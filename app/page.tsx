@@ -1,65 +1,73 @@
-import Image from "next/image";
+import Link from "next/link";
+import ScamChecker from "@/components/ScamChecker";
+import ScamCounter from "@/components/ScamCounter";
+import WaitlistForm from "@/components/WaitlistForm";
+import Footer from "@/components/Footer";
 
 export default function Home() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="min-h-screen flex flex-col">
+      {/* Top bar */}
+      <div className="h-1.5 bg-deep-navy w-full" />
+
+      {/* Nav */}
+      <nav className="w-full max-w-[640px] mx-auto px-5 py-4 flex items-center justify-between border-b border-gray-100">
+        <Link href="/" className="text-deep-navy font-extrabold text-lg uppercase tracking-wide">
+          Ask Arthur
+        </Link>
+        <div className="flex items-center gap-4">
+          <Link href="/blog" className="text-deep-navy font-bold text-sm hover:text-action-teal transition-colors">
+            Blog
+          </Link>
+          <Link href="/about" className="text-deep-navy font-bold text-sm hover:text-action-teal transition-colors">
+            About
+          </Link>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
+      </nav>
+
+      {/* Hero / Main content */}
+      <main className="flex-1 w-full max-w-[640px] mx-auto px-5 pt-16">
+        <h1 className="text-deep-navy text-4xl md:text-5xl font-extrabold mb-4 leading-tight text-center">
+          Got a suspicious message?
+        </h1>
+        <p className="text-lg text-gov-slate mb-10 leading-relaxed text-center">
+          Paste it here. We&apos;ll tell you if it&apos;s a scam — and exactly why.
+        </p>
+
+        <ScamChecker />
+        <ScamCounter />
+
+        {/* Feature grid */}
+        <section className="mt-16 grid grid-cols-1 md:grid-cols-3 gap-8">
+          <div className="text-center">
+            <span className="material-symbols-outlined text-deep-navy text-4xl mb-3 block">verified_user</span>
+            <h3 className="text-deep-navy font-bold text-sm uppercase tracking-widest mb-2">Authority</h3>
+            <p className="text-gov-slate text-sm leading-relaxed">
+              Powered by advanced AI trained on thousands of real scam patterns and fraud databases.
+            </p>
+          </div>
+          <div className="text-center">
+            <span className="material-symbols-outlined text-deep-navy text-4xl mb-3 block">bolt</span>
+            <h3 className="text-deep-navy font-bold text-sm uppercase tracking-widest mb-2">Efficiency</h3>
+            <p className="text-gov-slate text-sm leading-relaxed">
+              Get a detailed verdict in seconds. No signup, no waiting, no cost.
+            </p>
+          </div>
+          <div className="text-center">
+            <span className="material-symbols-outlined text-deep-navy text-4xl mb-3 block">shield</span>
+            <h3 className="text-deep-navy font-bold text-sm uppercase tracking-widest mb-2">Privacy</h3>
+            <p className="text-gov-slate text-sm leading-relaxed">
+              Your messages are never stored. Analyzed and immediately discarded.
+            </p>
+          </div>
+        </section>
       </main>
+
+      {/* Waitlist section */}
+      <WaitlistForm />
+
+      {/* Footer */}
+      <Footer />
     </div>
   );
 }

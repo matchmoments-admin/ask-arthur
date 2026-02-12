@@ -1,26 +1,69 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  --color-background: #ffffff;
+  --color-foreground: #171717;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  /* Primary */
+  --color-deep-navy: #001F3F;
+  --color-navy: #002B45;
+
+  /* Accent */
+  --color-action-teal: #008A98;
+
+  /* Text */
+  --color-gov-slate: #42526E;
+  --color-slate-500: #64748B;
+  --color-slate-400: #94A3B8;
+
+  /* Borders */
+  --color-border-light: #E2E8F0;
+
+  /* Verdict: Safe */
+  --color-safe-bg: #ECFDF5;
+  --color-safe-border: #A7F3D0;
+  --color-safe-text: #388E3C;
+  --color-safe-heading: #1B5E20;
+
+  /* Verdict: Suspicious */
+  --color-warn-bg: #FFF8E1;
+  --color-warn-border: #FFE082;
+  --color-warn-text: #F57C00;
+  --color-warn-heading: #E65100;
+
+  /* Verdict: High Risk */
+  --color-danger-bg: #FEF2F2;
+  --color-danger-border: #FECACA;
+  --color-danger-text: #D32F2F;
+  --color-danger-heading: #B71C1C;
+
+  --font-sans: "Public Sans", sans-serif;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-background);
+  color: var(--color-gov-slate);
+  font-family: var(--font-sans);
+}
+
+/* Focus ring for inputs */
+textarea:focus,
+input:focus {
+  outline: none;
+  border-color: var(--color-deep-navy);
+  box-shadow: 0 0 0 3px rgba(0, 31, 63, 0.1);
+}
+
+/* Heading letter-spacing */
+h1, h2, h3 {
+  letter-spacing: -0.01em;
+}
+
+/* Spinner animation for analysis progress */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
 }

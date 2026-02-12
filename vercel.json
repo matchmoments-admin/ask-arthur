@@ -1,0 +1,17 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/weekly-blog",
+      "schedule": "0 12 * * 1"
+    },
+    {
+      "path": "/api/cron/weekly-email",
+      "schedule": "0 14 * * 1"
+    }
+  ],
+  "functions": {
+    "app/api/analyze/route.ts": {
+      "maxDuration": 30
+    }
+  }
+}

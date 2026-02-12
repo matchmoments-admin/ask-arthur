@@ -1,0 +1,199 @@
+openapi: "3.1.0"
+info:
+  title: Ask Arthur Threat Intelligence API
+  version: "1.0.0"
+  description: |
+    Real-time Australian scam and fraud threat intelligence API.
+    Powered by community-sourced scam reports analysed by AI.
+  contact:
+    name: Ask Arthur
+    url: https://askarthur.ai
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://askarthur.ai/api/v1
+    description: Production
+
+security:
+  - BearerAuth: []
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: API key provided during onboarding. Keys are stored as SHA-256 hashes.
+
+  schemas:
+    ThreatSummary:
+      type: object
+      required:
+        - scam_type
+        - incident_count
+        - impersonated_brands
+        - channels
+        - latest_seen
+        - example_summaries
+      properties:
+        scam_type:
+          type: string
+          description: Classification of the scam type
+          example: phishing
+        incident_count:
+          type: integer
+          description: Number of verified incidents in the period
+          example: 42
+        impersonated_brands:
+          type: array
+          items:
+            type: string
+          description: Brands being impersonated in this scam type
+          example: ["CommBank", "ANZ"]
+        channels:
+          type: array
+          items:
+            type: string
+          description: Communication channels used
+          example: ["sms", "email"]
+        latest_seen:
+          type: string
+          format: date-time
+          description: Timestamp of the most recent incident
+        example_summaries:
+          type: array
+          items:
+            type: string
+          description: PII-scrubbed example summaries (max 3)
+
+    TrendingResponse:
+      type: object
+      required:
+        - meta
+        - threats
+      properties:
+        meta:
+          type: object
+          required:
+            - period_days
+            - total_threats
+            - generated_at
+          properties:
+            period_days:
+              type: integer
+              example: 7
+            total_threats:
+              type: integer
+              example: 156
+            generated_at:
+              type: string
+              format: date-time
+            region:
+              type: string
+              description: Region filter if applied
+              example: NSW
+        threats:
+          type: array
+          items:
+            $ref: "#/components/schemas/ThreatSummary"
+
+    StatsResponse:
+      type: object
+      required:
+        - generated_at
+        - verified_threats
+        - top_scam_types_7d
+      properties:
+        generated_at:
+          type: string
+          format: date-time
+        verified_threats:
+          type: object
+          properties:
+            last_24h:
+              type: integer
+              example: 12
+            last_7d:
+              type: integer
+              example: 87
+            last_30d:
+              type: integer
+              example: 342
+        top_scam_types_7d:
+          type: array
+          items:
+            type: object
+            properties:
+              scam_type:
+                type: string
+              count:
+                type: integer
+
+    Error:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+
+paths:
+  /threats/trending:
+    get:
+      summary: Get trending threats
+      description: Returns aggregated threat intelligence grouped by scam type, sorted by incident count.
+      operationId: getTrendingThreats
+      parameters:
+        - name: days
+          in: query
+          schema:
+            type: integer
+            default: 7
+            minimum: 1
+            maximum: 90
+          description: Number of days to look back
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 50
+          description: Maximum number of threat types to return
+        - name: region
+          in: query
+          schema:
+            type: string
+          description: Australian state/territory code (e.g. NSW, VIC, QLD)
+      responses:
+        "200":
+          description: Trending threats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrendingResponse"
+        "401":
+          description: Invalid or missing API key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /threats/stats:
+    get:
+      summary: Get aggregate threat statistics
+      description: Returns high-level statistics about verified threats across time periods.
+      operationId: getThreatStats
+      responses:
+        "200":
+          description: Aggregate statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatsResponse"
+        "401":
+          description: Invalid or missing API key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
