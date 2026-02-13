@@ -57,14 +57,20 @@ export async function storeVerifiedScam(
     if (imageBase64) {
       try {
         const buffer = Buffer.from(imageBase64, "base64");
-        let contentType = "image/png";
-        if (imageBase64.startsWith("/9j/")) contentType = "image/jpeg";
-        else if (imageBase64.startsWith("R0lGOD")) contentType = "image/gif";
-        else if (imageBase64.startsWith("UklGR")) contentType = "image/webp";
-        screenshotKey = await uploadScreenshot(buffer, contentType);
+        if (buffer.length > 4 * 1024 * 1024) {
+          logger.info("Skipping R2 upload — decoded image exceeds 4MB", { size: buffer.length });
+        } else {
+          let contentType = "image/png";
+          if (imageBase64.startsWith("/9j/")) contentType = "image/jpeg";
+          else if (imageBase64.startsWith("R0lGOD")) contentType = "image/gif";
+          else if (imageBase64.startsWith("UklGR")) contentType = "image/webp";
+          screenshotKey = await uploadScreenshot(buffer, contentType);
+        }
       } catch (err) {
         logger.error("R2 upload failed (non-blocking)", { error: String(err) });
       }
+    } else {
+      logger.info("HIGH_RISK verdict stored without screenshot");
     }
 
     await supabase.from("verified_scams").insert({

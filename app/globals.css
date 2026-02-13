@@ -10,6 +10,7 @@
 
   /* Accent */
   --color-action-teal: #008A98;
+  --color-action-teal-text: #006B75;
 
   /* Text */
   --color-gov-slate: #42526E;
@@ -44,6 +45,7 @@ body {
   background: var(--color-background);
   color: var(--color-gov-slate);
   font-family: var(--font-sans);
+  font-size: 18px;
 }
 
 /* Focus ring for inputs */

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import AnalysisProgress from "./AnalysisProgress";
 import ResultCard from "./ResultCard";
 
@@ -12,6 +12,7 @@ interface AnalysisResponse {
   summary: string;
   redFlags: string[];
   nextSteps: string[];
+  countryCode?: string | null;
 }
 
 type Status = "idle" | "analyzing" | "complete" | "error" | "rate_limited";
@@ -19,16 +20,16 @@ type Status = "idle" | "analyzing" | "complete" | "error" | "rate_limited";
 export default function ScamChecker() {
   const [text, setText] = useState("");
   const [imageData, setImageData] = useState<string | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [imageName, setImageName] = useState<string | null>(null);
   const [status, setStatus] = useState<Status>("idle");
   const [result, setResult] = useState<AnalysisResponse | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
+  const [isFocused, setIsFocused] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  const processFile = useCallback((file: File) => {
     if (file.size > 4 * 1024 * 1024) {
       setErrorMsg("Image must be under 4MB");
       return;
@@ -36,15 +37,58 @@ export default function ScamChecker() {
 
     const reader = new FileReader();
     reader.onload = () => {
-      const base64 = (reader.result as string).split(",")[1];
+      const dataUrl = reader.result as string;
+      const base64 = dataUrl.split(",")[1];
       setImageData(base64);
+      setImagePreview(dataUrl);
       setImageName(file.name);
+      setErrorMsg("");
     };
     reader.readAsDataURL(file);
+  }, []);
+
+  function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    processFile(file);
+  }
+
+  function handlePaste(e: React.ClipboardEvent) {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (const item of items) {
+      if (item.type.startsWith("image/")) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (file) processFile(file);
+        return;
+      }
+    }
+  }
+
+  function handleDragOver(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragging(true);
+  }
+
+  function handleDragLeave(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragging(false);
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file && file.type.startsWith("image/")) {
+      processFile(file);
+    }
   }
 
   function removeImage() {
     setImageData(null);
+    setImagePreview(null);
     setImageName(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
@@ -90,6 +134,7 @@ export default function ScamChecker() {
   function handleReset() {
     setText("");
     setImageData(null);
+    setImagePreview(null);
     setImageName(null);
     setStatus("idle");
     setResult(null);
@@ -100,71 +145,94 @@ export default function ScamChecker() {
   return (
     <div>
       <form onSubmit={handleSubmit} aria-label="Scam checker">
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="Paste the suspicious message, email, or URL here..."
-          aria-label="Suspicious message to check"
-          rows={6}
-          maxLength={10000}
-          disabled={status === "analyzing"}
-          aria-busy={status === "analyzing"}
-          className="w-full px-4 py-3 text-base text-deep-navy border-2 border-gray-200 rounded-[4px] resize-y min-h-[120px] h-48 md:h-64 bg-white disabled:opacity-60 placeholder:text-slate-400 focus:border-deep-navy focus:ring-0"
-        />
-
-        {/* Image attachment preview */}
-        {imageName && (
-          <div className="flex items-center gap-2 mt-2 text-sm text-gov-slate">
-            <span className="material-symbols-outlined text-base">attach_file</span>
-            <span>{imageName}</span>
-            <button
-              type="button"
-              onClick={removeImage}
-              className="text-slate-400 hover:text-gov-slate"
-            >
-              <span className="material-symbols-outlined text-base">close</span>
-            </button>
-          </div>
-        )}
-
-        {/* Upload area */}
-        <div className="bg-slate-50 border-t border-gray-200 -mx-0 px-4 py-3 mt-0 rounded-b-[4px]">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            onChange={handleImageUpload}
-            className="hidden"
-            id="screenshot-upload"
-          />
-          <label
-            htmlFor="screenshot-upload"
-            className="inline-flex items-center gap-1.5 text-sm text-gov-slate hover:text-deep-navy cursor-pointer"
-          >
-            <span className="material-symbols-outlined text-lg">add_photo_alternate</span>
-            Upload screenshot
-          </label>
-        </div>
-
-        {/* Submit / Reset button */}
-        <div className="mt-4">
-          {status === "complete" ? (
-            <button
-              type="button"
-              onClick={handleReset}
-              className="w-full py-4 bg-deep-navy text-white font-bold uppercase tracking-widest rounded-[4px] hover:bg-navy transition-colors"
-            >
-              Check Another
-            </button>
-          ) : (
-            <button
-              type="submit"
-              disabled={status === "analyzing" || (!text.trim() && !imageData)}
-              className="w-full py-4 bg-deep-navy text-white font-bold uppercase tracking-widest rounded-[4px] hover:bg-navy transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {status === "analyzing" ? "Analyzing..." : "Check Now"}
-            </button>
+        {/* Unified input container */}
+        <div
+          onPaste={handlePaste}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className={`rounded-3xl border-2 bg-white transition-colors ${
+            isDragging
+              ? "border-action-teal bg-slate-50"
+              : isFocused
+                ? "border-deep-navy"
+                : "border-gray-200"
+          }`}
+        >
+          {/* Image thumbnail preview */}
+          {imagePreview && (
+            <div className="flex items-center gap-3 px-4 pt-3">
+              <img
+                src={imagePreview}
+                alt={imageName || "Attached image"}
+                className="w-16 h-16 rounded-lg object-cover border border-gray-200"
+              />
+              <span className="text-sm text-gov-slate truncate flex-1">{imageName}</span>
+              <button
+                type="button"
+                onClick={removeImage}
+                aria-label="Remove image"
+                className="w-8 h-8 flex items-center justify-center rounded-full text-slate-400 hover:text-gov-slate hover:bg-slate-100 transition-colors"
+              >
+                <span className="material-symbols-outlined text-lg">close</span>
+              </button>
+            </div>
           )}
+
+          {/* Borderless textarea */}
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => setIsFocused(false)}
+            placeholder="Paste the suspicious message, email, or URL here..."
+            aria-label="Suspicious message to check"
+            rows={4}
+            maxLength={10000}
+            disabled={status === "analyzing"}
+            aria-busy={status === "analyzing"}
+            className="w-full px-4 py-3 text-lg text-deep-navy border-0 focus:outline-none focus:ring-0 bg-transparent resize-y min-h-[100px] disabled:opacity-60 placeholder:text-slate-400"
+          />
+
+          {/* Bottom toolbar */}
+          <div className="flex items-center justify-between px-3 pb-3">
+            {/* Attach button */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={handleImageUpload}
+              className="hidden"
+              id="screenshot-upload"
+            />
+            <label
+              htmlFor="screenshot-upload"
+              className="w-11 h-11 flex items-center justify-center rounded-full text-gov-slate hover:text-deep-navy hover:bg-slate-100 cursor-pointer transition-colors"
+              aria-label="Attach screenshot"
+            >
+              <span className="material-symbols-outlined text-xl">attach_file</span>
+            </label>
+
+            {/* Submit / Reset button */}
+            {status === "complete" ? (
+              <button
+                type="button"
+                onClick={handleReset}
+                className="h-11 px-6 bg-deep-navy text-white font-bold uppercase tracking-widest rounded-full hover:bg-navy transition-colors text-sm"
+              >
+                Check Another
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={status === "analyzing" || (!text.trim() && !imageData)}
+                className="h-11 px-6 bg-deep-navy text-white font-bold uppercase tracking-widest rounded-full hover:bg-navy transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+              >
+                {status === "analyzing" ? "Analyzing..." : "Check Now"}
+              </button>
+            )}
+          </div>
         </div>
       </form>
 
@@ -187,6 +255,7 @@ export default function ScamChecker() {
           summary={result.summary}
           redFlags={result.redFlags}
           nextSteps={result.nextSteps}
+          countryCode={result.countryCode}
         />
       )}
 

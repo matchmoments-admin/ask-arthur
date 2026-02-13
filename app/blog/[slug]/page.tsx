@@ -100,7 +100,7 @@ export default async function BlogPostPage({ params }: PageProps) {
       </header>
 
       <div
-        className="prose prose-slate max-w-none prose-headings:text-deep-navy prose-a:text-action-teal prose-a:no-underline hover:prose-a:underline"
+        className="prose prose-slate max-w-none prose-headings:text-deep-navy prose-a:text-action-teal-text prose-a:no-underline hover:prose-a:underline"
         dangerouslySetInnerHTML={{ __html: htmlContent }}
       />
 

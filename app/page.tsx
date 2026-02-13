@@ -26,21 +26,21 @@ export default function Home() {
           <div className="text-center">
             <span className="material-symbols-outlined text-deep-navy text-4xl mb-3 block">verified_user</span>
             <h3 className="text-deep-navy font-bold text-sm uppercase tracking-widest mb-2">Authority</h3>
-            <p className="text-gov-slate text-sm leading-relaxed">
+            <p className="text-gov-slate text-base leading-relaxed">
               Powered by advanced AI trained on thousands of real scam patterns and fraud databases.
             </p>
           </div>
           <div className="text-center">
             <span className="material-symbols-outlined text-deep-navy text-4xl mb-3 block">bolt</span>
             <h3 className="text-deep-navy font-bold text-sm uppercase tracking-widest mb-2">Efficiency</h3>
-            <p className="text-gov-slate text-sm leading-relaxed">
+            <p className="text-gov-slate text-base leading-relaxed">
               Get a detailed verdict in seconds. No signup, no waiting, no cost.
             </p>
           </div>
           <div className="text-center">
             <span className="material-symbols-outlined text-deep-navy text-4xl mb-3 block">shield</span>
             <h3 className="text-deep-navy font-bold text-sm uppercase tracking-widest mb-2">Privacy</h3>
-            <p className="text-gov-slate text-sm leading-relaxed">
+            <p className="text-gov-slate text-base leading-relaxed">
               Your messages are never stored. Analyzed and immediately discarded.
             </p>
           </div>

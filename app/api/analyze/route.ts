@@ -67,11 +67,12 @@ export async function POST(req: NextRequest) {
     const urls = text ? extractURLs(text) : [];
 
     // 4. Run AI analysis + URL reputation checks in parallel
-    const [aiResult, urlResults, region] = await Promise.all([
+    const [aiResult, urlResults, geo] = await Promise.all([
       analyzeWithClaude(text, image),
       checkURLReputation(urls),
       geolocateIP(ip),
     ]);
+    const { region, countryCode } = geo;
 
     // 5. Merge verdicts — URL threats escalate AI verdict
     let finalVerdict: Verdict = aiResult.verdict;
@@ -118,6 +119,7 @@ export async function POST(req: NextRequest) {
         nextSteps: aiResult.nextSteps,
         urlsChecked: urlResults.length,
         maliciousURLs: maliciousURLs.length,
+        countryCode,
       },
       {
         headers: {

@@ -8,6 +8,7 @@ interface ResultCardProps {
   summary: string;
   redFlags: string[];
   nextSteps: string[];
+  countryCode?: string | null;
 }
 
 const VERDICT_CONFIG = {
@@ -40,6 +41,7 @@ export default function ResultCard({
   summary,
   redFlags,
   nextSteps,
+  countryCode,
 }: ResultCardProps) {
   const config = VERDICT_CONFIG[verdict];
 
@@ -99,6 +101,27 @@ export default function ResultCard({
                 </li>
               ))}
             </ol>
+          </div>
+        )}
+
+        {/* Scamwatch reporting CTA for Australian users on HIGH_RISK */}
+        {verdict === "HIGH_RISK" && countryCode === "AU" && (
+          <div className="mt-5 p-4 bg-danger-bg border border-danger-border rounded-lg">
+            <p className="text-deep-navy text-base font-bold mb-2">
+              Report this scam to Scamwatch
+            </p>
+            <p className="text-gov-slate text-sm mb-3">
+              Help protect other Australians by reporting this scam to the ACCC.
+            </p>
+            <a
+              href="https://portal.scamwatch.gov.au/report-a-scam/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 h-11 px-5 bg-danger-text text-white font-bold text-sm uppercase tracking-widest rounded-full hover:opacity-90 transition-opacity"
+            >
+              <span className="material-symbols-outlined text-lg">flag</span>
+              Report to Scamwatch
+            </a>
           </div>
         )}
       </div>
