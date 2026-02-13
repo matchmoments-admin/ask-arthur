@@ -1,5 +1,6 @@
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
+import { logger } from "./logger";
 
 // Two-tier rate limiting:
 // - Burst: 3 checks per hour (covers quick succession use case)
@@ -73,10 +74,10 @@ export async function checkRateLimit(
   // Fail-closed in production, fail-open in dev
   if (!process.env.UPSTASH_REDIS_REST_URL) {
     if (process.env.NODE_ENV === "production") {
-      console.error("[CRITICAL] UPSTASH_REDIS_REST_URL not set in production — blocking request");
+      logger.error("UPSTASH_REDIS_REST_URL not set in production — blocking request");
       return { allowed: false, remaining: 0, resetAt: null, message: "Service temporarily unavailable." };
     }
-    console.warn("[dev] Rate limiting disabled — UPSTASH_REDIS_REST_URL not set");
+    logger.warn("Rate limiting disabled — UPSTASH_REDIS_REST_URL not set");
     return { allowed: true, remaining: 99, resetAt: null };
   }
 
@@ -117,10 +118,10 @@ export async function checkFormRateLimit(ip: string): Promise<RateLimitResult> {
   // Fail-closed in production, fail-open in dev
   if (!process.env.UPSTASH_REDIS_REST_URL) {
     if (process.env.NODE_ENV === "production") {
-      console.error("[CRITICAL] UPSTASH_REDIS_REST_URL not set in production — blocking request");
+      logger.error("UPSTASH_REDIS_REST_URL not set in production — blocking request");
       return { allowed: false, remaining: 0, resetAt: null, message: "Service temporarily unavailable." };
     }
-    console.warn("[dev] Form rate limiting disabled — UPSTASH_REDIS_REST_URL not set");
+    logger.warn("Form rate limiting disabled — UPSTASH_REDIS_REST_URL not set");
     return { allowed: true, remaining: 99, resetAt: null };
   }
 

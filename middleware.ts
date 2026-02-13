@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { logger } from "@/lib/logger";
 
 // Global edge rate limiting — 60 requests/min per IP (sliding window via Upstash)
 // Coexists with per-route limits in lib/rateLimit.ts (defense-in-depth)
@@ -15,7 +16,7 @@ export async function middleware(req: NextRequest) {
 
   if (!redisUrl || !redisToken) {
     if (process.env.NODE_ENV === "production") {
-      console.error("[CRITICAL] Upstash not configured in production — blocking request");
+      logger.error("Upstash not configured in production — blocking request");
       return NextResponse.json(
         { error: "Service temporarily unavailable" },
         { status: 503 }
@@ -57,7 +58,7 @@ export async function middleware(req: NextRequest) {
 
     if (!response.ok) {
       // Fail-open on Redis errors to avoid blocking legitimate traffic
-      console.error("[middleware] Upstash error:", response.status);
+      logger.error("Middleware Upstash error", { status: response.status });
       return NextResponse.next();
     }
 
@@ -87,7 +88,7 @@ export async function middleware(req: NextRequest) {
     return res;
   } catch (err) {
     // Fail-open on unexpected errors
-    console.error("[middleware] Rate limit error:", err);
+    logger.error("Middleware rate limit error", { error: String(err) });
     return NextResponse.next();
   }
 }

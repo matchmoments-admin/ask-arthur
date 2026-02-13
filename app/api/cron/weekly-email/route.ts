@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { sendWeeklyDigest } from "@/lib/resend";
+import { logger } from "@/lib/logger";
 
 export async function GET(req: NextRequest) {
   // Verify cron secret
@@ -86,7 +87,7 @@ export async function GET(req: NextRequest) {
       blogUrl,
     });
   } catch (err) {
-    console.error("Weekly email cron error:", err);
+    logger.error("Weekly email cron error", { error: String(err) });
     return NextResponse.json(
       { error: "Failed to send weekly emails" },
       { status: 500 }

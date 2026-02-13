@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
+import { logger } from "@/lib/logger";
 
 export async function GET() {
   try {
@@ -13,7 +14,7 @@ export async function GET() {
       .select("total_checks, safe_count, suspicious_count, high_risk_count");
 
     if (error) {
-      console.error("Stats query error:", error);
+      logger.error("Stats query error", { error: String(error) });
       return NextResponse.json({ totalChecks: 0 }, { status: 200 });
     }
 

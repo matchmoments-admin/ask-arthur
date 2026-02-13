@@ -12,6 +12,16 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  if (auth.rateLimited) {
+    return NextResponse.json(
+      { error: "Daily API limit exceeded. Resets at midnight UTC." },
+      {
+        status: 429,
+        headers: { "Retry-After": "3600" },
+      }
+    );
+  }
+
   const supabase = createServiceClient();
   if (!supabase) {
     return NextResponse.json(

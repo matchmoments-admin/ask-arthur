@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { logger } from "./logger";
 
 export const PROMPT_VERSION = "2.0.0";
 
@@ -133,7 +134,7 @@ const MOCK_RESPONSE: AnalysisResult = {
   channel: "other",
 };
 
-function validateResult(parsed: Record<string, unknown>): AnalysisResult {
+export function validateResult(parsed: Record<string, unknown>): AnalysisResult {
   // Validate verdict is one of the allowed values
   let verdict: Verdict = "SUSPICIOUS";
   if (typeof parsed.verdict === "string" && VALID_VERDICTS.includes(parsed.verdict)) {
@@ -179,10 +180,10 @@ export async function analyzeWithClaude(
   // Fail-closed in production, mock in dev
   if (!process.env.ANTHROPIC_API_KEY) {
     if (process.env.NODE_ENV === "production") {
-      console.error("[CRITICAL] ANTHROPIC_API_KEY not set in production — refusing to serve mock");
+      logger.error("ANTHROPIC_API_KEY not set in production — refusing to serve mock");
       throw new Error("Analysis service unavailable.");
     }
-    console.warn("[mock] ANTHROPIC_API_KEY not set — returning mock analysis");
+    logger.warn("ANTHROPIC_API_KEY not set — returning mock analysis");
     return { ...MOCK_RESPONSE };
   }
 

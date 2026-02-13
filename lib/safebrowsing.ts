@@ -1,6 +1,8 @@
 // URL reputation checks via Google Safe Browsing + VirusTotal
 // Uses Promise.allSettled so failures don't block each other
 
+import { logger } from "./logger";
+
 export interface URLCheckResult {
   url: string;
   isMalicious: boolean;
@@ -54,7 +56,7 @@ async function checkGoogleSafeBrowsing(urls: string[]): Promise<Set<string>> {
     }
   } catch {
     // Non-blocking: log but don't fail
-    console.warn("Google Safe Browsing check failed");
+    logger.warn("Google Safe Browsing check failed");
   }
 
   return malicious;

@@ -59,6 +59,7 @@ export default function WaitlistForm() {
             onChange={(e) => setEmail(e.target.value)}
             placeholder="you@example.com"
             required
+            aria-label="Email address"
             className="w-full px-4 py-3 text-base border border-border-light rounded-[4px] bg-white focus:ring-action-teal focus:border-action-teal"
           />
           <button

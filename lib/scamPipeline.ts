@@ -1,6 +1,7 @@
 import { createServiceClient } from "./supabase";
 import { uploadScreenshot } from "./r2";
 import type { AnalysisResult } from "./claude";
+import { logger } from "./logger";
 
 // PII patterns to scrub (defense in depth — Claude is also instructed not to echo PII)
 const PII_PATTERNS: [RegExp, string][] = [
@@ -30,7 +31,7 @@ const PII_PATTERNS: [RegExp, string][] = [
   [/\b(Dear|Hi|Hello|Mr\.?|Mrs\.?|Ms\.?|Dr\.?)\s+[A-Z][a-z]+(\s+[A-Z][a-z]+)?\b/g, "[NAME]"],
 ];
 
-function scrubPII(text: string): string {
+export function scrubPII(text: string): string {
   let scrubbed = text;
   for (const [pattern, replacement] of PII_PATTERNS) {
     scrubbed = scrubbed.replace(pattern, replacement);
@@ -62,7 +63,7 @@ export async function storeVerifiedScam(
         else if (imageBase64.startsWith("UklGR")) contentType = "image/webp";
         screenshotKey = await uploadScreenshot(buffer, contentType);
       } catch (err) {
-        console.error("R2 upload failed (non-blocking):", err);
+        logger.error("R2 upload failed (non-blocking)", { error: String(err) });
       }
     }
 
@@ -77,7 +78,7 @@ export async function storeVerifiedScam(
       ...(screenshotKey && { screenshot_key: screenshotKey }),
     });
   } catch (err) {
-    console.error("Failed to store verified scam:", err);
+    logger.error("Failed to store verified scam", { error: String(err) });
   }
 }
 
@@ -95,6 +96,6 @@ export async function incrementStats(
       p_region: region,
     });
   } catch (err) {
-    console.error("Failed to increment stats:", err);
+    logger.error("Failed to increment stats", { error: String(err) });
   }
 }

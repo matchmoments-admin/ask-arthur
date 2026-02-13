@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validateApiKey } from "@/lib/apiAuth";
 import { createServiceClient } from "@/lib/supabase";
+import { logger } from "@/lib/logger";
 
 export async function GET(req: NextRequest) {
   // API key authentication
@@ -9,6 +10,16 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(
       { error: "Invalid or missing API key" },
       { status: 401 }
+    );
+  }
+
+  if (auth.rateLimited) {
+    return NextResponse.json(
+      { error: "Daily API limit exceeded. Resets at midnight UTC." },
+      {
+        status: 429,
+        headers: { "Retry-After": "3600" },
+      }
     );
   }
 
@@ -43,7 +54,7 @@ export async function GET(req: NextRequest) {
   const { data: scams, error } = await query;
 
   if (error) {
-    console.error("Threat API query error:", error);
+    logger.error("Threat API query error", { error: String(error) });
     return NextResponse.json(
       { error: "Failed to fetch threat data" },
       { status: 500 }

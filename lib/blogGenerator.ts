@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { createServiceClient } from "./supabase";
+import { logger } from "./logger";
 
 interface ScamGroup {
   scam_type: string;
@@ -131,7 +132,7 @@ Return ONLY valid JSON:
       tags: Array.isArray(parsed.tags) ? parsed.tags : [],
     };
   } catch {
-    console.error("Failed to parse blog generation response");
+    logger.error("Failed to parse blog generation response");
     return null;
   }
 }

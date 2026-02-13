@@ -44,7 +44,7 @@ export default function ResultCard({
   const config = VERDICT_CONFIG[verdict];
 
   return (
-    <div className="mt-6 rounded-sm border border-slate-200 overflow-hidden">
+    <div role="alert" className="mt-6 rounded-sm border border-slate-200 overflow-hidden">
       {/* Colored header bar */}
       <div className={`${config.bg} px-6 py-4 flex items-center gap-3`}>
         <span className="material-symbols-outlined text-white text-2xl">{config.icon}</span>

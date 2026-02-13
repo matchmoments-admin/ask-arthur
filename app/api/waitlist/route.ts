@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createServiceClient } from "@/lib/supabase";
 import { sendWelcomeEmail } from "@/lib/resend";
 import { checkFormRateLimit } from "@/lib/rateLimit";
+import { logger } from "@/lib/logger";
 
 const WaitlistSchema = z.object({
   email: z.string().email("Please enter a valid email address"),
@@ -38,7 +39,7 @@ export async function POST(req: NextRequest) {
     const supabase = createServiceClient();
     if (!supabase) {
       sendWelcomeEmail(email).catch((err) =>
-        console.error("Failed to send welcome email:", err)
+        logger.error("Failed to send welcome email", { error: String(err) })
       );
       return NextResponse.json({ success: true });
     }
@@ -52,7 +53,7 @@ export async function POST(req: NextRequest) {
       );
 
     if (waitlistError) {
-      console.error("Waitlist insert error:", waitlistError);
+      logger.error("Waitlist insert error", { error: String(waitlistError) });
       return NextResponse.json(
         { error: "Failed to join waitlist" },
         { status: 500 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { generateWeeklyBlogPost } from "@/lib/blogGenerator";
+import { logger } from "@/lib/logger";
 
 export async function GET(req: NextRequest) {
   // Verify cron secret
@@ -36,7 +37,7 @@ export async function GET(req: NextRequest) {
     });
 
     if (error) {
-      console.error("Failed to insert blog post:", error);
+      logger.error("Failed to insert blog post", { error: String(error) });
       return NextResponse.json(
         { error: "Failed to insert blog post" },
         { status: 500 }
@@ -50,7 +51,7 @@ export async function GET(req: NextRequest) {
       published: false,
     });
   } catch (err) {
-    console.error("Weekly blog cron error:", err);
+    logger.error("Weekly blog cron error", { error: String(err) });
     return NextResponse.json(
       { error: "Failed to generate blog post" },
       { status: 500 }

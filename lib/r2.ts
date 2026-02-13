@@ -1,5 +1,6 @@
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { logger } from "./logger";
 
 // Lazy singleton S3-compatible client for Cloudflare R2
 let _r2Client: S3Client | null = null;
@@ -13,7 +14,7 @@ function getR2Client(): S3Client | null {
 
   if (!accountId || !accessKeyId || !secretAccessKey) {
     if (process.env.NODE_ENV === "production") {
-      console.error("[CRITICAL] R2 credentials not configured in production");
+      logger.error("R2 credentials not configured in production");
     }
     return null;
   }

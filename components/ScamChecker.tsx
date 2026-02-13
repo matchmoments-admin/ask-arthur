@@ -99,14 +99,16 @@ export default function ScamChecker() {
 
   return (
     <div>
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit} aria-label="Scam checker">
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder="Paste the suspicious message, email, or URL here..."
+          aria-label="Suspicious message to check"
           rows={6}
           maxLength={10000}
           disabled={status === "analyzing"}
+          aria-busy={status === "analyzing"}
           className="w-full px-4 py-3 text-base text-deep-navy border-2 border-gray-200 rounded-[4px] resize-y min-h-[120px] h-48 md:h-64 bg-white disabled:opacity-60 placeholder:text-slate-400 focus:border-deep-navy focus:ring-0"
         />
 
@@ -177,6 +179,7 @@ export default function ScamChecker() {
       <AnalysisProgress status={status} />
 
       {/* Result */}
+      <div aria-live="polite">
       {result && status === "complete" && (
         <ResultCard
           verdict={result.verdict}
@@ -189,7 +192,7 @@ export default function ScamChecker() {
 
       {/* Error / rate limit messages */}
       {(status === "error" || status === "rate_limited") && (
-        <div className="mt-6 p-4 bg-warn-bg border border-warn-border rounded-[4px]">
+        <div role="alert" className="mt-6 p-4 bg-warn-bg border border-warn-border rounded-[4px]">
           <p className="text-warn-heading text-base">{errorMsg}</p>
           {status === "rate_limited" && (
             <p className="text-gov-slate text-sm mt-2">
@@ -198,6 +201,7 @@ export default function ScamChecker() {
           )}
         </div>
       )}
+      </div>
     </div>
   );
 }

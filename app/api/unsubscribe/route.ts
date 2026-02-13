@@ -4,16 +4,17 @@ import { createServiceClient } from "@/lib/supabase";
 import { checkFormRateLimit } from "@/lib/rateLimit";
 import { logger } from "@/lib/logger";
 
-const SubscribeSchema = z.object({
+const UnsubscribeSchema = z.object({
   email: z.string().email("Please enter a valid email address"),
 });
 
 export async function POST(req: NextRequest) {
   try {
-    // Rate limit form submissions
-    const ip = req.headers.get("x-real-ip")
-      || req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
-      || "unknown";
+    // Rate limit
+    const ip =
+      req.headers.get("x-real-ip") ||
+      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      "unknown";
     const rateCheck = await checkFormRateLimit(ip);
     if (!rateCheck.allowed) {
       return NextResponse.json(
@@ -23,7 +24,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const parsed = SubscribeSchema.safeParse(body);
+    const parsed = UnsubscribeSchema.safeParse(body);
 
     if (!parsed.success) {
       return NextResponse.json(
@@ -40,15 +41,13 @@ export async function POST(req: NextRequest) {
 
     const { error } = await supabase
       .from("email_subscribers")
-      .upsert(
-        { email, is_active: true },
-        { onConflict: "email" }
-      );
+      .update({ is_active: false })
+      .eq("email", email);
 
     if (error) {
-      logger.error("Subscribe error", { error: String(error) });
+      logger.error("Unsubscribe error", { error: String(error) });
       return NextResponse.json(
-        { error: "Failed to subscribe" },
+        { error: "Failed to unsubscribe" },
         { status: 500 }
       );
     }

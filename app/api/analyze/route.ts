@@ -5,6 +5,7 @@ import { analyzeWithClaude, detectInjectionAttempt, type Verdict } from "@/lib/c
 import { extractURLs, checkURLReputation } from "@/lib/safebrowsing";
 import { geolocateIP } from "@/lib/geolocate";
 import { storeVerifiedScam, incrementStats } from "@/lib/scamPipeline";
+import { logger } from "@/lib/logger";
 
 const RequestSchema = z.object({
   text: z.string().max(10000).optional(),
@@ -125,7 +126,7 @@ export async function POST(req: NextRequest) {
       }
     );
   } catch (err) {
-    console.error("Analysis error:", err);
+    logger.error("Analysis error", { error: String(err) });
     return NextResponse.json(
       {
         error: "analysis_failed",
