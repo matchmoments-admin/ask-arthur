@@ -221,7 +221,13 @@ export async function analyzeWithClaude(
   const response = await client.messages.create({
     model: "claude-haiku-4-5-20251001",
     max_tokens: 1024,
-    system: SYSTEM_PROMPT,
+    system: [
+      {
+        type: "text" as const,
+        text: SYSTEM_PROMPT,
+        cache_control: { type: "ephemeral" as const },
+      },
+    ],
     messages: [
       { role: "user", content },
       { role: "assistant", content: [{ type: "text", text: "{" }] },
