@@ -7,6 +7,7 @@ interface ScamGroup {
   impersonated_brand: string | null;
   count: number;
   summaries: string[];
+  ids: number[];
 }
 
 interface GeneratedPost {
@@ -15,6 +16,7 @@ interface GeneratedPost {
   excerpt: string;
   content: string;
   tags: string[];
+  sourceScamIds: number[];
 }
 
 export async function generateWeeklyBlogPost(): Promise<GeneratedPost | null> {
@@ -27,7 +29,7 @@ export async function generateWeeklyBlogPost(): Promise<GeneratedPost | null> {
 
   const { data: scams } = await supabase
     .from("verified_scams")
-    .select("scam_type, summary, impersonated_brand, channel")
+    .select("id, scam_type, summary, impersonated_brand, channel")
     .gte("created_at", oneWeekAgo.toISOString())
     .order("created_at", { ascending: false });
 
@@ -40,6 +42,7 @@ export async function generateWeeklyBlogPost(): Promise<GeneratedPost | null> {
     const existing = groups.get(key);
     if (existing) {
       existing.count++;
+      existing.ids.push(scam.id);
       if (existing.summaries.length < 3) {
         existing.summaries.push(scam.summary);
       }
@@ -49,6 +52,7 @@ export async function generateWeeklyBlogPost(): Promise<GeneratedPost | null> {
         impersonated_brand: scam.impersonated_brand,
         count: 1,
         summaries: [scam.summary],
+        ids: [scam.id],
       });
     }
   }
@@ -65,10 +69,13 @@ export async function generateWeeklyBlogPost(): Promise<GeneratedPost | null> {
 
   const client = new Anthropic();
 
+  // Collect all source scam IDs from top groups
+  const sourceScamIds = topGroups.flatMap((g) => g.ids);
+
   const scamData = topGroups
     .map(
       (g, i) =>
-        `${i + 1}. Type: ${g.scam_type}, Brand: ${g.impersonated_brand || "N/A"}, Count: ${g.count}\n   Examples: ${g.summaries.join(" | ")}`
+        `<scam_group id="${i + 1}" source_ids="${g.ids.join(",")}">\n  <type>${g.scam_type}</type>\n  <brand>${g.impersonated_brand || "N/A"}</brand>\n  <count>${g.count}</count>\n  <examples>${g.summaries.join(" | ")}</examples>\n</scam_group>`
     )
     .join("\n");
 
@@ -81,7 +88,12 @@ export async function generateWeeklyBlogPost(): Promise<GeneratedPost | null> {
   const response = await client.messages.create({
     model: "claude-haiku-4-5-20251001",
     max_tokens: 2048,
-    system: `You are a cybersecurity blog writer for Ask Arthur, an Australian scam detection platform. Write SEO-optimised blog posts about scam trends in Australia. Use Australian English. Write for a general audience — clear, helpful, not overly technical. Always include practical advice for readers.`,
+    system: `You are a cybersecurity blog writer for Ask Arthur, an Australian scam detection platform. Write SEO-optimised blog posts about scam trends in Australia. Use Australian English. Write for a general audience — clear, helpful, not overly technical. Always include practical advice for readers.
+
+GROUNDING RULES:
+- Only reference scam data provided in the <scam_group> elements below. Do not invent statistics, percentages, or scam examples beyond what is provided.
+- You may add general protective advice and context, but all specific scam details must come from the provided data.
+- Do not fabricate quotes, case studies, or victim stories.`,
     messages: [
       {
         role: "user",
@@ -130,6 +142,7 @@ Return ONLY valid JSON:
       excerpt: parsed.excerpt,
       content: parsed.content,
       tags: Array.isArray(parsed.tags) ? parsed.tags : [],
+      sourceScamIds,
     };
   } catch {
     logger.error("Failed to parse blog generation response");

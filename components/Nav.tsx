@@ -20,6 +20,12 @@ export default function Nav() {
           Blog
         </Link>
         <Link
+          href="/api-docs"
+          className="text-deep-navy font-bold text-sm hover:text-action-teal transition-colors py-3 px-2"
+        >
+          API
+        </Link>
+        <Link
           href="/about"
           className="text-deep-navy font-bold text-sm hover:text-action-teal transition-colors py-3 px-2"
         >

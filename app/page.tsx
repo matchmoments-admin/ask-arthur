@@ -1,6 +1,5 @@
 import ScamChecker from "@/components/ScamChecker";
 import ScamCounter from "@/components/ScamCounter";
-import WaitlistForm from "@/components/WaitlistForm";
 import Footer from "@/components/Footer";
 import Nav from "@/components/Nav";
 
@@ -12,10 +11,10 @@ export default function Home() {
       {/* Hero / Main content */}
       <main id="main-content" className="flex-1 w-full max-w-[640px] mx-auto px-5 pt-16">
         <h1 className="text-deep-navy text-4xl md:text-5xl font-extrabold mb-4 leading-tight text-center">
-          Got a suspicious message?
+          Got a suspicious message, email, or image?
         </h1>
         <p className="text-lg text-gov-slate mb-10 leading-relaxed text-center">
-          Paste it here. We&apos;ll tell you if it&apos;s a scam — and exactly why.
+          Paste it here. Arthur will review it and report back to you.
         </p>
 
         <ScamChecker />
@@ -46,9 +45,6 @@ export default function Home() {
           </div>
         </section>
       </main>
-
-      {/* Waitlist section */}
-      <WaitlistForm />
 
       {/* Footer */}
       <Footer />

@@ -151,7 +151,7 @@ export default function ScamChecker() {
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
-          className={`rounded-3xl border-2 bg-white transition-colors ${
+          className={`rounded-3xl overflow-hidden border-2 bg-white transition-colors ${
             isDragging
               ? "border-action-teal bg-slate-50"
               : isFocused

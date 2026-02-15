@@ -11,13 +11,19 @@ const FROM = process.env.RESEND_FROM_EMAIL || "Ask Arthur <alerts@askarthur.ai>"
 
 export async function sendWelcomeEmail(email: string): Promise<void> {
   const resend = getResendClient();
-  const html = await render(Welcome());
+  const html = await render(Welcome({ email }));
+  const unsubscribeUrl = `https://askarthur.ai/unsubscribe?email=${encodeURIComponent(email)}`;
+  const oneClickUrl = `https://askarthur.ai/api/unsubscribe-one-click?email=${encodeURIComponent(email)}`;
 
   await resend.emails.send({
     from: FROM,
     to: email,
     subject: "Welcome to Ask Arthur — You're on the list!",
     html,
+    headers: {
+      "List-Unsubscribe": `<${unsubscribeUrl}>, <${oneClickUrl}>`,
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+    },
   });
 }
 
@@ -55,6 +61,9 @@ export async function sendWeeklyDigest(
           You're receiving this because you subscribed to weekly scam alerts.
           <a href="https://askarthur.ai/unsubscribe" style="color: #94A3B8;">Unsubscribe</a>
         </p>
+        <p style="color: #94A3B8; font-size: 12px; margin-top: 8px;">
+          Ask Arthur | ABN [YOUR_ABN] | Sydney, Australia
+        </p>
       </div>
     `;
 
@@ -62,14 +71,20 @@ export async function sendWeeklyDigest(
   for (let i = 0; i < emails.length; i += 50) {
     const batch = emails.slice(i, i + 50);
     await Promise.allSettled(
-      batch.map((email) =>
-        resend.emails.send({
+      batch.map((email) => {
+        const unsubscribeUrl = `https://askarthur.ai/unsubscribe?email=${encodeURIComponent(email)}`;
+        const oneClickUrl = `https://askarthur.ai/api/unsubscribe-one-click?email=${encodeURIComponent(email)}`;
+        return resend.emails.send({
           from: FROM,
           to: email,
           subject: "This Week's Top Scams — Ask Arthur Weekly Alert",
           html,
-        })
-      )
+          headers: {
+            "List-Unsubscribe": `<${unsubscribeUrl}>, <${oneClickUrl}>`,
+            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+          },
+        });
+      })
     );
   }
 }

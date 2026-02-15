@@ -188,6 +188,16 @@ export default function WeeklyDigest({
                 Unsubscribe
               </Link>
             </Text>
+            <Text
+              style={{
+                color: "#94A3B8",
+                fontSize: "12px",
+                lineHeight: "1.5",
+                margin: "8px 0 0 0",
+              }}
+            >
+              Ask Arthur | ABN [YOUR_ABN] | Sydney, Australia
+            </Text>
           </Section>
         </Container>
       </Body>

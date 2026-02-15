@@ -65,7 +65,12 @@ export async function POST(req: NextRequest) {
       await supabase
         .from("email_subscribers")
         .upsert(
-          { email, is_active: true },
+          {
+            email,
+            is_active: true,
+            consent_at: new Date().toISOString(),
+            consent_source: `waitlist_${source}`,
+          },
           { onConflict: "email" }
         );
     }

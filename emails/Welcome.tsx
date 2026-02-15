@@ -7,10 +7,16 @@ import {
   Section,
   Text,
   Link,
+  Hr,
   Heading,
 } from "@react-email/components";
 
-export default function Welcome() {
+interface WelcomeProps {
+  email?: string;
+}
+
+export default function Welcome({ email = "" }: WelcomeProps) {
+  const unsubscribeUrl = `https://askarthur.ai/unsubscribe${email ? `?email=${encodeURIComponent(email)}` : ""}`;
   return (
     <Html>
       <Head>
@@ -123,6 +129,38 @@ export default function Welcome() {
               }}
             >
               — The Ask Arthur Team
+            </Text>
+
+            <Hr
+              style={{
+                borderColor: "#E2E8F0",
+                margin: "24px 0",
+              }}
+            />
+
+            <Text
+              style={{
+                color: "#94A3B8",
+                fontSize: "12px",
+                lineHeight: "1.5",
+                margin: 0,
+              }}
+            >
+              Ask Arthur | ABN [YOUR_ABN] | Sydney, Australia
+            </Text>
+            <Text
+              style={{
+                color: "#94A3B8",
+                fontSize: "12px",
+                margin: "8px 0 0 0",
+              }}
+            >
+              <Link
+                href={unsubscribeUrl}
+                style={{ color: "#94A3B8" }}
+              >
+                Unsubscribe
+              </Link>
             </Text>
           </Section>
         </Container>

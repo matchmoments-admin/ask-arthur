@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { marked } from "marked";
+import DOMPurify from "isomorphic-dompurify";
 import { getPostBySlug, getAllSlugs } from "@/lib/blog";
 import SubscribeForm from "@/components/SubscribeForm";
 import type { Metadata } from "next";
@@ -44,7 +45,8 @@ export default async function BlogPostPage({ params }: PageProps) {
     notFound();
   }
 
-  const htmlContent = marked(post.content);
+  const rawHtml = await marked(post.content);
+  const htmlContent = DOMPurify.sanitize(rawHtml);
 
   // JSON-LD structured data for Google
   const jsonLd = {

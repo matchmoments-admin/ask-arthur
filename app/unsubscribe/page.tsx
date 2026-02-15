@@ -1,11 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Footer from "@/components/Footer";
 
-export default function UnsubscribePage() {
-  const [email, setEmail] = useState("");
+function UnsubscribeForm() {
+  const searchParams = useSearchParams();
+  const prefilled = searchParams.get("email") || "";
+  const [email, setEmail] = useState(prefilled);
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState("");
 
@@ -40,6 +43,41 @@ export default function UnsubscribePage() {
   }
 
   return (
+    <>
+      {status === "success" ? (
+        <div className="bg-safe-bg border border-safe-border rounded-[4px] p-4 text-[#388E3C] text-base font-medium">
+          You&apos;ve been unsubscribed. You won&apos;t receive any more emails from us.
+        </div>
+      ) : (
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com"
+            required
+            aria-label="Email address"
+            className="w-full px-4 py-3 text-base border border-border-light rounded-[4px] bg-white focus:ring-action-teal focus:border-action-teal"
+          />
+          <button
+            type="submit"
+            disabled={status === "loading"}
+            className="w-full py-4 bg-deep-navy text-white font-bold uppercase tracking-widest rounded-[4px] hover:bg-navy transition-colors disabled:opacity-50"
+          >
+            {status === "loading" ? "Unsubscribing..." : "Unsubscribe"}
+          </button>
+
+          {status === "error" && (
+            <p className="text-danger-text text-sm">{errorMsg}</p>
+          )}
+        </form>
+      )}
+    </>
+  );
+}
+
+export default function UnsubscribePage() {
+  return (
     <div className="min-h-screen flex flex-col">
       <div className="h-1.5 bg-deep-navy w-full" />
 
@@ -55,34 +93,9 @@ export default function UnsubscribePage() {
           Enter your email address below to unsubscribe from weekly scam alerts.
         </p>
 
-        {status === "success" ? (
-          <div className="bg-safe-bg border border-safe-border rounded-[4px] p-4 text-[#388E3C] text-base font-medium">
-            You&apos;ve been unsubscribed. You won&apos;t receive any more emails from us.
-          </div>
-        ) : (
-          <form onSubmit={handleSubmit} className="space-y-3">
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              required
-              aria-label="Email address"
-              className="w-full px-4 py-3 text-base border border-border-light rounded-[4px] bg-white focus:ring-action-teal focus:border-action-teal"
-            />
-            <button
-              type="submit"
-              disabled={status === "loading"}
-              className="w-full py-4 bg-deep-navy text-white font-bold uppercase tracking-widest rounded-[4px] hover:bg-navy transition-colors disabled:opacity-50"
-            >
-              {status === "loading" ? "Unsubscribing..." : "Unsubscribe"}
-            </button>
-
-            {status === "error" && (
-              <p className="text-danger-text text-sm">{errorMsg}</p>
-            )}
-          </form>
-        )}
+        <Suspense fallback={<div className="h-24" />}>
+          <UnsubscribeForm />
+        </Suspense>
       </main>
 
       <Footer />
