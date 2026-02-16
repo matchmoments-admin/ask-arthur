@@ -5,7 +5,7 @@
 - **Name**: Ask Arthur
 - **Tagline**: Free AI Scam Checker
 - **Voice**: Authoritative, trustworthy, approachable — like a knowledgeable friend who keeps you safe
-- **Domain**: askarthur.ai
+- **Domain**: askarthur.au
 
 ## Token Definitions
 
@@ -50,6 +50,7 @@ Components are in `/components/`:
 | Component | File | Purpose |
 |-----------|------|---------|
 | ScamChecker | `components/ScamChecker.tsx` | Main scam analysis input/output |
+| ScreenshotDrawer | `components/ScreenshotDrawer.tsx` | Vaul bottom sheet for image source selection (gallery, camera, clipboard, files) |
 | ScamCounter | `components/ScamCounter.tsx` | Live stats counter |
 | WaitlistForm | `components/WaitlistForm.tsx` | Email waitlist signup |
 | SubscribeForm | `components/SubscribeForm.tsx` | Email subscription form |
@@ -62,6 +63,8 @@ Components are in `/components/`:
 - **Styling**: Tailwind CSS v4 (with `@theme inline` tokens)
 - **Icons**: Google Material Symbols Outlined (loaded via Google Fonts)
 - **Analytics**: Plausible (privacy-first)
+- **Drawer**: Vaul (physics-based bottom sheet, built on Radix Dialog)
+- **Image Compression**: browser-image-compression (client-side resize/compress)
 
 ## Icon System
 

@@ -1,8 +1,11 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import AnalysisProgress from "./AnalysisProgress";
 import ResultCard from "./ResultCard";
+import ScreenshotDrawer from "./ScreenshotDrawer";
+import { compressImage } from "@/lib/compressImage";
 
 type Verdict = "SAFE" | "SUSPICIOUS" | "HIGH_RISK";
 
@@ -27,13 +30,26 @@ export default function ScamChecker() {
   const [errorMsg, setErrorMsg] = useState("");
   const [isFocused, setIsFocused] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const searchParams = useSearchParams();
 
-  const processFile = useCallback((file: File) => {
-    if (file.size > 4 * 1024 * 1024) {
-      setErrorMsg("Image must be under 4MB");
+  // Pre-fill textarea from Web Share Target (Android PWA)
+  useEffect(() => {
+    const sharedText = searchParams.get("shared_text");
+    if (sharedText) {
+      setText(sharedText);
+      // Clean up the URL without triggering a navigation
+      window.history.replaceState({}, "", "/");
+    }
+  }, [searchParams]);
+
+  const processFile = useCallback(async (file: File) => {
+    if (file.size > 10 * 1024 * 1024) {
+      setErrorMsg("Image must be under 10MB");
       return;
     }
+
+    const compressed = await compressImage(file);
 
     const reader = new FileReader();
     reader.onload = () => {
@@ -44,14 +60,8 @@ export default function ScamChecker() {
       setImageName(file.name);
       setErrorMsg("");
     };
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(compressed);
   }, []);
-
-  function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    processFile(file);
-  }
 
   function handlePaste(e: React.ClipboardEvent) {
     const items = e.clipboardData?.items;
@@ -90,7 +100,6 @@ export default function ScamChecker() {
     setImageData(null);
     setImagePreview(null);
     setImageName(null);
-    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -139,7 +148,6 @@ export default function ScamChecker() {
     setStatus("idle");
     setResult(null);
     setErrorMsg("");
-    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   return (
@@ -196,23 +204,15 @@ export default function ScamChecker() {
 
           {/* Bottom toolbar */}
           <div className="flex items-center justify-between px-3 pb-3">
-            {/* Attach button */}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={handleImageUpload}
-              className="hidden"
-              id="screenshot-upload"
-            />
-            <label
-              htmlFor="screenshot-upload"
+            {/* Attach button — opens image source drawer */}
+            <button
+              type="button"
+              onClick={() => setDrawerOpen(true)}
               className="w-11 h-11 flex items-center justify-center rounded-full text-gov-slate hover:text-deep-navy hover:bg-slate-100 cursor-pointer transition-colors"
               aria-label="Attach screenshot"
             >
               <span className="material-symbols-outlined text-xl">attach_file</span>
-            </label>
+            </button>
 
             {/* Submit / Reset button */}
             {status === "complete" ? (
@@ -235,6 +235,12 @@ export default function ScamChecker() {
           </div>
         </div>
       </form>
+
+      <ScreenshotDrawer
+        open={drawerOpen}
+        onOpenChange={setDrawerOpen}
+        onFileSelected={processFile}
+      />
 
       {/* Privacy line */}
       <div className="flex items-center justify-center gap-2 mt-4 text-xs font-bold uppercase tracking-widest text-gov-slate">

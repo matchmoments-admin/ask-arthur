@@ -18,6 +18,7 @@
     "@supabase/supabase-js": "^2.95.3",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.36.2",
+    "browser-image-compression": "^2.0.2",
     "isomorphic-dompurify": "^3.0.0-rc.2",
     "marked": "^17.0.2",
     "next": "16.1.6",
@@ -26,6 +27,7 @@
     "react-dom": "19.2.3",
     "reading-time": "^1.5.0",
     "resend": "^6.9.2",
+    "vaul": "^1.1.2",
     "zod": "^4.3.6"
   },
   "devDependencies": {

@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import ScamChecker from "@/components/ScamChecker";
 import ScamCounter from "@/components/ScamCounter";
 import Footer from "@/components/Footer";
@@ -17,7 +18,9 @@ export default function Home() {
           Paste it here. Arthur will review it and report back to you.
         </p>
 
-        <ScamChecker />
+        <Suspense>
+          <ScamChecker />
+        </Suspense>
         <ScamCounter />
 
         {/* Feature grid */}

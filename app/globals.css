@@ -69,3 +69,8 @@ h1, h2, h3 {
 .animate-spin {
   animation: spin 1s linear infinite;
 }
+
+/* Vaul drawer overlay fade */
+[vaul-overlay] {
+  transition: opacity 0.2s ease;
+}
