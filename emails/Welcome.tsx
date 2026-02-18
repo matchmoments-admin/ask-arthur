@@ -16,7 +16,7 @@ interface WelcomeProps {
 }
 
 export default function Welcome({ email = "" }: WelcomeProps) {
-  const unsubscribeUrl = `https://askarthur.ai/unsubscribe${email ? `?email=${encodeURIComponent(email)}` : ""}`;
+  const unsubscribeUrl = `https://askarthur.au/unsubscribe${email ? `?email=${encodeURIComponent(email)}` : ""}`;
   return (
     <Html>
       <Head>
@@ -102,10 +102,10 @@ export default function Welcome({ email = "" }: WelcomeProps) {
             >
               In the meantime, you can use our free scam checker anytime at{" "}
               <Link
-                href="https://askarthur.ai"
+                href="https://askarthur.au"
                 style={{ color: "#0D9488" }}
               >
-                askarthur.ai
+                askarthur.au
               </Link>
               .
             </Text>

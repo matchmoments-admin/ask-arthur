@@ -51,7 +51,7 @@ export async function GET(req: NextRequest) {
       .single();
 
     const blogUrl = latestPost
-      ? `https://askarthur.ai/blog/${latestPost.slug}`
+      ? `https://askarthur.au/blog/${latestPost.slug}`
       : undefined;
 
     // Build structured scam items for React Email template

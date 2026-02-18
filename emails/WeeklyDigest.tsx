@@ -165,10 +165,10 @@ export default function WeeklyDigest({
             >
               Got a suspicious message? Check it free at{" "}
               <Link
-                href="https://askarthur.ai"
+                href="https://askarthur.au"
                 style={{ color: "#0D9488" }}
               >
-                askarthur.ai
+                askarthur.au
               </Link>
             </Text>
 
@@ -182,7 +182,7 @@ export default function WeeklyDigest({
               You&apos;re receiving this because you subscribed to weekly scam
               alerts.{" "}
               <Link
-                href="https://askarthur.ai/unsubscribe"
+                href="https://askarthur.au/unsubscribe"
                 style={{ color: "#94A3B8" }}
               >
                 Unsubscribe

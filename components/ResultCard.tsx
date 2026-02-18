@@ -1,5 +1,8 @@
 "use client";
 
+import { featureFlags } from "@/lib/featureFlags";
+import DeepfakeGauge from "./DeepfakeGauge";
+
 type Verdict = "SAFE" | "SUSPICIOUS" | "HIGH_RISK";
 
 interface ResultCardProps {
@@ -9,6 +12,11 @@ interface ResultCardProps {
   redFlags: string[];
   nextSteps: string[];
   countryCode?: string | null;
+  // Phase 2 additions (optional — only present for media analyses)
+  deepfakeScore?: number;
+  deepfakeProvider?: string;
+  phoneRiskFlags?: string[];
+  isVoipCaller?: boolean;
 }
 
 const VERDICT_CONFIG = {
@@ -42,6 +50,10 @@ export default function ResultCard({
   redFlags,
   nextSteps,
   countryCode,
+  deepfakeScore,
+  deepfakeProvider,
+  phoneRiskFlags,
+  isVoipCaller,
 }: ResultCardProps) {
   const config = VERDICT_CONFIG[verdict];
 
@@ -67,6 +79,47 @@ export default function ResultCard({
             {Math.round(confidence * 100)}% confidence
           </span>
         </div>
+
+        {/* Phase 2: Deepfake gauge (gated by feature flag) */}
+        {featureFlags.deepfakeDetection && deepfakeScore != null && deepfakeProvider && (
+          <div className="mb-5">
+            <DeepfakeGauge score={deepfakeScore} provider={deepfakeProvider} />
+          </div>
+        )}
+
+        {/* Phase 2: Phone intelligence (gated by feature flag) */}
+        {featureFlags.phoneIntelligence && phoneRiskFlags && phoneRiskFlags.length > 0 && (
+          <div className="mb-5 rounded-sm border border-slate-200 overflow-hidden">
+            <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-lg text-deep-navy">phone_in_talk</span>
+                <h4 className="text-xs font-bold uppercase tracking-widest text-deep-navy">
+                  Phone Number Intelligence
+                </h4>
+              </div>
+            </div>
+            <div className="px-4 py-4 bg-white">
+              {isVoipCaller && (
+                <div className="flex items-start gap-2 mb-2">
+                  <span className="material-symbols-outlined text-sm text-[#F57C00] mt-0.5">warning</span>
+                  <span className="text-sm text-gov-slate">
+                    VoIP number detected — commonly used by scammers to mask their identity
+                  </span>
+                </div>
+              )}
+              <ul className="space-y-1">
+                {phoneRiskFlags.map((flag, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-gov-slate">
+                    <span
+                      className="mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0 bg-slate-400"
+                    />
+                    {formatRiskFlag(flag)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        )}
 
         {/* Red Flags */}
         {redFlags.length > 0 && (
@@ -127,4 +180,15 @@ export default function ResultCard({
       </div>
     </div>
   );
+}
+
+function formatRiskFlag(flag: string): string {
+  const labels: Record<string, string> = {
+    voip: "VoIP number (internet-based, not tied to a physical line)",
+    invalid_number: "Invalid phone number format",
+    non_au_origin: "Number originates outside Australia",
+    unknown_carrier: "Carrier information unavailable",
+    lookup_failed: "Phone number lookup could not be completed",
+  };
+  return labels[flag] || flag;
 }

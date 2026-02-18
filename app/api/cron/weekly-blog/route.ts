@@ -49,13 +49,13 @@ export async function GET(req: NextRequest) {
     // Notify admin that a new post needs review (fire-and-forget)
     if (process.env.ADMIN_EMAIL && process.env.RESEND_API_KEY) {
       const adminUrl = process.env.ADMIN_SECRET
-        ? `https://askarthur.ai/admin/blog?secret=${process.env.ADMIN_SECRET}`
-        : "https://askarthur.ai/admin/blog";
+        ? `https://askarthur.au/admin/blog?secret=${process.env.ADMIN_SECRET}`
+        : "https://askarthur.au/admin/blog";
 
       const resend = new Resend(process.env.RESEND_API_KEY);
       resend.emails
         .send({
-          from: process.env.RESEND_FROM_EMAIL || "Ask Arthur <alerts@askarthur.ai>",
+          from: process.env.RESEND_FROM_EMAIL || "Ask Arthur <alerts@askarthur.au>",
           to: process.env.ADMIN_EMAIL,
           subject: `New blog post needs review: ${post.title}`,
           html: `<p>A new blog post has been generated and needs review:</p>

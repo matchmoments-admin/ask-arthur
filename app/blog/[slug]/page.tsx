@@ -59,7 +59,7 @@ export default async function BlogPostPage({ params }: PageProps) {
     publisher: {
       "@type": "Organization",
       name: "Ask Arthur",
-      url: "https://askarthur.ai",
+      url: "https://askarthur.au",
     },
   };
 

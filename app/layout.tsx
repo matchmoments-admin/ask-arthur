@@ -10,7 +10,7 @@ export const metadata: Metadata = {
     title: "Ask Arthur — Free AI Scam Checker",
     description:
       "Paste a suspicious message and find out if it's a scam — instantly, for free.",
-    url: "https://askarthur.ai",
+    url: "https://askarthur.au",
     siteName: "Ask Arthur",
     type: "website",
   },
@@ -31,7 +31,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="light">
       <head>
-        <PlausibleProvider domain={process.env.NEXT_PUBLIC_PLAUSIBLE_DOMAIN || "askarthur.ai"} />
+        <PlausibleProvider domain={process.env.NEXT_PUBLIC_PLAUSIBLE_DOMAIN || "askarthur.au"} />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link

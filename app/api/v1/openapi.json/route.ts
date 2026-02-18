@@ -9,10 +9,10 @@ const spec = {
       "Real-time scam and fraud threat intelligence for Australia. Access trending threats, aggregate statistics, and scam analysis.",
     contact: {
       name: "Ask Arthur",
-      url: "https://askarthur.ai",
+      url: "https://askarthur.au",
     },
   },
-  servers: [{ url: "https://askarthur.ai", description: "Production" }],
+  servers: [{ url: "https://askarthur.au", description: "Production" }],
   security: [{ ApiKeyAuth: [] }],
   paths: {
     "/api/v1/threats/trending": {

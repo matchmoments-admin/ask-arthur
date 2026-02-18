@@ -78,3 +78,91 @@ export async function getScreenshotUrl(key: string): Promise<string | null> {
 
   return url;
 }
+
+// ── Media Analysis (Phase 1) ──
+
+const ACCEPTED_AUDIO_TYPES = new Set([
+  "audio/mpeg",
+  "audio/mp3",
+  "audio/mp4",
+  "audio/m4a",
+  "audio/x-m4a",
+  "audio/wav",
+  "audio/wave",
+  "audio/x-wav",
+  "audio/webm",
+  "audio/ogg",
+  "audio/flac",
+]);
+
+/** Validate a MIME type against accepted audio formats. */
+export function isAcceptedAudioType(contentType: string): boolean {
+  return ACCEPTED_AUDIO_TYPES.has(contentType.toLowerCase());
+}
+
+/** Map MIME type to file extension for R2 key. */
+function audioExtension(contentType: string): string {
+  const map: Record<string, string> = {
+    "audio/mpeg": "mp3",
+    "audio/mp3": "mp3",
+    "audio/mp4": "m4a",
+    "audio/m4a": "m4a",
+    "audio/x-m4a": "m4a",
+    "audio/wav": "wav",
+    "audio/wave": "wav",
+    "audio/x-wav": "wav",
+    "audio/webm": "webm",
+    "audio/ogg": "ogg",
+    "audio/flac": "flac",
+  };
+  return map[contentType.toLowerCase()] || "bin";
+}
+
+/**
+ * Create a presigned PUT URL for client-side media upload (10 min expiry).
+ * Returns { uploadUrl, r2Key } or null if R2 is not configured.
+ */
+export async function createPresignedUploadUrl(
+  contentType: string,
+  jobId: string
+): Promise<{ uploadUrl: string; r2Key: string } | null> {
+  const client = getR2Client();
+  if (!client) return null;
+
+  const date = new Date().toISOString().split("T")[0];
+  const ext = audioExtension(contentType);
+  const r2Key = `media/${date}/${jobId}.${ext}`;
+
+  const uploadUrl = await getSignedUrl(
+    client,
+    new PutObjectCommand({
+      Bucket: getBucket(),
+      Key: r2Key,
+      ContentType: contentType,
+    }),
+    { expiresIn: 600 }
+  );
+
+  return { uploadUrl, r2Key };
+}
+
+/**
+ * Download a media file from R2 as a Buffer (for Whisper transcription).
+ * Returns null if R2 is not configured or the file doesn't exist.
+ */
+export async function downloadMediaBuffer(key: string): Promise<Buffer | null> {
+  const client = getR2Client();
+  if (!client) return null;
+
+  const response = await client.send(
+    new GetObjectCommand({
+      Bucket: getBucket(),
+      Key: key,
+    })
+  );
+
+  if (!response.Body) return null;
+
+  const bytes = await response.Body.transformToByteArray();
+  return Buffer.from(bytes);
+}

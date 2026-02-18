@@ -74,4 +74,4 @@ This "sovereign trust" positioning makes us the natural choice for Australian AD
 
 *Ask Arthur — Protecting Australians from scams, one check at a time.*
 
-Contact: hello@askarthur.ai | askarthur.ai
+Contact: hello@askarthur.au | askarthur.au

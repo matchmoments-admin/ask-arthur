@@ -107,7 +107,7 @@ Return ONLY valid JSON:
 {
   "title": "SEO-optimised title (under 70 chars)",
   "excerpt": "1-2 sentence summary for preview cards (under 160 chars)",
-  "content": "Full markdown blog post (500-800 words). Include: intro, section per scam type with ## headings, how to protect yourself section, conclusion with link to askarthur.ai",
+  "content": "Full markdown blog post (500-800 words). Include: intro, section per scam type with ## headings, how to protect yourself section, conclusion with link to askarthur.au",
   "tags": ["tag1", "tag2", "tag3"]
 }`,
       },

@@ -7,13 +7,13 @@ function getResendClient() {
   return new Resend(process.env.RESEND_API_KEY);
 }
 
-const FROM = process.env.RESEND_FROM_EMAIL || "Ask Arthur <alerts@askarthur.ai>";
+const FROM = process.env.RESEND_FROM_EMAIL || "Ask Arthur <alerts@askarthur.au>";
 
 export async function sendWelcomeEmail(email: string): Promise<void> {
   const resend = getResendClient();
   const html = await render(Welcome({ email }));
-  const unsubscribeUrl = `https://askarthur.ai/unsubscribe?email=${encodeURIComponent(email)}`;
-  const oneClickUrl = `https://askarthur.ai/api/unsubscribe-one-click?email=${encodeURIComponent(email)}`;
+  const unsubscribeUrl = `https://askarthur.au/unsubscribe?email=${encodeURIComponent(email)}`;
+  const oneClickUrl = `https://askarthur.au/api/unsubscribe-one-click?email=${encodeURIComponent(email)}`;
 
   await resend.emails.send({
     from: FROM,
@@ -55,11 +55,11 @@ export async function sendWeeklyDigest(
         <hr style="border: none; border-top: 1px solid #E2E8F0; margin: 32px 0;" />
         <p style="color: #334155; font-size: 16px;">
           Got a suspicious message? Check it free at
-          <a href="https://askarthur.ai" style="color: #0D9488;">askarthur.ai</a>
+          <a href="https://askarthur.au" style="color: #0D9488;">askarthur.au</a>
         </p>
         <p style="color: #94A3B8; font-size: 12px; margin-top: 24px;">
           You're receiving this because you subscribed to weekly scam alerts.
-          <a href="https://askarthur.ai/unsubscribe" style="color: #94A3B8;">Unsubscribe</a>
+          <a href="https://askarthur.au/unsubscribe" style="color: #94A3B8;">Unsubscribe</a>
         </p>
         <p style="color: #94A3B8; font-size: 12px; margin-top: 8px;">
           Ask Arthur | ABN [YOUR_ABN] | Sydney, Australia
@@ -72,8 +72,8 @@ export async function sendWeeklyDigest(
     const batch = emails.slice(i, i + 50);
     await Promise.allSettled(
       batch.map((email) => {
-        const unsubscribeUrl = `https://askarthur.ai/unsubscribe?email=${encodeURIComponent(email)}`;
-        const oneClickUrl = `https://askarthur.ai/api/unsubscribe-one-click?email=${encodeURIComponent(email)}`;
+        const unsubscribeUrl = `https://askarthur.au/unsubscribe?email=${encodeURIComponent(email)}`;
+        const oneClickUrl = `https://askarthur.au/api/unsubscribe-one-click?email=${encodeURIComponent(email)}`;
         return resend.emails.send({
           from: FROM,
           to: email,

@@ -41,6 +41,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# editor config
+.vscode/
+
 # claude code (local settings contain machine paths + permissions)
 .claude/settings.local.json
 .claude/projects/

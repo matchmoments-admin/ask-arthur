@@ -12,6 +12,9 @@
   "functions": {
     "app/api/analyze/route.ts": {
       "maxDuration": 30
+    },
+    "app/api/media/analyze/route.ts": {
+      "maxDuration": 60
     }
   }
 }

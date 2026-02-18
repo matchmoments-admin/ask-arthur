@@ -7,12 +7,12 @@ info:
     Powered by community-sourced scam reports analysed by AI.
   contact:
     name: Ask Arthur
-    url: https://askarthur.ai
+    url: https://askarthur.au
   license:
     name: Proprietary
 
 servers:
-  - url: https://askarthur.ai/api/v1
+  - url: https://askarthur.au/api/v1
     description: Production
 
 security:
