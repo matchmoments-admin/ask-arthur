@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import AnalysisProgress from "./AnalysisProgress";
 import ResultCard from "./ResultCard";
 import ScreenshotDrawer from "./ScreenshotDrawer";
+import QrScanner from "./QrScanner";
 import { compressImage } from "@/lib/compressImage";
 import { tryDecodeQR } from "@/lib/qrDecode";
 import { featureFlags } from "@/lib/featureFlags";
@@ -40,6 +41,7 @@ export default function ScamChecker() {
   const [isFocused, setIsFocused] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [showQrScanner, setShowQrScanner] = useState(false);
   const [inputMode, setInputMode] = useState<"text" | "image" | "qrcode">("text");
   const [qrDecodedUrl, setQrDecodedUrl] = useState<string | null>(null);
   const [qrError, setQrError] = useState<string | null>(null);
@@ -204,10 +206,24 @@ export default function ScamChecker() {
     setInputMode("text");
     setQrDecodedUrl(null);
     setQrError(null);
+    setShowQrScanner(false);
     setStatus("idle");
     setResult(null);
     setErrorMsg("");
     media.reset();
+  }
+
+  function handleCameraQrScan(decodedText: string) {
+    setShowQrScanner(false);
+    setInputMode("qrcode");
+    const urlMatch = decodedText.match(/https?:\/\/\S+/);
+    if (urlMatch) {
+      setQrDecodedUrl(urlMatch[0]);
+      setText(urlMatch[0]);
+    } else {
+      setQrDecodedUrl(decodedText);
+      setText(decodedText);
+    }
   }
 
   // Determine if any analysis (text or media) is active
@@ -256,7 +272,7 @@ export default function ScamChecker() {
           )}
 
           {/* QR code success notice */}
-          {inputMode === "qrcode" && qrDecodedUrl && imagePreview && (
+          {inputMode === "qrcode" && qrDecodedUrl && !qrError && (
             <div className="flex items-center gap-2 px-4 pt-2 text-sm text-action-teal font-medium">
               <span className="material-symbols-outlined text-base">qr_code_scanner</span>
               {qrDecodedUrl.startsWith("http") ? "QR code detected \u2014 link extracted for checking" : "QR code detected \u2014 text extracted for checking"}
@@ -264,7 +280,7 @@ export default function ScamChecker() {
           )}
 
           {/* QR code error notice */}
-          {inputMode === "qrcode" && qrError && imagePreview && (
+          {inputMode === "qrcode" && qrError && (
             <div className="flex items-center gap-2 px-4 pt-2 text-sm text-red-600 font-medium">
               <span className="material-symbols-outlined text-base">qr_code_scanner</span>
               {qrError}
@@ -351,6 +367,16 @@ export default function ScamChecker() {
         open={drawerOpen}
         onOpenChange={setDrawerOpen}
         onFileSelected={processFile}
+        onScanQrCode={() => {
+          setDrawerOpen(false);
+          setShowQrScanner(true);
+        }}
+      />
+
+      <QrScanner
+        open={showQrScanner}
+        onClose={() => setShowQrScanner(false)}
+        onScan={handleCameraQrScan}
       />
 
       {/* Privacy line */}

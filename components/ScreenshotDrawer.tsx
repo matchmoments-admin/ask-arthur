@@ -7,12 +7,14 @@ interface ScreenshotDrawerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onFileSelected: (file: File, mode?: "image" | "qrcode") => void;
+  onScanQrCode: () => void;
 }
 
 export default function ScreenshotDrawer({
   open,
   onOpenChange,
   onFileSelected,
+  onScanQrCode,
 }: ScreenshotDrawerProps) {
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -20,11 +22,22 @@ export default function ScreenshotDrawer({
   const qrInputRef = useRef<HTMLInputElement>(null);
   const [isMobile, setIsMobile] = useState(false);
   const [clipboardAvailable, setClipboardAvailable] = useState(false);
+  const [hasCamera, setHasCamera] = useState(false);
 
   useEffect(() => {
     setIsMobile(
       "ontouchstart" in window || navigator.maxTouchPoints > 0
     );
+
+    // Check camera availability
+    if (navigator.mediaDevices?.enumerateDevices) {
+      navigator.mediaDevices
+        .enumerateDevices()
+        .then((devices) => {
+          setHasCamera(devices.some((d) => d.kind === "videoinput"));
+        })
+        .catch(() => setHasCamera(false));
+    }
 
     // Check clipboard read availability
     if (navigator.clipboard && typeof navigator.clipboard.read === "function") {
@@ -207,7 +220,28 @@ export default function ScreenshotDrawer({
             {/* Divider */}
             <div className="mx-3 my-1 border-t border-slate-200" />
 
-            {/* Scan QR code */}
+            {/* Scan with camera — only shown when camera is available */}
+            {hasCamera && (
+              <button
+                type="button"
+                onClick={onScanQrCode}
+                className="flex items-center gap-4 px-3 py-3 rounded-xl hover:bg-slate-50 transition-colors text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-deep-navy/20"
+              >
+                <span className="material-symbols-outlined text-2xl text-action-teal">
+                  photo_camera
+                </span>
+                <div>
+                  <div className="text-base font-semibold text-deep-navy">
+                    Scan with camera
+                  </div>
+                  <div className="text-sm text-gov-slate">
+                    Point your camera at a QR code
+                  </div>
+                </div>
+              </button>
+            )}
+
+            {/* Upload QR image */}
             <button
               type="button"
               onClick={() => qrInputRef.current?.click()}
@@ -218,10 +252,10 @@ export default function ScreenshotDrawer({
               </span>
               <div>
                 <div className="text-base font-semibold text-deep-navy">
-                  Scan QR code
+                  Upload QR image
                 </div>
                 <div className="text-sm text-gov-slate">
-                  Check where a QR code leads
+                  Select a saved QR code image
                 </div>
               </div>
             </button>
