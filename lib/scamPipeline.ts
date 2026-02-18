@@ -1,6 +1,7 @@
 import { createServiceClient } from "./supabase";
 import { uploadScreenshot } from "./r2";
 import type { AnalysisResult } from "./claude";
+import type { PhoneLookupResult } from "./twilioLookup";
 import { logger } from "./logger";
 
 // PII patterns to scrub (defense in depth — Claude is also instructed not to echo PII)
@@ -88,6 +89,37 @@ export async function storeVerifiedScam(
   }
 }
 
+// Phase 2: Store phone lookup results for a media analysis (HIGH_RISK only)
+export async function storePhoneLookups(
+  analysisId: string,
+  lookups: PhoneLookupResult[]
+): Promise<void> {
+  const supabase = createServiceClient();
+  if (!supabase || lookups.length === 0) return;
+
+  try {
+    const rows = lookups.map((l) => ({
+      analysis_id: analysisId,
+      phone_number_scrubbed: scrubPhoneForStorage(l.phoneNumber),
+      country_code: l.countryCode,
+      line_type: l.lineType,
+      carrier: l.carrier,
+      is_voip: l.isVoip,
+      risk_flags: l.riskFlags,
+    }));
+
+    await supabase.from("phone_lookups").insert(rows);
+  } catch (err) {
+    logger.error("Failed to store phone lookups", { error: String(err) });
+  }
+}
+
+// Only store last 3 digits + length indicator for privacy
+function scrubPhoneForStorage(phone: string): string {
+  if (phone.length < 4) return "***";
+  return "*".repeat(phone.length - 3) + phone.slice(-3);
+}
+
 // Increment daily check stats (fire-and-forget)
 export async function incrementStats(
   verdict: string,
@@ -95,12 +127,26 @@ export async function incrementStats(
 ): Promise<void> {
   try {
     const supabase = createServiceClient();
-    if (!supabase) return; // no-op in local dev
+    if (!supabase) {
+      logger.warn("incrementStats: Supabase service client is null — skipping");
+      return;
+    }
 
-    await supabase.rpc("increment_check_stats", {
+    const safeRegion = region || "__unknown__";
+
+    const { error } = await supabase.rpc("increment_check_stats", {
       p_verdict: verdict,
-      p_region: region,
+      p_region: safeRegion,
     });
+
+    if (error) {
+      logger.error("increment_check_stats RPC failed", {
+        error: error.message,
+        code: error.code,
+        verdict,
+        region: safeRegion,
+      });
+    }
   } catch (err) {
     logger.error("Failed to increment stats", { error: String(err) });
   }

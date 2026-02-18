@@ -105,9 +105,13 @@ export async function POST(req: NextRequest) {
 
     // 6. Fire-and-forget: store scam data + increment stats
     if (finalVerdict === "HIGH_RISK") {
-      storeVerifiedScam(aiResult, region, image).catch(() => {});
+      storeVerifiedScam(aiResult, region, image).catch((err) =>
+        logger.error("storeVerifiedScam failed", { error: String(err) })
+      );
     }
-    incrementStats(finalVerdict, region).catch(() => {});
+    incrementStats(finalVerdict, region).catch((err) =>
+      logger.error("incrementStats fire-and-forget failed", { error: String(err) })
+    );
 
     // 7. Return result
     return NextResponse.json(

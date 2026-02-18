@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import AnalysisProgress from "./AnalysisProgress";
 import ResultCard from "./ResultCard";
 import ScreenshotDrawer from "./ScreenshotDrawer";
 import { compressImage } from "@/lib/compressImage";
+import { featureFlags } from "@/lib/featureFlags";
+import { useMediaAnalysis } from "@/lib/hooks/useMediaAnalysis";
 
 type Verdict = "SAFE" | "SUSPICIOUS" | "HIGH_RISK";
 
@@ -20,6 +22,12 @@ interface AnalysisResponse {
 
 type Status = "idle" | "analyzing" | "complete" | "error" | "rate_limited";
 
+const MEDIA_STATUS_LABELS: Record<string, string> = {
+  uploading: "Uploading audio...",
+  transcribing: "Transcribing audio...",
+  analyzing: "Analyzing for scams...",
+};
+
 export default function ScamChecker() {
   const [text, setText] = useState("");
   const [imageData, setImageData] = useState<string | null>(null);
@@ -32,6 +40,10 @@ export default function ScamChecker() {
   const [isDragging, setIsDragging] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const searchParams = useSearchParams();
+
+  // Media analysis hook
+  const media = useMediaAnalysis();
+  const audioInputRef = useRef<HTMLInputElement>(null);
 
   // Pre-fill textarea from Web Share Target (Android PWA)
   useEffect(() => {
@@ -134,10 +146,23 @@ export default function ScamChecker() {
       const data: AnalysisResponse = await res.json();
       setResult(data);
       setStatus("complete");
+      window.dispatchEvent(new Event("safeverify:check-complete"));
     } catch {
       setStatus("error");
       setErrorMsg("Something went wrong. Please try again.");
     }
+  }
+
+  function handleAudioSelect() {
+    audioInputRef.current?.click();
+  }
+
+  function handleAudioChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // Reset the input so the same file can be re-selected
+    e.target.value = "";
+    media.analyze(file);
   }
 
   function handleReset() {
@@ -148,7 +173,16 @@ export default function ScamChecker() {
     setStatus("idle");
     setResult(null);
     setErrorMsg("");
+    media.reset();
   }
+
+  // Determine if any analysis (text or media) is active
+  const isMediaActive = media.status !== "idle" && media.status !== "complete" && media.status !== "error";
+  const isTextActive = status === "analyzing";
+  const isAnyActive = isMediaActive || isTextActive;
+
+  // Show media result via ResultCard when complete
+  const showMediaResult = media.status === "complete" && media.result;
 
   return (
     <div>
@@ -197,25 +231,40 @@ export default function ScamChecker() {
             aria-label="Suspicious message to check"
             rows={4}
             maxLength={10000}
-            disabled={status === "analyzing"}
-            aria-busy={status === "analyzing"}
+            disabled={isAnyActive}
+            aria-busy={isAnyActive}
             className="w-full px-4 py-3 text-lg text-deep-navy border-0 focus:outline-none focus:ring-0 bg-transparent resize-y min-h-[100px] disabled:opacity-60 placeholder:text-slate-400"
           />
 
           {/* Bottom toolbar */}
           <div className="flex items-center justify-between px-3 pb-3">
-            {/* Attach button — opens image source drawer */}
-            <button
-              type="button"
-              onClick={() => setDrawerOpen(true)}
-              className="w-11 h-11 flex items-center justify-center rounded-full text-gov-slate hover:text-deep-navy hover:bg-slate-100 cursor-pointer transition-colors"
-              aria-label="Attach screenshot"
-            >
-              <span className="material-symbols-outlined text-xl">attach_file</span>
-            </button>
+            <div className="flex items-center gap-1">
+              {/* Attach button — opens image source drawer */}
+              <button
+                type="button"
+                onClick={() => setDrawerOpen(true)}
+                className="w-11 h-11 flex items-center justify-center rounded-full text-gov-slate hover:text-deep-navy hover:bg-slate-100 cursor-pointer transition-colors"
+                aria-label="Attach screenshot"
+              >
+                <span className="material-symbols-outlined text-xl">attach_file</span>
+              </button>
+
+              {/* Audio upload button — gated by feature flag */}
+              {featureFlags.mediaAnalysis && (
+                <button
+                  type="button"
+                  onClick={handleAudioSelect}
+                  disabled={isAnyActive}
+                  className="w-11 h-11 flex items-center justify-center rounded-full text-gov-slate hover:text-deep-navy hover:bg-slate-100 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  aria-label="Upload audio recording"
+                >
+                  <span className="material-symbols-outlined text-xl">mic</span>
+                </button>
+              )}
+            </div>
 
             {/* Submit / Reset button */}
-            {status === "complete" ? (
+            {(status === "complete" || showMediaResult) ? (
               <button
                 type="button"
                 onClick={handleReset}
@@ -226,15 +275,27 @@ export default function ScamChecker() {
             ) : (
               <button
                 type="submit"
-                disabled={status === "analyzing" || (!text.trim() && !imageData)}
+                disabled={isAnyActive || (!text.trim() && !imageData)}
                 className="h-11 px-6 bg-deep-navy text-white font-bold uppercase tracking-widest rounded-full hover:bg-navy transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
               >
-                {status === "analyzing" ? "Analyzing..." : "Check Now"}
+                {isTextActive ? "Analyzing..." : "Check Now"}
               </button>
             )}
           </div>
         </div>
       </form>
+
+      {/* Hidden audio file input */}
+      {featureFlags.mediaAnalysis && (
+        <input
+          ref={audioInputRef}
+          type="file"
+          accept="audio/*"
+          onChange={handleAudioChange}
+          className="hidden"
+          aria-hidden="true"
+        />
+      )}
 
       <ScreenshotDrawer
         open={drawerOpen}
@@ -249,11 +310,22 @@ export default function ScamChecker() {
         We never store your data
       </div>
 
-      {/* Analysis progress */}
+      {/* Media analysis progress */}
+      {isMediaActive && (
+        <div className="mt-6 flex items-center gap-3 justify-center">
+          <div className="w-5 h-5 border-2 border-deep-navy border-t-transparent rounded-full animate-spin" />
+          <p className="text-gov-slate text-base">
+            {MEDIA_STATUS_LABELS[media.status] || "Processing..."}
+          </p>
+        </div>
+      )}
+
+      {/* Text analysis progress */}
       <AnalysisProgress status={status} />
 
       {/* Result */}
       <div aria-live="polite">
+      {/* Text analysis result */}
       {result && status === "complete" && (
         <ResultCard
           verdict={result.verdict}
@@ -265,7 +337,21 @@ export default function ScamChecker() {
         />
       )}
 
-      {/* Error / rate limit messages */}
+      {/* Media analysis result */}
+      {showMediaResult && media.result && (
+        <ResultCard
+          verdict={media.result.verdict as "SAFE" | "SUSPICIOUS" | "HIGH_RISK"}
+          confidence={media.result.confidence}
+          summary={media.result.summary}
+          redFlags={media.result.redFlags}
+          nextSteps={media.result.nextSteps}
+          deepfakeScore={media.result.deepfakeScore}
+          deepfakeProvider={media.result.deepfakeProvider}
+          phoneRiskFlags={media.result.phoneRiskFlags}
+        />
+      )}
+
+      {/* Error / rate limit messages (text analysis) */}
       {(status === "error" || status === "rate_limited") && (
         <div role="alert" className="mt-6 p-4 bg-warn-bg border border-warn-border rounded-[4px]">
           <p className="text-warn-heading text-base">{errorMsg}</p>
@@ -274,6 +360,13 @@ export default function ScamChecker() {
               This limit helps us keep the service free for everyone.
             </p>
           )}
+        </div>
+      )}
+
+      {/* Media analysis errors */}
+      {media.status === "error" && media.error && (
+        <div role="alert" className="mt-6 p-4 bg-warn-bg border border-warn-border rounded-[4px]">
+          <p className="text-warn-heading text-base">{media.error}</p>
         </div>
       )}
       </div>
