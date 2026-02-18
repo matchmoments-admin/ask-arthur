@@ -6,6 +6,7 @@ import AnalysisProgress from "./AnalysisProgress";
 import ResultCard from "./ResultCard";
 import ScreenshotDrawer from "./ScreenshotDrawer";
 import { compressImage } from "@/lib/compressImage";
+import { tryDecodeQR } from "@/lib/qrDecode";
 import { featureFlags } from "@/lib/featureFlags";
 import { useMediaAnalysis } from "@/lib/hooks/useMediaAnalysis";
 
@@ -39,6 +40,9 @@ export default function ScamChecker() {
   const [isFocused, setIsFocused] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [inputMode, setInputMode] = useState<"text" | "image" | "qrcode">("text");
+  const [qrDecodedUrl, setQrDecodedUrl] = useState<string | null>(null);
+  const [qrError, setQrError] = useState<string | null>(null);
   const searchParams = useSearchParams();
 
   // Media analysis hook
@@ -55,13 +59,36 @@ export default function ScamChecker() {
     }
   }, [searchParams]);
 
-  const processFile = useCallback(async (file: File) => {
+  const processFile = useCallback(async (file: File, mode?: "image" | "qrcode") => {
     if (file.size > 10 * 1024 * 1024) {
       setErrorMsg("Image must be under 10MB");
       return;
     }
 
+    // Reset QR state
+    setQrError(null);
+    setQrDecodedUrl(null);
+
     const compressed = await compressImage(file);
+
+    if (mode === "qrcode") {
+      setInputMode("qrcode");
+      const qrText = await tryDecodeQR(compressed);
+      if (qrText) {
+        const urlMatch = qrText.match(/https?:\/\/\S+/);
+        if (urlMatch) {
+          setQrDecodedUrl(urlMatch[0]);
+          setText(urlMatch[0]);
+        } else {
+          setQrDecodedUrl(qrText);
+          setText(qrText);
+        }
+      } else {
+        setQrError("Couldn\u2019t read this QR code \u2014 try a clearer photo");
+      }
+    } else {
+      setInputMode("image");
+    }
 
     const reader = new FileReader();
     reader.onload = () => {
@@ -112,6 +139,9 @@ export default function ScamChecker() {
     setImageData(null);
     setImagePreview(null);
     setImageName(null);
+    setInputMode("text");
+    setQrDecodedUrl(null);
+    setQrError(null);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -129,6 +159,7 @@ export default function ScamChecker() {
         body: JSON.stringify({
           text: text.trim() || undefined,
           image: imageData || undefined,
+          mode: inputMode !== "text" ? inputMode : undefined,
         }),
       });
 
@@ -170,6 +201,9 @@ export default function ScamChecker() {
     setImageData(null);
     setImagePreview(null);
     setImageName(null);
+    setInputMode("text");
+    setQrDecodedUrl(null);
+    setQrError(null);
     setStatus("idle");
     setResult(null);
     setErrorMsg("");
@@ -218,6 +252,22 @@ export default function ScamChecker() {
               >
                 <span className="material-symbols-outlined text-lg">close</span>
               </button>
+            </div>
+          )}
+
+          {/* QR code success notice */}
+          {inputMode === "qrcode" && qrDecodedUrl && imagePreview && (
+            <div className="flex items-center gap-2 px-4 pt-2 text-sm text-action-teal font-medium">
+              <span className="material-symbols-outlined text-base">qr_code_scanner</span>
+              {qrDecodedUrl.startsWith("http") ? "QR code detected \u2014 link extracted for checking" : "QR code detected \u2014 text extracted for checking"}
+            </div>
+          )}
+
+          {/* QR code error notice */}
+          {inputMode === "qrcode" && qrError && imagePreview && (
+            <div className="flex items-center gap-2 px-4 pt-2 text-sm text-red-600 font-medium">
+              <span className="material-symbols-outlined text-base">qr_code_scanner</span>
+              {qrError}
             </div>
           )}
 

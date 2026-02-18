@@ -6,7 +6,7 @@ import { Drawer } from "vaul";
 interface ScreenshotDrawerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onFileSelected: (file: File) => void;
+  onFileSelected: (file: File, mode?: "image" | "qrcode") => void;
 }
 
 export default function ScreenshotDrawer({
@@ -17,6 +17,7 @@ export default function ScreenshotDrawer({
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const qrInputRef = useRef<HTMLInputElement>(null);
   const [isMobile, setIsMobile] = useState(false);
   const [clipboardAvailable, setClipboardAvailable] = useState(false);
 
@@ -47,16 +48,21 @@ export default function ScreenshotDrawer({
   }, []);
 
   const handleFile = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
+    (e: React.ChangeEvent<HTMLInputElement>, mode?: "image" | "qrcode") => {
       const file = e.target.files?.[0];
       if (file) {
-        onFileSelected(file);
+        onFileSelected(file, mode);
         onOpenChange(false);
       }
       // Reset the input so the same file can be re-selected
       e.target.value = "";
     },
     [onFileSelected, onOpenChange]
+  );
+
+  const handleQrFile = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => handleFile(e, "qrcode"),
+    [handleFile]
   );
 
   async function handleClipboardPaste() {
@@ -195,6 +201,35 @@ export default function ScreenshotDrawer({
               type="file"
               accept="image/*"
               onChange={handleFile}
+              className="hidden"
+            />
+
+            {/* Divider */}
+            <div className="mx-3 my-1 border-t border-slate-200" />
+
+            {/* Scan QR code */}
+            <button
+              type="button"
+              onClick={() => qrInputRef.current?.click()}
+              className="flex items-center gap-4 px-3 py-3 rounded-xl hover:bg-slate-50 transition-colors text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-deep-navy/20"
+            >
+              <span className="material-symbols-outlined text-2xl text-action-teal">
+                qr_code_scanner
+              </span>
+              <div>
+                <div className="text-base font-semibold text-deep-navy">
+                  Scan QR code
+                </div>
+                <div className="text-sm text-gov-slate">
+                  Check where a QR code leads
+                </div>
+              </div>
+            </button>
+            <input
+              ref={qrInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleQrFile}
               className="hidden"
             />
           </div>

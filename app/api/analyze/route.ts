@@ -10,6 +10,7 @@ import { logger } from "@/lib/logger";
 const RequestSchema = z.object({
   text: z.string().max(10000).optional(),
   image: z.string().max(5_000_000).optional(), // base64, ~3.75MB decoded
+  mode: z.enum(["text", "image", "qrcode"]).optional(),
 }).refine((data) => data.text || data.image, {
   message: "Either text or image is required",
 });
@@ -58,7 +59,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { text, image } = parsed.data;
+    const { text, image, mode } = parsed.data;
 
     // 2b. Pre-filter for prompt injection attempts
     const injectionCheck = text ? detectInjectionAttempt(text) : { detected: false, patterns: [] };
@@ -68,7 +69,7 @@ export async function POST(req: NextRequest) {
 
     // 4. Run AI analysis + URL reputation checks in parallel
     const [aiResult, urlResults, geo] = await Promise.all([
-      analyzeWithClaude(text, image),
+      analyzeWithClaude(text, image, mode),
       checkURLReputation(urls),
       geolocateIP(ip),
     ]);

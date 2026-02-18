@@ -5,6 +5,7 @@ import { logger } from "./logger";
 export const PROMPT_VERSION = "2.0.0";
 
 export type Verdict = "SAFE" | "SUSPICIOUS" | "HIGH_RISK";
+export type AnalysisMode = "text" | "image" | "qrcode";
 
 export interface AnalysisResult {
   verdict: Verdict;
@@ -188,7 +189,8 @@ export function validateResult(parsed: Record<string, unknown>): AnalysisResult 
 
 export async function analyzeWithClaude(
   text?: string,
-  imageBase64?: string
+  imageBase64?: string,
+  mode?: AnalysisMode
 ): Promise<AnalysisResult> {
   // Fail-closed in production, mock in dev
   if (!process.env.ANTHROPIC_API_KEY) {
@@ -227,7 +229,17 @@ export async function analyzeWithClaude(
       type: "image",
       source: { type: "base64", media_type: mediaType, data: imageBase64 },
     });
-    if (!text) {
+    if (mode === "qrcode" && text) {
+      content.push({
+        type: "text",
+        text: "This image contains a QR code. The decoded content has been provided above for analysis. Pay special attention to: shortened or obfuscated URLs, redirects to suspicious domains, QR codes impersonating legitimate brands, and fake payment or login pages.",
+      });
+    } else if (mode === "qrcode" && !text) {
+      content.push({
+        type: "text",
+        text: "This image contains a QR code that could not be decoded. Analyse the image for any visible scam indicators, suspicious branding, or context that suggests fraud.",
+      });
+    } else if (!text) {
       content.push({
         type: "text",
         text: "Analyze this screenshot for signs of scams, phishing, or fraud.",
