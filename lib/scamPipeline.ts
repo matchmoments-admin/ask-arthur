@@ -1,3 +1,4 @@
+import "server-only";
 import { createServiceClient } from "./supabase";
 import { uploadScreenshot } from "./r2";
 import type { AnalysisResult } from "./claude";

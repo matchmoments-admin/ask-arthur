@@ -1,6 +1,14 @@
 import type { Metadata } from "next";
+import { Public_Sans } from "next/font/google";
 import PlausibleProvider from "next-plausible";
 import "./globals.css";
+
+const publicSans = Public_Sans({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800"],
+  display: "swap",
+  variable: "--font-public-sans",
+});
 
 export const metadata: Metadata = {
   title: "Ask Arthur — Free AI Scam Checker",
@@ -29,17 +37,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="light">
+    <html lang="en" className={`light ${publicSans.variable}`}>
       <head>
         <PlausibleProvider domain={process.env.NEXT_PUBLIC_PLAUSIBLE_DOMAIN || "askarthur.au"} />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link
-          href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700;800&display=swap"
-          rel="stylesheet"
-        />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0"
+          href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&icon_names=article,attach_file,bolt,close,content_paste,error_outline,flag,folder_open,gpp_bad,lock,mic,phone_in_talk,photo_camera,photo_library,qr_code_scanner,search_off,shield,speed,verified_user,videocam_off,visibility_off,warning"
           rel="stylesheet"
         />
       </head>

@@ -19,6 +19,7 @@
     "@supabase/supabase-js": "^2.95.3",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.36.2",
+    "@vercel/functions": "^3.4.2",
     "browser-image-compression": "^2.0.2",
     "isomorphic-dompurify": "^3.0.0-rc.2",
     "marked": "^17.0.2",
@@ -30,6 +31,7 @@
     "react-dom": "19.2.3",
     "reading-time": "^1.5.0",
     "resend": "^6.9.2",
+    "server-only": "^0.0.1",
     "twilio": "^5.12.1",
     "vaul": "^1.1.2",
     "zod": "^4.3.6"

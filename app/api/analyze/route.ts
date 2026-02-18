@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { waitUntil } from "@vercel/functions";
 import { checkRateLimit } from "@/lib/rateLimit";
 import { analyzeWithClaude, detectInjectionAttempt, type Verdict } from "@/lib/claude";
 import { extractURLs, checkURLReputation } from "@/lib/safebrowsing";
 import { geolocateIP } from "@/lib/geolocate";
 import { storeVerifiedScam, incrementStats } from "@/lib/scamPipeline";
+import { getCachedAnalysis, setCachedAnalysis } from "@/lib/analysisCache";
 import { logger } from "@/lib/logger";
 
 const RequestSchema = z.object({
@@ -64,10 +66,34 @@ export async function POST(req: NextRequest) {
     // 2b. Pre-filter for prompt injection attempts
     const injectionCheck = text ? detectInjectionAttempt(text) : { detected: false, patterns: [] };
 
-    // 3. Extract URLs from text for reputation checking
+    // 3. Check cache for text-only requests (skip for images — content-addressable hashing is complex)
+    const isTextOnly = text && !image;
+    if (isTextOnly) {
+      const cached = await getCachedAnalysis(text);
+      if (cached) {
+        const geo = await geolocateIP(ip);
+        waitUntil(incrementStats(cached.verdict, geo.region));
+        return NextResponse.json(
+          {
+            verdict: cached.verdict,
+            confidence: cached.confidence,
+            summary: cached.summary,
+            redFlags: cached.redFlags,
+            nextSteps: cached.nextSteps,
+            urlsChecked: 0,
+            maliciousURLs: 0,
+            countryCode: geo.countryCode,
+            cached: true,
+          },
+          { headers: { "X-RateLimit-Remaining": String(rateCheck.remaining) } }
+        );
+      }
+    }
+
+    // 4. Extract URLs from text for reputation checking
     const urls = text ? extractURLs(text) : [];
 
-    // 4. Run AI analysis + URL reputation checks in parallel
+    // 5. Run AI analysis + URL reputation checks in parallel
     const [aiResult, urlResults, geo] = await Promise.all([
       analyzeWithClaude(text, image, mode),
       checkURLReputation(urls),
@@ -75,7 +101,7 @@ export async function POST(req: NextRequest) {
     ]);
     const { region, countryCode } = geo;
 
-    // 5. Merge verdicts — URL threats escalate AI verdict
+    // 6. Merge verdicts — URL threats escalate AI verdict
     let finalVerdict: Verdict = aiResult.verdict;
     const maliciousURLs = urlResults.filter((r) => r.isMalicious);
 
@@ -94,7 +120,7 @@ export async function POST(req: NextRequest) {
 
     aiResult.verdict = finalVerdict;
 
-    // 5b. Injection floor — if injection detected, floor verdict at SUSPICIOUS minimum
+    // 6b. Injection floor — if injection detected, floor verdict at SUSPICIOUS minimum
     if (injectionCheck.detected) {
       if (finalVerdict === "SAFE") {
         aiResult.verdict = "SUSPICIOUS";
@@ -104,17 +130,26 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 6. Fire-and-forget: store scam data + increment stats
+    // 7. Background work via waitUntil (survives after response is sent)
     if (finalVerdict === "HIGH_RISK") {
-      storeVerifiedScam(aiResult, region, image).catch((err) =>
-        logger.error("storeVerifiedScam failed", { error: String(err) })
+      waitUntil(
+        storeVerifiedScam(aiResult, region, image).catch((err) =>
+          logger.error("storeVerifiedScam failed", { error: String(err) })
+        )
       );
     }
-    incrementStats(finalVerdict, region).catch((err) =>
-      logger.error("incrementStats fire-and-forget failed", { error: String(err) })
+    waitUntil(
+      incrementStats(finalVerdict, region).catch((err) =>
+        logger.error("incrementStats failed", { error: String(err) })
+      )
     );
 
-    // 7. Return result
+    // Cache text-only analysis results for future requests
+    if (isTextOnly) {
+      waitUntil(setCachedAnalysis(text, aiResult));
+    }
+
+    // 8. Return result
     return NextResponse.json(
       {
         verdict: aiResult.verdict,

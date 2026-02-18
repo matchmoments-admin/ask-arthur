@@ -38,7 +38,7 @@
   --color-danger-text: #D32F2F;
   --color-danger-heading: #B71C1C;
 
-  --font-sans: "Public Sans", sans-serif;
+  --font-sans: var(--font-public-sans), sans-serif;
 }
 
 body {
