@@ -3,6 +3,16 @@ import { createServiceClient } from "@/lib/supabase";
 import { sendWeeklyDigest } from "@/lib/resend";
 import { logger } from "@/lib/logger";
 
+/** Escape HTML special characters to prevent XSS in email templates */
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 export async function GET(req: NextRequest) {
   // Verify cron secret
   const authHeader = req.headers.get("authorization");
@@ -69,7 +79,7 @@ export async function GET(req: NextRequest) {
         ${scams
           .map(
             (s) =>
-              `<li><strong>${s.impersonated_brand || s.scam_type}</strong>: ${s.summary}</li>`
+              `<li><strong>${escapeHtml(s.impersonated_brand || s.scam_type)}</strong>: ${escapeHtml(s.summary)}</li>`
           )
           .join("")}
       </ul>

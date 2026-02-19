@@ -77,7 +77,7 @@ export async function POST(req: NextRequest) {
 
     // Send welcome email (fire-and-forget)
     sendWelcomeEmail(email).catch((err) =>
-      console.error("Failed to send welcome email:", err)
+      logger.error("Failed to send welcome email", { error: String(err) })
     );
 
     return NextResponse.json({ success: true });

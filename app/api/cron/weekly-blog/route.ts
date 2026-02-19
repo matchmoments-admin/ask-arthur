@@ -4,6 +4,16 @@ import { createServiceClient } from "@/lib/supabase";
 import { generateWeeklyBlogPost } from "@/lib/blogGenerator";
 import { logger } from "@/lib/logger";
 
+/** Escape HTML special characters to prevent XSS in email templates */
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 export async function GET(req: NextRequest) {
   // Verify cron secret
   const authHeader = req.headers.get("authorization");
@@ -59,8 +69,8 @@ export async function GET(req: NextRequest) {
           to: process.env.ADMIN_EMAIL,
           subject: `New blog post needs review: ${post.title}`,
           html: `<p>A new blog post has been generated and needs review:</p>
-<p><strong>${post.title}</strong></p>
-<p><a href="${adminUrl}">Review in admin panel</a></p>`,
+<p><strong>${escapeHtml(post.title)}</strong></p>
+<p><a href="${escapeHtml(adminUrl)}">Review in admin panel</a></p>`,
         })
         .catch((err) => logger.error("Failed to send admin notification", { error: String(err) }));
     }

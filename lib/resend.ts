@@ -7,6 +7,16 @@ function getResendClient() {
   return new Resend(process.env.RESEND_API_KEY);
 }
 
+/** Escape HTML special characters to prevent XSS in email templates */
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 const FROM = process.env.RESEND_FROM_EMAIL || "Ask Arthur <alerts@askarthur.au>";
 
 export async function sendWelcomeEmail(email: string): Promise<void> {
