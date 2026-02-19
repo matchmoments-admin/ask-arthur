@@ -75,7 +75,7 @@ export async function storeVerifiedScam(
       logger.info("HIGH_RISK verdict stored without screenshot");
     }
 
-    await supabase.from("verified_scams").insert({
+    const { error } = await supabase.from("verified_scams").insert({
       scam_type: analysis.scamType || "other",
       channel: analysis.channel,
       summary: scrubbedSummary,
@@ -85,6 +85,13 @@ export async function storeVerifiedScam(
       impersonated_brand: analysis.impersonatedBrand,
       ...(screenshotKey && { screenshot_key: screenshotKey }),
     });
+
+    if (error) {
+      logger.error("verified_scams insert failed", {
+        error: error.message,
+        code: error.code,
+      });
+    }
   } catch (err) {
     logger.error("Failed to store verified scam", { error: String(err) });
   }
@@ -109,7 +116,14 @@ export async function storePhoneLookups(
       risk_flags: l.riskFlags,
     }));
 
-    await supabase.from("phone_lookups").insert(rows);
+    const { error } = await supabase.from("phone_lookups").insert(rows);
+
+    if (error) {
+      logger.error("phone_lookups insert failed", {
+        error: error.message,
+        code: error.code,
+      });
+    }
   } catch (err) {
     logger.error("Failed to store phone lookups", { error: String(err) });
   }

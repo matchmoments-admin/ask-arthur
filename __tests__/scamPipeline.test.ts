@@ -1,5 +1,51 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { scrubPII } from "@/lib/scamPipeline";
+import type { AnalysisResult } from "@/lib/claude";
+
+// ── Mocks ──
+
+const mockInsert = vi.fn();
+const mockFrom = vi.fn(() => ({ insert: mockInsert }));
+
+vi.mock("@/lib/supabase", () => ({
+  createServiceClient: vi.fn(() => ({ from: mockFrom })),
+}));
+
+vi.mock("@/lib/r2", () => ({
+  uploadScreenshot: vi.fn(() => Promise.resolve("screenshots/2025-01-01/abc.png")),
+}));
+
+vi.mock("@/lib/logger", () => ({
+  logger: {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  },
+}));
+
+// Import after mocks are set up
+const { createServiceClient } = await import("@/lib/supabase");
+const { uploadScreenshot } = await import("@/lib/r2");
+const { logger } = await import("@/lib/logger");
+const { storeVerifiedScam, storePhoneLookups } = await import("@/lib/scamPipeline");
+
+// ── Helpers ──
+
+function makeAnalysis(overrides?: Partial<AnalysisResult>): AnalysisResult {
+  return {
+    verdict: "HIGH_RISK",
+    confidence: 0.95,
+    summary: "This is a scam message from john@evil.com",
+    redFlags: ["Urgency", "Asks for 123 Main Street address"],
+    nextSteps: ["Do not respond"],
+    scamType: "phishing",
+    impersonatedBrand: "AusPost",
+    channel: "sms",
+    ...overrides,
+  };
+}
+
+// ── scrubPII tests ──
 
 describe("scrubPII", () => {
   it("scrubs email addresses", () => {
@@ -10,8 +56,6 @@ describe("scrubPII", () => {
   });
 
   it("scrubs credit card numbers (phone pattern catches segments first)", () => {
-    // The PHONE pattern runs before CARD, so card digits are partially scrubbed
-    // as phone numbers. This is acceptable — the digits are still removed.
     const result = scrubPII("Card: 4111 1111 1111 1111");
     expect(result).not.toContain("4111 1111 1111 1111");
     expect(result).not.toMatch(/\d{4}\s\d{4}\s\d{4}\s\d{4}/);
@@ -55,5 +99,187 @@ describe("scrubPII", () => {
     );
     expect(result).toContain("[NAME]");
     expect(result).toContain("[EMAIL]");
+  });
+});
+
+// ── storeVerifiedScam tests ──
+
+describe("storeVerifiedScam", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockInsert.mockResolvedValue({ error: null });
+    vi.mocked(createServiceClient).mockReturnValue({ from: mockFrom } as any);
+    vi.mocked(uploadScreenshot).mockResolvedValue("screenshots/2025-01-01/abc.png");
+  });
+
+  it("inserts into verified_scams with correct shape", async () => {
+    const analysis = makeAnalysis();
+    await storeVerifiedScam(analysis, "AU");
+
+    expect(mockFrom).toHaveBeenCalledWith("verified_scams");
+    expect(mockInsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scam_type: "phishing",
+        channel: "sms",
+        region: "AU",
+        confidence_score: 0.95,
+        impersonated_brand: "AusPost",
+      })
+    );
+  });
+
+  it("applies PII scrubbing to summary and red flags before insert", async () => {
+    const analysis = makeAnalysis({
+      summary: "Scam sent by john@evil.com",
+      redFlags: ["Visit 123 Main Street"],
+    });
+    await storeVerifiedScam(analysis, "AU");
+
+    const insertArg = mockInsert.mock.calls[0][0];
+    expect(insertArg.summary).toContain("[EMAIL]");
+    expect(insertArg.summary).not.toContain("john@evil.com");
+    expect(insertArg.red_flags[0]).toContain("[ADDRESS]");
+    expect(insertArg.red_flags[0]).not.toContain("123 Main Street");
+  });
+
+  it("logs error when Supabase insert fails", async () => {
+    mockInsert.mockResolvedValue({
+      error: { message: "RLS violation", code: "42501" },
+    });
+
+    await storeVerifiedScam(makeAnalysis(), "AU");
+
+    expect(logger.error).toHaveBeenCalledWith(
+      "verified_scams insert failed",
+      expect.objectContaining({
+        error: "RLS violation",
+        code: "42501",
+      })
+    );
+  });
+
+  it("calls uploadScreenshot when imageBase64 is provided and under 4MB", async () => {
+    const smallImage = Buffer.from("tiny png data").toString("base64");
+    await storeVerifiedScam(makeAnalysis(), "AU", smallImage);
+
+    expect(uploadScreenshot).toHaveBeenCalledWith(
+      expect.any(Buffer),
+      "image/png"
+    );
+    const insertArg = mockInsert.mock.calls[0][0];
+    expect(insertArg.screenshot_key).toBe("screenshots/2025-01-01/abc.png");
+  });
+
+  it("skips upload when imageBase64 exceeds 4MB", async () => {
+    const largeImage = Buffer.alloc(5 * 1024 * 1024).toString("base64");
+    await storeVerifiedScam(makeAnalysis(), "AU", largeImage);
+
+    expect(uploadScreenshot).not.toHaveBeenCalled();
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.stringContaining("exceeds 4MB"),
+      expect.any(Object)
+    );
+  });
+
+  it("detects JPEG content type from base64 header", async () => {
+    const jpegImage = "/9j/" + Buffer.from("jpeg data").toString("base64");
+    await storeVerifiedScam(makeAnalysis(), "AU", jpegImage);
+
+    expect(uploadScreenshot).toHaveBeenCalledWith(
+      expect.any(Buffer),
+      "image/jpeg"
+    );
+  });
+
+  it("no-ops gracefully when createServiceClient returns null", async () => {
+    vi.mocked(createServiceClient).mockReturnValue(null);
+
+    await storeVerifiedScam(makeAnalysis(), "AU");
+
+    expect(mockFrom).not.toHaveBeenCalled();
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it("defaults scam_type to 'other' when not provided", async () => {
+    const analysis = makeAnalysis({ scamType: undefined });
+    await storeVerifiedScam(analysis, "AU");
+
+    const insertArg = mockInsert.mock.calls[0][0];
+    expect(insertArg.scam_type).toBe("other");
+  });
+});
+
+// ── storePhoneLookups tests ──
+
+describe("storePhoneLookups", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockInsert.mockResolvedValue({ error: null });
+    vi.mocked(createServiceClient).mockReturnValue({ from: mockFrom } as any);
+  });
+
+  it("inserts phone lookup rows with scrubbed phone numbers", async () => {
+    await storePhoneLookups("analysis-123", [
+      {
+        phoneNumber: "+61412345678",
+        countryCode: "AU",
+        lineType: "mobile",
+        carrier: "Telstra",
+        isVoip: false,
+        riskFlags: ["suspicious_carrier"],
+      },
+    ]);
+
+    expect(mockFrom).toHaveBeenCalledWith("phone_lookups");
+    const rows = mockInsert.mock.calls[0][0];
+    expect(rows[0].phone_number_scrubbed).toBe("*********678");
+    expect(rows[0].analysis_id).toBe("analysis-123");
+  });
+
+  it("logs error when insert fails", async () => {
+    mockInsert.mockResolvedValue({
+      error: { message: "constraint violation", code: "23505" },
+    });
+
+    await storePhoneLookups("analysis-123", [
+      {
+        phoneNumber: "+61412345678",
+        countryCode: "AU",
+        lineType: "mobile",
+        carrier: "Telstra",
+        isVoip: false,
+        riskFlags: [],
+      },
+    ]);
+
+    expect(logger.error).toHaveBeenCalledWith(
+      "phone_lookups insert failed",
+      expect.objectContaining({
+        error: "constraint violation",
+        code: "23505",
+      })
+    );
+  });
+
+  it("no-ops when lookups array is empty", async () => {
+    await storePhoneLookups("analysis-123", []);
+    expect(mockFrom).not.toHaveBeenCalled();
+  });
+
+  it("no-ops when createServiceClient returns null", async () => {
+    vi.mocked(createServiceClient).mockReturnValue(null);
+
+    await storePhoneLookups("analysis-123", [
+      {
+        phoneNumber: "+61412345678",
+        countryCode: "AU",
+        lineType: "mobile",
+        carrier: "Telstra",
+        isVoip: false,
+        riskFlags: [],
+      },
+    ]);
+
+    expect(mockFrom).not.toHaveBeenCalled();
   });
 });
