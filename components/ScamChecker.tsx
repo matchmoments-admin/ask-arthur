@@ -62,10 +62,8 @@ export default function ScamChecker() {
   }, [searchParams]);
 
   const processFile = useCallback(async (file: File, mode?: "image" | "qrcode") => {
-    if (file.size > 10 * 1024 * 1024) {
-      setErrorMsg("Image must be under 10MB");
-      return;
-    }
+    // No client-side size limit — compressImage() handles reduction to ~500KB
+    // and the API enforces its own 10MB payload limit as a backstop.
 
     // Reset QR state
     setQrError(null);

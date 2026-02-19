@@ -100,6 +100,40 @@ describe("scrubPII", () => {
     expect(result).toContain("[NAME]");
     expect(result).toContain("[EMAIL]");
   });
+
+  // Pattern ordering tests — specific patterns must match before generic phone
+  it("scrubs Medicare numbers as [MEDICARE], not [PHONE]", () => {
+    const result = scrubPII("Medicare: 2345 67890 1");
+    expect(result).toContain("[MEDICARE]");
+    expect(result).not.toMatch(/\d{4}\s\d{5}\s\d/);
+  });
+
+  it("scrubs credit card numbers as [CARD], not [PHONE]", () => {
+    const result = scrubPII("Card: 4111 1111 1111 1111");
+    expect(result).toContain("[CARD]");
+  });
+
+  it("scrubs TFN without spaces as [TFN], not [PHONE]", () => {
+    const result = scrubPII("My TFN is 987654321");
+    expect(result).toContain("[TFN]");
+  });
+
+  it("scrubs Australian landline numbers", () => {
+    const result = scrubPII("Call 02 9876 5432");
+    expect(result).not.toContain("9876 5432");
+  });
+
+  it("scrubs BSB numbers", () => {
+    const result = scrubPII("BSB: 062-000");
+    expect(result).toContain("[BSB]");
+    expect(result).not.toContain("062-000");
+  });
+
+  it("scrubs SSN numbers", () => {
+    const result = scrubPII("SSN: 123-45-6789");
+    expect(result).toContain("[SSN]");
+    expect(result).not.toContain("123-45-6789");
+  });
 });
 
 // ── storeVerifiedScam tests ──

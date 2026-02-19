@@ -6,23 +6,25 @@ import type { PhoneLookupResult } from "./twilioLookup";
 import { logger } from "./logger";
 
 // PII patterns to scrub (defense in depth — Claude is also instructed not to echo PII)
+// ORDER MATTERS: More specific patterns (card, Medicare, TFN) must run BEFORE the
+// generic phone pattern, which is greedy and would otherwise consume their digits.
 const PII_PATTERNS: [RegExp, string][] = [
   // Email addresses
   [/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, "[EMAIL]"],
-  // Phone numbers (various formats including AU)
-  [/(\+?1?\s?)?(\(?\d{3}\)?[\s.-]?)?\d{3}[\s.-]?\d{4}/g, "[PHONE]"],
-  // Australian phone numbers (04xx xxx xxx, +614xx xxx xxx)
-  [/(\+?61\s?)?0?4\d{2}[\s.-]?\d{3}[\s.-]?\d{3}/g, "[AU_PHONE]"],
-  // Australian landline (0x xxxx xxxx)
-  [/0[2-9]\s?\d{4}\s?\d{4}/g, "[AU_PHONE]"],
-  // SSN
-  [/\b\d{3}-?\d{2}-?\d{4}\b/g, "[SSN]"],
-  // Australian Tax File Number (TFN: XXX XXX XXX)
-  [/\b\d{3}\s?\d{3}\s?\d{3}\b/g, "[TFN]"],
-  // Australian Medicare number (XXXX XXXXX X)
-  [/\b\d{4}\s?\d{5}\s?\d\b/g, "[MEDICARE]"],
-  // Credit card numbers
+  // Credit card numbers (must run before generic phone)
   [/\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b/g, "[CARD]"],
+  // Australian Medicare number (XXXX XXXXX X) (must run before generic phone)
+  [/\b\d{4}\s?\d{5}\s?\d\b/g, "[MEDICARE]"],
+  // Australian Tax File Number (TFN: XXX XXX XXX) (must run before generic phone)
+  [/\b\d{3}\s?\d{3}\s?\d{3}\b/g, "[TFN]"],
+  // SSN (must run before generic phone)
+  [/\b\d{3}-?\d{2}-?\d{4}\b/g, "[SSN]"],
+  // Australian phone numbers (04xx xxx xxx, +614xx xxx xxx) (must run before generic phone)
+  [/(\+?61\s?)?0?4\d{2}[\s.-]?\d{3}[\s.-]?\d{3}/g, "[AU_PHONE]"],
+  // Australian landline (0x xxxx xxxx) (must run before generic phone)
+  [/0[2-9]\s?\d{4}\s?\d{4}/g, "[AU_PHONE]"],
+  // Phone numbers — generic catch-all (runs last among digit patterns)
+  [/(\+?1?\s?)?(\(?\d{3}\)?[\s.-]?)?\d{3}[\s.-]?\d{4}/g, "[PHONE]"],
   // IP addresses
   [/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g, "[IP]"],
   // Australian BSB (XXX-XXX)
