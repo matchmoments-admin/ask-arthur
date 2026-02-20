@@ -3,6 +3,7 @@ import { z } from "zod";
 import { waitUntil } from "@vercel/functions";
 import { checkRateLimit } from "@/lib/rateLimit";
 import { analyzeWithClaude, detectInjectionAttempt, type Verdict } from "@/lib/claude";
+import { featureFlags } from "@/lib/featureFlags";
 import { extractURLs, checkURLReputation } from "@/lib/safebrowsing";
 import { geolocateIP } from "@/lib/geolocate";
 import { storeVerifiedScam, incrementStats } from "@/lib/scamPipeline";
@@ -160,6 +161,9 @@ export async function POST(req: NextRequest) {
         urlsChecked: urlResults.length,
         maliciousURLs: maliciousURLs.length,
         countryCode,
+        ...(featureFlags.scamContactReporting && aiResult.scammerContacts && {
+          scammerContacts: aiResult.scammerContacts,
+        }),
       },
       {
         headers: {

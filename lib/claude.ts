@@ -9,6 +9,16 @@ export const PROMPT_VERSION = "2.0.0";
 export type Verdict = "SAFE" | "SUSPICIOUS" | "HIGH_RISK";
 export type AnalysisMode = "text" | "image" | "qrcode";
 
+export interface ScammerContact {
+  value: string;
+  context: string;
+}
+
+export interface ScammerContacts {
+  phoneNumbers: ScammerContact[];
+  emailAddresses: ScammerContact[];
+}
+
 export interface AnalysisResult {
   verdict: Verdict;
   confidence: number;
@@ -18,6 +28,7 @@ export interface AnalysisResult {
   scamType?: string;
   impersonatedBrand?: string;
   channel?: string;
+  scammerContacts?: ScammerContacts;
 }
 
 export interface InjectionCheckResult {
@@ -86,8 +97,21 @@ Respond with ONLY valid JSON matching this schema:
   "nextSteps": ["actionable step 1", "actionable step 2"],
   "scamType": "phishing|advance_fee|tech_support|romance|investment|impersonation|smishing|other|none",
   "impersonatedBrand": "brand name if applicable, or null",
-  "channel": "email|sms|social_media|phone|website|other"
+  "channel": "email|sms|social_media|phone|website|other",
+  "scammerContacts": {
+    "phoneNumbers": [{"value": "raw number", "context": "caller ID / callback number"}],
+    "emailAddresses": [{"value": "email", "context": "sender address / reply-to"}]
+  }
 }
+
+SCAMMER CONTACT EXTRACTION RULES:
+- ONLY extract contacts belonging to the SCAMMER/CALLER/SENDER
+- NEVER include the USER's/VICTIM's own details
+- "called FROM 028xxx" = SCAMMER. "called MY number 041xxx" = USER (exclude)
+- Email From: field = SCAMMER. Email To: field = USER (exclude)
+- When in doubt, EXCLUDE. False negatives are safe.
+- For screenshots: sender = scammer, recipient = user
+- Maximum 5 phone numbers and 5 email addresses
 
 Red flags to check for:
 - Urgency/pressure tactics ("act now", "your account will be closed")
@@ -174,6 +198,46 @@ export function validateResult(parsed: Record<string, unknown>): AnalysisResult 
   // Sanitize string lengths
   const summary = typeof parsed.summary === "string" ? parsed.summary.slice(0, 500) : "";
 
+  // Parse scammerContacts — only include for HIGH_RISK or SUSPICIOUS verdicts
+  let scammerContacts: ScammerContacts | undefined;
+  if (
+    (verdict === "HIGH_RISK" || verdict === "SUSPICIOUS") &&
+    parsed.scammerContacts &&
+    typeof parsed.scammerContacts === "object"
+  ) {
+    const raw = parsed.scammerContacts as Record<string, unknown>;
+
+    const phoneNumbers = (Array.isArray(raw.phoneNumbers) ? raw.phoneNumbers : [])
+      .filter(
+        (p: unknown): p is { value: string; context: string } =>
+          typeof p === "object" && p !== null &&
+          typeof (p as Record<string, unknown>).value === "string" &&
+          typeof (p as Record<string, unknown>).context === "string"
+      )
+      .map((p) => ({
+        value: p.value.slice(0, 50),
+        context: p.context.slice(0, 100),
+      }))
+      .slice(0, 5);
+
+    const emailAddresses = (Array.isArray(raw.emailAddresses) ? raw.emailAddresses : [])
+      .filter(
+        (e: unknown): e is { value: string; context: string } =>
+          typeof e === "object" && e !== null &&
+          typeof (e as Record<string, unknown>).value === "string" &&
+          typeof (e as Record<string, unknown>).context === "string"
+      )
+      .map((e) => ({
+        value: e.value.slice(0, 100),
+        context: e.context.slice(0, 100),
+      }))
+      .slice(0, 5);
+
+    if (phoneNumbers.length > 0 || emailAddresses.length > 0) {
+      scammerContacts = { phoneNumbers, emailAddresses };
+    }
+  }
+
   return {
     verdict,
     confidence,
@@ -186,6 +250,7 @@ export function validateResult(parsed: Record<string, unknown>): AnalysisResult 
         ? parsed.impersonatedBrand.slice(0, 100)
         : undefined,
     channel: typeof parsed.channel === "string" ? parsed.channel.slice(0, 50) : undefined,
+    scammerContacts,
   };
 }
 
@@ -254,7 +319,7 @@ export async function analyzeWithClaude(
   // Use assistant prefill to force JSON output
   const response = await client.messages.create({
     model: "claude-haiku-4-5-20251001",
-    max_tokens: 600,
+    max_tokens: 700,
     system: [
       {
         type: "text" as const,

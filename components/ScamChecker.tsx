@@ -10,6 +10,8 @@ import { compressImage } from "@/lib/compressImage";
 import { tryDecodeQR } from "@/lib/qrDecode";
 import { featureFlags } from "@/lib/featureFlags";
 import { useMediaAnalysis } from "@/lib/hooks/useMediaAnalysis";
+import type { ScammerContacts } from "@/lib/claude";
+import ScamReportCard from "./ScamReportCard";
 
 type Verdict = "SAFE" | "SUSPICIOUS" | "HIGH_RISK";
 
@@ -20,6 +22,10 @@ interface AnalysisResponse {
   redFlags: string[];
   nextSteps: string[];
   countryCode?: string | null;
+  scammerContacts?: ScammerContacts;
+  scamType?: string;
+  impersonatedBrand?: string;
+  channel?: string;
 }
 
 type Status = "idle" | "analyzing" | "complete" | "error" | "rate_limited";
@@ -401,14 +407,24 @@ export default function ScamChecker() {
       <div aria-live="polite">
       {/* Text analysis result */}
       {result && status === "complete" && (
-        <ResultCard
-          verdict={result.verdict}
-          confidence={result.confidence}
-          summary={result.summary}
-          redFlags={result.redFlags}
-          nextSteps={result.nextSteps}
-          countryCode={result.countryCode}
-        />
+        <>
+          <ResultCard
+            verdict={result.verdict}
+            confidence={result.confidence}
+            summary={result.summary}
+            redFlags={result.redFlags}
+            nextSteps={result.nextSteps}
+            countryCode={result.countryCode}
+          />
+          {featureFlags.scamContactReporting && result.scammerContacts && (
+            <ScamReportCard
+              contacts={result.scammerContacts}
+              scamType={result.scamType}
+              brandImpersonated={result.impersonatedBrand}
+              channel={result.channel}
+            />
+          )}
+        </>
       )}
 
       {/* Media analysis result */}

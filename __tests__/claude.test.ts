@@ -267,4 +267,157 @@ describe("validateResult", () => {
     expect(result.redFlags).toEqual([]);
     expect(result.nextSteps).toEqual([]);
   });
+
+  // ─── scammerContacts parsing ───
+
+  it("parses scammerContacts for HIGH_RISK verdict", () => {
+    const result = validateResult({
+      verdict: "HIGH_RISK",
+      confidence: 0.95,
+      summary: "Scam detected",
+      redFlags: ["test"],
+      nextSteps: ["test"],
+      scammerContacts: {
+        phoneNumbers: [{ value: "0412345678", context: "caller ID" }],
+        emailAddresses: [{ value: "scam@fake.com", context: "sender" }],
+      },
+    });
+
+    expect(result.scammerContacts).toBeDefined();
+    expect(result.scammerContacts!.phoneNumbers).toHaveLength(1);
+    expect(result.scammerContacts!.phoneNumbers[0].value).toBe("0412345678");
+    expect(result.scammerContacts!.emailAddresses).toHaveLength(1);
+    expect(result.scammerContacts!.emailAddresses[0].value).toBe("scam@fake.com");
+  });
+
+  it("parses scammerContacts for SUSPICIOUS verdict", () => {
+    const result = validateResult({
+      verdict: "SUSPICIOUS",
+      confidence: 0.6,
+      summary: "Suspicious",
+      redFlags: [],
+      nextSteps: [],
+      scammerContacts: {
+        phoneNumbers: [{ value: "+61282334342", context: "callback number" }],
+        emailAddresses: [],
+      },
+    });
+
+    expect(result.scammerContacts).toBeDefined();
+    expect(result.scammerContacts!.phoneNumbers).toHaveLength(1);
+  });
+
+  it("strips scammerContacts for SAFE verdict", () => {
+    const result = validateResult({
+      verdict: "SAFE",
+      confidence: 0.9,
+      summary: "Safe message",
+      redFlags: [],
+      nextSteps: [],
+      scammerContacts: {
+        phoneNumbers: [{ value: "0412345678", context: "some number" }],
+        emailAddresses: [],
+      },
+    });
+
+    expect(result.scammerContacts).toBeUndefined();
+  });
+
+  it("caps scammerContacts arrays at 5 entries each", () => {
+    const manyPhones = Array.from({ length: 10 }, (_, i) => ({
+      value: `041234567${i}`,
+      context: `caller ${i}`,
+    }));
+    const manyEmails = Array.from({ length: 10 }, (_, i) => ({
+      value: `scam${i}@fake.com`,
+      context: `sender ${i}`,
+    }));
+
+    const result = validateResult({
+      verdict: "HIGH_RISK",
+      confidence: 0.95,
+      summary: "Scam",
+      redFlags: [],
+      nextSteps: [],
+      scammerContacts: {
+        phoneNumbers: manyPhones,
+        emailAddresses: manyEmails,
+      },
+    });
+
+    expect(result.scammerContacts!.phoneNumbers).toHaveLength(5);
+    expect(result.scammerContacts!.emailAddresses).toHaveLength(5);
+  });
+
+  it("filters invalid entries from scammerContacts arrays", () => {
+    const result = validateResult({
+      verdict: "HIGH_RISK",
+      confidence: 0.95,
+      summary: "Scam",
+      redFlags: [],
+      nextSteps: [],
+      scammerContacts: {
+        phoneNumbers: [
+          { value: "0412345678", context: "valid" },
+          "not an object",
+          { value: 123, context: "bad type" },
+          null,
+        ],
+        emailAddresses: [
+          { value: "test@test.com", context: "valid" },
+        ],
+      },
+    });
+
+    expect(result.scammerContacts!.phoneNumbers).toHaveLength(1);
+    expect(result.scammerContacts!.phoneNumbers[0].value).toBe("0412345678");
+    expect(result.scammerContacts!.emailAddresses).toHaveLength(1);
+  });
+
+  it("returns undefined scammerContacts when both arrays are empty", () => {
+    const result = validateResult({
+      verdict: "HIGH_RISK",
+      confidence: 0.95,
+      summary: "Scam",
+      redFlags: [],
+      nextSteps: [],
+      scammerContacts: {
+        phoneNumbers: [],
+        emailAddresses: [],
+      },
+    });
+
+    expect(result.scammerContacts).toBeUndefined();
+  });
+
+  it("handles missing scammerContacts gracefully", () => {
+    const result = validateResult({
+      verdict: "HIGH_RISK",
+      confidence: 0.95,
+      summary: "Scam",
+      redFlags: [],
+      nextSteps: [],
+    });
+
+    expect(result.scammerContacts).toBeUndefined();
+  });
+
+  it("truncates long values in scammerContacts", () => {
+    const longValue = "A".repeat(200);
+    const longContext = "B".repeat(200);
+    const result = validateResult({
+      verdict: "HIGH_RISK",
+      confidence: 0.95,
+      summary: "Scam",
+      redFlags: [],
+      nextSteps: [],
+      scammerContacts: {
+        phoneNumbers: [{ value: longValue, context: longContext }],
+        emailAddresses: [],
+      },
+    });
+
+    expect(result.scammerContacts!.phoneNumbers[0].value).toHaveLength(50);
+    expect(result.scammerContacts!.phoneNumbers[0].context).toHaveLength(100);
+  });
 });

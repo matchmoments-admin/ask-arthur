@@ -14,6 +14,9 @@ export const featureFlags = {
 
   /** Phase 2: Video upload support (extends audio-only media input) */
   videoUpload: process.env.NEXT_PUBLIC_FF_VIDEO_UPLOAD === "true",
+
+  /** Phase 3: Community scam contact reporting + lookup */
+  scamContactReporting: process.env.NEXT_PUBLIC_FF_SCAM_REPORTING === "true",
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;
