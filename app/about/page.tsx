@@ -1,8 +1,64 @@
 import SubscribeForm from "@/components/SubscribeForm";
 import Footer from "@/components/Footer";
 import Nav from "@/components/Nav";
+import ChartsSection from "@/components/charts/ChartsSection";
+import { createServiceClient } from "@/lib/supabase";
+import { parseStateFromRegion } from "@/lib/chart-tokens";
 
-export default function AboutPage() {
+export const revalidate = 3600; // re-fetch hourly
+
+interface StatsRow {
+  safe_count: number;
+  suspicious_count: number;
+  high_risk_count: number;
+  region: string | null;
+}
+
+async function getChartData() {
+  const supabase = createServiceClient();
+  if (!supabase) {
+    return { safeCount: 0, suspiciousCount: 0, highRiskCount: 0, stateData: {} };
+  }
+
+  const { data, error } = await supabase
+    .from("check_stats")
+    .select("safe_count, suspicious_count, high_risk_count, region");
+
+  if (error || !data) {
+    return { safeCount: 0, suspiciousCount: 0, highRiskCount: 0, stateData: {} };
+  }
+
+  let safeCount = 0;
+  let suspiciousCount = 0;
+  let highRiskCount = 0;
+  const stateData: Record<string, number> = {};
+
+  for (const row of data as StatsRow[]) {
+    safeCount += row.safe_count ?? 0;
+    suspiciousCount += row.suspicious_count ?? 0;
+    highRiskCount += row.high_risk_count ?? 0;
+
+    if (row.region) {
+      const stateCode = parseStateFromRegion(row.region);
+      if (stateCode) {
+        const rowTotal =
+          (row.safe_count ?? 0) +
+          (row.suspicious_count ?? 0) +
+          (row.high_risk_count ?? 0);
+        stateData[stateCode] = (stateData[stateCode] ?? 0) + rowTotal;
+      }
+    }
+  }
+
+  return { safeCount, suspiciousCount, highRiskCount, stateData };
+}
+
+export default async function AboutPage() {
+  const { safeCount, suspiciousCount, highRiskCount, stateData } =
+    await getChartData();
+
+  const hasData = safeCount + suspiciousCount + highRiskCount > 0;
+
   return (
     <div className="min-h-screen flex flex-col">
       <Nav />
@@ -69,6 +125,25 @@ export default function AboutPage() {
             </div>
           </div>
         </section>
+
+        {/* Scam Check Insights — only render when we have data */}
+        {hasData && (
+          <section className="mb-12">
+            <h2 className="text-deep-navy text-2xl font-extrabold mb-6">
+              Scam Check Insights
+            </h2>
+            <p className="text-gov-slate text-base leading-relaxed mb-8">
+              A snapshot of how Australians are using Ask Arthur to stay safe.
+            </p>
+
+            <ChartsSection
+              safeCount={safeCount}
+              suspiciousCount={suspiciousCount}
+              highRiskCount={highRiskCount}
+              stateData={stateData}
+            />
+          </section>
+        )}
 
         {/* Privacy */}
         <section id="privacy" className="mb-12">
