@@ -1,4 +1,4 @@
-// WHOIS enrichment via whoisjsonapi.com (500 free/month)
+// WHOIS enrichment via whoisjson.com (1,000 free/month, no credit card)
 // Domain-level lookup — cached in scam_urls DB to avoid redundant calls.
 
 import "server-only";
@@ -25,7 +25,8 @@ const EMPTY_RESULT: WhoisResult = {
 };
 
 /**
- * Look up WHOIS data for a domain via whoisjsonapi.com.
+ * Look up WHOIS data for a domain via whoisjson.com.
+ * Free tier: 1,000 requests/month, 20 req/min rate limit.
  * 5s timeout, non-blocking — failures return empty result.
  */
 export async function lookupWhois(domain: string): Promise<WhoisResult> {
@@ -36,12 +37,15 @@ export async function lookupWhois(domain: string): Promise<WhoisResult> {
   }
 
   try {
-    const res = await fetch(`https://whoisjsonapi.com/v1/${encodeURIComponent(domain)}`, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
-      signal: AbortSignal.timeout(5000),
-    });
+    const res = await fetch(
+      `https://whoisjson.com/api/v1/whois?domain=${encodeURIComponent(domain)}`,
+      {
+        headers: {
+          Authorization: `TOKEN=${apiKey}`,
+        },
+        signal: AbortSignal.timeout(5000),
+      }
+    );
 
     if (!res.ok) {
       logger.warn("WHOIS lookup failed", { status: res.status, domain });
@@ -50,18 +54,23 @@ export async function lookupWhois(domain: string): Promise<WhoisResult> {
 
     const data = await res.json();
 
-    // Extract structured fields from response
-    const registrar = data.registrar?.name || data.registrar || null;
+    // Extract structured fields — whoisjson.com uses these common field names
+    const registrar =
+      data.registrar || data.registrar_name || data.registrar?.name || null;
     const registrantCountry =
-      data.registrant?.country || data.registrant_country || null;
+      data.registrant_country || data.registrant?.country || data.country || null;
 
-    const createdDate = parseDate(data.created || data.creation_date || data.registered);
-    const expiresDate = parseDate(data.expires || data.expiration_date || data.registry_expiry_date);
+    const createdDate = parseDate(
+      data.creation_date || data.created || data.created_date || data.registered
+    );
+    const expiresDate = parseDate(
+      data.expiration_date || data.expires || data.registry_expiry_date || data.expires_date
+    );
 
-    const rawNameServers = data.name_servers || data.nameservers || [];
-    const nameServers = Array.isArray(rawNameServers)
-      ? rawNameServers.map((ns: string) => String(ns).toLowerCase())
-      : [];
+    const rawNameServers = data.name_servers || data.nameservers || data.name_server || [];
+    const nameServers = (Array.isArray(rawNameServers) ? rawNameServers : [rawNameServers])
+      .filter(Boolean)
+      .map((ns: string) => String(ns).toLowerCase());
 
     // Privacy detection: check for common privacy/proxy indicators
     const rawStr = JSON.stringify(data).toLowerCase();
@@ -69,7 +78,8 @@ export async function lookupWhois(domain: string): Promise<WhoisResult> {
       rawStr.includes("privacy") ||
       rawStr.includes("whoisguard") ||
       rawStr.includes("redacted") ||
-      rawStr.includes("domains by proxy");
+      rawStr.includes("domains by proxy") ||
+      rawStr.includes("contact privacy");
 
     return {
       registrar: typeof registrar === "string" ? registrar : null,
