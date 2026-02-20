@@ -425,6 +425,13 @@ export default function ScamChecker() {
         <span className="material-symbols-outlined text-sm">visibility_off</span>
         We never store your data
       </div>
+      <p className="text-[11px] text-slate-400 text-center max-w-md mx-auto mt-1.5">
+        Your message is sent to our AI for analysis then immediately discarded.
+        No personal data is stored.{" "}
+        <a href="/privacy" className="underline hover:text-slate-500">
+          Privacy policy
+        </a>
+      </p>
 
       {/* Media analysis progress */}
       {isMediaActive && (

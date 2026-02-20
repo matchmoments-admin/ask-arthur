@@ -4,7 +4,7 @@ export default function Footer() {
   return (
     <footer className="w-full bg-slate-50 border-t border-border-light py-8 mt-20">
       <div className="max-w-[640px] mx-auto px-5 text-center">
-        <nav aria-label="Footer navigation" className="grid grid-cols-5 gap-4 mb-4">
+        <nav aria-label="Footer navigation" className="flex flex-wrap justify-center gap-x-6 gap-y-2 mb-4">
           <Link href="/about#how-it-works" className="text-xs font-bold uppercase tracking-widest text-gov-slate hover:text-action-teal transition-colors py-3">
             How It Works
           </Link>
@@ -17,8 +17,11 @@ export default function Footer() {
           <Link href="/about" className="text-xs font-bold uppercase tracking-widest text-gov-slate hover:text-action-teal transition-colors py-3">
             About
           </Link>
-          <Link href="/about#privacy" className="text-xs font-bold uppercase tracking-widest text-gov-slate hover:text-action-teal transition-colors py-3">
+          <Link href="/privacy" className="text-xs font-bold uppercase tracking-widest text-gov-slate hover:text-action-teal transition-colors py-3">
             Privacy
+          </Link>
+          <Link href="/terms" className="text-xs font-bold uppercase tracking-widest text-gov-slate hover:text-action-teal transition-colors py-3">
+            Terms
           </Link>
         </nav>
         <p className="text-xs text-gov-slate mb-4 leading-relaxed">
@@ -46,7 +49,7 @@ export default function Footer() {
           &copy; {new Date().getFullYear()} Ask Arthur
         </p>
         <p className="text-[10px] uppercase tracking-wider text-slate-400 mt-1">
-          ABN [YOUR_ABN]
+          {process.env.NEXT_PUBLIC_ABN || "ABN pending registration"}
         </p>
       </div>
     </footer>

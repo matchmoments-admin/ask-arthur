@@ -177,6 +177,23 @@ export default function ResultCard({
             </a>
           </div>
         )}
+
+        {/* AI advisory disclaimer */}
+        <div className="mt-5 pt-4 border-t border-slate-200">
+          <p className="text-xs text-slate-400 leading-relaxed">
+            This analysis is AI-generated and advisory only. Always exercise
+            your own judgment.{" "}
+            <a
+              href="https://www.scamwatch.gov.au"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-slate-400 underline hover:text-slate-500"
+            >
+              Report scams to Scamwatch
+            </a>
+            .
+          </p>
+        </div>
       </div>
     </div>
   );
