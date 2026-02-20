@@ -45,10 +45,9 @@ const MEDIA_STATUS_LABELS: Record<string, string> = {
 };
 
 export default function ScamChecker() {
+  const MAX_IMAGES = 10;
   const [text, setText] = useState("");
-  const [imageData, setImageData] = useState<string | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [imageName, setImageName] = useState<string | null>(null);
+  const [images, setImages] = useState<Array<{ base64: string; preview: string; name: string }>>([]);
   const [status, setStatus] = useState<Status>("idle");
   const [result, setResult] = useState<AnalysisResponse | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
@@ -75,18 +74,17 @@ export default function ScamChecker() {
     }
   }, [searchParams]);
 
-  const processFile = useCallback(async (file: File, mode?: "image" | "qrcode") => {
-    // No client-side size limit — compressImage() handles reduction to ~500KB
-    // and the API enforces its own 10MB payload limit as a backstop.
-
+  const processFiles = useCallback(async (files: File[], mode?: "image" | "qrcode") => {
     // Reset QR state
     setQrError(null);
     setQrDecodedUrl(null);
 
-    const compressed = await compressImage(file);
-
     if (mode === "qrcode") {
+      // QR mode: single image only
+      const file = files[0];
+      if (!file) return;
       setInputMode("qrcode");
+      const compressed = await compressImage(file);
       const qrText = await tryDecodeQR(compressed);
       if (qrText) {
         const urlMatch = qrText.match(/https?:\/\/\S+/);
@@ -100,20 +98,33 @@ export default function ScamChecker() {
       } else {
         setQrError("Couldn\u2019t read this QR code \u2014 try a clearer photo");
       }
-    } else {
-      setInputMode("image");
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        const base64 = dataUrl.split(",")[1];
+        setImages((prev) => [...prev, { base64, preview: dataUrl, name: file.name }].slice(0, MAX_IMAGES));
+        setErrorMsg("");
+      };
+      reader.readAsDataURL(compressed);
+      return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result as string;
-      const base64 = dataUrl.split(",")[1];
-      setImageData(base64);
-      setImagePreview(dataUrl);
-      setImageName(file.name);
-      setErrorMsg("");
-    };
-    reader.readAsDataURL(compressed);
+    // Image mode: process all files
+    setInputMode("image");
+    for (const file of files) {
+      const compressed = await compressImage(file);
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        const base64 = dataUrl.split(",")[1];
+        setImages((prev) => {
+          if (prev.length >= MAX_IMAGES) return prev;
+          return [...prev, { base64, preview: dataUrl, name: file.name }];
+        });
+        setErrorMsg("");
+      };
+      reader.readAsDataURL(compressed);
+    }
   }, []);
 
   function handlePaste(e: React.ClipboardEvent) {
@@ -124,7 +135,7 @@ export default function ScamChecker() {
       if (item.type.startsWith("image/")) {
         e.preventDefault();
         const file = item.getAsFile();
-        if (file) processFile(file);
+        if (file) processFiles([file]);
         return;
       }
     }
@@ -143,24 +154,29 @@ export default function ScamChecker() {
   function handleDrop(e: React.DragEvent) {
     e.preventDefault();
     setIsDragging(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file && file.type.startsWith("image/")) {
-      processFile(file);
+    const fileList = e.dataTransfer.files;
+    if (!fileList || fileList.length === 0) return;
+    const imageFiles = Array.from(fileList).filter((f) => f.type.startsWith("image/"));
+    if (imageFiles.length > 0) {
+      processFiles(imageFiles);
     }
   }
 
-  function removeImage() {
-    setImageData(null);
-    setImagePreview(null);
-    setImageName(null);
-    setInputMode("text");
-    setQrDecodedUrl(null);
-    setQrError(null);
+  function removeImage(index: number) {
+    setImages((prev) => {
+      const next = prev.filter((_, i) => i !== index);
+      if (next.length === 0) {
+        setInputMode("text");
+        setQrDecodedUrl(null);
+        setQrError(null);
+      }
+      return next;
+    });
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!text.trim() && !imageData) return;
+    if (!text.trim() && images.length === 0) return;
 
     setStatus("analyzing");
     setResult(null);
@@ -172,7 +188,7 @@ export default function ScamChecker() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text: text.trim() || undefined,
-          image: imageData || undefined,
+          images: images.length > 0 ? images.map((i) => i.base64) : undefined,
           mode: inputMode !== "text" ? inputMode : undefined,
         }),
       });
@@ -212,9 +228,7 @@ export default function ScamChecker() {
 
   function handleReset() {
     setText("");
-    setImageData(null);
-    setImagePreview(null);
-    setImageName(null);
+    setImages([]);
     setInputMode("text");
     setQrDecodedUrl(null);
     setQrError(null);
@@ -263,23 +277,29 @@ export default function ScamChecker() {
                 : "border-gray-200"
           }`}
         >
-          {/* Image thumbnail preview */}
-          {imagePreview && (
-            <div className="flex items-center gap-3 px-4 pt-3">
-              <img
-                src={imagePreview}
-                alt={imageName || "Attached image"}
-                className="w-16 h-16 rounded-lg object-cover border border-gray-200"
-              />
-              <span className="text-sm text-gov-slate truncate flex-1">{imageName}</span>
-              <button
-                type="button"
-                onClick={removeImage}
-                aria-label="Remove image"
-                className="w-8 h-8 flex items-center justify-center rounded-full text-slate-400 hover:text-gov-slate hover:bg-slate-100 transition-colors"
-              >
-                <span className="material-symbols-outlined text-lg">close</span>
-              </button>
+          {/* Image thumbnail strip */}
+          {images.length > 0 && (
+            <div className="flex items-center gap-2 px-4 pt-3 overflow-x-auto">
+              {images.map((img, i) => (
+                <div key={i} className="relative flex-shrink-0 group">
+                  <img
+                    src={img.preview}
+                    alt={img.name || `Screenshot ${i + 1}`}
+                    className="w-16 h-16 rounded-lg object-cover border border-gray-200"
+                  />
+                  <span className="absolute -top-1.5 -left-1.5 w-5 h-5 bg-deep-navy text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+                    {i + 1}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => removeImage(i)}
+                    aria-label={`Remove image ${i + 1}`}
+                    className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-white border border-gray-300 rounded-full flex items-center justify-center text-slate-400 hover:text-gov-slate hover:bg-slate-100 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+                  >
+                    <span className="material-symbols-outlined text-xs">close</span>
+                  </button>
+                </div>
+              ))}
             </div>
           )}
 
@@ -318,14 +338,22 @@ export default function ScamChecker() {
           <div className="flex items-center justify-between px-3 pb-3">
             <div className="flex items-center gap-1">
               {/* Attach button — opens image source drawer */}
-              <button
-                type="button"
-                onClick={() => setDrawerOpen(true)}
-                className="w-11 h-11 flex items-center justify-center rounded-full text-gov-slate hover:text-deep-navy hover:bg-slate-100 cursor-pointer transition-colors"
-                aria-label="Attach screenshot"
-              >
-                <span className="material-symbols-outlined text-xl">attach_file</span>
-              </button>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setDrawerOpen(true)}
+                  disabled={images.length >= MAX_IMAGES}
+                  className="w-11 h-11 flex items-center justify-center rounded-full text-gov-slate hover:text-deep-navy hover:bg-slate-100 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  aria-label="Attach screenshot"
+                >
+                  <span className="material-symbols-outlined text-xl">attach_file</span>
+                </button>
+                {images.length > 0 && (
+                  <span className="absolute -top-1 -right-1 w-5 h-5 bg-action-teal text-white text-[10px] font-bold rounded-full flex items-center justify-center pointer-events-none">
+                    {images.length}
+                  </span>
+                )}
+              </div>
 
               {/* Audio upload button — gated by feature flag */}
               {featureFlags.mediaAnalysis && (
@@ -353,7 +381,7 @@ export default function ScamChecker() {
             ) : (
               <button
                 type="submit"
-                disabled={isAnyActive || (!text.trim() && !imageData)}
+                disabled={isAnyActive || (!text.trim() && images.length === 0)}
                 className="h-11 px-6 bg-deep-navy text-white font-bold uppercase tracking-widest rounded-full hover:bg-navy transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
               >
                 {isTextActive ? "Analyzing..." : "Check Now"}
@@ -378,7 +406,7 @@ export default function ScamChecker() {
       <ScreenshotDrawer
         open={drawerOpen}
         onOpenChange={setDrawerOpen}
-        onFileSelected={processFile}
+        onFilesSelected={processFiles}
         onScanQrCode={() => {
           setDrawerOpen(false);
           setShowQrScanner(true);

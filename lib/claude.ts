@@ -256,7 +256,7 @@ export function validateResult(parsed: Record<string, unknown>): AnalysisResult 
 
 export async function analyzeWithClaude(
   text?: string,
-  imageBase64?: string,
+  imagesBase64?: string[],
   mode?: AnalysisMode
 ): Promise<AnalysisResult> {
   // Fail-closed in production, mock in dev
@@ -287,17 +287,31 @@ export async function analyzeWithClaude(
     });
   }
 
-  if (imageBase64) {
-    // Detect media type from base64 header
-    let mediaType: "image/jpeg" | "image/png" | "image/gif" | "image/webp" = "image/png";
-    if (imageBase64.startsWith("/9j/")) mediaType = "image/jpeg";
-    else if (imageBase64.startsWith("R0lGOD")) mediaType = "image/gif";
-    else if (imageBase64.startsWith("UklGR")) mediaType = "image/webp";
+  if (imagesBase64 && imagesBase64.length > 0) {
+    const isMultiImage = imagesBase64.length > 1;
 
-    content.push({
-      type: "image",
-      source: { type: "base64", media_type: mediaType, data: imageBase64 },
-    });
+    for (let i = 0; i < imagesBase64.length; i++) {
+      const imgData = imagesBase64[i];
+      // Detect media type from base64 header
+      let mediaType: "image/jpeg" | "image/png" | "image/gif" | "image/webp" = "image/png";
+      if (imgData.startsWith("/9j/")) mediaType = "image/jpeg";
+      else if (imgData.startsWith("R0lGOD")) mediaType = "image/gif";
+      else if (imgData.startsWith("UklGR")) mediaType = "image/webp";
+
+      if (isMultiImage) {
+        content.push({
+          type: "text",
+          text: `Screenshot ${i + 1} of ${imagesBase64.length}:`,
+        });
+      }
+
+      content.push({
+        type: "image",
+        source: { type: "base64", media_type: mediaType, data: imgData },
+      });
+    }
+
+    // Add context instructions after all images
     if (mode === "qrcode" && text) {
       content.push({
         type: "text",
@@ -308,6 +322,11 @@ export async function analyzeWithClaude(
         type: "text",
         text: "This image contains a QR code that could not be decoded. Analyse the image for any visible scam indicators, suspicious branding, or context that suggests fraud.",
       });
+    } else if (isMultiImage) {
+      content.push({
+        type: "text",
+        text: "Analyze these screenshots together as a conversation. Cross-reference phone numbers, URLs, writing style, and escalation patterns across all images.",
+      });
     } else if (!text) {
       content.push({
         type: "text",
@@ -317,9 +336,10 @@ export async function analyzeWithClaude(
   }
 
   // Use assistant prefill to force JSON output
+  const multiImage = imagesBase64 && imagesBase64.length > 1;
   const response = await client.messages.create({
     model: "claude-haiku-4-5-20251001",
-    max_tokens: 700,
+    max_tokens: multiImage ? 1200 : 700,
     system: [
       {
         type: "text" as const,

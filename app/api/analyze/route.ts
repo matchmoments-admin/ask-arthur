@@ -13,10 +13,11 @@ import { logger } from "@/lib/logger";
 
 const RequestSchema = z.object({
   text: z.string().max(10000).optional(),
-  image: z.string().max(5_000_000).optional(), // base64, ~3.75MB decoded
+  image: z.string().max(5_000_000).optional(), // backward compat: single image
+  images: z.array(z.string().max(5_000_000)).max(10).optional(), // multi-image
   mode: z.enum(["text", "image", "qrcode"]).optional(),
-}).refine((data) => data.text || data.image, {
-  message: "Either text or image is required",
+}).refine((data) => data.text || data.image || (data.images && data.images.length > 0), {
+  message: "Either text or image(s) is required",
 });
 
 export async function POST(req: NextRequest) {
@@ -63,13 +64,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { text, image, mode } = parsed.data;
+    const { text, image, images: rawImages, mode } = parsed.data;
+    // Normalize: merge legacy single `image` into `images` array
+    const images: string[] = rawImages && rawImages.length > 0
+      ? rawImages
+      : image ? [image] : [];
 
     // 2b. Pre-filter for prompt injection attempts
     const injectionCheck = text ? detectInjectionAttempt(text) : { detected: false, patterns: [] };
 
     // 3. Check cache for text-only requests (skip for images — content-addressable hashing is complex)
-    const isTextOnly = text && !image;
+    const isTextOnly = text && images.length === 0;
     if (isTextOnly) {
       const cached = await getCachedAnalysis(text);
       if (cached) {
@@ -97,7 +102,7 @@ export async function POST(req: NextRequest) {
 
     // 5. Run AI analysis + URL reputation checks in parallel
     const [aiResult, urlResults, geo] = await Promise.all([
-      analyzeWithClaude(text, image, mode),
+      analyzeWithClaude(text, images.length > 0 ? images : undefined, mode),
       checkURLReputation(urls),
       geolocateIP(ip),
     ]);
@@ -135,7 +140,7 @@ export async function POST(req: NextRequest) {
     // 7. Background work via waitUntil (survives after response is sent)
     if (finalVerdict === "HIGH_RISK") {
       waitUntil(
-        storeVerifiedScam(aiResult, region, image).catch((err) =>
+        storeVerifiedScam(aiResult, region, images.length > 0 ? images : undefined).catch((err) =>
           logger.error("storeVerifiedScam failed", { error: String(err) })
         )
       );

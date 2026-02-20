@@ -6,14 +6,14 @@ import { Drawer } from "vaul";
 interface ScreenshotDrawerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onFileSelected: (file: File, mode?: "image" | "qrcode") => void;
+  onFilesSelected: (files: File[], mode?: "image" | "qrcode") => void;
   onScanQrCode: () => void;
 }
 
 export default function ScreenshotDrawer({
   open,
   onOpenChange,
-  onFileSelected,
+  onFilesSelected,
   onScanQrCode,
 }: ScreenshotDrawerProps) {
   const galleryInputRef = useRef<HTMLInputElement>(null);
@@ -62,15 +62,16 @@ export default function ScreenshotDrawer({
 
   const handleFile = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>, mode?: "image" | "qrcode") => {
-      const file = e.target.files?.[0];
-      if (file) {
-        onFileSelected(file, mode);
+      const fileList = e.target.files;
+      if (fileList && fileList.length > 0) {
+        const files = Array.from(fileList);
+        onFilesSelected(files, mode);
         onOpenChange(false);
       }
       // Reset the input so the same file can be re-selected
       e.target.value = "";
     },
-    [onFileSelected, onOpenChange]
+    [onFilesSelected, onOpenChange]
   );
 
   const handleQrFile = useCallback(
@@ -88,7 +89,7 @@ export default function ScreenshotDrawer({
           const file = new File([blob], "clipboard-image.png", {
             type: imageType,
           });
-          onFileSelected(file);
+          onFilesSelected([file]);
           onOpenChange(false);
           return;
         }
@@ -156,6 +157,7 @@ export default function ScreenshotDrawer({
               ref={galleryInputRef}
               type="file"
               accept="image/*"
+              multiple
               onChange={handleFile}
               className="hidden"
             />
@@ -213,6 +215,7 @@ export default function ScreenshotDrawer({
               ref={fileInputRef}
               type="file"
               accept="image/*"
+              multiple
               onChange={handleFile}
               className="hidden"
             />

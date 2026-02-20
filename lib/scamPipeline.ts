@@ -47,7 +47,7 @@ export function scrubPII(text: string): string {
 export async function storeVerifiedScam(
   analysis: AnalysisResult,
   region: string | null,
-  imageBase64?: string
+  imagesBase64?: string[]
 ): Promise<void> {
   try {
     const supabase = createServiceClient();
@@ -56,26 +56,35 @@ export async function storeVerifiedScam(
     const scrubbedSummary = scrubPII(analysis.summary);
     const scrubbedFlags = analysis.redFlags.map(scrubPII);
 
-    // Upload screenshot to R2 if provided (fire-and-forget, non-blocking)
-    let screenshotKey: string | null = null;
-    if (imageBase64) {
-      try {
-        const buffer = Buffer.from(imageBase64, "base64");
-        if (buffer.length > 4 * 1024 * 1024) {
-          logger.info("Skipping R2 upload — decoded image exceeds 4MB", { size: buffer.length });
-        } else {
+    // Upload screenshots to R2 if provided
+    const screenshotKeys: string[] = [];
+    if (imagesBase64 && imagesBase64.length > 0) {
+      for (const imgBase64 of imagesBase64) {
+        try {
+          const buffer = Buffer.from(imgBase64, "base64");
+          if (buffer.length > 4 * 1024 * 1024) {
+            logger.info("Skipping R2 upload — decoded image exceeds 4MB", { size: buffer.length });
+            continue;
+          }
           let contentType = "image/png";
-          if (imageBase64.startsWith("/9j/")) contentType = "image/jpeg";
-          else if (imageBase64.startsWith("R0lGOD")) contentType = "image/gif";
-          else if (imageBase64.startsWith("UklGR")) contentType = "image/webp";
-          screenshotKey = await uploadScreenshot(buffer, contentType);
+          if (imgBase64.startsWith("/9j/")) contentType = "image/jpeg";
+          else if (imgBase64.startsWith("R0lGOD")) contentType = "image/gif";
+          else if (imgBase64.startsWith("UklGR")) contentType = "image/webp";
+          const key = await uploadScreenshot(buffer, contentType);
+          if (key) screenshotKeys.push(key);
+        } catch (err) {
+          logger.error("R2 upload failed (non-blocking)", { error: String(err) });
         }
-      } catch (err) {
-        logger.error("R2 upload failed (non-blocking)", { error: String(err) });
+      }
+      if (imagesBase64.length > 1) {
+        logger.info(`Uploaded ${screenshotKeys.length}/${imagesBase64.length} screenshots to R2`);
       }
     } else {
       logger.info("HIGH_RISK verdict stored without screenshot");
     }
+
+    // Store first key in screenshot_key for backward compat
+    const screenshotKey = screenshotKeys.length > 0 ? screenshotKeys[0] : null;
 
     const { error } = await supabase.from("verified_scams").insert({
       scam_type: analysis.scamType || "other",
