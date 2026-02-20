@@ -17,6 +17,9 @@ export const featureFlags = {
 
   /** Phase 3: Community scam contact reporting + lookup */
   scamContactReporting: process.env.NEXT_PUBLIC_FF_SCAM_REPORTING === "true",
+
+  /** Phase 3: Scam URL reporting + WHOIS/SSL enrichment */
+  scamUrlReporting: process.env.NEXT_PUBLIC_FF_SCAM_URL_REPORTING === "true",
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;

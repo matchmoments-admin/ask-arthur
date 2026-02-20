@@ -166,6 +166,20 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // 8b. Extract scammer URLs when URL reporting feature is on
+    let scammerUrls: Array<{ url: string; isMalicious: boolean; sources: string[] }> | undefined;
+    if (
+      featureFlags.scamUrlReporting &&
+      (aiResult.verdict === "HIGH_RISK" || aiResult.verdict === "SUSPICIOUS") &&
+      urlResults.length > 0
+    ) {
+      scammerUrls = urlResults.map((r) => ({
+        url: r.url,
+        isMalicious: r.isMalicious,
+        sources: r.sources,
+      }));
+    }
+
     // 9. Return result
     return NextResponse.json(
       {
@@ -178,6 +192,8 @@ export async function POST(req: NextRequest) {
         maliciousURLs: maliciousURLs.length,
         countryCode,
         ...(scammerContacts && { scammerContacts }),
+        ...(scammerUrls && { scammerUrls }),
+        ...(scammerUrls && mode && { inputMode: mode }),
       },
       {
         headers: {

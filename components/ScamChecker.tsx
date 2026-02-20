@@ -15,6 +15,12 @@ import ScamReportCard from "./ScamReportCard";
 
 type Verdict = "SAFE" | "SUSPICIOUS" | "HIGH_RISK";
 
+interface ScammerUrl {
+  url: string;
+  isMalicious: boolean;
+  sources: string[];
+}
+
 interface AnalysisResponse {
   verdict: Verdict;
   confidence: number;
@@ -23,6 +29,8 @@ interface AnalysisResponse {
   nextSteps: string[];
   countryCode?: string | null;
   scammerContacts?: ScammerContacts;
+  scammerUrls?: ScammerUrl[];
+  inputMode?: string;
   scamType?: string;
   impersonatedBrand?: string;
   channel?: string;
@@ -416,12 +424,14 @@ export default function ScamChecker() {
             nextSteps={result.nextSteps}
             countryCode={result.countryCode}
           />
-          {featureFlags.scamContactReporting && result.scammerContacts && (
+          {featureFlags.scamContactReporting && (result.scammerContacts || result.scammerUrls) && (
             <ScamReportCard
               contacts={result.scammerContacts}
+              scammerUrls={result.scammerUrls}
               scamType={result.scamType}
               brandImpersonated={result.impersonatedBrand}
               channel={result.channel}
+              sourceType={result.inputMode || inputMode}
             />
           )}
         </>
