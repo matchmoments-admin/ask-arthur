@@ -4,6 +4,7 @@ import { waitUntil } from "@vercel/functions";
 import { checkRateLimit } from "@/lib/rateLimit";
 import { analyzeWithClaude, detectInjectionAttempt, type Verdict } from "@/lib/claude";
 import { featureFlags } from "@/lib/featureFlags";
+import { extractContactsFromText } from "@/lib/phoneNormalize";
 import { extractURLs, checkURLReputation } from "@/lib/safebrowsing";
 import { geolocateIP } from "@/lib/geolocate";
 import { storeVerifiedScam, incrementStats } from "@/lib/scamPipeline";
@@ -150,7 +151,22 @@ export async function POST(req: NextRequest) {
       waitUntil(setCachedAnalysis(text, aiResult));
     }
 
-    // 8. Return result
+    // 8. Extract scammer contacts from original (unscrubbed) text when feature is on
+    // PII scrubbing runs before Claude, so Claude can't see the actual values.
+    // We extract from the original text server-side for HIGH_RISK/SUSPICIOUS verdicts.
+    let scammerContacts: { phoneNumbers: Array<{ value: string; context: string }>; emailAddresses: Array<{ value: string; context: string }> } | undefined;
+    if (
+      featureFlags.scamContactReporting &&
+      text &&
+      (aiResult.verdict === "HIGH_RISK" || aiResult.verdict === "SUSPICIOUS")
+    ) {
+      const extracted = extractContactsFromText(text);
+      if (extracted.phoneNumbers.length > 0 || extracted.emailAddresses.length > 0) {
+        scammerContacts = extracted;
+      }
+    }
+
+    // 9. Return result
     return NextResponse.json(
       {
         verdict: aiResult.verdict,
@@ -161,9 +177,7 @@ export async function POST(req: NextRequest) {
         urlsChecked: urlResults.length,
         maliciousURLs: maliciousURLs.length,
         countryCode,
-        ...(featureFlags.scamContactReporting && aiResult.scammerContacts && {
-          scammerContacts: aiResult.scammerContacts,
-        }),
+        ...(scammerContacts && { scammerContacts }),
       },
       {
         headers: {

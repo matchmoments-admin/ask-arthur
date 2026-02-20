@@ -60,3 +60,53 @@ export function isValidPhoneFormat(raw: string): boolean {
 export function isValidEmailFormat(raw: string): boolean {
   return /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(raw.trim());
 }
+
+/**
+ * Extract phone numbers and email addresses from raw text.
+ * Used to populate scammerContacts from the original (unscrubbed) text,
+ * since PII scrubbing runs before Claude sees the message.
+ */
+export function extractContactsFromText(text: string): {
+  phoneNumbers: Array<{ value: string; context: string }>;
+  emailAddresses: Array<{ value: string; context: string }>;
+} {
+  const phoneNumbers: Array<{ value: string; context: string }> = [];
+  const emailAddresses: Array<{ value: string; context: string }> = [];
+  const seenPhones = new Set<string>();
+  const seenEmails = new Set<string>();
+
+  // Extract phone numbers (AU patterns + international)
+  const phonePatterns = [
+    /\+\d{10,15}/g,
+    /\b0[45]\d{2}[\s.-]?\d{3}[\s.-]?\d{3}\b/g,
+    /\b\(?0[2378]\)?[\s.-]?\d{4}[\s.-]?\d{4}\b/g,
+  ];
+
+  for (const pattern of phonePatterns) {
+    let match;
+    pattern.lastIndex = 0;
+    while ((match = pattern.exec(text)) !== null) {
+      const normalized = normalizePhoneE164(match[0]);
+      if (normalized && !seenPhones.has(normalized)) {
+        seenPhones.add(normalized);
+        phoneNumbers.push({ value: match[0].trim(), context: "extracted from message" });
+      }
+    }
+  }
+
+  // Extract email addresses
+  const emailPattern = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+  let emailMatch;
+  while ((emailMatch = emailPattern.exec(text)) !== null) {
+    const email = emailMatch[0].toLowerCase();
+    if (!seenEmails.has(email)) {
+      seenEmails.add(email);
+      emailAddresses.push({ value: emailMatch[0], context: "extracted from message" });
+    }
+  }
+
+  return {
+    phoneNumbers: phoneNumbers.slice(0, 5),
+    emailAddresses: emailAddresses.slice(0, 5),
+  };
+}
