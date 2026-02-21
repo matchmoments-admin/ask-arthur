@@ -7,7 +7,7 @@ import type { AnalysisResult } from "@askarthur/types";
 const mockInsert = vi.fn();
 const mockFrom = vi.fn(() => ({ insert: mockInsert }));
 
-vi.mock("@/lib/supabase", () => ({
+vi.mock("@askarthur/supabase/server", () => ({
   createServiceClient: vi.fn(() => ({ from: mockFrom })),
 }));
 
@@ -24,7 +24,7 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 // Import after mocks are set up
-const { createServiceClient } = await import("@/lib/supabase");
+const { createServiceClient } = await import("@askarthur/supabase/server");
 const { uploadScreenshot } = await import("@/lib/r2");
 const { logger } = await import("@/lib/logger");
 const { storeVerifiedScam, storePhoneLookups } = await import("@/lib/scamPipeline");

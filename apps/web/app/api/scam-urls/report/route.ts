@@ -3,7 +3,7 @@ import { z } from "zod";
 import { checkFormRateLimit } from "@/lib/rateLimit";
 import { hashIdentifier } from "@/lib/hash";
 import { geolocateIP } from "@/lib/geolocate";
-import { createServiceClient } from "@/lib/supabase";
+import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@/lib/featureFlags";
 import { normalizeURL, isURLFormat } from "@/lib/urlNormalize";
 import { lookupWhois } from "@/lib/whoisLookup";

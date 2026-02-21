@@ -2,7 +2,7 @@ import SubscribeForm from "@/components/SubscribeForm";
 import Footer from "@/components/Footer";
 import Nav from "@/components/Nav";
 import ChartsSection from "@/components/charts/ChartsSection";
-import { createServiceClient } from "@/lib/supabase";
+import { createServiceClient } from "@askarthur/supabase/server";
 import { parseStateFromRegion } from "@/lib/chart-tokens";
 
 export const revalidate = 3600; // re-fetch hourly

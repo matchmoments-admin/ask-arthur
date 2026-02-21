@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { createServiceClient } from "@/lib/supabase";
+import { createServiceClient } from "@askarthur/supabase/server";
 
 interface PageProps {
   searchParams: Promise<{ secret?: string }>;

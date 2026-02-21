@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase";
+import { createServiceClient } from "@askarthur/supabase/server";
 import { sendWeeklyDigest } from "@/lib/resend";
 import { logger } from "@/lib/logger";
 

@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { Redis } from "@upstash/redis";
-import { createServiceClient } from "./supabase";
+import { createServiceClient } from "@askarthur/supabase/server";
 
 export interface ApiKeyValidation {
   valid: boolean;

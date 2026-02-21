@@ -1,4 +1,4 @@
-import { createServiceClient } from "./supabase";
+import { createServiceClient } from "@askarthur/supabase/server";
 import { downloadMediaBuffer } from "./r2";
 import { transcribeAudio } from "./whisper";
 import { analyzeWithClaude, detectInjectionAttempt } from "./claude";

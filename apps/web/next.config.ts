@@ -41,7 +41,7 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
-  transpilePackages: ["@askarthur/types"],
+  transpilePackages: ["@askarthur/types", "@askarthur/supabase"],
   poweredByHeader: false,
   async headers() {
     return [

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { createServiceClient } from "@/lib/supabase";
+import { createServiceClient } from "@askarthur/supabase/server";
 import { sendWelcomeEmail } from "@/lib/resend";
 import { checkFormRateLimit } from "@/lib/rateLimit";
 import { logger } from "@/lib/logger";

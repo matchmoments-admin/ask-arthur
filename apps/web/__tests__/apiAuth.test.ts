@@ -25,7 +25,7 @@ mockEq.mockReturnValue({ single: mockSingle });
 mockUpdate.mockReturnValue({ eq: mockUpdateEq });
 mockUpdateEq.mockReturnValue({ then: vi.fn((cb: () => void) => cb()) });
 
-vi.mock("@/lib/supabase", () => ({
+vi.mock("@askarthur/supabase/server", () => ({
   createServiceClient: vi.fn(() => ({ from: mockFrom })),
 }));
 
@@ -36,7 +36,7 @@ vi.mock("@upstash/redis", () => ({
   })),
 }));
 
-const { createServiceClient } = await import("@/lib/supabase");
+const { createServiceClient } = await import("@askarthur/supabase/server");
 const { validateApiKey } = await import("@/lib/apiAuth");
 
 // ── Helpers ──

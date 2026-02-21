@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validateApiKey } from "@/lib/apiAuth";
-import { createServiceClient } from "@/lib/supabase";
+import { createServiceClient } from "@askarthur/supabase/server";
 import { normalizeURL, isURLFormat } from "@/lib/urlNormalize";
 import { logger } from "@/lib/logger";
 

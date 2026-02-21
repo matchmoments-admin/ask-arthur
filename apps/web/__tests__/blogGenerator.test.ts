@@ -13,7 +13,7 @@ const mockFrom = vi.fn(() => ({
 mockSelect.mockReturnValue({ gte: mockGte });
 mockGte.mockReturnValue({ order: mockOrder });
 
-vi.mock("@/lib/supabase", () => ({
+vi.mock("@askarthur/supabase/server", () => ({
   createServiceClient: vi.fn(() => ({ from: mockFrom })),
 }));
 
@@ -48,7 +48,7 @@ vi.mock("@anthropic-ai/sdk", () => {
   };
 });
 
-const { createServiceClient } = await import("@/lib/supabase");
+const { createServiceClient } = await import("@askarthur/supabase/server");
 const { logger } = await import("@/lib/logger");
 const { generateWeeklyBlogPost } = await import("@/lib/blogGenerator");
 

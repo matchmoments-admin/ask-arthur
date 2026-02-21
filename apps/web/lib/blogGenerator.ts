@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { createServiceClient } from "./supabase";
+import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "./logger";
 
 interface ScamGroup {

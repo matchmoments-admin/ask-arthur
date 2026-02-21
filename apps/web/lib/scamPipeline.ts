@@ -1,5 +1,5 @@
 import "server-only";
-import { createServiceClient } from "./supabase";
+import { createServiceClient } from "@askarthur/supabase/server";
 import { uploadScreenshot } from "./r2";
 import type { AnalysisResult } from "@askarthur/types";
 import type { PhoneLookupResult } from "./twilioLookup";

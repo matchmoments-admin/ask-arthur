@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Resend } from "resend";
-import { createServiceClient } from "@/lib/supabase";
+import { createServiceClient } from "@askarthur/supabase/server";
 import { generateWeeklyBlogPost } from "@/lib/blogGenerator";
 import { logger } from "@/lib/logger";
 

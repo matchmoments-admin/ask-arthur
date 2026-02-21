@@ -1,4 +1,4 @@
-import { createServiceClient } from "./supabase";
+import { createServiceClient } from "@askarthur/supabase/server";
 import readingTime from "reading-time";
 
 export interface BlogPost {
