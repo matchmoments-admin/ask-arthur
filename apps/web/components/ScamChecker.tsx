@@ -10,7 +10,7 @@ import { compressImage } from "@/lib/compressImage";
 import { tryDecodeQR } from "@/lib/qrDecode";
 import { featureFlags } from "@/lib/featureFlags";
 import { useMediaAnalysis } from "@/lib/hooks/useMediaAnalysis";
-import type { ScammerContacts } from "@/lib/claude";
+import type { ScammerContacts } from "@askarthur/types";
 import ScamReportCard from "./ScamReportCard";
 
 type Verdict = "SAFE" | "SUSPICIOUS" | "HIGH_RISK";

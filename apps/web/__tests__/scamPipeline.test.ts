@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { scrubPII } from "@/lib/scamPipeline";
-import type { AnalysisResult } from "@/lib/claude";
+import type { AnalysisResult } from "@askarthur/types";
 
 // ── Mocks ──
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { ScammerContacts } from "@/lib/claude";
+import type { ScammerContacts } from "@askarthur/types";
 
 interface ScammerUrl {
   url: string;

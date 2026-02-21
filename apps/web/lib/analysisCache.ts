@@ -1,6 +1,6 @@
 import "server-only";
 import { Redis } from "@upstash/redis";
-import { PROMPT_VERSION, type AnalysisResult } from "./claude";
+import { PROMPT_VERSION, type AnalysisResult } from "@askarthur/types";
 import { logger } from "./logger";
 
 // Cache analysis results in Redis to avoid redundant Claude API calls.
