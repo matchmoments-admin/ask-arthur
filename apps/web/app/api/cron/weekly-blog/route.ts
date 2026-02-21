@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Resend } from "resend";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { generateWeeklyBlogPost } from "@/lib/blogGenerator";
-import { logger } from "@/lib/logger";
+import { logger } from "@askarthur/utils/logger";
 
 /** Escape HTML special characters to prevent XSS in email templates */
 function escapeHtml(str: string): string {

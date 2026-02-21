@@ -3,7 +3,7 @@ import { NextRequest } from "next/server";
 
 // ── Mocks ──
 
-vi.mock("@/lib/rateLimit", () => ({
+vi.mock("@askarthur/utils/rate-limit", () => ({
   checkRateLimit: vi.fn(() =>
     Promise.resolve({ allowed: true, remaining: 9, resetAt: null })
   ),
@@ -44,7 +44,7 @@ vi.mock("@/lib/analysisCache", () => ({
   setCachedAnalysis: vi.fn(() => Promise.resolve()),
 }));
 
-vi.mock("@/lib/logger", () => ({
+vi.mock("@askarthur/utils/logger", () => ({
   logger: {
     info: vi.fn(),
     warn: vi.fn(),
@@ -56,7 +56,7 @@ vi.mock("@vercel/functions", () => ({
   waitUntil: vi.fn((p: Promise<unknown>) => p),
 }));
 
-const { checkRateLimit } = await import("@/lib/rateLimit");
+const { checkRateLimit } = await import("@askarthur/utils/rate-limit");
 const { detectInjectionAttempt } = await import("@/lib/claude");
 const { POST } = await import("@/app/api/analyze/route");
 

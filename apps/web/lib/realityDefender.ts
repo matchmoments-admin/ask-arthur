@@ -2,7 +2,7 @@
 // Requires: REALITY_DEFENDER_API_KEY env var. Called via lib/deepfakeDetection.ts.
 
 import { RealityDefender } from "@realitydefender/realitydefender";
-import { logger } from "./logger";
+import { logger } from "@askarthur/utils/logger";
 
 export interface DeepfakeResult {
   isLikelyDeepfake: boolean;

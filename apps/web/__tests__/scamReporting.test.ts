@@ -6,7 +6,7 @@ import {
   isValidPhoneFormat,
   isValidEmailFormat,
 } from "@/lib/phoneNormalize";
-import { hashIdentifier } from "@/lib/hash";
+import { hashIdentifier } from "@askarthur/utils/hash";
 
 // ─── Phone Normalization ───
 

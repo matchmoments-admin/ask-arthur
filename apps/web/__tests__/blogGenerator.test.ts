@@ -17,7 +17,7 @@ vi.mock("@askarthur/supabase/server", () => ({
   createServiceClient: vi.fn(() => ({ from: mockFrom })),
 }));
 
-vi.mock("@/lib/logger", () => ({
+vi.mock("@askarthur/utils/logger", () => ({
   logger: {
     info: vi.fn(),
     warn: vi.fn(),
@@ -49,7 +49,7 @@ vi.mock("@anthropic-ai/sdk", () => {
 });
 
 const { createServiceClient } = await import("@askarthur/supabase/server");
-const { logger } = await import("@/lib/logger");
+const { logger } = await import("@askarthur/utils/logger");
 const { generateWeeklyBlogPost } = await import("@/lib/blogGenerator");
 
 // ── Tests ──

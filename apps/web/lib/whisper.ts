@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { logger } from "./logger";
+import { logger } from "@askarthur/utils/logger";
 
 const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB — Whisper API limit
 

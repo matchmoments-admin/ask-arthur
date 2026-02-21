@@ -97,21 +97,21 @@ describe("feature flag gating", () => {
   it("mediaAnalysis flag defaults to false", async () => {
     delete process.env.NEXT_PUBLIC_FF_MEDIA_ANALYSIS;
 
-    const { featureFlags } = await import("@/lib/featureFlags");
+    const { featureFlags } = await import("@askarthur/utils/feature-flags");
     expect(featureFlags.mediaAnalysis).toBe(false);
   });
 
   it('mediaAnalysis flag is true when env is "true"', async () => {
     process.env.NEXT_PUBLIC_FF_MEDIA_ANALYSIS = "true";
 
-    const { featureFlags } = await import("@/lib/featureFlags");
+    const { featureFlags } = await import("@askarthur/utils/feature-flags");
     expect(featureFlags.mediaAnalysis).toBe(true);
   });
 
   it('mediaAnalysis flag is false for non-"true" values', async () => {
     process.env.NEXT_PUBLIC_FF_MEDIA_ANALYSIS = "1";
 
-    const { featureFlags } = await import("@/lib/featureFlags");
+    const { featureFlags } = await import("@askarthur/utils/feature-flags");
     expect(featureFlags.mediaAnalysis).toBe(false);
   });
 });

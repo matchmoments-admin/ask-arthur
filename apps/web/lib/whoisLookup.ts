@@ -2,7 +2,7 @@
 // Domain-level lookup — cached in scam_urls DB to avoid redundant calls.
 
 import "server-only";
-import { logger } from "./logger";
+import { logger } from "@askarthur/utils/logger";
 
 export interface WhoisResult {
   registrar: string | null;

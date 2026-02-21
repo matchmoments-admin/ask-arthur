@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { featureFlags } from "@/lib/featureFlags";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 import { getMediaJob, runMediaAnalysis } from "@/lib/mediaAnalysis";
-import { logger } from "@/lib/logger";
+import { logger } from "@askarthur/utils/logger";
 
 const RequestSchema = z.object({
   jobId: z.string().uuid("Invalid job ID"),

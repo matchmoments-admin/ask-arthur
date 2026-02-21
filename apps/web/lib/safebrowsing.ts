@@ -3,7 +3,7 @@
 
 import "server-only";
 import { Redis } from "@upstash/redis";
-import { logger } from "./logger";
+import { logger } from "@askarthur/utils/logger";
 
 // URL reputation cache — threat data changes slowly, no need to re-check every request
 const SAFE_BROWSING_CACHE_TTL = 3_600;   // 1 hour

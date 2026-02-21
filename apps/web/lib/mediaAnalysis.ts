@@ -3,7 +3,7 @@ import { downloadMediaBuffer } from "./r2";
 import { transcribeAudio } from "./whisper";
 import { analyzeWithClaude, detectInjectionAttempt } from "./claude";
 import { scrubPII, incrementStats } from "./scamPipeline";
-import { logger } from "./logger";
+import { logger } from "@askarthur/utils/logger";
 
 export interface MediaJob {
   id: string;

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateApiKey } from "@/lib/apiAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { normalizeURL, isURLFormat } from "@/lib/urlNormalize";
-import { logger } from "@/lib/logger";
+import { logger } from "@askarthur/utils/logger";
 
 export async function GET(req: NextRequest) {
   // API key authentication

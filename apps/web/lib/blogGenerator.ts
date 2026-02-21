@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { createServiceClient } from "@askarthur/supabase/server";
-import { logger } from "./logger";
+import { logger } from "@askarthur/utils/logger";
 
 interface ScamGroup {
   scam_type: string;

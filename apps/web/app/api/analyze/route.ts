@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { waitUntil } from "@vercel/functions";
-import { checkRateLimit } from "@/lib/rateLimit";
+import { checkRateLimit } from "@askarthur/utils/rate-limit";
 import { analyzeWithClaude, detectInjectionAttempt, type Verdict } from "@/lib/claude";
-import { featureFlags } from "@/lib/featureFlags";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 import { extractContactsFromText } from "@/lib/phoneNormalize";
 import { extractURLs, checkURLReputation } from "@/lib/safebrowsing";
 import { geolocateIP } from "@/lib/geolocate";
 import { storeVerifiedScam, incrementStats } from "@/lib/scamPipeline";
 import { getCachedAnalysis, setCachedAnalysis } from "@/lib/analysisCache";
-import { logger } from "@/lib/logger";
+import { logger } from "@askarthur/utils/logger";
 
 const RequestSchema = z.object({
   text: z.string().max(10000).optional(),

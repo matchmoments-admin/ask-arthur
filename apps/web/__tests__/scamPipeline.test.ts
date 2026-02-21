@@ -15,7 +15,7 @@ vi.mock("@/lib/r2", () => ({
   uploadScreenshot: vi.fn(() => Promise.resolve("screenshots/2025-01-01/abc.png")),
 }));
 
-vi.mock("@/lib/logger", () => ({
+vi.mock("@askarthur/utils/logger", () => ({
   logger: {
     info: vi.fn(),
     warn: vi.fn(),
@@ -26,7 +26,7 @@ vi.mock("@/lib/logger", () => ({
 // Import after mocks are set up
 const { createServiceClient } = await import("@askarthur/supabase/server");
 const { uploadScreenshot } = await import("@/lib/r2");
-const { logger } = await import("@/lib/logger");
+const { logger } = await import("@askarthur/utils/logger");
 const { storeVerifiedScam, storePhoneLookups } = await import("@/lib/scamPipeline");
 
 // ── Helpers ──

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { logger } from "@/lib/logger";
+import { logger } from "@askarthur/utils/logger";
 
 // Global edge rate limiting — 60 requests/min per IP (sliding window via Upstash)
 // Coexists with per-route limits in lib/rateLimit.ts (defense-in-depth)

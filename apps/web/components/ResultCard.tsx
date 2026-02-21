@@ -1,6 +1,6 @@
 "use client";
 
-import { featureFlags } from "@/lib/featureFlags";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 import DeepfakeGauge from "./DeepfakeGauge";
 
 type Verdict = "SAFE" | "SUSPICIOUS" | "HIGH_RISK";

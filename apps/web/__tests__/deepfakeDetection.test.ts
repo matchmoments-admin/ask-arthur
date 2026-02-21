@@ -9,7 +9,7 @@ vi.mock("@/lib/resembleDetect", () => ({
   detectDeepfakeResemble: vi.fn(),
 }));
 
-vi.mock("@/lib/logger", () => ({
+vi.mock("@askarthur/utils/logger", () => ({
   logger: {
     info: vi.fn(),
     warn: vi.fn(),

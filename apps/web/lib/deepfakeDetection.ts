@@ -4,7 +4,7 @@
 
 import { detectDeepfakeRD, type DeepfakeResult } from "./realityDefender";
 import { detectDeepfakeResemble } from "./resembleDetect";
-import { logger } from "./logger";
+import { logger } from "@askarthur/utils/logger";
 
 /**
  * Attempt deepfake detection with primary provider (Reality Defender),

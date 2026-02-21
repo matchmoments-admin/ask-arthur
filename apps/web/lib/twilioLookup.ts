@@ -1,5 +1,5 @@
 import Twilio from "twilio";
-import { logger } from "./logger";
+import { logger } from "@askarthur/utils/logger";
 
 export interface PhoneLookupResult {
   valid: boolean;

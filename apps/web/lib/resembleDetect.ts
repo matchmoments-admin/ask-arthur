@@ -1,7 +1,7 @@
 // Phase 2 — Fallback deepfake detection provider (~$2.40/1,000 min).
 // Requires: RESEMBLE_AI_API_TOKEN env var. Called via lib/deepfakeDetection.ts.
 
-import { logger } from "./logger";
+import { logger } from "@askarthur/utils/logger";
 
 // Corrected endpoint: /api/v2/intelligence (not /api/v2/detect)
 const RESEMBLE_API = "https://app.resemble.ai/api/v2";

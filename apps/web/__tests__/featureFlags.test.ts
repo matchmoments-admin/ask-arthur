@@ -18,7 +18,7 @@ describe("featureFlags", () => {
     delete process.env.NEXT_PUBLIC_FF_PHONE_INTEL;
     delete process.env.NEXT_PUBLIC_FF_VIDEO_UPLOAD;
 
-    const { featureFlags } = await import("@/lib/featureFlags");
+    const { featureFlags } = await import("@askarthur/utils/feature-flags");
     expect(featureFlags.mediaAnalysis).toBe(false);
     expect(featureFlags.deepfakeDetection).toBe(false);
     expect(featureFlags.phoneIntelligence).toBe(false);
@@ -28,42 +28,42 @@ describe("featureFlags", () => {
   it("enables mediaAnalysis when env var is true", async () => {
     process.env.NEXT_PUBLIC_FF_MEDIA_ANALYSIS = "true";
 
-    const { featureFlags } = await import("@/lib/featureFlags");
+    const { featureFlags } = await import("@askarthur/utils/feature-flags");
     expect(featureFlags.mediaAnalysis).toBe(true);
   });
 
   it('keeps mediaAnalysis false for non-"true" values', async () => {
     process.env.NEXT_PUBLIC_FF_MEDIA_ANALYSIS = "1";
 
-    const { featureFlags } = await import("@/lib/featureFlags");
+    const { featureFlags } = await import("@askarthur/utils/feature-flags");
     expect(featureFlags.mediaAnalysis).toBe(false);
   });
 
   it('enables deepfakeDetection when NEXT_PUBLIC_FF_DEEPFAKE is "true"', async () => {
     process.env.NEXT_PUBLIC_FF_DEEPFAKE = "true";
 
-    const { featureFlags } = await import("@/lib/featureFlags");
+    const { featureFlags } = await import("@askarthur/utils/feature-flags");
     expect(featureFlags.deepfakeDetection).toBe(true);
   });
 
   it('keeps deepfakeDetection false for non-"true" values', async () => {
     process.env.NEXT_PUBLIC_FF_DEEPFAKE = "1";
 
-    const { featureFlags } = await import("@/lib/featureFlags");
+    const { featureFlags } = await import("@askarthur/utils/feature-flags");
     expect(featureFlags.deepfakeDetection).toBe(false);
   });
 
   it("enables phoneIntelligence when env var is true", async () => {
     process.env.NEXT_PUBLIC_FF_PHONE_INTEL = "true";
 
-    const { featureFlags } = await import("@/lib/featureFlags");
+    const { featureFlags } = await import("@askarthur/utils/feature-flags");
     expect(featureFlags.phoneIntelligence).toBe(true);
   });
 
   it("enables videoUpload when env var is true", async () => {
     process.env.NEXT_PUBLIC_FF_VIDEO_UPLOAD = "true";
 
-    const { featureFlags } = await import("@/lib/featureFlags");
+    const { featureFlags } = await import("@askarthur/utils/feature-flags");
     expect(featureFlags.videoUpload).toBe(true);
   });
 });

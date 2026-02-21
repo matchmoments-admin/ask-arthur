@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@askarthur/supabase/server";
-import { logger } from "@/lib/logger";
+import { logger } from "@askarthur/utils/logger";
 
 // RFC 8058 one-click unsubscribe endpoint
 // Email clients POST to this URL to unsubscribe the user

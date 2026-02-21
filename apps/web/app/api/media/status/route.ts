@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { featureFlags } from "@/lib/featureFlags";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 import { getMediaJob } from "@/lib/mediaAnalysis";
 
 export async function GET(req: NextRequest) {

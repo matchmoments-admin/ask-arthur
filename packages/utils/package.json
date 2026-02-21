@@ -1,0 +1,16 @@
+{
+  "name": "@askarthur/utils",
+  "version": "0.0.0",
+  "private": true,
+  "exports": {
+    ".": "./src/index.ts",
+    "./logger": "./src/logger.ts",
+    "./hash": "./src/hash.ts",
+    "./feature-flags": "./src/feature-flags.ts",
+    "./rate-limit": "./src/rate-limit.ts"
+  },
+  "dependencies": {
+    "@upstash/ratelimit": "^2.0.8",
+    "@upstash/redis": "^1.36.2"
+  }
+}

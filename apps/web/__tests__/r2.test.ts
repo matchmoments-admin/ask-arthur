@@ -27,7 +27,7 @@ describe("uploadScreenshot", () => {
     vi.doMock("@aws-sdk/s3-request-presigner", () => ({
       getSignedUrl: vi.fn(() => Promise.resolve("https://example.com")),
     }));
-    vi.doMock("@/lib/logger", () => ({
+    vi.doMock("@askarthur/utils/logger", () => ({
       logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     }));
   }

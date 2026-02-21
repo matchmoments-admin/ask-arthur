@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { checkFormRateLimit } from "@/lib/rateLimit";
-import { hashIdentifier } from "@/lib/hash";
+import { checkFormRateLimit } from "@askarthur/utils/rate-limit";
+import { hashIdentifier } from "@askarthur/utils/hash";
 import { geolocateIP } from "@/lib/geolocate";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { lookupPhoneNumber } from "@/lib/twilioLookup";
-import { featureFlags } from "@/lib/featureFlags";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 import {
   normalizePhoneE164,
   normalizeEmail,
@@ -13,7 +13,7 @@ import {
   isValidPhoneFormat,
   isValidEmailFormat,
 } from "@/lib/phoneNormalize";
-import { logger } from "@/lib/logger";
+import { logger } from "@askarthur/utils/logger";
 
 const ContactSchema = z.object({
   type: z.enum(["phone", "email"]),

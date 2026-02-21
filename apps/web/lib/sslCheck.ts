@@ -3,7 +3,7 @@
 
 import "server-only";
 import * as tls from "tls";
-import { logger } from "./logger";
+import { logger } from "@askarthur/utils/logger";
 
 export interface SSLResult {
   valid: boolean;

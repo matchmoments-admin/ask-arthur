@@ -21,6 +21,15 @@ importers:
       '@anthropic-ai/sdk':
         specifier: ^0.74.0
         version: 0.74.0(zod@4.3.6)
+      '@askarthur/supabase':
+        specifier: workspace:*
+        version: link:../../packages/supabase
+      '@askarthur/types':
+        specifier: workspace:*
+        version: link:../../packages/types
+      '@askarthur/utils':
+        specifier: workspace:*
+        version: link:../../packages/utils
       '@aws-sdk/client-s3':
         specifier: ^3.988.0
         version: 3.995.0
@@ -133,6 +142,29 @@ importers:
       vitest:
         specifier: ^4.0.18
         version: 4.0.18(@types/node@20.19.33)(jiti@2.6.1)(jsdom@28.1.0)(lightningcss@1.31.1)
+
+  packages/supabase:
+    dependencies:
+      '@supabase/supabase-js':
+        specifier: ^2.95.3
+        version: 2.97.0
+
+  packages/types:
+    dependencies:
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
+
+  packages/utils:
+    dependencies:
+      '@upstash/ratelimit':
+        specifier: ^2.0.8
+        version: 2.0.8(@upstash/redis@1.36.2)
+      '@upstash/redis':
+        specifier: ^1.36.2
+        version: 1.36.2
+
+  tooling/typescript: {}
 
 packages:
 

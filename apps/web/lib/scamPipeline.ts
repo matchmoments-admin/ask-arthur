@@ -3,7 +3,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { uploadScreenshot } from "./r2";
 import type { AnalysisResult } from "@askarthur/types";
 import type { PhoneLookupResult } from "./twilioLookup";
-import { logger } from "./logger";
+import { logger } from "@askarthur/utils/logger";
 
 // PII patterns to scrub (defense in depth — Claude is also instructed not to echo PII)
 // ORDER MATTERS: More specific patterns (card, Medicare, TFN) must run BEFORE the

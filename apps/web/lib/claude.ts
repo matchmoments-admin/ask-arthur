@@ -1,7 +1,7 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import crypto from "crypto";
-import { logger } from "./logger";
+import { logger } from "@askarthur/utils/logger";
 import { scrubPII } from "./scamPipeline";
 import {
   PROMPT_VERSION,

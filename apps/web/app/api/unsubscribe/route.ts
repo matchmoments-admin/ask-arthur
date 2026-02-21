@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createServiceClient } from "@askarthur/supabase/server";
-import { checkFormRateLimit } from "@/lib/rateLimit";
-import { logger } from "@/lib/logger";
+import { checkFormRateLimit } from "@askarthur/utils/rate-limit";
+import { logger } from "@askarthur/utils/logger";
 
 const UnsubscribeSchema = z.object({
   email: z.string().email("Please enter a valid email address"),
