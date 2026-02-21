@@ -9,7 +9,10 @@
     "lint": "turbo run lint",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
-    "clean": "turbo run clean"
+    "clean": "turbo run clean",
+    "dev:web": "pnpm --filter @askarthur/web dev",
+    "dev:mobile": "pnpm --filter @askarthur/mobile dev",
+    "dev:telegram": "pnpm --filter @askarthur/web telegram:dev"
   },
   "devDependencies": {
     "turbo": "^2.8.10"

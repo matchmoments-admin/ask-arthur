@@ -8,9 +8,11 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "telegram:dev": "tsx scripts/telegram-dev.ts"
   },
   "dependencies": {
+    "@askarthur/bot-core": "workspace:*",
     "@askarthur/scam-engine": "workspace:*",
     "@askarthur/supabase": "workspace:*",
     "@askarthur/types": "workspace:*",
@@ -42,6 +44,7 @@
     "tldts": "^7.0.23",
     "twilio": "^5.12.1",
     "vaul": "^1.1.2",
+    "grammy": "^1.40.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {

@@ -1,0 +1,30 @@
+{
+  "name": "@askarthur/bot-core",
+  "version": "0.0.0",
+  "private": true,
+  "exports": {
+    ".": "./src/index.ts",
+    "./types": "./src/types.ts",
+    "./analyze": "./src/analyze.ts",
+    "./format-telegram": "./src/format-telegram.ts",
+    "./format-whatsapp": "./src/format-whatsapp.ts",
+    "./format-slack": "./src/format-slack.ts",
+    "./rate-limit": "./src/rate-limit.ts",
+    "./webhook-verify": "./src/webhook-verify.ts"
+  },
+  "dependencies": {
+    "@askarthur/types": "workspace:*",
+    "@askarthur/utils": "workspace:*",
+    "@askarthur/scam-engine": "workspace:*",
+    "@upstash/ratelimit": "^2.0.8",
+    "@upstash/redis": "^1.36.2"
+  },
+  "devDependencies": {
+    "typescript": "^5",
+    "vitest": "^4.0.18"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  }
+}

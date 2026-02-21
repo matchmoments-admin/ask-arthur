@@ -53,3 +53,12 @@ next-env.d.ts
 
 # mcp config (may contain local server URLs)
 .mcp.json
+
+# Expo / React Native
+apps/mobile/.expo/
+apps/mobile/android/
+apps/mobile/ios/
+*.jks
+*.p8
+*.p12
+*.mobileprovision
