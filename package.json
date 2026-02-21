@@ -4,11 +4,12 @@
   "private": true,
   "packageManager": "pnpm@10.5.2",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint",
-    "test": "vitest run"
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "clean": "turbo run clean"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",
@@ -49,6 +50,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
+    "turbo": "^2.8.10",
     "typescript": "^5",
     "vitest": "^4.0.18"
   },

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": [".next/**", "!.next/cache/**", "dist/**"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "lint": {
+      "dependsOn": ["^build"]
+    },
+    "test": {
+      "dependsOn": ["^build"]
+    },
+    "typecheck": {
+      "dependsOn": ["^build"]
+    },
+    "clean": {
+      "cache": false
+    }
+  },
+  "globalEnv": [
+    "NEXT_PUBLIC_SUPABASE_URL",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "SUPABASE_URL",
+    "ANTHROPIC_API_KEY",
+    "UPSTASH_REDIS_REST_URL",
+    "UPSTASH_REDIS_REST_TOKEN",
+    "INNGEST_EVENT_KEY",
+    "INNGEST_SIGNING_KEY",
+    "NEXT_PUBLIC_FF_MEDIA_ANALYSIS",
+    "NEXT_PUBLIC_FF_DEEPFAKE",
+    "NEXT_PUBLIC_FF_PHONE_INTEL",
+    "NEXT_PUBLIC_FF_VIDEO_UPLOAD",
+    "NEXT_PUBLIC_FF_SCAM_REPORTING",
+    "NEXT_PUBLIC_FF_SCAM_URL_REPORTING"
+  ]
+}
