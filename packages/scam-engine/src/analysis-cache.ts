@@ -1,4 +1,3 @@
-import "server-only";
 import { Redis } from "@upstash/redis";
 import { PROMPT_VERSION, type AnalysisResult } from "@askarthur/types";
 import { logger } from "@askarthur/utils/logger";

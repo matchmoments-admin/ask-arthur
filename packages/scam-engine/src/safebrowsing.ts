@@ -1,7 +1,6 @@
 // URL reputation checks via Google Safe Browsing + VirusTotal
 // Uses Promise.allSettled so failures don't block each other
 
-import "server-only";
 import { Redis } from "@upstash/redis";
 import { logger } from "@askarthur/utils/logger";
 

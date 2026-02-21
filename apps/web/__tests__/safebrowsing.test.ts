@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractURLs } from "@/lib/safebrowsing";
+import { extractURLs } from "@askarthur/scam-engine/safebrowsing";
 
 describe("extractURLs", () => {
   it("extracts a single URL", () => {

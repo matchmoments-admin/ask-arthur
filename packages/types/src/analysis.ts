@@ -29,3 +29,14 @@ export interface InjectionCheckResult {
   detected: boolean;
   patterns: string[];
 }
+
+export interface PhoneLookupResult {
+  valid: boolean;
+  phoneNumber: string;
+  countryCode: string | null;
+  nationalFormat: string | null;
+  lineType: string | null;
+  carrier: string | null;
+  isVoip: boolean;
+  riskFlags: string[];
+}

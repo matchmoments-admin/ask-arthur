@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { detectInjectionAttempt, validateResult, escapeXml } from "@/lib/claude";
+import { detectInjectionAttempt, validateResult, escapeXml } from "@askarthur/scam-engine/claude";
 
 describe("detectInjectionAttempt", () => {
   it("returns detected: false for normal text", () => {

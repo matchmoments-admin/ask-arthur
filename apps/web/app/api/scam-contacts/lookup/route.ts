@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { validateApiKey } from "@/lib/apiAuth";
 import { featureFlags } from "@askarthur/utils/feature-flags";
-import { normalizePhoneE164, normalizeEmail, isValidPhoneFormat, isValidEmailFormat } from "@/lib/phoneNormalize";
+import { normalizePhoneE164, normalizeEmail, isValidPhoneFormat, isValidEmailFormat } from "@askarthur/scam-engine/phone-normalize";
 import { logger } from "@askarthur/utils/logger";
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";

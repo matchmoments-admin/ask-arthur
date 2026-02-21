@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { validateApiKey } from "@/lib/apiAuth";
 import { featureFlags } from "@askarthur/utils/feature-flags";
-import { normalizeURL, isURLFormat } from "@/lib/urlNormalize";
+import { normalizeURL, isURLFormat } from "@askarthur/scam-engine/url-normalize";
 import { logger } from "@askarthur/utils/logger";
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";

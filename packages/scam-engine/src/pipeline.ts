@@ -1,9 +1,8 @@
-import "server-only";
 import { createServiceClient } from "@askarthur/supabase/server";
-import { uploadScreenshot } from "./r2";
-import type { AnalysisResult } from "@askarthur/types";
-import type { PhoneLookupResult } from "./twilioLookup";
+import type { AnalysisResult, PhoneLookupResult } from "@askarthur/types";
 import { logger } from "@askarthur/utils/logger";
+
+type UploadScreenshotFn = (buffer: Buffer, contentType: string) => Promise<string | null>;
 
 // PII patterns to scrub (defense in depth — Claude is also instructed not to echo PII)
 // ORDER MATTERS: More specific patterns (card, Medicare, TFN) must run BEFORE the
@@ -47,7 +46,8 @@ export function scrubPII(text: string): string {
 export async function storeVerifiedScam(
   analysis: AnalysisResult,
   region: string | null,
-  imagesBase64?: string[]
+  imagesBase64?: string[],
+  uploadScreenshot?: UploadScreenshotFn
 ): Promise<void> {
   try {
     const supabase = createServiceClient();
@@ -58,7 +58,7 @@ export async function storeVerifiedScam(
 
     // Upload screenshots to R2 if provided
     const screenshotKeys: string[] = [];
-    if (imagesBase64 && imagesBase64.length > 0) {
+    if (imagesBase64 && imagesBase64.length > 0 && uploadScreenshot) {
       for (const imgBase64 of imagesBase64) {
         try {
           const buffer = Buffer.from(imgBase64, "base64");

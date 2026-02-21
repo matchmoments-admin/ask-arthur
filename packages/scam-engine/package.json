@@ -1,0 +1,25 @@
+{
+  "name": "@askarthur/scam-engine",
+  "version": "0.0.0",
+  "private": true,
+  "exports": {
+    ".": "./src/index.ts",
+    "./claude": "./src/claude.ts",
+    "./pipeline": "./src/pipeline.ts",
+    "./safebrowsing": "./src/safebrowsing.ts",
+    "./whois": "./src/whois.ts",
+    "./ssl": "./src/ssl.ts",
+    "./url-normalize": "./src/url-normalize.ts",
+    "./phone-normalize": "./src/phone-normalize.ts",
+    "./analysis-cache": "./src/analysis-cache.ts",
+    "./geolocate": "./src/geolocate.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.74.0",
+    "@askarthur/types": "workspace:*",
+    "@askarthur/utils": "workspace:*",
+    "@askarthur/supabase": "workspace:*",
+    "@upstash/redis": "^1.36.2",
+    "tldts": "^7.0.23"
+  }
+}

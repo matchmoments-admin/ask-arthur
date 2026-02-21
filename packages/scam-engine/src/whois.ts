@@ -1,7 +1,6 @@
 // WHOIS enrichment via whoisjson.com (1,000 free/month, no credit card)
 // Domain-level lookup — cached in scam_urls DB to avoid redundant calls.
 
-import "server-only";
 import { logger } from "@askarthur/utils/logger";
 
 export interface WhoisResult {

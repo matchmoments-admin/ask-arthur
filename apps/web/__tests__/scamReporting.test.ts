@@ -5,7 +5,7 @@ import {
   extractEmailDomain,
   isValidPhoneFormat,
   isValidEmailFormat,
-} from "@/lib/phoneNormalize";
+} from "@askarthur/scam-engine/phone-normalize";
 import { hashIdentifier } from "@askarthur/utils/hash";
 
 // ─── Phone Normalization ───

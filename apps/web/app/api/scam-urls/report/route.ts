@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { checkFormRateLimit } from "@askarthur/utils/rate-limit";
 import { hashIdentifier } from "@askarthur/utils/hash";
-import { geolocateIP } from "@/lib/geolocate";
+import { geolocateIP } from "@askarthur/scam-engine/geolocate";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
-import { normalizeURL, isURLFormat } from "@/lib/urlNormalize";
-import { lookupWhois } from "@/lib/whoisLookup";
-import { checkSSL } from "@/lib/sslCheck";
+import { normalizeURL, isURLFormat } from "@askarthur/scam-engine/url-normalize";
+import { lookupWhois } from "@askarthur/scam-engine/whois";
+import { checkSSL } from "@askarthur/scam-engine/ssl";
 import { logger } from "@askarthur/utils/logger";
 
 const URLItemSchema = z.object({

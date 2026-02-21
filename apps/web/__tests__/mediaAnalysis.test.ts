@@ -67,7 +67,7 @@ describe("mediaAnalysis pipeline", () => {
 
 describe("PII scrubbing on transcripts", () => {
   it("scrubs email addresses from transcript text", async () => {
-    const { scrubPII } = await import("@/lib/scamPipeline");
+    const { scrubPII } = await import("@askarthur/scam-engine/pipeline");
     const transcript = "Please send your details to victim@gmail.com for the refund";
     const scrubbed = scrubPII(transcript);
     expect(scrubbed).toContain("[EMAIL]");
@@ -75,7 +75,7 @@ describe("PII scrubbing on transcripts", () => {
   });
 
   it("scrubs Australian phone numbers from transcript text", async () => {
-    const { scrubPII } = await import("@/lib/scamPipeline");
+    const { scrubPII } = await import("@askarthur/scam-engine/pipeline");
     const transcript = "Call us back on 0412 345 678 to claim your prize";
     const scrubbed = scrubPII(transcript);
     expect(scrubbed).not.toContain("0412 345 678");

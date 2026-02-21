@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { checkFormRateLimit } from "@askarthur/utils/rate-limit";
 import { hashIdentifier } from "@askarthur/utils/hash";
-import { geolocateIP } from "@/lib/geolocate";
+import { geolocateIP } from "@askarthur/scam-engine/geolocate";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { lookupPhoneNumber } from "@/lib/twilioLookup";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -12,7 +12,7 @@ import {
   extractEmailDomain,
   isValidPhoneFormat,
   isValidEmailFormat,
-} from "@/lib/phoneNormalize";
+} from "@askarthur/scam-engine/phone-normalize";
 import { logger } from "@askarthur/utils/logger";
 
 const ContactSchema = z.object({

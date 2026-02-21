@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validateApiKey } from "@/lib/apiAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
-import { normalizeURL, isURLFormat } from "@/lib/urlNormalize";
+import { normalizeURL, isURLFormat } from "@askarthur/scam-engine/url-normalize";
 import { logger } from "@askarthur/utils/logger";
 
 export async function GET(req: NextRequest) {

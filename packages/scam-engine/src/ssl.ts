@@ -1,7 +1,6 @@
 // SSL certificate check via Node.js tls module.
 // Zero-cost enrichment — extracts issuer, validity, and days remaining.
 
-import "server-only";
 import * as tls from "tls";
 import { logger } from "@askarthur/utils/logger";
 

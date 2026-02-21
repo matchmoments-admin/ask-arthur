@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { waitUntil } from "@vercel/functions";
 import { checkRateLimit } from "@askarthur/utils/rate-limit";
-import { analyzeWithClaude, detectInjectionAttempt, type Verdict } from "@/lib/claude";
+import { analyzeWithClaude, detectInjectionAttempt, type Verdict } from "@askarthur/scam-engine/claude";
 import { featureFlags } from "@askarthur/utils/feature-flags";
-import { extractContactsFromText } from "@/lib/phoneNormalize";
-import { extractURLs, checkURLReputation } from "@/lib/safebrowsing";
-import { geolocateIP } from "@/lib/geolocate";
-import { storeVerifiedScam, incrementStats } from "@/lib/scamPipeline";
-import { getCachedAnalysis, setCachedAnalysis } from "@/lib/analysisCache";
+import { extractContactsFromText } from "@askarthur/scam-engine/phone-normalize";
+import { extractURLs, checkURLReputation } from "@askarthur/scam-engine/safebrowsing";
+import { geolocateIP } from "@askarthur/scam-engine/geolocate";
+import { storeVerifiedScam, incrementStats } from "@askarthur/scam-engine/pipeline";
+import { getCachedAnalysis, setCachedAnalysis } from "@askarthur/scam-engine/analysis-cache";
+import { uploadScreenshot } from "@/lib/r2";
 import { logger } from "@askarthur/utils/logger";
 
 const RequestSchema = z.object({
@@ -140,7 +141,7 @@ export async function POST(req: NextRequest) {
     // 7. Background work via waitUntil (survives after response is sent)
     if (finalVerdict === "HIGH_RISK") {
       waitUntil(
-        storeVerifiedScam(aiResult, region, images.length > 0 ? images : undefined).catch((err) =>
+        storeVerifiedScam(aiResult, region, images.length > 0 ? images : undefined, uploadScreenshot).catch((err) =>
           logger.error("storeVerifiedScam failed", { error: String(err) })
         )
       );

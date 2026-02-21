@@ -9,7 +9,7 @@ vi.mock("@askarthur/utils/rate-limit", () => ({
   ),
 }));
 
-vi.mock("@/lib/claude", () => ({
+vi.mock("@askarthur/scam-engine/claude", () => ({
   analyzeWithClaude: vi.fn(() =>
     Promise.resolve({
       verdict: "SUSPICIOUS",
@@ -23,23 +23,23 @@ vi.mock("@/lib/claude", () => ({
   detectInjectionAttempt: vi.fn(() => ({ detected: false, patterns: [] })),
 }));
 
-vi.mock("@/lib/safebrowsing", () => ({
+vi.mock("@askarthur/scam-engine/safebrowsing", () => ({
   extractURLs: vi.fn(() => []),
   checkURLReputation: vi.fn(() => Promise.resolve([])),
 }));
 
-vi.mock("@/lib/geolocate", () => ({
+vi.mock("@askarthur/scam-engine/geolocate", () => ({
   geolocateIP: vi.fn(() =>
     Promise.resolve({ region: "AU", countryCode: "AU" })
   ),
 }));
 
-vi.mock("@/lib/scamPipeline", () => ({
+vi.mock("@askarthur/scam-engine/pipeline", () => ({
   storeVerifiedScam: vi.fn(() => Promise.resolve()),
   incrementStats: vi.fn(() => Promise.resolve()),
 }));
 
-vi.mock("@/lib/analysisCache", () => ({
+vi.mock("@askarthur/scam-engine/analysis-cache", () => ({
   getCachedAnalysis: vi.fn(() => Promise.resolve(null)),
   setCachedAnalysis: vi.fn(() => Promise.resolve()),
 }));
@@ -57,7 +57,7 @@ vi.mock("@vercel/functions", () => ({
 }));
 
 const { checkRateLimit } = await import("@askarthur/utils/rate-limit");
-const { detectInjectionAttempt } = await import("@/lib/claude");
+const { detectInjectionAttempt } = await import("@askarthur/scam-engine/claude");
 const { POST } = await import("@/app/api/analyze/route");
 
 // ── Helpers ──
@@ -103,7 +103,7 @@ describe("/api/analyze input validation", () => {
     expect(res.status).toBe(400);
     const data = await res.json();
     expect(data.error).toBe("validation_error");
-    expect(data.message).toContain("Either text or image is required");
+    expect(data.message).toContain("Either text or image");
   });
 
   // A-02: Text-only analysis → 200 with verdict
@@ -207,7 +207,7 @@ describe("/api/analyze input validation", () => {
     });
 
     // Mock Claude returning SAFE (which should be overridden)
-    const { analyzeWithClaude } = await import("@/lib/claude");
+    const { analyzeWithClaude } = await import("@askarthur/scam-engine/claude");
     vi.mocked(analyzeWithClaude).mockResolvedValue({
       verdict: "SAFE",
       confidence: 0.9,

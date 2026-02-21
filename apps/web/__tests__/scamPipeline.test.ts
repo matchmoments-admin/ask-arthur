@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { scrubPII } from "@/lib/scamPipeline";
+import { scrubPII } from "@askarthur/scam-engine/pipeline";
 import type { AnalysisResult } from "@askarthur/types";
 
 // ── Mocks ──
@@ -27,7 +27,7 @@ vi.mock("@askarthur/utils/logger", () => ({
 const { createServiceClient } = await import("@askarthur/supabase/server");
 const { uploadScreenshot } = await import("@/lib/r2");
 const { logger } = await import("@askarthur/utils/logger");
-const { storeVerifiedScam, storePhoneLookups } = await import("@/lib/scamPipeline");
+const { storeVerifiedScam, storePhoneLookups } = await import("@askarthur/scam-engine/pipeline");
 
 // ── Helpers ──
 

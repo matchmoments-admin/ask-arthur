@@ -21,6 +21,9 @@ importers:
       '@anthropic-ai/sdk':
         specifier: ^0.74.0
         version: 0.74.0(zod@4.3.6)
+      '@askarthur/scam-engine':
+        specifier: workspace:*
+        version: link:../../packages/scam-engine
       '@askarthur/supabase':
         specifier: workspace:*
         version: link:../../packages/supabase
@@ -142,6 +145,27 @@ importers:
       vitest:
         specifier: ^4.0.18
         version: 4.0.18(@types/node@20.19.33)(jiti@2.6.1)(jsdom@28.1.0)(lightningcss@1.31.1)
+
+  packages/scam-engine:
+    dependencies:
+      '@anthropic-ai/sdk':
+        specifier: ^0.74.0
+        version: 0.74.0(zod@4.3.6)
+      '@askarthur/supabase':
+        specifier: workspace:*
+        version: link:../supabase
+      '@askarthur/types':
+        specifier: workspace:*
+        version: link:../types
+      '@askarthur/utils':
+        specifier: workspace:*
+        version: link:../utils
+      '@upstash/redis':
+        specifier: ^1.36.2
+        version: 1.36.2
+      tldts:
+        specifier: ^7.0.23
+        version: 7.0.23
 
   packages/supabase:
     dependencies:
