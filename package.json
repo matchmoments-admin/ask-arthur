@@ -12,7 +12,8 @@
     "clean": "turbo run clean",
     "dev:web": "pnpm --filter @askarthur/web dev",
     "dev:mobile": "pnpm --filter @askarthur/mobile dev",
-    "dev:telegram": "pnpm --filter @askarthur/web telegram:dev"
+    "dev:telegram": "pnpm --filter @askarthur/web telegram:dev",
+    "pipeline-test": "cd pipeline/scrapers && python -m pytest tests/ -v"
   },
   "devDependencies": {
     "turbo": "^2.8.10"

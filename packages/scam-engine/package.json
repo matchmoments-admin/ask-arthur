@@ -12,7 +12,9 @@
     "./url-normalize": "./src/url-normalize.ts",
     "./phone-normalize": "./src/phone-normalize.ts",
     "./analysis-cache": "./src/analysis-cache.ts",
-    "./geolocate": "./src/geolocate.ts"
+    "./geolocate": "./src/geolocate.ts",
+    "./inngest/client": "./src/inngest/client.ts",
+    "./inngest/functions": "./src/inngest/functions.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",
@@ -20,6 +22,7 @@
     "@askarthur/utils": "workspace:*",
     "@askarthur/supabase": "workspace:*",
     "@upstash/redis": "^1.36.2",
+    "inngest": "^3.27.0",
     "tldts": "^7.0.23"
   }
 }

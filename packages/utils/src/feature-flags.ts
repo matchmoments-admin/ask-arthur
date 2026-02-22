@@ -20,6 +20,9 @@ export const featureFlags = {
 
   /** Phase 3: Scam URL reporting + WHOIS/SSL enrichment */
   scamUrlReporting: process.env.NEXT_PUBLIC_FF_SCAM_URL_REPORTING === "true",
+
+  /** Phase 4: Threat feed ingestion pipeline + Inngest orchestration */
+  dataPipeline: process.env.NEXT_PUBLIC_FF_DATA_PIPELINE === "true",
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;

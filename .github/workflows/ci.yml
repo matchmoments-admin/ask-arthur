@@ -32,3 +32,22 @@ jobs:
 
       - name: Test
         run: pnpm turbo test
+
+  pipeline-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: pipeline/scrapers/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r pipeline/scrapers/requirements.txt
+
+      - name: Run pipeline tests
+        working-directory: pipeline/scrapers
+        run: python -m pytest tests/ -v
