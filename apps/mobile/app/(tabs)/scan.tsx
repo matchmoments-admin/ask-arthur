@@ -1,9 +1,10 @@
 import { useState, useCallback } from "react";
-import { View, Text, StyleSheet, Pressable } from "react-native";
+import { View, Text, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { QRScanner } from "@/components/QRScanner";
 import { AnalysisResultView } from "@/components/AnalysisResult";
 import { LoadingOverlay } from "@/components/LoadingOverlay";
+import { Button } from "@/components/Button";
 import { useAnalysis } from "@/hooks/useAnalysis";
 import { Colors } from "@/constants/colors";
 import { Fonts } from "@/constants/fonts";
@@ -30,9 +31,7 @@ export default function ScanScreen() {
       <SafeAreaView style={styles.container} edges={["bottom"]}>
         <AnalysisResultView result={result} />
         <View style={styles.footer}>
-          <Pressable style={styles.button} onPress={handleReset}>
-            <Text style={styles.buttonText}>Scan Another</Text>
-          </Pressable>
+          <Button label="Scan Another" onPress={handleReset} />
         </View>
       </SafeAreaView>
     );
@@ -44,9 +43,7 @@ export default function ScanScreen() {
         <View style={styles.errorCard}>
           <Text style={styles.errorText}>{error}</Text>
         </View>
-        <Pressable style={styles.button} onPress={handleReset}>
-          <Text style={styles.buttonText}>Try Again</Text>
-        </Pressable>
+        <Button label="Try Again" onPress={handleReset} />
       </SafeAreaView>
     );
   }
@@ -94,16 +91,5 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: Colors.border,
     backgroundColor: Colors.white,
-  },
-  button: {
-    backgroundColor: Colors.primary,
-    paddingVertical: 14,
-    borderRadius: 10,
-    alignItems: "center",
-  },
-  buttonText: {
-    color: Colors.textOnPrimary,
-    fontSize: 16,
-    fontFamily: Fonts.semiBold,
   },
 });

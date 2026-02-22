@@ -2,7 +2,8 @@ import { API_URL } from "@/constants/config";
 import type { AnalysisResult, AnalysisMode } from "@askarthur/types";
 
 interface AnalyzeRequest {
-  text: string;
+  text?: string;
+  images?: string[];
   mode?: AnalysisMode;
 }
 

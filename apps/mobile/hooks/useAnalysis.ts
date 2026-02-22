@@ -8,7 +8,7 @@ interface UseAnalysisReturn {
   result: AnalysisResult | null;
   loading: boolean;
   error: string | null;
-  analyze: (text: string, mode?: AnalysisMode) => Promise<void>;
+  analyze: (text: string, mode?: AnalysisMode, images?: string[]) => Promise<void>;
   reset: () => void;
 }
 
@@ -17,13 +17,17 @@ export function useAnalysis(): UseAnalysisReturn {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const analyze = useCallback(async (text: string, mode: AnalysisMode = "text") => {
+  const analyze = useCallback(async (text: string, mode: AnalysisMode = "text", images?: string[]) => {
     setLoading(true);
     setError(null);
     setResult(null);
 
     try {
-      const response = await analyzeMessage({ text, mode });
+      const response = await analyzeMessage({
+        text: text || undefined,
+        images,
+        mode: images?.length ? "image" : mode,
+      });
       setResult(response);
       verdictHaptic(response.verdict);
 

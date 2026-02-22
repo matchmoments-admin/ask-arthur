@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { View, Text, TextInput, Pressable, StyleSheet, ScrollView, KeyboardAvoidingView, Platform } from "react-native";
+import { View, Text, TextInput, StyleSheet, ScrollView, KeyboardAvoidingView, Platform } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { LoadingOverlay } from "@/components/LoadingOverlay";
+import { Button } from "@/components/Button";
 import { checkBreach, type BreachResult } from "@/lib/breach";
 import { Colors } from "@/constants/colors";
 import { Fonts } from "@/constants/fonts";
@@ -71,13 +72,11 @@ export default function BreachScreen() {
           )}
 
           {!result && (
-            <Pressable
-              style={[styles.button, !email.trim() && styles.buttonDisabled]}
+            <Button
+              label="Check Breaches"
               onPress={handleCheck}
               disabled={!email.trim() || loading}
-            >
-              <Text style={styles.buttonText}>Check Breaches</Text>
-            </Pressable>
+            />
           )}
 
           {result && !result.breached && (
@@ -121,9 +120,7 @@ export default function BreachScreen() {
           )}
 
           {result && (
-            <Pressable style={styles.button} onPress={handleReset}>
-              <Text style={styles.buttonText}>Check Another</Text>
-            </Pressable>
+            <Button label="Check Another" onPress={handleReset} />
           )}
         </ScrollView>
         {loading && <LoadingOverlay message="Checking breaches..." />}
@@ -197,20 +194,6 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.regular,
     color: Colors.error,
     textAlign: "center",
-  },
-  button: {
-    backgroundColor: Colors.primary,
-    paddingVertical: 14,
-    borderRadius: 10,
-    alignItems: "center",
-  },
-  buttonDisabled: {
-    opacity: 0.5,
-  },
-  buttonText: {
-    color: Colors.textOnPrimary,
-    fontSize: 16,
-    fontFamily: Fonts.semiBold,
   },
   resultCard: {
     backgroundColor: Colors.white,

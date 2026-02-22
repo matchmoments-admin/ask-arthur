@@ -8,21 +8,28 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  Image,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
 import { AnalysisResultView } from "@/components/AnalysisResult";
 import { LoadingOverlay } from "@/components/LoadingOverlay";
+import { Button } from "@/components/Button";
 import { useAnalysis } from "@/hooks/useAnalysis";
 import { API_URL } from "@/constants/config";
 import { Colors } from "@/constants/colors";
 import { Fonts } from "@/constants/fonts";
 
+const MAX_IMAGES = 10;
+
 export default function HomeScreen() {
   const router = useRouter();
   const { result, loading, error, analyze, reset } = useAnalysis();
   const [text, setText] = useState("");
+  const [images, setImages] = useState<Array<{ base64: string; uri: string }>>([]);
   const [focused, setFocused] = useState(false);
   const [scamCount, setScamCount] = useState<number | null>(null);
 
@@ -37,14 +44,49 @@ export default function HomeScreen() {
     fetchCount();
   }, [fetchCount]);
 
+  const handleAttach = async () => {
+    const remaining = MAX_IMAGES - images.length;
+    if (remaining <= 0) {
+      Alert.alert("Limit reached", `You can attach up to ${MAX_IMAGES} images.`);
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsMultipleSelection: true,
+      selectionLimit: remaining,
+      quality: 0.7,
+      base64: true,
+    });
+
+    if (result.canceled || !result.assets) return;
+
+    const newImages = result.assets
+      .filter((a) => a.base64)
+      .map((a) => ({ base64: a.base64!, uri: a.uri }));
+
+    setImages((prev) => [...prev, ...newImages].slice(0, MAX_IMAGES));
+  };
+
+  const removeImage = (index: number) => {
+    setImages((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const canSubmit = text.trim() || images.length > 0;
+
   const handleSubmit = () => {
-    if (!text.trim()) return;
-    analyze(text.trim());
+    if (!canSubmit) return;
+    analyze(
+      text.trim(),
+      images.length > 0 ? "image" : "text",
+      images.length > 0 ? images.map((i) => i.base64) : undefined,
+    );
   };
 
   const handleReset = () => {
     reset();
     setText("");
+    setImages([]);
     fetchCount();
   };
 
@@ -89,25 +131,50 @@ export default function HomeScreen() {
               onBlur={() => setFocused(false)}
               editable={!loading && !hasResult}
             />
+            {images.length > 0 && (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.imageStrip}
+                contentContainerStyle={styles.imageStripContent}
+              >
+                {images.map((img, index) => (
+                  <View key={index} style={styles.imageThumb}>
+                    <Image source={{ uri: img.uri }} style={styles.thumbImage} />
+                    {!loading && !hasResult && (
+                      <Pressable
+                        style={styles.removeButton}
+                        onPress={() => removeImage(index)}
+                        hitSlop={8}
+                      >
+                        <Ionicons name="close-circle" size={20} color={Colors.error} />
+                      </Pressable>
+                    )}
+                  </View>
+                ))}
+              </ScrollView>
+            )}
             <View style={styles.toolbar}>
-              <Pressable style={styles.attachButton}>
-                <Ionicons name="attach" size={22} color={Colors.textSecondary} />
+              <Pressable
+                style={styles.attachButton}
+                onPress={handleAttach}
+                disabled={loading || hasResult}
+              >
+                <Ionicons
+                  name="attach"
+                  size={22}
+                  color={loading || hasResult ? Colors.border : Colors.textSecondary}
+                />
               </Pressable>
               {hasResult ? (
-                <Pressable style={styles.checkButton} onPress={handleReset}>
-                  <Text style={styles.checkButtonText}>CHECK ANOTHER</Text>
-                </Pressable>
+                <Button variant="pill" label="CHECK ANOTHER" onPress={handleReset} />
               ) : (
-                <Pressable
-                  style={[
-                    styles.checkButton,
-                    (!text.trim() || loading) && styles.buttonDisabled,
-                  ]}
+                <Button
+                  variant="pill"
+                  label="CHECK NOW"
                   onPress={handleSubmit}
-                  disabled={!text.trim() || loading}
-                >
-                  <Text style={styles.checkButtonText}>CHECK NOW</Text>
-                </Pressable>
+                  disabled={!canSubmit || loading}
+                />
               )}
             </View>
           </View>
@@ -144,24 +211,9 @@ export default function HomeScreen() {
 
           {/* Navigation buttons */}
           <View style={styles.navButtons}>
-            <Pressable
-              style={styles.navButton}
-              onPress={() => router.push("/scan")}
-            >
-              <Text style={styles.navButtonText}>SCAN QR CODE</Text>
-            </Pressable>
-            <Pressable
-              style={styles.navButton}
-              onPress={() => router.push("/breach")}
-            >
-              <Text style={styles.navButtonText}>BREACH CHECK</Text>
-            </Pressable>
-            <Pressable
-              style={styles.navButton}
-              onPress={() => router.push("/settings")}
-            >
-              <Text style={styles.navButtonText}>SETTINGS</Text>
-            </Pressable>
+            <Button label="SCAN QR CODE" onPress={() => router.push("/scan")} />
+            <Button label="BREACH CHECK" onPress={() => router.push("/breach")} />
+            <Button label="SETTINGS" onPress={() => router.push("/settings")} />
           </View>
         </ScrollView>
 
@@ -219,6 +271,33 @@ const styles = StyleSheet.create({
     color: Colors.navy,
     minHeight: 100,
   },
+  imageStrip: {
+    maxHeight: 80,
+    paddingHorizontal: 12,
+  },
+  imageStripContent: {
+    gap: 8,
+    paddingVertical: 4,
+  },
+  imageThumb: {
+    width: 64,
+    height: 64,
+    borderRadius: 8,
+    overflow: "hidden",
+    position: "relative",
+  },
+  thumbImage: {
+    width: 64,
+    height: 64,
+    borderRadius: 8,
+  },
+  removeButton: {
+    position: "absolute",
+    top: -2,
+    right: -2,
+    backgroundColor: Colors.white,
+    borderRadius: 10,
+  },
   toolbar: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -233,24 +312,6 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
     justifyContent: "center",
     alignItems: "center",
-  },
-  checkButton: {
-    height: 44,
-    paddingHorizontal: 24,
-    backgroundColor: Colors.navy,
-    borderRadius: 9999,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  checkButtonText: {
-    color: Colors.textOnDark,
-    fontSize: 13,
-    fontFamily: Fonts.bold,
-    textTransform: "uppercase",
-    letterSpacing: 3,
-  },
-  buttonDisabled: {
-    opacity: 0.5,
   },
 
   // Error
@@ -315,19 +376,5 @@ const styles = StyleSheet.create({
   // Navigation buttons
   navButtons: {
     gap: 12,
-  },
-  navButton: {
-    backgroundColor: Colors.navy,
-    borderRadius: 10,
-    paddingVertical: 18,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  navButtonText: {
-    color: Colors.textOnDark,
-    fontSize: 15,
-    fontFamily: Fonts.bold,
-    textTransform: "uppercase",
-    letterSpacing: 3,
   },
 });
