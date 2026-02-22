@@ -1,7 +1,9 @@
 import { View, Text, Pressable, StyleSheet, Linking, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 import { useScanHistory } from "@/hooks/useScanHistory";
 import { Colors } from "@/constants/colors";
+import { Fonts } from "@/constants/fonts";
 
 export default function SettingsScreen() {
   const { history, clear } = useScanHistory();
@@ -20,7 +22,7 @@ export default function SettingsScreen() {
   return (
     <SafeAreaView style={styles.container} edges={["bottom"]}>
       <View style={styles.content}>
-        <View style={styles.section}>
+        <View style={styles.card}>
           <Text style={styles.sectionTitle}>History</Text>
           <Text style={styles.sectionMeta}>
             {history.length} scan{history.length !== 1 ? "s" : ""} saved locally
@@ -30,15 +32,16 @@ export default function SettingsScreen() {
             onPress={handleClearHistory}
             disabled={history.length === 0}
           >
+            <Ionicons name="trash-outline" size={18} color={Colors.error} />
             <Text style={styles.destructiveButtonText}>Clear Scan History</Text>
           </Pressable>
         </View>
 
-        <View style={styles.section}>
+        <View style={styles.card}>
           <Text style={styles.sectionTitle}>About</Text>
-          <SettingsLink label="Privacy Policy" url="https://askarthur.au/privacy" />
-          <SettingsLink label="Terms of Service" url="https://askarthur.au/terms" />
-          <SettingsLink label="Website" url="https://askarthur.au" />
+          <SettingsLink icon="document-text-outline" label="Privacy Policy" url="https://askarthur.au/privacy" />
+          <SettingsLink icon="reader-outline" label="Terms of Service" url="https://askarthur.au/terms" />
+          <SettingsLink icon="globe-outline" label="Website" url="https://askarthur.au" />
         </View>
 
         <Text style={styles.version}>Ask Arthur v1.0.0</Text>
@@ -47,11 +50,14 @@ export default function SettingsScreen() {
   );
 }
 
-function SettingsLink({ label, url }: { label: string; url: string }) {
+function SettingsLink({ icon, label, url }: { icon: string; label: string; url: string }) {
   return (
     <Pressable style={styles.link} onPress={() => Linking.openURL(url)}>
-      <Text style={styles.linkText}>{label}</Text>
-      <Text style={styles.arrow}>{"\u203a"}</Text>
+      <View style={styles.linkLeft}>
+        <Ionicons name={icon as any} size={20} color={Colors.primary} />
+        <Text style={styles.linkText}>{label}</Text>
+      </View>
+      <Ionicons name="chevron-forward" size={18} color={Colors.textSecondary} />
     </Pressable>
   );
 }
@@ -64,25 +70,34 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     padding: 16,
-    gap: 32,
+    gap: 16,
   },
-  section: {
+  card: {
+    backgroundColor: Colors.white,
+    borderRadius: 12,
+    padding: 16,
     gap: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
   sectionTitle: {
     fontSize: 18,
-    fontWeight: "700",
-    color: Colors.text,
+    fontFamily: Fonts.bold,
+    color: Colors.navy,
   },
   sectionMeta: {
     fontSize: 14,
+    fontFamily: Fonts.regular,
     color: Colors.textSecondary,
   },
   destructiveButton: {
-    backgroundColor: Colors.surface,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: Colors.errorBg,
     paddingVertical: 12,
     borderRadius: 10,
-    alignItems: "center",
     borderWidth: 1,
     borderColor: Colors.error,
   },
@@ -92,27 +107,30 @@ const styles = StyleSheet.create({
   destructiveButtonText: {
     color: Colors.error,
     fontSize: 15,
-    fontWeight: "600",
+    fontFamily: Fonts.semiBold,
   },
   link: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    backgroundColor: Colors.surface,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    backgroundColor: Colors.background,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     borderRadius: 10,
+  },
+  linkLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
   },
   linkText: {
     fontSize: 15,
+    fontFamily: Fonts.medium,
     color: Colors.text,
-  },
-  arrow: {
-    fontSize: 20,
-    color: Colors.textSecondary,
   },
   version: {
     fontSize: 13,
+    fontFamily: Fonts.regular,
     color: Colors.textSecondary,
     textAlign: "center",
     marginTop: "auto",

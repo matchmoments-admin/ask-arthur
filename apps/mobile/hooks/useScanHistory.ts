@@ -11,12 +11,11 @@ export function useScanHistory(): UseScanHistoryReturn {
   const [history, setHistory] = useState<ScanHistoryItem[]>([]);
 
   const refresh = useCallback(() => {
-    setHistory(getScanHistory());
+    getScanHistory().then(setHistory).catch(() => setHistory([]));
   }, []);
 
   const clear = useCallback(() => {
-    clearScanHistory();
-    setHistory([]);
+    clearScanHistory().then(() => setHistory([])).catch(() => {});
   }, []);
 
   useEffect(() => {

@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { View, Text, TextInput, Pressable, StyleSheet, ScrollView, KeyboardAvoidingView, Platform } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 import { LoadingOverlay } from "@/components/LoadingOverlay";
 import { checkBreach, type BreachResult } from "@/lib/breach";
 import { Colors } from "@/constants/colors";
+import { Fonts } from "@/constants/fonts";
 
 export default function BreachScreen() {
   const [email, setEmail] = useState("");
@@ -40,23 +42,33 @@ export default function BreachScreen() {
     >
       <SafeAreaView style={styles.container} edges={["bottom"]}>
         <ScrollView contentContainerStyle={styles.content}>
-          <Text style={styles.title}>Data Breach Check</Text>
-          <Text style={styles.description}>
-            Check if your email has appeared in known data breaches. Powered by Have I Been Pwned.
-          </Text>
+          <View style={styles.headerCard}>
+            <Ionicons name="shield-checkmark" size={32} color={Colors.primary} />
+            <Text style={styles.title}>Data Breach Check</Text>
+            <Text style={styles.description}>
+              Check if your email has appeared in known data breaches. Powered by Have I Been Pwned.
+            </Text>
+          </View>
 
-          <TextInput
-            style={styles.input}
-            value={email}
-            onChangeText={setEmail}
-            placeholder="Enter your email address"
-            placeholderTextColor={Colors.textSecondary}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
+          <View style={styles.inputCard}>
+            <Text style={styles.inputLabel}>Email address</Text>
+            <TextInput
+              style={styles.input}
+              value={email}
+              onChangeText={setEmail}
+              placeholder="you@example.com"
+              placeholderTextColor={Colors.textSecondary}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
 
-          {error && <Text style={styles.errorText}>{error}</Text>}
+          {error && (
+            <View style={styles.errorCard}>
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          )}
 
           {!result && (
             <Pressable
@@ -69,10 +81,13 @@ export default function BreachScreen() {
           )}
 
           {result && !result.breached && (
-            <View style={[styles.resultCard, { borderColor: Colors.safe }]}>
-              <Text style={[styles.resultTitle, { color: Colors.safe }]}>
-                {"\u2705"} No breaches found
-              </Text>
+            <View style={[styles.resultCard, styles.resultCardSafe]}>
+              <View style={styles.resultHeader}>
+                <Ionicons name="checkmark-circle" size={24} color={Colors.safe} />
+                <Text style={[styles.resultTitle, { color: Colors.safe }]}>
+                  No breaches found
+                </Text>
+              </View>
               <Text style={styles.resultText}>
                 Great news! This email hasn't appeared in any known data breaches.
               </Text>
@@ -80,10 +95,13 @@ export default function BreachScreen() {
           )}
 
           {result && result.breached && (
-            <View style={[styles.resultCard, { borderColor: Colors.highRisk }]}>
-              <Text style={[styles.resultTitle, { color: Colors.highRisk }]}>
-                {"\ud83d\udea8"} Found in {result.breachCount} breach{result.breachCount !== 1 ? "es" : ""}
-              </Text>
+            <View style={[styles.resultCard, styles.resultCardRisk]}>
+              <View style={styles.resultHeader}>
+                <Ionicons name="warning" size={24} color={Colors.highRisk} />
+                <Text style={[styles.resultTitle, { color: Colors.highRisk }]}>
+                  Found in {result.breachCount} breach{result.breachCount !== 1 ? "es" : ""}
+                </Text>
+              </View>
               <Text style={styles.resultText}>
                 This email was found in the following data breaches. Consider changing your passwords.
               </Text>
@@ -123,27 +141,60 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 16,
   },
+  headerCard: {
+    backgroundColor: Colors.white,
+    borderRadius: 12,
+    padding: 20,
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
   title: {
-    fontSize: 24,
-    fontWeight: "700",
-    color: Colors.text,
+    fontSize: 22,
+    fontFamily: Fonts.bold,
+    color: Colors.navy,
   },
   description: {
     fontSize: 14,
     lineHeight: 22,
+    fontFamily: Fonts.regular,
     color: Colors.textSecondary,
+    textAlign: "center",
   },
-  input: {
-    backgroundColor: Colors.surface,
+  inputCard: {
+    backgroundColor: Colors.white,
     borderRadius: 12,
     padding: 16,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontFamily: Fonts.semiBold,
+    color: Colors.navy,
+  },
+  input: {
+    backgroundColor: Colors.background,
+    borderRadius: 8,
+    padding: 14,
     fontSize: 16,
+    fontFamily: Fonts.regular,
     color: Colors.text,
     borderWidth: 1,
     borderColor: Colors.border,
   },
+  errorCard: {
+    backgroundColor: Colors.errorBg,
+    borderRadius: 8,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: Colors.error,
+  },
   errorText: {
     fontSize: 14,
+    fontFamily: Fonts.regular,
     color: Colors.error,
     textAlign: "center",
   },
@@ -157,24 +208,38 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   buttonText: {
-    color: Colors.white,
+    color: Colors.textOnPrimary,
     fontSize: 16,
-    fontWeight: "600",
+    fontFamily: Fonts.semiBold,
   },
   resultCard: {
-    backgroundColor: Colors.surface,
+    backgroundColor: Colors.white,
     borderRadius: 12,
     padding: 16,
     borderWidth: 1,
     gap: 12,
   },
+  resultCardSafe: {
+    borderColor: Colors.safe,
+    backgroundColor: Colors.safeBg,
+  },
+  resultCardRisk: {
+    borderColor: Colors.highRisk,
+    backgroundColor: Colors.highRiskBg,
+  },
+  resultHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
   resultTitle: {
     fontSize: 18,
-    fontWeight: "700",
+    fontFamily: Fonts.bold,
   },
   resultText: {
     fontSize: 14,
     lineHeight: 22,
+    fontFamily: Fonts.regular,
     color: Colors.text,
   },
   breachItem: {
@@ -185,15 +250,17 @@ const styles = StyleSheet.create({
   },
   breachName: {
     fontSize: 16,
-    fontWeight: "600",
-    color: Colors.text,
+    fontFamily: Fonts.semiBold,
+    color: Colors.navy,
   },
   breachMeta: {
     fontSize: 12,
+    fontFamily: Fonts.regular,
     color: Colors.textSecondary,
   },
   breachData: {
     fontSize: 13,
+    fontFamily: Fonts.regular,
     color: Colors.textSecondary,
     fontStyle: "italic",
   },

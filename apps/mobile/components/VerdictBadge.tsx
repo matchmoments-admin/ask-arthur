@@ -1,11 +1,13 @@
 import { View, Text, StyleSheet } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { VerdictColors } from "@/constants/colors";
+import { Fonts } from "@/constants/fonts";
 import type { Verdict } from "@askarthur/types";
 
-const VERDICT_EMOJI: Record<Verdict, string> = {
-  SAFE: "\u2705",
-  SUSPICIOUS: "\u26a0\ufe0f",
-  HIGH_RISK: "\ud83d\udea8",
+const VERDICT_ICON: Record<Verdict, string> = {
+  SAFE: "checkmark-circle",
+  SUSPICIOUS: "alert-circle",
+  HIGH_RISK: "close-circle",
 };
 
 const VERDICT_LABEL: Record<Verdict, string> = {
@@ -25,7 +27,7 @@ export function VerdictBadge({ verdict, confidence }: VerdictBadgeProps) {
 
   return (
     <View style={[styles.badge, { backgroundColor: colors.bg, borderColor: colors.text }]}>
-      <Text style={[styles.emoji]}>{VERDICT_EMOJI[verdict]}</Text>
+      <Ionicons name={VERDICT_ICON[verdict] as any} size={24} color={colors.text} />
       <Text style={[styles.label, { color: colors.text }]}>
         {VERDICT_LABEL[verdict]}
       </Text>
@@ -40,22 +42,19 @@ const styles = StyleSheet.create({
   badge: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
     borderRadius: 12,
-    borderWidth: 1,
+    borderWidth: 1.5,
     gap: 8,
-  },
-  emoji: {
-    fontSize: 20,
   },
   label: {
     fontSize: 18,
-    fontWeight: "700",
+    fontFamily: Fonts.bold,
   },
   confidence: {
     fontSize: 14,
-    fontWeight: "500",
+    fontFamily: Fonts.medium,
     opacity: 0.8,
   },
 });

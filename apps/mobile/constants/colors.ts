@@ -1,26 +1,38 @@
 export const Colors = {
-  // Brand
-  primary: "#6366f1",
-  primaryDark: "#4f46e5",
-  background: "#1a1a2e",
-  surface: "#16213e",
-  surfaceLight: "#1f2b47",
-  text: "#e2e8f0",
-  textSecondary: "#94a3b8",
-  border: "#334155",
+  // Brand — matches web app design system
+  primary: "#008A98",       // Action Teal — buttons, links, active states
+  primaryDark: "#007080",   // Darker teal for pressed states
+  navy: "#001F3F",          // Deep Navy — headers, navigation
+  navyLight: "#002B45",     // Lighter navy
+
+  // Backgrounds
+  background: "#F7F8FA",    // Light gray page background
+  surface: "#FFFFFF",       // White card/surface
+  surfaceHover: "#F0F2F5",  // Slightly darker for pressed states
+
+  // Text
+  text: "#42526E",          // Gov Slate — primary body text
+  textSecondary: "#6B7C93", // Secondary text
+  textOnDark: "#FFFFFF",    // White text on dark backgrounds
+  textOnPrimary: "#FFFFFF", // White text on primary color
+
+  // Borders
+  border: "#E1E4E8",
+  borderLight: "#F0F0F0",
 
   // Verdict
-  safe: "#22c55e",
-  safeBg: "#052e16",
-  suspicious: "#f59e0b",
-  suspiciousBg: "#451a03",
-  highRisk: "#ef4444",
-  highRiskBg: "#450a0a",
+  safe: "#388E3C",
+  safeBg: "#ECFDF5",
+  suspicious: "#F57C00",
+  suspiciousBg: "#FFF8E1",
+  highRisk: "#D32F2F",
+  highRiskBg: "#FEF2F2",
 
   // UI
-  white: "#ffffff",
+  white: "#FFFFFF",
   black: "#000000",
-  error: "#ef4444",
+  error: "#D32F2F",
+  errorBg: "#FEF2F2",
 } as const;
 
 export const VerdictColors = {

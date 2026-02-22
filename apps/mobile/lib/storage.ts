@@ -1,7 +1,5 @@
-import { MMKV } from "react-native-mmkv";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { Verdict } from "@askarthur/types";
-
-const storage = new MMKV({ id: "askarthur-history" });
 
 export interface ScanHistoryItem {
   id: string;
@@ -13,36 +11,26 @@ export interface ScanHistoryItem {
   mode: string;
 }
 
-const HISTORY_KEY = "scan_history";
+const HISTORY_KEY = "askarthur_scan_history";
 const MAX_HISTORY = 50;
 
-/**
- * Get scan history, newest first.
- */
-export function getScanHistory(): ScanHistoryItem[] {
-  const raw = storage.getString(HISTORY_KEY);
-  if (!raw) return [];
+export async function getScanHistory(): Promise<ScanHistoryItem[]> {
   try {
+    const raw = await AsyncStorage.getItem(HISTORY_KEY);
+    if (!raw) return [];
     return JSON.parse(raw) as ScanHistoryItem[];
   } catch {
     return [];
   }
 }
 
-/**
- * Add an item to scan history.
- */
-export function addToScanHistory(item: ScanHistoryItem): void {
-  const history = getScanHistory();
+export async function addToScanHistory(item: ScanHistoryItem): Promise<void> {
+  const history = await getScanHistory();
   history.unshift(item);
-  // Keep only the most recent items
   const trimmed = history.slice(0, MAX_HISTORY);
-  storage.set(HISTORY_KEY, JSON.stringify(trimmed));
+  await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(trimmed));
 }
 
-/**
- * Clear all scan history.
- */
-export function clearScanHistory(): void {
-  storage.delete(HISTORY_KEY);
+export async function clearScanHistory(): Promise<void> {
+  await AsyncStorage.removeItem(HISTORY_KEY);
 }

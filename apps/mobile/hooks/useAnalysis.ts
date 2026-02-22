@@ -27,7 +27,7 @@ export function useAnalysis(): UseAnalysisReturn {
       setResult(response);
       verdictHaptic(response.verdict);
 
-      // Save to history
+      // Save to history (fire-and-forget)
       addToScanHistory({
         id: Date.now().toString(),
         text: text.slice(0, 200),
@@ -36,7 +36,7 @@ export function useAnalysis(): UseAnalysisReturn {
         summary: response.summary,
         timestamp: Date.now(),
         mode,
-      });
+      }).catch(() => {});
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
