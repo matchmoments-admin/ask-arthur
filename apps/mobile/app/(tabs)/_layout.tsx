@@ -1,3 +1,4 @@
+import { Platform } from "react-native";
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Colors } from "@/constants/colors";
@@ -46,6 +47,16 @@ export default function TabLayout() {
           tabBarLabel: "Breach",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="shield-checkmark-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="apps"
+        options={{
+          title: Platform.OS === "android" ? "App Scanner" : "App Security",
+          tabBarLabel: "Apps",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="shield-outline" size={size} color={color} />
           ),
         }}
       />

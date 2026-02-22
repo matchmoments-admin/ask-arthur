@@ -16,6 +16,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "au.askarthur.app",
+      "buildNumber": "1",
       "infoPlist": {
         "NSCameraUsageDescription": "Ask Arthur needs camera access to scan QR codes for scam detection."
       }
@@ -26,8 +27,11 @@
         "backgroundColor": "#001F3F"
       },
       "package": "au.askarthur.app",
+      "versionCode": 1,
       "permissions": [
-        "android.permission.CAMERA"
+        "android.permission.CAMERA",
+        "android.permission.QUERY_ALL_PACKAGES",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "plugins": [
@@ -39,7 +43,21 @@
           "cameraPermission": "Ask Arthur needs camera access to scan QR codes for scam detection."
         }
       ],
-      "expo-font"
+      "expo-font",
+      [
+        "expo-share-intent",
+        {
+          "iosActivationRules": {
+            "NSExtensionActivationSupportsText": true,
+            "NSExtensionActivationSupportsWebURLWithMaxCount": 1,
+            "NSExtensionActivationSupportsImageWithMaxCount": 5
+          },
+          "androidIntentFilters": [
+            "text/*",
+            "image/*"
+          ]
+        }
+      ]
     ],
     "web": {
       "bundler": "metro",
@@ -51,6 +69,13 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "21a9c339-8761-450c-ae1f-1b89b5e904d0"
+      }
+    },
+    "owner": "bren.apps"
   }
 }

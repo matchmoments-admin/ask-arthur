@@ -9,8 +9,10 @@
     "./format-telegram": "./src/format-telegram.ts",
     "./format-whatsapp": "./src/format-whatsapp.ts",
     "./format-slack": "./src/format-slack.ts",
+    "./format-messenger": "./src/format-messenger.ts",
     "./rate-limit": "./src/rate-limit.ts",
-    "./webhook-verify": "./src/webhook-verify.ts"
+    "./webhook-verify": "./src/webhook-verify.ts",
+    "./queue": "./src/queue.ts"
   },
   "dependencies": {
     "@askarthur/types": "workspace:*",

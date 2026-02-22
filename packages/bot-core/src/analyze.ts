@@ -7,8 +7,13 @@ import type { AnalysisResult } from "@askarthur/types";
 /**
  * Run the full scam analysis pipeline for a bot message.
  * Same logic as /api/analyze but called directly (no HTTP hop).
+ * Supports optional image analysis via base64-encoded images.
  */
-export async function analyzeForBot(text: string, region?: string): Promise<AnalysisResult> {
+export async function analyzeForBot(
+  text: string,
+  region?: string,
+  images?: string[],
+): Promise<AnalysisResult> {
   // 1. Injection pre-filter
   const injection = detectInjectionAttempt(text);
 
@@ -17,7 +22,7 @@ export async function analyzeForBot(text: string, region?: string): Promise<Anal
 
   // 3. Run Claude analysis + URL reputation in parallel
   const [analysis, urlResults] = await Promise.all([
-    analyzeWithClaude(text),
+    analyzeWithClaude(text, images, images?.length ? "image" : "text"),
     urls.length > 0 ? checkURLReputation(urls) : Promise.resolve([]),
   ]);
 

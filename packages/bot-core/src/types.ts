@@ -1,6 +1,6 @@
 import type { AnalysisResult } from "@askarthur/types";
 
-export type Platform = "telegram" | "whatsapp" | "slack";
+export type Platform = "telegram" | "whatsapp" | "slack" | "messenger";
 
 export interface BotMessage {
   platform: Platform;

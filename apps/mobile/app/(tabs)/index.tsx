@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   View,
   Text,
@@ -12,9 +12,10 @@ import {
   Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
+import * as FileSystem from "expo-file-system";
 import { AnalysisResultView } from "@/components/AnalysisResult";
 import { LoadingOverlay } from "@/components/LoadingOverlay";
 import { Button } from "@/components/Button";
@@ -27,22 +28,76 @@ const MAX_IMAGES = 10;
 
 export default function HomeScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ sharedText?: string; sharedImages?: string }>();
   const { result, loading, error, analyze, reset } = useAnalysis();
   const [text, setText] = useState("");
   const [images, setImages] = useState<Array<{ base64: string; uri: string }>>([]);
   const [focused, setFocused] = useState(false);
   const [scamCount, setScamCount] = useState<number | null>(null);
+  const sharedHandled = useRef(false);
 
   const fetchCount = useCallback(() => {
     fetch(`${API_URL}/api/stats`)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
       .then((data) => setScamCount(data.totalChecks ?? data.count ?? 0))
-      .catch(() => {});
+      .catch((err) => {
+        console.warn("Failed to fetch stats:", err.message);
+        setScamCount(null);
+      });
   }, []);
 
   useEffect(() => {
     fetchCount();
   }, [fetchCount]);
+
+  // Consume share intent data
+  useEffect(() => {
+    if (sharedHandled.current) return;
+
+    const hasSharedText = params.sharedText && params.sharedText.length > 0;
+    const hasSharedImages = params.sharedImages && params.sharedImages.length > 0;
+
+    if (!hasSharedText && !hasSharedImages) return;
+
+    sharedHandled.current = true;
+
+    if (hasSharedText) {
+      setText(params.sharedText!);
+    }
+
+    if (hasSharedImages) {
+      // Load shared image URIs and convert to base64
+      const imageUris: string[] = JSON.parse(params.sharedImages!);
+      Promise.all(
+        imageUris.slice(0, MAX_IMAGES).map(async (uri) => {
+          const base64 = await FileSystem.readAsStringAsync(uri, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+          return { base64, uri };
+        })
+      ).then((loaded) => {
+        setImages(loaded);
+        // Auto-trigger analysis with shared content
+        const sharedText = params.sharedText ?? "";
+        analyze(
+          sharedText,
+          loaded.length > 0 ? "image" : "text",
+          loaded.length > 0 ? loaded.map((i) => i.base64) : undefined,
+        );
+      }).catch(() => {
+        // If image loading fails, just analyze the text
+        if (hasSharedText) {
+          analyze(params.sharedText!, "text");
+        }
+      });
+    } else if (hasSharedText) {
+      // Auto-trigger text analysis
+      analyze(params.sharedText!, "text");
+    }
+  }, [params.sharedText, params.sharedImages, analyze]);
 
   const handleAttach = async () => {
     const remaining = MAX_IMAGES - images.length;

@@ -38,6 +38,31 @@ export default function SettingsScreen() {
         </View>
 
         <View style={styles.card}>
+          <Text style={styles.sectionTitle}>AI Disclosure</Text>
+          <Text style={styles.disclosureText}>
+            Ask Arthur uses Anthropic's Claude AI to analyse messages for scam
+            indicators. Your message text is sent to the AI for analysis and is
+            never stored or used for training. Images are processed in-memory
+            and immediately discarded.
+          </Text>
+          <Text style={styles.disclosureText}>
+            AI analysis may not be 100% accurate. Always exercise caution with
+            suspicious messages and verify through official channels.
+          </Text>
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Privacy</Text>
+          <Text style={styles.disclosureText}>
+            {"\u2022"} Messages are analysed in real-time and never saved{"\n"}
+            {"\u2022"} Personal information is automatically scrubbed before analysis{"\n"}
+            {"\u2022"} App scan results stay entirely on your device{"\n"}
+            {"\u2022"} No account or login required{"\n"}
+            {"\u2022"} No tracking or analytics SDKs
+          </Text>
+        </View>
+
+        <View style={styles.card}>
           <Text style={styles.sectionTitle}>About</Text>
           <SettingsLink icon="document-text-outline" label="Privacy Policy" url="https://askarthur.au/privacy" />
           <SettingsLink icon="reader-outline" label="Terms of Service" url="https://askarthur.au/terms" />
@@ -89,6 +114,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: Fonts.regular,
     color: Colors.textSecondary,
+  },
+  disclosureText: {
+    fontSize: 14,
+    fontFamily: Fonts.regular,
+    color: Colors.text,
+    lineHeight: 22,
   },
   destructiveButton: {
     flexDirection: "row",
