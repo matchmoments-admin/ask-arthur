@@ -43,7 +43,7 @@ export default function RootLayout({
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link
-          href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&icon_names=article,attach_file,bolt,close,content_paste,error_outline,flag,folder_open,gpp_bad,lock,mic,phone_in_talk,photo_camera,photo_library,qr_code_scanner,search_off,shield,speed,verified_user,videocam_off,visibility_off,warning"
+          href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&icon_names=article,attach_file,bolt,check,close,content_paste,error_outline,flag,folder_open,gpp_bad,link,lock,mic,phone_in_talk,photo_camera,photo_library,qr_code_scanner,search_off,shield,speed,verified_user,videocam_off,visibility_off,warning"
           rel="stylesheet"
         />
       </head>

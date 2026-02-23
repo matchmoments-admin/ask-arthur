@@ -1,57 +1,61 @@
 import {
   getPaginatedPosts,
-  getFeaturedPosts,
   getAllCategories,
+  CATEGORY_DISPLAY,
 } from "@/lib/blog";
 import PostCard from "@/components/blog/PostCard";
 import CategoryTabs from "@/components/blog/CategoryTabs";
-import FeaturedCarousel from "@/components/blog/FeaturedCarousel";
 import Pagination from "@/components/blog/Pagination";
 import type { Metadata } from "next";
 
-export const metadata: Metadata = {
-  title: "Scam Alerts & Guides — Ask Arthur Blog",
-  description:
-    "Weekly scam alerts, fraud prevention guides, and cybersecurity tips for Australians. Stay informed about the latest scams targeting Australians.",
-  openGraph: {
-    title: "Scam Alerts & Guides — Ask Arthur Blog",
-    description:
-      "Weekly scam alerts and fraud prevention guides for Australians.",
-    type: "website",
-  },
-};
-
-// Revalidate every hour
-export const revalidate = 3600;
-
 interface PageProps {
-  searchParams: Promise<{ page?: string; category?: string }>;
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<{ page?: string }>;
 }
 
-export default async function BlogPage({ searchParams }: PageProps) {
-  const { page: pageStr, category } = await searchParams;
+export async function generateMetadata({
+  params,
+}: PageProps): Promise<Metadata> {
+  const { slug } = await params;
+  const displayName = CATEGORY_DISPLAY[slug] || slug;
+
+  return {
+    title: `${displayName} — Ask Arthur Blog`,
+    description: `Browse ${displayName.toLowerCase()} posts on the Ask Arthur blog. Scam alerts and fraud prevention for Australians.`,
+    openGraph: {
+      title: `${displayName} — Ask Arthur Blog`,
+      description: `Browse ${displayName.toLowerCase()} posts on the Ask Arthur blog.`,
+      type: "website",
+    },
+  };
+}
+
+export const revalidate = 3600;
+
+export default async function CategoryPage({
+  params,
+  searchParams,
+}: PageProps) {
+  const { slug: category } = await params;
+  const { page: pageStr } = await searchParams;
   const page = Math.max(1, parseInt(pageStr || "1", 10) || 1);
 
-  const [paginated, featured, categories] = await Promise.all([
+  const [paginated, categories] = await Promise.all([
     getPaginatedPosts(page, 12, category),
-    // Only load featured on page 1 without category filter
-    !category && page === 1 ? getFeaturedPosts() : Promise.resolve([]),
     getAllCategories(),
   ]);
 
   const totalPosts = categories.reduce((sum, c) => sum + c.count, 0);
+  const displayName = CATEGORY_DISPLAY[category] || category;
 
   return (
     <div>
       <h1 className="text-deep-navy text-3xl font-extrabold mb-2">
-        Scam Alerts & Guides
+        {displayName}
       </h1>
       <p className="text-gov-slate text-base mb-8">
-        Weekly scam alerts and fraud prevention tips based on real threats
-        detected by Ask Arthur.
+        Browse all {displayName.toLowerCase()} posts.
       </p>
-
-      {featured.length > 0 && <FeaturedCarousel posts={featured} />}
 
       <CategoryTabs
         categories={categories}
@@ -65,7 +69,7 @@ export default async function BlogPage({ searchParams }: PageProps) {
             article
           </span>
           <p className="text-gov-slate text-base">
-            No posts yet. Check back soon for weekly scam alerts.
+            No posts in this category yet.
           </p>
         </div>
       ) : (
@@ -79,8 +83,7 @@ export default async function BlogPage({ searchParams }: PageProps) {
       <Pagination
         page={paginated.page}
         totalPages={paginated.totalPages}
-        basePath="/blog"
-        extraParams={category ? { category } : undefined}
+        basePath={`/blog/category/${category}`}
       />
     </div>
   );

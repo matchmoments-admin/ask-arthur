@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createServiceClient } from "@askarthur/supabase/server";
+import { CATEGORY_DISPLAY } from "@/lib/blog";
 
 interface PageProps {
   searchParams: Promise<{ secret?: string }>;
@@ -15,103 +16,173 @@ export default async function AdminBlogPage({ searchParams }: PageProps) {
 
   const supabase = createServiceClient();
   if (!supabase) {
-    return <p>Database not configured</p>;
+    return <p className="p-8 text-gov-slate">Database not configured</p>;
   }
 
   const { data: posts } = await supabase
     .from("blog_posts")
-    .select("id, title, slug, published, published_at, created_at")
+    .select(
+      "id, title, slug, published, status, category, subtitle, is_featured, created_at, published_at"
+    )
     .order("created_at", { ascending: false });
 
-  async function togglePublish(formData: FormData) {
+  async function updatePost(formData: FormData) {
     "use server";
 
     const adminSecret = formData.get("secret") as string;
     if (adminSecret !== process.env.ADMIN_SECRET) return;
 
     const postId = formData.get("postId") as string;
-    const newPublished = formData.get("published") === "true";
+    const status = formData.get("status") as string;
+    const category = formData.get("category") as string;
+    const subtitle = formData.get("subtitle") as string;
+    const isFeatured = formData.get("is_featured") === "on";
 
     const sb = createServiceClient();
     if (!sb) return;
 
-    await sb
-      .from("blog_posts")
-      .update({
-        published: newPublished,
-        published_at: newPublished ? new Date().toISOString() : null,
-      })
-      .eq("id", postId);
+    const updateData: Record<string, unknown> = {
+      status,
+      category,
+      subtitle: subtitle || null,
+      is_featured: isFeatured,
+      // Keep published column in sync during transition
+      published: status === "published",
+      updated_at: new Date().toISOString(),
+    };
+
+    // Set published_at when first published
+    if (status === "published") {
+      updateData.published_at = new Date().toISOString();
+    }
+
+    await sb.from("blog_posts").update(updateData).eq("id", postId);
 
     revalidatePath("/blog");
-    revalidatePath(`/admin/blog`);
+    revalidatePath("/admin/blog");
   }
 
-  return (
-    <div style={{ maxWidth: 800, margin: "40px auto", padding: "0 20px", fontFamily: "system-ui, sans-serif" }}>
-      <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 24 }}>Blog Admin</h1>
+  const statusColors: Record<string, { bg: string; text: string }> = {
+    published: { bg: "bg-safe-bg", text: "text-safe-text" },
+    draft: { bg: "bg-warn-bg", text: "text-warn-text" },
+    archived: { bg: "bg-slate-100", text: "text-slate-500" },
+  };
 
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
-        <thead>
-          <tr style={{ borderBottom: "2px solid #E2E8F0", textAlign: "left" }}>
-            <th style={{ padding: "8px 12px" }}>Title</th>
-            <th style={{ padding: "8px 12px" }}>Status</th>
-            <th style={{ padding: "8px 12px" }}>Created</th>
-            <th style={{ padding: "8px 12px" }}>Action</th>
-          </tr>
-        </thead>
-        <tbody>
-          {(posts || []).map((post) => (
-            <tr key={post.id} style={{ borderBottom: "1px solid #E2E8F0" }}>
-              <td style={{ padding: "8px 12px" }}>{post.title}</td>
-              <td style={{ padding: "8px 12px" }}>
+  return (
+    <div className="max-w-4xl mx-auto py-10 px-5">
+      <h1 className="text-deep-navy text-2xl font-bold mb-6">Blog Admin</h1>
+
+      <div className="space-y-4">
+        {(posts || []).map((post) => {
+          const status = post.status || (post.published ? "published" : "draft");
+          const colors = statusColors[status] || statusColors.draft;
+
+          return (
+            <div
+              key={post.id}
+              className="border border-border-light rounded-lg p-5"
+            >
+              <div className="flex items-start justify-between gap-4 mb-3">
+                <div>
+                  <h2 className="text-deep-navy font-bold text-base">
+                    {post.title}
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {new Date(post.created_at).toLocaleDateString("en-AU")}
+                    {post.slug && ` — /blog/${post.slug}`}
+                  </p>
+                </div>
                 <span
-                  style={{
-                    padding: "2px 8px",
-                    borderRadius: 4,
-                    fontSize: 12,
-                    fontWeight: 600,
-                    backgroundColor: post.published ? "#D1FAE5" : "#FEF3C7",
-                    color: post.published ? "#065F46" : "#92400E",
-                  }}
+                  className={`${colors.bg} ${colors.text} text-xs font-semibold px-2.5 py-1 rounded-full shrink-0`}
                 >
-                  {post.published ? "Published" : "Draft"}
+                  {status}
                 </span>
-              </td>
-              <td style={{ padding: "8px 12px", fontSize: 14, color: "#64748B" }}>
-                {new Date(post.created_at).toLocaleDateString("en-AU")}
-              </td>
-              <td style={{ padding: "8px 12px" }}>
-                <form action={togglePublish}>
-                  <input type="hidden" name="secret" value={secret || ""} />
-                  <input type="hidden" name="postId" value={post.id} />
-                  <input type="hidden" name="published" value={post.published ? "false" : "true"} />
-                  <button
-                    type="submit"
-                    style={{
-                      padding: "4px 12px",
-                      borderRadius: 4,
-                      border: "1px solid #CBD5E1",
-                      backgroundColor: "#FFFFFF",
-                      cursor: "pointer",
-                      fontSize: 13,
-                    }}
-                  >
-                    {post.published ? "Unpublish" : "Publish"}
-                  </button>
-                </form>
-              </td>
-            </tr>
-          ))}
-          {(!posts || posts.length === 0) && (
-            <tr>
-              <td colSpan={4} style={{ padding: "24px 12px", textAlign: "center", color: "#94A3B8" }}>
-                No blog posts yet
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+              </div>
+
+              <form action={updatePost} className="space-y-3">
+                <input type="hidden" name="secret" value={secret || ""} />
+                <input type="hidden" name="postId" value={post.id} />
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {/* Status */}
+                  <div>
+                    <label className="block text-xs font-medium text-gov-slate mb-1">
+                      Status
+                    </label>
+                    <select
+                      name="status"
+                      defaultValue={status}
+                      className="w-full text-sm border border-border-light rounded px-2.5 py-1.5 bg-white"
+                    >
+                      <option value="draft">Draft</option>
+                      <option value="published">Published</option>
+                      <option value="archived">Archived</option>
+                    </select>
+                  </div>
+
+                  {/* Category */}
+                  <div>
+                    <label className="block text-xs font-medium text-gov-slate mb-1">
+                      Category
+                    </label>
+                    <select
+                      name="category"
+                      defaultValue={post.category || "weekly-roundup"}
+                      className="w-full text-sm border border-border-light rounded px-2.5 py-1.5 bg-white"
+                    >
+                      {Object.entries(CATEGORY_DISPLAY).map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Featured */}
+                  <div className="flex items-end pb-1">
+                    <label className="flex items-center gap-2 text-sm text-gov-slate">
+                      <input
+                        type="checkbox"
+                        name="is_featured"
+                        defaultChecked={post.is_featured || false}
+                        className="rounded border-border-light"
+                      />
+                      Featured
+                    </label>
+                  </div>
+                </div>
+
+                {/* Subtitle */}
+                <div>
+                  <label className="block text-xs font-medium text-gov-slate mb-1">
+                    Subtitle
+                  </label>
+                  <input
+                    type="text"
+                    name="subtitle"
+                    defaultValue={post.subtitle || ""}
+                    placeholder="Optional subtitle..."
+                    className="w-full text-sm border border-border-light rounded px-2.5 py-1.5"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 text-sm font-medium bg-deep-navy text-white rounded hover:bg-navy transition-colors"
+                >
+                  Save changes
+                </button>
+              </form>
+            </div>
+          );
+        })}
+
+        {(!posts || posts.length === 0) && (
+          <div className="text-center py-12 text-slate-400">
+            No blog posts yet
+          </div>
+        )}
+      </div>
     </div>
   );
 }

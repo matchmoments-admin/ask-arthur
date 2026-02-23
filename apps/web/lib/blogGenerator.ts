@@ -13,9 +13,12 @@ interface ScamGroup {
 interface GeneratedPost {
   slug: string;
   title: string;
+  subtitle: string;
   excerpt: string;
   content: string;
   tags: string[];
+  category: string;
+  readingTimeMinutes: number;
   sourceScamIds: number[];
 }
 
@@ -64,6 +67,11 @@ export async function generateWeeklyBlogPost(): Promise<GeneratedPost | null> {
 
   if (topGroups.length === 0) return null;
 
+  // Auto-categorize based on scam data composition
+  const uniqueTypes = new Set(topGroups.map((g) => g.scam_type));
+  const autoCategory =
+    uniqueTypes.size >= 2 ? "weekly-roundup" : "scam-alerts";
+
   // Generate blog post with Claude Haiku
   if (!process.env.ANTHROPIC_API_KEY) return null;
 
@@ -90,6 +98,12 @@ export async function generateWeeklyBlogPost(): Promise<GeneratedPost | null> {
     max_tokens: 2048,
     system: `You are a cybersecurity blog writer for Ask Arthur, an Australian scam detection platform. Write SEO-optimised blog posts about scam trends in Australia. Use Australian English. Write for a general audience — clear, helpful, not overly technical. Always include practical advice for readers.
 
+FORMATTING RULES:
+- Use > [!WARNING] blockquote syntax for scam warnings (amber callout box)
+- Use > [!TIP] blockquote syntax for protective advice (green callout box)
+- Use > [!DANGER] blockquote syntax for critical alerts (red callout box)
+- These render as styled callout boxes on the blog
+
 GROUNDING RULES:
 - Only reference scam data provided in the <scam_group> elements below. Do not invent statistics, percentages, or scam examples beyond what is provided.
 - You may add general protective advice and context, but all specific scam details must come from the provided data.
@@ -106,9 +120,11 @@ Total scams detected this week: ${scams.length}
 Return ONLY valid JSON:
 {
   "title": "SEO-optimised title (under 70 chars)",
+  "subtitle": "A brief contextual subtitle (1 sentence, under 120 chars)",
   "excerpt": "1-2 sentence summary for preview cards (under 160 chars)",
-  "content": "Full markdown blog post (500-800 words). Include: intro, section per scam type with ## headings, how to protect yourself section, conclusion with link to askarthur.au",
-  "tags": ["tag1", "tag2", "tag3"]
+  "content": "Full markdown blog post (500-800 words). Include: intro, section per scam type with ## headings, a > [!TIP] callout with protection advice, how to protect yourself section, conclusion with link to askarthur.au. Use > [!WARNING] for key scam warnings.",
+  "tags": ["tag1", "tag2", "tag3"],
+  "category": "${autoCategory}"
 }`,
       },
       {
@@ -136,12 +152,32 @@ Return ONLY valid JSON:
         .replace(/^-|-$/g, "")
         .slice(0, 60);
 
+    const content = parsed.content || "";
+    const readingTimeMinutes = Math.max(
+      1,
+      Math.ceil(content.split(/\s+/).length / 200)
+    );
+
+    const validCategories = [
+      "weekly-roundup",
+      "scam-alerts",
+      "guides",
+      "platform-safety",
+      "news",
+    ];
+    const category = validCategories.includes(parsed.category)
+      ? parsed.category
+      : autoCategory;
+
     return {
       slug,
       title: parsed.title,
+      subtitle: parsed.subtitle || "",
       excerpt: parsed.excerpt,
-      content: parsed.content,
+      content,
       tags: Array.isArray(parsed.tags) ? parsed.tags : [],
+      category,
+      readingTimeMinutes,
       sourceScamIds,
     };
   } catch {

@@ -12,12 +12,12 @@
     "telegram:dev": "tsx scripts/telegram-dev.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.74.0",
     "@askarthur/bot-core": "workspace:*",
     "@askarthur/scam-engine": "workspace:*",
     "@askarthur/supabase": "workspace:*",
     "@askarthur/types": "workspace:*",
     "@askarthur/utils": "workspace:*",
-    "@anthropic-ai/sdk": "^0.74.0",
     "@aws-sdk/client-s3": "^3.988.0",
     "@aws-sdk/s3-request-presigner": "^3.988.0",
     "@react-email/components": "^1.0.7",
@@ -29,8 +29,11 @@
     "@upstash/redis": "^1.36.2",
     "@vercel/functions": "^3.4.2",
     "browser-image-compression": "^2.0.2",
+    "grammy": "^1.40.0",
+    "highlight.js": "^11.11.1",
     "isomorphic-dompurify": "^3.0.0-rc.3",
     "marked": "^17.0.2",
+    "marked-highlight": "^2.2.3",
     "next": "16.1.6",
     "next-plausible": "^3.12.5",
     "openai": "^6.22.0",
@@ -44,7 +47,6 @@
     "tldts": "^7.0.23",
     "twilio": "^5.12.1",
     "vaul": "^1.1.2",
-    "grammy": "^1.40.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {

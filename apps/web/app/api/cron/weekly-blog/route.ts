@@ -35,15 +35,19 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // Insert with published: false (manual review before publish)
+    // Insert as draft (manual review before publish)
     const { error } = await supabase.from("blog_posts").insert({
       slug: post.slug,
       title: post.title,
+      subtitle: post.subtitle,
       excerpt: post.excerpt,
       content: post.content,
       tags: post.tags,
       author: "Arthur AI",
       published: false,
+      status: "draft",
+      category: post.category,
+      reading_time_minutes: post.readingTimeMinutes,
       published_at: new Date().toISOString(),
       source_scam_ids: post.sourceScamIds,
     });
