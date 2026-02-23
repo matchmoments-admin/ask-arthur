@@ -1,7 +1,8 @@
-"""Phishing.Database text file scraper — one URL per line.
+"""Phishing Army blocklist scraper — domains converted to URLs.
 
-Data source: https://raw.githubusercontent.com/mitchellkrogza/Phishing.Database/master/phishing-links-ACTIVE-NOW.txt
-Simplest scraper — no parsing needed, just one URL per line.
+Data source: https://phishing.army/download/phishing_army_blocklist_extended.txt
+Format: Plain text, 1 domain/line
+License: Free
 """
 
 import time
@@ -13,8 +14,8 @@ from common.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-FEED_NAME = "phishing_database"
-TEXT_URL = "https://raw.githubusercontent.com/mitchellkrogza/Phishing.Database/master/phishing-links-ACTIVE-NOW.txt"
+FEED_NAME = "phishing_army"
+FEED_URL = "https://phishing.army/download/phishing_army_blocklist_extended.txt"
 
 
 def scrape() -> None:
@@ -24,29 +25,27 @@ def scrape() -> None:
     status = "success"
 
     try:
-        logger.info(f"Fetching Phishing.Database from {TEXT_URL}")
-        resp = requests.get(TEXT_URL, timeout=60)
+        logger.info(f"Fetching Phishing Army blocklist from {FEED_URL}")
+        resp = requests.get(FEED_URL, timeout=60)
         resp.raise_for_status()
 
         for line in resp.text.splitlines():
-            raw_url = line.strip()
-            if not raw_url or raw_url.startswith("#"):
+            domain = line.strip()
+            if not domain or domain.startswith(("#", "!")):
                 continue
-            # Ensure URL has a scheme
-            if not raw_url.startswith(("http://", "https://")):
-                raw_url = f"http://{raw_url}"
+            # Prepend scheme (same pattern as phishing_database.py)
             urls.append({
-                "url": raw_url,
+                "url": f"http://{domain}",
                 "scam_type": "phishing",
-                "feed_reference_url": "https://github.com/mitchellkrogza/Phishing.Database",
+                "feed_reference_url": "https://phishing.army",
             })
 
-        logger.info(f"Parsed {len(urls)} URLs from Phishing.Database")
+        logger.info(f"Parsed {len(urls)} domains from Phishing Army")
 
     except Exception as e:
         error_msg = str(e)
         status = "error"
-        logger.error(f"Phishing.Database fetch failed: {e}")
+        logger.error(f"Phishing Army fetch failed: {e}")
 
     with get_db() as conn:
         if urls:
@@ -58,7 +57,7 @@ def scrape() -> None:
                 error_msg = str(e)
                 status = "error"
                 stats = {"new": 0, "updated": 0, "skipped": len(urls)}
-                logger.error(f"Phishing.Database upsert failed: {e}")
+                logger.error(f"Phishing Army upsert failed: {e}")
         else:
             stats = {"new": 0, "updated": 0, "skipped": 0}
 
@@ -77,7 +76,7 @@ def scrape() -> None:
         )
 
     logger.info(
-        f"Phishing.Database complete: {stats['new']} new, {stats['updated']} updated, "
+        f"Phishing Army complete: {stats['new']} new, {stats['updated']} updated, "
         f"{stats['skipped']} skipped in {duration_ms}ms"
     )
 

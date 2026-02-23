@@ -112,12 +112,13 @@ def scrape() -> None:
             conn,
             feed_name=FEED_NAME,
             status=status,
-            urls_fetched=len(urls),
-            urls_new=stats["new"],
-            urls_updated=stats["updated"],
-            urls_skipped=stats["skipped"],
+            records_fetched=len(urls),
+            records_new=stats["new"],
+            records_updated=stats["updated"],
+            records_skipped=stats["skipped"],
             duration_ms=duration_ms,
             error_message=error_msg,
+            record_type="url",
         )
 
     logger.info(

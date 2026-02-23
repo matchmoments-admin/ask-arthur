@@ -2,7 +2,15 @@
 // for the serve() handler.
 
 import { stalenessCheck } from "./staleness";
+import { stalenessCheckIPs } from "./staleness-ips";
+import { stalenessCheckWallets } from "./staleness-wallets";
 import { enrichmentFanOut } from "./enrichment";
 import { ctMonitor } from "./ct-monitor";
 
-export const inngestFunctions = [stalenessCheck, enrichmentFanOut, ctMonitor];
+export const inngestFunctions = [
+  stalenessCheck,
+  stalenessCheckIPs,
+  stalenessCheckWallets,
+  enrichmentFanOut,
+  ctMonitor,
+];
