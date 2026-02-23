@@ -153,11 +153,13 @@ def scrape() -> None:
                     continue
                 seen_domains.add(common_name)
 
+                not_before = cert.get("not_before", "").strip() or None
                 urls.append(
                     {
                         "url": f"https://{common_name}",
                         "scam_type": "brand_impersonation",
                         "brand": keyword,
+                        "feed_reported_at": not_before,
                     }
                 )
 

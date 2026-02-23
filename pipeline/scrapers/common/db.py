@@ -47,14 +47,24 @@ def bulk_upsert_urls(
     Optional:
         - scam_type: str
         - brand: str
+        - feed_reported_at: str (ISO 8601 timestamp from the feed)
 
     Returns stats: {new: int, updated: int, skipped: int}
     """
     stats = {"new": 0, "updated": 0, "skipped": 0}
+    total = len(urls)
+    total_batches = (total + BATCH_SIZE - 1) // BATCH_SIZE
     cursor = conn.cursor()
+    upsert_start = time.time()
 
-    for i in range(0, len(urls), BATCH_SIZE):
+    logger.info(
+        f"Starting upsert: {total} URLs in {total_batches} batches of {BATCH_SIZE}",
+        extra={"metadata": {"feed": feed_name}},
+    )
+
+    for batch_num, i in enumerate(range(0, total, BATCH_SIZE), start=1):
         batch = urls[i : i + BATCH_SIZE]
+        batch_start = time.time()
 
         for item in batch:
             raw_url = item.get("url", "")
@@ -65,7 +75,7 @@ def bulk_upsert_urls(
 
             try:
                 cursor.execute(
-                    "SELECT bulk_upsert_feed_url(%s, %s, %s, %s, %s, %s, %s, %s)",
+                    "SELECT bulk_upsert_feed_url(%s, %s, %s, %s, %s, %s, %s, %s, %s)",
                     (
                         result.normalized,
                         result.domain,
@@ -75,6 +85,7 @@ def bulk_upsert_urls(
                         feed_name,
                         item.get("scam_type"),
                         item.get("brand"),
+                        item.get("feed_reported_at"),
                     ),
                 )
                 row = cursor.fetchone()
@@ -94,8 +105,23 @@ def bulk_upsert_urls(
                 continue
 
         conn.commit()
+        batch_ms = int((time.time() - batch_start) * 1000)
+        processed = stats["new"] + stats["updated"] + stats["skipped"]
+        logger.info(
+            f"Batch {batch_num}/{total_batches} committed: "
+            f"{len(batch)} URLs in {batch_ms}ms "
+            f"(progress: {processed}/{total}, "
+            f"new={stats['new']}, updated={stats['updated']}, skipped={stats['skipped']})",
+            extra={"metadata": {"feed": feed_name, "batch": batch_num}},
+        )
 
     cursor.close()
+    total_ms = int((time.time() - upsert_start) * 1000)
+    logger.info(
+        f"Upsert complete: {total_ms}ms total — "
+        f"{stats['new']} new, {stats['updated']} updated, {stats['skipped']} skipped",
+        extra={"metadata": {"feed": feed_name, "duration_ms": total_ms}},
+    )
     return stats
 
 

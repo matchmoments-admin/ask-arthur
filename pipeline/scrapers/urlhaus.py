@@ -50,6 +50,7 @@ def scrape() -> None:
             if len(row) < 7:
                 continue
             # Columns: id, dateadded, url, url_status, last_online, threat, tags, ...
+            dateadded = row[1].strip('"').strip() or None
             raw_url = row[2].strip('"').strip()
             threat = row[5].strip('"').strip().lower()
 
@@ -57,6 +58,7 @@ def scrape() -> None:
                 {
                     "url": raw_url,
                     "scam_type": THREAT_TYPE_MAP.get(threat, threat or None),
+                    "feed_reported_at": dateadded,
                 }
             )
 

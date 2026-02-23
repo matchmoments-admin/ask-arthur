@@ -47,10 +47,12 @@ def scrape() -> None:
             if not raw_url:
                 continue
 
+            feed_date = entry.get("date", "").strip() or None
             urls.append(
                 {
                     "url": raw_url,
                     "scam_type": "phishing",
+                    "feed_reported_at": feed_date,
                 }
             )
 

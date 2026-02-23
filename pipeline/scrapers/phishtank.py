@@ -42,11 +42,13 @@ def scrape() -> None:
                 continue
 
             target = row.get("target", "").strip()
+            submission_time = row.get("submission_time", "").strip() or None
             urls.append(
                 {
                     "url": raw_url,
                     "scam_type": "phishing",
                     "brand": target if target and target.lower() != "other" else None,
+                    "feed_reported_at": submission_time,
                 }
             )
 
