@@ -53,6 +53,7 @@ def scrape() -> None:
                     "url": raw_url,
                     "scam_type": "phishing",
                     "feed_reported_at": feed_date,
+                    "feed_reference_url": "https://phishstats.info",
                 }
             )
 

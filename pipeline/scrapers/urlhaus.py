@@ -49,16 +49,18 @@ def scrape() -> None:
         for row in reader:
             if len(row) < 7:
                 continue
-            # Columns: id, dateadded, url, url_status, last_online, threat, tags, ...
+            # Columns: id, dateadded, url, url_status, last_online, threat, tags, urlhaus_link, reporter
             dateadded = row[1].strip('"').strip() or None
             raw_url = row[2].strip('"').strip()
             threat = row[5].strip('"').strip().lower()
+            urlhaus_link = row[7].strip('"').strip() if len(row) > 7 else None
 
             urls.append(
                 {
                     "url": raw_url,
                     "scam_type": THREAT_TYPE_MAP.get(threat, threat or None),
                     "feed_reported_at": dateadded,
+                    "feed_reference_url": urlhaus_link or None,
                 }
             )
 

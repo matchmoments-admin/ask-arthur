@@ -154,12 +154,15 @@ def scrape() -> None:
                 seen_domains.add(common_name)
 
                 not_before = cert.get("not_before", "").strip() or None
+                cert_id = cert.get("id")
+                ref_url = f"https://crt.sh/?id={cert_id}" if cert_id else None
                 urls.append(
                     {
                         "url": f"https://{common_name}",
                         "scam_type": "brand_impersonation",
                         "brand": keyword,
                         "feed_reported_at": not_before,
+                        "feed_reference_url": ref_url,
                     }
                 )
 

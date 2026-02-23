@@ -48,6 +48,7 @@ def bulk_upsert_urls(
         - scam_type: str
         - brand: str
         - feed_reported_at: str (ISO 8601 timestamp from the feed)
+        - feed_reference_url: str (source attribution URL, e.g. URLhaus detail page)
 
     Returns stats: {new: int, updated: int, skipped: int}
     """
@@ -75,7 +76,7 @@ def bulk_upsert_urls(
 
             try:
                 cursor.execute(
-                    "SELECT bulk_upsert_feed_url(%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    "SELECT bulk_upsert_feed_url(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                     (
                         result.normalized,
                         result.domain,
@@ -86,6 +87,7 @@ def bulk_upsert_urls(
                         item.get("scam_type"),
                         item.get("brand"),
                         item.get("feed_reported_at"),
+                        item.get("feed_reference_url"),
                     ),
                 )
                 row = cursor.fetchone()

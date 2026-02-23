@@ -35,7 +35,11 @@ def scrape() -> None:
             # Ensure URL has a scheme
             if not raw_url.startswith(("http://", "https://")):
                 raw_url = f"http://{raw_url}"
-            urls.append({"url": raw_url, "scam_type": "phishing"})
+            urls.append({
+                "url": raw_url,
+                "scam_type": "phishing",
+                "feed_reference_url": "https://github.com/mitchellkrogza/Phishing.Database",
+            })
 
         logger.info(f"Parsed {len(urls)} URLs from Phishing.Database")
 
