@@ -1,6 +1,9 @@
-// Staleness cron — daily, marks URLs not seen in any feed for 7 days as inactive,
-// then archives feed-sourced URLs older than 90 days.
+// Staleness cron — daily, marks URLs not seen in any feed for 7 days as inactive.
 // Preserves community-validated URLs (3+ reporters) and HIGH_RISK from Claude analysis.
+//
+// NOTE: archive_old_urls() is available as a manual SQL function in the database
+// for archiving feed URLs older than 180 days. Run it from the Supabase SQL Editor:
+//   SELECT archive_old_urls(180);
 
 import { inngest } from "./client";
 import { createServiceClient } from "@askarthur/supabase/server";
@@ -10,7 +13,7 @@ import { featureFlags } from "@askarthur/utils/feature-flags";
 export const stalenessCheck = inngest.createFunction(
   {
     id: "pipeline-staleness-check",
-    name: "Pipeline: Mark Stale & Archive Old URLs",
+    name: "Pipeline: Mark Stale URLs",
   },
   { cron: "0 3 * * *" }, // Daily at 3am UTC
   async ({ step }) => {
@@ -18,7 +21,7 @@ export const stalenessCheck = inngest.createFunction(
       return { skipped: true, reason: "dataPipeline feature flag disabled" };
     }
 
-    const staleResult = await step.run("mark-stale-urls", async () => {
+    const result = await step.run("mark-stale-urls", async () => {
       const supabase = createServiceClient();
       if (!supabase) {
         logger.warn("Supabase not configured, skipping staleness check");
@@ -38,26 +41,6 @@ export const stalenessCheck = inngest.createFunction(
       return data;
     });
 
-    const archiveResult = await step.run("archive-old-urls", async () => {
-      const supabase = createServiceClient();
-      if (!supabase) {
-        logger.warn("Supabase not configured, skipping archive");
-        return { skipped: true };
-      }
-
-      const { data, error } = await supabase.rpc("archive_old_urls", {
-        p_archive_days: 90,
-      });
-
-      if (error) {
-        logger.error("Archive old URLs failed", { error: String(error) });
-        throw new Error(`Archive RPC failed: ${error.message}`);
-      }
-
-      logger.info("Archive old URLs complete", { result: data });
-      return data;
-    });
-
-    return { stale: staleResult, archive: archiveResult };
+    return result;
   }
 );

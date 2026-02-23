@@ -82,13 +82,16 @@ $$;
 
 -- ══════════════════════════════════════════════
 -- Function: archive_old_urls
--- Deactivates feed-sourced URLs older than N days that haven't
--- been re-confirmed recently. Preserves community-validated and
--- high-confidence URLs.
+-- Deactivates feed-sourced URLs older than N days (default 180) that
+-- haven't been re-confirmed recently. Preserves community-validated
+-- and high-confidence URLs.
+-- NOT called automatically — run manually from SQL Editor:
+--   SELECT archive_old_urls();       -- 180 days default
+--   SELECT archive_old_urls(365);    -- custom threshold
 -- Returns count of archived URLs.
 -- ══════════════════════════════════════════════
 
-CREATE OR REPLACE FUNCTION archive_old_urls(p_archive_days INT DEFAULT 90)
+CREATE OR REPLACE FUNCTION archive_old_urls(p_archive_days INT DEFAULT 180)
 RETURNS JSON
 LANGUAGE plpgsql
 SECURITY DEFINER
