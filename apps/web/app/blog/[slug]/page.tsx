@@ -8,7 +8,7 @@ import python from "highlight.js/lib/languages/python";
 import bash from "highlight.js/lib/languages/bash";
 import json from "highlight.js/lib/languages/json";
 import "highlight.js/styles/github.css";
-import DOMPurify from "isomorphic-dompurify";
+import sanitizeHtml from "sanitize-html";
 import {
   getPostBySlug,
   getAllSlugs,
@@ -144,9 +144,23 @@ export default async function BlogPostPage({ params }: PageProps) {
 
   const rawHtml = await marked.parse(post.content);
   const transformedHtml = transformMarkdown(rawHtml as string);
-  const htmlContent = DOMPurify.sanitize(transformedHtml, {
-    ADD_TAGS: ["figure", "figcaption"],
-    ADD_ATTR: ["class"],
+  const htmlContent = sanitizeHtml(transformedHtml, {
+    allowedTags: [
+      ...sanitizeHtml.defaults.allowedTags,
+      "figure",
+      "figcaption",
+      "img",
+      "span",
+      "pre",
+      "code",
+    ],
+    allowedAttributes: {
+      ...sanitizeHtml.defaults.allowedAttributes,
+      "*": ["class"],
+      img: ["src", "alt"],
+      a: ["href", "target", "rel"],
+      time: ["datetime"],
+    },
   });
 
   const relatedPosts = await getRelatedPosts(slug, post.category);
