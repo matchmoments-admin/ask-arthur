@@ -17,6 +17,44 @@ FEED_NAME = "phishstats"
 API_URL = "https://phishstats.info:2096/api/phishing"
 MIN_SCORE = 5
 PAGE_SIZE = 1000
+MAX_RETRIES = 3
+BASE_DELAY = 5  # seconds
+
+
+def _fetch_with_retry() -> requests.Response:
+    """Fetch PhishStats API with exponential backoff (service is unreliable)."""
+    for attempt in range(MAX_RETRIES):
+        try:
+            resp = requests.get(
+                API_URL,
+                params={
+                    "_where": f"(score,gte,{MIN_SCORE})",
+                    "_sort": "-date",
+                    "_size": str(PAGE_SIZE),
+                },
+                timeout=60,
+            )
+            if resp.status_code in (502, 503, 504, 522):
+                delay = BASE_DELAY * (2 ** attempt)
+                logger.warning(
+                    f"PhishStats returned {resp.status_code}, "
+                    f"retrying in {delay}s (attempt {attempt + 1}/{MAX_RETRIES})"
+                )
+                time.sleep(delay)
+                continue
+            resp.raise_for_status()
+            return resp
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            delay = BASE_DELAY * (2 ** attempt)
+            logger.warning(
+                f"PhishStats {type(e).__name__}, "
+                f"retrying in {delay}s (attempt {attempt + 1}/{MAX_RETRIES})"
+            )
+            time.sleep(delay)
+
+    raise requests.exceptions.HTTPError(
+        f"PhishStats failed after {MAX_RETRIES} retries"
+    )
 
 
 def scrape() -> None:
@@ -27,16 +65,7 @@ def scrape() -> None:
 
     try:
         logger.info("Fetching PhishStats API (score >= 5)")
-        resp = requests.get(
-            API_URL,
-            params={
-                "_where": f"(score,gte,{MIN_SCORE})",
-                "_sort": "-date",
-                "_size": str(PAGE_SIZE),
-            },
-            timeout=60,
-        )
-        resp.raise_for_status()
+        resp = _fetch_with_retry()
 
         data = resp.json()
         if not isinstance(data, list):

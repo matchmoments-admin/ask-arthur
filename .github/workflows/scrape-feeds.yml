@@ -14,7 +14,6 @@ on:
         options:
           - all
           - urlhaus
-          - phishtank
           - phishstats
           - phishing_database
           - crtsh
@@ -46,12 +45,6 @@ jobs:
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: python -m urlhaus
-
-      - name: Scrape PhishTank
-        if: github.event.inputs.feed == 'all' || github.event.inputs.feed == 'phishtank' || github.event_name == 'schedule'
-        env:
-          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
-        run: python -m phishtank
 
       - name: Scrape PhishStats
         if: github.event.inputs.feed == 'all' || github.event.inputs.feed == 'phishstats' || github.event_name == 'schedule'
