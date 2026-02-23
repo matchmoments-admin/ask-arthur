@@ -42,6 +42,9 @@ def bulk_upsert_urls(
 ) -> dict:
     """Upsert a batch of URLs via the bulk_upsert_feed_url() RPC.
 
+    Sends each batch as a single SQL round-trip using execute_values
+    instead of one call per URL, cutting network latency ~100x.
+
     Each item in `urls` should have at minimum:
         - url: str (raw URL to normalize)
     Optional:
@@ -67,44 +70,75 @@ def bulk_upsert_urls(
         batch = urls[i : i + BATCH_SIZE]
         batch_start = time.time()
 
+        # Normalize all URLs in batch, collect valid rows
+        rows = []
         for item in batch:
             raw_url = item.get("url", "")
             result = normalize_url(raw_url)
             if result is None:
                 stats["skipped"] += 1
                 continue
+            rows.append((
+                result.normalized,
+                result.domain,
+                result.subdomain,
+                result.tld,
+                result.full_path,
+                feed_name,
+                item.get("scam_type"),
+                item.get("brand"),
+                item.get("feed_reported_at"),
+                item.get("feed_reference_url"),
+            ))
 
+        if rows:
             try:
-                cursor.execute(
-                    "SELECT bulk_upsert_feed_url(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                    (
-                        result.normalized,
-                        result.domain,
-                        result.subdomain,
-                        result.tld,
-                        result.full_path,
-                        feed_name,
-                        item.get("scam_type"),
-                        item.get("brand"),
-                        item.get("feed_reported_at"),
-                        item.get("feed_reference_url"),
-                    ),
+                # Single round-trip per batch: send all rows as VALUES list
+                results = psycopg2.extras.execute_values(
+                    cursor,
+                    """
+                    SELECT bulk_upsert_feed_url(
+                        t.c1, t.c2, t.c3, t.c4, t.c5, t.c6, t.c7, t.c8,
+                        t.c9::timestamptz, t.c10
+                    )
+                    FROM (VALUES %s) AS t(c1, c2, c3, c4, c5, c6, c7, c8, c9, c10)
+                    """,
+                    rows,
+                    fetch=True,
                 )
-                row = cursor.fetchone()
-                if row:
+                for row in results:
                     data = row[0] if isinstance(row[0], dict) else json.loads(row[0])
                     if data.get("is_new"):
                         stats["new"] += 1
                     else:
                         stats["updated"] += 1
             except Exception as e:
-                logger.error(
-                    f"Failed to upsert URL: {raw_url}",
-                    extra={"metadata": {"error": str(e)}},
-                )
-                stats["skipped"] += 1
                 conn.rollback()
-                continue
+                logger.warning(
+                    f"Batch {batch_num} failed, falling back to row-by-row: {e}",
+                    extra={"metadata": {"feed": feed_name}},
+                )
+                # Fallback: try each row individually so one bad row doesn't skip the batch
+                for row in rows:
+                    try:
+                        cursor.execute(
+                            "SELECT bulk_upsert_feed_url(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                            row,
+                        )
+                        r = cursor.fetchone()
+                        if r:
+                            data = r[0] if isinstance(r[0], dict) else json.loads(r[0])
+                            if data.get("is_new"):
+                                stats["new"] += 1
+                            else:
+                                stats["updated"] += 1
+                    except Exception as e2:
+                        logger.error(
+                            f"Failed to upsert URL: {row[0]}",
+                            extra={"metadata": {"error": str(e2)}},
+                        )
+                        stats["skipped"] += 1
+                        conn.rollback()
 
         conn.commit()
         batch_ms = int((time.time() - batch_start) * 1000)
