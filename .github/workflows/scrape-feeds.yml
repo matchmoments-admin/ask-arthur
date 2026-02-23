@@ -26,6 +26,9 @@ on:
 
 jobs:
   scrape:
+    # Set ENABLE_SCRAPER to "true" in GitHub repo variables to allow scheduled runs.
+    # Manual workflow_dispatch always runs regardless of this setting.
+    if: github.event_name == 'workflow_dispatch' || vars.ENABLE_SCRAPER == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     defaults:
