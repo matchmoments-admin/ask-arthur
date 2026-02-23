@@ -2,8 +2,8 @@ name: Scrape Threat Feeds
 
 on:
   schedule:
-    # 4x daily UTC: midnight, 6am, noon, 6pm
-    - cron: '0 0,6,12,18 * * *'
+    # Once daily at midnight UTC
+    - cron: '0 0 * * *'
   workflow_dispatch:
     inputs:
       feed:
