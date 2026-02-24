@@ -1,87 +1,152 @@
-import {
-  getPaginatedPosts,
-  getFeaturedPosts,
-  getAllCategories,
-} from "@/lib/blog";
-import PostCard from "@/components/blog/PostCard";
-import CategoryTabs from "@/components/blog/CategoryTabs";
-import FeaturedCarousel from "@/components/blog/FeaturedCarousel";
-import Pagination from "@/components/blog/Pagination";
+import Link from "next/link";
+import { getAllPosts, getCategories } from "@/lib/blog";
+import BlogSearch from "@/components/blog/BlogSearch";
+import SubscribeForm from "@/components/SubscribeForm";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Scam Alerts & Guides — Ask Arthur Blog",
+  title: "Blog — Ask Arthur",
   description:
-    "Weekly scam alerts, fraud prevention guides, and cybersecurity tips for Australians. Stay informed about the latest scams targeting Australians.",
+    "Scam alerts, security guides, and product updates. Stay protected with the latest threat intelligence from Ask Arthur.",
   openGraph: {
-    title: "Scam Alerts & Guides — Ask Arthur Blog",
-    description:
-      "Weekly scam alerts and fraud prevention guides for Australians.",
+    title: "Blog — Ask Arthur",
+    description: "Scam alerts, security guides, and product updates.",
     type: "website",
   },
 };
 
-// Revalidate every hour
 export const revalidate = 3600;
 
 interface PageProps {
-  searchParams: Promise<{ page?: string; category?: string }>;
+  searchParams: Promise<{ category?: string }>;
 }
 
 export default async function BlogPage({ searchParams }: PageProps) {
-  const { page: pageStr, category } = await searchParams;
-  const page = Math.max(1, parseInt(pageStr || "1", 10) || 1);
-
-  const [paginated, featured, categories] = await Promise.all([
-    getPaginatedPosts(page, 12, category),
-    // Only load featured on page 1 without category filter
-    !category && page === 1 ? getFeaturedPosts() : Promise.resolve([]),
-    getAllCategories(),
+  const { category } = await searchParams;
+  const [posts, categories] = await Promise.all([
+    getAllPosts(category),
+    getCategories(),
   ]);
-
-  const totalPosts = categories.reduce((sum, c) => sum + c.count, 0);
 
   return (
     <div>
-      <h1 className="text-deep-navy text-3xl font-extrabold mb-2">
-        Scam Alerts & Guides
-      </h1>
-      <p className="text-gov-slate text-base mb-8">
-        Weekly scam alerts and fraud prevention tips based on real threats
-        detected by Ask Arthur.
-      </p>
+      {/* Hero — minimal */}
+      <header className="mb-12">
+        <h1 className="text-deep-navy text-[2.5rem] font-extrabold tracking-tight leading-tight mb-3">
+          Blog
+        </h1>
+        <p className="text-slate-500 text-lg">
+          Scam alerts, protection guides, and product updates.
+        </p>
+      </header>
 
-      {featured.length > 0 && <FeaturedCarousel posts={featured} />}
+      {/* Category tabs — horizontal, underline style */}
+      <nav className="flex items-center gap-1 border-b border-border-light mb-10 -mx-1 overflow-x-auto">
+        <Link
+          href="/blog"
+          className={`px-3 py-2.5 text-sm font-medium whitespace-nowrap transition-colors relative ${
+            !category
+              ? "text-deep-navy after:absolute after:bottom-0 after:left-0 after:right-0 after:h-[2px] after:bg-deep-navy"
+              : "text-slate-400 hover:text-deep-navy"
+          }`}
+        >
+          All
+        </Link>
+        {categories.map((cat) => (
+          <Link
+            key={cat.slug}
+            href={`/blog?category=${cat.slug}`}
+            className={`px-3 py-2.5 text-sm font-medium whitespace-nowrap transition-colors relative ${
+              category === cat.slug
+                ? "text-deep-navy after:absolute after:bottom-0 after:left-0 after:right-0 after:h-[2px] after:bg-deep-navy"
+                : "text-slate-400 hover:text-deep-navy"
+            }`}
+          >
+            {cat.name}
+          </Link>
+        ))}
 
-      <CategoryTabs
-        categories={categories}
-        activeCategory={category}
-        totalPosts={totalPosts}
-      />
+        {/* Search — right aligned */}
+        <div className="ml-auto pl-4">
+          <BlogSearch />
+        </div>
+      </nav>
 
-      {paginated.posts.length === 0 ? (
-        <div className="text-center py-16">
-          <span className="material-symbols-outlined text-slate-300 text-5xl mb-4 block">
-            article
-          </span>
-          <p className="text-gov-slate text-base">
-            No posts yet. Check back soon for weekly scam alerts.
+      {/* Post list — ultra-minimal, divider style */}
+      {posts.length === 0 ? (
+        <div className="py-20 text-center">
+          <p className="text-slate-400 text-base">
+            No posts yet. Check back soon.
           </p>
         </div>
       ) : (
-        <div className="space-y-6">
-          {paginated.posts.map((post) => (
-            <PostCard key={post.slug} post={post} />
+        <div className="divide-y divide-border-light">
+          {posts.map((post) => (
+            <article key={post.slug} className="py-7 first:pt-0">
+              <Link href={`/blog/${post.slug}`} className="block group">
+                <div className="flex items-center gap-2 mb-2">
+                  {post.categoryName && (
+                    <span className="text-action-teal text-xs font-semibold uppercase tracking-wider">
+                      {post.categoryName}
+                    </span>
+                  )}
+                  {post.product && (
+                    <>
+                      <span className="text-slate-300">&middot;</span>
+                      <span className="text-slate-400 text-xs">
+                        {post.product}
+                      </span>
+                    </>
+                  )}
+                </div>
+
+                <h2 className="text-deep-navy text-xl font-bold leading-snug mb-1.5 group-hover:text-action-teal transition-colors">
+                  {post.title}
+                </h2>
+
+                <p className="text-slate-500 text-[15px] leading-relaxed mb-3 line-clamp-2">
+                  {post.excerpt}
+                </p>
+
+                <div className="flex items-center gap-2 text-xs text-slate-400">
+                  <time dateTime={post.publishedAt}>
+                    {new Date(post.publishedAt).toLocaleDateString("en-AU", {
+                      day: "numeric",
+                      month: "short",
+                      year: "numeric",
+                    })}
+                  </time>
+                  <span>&middot;</span>
+                  <span>{post.readingTimeMinutes} min</span>
+                </div>
+              </Link>
+            </article>
           ))}
         </div>
       )}
 
-      <Pagination
-        page={paginated.page}
-        totalPages={paginated.totalPages}
-        basePath="/blog"
-        extraParams={category ? { category } : undefined}
-      />
+      {/* CTA section */}
+      <section className="mt-16 pt-12 border-t border-border-light">
+        <div className="text-center mb-10">
+          <h2 className="text-deep-navy text-2xl font-bold mb-2">
+            Protect yourself from scams
+          </h2>
+          <p className="text-slate-500 text-base mb-6">
+            Free, private, no signup required.
+          </p>
+          <Link
+            href="/"
+            className="inline-block py-3 px-8 bg-deep-navy text-white font-bold text-sm uppercase tracking-widest rounded-[4px] hover:bg-navy transition-colors"
+          >
+            Check a message
+          </Link>
+        </div>
+
+        {/* Newsletter signup */}
+        <div className="max-w-md mx-auto">
+          <SubscribeForm />
+        </div>
+      </section>
     </div>
   );
 }

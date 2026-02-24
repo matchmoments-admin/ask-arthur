@@ -74,3 +74,197 @@ h1, h2, h3 {
 [vaul-overlay] {
   transition: opacity 0.2s ease;
 }
+
+/* ============================================================
+   Blog content styles — Claude-inspired minimal typography
+   ============================================================ */
+
+.blog-content {
+  font-size: 1.0625rem;       /* 17px */
+  line-height: 1.75;
+  color: var(--color-gov-slate);
+}
+
+.blog-content > * + * {
+  margin-top: 1.5em;
+}
+
+/* Headings */
+.blog-content h2 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--color-deep-navy);
+  margin-top: 2.5em;
+  margin-bottom: 0.5em;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+
+.blog-content h3 {
+  font-size: 1.1875rem;
+  font-weight: 700;
+  color: var(--color-deep-navy);
+  margin-top: 2em;
+  margin-bottom: 0.5em;
+  letter-spacing: -0.01em;
+  line-height: 1.4;
+}
+
+/* Paragraphs */
+.blog-content p {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+/* Links */
+.blog-content a {
+  color: var(--color-action-teal-text);
+  text-decoration: none;
+  font-weight: 500;
+}
+.blog-content a:hover {
+  text-decoration: underline;
+}
+
+/* Lists */
+.blog-content ul,
+.blog-content ol {
+  padding-left: 1.25em;
+}
+.blog-content li {
+  margin-top: 0.375em;
+}
+.blog-content li::marker {
+  color: var(--color-slate-400);
+}
+
+/* Images — contained, soft corners */
+.blog-content img {
+  width: 100%;
+  height: auto;
+  border-radius: 2px;
+  margin-top: 2em;
+  margin-bottom: 2em;
+}
+
+/* Figures with captions */
+.blog-content figure {
+  margin: 2em 0;
+}
+.blog-content figure img {
+  margin: 0;
+}
+.blog-content figcaption {
+  margin-top: 0.75em;
+  font-size: 0.8125rem;
+  color: var(--color-slate-400);
+  text-align: center;
+}
+
+/* Code blocks */
+.blog-content pre {
+  background-color: #f8fafc;
+  border: 1px solid var(--color-border-light);
+  border-radius: 2px;
+  padding: 1.25em 1.5em;
+  overflow-x: auto;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  margin-top: 1.5em;
+  margin-bottom: 1.5em;
+}
+
+.blog-content code {
+  font-family: "SF Mono", "Fira Code", "Fira Mono", "Roboto Mono", monospace;
+  font-size: 0.875em;
+}
+
+.blog-content :not(pre) > code {
+  background-color: #f8fafc;
+  border: 1px solid var(--color-border-light);
+  border-radius: 2px;
+  padding: 0.125em 0.375em;
+  font-size: 0.85em;
+}
+
+/* Blockquotes — soft left border, no background */
+.blog-content blockquote {
+  border-left: 3px solid var(--color-action-teal);
+  padding-left: 1.25em;
+  margin-left: 0;
+  margin-right: 0;
+  color: var(--color-gov-slate);
+  font-style: italic;
+}
+.blog-content blockquote p {
+  margin: 0;
+}
+
+/* Info/tip/warning panels — soft, minimal
+   Use in markdown as:
+   > **Warning:** Don't share your banking PIN
+   > **Tip:** Always verify the sender
+   > **Important:** Report scams to Scamwatch
+*/
+.blog-content blockquote:has(strong:first-child) {
+  font-style: normal;
+  border-left: 3px solid var(--color-border-light);
+  background-color: #f8fafc;
+  padding: 1em 1.25em;
+  border-radius: 0 2px 2px 0;
+}
+
+/* Horizontal rules */
+.blog-content hr {
+  border: none;
+  border-top: 1px solid var(--color-border-light);
+  margin: 2.5em 0;
+}
+
+/* Tables */
+.blog-content table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+  margin-top: 1.5em;
+  margin-bottom: 1.5em;
+}
+.blog-content th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--color-deep-navy);
+  padding: 0.625em 0.75em;
+  border-bottom: 2px solid var(--color-border-light);
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.blog-content td {
+  padding: 0.625em 0.75em;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+/* YouTube embeds — responsive container */
+.blog-content .video-embed {
+  position: relative;
+  width: 100%;
+  padding-bottom: 56.25%; /* 16:9 */
+  margin: 2em 0;
+  border-radius: 2px;
+  overflow: hidden;
+  background-color: #f8fafc;
+}
+.blog-content .video-embed iframe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+/* Strong emphasis */
+.blog-content strong {
+  font-weight: 600;
+  color: var(--color-deep-navy);
+}

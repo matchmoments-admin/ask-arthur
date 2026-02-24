@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createServiceClient } from "@askarthur/supabase/server";
-import { CATEGORY_DISPLAY } from "@/lib/blog";
+import { getCategories } from "@/lib/blog";
 
 interface PageProps {
   searchParams: Promise<{ secret?: string }>;
@@ -19,12 +19,15 @@ export default async function AdminBlogPage({ searchParams }: PageProps) {
     return <p className="p-8 text-gov-slate">Database not configured</p>;
   }
 
-  const { data: posts } = await supabase
-    .from("blog_posts")
-    .select(
-      "id, title, slug, published, status, category, subtitle, is_featured, created_at, published_at"
-    )
-    .order("created_at", { ascending: false });
+  const [{ data: posts }, categories] = await Promise.all([
+    supabase
+      .from("blog_posts")
+      .select(
+        "id, title, slug, status, category, category_slug, subtitle, is_featured, created_at, published_at"
+      )
+      .order("created_at", { ascending: false }),
+    getCategories(),
+  ]);
 
   async function updatePost(formData: FormData) {
     "use server";
@@ -34,7 +37,7 @@ export default async function AdminBlogPage({ searchParams }: PageProps) {
 
     const postId = formData.get("postId") as string;
     const status = formData.get("status") as string;
-    const category = formData.get("category") as string;
+    const categorySlug = formData.get("category_slug") as string;
     const subtitle = formData.get("subtitle") as string;
     const isFeatured = formData.get("is_featured") === "on";
 
@@ -43,11 +46,9 @@ export default async function AdminBlogPage({ searchParams }: PageProps) {
 
     const updateData: Record<string, unknown> = {
       status,
-      category,
+      category_slug: categorySlug || null,
       subtitle: subtitle || null,
       is_featured: isFeatured,
-      // Keep published column in sync during transition
-      published: status === "published",
       updated_at: new Date().toISOString(),
     };
 
@@ -74,7 +75,7 @@ export default async function AdminBlogPage({ searchParams }: PageProps) {
 
       <div className="space-y-4">
         {(posts || []).map((post) => {
-          const status = post.status || (post.published ? "published" : "draft");
+          const status = post.status || "draft";
           const colors = statusColors[status] || statusColors.draft;
 
           return (
@@ -126,13 +127,14 @@ export default async function AdminBlogPage({ searchParams }: PageProps) {
                       Category
                     </label>
                     <select
-                      name="category"
-                      defaultValue={post.category || "weekly-roundup"}
+                      name="category_slug"
+                      defaultValue={post.category_slug || ""}
                       className="w-full text-sm border border-border-light rounded px-2.5 py-1.5 bg-white"
                     >
-                      {Object.entries(CATEGORY_DISPLAY).map(([value, label]) => (
-                        <option key={value} value={value}>
-                          {label}
+                      <option value="">None</option>
+                      {categories.map((cat) => (
+                        <option key={cat.slug} value={cat.slug}>
+                          {cat.name}
                         </option>
                       ))}
                     </select>

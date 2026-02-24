@@ -1,14 +1,6 @@
 import { createServiceClient } from "@askarthur/supabase/server";
 import readingTime from "reading-time";
 
-export const CATEGORY_DISPLAY: Record<string, string> = {
-  "weekly-roundup": "Weekly Roundup",
-  "scam-alerts": "Scam Alerts",
-  guides: "Guides",
-  "platform-safety": "Platform Safety",
-  news: "News",
-};
-
 export interface BlogPost {
   slug: string;
   title: string;
@@ -17,14 +9,24 @@ export interface BlogPost {
   content: string;
   author: string;
   tags: string[];
+  categorySlug: string | null;
+  categoryName: string | null;
+  product: string | null;
+  heroImageUrl: string | null;
+  heroImageAlt: string | null;
   publishedAt: string;
   updatedAt: string | null;
   readingTime: string;
   readingTimeMinutes: number;
-  category: string;
   isFeatured: boolean;
   seoTitle: string | null;
   metaDescription: string | null;
+}
+
+export interface BlogCategory {
+  slug: string;
+  name: string;
+  description: string | null;
 }
 
 interface BlogRow {
@@ -35,52 +37,70 @@ interface BlogRow {
   content: string;
   author: string;
   tags: string[];
+  category_slug: string | null;
+  product: string | null;
+  hero_image_url: string | null;
+  hero_image_alt: string | null;
   published_at: string;
   updated_at: string | null;
   reading_time_minutes: number | null;
-  category: string | null;
   is_featured: boolean | null;
   seo_title: string | null;
   meta_description: string | null;
+  blog_categories: { name: string } | null;
 }
 
-const POST_COLUMNS =
-  "slug, title, subtitle, excerpt, content, author, tags, published_at, updated_at, reading_time_minutes, category, is_featured, seo_title, meta_description";
-
 function rowToPost(row: BlogRow): BlogPost {
-  const minutes = row.reading_time_minutes ?? Math.ceil(readingTime(row.content).minutes);
+  const rt = readingTime(row.content);
+  const minutes = row.reading_time_minutes ?? Math.ceil(rt.minutes);
   return {
     slug: row.slug,
     title: row.title,
-    subtitle: row.subtitle ?? null,
+    subtitle: row.subtitle,
     excerpt: row.excerpt,
     content: row.content,
     author: row.author,
     tags: row.tags || [],
+    categorySlug: row.category_slug,
+    categoryName: row.blog_categories?.name ?? null,
+    product: row.product,
+    heroImageUrl: row.hero_image_url,
+    heroImageAlt: row.hero_image_alt,
     publishedAt: row.published_at,
     updatedAt: row.updated_at ?? null,
-    readingTime: `${minutes} min read`,
-    readingTimeMinutes: minutes,
-    category: row.category || "weekly-roundup",
+    readingTime: rt.text,
+    readingTimeMinutes: Math.max(1, minutes),
     isFeatured: row.is_featured ?? false,
     seoTitle: row.seo_title ?? null,
     metaDescription: row.meta_description ?? null,
   };
 }
 
-export async function getAllPosts(): Promise<BlogPost[]> {
+const POST_SELECT = `
+  slug, title, subtitle, excerpt, content, author, tags,
+  category_slug, product, hero_image_url, hero_image_alt,
+  published_at, updated_at, reading_time_minutes, is_featured,
+  seo_title, meta_description,
+  blog_categories ( name )
+`;
+
+export async function getAllPosts(categorySlug?: string): Promise<BlogPost[]> {
   const supabase = createServiceClient();
   if (!supabase) return [];
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("blog_posts")
-    .select(POST_COLUMNS)
+    .select(POST_SELECT)
     .eq("status", "published")
     .order("published_at", { ascending: false });
 
-  if (error || !data) return [];
+  if (categorySlug) {
+    query = query.eq("category_slug", categorySlug);
+  }
 
-  return data.map(rowToPost);
+  const { data, error } = await query;
+  if (error || !data) return [];
+  return (data as unknown as BlogRow[]).map(rowToPost);
 }
 
 export async function getPostBySlug(slug: string): Promise<BlogPost | null> {
@@ -89,14 +109,13 @@ export async function getPostBySlug(slug: string): Promise<BlogPost | null> {
 
   const { data, error } = await supabase
     .from("blog_posts")
-    .select(POST_COLUMNS)
+    .select(POST_SELECT)
     .eq("slug", slug)
     .eq("status", "published")
     .single();
 
   if (error || !data) return null;
-
-  return rowToPost(data);
+  return rowToPost(data as unknown as BlogRow);
 }
 
 export async function getAllSlugs(): Promise<string[]> {
@@ -111,116 +130,55 @@ export async function getAllSlugs(): Promise<string[]> {
   return data?.map((row) => row.slug) || [];
 }
 
-export async function getFeaturedPosts(limit = 5): Promise<BlogPost[]> {
+export async function getCategories(): Promise<BlogCategory[]> {
+  const supabase = createServiceClient();
+  if (!supabase) return [];
+
+  const { data } = await supabase
+    .from("blog_categories")
+    .select("slug, name, description")
+    .order("sort_order", { ascending: true });
+
+  return (data as BlogCategory[]) || [];
+}
+
+export async function searchPosts(query: string): Promise<BlogPost[]> {
   const supabase = createServiceClient();
   if (!supabase) return [];
 
   const { data, error } = await supabase
     .from("blog_posts")
-    .select(POST_COLUMNS)
+    .select(POST_SELECT)
     .eq("status", "published")
-    .eq("is_featured", true)
+    .textSearch("search_vector", query, { type: "websearch" })
     .order("published_at", { ascending: false })
-    .limit(limit);
+    .limit(20);
 
   if (error || !data) return [];
-
-  return data.map(rowToPost);
+  return (data as unknown as BlogRow[]).map(rowToPost);
 }
 
 export async function getRelatedPosts(
-  slug: string,
-  category: string,
+  currentSlug: string,
+  categorySlug: string | null,
   limit = 4
 ): Promise<BlogPost[]> {
   const supabase = createServiceClient();
   if (!supabase) return [];
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("blog_posts")
-    .select(POST_COLUMNS)
+    .select(POST_SELECT)
     .eq("status", "published")
-    .eq("category", category)
-    .neq("slug", slug)
+    .neq("slug", currentSlug)
     .order("published_at", { ascending: false })
     .limit(limit);
 
+  if (categorySlug) {
+    query = query.eq("category_slug", categorySlug);
+  }
+
+  const { data, error } = await query;
   if (error || !data) return [];
-
-  return data.map(rowToPost);
-}
-
-export interface CategoryCount {
-  category: string;
-  count: number;
-}
-
-export async function getAllCategories(): Promise<CategoryCount[]> {
-  const supabase = createServiceClient();
-  if (!supabase) return [];
-
-  // Supabase JS doesn't support GROUP BY, so fetch all published and count client-side
-  const { data, error } = await supabase
-    .from("blog_posts")
-    .select("category")
-    .eq("status", "published");
-
-  if (error || !data) return [];
-
-  const counts = new Map<string, number>();
-  for (const row of data) {
-    const cat = row.category || "weekly-roundup";
-    counts.set(cat, (counts.get(cat) || 0) + 1);
-  }
-
-  return Array.from(counts.entries()).map(([category, count]) => ({
-    category,
-    count,
-  }));
-}
-
-export interface PaginatedResult {
-  posts: BlogPost[];
-  total: number;
-  page: number;
-  pageSize: number;
-  totalPages: number;
-}
-
-export async function getPaginatedPosts(
-  page = 1,
-  pageSize = 12,
-  category?: string
-): Promise<PaginatedResult> {
-  const supabase = createServiceClient();
-  if (!supabase) return { posts: [], total: 0, page, pageSize, totalPages: 0 };
-
-  let query = supabase
-    .from("blog_posts")
-    .select(POST_COLUMNS, { count: "exact" })
-    .eq("status", "published");
-
-  if (category) {
-    query = query.eq("category", category);
-  }
-
-  const from = (page - 1) * pageSize;
-  const to = from + pageSize - 1;
-
-  const { data, error, count } = await query
-    .order("published_at", { ascending: false })
-    .range(from, to);
-
-  if (error || !data) {
-    return { posts: [], total: 0, page, pageSize, totalPages: 0 };
-  }
-
-  const total = count ?? 0;
-  return {
-    posts: data.map(rowToPost),
-    total,
-    page,
-    pageSize,
-    totalPages: Math.ceil(total / pageSize),
-  };
+  return (data as unknown as BlogRow[]).map(rowToPost);
 }

@@ -18,8 +18,7 @@ export default function CopyLinkButton() {
   return (
     <button
       onClick={handleCopy}
-      className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-action-teal-text transition-colors"
-      aria-label="Copy link to this post"
+      className="text-deep-navy font-medium hover:text-action-teal transition-colors inline-flex items-center gap-1"
     >
       <span className="material-symbols-outlined text-base">
         {copied ? "check" : "link"}

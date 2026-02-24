@@ -1,30 +1,12 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { Marked } from "marked";
-import { markedHighlight } from "marked-highlight";
-import hljs from "highlight.js/lib/core";
-import javascript from "highlight.js/lib/languages/javascript";
-import python from "highlight.js/lib/languages/python";
-import bash from "highlight.js/lib/languages/bash";
-import json from "highlight.js/lib/languages/json";
 import "highlight.js/styles/github.css";
 import sanitizeHtml from "sanitize-html";
-import {
-  getPostBySlug,
-  getAllSlugs,
-  getRelatedPosts,
-  CATEGORY_DISPLAY,
-} from "@/lib/blog";
-import SubscribeForm from "@/components/SubscribeForm";
+import { getPostBySlug, getAllSlugs, getRelatedPosts } from "@/lib/blog";
+import { renderMarkdown } from "@/lib/blogRenderer";
 import CopyLinkButton from "@/components/CopyLinkButton";
-import PostCard from "@/components/blog/PostCard";
+import SubscribeForm from "@/components/SubscribeForm";
 import type { Metadata } from "next";
-
-// Register highlight.js languages
-hljs.registerLanguage("javascript", javascript);
-hljs.registerLanguage("python", python);
-hljs.registerLanguage("bash", bash);
-hljs.registerLanguage("json", json);
 
 interface PageProps {
   params: Promise<{ slug: string }>;
@@ -42,109 +24,32 @@ export async function generateMetadata({
   const post = await getPostBySlug(slug);
 
   if (!post) {
-    return { title: "Post Not Found — Ask Arthur Blog" };
+    return { title: "Post Not Found — Ask Arthur" };
   }
 
   return {
-    title: `${post.seoTitle || post.title} — Ask Arthur Blog`,
+    title: `${post.seoTitle || post.title} — Ask Arthur`,
     description: post.metaDescription || post.excerpt,
     openGraph: {
       title: post.seoTitle || post.title,
       description: post.metaDescription || post.excerpt,
       type: "article",
       publishedTime: post.publishedAt,
-      ...(post.updatedAt ? { modifiedTime: post.updatedAt } : {}),
-      authors: [post.author],
+      ...(post.heroImageUrl && { images: [post.heroImageUrl] }),
     },
   };
 }
 
 export const revalidate = 3600;
 
-/** Transform callout blockquotes and wrap images in figure/figcaption */
-function transformMarkdown(html: string): string {
-  // Transform callout blockquotes: > [!WARNING], > [!TIP], > [!DANGER]
-  const calloutMap: Record<string, { bg: string; border: string; text: string; icon: string; label: string }> = {
-    WARNING: {
-      bg: "bg-warn-bg",
-      border: "border-warn-border",
-      text: "text-warn-heading",
-      icon: "warning",
-      label: "Warning",
-    },
-    DANGER: {
-      bg: "bg-danger-bg",
-      border: "border-danger-border",
-      text: "text-danger-heading",
-      icon: "error_outline",
-      label: "Danger",
-    },
-    TIP: {
-      bg: "bg-safe-bg",
-      border: "border-safe-border",
-      text: "text-safe-heading",
-      icon: "verified_user",
-      label: "Tip",
-    },
-  };
-
-  let result = html;
-
-  // Match blockquotes containing [!TYPE] pattern
-  result = result.replace(
-    /<blockquote>\s*<p>\[!(WARNING|DANGER|TIP)\]\s*([\s\S]*?)<\/p>\s*<\/blockquote>/gi,
-    (_match, type: string, content: string) => {
-      const key = type.toUpperCase();
-      const style = calloutMap[key];
-      if (!style) return _match;
-
-      return `<div class="${style.bg} ${style.border} border-l-4 rounded-r-lg p-4 my-4">
-        <div class="flex items-center gap-2 mb-1">
-          <span class="material-symbols-outlined ${style.text} text-lg">${style.icon}</span>
-          <span class="font-bold ${style.text} text-sm">${style.label}</span>
-        </div>
-        <div class="text-gov-slate text-sm">${content.trim()}</div>
-      </div>`;
-    }
-  );
-
-  // Wrap standalone images in figure/figcaption
-  result = result.replace(
-    /<p>\s*<img\s+src="([^"]+)"\s+alt="([^"]*)"[^>]*>\s*<\/p>/gi,
-    (_match, src: string, alt: string) => {
-      const caption = alt
-        ? `<figcaption class="text-center text-xs text-slate-400 mt-2">${alt}</figcaption>`
-        : "";
-      return `<figure class="my-6"><img src="${src}" alt="${alt}" class="rounded-lg w-full" />${caption}</figure>`;
-    }
-  );
-
-  return result;
-}
-
 export default async function BlogPostPage({ params }: PageProps) {
   const { slug } = await params;
   const post = await getPostBySlug(slug);
+  if (!post) notFound();
 
-  if (!post) {
-    notFound();
-  }
-
-  // Set up marked with syntax highlighting
-  const marked = new Marked(
-    markedHighlight({
-      emptyLangClass: "hljs",
-      langPrefix: "hljs language-",
-      highlight(code, lang) {
-        const language = hljs.getLanguage(lang) ? lang : "plaintext";
-        return hljs.highlight(code, { language }).value;
-      },
-    })
-  );
-
-  const rawHtml = await marked.parse(post.content);
-  const transformedHtml = transformMarkdown(rawHtml as string);
-  const htmlContent = sanitizeHtml(transformedHtml, {
+  const related = await getRelatedPosts(slug, post.categorySlug);
+  const rawHtml = await renderMarkdown(post.content);
+  const htmlContent = sanitizeHtml(rawHtml, {
     allowedTags: [
       ...sanitizeHtml.defaults.allowedTags,
       "figure",
@@ -153,25 +58,25 @@ export default async function BlogPostPage({ params }: PageProps) {
       "span",
       "pre",
       "code",
+      "iframe",
+      "div",
     ],
     allowedAttributes: {
       ...sanitizeHtml.defaults.allowedAttributes,
       "*": ["class"],
-      img: ["src", "alt"],
+      img: ["src", "alt", "loading"],
       a: ["href", "target", "rel"],
-      time: ["datetime"],
+      iframe: ["src", "title", "allow", "allowfullscreen"],
+      div: ["class"],
     },
   });
 
-  const relatedPosts = await getRelatedPosts(slug, post.category);
-
-  // JSON-LD structured data for Google
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "Article",
     headline: post.title,
     description: post.metaDescription || post.excerpt,
-    author: { "@type": "Organization", name: post.author },
+    author: { "@type": "Organization", name: "Ask Arthur" },
     datePublished: post.publishedAt,
     ...(post.updatedAt ? { dateModified: post.updatedAt } : {}),
     publisher: {
@@ -179,6 +84,7 @@ export default async function BlogPostPage({ params }: PageProps) {
       name: "Ask Arthur",
       url: "https://askarthur.au",
     },
+    ...(post.heroImageUrl && { image: post.heroImageUrl }),
   };
 
   return (
@@ -188,84 +94,174 @@ export default async function BlogPostPage({ params }: PageProps) {
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
 
-      <header className="mb-8">
-        {/* Category pill */}
+      {/* Breadcrumb — minimal */}
+      <nav className="text-xs text-slate-400 mb-8">
         <Link
-          href={`/blog/category/${post.category}`}
-          className="inline-block bg-action-teal/10 text-action-teal-text text-xs font-semibold px-2.5 py-1 rounded-full mb-3 hover:bg-action-teal/20 transition-colors"
+          href="/blog"
+          className="hover:text-action-teal transition-colors"
         >
-          {CATEGORY_DISPLAY[post.category] || post.category}
+          Blog
         </Link>
+        <span className="mx-1.5">/</span>
+        <span className="text-slate-500">{post.title}</span>
+      </nav>
 
-        <h1 className="text-deep-navy text-3xl font-extrabold mb-3">
+      {/* Hero image */}
+      {post.heroImageUrl && (
+        <div className="mb-8 rounded-sm overflow-hidden bg-slate-50">
+          <img
+            src={post.heroImageUrl}
+            alt={post.heroImageAlt || post.title}
+            className="w-full h-auto"
+          />
+        </div>
+      )}
+
+      {/* Title block */}
+      <header className="mb-10">
+        <h1 className="text-deep-navy text-[2.25rem] font-extrabold tracking-tight leading-[1.15] mb-3">
           {post.title}
         </h1>
 
         {post.subtitle && (
-          <p className="text-gov-slate text-lg italic mb-4">{post.subtitle}</p>
+          <p className="text-slate-500 text-lg italic leading-relaxed mb-6">
+            {post.subtitle}
+          </p>
         )}
 
-        <div className="flex items-center gap-3 text-xs text-slate-400 mb-4">
-          <span>{post.author}</span>
-          <span>&middot;</span>
-          <time dateTime={post.publishedAt}>
-            {new Date(post.publishedAt).toLocaleDateString("en-AU", {
-              day: "numeric",
-              month: "long",
-              year: "numeric",
-            })}
-          </time>
-          <span>&middot;</span>
-          <span>{post.readingTime}</span>
-          <span>&middot;</span>
-          <CopyLinkButton />
-        </div>
-
-        {post.tags.length > 0 && (
-          <div className="flex gap-1.5">
-            {post.tags.map((tag) => (
-              <span
-                key={tag}
-                className="bg-slate-100 text-slate-500 px-2 py-0.5 rounded text-[10px] uppercase tracking-wider font-medium"
-              >
-                {tag}
+        {/* Metadata row — label + value pairs */}
+        <div className="flex flex-wrap items-start gap-x-8 gap-y-2 text-sm pt-5 border-t border-border-light">
+          {post.categoryName && (
+            <div>
+              <span className="text-slate-400 text-xs uppercase tracking-wider block mb-0.5">
+                Category
               </span>
-            ))}
+              <Link
+                href={`/blog?category=${post.categorySlug}`}
+                className="text-deep-navy font-medium hover:text-action-teal transition-colors"
+              >
+                {post.categoryName}
+              </Link>
+            </div>
+          )}
+
+          {post.product && (
+            <div>
+              <span className="text-slate-400 text-xs uppercase tracking-wider block mb-0.5">
+                Product
+              </span>
+              <span className="text-deep-navy font-medium">
+                {post.product}
+              </span>
+            </div>
+          )}
+
+          <div>
+            <span className="text-slate-400 text-xs uppercase tracking-wider block mb-0.5">
+              Date
+            </span>
+            <time
+              dateTime={post.publishedAt}
+              className="text-deep-navy font-medium"
+            >
+              {new Date(post.publishedAt).toLocaleDateString("en-AU", {
+                day: "numeric",
+                month: "long",
+                year: "numeric",
+              })}
+            </time>
           </div>
-        )}
+
+          <div>
+            <span className="text-slate-400 text-xs uppercase tracking-wider block mb-0.5">
+              Reading time
+            </span>
+            <span className="text-deep-navy font-medium">
+              {post.readingTimeMinutes} min
+            </span>
+          </div>
+
+          <div>
+            <span className="text-slate-400 text-xs uppercase tracking-wider block mb-0.5">
+              Share
+            </span>
+            <CopyLinkButton />
+          </div>
+        </div>
       </header>
 
+      {/* Article body */}
       <div
-        className="prose prose-slate max-w-none prose-headings:text-deep-navy prose-a:text-action-teal-text prose-a:no-underline hover:prose-a:underline"
+        className="blog-content"
         dangerouslySetInnerHTML={{ __html: htmlContent }}
       />
 
-      <hr className="my-12 border-border-light" />
-
-      <div className="mb-8">
-        <h3 className="text-deep-navy text-lg font-bold mb-2">
-          Stay ahead of scammers
-        </h3>
-        <p className="text-gov-slate text-sm mb-4">
-          Get weekly scam alerts delivered to your inbox. No spam, just
-          protection.
-        </p>
-        <SubscribeForm />
-      </div>
-
       {/* Related posts */}
-      {relatedPosts.length > 0 && (
-        <section className="mt-12">
-          <h3 className="text-deep-navy text-lg font-bold mb-6">
+      {related.length > 0 && (
+        <section className="mt-16 pt-10 border-t border-border-light">
+          <h2 className="text-deep-navy text-xl font-bold mb-6">
             Related posts
-          </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {relatedPosts.map((related) => (
-              <PostCard key={related.slug} post={related} compact />
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {related.map((rp) => (
+              <Link
+                key={rp.slug}
+                href={`/blog/${rp.slug}`}
+                className="group block"
+              >
+                {rp.heroImageUrl && (
+                  <div className="mb-3 rounded-sm overflow-hidden bg-slate-50 aspect-[16/10]">
+                    <img
+                      src={rp.heroImageUrl}
+                      alt={rp.heroImageAlt || rp.title}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                )}
+                <time
+                  dateTime={rp.publishedAt}
+                  className="text-xs text-slate-400 block mb-1"
+                >
+                  {new Date(rp.publishedAt).toLocaleDateString("en-AU", {
+                    day: "numeric",
+                    month: "short",
+                    year: "numeric",
+                  })}
+                </time>
+                <h3 className="text-deep-navy font-bold text-base leading-snug group-hover:text-action-teal transition-colors">
+                  {rp.title}
+                </h3>
+                {rp.categoryName && (
+                  <span className="text-action-teal text-xs font-semibold uppercase tracking-wider mt-1 block">
+                    {rp.categoryName}
+                  </span>
+                )}
+              </Link>
             ))}
           </div>
         </section>
       )}
+
+      {/* Bottom CTA */}
+      <section className="mt-16 pt-10 border-t border-border-light text-center">
+        <h2 className="text-deep-navy text-xl font-bold mb-2">
+          Think you&apos;ve received a scam?
+        </h2>
+        <p className="text-slate-500 text-base mb-5">
+          Check it instantly — free, private, no signup.
+        </p>
+        <Link
+          href="/"
+          className="inline-block py-3 px-8 bg-deep-navy text-white font-bold text-sm uppercase tracking-widest rounded-[4px] hover:bg-navy transition-colors"
+        >
+          Check now
+        </Link>
+      </section>
+
+      {/* Newsletter */}
+      <section className="mt-12 max-w-md mx-auto">
+        <SubscribeForm />
+      </section>
     </article>
   );
 }

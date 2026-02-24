@@ -1,90 +1,104 @@
-import {
-  getPaginatedPosts,
-  getAllCategories,
-  CATEGORY_DISPLAY,
-} from "@/lib/blog";
-import PostCard from "@/components/blog/PostCard";
-import CategoryTabs from "@/components/blog/CategoryTabs";
-import Pagination from "@/components/blog/Pagination";
+import { redirect } from "next/navigation";
+import Link from "next/link";
+import { getAllPosts, getCategories } from "@/lib/blog";
 import type { Metadata } from "next";
 
 interface PageProps {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ page?: string }>;
 }
 
 export async function generateMetadata({
   params,
 }: PageProps): Promise<Metadata> {
   const { slug } = await params;
-  const displayName = CATEGORY_DISPLAY[slug] || slug;
+  const categories = await getCategories();
+  const cat = categories.find((c) => c.slug === slug);
+  if (!cat) return { title: "Not Found — Ask Arthur" };
 
   return {
-    title: `${displayName} — Ask Arthur Blog`,
-    description: `Browse ${displayName.toLowerCase()} posts on the Ask Arthur blog. Scam alerts and fraud prevention for Australians.`,
-    openGraph: {
-      title: `${displayName} — Ask Arthur Blog`,
-      description: `Browse ${displayName.toLowerCase()} posts on the Ask Arthur blog.`,
-      type: "website",
-    },
+    title: `${cat.name} — Ask Arthur Blog`,
+    description: cat.description || `${cat.name} posts from Ask Arthur.`,
   };
 }
 
 export const revalidate = 3600;
 
-export default async function CategoryPage({
-  params,
-  searchParams,
-}: PageProps) {
-  const { slug: category } = await params;
-  const { page: pageStr } = await searchParams;
-  const page = Math.max(1, parseInt(pageStr || "1", 10) || 1);
-
-  const [paginated, categories] = await Promise.all([
-    getPaginatedPosts(page, 12, category),
-    getAllCategories(),
+export default async function CategoryPage({ params }: PageProps) {
+  const { slug } = await params;
+  const [categories, posts] = await Promise.all([
+    getCategories(),
+    getAllPosts(slug),
   ]);
 
-  const totalPosts = categories.reduce((sum, c) => sum + c.count, 0);
-  const displayName = CATEGORY_DISPLAY[category] || category;
+  const category = categories.find((c) => c.slug === slug);
+  if (!category) redirect("/blog");
 
   return (
     <div>
-      <h1 className="text-deep-navy text-3xl font-extrabold mb-2">
-        {displayName}
-      </h1>
-      <p className="text-gov-slate text-base mb-8">
-        Browse all {displayName.toLowerCase()} posts.
-      </p>
+      <header className="mb-10">
+        <Link
+          href="/blog"
+          className="text-action-teal text-sm font-medium hover:underline mb-4 block"
+        >
+          &larr; All posts
+        </Link>
+        <h1 className="text-deep-navy text-[2rem] font-extrabold tracking-tight mb-2">
+          {category.name}
+        </h1>
+        {category.description && (
+          <p className="text-slate-500 text-base">{category.description}</p>
+        )}
+      </header>
 
-      <CategoryTabs
-        categories={categories}
-        activeCategory={category}
-        totalPosts={totalPosts}
-      />
+      {/* Category tabs */}
+      <nav className="flex items-center gap-1 border-b border-border-light mb-10 overflow-x-auto">
+        {categories.map((cat) => (
+          <Link
+            key={cat.slug}
+            href={`/blog/category/${cat.slug}`}
+            className={`px-3 py-2.5 text-sm font-medium whitespace-nowrap transition-colors relative ${
+              cat.slug === slug
+                ? "text-deep-navy after:absolute after:bottom-0 after:left-0 after:right-0 after:h-[2px] after:bg-deep-navy"
+                : "text-slate-400 hover:text-deep-navy"
+            }`}
+          >
+            {cat.name}
+          </Link>
+        ))}
+      </nav>
 
-      {paginated.posts.length === 0 ? (
-        <div className="text-center py-16">
-          <span className="material-symbols-outlined text-slate-300 text-5xl mb-4 block">
-            article
-          </span>
-          <p className="text-gov-slate text-base">
-            No posts in this category yet.
-          </p>
-        </div>
+      {/* Posts */}
+      {posts.length === 0 ? (
+        <p className="text-slate-400 py-12 text-center">
+          No posts in this category yet.
+        </p>
       ) : (
-        <div className="space-y-6">
-          {paginated.posts.map((post) => (
-            <PostCard key={post.slug} post={post} />
+        <div className="divide-y divide-border-light">
+          {posts.map((post) => (
+            <article key={post.slug} className="py-7 first:pt-0">
+              <Link href={`/blog/${post.slug}`} className="block group">
+                <h2 className="text-deep-navy text-xl font-bold leading-snug mb-1.5 group-hover:text-action-teal transition-colors">
+                  {post.title}
+                </h2>
+                <p className="text-slate-500 text-[15px] leading-relaxed mb-3 line-clamp-2">
+                  {post.excerpt}
+                </p>
+                <div className="flex items-center gap-2 text-xs text-slate-400">
+                  <time dateTime={post.publishedAt}>
+                    {new Date(post.publishedAt).toLocaleDateString("en-AU", {
+                      day: "numeric",
+                      month: "short",
+                      year: "numeric",
+                    })}
+                  </time>
+                  <span>&middot;</span>
+                  <span>{post.readingTimeMinutes} min</span>
+                </div>
+              </Link>
+            </article>
           ))}
         </div>
       )}
-
-      <Pagination
-        page={paginated.page}
-        totalPages={paginated.totalPages}
-        basePath={`/blog/category/${category}`}
-      />
     </div>
   );
 }
