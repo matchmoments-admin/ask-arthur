@@ -1,36 +1,37 @@
 import type { Verdict } from "@askarthur/types";
 
-const verdictConfig: Record<
-  Verdict,
-  { label: string; bg: string; border: string; text: string }
-> = {
+const VERDICT_CONFIG = {
   SAFE: {
-    label: "Safe",
-    bg: "bg-safe-bg",
-    border: "border-safe-border",
-    text: "text-safe-heading",
+    bg: "bg-[#388E3C]",
+    textColor: "text-[#388E3C]",
+    title: "This Appears Safe",
+    icon: "verified_user",
   },
   SUSPICIOUS: {
-    label: "Suspicious",
-    bg: "bg-warn-bg",
-    border: "border-warn-border",
-    text: "text-warn-heading",
+    bg: "bg-[#F57C00]",
+    textColor: "text-[#F57C00]",
+    title: "Proceed with Caution",
+    icon: "warning",
   },
   HIGH_RISK: {
-    label: "High Risk",
-    bg: "bg-danger-bg",
-    border: "border-danger-border",
-    text: "text-danger-heading",
+    bg: "bg-[#D32F2F]",
+    textColor: "text-[#D32F2F]",
+    title: "High Risk — Likely a Scam",
+    icon: "gpp_bad",
   },
 };
 
-export function VerdictBadge({ verdict }: { verdict: Verdict }) {
-  const config = verdictConfig[verdict];
+export { VERDICT_CONFIG };
+
+/** Colored header bar matching web app ResultCard */
+export function VerdictHeader({ verdict }: { verdict: Verdict }) {
+  const config = VERDICT_CONFIG[verdict];
   return (
-    <span
-      className={`inline-flex items-center rounded-full border px-3 py-1 text-sm font-semibold ${config.bg} ${config.border} ${config.text}`}
-    >
-      {config.label}
-    </span>
+    <div className={`${config.bg} px-4 py-3 flex items-center gap-2`}>
+      <span className="material-symbols-outlined text-white text-xl">{config.icon}</span>
+      <h2 className="text-sm font-bold text-white">
+        {config.title}
+      </h2>
+    </div>
   );
 }

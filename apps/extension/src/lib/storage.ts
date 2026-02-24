@@ -6,7 +6,7 @@ import type { AnalysisResult, ExtensionURLCheckResponse } from "@askarthur/types
 
 export async function getInstallId(): Promise<string | null> {
   const result = await chrome.storage.local.get("installId");
-  return result.installId ?? null;
+  return (result.installId as string) ?? null;
 }
 
 export async function setInstallId(id: string): Promise<void> {
@@ -24,7 +24,7 @@ export interface LastResult {
 
 export async function getLastResult(): Promise<LastResult | null> {
   const result = await chrome.storage.session.get("lastResult");
-  return result.lastResult ?? null;
+  return (result.lastResult as LastResult) ?? null;
 }
 
 export async function setLastResult(data: LastResult): Promise<void> {
@@ -33,7 +33,7 @@ export async function setLastResult(data: LastResult): Promise<void> {
 
 export async function getContextMenuText(): Promise<string | null> {
   const result = await chrome.storage.session.get("contextMenuText");
-  return result.contextMenuText ?? null;
+  return (result.contextMenuText as string) ?? null;
 }
 
 export async function setContextMenuText(text: string | null): Promise<void> {
