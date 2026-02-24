@@ -23,6 +23,9 @@ export const featureFlags = {
 
   /** Phase 4: Threat feed ingestion pipeline + Inngest orchestration */
   dataPipeline: process.env.NEXT_PUBLIC_FF_DATA_PIPELINE === "true",
+
+  /** Newsletter signup form on blog pages */
+  newsletter: process.env.NEXT_PUBLIC_FF_NEWSLETTER === "true",
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;

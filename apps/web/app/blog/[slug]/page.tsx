@@ -6,6 +6,7 @@ import { getPostBySlug, getAllSlugs, getRelatedPosts } from "@/lib/blog";
 import { renderMarkdown } from "@/lib/blogRenderer";
 import CopyLinkButton from "@/components/CopyLinkButton";
 import SubscribeForm from "@/components/SubscribeForm";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 import type { Metadata } from "next";
 
 interface PageProps {
@@ -252,16 +253,24 @@ export default async function BlogPostPage({ params }: PageProps) {
         </p>
         <Link
           href="/"
-          className="inline-block py-3 px-8 bg-deep-navy text-white font-bold text-sm uppercase tracking-widest rounded-[4px] hover:bg-navy transition-colors"
+          className="inline-block py-2.5 px-6 bg-deep-navy text-white font-bold text-xs uppercase tracking-widest rounded-[4px] hover:bg-navy transition-colors"
         >
           Check now
         </Link>
       </section>
 
-      {/* Newsletter */}
-      <section className="mt-12 max-w-md mx-auto">
-        <SubscribeForm />
-      </section>
+      {/* Newsletter — feature-flagged */}
+      {featureFlags.newsletter && (
+        <section className="mt-12 max-w-md mx-auto">
+          <h3 className="text-deep-navy text-lg font-bold mb-1">
+            Stay ahead of scams
+          </h3>
+          <p className="text-slate-500 text-sm mb-4">
+            Weekly alerts delivered to your inbox every Monday.
+          </p>
+          <SubscribeForm variant="inline" />
+        </section>
+      )}
     </article>
   );
 }

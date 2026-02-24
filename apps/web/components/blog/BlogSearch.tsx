@@ -21,28 +21,40 @@ export default function BlogSearch() {
     }
   }
 
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Escape") {
+      setQuery("");
+      setOpen(false);
+    }
+  }
+
   if (!open) {
     return (
       <button
         onClick={() => setOpen(true)}
-        className="text-slate-400 hover:text-deep-navy transition-colors p-1"
+        className="flex items-center gap-1.5 text-slate-400 hover:text-deep-navy transition-colors"
         aria-label="Search blog"
       >
         <span className="material-symbols-outlined text-xl">search</span>
+        <span className="text-sm font-medium">Search</span>
       </button>
     );
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex items-center gap-2">
+    <form onSubmit={handleSubmit} className="relative">
+      <span className="material-symbols-outlined text-lg text-slate-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none">
+        search
+      </span>
       <input
         ref={inputRef}
         type="text"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onBlur={() => !query && setOpen(false)}
+        onKeyDown={handleKeyDown}
         placeholder="Search…"
-        className="w-36 text-sm border-b border-border-light bg-transparent py-1 text-deep-navy placeholder:text-slate-400 focus:border-deep-navy focus:outline-none transition-colors"
+        className="w-48 text-sm pl-8 pr-3 py-1.5 border border-border-light rounded-full bg-white text-deep-navy placeholder:text-slate-400 focus:border-deep-navy focus:outline-none transition-colors"
       />
     </form>
   );

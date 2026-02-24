@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getAllPosts, getCategories } from "@/lib/blog";
 import BlogSearch from "@/components/blog/BlogSearch";
 import SubscribeForm from "@/components/SubscribeForm";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -28,51 +29,71 @@ export default async function BlogPage({ searchParams }: PageProps) {
     getCategories(),
   ]);
 
+  const activeCategory = categories.find((c) => c.slug === category);
+
   return (
     <div>
-      {/* Hero — minimal */}
-      <header className="mb-12">
-        <h1 className="text-deep-navy text-[2.5rem] font-extrabold tracking-tight leading-tight mb-3">
-          Blog
-        </h1>
-        <p className="text-slate-500 text-lg">
-          Scam alerts, protection guides, and product updates.
-        </p>
+      {/* Header */}
+      <header className="flex items-start justify-between mb-10">
+        <div>
+          <h1 className="text-deep-navy text-[2.5rem] font-extrabold tracking-tight leading-tight mb-3">
+            Blog
+          </h1>
+          <p className="text-slate-500 text-lg">
+            Scam alerts, protection guides, and product updates.
+          </p>
+        </div>
+        <Link
+          href="/"
+          className="hidden sm:inline-block py-2.5 px-6 bg-deep-navy text-white font-bold text-xs uppercase tracking-widest rounded-[4px] hover:bg-navy transition-colors mt-2"
+        >
+          Check a message
+        </Link>
       </header>
 
-      {/* Category tabs — horizontal, underline style */}
-      <nav className="flex items-center gap-1 border-b border-border-light mb-10 -mx-1 overflow-x-auto">
-        <Link
-          href="/blog"
-          className={`px-3 py-2.5 text-sm font-medium whitespace-nowrap transition-colors relative ${
-            !category
-              ? "text-deep-navy after:absolute after:bottom-0 after:left-0 after:right-0 after:h-[2px] after:bg-deep-navy"
-              : "text-slate-400 hover:text-deep-navy"
-          }`}
-        >
-          All
-        </Link>
+      {/* Category nav — large heading links */}
+      <nav className="flex flex-wrap items-center gap-x-6 gap-y-2 mb-8">
         {categories.map((cat) => (
           <Link
             key={cat.slug}
             href={`/blog?category=${cat.slug}`}
-            className={`px-3 py-2.5 text-sm font-medium whitespace-nowrap transition-colors relative ${
+            className={`text-2xl md:text-3xl font-bold transition-colors ${
               category === cat.slug
-                ? "text-deep-navy after:absolute after:bottom-0 after:left-0 after:right-0 after:h-[2px] after:bg-deep-navy"
-                : "text-slate-400 hover:text-deep-navy"
+                ? "text-deep-navy"
+                : "text-slate-300 hover:text-deep-navy"
             }`}
           >
             {cat.name}
+            <span className="ml-1 text-lg align-middle">&rarr;</span>
           </Link>
         ))}
-
-        {/* Search — right aligned */}
-        <div className="ml-auto pl-4">
-          <BlogSearch />
-        </div>
       </nav>
 
-      {/* Post list — ultra-minimal, divider style */}
+      {/* Filter bar */}
+      <div className="flex items-center justify-between border-b border-border-light pb-4 mb-8">
+        <div className="text-sm text-slate-500">
+          {activeCategory ? (
+            <span className="flex items-center gap-2">
+              Showing:{" "}
+              <span className="font-semibold text-deep-navy">
+                {activeCategory.name}
+              </span>
+              <Link
+                href="/blog"
+                className="text-slate-400 hover:text-deep-navy transition-colors"
+                aria-label="Clear filter"
+              >
+                &times;
+              </Link>
+            </span>
+          ) : (
+            <span>All posts</span>
+          )}
+        </div>
+        <BlogSearch />
+      </div>
+
+      {/* Post list */}
       {posts.length === 0 ? (
         <div className="py-20 text-center">
           <p className="text-slate-400 text-base">
@@ -82,23 +103,13 @@ export default async function BlogPage({ searchParams }: PageProps) {
       ) : (
         <div className="divide-y divide-border-light">
           {posts.map((post) => (
-            <article key={post.slug} className="py-7 first:pt-0">
+            <article key={post.slug} className="py-6 first:pt-0">
               <Link href={`/blog/${post.slug}`} className="block group">
-                <div className="flex items-center gap-2 mb-2">
-                  {post.categoryName && (
-                    <span className="text-action-teal text-xs font-semibold uppercase tracking-wider">
-                      {post.categoryName}
-                    </span>
-                  )}
-                  {post.product && (
-                    <>
-                      <span className="text-slate-300">&middot;</span>
-                      <span className="text-slate-400 text-xs">
-                        {post.product}
-                      </span>
-                    </>
-                  )}
-                </div>
+                {post.categoryName && (
+                  <span className="text-action-teal text-xs font-semibold uppercase tracking-wider mb-2 block">
+                    {post.categoryName}
+                  </span>
+                )}
 
                 <h2 className="text-deep-navy text-xl font-bold leading-snug mb-1.5 group-hover:text-action-teal transition-colors">
                   {post.title}
@@ -126,26 +137,28 @@ export default async function BlogPage({ searchParams }: PageProps) {
       )}
 
       {/* CTA section */}
-      <section className="mt-16 pt-12 border-t border-border-light">
-        <div className="text-center mb-10">
-          <h2 className="text-deep-navy text-2xl font-bold mb-2">
+      <section className="mt-12 pt-10 border-t border-border-light">
+        <div className="text-center mb-8">
+          <h2 className="text-deep-navy text-xl font-bold mb-2">
             Protect yourself from scams
           </h2>
-          <p className="text-slate-500 text-base mb-6">
+          <p className="text-slate-500 text-base mb-5">
             Free, private, no signup required.
           </p>
           <Link
             href="/"
-            className="inline-block py-3 px-8 bg-deep-navy text-white font-bold text-sm uppercase tracking-widest rounded-[4px] hover:bg-navy transition-colors"
+            className="inline-block py-2.5 px-6 bg-deep-navy text-white font-bold text-xs uppercase tracking-widest rounded-[4px] hover:bg-navy transition-colors"
           >
             Check a message
           </Link>
         </div>
 
-        {/* Newsletter signup */}
-        <div className="max-w-md mx-auto">
-          <SubscribeForm />
-        </div>
+        {/* Newsletter signup — feature-flagged */}
+        {featureFlags.newsletter && (
+          <div className="max-w-md mx-auto">
+            <SubscribeForm variant="inline" />
+          </div>
+        )}
       </section>
     </div>
   );
