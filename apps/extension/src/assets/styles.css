@@ -1,0 +1,42 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-background: #ffffff;
+  --color-foreground: #171717;
+
+  /* Primary */
+  --color-deep-navy: #001F3F;
+  --color-navy: #002B45;
+
+  /* Accent */
+  --color-action-teal: #008A98;
+  --color-action-teal-text: #006B75;
+
+  /* Text */
+  --color-gov-slate: #42526E;
+  --color-slate-500: #64748B;
+  --color-slate-400: #94A3B8;
+
+  /* Borders */
+  --color-border-light: #E2E8F0;
+
+  /* Verdict: Safe */
+  --color-safe-bg: #ECFDF5;
+  --color-safe-border: #A7F3D0;
+  --color-safe-text: #388E3C;
+  --color-safe-heading: #1B5E20;
+
+  /* Verdict: Suspicious */
+  --color-warn-bg: #FFF8E1;
+  --color-warn-border: #FFE082;
+  --color-warn-text: #F57C00;
+  --color-warn-heading: #E65100;
+
+  /* Verdict: High Risk */
+  --color-danger-bg: #FEF2F2;
+  --color-danger-border: #FECACA;
+  --color-danger-text: #D32F2F;
+  --color-danger-heading: #B71C1C;
+
+  --font-sans: "Public Sans", system-ui, sans-serif;
+}

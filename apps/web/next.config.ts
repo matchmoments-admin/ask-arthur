@@ -49,6 +49,15 @@ const nextConfig: NextConfig = {
         source: "/(.*)",
         headers: securityHeaders,
       },
+      {
+        source: "/api/extension/:path*",
+        headers: [
+          { key: "Access-Control-Allow-Origin", value: "*" },
+          { key: "Access-Control-Allow-Methods", value: "GET, POST, OPTIONS" },
+          { key: "Access-Control-Allow-Headers", value: "Content-Type, X-Extension-Secret, X-Extension-Id" },
+          { key: "Access-Control-Max-Age", value: "86400" },
+        ],
+      },
     ];
   },
   async redirects() {

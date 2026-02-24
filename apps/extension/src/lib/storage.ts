@@ -1,0 +1,41 @@
+import type { AnalysisResult, ExtensionURLCheckResponse } from "@askarthur/types";
+
+// Typed wrappers for chrome.storage
+
+// --- chrome.storage.local (persisted across sessions) ---
+
+export async function getInstallId(): Promise<string | null> {
+  const result = await chrome.storage.local.get("installId");
+  return result.installId ?? null;
+}
+
+export async function setInstallId(id: string): Promise<void> {
+  await chrome.storage.local.set({ installId: id });
+}
+
+// --- chrome.storage.session (transient, cleared on browser close) ---
+
+export interface LastResult {
+  type: "url" | "text";
+  urlResult?: ExtensionURLCheckResponse;
+  analysisResult?: AnalysisResult;
+  timestamp: number;
+}
+
+export async function getLastResult(): Promise<LastResult | null> {
+  const result = await chrome.storage.session.get("lastResult");
+  return result.lastResult ?? null;
+}
+
+export async function setLastResult(data: LastResult): Promise<void> {
+  await chrome.storage.session.set({ lastResult: data });
+}
+
+export async function getContextMenuText(): Promise<string | null> {
+  const result = await chrome.storage.session.get("contextMenuText");
+  return result.contextMenuText ?? null;
+}
+
+export async function setContextMenuText(text: string | null): Promise<void> {
+  await chrome.storage.session.set({ contextMenuText: text });
+}

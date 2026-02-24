@@ -62,3 +62,7 @@ apps/mobile/ios/
 *.p8
 *.p12
 *.mobileprovision
+
+# WXT (Chrome extension)
+apps/extension/.wxt/
+apps/extension/dist/

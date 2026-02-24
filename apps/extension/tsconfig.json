@@ -1,0 +1,10 @@
+{
+  "extends": "../../tooling/typescript/base.json",
+  "compilerOptions": {
+    "types": ["wxt/client"],
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "wxt.config.ts"],
+  "exclude": ["node_modules", "dist"]
+}
