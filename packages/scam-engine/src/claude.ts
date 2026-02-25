@@ -9,6 +9,7 @@ import {
   type AnalysisResult,
   type ScammerContacts,
   type InjectionCheckResult,
+  type RedirectChain,
 } from "@askarthur/types";
 
 export { PROMPT_VERSION };
@@ -235,7 +236,8 @@ export function validateResult(parsed: Record<string, unknown>): AnalysisResult 
 export async function analyzeWithClaude(
   text?: string,
   imagesBase64?: string[],
-  mode?: AnalysisMode
+  mode?: AnalysisMode,
+  redirectChains?: RedirectChain[]
 ): Promise<AnalysisResult> {
   // Fail-closed in production, mock in dev
   if (!process.env.ANTHROPIC_API_KEY) {
@@ -311,6 +313,25 @@ export async function analyzeWithClaude(
         text: "Analyze this screenshot for signs of scams, phishing, or fraud.",
       });
     }
+  }
+
+  // Add redirect chain context when available
+  if (redirectChains && redirectChains.length > 0) {
+    const chainSummaries = redirectChains
+      .map((chain) => {
+        const parts = [`Original: ${chain.originalUrl}`, `Final destination: ${chain.finalUrl}`, `Hops: ${chain.hopCount}`];
+        if (chain.isShortened) parts.push("URL SHORTENER detected");
+        if (chain.hasOpenRedirect) parts.push("OPEN REDIRECT detected");
+        if (chain.truncated) parts.push("EXCESSIVE REDIRECTS (chain truncated)");
+        if (chain.error) parts.push(`Error: ${chain.error}`);
+        return parts.join(" | ");
+      })
+      .join("\n");
+
+    content.push({
+      type: "text",
+      text: `URL redirect analysis results:\n${chainSummaries}\n\nPay special attention to mismatches between original domain and final destination, use of URL shorteners, open redirects through legitimate services, and excessive redirect chains.`,
+    });
   }
 
   // Use assistant prefill to force JSON output

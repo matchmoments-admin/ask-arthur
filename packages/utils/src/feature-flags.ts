@@ -26,6 +26,9 @@ export const featureFlags = {
 
   /** Newsletter signup form on blog pages */
   newsletter: process.env.NEXT_PUBLIC_FF_NEWSLETTER === "true",
+
+  /** Resolve URL redirect chains before reputation checking */
+  redirectResolve: process.env.NEXT_PUBLIC_FF_REDIRECT_RESOLVE === "true",
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;

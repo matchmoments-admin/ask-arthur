@@ -28,6 +28,11 @@ vi.mock("@askarthur/scam-engine/safebrowsing", () => ({
   checkURLReputation: vi.fn(() => Promise.resolve([])),
 }));
 
+vi.mock("@askarthur/scam-engine/redirect-resolver", () => ({
+  resolveRedirects: vi.fn(() => Promise.resolve([])),
+  extractFinalUrls: vi.fn(() => []),
+}));
+
 vi.mock("@askarthur/scam-engine/geolocate", () => ({
   geolocateIP: vi.fn(() =>
     Promise.resolve({ region: "AU", countryCode: "AU" })
@@ -265,5 +270,85 @@ describe("/api/analyze input validation", () => {
       makeRequest({ text: "test", mode: "invalid_mode" })
     );
     expect(res.status).toBe(400);
+  });
+});
+
+// ── Redirect integration tests ──
+
+describe("/api/analyze redirect integration", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(checkRateLimit).mockResolvedValue({
+      allowed: true,
+      remaining: 9,
+      resetAt: null,
+    });
+  });
+
+  it("calls resolveRedirects when flag is ON and URLs exist", async () => {
+    // Enable the feature flag
+    const featureFlagsMod = await import("@askarthur/utils/feature-flags");
+    const original = featureFlagsMod.featureFlags.redirectResolve;
+    Object.defineProperty(featureFlagsMod.featureFlags, "redirectResolve", {
+      value: true,
+      writable: true,
+      configurable: true,
+    });
+
+    const { extractURLs } = await import("@askarthur/scam-engine/safebrowsing");
+    vi.mocked(extractURLs).mockReturnValue(["https://bit.ly/test"]);
+
+    const { resolveRedirects } = await import("@askarthur/scam-engine/redirect-resolver");
+    vi.mocked(resolveRedirects).mockResolvedValue([
+      {
+        originalUrl: "https://bit.ly/test",
+        finalUrl: "https://evil.com/phish",
+        hops: [
+          { url: "https://bit.ly/test", statusCode: 301, latencyMs: 50 },
+          { url: "https://evil.com/phish", statusCode: 200, latencyMs: 30 },
+        ],
+        hopCount: 2,
+        isShortened: true,
+        hasOpenRedirect: false,
+        truncated: false,
+      },
+    ]);
+
+    const res = await POST(makeRequest({ text: "Check https://bit.ly/test" }));
+    expect(res.status).toBe(200);
+    expect(resolveRedirects).toHaveBeenCalledWith(["https://bit.ly/test"]);
+
+    const data = await res.json();
+    expect(data.redirects).toBeDefined();
+    expect(data.redirects).toHaveLength(1);
+    expect(data.redirects[0].isShortened).toBe(true);
+
+    // Restore
+    Object.defineProperty(featureFlagsMod.featureFlags, "redirectResolve", {
+      value: original,
+      writable: true,
+      configurable: true,
+    });
+  });
+
+  it("does NOT call resolveRedirects when flag is OFF", async () => {
+    const featureFlagsMod = await import("@askarthur/utils/feature-flags");
+    Object.defineProperty(featureFlagsMod.featureFlags, "redirectResolve", {
+      value: false,
+      writable: true,
+      configurable: true,
+    });
+
+    const { extractURLs } = await import("@askarthur/scam-engine/safebrowsing");
+    vi.mocked(extractURLs).mockReturnValue(["https://bit.ly/test"]);
+
+    const { resolveRedirects } = await import("@askarthur/scam-engine/redirect-resolver");
+
+    const res = await POST(makeRequest({ text: "Check https://bit.ly/test" }));
+    expect(res.status).toBe(200);
+    expect(resolveRedirects).not.toHaveBeenCalled();
+
+    const data = await res.json();
+    expect(data.redirects).toBeUndefined();
   });
 });

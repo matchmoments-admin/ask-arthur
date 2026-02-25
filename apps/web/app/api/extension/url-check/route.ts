@@ -3,6 +3,8 @@ import { z } from "zod";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { normalizeURL } from "@askarthur/scam-engine/url-normalize";
 import { checkURLReputation } from "@askarthur/scam-engine/safebrowsing";
+import { resolveRedirectChain } from "@askarthur/scam-engine/redirect-resolver";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { validateExtensionRequest } from "../_lib/auth";
 import type { ExtensionURLCheckResponse } from "@askarthur/types";
@@ -46,50 +48,89 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 4. Check scam_urls table in Supabase
+    // 4. Resolve redirects when feature flag is on
+    let redirectInfo: { finalUrl: string; hopCount: number; isShortened: boolean } | undefined;
+    let finalNormalized: string | undefined;
+    if (featureFlags.redirectResolve) {
+      const chain = await resolveRedirectChain(parsed.data.url);
+      if (chain.finalUrl !== chain.originalUrl) {
+        redirectInfo = {
+          finalUrl: chain.finalUrl,
+          hopCount: chain.hopCount,
+          isShortened: chain.isShortened,
+        };
+        const finalNorm = normalizeURL(chain.finalUrl);
+        if (finalNorm) {
+          finalNormalized = finalNorm.normalized;
+        }
+      }
+    }
+
+    // 5. Check scam_urls table in Supabase (original + final URL)
     let found = false;
     let threatLevel: "LOW" | "MEDIUM" | "HIGH" | undefined;
     let reportCount: number | undefined;
 
     const supabase = createServiceClient();
     if (supabase) {
-      const { data } = await supabase
-        .from("scam_urls")
-        .select("confidence_level, report_count")
-        .eq("normalized_url", norm.normalized)
-        .eq("is_active", true)
-        .single();
-
-      if (data) {
-        found = true;
-        threatLevel = data.confidence_level;
-        reportCount = data.report_count;
+      const urlsToCheck = [norm.normalized];
+      if (finalNormalized && finalNormalized !== norm.normalized) {
+        urlsToCheck.push(finalNormalized);
       }
-    }
 
-    // 5. If not found in DB, check URL reputation (Safe Browsing + VirusTotal)
-    let safeBrowsing: { isMalicious: boolean; sources: string[] } | undefined;
-    if (!found) {
-      const results = await checkURLReputation([parsed.data.url]);
-      if (results.length > 0 && results[0]) {
-        safeBrowsing = {
-          isMalicious: results[0].isMalicious,
-          sources: results[0].sources,
-        };
-        if (results[0].isMalicious) {
+      for (const normalizedUrl of urlsToCheck) {
+        const { data } = await supabase
+          .from("scam_urls")
+          .select("confidence_level, report_count")
+          .eq("normalized_url", normalizedUrl)
+          .eq("is_active", true)
+          .single();
+
+        if (data) {
           found = true;
-          threatLevel = "HIGH";
+          threatLevel = data.confidence_level;
+          reportCount = data.report_count;
+          break;
         }
       }
     }
 
-    // 6. Return response
+    // 6. If not found in DB, check URL reputation (Safe Browsing + VirusTotal)
+    let safeBrowsing: { isMalicious: boolean; sources: string[] } | undefined;
+    if (!found) {
+      const urlsToCheck = [parsed.data.url];
+      if (redirectInfo && redirectInfo.finalUrl !== parsed.data.url) {
+        urlsToCheck.push(redirectInfo.finalUrl);
+      }
+      const results = await checkURLReputation(urlsToCheck);
+      for (const result of results) {
+        if (result.isMalicious) {
+          safeBrowsing = {
+            isMalicious: true,
+            sources: result.sources,
+          };
+          found = true;
+          threatLevel = "HIGH";
+          break;
+        }
+      }
+      // If none malicious, use first result
+      if (!safeBrowsing && results.length > 0 && results[0]) {
+        safeBrowsing = {
+          isMalicious: results[0].isMalicious,
+          sources: results[0].sources,
+        };
+      }
+    }
+
+    // 7. Return response
     const response: ExtensionURLCheckResponse = {
       found,
       ...(threatLevel && { threatLevel }),
       ...(reportCount && { reportCount }),
       domain: norm.domain,
       ...(safeBrowsing && { safeBrowsing }),
+      ...(redirectInfo && { redirect: redirectInfo }),
     };
 
     return NextResponse.json(response, {

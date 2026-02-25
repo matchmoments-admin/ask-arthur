@@ -6,7 +6,9 @@ import { analyzeWithClaude, detectInjectionAttempt, type Verdict } from "@askart
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { extractContactsFromText } from "@askarthur/scam-engine/phone-normalize";
 import { extractURLs, checkURLReputation } from "@askarthur/scam-engine/safebrowsing";
+import { resolveRedirects, extractFinalUrls } from "@askarthur/scam-engine/redirect-resolver";
 import { geolocateIP } from "@askarthur/scam-engine/geolocate";
+import type { RedirectChain } from "@askarthur/types";
 import { storeVerifiedScam, incrementStats } from "@askarthur/scam-engine/pipeline";
 import { getCachedAnalysis, setCachedAnalysis } from "@askarthur/scam-engine/analysis-cache";
 import { uploadScreenshot } from "@/lib/r2";
@@ -101,10 +103,20 @@ export async function POST(req: NextRequest) {
     // 4. Extract URLs from text for reputation checking
     const urls = text ? extractURLs(text) : [];
 
+    // 4b. Resolve redirect chains when feature flag is on
+    let redirectChains: RedirectChain[] = [];
+    let allUrls = urls;
+    if (featureFlags.redirectResolve && urls.length > 0) {
+      redirectChains = await resolveRedirects(urls);
+      const finalUrls = extractFinalUrls(redirectChains);
+      // Deduplicate: originals + final destinations
+      allUrls = [...new Set([...urls, ...finalUrls])];
+    }
+
     // 5. Run AI analysis + URL reputation checks in parallel
     const [aiResult, urlResults, geo] = await Promise.all([
-      analyzeWithClaude(text, images.length > 0 ? images : undefined, mode),
-      checkURLReputation(urls),
+      analyzeWithClaude(text, images.length > 0 ? images : undefined, mode, redirectChains.length > 0 ? redirectChains : undefined),
+      checkURLReputation(allUrls),
       geolocateIP(ip),
     ]);
     const { region, countryCode } = geo;
@@ -128,7 +140,26 @@ export async function POST(req: NextRequest) {
 
     aiResult.verdict = finalVerdict;
 
-    // 6b. Injection floor — if injection detected, floor verdict at SUSPICIOUS minimum
+    // 6b. Redirect-specific red flags
+    for (const chain of redirectChains) {
+      if (chain.isShortened) {
+        aiResult.redFlags.push(
+          `Shortened URL detected: ${chain.originalUrl} redirects to ${chain.finalUrl}`
+        );
+      }
+      if (chain.hasOpenRedirect) {
+        aiResult.redFlags.push(
+          `Open redirect detected in chain from ${chain.originalUrl}`
+        );
+      }
+      if (chain.truncated) {
+        aiResult.redFlags.push(
+          `Excessive redirect chain (${chain.hopCount}+ hops) from ${chain.originalUrl}`
+        );
+      }
+    }
+
+    // 6c. Injection floor — if injection detected, floor verdict at SUSPICIOUS minimum
     if (injectionCheck.detected) {
       if (finalVerdict === "SAFE") {
         aiResult.verdict = "SUSPICIOUS";
@@ -200,6 +231,7 @@ export async function POST(req: NextRequest) {
         ...(scammerContacts && { scammerContacts }),
         ...(scammerUrls && { scammerUrls }),
         ...(scammerUrls && mode && { inputMode: mode }),
+        ...(redirectChains.length > 0 && { redirects: redirectChains }),
       },
       {
         headers: {

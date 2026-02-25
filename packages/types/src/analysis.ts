@@ -23,6 +23,7 @@ export interface AnalysisResult {
   impersonatedBrand?: string;
   channel?: string;
   scammerContacts?: ScammerContacts;
+  redirects?: RedirectChain[];
 }
 
 export interface InjectionCheckResult {
@@ -39,4 +40,21 @@ export interface PhoneLookupResult {
   carrier: string | null;
   isVoip: boolean;
   riskFlags: string[];
+}
+
+export interface RedirectHop {
+  url: string;
+  statusCode: number;
+  latencyMs: number;
+}
+
+export interface RedirectChain {
+  originalUrl: string;
+  finalUrl: string;
+  hops: RedirectHop[];
+  hopCount: number;
+  isShortened: boolean;
+  hasOpenRedirect: boolean;
+  truncated: boolean;
+  error?: string;
 }

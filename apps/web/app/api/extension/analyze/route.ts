@@ -3,7 +3,10 @@ import { z } from "zod";
 import { waitUntil } from "@vercel/functions";
 import { analyzeWithClaude, detectInjectionAttempt, type Verdict } from "@askarthur/scam-engine/claude";
 import { extractURLs, checkURLReputation } from "@askarthur/scam-engine/safebrowsing";
+import { resolveRedirects, extractFinalUrls } from "@askarthur/scam-engine/redirect-resolver";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 import { getCachedAnalysis, setCachedAnalysis } from "@askarthur/scam-engine/analysis-cache";
+import type { RedirectChain } from "@askarthur/types";
 import { storeVerifiedScam, incrementStats } from "@askarthur/scam-engine/pipeline";
 import { logger } from "@askarthur/utils/logger";
 import { validateExtensionRequest } from "../_lib/auth";
@@ -66,11 +69,21 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 5. Extract URLs + run AI analysis in parallel
+    // 5. Extract URLs + resolve redirects
     const urls = extractURLs(text);
+
+    let redirectChains: RedirectChain[] = [];
+    let allUrls = urls;
+    if (featureFlags.redirectResolve && urls.length > 0) {
+      redirectChains = await resolveRedirects(urls);
+      const finalUrls = extractFinalUrls(redirectChains);
+      allUrls = [...new Set([...urls, ...finalUrls])];
+    }
+
+    // 5b. Run AI analysis + URL reputation checks in parallel
     const [aiResult, urlResults] = await Promise.all([
-      analyzeWithClaude(text),
-      checkURLReputation(urls),
+      analyzeWithClaude(text, undefined, undefined, redirectChains.length > 0 ? redirectChains : undefined),
+      checkURLReputation(allUrls),
     ]);
 
     // 6. Merge verdicts — URL threats escalate AI verdict
