@@ -151,7 +151,7 @@ export default async function BlogPage({ searchParams }: PageProps) {
         </p>
         <Link
           href="/"
-          className="inline-block py-3 px-8 bg-deep-navy text-white font-bold text-sm uppercase tracking-widest rounded-[4px] hover:bg-navy transition-colors"
+          className="block w-full max-w-md mx-auto py-3.5 bg-deep-navy text-white font-bold text-sm uppercase tracking-widest rounded-[4px] hover:bg-navy transition-colors text-center"
         >
           Check a message
         </Link>
