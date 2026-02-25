@@ -29,6 +29,9 @@ export const featureFlags = {
 
   /** Resolve URL redirect chains before reputation checking */
   redirectResolve: process.env.NEXT_PUBLIC_FF_REDIRECT_RESOLVE === "true",
+
+  /** Chrome extension: Gmail email scanning */
+  emailScanning: process.env.NEXT_PUBLIC_FF_EMAIL_SCANNING === "true",
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;

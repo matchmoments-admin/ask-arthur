@@ -7,16 +7,25 @@ export type ExtensionAuthResult =
   | { valid: true; installId: string; remaining: number }
   | { valid: false; error: string; status: number; retryAfter?: string };
 
+// Manual checks: 10/min burst, 50/day
 let _burstLimiter: Ratelimit | null = null;
 let _dailyLimiter: Ratelimit | null = null;
+
+// Email scans: 20/min burst, 200/day (auto-scanning uses more quota)
+let _emailBurstLimiter: Ratelimit | null = null;
+let _emailDailyLimiter: Ratelimit | null = null;
+
+function getRedis() {
+  return new Redis({
+    url: process.env.UPSTASH_REDIS_REST_URL!,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+  });
+}
 
 function getBurstLimiter() {
   if (!_burstLimiter) {
     _burstLimiter = new Ratelimit({
-      redis: new Redis({
-        url: process.env.UPSTASH_REDIS_REST_URL!,
-        token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-      }),
+      redis: getRedis(),
       limiter: Ratelimit.slidingWindow(10, "1 m"),
       prefix: "askarthur:ext:burst",
     });
@@ -27,15 +36,34 @@ function getBurstLimiter() {
 function getDailyLimiter() {
   if (!_dailyLimiter) {
     _dailyLimiter = new Ratelimit({
-      redis: new Redis({
-        url: process.env.UPSTASH_REDIS_REST_URL!,
-        token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-      }),
+      redis: getRedis(),
       limiter: Ratelimit.slidingWindow(50, "24 h"),
       prefix: "askarthur:ext:daily",
     });
   }
   return _dailyLimiter;
+}
+
+function getEmailBurstLimiter() {
+  if (!_emailBurstLimiter) {
+    _emailBurstLimiter = new Ratelimit({
+      redis: getRedis(),
+      limiter: Ratelimit.slidingWindow(20, "1 m"),
+      prefix: "askarthur:ext:email:burst",
+    });
+  }
+  return _emailBurstLimiter;
+}
+
+function getEmailDailyLimiter() {
+  if (!_emailDailyLimiter) {
+    _emailDailyLimiter = new Ratelimit({
+      redis: getRedis(),
+      limiter: Ratelimit.slidingWindow(200, "24 h"),
+      prefix: "askarthur:ext:email:daily",
+    });
+  }
+  return _emailDailyLimiter;
 }
 
 function timingSafeEqual(a: string, b: string): boolean {
@@ -91,8 +119,16 @@ export async function validateExtensionRequest(
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 
+  // Select rate limit buckets based on scan source
+  const scanSource = req.headers.get("x-scan-source");
+  const isEmailScan = scanSource === "email";
+
+  const burstLimiter = isEmailScan ? getEmailBurstLimiter() : getBurstLimiter();
+  const dailyLimiter = isEmailScan ? getEmailDailyLimiter() : getDailyLimiter();
+  const dailyLimit = isEmailScan ? 200 : 50;
+
   // Check burst limit first
-  const burst = await getBurstLimiter().limit(identifier);
+  const burst = await burstLimiter.limit(identifier);
   if (!burst.success) {
     const retryAfter = String(
       Math.ceil((burst.reset - Date.now()) / 1000)
@@ -106,15 +142,14 @@ export async function validateExtensionRequest(
   }
 
   // Check daily limit
-  const daily = await getDailyLimiter().limit(identifier);
+  const daily = await dailyLimiter.limit(identifier);
   if (!daily.success) {
     const retryAfter = String(
       Math.ceil((daily.reset - Date.now()) / 1000)
     );
     return {
       valid: false,
-      error:
-        "Daily limit reached (50 checks). Come back tomorrow — we keep this free for everyone!",
+      error: `Daily limit reached (${dailyLimit} checks). Come back tomorrow — we keep this free for everyone!`,
       status: 429,
       retryAfter,
     };

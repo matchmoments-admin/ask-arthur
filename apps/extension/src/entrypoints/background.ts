@@ -1,5 +1,7 @@
 import { setInstallId, getInstallId, setContextMenuText } from "@/lib/storage";
-import { checkURL, analyzeText, ExtensionApiError } from "@/lib/api";
+import { checkURL, analyzeText, reportScamEmail, ExtensionApiError } from "@/lib/api";
+import { getCachedEmailScan, setCachedEmailScan } from "@/lib/email-cache";
+import type { EmailContent, EmailScanResult } from "@askarthur/types";
 import type { ExtensionMessage, MessageResponse } from "@/lib/types";
 
 export default defineBackground(() => {
@@ -77,7 +79,63 @@ async function handleMessage(
       const installId = await getInstallId();
       return { success: true, data: { installId, ready: !!installId } };
     }
+    case "SCAN_EMAIL": {
+      const { email } = message;
+
+      // Check local cache first
+      const cached = await getCachedEmailScan(email.messageId);
+      if (cached) {
+        return { success: true, data: cached };
+      }
+
+      // Compose email into structured text for Claude analysis
+      const text = composeEmailForAnalysis(email);
+      const { data } = await analyzeText(text, "email");
+
+      const result: EmailScanResult = {
+        messageId: email.messageId,
+        verdict: data.verdict,
+        confidence: data.confidence,
+        summary: data.summary,
+        redFlags: data.redFlags,
+        nextSteps: data.nextSteps,
+        scamType: data.scamType,
+        impersonatedBrand: data.impersonatedBrand,
+        scannedAt: Date.now(),
+      };
+
+      // Cache for future opens
+      await setCachedEmailScan(result);
+      return { success: true, data: result };
+    }
+    case "GET_EMAIL_CACHE": {
+      const cached = await getCachedEmailScan(message.messageId);
+      return { success: true, data: cached };
+    }
+    case "REPORT_EMAIL": {
+      await reportScamEmail(message.report);
+      return { success: true, data: { reported: true } };
+    }
     default:
       return { success: false, error: "Unknown message type" };
   }
+}
+
+function composeEmailForAnalysis(email: EmailContent): string {
+  const parts = [
+    `[EMAIL ANALYSIS]`,
+    `From: ${email.from}`,
+    `Subject: ${email.subject}`,
+    ``,
+    email.body,
+  ];
+
+  if (email.links.length > 0) {
+    parts.push("", `[Links found in email]`);
+    for (const link of email.links.slice(0, 20)) {
+      parts.push(`- ${link}`);
+    }
+  }
+
+  return parts.join("\n").slice(0, 10000);
 }

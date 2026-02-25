@@ -68,11 +68,26 @@ export async function checkURL(
 }
 
 export async function analyzeText(
-  text: string
+  text: string,
+  source?: string
 ): Promise<{ data: AnalysisResult; remaining: number | null }> {
   return request<AnalysisResult>("/analyze", {
     method: "POST",
     body: JSON.stringify({ text }),
+    ...(source && { headers: { "X-Scan-Source": source } }),
+  });
+}
+
+export async function reportScamEmail(report: {
+  senderEmail: string;
+  subject: string;
+  urls: string[];
+  verdict: string;
+  confidence: number;
+}): Promise<{ data: { success: boolean }; remaining: number | null }> {
+  return request<{ success: boolean }>("/report-email", {
+    method: "POST",
+    body: JSON.stringify(report),
   });
 }
 
