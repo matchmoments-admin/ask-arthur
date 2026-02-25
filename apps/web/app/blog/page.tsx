@@ -23,35 +23,44 @@ interface PageProps {
 
 export default async function BlogPage({ searchParams }: PageProps) {
   const { category } = await searchParams;
-  const [posts, categories] = await Promise.all([
-    getAllPosts(category),
+  const [allPosts, categories] = await Promise.all([
+    getAllPosts(),
     getCategories(),
   ]);
 
+  // Count posts per category so we only show categories that have content
+  const categoryCounts = new Map<string, number>();
+  for (const post of allPosts) {
+    if (post.categorySlug) {
+      categoryCounts.set(
+        post.categorySlug,
+        (categoryCounts.get(post.categorySlug) ?? 0) + 1
+      );
+    }
+  }
+  const activeCategories = categories.filter(
+    (c) => (categoryCounts.get(c.slug) ?? 0) > 0
+  );
+
+  const posts = category
+    ? allPosts.filter((p) => p.categorySlug === category)
+    : allPosts;
+
   return (
     <div>
-      {/* ── Hero: title + subtitle on left, headings stacked on right ── */}
+      {/* ── Header ── */}
       <header className="mb-10">
-        <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-6 md:gap-12">
-          {/* Left column — title, subtitle, CTA */}
-          <div className="shrink-0 md:max-w-[200px]">
-            <h1 className="text-deep-navy text-[2rem] font-extrabold tracking-tight leading-tight mb-2">
-              Blog
-            </h1>
-            <p className="text-slate-500 text-sm leading-relaxed mb-4">
-              Scam alerts, protection guides, and product updates.
-            </p>
-            <Link
-              href="/"
-              className="inline-block py-2.5 px-5 bg-deep-navy text-white font-bold text-xs uppercase tracking-widest rounded-[4px] hover:bg-navy transition-colors"
-            >
-              Check a message
-            </Link>
-          </div>
+        <h1 className="text-deep-navy text-[2rem] font-extrabold tracking-tight leading-tight mb-2">
+          Blog
+        </h1>
+        <p className="text-slate-500 text-sm leading-relaxed mb-6">
+          Scam alerts, protection guides, and product updates.
+        </p>
 
-          {/* Right column — large stacked category heading links */}
-          <nav className="flex flex-col items-start md:items-end">
-            {categories.map((cat) => (
+        {/* Stacked category heading links — only categories with posts */}
+        {activeCategories.length > 0 && (
+          <nav className="flex flex-col items-start">
+            {activeCategories.map((cat) => (
               <Link
                 key={cat.slug}
                 href={`/blog?category=${cat.slug}`}
@@ -68,7 +77,7 @@ export default async function BlogPage({ searchParams }: PageProps) {
               </Link>
             ))}
           </nav>
-        </div>
+        )}
       </header>
 
       {/* ── Filter indicator ── */}
@@ -142,7 +151,7 @@ export default async function BlogPage({ searchParams }: PageProps) {
         </p>
         <Link
           href="/"
-          className="inline-block py-2.5 px-5 bg-deep-navy text-white font-bold text-xs uppercase tracking-widest rounded-[4px] hover:bg-navy transition-colors"
+          className="inline-block py-3 px-8 bg-deep-navy text-white font-bold text-sm uppercase tracking-widest rounded-[4px] hover:bg-navy transition-colors"
         >
           Check a message
         </Link>
