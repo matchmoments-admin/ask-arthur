@@ -253,7 +253,7 @@ export default async function BlogPostPage({ params }: PageProps) {
         </p>
         <Link
           href="/"
-          className="inline-block py-2.5 px-6 bg-deep-navy text-white font-bold text-xs uppercase tracking-widest rounded-[4px] hover:bg-navy transition-colors"
+          className="block w-full max-w-md mx-auto py-3.5 bg-deep-navy text-white font-bold text-sm uppercase tracking-widest rounded-[4px] hover:bg-navy transition-colors text-center"
         >
           Check now
         </Link>
