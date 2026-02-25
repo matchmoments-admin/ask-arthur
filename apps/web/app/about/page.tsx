@@ -1,5 +1,6 @@
 import SubscribeForm from "@/components/SubscribeForm";
 import Footer from "@/components/Footer";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 import Nav from "@/components/Nav";
 import ChartsSection from "@/components/charts/ChartsSection";
 import { createServiceClient } from "@askarthur/supabase/server";
@@ -168,7 +169,7 @@ export default async function AboutPage() {
         </section>
 
         {/* Subscribe */}
-        <SubscribeForm />
+        {featureFlags.newsletter && <SubscribeForm />}
       </main>
 
       <Footer />

@@ -1,8 +1,7 @@
 import Link from "next/link";
 import { getAllPosts, getCategories } from "@/lib/blog";
-import BlogSearch from "@/components/blog/BlogSearch";
-import SubscribeForm from "@/components/SubscribeForm";
 import { featureFlags } from "@askarthur/utils/feature-flags";
+import SubscribeForm from "@/components/SubscribeForm";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -29,71 +28,71 @@ export default async function BlogPage({ searchParams }: PageProps) {
     getCategories(),
   ]);
 
-  const activeCategory = categories.find((c) => c.slug === category);
-
   return (
     <div>
-      {/* Header */}
-      <header className="flex items-start justify-between mb-10">
-        <div>
-          <h1 className="text-deep-navy text-[2.5rem] font-extrabold tracking-tight leading-tight mb-3">
-            Blog
-          </h1>
-          <p className="text-slate-500 text-lg">
-            Scam alerts, protection guides, and product updates.
-          </p>
+      {/* ── Hero: title + subtitle on left, headings stacked on right ── */}
+      <header className="mb-10">
+        <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-6 md:gap-12">
+          {/* Left column — title, subtitle, CTA */}
+          <div className="shrink-0 md:max-w-[200px]">
+            <h1 className="text-deep-navy text-[2rem] font-extrabold tracking-tight leading-tight mb-2">
+              Blog
+            </h1>
+            <p className="text-slate-500 text-sm leading-relaxed mb-4">
+              Scam alerts, protection guides, and product updates.
+            </p>
+            <Link
+              href="/"
+              className="inline-block py-2.5 px-5 bg-deep-navy text-white font-bold text-xs uppercase tracking-widest rounded-[4px] hover:bg-navy transition-colors"
+            >
+              Check a message
+            </Link>
+          </div>
+
+          {/* Right column — large stacked category heading links */}
+          <nav className="flex flex-col items-start md:items-end">
+            {categories.map((cat) => (
+              <Link
+                key={cat.slug}
+                href={`/blog?category=${cat.slug}`}
+                className={`text-[2rem] md:text-[2.75rem] font-extrabold tracking-tight leading-[1.2] transition-colors group ${
+                  category === cat.slug
+                    ? "text-deep-navy"
+                    : "text-slate-300 hover:text-deep-navy"
+                }`}
+              >
+                {cat.name}
+                <span className="inline-block ml-1.5 text-[0.6em] transition-transform group-hover:translate-x-1">
+                  →
+                </span>
+              </Link>
+            ))}
+          </nav>
         </div>
-        <Link
-          href="/"
-          className="hidden sm:inline-block py-2.5 px-6 bg-deep-navy text-white font-bold text-xs uppercase tracking-widest rounded-[4px] hover:bg-navy transition-colors mt-2"
-        >
-          Check a message
-        </Link>
       </header>
 
-      {/* Category nav — large heading links */}
-      <nav className="flex flex-wrap items-center gap-x-6 gap-y-2 mb-8">
-        {categories.map((cat) => (
-          <Link
-            key={cat.slug}
-            href={`/blog?category=${cat.slug}`}
-            className={`text-2xl md:text-3xl font-bold transition-colors ${
-              category === cat.slug
-                ? "text-deep-navy"
-                : "text-slate-300 hover:text-deep-navy"
-            }`}
-          >
-            {cat.name}
-            <span className="ml-1 text-lg align-middle">&rarr;</span>
-          </Link>
-        ))}
-      </nav>
-
-      {/* Filter bar */}
-      <div className="flex items-center justify-between border-b border-border-light pb-4 mb-8">
-        <div className="text-sm text-slate-500">
-          {activeCategory ? (
-            <span className="flex items-center gap-2">
-              Showing:{" "}
-              <span className="font-semibold text-deep-navy">
-                {activeCategory.name}
-              </span>
-              <Link
-                href="/blog"
-                className="text-slate-400 hover:text-deep-navy transition-colors"
-                aria-label="Clear filter"
-              >
-                &times;
-              </Link>
+      {/* ── Filter indicator ── */}
+      <div className="flex items-center border-b border-border-light pb-3 mb-8">
+        {category ? (
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-slate-400">Showing:</span>
+            <span className="text-deep-navy font-semibold">
+              {categories.find((c) => c.slug === category)?.name}
             </span>
-          ) : (
-            <span>All posts</span>
-          )}
-        </div>
-        <BlogSearch />
+            <Link
+              href="/blog"
+              className="text-slate-400 hover:text-deep-navy transition-colors"
+              title="Clear filter"
+            >
+              <span className="material-symbols-outlined text-base leading-none">close</span>
+            </Link>
+          </div>
+        ) : (
+          <span className="text-sm text-slate-400">All posts</span>
+        )}
       </div>
 
-      {/* Post list */}
+      {/* ── Post list ── */}
       {posts.length === 0 ? (
         <div className="py-20 text-center">
           <p className="text-slate-400 text-base">
@@ -106,19 +105,16 @@ export default async function BlogPage({ searchParams }: PageProps) {
             <article key={post.slug} className="py-6 first:pt-0">
               <Link href={`/blog/${post.slug}`} className="block group">
                 {post.categoryName && (
-                  <span className="text-action-teal text-xs font-semibold uppercase tracking-wider mb-2 block">
+                  <span className="text-action-teal text-xs font-semibold uppercase tracking-wider block mb-1.5">
                     {post.categoryName}
                   </span>
                 )}
-
-                <h2 className="text-deep-navy text-xl font-bold leading-snug mb-1.5 group-hover:text-action-teal transition-colors">
+                <h2 className="text-deep-navy text-xl font-bold leading-snug mb-1 group-hover:text-action-teal transition-colors">
                   {post.title}
                 </h2>
-
-                <p className="text-slate-500 text-[15px] leading-relaxed mb-3 line-clamp-2">
+                <p className="text-slate-500 text-[15px] leading-relaxed mb-2.5 line-clamp-2">
                   {post.excerpt}
                 </p>
-
                 <div className="flex items-center gap-2 text-xs text-slate-400">
                   <time dateTime={post.publishedAt}>
                     {new Date(post.publishedAt).toLocaleDateString("en-AU", {
@@ -127,7 +123,7 @@ export default async function BlogPage({ searchParams }: PageProps) {
                       year: "numeric",
                     })}
                   </time>
-                  <span>&middot;</span>
+                  <span>·</span>
                   <span>{post.readingTimeMinutes} min</span>
                 </div>
               </Link>
@@ -136,30 +132,36 @@ export default async function BlogPage({ searchParams }: PageProps) {
         </div>
       )}
 
-      {/* CTA section */}
-      <section className="mt-12 pt-10 border-t border-border-light">
-        <div className="text-center mb-8">
-          <h2 className="text-deep-navy text-xl font-bold mb-2">
-            Protect yourself from scams
-          </h2>
-          <p className="text-slate-500 text-base mb-5">
-            Free, private, no signup required.
-          </p>
-          <Link
-            href="/"
-            className="inline-block py-2.5 px-6 bg-deep-navy text-white font-bold text-xs uppercase tracking-widest rounded-[4px] hover:bg-navy transition-colors"
-          >
-            Check a message
-          </Link>
-        </div>
+      {/* ── Bottom CTA ── */}
+      <section className="mt-12 pt-10 border-t border-border-light text-center">
+        <h2 className="text-deep-navy text-xl font-bold mb-1.5">
+          Protect yourself from scams
+        </h2>
+        <p className="text-slate-500 text-sm mb-5">
+          Free, private, no signup required.
+        </p>
+        <Link
+          href="/"
+          className="inline-block py-2.5 px-5 bg-deep-navy text-white font-bold text-xs uppercase tracking-widest rounded-[4px] hover:bg-navy transition-colors"
+        >
+          Check a message
+        </Link>
+      </section>
 
-        {/* Newsletter signup — feature-flagged */}
-        {featureFlags.newsletter && (
+      {/* ── Newsletter (feature-flagged) ── */}
+      {featureFlags.newsletter && (
+        <section className="mt-10 pt-8 border-t border-border-light">
           <div className="max-w-md mx-auto">
+            <h3 className="text-deep-navy text-sm font-bold uppercase tracking-wider mb-1">
+              Get weekly scam alerts
+            </h3>
+            <p className="text-slate-400 text-sm mb-3">
+              Stay ahead of the latest scams — delivered to your inbox every Monday.
+            </p>
             <SubscribeForm variant="inline" />
           </div>
-        )}
-      </section>
+        </section>
+      )}
     </div>
   );
 }
