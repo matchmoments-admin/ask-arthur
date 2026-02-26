@@ -30,10 +30,10 @@ function URLResult({ result }: { result: ExtensionURLCheckResponse }) {
   if (!result.found) {
     // Safe — use the same card structure as web app
     return (
-      <div role="alert" className="rounded-sm border border-slate-200 overflow-hidden">
-        <div className="bg-[#388E3C] px-4 py-3 flex items-center gap-2">
+      <div role="alert" className="rounded-xl card-shadow overflow-hidden">
+        <div className="bg-[#388E3C] px-4 py-3 flex items-center gap-2 rounded-t-xl">
           <span className="material-symbols-outlined text-white text-xl">verified_user</span>
-          <h2 className="text-sm font-bold text-white">No Threats Found</h2>
+          <h2 className="text-sm font-semibold text-white">No Threats Found</h2>
         </div>
         <div className="bg-white px-4 py-4">
           <p className="text-deep-navy text-sm leading-relaxed">
@@ -65,10 +65,10 @@ function URLResult({ result }: { result: ExtensionURLCheckResponse }) {
   const config = VERDICT_CONFIG[verdict];
 
   return (
-    <div role="alert" className="rounded-sm border border-slate-200 overflow-hidden">
-      <div className={`${config.bg} px-4 py-3 flex items-center gap-2`}>
+    <div role="alert" className="rounded-xl card-shadow overflow-hidden">
+      <div className={`${config.bg} px-4 py-3 flex items-center gap-2 rounded-t-xl`}>
         <span className="material-symbols-outlined text-white text-xl">{config.icon}</span>
-        <h2 className="text-sm font-bold text-white">Threat Detected</h2>
+        <h2 className="text-sm font-semibold text-white">Threat Detected</h2>
       </div>
       <div className="bg-white px-4 py-4">
         {result.domain && (
@@ -98,7 +98,7 @@ function TextResult({ result }: { result: AnalysisResult }) {
   const config = VERDICT_CONFIG[result.verdict];
 
   return (
-    <div role="alert" className="rounded-sm border border-slate-200 overflow-hidden">
+    <div role="alert" className="rounded-xl card-shadow overflow-hidden">
       {/* Colored header bar — matches web app ResultCard */}
       <VerdictHeader verdict={result.verdict} />
 
@@ -110,15 +110,15 @@ function TextResult({ result }: { result: AnalysisResult }) {
         {/* Confidence */}
         <div className={`flex items-center gap-2 mb-4 ${config.textColor}`}>
           <span className="material-symbols-outlined text-base">speed</span>
-          <span className="text-xs font-bold uppercase tracking-widest">
+          <span className="text-xs font-semibold">
             {Math.round(result.confidence * 100)}% confidence
           </span>
         </div>
 
-        {/* Red Flags — "What We Found" matching web app */}
+        {/* Red Flags — "What We Found" */}
         {result.redFlags.length > 0 && (
           <div className="mb-4">
-            <h3 className="text-xs font-bold uppercase tracking-widest text-deep-navy mb-2">
+            <h3 className="text-xs font-semibold text-deep-navy mb-2">
               What We Found
             </h3>
             <ul className="space-y-1.5">
@@ -135,10 +135,10 @@ function TextResult({ result }: { result: AnalysisResult }) {
           </div>
         )}
 
-        {/* Next Steps — "What To Do" matching web app */}
+        {/* Next Steps — "What To Do" */}
         {result.nextSteps.length > 0 && (
           <div>
-            <h3 className="text-xs font-bold uppercase tracking-widest text-deep-navy mb-2">
+            <h3 className="text-xs font-semibold text-deep-navy mb-2">
               What To Do
             </h3>
             <ol className="space-y-1.5 list-decimal list-inside">
@@ -151,8 +151,8 @@ function TextResult({ result }: { result: AnalysisResult }) {
           </div>
         )}
 
-        {/* Disclaimer — matches web app */}
-        <div className="mt-4 pt-3 border-t border-slate-200">
+        {/* Disclaimer */}
+        <div className="mt-4 pt-3 border-t border-border-default">
           <p className="text-xs text-slate-400 leading-relaxed">
             This analysis is AI-generated and advisory only. Always exercise
             your own judgment.

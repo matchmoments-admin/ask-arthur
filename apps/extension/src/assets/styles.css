@@ -13,12 +13,19 @@
   --color-action-teal-text: #006B75;
 
   /* Text */
+  --color-text-primary: #1A1D21;
+  --color-text-secondary: #5E6C84;
+  --color-text-tertiary: #8993A4;
   --color-gov-slate: #42526E;
   --color-slate-500: #64748B;
   --color-slate-400: #94A3B8;
 
+  /* Surfaces */
+  --color-surface: #F7F8FA;
+
   /* Borders */
   --color-border-light: #E2E8F0;
+  --color-border-default: hsla(226, 57%, 10%, 0.14);
 
   /* Verdict: Safe */
   --color-safe-bg: #ECFDF5;
@@ -38,7 +45,7 @@
   --color-danger-text: #D32F2F;
   --color-danger-heading: #B71C1C;
 
-  --font-sans: "Public Sans", system-ui, sans-serif;
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
 body {
@@ -47,15 +54,15 @@ body {
   font-family: var(--font-sans);
 }
 
-/* Focus ring for inputs — matches web app */
+/* Focus ring — deep navy */
 textarea:focus,
 input:focus {
   outline: none;
   border-color: var(--color-deep-navy);
-  box-shadow: 0 0 0 3px rgba(0, 31, 63, 0.1);
+  box-shadow: 0 0 0 3px rgba(0, 31, 63, 0.12);
 }
 
-/* Heading letter-spacing — matches web app */
+/* Heading letter-spacing */
 h1, h2, h3 {
   letter-spacing: -0.01em;
 }
@@ -67,6 +74,42 @@ h1, h2, h3 {
 
 .animate-spin {
   animation: spin 1s linear infinite;
+}
+
+/* Slide-up entrance for popup */
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-up {
+  animation: slideUp 180ms ease-out;
+}
+
+/* Fade-in for result cards */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-fade-in {
+  animation: fadeIn 200ms ease-out;
+}
+
+/* CTA glow on hover */
+.cta-glow:hover {
+  box-shadow: 0 0 0 3px rgba(0, 31, 63, 0.15), 0 4px 12px rgba(0, 31, 63, 0.18);
+}
+
+/* Loom-style multi-layer card shadow */
+.card-shadow {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 8px 32px rgba(0, 0, 0, 0.04);
 }
 
 /* Material Symbols — loaded via popup index.html */

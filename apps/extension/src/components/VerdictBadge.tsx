@@ -27,9 +27,9 @@ export { VERDICT_CONFIG };
 export function VerdictHeader({ verdict }: { verdict: Verdict }) {
   const config = VERDICT_CONFIG[verdict];
   return (
-    <div className={`${config.bg} px-4 py-3 flex items-center gap-2`}>
+    <div className={`${config.bg} px-4 py-3 flex items-center gap-2 rounded-t-xl`}>
       <span className="material-symbols-outlined text-white text-xl">{config.icon}</span>
-      <h2 className="text-sm font-bold text-white">
+      <h2 className="text-sm font-semibold text-white">
         {config.title}
       </h2>
     </div>

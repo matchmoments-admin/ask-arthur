@@ -114,40 +114,41 @@ export default function App() {
   };
 
   return (
-    <div className="w-[400px] bg-background text-gov-slate">
+    <div className="w-[380px] bg-background text-gov-slate animate-slide-up">
       {/* Header */}
-      <div className="bg-deep-navy px-5 py-4">
+      <div className="bg-deep-navy px-4 py-3">
         <div className="flex items-center gap-2.5">
           <img src="/icon/48.png" alt="" className="h-7 w-7" />
-          <h1 className="text-lg font-bold text-white">Ask Arthur</h1>
+          <h1 className="text-base font-semibold text-white">Ask Arthur</h1>
         </div>
-        <p className="mt-1 text-xs text-slate-400">
-          AI-powered scam detection
-        </p>
       </div>
 
-      {/* Tab switcher */}
-      <div className="flex border-b border-border-light">
-        <button
-          onClick={() => { setTab("url"); handleReset(); }}
-          className={`flex-1 px-4 py-2.5 text-xs font-bold uppercase tracking-widest transition-colors ${
-            tab === "url"
-              ? "border-b-2 border-action-teal text-action-teal-text"
-              : "text-slate-400 hover:text-gov-slate"
-          }`}
-        >
-          Check URL
-        </button>
-        <button
-          onClick={() => { setTab("text"); handleReset(); }}
-          className={`flex-1 px-4 py-2.5 text-xs font-bold uppercase tracking-widest transition-colors ${
-            tab === "text"
-              ? "border-b-2 border-action-teal text-action-teal-text"
-              : "text-slate-400 hover:text-gov-slate"
-          }`}
-        >
-          Check Text
-        </button>
+      {/* Segmented tab control */}
+      <div className="px-4 pt-3">
+        <div className="flex bg-surface rounded-lg p-1">
+          <button
+            onClick={() => { setTab("url"); handleReset(); }}
+            className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-all ${
+              tab === "url"
+                ? "bg-white text-deep-navy shadow-sm"
+                : "text-slate-400 hover:text-gov-slate"
+            }`}
+          >
+            <span className="material-symbols-outlined text-base">link</span>
+            URL
+          </button>
+          <button
+            onClick={() => { setTab("text"); handleReset(); }}
+            className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-all ${
+              tab === "text"
+                ? "bg-white text-deep-navy shadow-sm"
+                : "text-slate-400 hover:text-gov-slate"
+            }`}
+          >
+            <span className="material-symbols-outlined text-base">chat_bubble_outline</span>
+            Text
+          </button>
+        </div>
       </div>
 
       {/* Content */}
@@ -155,7 +156,7 @@ export default function App() {
         {tab === "url" ? (
           <>
             <div>
-              <label htmlFor="url-input" className="block text-xs font-bold uppercase tracking-widest text-deep-navy mb-1.5">
+              <label htmlFor="url-input" className="block text-xs font-medium text-deep-navy mb-1.5">
                 Website URL
               </label>
               <input
@@ -165,7 +166,7 @@ export default function App() {
                 onChange={(e) => setUrlInput(e.target.value)}
                 placeholder="https://example.com"
                 disabled={loading}
-                className="w-full rounded-sm border-2 border-gray-200 bg-white px-3 py-2.5 text-sm text-deep-navy placeholder:text-slate-400 focus:border-deep-navy transition-colors disabled:opacity-60"
+                className="w-full rounded-xl border border-border-default bg-surface px-3 py-2.5 text-sm text-deep-navy placeholder:text-slate-400 focus:bg-white transition-colors disabled:opacity-60"
                 onKeyDown={(e) => e.key === "Enter" && handleCheckURL()}
               />
             </div>
@@ -173,7 +174,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={handleReset}
-                className="w-full h-11 px-6 bg-deep-navy text-white font-bold uppercase tracking-widest rounded-full hover:bg-navy transition-colors text-sm"
+                className="w-full h-11 px-6 bg-white border border-border-default text-deep-navy font-semibold rounded-xl hover:bg-surface transition-colors text-sm"
               >
                 Check Another
               </button>
@@ -181,7 +182,7 @@ export default function App() {
               <button
                 onClick={handleCheckURL}
                 disabled={loading || !urlInput.trim()}
-                className="w-full h-11 px-6 bg-deep-navy text-white font-bold uppercase tracking-widest rounded-full hover:bg-navy transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                className="w-full h-11 px-6 bg-deep-navy text-white font-semibold rounded-xl cta-glow hover:bg-navy transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
               >
                 {loading ? "Checking..." : "Check Now"}
               </button>
@@ -190,8 +191,8 @@ export default function App() {
         ) : (
           <>
             <div>
-              <label htmlFor="text-input" className="block text-xs font-bold uppercase tracking-widest text-deep-navy mb-1.5">
-                Suspicious Message
+              <label htmlFor="text-input" className="block text-xs font-medium text-deep-navy mb-1.5">
+                Suspicious message
               </label>
               <textarea
                 id="text-input"
@@ -201,7 +202,7 @@ export default function App() {
                 rows={5}
                 maxLength={10000}
                 disabled={loading}
-                className="w-full rounded-sm border-2 border-gray-200 bg-white px-3 py-2.5 text-sm text-deep-navy placeholder:text-slate-400 focus:border-deep-navy transition-colors resize-none disabled:opacity-60"
+                className="w-full rounded-xl border border-border-default bg-surface px-3 py-2.5 text-sm text-deep-navy placeholder:text-slate-400 focus:bg-white transition-colors resize-none disabled:opacity-60"
               />
               <p className="mt-0.5 text-xs text-slate-400">
                 {textInput.length.toLocaleString()}/10,000 characters
@@ -211,7 +212,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={handleReset}
-                className="w-full h-11 px-6 bg-deep-navy text-white font-bold uppercase tracking-widest rounded-full hover:bg-navy transition-colors text-sm"
+                className="w-full h-11 px-6 bg-white border border-border-default text-deep-navy font-semibold rounded-xl hover:bg-surface transition-colors text-sm"
               >
                 Check Another
               </button>
@@ -219,7 +220,7 @@ export default function App() {
               <button
                 onClick={handleAnalyzeText}
                 disabled={loading || !textInput.trim() || textInput.length > 10000}
-                className="w-full h-11 px-6 bg-deep-navy text-white font-bold uppercase tracking-widest rounded-full hover:bg-navy transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                className="w-full h-11 px-6 bg-deep-navy text-white font-semibold rounded-xl cta-glow hover:bg-navy transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
               >
                 {loading ? "Analyzing..." : "Check Now"}
               </button>
@@ -240,32 +241,32 @@ export default function App() {
         )}
 
         {/* Results */}
-        {urlResult && <ResultDisplay type="url" result={urlResult} />}
-        {textResult && <ResultDisplay type="text" result={textResult} />}
+        <div className="animate-fade-in">
+          {urlResult && <ResultDisplay type="url" result={urlResult} />}
+          {textResult && <ResultDisplay type="text" result={textResult} />}
+        </div>
       </div>
 
-      {/* Footer — privacy + remaining checks */}
-      <div className="border-t border-border-light px-4 py-3">
-        <div className="flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-widest text-gov-slate">
-          <span className="material-symbols-outlined text-sm">lock</span>
-          <span className="material-symbols-outlined text-sm">visibility_off</span>
-          We never store your data
-        </div>
-        <div className="flex items-center justify-between mt-2">
+      {/* Footer */}
+      <div className="border-t border-border-default px-4 py-2.5 flex items-center justify-between">
+        <div className="flex items-center gap-1.5 text-xs text-slate-400">
+          <span className="material-symbols-outlined text-sm">shield</span>
+          <span>Private &amp; secure</span>
+          <span className="mx-1">·</span>
           <a
             href="https://askarthur.au"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-[11px] text-slate-400 hover:text-action-teal-text transition-colors"
+            className="hover:text-action-teal-text transition-colors"
           >
             askarthur.au
           </a>
-          {remaining !== null && (
-            <span className="text-[11px] text-slate-400">
-              {remaining} checks remaining
-            </span>
-          )}
         </div>
+        {remaining !== null && (
+          <span className="text-xs text-slate-400">
+            {remaining} left
+          </span>
+        )}
       </div>
     </div>
   );
