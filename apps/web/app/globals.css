@@ -70,6 +70,26 @@ h1, h2, h3 {
   animation: spin 1s linear infinite;
 }
 
+/* QR verdict animations */
+@keyframes verdict-icon-scale-in {
+  0% { transform: scale(0); opacity: 0; }
+  60% { transform: scale(1.15); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes verdict-content-fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-verdict-icon {
+  animation: verdict-icon-scale-in 0.4s ease-out both;
+}
+
+.animate-verdict-content {
+  animation: verdict-content-fade-in 0.3s ease-out 0.2s both;
+}
+
 /* Vaul drawer overlay fade */
 [vaul-overlay] {
   transition: opacity 0.2s ease;

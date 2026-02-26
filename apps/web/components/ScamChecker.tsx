@@ -5,36 +5,13 @@ import { useSearchParams } from "next/navigation";
 import AnalysisProgress from "./AnalysisProgress";
 import ResultCard from "./ResultCard";
 import ScreenshotDrawer from "./ScreenshotDrawer";
-import QrScanner from "./QrScanner";
+import QrScanFlow from "./QrScanFlow";
 import { compressImage } from "@/lib/compressImage";
 import { tryDecodeQR } from "@/lib/qrDecode";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { useMediaAnalysis } from "@/lib/hooks/useMediaAnalysis";
-import type { ScammerContacts } from "@askarthur/types";
 import ScamReportCard from "./ScamReportCard";
-
-type Verdict = "SAFE" | "SUSPICIOUS" | "HIGH_RISK";
-
-interface ScammerUrl {
-  url: string;
-  isMalicious: boolean;
-  sources: string[];
-}
-
-interface AnalysisResponse {
-  verdict: Verdict;
-  confidence: number;
-  summary: string;
-  redFlags: string[];
-  nextSteps: string[];
-  countryCode?: string | null;
-  scammerContacts?: ScammerContacts;
-  scammerUrls?: ScammerUrl[];
-  inputMode?: string;
-  scamType?: string;
-  impersonatedBrand?: string;
-  channel?: string;
-}
+import type { AnalysisResponse } from "@/types/analysis";
 
 type Status = "idle" | "analyzing" | "complete" | "error" | "rate_limited";
 
@@ -239,19 +216,6 @@ export default function ScamChecker() {
     media.reset();
   }
 
-  function handleCameraQrScan(decodedText: string) {
-    setShowQrScanner(false);
-    setInputMode("qrcode");
-    const urlMatch = decodedText.match(/https?:\/\/\S+/);
-    if (urlMatch) {
-      setQrDecodedUrl(urlMatch[0]);
-      setText(urlMatch[0]);
-    } else {
-      setQrDecodedUrl(decodedText);
-      setText(decodedText);
-    }
-  }
-
   // Determine if any analysis (text or media) is active
   const isMediaActive = media.status !== "idle" && media.status !== "complete" && media.status !== "error";
   const isTextActive = status === "analyzing";
@@ -413,10 +377,9 @@ export default function ScamChecker() {
         }}
       />
 
-      <QrScanner
+      <QrScanFlow
         open={showQrScanner}
         onClose={() => setShowQrScanner(false)}
-        onScan={handleCameraQrScan}
       />
 
       {/* Privacy line */}
