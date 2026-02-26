@@ -2,6 +2,7 @@ import { Resend } from "resend";
 import { render } from "@react-email/components";
 import Welcome from "@/emails/Welcome";
 import WeeklyDigest from "@/emails/WeeklyDigest";
+import { signUnsubscribeUrl } from "@/lib/unsubscribe";
 
 function getResendClient() {
   return new Resend(process.env.RESEND_API_KEY);
@@ -22,8 +23,8 @@ const FROM = process.env.RESEND_FROM_EMAIL || "Ask Arthur <alerts@askarthur.au>"
 export async function sendWelcomeEmail(email: string): Promise<void> {
   const resend = getResendClient();
   const html = await render(Welcome({ email }));
-  const unsubscribeUrl = `https://askarthur.au/unsubscribe?email=${encodeURIComponent(email)}`;
-  const oneClickUrl = `https://askarthur.au/api/unsubscribe-one-click?email=${encodeURIComponent(email)}`;
+  const unsubscribeUrl = signUnsubscribeUrl(email, "https://askarthur.au/unsubscribe");
+  const oneClickUrl = signUnsubscribeUrl(email, "https://askarthur.au/api/unsubscribe-one-click");
 
   await resend.emails.send({
     from: FROM,
@@ -82,8 +83,8 @@ export async function sendWeeklyDigest(
     const batch = emails.slice(i, i + 50);
     await Promise.allSettled(
       batch.map((email) => {
-        const unsubscribeUrl = `https://askarthur.au/unsubscribe?email=${encodeURIComponent(email)}`;
-        const oneClickUrl = `https://askarthur.au/api/unsubscribe-one-click?email=${encodeURIComponent(email)}`;
+        const unsubscribeUrl = signUnsubscribeUrl(email, "https://askarthur.au/unsubscribe");
+        const oneClickUrl = signUnsubscribeUrl(email, "https://askarthur.au/api/unsubscribe-one-click");
         return resend.emails.send({
           from: FROM,
           to: email,

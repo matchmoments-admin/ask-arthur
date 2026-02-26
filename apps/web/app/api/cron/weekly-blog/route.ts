@@ -62,9 +62,7 @@ export async function GET(req: NextRequest) {
 
     // Notify admin that a new post needs review (fire-and-forget)
     if (process.env.ADMIN_EMAIL && process.env.RESEND_API_KEY) {
-      const adminUrl = process.env.ADMIN_SECRET
-        ? `https://askarthur.au/admin/blog?secret=${process.env.ADMIN_SECRET}`
-        : "https://askarthur.au/admin/blog";
+      const adminUrl = "https://askarthur.au/admin/blog";
 
       const resend = new Resend(process.env.RESEND_API_KEY);
       resend.emails

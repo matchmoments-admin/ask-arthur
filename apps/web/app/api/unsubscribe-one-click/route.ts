@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@askarthur/supabase/server";
+import { verifyUnsubscribeToken } from "@/lib/unsubscribe";
 import { logger } from "@askarthur/utils/logger";
 
 // RFC 8058 one-click unsubscribe endpoint
 // Email clients POST to this URL to unsubscribe the user
 export async function POST(req: NextRequest) {
   const email = req.nextUrl.searchParams.get("email");
-  if (!email) {
-    return NextResponse.json({ error: "Missing email" }, { status: 400 });
+  const token = req.nextUrl.searchParams.get("token");
+
+  // Always return 200 per RFC 8058 — don't reveal subscription status
+  if (!email || !token || !verifyUnsubscribeToken(email, token)) {
+    return new NextResponse(null, { status: 200 });
   }
 
   const supabase = createServiceClient();
@@ -22,7 +26,6 @@ export async function POST(req: NextRequest) {
 
   if (error) {
     logger.error("One-click unsubscribe error", { error: String(error) });
-    return NextResponse.json({ error: "Failed to unsubscribe" }, { status: 500 });
   }
 
   return new NextResponse(null, { status: 200 });

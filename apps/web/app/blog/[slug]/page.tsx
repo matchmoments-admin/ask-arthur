@@ -72,20 +72,47 @@ export default async function BlogPostPage({ params }: PageProps) {
     },
   });
 
+  const breadcrumbItems = [
+    { "@type": "ListItem", position: 1, name: "Home", item: "https://askarthur.au/" },
+    { "@type": "ListItem", position: 2, name: "Blog", item: "https://askarthur.au/blog" },
+  ];
+  if (post.categoryName && post.categorySlug) {
+    breadcrumbItems.push({
+      "@type": "ListItem",
+      position: 3,
+      name: post.categoryName,
+      item: `https://askarthur.au/blog?category=${post.categorySlug}`,
+    });
+  }
+  breadcrumbItems.push({
+    "@type": "ListItem",
+    position: breadcrumbItems.length + 1,
+    name: post.title,
+    item: `https://askarthur.au/blog/${slug}`,
+  });
+
   const jsonLd = {
     "@context": "https://schema.org",
-    "@type": "Article",
-    headline: post.title,
-    description: post.metaDescription || post.excerpt,
-    author: { "@type": "Organization", name: "Ask Arthur" },
-    datePublished: post.publishedAt,
-    ...(post.updatedAt ? { dateModified: post.updatedAt } : {}),
-    publisher: {
-      "@type": "Organization",
-      name: "Ask Arthur",
-      url: "https://askarthur.au",
-    },
-    ...(post.heroImageUrl && { image: post.heroImageUrl }),
+    "@graph": [
+      {
+        "@type": "Article",
+        headline: post.title,
+        description: post.metaDescription || post.excerpt,
+        author: { "@type": "Organization", name: "Ask Arthur" },
+        datePublished: post.publishedAt,
+        ...(post.updatedAt ? { dateModified: post.updatedAt } : {}),
+        publisher: {
+          "@type": "Organization",
+          name: "Ask Arthur",
+          url: "https://askarthur.au",
+        },
+        ...(post.heroImageUrl && { image: post.heroImageUrl }),
+      },
+      {
+        "@type": "BreadcrumbList",
+        itemListElement: breadcrumbItems,
+      },
+    ],
   };
 
   return (

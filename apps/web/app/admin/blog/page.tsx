@@ -2,17 +2,11 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { getCategories } from "@/lib/blog";
+import { requireAdmin, verifyAdminToken, COOKIE_NAME, MAX_AGE } from "@/lib/adminAuth";
+import { cookies } from "next/headers";
 
-interface PageProps {
-  searchParams: Promise<{ secret?: string }>;
-}
-
-export default async function AdminBlogPage({ searchParams }: PageProps) {
-  const { secret } = await searchParams;
-
-  if (!process.env.ADMIN_SECRET || secret !== process.env.ADMIN_SECRET) {
-    redirect("/");
-  }
+export default async function AdminBlogPage() {
+  await requireAdmin();
 
   const supabase = createServiceClient();
   if (!supabase) {
@@ -29,11 +23,26 @@ export default async function AdminBlogPage({ searchParams }: PageProps) {
     getCategories(),
   ]);
 
+  async function logout() {
+    "use server";
+    const cookieStore = await cookies();
+    cookieStore.set(COOKIE_NAME, "", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      path: "/admin",
+      maxAge: 0,
+    });
+    redirect("/admin/login");
+  }
+
   async function updatePost(formData: FormData) {
     "use server";
 
-    const adminSecret = formData.get("secret") as string;
-    if (adminSecret !== process.env.ADMIN_SECRET) return;
+    // Validate admin cookie
+    const cookieStore = await cookies();
+    const token = cookieStore.get(COOKIE_NAME)?.value;
+    if (!token || !verifyAdminToken(token)) return;
 
     const postId = formData.get("postId") as string;
     const status = formData.get("status") as string;
@@ -71,7 +80,17 @@ export default async function AdminBlogPage({ searchParams }: PageProps) {
 
   return (
     <div className="max-w-4xl mx-auto py-10 px-5">
-      <h1 className="text-deep-navy text-2xl font-bold mb-6">Blog Admin</h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-deep-navy text-2xl font-bold">Blog Admin</h1>
+        <form action={logout}>
+          <button
+            type="submit"
+            className="text-sm text-slate-400 hover:text-danger-text transition-colors"
+          >
+            Sign out
+          </button>
+        </form>
+      </div>
 
       <div className="space-y-4">
         {(posts || []).map((post) => {
@@ -101,7 +120,6 @@ export default async function AdminBlogPage({ searchParams }: PageProps) {
               </div>
 
               <form action={updatePost} className="space-y-3">
-                <input type="hidden" name="secret" value={secret || ""} />
                 <input type="hidden" name="postId" value={post.id} />
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

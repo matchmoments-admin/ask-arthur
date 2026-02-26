@@ -17,6 +17,13 @@ export type { Verdict, AnalysisMode, AnalysisResult, ScammerContacts, InjectionC
 
 const VALID_VERDICTS: readonly string[] = ["SAFE", "SUSPICIOUS", "HIGH_RISK"];
 
+/** Strip invisible Unicode characters that can bypass prompt injection detection */
+export function sanitizeUnicode(text: string): string {
+  return text
+    .replace(/[\u200B\u200C\u200D\uFEFF\u2060\u2062-\u2064\u{E0000}-\u{E007F}]/gu, "")
+    .normalize("NFC");
+}
+
 /** Escape XML-sensitive characters in user input to prevent delimiter breakout */
 export function escapeXml(text: string): string {
   return text
@@ -256,8 +263,9 @@ export async function analyzeWithClaude(
     // Generate random nonce for delimiter tags to prevent breakout attacks
     const nonce = crypto.randomUUID().slice(0, 8);
     const tag = `user_input_${nonce}`;
-    // Scrub PII before sending to external API (privacy compliance)
-    const scrubbedText = scrubPII(text);
+    // Strip invisible Unicode chars → scrub PII → escape XML delimiters
+    const sanitizedText = sanitizeUnicode(text);
+    const scrubbedText = scrubPII(sanitizedText);
     const escapedText = escapeXml(scrubbedText);
 
     // Sandwich defense: explicit instruction before AND after user content
