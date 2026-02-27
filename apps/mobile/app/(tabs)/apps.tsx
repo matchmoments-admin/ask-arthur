@@ -10,7 +10,7 @@ import {
   RefreshControl,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { Shield, Lock, Search } from "lucide-react-native";
 import { scanInstalledApps, type AppScanResult, type RiskLevel } from "@/modules/app-scanner";
 import { AppRiskCard } from "@/components/AppRiskCard";
 import { PermissionEducationHub } from "@/components/PermissionEducationHub";
@@ -69,7 +69,7 @@ function AndroidScanner() {
     <SafeAreaView style={styles.container} edges={["bottom"]}>
       {!hasScanned ? (
         <View style={styles.emptyState}>
-          <Ionicons name="shield-outline" size={64} color={Colors.primary} />
+          <Shield size={64} color={Colors.primary} />
           <Text style={styles.emptyTitle}>App Permission Scanner</Text>
           <Text style={styles.emptyDescription}>
             Scan your installed apps to find potentially dangerous permission
@@ -83,7 +83,7 @@ function AndroidScanner() {
             />
           </View>
           <View style={styles.privacyBanner}>
-            <Ionicons name="lock-closed" size={14} color={Colors.textSecondary} />
+            <Lock size={14} color={Colors.textSecondary} />
             <Text style={styles.privacyText}>
               Your app list stays on your device
             </Text>
@@ -114,7 +114,7 @@ function AndroidScanner() {
 
           {/* Search */}
           <View style={styles.searchContainer}>
-            <Ionicons name="search" size={18} color={Colors.textSecondary} />
+            <Search size={18} color={Colors.textSecondary} />
             <TextInput
               style={styles.searchInput}
               placeholder="Search apps..."
@@ -140,7 +140,7 @@ function AndroidScanner() {
           />
 
           <View style={styles.privacyBannerBottom}>
-            <Ionicons name="lock-closed" size={12} color={Colors.textSecondary} />
+            <Lock size={12} color={Colors.textSecondary} />
             <Text style={styles.privacyTextSmall}>
               Your app list never leaves your device
             </Text>

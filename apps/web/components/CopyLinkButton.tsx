@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Check, Link } from "lucide-react";
 
 export default function CopyLinkButton() {
   const [copied, setCopied] = useState(false);
@@ -20,9 +21,7 @@ export default function CopyLinkButton() {
       onClick={handleCopy}
       className="text-deep-navy font-medium hover:text-action-teal transition-colors inline-flex items-center gap-1"
     >
-      <span className="material-symbols-outlined text-base">
-        {copied ? "check" : "link"}
-      </span>
+      {copied ? <Check size={16} /> : <Link size={16} />}
       <span>{copied ? "Copied" : "Copy link"}</span>
     </button>
   );

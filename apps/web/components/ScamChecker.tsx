@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useSearchParams } from "next/navigation";
+import { X, ScanLine, Paperclip, Mic, Lock, EyeOff } from "lucide-react";
 import AnalysisProgress from "./AnalysisProgress";
 import ResultCard from "./ResultCard";
 import ScreenshotDrawer from "./ScreenshotDrawer";
@@ -259,7 +260,7 @@ export default function ScamChecker() {
                     aria-label={`Remove image ${i + 1}`}
                     className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-white border border-gray-300 rounded-full flex items-center justify-center text-slate-400 hover:text-gov-slate hover:bg-slate-100 transition-colors"
                   >
-                    <span className="material-symbols-outlined text-xs">close</span>
+                    <X size={12} />
                   </button>
                 </div>
               ))}
@@ -269,7 +270,7 @@ export default function ScamChecker() {
           {/* QR code success notice */}
           {inputMode === "qrcode" && qrDecodedUrl && !qrError && (
             <div className="flex items-center gap-2 px-4 pt-2 text-sm text-action-teal font-medium">
-              <span className="material-symbols-outlined text-base">qr_code_scanner</span>
+              <ScanLine size={16} />
               {qrDecodedUrl.startsWith("http") ? "QR code detected \u2014 link extracted for checking" : "QR code detected \u2014 text extracted for checking"}
             </div>
           )}
@@ -277,7 +278,7 @@ export default function ScamChecker() {
           {/* QR code error notice */}
           {inputMode === "qrcode" && qrError && (
             <div className="flex items-center gap-2 px-4 pt-2 text-sm text-red-600 font-medium">
-              <span className="material-symbols-outlined text-base">qr_code_scanner</span>
+              <ScanLine size={16} />
               {qrError}
             </div>
           )}
@@ -309,7 +310,7 @@ export default function ScamChecker() {
                   className="w-11 h-11 flex items-center justify-center rounded-full text-gov-slate hover:text-deep-navy hover:bg-slate-100 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   aria-label="Attach screenshot"
                 >
-                  <span className="material-symbols-outlined text-xl">attach_file</span>
+                  <Paperclip size={20} />
                 </button>
                 {images.length > 0 && (
                   <span className="absolute -top-1 -right-1 w-5 h-5 bg-action-teal text-white text-[10px] font-bold rounded-full flex items-center justify-center pointer-events-none">
@@ -327,7 +328,7 @@ export default function ScamChecker() {
                   className="w-11 h-11 flex items-center justify-center rounded-full text-gov-slate hover:text-deep-navy hover:bg-slate-100 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   aria-label="Upload audio recording"
                 >
-                  <span className="material-symbols-outlined text-xl">mic</span>
+                  <Mic size={20} />
                 </button>
               )}
             </div>
@@ -383,8 +384,8 @@ export default function ScamChecker() {
 
       {/* Privacy line */}
       <div className="flex items-center justify-center gap-2 mt-4 text-xs font-bold uppercase tracking-widest text-gov-slate">
-        <span className="material-symbols-outlined text-sm">lock</span>
-        <span className="material-symbols-outlined text-sm">visibility_off</span>
+        <Lock size={14} />
+        <EyeOff size={14} />
         We never store your data
       </div>
       <p className="text-[11px] text-slate-400 text-center max-w-md mx-auto mt-1.5">

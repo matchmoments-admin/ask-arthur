@@ -1,5 +1,8 @@
 "use client";
 
+import type { LucideIcon } from "lucide-react";
+import { CheckCircle, TriangleAlert, XCircle, CircleAlert, MinusCircle } from "lucide-react";
+
 interface AuditCheckRowProps {
   label: string;
   status: string;
@@ -8,12 +11,12 @@ interface AuditCheckRowProps {
   maxScore: number;
 }
 
-const STATUS_CONFIG: Record<string, { icon: string; color: string; bg: string }> = {
-  pass: { icon: "check_circle", color: "text-green-700", bg: "bg-green-50" },
-  warn: { icon: "warning", color: "text-amber-600", bg: "bg-amber-50" },
-  fail: { icon: "cancel", color: "text-red-600", bg: "bg-red-50" },
-  error: { icon: "error", color: "text-slate-400", bg: "bg-slate-50" },
-  skipped: { icon: "remove_circle_outline", color: "text-slate-400", bg: "bg-slate-50" },
+const STATUS_CONFIG: Record<string, { icon: LucideIcon; color: string; bg: string }> = {
+  pass: { icon: CheckCircle, color: "text-green-700", bg: "bg-green-50" },
+  warn: { icon: TriangleAlert, color: "text-amber-600", bg: "bg-amber-50" },
+  fail: { icon: XCircle, color: "text-red-600", bg: "bg-red-50" },
+  error: { icon: CircleAlert, color: "text-slate-400", bg: "bg-slate-50" },
+  skipped: { icon: MinusCircle, color: "text-slate-400", bg: "bg-slate-50" },
 };
 
 export default function AuditCheckRow({
@@ -27,9 +30,7 @@ export default function AuditCheckRow({
 
   return (
     <div className={`flex items-start gap-3 px-3 py-2.5 rounded-lg ${config.bg}`}>
-      <span className={`material-symbols-outlined text-lg mt-0.5 flex-shrink-0 ${config.color}`}>
-        {config.icon}
-      </span>
+      <config.icon className={`mt-0.5 flex-shrink-0 ${config.color}`} size={18} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-2">
           <span className="text-sm font-semibold text-deep-navy">{label}</span>

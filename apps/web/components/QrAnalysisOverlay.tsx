@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import type { LucideIcon } from "lucide-react";
+import { ShieldCheck, TriangleAlert, ShieldAlert, CheckCircle, Clock, Circle, CircleAlert, ExternalLink, BadgeCheck } from "lucide-react";
 import { Drawer } from "vaul";
 import type { AnalysisResponse } from "@/types/analysis";
 import { getOfficialBrand } from "@/lib/officialBrands";
@@ -14,26 +16,26 @@ interface QrAnalysisOverlayProps {
   onScanAnother: () => void;
 }
 
-const VERDICT_CONFIG = {
+const VERDICT_CONFIG: Record<string, { icon: LucideIcon; iconColor: string; iconBg: string; title: string }> = {
   SAFE: {
-    icon: "verified_user",
+    icon: ShieldCheck,
     iconColor: "text-[#388E3C]",
     iconBg: "bg-safe-bg",
     title: "This Appears Safe",
   },
   SUSPICIOUS: {
-    icon: "warning",
+    icon: TriangleAlert,
     iconColor: "text-[#F57C00]",
     iconBg: "bg-warn-bg",
     title: "Proceed with Caution",
   },
   HIGH_RISK: {
-    icon: "gpp_bad",
+    icon: ShieldAlert,
     iconColor: "text-[#D32F2F]",
     iconBg: "bg-danger-bg",
     title: "High Risk — Likely a Scam",
   },
-} as const;
+};
 
 const ANALYSIS_STEPS = [
   "Decoding QR content...",
@@ -141,9 +143,13 @@ export default function QrAnalysisOverlay({
                         i <= analysisStep ? "opacity-100" : "opacity-30"
                       }`}
                     >
-                      <span className="material-symbols-outlined text-lg text-action-teal">
-                        {i < analysisStep ? "check_circle" : i === analysisStep ? "pending" : "radio_button_unchecked"}
-                      </span>
+                      {i < analysisStep ? (
+                        <CheckCircle className="text-action-teal" size={18} />
+                      ) : i === analysisStep ? (
+                        <Clock className="text-action-teal" size={18} />
+                      ) : (
+                        <Circle className="text-action-teal" size={18} />
+                      )}
                       <span className="text-gov-slate text-base">{label}</span>
                     </div>
                   ))}
@@ -160,7 +166,7 @@ export default function QrAnalysisOverlay({
             {step === "error" && (
               <div className="flex flex-col items-center gap-4 pb-6">
                 <div className="w-12 h-12 rounded-full bg-danger-bg flex items-center justify-center">
-                  <span className="material-symbols-outlined text-2xl text-[#D32F2F]">error</span>
+                  <CircleAlert className="text-[#D32F2F]" size={24} />
                 </div>
                 <p className="text-deep-navy text-base text-center">{errorMsg}</p>
                 <div className="flex flex-col gap-3 w-full">
@@ -229,9 +235,7 @@ function VerdictContent({
       <div
         className={`w-14 h-14 rounded-full ${config.iconBg} flex items-center justify-center animate-verdict-icon`}
       >
-        <span className={`material-symbols-outlined text-3xl ${config.iconColor}`}>
-          {config.icon}
-        </span>
+        <config.icon className={config.iconColor} size={30} />
       </div>
 
       {/* Title */}
@@ -281,7 +285,7 @@ function VerdictContent({
                   rel="noopener noreferrer"
                   className="h-12 px-6 bg-[#388E3C] text-white font-bold uppercase tracking-widest rounded-full hover:opacity-90 transition-opacity text-sm flex items-center justify-center gap-2"
                 >
-                  <span className="material-symbols-outlined text-lg">open_in_new</span>
+                  <ExternalLink size={18} />
                   Visit Link
                 </a>
               )}
@@ -323,7 +327,7 @@ function VerdictContent({
               rel="noopener noreferrer"
               className="h-12 px-6 text-gov-slate font-bold uppercase tracking-widest rounded-full border-2 border-slate-200 hover:bg-slate-50 transition-colors text-sm flex items-center justify-center gap-2"
             >
-              <span className="material-symbols-outlined text-lg">open_in_new</span>
+              <ExternalLink size={18} />
               Visit Anyway
             </a>
           )}
@@ -347,7 +351,7 @@ function VerdictContent({
               rel="noopener noreferrer"
               className="h-12 px-6 bg-[#388E3C] text-white font-bold uppercase tracking-widest rounded-full hover:opacity-90 transition-opacity text-sm flex items-center justify-center gap-2"
             >
-              <span className="material-symbols-outlined text-lg">verified</span>
+              <BadgeCheck size={18} />
               Visit the real {officialBrand.label}
             </a>
           )}

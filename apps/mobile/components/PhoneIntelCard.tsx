@@ -1,5 +1,5 @@
 import { View, Text, StyleSheet } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Phone, Smartphone, Cpu, Globe, User, CircleAlert } from "lucide-react-native";
 import { Colors, VerdictColors } from "@/constants/colors";
 import { Fonts } from "@/constants/fonts";
 import type { PhoneLookupResult, PhoneRiskLevel } from "@askarthur/types";
@@ -56,7 +56,7 @@ export function PhoneIntelCard({ lookup }: PhoneIntelCardProps) {
     <View style={styles.card}>
       {/* Header */}
       <View style={styles.header}>
-        <Ionicons name="call" size={18} color={Colors.navy} />
+        <Phone size={18} color={Colors.navy} />
         <Text style={styles.headerText}>Phone Risk Report Card</Text>
       </View>
 
@@ -77,22 +77,22 @@ export function PhoneIntelCard({ lookup }: PhoneIntelCardProps) {
       {/* Signal Grid (2x2) */}
       <View style={styles.grid}>
         <View style={styles.gridCell}>
-          <Ionicons name="phone-portrait-outline" size={20} color={Colors.textSecondary} />
+          <Smartphone size={20} color={Colors.textSecondary} />
           <Text style={styles.cellLabel}>Line Type</Text>
           <Text style={styles.cellValue}>{formatLineType(lookup.lineType)}</Text>
         </View>
         <View style={styles.gridCell}>
-          <Ionicons name="hardware-chip-outline" size={20} color={Colors.textSecondary} />
+          <Cpu size={20} color={Colors.textSecondary} />
           <Text style={styles.cellLabel}>Carrier</Text>
           <Text style={styles.cellValue} numberOfLines={1}>{lookup.carrier || "Unknown"}</Text>
         </View>
         <View style={styles.gridCell}>
-          <Ionicons name="globe-outline" size={20} color={Colors.textSecondary} />
+          <Globe size={20} color={Colors.textSecondary} />
           <Text style={styles.cellLabel}>Country</Text>
           <Text style={styles.cellValue}>{lookup.countryCode || "Unknown"}</Text>
         </View>
         <View style={styles.gridCell}>
-          <Ionicons name="person-outline" size={20} color={Colors.textSecondary} />
+          <User size={20} color={Colors.textSecondary} />
           <Text style={styles.cellLabel}>Caller</Text>
           <Text style={styles.cellValue} numberOfLines={1}>{lookup.callerName || "Not Reg."}</Text>
         </View>
@@ -103,7 +103,7 @@ export function PhoneIntelCard({ lookup }: PhoneIntelCardProps) {
         <View style={styles.warnings}>
           {warningFlags.map((flag, i) => (
             <View key={i} style={styles.warningRow}>
-              <Ionicons name="alert-circle" size={16} color="#F57C00" />
+              <CircleAlert size={16} color="#F57C00" />
               <Text style={styles.warningText}>{formatRiskFlag(flag)}</Text>
             </View>
           ))}

@@ -1,5 +1,5 @@
 import { View, Text, StyleSheet, ScrollView } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Flag, ArrowRightCircle } from "lucide-react-native";
 import { Colors } from "@/constants/colors";
 import { Fonts } from "@/constants/fonts";
 import { VerdictBadge } from "./VerdictBadge";
@@ -31,7 +31,7 @@ export function AnalysisResultView({ result, scrollable = true }: AnalysisResult
       {result.redFlags.length > 0 && (
         <View style={styles.card}>
           <View style={styles.sectionHeader}>
-            <Ionicons name="flag" size={18} color={Colors.highRisk} />
+            <Flag size={18} color={Colors.highRisk} />
             <Text style={styles.sectionTitle}>Red Flags</Text>
           </View>
           {result.redFlags.map((flag, i) => (
@@ -46,7 +46,7 @@ export function AnalysisResultView({ result, scrollable = true }: AnalysisResult
       {result.nextSteps.length > 0 && (
         <View style={styles.card}>
           <View style={styles.sectionHeader}>
-            <Ionicons name="arrow-forward-circle" size={18} color={Colors.primary} />
+            <ArrowRightCircle size={18} color={Colors.primary} />
             <Text style={styles.sectionTitle}>What to Do</Text>
           </View>
           {result.nextSteps.map((step, i) => (

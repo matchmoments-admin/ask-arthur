@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { X } from "lucide-react";
 import { getAllPosts, getCategories } from "@/lib/blog";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import SubscribeForm from "@/components/SubscribeForm";
@@ -93,7 +94,7 @@ export default async function BlogPage({ searchParams }: PageProps) {
               className="text-slate-400 hover:text-deep-navy transition-colors"
               title="Clear filter"
             >
-              <span className="material-symbols-outlined text-base leading-none">close</span>
+              <X size={16} />
             </Link>
           </div>
         ) : (

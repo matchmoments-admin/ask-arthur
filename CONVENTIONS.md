@@ -138,14 +138,27 @@ import { verifyAdminToken } from "@/lib/adminAuth";
 - `"use client"` directive only when needed (interactivity, hooks, browser APIs)
 - `ssr: false` in `next/dynamic` is NOT allowed in Server Components
 
-### Material Symbols Icons
+### Icons — Lucide
 
-This project uses [Google Material Symbols](https://fonts.google.com/icons) with a selective `icon_names` parameter in the Google Fonts URL (`apps/web/app/layout.tsx`). Only icons listed in that URL will render — unlisted icons show as fallback text (the icon name in uppercase).
+All apps use [Lucide](https://lucide.dev) for icons:
+- **Web + Extension:** `lucide-react` — inline SVG components, tree-shakeable
+- **Mobile:** `lucide-react-native` — uses `color` prop instead of className
 
-**When adding a new icon:**
-1. Find the icon name at [fonts.google.com/icons](https://fonts.google.com/icons)
-2. Open `apps/web/app/layout.tsx` and add the icon name to the `icon_names=` parameter (keep alphabetical order)
-3. Verify the icon renders correctly in the browser
+**Usage:**
+```tsx
+// Web / Extension
+import { ShieldCheck } from "lucide-react";
+<ShieldCheck className="text-deep-navy" size={18} />
+
+// Mobile
+import { ShieldCheck } from "lucide-react-native";
+<ShieldCheck size={18} color={Colors.primary} />
+
+// Config-driven (type-safe)
+import type { LucideIcon } from "lucide-react";
+const CONFIG: Record<string, { icon: LucideIcon }> = { SAFE: { icon: ShieldCheck } };
+<config.icon className="text-white" size={24} />
+```
 
 ### Error Handling
 

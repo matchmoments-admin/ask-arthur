@@ -1,8 +1,23 @@
+import type { LucideIcon } from "lucide-react";
+import {
+  AlertTriangle,
+  Flag,
+  Shield,
+  HeartHandshake,
+  TrendingUp,
+  Heart,
+  Monitor,
+  Fish,
+  UserX,
+  Landmark,
+  Truck,
+} from "lucide-react";
+
 type Verdict = "SAFE" | "SUSPICIOUS" | "HIGH_RISK";
 
 export interface RecoverySection {
   title: string;
-  icon: string;
+  icon: LucideIcon;
   items: Array<{
     text: string;
     /** Optional phone number or URL for direct action */
@@ -17,7 +32,7 @@ export interface RecoverySteps {
 
 const IMMEDIATE_ACTIONS: RecoverySection = {
   title: "Immediate Actions",
-  icon: "priority_high",
+  icon: AlertTriangle,
   items: [
     { text: "Stop all communication with the sender immediately" },
     { text: "Do not click any links or download attachments" },
@@ -30,7 +45,7 @@ const IMMEDIATE_ACTIONS: RecoverySection = {
 
 const REPORT_SCAM_AU: RecoverySection = {
   title: "Report the Scam",
-  icon: "flag",
+  icon: Flag,
   items: [
     {
       text: "Report to Scamwatch (ACCC)",
@@ -52,7 +67,7 @@ const REPORT_SCAM_AU: RecoverySection = {
 
 const PROTECT_ACCOUNTS: RecoverySection = {
   title: "Protect Your Accounts",
-  icon: "shield",
+  icon: Shield,
   items: [
     { text: "Change passwords on any accounts you mentioned or that may be compromised" },
     { text: "Enable two-factor authentication (2FA) on all important accounts" },
@@ -63,7 +78,7 @@ const PROTECT_ACCOUNTS: RecoverySection = {
 
 const GET_SUPPORT: RecoverySection = {
   title: "Get Support",
-  icon: "support",
+  icon: HeartHandshake,
   items: [
     {
       text: "Lifeline \u2014 24/7 crisis support",
@@ -83,7 +98,7 @@ const GET_SUPPORT: RecoverySection = {
 const SCAM_TYPE_STEPS: Record<string, RecoverySection> = {
   investment: {
     title: "Investment Scam Recovery",
-    icon: "trending_up",
+    icon: TrendingUp,
     items: [
       {
         text: "Report to ASIC (Australian Securities & Investments Commission)",
@@ -95,7 +110,7 @@ const SCAM_TYPE_STEPS: Record<string, RecoverySection> = {
   },
   romance: {
     title: "Romance Scam Recovery",
-    icon: "favorite",
+    icon: Heart,
     items: [
       { text: "Stop sending money immediately \u2014 promises of meeting in person are part of the scam" },
       { text: "Report the fake profile to the dating platform" },
@@ -104,7 +119,7 @@ const SCAM_TYPE_STEPS: Record<string, RecoverySection> = {
   },
   "tech-support": {
     title: "Tech Support Scam Recovery",
-    icon: "computer",
+    icon: Monitor,
     items: [
       { text: "Uninstall any remote access software (TeamViewer, AnyDesk, etc.)" },
       { text: "Run a full antivirus scan on your device" },
@@ -114,7 +129,7 @@ const SCAM_TYPE_STEPS: Record<string, RecoverySection> = {
   },
   phishing: {
     title: "Phishing Recovery",
-    icon: "phishing",
+    icon: Fish,
     items: [
       { text: "Change the password on any account you entered credentials for" },
       { text: "Enable 2FA on the compromised account" },
@@ -123,7 +138,7 @@ const SCAM_TYPE_STEPS: Record<string, RecoverySection> = {
   },
   impersonation: {
     title: "Impersonation Scam Recovery",
-    icon: "person_off",
+    icon: UserX,
     items: [
       { text: "Contact the real organisation directly using their official website or phone number" },
       { text: "Do not call back numbers provided in the suspicious message" },
@@ -134,7 +149,7 @@ const SCAM_TYPE_STEPS: Record<string, RecoverySection> = {
 const BRAND_STEPS: Record<string, RecoverySection> = {
   ato: {
     title: "ATO-Specific Steps",
-    icon: "account_balance",
+    icon: Landmark,
     items: [
       {
         text: "Call the ATO directly to verify any tax-related claims",
@@ -146,7 +161,7 @@ const BRAND_STEPS: Record<string, RecoverySection> = {
   },
   mygov: {
     title: "myGov-Specific Steps",
-    icon: "account_balance",
+    icon: Landmark,
     items: [
       { text: "Log in to myGov directly at my.gov.au (never via a link in a message)" },
       { text: "Change your myGov password and enable multi-factor authentication" },
@@ -158,7 +173,7 @@ const BRAND_STEPS: Record<string, RecoverySection> = {
   },
   centrelink: {
     title: "Centrelink-Specific Steps",
-    icon: "account_balance",
+    icon: Landmark,
     items: [
       {
         text: "Contact Centrelink directly",
@@ -169,7 +184,7 @@ const BRAND_STEPS: Record<string, RecoverySection> = {
   },
   "australia-post": {
     title: "Australia Post-Specific Steps",
-    icon: "local_shipping",
+    icon: Truck,
     items: [
       { text: "Track parcels directly at auspost.com.au" },
       {

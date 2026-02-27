@@ -5,6 +5,7 @@ import { getContextMenuText, setContextMenuText } from "@/lib/storage";
 import { ResultDisplay } from "@/components/ResultDisplay";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { ErrorState } from "@/components/ErrorState";
+import { Link as LinkIcon, MessageCircle, Shield } from "lucide-react";
 
 type Tab = "url" | "text";
 
@@ -134,7 +135,7 @@ export default function App() {
                 : "text-slate-400 hover:text-gov-slate"
             }`}
           >
-            <span className="material-symbols-outlined text-base">link</span>
+            <LinkIcon size={16} />
             URL
           </button>
           <button
@@ -145,7 +146,7 @@ export default function App() {
                 : "text-slate-400 hover:text-gov-slate"
             }`}
           >
-            <span className="material-symbols-outlined text-base">chat_bubble_outline</span>
+            <MessageCircle size={16} />
             Text
           </button>
         </div>
@@ -250,7 +251,7 @@ export default function App() {
       {/* Footer */}
       <div className="border-t border-border-default px-4 py-2.5 flex items-center justify-between">
         <div className="flex items-center gap-1.5 text-xs text-slate-400">
-          <span className="material-symbols-outlined text-sm">shield</span>
+          <Shield size={14} />
           <span>Private &amp; secure</span>
           <span className="mx-1">·</span>
           <a

@@ -174,7 +174,7 @@ Enrichment card displayed for SUSPICIOUS/HIGH_RISK verdicts when phone intellige
 - Header: `bg-slate-50 border-b border-slate-200`, text `text-xs font-bold uppercase tracking-widest text-deep-navy`
 - Score bar: `w-full bg-gray-100 rounded-full h-3` (same as DeepfakeGauge)
 - Signal grid: `grid grid-cols-2 sm:grid-cols-4 gap-3`, each cell `bg-slate-50 rounded-sm p-3 text-center`
-- Warning items: `material-symbols-outlined text-sm text-[#F57C00]` icon + `text-sm text-gov-slate`
+- Warning items: Lucide `TriangleAlert` icon (`size={14}`, `text-[#F57C00]`) + `text-sm text-gov-slate`
 - Risk badge: colored pill with `rounded-full px-2 py-0.5 text-xs font-bold uppercase`
 
 **Files:** `apps/web/components/PhoneIntelCard.tsx`, `apps/mobile/components/PhoneIntelCard.tsx`

@@ -1,5 +1,6 @@
 "use client";
 
+import { CircleAlert } from "lucide-react";
 import Footer from "@/components/Footer";
 
 export default function Error({
@@ -16,9 +17,7 @@ export default function Error({
       <div className="h-1.5 bg-deep-navy w-full" />
 
       <main className="flex-1 flex flex-col items-center justify-center px-5 text-center">
-        <span className="material-symbols-outlined text-deep-navy text-6xl mb-4">
-          error_outline
-        </span>
+        <CircleAlert className="text-deep-navy mb-4" size={60} />
         <h1 className="text-deep-navy text-4xl font-extrabold mb-3">
           Something Went Wrong
         </h1>

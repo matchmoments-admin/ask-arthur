@@ -1,6 +1,7 @@
 import { View, Text, Pressable, StyleSheet, Linking, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { Trash2, FileText, BookOpen, Globe, ChevronRight } from "lucide-react-native";
+import type { LucideIcon } from "lucide-react-native";
 import { useScanHistory } from "@/hooks/useScanHistory";
 import { Colors } from "@/constants/colors";
 import { Fonts } from "@/constants/fonts";
@@ -32,7 +33,7 @@ export default function SettingsScreen() {
             onPress={handleClearHistory}
             disabled={history.length === 0}
           >
-            <Ionicons name="trash-outline" size={18} color={Colors.error} />
+            <Trash2 size={18} color={Colors.error} />
             <Text style={styles.destructiveButtonText}>Clear Scan History</Text>
           </Pressable>
         </View>
@@ -64,9 +65,9 @@ export default function SettingsScreen() {
 
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>About</Text>
-          <SettingsLink icon="document-text-outline" label="Privacy Policy" url="https://askarthur.au/privacy" />
-          <SettingsLink icon="reader-outline" label="Terms of Service" url="https://askarthur.au/terms" />
-          <SettingsLink icon="globe-outline" label="Website" url="https://askarthur.au" />
+          <SettingsLink icon={FileText} label="Privacy Policy" url="https://askarthur.au/privacy" />
+          <SettingsLink icon={BookOpen} label="Terms of Service" url="https://askarthur.au/terms" />
+          <SettingsLink icon={Globe} label="Website" url="https://askarthur.au" />
         </View>
 
         <Text style={styles.version}>Ask Arthur v1.0.0</Text>
@@ -75,14 +76,14 @@ export default function SettingsScreen() {
   );
 }
 
-function SettingsLink({ icon, label, url }: { icon: string; label: string; url: string }) {
+function SettingsLink({ icon: Icon, label, url }: { icon: LucideIcon; label: string; url: string }) {
   return (
     <Pressable style={styles.link} onPress={() => Linking.openURL(url)}>
       <View style={styles.linkLeft}>
-        <Ionicons name={icon as any} size={20} color={Colors.primary} />
+        <Icon size={20} color={Colors.primary} />
         <Text style={styles.linkText}>{label}</Text>
       </View>
-      <Ionicons name="chevron-forward" size={18} color={Colors.textSecondary} />
+      <ChevronRight size={18} color={Colors.textSecondary} />
     </Pressable>
   );
 }

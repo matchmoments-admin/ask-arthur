@@ -1,5 +1,7 @@
 "use client";
 
+import type { LucideIcon } from "lucide-react";
+import { ShieldCheck, TriangleAlert, ShieldAlert, Gauge, Flag } from "lucide-react";
 import type { PhoneLookupResult } from "@askarthur/types";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { getRecoverySteps } from "@/lib/recoverySteps";
@@ -33,27 +35,27 @@ interface ResultCardProps {
   inputMode?: string;
 }
 
-const VERDICT_CONFIG = {
+const VERDICT_CONFIG: Record<Verdict, { color: string; bg: string; textColor: string; title: string; icon: LucideIcon }> = {
   SAFE: {
     color: "#388E3C",
     bg: "bg-[#388E3C]",
     textColor: "text-[#388E3C]",
     title: "This Appears Safe",
-    icon: "verified_user",
+    icon: ShieldCheck,
   },
   SUSPICIOUS: {
     color: "#F57C00",
     bg: "bg-[#F57C00]",
     textColor: "text-[#F57C00]",
     title: "Proceed with Caution",
-    icon: "warning",
+    icon: TriangleAlert,
   },
   HIGH_RISK: {
     color: "#D32F2F",
     bg: "bg-[#D32F2F]",
     textColor: "text-[#D32F2F]",
     title: "High Risk — Likely a Scam",
-    icon: "gpp_bad",
+    icon: ShieldAlert,
   },
 };
 
@@ -83,7 +85,7 @@ export default function ResultCard({
     <div role="alert" className="mt-6 rounded-sm border border-slate-200 overflow-hidden">
       {/* Colored header bar */}
       <div className={`${config.bg} px-6 py-4 flex items-center gap-3`}>
-        <span className="material-symbols-outlined text-white text-2xl">{config.icon}</span>
+        <config.icon className="text-white" size={24} />
         <h2 className="text-lg font-bold text-white">
           {config.title}
         </h2>
@@ -96,7 +98,7 @@ export default function ResultCard({
 
         {/* Confidence */}
         <div className={`flex items-center gap-2 mb-5 ${config.textColor}`}>
-          <span className="material-symbols-outlined text-lg">speed</span>
+          <Gauge size={18} />
           <span className="text-sm font-bold uppercase tracking-widest">
             {Math.round(confidence * 100)}% confidence
           </span>
@@ -187,7 +189,7 @@ export default function ResultCard({
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 h-11 px-5 bg-danger-text text-white font-bold text-sm uppercase tracking-widest rounded-full hover:opacity-90 transition-opacity"
             >
-              <span className="material-symbols-outlined text-lg">flag</span>
+              <Flag size={18} />
               Report to Scamwatch
             </a>
           </div>

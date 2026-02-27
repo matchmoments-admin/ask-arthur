@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { ShieldCheck, Gauge, ClipboardCheck } from "lucide-react";
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
 import SiteAuditChecker from "@/components/SiteAuditChecker";
@@ -31,9 +32,7 @@ export default function AuditPage() {
         {/* Feature grid */}
         <section className="mt-16 grid grid-cols-1 md:grid-cols-3 gap-8">
           <div className="text-center">
-            <span className="material-symbols-outlined text-deep-navy text-4xl mb-3 block">
-              security
-            </span>
+            <ShieldCheck className="text-deep-navy mb-3 mx-auto" size={36} />
             <h3 className="text-deep-navy font-bold text-sm uppercase tracking-widest mb-2">
               Headers & TLS
             </h3>
@@ -43,9 +42,7 @@ export default function AuditPage() {
             </p>
           </div>
           <div className="text-center">
-            <span className="material-symbols-outlined text-deep-navy text-4xl mb-3 block">
-              speed
-            </span>
+            <Gauge className="text-deep-navy mb-3 mx-auto" size={36} />
             <h3 className="text-deep-navy font-bold text-sm uppercase tracking-widest mb-2">
               Instant Results
             </h3>
@@ -55,9 +52,7 @@ export default function AuditPage() {
             </p>
           </div>
           <div className="text-center">
-            <span className="material-symbols-outlined text-deep-navy text-4xl mb-3 block">
-              checklist
-            </span>
+            <ClipboardCheck className="text-deep-navy mb-3 mx-auto" size={36} />
             <h3 className="text-deep-navy font-bold text-sm uppercase tracking-widest mb-2">
               Actionable
             </h3>

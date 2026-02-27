@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Globe, ShieldCheck } from "lucide-react";
 import SiteAuditProgress from "./SiteAuditProgress";
 import SiteAuditReport from "./SiteAuditReport";
 import type { SiteAuditResult } from "./SiteAuditReport";
@@ -87,9 +88,7 @@ export default function SiteAuditChecker() {
         >
           {/* URL input */}
           <div className="flex items-center gap-2 px-4 py-1">
-            <span className="material-symbols-outlined text-gov-slate text-xl flex-shrink-0">
-              language
-            </span>
+            <Globe className="text-gov-slate flex-shrink-0" size={20} />
             <input
               type="text"
               value={url}
@@ -129,7 +128,7 @@ export default function SiteAuditChecker() {
 
       {/* Privacy line */}
       <div className="flex items-center justify-center gap-2 mt-4 text-xs font-bold uppercase tracking-widest text-gov-slate">
-        <span className="material-symbols-outlined text-sm">security</span>
+        <ShieldCheck size={14} />
         Non-intrusive scan only
       </div>
       <p className="text-[11px] text-slate-400 text-center max-w-md mx-auto mt-1.5">

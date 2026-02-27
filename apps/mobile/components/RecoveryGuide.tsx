@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { View, Text, Pressable, StyleSheet, Linking } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Cross, ChevronUp, ChevronDown } from "lucide-react-native";
 import { Colors } from "@/constants/colors";
 import { Fonts } from "@/constants/fonts";
 import type { Verdict } from "@askarthur/types";
@@ -119,14 +119,14 @@ export function RecoveryGuide({ verdict, scamType, impersonatedBrand }: Recovery
         accessibilityState={{ expanded }}
       >
         <View style={styles.headerLeft}>
-          <Ionicons name="medkit" size={18} color={Colors.navy} />
+          <Cross size={18} color={Colors.navy} />
           <Text style={styles.headerTitle}>Recovery Guidance</Text>
         </View>
-        <Ionicons
-          name={expanded ? "chevron-up" : "chevron-down"}
-          size={18}
-          color={Colors.textSecondary}
-        />
+        {expanded ? (
+          <ChevronUp size={18} color={Colors.textSecondary} />
+        ) : (
+          <ChevronDown size={18} color={Colors.textSecondary} />
+        )}
       </Pressable>
 
       {expanded && (

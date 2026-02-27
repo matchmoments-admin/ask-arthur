@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { Search } from "lucide-react";
 
 export default function BlogSearch() {
   const [open, setOpen] = useState(false);
@@ -35,7 +36,7 @@ export default function BlogSearch() {
         className="flex items-center gap-1.5 text-slate-400 hover:text-deep-navy transition-colors"
         aria-label="Search blog"
       >
-        <span className="material-symbols-outlined text-xl">search</span>
+        <Search size={20} />
         <span className="text-sm font-medium">Search</span>
       </button>
     );
@@ -43,9 +44,7 @@ export default function BlogSearch() {
 
   return (
     <form onSubmit={handleSubmit} className="relative">
-      <span className="material-symbols-outlined text-lg text-slate-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none">
-        search
-      </span>
+      <Search className="text-slate-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" size={18} />
       <input
         ref={inputRef}
         type="text"

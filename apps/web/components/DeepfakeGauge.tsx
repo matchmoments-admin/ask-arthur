@@ -1,5 +1,7 @@
 "use client";
 
+import { Mic } from "lucide-react";
+
 interface DeepfakeGaugeProps {
   score: number; // 0–1
   provider: string; // "reality_defender" | "resemble_ai"
@@ -28,7 +30,7 @@ export default function DeepfakeGauge({ score, provider }: DeepfakeGaugeProps) {
     <div className="rounded-sm border border-slate-200 overflow-hidden">
       <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
         <div className="flex items-center gap-2">
-          <span className="material-symbols-outlined text-lg text-deep-navy">mic</span>
+          <Mic className="text-deep-navy" size={18} />
           <h4 className="text-xs font-bold uppercase tracking-widest text-deep-navy">
             Voice Authenticity Check
           </h4>

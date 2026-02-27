@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { View, Text, TextInput, StyleSheet, ScrollView, KeyboardAvoidingView, Platform } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { ShieldCheck, CheckCircle, TriangleAlert } from "lucide-react-native";
 import { LoadingOverlay } from "@/components/LoadingOverlay";
 import { Button } from "@/components/Button";
 import { checkBreach, type BreachResult } from "@/lib/breach";
@@ -44,7 +44,7 @@ export default function BreachScreen() {
       <SafeAreaView style={styles.container} edges={["bottom"]}>
         <ScrollView contentContainerStyle={styles.content}>
           <View style={styles.headerCard}>
-            <Ionicons name="shield-checkmark" size={32} color={Colors.primary} />
+            <ShieldCheck size={32} color={Colors.primary} />
             <Text style={styles.title}>Data Breach Check</Text>
             <Text style={styles.description}>
               Check if your email has appeared in known data breaches. Powered by Have I Been Pwned.
@@ -82,7 +82,7 @@ export default function BreachScreen() {
           {result && !result.breached && (
             <View style={[styles.resultCard, styles.resultCardSafe]}>
               <View style={styles.resultHeader}>
-                <Ionicons name="checkmark-circle" size={24} color={Colors.safe} />
+                <CheckCircle size={24} color={Colors.safe} />
                 <Text style={[styles.resultTitle, { color: Colors.safe }]}>
                   No breaches found
                 </Text>
@@ -96,7 +96,7 @@ export default function BreachScreen() {
           {result && result.breached && (
             <View style={[styles.resultCard, styles.resultCardRisk]}>
               <View style={styles.resultHeader}>
-                <Ionicons name="warning" size={24} color={Colors.highRisk} />
+                <TriangleAlert size={24} color={Colors.highRisk} />
                 <Text style={[styles.resultTitle, { color: Colors.highRisk }]}>
                   Found in {result.breachCount} breach{result.breachCount !== 1 ? "es" : ""}
                 </Text>

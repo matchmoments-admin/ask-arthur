@@ -13,7 +13,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
+import { XCircle, Paperclip, Lock, EyeOff } from "lucide-react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system";
 import { AnalysisResultView } from "@/components/AnalysisResult";
@@ -211,7 +211,7 @@ export default function HomeScreen() {
                         onPress={() => removeImage(index)}
                         hitSlop={8}
                       >
-                        <Ionicons name="close-circle" size={20} color={Colors.error} />
+                        <XCircle size={20} color={Colors.error} />
                       </Pressable>
                     )}
                   </View>
@@ -224,8 +224,7 @@ export default function HomeScreen() {
                 onPress={handleAttach}
                 disabled={loading || hasResult}
               >
-                <Ionicons
-                  name="attach"
+                <Paperclip
                   size={22}
                   color={loading || hasResult ? Colors.border : Colors.textSecondary}
                 />
@@ -252,8 +251,8 @@ export default function HomeScreen() {
 
           {/* Privacy notice */}
           <View style={styles.privacyRow}>
-            <Ionicons name="lock-closed" size={14} color={Colors.textSecondary} />
-            <Ionicons name="eye-off" size={14} color={Colors.textSecondary} />
+            <Lock size={14} color={Colors.textSecondary} />
+            <EyeOff size={14} color={Colors.textSecondary} />
             <Text style={styles.privacyLabel}>WE NEVER STORE YOUR DATA</Text>
           </View>
           <Text style={styles.privacyDetail}>

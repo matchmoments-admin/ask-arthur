@@ -1,5 +1,5 @@
 import { View, Text, Pressable, StyleSheet, Linking, Platform } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { ShieldCheck, Settings, TriangleAlert, ExternalLink } from "lucide-react-native";
 import { Colors } from "@/constants/colors";
 import { Fonts } from "@/constants/fonts";
 
@@ -19,7 +19,7 @@ export function PermissionEducationHub() {
     <View style={styles.container}>
       <View style={styles.card}>
         <View style={styles.iconRow}>
-          <Ionicons name="shield-checkmark" size={32} color={Colors.primary} />
+          <ShieldCheck size={32} color={Colors.primary} />
         </View>
         <Text style={styles.title}>App Permission Audit</Text>
         <Text style={styles.description}>
@@ -27,7 +27,7 @@ export function PermissionEducationHub() {
           app permissions directly in your device Settings.
         </Text>
         <Pressable style={styles.settingsButton} onPress={openSettings}>
-          <Ionicons name="settings-outline" size={18} color={Colors.white} />
+          <Settings size={18} color={Colors.white} />
           <Text style={styles.settingsButtonText}>Open Settings</Text>
         </Pressable>
       </View>
@@ -76,7 +76,7 @@ function Step({ number, text }: { number: number; text: string }) {
 function WarningItem({ text }: { text: string }) {
   return (
     <View style={styles.warningRow}>
-      <Ionicons name="warning" size={16} color={Colors.suspicious} />
+      <TriangleAlert size={16} color={Colors.suspicious} />
       <Text style={styles.warningText}>{text}</Text>
     </View>
   );
@@ -85,7 +85,7 @@ function WarningItem({ text }: { text: string }) {
 function LinkItem({ label, url }: { label: string; url: string }) {
   return (
     <Pressable style={styles.linkRow} onPress={() => Linking.openURL(url)}>
-      <Ionicons name="open-outline" size={16} color={Colors.primary} />
+      <ExternalLink size={16} color={Colors.primary} />
       <Text style={styles.linkText}>{label}</Text>
     </Pressable>
   );

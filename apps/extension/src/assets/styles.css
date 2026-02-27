@@ -111,8 +111,3 @@ h1, h2, h3 {
 .card-shadow {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 8px 32px rgba(0, 0, 0, 0.04);
 }
-
-/* Material Symbols — loaded via popup index.html */
-.material-symbols-outlined {
-  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
-}

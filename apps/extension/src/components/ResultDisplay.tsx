@@ -1,4 +1,5 @@
 import type { AnalysisResult, Verdict, ExtensionURLCheckResponse } from "@askarthur/types";
+import { ShieldCheck, TriangleAlert, Gauge } from "lucide-react";
 import { VerdictHeader, VERDICT_CONFIG } from "./VerdictBadge";
 
 const VERDICT_COLORS: Record<Verdict, string> = {
@@ -32,7 +33,7 @@ function URLResult({ result }: { result: ExtensionURLCheckResponse }) {
     return (
       <div role="alert" className="rounded-xl card-shadow overflow-hidden">
         <div className="bg-[#388E3C] px-4 py-3 flex items-center gap-2 rounded-t-xl">
-          <span className="material-symbols-outlined text-white text-xl">verified_user</span>
+          <ShieldCheck size={20} className="text-white" />
           <h2 className="text-sm font-semibold text-white">No Threats Found</h2>
         </div>
         <div className="bg-white px-4 py-4">
@@ -67,7 +68,7 @@ function URLResult({ result }: { result: ExtensionURLCheckResponse }) {
   return (
     <div role="alert" className="rounded-xl card-shadow overflow-hidden">
       <div className={`${config.bg} px-4 py-3 flex items-center gap-2 rounded-t-xl`}>
-        <span className="material-symbols-outlined text-white text-xl">{config.icon}</span>
+        <config.icon size={20} className="text-white" />
         <h2 className="text-sm font-semibold text-white">Threat Detected</h2>
       </div>
       <div className="bg-white px-4 py-4">
@@ -83,7 +84,7 @@ function URLResult({ result }: { result: ExtensionURLCheckResponse }) {
         )}
         {result.safeBrowsing?.isMalicious && (
           <div className="flex items-start gap-2 mt-2">
-            <span className="material-symbols-outlined text-sm text-[#F57C00] mt-0.5">warning</span>
+            <TriangleAlert size={14} className="text-[#F57C00] mt-0.5" />
             <span className="text-gov-slate text-sm">
               Flagged by {result.safeBrowsing.sources.join(" and ")}
             </span>
@@ -109,7 +110,7 @@ function TextResult({ result }: { result: AnalysisResult }) {
 
         {/* Confidence */}
         <div className={`flex items-center gap-2 mb-4 ${config.textColor}`}>
-          <span className="material-symbols-outlined text-base">speed</span>
+          <Gauge size={16} />
           <span className="text-xs font-semibold">
             {Math.round(result.confidence * 100)}% confidence
           </span>

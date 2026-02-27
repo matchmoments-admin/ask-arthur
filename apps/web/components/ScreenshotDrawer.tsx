@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, useEffect, useCallback } from "react";
+import { ClipboardPaste, Images, Camera, FolderOpen, ScanLine } from "lucide-react";
 import { Drawer } from "vaul";
 
 interface ScreenshotDrawerProps {
@@ -121,9 +122,7 @@ export default function ScreenshotDrawer({
                 onClick={handleClipboardPaste}
                 className="flex items-center gap-4 px-3 py-3 rounded-xl hover:bg-slate-50 transition-colors text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-deep-navy/20"
               >
-                <span className="material-symbols-outlined text-2xl text-action-teal">
-                  content_paste
-                </span>
+                <ClipboardPaste className="text-action-teal" size={24} />
                 <div>
                   <div className="text-base font-semibold text-deep-navy">
                     Paste from clipboard
@@ -141,9 +140,7 @@ export default function ScreenshotDrawer({
               onClick={() => galleryInputRef.current?.click()}
               className="flex items-center gap-4 px-3 py-3 rounded-xl hover:bg-slate-50 transition-colors text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-deep-navy/20"
             >
-              <span className="material-symbols-outlined text-2xl text-action-teal">
-                photo_library
-              </span>
+              <Images className="text-action-teal" size={24} />
               <div>
                 <div className="text-base font-semibold text-deep-navy">
                   Choose from gallery
@@ -170,9 +167,7 @@ export default function ScreenshotDrawer({
                   onClick={() => cameraInputRef.current?.click()}
                   className="flex items-center gap-4 px-3 py-3 rounded-xl hover:bg-slate-50 transition-colors text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-deep-navy/20"
                 >
-                  <span className="material-symbols-outlined text-2xl text-action-teal">
-                    photo_camera
-                  </span>
+                  <Camera className="text-action-teal" size={24} />
                   <div>
                     <div className="text-base font-semibold text-deep-navy">
                       Take a photo
@@ -199,9 +194,7 @@ export default function ScreenshotDrawer({
               onClick={() => fileInputRef.current?.click()}
               className="flex items-center gap-4 px-3 py-3 rounded-xl hover:bg-slate-50 transition-colors text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-deep-navy/20"
             >
-              <span className="material-symbols-outlined text-2xl text-action-teal">
-                folder_open
-              </span>
+              <FolderOpen className="text-action-teal" size={24} />
               <div>
                 <div className="text-base font-semibold text-deep-navy">
                   Browse files
@@ -230,9 +223,7 @@ export default function ScreenshotDrawer({
                 onClick={onScanQrCode}
                 className="flex items-center gap-4 px-3 py-3 rounded-xl hover:bg-slate-50 transition-colors text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-deep-navy/20"
               >
-                <span className="material-symbols-outlined text-2xl text-action-teal">
-                  photo_camera
-                </span>
+                <Camera className="text-action-teal" size={24} />
                 <div>
                   <div className="text-base font-semibold text-deep-navy">
                     Scan with camera
@@ -250,9 +241,7 @@ export default function ScreenshotDrawer({
               onClick={() => qrInputRef.current?.click()}
               className="flex items-center gap-4 px-3 py-3 rounded-xl hover:bg-slate-50 transition-colors text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-deep-navy/20"
             >
-              <span className="material-symbols-outlined text-2xl text-action-teal">
-                qr_code_scanner
-              </span>
+              <ScanLine className="text-action-teal" size={24} />
               <div>
                 <div className="text-base font-semibold text-deep-navy">
                   Upload QR image

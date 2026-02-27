@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { X, VideoOff } from "lucide-react";
 import { decodeQR } from "qr/decode.js";
 
 interface QrScannerProps {
@@ -207,7 +208,7 @@ export default function QrScanner({ open, onClose, onScan, frozen }: QrScannerPr
             className="absolute left-3 top-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center rounded-full text-white/80 hover:text-white hover:bg-white/10 transition-colors"
             aria-label="Close scanner"
           >
-            <span className="material-symbols-outlined text-2xl">close</span>
+            <X size={24} />
           </button>
           <h2 className="text-white font-semibold text-base">Scan QR Code</h2>
         </div>
@@ -237,9 +238,7 @@ export default function QrScanner({ open, onClose, onScan, frozen }: QrScannerPr
         {/* Error state */}
         {state === "error" && (
           <div className="relative z-10 flex flex-col items-center gap-4 px-8 text-center">
-            <span className="material-symbols-outlined text-4xl text-white/60">
-              videocam_off
-            </span>
+            <VideoOff className="text-white/60" size={36} />
             <p className="text-white text-base">{errorMessage}</p>
             <button
               type="button"

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Siren, ChevronUp, ChevronDown } from "lucide-react";
 import type { RecoverySteps } from "@/lib/recoverySteps";
 
 interface RecoveryGuideProps {
@@ -19,16 +20,12 @@ export default function RecoveryGuide({ recovery, verdict }: RecoveryGuideProps)
         aria-expanded={expanded}
       >
         <div className="flex items-center gap-2">
-          <span className="material-symbols-outlined text-lg text-deep-navy">
-            emergency
-          </span>
+          <Siren className="text-deep-navy" size={18} />
           <h3 className="text-xs font-bold uppercase tracking-widest text-deep-navy">
             Recovery Guidance
           </h3>
         </div>
-        <span className="material-symbols-outlined text-lg text-gov-slate">
-          {expanded ? "expand_less" : "expand_more"}
-        </span>
+        {expanded ? <ChevronUp className="text-gov-slate" size={18} /> : <ChevronDown className="text-gov-slate" size={18} />}
       </button>
 
       {expanded && (
@@ -36,9 +33,7 @@ export default function RecoveryGuide({ recovery, verdict }: RecoveryGuideProps)
           {recovery.sections.map((section, i) => (
             <div key={i}>
               <div className="flex items-center gap-2 mb-2">
-                <span className="material-symbols-outlined text-base text-deep-navy">
-                  {section.icon}
-                </span>
+                <section.icon className="text-deep-navy" size={16} />
                 <h4 className="text-sm font-bold text-deep-navy">
                   {section.title}
                 </h4>

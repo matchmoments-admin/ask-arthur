@@ -1,14 +1,15 @@
 import { useState } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { CircleAlert, TriangleAlert, CheckCircle, XCircle, ChevronUp, ChevronDown } from "lucide-react-native";
+import type { LucideIcon } from "lucide-react-native";
 import { Colors } from "@/constants/colors";
 import { Fonts } from "@/constants/fonts";
 import type { AppScanResult, RiskLevel } from "@/modules/app-scanner";
 
-const RISK_CONFIG: Record<RiskLevel, { color: string; bg: string; icon: string; label: string }> = {
-  red: { color: "#D32F2F", bg: "#FEF2F2", icon: "alert-circle", label: "High Risk" },
-  yellow: { color: "#F57C00", bg: "#FFF8E1", icon: "warning", label: "Caution" },
-  green: { color: "#388E3C", bg: "#ECFDF5", icon: "checkmark-circle", label: "Low Risk" },
+const RISK_CONFIG: Record<RiskLevel, { color: string; bg: string; icon: LucideIcon; label: string }> = {
+  red: { color: "#D32F2F", bg: "#FEF2F2", icon: CircleAlert, label: "High Risk" },
+  yellow: { color: "#F57C00", bg: "#FFF8E1", icon: TriangleAlert, label: "Caution" },
+  green: { color: "#388E3C", bg: "#ECFDF5", icon: CheckCircle, label: "Low Risk" },
 };
 
 /** Plain-language labels for common Android permissions */
@@ -57,7 +58,7 @@ export function AppRiskCard({ app }: AppRiskCardProps) {
           <Text style={styles.version}>v{app.versionName}</Text>
         </View>
         <View style={[styles.badge, { backgroundColor: config.bg }]}>
-          <Ionicons name={config.icon as any} size={14} color={config.color} />
+          <config.icon size={14} color={config.color} />
           <Text style={[styles.badgeText, { color: config.color }]}>
             {config.label}
           </Text>
@@ -83,11 +84,11 @@ export function AppRiskCard({ app }: AppRiskCardProps) {
           <Text style={styles.permListTitle}>Permissions</Text>
           {app.dangerousPermissions.map((perm, i) => (
             <View key={i} style={styles.permRow}>
-              <Ionicons
-                name={perm.granted ? "checkmark-circle" : "close-circle"}
-                size={16}
-                color={perm.granted ? Colors.highRisk : Colors.textSecondary}
-              />
+              {perm.granted ? (
+                <CheckCircle size={16} color={Colors.highRisk} />
+              ) : (
+                <XCircle size={16} color={Colors.textSecondary} />
+              )}
               <Text style={styles.permName}>{getPermissionLabel(perm.name)}</Text>
               <Text style={styles.permStatus}>
                 {perm.granted ? "Granted" : "Denied"}
@@ -98,11 +99,11 @@ export function AppRiskCard({ app }: AppRiskCardProps) {
       )}
 
       <View style={styles.expandRow}>
-        <Ionicons
-          name={expanded ? "chevron-up" : "chevron-down"}
-          size={16}
-          color={Colors.textSecondary}
-        />
+        {expanded ? (
+          <ChevronUp size={16} color={Colors.textSecondary} />
+        ) : (
+          <ChevronDown size={16} color={Colors.textSecondary} />
+        )}
       </View>
     </Pressable>
   );

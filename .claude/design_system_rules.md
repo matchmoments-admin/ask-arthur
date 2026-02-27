@@ -61,19 +61,20 @@ Components are in `/components/`:
 - **Framework**: Next.js 16 (App Router)
 - **Language**: TypeScript
 - **Styling**: Tailwind CSS v4 (with `@theme inline` tokens)
-- **Icons**: Google Material Symbols Outlined (loaded via Google Fonts)
+- **Icons**: Lucide React (inline SVG, tree-shakeable)
 - **Analytics**: Plausible (privacy-first)
 - **Drawer**: Vaul (physics-based bottom sheet, built on Radix Dialog)
 - **Image Compression**: browser-image-compression (client-side resize/compress)
 
 ## Icon System
 
-Icons use Material Symbols Outlined via CDN:
-```html
-<span className="material-symbols-outlined text-deep-navy text-4xl">icon_name</span>
+Icons use Lucide React (inline SVG components):
+```tsx
+import { ShieldCheck } from "lucide-react";
+<ShieldCheck className="text-deep-navy" size={36} />
 ```
 
-Key icons used: `verified_user`, `bolt`, `shield`
+Key icons used: `ShieldCheck`, `Zap`, `Shield`, `TriangleAlert`, `ShieldAlert`
 
 ## Styling Approach
 

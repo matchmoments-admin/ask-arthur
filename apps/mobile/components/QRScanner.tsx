@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import { View, Text, StyleSheet, Pressable } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { Ionicons } from "@expo/vector-icons";
+import { Camera } from "lucide-react-native";
 import { Colors } from "@/constants/colors";
 import { Fonts } from "@/constants/fonts";
 
@@ -30,7 +30,7 @@ export function QRScanner({ onScan, active }: QRScannerProps) {
   if (!permission) {
     return (
       <View style={styles.centered}>
-        <Ionicons name="camera-outline" size={48} color={Colors.textSecondary} />
+        <Camera size={48} color={Colors.textSecondary} />
         <Text style={styles.message}>Requesting camera permission...</Text>
       </View>
     );
@@ -39,7 +39,7 @@ export function QRScanner({ onScan, active }: QRScannerProps) {
   if (!permission.granted) {
     return (
       <View style={styles.centered}>
-        <Ionicons name="camera-outline" size={48} color={Colors.navy} />
+        <Camera size={48} color={Colors.navy} />
         <Text style={styles.title}>Camera Access Required</Text>
         <Text style={styles.message}>
           Ask Arthur needs camera access to scan QR codes for scam detection.

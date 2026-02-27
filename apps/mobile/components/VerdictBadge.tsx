@@ -1,13 +1,14 @@
 import { View, Text, StyleSheet } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { CheckCircle, CircleAlert, XCircle } from "lucide-react-native";
+import type { LucideIcon } from "lucide-react-native";
 import { VerdictColors } from "@/constants/colors";
 import { Fonts } from "@/constants/fonts";
 import type { Verdict } from "@askarthur/types";
 
-const VERDICT_ICON: Record<Verdict, string> = {
-  SAFE: "checkmark-circle",
-  SUSPICIOUS: "alert-circle",
-  HIGH_RISK: "close-circle",
+const VERDICT_ICON: Record<Verdict, LucideIcon> = {
+  SAFE: CheckCircle,
+  SUSPICIOUS: CircleAlert,
+  HIGH_RISK: XCircle,
 };
 
 const VERDICT_LABEL: Record<Verdict, string> = {
@@ -24,10 +25,11 @@ interface VerdictBadgeProps {
 export function VerdictBadge({ verdict, confidence }: VerdictBadgeProps) {
   const colors = VerdictColors[verdict];
   const percentage = Math.round(confidence * 100);
+  const Icon = VERDICT_ICON[verdict];
 
   return (
     <View style={[styles.badge, { backgroundColor: colors.bg, borderColor: colors.text }]}>
-      <Ionicons name={VERDICT_ICON[verdict] as any} size={24} color={colors.text} />
+      <Icon size={24} color={colors.text} />
       <Text style={[styles.label, { color: colors.text }]}>
         {VERDICT_LABEL[verdict]}
       </Text>

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { SearchX } from "lucide-react";
 import Footer from "@/components/Footer";
 
 export default function NotFound() {
@@ -7,9 +8,7 @@ export default function NotFound() {
       <div className="h-1.5 bg-deep-navy w-full" />
 
       <main className="flex-1 flex flex-col items-center justify-center px-5 text-center">
-        <span className="material-symbols-outlined text-deep-navy text-6xl mb-4">
-          search_off
-        </span>
+        <SearchX className="text-deep-navy mb-4" size={60} />
         <h1 className="text-deep-navy text-4xl font-extrabold mb-3">
           Page Not Found
         </h1>

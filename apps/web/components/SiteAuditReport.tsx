@@ -1,5 +1,6 @@
 "use client";
 
+import { Clock, ClipboardCheck, Lock } from "lucide-react";
 import AuditGradeRing from "./AuditGradeRing";
 import AuditCategoryCard from "./AuditCategoryCard";
 
@@ -71,16 +72,16 @@ export default function SiteAuditReport({ result }: SiteAuditReportProps) {
             <p className="text-sm text-gov-slate mb-2">{result.url}</p>
             <div className="flex flex-wrap items-center justify-center sm:justify-start gap-3 text-xs text-gov-slate">
               <span className="flex items-center gap-1">
-                <span className="material-symbols-outlined text-sm">schedule</span>
+                <Clock size={14} />
                 {(result.durationMs / 1000).toFixed(1)}s
               </span>
               <span className="flex items-center gap-1">
-                <span className="material-symbols-outlined text-sm">checklist</span>
+                <ClipboardCheck size={14} />
                 {result.checks.length} checks
               </span>
               {result.ssl?.valid && (
                 <span className="flex items-center gap-1">
-                  <span className="material-symbols-outlined text-sm">lock</span>
+                  <Lock size={14} />
                   {result.ssl.protocol || "TLS"}
                   {result.ssl.daysRemaining != null && ` (${result.ssl.daysRemaining}d)`}
                 </span>

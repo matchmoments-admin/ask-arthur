@@ -1,5 +1,6 @@
 "use client";
 
+import { PhoneCall, Smartphone, Router, Globe, User, TriangleAlert } from "lucide-react";
 import type { PhoneLookupResult, PhoneRiskLevel } from "@askarthur/types";
 
 interface PhoneIntelCardProps {
@@ -57,7 +58,7 @@ export default function PhoneIntelCard({ lookup }: PhoneIntelCardProps) {
       {/* Header */}
       <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
         <div className="flex items-center gap-2">
-          <span className="material-symbols-outlined text-lg text-deep-navy">phone_in_talk</span>
+          <PhoneCall className="text-deep-navy" size={18} />
           <h4 className="text-xs font-bold uppercase tracking-widest text-deep-navy">
             Phone Risk Report Card
           </h4>
@@ -92,22 +93,22 @@ export default function PhoneIntelCard({ lookup }: PhoneIntelCardProps) {
         {/* Signal Grid */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
           <div className="bg-slate-50 rounded-sm p-3 text-center">
-            <span className="material-symbols-outlined text-lg text-gov-slate mb-1 block">phone_android</span>
+            <Smartphone className="text-gov-slate mb-1 mx-auto" size={18} />
             <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-0.5">Line Type</div>
             <div className="text-sm font-semibold text-deep-navy">{formatLineType(lookup.lineType)}</div>
           </div>
           <div className="bg-slate-50 rounded-sm p-3 text-center">
-            <span className="material-symbols-outlined text-lg text-gov-slate mb-1 block">router</span>
+            <Router className="text-gov-slate mb-1 mx-auto" size={18} />
             <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-0.5">Carrier</div>
             <div className="text-sm font-semibold text-deep-navy">{lookup.carrier || "Unknown"}</div>
           </div>
           <div className="bg-slate-50 rounded-sm p-3 text-center">
-            <span className="material-symbols-outlined text-lg text-gov-slate mb-1 block">globe</span>
+            <Globe className="text-gov-slate mb-1 mx-auto" size={18} />
             <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-0.5">Country</div>
             <div className="text-sm font-semibold text-deep-navy">{lookup.countryCode || "Unknown"}</div>
           </div>
           <div className="bg-slate-50 rounded-sm p-3 text-center">
-            <span className="material-symbols-outlined text-lg text-gov-slate mb-1 block">person</span>
+            <User className="text-gov-slate mb-1 mx-auto" size={18} />
             <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-0.5">Caller</div>
             <div className="text-sm font-semibold text-deep-navy">{lookup.callerName || "Not Reg."}</div>
           </div>
@@ -118,7 +119,7 @@ export default function PhoneIntelCard({ lookup }: PhoneIntelCardProps) {
           <div className="space-y-2 mb-3">
             {warningFlags.map((flag, i) => (
               <div key={i} className="flex items-start gap-2">
-                <span className="material-symbols-outlined text-sm text-[#F57C00] mt-0.5">warning</span>
+                <TriangleAlert className="text-[#F57C00] mt-0.5" size={14} />
                 <span className="text-sm text-gov-slate">{formatRiskFlag(flag)}</span>
               </div>
             ))}

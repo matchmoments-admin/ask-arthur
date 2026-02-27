@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Shield, Phone, Mail, Link as LinkIcon, CheckCircle } from "lucide-react";
 import type { ScammerContacts } from "@askarthur/types";
 
 interface ScammerUrl {
@@ -149,7 +150,7 @@ export default function ScamReportCard({
       {(state === "idle" || state === "error") && (
         <>
           <div className="flex items-center gap-2 mb-3">
-            <span className="material-symbols-outlined text-action-teal text-xl">shield</span>
+            <Shield className="text-action-teal" size={20} />
             <h3 className="font-bold text-deep-navy text-base">
               Help protect others from this scammer
             </h3>
@@ -168,9 +169,7 @@ export default function ScamReportCard({
                   key={`contact-${i}`}
                   className="flex items-center gap-2 text-sm bg-slate-50 rounded-lg px-3 py-2"
                 >
-                  <span className="material-symbols-outlined text-base text-gov-slate">
-                    {c.type === "phone" ? "phone" : "mail"}
-                  </span>
+                  {c.type === "phone" ? <Phone className="text-gov-slate" size={16} /> : <Mail className="text-gov-slate" size={16} />}
                   <span className="font-mono text-deep-navy">{c.value}</span>
                   {c.context && (
                     <span className="text-gov-slate ml-auto text-xs">{c.context}</span>
@@ -188,7 +187,7 @@ export default function ScamReportCard({
                   key={`url-${i}`}
                   className="flex items-center gap-2 text-sm bg-slate-50 rounded-lg px-3 py-2"
                 >
-                  <span className="material-symbols-outlined text-base text-gov-slate">link</span>
+                  <LinkIcon className="text-gov-slate" size={16} />
                   <span className="font-mono text-deep-navy truncate flex-1">{u.url}</span>
                   {u.isMalicious && (
                     <span className="shrink-0 px-2 py-0.5 bg-red-100 text-red-700 text-xs font-bold rounded-full">
@@ -237,9 +236,7 @@ export default function ScamReportCard({
       {state === "reported" && (
         <>
           <div className="flex items-center gap-2 mb-3">
-            <span className="material-symbols-outlined text-action-teal text-xl">
-              check_circle
-            </span>
+            <CheckCircle className="text-action-teal" size={20} />
             <h3 className="font-bold text-deep-navy text-base">
               Report submitted — thank you!
             </h3>
@@ -277,7 +274,7 @@ export default function ScamReportCard({
                   className="flex flex-col gap-1 text-sm bg-slate-50 rounded-lg px-3 py-2"
                 >
                   <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-base text-gov-slate">link</span>
+                    <LinkIcon className="text-gov-slate" size={16} />
                     <span className="font-mono text-deep-navy truncate">{u.domain}</span>
                     <span className="text-gov-slate text-xs ml-auto">
                       {u.reportCount === 1
