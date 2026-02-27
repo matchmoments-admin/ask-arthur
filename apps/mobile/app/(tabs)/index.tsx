@@ -17,9 +17,11 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system";
 import { AnalysisResultView } from "@/components/AnalysisResult";
+import { AIConsentModal } from "@/components/AIConsentModal";
 import { LoadingOverlay } from "@/components/LoadingOverlay";
 import { Button } from "@/components/Button";
 import { useAnalysis } from "@/hooks/useAnalysis";
+import { useAIConsent } from "@/hooks/useAIConsent";
 import { API_URL } from "@/constants/config";
 import { Colors } from "@/constants/colors";
 import { Fonts } from "@/constants/fonts";
@@ -30,6 +32,7 @@ export default function HomeScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ sharedText?: string; sharedImages?: string }>();
   const { result, loading, error, analyze, reset } = useAnalysis();
+  const { hasConsent, showModal, ensureConsent, acceptConsent, dismissModal } = useAIConsent();
   const [text, setText] = useState("");
   const [images, setImages] = useState<Array<{ base64: string; uri: string }>>([]);
   const [focused, setFocused] = useState(false);
@@ -80,24 +83,28 @@ export default function HomeScreen() {
         })
       ).then((loaded) => {
         setImages(loaded);
-        // Auto-trigger analysis with shared content
+        // Auto-trigger analysis with shared content (gated by AI consent)
         const sharedText = params.sharedText ?? "";
-        analyze(
-          sharedText,
-          loaded.length > 0 ? "image" : "text",
-          loaded.length > 0 ? loaded.map((i) => i.base64) : undefined,
-        );
+        const triggerAnalysis = () =>
+          analyze(
+            sharedText,
+            loaded.length > 0 ? "image" : "text",
+            loaded.length > 0 ? loaded.map((i) => i.base64) : undefined,
+          );
+        ensureConsent(triggerAnalysis);
       }).catch(() => {
         // If image loading fails, just analyze the text
         if (hasSharedText) {
-          analyze(params.sharedText!, "text");
+          const triggerAnalysis = () => analyze(params.sharedText!, "text");
+          ensureConsent(triggerAnalysis);
         }
       });
     } else if (hasSharedText) {
-      // Auto-trigger text analysis
-      analyze(params.sharedText!, "text");
+      // Auto-trigger text analysis (gated by AI consent)
+      const triggerAnalysis = () => analyze(params.sharedText!, "text");
+      ensureConsent(triggerAnalysis);
     }
-  }, [params.sharedText, params.sharedImages, analyze]);
+  }, [params.sharedText, params.sharedImages, analyze, ensureConsent]);
 
   const handleAttach = async () => {
     const remaining = MAX_IMAGES - images.length;
@@ -131,11 +138,13 @@ export default function HomeScreen() {
 
   const handleSubmit = () => {
     if (!canSubmit) return;
-    analyze(
-      text.trim(),
-      images.length > 0 ? "image" : "text",
-      images.length > 0 ? images.map((i) => i.base64) : undefined,
-    );
+    const triggerAnalysis = () =>
+      analyze(
+        text.trim(),
+        images.length > 0 ? "image" : "text",
+        images.length > 0 ? images.map((i) => i.base64) : undefined,
+      );
+    ensureConsent(triggerAnalysis);
   };
 
   const handleReset = () => {
@@ -274,6 +283,11 @@ export default function HomeScreen() {
 
         {loading && <LoadingOverlay />}
       </SafeAreaView>
+
+      <AIConsentModal
+        visible={showModal}
+        onAccept={acceptConsent}
+      />
     </KeyboardAvoidingView>
   );
 }

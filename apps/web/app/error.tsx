@@ -3,11 +3,14 @@
 import Footer from "@/components/Footer";
 
 export default function Error({
+  error,
   reset,
 }: {
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const isRateLimit =
+    error.message?.includes("429") || error.message?.includes("rate");
   return (
     <div className="min-h-screen flex flex-col">
       <div className="h-1.5 bg-deep-navy w-full" />
@@ -20,7 +23,9 @@ export default function Error({
           Something Went Wrong
         </h1>
         <p className="text-gov-slate text-base leading-relaxed mb-8 max-w-md">
-          An unexpected error occurred. Please try again.
+          {isRateLimit
+            ? "You're browsing too quickly. Please wait a moment and try again."
+            : "An unexpected error occurred. Please try again."}
         </p>
         <button
           onClick={reset}

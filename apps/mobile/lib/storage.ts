@@ -11,8 +11,22 @@ export interface ScanHistoryItem {
   mode: string;
 }
 
+const AI_CONSENT_KEY = "askarthur_ai_consent";
 const HISTORY_KEY = "askarthur_scan_history";
 const MAX_HISTORY = 50;
+
+export async function getAIConsent(): Promise<boolean> {
+  try {
+    const value = await AsyncStorage.getItem(AI_CONSENT_KEY);
+    return value === "true";
+  } catch {
+    return false;
+  }
+}
+
+export async function setAIConsent(consented: boolean): Promise<void> {
+  await AsyncStorage.setItem(AI_CONSENT_KEY, consented ? "true" : "false");
+}
 
 export async function getScanHistory(): Promise<ScanHistoryItem[]> {
   try {

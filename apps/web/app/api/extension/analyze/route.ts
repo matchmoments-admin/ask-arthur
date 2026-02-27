@@ -8,6 +8,7 @@ import { featureFlags } from "@askarthur/utils/feature-flags";
 import { getCachedAnalysis, setCachedAnalysis } from "@askarthur/scam-engine/analysis-cache";
 import type { RedirectChain } from "@askarthur/types";
 import { storeVerifiedScam, incrementStats } from "@askarthur/scam-engine/pipeline";
+import { stripEmailHtml } from "@askarthur/scam-engine/html-sanitize";
 import { logger } from "@askarthur/utils/logger";
 import { validateExtensionRequest } from "../_lib/auth";
 
@@ -47,7 +48,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { text } = parsed.data;
+    const { text: rawText } = parsed.data;
+
+    // 2b. Strip HTML artifacts from email content (defense-in-depth)
+    const text = stripEmailHtml(rawText);
 
     // 3. Pre-filter for injection attempts
     const injectionCheck = detectInjectionAttempt(text);

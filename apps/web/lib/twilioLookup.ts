@@ -1,16 +1,8 @@
 import Twilio from "twilio";
 import { logger } from "@askarthur/utils/logger";
+import type { PhoneLookupResult, PhoneRiskLevel } from "@askarthur/types";
 
-export interface PhoneLookupResult {
-  valid: boolean;
-  phoneNumber: string; // E.164 format
-  countryCode: string | null;
-  nationalFormat: string | null;
-  lineType: string | null; // "mobile" | "landline" | "nonFixedVoip" | "tollFree" | ...
-  carrier: string | null;
-  isVoip: boolean;
-  riskFlags: string[];
-}
+export type { PhoneLookupResult };
 
 let _client: ReturnType<typeof Twilio> | null = null;
 
@@ -24,8 +16,37 @@ function getClient() {
 }
 
 /**
+ * Compute a 0-100 risk score from phone lookup signals.
+ */
+function computePhoneRiskScore(flags: {
+  isVoip: boolean;
+  countryCode: string | null;
+  lineType: string | null;
+  valid: boolean;
+  carrier: string | null;
+  callerName: string | null;
+}): { riskScore: number; riskLevel: PhoneRiskLevel } {
+  let score = 0;
+  if (flags.isVoip) score += 35;
+  if (flags.countryCode && flags.countryCode !== "AU") score += 25;
+  if (!flags.lineType || flags.lineType === "unknown") score += 20;
+  if (!flags.valid) score += 15;
+  if (!flags.carrier) score += 10;
+  if (!flags.callerName) score += 5;
+  score = Math.min(score, 100);
+
+  const riskLevel: PhoneRiskLevel =
+    score >= 70 ? "CRITICAL" :
+    score >= 40 ? "HIGH" :
+    score >= 20 ? "MEDIUM" :
+    "LOW";
+
+  return { riskScore: score, riskLevel };
+}
+
+/**
  * Look up a phone number via Twilio Lookup v2.
- * Basic validation = free. Line type intelligence = $0.008/lookup.
+ * Line type intelligence ($0.008) + CNAM ($0.01) = $0.018/lookup.
  */
 export async function lookupPhoneNumber(phoneNumber: string): Promise<PhoneLookupResult> {
   const client = getClient();
@@ -33,17 +54,30 @@ export async function lookupPhoneNumber(phoneNumber: string): Promise<PhoneLooku
   try {
     const result = await client.lookups.v2
       .phoneNumbers(phoneNumber)
-      .fetch({ fields: "line_type_intelligence", countryCode: "AU" });
+      .fetch({ fields: "line_type_intelligence,caller_name", countryCode: "AU" });
 
     const lineType = result.lineTypeIntelligence?.type ?? null;
     const carrier = result.lineTypeIntelligence?.carrierName ?? null;
     const isVoip = lineType === "nonFixedVoip";
+    const callerName = (result as unknown as Record<string, unknown>).callerName as { caller_name?: string; caller_type?: string } | null;
+    const callerNameValue = callerName?.caller_name ?? null;
+    const callerNameType = callerName?.caller_type ?? null;
 
     const riskFlags: string[] = [];
     if (isVoip) riskFlags.push("voip");
     if (!result.valid) riskFlags.push("invalid_number");
     if (result.countryCode && result.countryCode !== "AU") riskFlags.push("non_au_origin");
     if (!carrier) riskFlags.push("unknown_carrier");
+    if (!callerNameValue) riskFlags.push("no_registered_name");
+
+    const { riskScore, riskLevel } = computePhoneRiskScore({
+      isVoip,
+      countryCode: result.countryCode ?? null,
+      lineType,
+      valid: result.valid ?? false,
+      carrier,
+      callerName: callerNameValue,
+    });
 
     return {
       valid: result.valid ?? false,
@@ -54,6 +88,10 @@ export async function lookupPhoneNumber(phoneNumber: string): Promise<PhoneLooku
       carrier,
       isVoip,
       riskFlags,
+      riskScore,
+      riskLevel,
+      callerName: callerNameValue,
+      callerNameType,
     };
   } catch (err) {
     logger.error("Twilio lookup failed", { phone: phoneNumber.slice(-4), error: String(err) });
@@ -66,6 +104,10 @@ export async function lookupPhoneNumber(phoneNumber: string): Promise<PhoneLooku
       carrier: null,
       isVoip: false,
       riskFlags: ["lookup_failed"],
+      riskScore: 0,
+      riskLevel: "LOW",
+      callerName: null,
+      callerNameType: null,
     };
   }
 }

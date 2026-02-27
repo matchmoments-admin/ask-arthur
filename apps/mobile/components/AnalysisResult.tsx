@@ -3,6 +3,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { Colors } from "@/constants/colors";
 import { Fonts } from "@/constants/fonts";
 import { VerdictBadge } from "./VerdictBadge";
+import { RecoveryGuide } from "./RecoveryGuide";
+import { PhoneIntelCard } from "./PhoneIntelCard";
 import type { AnalysisResult as AnalysisResultType } from "@askarthur/types";
 
 interface AnalysisResultProps {
@@ -54,6 +56,18 @@ export function AnalysisResultView({ result, scrollable = true }: AnalysisResult
             </View>
           ))}
         </View>
+      )}
+
+      {result.phoneIntelligence && (
+        <PhoneIntelCard lookup={result.phoneIntelligence} />
+      )}
+
+      {(result.verdict === "HIGH_RISK" || result.verdict === "SUSPICIOUS") && (
+        <RecoveryGuide
+          verdict={result.verdict}
+          scamType={result.scamType}
+          impersonatedBrand={result.impersonatedBrand}
+        />
       )}
 
       {result.scamType && result.scamType !== "none" && (

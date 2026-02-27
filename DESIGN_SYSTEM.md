@@ -132,6 +132,53 @@ The primary result display used across web and extension:
 - Rounded corners: `rounded-xl` (web), `rounded-2xl` (extension)
 - Border: 1px solid verdict border color
 
+### Phone Risk Report Card
+
+Enrichment card displayed for SUSPICIOUS/HIGH_RISK verdicts when phone intelligence is available. Follows the DeepfakeGauge pattern (self-contained, feature-flagged).
+
+```
+┌──────────────────────────────────────────┐
+│ [bg-slate-50 header]                     │
+│ [phone_in_talk] PHONE RISK REPORT CARD   │
+├──────────────────────────────────────────┤
+│                                          │
+│  Risk Score                     42/100   │
+│  [████████████░░░░░░░░░░░░░░░░]          │
+│  [MEDIUM badge]                          │
+│                                          │
+│  ┌──────────┬──────────┐                 │
+│  │LINE TYPE │ CARRIER  │                 │
+│  │  VoIP    │ Unknown  │                 │
+│  ├──────────┼──────────┤                 │
+│  │ COUNTRY  │ CALLER   │                 │
+│  │  AU      │ Not Reg. │                 │
+│  └──────────┴──────────┘                 │
+│                                          │
+│  ⚠ VoIP number — internet-based         │
+│  ⚠ No registered caller name            │
+│                                          │
+│  Powered by Twilio Lookup                │
+└──────────────────────────────────────────┘
+```
+
+**Risk level colors:**
+
+| Score | Level | Color | Background |
+|-------|-------|-------|------------|
+| 0-19 | LOW | `#388E3C` | `#ECFDF5` |
+| 20-39 | MEDIUM | `#F57C00` | `#FFF8E1` |
+| 40-69 | HIGH | `#E65100` | `#FFF3E0` |
+| 70-100 | CRITICAL | `#D32F2F` | `#FEF2F2` |
+
+**Design tokens:**
+- Header: `bg-slate-50 border-b border-slate-200`, text `text-xs font-bold uppercase tracking-widest text-deep-navy`
+- Score bar: `w-full bg-gray-100 rounded-full h-3` (same as DeepfakeGauge)
+- Signal grid: `grid grid-cols-2 sm:grid-cols-4 gap-3`, each cell `bg-slate-50 rounded-sm p-3 text-center`
+- Warning items: `material-symbols-outlined text-sm text-[#F57C00]` icon + `text-sm text-gov-slate`
+- Risk badge: colored pill with `rounded-full px-2 py-0.5 text-xs font-bold uppercase`
+
+**Files:** `apps/web/components/PhoneIntelCard.tsx`, `apps/mobile/components/PhoneIntelCard.tsx`
+
 ### Button Styles
 
 | Type | Background | Text | Border |

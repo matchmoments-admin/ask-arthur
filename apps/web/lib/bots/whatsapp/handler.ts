@@ -1,9 +1,54 @@
+import { Redis } from "@upstash/redis";
 import { analyzeForBot } from "@askarthur/bot-core/analyze";
 import { toWhatsAppMessage } from "@askarthur/bot-core/format-whatsapp";
 import { checkBotRateLimit } from "@askarthur/bot-core/rate-limit";
 import { logger } from "@askarthur/utils/logger";
 import { sendTextMessage, sendInteractiveButtons } from "./api";
 import { downloadWhatsAppMedia } from "./media";
+
+const DISCLOSURE_MESSAGE =
+  "Welcome to Ask Arthur \u2014 Australia's scam detection service. " +
+  "I use Anthropic's Claude AI to analyse messages for scam indicators. " +
+  "Your messages are processed in real-time and never stored.\n\n" +
+  "Forward me a suspicious message to check it.";
+
+let _redis: Redis | null = null;
+function getRedis(): Redis | null {
+  if (_redis) return _redis;
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) return null;
+  _redis = new Redis({ url, token });
+  return _redis;
+}
+
+async function hashPhone(phone: string): Promise<string> {
+  const data = new TextEncoder().encode(phone);
+  const buf = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+    .slice(0, 16);
+}
+
+/**
+ * Check if this is a first-time user and send AI disclosure if so.
+ * Returns true if this is a new user (disclosure was sent).
+ */
+async function sendDisclosureIfNew(from: string): Promise<boolean> {
+  const redis = getRedis();
+  if (!redis) return false;
+
+  const phoneHash = await hashPhone(from);
+  const key = `whatsapp:seen:${phoneHash}`;
+  const seen = await redis.get(key);
+  if (seen) return false;
+
+  // Mark as seen with 30-day TTL
+  await redis.set(key, "1", { ex: 30 * 24 * 60 * 60 });
+  await sendTextMessage(from, DISCLOSURE_MESSAGE);
+  return true;
+}
 
 interface WhatsAppMessage {
   from: string;
@@ -59,9 +104,14 @@ async function processMessage(message: WhatsAppMessage): Promise<void> {
       );
     } else if (buttonId === "action:check") {
       await sendTextMessage(from, "Send me another message to check \u{1f50d}");
+    } else if (buttonId === "action:about") {
+      await sendTextMessage(from, DISCLOSURE_MESSAGE);
     }
     return;
   }
+
+  // Send AI disclosure on first interaction
+  await sendDisclosureIfNew(from);
 
   // Handle image messages
   if (message.type === "image" && message.image?.id) {
@@ -107,12 +157,12 @@ async function processImageMessage(
     const result = await analyzeForBot(caption ?? "Analyse this image for scam indicators", undefined, [base64]);
     const formatted = toWhatsAppMessage(result);
 
-    const buttons = [
-      { id: "action:check", title: "Check another" },
-    ];
+    const buttons: Array<{ id: string; title: string }> = [];
     if (result.verdict === "HIGH_RISK" || result.verdict === "SUSPICIOUS") {
-      buttons.unshift({ id: "action:report", title: "Report scam" });
+      buttons.push({ id: "action:report", title: "Report scam" });
     }
+    buttons.push({ id: "action:check", title: "Check another" });
+    buttons.push({ id: "action:about", title: "About" });
 
     await sendInteractiveButtons(from, formatted, buttons);
   } catch (err) {
@@ -134,13 +184,12 @@ async function processAnalysis(from: string, text: string): Promise<void> {
     const formatted = toWhatsAppMessage(result);
 
     // Send the analysis result with follow-up buttons
-    const buttons = [
-      { id: "action:check", title: "Check another" },
-    ];
-
+    const buttons: Array<{ id: string; title: string }> = [];
     if (result.verdict === "HIGH_RISK" || result.verdict === "SUSPICIOUS") {
-      buttons.unshift({ id: "action:report", title: "Report scam" });
+      buttons.push({ id: "action:report", title: "Report scam" });
     }
+    buttons.push({ id: "action:check", title: "Check another" });
+    buttons.push({ id: "action:about", title: "About" });
 
     await sendInteractiveButtons(from, formatted, buttons);
   } catch (err) {

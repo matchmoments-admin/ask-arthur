@@ -10,6 +10,13 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
+  // Only rate-limit API routes and mutating requests — not page navigation
+  const isApiRoute = req.nextUrl.pathname.startsWith("/api/");
+  const isMutatingRequest = req.method !== "GET" && req.method !== "HEAD";
+  if (!isApiRoute && !isMutatingRequest) {
+    return NextResponse.next();
+  }
+
   // Fail-open in dev when Upstash not configured
   const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
   const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;

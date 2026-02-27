@@ -24,6 +24,7 @@ Threat model, mandatory defenses, and compliance status for Ask Arthur.
 |--------|------|------------|
 | Prompt injection via user text | High | Unicode sanitization, nonce delimiters, sandwich defense, 14 regex patterns |
 | Prompt injection via invisible Unicode | High | `sanitizeUnicode()` strips zero-width chars + NFC normalization |
+| Email HTML/CSS injection (hidden content) | Medium | Client-side: hidden element removal before `innerText`; Server-side: `stripEmailHtml()` strips comments, style/script blocks, hidden elements, data attributes, HTML tags |
 | API abuse / scraping | Medium | Two-tier rate limiting (burst + daily), fail-closed |
 | Admin panel access | High | Cookie-based HMAC auth with 24h expiry, timing-safe comparison |
 | Webhook forgery | High | HMAC-SHA256 signature verification per platform |
@@ -47,10 +48,15 @@ All user text is sanitized before Claude analysis:
 4. **Nonce-based delimiters** — user content wrapped in UUID-tagged XML elements (`<user_input_{nonce}>`)
 5. **Sandwich defense** — analysis instructions placed before AND after user content
 6. **Injection pattern detection** — 14 regex patterns flag manipulation attempts (e.g., "ignore previous instructions", "return SAFE", "system prompt", delimiter breakout)
+7. **Email HTML sanitization** — `stripEmailHtml()` in `scam-engine/html-sanitize.ts` strips HTML comments, `<style>`/`<script>` blocks, elements with `display:none`/`visibility:hidden`, `data-*` attributes, and remaining HTML tags before analysis (defense-in-depth for extension email scanning)
 
 ### 2. Rate Limiting
 
-**File:** `packages/utils/src/rate-limit.ts`
+**Two layers of defense:**
+
+**Layer 1 — Global edge middleware** (`apps/web/middleware.ts`): 60 requests/min per IP via Upstash Redis sliding window. Only applied to API routes (`/api/*`) and mutating requests (POST, PUT, DELETE). Page navigation (GET to non-API paths) is exempt to prevent rate limit errors when browsing between pages.
+
+**Layer 2 — Per-route analysis limits** (`packages/utils/src/rate-limit.ts`):
 
 | Context | Burst | Daily | Identifier |
 |---------|-------|-------|-----------|

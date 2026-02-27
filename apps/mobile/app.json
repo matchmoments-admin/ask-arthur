@@ -18,7 +18,17 @@
       "bundleIdentifier": "au.askarthur.app",
       "buildNumber": "1",
       "infoPlist": {
-        "NSCameraUsageDescription": "Ask Arthur needs camera access to scan QR codes for scam detection."
+        "NSCameraUsageDescription": "Ask Arthur needs camera access to scan QR codes for scam detection.",
+        "NSPrivacyCollectedDataTypes": [
+          {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeOtherUserContent",
+            "NSPrivacyCollectedDataTypeLinked": false,
+            "NSPrivacyCollectedDataTypeTracking": false,
+            "NSPrivacyCollectedDataTypePurposes": [
+              "NSPrivacyCollectedDataTypePurposeAppFunctionality"
+            ]
+          }
+        ]
       }
     },
     "android": {

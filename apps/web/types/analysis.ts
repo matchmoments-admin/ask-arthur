@@ -1,4 +1,4 @@
-import type { ScammerContacts } from "@askarthur/types";
+import type { ScammerContacts, PhoneLookupResult } from "@askarthur/types";
 
 export type Verdict = "SAFE" | "SUSPICIOUS" | "HIGH_RISK";
 
@@ -21,4 +21,7 @@ export interface AnalysisResponse {
   scamType?: string;
   impersonatedBrand?: string;
   channel?: string;
+  phoneRiskFlags?: string[];
+  isVoipCaller?: boolean;
+  phoneIntelligence?: PhoneLookupResult;
 }

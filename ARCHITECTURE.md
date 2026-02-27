@@ -96,11 +96,16 @@ Request
   ├─ 8. Verdict merging
   │     ├─ Escalate to HIGH_RISK if any URL flagged
   │     └─ Floor to SUSPICIOUS if injection detected
-  ├─ 9. Background work (Vercel waitUntil)
+  ├─ 9. Phone intelligence (HIGH_RISK/SUSPICIOUS only)
+  │     ├─ Extract phone numbers from text
+  │     ├─ Twilio Lookup v2 (line type + CNAM, $0.018/lookup)
+  │     ├─ Compute 0-100 risk score (VoIP, non-AU, unknown type, invalid, no carrier, no CNAM)
+  │     └─ Inject VoIP/non-AU findings as red flags
+  ├─ 10. Background work (Vercel waitUntil)
   │     ├─ Store HIGH_RISK verdicts to Supabase
   │     ├─ Increment statistics counters
   │     └─ Cache text-only results in Redis
-  └─ 10. Response with rate limit headers
+  └─ 11. Response with rate limit headers
 ```
 
 ### Request Schema
@@ -129,6 +134,20 @@ Request
   scammerContacts: {
     phoneNumbers: { value: string, context: string }[]
     emailAddresses: { value: string, context: string }[]
+  }
+  phoneIntelligence?: {     // Present when phone detected in HIGH_RISK/SUSPICIOUS
+    valid: boolean
+    phoneNumber: string     // E.164 format
+    countryCode: string | null
+    nationalFormat: string | null
+    lineType: string | null // "mobile" | "landline" | "nonFixedVoip" | ...
+    carrier: string | null
+    isVoip: boolean
+    riskFlags: string[]
+    riskScore: number       // 0-100 composite risk score
+    riskLevel: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"
+    callerName: string | null      // CNAM registered name
+    callerNameType: string | null  // "business" | "consumer" | null
   }
 }
 ```
@@ -217,7 +236,7 @@ Authenticated via Bearer token (API key). See `docs/openapi.yaml` for full spec.
 
 ### Supabase (PostgreSQL)
 
-18 migration files (`supabase/migration.sql` through `migration-v18-blog-categories.sql`).
+19 migration files (`supabase/migration.sql` through `migration-v19-phone-intel.sql`).
 
 **Core Tables:**
 
@@ -236,6 +255,7 @@ Authenticated via Bearer token (API key). See `docs/openapi.yaml` for full spec.
 | `crypto_wallets` | Scam-associated crypto wallets |
 | `feed_timestamps` | Scraper last-run tracking |
 | `feed_references` | Scraper source attribution |
+| `phone_lookups` | Twilio phone intelligence results (risk score, CNAM, carrier) |
 
 ### Upstash Redis
 

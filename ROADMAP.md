@@ -128,12 +128,43 @@ Building a comprehensive threat database.
 | Multi-image analysis (up to 10 images per request) | ✅ Done |
 | Breach check API endpoint | ✅ Done |
 
+## Phase 5b — Soft Launch Readiness ✅
+
+Pre-launch compliance, security hardening, and competitive feature parity.
+
+### Compliance & Security
+
+| Feature | Status |
+|---------|--------|
+| Apple AI consent flow (Guideline 5.1.2(i)) — mobile consent modal + AsyncStorage | ✅ Done |
+| iOS `NSPrivacyCollectedDataTypes` declaration | ✅ Done |
+| WhatsApp bot AI disclosure — first-time welcome message via Redis | ✅ Done |
+| Email HTML/CSS injection hardening — `stripEmailHtml()` server-side + client-side hidden element removal | ✅ Done |
+
+### Feature Enablement
+
+| Feature | Status |
+|---------|--------|
+| Phone intelligence wired into analysis pipeline (Twilio Lookup v2) | ✅ Done |
+| Phone Risk Report Card — CNAM, risk score (0-100), carrier/line-type/country grid (web + mobile) | ✅ Done |
+| Rate limiter fix — page navigation exempted from global rate limit (API routes still protected) | ✅ Done |
+| Scam recovery guidance UI — structured Australian contacts (web + mobile) | ✅ Done |
+| SEO blog content — 7 targeted Australian scam posts (seed script) | ✅ Done |
+
 ## Phase 6 — Scale & Growth
 
 Future priorities. Items here may move to `BACKLOG.md` if deprioritized.
 
 | Feature | Status |
 |---------|--------|
+| Premium tier with rate limit tiers (Stripe) | Planned |
+| Family protection plan (shared check routing) | Planned |
+| Push scam alerts (FCM/APNs) | Planned |
+| Background SMS scanning (Android NotificationListenerService / iOS ILMessageFilterExtension) | Planned |
+| Call screening (Android CallScreeningService / iOS CallKit) | Planned |
+| Deepfake detection pipeline wiring (Reality Defender / Resemble AI) | Planned |
+| Automated decision-making disclosure (Privacy Act tranche 1, Dec 2026) | Planned |
+| Chrome Web Store / Google Play submissions | Planned |
 | Public threat intelligence feeds (real-time) | Planned |
 | Brand monitoring (impersonation detection) | Planned |
 | Carrier feeds integration (Telstra/Optus) | Planned |

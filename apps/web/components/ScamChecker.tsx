@@ -421,6 +421,11 @@ export default function ScamChecker() {
             redFlags={result.redFlags}
             nextSteps={result.nextSteps}
             countryCode={result.countryCode}
+            phoneRiskFlags={result.phoneRiskFlags}
+            isVoipCaller={result.isVoipCaller}
+            phoneIntelligence={result.phoneIntelligence}
+            scamType={result.scamType}
+            impersonatedBrand={result.impersonatedBrand}
           />
           {featureFlags.scamContactReporting && (result.scammerContacts || result.scammerUrls) && (
             <ScamReportCard

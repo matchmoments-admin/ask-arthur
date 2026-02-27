@@ -15,7 +15,8 @@
     "./geolocate": "./src/geolocate.ts",
     "./inngest/client": "./src/inngest/client.ts",
     "./inngest/functions": "./src/inngest/functions.ts",
-    "./redirect-resolver": "./src/redirect-resolver.ts"
+    "./redirect-resolver": "./src/redirect-resolver.ts",
+    "./html-sanitize": "./src/html-sanitize.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",

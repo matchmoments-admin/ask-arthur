@@ -24,12 +24,15 @@ export interface AnalysisResult {
   channel?: string;
   scammerContacts?: ScammerContacts;
   redirects?: RedirectChain[];
+  phoneIntelligence?: PhoneLookupResult;
 }
 
 export interface InjectionCheckResult {
   detected: boolean;
   patterns: string[];
 }
+
+export type PhoneRiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 
 export interface PhoneLookupResult {
   valid: boolean;
@@ -40,6 +43,10 @@ export interface PhoneLookupResult {
   carrier: string | null;
   isVoip: boolean;
   riskFlags: string[];
+  riskScore: number;
+  riskLevel: PhoneRiskLevel;
+  callerName: string | null;
+  callerNameType: string | null;
 }
 
 export interface RedirectHop {

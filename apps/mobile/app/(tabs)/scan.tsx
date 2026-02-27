@@ -3,22 +3,28 @@ import { View, Text, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { QRScanner } from "@/components/QRScanner";
 import { AnalysisResultView } from "@/components/AnalysisResult";
+import { AIConsentModal } from "@/components/AIConsentModal";
 import { LoadingOverlay } from "@/components/LoadingOverlay";
 import { Button } from "@/components/Button";
 import { useAnalysis } from "@/hooks/useAnalysis";
+import { useAIConsent } from "@/hooks/useAIConsent";
 import { Colors } from "@/constants/colors";
 import { Fonts } from "@/constants/fonts";
 
 export default function ScanScreen() {
   const { result, loading, error, analyze, reset } = useAnalysis();
+  const { showModal, ensureConsent, acceptConsent } = useAIConsent();
   const [scannerActive, setScannerActive] = useState(true);
 
   const handleScan = useCallback(
     (content: string, type: "url" | "text") => {
-      setScannerActive(false);
-      analyze(content, type === "url" ? "qrcode" : "text");
+      const triggerAnalysis = () => {
+        setScannerActive(false);
+        analyze(content, type === "url" ? "qrcode" : "text");
+      };
+      ensureConsent(triggerAnalysis);
     },
-    [analyze]
+    [analyze, ensureConsent]
   );
 
   const handleReset = useCallback(() => {
@@ -52,6 +58,7 @@ export default function ScanScreen() {
     <View style={styles.scanContainer}>
       <QRScanner onScan={handleScan} active={scannerActive} />
       {loading && <LoadingOverlay message="Checking QR code..." />}
+      <AIConsentModal visible={showModal} onAccept={acceptConsent} />
     </View>
   );
 }

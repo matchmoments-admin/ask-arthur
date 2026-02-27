@@ -11,6 +11,8 @@ import { geolocateIP } from "@askarthur/scam-engine/geolocate";
 import type { RedirectChain } from "@askarthur/types";
 import { storeVerifiedScam, incrementStats } from "@askarthur/scam-engine/pipeline";
 import { getCachedAnalysis, setCachedAnalysis } from "@askarthur/scam-engine/analysis-cache";
+import type { PhoneLookupResult } from "@askarthur/types";
+import { lookupPhoneNumber, extractPhoneNumbers } from "@/lib/twilioLookup";
 import { uploadScreenshot } from "@/lib/r2";
 import { logger } from "@askarthur/utils/logger";
 
@@ -203,7 +205,44 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 8b. Extract scammer URLs when URL reporting feature is on
+    // 8b. Phone intelligence enrichment (Twilio Lookup v2 + CNAM)
+    let phoneIntelligence: PhoneLookupResult | undefined;
+    let phoneRiskFlags: string[] | undefined;   // backward compat
+    let isVoipCaller: boolean | undefined;       // backward compat
+    if (
+      featureFlags.phoneIntelligence &&
+      text &&
+      (aiResult.verdict === "HIGH_RISK" || aiResult.verdict === "SUSPICIOUS")
+    ) {
+      const phones = extractPhoneNumbers(text);
+      const lookupTarget = phones.find((p) => p.e164);
+      if (lookupTarget?.e164) {
+        try {
+          const lookup = await lookupPhoneNumber(lookupTarget.e164);
+          phoneIntelligence = lookup;
+
+          // Inject key findings as red flags
+          if (lookup.isVoip) {
+            aiResult.redFlags.push(
+              `Phone ${lookup.nationalFormat || "detected"} uses VoIP — commonly used by scam operations`
+            );
+          }
+          if (lookup.countryCode && lookup.countryCode !== "AU") {
+            aiResult.redFlags.push(
+              `Phone ${lookup.nationalFormat || "detected"} originates outside Australia (${lookup.countryCode})`
+            );
+          }
+
+          // Backward compat
+          phoneRiskFlags = lookup.riskFlags.length > 0 ? lookup.riskFlags : undefined;
+          isVoipCaller = lookup.isVoip || undefined;
+        } catch (err) {
+          logger.error("Phone intelligence lookup failed", { error: String(err) });
+        }
+      }
+    }
+
+    // 8c. Extract scammer URLs when URL reporting feature is on
     let scammerUrls: Array<{ url: string; isMalicious: boolean; sources: string[] }> | undefined;
     if (
       featureFlags.scamUrlReporting &&
@@ -235,6 +274,9 @@ export async function POST(req: NextRequest) {
         ...(scammerUrls && { scammerUrls }),
         ...(scammerUrls && mode && { inputMode: mode }),
         ...(redirectChains.length > 0 && { redirects: redirectChains }),
+        ...(phoneIntelligence && { phoneIntelligence }),
+        ...(phoneRiskFlags && { phoneRiskFlags }),          // backward compat
+        ...(isVoipCaller != null && { isVoipCaller }),       // backward compat
       },
       {
         headers: {

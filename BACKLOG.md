@@ -6,6 +6,8 @@ Deferred features organized by platform. Items here are validated ideas that did
 
 ## Mobile
 
+- [x] AI consent modal (Apple Guideline 5.1.2(i) compliance)
+- [x] Recovery guidance component (Australian contacts)
 - [ ] Push notifications (scam alerts for your area)
 - [ ] Call screening via Android CallScreeningService
 - [ ] SMS filtering via iOS ILMessageFilterExtension
@@ -27,6 +29,8 @@ Deferred features organized by platform. Items here are validated ideas that did
 
 ## WhatsApp
 
+- [x] AI disclosure welcome message (Meta compliance)
+- [x] "About" button for AI transparency
 - [ ] Image analysis (forward screenshot of scam)
 - [ ] Document analysis (PDF/Word attachments)
 - [ ] Phone number lookup
@@ -49,11 +53,23 @@ Deferred features organized by platform. Items here are validated ideas that did
 
 ## Browser Extension
 
+- [x] Email HTML/CSS injection hardening (hidden element stripping + server-side sanitization)
 - [ ] Real-time URL checking on page load
 - [ ] Email scanner (Gmail/Outlook web)
 - [ ] Page content analysis
 - [ ] Phishing site warning overlay
 - [ ] Safe browsing indicator in toolbar
+- [ ] Website permission check — audit a site's requested browser permissions (camera, mic, location, notifications, clipboard) and flag overreach. Similar to the existing URL check but focused on permission hygiene rather than scam detection
+- [ ] Website vulnerability check — scan a site for common security issues (mixed content, missing HSTS, open redirects, outdated TLS, exposed admin panels, missing CSP). Not scam detection — aimed at helping site owners and users understand if a site is safe to interact with. Results stored in `site_audits` table for trend analysis
+
+## Website Safety Audits (Extension + Web)
+
+Cross-platform features to help users and site owners assess website security — complementary to scam detection.
+
+- [ ] **Permission check** — audit a website's requested browser permissions (camera, microphone, location, notifications, clipboard, payment). Flag overreach (e.g. a blog requesting camera access). Extension: real-time check on page load. Web: paste a URL to audit. Report card with permission-by-permission breakdown and risk assessment
+- [ ] **Vulnerability check** — scan a website for common security issues: missing HSTS, weak TLS, no CSP, mixed content, open redirects, exposed admin panels, missing security headers, outdated server software. Extension: badge overlay on current page. Web: paste a URL to scan. Not about scam detection — about helping sites be safe for users
+- [ ] **`site_audits` table** — store permission and vulnerability check results for longitudinal tracking. Schema: `url`, `audit_type` (permission|vulnerability), `findings` (JSONB), `score` (0-100), `checked_at`. Index on url + audit_type for quick lookups. Enables trend analysis ("this site's security improved/degraded over time")
+- [ ] **Site safety badge** — embeddable badge for site owners who pass audits (like SSL badges). Links back to askarthur.au with full report
 
 ## B2B / API
 
@@ -67,8 +83,14 @@ Deferred features organized by platform. Items here are validated ideas that did
 
 ## Web App
 
+- [x] Phone intelligence in analysis pipeline (Twilio Lookup v2)
+- [x] Phone Risk Report Card — CNAM caller name, 0-100 risk score, carrier/line-type/country grid, visual parity web + mobile
+- [x] Scam recovery guidance UI (Australian contacts, collapsible)
+- [x] SEO blog content seed script (7 targeted Australian scam posts)
 - [ ] Breach check page (use /api/breach-check from web UI)
 - [ ] Bot setup wizard (guided Telegram/WhatsApp/Slack setup)
 - [ ] Community scam reports feed
 - [ ] Scam trend analytics dashboard
 - [ ] Email forwarding analysis (forward scam emails to check@askarthur.au)
+- [ ] Website permission check (web version) — let users paste a URL to audit its requested browser permissions. Report card showing which permissions the site requests and whether they're justified for the site's purpose
+- [ ] Website vulnerability check (web version) — let users paste a URL to get a security health report. Check TLS version, HSTS, CSP, mixed content, open redirects, exposed endpoints. Store results in `site_audits` for longitudinal tracking

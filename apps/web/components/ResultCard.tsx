@@ -1,7 +1,11 @@
 "use client";
 
+import type { PhoneLookupResult } from "@askarthur/types";
 import { featureFlags } from "@askarthur/utils/feature-flags";
+import { getRecoverySteps } from "@/lib/recoverySteps";
 import DeepfakeGauge from "./DeepfakeGauge";
+import PhoneIntelCard from "./PhoneIntelCard";
+import RecoveryGuide from "./RecoveryGuide";
 
 type Verdict = "SAFE" | "SUSPICIOUS" | "HIGH_RISK";
 
@@ -17,6 +21,9 @@ interface ResultCardProps {
   deepfakeProvider?: string;
   phoneRiskFlags?: string[];
   isVoipCaller?: boolean;
+  phoneIntelligence?: PhoneLookupResult;
+  scamType?: string;
+  impersonatedBrand?: string;
 }
 
 const VERDICT_CONFIG = {
@@ -54,8 +61,12 @@ export default function ResultCard({
   deepfakeProvider,
   phoneRiskFlags,
   isVoipCaller,
+  phoneIntelligence,
+  scamType,
+  impersonatedBrand,
 }: ResultCardProps) {
   const config = VERDICT_CONFIG[verdict];
+  const recovery = getRecoverySteps(scamType, impersonatedBrand, verdict);
 
   return (
     <div role="alert" className="mt-6 rounded-sm border border-slate-200 overflow-hidden">
@@ -87,37 +98,10 @@ export default function ResultCard({
           </div>
         )}
 
-        {/* Phase 2: Phone intelligence (gated by feature flag) */}
-        {featureFlags.phoneIntelligence && phoneRiskFlags && phoneRiskFlags.length > 0 && (
-          <div className="mb-5 rounded-sm border border-slate-200 overflow-hidden">
-            <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
-              <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-lg text-deep-navy">phone_in_talk</span>
-                <h4 className="text-xs font-bold uppercase tracking-widest text-deep-navy">
-                  Phone Number Intelligence
-                </h4>
-              </div>
-            </div>
-            <div className="px-4 py-4 bg-white">
-              {isVoipCaller && (
-                <div className="flex items-start gap-2 mb-2">
-                  <span className="material-symbols-outlined text-sm text-[#F57C00] mt-0.5">warning</span>
-                  <span className="text-sm text-gov-slate">
-                    VoIP number detected — commonly used by scammers to mask their identity
-                  </span>
-                </div>
-              )}
-              <ul className="space-y-1">
-                {phoneRiskFlags.map((flag, i) => (
-                  <li key={i} className="flex items-start gap-2 text-sm text-gov-slate">
-                    <span
-                      className="mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0 bg-slate-400"
-                    />
-                    {formatRiskFlag(flag)}
-                  </li>
-                ))}
-              </ul>
-            </div>
+        {/* Phase 2: Phone intelligence report card (gated by feature flag) */}
+        {featureFlags.phoneIntelligence && phoneIntelligence && (
+          <div className="mb-5">
+            <PhoneIntelCard lookup={phoneIntelligence} />
           </div>
         )}
 
@@ -155,6 +139,11 @@ export default function ResultCard({
               ))}
             </ol>
           </div>
+        )}
+
+        {/* Recovery guidance for HIGH_RISK / SUSPICIOUS */}
+        {recovery && (verdict === "HIGH_RISK" || verdict === "SUSPICIOUS") && (
+          <RecoveryGuide recovery={recovery} verdict={verdict} />
         )}
 
         {/* Scamwatch reporting CTA for Australian users on HIGH_RISK */}
@@ -199,13 +188,3 @@ export default function ResultCard({
   );
 }
 
-function formatRiskFlag(flag: string): string {
-  const labels: Record<string, string> = {
-    voip: "VoIP number (internet-based, not tied to a physical line)",
-    invalid_number: "Invalid phone number format",
-    non_au_origin: "Number originates outside Australia",
-    unknown_carrier: "Carrier information unavailable",
-    lookup_failed: "Phone number lookup could not be completed",
-  };
-  return labels[flag] || flag;
-}

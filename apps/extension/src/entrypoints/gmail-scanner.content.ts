@@ -123,8 +123,16 @@ function extractEmailContent(
       }
     }
 
+    // Clone and strip hidden elements before extracting text
+    const bodyClone = bodyEl.cloneNode(true) as HTMLElement;
+    bodyClone
+      .querySelectorAll(
+        '[style*="display:none"], [style*="display: none"], [style*="visibility:hidden"], [style*="visibility: hidden"]'
+      )
+      .forEach((el) => el.remove());
+
     // Get body text (skip quoted/forwarded content where possible)
-    const bodyText = bodyEl.innerText?.trim() ?? "";
+    const bodyText = bodyClone.innerText?.trim() ?? "";
     if (!bodyText) return null;
 
     // Extract links from body, filtering out Gmail UI links
