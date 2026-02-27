@@ -123,6 +123,16 @@ export async function POST(req: NextRequest) {
     ]);
     const { region, countryCode } = geo;
 
+    // Debug: log whether Claude returned scammer contacts (useful for screenshot submissions)
+    console.log("[phone-debug] Claude result", {
+      verdict: aiResult.verdict,
+      hasText: !!text,
+      imageCount: images.length,
+      hasScammerContacts: !!aiResult.scammerContacts,
+      contactPhones: aiResult.scammerContacts?.phoneNumbers?.length ?? 0,
+      contactEmails: aiResult.scammerContacts?.emailAddresses?.length ?? 0,
+    });
+
     // 6. Merge verdicts — URL threats escalate AI verdict
     let finalVerdict: Verdict = aiResult.verdict;
     const maliciousURLs = urlResults.filter((r) => r.isMalicious);
@@ -190,34 +200,72 @@ export async function POST(req: NextRequest) {
       waitUntil(setCachedAnalysis(text, aiResult));
     }
 
-    // 8. Extract scammer contacts from original (unscrubbed) text when feature is on
-    // PII scrubbing runs before Claude, so Claude can't see the actual values.
-    // We extract from the original text server-side for HIGH_RISK/SUSPICIOUS verdicts.
+    // 8. Extract scammer contacts when feature is on
+    // Text path: extract from original (unscrubbed) text (preferred — has raw values)
+    // Vision fallback: use contacts Claude extracted from screenshot
     let scammerContacts: { phoneNumbers: Array<{ value: string; context: string }>; emailAddresses: Array<{ value: string; context: string }> } | undefined;
     if (
       featureFlags.scamContactReporting &&
-      text &&
       (aiResult.verdict === "HIGH_RISK" || aiResult.verdict === "SUSPICIOUS")
     ) {
-      const extracted = extractContactsFromText(text);
-      if (extracted.phoneNumbers.length > 0 || extracted.emailAddresses.length > 0) {
-        scammerContacts = extracted;
+      if (text) {
+        const extracted = extractContactsFromText(text);
+        if (extracted.phoneNumbers.length > 0 || extracted.emailAddresses.length > 0) {
+          scammerContacts = extracted;
+          console.log("[phone-debug] contacts extracted from text", {
+            phones: extracted.phoneNumbers.length,
+            emails: extracted.emailAddresses.length,
+          });
+        }
+      } else if (aiResult.scammerContacts) {
+        // Vision fallback — Claude extracted contacts from the screenshot
+        try {
+          const ai = aiResult.scammerContacts;
+          if (ai.phoneNumbers.length > 0 || ai.emailAddresses.length > 0) {
+            scammerContacts = ai;
+            console.log("[phone-debug] contacts from vision fallback", {
+              phones: ai.phoneNumbers.map((p) => p.value),
+              emails: ai.emailAddresses.map((e) => e.value),
+            });
+          }
+        } catch (err) {
+          console.log("[phone-debug] vision contact extraction failed", String(err));
+        }
       }
     }
 
     // 8b. Phone intelligence enrichment (Twilio Lookup v2 + CNAM)
+    // Text path: extract phones from raw text
+    // Vision fallback: normalize phones from Claude's scammerContacts
     let phoneIntelligence: PhoneLookupResult | undefined;
     let phoneRiskFlags: string[] | undefined;   // backward compat
     let isVoipCaller: boolean | undefined;       // backward compat
     if (
       featureFlags.phoneIntelligence &&
-      text &&
       (aiResult.verdict === "HIGH_RISK" || aiResult.verdict === "SUSPICIOUS")
     ) {
-      const phones = extractPhoneNumbers(text);
+      let phones: Array<{ original: string; e164: string | null }> = [];
+
+      if (text) {
+        phones = extractPhoneNumbers(text);
+        console.log("[phone-debug] phones extracted from text for intel", phones);
+      } else if (aiResult.scammerContacts?.phoneNumbers?.length) {
+        // Vision fallback — run each value Claude found through extractPhoneNumbers to normalize
+        try {
+          for (const p of aiResult.scammerContacts.phoneNumbers) {
+            const normalized = extractPhoneNumbers(p.value);
+            phones.push(...normalized);
+          }
+          console.log("[phone-debug] phones from vision fallback for intel", phones);
+        } catch (err) {
+          console.log("[phone-debug] vision phone normalization failed", String(err));
+        }
+      }
+
       const lookupTarget = phones.find((p) => p.e164);
       if (lookupTarget?.e164) {
         try {
+          console.log("[phone-debug] Twilio lookup for", lookupTarget.e164);
           const lookup = await lookupPhoneNumber(lookupTarget.e164);
           phoneIntelligence = lookup;
 
