@@ -202,12 +202,13 @@ export async function POST(req: NextRequest) {
 
     // 8. Extract scammer contacts when feature is on
     // Text path: extract from original (unscrubbed) text (preferred — has raw values)
-    // Vision fallback: use contacts Claude extracted from screenshot
+    // Vision fallback: use contacts Claude extracted from screenshot (when text has none)
     let scammerContacts: { phoneNumbers: Array<{ value: string; context: string }>; emailAddresses: Array<{ value: string; context: string }> } | undefined;
     if (
       featureFlags.scamContactReporting &&
       (aiResult.verdict === "HIGH_RISK" || aiResult.verdict === "SUSPICIOUS")
     ) {
+      // Try text extraction first
       if (text) {
         const extracted = extractContactsFromText(text);
         if (extracted.phoneNumbers.length > 0 || extracted.emailAddresses.length > 0) {
@@ -217,8 +218,9 @@ export async function POST(req: NextRequest) {
             emails: extracted.emailAddresses.length,
           });
         }
-      } else if (aiResult.scammerContacts) {
-        // Vision fallback — Claude extracted contacts from the screenshot
+      }
+      // Fall through to vision if text extraction found nothing (or no text)
+      if (!scammerContacts && aiResult.scammerContacts) {
         try {
           const ai = aiResult.scammerContacts;
           if (ai.phoneNumbers.length > 0 || ai.emailAddresses.length > 0) {
@@ -246,11 +248,13 @@ export async function POST(req: NextRequest) {
     ) {
       let phones: Array<{ original: string; e164: string | null }> = [];
 
+      // Try text extraction first
       if (text) {
         phones = extractPhoneNumbers(text);
         console.log("[phone-debug] phones extracted from text for intel", phones);
-      } else if (aiResult.scammerContacts?.phoneNumbers?.length) {
-        // Vision fallback — run each value Claude found through extractPhoneNumbers to normalize
+      }
+      // Fall through to vision if text extraction found nothing (or no text)
+      if (phones.length === 0 && aiResult.scammerContacts?.phoneNumbers?.length) {
         try {
           for (const p of aiResult.scammerContacts.phoneNumbers) {
             const normalized = extractPhoneNumbers(p.value);
