@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Drawer } from "vaul";
 import type { AnalysisResponse } from "@/types/analysis";
 import { getOfficialBrand } from "@/lib/officialBrands";
 
@@ -53,6 +54,8 @@ export default function QrAnalysisOverlay({
   const autoOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [analysisStep, setAnalysisStep] = useState(0);
+
+  const isHighRisk = step === "verdict" && result?.verdict === "HIGH_RISK";
 
   // Animate through analysis steps
   useEffect(() => {
@@ -109,91 +112,92 @@ export default function QrAnalysisOverlay({
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-white flex flex-col">
-      {/* Header */}
-      <div className="relative flex items-center justify-center px-4 pt-safe-top h-14 shrink-0 border-b border-slate-200">
-        <button
-          type="button"
-          onClick={onGoBack}
-          className="absolute left-3 top-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center rounded-full text-gov-slate hover:text-deep-navy hover:bg-slate-100 transition-colors"
-          aria-label="Go back"
+    <Drawer.Root
+      open={true}
+      modal={false}
+      dismissible={!isHighRisk}
+      onClose={onGoBack}
+    >
+      <Drawer.Portal>
+        <Drawer.Content
+          className="fixed inset-x-0 bottom-0 z-[60] rounded-t-2xl bg-white max-h-[85vh] flex flex-col focus:outline-none"
         >
-          <span className="material-symbols-outlined text-2xl">arrow_back</span>
-        </button>
-        <h2 className="text-deep-navy font-semibold text-base">QR Code Check</h2>
-      </div>
+          {/* Drag handle */}
+          <div className="flex justify-center pt-3 pb-2 shrink-0">
+            <div className="w-10 h-1 rounded-full bg-slate-300" />
+          </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-lg mx-auto px-5 py-8">
-          {/* Analyzing state */}
-          {step === "analyzing" && (
-            <div className="flex flex-col items-center gap-6 pt-12">
-              <div className="w-12 h-12 border-3 border-deep-navy border-t-transparent rounded-full animate-spin" />
-              <div className="text-center space-y-3">
-                {ANALYSIS_STEPS.map((label, i) => (
-                  <div
-                    key={i}
-                    className={`flex items-center gap-2.5 transition-opacity duration-300 ${
-                      i <= analysisStep ? "opacity-100" : "opacity-30"
-                    }`}
+          {/* Scrollable content */}
+          <div className="flex-1 overflow-y-auto px-5 pb-safe-bottom">
+            {/* Analyzing state */}
+            {step === "analyzing" && (
+              <div className="flex flex-col items-center gap-4 pb-6">
+                <div className="w-10 h-10 border-3 border-deep-navy border-t-transparent rounded-full animate-spin" />
+                <div className="text-center space-y-3">
+                  {ANALYSIS_STEPS.map((label, i) => (
+                    <div
+                      key={i}
+                      className={`flex items-center gap-2.5 transition-opacity duration-300 ${
+                        i <= analysisStep ? "opacity-100" : "opacity-30"
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-lg text-action-teal">
+                        {i < analysisStep ? "check_circle" : i === analysisStep ? "pending" : "radio_button_unchecked"}
+                      </span>
+                      <span className="text-gov-slate text-base">{label}</span>
+                    </div>
+                  ))}
+                </div>
+                {scannedUrl && (
+                  <p className="text-sm text-slate-400 text-center break-all max-w-xs mt-2">
+                    {scannedUrl}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Error state */}
+            {step === "error" && (
+              <div className="flex flex-col items-center gap-4 pb-6">
+                <div className="w-12 h-12 rounded-full bg-danger-bg flex items-center justify-center">
+                  <span className="material-symbols-outlined text-2xl text-[#D32F2F]">error</span>
+                </div>
+                <p className="text-deep-navy text-base text-center">{errorMsg}</p>
+                <div className="flex flex-col gap-3 w-full">
+                  <button
+                    type="button"
+                    onClick={onGoBack}
+                    className="h-12 px-6 bg-deep-navy text-white font-bold uppercase tracking-widest rounded-full hover:bg-navy transition-colors text-sm"
                   >
-                    <span className="material-symbols-outlined text-lg text-action-teal">
-                      {i < analysisStep ? "check_circle" : i === analysisStep ? "pending" : "radio_button_unchecked"}
-                    </span>
-                    <span className="text-gov-slate text-base">{label}</span>
-                  </div>
-                ))}
+                    Go Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onScanAnother}
+                    className="h-12 px-6 text-gov-slate font-bold uppercase tracking-widest rounded-full border-2 border-slate-200 hover:bg-slate-50 transition-colors text-sm"
+                  >
+                    Scan Another
+                  </button>
+                </div>
               </div>
-              {scannedUrl && (
-                <p className="text-sm text-slate-400 text-center break-all max-w-xs mt-2">
-                  {scannedUrl}
-                </p>
-              )}
-            </div>
-          )}
+            )}
 
-          {/* Error state */}
-          {step === "error" && (
-            <div className="flex flex-col items-center gap-6 pt-12">
-              <div className="w-16 h-16 rounded-full bg-danger-bg flex items-center justify-center">
-                <span className="material-symbols-outlined text-3xl text-[#D32F2F]">error</span>
-              </div>
-              <p className="text-deep-navy text-base text-center">{errorMsg}</p>
-              <div className="flex flex-col gap-3 w-full max-w-xs">
-                <button
-                  type="button"
-                  onClick={onGoBack}
-                  className="h-12 px-6 bg-deep-navy text-white font-bold uppercase tracking-widest rounded-full hover:bg-navy transition-colors text-sm"
-                >
-                  Go Back
-                </button>
-                <button
-                  type="button"
-                  onClick={onScanAnother}
-                  className="h-12 px-6 text-gov-slate font-bold uppercase tracking-widest rounded-full border-2 border-slate-200 hover:bg-slate-50 transition-colors text-sm"
-                >
-                  Scan Another
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Verdict state */}
-          {step === "verdict" && result && (
-            <VerdictContent
-              result={result}
-              scannedUrl={scannedUrl}
-              autoOpenCountdown={autoOpenCountdown}
-              autoOpenCancelled={autoOpenCancelled}
-              onCancelAutoOpen={cancelAutoOpen}
-              onGoBack={onGoBack}
-              onScanAnother={onScanAnother}
-            />
-          )}
-        </div>
-      </div>
-    </div>
+            {/* Verdict state */}
+            {step === "verdict" && result && (
+              <VerdictContent
+                result={result}
+                scannedUrl={scannedUrl}
+                autoOpenCountdown={autoOpenCountdown}
+                autoOpenCancelled={autoOpenCancelled}
+                onCancelAutoOpen={cancelAutoOpen}
+                onGoBack={onGoBack}
+                onScanAnother={onScanAnother}
+              />
+            )}
+          </div>
+        </Drawer.Content>
+      </Drawer.Portal>
+    </Drawer.Root>
   );
 }
 
@@ -220,18 +224,18 @@ function VerdictContent({
     : null;
 
   return (
-    <div className="flex flex-col items-center gap-5">
+    <div className="flex flex-col items-center gap-3 pb-6">
       {/* Verdict icon */}
       <div
-        className={`w-20 h-20 rounded-full ${config.iconBg} flex items-center justify-center animate-verdict-icon`}
+        className={`w-14 h-14 rounded-full ${config.iconBg} flex items-center justify-center animate-verdict-icon`}
       >
-        <span className={`material-symbols-outlined text-5xl ${config.iconColor}`}>
+        <span className={`material-symbols-outlined text-3xl ${config.iconColor}`}>
           {config.icon}
         </span>
       </div>
 
       {/* Title */}
-      <h3 className="text-xl font-bold text-deep-navy animate-verdict-content">
+      <h3 className="text-lg font-bold text-deep-navy animate-verdict-content">
         {config.title}
       </h3>
 
@@ -262,7 +266,7 @@ function VerdictContent({
 
       {/* SAFE verdict actions */}
       {result.verdict === "SAFE" && (
-        <div className="animate-verdict-content flex flex-col gap-3 w-full max-w-xs mt-2">
+        <div className="animate-verdict-content flex flex-col gap-3 w-full mt-2">
           {scannedUrl && (
             <>
               {/* Auto-open notice or manual link */}
@@ -304,7 +308,7 @@ function VerdictContent({
 
       {/* SUSPICIOUS verdict actions */}
       {result.verdict === "SUSPICIOUS" && (
-        <div className="animate-verdict-content flex flex-col gap-3 w-full max-w-xs mt-2">
+        <div className="animate-verdict-content flex flex-col gap-3 w-full mt-2">
           <button
             type="button"
             onClick={onGoBack}
@@ -335,7 +339,7 @@ function VerdictContent({
 
       {/* HIGH_RISK verdict actions */}
       {result.verdict === "HIGH_RISK" && (
-        <div className="animate-verdict-content flex flex-col gap-3 w-full max-w-xs mt-2">
+        <div className="animate-verdict-content flex flex-col gap-3 w-full mt-2">
           {officialBrand && (
             <a
               href={officialBrand.url}

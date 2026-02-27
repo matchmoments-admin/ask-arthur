@@ -93,9 +93,9 @@ export default function QrScanFlow({ open, onClose }: QrScanFlowProps) {
 
   if (!open) return null;
 
-  // Scanning phase — use existing QrScanner
-  if (state.step === "scanning") {
-    return (
+  return (
+    <>
+      {/* Scanner stays mounted in all states — frozen when not scanning */}
       <QrScanner
         open={true}
         onClose={() => {
@@ -103,19 +103,20 @@ export default function QrScanFlow({ open, onClose }: QrScanFlowProps) {
           onClose();
         }}
         onScan={handleScan}
+        frozen={state.step !== "scanning"}
       />
-    );
-  }
 
-  // Analyzing / Verdict / Error phases — use overlay
-  return (
-    <QrAnalysisOverlay
-      step={state.step}
-      scannedUrl={state.scannedUrl}
-      result={state.step === "verdict" ? state.result : null}
-      errorMsg={state.step === "error" ? state.errorMsg : null}
-      onGoBack={handleGoBack}
-      onScanAnother={handleScanAnother}
-    />
+      {/* Drawer overlays on top when analyzing/verdict/error */}
+      {state.step !== "scanning" && (
+        <QrAnalysisOverlay
+          step={state.step}
+          scannedUrl={state.scannedUrl}
+          result={state.step === "verdict" ? state.result : null}
+          errorMsg={state.step === "error" ? state.errorMsg : null}
+          onGoBack={handleGoBack}
+          onScanAnother={handleScanAnother}
+        />
+      )}
+    </>
   );
 }

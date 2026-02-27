@@ -7,11 +7,12 @@ interface QrScannerProps {
   open: boolean;
   onClose: () => void;
   onScan: (text: string) => void;
+  frozen?: boolean;
 }
 
 type ScannerState = "initializing" | "scanning" | "error";
 
-export default function QrScanner({ open, onClose, onScan }: QrScannerProps) {
+export default function QrScanner({ open, onClose, onScan, frozen }: QrScannerProps) {
   const [state, setState] = useState<ScannerState>("initializing");
   const [errorMessage, setErrorMessage] = useState("");
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -45,10 +46,14 @@ export default function QrScanner({ open, onClose, onScan }: QrScannerProps) {
         navigator.vibrate(100);
       }
 
-      cleanup();
+      // Stop scanning but keep camera stream alive
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = 0;
+      }
       onScan(rawValue);
     },
-    [cleanup, onScan]
+    [onScan]
   );
 
   const scanFrame = useCallback(() => {
@@ -124,6 +129,7 @@ export default function QrScanner({ open, onClose, onScan }: QrScannerProps) {
     rafRef.current = requestAnimationFrame(scanFrame);
   }, [handleDetection]);
 
+  // Main setup effect: start camera when open, full cleanup on close/unmount
   useEffect(() => {
     if (!open) {
       cleanup();
@@ -177,25 +183,35 @@ export default function QrScanner({ open, onClose, onScan }: QrScannerProps) {
     return cleanup;
   }, [open, cleanup, scanFrame]);
 
+  // Restart scanning when frozen transitions from true → false ("Scan Another")
+  useEffect(() => {
+    if (!frozen && hasScanned.current && streamRef.current && state === "scanning") {
+      hasScanned.current = false;
+      rafRef.current = requestAnimationFrame(scanFrame);
+    }
+  }, [frozen, scanFrame, state]);
+
   if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-black flex flex-col">
-      {/* Header */}
-      <div className="relative flex items-center justify-center px-4 pt-safe-top h-14 shrink-0">
-        <button
-          type="button"
-          onClick={() => {
-            cleanup();
-            onClose();
-          }}
-          className="absolute left-3 top-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center rounded-full text-white/80 hover:text-white hover:bg-white/10 transition-colors"
-          aria-label="Close scanner"
-        >
-          <span className="material-symbols-outlined text-2xl">close</span>
-        </button>
-        <h2 className="text-white font-semibold text-base">Scan QR Code</h2>
-      </div>
+      {/* Header — hidden when frozen (drawer handles navigation) */}
+      {!frozen && (
+        <div className="relative flex items-center justify-center px-4 pt-safe-top h-14 shrink-0">
+          <button
+            type="button"
+            onClick={() => {
+              cleanup();
+              onClose();
+            }}
+            className="absolute left-3 top-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center rounded-full text-white/80 hover:text-white hover:bg-white/10 transition-colors"
+            aria-label="Close scanner"
+          >
+            <span className="material-symbols-outlined text-2xl">close</span>
+          </button>
+          <h2 className="text-white font-semibold text-base">Scan QR Code</h2>
+        </div>
+      )}
 
       {/* Main content */}
       <div className="flex-1 flex items-center justify-center relative overflow-hidden">
@@ -238,8 +254,8 @@ export default function QrScanner({ open, onClose, onScan }: QrScannerProps) {
           </div>
         )}
 
-        {/* Scanning viewfinder overlay */}
-        {state === "scanning" && (
+        {/* Scanning viewfinder overlay — hidden when frozen */}
+        {state === "scanning" && !frozen && (
           <>
             {/* Semi-transparent overlay with cutout effect */}
             <div className="absolute inset-0 z-10 pointer-events-none">
@@ -268,8 +284,8 @@ export default function QrScanner({ open, onClose, onScan }: QrScannerProps) {
         )}
       </div>
 
-      {/* Bottom hint */}
-      {state === "scanning" && (
+      {/* Bottom hint — hidden when frozen */}
+      {state === "scanning" && !frozen && (
         <div className="shrink-0 pb-safe-bottom px-4 pb-8 pt-4 text-center">
           <p className="text-white/70 text-sm">
             Point your camera at a QR code
