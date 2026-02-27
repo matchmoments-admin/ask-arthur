@@ -15,6 +15,7 @@
     "@anthropic-ai/sdk": "^0.74.0",
     "@askarthur/bot-core": "workspace:*",
     "@askarthur/scam-engine": "workspace:*",
+    "@askarthur/site-audit": "workspace:*",
     "@askarthur/supabase": "workspace:*",
     "@askarthur/types": "workspace:*",
     "@askarthur/utils": "workspace:*",

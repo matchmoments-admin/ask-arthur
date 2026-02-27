@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 
 export default function Nav() {
   return (
@@ -13,6 +14,14 @@ export default function Nav() {
         Ask Arthur
       </Link>
       <div className="flex items-center gap-4">
+        {featureFlags.siteAudit && (
+          <Link
+            href="/audit"
+            className="text-deep-navy font-bold text-sm hover:text-action-teal transition-colors py-3 px-2"
+          >
+            Audit
+          </Link>
+        )}
         <Link
           href="/blog"
           className="text-deep-navy font-bold text-sm hover:text-action-teal transition-colors py-3 px-2"

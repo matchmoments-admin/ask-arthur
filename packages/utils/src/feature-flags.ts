@@ -32,6 +32,9 @@ export const featureFlags = {
 
   /** Chrome extension: Gmail email scanning */
   emailScanning: process.env.NEXT_PUBLIC_FF_EMAIL_SCANNING === "true",
+
+  /** Website Safety Audit: lightweight security header scanner */
+  siteAudit: process.env.NEXT_PUBLIC_FF_SITE_AUDIT === "true",
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;
