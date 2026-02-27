@@ -150,6 +150,9 @@ Pre-launch compliance, security hardening, and competitive feature parity.
 | Rate limiter fix — page navigation exempted from global rate limit (API routes still protected) | ✅ Done |
 | Scam recovery guidance UI — structured Australian contacts (web + mobile) | ✅ Done |
 | SEO blog content — 7 targeted Australian scam posts (seed script) | ✅ Done |
+| Website Safety Audit — security header/TLS scanner with letter grade (`/audit` page) | ✅ Done |
+| Scam Report Card — moved inside ResultCard for prominence, with contact/URL reporting | ✅ Done |
+| PhoneIntelCard — hidden for high-confidence HIGH_RISK to avoid mixed signals | ✅ Done |
 
 ## Phase 6 — Scale & Growth
 

@@ -67,7 +67,8 @@ Deferred features organized by platform. Items here are validated ideas that did
 Cross-platform features to help users and site owners assess website security — complementary to scam detection.
 
 - [ ] **Permission check** — audit a website's requested browser permissions (camera, microphone, location, notifications, clipboard, payment). Flag overreach (e.g. a blog requesting camera access). Extension: real-time check on page load. Web: paste a URL to audit. Report card with permission-by-permission breakdown and risk assessment
-- [ ] **Vulnerability check** — scan a website for common security issues: missing HSTS, weak TLS, no CSP, mixed content, open redirects, exposed admin panels, missing security headers, outdated server software. Extension: badge overlay on current page. Web: paste a URL to scan. Not about scam detection — about helping sites be safe for users
+- [x] **Vulnerability check (Phase 1)** — basic security header + TLS scanner with letter grade, deployed at `/audit`. Full version (open redirects, exposed admin panels, outdated server software) still TODO
+- [ ] **Vulnerability check (Phase 2)** — extended scanning: open redirects, exposed admin panels, outdated server software, mixed content deep scan
 - [ ] **`site_audits` table** — store permission and vulnerability check results for longitudinal tracking. Schema: `url`, `audit_type` (permission|vulnerability), `findings` (JSONB), `score` (0-100), `checked_at`. Index on url + audit_type for quick lookups. Enables trend analysis ("this site's security improved/degraded over time")
 - [ ] **Site safety badge** — embeddable badge for site owners who pass audits (like SSL badges). Links back to askarthur.au with full report
 
@@ -87,6 +88,7 @@ Cross-platform features to help users and site owners assess website security �
 - [x] Phone Risk Report Card — CNAM caller name, 0-100 risk score, carrier/line-type/country grid, visual parity web + mobile
 - [x] Scam recovery guidance UI (Australian contacts, collapsible)
 - [x] SEO blog content seed script (7 targeted Australian scam posts)
+- [x] Scam Report Card integrated into result view (contact/URL reporting)
 - [ ] Breach check page (use /api/breach-check from web UI)
 - [ ] Bot setup wizard (guided Telegram/WhatsApp/Slack setup)
 - [ ] Community scam reports feed
