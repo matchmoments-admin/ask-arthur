@@ -91,7 +91,7 @@ font-family: "SF Mono", "Fira Code", "Fira Mono", Menlo, monospace;
 | Context | Max Width | Notes |
 |---------|-----------|-------|
 | General content | 640px | Standard page content |
-| Blog content | 720px | Wider for readability |
+| Blog content | 640px | Matches main content width |
 | Hero sections | Full width | Navy background, contained content |
 | Extension popup | 380px | Fixed width Chrome popup |
 
