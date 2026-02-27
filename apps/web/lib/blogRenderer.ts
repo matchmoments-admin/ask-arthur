@@ -1,4 +1,4 @@
-import { Marked, type Tokens } from "marked";
+import { Marked, type Token, type Tokens } from "marked";
 import { markedHighlight } from "marked-highlight";
 import hljs from "highlight.js/lib/core";
 import javascript from "highlight.js/lib/languages/javascript";
@@ -12,6 +12,51 @@ hljs.registerLanguage("javascript", javascript);
 hljs.registerLanguage("python", python);
 hljs.registerLanguage("bash", bash);
 hljs.registerLanguage("json", json);
+
+// GitHub-style admonition callouts: [!TIP], [!WARNING], [!DANGER], etc.
+const CALLOUT_CONFIG: Record<string, { label: string; icon: string; cls: string }> = {
+  TIP: {
+    label: "Tip",
+    cls: "callout-tip",
+    // Lucide Lightbulb icon (24×24)
+    icon: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg>',
+  },
+  WARNING: {
+    label: "Warning",
+    cls: "callout-warning",
+    // Lucide TriangleAlert icon (24×24)
+    icon: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>',
+  },
+  DANGER: {
+    label: "Danger",
+    cls: "callout-danger",
+    // Lucide ShieldAlert icon (24×24)
+    icon: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>',
+  },
+  NOTE: {
+    label: "Note",
+    cls: "callout-note",
+    // Lucide Info icon (24×24)
+    icon: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>',
+  },
+  IMPORTANT: {
+    label: "Important",
+    cls: "callout-warning",
+    // Lucide AlertCircle icon (24×24)
+    icon: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>',
+  },
+};
+
+/** Extract raw text from a token tree (for matching callout markers). */
+function extractRawText(tokens: Token[]): string {
+  return tokens
+    .map((t) => {
+      if ("text" in t && typeof t.text === "string") return t.text;
+      if ("raw" in t && typeof t.raw === "string") return t.raw;
+      return "";
+    })
+    .join("");
+}
 
 const marked = new Marked(
   markedHighlight({
@@ -60,6 +105,26 @@ const marked = new Marked(
         }
 
         return `<img src="${href}" alt="${alt}" loading="lazy" />`;
+      },
+
+      // GitHub-style admonition blockquotes: > [!WARNING] content
+      blockquote({ tokens }: Tokens.Blockquote) {
+        const inner = this.parser.parse(tokens);
+
+        // Check if the first text node starts with [!TYPE]
+        const raw = extractRawText(tokens);
+        const match = raw.match(/^\[!(\w+)\]\s*/);
+        if (match) {
+          const type = match[1].toUpperCase();
+          const config = CALLOUT_CONFIG[type];
+          if (config) {
+            // Strip the [!TYPE] marker from the rendered HTML
+            const cleaned = inner.replace(/\[!\w+\]\s*/, "");
+            return `<div class="callout ${config.cls}"><div class="callout-title">${config.icon}<span>${config.label}</span></div><div class="callout-body">${cleaned}</div></div>\n`;
+          }
+        }
+
+        return `<blockquote>${inner}</blockquote>\n`;
       },
     },
   }

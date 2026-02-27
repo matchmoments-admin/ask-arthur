@@ -61,6 +61,9 @@ export default async function BlogPostPage({ params }: PageProps) {
       "code",
       "iframe",
       "div",
+      "svg",
+      "path",
+      "circle",
     ],
     allowedAttributes: {
       ...sanitizeHtml.defaults.allowedAttributes,
@@ -69,6 +72,9 @@ export default async function BlogPostPage({ params }: PageProps) {
       a: ["href", "target", "rel"],
       iframe: ["src", "title", "allow", "allowfullscreen"],
       div: ["class"],
+      svg: ["xmlns", "width", "height", "viewBox", "fill", "stroke", "stroke-width", "stroke-linecap", "stroke-linejoin"],
+      path: ["d"],
+      circle: ["cx", "cy", "r"],
     },
   });
 

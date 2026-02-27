@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { ShieldCheck, Gauge, ClipboardCheck } from "lucide-react";
+import { ShieldCheck, FileCheckCorner, ClipboardCheck } from "lucide-react";
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
 import SiteAuditChecker from "@/components/SiteAuditChecker";
@@ -42,7 +42,7 @@ export default function AuditPage() {
             </p>
           </div>
           <div className="text-center">
-            <Gauge className="text-deep-navy mb-3 mx-auto" size={36} />
+            <FileCheckCorner className="text-deep-navy mb-3 mx-auto" size={36} />
             <h3 className="text-deep-navy font-bold text-sm uppercase tracking-widest mb-2">
               Instant Results
             </h3>
