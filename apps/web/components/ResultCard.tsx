@@ -141,8 +141,8 @@ export default function ResultCard({
           </div>
         )}
 
-        {/* Recovery guidance for HIGH_RISK / SUSPICIOUS */}
-        {recovery && (verdict === "HIGH_RISK" || verdict === "SUSPICIOUS") && (
+        {/* Recovery guidance for HIGH_RISK / SUSPICIOUS (feature-gated) */}
+        {featureFlags.recoveryGuidance && recovery && (verdict === "HIGH_RISK" || verdict === "SUSPICIOUS") && (
           <RecoveryGuide recovery={recovery} verdict={verdict} />
         )}
 

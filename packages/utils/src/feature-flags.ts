@@ -35,6 +35,9 @@ export const featureFlags = {
 
   /** Website Safety Audit: lightweight security header scanner */
   siteAudit: process.env.NEXT_PUBLIC_FF_SITE_AUDIT === "true",
+
+  /** Recovery guidance steps on HIGH_RISK / SUSPICIOUS verdicts */
+  recoveryGuidance: process.env.NEXT_PUBLIC_FF_RECOVERY_GUIDANCE === "true",
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;
