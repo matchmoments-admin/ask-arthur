@@ -6,6 +6,8 @@ import { getRecoverySteps } from "@/lib/recoverySteps";
 import DeepfakeGauge from "./DeepfakeGauge";
 import PhoneIntelCard from "./PhoneIntelCard";
 import RecoveryGuide from "./RecoveryGuide";
+import ScamReportCard from "./ScamReportCard";
+import type { ScammerContacts } from "@askarthur/types";
 
 type Verdict = "SAFE" | "SUSPICIOUS" | "HIGH_RISK";
 
@@ -24,6 +26,11 @@ interface ResultCardProps {
   phoneIntelligence?: PhoneLookupResult;
   scamType?: string;
   impersonatedBrand?: string;
+  // ScamReportCard props (passed through)
+  scammerContacts?: ScammerContacts;
+  scammerUrls?: Array<{ url: string; isMalicious: boolean; sources: string[] }>;
+  channel?: string;
+  inputMode?: string;
 }
 
 const VERDICT_CONFIG = {
@@ -64,6 +71,10 @@ export default function ResultCard({
   phoneIntelligence,
   scamType,
   impersonatedBrand,
+  scammerContacts,
+  scammerUrls,
+  channel,
+  inputMode,
 }: ResultCardProps) {
   const config = VERDICT_CONFIG[verdict];
   const recovery = getRecoverySteps(scamType, impersonatedBrand, verdict);
@@ -98,8 +109,23 @@ export default function ResultCard({
           </div>
         )}
 
-        {/* Phase 2: Phone intelligence report card (gated by feature flag) */}
-        {featureFlags.phoneIntelligence && phoneIntelligence && (
+        {/* Scam Report Card — help protect others */}
+        {featureFlags.scamContactReporting && (scammerContacts || scammerUrls) && (
+          <div className="mb-5">
+            <ScamReportCard
+              contacts={scammerContacts}
+              scammerUrls={scammerUrls}
+              scamType={scamType}
+              brandImpersonated={impersonatedBrand}
+              channel={channel}
+              sourceType={inputMode}
+            />
+          </div>
+        )}
+
+        {/* Phase 2: Phone intelligence report card (hidden for high-confidence HIGH_RISK) */}
+        {featureFlags.phoneIntelligence && phoneIntelligence &&
+          !(verdict === "HIGH_RISK" && confidence >= 0.8) && (
           <div className="mb-5">
             <PhoneIntelCard lookup={phoneIntelligence} />
           </div>

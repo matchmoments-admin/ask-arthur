@@ -10,7 +10,6 @@ import { compressImage } from "@/lib/compressImage";
 import { tryDecodeQR } from "@/lib/qrDecode";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { useMediaAnalysis } from "@/lib/hooks/useMediaAnalysis";
-import ScamReportCard from "./ScamReportCard";
 import type { AnalysisResponse } from "@/types/analysis";
 
 type Status = "idle" | "analyzing" | "complete" | "error" | "rate_limited";
@@ -413,7 +412,6 @@ export default function ScamChecker() {
       <div aria-live="polite">
       {/* Text analysis result */}
       {result && status === "complete" && (
-        <>
           <ResultCard
             verdict={result.verdict}
             confidence={result.confidence}
@@ -426,18 +424,11 @@ export default function ScamChecker() {
             phoneIntelligence={result.phoneIntelligence}
             scamType={result.scamType}
             impersonatedBrand={result.impersonatedBrand}
+            scammerContacts={result.scammerContacts}
+            scammerUrls={result.scammerUrls}
+            channel={result.channel}
+            inputMode={result.inputMode || inputMode}
           />
-          {featureFlags.scamContactReporting && (result.scammerContacts || result.scammerUrls) && (
-            <ScamReportCard
-              contacts={result.scammerContacts}
-              scammerUrls={result.scammerUrls}
-              scamType={result.scamType}
-              brandImpersonated={result.impersonatedBrand}
-              channel={result.channel}
-              sourceType={result.inputMode || inputMode}
-            />
-          )}
-        </>
       )}
 
       {/* Media analysis result */}

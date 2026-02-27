@@ -43,7 +43,7 @@ export default function RootLayout({
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link
-          href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&icon_names=arrow_back,article,attach_file,bolt,check,check_circle,close,content_paste,error,error_outline,flag,folder_open,gpp_bad,link,lock,mail,mic,open_in_new,pending,phone,phone_in_talk,photo_camera,photo_library,qr_code_scanner,radio_button_unchecked,search_off,shield,speed,verified,verified_user,videocam_off,visibility_off,warning&display=block"
+          href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&icon_names=account_balance,arrow_back,article,attach_file,bolt,check,check_circle,close,computer,content_paste,emergency,error,error_outline,expand_less,expand_more,favorite,flag,folder_open,globe,gpp_bad,link,local_shipping,lock,mail,mic,open_in_new,pending,person,person_off,phone,phone_android,phone_in_talk,phishing,photo_camera,photo_library,priority_high,qr_code_scanner,radio_button_unchecked,router,search_off,shield,speed,support,trending_up,verified,verified_user,videocam_off,visibility_off,warning&display=block"
           rel="stylesheet"
         />
       </head>
