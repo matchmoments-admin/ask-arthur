@@ -258,7 +258,7 @@ export default function ScamChecker() {
                     type="button"
                     onClick={() => removeImage(i)}
                     aria-label={`Remove image ${i + 1}`}
-                    className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-white border border-gray-300 rounded-full flex items-center justify-center text-slate-400 hover:text-gov-slate hover:bg-slate-100 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+                    className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-white border border-gray-300 rounded-full flex items-center justify-center text-slate-400 hover:text-gov-slate hover:bg-slate-100 transition-colors"
                   >
                     <span className="material-symbols-outlined text-xs">close</span>
                   </button>
