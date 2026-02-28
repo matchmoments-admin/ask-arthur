@@ -2,11 +2,9 @@
 
 import type { LucideIcon } from "lucide-react";
 import { ShieldCheck, TriangleAlert, ShieldAlert, Gauge, Flag } from "lucide-react";
-import type { PhoneLookupResult } from "@askarthur/types";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { getRecoverySteps } from "@/lib/recoverySteps";
 import DeepfakeGauge from "./DeepfakeGauge";
-import PhoneIntelCard from "./PhoneIntelCard";
 import RecoveryGuide from "./RecoveryGuide";
 import ScamReportCard from "./ScamReportCard";
 import type { ScammerContacts } from "@askarthur/types";
@@ -25,7 +23,6 @@ interface ResultCardProps {
   deepfakeProvider?: string;
   phoneRiskFlags?: string[];
   isVoipCaller?: boolean;
-  phoneIntelligence?: PhoneLookupResult;
   scamType?: string;
   impersonatedBrand?: string;
   // ScamReportCard props (passed through)
@@ -70,7 +67,6 @@ export default function ResultCard({
   deepfakeProvider,
   phoneRiskFlags,
   isVoipCaller,
-  phoneIntelligence,
   scamType,
   impersonatedBrand,
   scammerContacts,
@@ -122,14 +118,6 @@ export default function ResultCard({
               channel={channel}
               sourceType={inputMode}
             />
-          </div>
-        )}
-
-        {/* Phase 2: Phone intelligence report card (hidden for high-confidence HIGH_RISK) */}
-        {featureFlags.phoneIntelligence && phoneIntelligence &&
-          !(verdict === "HIGH_RISK" && confidence >= 0.8) && (
-          <div className="mb-5">
-            <PhoneIntelCard lookup={phoneIntelligence} />
           </div>
         )}
 

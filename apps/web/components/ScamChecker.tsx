@@ -422,7 +422,6 @@ export default function ScamChecker() {
             countryCode={result.countryCode}
             phoneRiskFlags={result.phoneRiskFlags}
             isVoipCaller={result.isVoipCaller}
-            phoneIntelligence={result.phoneIntelligence}
             scamType={result.scamType}
             impersonatedBrand={result.impersonatedBrand}
             scammerContacts={result.scammerContacts}

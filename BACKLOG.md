@@ -74,6 +74,7 @@ Cross-platform features to help users and site owners assess website security �
 
 ## B2B / API
 
+- [ ] **Phone Intel Card for B2B/Gov** — re-enable PhoneIntelCard UI (currently hidden from consumer web app) for paid government/enterprise tiers. Shows Twilio Lookup v2 data: carrier, line type, VoIP detection, CNAM caller name, 0-100 risk score. Phone intelligence still runs in the background and feeds into enrichment pipeline + risk scoring — this is just the consumer-facing card
 - [ ] Public entity API (batch scam checking)
 - [ ] Threat intelligence feeds (real-time scam data)
 - [ ] Brand monitoring (detect impersonation)

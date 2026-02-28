@@ -35,8 +35,8 @@ Ask Arthur is a multi-platform scam detection service. Users submit suspicious c
        │
 ┌──────┴───────────────────────────────────────────────────┐
 │              Background Processing                        │
-│  Inngest (5 functions)  │  Python Scrapers (14 feeds)    │
-│  GitHub Actions (cron)  │  Cron API routes (4)           │
+│  Inngest (9 functions)  │  Python Scrapers (14 feeds)    │
+│  GitHub Actions (cron)  │  Deep Investigation Pipeline   │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -270,7 +270,7 @@ Authenticated via Bearer token (API key). See `docs/openapi.yaml` for full spec.
 
 ## Inngest Background Functions
 
-Five event-driven functions registered in `@askarthur/scam-engine/inngest/functions`:
+Nine event-driven functions registered in `@askarthur/scam-engine/inngest/functions`:
 
 | Function | Schedule | Purpose |
 |----------|----------|---------|
@@ -279,6 +279,10 @@ Five event-driven functions registered in `@askarthur/scam-engine/inngest/functi
 | Staleness — Wallets | Daily 3am UTC | Mark wallets inactive after 14 days |
 | Enrichment Fan-Out | Every 6 hours | WHOIS + SSL enrichment for pending URLs (20 domains/run) |
 | CT Monitor | Every 12 hours | Certificate Transparency monitoring for AU brand impersonation |
+| Entity Enrichment | Every 4 hours | Two-tier enrichment for entities with 3+ reports. Tier 1 (inline): local intel + AbuseIPDB + HIBP + crt.sh + Twilio. All via Promise.allSettled |
+| URLScan Enrichment | Every 4 hours (+30 min) | Tier 2 async: submits URLs to URLScan.io, waits 60s, retrieves results |
+| Cluster Builder | Daily 4am UTC | Groups related scam reports by shared entities |
+| Risk Scorer | Every 6 hours | Computes composite 0-100 risk scores per entity via SQL RPC |
 
 ## Threat Intelligence Pipeline
 
@@ -299,6 +303,23 @@ Five event-driven functions registered in `@askarthur/scam-engine/inngest/functi
 | `urlhaus.py` | URLhaus malware hosting |
 
 Scrapers run on GitHub Actions (scheduled, gated by `ENABLE_SCRAPER` repo variable). They use a shared `common/` library for URL normalization, database operations, and validation.
+
+## Deep Investigation Pipeline
+
+Weekly passive reconnaissance on CRITICAL/HIGH risk entities using Linux security tools. Runs on GitHub Actions (Sunday 2am UTC, gated by `ENABLE_DEEP_INVESTIGATION` repo variable).
+
+| Tool | Entity Types | What It Produces |
+|------|-------------|-----------------|
+| `nmap -sV` | IP | Open ports, service versions, OS guess |
+| `nmap --script ssl-enum-ciphers` | IP | Weak ciphers, deprecated TLS |
+| `whois` | IP | ASN, network name, bulletproof hosting detection |
+| `dnsrecon` | Domain | Subdomains, zone transfer, wildcard DNS |
+| `whatweb` | Domain | Technology fingerprinting (CMS, frameworks) |
+| `sslscan` | Domain | Protocol support, self-signed certs |
+| `nikto` | URL | Exposed admin panels, directory listings |
+| `curl -sI` | URL | Security headers, redirect chain |
+
+Results stored in `scam_entities.investigation_data` JSONB. Max 50 entities/run, 1s delay between targets, private IP filtering, no active exploitation.
 
 ## Bot Architecture
 

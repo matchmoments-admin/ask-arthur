@@ -154,7 +154,48 @@ Pre-launch compliance, security hardening, and competitive feature parity.
 | Scam Report Card — moved inside ResultCard for prominence, with contact/URL reporting | ✅ Done |
 | PhoneIntelCard — hidden for high-confidence HIGH_RISK to avoid mixed signals | ✅ Done |
 
-## Phase 6 — Scale & Growth
+## Phase 7 — Intelligence Pipeline & External Enrichment ✅
+
+Automated entity enrichment, external threat intelligence feeds, risk scoring with new signals, and deep investigation.
+
+### External API Integrations ✅
+
+| Feature | Status |
+|---------|--------|
+| AbuseIPDB v2 — IP abuse reputation (6h Redis cache) | ✅ Done |
+| HIBP v3 — email breach exposure (24h Redis cache) | ✅ Done |
+| crt.sh — Certificate Transparency log search (12h Redis cache) | ✅ Done |
+| Twilio Lookup v2 — migrated from web app to scam-engine package (24h Redis cache) | ✅ Done |
+| URLScan.io — async URL scanning via Inngest (submit → wait → retrieve) | ✅ Done |
+| Feature flags for each API (independently toggleable) | ✅ Done |
+
+### Entity Enrichment Pipeline ✅
+
+| Feature | Status |
+|---------|--------|
+| Tier 1 inline enrichment (AbuseIPDB, HIBP, crt.sh, Twilio) in entity-enrichment | ✅ Done |
+| Tier 2 async enrichment (URLScan.io) via separate Inngest function | ✅ Done |
+| Promise.allSettled — one API failure never blocks others | ✅ Done |
+| Extended risk scoring RPC (v27) with new external intel signals | ✅ Done |
+| Enrichment points cap raised 25 → 40 | ✅ Done |
+
+### Deep Investigation Pipeline ✅
+
+| Feature | Status |
+|---------|--------|
+| GitHub Actions workflow (Sunday 2am UTC, gated by ENABLE_DEEP_INVESTIGATION) | ✅ Done |
+| Python investigation script (nmap, dnsrecon, nikto, whatweb, sslscan, whois) | ✅ Done |
+| investigation_data JSONB + investigated_at columns (v28) | ✅ Done |
+| Safety: max 50 entities/run, 1s delay, private IP filtering, no active exploitation | ✅ Done |
+
+### UI Changes
+
+| Feature | Status |
+|---------|--------|
+| PhoneIntelCard hidden from consumer web app (data flows to enrichment/scoring instead) | ✅ Done |
+| Phone intel card deferred to B2B/Gov tier (see BACKLOG.md) | ✅ Done |
+
+## Phase 8 — Scale & Growth
 
 Future priorities. Items here may move to `BACKLOG.md` if deprioritized.
 
