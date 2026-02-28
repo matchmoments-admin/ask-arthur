@@ -38,6 +38,30 @@ export const featureFlags = {
 
   /** Recovery guidance steps on HIGH_RISK / SUSPICIOUS verdicts */
   recoveryGuidance: process.env.NEXT_PUBLIC_FF_RECOVERY_GUIDANCE === "true",
+
+  /** Intelligence Core: store unified reports + entity linkage */
+  intelligenceCore: process.env.NEXT_PUBLIC_FF_INTELLIGENCE_CORE === "true",
+
+  /** Entity enrichment: auto-enrich high-report-count entities with external intel */
+  entityEnrichment: process.env.NEXT_PUBLIC_FF_ENTITY_ENRICHMENT === "true",
+
+  /** Cluster builder: auto-group related scam reports by shared entities */
+  clusterBuilder: process.env.NEXT_PUBLIC_FF_CLUSTER_BUILDER === "true",
+
+  /** Risk scoring: composite 0-100 risk scores per entity */
+  riskScoring: process.env.NEXT_PUBLIC_FF_RISK_SCORING === "true",
+
+  /** AbuseIPDB IP reputation lookups during enrichment */
+  abuseIPDB: process.env.NEXT_PUBLIC_FF_ABUSEIPDB === "true",
+
+  /** URLScan.io async URL scanning during enrichment */
+  urlScanIO: process.env.NEXT_PUBLIC_FF_URLSCAN === "true",
+
+  /** HIBP email breach checking during enrichment */
+  hibpCheck: process.env.NEXT_PUBLIC_FF_HIBP === "true",
+
+  /** Certificate Transparency log lookups during enrichment */
+  ctLookup: process.env.NEXT_PUBLIC_FF_CT_LOOKUP === "true",
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;

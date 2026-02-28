@@ -6,6 +6,10 @@ import { stalenessCheckIPs } from "./staleness-ips";
 import { stalenessCheckWallets } from "./staleness-wallets";
 import { enrichmentFanOut } from "./enrichment";
 import { ctMonitor } from "./ct-monitor";
+import { entityEnrichmentFanOut } from "./entity-enrichment";
+import { clusterBuilder } from "./cluster-builder";
+import { riskScorer } from "./risk-scorer";
+import { urlscanEnrichment } from "./urlscan-enrichment";
 
 export const inngestFunctions = [
   stalenessCheck,
@@ -13,4 +17,8 @@ export const inngestFunctions = [
   stalenessCheckWallets,
   enrichmentFanOut,
   ctMonitor,
+  entityEnrichmentFanOut,
+  clusterBuilder,
+  riskScorer,
+  urlscanEnrichment,
 ];

@@ -16,15 +16,24 @@
     "./inngest/client": "./src/inngest/client.ts",
     "./inngest/functions": "./src/inngest/functions.ts",
     "./redirect-resolver": "./src/redirect-resolver.ts",
-    "./html-sanitize": "./src/html-sanitize.ts"
+    "./html-sanitize": "./src/html-sanitize.ts",
+    "./report-store": "./src/report-store.ts",
+    "./local-intel": "./src/local-intel.ts",
+    "./abuseipdb": "./src/abuseipdb.ts",
+    "./hibp": "./src/hibp.ts",
+    "./ct-lookup": "./src/ct-lookup.ts",
+    "./twilio-lookup": "./src/twilio-lookup.ts",
+    "./urlscan": "./src/urlscan.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",
+    "libphonenumber-js": "^1.11.0",
     "@askarthur/types": "workspace:*",
     "@askarthur/utils": "workspace:*",
     "@askarthur/supabase": "workspace:*",
     "@upstash/redis": "^1.36.2",
     "inngest": "^3.27.0",
-    "tldts": "^7.0.23"
+    "tldts": "^7.0.23",
+    "twilio": "^5.4.0"
   }
 }

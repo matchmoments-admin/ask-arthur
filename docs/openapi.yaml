@@ -1,10 +1,36 @@
 openapi: "3.1.0"
 info:
   title: Ask Arthur Threat Intelligence API
-  version: "1.0.0"
+  version: "2.0.0"
   description: |
     Real-time Australian scam and fraud threat intelligence API.
     Powered by community-sourced scam reports analysed by AI.
+
+    ## Authentication
+    All endpoints require a Bearer token (API key) provided during onboarding.
+
+    ## Rate Limits
+    - Per-minute: configurable per API key tier (default: 60 RPM)
+    - Per-day: configurable per API key tier (default: 100/day)
+    - Batch endpoints: configurable max batch size per tier (default: 100)
+
+    ## Caching
+    Most GET endpoints return `Cache-Control: public, s-maxage=300` headers.
+
+    ## Changelog
+    - **v2.2.0**: `enrichmentData` now includes additional namespaces from external
+      intelligence integrations (all additive, backwards-compatible):
+      - `abuseIPDB`: IP abuse reputation (confidence score, total reports, ISP, usage type)
+      - `hibp`: Email breach exposure (breach count, breach names)
+      - `ctLookup`: Certificate Transparency logs (certificate count, subdomains, wildcard, date range)
+      - `twilioLookup`: Phone number intelligence (line type, carrier, VoIP detection, caller name)
+      - `urlscan`: URL scanning results (malicious verdict, score, technologies, server info)
+      Each namespace is populated when the corresponding feature flag and API key are configured.
+      Enrichment points cap raised from 25 to 40 in risk scoring to accommodate new signals.
+    - **v2.1.0**: Entity endpoints now include `enrichmentStatus`, `enrichmentData`,
+      `riskScore`, `riskLevel`, and `riskFactors` fields. These are additive
+      (backwards-compatible) additions. Batch lookup results include `riskScore`
+      and `riskLevel`.
   contact:
     name: Ask Arthur
     url: https://askarthur.au
@@ -129,6 +155,306 @@ components:
               count:
                 type: integer
 
+    EntityLookupResponse:
+      type: object
+      required:
+        - found
+      properties:
+        found:
+          type: boolean
+        entity:
+          type: object
+          properties:
+            id:
+              type: integer
+            entityType:
+              type: string
+              enum: [phone, email, url, domain, ip, crypto_wallet, bank_account]
+            normalizedValue:
+              type: string
+            reportCount:
+              type: integer
+            firstSeen:
+              type: string
+              format: date-time
+            lastSeen:
+              type: string
+              format: date-time
+            enrichmentStatus:
+              type: string
+              enum: [none, pending, in_progress, completed, failed]
+              description: "Status of entity enrichment (added in v2.1.0)"
+            enrichmentData:
+              type: object
+              description: "Enrichment intelligence data with namespaced results (added in v2.1.0)"
+              additionalProperties: true
+            riskScore:
+              type: integer
+              minimum: 0
+              maximum: 100
+              description: "Composite risk score 0-100 (added in v2.1.0)"
+            riskLevel:
+              type: string
+              enum: [LOW, MEDIUM, HIGH, CRITICAL, UNKNOWN]
+              description: "Risk level derived from score (added in v2.1.0)"
+            riskFactors:
+              type: object
+              description: "Breakdown of risk scoring factors (added in v2.1.0)"
+              additionalProperties: true
+        recentReports:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportSummary"
+
+    BatchLookupRequest:
+      type: object
+      required:
+        - entities
+      properties:
+        entities:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            required:
+              - type
+              - value
+            properties:
+              type:
+                type: string
+                enum: [phone, email, url, domain, ip, crypto_wallet, bank_account]
+              value:
+                type: string
+
+    BatchLookupResponse:
+      type: object
+      required:
+        - total
+        - found
+        - results
+      properties:
+        total:
+          type: integer
+        found:
+          type: integer
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+              value:
+                type: string
+              found:
+                type: boolean
+              entityId:
+                type: integer
+              reportCount:
+                type: integer
+              firstSeen:
+                type: string
+                format: date-time
+              lastSeen:
+                type: string
+                format: date-time
+              riskScore:
+                type: integer
+                minimum: 0
+                maximum: 100
+                description: "Composite risk score 0-100 (added in v2.1.0)"
+              riskLevel:
+                type: string
+                enum: [LOW, MEDIUM, HIGH, CRITICAL, UNKNOWN]
+                description: "Risk level derived from score (added in v2.1.0)"
+
+    EntityDetailResponse:
+      type: object
+      required:
+        - entity
+        - summary
+        - reports
+      properties:
+        entity:
+          type: object
+          properties:
+            id:
+              type: integer
+            entityType:
+              type: string
+            normalizedValue:
+              type: string
+            reportCount:
+              type: integer
+            firstSeen:
+              type: string
+              format: date-time
+            lastSeen:
+              type: string
+              format: date-time
+            enrichmentStatus:
+              type: string
+              enum: [none, pending, in_progress, completed, failed]
+              description: "Status of entity enrichment (added in v2.1.0)"
+            enrichmentData:
+              type: object
+              description: "Enrichment intelligence data with namespaced results (added in v2.1.0)"
+              additionalProperties: true
+            riskScore:
+              type: integer
+              minimum: 0
+              maximum: 100
+              description: "Composite risk score 0-100 (added in v2.1.0)"
+            riskLevel:
+              type: string
+              enum: [LOW, MEDIUM, HIGH, CRITICAL, UNKNOWN]
+              description: "Risk level derived from score (added in v2.1.0)"
+            riskFactors:
+              type: object
+              description: "Breakdown of risk scoring factors (added in v2.1.0)"
+              additionalProperties: true
+        summary:
+          type: object
+          properties:
+            verdictDistribution:
+              type: object
+              additionalProperties:
+                type: integer
+            scamTypes:
+              type: object
+              additionalProperties:
+                type: integer
+            clusterIds:
+              type: array
+              items:
+                type: integer
+        reports:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportSummary"
+
+    ReportSummary:
+      type: object
+      properties:
+        reportId:
+          type: integer
+        role:
+          type: string
+        extractionMethod:
+          type: string
+        verdict:
+          type: string
+          enum: [SAFE, SUSPICIOUS, HIGH_RISK]
+        confidenceScore:
+          type: number
+        scamType:
+          type: string
+        channel:
+          type: string
+        impersonatedBrand:
+          type: string
+        region:
+          type: string
+        reportedAt:
+          type: string
+          format: date-time
+
+    ClusterSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        clusterType:
+          type: string
+          enum: [entity_overlap, text_similarity, brand_campaign, manual]
+        primaryScamType:
+          type: string
+        primaryBrand:
+          type: string
+        memberCount:
+          type: integer
+        entityCount:
+          type: integer
+        status:
+          type: string
+          enum: [active, dormant, disrupted]
+        firstSeen:
+          type: string
+          format: date-time
+        lastSeen:
+          type: string
+          format: date-time
+
+    ClusterDetailResponse:
+      type: object
+      required:
+        - cluster
+        - sharedEntities
+        - reports
+      properties:
+        cluster:
+          $ref: "#/components/schemas/ClusterSummary"
+        sharedEntities:
+          type: array
+          items:
+            type: object
+            properties:
+              entityId:
+                type: integer
+              entityType:
+                type: string
+              normalizedValue:
+                type: string
+              totalReportCount:
+                type: integer
+              clusterAppearances:
+                type: integer
+        reports:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportSummary"
+
+    UsageResponse:
+      type: object
+      required:
+        - period
+        - totalCalls
+        - byEndpoint
+        - dailyBreakdown
+      properties:
+        period:
+          type: object
+          properties:
+            days:
+              type: integer
+            since:
+              type: string
+              format: date
+        totalCalls:
+          type: integer
+        dailyRemaining:
+          type: integer
+        byEndpoint:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              totalCalls:
+                type: integer
+              lastCalled:
+                type: string
+                format: date-time
+        dailyBreakdown:
+          type: array
+          items:
+            type: object
+            properties:
+              day:
+                type: string
+                format: date
+              calls:
+                type: integer
+
     Error:
       type: object
       required:
@@ -143,6 +469,7 @@ paths:
       summary: Get trending threats
       description: Returns aggregated threat intelligence grouped by scam type, sorted by incident count.
       operationId: getTrendingThreats
+      tags: [Threats]
       parameters:
         - name: days
           in: query
@@ -184,6 +511,7 @@ paths:
       summary: Get aggregate threat statistics
       description: Returns high-level statistics about verified threats across time periods.
       operationId: getThreatStats
+      tags: [Threats]
       responses:
         "200":
           description: Aggregate statistics
@@ -191,6 +519,270 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/StatsResponse"
+        "401":
+          description: Invalid or missing API key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /threats/urls/lookup:
+    get:
+      summary: Look up a URL
+      description: Check if a specific URL has been reported as a scam threat.
+      operationId: lookupUrl
+      tags: [Threats]
+      parameters:
+        - name: url
+          in: query
+          required: true
+          schema:
+            type: string
+          description: The URL to look up
+      responses:
+        "200":
+          description: URL lookup result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  found:
+                    type: boolean
+                  normalizedUrl:
+                    type: string
+        "401":
+          description: Invalid or missing API key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /entities/lookup:
+    get:
+      summary: Look up an entity
+      description: |
+        Check if a phone number, email, URL, domain, IP, crypto wallet, or bank account
+        has been reported in scam reports. Returns entity details and recent linked reports.
+      operationId: lookupEntity
+      tags: [Entities]
+      parameters:
+        - name: type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [phone, email, url, domain, ip, crypto_wallet, bank_account]
+          description: The entity type to look up
+        - name: value
+          in: query
+          required: true
+          schema:
+            type: string
+          description: The normalized entity value (e.g. E.164 phone number, lowercase email)
+      responses:
+        "200":
+          description: Entity lookup result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EntityLookupResponse"
+        "400":
+          description: Invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Invalid or missing API key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /entities/batch:
+    post:
+      summary: Batch entity lookup
+      description: |
+        Check up to 100 entities in a single request. Returns match status and
+        basic details for each entity.
+      operationId: batchLookupEntities
+      tags: [Entities]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BatchLookupRequest"
+      responses:
+        "200":
+          description: Batch lookup results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchLookupResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Invalid or missing API key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /entities/{id}:
+    get:
+      summary: Get entity details
+      description: |
+        Returns full details for an entity including linked reports,
+        verdict distribution, scam type breakdown, and cluster membership.
+      operationId: getEntityDetail
+      tags: [Entities]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The entity ID
+      responses:
+        "200":
+          description: Entity details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EntityDetailResponse"
+        "404":
+          description: Entity not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Invalid or missing API key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /clusters:
+    get:
+      summary: List scam clusters
+      description: |
+        Returns clusters of related scam reports grouped by shared entities.
+        Clusters are automatically detected by the pipeline.
+      operationId: listClusters
+      tags: [Clusters]
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            default: active
+            enum: [active, dormant, disrupted]
+          description: Filter by cluster status
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+          description: Maximum number of clusters to return
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+          description: Pagination offset
+      responses:
+        "200":
+          description: List of clusters
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  offset:
+                    type: integer
+                  limit:
+                    type: integer
+                  clusters:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ClusterSummary"
+        "401":
+          description: Invalid or missing API key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /clusters/{id}:
+    get:
+      summary: Get cluster details
+      description: |
+        Returns full details for a cluster including member reports,
+        shared entities, and metadata.
+      operationId: getClusterDetail
+      tags: [Clusters]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The cluster ID
+      responses:
+        "200":
+          description: Cluster details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClusterDetailResponse"
+        "404":
+          description: Cluster not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Invalid or missing API key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /usage:
+    get:
+      summary: Get API usage stats
+      description: |
+        Returns usage statistics for the authenticated API key, including
+        per-endpoint breakdowns and daily call counts.
+      operationId: getUsageStats
+      tags: [Usage]
+      parameters:
+        - name: days
+          in: query
+          schema:
+            type: integer
+            default: 30
+            minimum: 1
+            maximum: 90
+          description: Number of days of usage history to return
+      responses:
+        "200":
+          description: Usage statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsageResponse"
         "401":
           description: Invalid or missing API key
           content:

@@ -1,0 +1,65 @@
+name: Deep Investigation Scan
+
+on:
+  schedule:
+    # Sunday 2am UTC (after scrape-feeds at midnight)
+    - cron: '0 2 * * 0'
+  workflow_dispatch:
+    inputs:
+      entity_type:
+        description: 'Entity type to investigate (or "all")'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - ip
+          - domain
+          - url
+      risk_threshold:
+        description: 'Minimum risk level to investigate'
+        required: true
+        default: 'HIGH'
+        type: choice
+        options:
+          - CRITICAL
+          - HIGH
+
+jobs:
+  investigate:
+    # Set ENABLE_DEEP_INVESTIGATION to "true" in GitHub repo variables to allow scheduled runs.
+    # Manual workflow_dispatch always runs regardless of this setting.
+    if: github.event_name == 'workflow_dispatch' || vars.ENABLE_DEEP_INVESTIGATION == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: pipeline/investigation
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: pipeline/investigation
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: pipeline/investigation/requirements.txt
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install investigation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nmap dnsrecon nikto whatweb sslscan whois curl
+
+      - name: Run deep investigation
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          python -m investigation \
+            --type "${{ github.event.inputs.entity_type || 'all' }}" \
+            --risk-threshold "${{ github.event.inputs.risk_threshold || 'HIGH' }}" \
+            --limit 50
