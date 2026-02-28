@@ -4,8 +4,8 @@ export default function robots(): MetadataRoute.Robots {
   return {
     rules: {
       userAgent: "*",
-      allow: "/",
-      disallow: ["/api/", "/admin/", "/unsubscribe"],
+      allow: ["/", "/report/", "/scan/"],
+      disallow: ["/api/", "/admin/", "/unsubscribe", "/badge/"],
     },
     sitemap: "https://askarthur.au/sitemap.xml",
   };

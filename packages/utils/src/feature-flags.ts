@@ -36,6 +36,9 @@ export const featureFlags = {
   /** Website Safety Audit: lightweight security header scanner */
   siteAudit: process.env.NEXT_PUBLIC_FF_SITE_AUDIT === "true",
 
+  /** Email security checks (SPF/DMARC/DKIM) in site audit — zero cost, default ON */
+  emailSecurityChecks: process.env.NEXT_PUBLIC_FF_EMAIL_SECURITY_CHECKS !== "false",
+
   /** Recovery guidance steps on HIGH_RISK / SUSPICIOUS verdicts */
   recoveryGuidance: process.env.NEXT_PUBLIC_FF_RECOVERY_GUIDANCE === "true",
 

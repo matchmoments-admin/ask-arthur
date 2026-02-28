@@ -1,6 +1,7 @@
 "use client";
 
-import { Clock, ClipboardCheck, Lock } from "lucide-react";
+import { useState } from "react";
+import { Clock, ClipboardCheck, Lock, Link2, Share2, Code2, ChevronDown } from "lucide-react";
 import AuditGradeRing from "./AuditGradeRing";
 import AuditCategoryCard from "./AuditCategoryCard";
 
@@ -45,6 +46,7 @@ export interface SiteAuditResult {
 
 interface SiteAuditReportProps {
   result: SiteAuditResult;
+  shareUrl?: string;
 }
 
 const GRADE_HEADER_COLORS: Record<string, string> = {
@@ -56,8 +58,32 @@ const GRADE_HEADER_COLORS: Record<string, string> = {
   F: "bg-red-50 border-red-200",
 };
 
-export default function SiteAuditReport({ result }: SiteAuditReportProps) {
+export default function SiteAuditReport({ result, shareUrl }: SiteAuditReportProps) {
+  const [copied, setCopied] = useState(false);
+  const [showBadge, setShowBadge] = useState(false);
   const headerColor = GRADE_HEADER_COLORS[result.grade] || "bg-slate-50 border-slate-200";
+
+  const badgeUrl = `https://askarthur.au/badge/${encodeURIComponent(result.domain)}`;
+  const reportUrl = `https://askarthur.au/report/${encodeURIComponent(result.domain)}`;
+  const badgeSnippet = `<a href="${reportUrl}"><img src="${badgeUrl}" alt="${result.domain} safety grade" /></a>`;
+
+  function handleCopyLink() {
+    if (!shareUrl) return;
+    navigator.clipboard.writeText(shareUrl).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  const twitterText = encodeURIComponent(
+    `${result.domain} scored ${result.grade} (${result.overallScore}/100) on the Ask Arthur Website Safety Audit`
+  );
+  const twitterUrl = shareUrl
+    ? `https://twitter.com/intent/tweet?text=${twitterText}&url=${encodeURIComponent(shareUrl)}`
+    : null;
+  const linkedInUrl = shareUrl
+    ? `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(shareUrl)}`
+    : null;
 
   return (
     <div className="mt-8 space-y-6">
@@ -89,6 +115,61 @@ export default function SiteAuditReport({ result }: SiteAuditReportProps) {
             </div>
           </div>
         </div>
+
+        {/* Share section */}
+        {shareUrl && (
+          <div className="mt-4 pt-4 border-t border-black/10 flex flex-wrap items-center justify-center sm:justify-start gap-2">
+            <button
+              onClick={handleCopyLink}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold uppercase tracking-widest bg-deep-navy text-white rounded-full hover:bg-navy transition-colors"
+            >
+              <Link2 size={12} />
+              {copied ? "Copied!" : "Copy Link"}
+            </button>
+            {twitterUrl && (
+              <a
+                href={twitterUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold uppercase tracking-widest bg-white text-deep-navy border border-gray-200 rounded-full hover:bg-gray-50 transition-colors"
+              >
+                <Share2 size={12} />
+                Twitter
+              </a>
+            )}
+            {linkedInUrl && (
+              <a
+                href={linkedInUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold uppercase tracking-widest bg-white text-deep-navy border border-gray-200 rounded-full hover:bg-gray-50 transition-colors"
+              >
+                <Share2 size={12} />
+                LinkedIn
+              </a>
+            )}
+            <button
+              onClick={() => setShowBadge(!showBadge)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold uppercase tracking-widest bg-white text-deep-navy border border-gray-200 rounded-full hover:bg-gray-50 transition-colors"
+            >
+              <Code2 size={12} />
+              Badge
+              <ChevronDown size={10} className={`transition-transform ${showBadge ? "rotate-180" : ""}`} />
+            </button>
+          </div>
+        )}
+
+        {/* Badge embed snippet */}
+        {showBadge && (
+          <div className="mt-3 p-3 bg-white/60 rounded-lg border border-black/10">
+            <p className="text-xs text-gov-slate mb-2">
+              Embed this badge on your site:
+            </p>
+            <code className="block text-xs bg-slate-100 p-2 rounded font-mono break-all text-deep-navy select-all">
+              {badgeSnippet}
+            </code>
+          </div>
+        )}
       </div>
 
       {/* Category cards */}

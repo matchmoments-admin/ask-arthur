@@ -19,6 +19,14 @@ vi.mock("@askarthur/utils/logger", () => ({
   logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
 }));
 
+// Mock node:dns for email-security and domain-blacklist checks
+vi.mock("node:dns", () => ({
+  promises: {
+    resolveTxt: vi.fn().mockRejectedValue(new Error("ENOTFOUND")),
+    resolve4: vi.fn().mockRejectedValue(new Error("ENOTFOUND")),
+  },
+}));
+
 // Mock tls for SSL/TLS checks
 vi.mock("tls", () => {
   const EventEmitter = require("events");

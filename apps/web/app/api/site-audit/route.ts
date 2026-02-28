@@ -66,10 +66,11 @@ export async function POST(req: NextRequest) {
     const result = await runSiteAudit({ url });
 
     // 5. Store in database (non-blocking — don't fail the response on DB errors)
+    let shareUrl: string | undefined;
     const supabase = createServiceClient();
     if (supabase) {
       try {
-        const { error } = await supabase.rpc("upsert_site_and_store_audit", {
+        const { data, error } = await supabase.rpc("upsert_site_and_store_audit", {
           p_domain: result.domain,
           p_normalized_url: result.url,
           p_overall_score: result.overallScore,
@@ -82,6 +83,11 @@ export async function POST(req: NextRequest) {
 
         if (error) {
           logger.error("Failed to store site audit", { error: error.message, url: result.url });
+        } else if (data && data.length > 0) {
+          const token = data[0].share_token;
+          if (token) {
+            shareUrl = `https://askarthur.au/scan/${token}`;
+          }
         }
       } catch (dbErr) {
         logger.error("Site audit DB write threw", {
@@ -91,8 +97,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 6. Return result
-    return NextResponse.json(result, {
+    // 6. Return result with optional share URL
+    return NextResponse.json({ ...result, shareUrl }, {
       headers: {
         "X-RateLimit-Remaining": String(rateCheck.remaining),
       },

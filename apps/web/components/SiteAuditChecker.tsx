@@ -12,6 +12,7 @@ export default function SiteAuditChecker() {
   const [url, setUrl] = useState("");
   const [status, setStatus] = useState<Status>("idle");
   const [result, setResult] = useState<SiteAuditResult | null>(null);
+  const [shareUrl, setShareUrl] = useState<string | undefined>();
   const [errorMsg, setErrorMsg] = useState("");
   const [isFocused, setIsFocused] = useState(false);
 
@@ -37,6 +38,7 @@ export default function SiteAuditChecker() {
 
     setStatus("scanning");
     setResult(null);
+    setShareUrl(undefined);
     setErrorMsg("");
 
     try {
@@ -58,8 +60,9 @@ export default function SiteAuditChecker() {
         throw new Error(data.message || "Audit failed");
       }
 
-      const data: SiteAuditResult = await res.json();
-      setResult(data);
+      const data = await res.json();
+      setResult(data as SiteAuditResult);
+      setShareUrl(data.shareUrl);
       setStatus("complete");
     } catch (err) {
       setStatus("error");
@@ -75,6 +78,7 @@ export default function SiteAuditChecker() {
     setUrl("");
     setStatus("idle");
     setResult(null);
+    setShareUrl(undefined);
     setErrorMsg("");
   }
 
@@ -141,7 +145,7 @@ export default function SiteAuditChecker() {
 
       {/* Result */}
       <div aria-live="polite">
-        {result && status === "complete" && <SiteAuditReport result={result} />}
+        {result && status === "complete" && <SiteAuditReport result={result} shareUrl={shareUrl} />}
 
         {(status === "error" || status === "rate_limited") && (
           <div

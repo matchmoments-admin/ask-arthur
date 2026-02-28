@@ -11,6 +11,9 @@ import { checkMixedContent } from "./checks/mixed-content";
 import { checkExposedAdminPaths } from "./checks/admin-paths";
 import { checkServerInfo } from "./checks/server-info";
 import { checkSSLCertificate } from "./checks/ssl-certificate";
+import { checkEmailSecurity } from "./checks/email-security";
+import { checkDomainBlacklist } from "./checks/domain-blacklist";
+import { checkRedirectChain } from "./checks/redirect-chain";
 import {
   calculateCategoryScores,
   calculateScore,
@@ -23,6 +26,7 @@ import type {
   CheckResult,
   SSLInfo,
   ServerInfo,
+  RedirectHop,
 } from "./types";
 
 const DEFAULT_TIMEOUT_MS = 5000;
@@ -89,6 +93,7 @@ export async function runSiteAudit(options: ScanOptions): Promise<SiteAuditResul
   const allChecks: CheckResult[] = [];
   let sslInfo: SSLInfo | null = null;
   let serverInfo: ServerInfo | null = null;
+  let redirectChain: RedirectHop[] | null = null;
 
   // Create a total timeout that aborts remaining work
   const totalTimeout = new Promise<void>((resolve) =>
@@ -144,6 +149,31 @@ export async function runSiteAudit(options: ScanOptions): Promise<SiteAuditResul
     );
   }
 
+  if (!skip.has("email-security")) {
+    checkPromises.push(
+      checkEmailSecurity(domain).then((results) => {
+        allChecks.push(...results);
+      })
+    );
+  }
+
+  if (!skip.has("domain-blacklist")) {
+    checkPromises.push(
+      checkDomainBlacklist(domain).then((result) => {
+        allChecks.push(result);
+      })
+    );
+  }
+
+  if (!skip.has("redirect-chain")) {
+    checkPromises.push(
+      checkRedirectChain(url, timeoutMs).then(({ check, chain }) => {
+        allChecks.push(check);
+        redirectChain = chain;
+      })
+    );
+  }
+
   // Wait for async checks with total timeout
   await Promise.race([
     Promise.allSettled(checkPromises),
@@ -177,5 +207,6 @@ export async function runSiteAudit(options: ScanOptions): Promise<SiteAuditResul
     recommendations,
     ssl: sslInfo,
     serverInfo,
+    redirectChain,
   };
 }

@@ -12,12 +12,13 @@ const CATEGORY_CONFIG: Record<
   CheckCategory,
   { label: string; weight: number }
 > = {
-  https: { label: "HTTPS & TLS", weight: 0.3 },
-  headers: { label: "Security Headers", weight: 0.25 },
-  csp: { label: "Content Security Policy", weight: 0.2 },
-  permissions: { label: "Permissions Policy", weight: 0.1 },
-  server: { label: "Server Security", weight: 0.1 },
-  content: { label: "Content Security", weight: 0.05 },
+  https: { label: "HTTPS & TLS", weight: 0.27 },
+  headers: { label: "Security Headers", weight: 0.23 },
+  csp: { label: "Content Security Policy", weight: 0.18 },
+  permissions: { label: "Permissions Policy", weight: 0.09 },
+  server: { label: "Server Security", weight: 0.09 },
+  content: { label: "Content Security", weight: 0.06 },
+  email: { label: "Email Security", weight: 0.08 },
 };
 
 // Grade thresholds (percentage score 0-100)
@@ -48,6 +49,11 @@ const RECOMMENDATIONS: Record<string, string> = {
   "mixed-content": "Update all resource URLs to use HTTPS instead of HTTP.",
   "admin-paths": "Restrict access to admin and sensitive paths using IP allowlists or authentication.",
   "server-info": "Remove or hide the Server header to prevent version disclosure.",
+  spf: "Add an SPF record (TXT v=spf1) to prevent email spoofing from your domain.",
+  dmarc: 'Add a DMARC record with p=reject at _dmarc.yourdomain.com to block spoofed emails.',
+  dkim: "Configure DKIM signing for your email to authenticate outgoing messages.",
+  "domain-blacklist": "Your domain is listed on one or more DNS blacklists. Investigate and request removal.",
+  "redirect-chain": "Reduce the number of redirects in your URL chain. Excessive redirects slow page loads and may indicate URL obfuscation.",
 };
 
 /** Calculate grade from a percentage score (0-100) */

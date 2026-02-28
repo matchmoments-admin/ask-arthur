@@ -8,6 +8,7 @@ export type {
   CategoryScore,
   SSLInfo,
   ServerInfo,
+  RedirectHop,
   SiteAuditResult,
   ScanOptions,
 } from "./types";

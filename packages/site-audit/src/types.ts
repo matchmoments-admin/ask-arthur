@@ -10,7 +10,8 @@ export type CheckCategory =
   | "csp"
   | "permissions"
   | "server"
-  | "content";
+  | "content"
+  | "email";
 
 export interface CheckResult {
   id: string;
@@ -54,6 +55,13 @@ export interface PermissionDirective {
   isRestricted: boolean;
 }
 
+export interface RedirectHop {
+  url: string;
+  statusCode: number;
+  server?: string;
+  location?: string;
+}
+
 export interface SiteAuditResult {
   url: string;
   domain: string;
@@ -66,6 +74,7 @@ export interface SiteAuditResult {
   recommendations: string[];
   ssl: SSLInfo | null;
   serverInfo: ServerInfo | null;
+  redirectChain: RedirectHop[] | null;
 }
 
 export interface ScanOptions {
