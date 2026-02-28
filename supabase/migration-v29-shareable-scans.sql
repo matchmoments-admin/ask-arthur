@@ -6,7 +6,10 @@ ALTER TABLE site_audits
 CREATE UNIQUE INDEX IF NOT EXISTS idx_site_audits_share_token
   ON site_audits (share_token);
 
--- Update the RPC to return both audit_id and share_token
+-- Drop the old function first (return type changed from BIGINT to TABLE)
+DROP FUNCTION IF EXISTS upsert_site_and_store_audit(text,text,integer,text,jsonb,jsonb,text[],integer);
+
+-- Recreate with new return type: (audit_id, share_token)
 CREATE OR REPLACE FUNCTION upsert_site_and_store_audit(
   p_domain TEXT,
   p_normalized_url TEXT,
