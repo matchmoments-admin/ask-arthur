@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { ShieldCheck, Zap, Shield } from "lucide-react";
+import { ShieldCheck, ClipboardClock, Shield } from "lucide-react";
 import ScamChecker from "@/components/ScamChecker";
 import ScamCounter from "@/components/ScamCounter";
 import Footer from "@/components/Footer";
@@ -63,7 +63,7 @@ export default function Home() {
             </p>
           </div>
           <div className="text-center">
-            <Zap className="text-deep-navy mb-3 mx-auto" size={36} />
+            <ClipboardClock className="text-deep-navy mb-3 mx-auto" size={36} />
             <h3 className="text-deep-navy font-bold text-sm uppercase tracking-widest mb-2">Efficiency</h3>
             <p className="text-gov-slate text-base leading-relaxed">
               Get a detailed verdict in seconds. No signup, no waiting, no cost.
