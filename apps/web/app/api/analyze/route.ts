@@ -270,10 +270,13 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      const lookupTarget = phones.find((p) => p.e164);
+      // Only run Twilio on mobile numbers (04xx/05xx) — landlines and toll-free
+      // return the same data as free libphonenumber. VoIP detection on mobiles
+      // is the only signal Twilio adds that we can't get for free.
+      const lookupTarget = phones.find((p) => p.e164 && /^\+61[45]/.test(p.e164));
       if (lookupTarget?.e164) {
         try {
-          console.log("[phone-debug] Twilio lookup for", lookupTarget.e164);
+          console.log("[phone-debug] Twilio lookup for mobile", lookupTarget.e164);
           const lookup = await lookupPhoneNumber(lookupTarget.e164);
           phoneIntelligence = lookup;
 

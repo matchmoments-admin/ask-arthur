@@ -39,8 +39,12 @@ interface EnrichmentResult {
 async function enrichPhone(value: string): Promise<Record<string, unknown>> {
   const checks: Promise<unknown>[] = [analyzePhone(value)];
 
-  // Twilio Lookup v2 — gated by phoneIntelligence flag and env vars
+  // Twilio Lookup v2 — only for mobile numbers (04xx/05xx in E.164: +614x/+615x).
+  // Landlines and toll-free return the same data as free libphonenumber.
+  // VoIP detection on mobiles is the only signal Twilio adds.
+  const isMobile = /^\+61[45]/.test(value);
   const useTwilio =
+    isMobile &&
     featureFlags.phoneIntelligence &&
     !!process.env.TWILIO_ACCOUNT_SID &&
     !!process.env.TWILIO_AUTH_TOKEN;
