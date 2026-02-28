@@ -26,7 +26,7 @@ describe("checkDomainBlacklist", () => {
     expect(result.category).toBe("server");
   });
 
-  it("fails when domain is listed on a blacklist", async () => {
+  it("warns when domain is listed on a single blacklist (possible false positive)", async () => {
     mockResolve4.mockImplementation(async (query: string) => {
       if (query.includes("dbl.spamhaus.org")) {
         return ["127.0.1.2"];
@@ -34,10 +34,11 @@ describe("checkDomainBlacklist", () => {
       throw new Error("ENOTFOUND");
     });
 
-    const result = await checkDomainBlacklist("malicious.com");
-    expect(result.status).toBe("fail");
-    expect(result.score).toBe(0);
+    const result = await checkDomainBlacklist("suspicious.com");
+    expect(result.status).toBe("warn");
+    expect(result.score).toBe(3);
     expect(result.details).toContain("Spamhaus DBL");
+    expect(result.details).toContain("false positive");
   });
 
   it("fails and lists multiple blacklists when listed on several", async () => {
@@ -57,6 +58,16 @@ describe("checkDomainBlacklist", () => {
     expect(result.details).toContain("Spamhaus DBL");
     expect(result.details).toContain("SURBL");
     expect(result.details).toContain("2 blacklists");
+  });
+
+  it("ignores test/error RBL responses (127.0.0.1, 127.255.255.254)", async () => {
+    mockResolve4.mockImplementation(async () => {
+      return ["127.0.0.1"];
+    });
+
+    const result = await checkDomainBlacklist("google.com");
+    expect(result.status).toBe("pass");
+    expect(result.score).toBe(5);
   });
 
   it("handles DNS timeouts gracefully (treats as not listed)", async () => {

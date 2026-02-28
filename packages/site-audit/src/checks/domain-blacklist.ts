@@ -8,12 +8,14 @@ const DNS_TIMEOUT_MS = 3000;
 const RBL_SERVERS = [
   { host: "dbl.spamhaus.org", label: "Spamhaus DBL" },
   { host: "multi.surbl.org", label: "SURBL" },
-  { host: "black.uribl.com", label: "URIBL" },
-  { host: "rhsbl.sorbs.net", label: "SORBS RHSBL" },
   { host: "dnsbl.abuse.ch", label: "abuse.ch" },
 ];
 
-/** Check a single RBL — A record returned means listed */
+// RBL responses in 127.0.0.x or 127.255.255.x are test/error codes, not real listings.
+// Only 127.0.1.x+ (Spamhaus) or 127.0.0.2+ (others) indicate actual listings.
+const IGNORED_RESPONSES = new Set(["127.0.0.1", "127.255.255.254", "127.255.255.255"]);
+
+/** Check a single RBL — specific A record ranges indicate a listing */
 async function queryRBL(
   domain: string,
   rbl: { host: string; label: string }
@@ -26,8 +28,9 @@ async function queryRBL(
         setTimeout(() => reject(new Error("DNS timeout")), DNS_TIMEOUT_MS)
       ),
     ]);
-    // A record returned = domain is listed
-    return { listed: result.length > 0, label: rbl.label };
+    // Filter out test/error responses — only count genuine listings
+    const genuine = result.filter((ip) => !IGNORED_RESPONSES.has(ip));
+    return { listed: genuine.length > 0, label: rbl.label };
   } catch {
     // ENOTFOUND / ENODATA = not listed, timeout = treat as not listed
     return { listed: false, label: rbl.label };
@@ -49,7 +52,7 @@ export async function checkDomainBlacklist(
     }
   }
 
-  if (listed.length > 0) {
+  if (listed.length >= 2) {
     return {
       id: "domain-blacklist",
       category: "server",
@@ -57,7 +60,19 @@ export async function checkDomainBlacklist(
       status: "fail",
       score: 0,
       maxScore: 5,
-      details: `Domain is listed on ${listed.length} blacklist${listed.length > 1 ? "s" : ""}: ${listed.join(", ")}.`,
+      details: `Domain is listed on ${listed.length} blacklists: ${listed.join(", ")}.`,
+    };
+  }
+
+  if (listed.length === 1) {
+    return {
+      id: "domain-blacklist",
+      category: "server",
+      label: "Domain Blacklist",
+      status: "warn",
+      score: 3,
+      maxScore: 5,
+      details: `Domain appeared on 1 blacklist (${listed[0]}). This may be a false positive — listed on only 1 of ${RBL_SERVERS.length} checked.`,
     };
   }
 
