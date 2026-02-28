@@ -42,16 +42,17 @@ export function scrubPII(text: string): string {
   return scrubbed;
 }
 
-// Store a PII-scrubbed scam record for HIGH_RISK verdicts only
+// Store a PII-scrubbed scam record for HIGH_RISK verdicts only.
+// Returns the inserted row ID (or null on error / no client).
 export async function storeVerifiedScam(
   analysis: AnalysisResult,
   region: string | null,
   imagesBase64?: string[],
   uploadScreenshot?: UploadScreenshotFn
-): Promise<void> {
+): Promise<number | null> {
   try {
     const supabase = createServiceClient();
-    if (!supabase) return; // no-op in local dev
+    if (!supabase) return null; // no-op in local dev
 
     const scrubbedSummary = scrubPII(analysis.summary);
     const scrubbedFlags = analysis.redFlags.map(scrubPII);
@@ -86,7 +87,7 @@ export async function storeVerifiedScam(
     // Store first key in screenshot_key for backward compat
     const screenshotKey = screenshotKeys.length > 0 ? screenshotKeys[0] : null;
 
-    const { error } = await supabase.from("verified_scams").insert({
+    const { data, error } = await supabase.from("verified_scams").insert({
       scam_type: analysis.scamType || "other",
       channel: analysis.channel,
       summary: scrubbedSummary,
@@ -95,16 +96,20 @@ export async function storeVerifiedScam(
       confidence_score: analysis.confidence,
       impersonated_brand: analysis.impersonatedBrand,
       ...(screenshotKey && { screenshot_key: screenshotKey }),
-    });
+    }).select("id").single();
 
     if (error) {
       logger.error("verified_scams insert failed", {
         error: error.message,
         code: error.code,
       });
+      return null;
     }
+
+    return data?.id ?? null;
   } catch (err) {
     logger.error("Failed to store verified scam", { error: String(err) });
+    return null;
   }
 }
 

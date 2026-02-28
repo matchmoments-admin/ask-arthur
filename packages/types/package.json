@@ -4,7 +4,8 @@
   "private": true,
   "exports": {
     ".": "./src/index.ts",
-    "./analysis": "./src/analysis.ts"
+    "./analysis": "./src/analysis.ts",
+    "./intelligence": "./src/intelligence.ts"
   },
   "dependencies": {
     "zod": "^4.3.6"

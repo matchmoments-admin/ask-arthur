@@ -8,6 +8,10 @@ export interface ApiKeyValidation {
   tier?: string;
   dailyRemaining?: number;
   rateLimited?: boolean;
+  minuteRateLimited?: boolean;
+  endpointBlocked?: boolean;
+  keyHash?: string;
+  maxBatchSize?: number;
 }
 
 async function hashKey(key: string): Promise<string> {
@@ -57,8 +61,42 @@ async function checkDailyLimit(
   };
 }
 
+async function checkMinuteLimit(
+  keyHash: string,
+  perMinuteLimit: number
+): Promise<boolean> {
+  const redis = getRedis();
+  if (!redis) {
+    // Same fail-open/fail-closed pattern as daily limit
+    return process.env.NODE_ENV !== "production";
+  }
+
+  const minuteKey = `askarthur:apikey:${keyHash}:rpm:${Math.floor(Date.now() / 60000)}`;
+  const current = await redis.incr(minuteKey);
+
+  if (current === 1) {
+    await redis.expire(minuteKey, 120); // 2-minute TTL
+  }
+
+  return current <= perMinuteLimit;
+}
+
+/**
+ * Log API usage to Supabase (fire-and-forget).
+ * Uses the log_api_usage RPC to upsert per-key, per-endpoint, per-day counts.
+ */
+export function logApiUsage(keyHash: string, endpoint: string): void {
+  const supabase = createServiceClient();
+  if (!supabase) return;
+
+  supabase
+    .rpc("log_api_usage", { p_key_hash: keyHash, p_endpoint: endpoint })
+    .then(() => {});
+}
+
 export async function validateApiKey(
-  req: NextRequest
+  req: NextRequest,
+  endpoint?: string
 ): Promise<ApiKeyValidation> {
   const authHeader = req.headers.get("authorization");
   if (!authHeader?.startsWith("Bearer ")) {
@@ -75,12 +113,44 @@ export async function validateApiKey(
 
   const { data, error } = await supabase
     .from("api_keys")
-    .select("org_name, tier, is_active, daily_limit")
+    .select(
+      "org_name, tier, is_active, daily_limit, rate_limit_per_minute, max_batch_size, allowed_endpoints"
+    )
     .eq("key_hash", keyHash)
     .single();
 
   if (error || !data || !data.is_active) {
     return { valid: false };
+  }
+
+  // Check endpoint restrictions (empty array = all endpoints allowed)
+  const allowedEndpoints = data.allowed_endpoints as string[] | null;
+  if (
+    endpoint &&
+    allowedEndpoints &&
+    allowedEndpoints.length > 0 &&
+    !allowedEndpoints.includes(endpoint)
+  ) {
+    return {
+      valid: true,
+      orgName: data.org_name,
+      tier: data.tier,
+      keyHash,
+      endpointBlocked: true,
+    };
+  }
+
+  // Check per-minute rate limit
+  const perMinuteLimit = data.rate_limit_per_minute ?? 60;
+  const minuteAllowed = await checkMinuteLimit(keyHash, perMinuteLimit);
+  if (!minuteAllowed) {
+    return {
+      valid: true,
+      orgName: data.org_name,
+      tier: data.tier,
+      keyHash,
+      minuteRateLimited: true,
+    };
   }
 
   // Check daily rate limit
@@ -94,6 +164,7 @@ export async function validateApiKey(
       tier: data.tier,
       dailyRemaining: 0,
       rateLimited: true,
+      keyHash,
     };
   }
 
@@ -104,10 +175,17 @@ export async function validateApiKey(
     .eq("key_hash", keyHash)
     .then(() => {});
 
+  // Log usage (fire-and-forget)
+  if (endpoint) {
+    logApiUsage(keyHash, endpoint);
+  }
+
   return {
     valid: true,
     orgName: data.org_name,
     tier: data.tier,
     dailyRemaining: remaining,
+    keyHash,
+    maxBatchSize: data.max_batch_size ?? 100,
   };
 }

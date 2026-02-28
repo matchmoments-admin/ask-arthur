@@ -7,3 +7,5 @@ export { normalizeURL, extractDomain } from "./url-normalize";
 export { normalizePhoneNumber, extractContactsFromText } from "./phone-normalize";
 export { getCachedAnalysis, setCachedAnalysis } from "./analysis-cache";
 export { geolocateIP } from "./geolocate";
+export { storeScamReport, buildEntities } from "./report-store";
+export type { EntityToLink, StoreScamReportParams } from "./report-store";

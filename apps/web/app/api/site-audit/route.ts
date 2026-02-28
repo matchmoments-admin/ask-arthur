@@ -3,6 +3,7 @@ import { z } from "zod";
 import { checkFormRateLimit } from "@askarthur/utils/rate-limit";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { runSiteAudit } from "@askarthur/site-audit/scanner";
+import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
 const RequestSchema = z.object({
@@ -64,7 +65,33 @@ export async function POST(req: NextRequest) {
     // 4. Run the audit
     const result = await runSiteAudit({ url });
 
-    // 5. Return result
+    // 5. Store in database (non-blocking — don't fail the response on DB errors)
+    const supabase = createServiceClient();
+    if (supabase) {
+      try {
+        const { error } = await supabase.rpc("upsert_site_and_store_audit", {
+          p_domain: result.domain,
+          p_normalized_url: result.url,
+          p_overall_score: result.overallScore,
+          p_grade: result.grade,
+          p_test_results: result.checks,
+          p_category_scores: result.categories,
+          p_recommendations: result.recommendations,
+          p_duration_ms: result.durationMs,
+        });
+
+        if (error) {
+          logger.error("Failed to store site audit", { error: error.message, url: result.url });
+        }
+      } catch (dbErr) {
+        logger.error("Site audit DB write threw", {
+          error: dbErr instanceof Error ? dbErr.message : String(dbErr),
+          url: result.url,
+        });
+      }
+    }
+
+    // 6. Return result
     return NextResponse.json(result, {
       headers: {
         "X-RateLimit-Remaining": String(rateCheck.remaining),

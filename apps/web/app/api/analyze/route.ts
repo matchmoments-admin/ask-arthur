@@ -10,6 +10,8 @@ import { resolveRedirects, extractFinalUrls } from "@askarthur/scam-engine/redir
 import { geolocateIP } from "@askarthur/scam-engine/geolocate";
 import type { RedirectChain } from "@askarthur/types";
 import { storeVerifiedScam, incrementStats } from "@askarthur/scam-engine/pipeline";
+import { storeScamReport, buildEntities } from "@askarthur/scam-engine/report-store";
+import { hashIdentifier } from "@askarthur/utils/hash";
 import { getCachedAnalysis, setCachedAnalysis } from "@askarthur/scam-engine/analysis-cache";
 import type { PhoneLookupResult } from "@askarthur/types";
 import { lookupPhoneNumber, extractPhoneNumbers } from "@/lib/twilioLookup";
@@ -182,7 +184,9 @@ export async function POST(req: NextRequest) {
     }
 
     // 7. Background work via waitUntil (survives after response is sent)
-    if (finalVerdict === "HIGH_RISK") {
+    // When intelligenceCore is OFF, use the existing storeVerifiedScam path.
+    // When ON, defer report storage until after entity extraction (step 8d).
+    if (!featureFlags.intelligenceCore && finalVerdict === "HIGH_RISK") {
       waitUntil(
         storeVerifiedScam(aiResult, region, images.length > 0 ? images : undefined, uploadScreenshot).catch((err) =>
           logger.error("storeVerifiedScam failed", { error: String(err) })
@@ -306,6 +310,37 @@ export async function POST(req: NextRequest) {
         isMalicious: r.isMalicious,
         sources: r.sources,
       }));
+    }
+
+    // 8d. Intelligence Core: store unified report + entity linkage (behind feature flag)
+    if (featureFlags.intelligenceCore) {
+      const reporterHash = await hashIdentifier(ip, ua);
+      const entitiesToLink = buildEntities({
+        phones: scammerContacts?.phoneNumbers,
+        emails: scammerContacts?.emailAddresses,
+        urls: urlResults.length > 0 ? urlResults : undefined,
+        extractionMethod: images.length > 0 ? "claude" : "regex",
+      });
+
+      if (finalVerdict === "HIGH_RISK") {
+        // Chain: store verified scam first to get ID, then store report with link
+        waitUntil(
+          (async () => {
+            const verifiedScamId = await storeVerifiedScam(aiResult, region, images.length > 0 ? images : undefined, uploadScreenshot);
+            await storeScamReport({
+              reporterHash, source: "web", inputMode: mode || (images.length > 0 ? "image" : "text"),
+              analysis: aiResult, text, region, countryCode, verifiedScamId, entities: entitiesToLink,
+            });
+          })().catch(err => logger.error("Report pipeline failed", { error: String(err) }))
+        );
+      } else {
+        waitUntil(
+          storeScamReport({
+            reporterHash, source: "web", inputMode: mode || (images.length > 0 ? "image" : "text"),
+            analysis: aiResult, text, region, countryCode, entities: entitiesToLink,
+          }).catch(err => logger.error("storeScamReport failed", { error: String(err) }))
+        );
+      }
     }
 
     // 9. Return result
