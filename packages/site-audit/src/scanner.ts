@@ -4,6 +4,8 @@ import { isPrivateURL } from "@askarthur/scam-engine/safebrowsing";
 import { extractDomain } from "@askarthur/scam-engine/url-normalize";
 import { logger } from "@askarthur/utils/logger";
 import { checkSecurityHeaders } from "./checks/security-headers";
+import { checkCrossOriginHeaders } from "./checks/cross-origin";
+import { checkCORS } from "./checks/cors";
 import { checkCSP } from "./checks/csp";
 import { checkPermissionsPolicy } from "./checks/permissions-policy";
 import { checkTLSVersions } from "./checks/tls-version";
@@ -79,6 +81,12 @@ export async function runSiteAudit(options: ScanOptions): Promise<SiteAuditResul
     throw new Error(`Failed to fetch ${url}: ${err instanceof Error ? err.message : String(err)}`);
   }
 
+  // Capture raw headers
+  const rawHeaders: Record<string, string> = {};
+  headers.forEach((value, name) => {
+    rawHeaders[name] = value;
+  });
+
   // Extract the hostname from the final URL (after redirects)
   const finalDomain = (() => {
     try {
@@ -116,6 +124,12 @@ export async function runSiteAudit(options: ScanOptions): Promise<SiteAuditResul
     const result = checkServerInfo(headers);
     allChecks.push(result.check);
     serverInfo = result.info;
+  }
+  if (!skip.has("cross-origin")) {
+    allChecks.push(...checkCrossOriginHeaders(headers));
+  }
+  if (!skip.has("cors")) {
+    allChecks.push(checkCORS(headers));
   }
 
   // Async checks
@@ -208,5 +222,6 @@ export async function runSiteAudit(options: ScanOptions): Promise<SiteAuditResul
     ssl: sslInfo,
     serverInfo,
     redirectChain,
+    rawHeaders,
   };
 }

@@ -10,7 +10,8 @@
     ".": "./src/index.ts",
     "./scanner": "./src/scanner.ts",
     "./scoring": "./src/scoring.ts",
-    "./types": "./src/types.ts"
+    "./types": "./src/types.ts",
+    "./learn-more": "./src/learn-more.ts"
   },
   "dependencies": {
     "@askarthur/scam-engine": "workspace:*",

@@ -54,6 +54,10 @@ const RECOMMENDATIONS: Record<string, string> = {
   dkim: "Configure DKIM signing for your email to authenticate outgoing messages.",
   "domain-blacklist": "Your domain is listed on one or more DNS blacklists. Investigate and request removal.",
   "redirect-chain": "Reduce the number of redirects in your URL chain. Excessive redirects slow page loads and may indicate URL obfuscation.",
+  coep: "Add a Cross-Origin-Embedder-Policy header (require-corp or credentialless) to enable cross-origin isolation.",
+  coop: "Add a Cross-Origin-Opener-Policy: same-origin header to isolate your browsing context from cross-origin windows.",
+  corp: "Add a Cross-Origin-Resource-Policy: same-origin header to prevent your resources from being loaded by other origins.",
+  cors: "Restrict Access-Control-Allow-Origin to specific trusted origins instead of using wildcard (*).",
 };
 
 /** Calculate grade from a percentage score (0-100) */

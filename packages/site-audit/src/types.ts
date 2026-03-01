@@ -75,6 +75,7 @@ export interface SiteAuditResult {
   ssl: SSLInfo | null;
   serverInfo: ServerInfo | null;
   redirectChain: RedirectHop[] | null;
+  rawHeaders: Record<string, string> | null;
 }
 
 export interface ScanOptions {

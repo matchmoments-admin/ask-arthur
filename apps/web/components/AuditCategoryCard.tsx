@@ -1,5 +1,6 @@
 "use client";
 
+import { LEARN_MORE_URLS } from "@askarthur/site-audit/learn-more";
 import AuditCheckRow from "./AuditCheckRow";
 
 interface CategoryCheck {
@@ -69,6 +70,7 @@ export default function AuditCategoryCard({
             details={check.details}
             score={check.score}
             maxScore={check.maxScore}
+            learnMoreUrl={LEARN_MORE_URLS[check.id]}
           />
         ))}
       </div>

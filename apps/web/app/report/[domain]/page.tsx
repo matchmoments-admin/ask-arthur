@@ -96,6 +96,7 @@ export default async function ReportPage({ params }: PageProps) {
     checks: audit.test_results as any[],
     recommendations: audit.recommendations ?? [],
     ssl: null,
+    rawHeaders: (audit as any).raw_headers ?? null,
   };
 
   const shareUrl = audit.share_token

@@ -89,6 +89,7 @@ export default async function ScanPage({ params }: PageProps) {
     checks: audit.test_results as any[],
     recommendations: audit.recommendations ?? [],
     ssl: null,
+    rawHeaders: (audit as any).raw_headers ?? null,
   };
 
   const shareUrl = `https://askarthur.au/scan/${token}`;

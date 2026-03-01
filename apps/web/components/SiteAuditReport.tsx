@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Clock, ClipboardCheck, Lock, Link2, Share2, Code2, ChevronDown } from "lucide-react";
 import AuditGradeRing from "./AuditGradeRing";
 import AuditCategoryCard from "./AuditCategoryCard";
+import AuditRawHeaders from "./AuditRawHeaders";
 
 interface CheckResult {
   id: string;
@@ -42,6 +43,7 @@ export interface SiteAuditResult {
   checks: CheckResult[];
   recommendations: string[];
   ssl: SSLInfo | null;
+  rawHeaders: Record<string, string> | null;
 }
 
 interface SiteAuditReportProps {
@@ -187,6 +189,9 @@ export default function SiteAuditReport({ result, shareUrl }: SiteAuditReportPro
             />
           ))}
       </div>
+
+      {/* Raw Headers */}
+      <AuditRawHeaders rawHeaders={result.rawHeaders} />
 
       {/* Recommendations */}
       {result.recommendations.length > 0 && (

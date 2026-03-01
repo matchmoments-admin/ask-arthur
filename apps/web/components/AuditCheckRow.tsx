@@ -9,6 +9,7 @@ interface AuditCheckRowProps {
   details: string;
   score: number;
   maxScore: number;
+  learnMoreUrl?: string;
 }
 
 const STATUS_CONFIG: Record<string, { icon: LucideIcon; color: string; bg: string }> = {
@@ -25,6 +26,7 @@ export default function AuditCheckRow({
   details,
   score,
   maxScore,
+  learnMoreUrl,
 }: AuditCheckRowProps) {
   const config = STATUS_CONFIG[status] || STATUS_CONFIG.error;
 
@@ -38,7 +40,22 @@ export default function AuditCheckRow({
             {score}/{maxScore}
           </span>
         </div>
-        <p className="text-xs text-gov-slate mt-0.5 leading-relaxed">{details}</p>
+        <p className="text-xs text-gov-slate mt-0.5 leading-relaxed">
+          {details}
+          {learnMoreUrl && (
+            <>
+              {" "}
+              <a
+                href={learnMoreUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-teal-600 hover:text-teal-800 font-medium"
+              >
+                Learn more ↗
+              </a>
+            </>
+          )}
+        </p>
       </div>
     </div>
   );
