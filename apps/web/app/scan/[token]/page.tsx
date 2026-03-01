@@ -44,7 +44,7 @@ export async function generateMetadata({
     normalized_url: string;
   };
   const title = `${site.domain} — Grade ${audit.grade} (${audit.overall_score}/100) | Ask Arthur`;
-  const description = `Website safety audit for ${site.domain}. Grade: ${audit.grade}, Score: ${audit.overall_score}/100.`;
+  const description = `Website health check for ${site.domain}. Grade: ${audit.grade}, Score: ${audit.overall_score}/100.`;
 
   return {
     title,
@@ -102,7 +102,7 @@ export default async function ScanPage({ params }: PageProps) {
         className="flex-1 w-full max-w-[640px] mx-auto px-5 pt-16"
       >
         <h1 className="text-deep-navy text-3xl md:text-4xl font-extrabold mb-2 leading-tight text-center">
-          Website Safety Audit
+          Website Health Check
         </h1>
         <p className="text-sm text-gov-slate text-center mb-6">
           Scanned {new Date(audit.scanned_at).toLocaleDateString("en-AU")}

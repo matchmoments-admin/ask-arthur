@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
     // 0. Feature flag guard
     if (!featureFlags.siteAudit) {
       return NextResponse.json(
-        { error: "feature_disabled", message: "Website Safety Audit is not yet available." },
+        { error: "feature_disabled", message: "Website Health Check is not yet available." },
         { status: 404 }
       );
     }
@@ -123,7 +123,7 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json(
-      { error: "audit_failed", message: "Something went wrong running the audit. Please try again." },
+      { error: "audit_failed", message: "Something went wrong running the health check. Please try again." },
       { status: 500 }
     );
   }

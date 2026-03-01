@@ -6,7 +6,7 @@ import SiteAuditChecker from "@/components/SiteAuditChecker";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Website Safety Audit | Ask Arthur",
+  title: "Website Health Check | Ask Arthur",
   description:
     "Free website security scanner. Check any URL for security headers, TLS configuration, mixed content, and more. Get a safety grade in seconds.",
 };
@@ -18,10 +18,10 @@ export default function AuditPage() {
 
       <main id="main-content" className="flex-1 w-full max-w-[640px] mx-auto px-5 pt-16">
         <h1 className="text-deep-navy text-4xl md:text-5xl font-extrabold mb-4 leading-tight text-center">
-          Website Safety Audit
+          Website Health Check
         </h1>
         <p className="text-lg text-gov-slate mb-10 leading-relaxed text-center">
-          Enter any website URL to scan its security configuration. Get a safety
+          Enter any website URL to check its security configuration. Get a health
           grade with actionable recommendations.
         </p>
 

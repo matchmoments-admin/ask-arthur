@@ -57,7 +57,7 @@ export default function SiteAuditChecker() {
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.message || "Audit failed");
+        throw new Error(data.message || "Health check failed");
       }
 
       const data = await res.json();
@@ -84,7 +84,7 @@ export default function SiteAuditChecker() {
 
   return (
     <div>
-      <form onSubmit={handleSubmit} aria-label="Website audit">
+      <form onSubmit={handleSubmit} aria-label="Website health check">
         <div
           className={`rounded-3xl overflow-hidden border-2 bg-white transition-colors ${
             isFocused ? "border-deep-navy" : "border-gray-200"
@@ -100,7 +100,7 @@ export default function SiteAuditChecker() {
               onFocus={() => setIsFocused(true)}
               onBlur={() => setIsFocused(false)}
               placeholder="Enter a website URL (e.g. example.com.au)"
-              aria-label="Website URL to audit"
+              aria-label="Website URL to check"
               maxLength={2048}
               disabled={status === "scanning"}
               className="flex-1 py-3 text-lg text-deep-navy border-0 focus:outline-none focus:ring-0 bg-transparent disabled:opacity-60 placeholder:text-slate-400"

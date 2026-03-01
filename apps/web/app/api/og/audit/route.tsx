@@ -90,7 +90,7 @@ export async function GET(req: NextRequest) {
             marginBottom: "32px",
           }}
         >
-          Website Safety Audit
+          Website Health Check
         </span>
 
         {/* Branding */}

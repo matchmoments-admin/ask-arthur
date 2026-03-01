@@ -68,6 +68,11 @@ const nextConfig: NextConfig = {
         destination: "https://askarthur.au/:path*",
         permanent: true,
       },
+      {
+        source: "/audit",
+        destination: "/health",
+        permanent: true,
+      },
     ];
   },
 };

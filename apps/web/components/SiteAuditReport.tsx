@@ -78,7 +78,7 @@ export default function SiteAuditReport({ result, shareUrl }: SiteAuditReportPro
   }
 
   const twitterText = encodeURIComponent(
-    `${result.domain} scored ${result.grade} (${result.overallScore}/100) on the Ask Arthur Website Safety Audit`
+    `${result.domain} scored ${result.grade} (${result.overallScore}/100) on the Ask Arthur Website Health Check`
   );
   const twitterUrl = shareUrl
     ? `https://twitter.com/intent/tweet?text=${twitterText}&url=${encodeURIComponent(shareUrl)}`

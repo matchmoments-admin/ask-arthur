@@ -16,10 +16,10 @@ export default function Nav() {
       <div className="flex items-center gap-4">
         {featureFlags.siteAudit && (
           <Link
-            href="/audit"
+            href="/health"
             className="text-deep-navy font-bold text-sm hover:text-action-teal transition-colors py-3 px-2"
           >
-            Audit
+            Health
           </Link>
         )}
         <Link
