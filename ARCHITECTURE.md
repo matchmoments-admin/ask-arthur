@@ -202,6 +202,7 @@ Authenticated via `X-Extension-Secret` + `X-Extension-Id` headers. CORS enabled.
 | `/api/webhooks/slack` | POST | Slack event webhook |
 | `/api/webhooks/slack/shortcuts` | POST | Slack slash commands |
 | `/api/webhooks/messenger` | POST | Facebook Messenger webhook |
+| `/api/webhooks/paddle` | POST | Paddle subscription webhook |
 
 ### B2B Threat Intelligence API (v1)
 
@@ -236,7 +237,7 @@ Authenticated via Bearer token (API key). See `docs/openapi.yaml` for full spec.
 
 ### Supabase (PostgreSQL)
 
-19 migration files (`supabase/migration.sql` through `migration-v19-phone-intel.sql`).
+30 migration files (`supabase/migration.sql` through `migration-v30-subscriptions.sql`).
 
 **Core Tables:**
 
@@ -247,6 +248,8 @@ Authenticated via Bearer token (API key). See `docs/openapi.yaml` for full spec.
 | `scam_contacts` | Reported phone numbers and emails |
 | `check_stats` | Daily analysis counters by verdict and region |
 | `api_keys` | B2B API key hashes, tiers, daily limits |
+| `subscriptions` | Paddle subscription records linked to API keys |
+| `api_usage_log` | Per-key, per-endpoint, per-day API usage tracking |
 | `subscribers` | Newsletter subscribers |
 | `blog_posts` | Blog content with categories |
 | `blog_categories` | Blog category taxonomy |
@@ -371,4 +374,5 @@ entrypoints/
 | Inngest | Background job orchestration |
 | Plausible | Privacy-first analytics |
 | InboxSDK | Gmail extension integration |
+| Paddle | Merchant-of-record billing (B2B API subscriptions) |
 | Reality Defender / Resemble AI | Deepfake detection (media analysis) |

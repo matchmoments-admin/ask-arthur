@@ -1,4 +1,5 @@
 export * from "./analysis";
+export * from "./billing";
 export * from "./email-scan";
 export * from "./extension";
 export * from "./intelligence";

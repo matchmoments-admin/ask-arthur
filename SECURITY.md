@@ -85,11 +85,12 @@ All user text is sanitized before Claude analysis:
 ```
 Content-Security-Policy:
   default-src 'self'
-  script-src 'self' 'unsafe-inline' https://plausible.io https://cdn.jsdelivr.net
+  script-src 'self' 'unsafe-inline' https://plausible.io https://cdn.jsdelivr.net https://cdn.paddle.com
   style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net
   font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net
   img-src 'self' data: blob: https://*.r2.cloudflarestorage.com
-  connect-src 'self' https://*.supabase.co wss://*.supabase.co https://plausible.io https://cdn.jsdelivr.net
+  connect-src 'self' https://*.supabase.co wss://*.supabase.co https://plausible.io https://cdn.jsdelivr.net https://*.paddle.com
+  frame-src https://*.paddle.com
   frame-ancestors 'none'
   form-action 'self'
   base-uri 'self'
@@ -101,7 +102,7 @@ Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
 X-Frame-Options: DENY
 X-Content-Type-Options: nosniff
 Referrer-Policy: strict-origin-when-cross-origin
-Permissions-Policy: camera=(self), microphone=(), geolocation=(), payment=()
+Permissions-Policy: camera=(self), microphone=(), geolocation=(), payment=(self)
 ```
 
 ### 5. PII Scrubbing Pipeline

@@ -201,7 +201,7 @@ Future priorities. Items here may move to `BACKLOG.md` if deprioritized.
 
 | Feature | Status |
 |---------|--------|
-| Premium tier with rate limit tiers (Stripe) | Planned |
+| Premium tier with rate limit tiers (Paddle) | 🔄 In progress |
 | Family protection plan (shared check routing) | Planned |
 | Push scam alerts (FCM/APNs) | Planned |
 | Background SMS scanning (Android NotificationListenerService / iOS ILMessageFilterExtension) | Planned |

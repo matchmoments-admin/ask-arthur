@@ -65,6 +65,9 @@ export const featureFlags = {
 
   /** Certificate Transparency log lookups during enrichment */
   ctLookup: process.env.NEXT_PUBLIC_FF_CT_LOOKUP === "true",
+
+  /** Paddle billing — pricing page and checkout */
+  billing: process.env.NEXT_PUBLIC_FF_BILLING === "true",
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;

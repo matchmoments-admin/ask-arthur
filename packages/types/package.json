@@ -5,6 +5,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./analysis": "./src/analysis.ts",
+    "./billing": "./src/billing.ts",
     "./intelligence": "./src/intelligence.ts"
   },
   "dependencies": {

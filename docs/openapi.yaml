@@ -10,9 +10,13 @@ info:
     All endpoints require a Bearer token (API key) provided during onboarding.
 
     ## Rate Limits
-    - Per-minute: configurable per API key tier (default: 60 RPM)
-    - Per-day: configurable per API key tier (default: 100/day)
-    - Batch endpoints: configurable max batch size per tier (default: 100)
+    Three tiers are available. See [Pricing](https://askarthur.au/pricing) for details.
+
+    | Tier | Daily Limit | RPM | Max Batch Size |
+    |------|-------------|-----|----------------|
+    | Free | 25 | 60 | 10 |
+    | Pro | 100 | 60 | 100 |
+    | Enterprise | 5,000 | 300 | 500 |
 
     ## Caching
     Most GET endpoints return `Cache-Control: public, s-maxage=300` headers.

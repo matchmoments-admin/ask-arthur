@@ -154,7 +154,7 @@ export async function validateApiKey(
   }
 
   // Check daily rate limit
-  const dailyLimit = data.daily_limit ?? 100;
+  const dailyLimit = data.daily_limit ?? 25;
   const { allowed, remaining } = await checkDailyLimit(keyHash, dailyLimit);
 
   if (!allowed) {
@@ -186,6 +186,6 @@ export async function validateApiKey(
     tier: data.tier,
     dailyRemaining: remaining,
     keyHash,
-    maxBatchSize: data.max_batch_size ?? 100,
+    maxBatchSize: data.max_batch_size ?? 10,
   };
 }

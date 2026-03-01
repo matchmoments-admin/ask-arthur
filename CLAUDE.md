@@ -86,6 +86,7 @@ import { analyzeWithClaude } from "@askarthur/scam-engine/claude";
 import { storeVerifiedScam } from "@askarthur/scam-engine/pipeline";
 import { analyzeForBot } from "@askarthur/bot-core/analyze";
 import { toTelegramMessage } from "@askarthur/bot-core/format-telegram";
+import { TIER_LIMITS } from "@askarthur/types/billing";
 ```
 
 Within the web app, use `@/` for local imports:
@@ -110,6 +111,7 @@ import { validateApiKey } from "@/lib/apiAuth";
 | Background jobs | Inngest | Event-driven, cron, fan-out |
 | Analytics | Plausible | Privacy-first, no cookies |
 | Email | Resend + React Email | Modern transactional email |
+| Billing | Paddle | Merchant-of-record, handles tax/compliance |
 
 ## Critical Rules
 
@@ -157,4 +159,5 @@ import { validateApiKey } from "@/lib/apiAuth";
 - **Bots**: `TELEGRAM_*`, `WHATSAPP_*`, `SLACK_*`, `MESSENGER_*`
 - **Extension**: `WXT_EXTENSION_SECRET`, `WXT_INBOXSDK_APP_ID`
 - **Admin**: `ADMIN_SECRET`
+- **Billing**: `PADDLE_API_KEY`, `PADDLE_WEBHOOK_SECRET`, `NEXT_PUBLIC_PADDLE_CLIENT_TOKEN`, `NEXT_PUBLIC_PADDLE_ENV`, `PADDLE_PRO_PRICE_ID`, `PADDLE_ENTERPRISE_PRICE_ID`
 - **External APIs**: `SAFE_BROWSING_API_KEY`, `TWILIO_*`

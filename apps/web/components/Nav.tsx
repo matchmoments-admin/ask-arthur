@@ -22,6 +22,14 @@ export default function Nav() {
             Health
           </Link>
         )}
+        {featureFlags.billing && (
+          <Link
+            href="/pricing"
+            className="text-deep-navy font-bold text-sm hover:text-action-teal transition-colors py-3 px-2"
+          >
+            Pricing
+          </Link>
+        )}
         <Link
           href="/blog"
           className="text-deep-navy font-bold text-sm hover:text-action-teal transition-colors py-3 px-2"

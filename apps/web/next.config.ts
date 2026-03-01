@@ -19,18 +19,19 @@ const securityHeaders = [
   },
   {
     key: "Permissions-Policy",
-    value: "camera=(self), microphone=(), geolocation=(), payment=()",
+    value: "camera=(self), microphone=(), geolocation=(), payment=(self)",
   },
   {
     key: "Content-Security-Policy",
     value: [
       "default-src 'self'",
       "worker-src 'self' blob:",
-      "script-src 'self' 'unsafe-inline' https://plausible.io https://cdn.jsdelivr.net",
+      "script-src 'self' 'unsafe-inline' https://plausible.io https://cdn.jsdelivr.net https://cdn.paddle.com",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net",
       "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net",
       "img-src 'self' data: blob: https://*.r2.cloudflarestorage.com",
-      "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://plausible.io https://cdn.jsdelivr.net",
+      "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://plausible.io https://cdn.jsdelivr.net https://*.paddle.com",
+      "frame-src https://*.paddle.com",
       "frame-ancestors 'none'",
       "form-action 'self'",
       "base-uri 'self'",
