@@ -24,7 +24,6 @@ export default defineConfig({
     ],
     host_permissions: [
       "https://askarthur.au/api/extension/*",
-      "https://mail.google.com/*",
       ...(urlGuardEnabled ? ["<all_urls>" as const] : []),
     ],
     icons: {
@@ -45,11 +44,6 @@ export default defineConfig({
       __EXTENSION_SECRET__: JSON.stringify(
         process.env.WXT_EXTENSION_SECRET ?? ""
       ),
-      __INBOXSDK_APP_ID__: JSON.stringify(
-        process.env.WXT_INBOXSDK_APP_ID ?? ""
-      ),
-      __EMAIL_SCANNING_ENABLED__:
-        process.env.WXT_EMAIL_SCANNING === "true",
       __URL_GUARD_ENABLED__: urlGuardEnabled,
       __EXTENSION_SECURITY_ENABLED__: extensionSecurityEnabled,
     },

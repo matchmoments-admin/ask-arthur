@@ -351,13 +351,10 @@ Cron: /api/cron/process-bot-queue → Dequeue batch → Analyze → Format → R
 ```
 entrypoints/
 ├── background.ts              # Service worker (message routing, context menus)
-├── popup/App.tsx               # Popup UI (URL + text analysis)
-├── gmail-scanner.content.ts    # Gmail email scanning
-└── gmail-relay.content.ts      # Gmail message relay (InboxSDK)
+└── popup/App.tsx               # Popup UI (URL + text analysis)
 ```
 
 - **Popup**: 380px fixed width, segmented tabs (URL / Text)
-- **Gmail Integration**: InboxSDK-based email scanning with local cache
 - **Auth**: `X-Extension-Secret` header + installation ID
 
 ## User Authentication

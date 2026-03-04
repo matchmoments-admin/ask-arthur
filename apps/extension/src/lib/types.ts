@@ -1,13 +1,10 @@
-import type { AnalysisResult, EmailContent, EmailScanResult, ExtensionURLCheckResponse } from "@askarthur/types";
+import type { AnalysisResult, ExtensionURLCheckResponse } from "@askarthur/types";
 
 // Message types between popup <-> background service worker
 export type MessageType =
   | "CHECK_URL"
   | "CHECK_TEXT"
   | "GET_STATUS"
-  | "SCAN_EMAIL"
-  | "REPORT_EMAIL"
-  | "GET_EMAIL_CACHE"
   | "CHECK_URL_PASSIVE"
   | "SHOW_PHISHING_WARNING"
   | "SCAN_EXTENSIONS"
@@ -25,27 +22,6 @@ export interface CheckTextMessage {
 
 export interface GetStatusMessage {
   type: "GET_STATUS";
-}
-
-export interface ScanEmailMessage {
-  type: "SCAN_EMAIL";
-  email: EmailContent;
-}
-
-export interface ReportEmailMessage {
-  type: "REPORT_EMAIL";
-  report: {
-    senderEmail: string;
-    subject: string;
-    urls: string[];
-    verdict: string;
-    confidence: number;
-  };
-}
-
-export interface GetEmailCacheMessage {
-  type: "GET_EMAIL_CACHE";
-  messageId: string;
 }
 
 export interface CheckURLPassiveMessage {
@@ -79,9 +55,6 @@ export type ExtensionMessage =
   | CheckURLMessage
   | CheckTextMessage
   | GetStatusMessage
-  | ScanEmailMessage
-  | ReportEmailMessage
-  | GetEmailCacheMessage
   | CheckURLPassiveMessage
   | ShowPhishingWarningMessage
   | ScanExtensionsMessage

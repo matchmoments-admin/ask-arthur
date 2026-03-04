@@ -1,12 +1,10 @@
 import { setInstallId, getInstallId, setContextMenuText } from "@/lib/storage";
-import { checkURL, analyzeText, reportScamEmail, analyzeExtensionsCRX, fetchThreatDBUpdate, ExtensionApiError } from "@/lib/api";
-import { getCachedEmailScan, setCachedEmailScan } from "@/lib/email-cache";
+import { checkURL, analyzeText, analyzeExtensionsCRX, fetchThreatDBUpdate, ExtensionApiError } from "@/lib/api";
 import { getCachedScanReport, setCachedScanReport } from "@/lib/extension-scan-cache";
 import { scanInstalledExtensions, buildSecurityReport } from "@/lib/extension-scanner";
 import { setupThreatDBRefresh, getThreatDB } from "@/lib/threat-db";
 import { urlCache } from "@/lib/url-cache";
 import { checkSubscription } from "@/lib/subscription";
-import type { EmailContent, EmailScanResult, ExtensionSecurityReport, CRXAnalysisResult } from "@askarthur/types";
 import type { ExtensionMessage, MessageResponse } from "@/lib/types";
 
 declare const __EXTENSION_SECRET__: string;
@@ -181,43 +179,6 @@ async function handleMessage(
       const installId = await getInstallId();
       return { success: true, data: { installId, ready: !!installId } };
     }
-    case "SCAN_EMAIL": {
-      const { email } = message;
-
-      // Check local cache first
-      const cached = await getCachedEmailScan(email.messageId);
-      if (cached) {
-        return { success: true, data: cached };
-      }
-
-      // Compose email into structured text for Claude analysis
-      const text = composeEmailForAnalysis(email);
-      const { data } = await analyzeText(text, "email");
-
-      const result: EmailScanResult = {
-        messageId: email.messageId,
-        verdict: data.verdict,
-        confidence: data.confidence,
-        summary: data.summary,
-        redFlags: data.redFlags,
-        nextSteps: data.nextSteps,
-        scamType: data.scamType,
-        impersonatedBrand: data.impersonatedBrand,
-        scannedAt: Date.now(),
-      };
-
-      // Cache for future opens
-      await setCachedEmailScan(result);
-      return { success: true, data: result };
-    }
-    case "GET_EMAIL_CACHE": {
-      const cached = await getCachedEmailScan(message.messageId);
-      return { success: true, data: cached };
-    }
-    case "REPORT_EMAIL": {
-      await reportScamEmail(message.report);
-      return { success: true, data: { reported: true } };
-    }
     case "SCAN_EXTENSIONS": {
       // Check cache first
       const cachedReport = await getCachedScanReport();
@@ -241,21 +202,3 @@ async function handleMessage(
   }
 }
 
-function composeEmailForAnalysis(email: EmailContent): string {
-  const parts = [
-    `[EMAIL ANALYSIS]`,
-    `From: ${email.from}`,
-    `Subject: ${email.subject}`,
-    ``,
-    email.body,
-  ];
-
-  if (email.links.length > 0) {
-    parts.push("", `[Links found in email]`);
-    for (const link of email.links.slice(0, 20)) {
-      parts.push(`- ${link}`);
-    }
-  }
-
-  return parts.join("\n").slice(0, 10000);
-}
