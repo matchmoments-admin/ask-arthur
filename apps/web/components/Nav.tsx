@@ -1,7 +1,13 @@
 import Link from "next/link";
 import { featureFlags } from "@askarthur/utils/feature-flags";
+import { getUser } from "@/lib/auth";
 
-export default function Nav() {
+export default async function Nav() {
+  let user = null;
+  if (featureFlags.auth) {
+    user = await getUser();
+  }
+
   return (
     <nav
       aria-label="Main navigation"
@@ -48,6 +54,22 @@ export default function Nav() {
         >
           About
         </Link>
+        {featureFlags.auth && user && (
+          <Link
+            href="/app"
+            className="rounded-lg bg-action-teal text-white font-bold text-sm px-4 py-2 hover:bg-action-teal/90 transition-colors"
+          >
+            Dashboard
+          </Link>
+        )}
+        {featureFlags.auth && !user && (
+          <Link
+            href="/login"
+            className="rounded-lg border-2 border-deep-navy text-deep-navy font-bold text-sm px-4 py-2 hover:bg-deep-navy/5 transition-colors"
+          >
+            Sign In
+          </Link>
+        )}
       </div>
     </nav>
   );

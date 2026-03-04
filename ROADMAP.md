@@ -201,7 +201,8 @@ Future priorities. Items here may move to `BACKLOG.md` if deprioritized.
 
 | Feature | Status |
 |---------|--------|
-| Premium tier with rate limit tiers (Paddle) | 🔄 In progress |
+| Premium tier with rate limit tiers (Paddle) | ✅ Done |
+| User auth + dashboard + API key self-service (Supabase Auth) | ✅ Done |
 | Family protection plan (shared check routing) | Planned |
 | Push scam alerts (FCM/APNs) | Planned |
 | Background SMS scanning (Android NotificationListenerService / iOS ILMessageFilterExtension) | Planned |

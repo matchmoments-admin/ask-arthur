@@ -7,7 +7,11 @@ export type MessageType =
   | "GET_STATUS"
   | "SCAN_EMAIL"
   | "REPORT_EMAIL"
-  | "GET_EMAIL_CACHE";
+  | "GET_EMAIL_CACHE"
+  | "CHECK_URL_PASSIVE"
+  | "SHOW_PHISHING_WARNING"
+  | "SCAN_EXTENSIONS"
+  | "DEEP_SCAN_EXTENSIONS";
 
 export interface CheckURLMessage {
   type: "CHECK_URL";
@@ -44,13 +48,44 @@ export interface GetEmailCacheMessage {
   messageId: string;
 }
 
+export interface CheckURLPassiveMessage {
+  type: "CHECK_URL_PASSIVE";
+  url: string;
+  tabId: number;
+}
+
+export interface ShowPhishingWarningMessage {
+  type: "SHOW_PHISHING_WARNING";
+  url: string;
+  domain: string;
+  threatLevel: string;
+  reportCount?: number;
+}
+
+export interface ScanExtensionsMessage {
+  type: "SCAN_EXTENSIONS";
+}
+
+export interface DeepScanExtensionsMessage {
+  type: "DEEP_SCAN_EXTENSIONS";
+  extensions: Array<{
+    id: string;
+    name: string;
+    version: string;
+  }>;
+}
+
 export type ExtensionMessage =
   | CheckURLMessage
   | CheckTextMessage
   | GetStatusMessage
   | ScanEmailMessage
   | ReportEmailMessage
-  | GetEmailCacheMessage;
+  | GetEmailCacheMessage
+  | CheckURLPassiveMessage
+  | ShowPhishingWarningMessage
+  | ScanExtensionsMessage
+  | DeepScanExtensionsMessage;
 
 export interface MessageResponse<T = unknown> {
   success: boolean;

@@ -50,6 +50,16 @@ const PROTECT_ACCOUNTS: RecoverySection = {
   ],
 };
 
+const SECURITY_TOOLS: RecoverySection = {
+  title: "Recommended Security Tools",
+  items: [
+    { text: "1Password \u2014 unique passwords for every account", contact: "https://1password.com/askarthur", contactLabel: "Get 1Password" },
+    { text: "NordVPN \u2014 encrypt your internet connection", contact: "https://nordvpn.com/askarthur", contactLabel: "Get NordVPN" },
+    { text: "IDCare \u2014 free identity theft support (AU)", contact: "https://www.idcare.org", contactLabel: "Visit IDCare" },
+    { text: "Have I Been Pwned \u2014 check for data breaches", contact: "https://haveibeenpwned.com", contactLabel: "Check Now" },
+  ],
+};
+
 const GET_SUPPORT: RecoverySection = {
   title: "Get Support",
   items: [
@@ -99,7 +109,7 @@ function buildSections(scamType?: string, impersonatedBrand?: string): RecoveryS
     if (extra) sections.push(extra);
   }
 
-  sections.push(REPORT_SCAM_AU, PROTECT_ACCOUNTS, GET_SUPPORT);
+  sections.push(REPORT_SCAM_AU, PROTECT_ACCOUNTS, SECURITY_TOOLS, GET_SUPPORT);
   return sections;
 }
 
@@ -141,7 +151,12 @@ export function RecoveryGuide({ verdict, scamType, impersonatedBrand }: Recovery
                     <Text style={styles.itemText}>{item.text}</Text>
                     {item.contactLabel && (
                       <Pressable
-                        onPress={() => Linking.openURL(`tel:${item.contactLabel!.replace(/\s/g, "")}`)}
+                        onPress={() => {
+                          const url = item.contact?.startsWith("http")
+                            ? item.contact
+                            : `tel:${item.contactLabel!.replace(/\s/g, "")}`;
+                          Linking.openURL(url);
+                        }}
                       >
                         <Text style={styles.contactLabel}>{item.contactLabel}</Text>
                       </Pressable>

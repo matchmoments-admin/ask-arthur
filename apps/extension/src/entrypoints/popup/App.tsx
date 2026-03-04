@@ -5,9 +5,10 @@ import { getContextMenuText, setContextMenuText } from "@/lib/storage";
 import { ResultDisplay } from "@/components/ResultDisplay";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { ErrorState } from "@/components/ErrorState";
-import { Link as LinkIcon, MessageCircle, Shield } from "lucide-react";
+import { ExtensionSecurityTab } from "@/components/ExtensionSecurityTab";
+import { Link as LinkIcon, MessageCircle, Shield, Puzzle } from "lucide-react";
 
-type Tab = "url" | "text";
+type Tab = "url" | "text" | "extensions";
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("url");
@@ -149,12 +150,25 @@ export default function App() {
             <MessageCircle size={16} />
             Text
           </button>
+          <button
+            onClick={() => { setTab("extensions"); handleReset(); }}
+            className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-all ${
+              tab === "extensions"
+                ? "bg-white text-deep-navy shadow-sm"
+                : "text-slate-400 hover:text-gov-slate"
+            }`}
+          >
+            <Puzzle size={16} />
+            Extensions
+          </button>
         </div>
       </div>
 
       {/* Content */}
       <div className="p-4 space-y-3">
-        {tab === "url" ? (
+        {tab === "extensions" ? (
+          <ExtensionSecurityTab />
+        ) : tab === "url" ? (
           <>
             <div>
               <label htmlFor="url-input" className="block text-xs font-medium text-deep-navy mb-1.5">
@@ -232,11 +246,32 @@ export default function App() {
         {/* Loading */}
         {loading && <LoadingSpinner message={loadingMessage} />}
 
+        {/* Upgrade prompt when rate-limited */}
+        {isRateLimit && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-2">
+            <p className="text-sm font-semibold text-amber-800">
+              Daily limit reached
+            </p>
+            <p className="text-xs text-amber-700">
+              Upgrade to Pro for 500 checks/day, real-time URL protection, and
+              email scanning.
+            </p>
+            <a
+              href="https://askarthur.au/extension/upgrade"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-block w-full text-center py-2 bg-deep-navy text-white font-semibold rounded-lg text-sm hover:bg-navy transition-colors"
+            >
+              Upgrade to Pro
+            </a>
+          </div>
+        )}
+
         {/* Error */}
-        {error && (
+        {error && !isRateLimit && (
           <ErrorState
             message={error}
-            isRateLimit={isRateLimit}
+            isRateLimit={false}
             onRetry={tab === "url" ? handleCheckURL : handleAnalyzeText}
           />
         )}

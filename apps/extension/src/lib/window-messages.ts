@@ -16,6 +16,7 @@ export interface ScanRequest {
   type: typeof WindowMessageType.SCAN_REQUEST;
   requestId: string;
   email: EmailContent;
+  hmac?: string;
 }
 
 export interface ScanResponse {
@@ -24,6 +25,7 @@ export interface ScanResponse {
   success: boolean;
   data?: EmailScanResult;
   error?: string;
+  hmac?: string;
 }
 
 export interface ReportRequest {
@@ -36,6 +38,7 @@ export interface ReportRequest {
     verdict: string;
     confidence: number;
   };
+  hmac?: string;
 }
 
 export interface ReportResponse {
@@ -43,18 +46,21 @@ export interface ReportResponse {
   requestId: string;
   success: boolean;
   error?: string;
+  hmac?: string;
 }
 
 export interface CacheRequest {
   type: typeof WindowMessageType.CACHE_REQUEST;
   requestId: string;
   messageId: string;
+  hmac?: string;
 }
 
 export interface CacheResponse {
   type: typeof WindowMessageType.CACHE_RESPONSE;
   requestId: string;
   data: EmailScanResult | null;
+  hmac?: string;
 }
 
 export type WindowMessage =
@@ -77,14 +83,81 @@ export function generateRequestId(): string {
   return crypto.randomUUID();
 }
 
+// ---------------------------------------------------------------------------
+// HMAC signing / verification for postMessage security (S-EXT-2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Generate an HMAC-SHA256 signature for a window message.
+ * Signs {type, requestId} to prove message origin.
+ */
+export async function signMessage(
+  key: CryptoKey,
+  type: string,
+  requestId: string
+): Promise<string> {
+  const data = new TextEncoder().encode(`${type}:${requestId}`);
+  const sig = await crypto.subtle.sign("HMAC", key, data);
+  return btoa(String.fromCharCode(...new Uint8Array(sig)));
+}
+
+/**
+ * Verify an HMAC-SHA256 signature on a window message.
+ */
+export async function verifyMessage(
+  key: CryptoKey,
+  type: string,
+  requestId: string,
+  hmac: string
+): Promise<boolean> {
+  const data = new TextEncoder().encode(`${type}:${requestId}`);
+  const sigBytes = Uint8Array.from(atob(hmac), (c) => c.charCodeAt(0));
+  return crypto.subtle.verify("HMAC", key, sigBytes, data);
+}
+
+/**
+ * Generate a per-session HMAC key for signing window messages.
+ */
+export async function generateHmacKey(): Promise<CryptoKey> {
+  return crypto.subtle.generateKey(
+    { name: "HMAC", hash: "SHA-256" },
+    true,
+    ["sign", "verify"]
+  );
+}
+
+/**
+ * Export a CryptoKey to a base64 string for sharing between worlds.
+ */
+export async function exportKey(key: CryptoKey): Promise<string> {
+  const raw = await crypto.subtle.exportKey("raw", key);
+  return btoa(String.fromCharCode(...new Uint8Array(raw)));
+}
+
+/**
+ * Import a base64 key string back into a CryptoKey.
+ */
+export async function importKey(keyStr: string): Promise<CryptoKey> {
+  const raw = Uint8Array.from(atob(keyStr), (c) => c.charCodeAt(0));
+  return crypto.subtle.importKey(
+    "raw",
+    raw,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign", "verify"]
+  );
+}
+
 /**
  * Send a window message and await a response with matching requestId.
  * Used by MAIN world scripts to communicate with ISOLATED world relay.
+ * If an HMAC key is provided, signs outgoing and verifies incoming messages.
  */
 export function sendWindowMessage<T extends WindowMessage>(
   message: WindowMessage,
   responseType: string,
-  timeoutMs = 30000
+  timeoutMs = 30000,
+  hmacKey?: CryptoKey
 ): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -92,18 +165,37 @@ export function sendWindowMessage<T extends WindowMessage>(
       reject(new Error("Window message timeout"));
     }, timeoutMs);
 
-    function handler(event: MessageEvent) {
+    async function handler(event: MessageEvent) {
       if (!isArthurMessage(event)) return;
       if (event.data.type !== responseType) return;
       if (event.data.requestId !== message.requestId) return;
+
+      // Verify HMAC if key is available
+      if (hmacKey && event.data.hmac) {
+        const valid = await verifyMessage(
+          hmacKey,
+          event.data.type,
+          event.data.requestId,
+          event.data.hmac
+        );
+        if (!valid) return; // Silently drop invalid messages
+      }
 
       clearTimeout(timer);
       window.removeEventListener("message", handler);
       resolve(event.data as T);
     }
 
-    window.addEventListener("message", handler);
-    window.postMessage(message, "*");
+    // Sign and send
+    if (hmacKey) {
+      signMessage(hmacKey, message.type, message.requestId).then((hmac) => {
+        window.addEventListener("message", handler);
+        window.postMessage({ ...message, hmac }, "*");
+      });
+    } else {
+      window.addEventListener("message", handler);
+      window.postMessage(message, "*");
+    }
   });
 }
 

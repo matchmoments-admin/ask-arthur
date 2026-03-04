@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { initializePaddle } from "@paddle/paddle-js";
 import type { Paddle } from "@paddle/paddle-js";
 import { TIER_LIMITS } from "@askarthur/types/billing";
@@ -10,7 +11,16 @@ const proPriceId = process.env.NEXT_PUBLIC_PADDLE_PRO_PRICE_ID ?? "";
 const enterprisePriceId =
   process.env.NEXT_PUBLIC_PADDLE_ENTERPRISE_PRICE_ID ?? "";
 
-export default function PricingTiers() {
+export default function PricingTiers({
+  apiKeyId,
+  userId,
+  userEmail,
+}: {
+  apiKeyId?: number;
+  userId?: string;
+  userEmail?: string;
+}) {
+  const router = useRouter();
   const [paddle, setPaddle] = useState<Paddle>();
 
   useEffect(() => {
@@ -27,9 +37,17 @@ export default function PricingTiers() {
   }, []);
 
   function openCheckout(priceId: string) {
+    // If no authenticated user or API key, redirect to login
+    if (!userId || !apiKeyId) {
+      router.push("/login?next=/app/billing");
+      return;
+    }
+
     if (!paddle) return;
     paddle.Checkout.open({
       items: [{ priceId, quantity: 1 }],
+      customer: userEmail ? { email: userEmail } : undefined,
+      customData: { apiKeyId: String(apiKeyId), userId },
     });
   }
 

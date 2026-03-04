@@ -1,5 +1,5 @@
 import type { AnalysisResult, Verdict, ExtensionURLCheckResponse } from "@askarthur/types";
-import { ShieldCheck, TriangleAlert, Gauge } from "lucide-react";
+import { ShieldCheck, TriangleAlert, Gauge, ExternalLink } from "lucide-react";
 import { VerdictHeader, VERDICT_CONFIG } from "./VerdictBadge";
 
 const VERDICT_COLORS: Record<Verdict, string> = {
@@ -152,6 +152,9 @@ function TextResult({ result }: { result: AnalysisResult }) {
           </div>
         )}
 
+        {/* Recommended security tools */}
+        <SecurityToolRecommendations />
+
         {/* Disclaimer */}
         <div className="mt-4 pt-3 border-t border-border-default">
           <p className="text-xs text-slate-400 leading-relaxed">
@@ -159,6 +162,39 @@ function TextResult({ result }: { result: AnalysisResult }) {
             your own judgment.
           </p>
         </div>
+      </div>
+    </div>
+  );
+}
+
+const SECURITY_TOOLS = [
+  { name: "1Password", url: "https://1password.com/askarthur", desc: "Unique passwords for every account" },
+  { name: "NordVPN", url: "https://nordvpn.com/askarthur", desc: "Encrypt your connection" },
+  { name: "Have I Been Pwned", url: "https://haveibeenpwned.com", desc: "Check for data breaches" },
+];
+
+function SecurityToolRecommendations() {
+  return (
+    <div className="mt-4 pt-3 border-t border-border-default">
+      <h3 className="text-xs font-semibold text-deep-navy mb-2">
+        Recommended Security Tools
+      </h3>
+      <div className="space-y-1.5">
+        {SECURITY_TOOLS.map((tool) => (
+          <a
+            key={tool.name}
+            href={tool.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-between text-sm text-gov-slate hover:text-action-teal-text transition-colors"
+          >
+            <span>
+              <strong className="text-deep-navy">{tool.name}</strong>
+              <span className="text-xs text-slate-400 ml-1.5">{tool.desc}</span>
+            </span>
+            <ExternalLink size={12} className="text-slate-400 flex-shrink-0" />
+          </a>
+        ))}
       </div>
     </div>
   );

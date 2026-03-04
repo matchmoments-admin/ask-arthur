@@ -68,6 +68,30 @@ export const featureFlags = {
 
   /** Paddle billing — pricing page and checkout */
   billing: process.env.NEXT_PUBLIC_FF_BILLING === "true",
+
+  /** User auth, dashboard, and API key self-service */
+  auth: process.env.NEXT_PUBLIC_FF_AUTH === "true",
+
+  /** Extension: real-time URL checking on page navigation */
+  urlGuard: process.env.NEXT_PUBLIC_FF_URL_GUARD === "true",
+
+  /** Mobile: scam alert push notifications */
+  pushAlerts: process.env.NEXT_PUBLIC_FF_PUSH_ALERTS === "true",
+
+  /** Mobile: device attestation (Play Integrity / App Attest) */
+  deviceAttestation: process.env.NEXT_PUBLIC_FF_DEVICE_ATTEST === "true",
+
+  /** Mobile: offline scam database via SQLite */
+  offlineDB: process.env.NEXT_PUBLIC_FF_OFFLINE_DB === "true",
+
+  /** Mobile: Android call screening service */
+  callScreening: process.env.NEXT_PUBLIC_FF_CALL_SCREEN === "true",
+
+  /** Mobile: iOS SMS filtering extension */
+  smsFilter: process.env.NEXT_PUBLIC_FF_SMS_FILTER === "true",
+
+  /** Family protection plan: shared dashboard + activity log */
+  familyPlan: process.env.NEXT_PUBLIC_FF_FAMILY_PLAN === "true",
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;

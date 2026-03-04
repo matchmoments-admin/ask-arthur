@@ -23,7 +23,10 @@
     "./hibp": "./src/hibp.ts",
     "./ct-lookup": "./src/ct-lookup.ts",
     "./twilio-lookup": "./src/twilio-lookup.ts",
-    "./urlscan": "./src/urlscan.ts"
+    "./urlscan": "./src/urlscan.ts",
+    "./deepfake-detect": "./src/deepfake-detect.ts",
+    "./push-sender": "./src/push-sender.ts",
+    "./inngest/scam-alerts": "./src/inngest/scam-alerts.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",

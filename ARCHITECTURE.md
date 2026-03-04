@@ -237,7 +237,7 @@ Authenticated via Bearer token (API key). See `docs/openapi.yaml` for full spec.
 
 ### Supabase (PostgreSQL)
 
-30 migration files (`supabase/migration.sql` through `migration-v30-subscriptions.sql`).
+31 migration files (`supabase/migration.sql` through `migration-v31-auth.sql`).
 
 **Core Tables:**
 
@@ -249,6 +249,7 @@ Authenticated via Bearer token (API key). See `docs/openapi.yaml` for full spec.
 | `check_stats` | Daily analysis counters by verdict and region |
 | `api_keys` | B2B API key hashes, tiers, daily limits |
 | `subscriptions` | Paddle subscription records linked to API keys |
+| `user_profiles` | User profiles (role, display name, company) linked to auth.users |
 | `api_usage_log` | Per-key, per-endpoint, per-day API usage tracking |
 | `subscribers` | Newsletter subscribers |
 | `blog_posts` | Blog content with categories |
@@ -358,6 +359,25 @@ entrypoints/
 - **Popup**: 380px fixed width, segmented tabs (URL / Text)
 - **Gmail Integration**: InboxSDK-based email scanning with local cache
 - **Auth**: `X-Extension-Secret` header + installation ID
+
+## User Authentication
+
+Supabase Auth with PKCE flow, feature-flagged behind `NEXT_PUBLIC_FF_AUTH`.
+
+| Component | File |
+|-----------|------|
+| Auth server client (RLS-aware) | `packages/supabase/src/server-auth.ts` |
+| Middleware client (token refresh) | `packages/supabase/src/middleware.ts` |
+| Browser client (cookie auth) | `packages/supabase/src/browser.ts` |
+| Auth helpers (`getUser`, `requireAuth`) | `apps/web/lib/auth.ts` |
+| Session refresh + route protection | `apps/web/middleware.ts` |
+| Admin dual-mode (Supabase + HMAC) | `apps/web/lib/adminAuth.ts` |
+
+**Protected routes:**
+- `/app/*` — requires authenticated user (redirects to `/login`)
+- `/admin/*` — requires admin role (Supabase Auth) or HMAC cookie (legacy)
+
+**Auth flow:** Signup → email confirmation → login → dashboard → API key creation → billing checkout
 
 ## External Services
 

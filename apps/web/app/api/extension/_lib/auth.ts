@@ -4,7 +4,7 @@ import { Redis } from "@upstash/redis";
 import { logger } from "@askarthur/utils/logger";
 
 export type ExtensionAuthResult =
-  | { valid: true; installId: string; remaining: number }
+  | { valid: true; installId: string; remaining: number; requestId: string | null }
   | { valid: false; error: string; status: number; retryAfter?: string };
 
 // Manual checks: 10/min burst, 50/day
@@ -83,6 +83,12 @@ function timingSafeEqual(a: string, b: string): boolean {
 export async function validateExtensionRequest(
   req: NextRequest
 ): Promise<ExtensionAuthResult> {
+  // 0. Extract request ID for tracing
+  const requestId = req.headers.get("x-request-id");
+  if (requestId) {
+    logger.info("Extension request", { requestId });
+  }
+
   // 1. Validate extension secret
   const secret = req.headers.get("x-extension-secret");
   const expectedSecret = process.env.EXTENSION_SECRET;
@@ -109,7 +115,7 @@ export async function validateExtensionRequest(
       logger.error("UPSTASH_REDIS_REST_URL not set in production — blocking");
       return { valid: false, error: "Service unavailable", status: 503 };
     }
-    return { valid: true, installId, remaining: 99 };
+    return { valid: true, installId, remaining: 99, requestId };
   }
 
   // Hash the install ID for privacy
@@ -159,5 +165,6 @@ export async function validateExtensionRequest(
     valid: true,
     installId,
     remaining: Math.min(burst.remaining, daily.remaining),
+    requestId,
   };
 }

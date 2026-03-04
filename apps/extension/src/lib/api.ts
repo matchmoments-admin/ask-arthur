@@ -1,4 +1,9 @@
-import type { AnalysisResult, ExtensionURLCheckResponse } from "@askarthur/types";
+import type {
+  AnalysisResult,
+  ExtensionURLCheckResponse,
+  ExtensionAnalyzeRequest,
+  ExtensionAnalyzeResponse,
+} from "@askarthur/types";
 import { getInstallId } from "./storage";
 
 declare const __EXTENSION_SECRET__: string;
@@ -27,6 +32,7 @@ async function getHeaders(): Promise<Record<string, string>> {
   return {
     "Content-Type": "application/json",
     "X-Extension-Secret": __EXTENSION_SECRET__,
+    "X-Request-ID": crypto.randomUUID(),
     ...(installId && { "X-Extension-Id": installId }),
   };
 }
@@ -94,6 +100,35 @@ export async function reportScamEmail(report: {
 export async function heartbeat(): Promise<{ ok: boolean; version: string }> {
   const res = await fetch(`${API_BASE}/heartbeat`);
   return res.json();
+}
+
+export async function analyzeExtensionsCRX(
+  extensions: ExtensionAnalyzeRequest["extensions"]
+): Promise<{ data: ExtensionAnalyzeResponse; remaining: number | null }> {
+  return request<ExtensionAnalyzeResponse>("/extension-security/analyze", {
+    method: "POST",
+    body: JSON.stringify({ extensions }),
+  });
+}
+
+export async function fetchThreatDBUpdate(
+  since?: string
+): Promise<{
+  ids: Record<string, { name: string; campaign: string; source: string }>;
+  updatedAt: string;
+} | null> {
+  try {
+    const params = since ? `?since=${encodeURIComponent(since)}` : "";
+    const headers = await getHeaders();
+    const res = await fetch(
+      `${API_BASE}/extension-security/threat-db${params}`,
+      { headers }
+    );
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
 }
 
 export { ExtensionApiError };

@@ -4,6 +4,7 @@ import {
   WindowMessageType,
   generateRequestId,
   sendWindowMessage,
+  importKey,
   type ScanResponse,
   type CacheResponse,
   type ReportResponse,
@@ -16,6 +17,11 @@ import {
 
 declare const __INBOXSDK_APP_ID__: string;
 declare const __EMAIL_SCANNING_ENABLED__: boolean;
+declare global {
+  interface Window {
+    __ARTHUR_HMAC_KEY__?: string;
+  }
+}
 
 export default defineContentScript({
   matches: ["https://mail.google.com/*"],
@@ -24,6 +30,16 @@ export default defineContentScript({
 
   async main() {
     if (!__EMAIL_SCANNING_ENABLED__) return;
+
+    // Import HMAC key injected by the relay content script
+    let hmacKey: CryptoKey | undefined;
+    if (window.__ARTHUR_HMAC_KEY__) {
+      try {
+        hmacKey = await importKey(window.__ARTHUR_HMAC_KEY__);
+      } catch {
+        // Continue without HMAC — graceful degradation
+      }
+    }
 
     const sdk = await InboxSDK.load(2, __INBOXSDK_APP_ID__);
 
@@ -35,13 +51,13 @@ export default defineContentScript({
       if (!messageId || inFlight.has(messageId)) return;
 
       // Check cache first via relay
-      const cachedResult = await checkCache(messageId);
+      const cachedResult = await checkCache(messageId, hmacKey);
       if (cachedResult) {
         const bodyEl = messageView.getBodyElement();
         const email = extractEmailContent(messageView, messageId);
         const banner = createVerdictBanner(
           cachedResult,
-          email ? () => reportEmail(email, cachedResult) : undefined,
+          email ? () => reportEmail(email, cachedResult, hmacKey) : undefined,
           undefined
         );
         bodyEl.parentElement?.insertBefore(banner, bodyEl);
@@ -70,13 +86,15 @@ export default defineContentScript({
             requestId: generateRequestId(),
             email,
           },
-          WindowMessageType.SCAN_RESPONSE
+          WindowMessageType.SCAN_RESPONSE,
+          30000,
+          hmacKey
         );
 
         if (response.success && response.data) {
           const verdictBanner = createVerdictBanner(
             response.data,
-            () => reportEmail(email, response.data!),
+            () => reportEmail(email, response.data!, hmacKey),
             undefined
           );
           replaceBanner(
@@ -164,7 +182,7 @@ function extractEmailContent(
   }
 }
 
-async function checkCache(messageId: string): Promise<EmailScanResult | null> {
+async function checkCache(messageId: string, hmacKey?: CryptoKey): Promise<EmailScanResult | null> {
   try {
     const response = await sendWindowMessage<CacheResponse>(
       {
@@ -173,7 +191,8 @@ async function checkCache(messageId: string): Promise<EmailScanResult | null> {
         messageId,
       },
       WindowMessageType.CACHE_RESPONSE,
-      5000
+      5000,
+      hmacKey
     );
     return response.data ?? null;
   } catch {
@@ -183,7 +202,8 @@ async function checkCache(messageId: string): Promise<EmailScanResult | null> {
 
 async function reportEmail(
   email: EmailContent,
-  result: EmailScanResult
+  result: EmailScanResult,
+  hmacKey?: CryptoKey
 ): Promise<void> {
   try {
     await sendWindowMessage<ReportResponse>(
@@ -198,7 +218,9 @@ async function reportEmail(
           confidence: result.confidence,
         },
       },
-      WindowMessageType.REPORT_RESPONSE
+      WindowMessageType.REPORT_RESPONSE,
+      30000,
+      hmacKey
     );
   } catch {
     // Silently fail — report is best-effort

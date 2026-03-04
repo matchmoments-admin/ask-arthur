@@ -1,5 +1,10 @@
 /**
- * API base URL — set via EXPO_PUBLIC_API_URL env var.
- * Defaults to production.
+ * API base URL.
+ * In production builds, always use the hardcoded domain regardless of env vars.
+ * In dev, allow EXPO_PUBLIC_API_URL override for local testing.
  */
-export const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "https://askarthur.au";
+const PRODUCTION_URL = "https://askarthur.au";
+
+export const API_URL: string = __DEV__
+  ? (process.env.EXPO_PUBLIC_API_URL ?? PRODUCTION_URL)
+  : PRODUCTION_URL;

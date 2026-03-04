@@ -1,8 +1,17 @@
 import { setInstallId, getInstallId, setContextMenuText } from "@/lib/storage";
-import { checkURL, analyzeText, reportScamEmail, ExtensionApiError } from "@/lib/api";
+import { checkURL, analyzeText, reportScamEmail, analyzeExtensionsCRX, fetchThreatDBUpdate, ExtensionApiError } from "@/lib/api";
 import { getCachedEmailScan, setCachedEmailScan } from "@/lib/email-cache";
-import type { EmailContent, EmailScanResult } from "@askarthur/types";
+import { getCachedScanReport, setCachedScanReport } from "@/lib/extension-scan-cache";
+import { scanInstalledExtensions, buildSecurityReport } from "@/lib/extension-scanner";
+import { setupThreatDBRefresh, getThreatDB } from "@/lib/threat-db";
+import { urlCache } from "@/lib/url-cache";
+import { checkSubscription } from "@/lib/subscription";
+import type { EmailContent, EmailScanResult, ExtensionSecurityReport, CRXAnalysisResult } from "@askarthur/types";
 import type { ExtensionMessage, MessageResponse } from "@/lib/types";
+
+declare const __EXTENSION_SECRET__: string;
+declare const __URL_GUARD_ENABLED__: boolean;
+declare const __EXTENSION_SECURITY_ENABLED__: boolean;
 
 export default defineBackground(() => {
   // --- onInstalled: generate UUID + create context menu ---
@@ -17,6 +26,14 @@ export default defineBackground(() => {
       title: "Check with Ask Arthur",
       contexts: ["selection"],
     });
+
+    // Set up threat DB refresh for extension security scanner
+    if (typeof __EXTENSION_SECURITY_ENABLED__ !== "undefined" && __EXTENSION_SECURITY_ENABLED__) {
+      setupThreatDBRefresh(async () => {
+        const db = await getThreatDB();
+        return fetchThreatDBUpdate(db.updatedAt);
+      });
+    }
   });
 
   // --- Context menu click: store text for popup ---
@@ -33,6 +50,67 @@ export default defineBackground(() => {
       }
     }
   });
+
+  // --- URL Guard: real-time URL checking on navigation (C1) ---
+  if (typeof __URL_GUARD_ENABLED__ !== "undefined" && __URL_GUARD_ENABLED__) {
+    chrome.webNavigation?.onCompleted.addListener(async (details) => {
+      // Only check main frame navigations
+      if (details.frameId !== 0) return;
+
+      const url = details.url;
+      if (!url || !url.startsWith("http")) return;
+
+      const tabId = details.tabId;
+
+      try {
+        // Check local cache first
+        const cached = urlCache.get(url);
+        if (cached) {
+          updateBadge(tabId, cached.threatLevel, cached.found);
+          if (cached.found && cached.threatLevel === "HIGH") {
+            chrome.tabs.sendMessage(tabId, {
+              type: "SHOW_PHISHING_WARNING",
+              url,
+              domain: cached.domain,
+              threatLevel: cached.threatLevel,
+              reportCount: cached.reportCount,
+            });
+          }
+          return;
+        }
+
+        // Check API
+        const { data } = await checkURL(url);
+
+        const threatLevel = data.found
+          ? data.threatLevel ?? "MEDIUM"
+          : "NONE";
+
+        // Cache result
+        urlCache.set(url, {
+          threatLevel: threatLevel as "NONE" | "MEDIUM" | "HIGH",
+          domain: data.domain ?? new URL(url).hostname,
+          found: data.found,
+          reportCount: data.reportCount,
+        });
+
+        updateBadge(tabId, threatLevel, data.found);
+
+        // Show phishing warning for HIGH threats
+        if (data.found && threatLevel === "HIGH") {
+          chrome.tabs.sendMessage(tabId, {
+            type: "SHOW_PHISHING_WARNING",
+            url,
+            domain: data.domain ?? new URL(url).hostname,
+            threatLevel,
+            reportCount: data.reportCount,
+          });
+        }
+      } catch {
+        // Silently fail — don't block navigation
+      }
+    });
+  }
 
   // --- Message handler for popup communication ---
   chrome.runtime.onMessage.addListener(
@@ -62,6 +140,30 @@ export default defineBackground(() => {
     }
   );
 });
+
+function updateBadge(
+  tabId: number,
+  threatLevel: string,
+  found: boolean
+): void {
+  if (!found || threatLevel === "NONE") {
+    chrome.action.setBadgeBackgroundColor({ tabId, color: "#388E3C" });
+    chrome.action.setBadgeText({ tabId, text: "OK" });
+  } else if (threatLevel === "HIGH") {
+    chrome.action.setBadgeBackgroundColor({ tabId, color: "#D32F2F" });
+    chrome.action.setBadgeText({ tabId, text: "!!" });
+  } else {
+    chrome.action.setBadgeBackgroundColor({ tabId, color: "#F57C00" });
+    chrome.action.setBadgeText({ tabId, text: "!" });
+  }
+
+  // Clear badge after 30 seconds for clean URLs
+  if (!found || threatLevel === "NONE") {
+    setTimeout(() => {
+      chrome.action.setBadgeText({ tabId, text: "" });
+    }, 30000);
+  }
+}
 
 async function handleMessage(
   message: ExtensionMessage
@@ -115,6 +217,24 @@ async function handleMessage(
     case "REPORT_EMAIL": {
       await reportScamEmail(message.report);
       return { success: true, data: { reported: true } };
+    }
+    case "SCAN_EXTENSIONS": {
+      // Check cache first
+      const cachedReport = await getCachedScanReport();
+      if (cachedReport) {
+        return { success: true, data: cachedReport };
+      }
+
+      const results = await scanInstalledExtensions();
+      const report = buildSecurityReport(results);
+      await setCachedScanReport(report);
+      return { success: true, data: report };
+    }
+    case "DEEP_SCAN_EXTENSIONS": {
+      const { data } = await analyzeExtensionsCRX(message.extensions);
+
+      // Merge additional risk factors from CRX analysis into scan results
+      return { success: true, data: data.results };
     }
     default:
       return { success: false, error: "Unknown message type" };

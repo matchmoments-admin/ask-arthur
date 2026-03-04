@@ -19,15 +19,40 @@ interface AnalyzeError {
 }
 
 /**
+ * Validate the API URL before making requests.
+ * In production, only allow HTTPS to askarthur.au.
+ */
+function validateApiUrl(url: string): void {
+  const parsed = new URL(url);
+  if (parsed.protocol !== "https:") {
+    throw new Error("API URL must use HTTPS");
+  }
+  if (!parsed.hostname.endsWith("askarthur.au")) {
+    throw new Error("API URL must be on askarthur.au domain");
+  }
+}
+
+function generateRequestId(): string {
+  const timestamp = Date.now();
+  const random = Math.random().toString(36).slice(2, 10);
+  return `mob-${timestamp}-${random}`;
+}
+
+/**
  * Call the /api/analyze endpoint on the web app.
  */
 export async function analyzeMessage(params: AnalyzeRequest): Promise<AnalyzeResponse> {
+  validateApiUrl(API_URL);
+
   let response: Response;
 
   try {
     response = await fetch(`${API_URL}/api/analyze`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-Request-ID": generateRequestId(),
+      },
       body: JSON.stringify(params),
     });
   } catch (err) {

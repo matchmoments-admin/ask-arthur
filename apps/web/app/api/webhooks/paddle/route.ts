@@ -80,15 +80,46 @@ function getApiKeyId(sub: SubscriptionNotification): number | null {
   return null;
 }
 
-function getPlan(sub: SubscriptionNotification): "pro" | "enterprise" | null {
+function getUserId(sub: SubscriptionNotification): string | null {
+  const customData = sub.customData as Record<string, unknown> | null;
+  const raw = customData?.userId;
+  if (typeof raw === "string" && raw.length > 0) return raw;
+  return null;
+}
+
+function getPlan(sub: SubscriptionNotification): string | null {
   const proPriceId = process.env.PADDLE_PRO_PRICE_ID;
   const enterprisePriceId = process.env.PADDLE_ENTERPRISE_PRICE_ID;
+  const extensionProPriceId = process.env.PADDLE_EXTENSION_PRO_PRICE_ID;
+  const mobilePremiumPriceId = process.env.PADDLE_MOBILE_PREMIUM_PRICE_ID;
 
   for (const item of sub.items) {
     if (item.price?.id === enterprisePriceId) return "enterprise";
     if (item.price?.id === proPriceId) return "pro";
+    if (item.price?.id === extensionProPriceId) return "extension_pro";
+    if (item.price?.id === mobilePremiumPriceId) return "mobile_premium";
   }
   return null;
+}
+
+async function verifyOwnership(
+  supabase: NonNullable<ReturnType<typeof createServiceClient>>,
+  apiKeyId: number,
+  userId: string | null
+): Promise<boolean> {
+  if (!userId) return true; // No userId in customData — legacy, allow
+
+  const { data } = await supabase
+    .from("api_keys")
+    .select("user_id")
+    .eq("id", apiKeyId)
+    .single();
+
+  if (!data) return false;
+
+  // Allow if key has no user_id (legacy) or matches
+  if (!data.user_id) return true;
+  return data.user_id === userId;
 }
 
 async function upsertSubscription(sub: SubscriptionNotification) {
@@ -99,6 +130,19 @@ async function upsertSubscription(sub: SubscriptionNotification) {
   if (!apiKeyId) {
     logger.warn("Paddle subscription missing apiKeyId in customData", {
       subscriptionId: sub.id,
+    });
+    return;
+  }
+
+  const userId = getUserId(sub);
+
+  // Verify ownership — prevent subscription theft
+  const owns = await verifyOwnership(supabase, apiKeyId, userId);
+  if (!owns) {
+    logger.warn("Paddle subscription ownership mismatch", {
+      subscriptionId: sub.id,
+      apiKeyId,
+      userId,
     });
     return;
   }
@@ -114,6 +158,7 @@ async function upsertSubscription(sub: SubscriptionNotification) {
   const { error } = await supabase.from("subscriptions").upsert(
     {
       api_key_id: apiKeyId,
+      user_id: userId,
       paddle_subscription_id: sub.id,
       paddle_customer_id: sub.customerId,
       paddle_price_id: sub.items[0]?.price?.id ?? "",
@@ -138,6 +183,26 @@ async function upsertSubscription(sub: SubscriptionNotification) {
   }
 
   await syncTier(supabase, apiKeyId, plan, sub.status as string);
+
+  // Handle extension subscriptions — upsert into extension_subscriptions table
+  if (plan === "extension_pro") {
+    const customData = sub.customData as Record<string, unknown> | null;
+    const installId = customData?.installId as string | undefined;
+    if (installId) {
+      await supabase.from("extension_subscriptions").upsert(
+        {
+          install_id: installId,
+          paddle_subscription_id: sub.id,
+          paddle_customer_id: sub.customerId,
+          tier: "pro",
+          status: sub.status as string,
+          current_period_end: sub.currentBillingPeriod?.endsAt ?? null,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "install_id" }
+      );
+    }
+  }
 }
 
 async function handleCanceled(sub: SubscriptionNotification) {

@@ -2,19 +2,28 @@ import { initializeSslPinning, fetch as pinnedFetch } from "react-native-ssl-pub
 
 /**
  * SHA-256 public key hashes for askarthur.au.
- * Generate with: openssl s_client -connect askarthur.au:443 | openssl x509 -pubkey -noout | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | openssl enc -base64
  *
- * TODO: Replace these placeholder hashes with actual production certificate hashes
- * before store submission. Include both primary and backup CA hashes.
+ * Generate leaf hash with:
+ *   openssl s_client -connect askarthur.au:443 -servername askarthur.au < /dev/null 2>/dev/null \
+ *     | openssl x509 -pubkey -noout \
+ *     | openssl pkey -pubin -outform der \
+ *     | openssl dgst -sha256 -binary \
+ *     | openssl enc -base64
+ *
+ * The backup pin is ISRG Root X1 (Let's Encrypt), which provides CA rotation safety.
+ * ISRG Root X1 SPKI hash: C5+lpZ7tcVwmwQIMcRtPbsQtWLABXhQzejna0wHFr8M=
  */
 const CERT_PINS = {
   "askarthur.au": {
     includeSubdomains: true,
     publicKeyHashes: [
-      // Primary certificate hash — replace with actual value
+      // Leaf / intermediate certificate — replace with actual hash before store submission.
+      // Run the openssl command above to get the current value.
+      // Vercel uses Let's Encrypt certificates which rotate every ~90 days,
+      // so pin the intermediate (R3/R10/R11) rather than the leaf for stability.
       "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-      // Backup / CA intermediate hash — replace with actual value
-      "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+      // ISRG Root X1 — backup pin for CA rotation safety
+      "C5+lpZ7tcVwmwQIMcRtPbsQtWLABXhQzejna0wHFr8M=",
     ],
   },
 };

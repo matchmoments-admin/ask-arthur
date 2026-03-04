@@ -12,7 +12,10 @@ import * as SplashScreen from "expo-splash-screen";
 import { useShareIntentContext, ShareIntentProvider } from "expo-share-intent";
 import { Colors } from "@/constants/colors";
 import { normalizeSharedContent } from "@/lib/share-handler";
-import { initNotifications, handleNotificationAction } from "@/lib/notifications";
+import { Platform } from "react-native";
+import * as Application from "expo-application";
+import { initNotifications, handleNotificationAction, getExpoPushToken } from "@/lib/notifications";
+import { API_URL } from "@/constants/config";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -28,10 +31,36 @@ function RootLayoutInner() {
     PublicSans_700Bold,
   });
 
-  // Initialize notification channels on app start
+  // Initialize notification channels + register push token on app start
   useEffect(() => {
     initNotifications();
     handleNotificationAction(router);
+
+    // Register push token with backend
+    (async () => {
+      const token = await getExpoPushToken();
+      if (token) {
+        const deviceId =
+          (Platform.OS === "android"
+            ? Application.getAndroidId()
+            : await Application.getIosIdForVendorAsync()) ??
+          `${Platform.OS}-${Date.now()}`;
+
+        try {
+          await fetch(`${API_URL}/api/mobile/push/register`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              expoToken: token,
+              platform: Platform.OS,
+              deviceId,
+            }),
+          });
+        } catch {
+          // Silently fail — will retry on next launch
+        }
+      }
+    })();
   }, [router]);
 
   useEffect(() => {

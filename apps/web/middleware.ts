@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createMiddlewareClient } from "@askarthur/supabase/middleware";
 import { logger } from "@askarthur/utils/logger";
 
 // Global edge rate limiting — 60 requests/min per IP (sliding window via Upstash)
@@ -10,11 +11,57 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // Only rate-limit API routes and mutating requests — not page navigation
+  // ---------------------------------------------------------------------------
+  // 1. Session refresh — refresh expired tokens on every request
+  //    Required by @supabase/ssr to keep auth cookies fresh.
+  // ---------------------------------------------------------------------------
+  const authEnabled = process.env.NEXT_PUBLIC_FF_AUTH === "true";
+  const { supabase, response } = createMiddlewareClient(req);
+
+  if (authEnabled && supabase) {
+    // getUser() validates JWT server-side (not spoofable like getSession)
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    const pathname = req.nextUrl.pathname;
+
+    // -------------------------------------------------------------------------
+    // 2. Route protection: /app/* — require authenticated user
+    // -------------------------------------------------------------------------
+    if (pathname.startsWith("/app")) {
+      if (!user) {
+        const loginUrl = req.nextUrl.clone();
+        loginUrl.pathname = "/login";
+        loginUrl.searchParams.set("next", pathname);
+        return NextResponse.redirect(loginUrl);
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // 3. Route protection: /admin/* — require admin role
+    //    (except /admin/login which uses its own HMAC auth)
+    // -------------------------------------------------------------------------
+    if (pathname.startsWith("/admin") && pathname !== "/admin/login") {
+      if (!user) {
+        const loginUrl = req.nextUrl.clone();
+        loginUrl.pathname = "/login";
+        return NextResponse.redirect(loginUrl);
+      }
+      if (user.app_metadata?.role !== "admin") {
+        // Non-admin user — fall through to existing HMAC admin auth
+        // (dual-mode during transition, don't block here)
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 4. Rate limiting — only API routes and mutating requests
+  // ---------------------------------------------------------------------------
   const isApiRoute = req.nextUrl.pathname.startsWith("/api/");
   const isMutatingRequest = req.method !== "GET" && req.method !== "HEAD";
   if (!isApiRoute && !isMutatingRequest) {
-    return NextResponse.next();
+    return response;
   }
 
   // Fail-open in dev when Upstash not configured
@@ -29,7 +76,7 @@ export async function middleware(req: NextRequest) {
         { status: 503 }
       );
     }
-    return NextResponse.next();
+    return response;
   }
 
   const ip =
@@ -45,7 +92,7 @@ export async function middleware(req: NextRequest) {
     const key = `askarthur:global:${ip}`;
 
     // Use Upstash Redis REST API directly for edge compatibility
-    const response = await fetch(`${redisUrl}/pipeline`, {
+    const redisResponse = await fetch(`${redisUrl}/pipeline`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${redisToken}`,
@@ -63,13 +110,13 @@ export async function middleware(req: NextRequest) {
       ]),
     });
 
-    if (!response.ok) {
+    if (!redisResponse.ok) {
       // Fail-open on Redis errors to avoid blocking legitimate traffic
-      logger.error("Middleware Upstash error", { status: response.status });
-      return NextResponse.next();
+      logger.error("Middleware Upstash error", { status: redisResponse.status });
+      return response;
     }
 
-    const results = await response.json();
+    const results = await redisResponse.json();
     const requestCount = results[2]?.result ?? 0;
 
     if (requestCount > maxRequests) {
@@ -86,17 +133,16 @@ export async function middleware(req: NextRequest) {
       );
     }
 
-    const res = NextResponse.next();
-    res.headers.set("X-RateLimit-Limit", String(maxRequests));
-    res.headers.set(
+    response.headers.set("X-RateLimit-Limit", String(maxRequests));
+    response.headers.set(
       "X-RateLimit-Remaining",
       String(Math.max(0, maxRequests - requestCount))
     );
-    return res;
+    return response;
   } catch (err) {
     // Fail-open on unexpected errors
     logger.error("Middleware rate limit error", { error: String(err) });
-    return NextResponse.next();
+    return response;
   }
 }
 

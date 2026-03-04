@@ -5,9 +5,12 @@
   "exports": {
     ".": "./src/index.ts",
     "./server": "./src/server.ts",
-    "./browser": "./src/browser.ts"
+    "./browser": "./src/browser.ts",
+    "./server-auth": "./src/server-auth.ts",
+    "./middleware": "./src/middleware.ts"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.95.3"
   }
 }

@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 
 const COOKIE_NAME = "__aa_admin";
 const MAX_AGE = 60 * 60 * 24; // 24 hours
@@ -45,8 +46,27 @@ export function verifyAdminToken(token: string): boolean {
   }
 }
 
-/** Check admin cookie on the current request. Redirects to login if invalid. */
+/**
+ * Check admin access. Dual-mode:
+ * 1. Supabase Auth — if auth flag is on, check for admin role
+ * 2. HMAC cookie — fallback for existing admin flow
+ * Redirects to login if neither passes.
+ */
 export async function requireAdmin(): Promise<void> {
+  // Try Supabase Auth first (if enabled)
+  if (featureFlags.auth) {
+    try {
+      const { getUser } = await import("@/lib/auth");
+      const user = await getUser();
+      if (user?.role === "admin") {
+        return; // Admin via Supabase Auth
+      }
+    } catch {
+      // Fall through to HMAC check
+    }
+  }
+
+  // HMAC cookie fallback
   const cookieStore = await cookies();
   const token = cookieStore.get(COOKIE_NAME)?.value;
   if (!token || !verifyAdminToken(token)) {

@@ -80,6 +80,8 @@ All cross-package imports use `@askarthur/*` (no hyphen):
 ```typescript
 import type { AnalysisResult } from "@askarthur/types";
 import { createServiceClient } from "@askarthur/supabase/server";
+import { createAuthServerClient } from "@askarthur/supabase/server-auth";
+import { createMiddlewareClient } from "@askarthur/supabase/middleware";
 import { logger } from "@askarthur/utils/logger";
 import { checkRateLimit } from "@askarthur/utils/rate-limit";
 import { analyzeWithClaude } from "@askarthur/scam-engine/claude";
@@ -160,4 +162,5 @@ import { validateApiKey } from "@/lib/apiAuth";
 - **Extension**: `WXT_EXTENSION_SECRET`, `WXT_INBOXSDK_APP_ID`
 - **Admin**: `ADMIN_SECRET`
 - **Billing**: `PADDLE_API_KEY`, `PADDLE_WEBHOOK_SECRET`, `NEXT_PUBLIC_PADDLE_CLIENT_TOKEN`, `NEXT_PUBLIC_PADDLE_ENV`, `PADDLE_PRO_PRICE_ID`, `PADDLE_ENTERPRISE_PRICE_ID`
+- **Auth**: `NEXT_PUBLIC_FF_AUTH`
 - **External APIs**: `SAFE_BROWSING_API_KEY`, `TWILIO_*`

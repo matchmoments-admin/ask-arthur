@@ -73,10 +73,20 @@ All user text is sanitized before Claude analysis:
 
 | Surface | Method | Details |
 |---------|--------|---------|
-| Admin panel | Cookie HMAC | SHA-256 HMAC with timestamp nonce, 24h expiry, timing-safe compare |
+| User auth | Supabase Auth (PKCE) | Email/password + magic link, JWT validation via `getUser()`, cookie-based sessions via `@supabase/ssr`, feature-flagged behind `NEXT_PUBLIC_FF_AUTH` |
+| Admin panel | Dual-mode | Supabase Auth (admin role in `app_metadata`) with HMAC cookie fallback, dual-mode in `lib/adminAuth.ts` |
+| Session refresh | Edge middleware | `createMiddlewareClient()` refreshes expired tokens on every request |
+| Route protection | Middleware | `/app/*` requires authenticated user, `/admin/*` requires admin role |
 | Extension API | Shared secret | `X-Extension-Secret` header, timing-safe comparison |
 | B2B API | Bearer token | API key hashed with SHA-256, compared against `api_keys.key_hash` |
 | Bot webhooks | Platform HMAC | Telegram secret token, WhatsApp SHA-256 signature, Slack v0 signature with replay protection (5-min window) |
+
+**Auth security notes:**
+- Uses `supabase.auth.getUser()` (server-side JWT validation) not `getSession()` (client-side, spoofable)
+- RLS policies enforce user-scoped data access (api_keys, subscriptions, api_usage_log)
+- Max 5 active API keys per user (enforced in `generate_api_key_record` RPC)
+- Subscription ownership verified in Paddle webhook (prevents subscription theft via customData manipulation)
+- User profile role column is immutable via RLS WITH CHECK constraint
 
 ### 4. Security Headers
 
