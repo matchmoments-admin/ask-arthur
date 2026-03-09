@@ -146,7 +146,7 @@ export default function Welcome({ email = "" }: WelcomeProps) {
                 margin: 0,
               }}
             >
-              Ask Arthur | ABN [YOUR_ABN] | Sydney, Australia
+              Ask Arthur | ABN 72 695 772 313 | Sydney, Australia
             </Text>
             <Text
               style={{

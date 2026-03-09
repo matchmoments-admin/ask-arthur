@@ -55,7 +55,7 @@ Deferred features organized by platform. Items here are validated ideas that did
 
 - [x] Email HTML/CSS injection hardening (hidden element stripping + server-side sanitization)
 - [ ] Real-time URL checking on page load
-- [ ] Email scanner (Gmail/Outlook web)
+- [ ] Email scanning via forwarding model (forward to analyse@askarthur.au)
 - [ ] Page content analysis
 - [ ] Phishing site warning overlay
 - [ ] Safe browsing indicator in toolbar

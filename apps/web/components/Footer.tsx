@@ -52,7 +52,7 @@ export default function Footer() {
           &copy; {new Date().getFullYear()} Ask Arthur
         </p>
         <p className="text-[10px] uppercase tracking-wider text-slate-400 mt-1">
-          {process.env.NEXT_PUBLIC_ABN || "ABN pending registration"}
+          ABN 72 695 772 313
         </p>
       </div>
     </footer>

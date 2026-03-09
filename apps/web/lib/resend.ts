@@ -73,7 +73,7 @@ export async function sendWeeklyDigest(
           <a href="https://askarthur.au/unsubscribe" style="color: #94A3B8;">Unsubscribe</a>
         </p>
         <p style="color: #94A3B8; font-size: 12px; margin-top: 8px;">
-          Ask Arthur | ABN [YOUR_ABN] | Sydney, Australia
+          Ask Arthur | ABN 72 695 772 313 | Sydney, Australia
         </p>
       </div>
     `;

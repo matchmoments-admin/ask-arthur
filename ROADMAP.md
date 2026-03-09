@@ -35,10 +35,9 @@ Bringing scam detection to users where they are.
 | Feature | Status |
 |---------|--------|
 | Phase 1: URL checking + text analysis popup | ✅ Done |
-| Phase 2: Gmail email scanning (InboxSDK) | ✅ Done |
+| Phase 2: Gmail email scanning (InboxSDK) | Removed — shifting to email-forwarding model |
 | WXT framework (Chrome + Firefox support) | ✅ Done |
 | Extension API with dedicated auth + rate limits | ✅ Done |
-| Email result caching (local Chrome storage) | ✅ Done |
 | Segmented tabs, rounded corners, animations | ✅ Done |
 
 ### Mobile App ✅
@@ -217,6 +216,35 @@ Future priorities. Items here may move to `BACKLOG.md` if deprioritized.
 | Webhook notifications for new threats | Planned |
 | Community scam reports feed | Planned |
 | SOC/SIEM integration | Planned |
+
+## Phase 9 — Data Partnerships & External Intelligence
+
+Building Ask Arthur into a recognised contributor/consumer in Australia's anti-scam ecosystem.
+
+### Phase 9a — Government & Industry Partnerships (non-code)
+
+| Item | Status |
+|------|--------|
+| Submit NASC/Scamwatch partnership enquiry (data-sharing, SPF "third party gateway" candidacy) | Planned |
+| Register as ASD Cyber Security Business Partner (cyber.gov.au/partnershipprogram) | Planned |
+| Explore AFCX (Australian Financial Crimes Exchange) Intel Loop membership | Planned |
+| Structure collected data to align with Scamwatch categories | Planned |
+
+### Phase 9b — API Integrations (code — IPQualityScore is first)
+
+| Item | Status |
+|------|--------|
+| IPQualityScore phone fraud scoring (free tier, 1K/mo) | Planned |
+| ScamAdviser Number API (2.6B phone records, 50+ downstream partners) | Planned |
+| Telesign Score API (phone risk scoring) | Planned |
+
+### Phase 9c — Alliance Memberships (strategic)
+
+| Item | Status |
+|------|--------|
+| GASA membership + Global Signal Exchange accreditation (320M+ signals) | Planned |
+| Upgrade ASD to Network Partner (CTIS STIX machine-speed exchange) | Planned |
+| Explore Twilio Marketplace Publisher (AU scam intelligence add-on) | Planned |
 
 ---
 

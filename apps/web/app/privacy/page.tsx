@@ -14,13 +14,6 @@ export default function PrivacyPage() {
       <Nav />
 
       <main className="flex-1 w-full max-w-[640px] mx-auto px-5 pt-16 pb-12">
-        <div className="mb-8 p-4 bg-amber-50 border border-amber-200 rounded-lg">
-          <p className="text-sm text-amber-800 font-bold">
-            DRAFT — This policy is provided in draft form. Seek independent
-            legal advice before relying on it.
-          </p>
-        </div>
-
         <h1 className="text-deep-navy text-3xl font-extrabold mb-8">
           Privacy Policy
         </h1>

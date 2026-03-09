@@ -25,6 +25,7 @@ import { checkAbuseIPDB } from "../abuseipdb";
 import { checkHIBP } from "../hibp";
 import { lookupCT } from "../ct-lookup";
 import { lookupPhoneNumber } from "../twilio-lookup";
+import { checkIPQS } from "../ipqualityscore";
 
 const MAX_ENTITIES_PER_RUN = 30;
 
@@ -52,13 +53,32 @@ async function enrichPhone(value: string): Promise<Record<string, unknown>> {
     checks.push(lookupPhoneNumber(value));
   }
 
+  // IPQualityScore phone fraud scoring — gated by flag and env var
+  const useIPQS =
+    featureFlags.ipqualityScore &&
+    !!process.env.IPQUALITYSCORE_API_KEY;
+  if (useIPQS) {
+    checks.push(checkIPQS(value));
+  }
+
   const results = await Promise.allSettled(checks);
   const localIntel = results[0].status === "fulfilled" ? results[0].value : null;
 
   const data: Record<string, unknown> = { localIntel };
 
-  if (useTwilio && results[1]?.status === "fulfilled") {
-    data.twilioLookup = results[1].value;
+  let nextIdx = 1;
+  if (useTwilio) {
+    const r = results[nextIdx];
+    if (r?.status === "fulfilled") {
+      data.twilioLookup = r.value;
+    }
+    nextIdx++;
+  }
+  if (useIPQS) {
+    const r = results[nextIdx];
+    if (r?.status === "fulfilled") {
+      data.ipqs = r.value;
+    }
   }
 
   return data;

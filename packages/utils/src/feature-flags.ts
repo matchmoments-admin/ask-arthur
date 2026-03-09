@@ -66,6 +66,9 @@ export const featureFlags = {
   /** Certificate Transparency log lookups during enrichment */
   ctLookup: process.env.NEXT_PUBLIC_FF_CT_LOOKUP === "true",
 
+  /** IPQualityScore phone number fraud scoring during enrichment */
+  ipqualityScore: process.env.NEXT_PUBLIC_FF_IPQS === "true",
+
   /** Paddle billing — pricing page and checkout */
   billing: process.env.NEXT_PUBLIC_FF_BILLING === "true",
 

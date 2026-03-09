@@ -196,7 +196,7 @@ export default function WeeklyDigest({
                 margin: "8px 0 0 0",
               }}
             >
-              Ask Arthur | ABN [YOUR_ABN] | Sydney, Australia
+              Ask Arthur | ABN 72 695 772 313 | Sydney, Australia
             </Text>
           </Section>
         </Container>

@@ -26,7 +26,8 @@
     "./urlscan": "./src/urlscan.ts",
     "./deepfake-detect": "./src/deepfake-detect.ts",
     "./push-sender": "./src/push-sender.ts",
-    "./inngest/scam-alerts": "./src/inngest/scam-alerts.ts"
+    "./inngest/scam-alerts": "./src/inngest/scam-alerts.ts",
+    "./ipqualityscore": "./src/ipqualityscore.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",
