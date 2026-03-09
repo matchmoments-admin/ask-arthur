@@ -10,6 +10,13 @@ const STEPS = [
   "Generating safety report...",
 ];
 
+// Map SSE progress phases to step indices
+const PHASE_TO_STEP: Record<string, number> = {
+  headers_done: 2,
+  tls_done: 3,
+  email_done: 4,
+};
+
 const STEP_DELAYS = [0, 800, 2000, 3200, 4500];
 
 type StepState = "pending" | "active" | "done";
@@ -29,6 +36,10 @@ function reducer(state: State, action: Action): State {
     case "START":
       return { phase: "running", activeStepIndex: 0 };
     case "ADVANCE":
+      // Only advance forward, never backward
+      if (action.index <= state.activeStepIndex && state.phase === "running") {
+        return state;
+      }
       return { ...state, activeStepIndex: action.index };
     case "DONE":
       return { phase: "done", activeStepIndex: STEPS.length - 1 };
@@ -37,36 +48,60 @@ function reducer(state: State, action: Action): State {
   }
 }
 
-interface Props {
-  status: "idle" | "scanning" | "complete" | "error" | "rate_limited";
+interface SSEProgress {
+  phase: string;
+  completed: number;
+  total: number;
 }
 
-export default function SiteAuditProgress({ status }: Props) {
+interface Props {
+  status: "idle" | "scanning" | "complete" | "error" | "rate_limited";
+  sseProgress?: SSEProgress | null;
+}
+
+export default function SiteAuditProgress({ status, sseProgress }: Props) {
   const [state, dispatch] = useReducer(reducer, {
     phase: "idle",
     activeStepIndex: 0,
   });
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const usingSSE = useRef(false);
 
   const clearTimers = useCallback(() => {
     timersRef.current.forEach(clearTimeout);
     timersRef.current = [];
   }, []);
 
+  // Handle SSE progress updates
+  useEffect(() => {
+    if (sseProgress && status === "scanning") {
+      usingSSE.current = true;
+      clearTimers(); // Cancel fake timers when real progress arrives
+
+      const targetStep = PHASE_TO_STEP[sseProgress.phase];
+      if (targetStep !== undefined) {
+        dispatch({ type: "ADVANCE", index: targetStep });
+      }
+    }
+  }, [sseProgress, status, clearTimers]);
+
   useEffect(() => {
     if (status !== "scanning") {
       clearTimers();
+      usingSSE.current = false;
       return;
     }
 
     const startTimer = setTimeout(() => dispatch({ type: "START" }), 0);
     timersRef.current.push(startTimer);
 
+    // Only use fake timers as fallback when SSE progress hasn't arrived
     STEP_DELAYS.slice(1).forEach((delay, i) => {
-      const timer = setTimeout(
-        () => dispatch({ type: "ADVANCE", index: i + 1 }),
-        delay
-      );
+      const timer = setTimeout(() => {
+        if (!usingSSE.current) {
+          dispatch({ type: "ADVANCE", index: i + 1 });
+        }
+      }, delay);
       timersRef.current.push(timer);
     });
 

@@ -58,6 +58,27 @@ export const LEARN_MORE_URLS: Record<string, string> = {
   dmarc: "https://www.cloudflare.com/learning/dns/dns-records/dns-dmarc-record/",
   dkim: "https://www.cloudflare.com/learning/dns/dns-records/dns-dkim-record/",
 
+  // Cookie security
+  "cookie-security":
+    "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie",
+
+  // Subresource integrity
+  sri: "https://developer.mozilla.org/en-US/docs/Web/Security/Subresource_Integrity",
+
+  // Open redirect
+  "open-redirect":
+    "https://cheatsheetseries.owasp.org/cheatsheets/Unvalidated_Redirects_and_Forwards_Cheat_Sheet.html",
+
+  // Cache-Control
+  "cache-control":
+    "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control",
+
+  // DNSSEC
+  dnssec: "https://www.cloudflare.com/dns/dnssec/how-dnssec-works/",
+
+  // security.txt
+  "security-txt": "https://securitytxt.org/",
+
   // Other
   "domain-blacklist":
     "https://www.spamhaus.org/consumer/faq/",

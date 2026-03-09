@@ -157,6 +157,45 @@ export function checkReferrerPolicy(headers: Headers): CheckResult {
   };
 }
 
+/** Check Cache-Control header */
+export function checkCacheControl(headers: Headers): CheckResult {
+  const value = headers.get("cache-control")?.toLowerCase();
+
+  if (!value) {
+    return {
+      id: "cache-control",
+      category: "headers",
+      label: "Cache-Control",
+      status: "warn",
+      score: 1,
+      maxScore: 3,
+      details: "Cache-Control header is missing. Sensitive responses may be cached by intermediaries.",
+    };
+  }
+
+  if (value.includes("no-store") || value.includes("private")) {
+    return {
+      id: "cache-control",
+      category: "headers",
+      label: "Cache-Control",
+      status: "pass",
+      score: 3,
+      maxScore: 3,
+      details: `Cache-Control is set to "${headers.get("cache-control")}".`,
+    };
+  }
+
+  return {
+    id: "cache-control",
+    category: "headers",
+    label: "Cache-Control",
+    status: "warn",
+    score: 1,
+    maxScore: 3,
+    details: `Cache-Control is "${headers.get("cache-control")}" but does not include no-store or private. Sensitive pages may be cached.`,
+  };
+}
+
 /** Run all security header checks */
 export function checkSecurityHeaders(headers: Headers): CheckResult[] {
   return [
@@ -164,5 +203,6 @@ export function checkSecurityHeaders(headers: Headers): CheckResult[] {
     checkXContentTypeOptions(headers),
     checkXFrameOptions(headers),
     checkReferrerPolicy(headers),
+    checkCacheControl(headers),
   ];
 }

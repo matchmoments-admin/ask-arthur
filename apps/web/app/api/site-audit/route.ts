@@ -115,10 +115,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (message.includes("Failed to fetch")) {
+    if (message.includes("Could not extract domain")) {
       return NextResponse.json(
-        { error: "fetch_failed", message: "Could not reach this website. Check the URL and try again." },
-        { status: 422 }
+        { error: "invalid_url", message: "Could not extract a valid domain from this URL." },
+        { status: 400 }
       );
     }
 

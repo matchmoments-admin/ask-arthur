@@ -13,6 +13,21 @@ export type CheckCategory =
   | "content"
   | "email";
 
+export type FetchErrorType = "timeout" | "blocked" | "dns_error" | "tls_error" | "network_error";
+
+export interface FetchError {
+  type: FetchErrorType;
+  message: string;
+}
+
+export type Severity = "critical" | "high" | "medium" | "low";
+
+export interface Recommendation {
+  text: string;
+  severity: Severity;
+  snippet?: string;
+}
+
 export interface CheckResult {
   id: string;
   category: CheckCategory;
@@ -71,11 +86,13 @@ export interface SiteAuditResult {
   grade: SecurityGrade;
   categories: CategoryScore[];
   checks: CheckResult[];
-  recommendations: string[];
+  recommendations: Recommendation[];
   ssl: SSLInfo | null;
   serverInfo: ServerInfo | null;
   redirectChain: RedirectHop[] | null;
   rawHeaders: Record<string, string> | null;
+  partial: boolean;
+  fetchError: FetchError | null;
 }
 
 export interface ScanOptions {

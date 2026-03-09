@@ -14,12 +14,11 @@ const ADMIN_PATHS = [
   "/server-status",
   "/actuator",
   "/elmah.axd",
-  "/.well-known/security.txt",
   "/robots.txt",
 ];
 
 // Paths that are expected/fine to be accessible
-const ALLOWED_PATHS = new Set(["/.well-known/security.txt", "/robots.txt"]);
+const ALLOWED_PATHS = new Set(["/robots.txt"]);
 
 // Paths that indicate info disclosure if accessible
 const INFO_DISCLOSURE_PATHS = new Set([
