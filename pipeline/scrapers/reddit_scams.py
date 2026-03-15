@@ -37,6 +37,7 @@ logger = get_logger(__name__)
 # ── Configuration ──
 
 _REDDIT_JSON_BASE = "https://www.reddit.com/r/{subreddit}/new.json"
+_REDDIT_OAUTH_BASE = "https://oauth.reddit.com/r/{subreddit}/new"
 _USER_AGENT = "AskArthur-ThreatFeed/1.0 (+https://askarthur.au)"
 _REQUEST_DELAY_SECONDS = 7  # Stay under 10 req/min limit
 
@@ -276,8 +277,61 @@ def _extract_first_image(post: dict) -> str | None:
     return None
 
 
+def _get_oauth_token() -> str | None:
+    """Get Reddit OAuth bearer token using app-only (client_credentials) flow.
+
+    Requires REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET env vars.
+    Returns None if credentials are not configured.
+    """
+    import os
+    client_id = os.environ.get("REDDIT_CLIENT_ID")
+    client_secret = os.environ.get("REDDIT_CLIENT_SECRET")
+    if not client_id or not client_secret:
+        return None
+    resp = requests.post(
+        "https://www.reddit.com/api/v1/access_token",
+        auth=(client_id, client_secret),
+        data={"grant_type": "client_credentials"},
+        headers={"User-Agent": _USER_AGENT},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    return resp.json().get("access_token")
+
+
+# Module-level token cache (refreshed per scrape run)
+_oauth_token: str | None = None
+
+
 def _fetch_subreddit_posts(subreddit: str, limit: int) -> list[dict]:
-    """Fetch posts from a subreddit using Reddit's public JSON API."""
+    """Fetch posts from a subreddit. Uses OAuth API if credentials available,
+    falls back to public JSON API."""
+    global _oauth_token
+
+    # Try OAuth first (avoids 403 blocks on cloud IPs)
+    if _oauth_token is None:
+        try:
+            _oauth_token = _get_oauth_token() or ""
+        except Exception as e:
+            logger.warning(f"OAuth token fetch failed, using public API: {e}")
+            _oauth_token = ""
+
+    if _oauth_token:
+        url = _REDDIT_OAUTH_BASE.format(subreddit=subreddit)
+        resp = requests.get(
+            url,
+            params={"limit": limit, "raw_json": 1},
+            headers={
+                "User-Agent": _USER_AGENT,
+                "Authorization": f"Bearer {_oauth_token}",
+            },
+            timeout=60,
+        )
+        resp.raise_for_status()
+        children = resp.json().get("data", {}).get("children", [])
+        return [child["data"] for child in children if child.get("kind") == "t3"]
+
+    # Fallback: public JSON API (may be blocked on cloud IPs)
     url = _REDDIT_JSON_BASE.format(subreddit=subreddit)
     resp = requests.get(
         url,
