@@ -421,6 +421,191 @@ def bulk_upsert_crypto_wallets(
     return stats
 
 
+def bulk_upsert_entities(
+    conn,
+    entities: list[dict],
+    feed_name: str,
+) -> dict:
+    """Upsert a batch of entities (phones, emails, etc.) via bulk_upsert_feed_entity() RPC.
+
+    Same 500/batch pattern as bulk_upsert_urls().
+
+    Each item in `entities` should have:
+        - entity_type: str (phone, email, domain, etc.)
+        - normalized_value: str
+    Optional:
+        - feed_reference_url: str
+        - feed_reported_at: str (ISO 8601)
+        - evidence_r2_key: str
+
+    Returns stats: {new: int, updated: int, skipped: int}
+    """
+    stats = {"new": 0, "updated": 0, "skipped": 0}
+    total = len(entities)
+    total_batches = (total + BATCH_SIZE - 1) // BATCH_SIZE
+    cursor = conn.cursor()
+    upsert_start = time.time()
+
+    logger.info(
+        f"Starting entity upsert: {total} entities in {total_batches} batches of {BATCH_SIZE}",
+        extra={"metadata": {"feed": feed_name}},
+    )
+
+    for batch_num, i in enumerate(range(0, total, BATCH_SIZE), start=1):
+        batch = entities[i : i + BATCH_SIZE]
+        batch_start = time.time()
+
+        rows = []
+        for item in batch:
+            entity_type = item.get("entity_type", "").strip()
+            normalized_value = item.get("normalized_value", "").strip()
+            if not entity_type or not normalized_value:
+                stats["skipped"] += 1
+                continue
+            rows.append((
+                entity_type,
+                normalized_value,
+                feed_name,
+                item.get("feed_reference_url"),
+                item.get("feed_reported_at"),
+                item.get("evidence_r2_key"),
+            ))
+
+        if rows:
+            try:
+                results = psycopg2.extras.execute_values(
+                    cursor,
+                    """
+                    SELECT bulk_upsert_feed_entity(
+                        t.c1, t.c2, t.c3, t.c4,
+                        t.c5::timestamptz, t.c6
+                    )
+                    FROM (VALUES %s) AS t(c1, c2, c3, c4, c5, c6)
+                    """,
+                    rows,
+                    fetch=True,
+                )
+                for row in results:
+                    data = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+                    if data.get("is_new"):
+                        stats["new"] += 1
+                    else:
+                        stats["updated"] += 1
+            except Exception as e:
+                conn.rollback()
+                logger.warning(
+                    f"Entity batch {batch_num} failed, falling back to row-by-row: {e}",
+                    extra={"metadata": {"feed": feed_name}},
+                )
+                for row in rows:
+                    try:
+                        cursor.execute(
+                            "SELECT bulk_upsert_feed_entity("
+                            "%s, %s, %s, %s, %s::timestamptz, %s)",
+                            row,
+                        )
+                        r = cursor.fetchone()
+                        if r:
+                            data = r[0] if isinstance(r[0], dict) else json.loads(r[0])
+                            if data.get("is_new"):
+                                stats["new"] += 1
+                            else:
+                                stats["updated"] += 1
+                    except Exception as e2:
+                        logger.error(
+                            f"Failed to upsert entity: {row[1]}",
+                            extra={"metadata": {"error": str(e2)}},
+                        )
+                        stats["skipped"] += 1
+                        conn.rollback()
+
+        conn.commit()
+        batch_ms = int((time.time() - batch_start) * 1000)
+        processed = stats["new"] + stats["updated"] + stats["skipped"]
+        logger.info(
+            f"Entity batch {batch_num}/{total_batches} committed: "
+            f"{len(batch)} entities in {batch_ms}ms "
+            f"(progress: {processed}/{total}, "
+            f"new={stats['new']}, updated={stats['updated']}, skipped={stats['skipped']})",
+            extra={"metadata": {"feed": feed_name, "batch": batch_num}},
+        )
+
+    cursor.close()
+    total_ms = int((time.time() - upsert_start) * 1000)
+    logger.info(
+        f"Entity upsert complete: {total_ms}ms total — "
+        f"{stats['new']} new, {stats['updated']} updated, {stats['skipped']} skipped",
+        extra={"metadata": {"feed": feed_name, "duration_ms": total_ms}},
+    )
+    return stats
+
+
+# ── Reddit deduplication helpers ──
+
+
+def get_processed_reddit_posts(conn) -> set[str]:
+    """Load all processed Reddit post IDs into memory for dedup."""
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT post_id FROM reddit_processed_posts")
+        return {row[0] for row in cursor.fetchall()}
+    except Exception as e:
+        logger.warning(f"Failed to load processed Reddit posts: {e}")
+        conn.rollback()
+        return set()
+    finally:
+        cursor.close()
+
+
+def mark_reddit_posts_processed(
+    conn,
+    post_ids: list[tuple[str, str]],
+) -> None:
+    """Batch-insert processed Reddit post IDs.
+
+    Args:
+        conn: Database connection
+        post_ids: List of (post_id, subreddit) tuples
+    """
+    if not post_ids:
+        return
+    cursor = conn.cursor()
+    try:
+        psycopg2.extras.execute_values(
+            cursor,
+            """
+            INSERT INTO reddit_processed_posts (post_id, subreddit)
+            VALUES %s
+            ON CONFLICT (post_id) DO NOTHING
+            """,
+            post_ids,
+        )
+        conn.commit()
+        logger.info(f"Marked {len(post_ids)} Reddit posts as processed")
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Failed to mark Reddit posts as processed: {e}")
+    finally:
+        cursor.close()
+
+
+def cleanup_reddit_posts(conn) -> None:
+    """Delete processed Reddit posts older than 30 days via RPC."""
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT cleanup_old_reddit_posts(30)")
+        result = cursor.fetchone()
+        conn.commit()
+        deleted = result[0] if result else 0
+        if deleted:
+            logger.info(f"Cleaned up {deleted} old Reddit processed posts")
+    except Exception as e:
+        conn.rollback()
+        logger.warning(f"Failed to cleanup old Reddit posts: {e}")
+    finally:
+        cursor.close()
+
+
 def log_ingestion(
     conn,
     feed_name: str,

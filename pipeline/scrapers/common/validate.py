@@ -40,3 +40,45 @@ def validate_eth_address(addr: str) -> bool:
 def validate_btc_address(addr: str) -> bool:
     """Check if a string looks like a valid Bitcoin address."""
     return bool(_BTC_RE.match(addr.strip()))
+
+
+# Phone: Australian mobile/landline or international with + prefix
+_AU_PHONE_RE = re.compile(r"^(?:\+?61|0)[2-9]\d{7,8}$")
+_INTL_PHONE_RE = re.compile(r"^\+[1-9]\d{6,14}$")
+
+# Basic email validation
+_EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
+
+
+def validate_phone(raw: str) -> str | None:
+    """Normalize and validate a phone number.
+
+    Returns E.164 format (e.g. +61412345678) or None if invalid.
+    Australian numbers starting with 0 are converted to +61.
+    """
+    cleaned = re.sub(r"[\s\-\(\).]", "", raw.strip())
+    if not cleaned:
+        return None
+
+    if _AU_PHONE_RE.match(cleaned):
+        # Normalize AU numbers to +61 format
+        if cleaned.startswith("0"):
+            cleaned = "+61" + cleaned[1:]
+        elif cleaned.startswith("61") and not cleaned.startswith("+"):
+            cleaned = "+" + cleaned
+        return cleaned
+
+    if _INTL_PHONE_RE.match(cleaned):
+        return cleaned
+
+    return None
+
+
+def validate_email(raw: str) -> str | None:
+    """Validate and normalize an email address. Returns lowercase or None."""
+    email = raw.strip().lower()
+    if not email:
+        return None
+    if _EMAIL_RE.match(email):
+        return email
+    return None
