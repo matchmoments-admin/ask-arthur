@@ -263,6 +263,36 @@ Enrichment card displayed for SUSPICIOUS/HIGH_RISK verdicts when phone intellige
 - Custom fonts loaded via `expo-font`
 - Adaptive icon with navy background (Android)
 
+## Provider Report Status Badges
+
+Status badges for provider reporting workflows (v39). Used in admin/government dashboards.
+
+| Status | Background | Text | Border |
+|--------|-----------|------|--------|
+| `queued` | `#F1F5F9` (slate-100) | `#475569` (slate-600) | `#CBD5E1` (slate-300) |
+| `submitted` | `#DBEAFE` (blue-100) | `#1D4ED8` (blue-700) | `#93C5FD` (blue-300) |
+| `acknowledged` | `#FEF3C7` (amber-100) | `#B45309` (amber-700) | `#FCD34D` (amber-300) |
+| `actioned` | `#DCFCE7` (green-100) | `#15803D` (green-700) | `#86EFAC` (green-300) |
+| `closed` | `#F3F4F6` (gray-100) | `#6B7280` (gray-500) | `#D1D5DB` (gray-300) |
+
+**Pattern:** `rounded-full px-2.5 py-0.5 text-xs font-medium` (matches risk badge pattern)
+
+## Financial Impact Display
+
+Currency and loss amount rendering for financial impact tracking (v40).
+
+**Formatting rules:**
+- Currency: ISO 4217 code displayed before amount (e.g. `AUD $1,250.00`)
+- Large amounts: Use locale formatting with thousands separators
+- Zero/null: Display "No loss reported" in muted text (`text-slate-400`)
+- Aggregates: Display total with count (e.g. `AUD $45,230 across 12 reports`)
+
+**Display tokens:**
+- Loss amount: `font-semibold text-lg` for individual, `text-2xl font-bold` for aggregates
+- Currency code: `text-xs font-medium text-slate-500 uppercase tracking-wide`
+- Loss trend (up): `text-red-600` with `TrendingUp` Lucide icon
+- Loss trend (down): `text-green-600` with `TrendingDown` Lucide icon
+
 ## Responsive Breakpoints
 
 Follow Tailwind defaults:

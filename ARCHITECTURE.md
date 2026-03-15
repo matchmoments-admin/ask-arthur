@@ -35,7 +35,7 @@ Ask Arthur is a multi-platform scam detection service. Users submit suspicious c
        │
 ┌──────┴───────────────────────────────────────────────────┐
 │              Background Processing                        │
-│  Inngest (9 functions)  │  Python Scrapers (14 feeds)    │
+│  Inngest (9 functions)  │  Python Scrapers (16 feeds)    │
 │  GitHub Actions (cron)  │  Deep Investigation Pipeline   │
 └──────────────────────────────────────────────────────────┘
 ```
@@ -60,11 +60,11 @@ ask-arthur/
 │   └── typescript/             # @askarthur/tsconfig — Shared TS configs (base, nextjs, node)
 │
 ├── pipeline/
-│   └── scrapers/               # Python threat feed scrapers (14 feeds)
+│   └── scrapers/               # Python threat feed scrapers (16 feeds)
 │       ├── common/             # Shared utilities (db, normalize, validate)
 │       └── tests/              # Pytest suite
 │
-├── supabase/                   # Migration SQL files (v2–v18)
+├── supabase/                   # Migration SQL files (v2–v42)
 ├── docs/                       # OpenAPI spec, setup guides, pitch materials
 │
 ├── turbo.json                  # Turborepo task configuration
@@ -233,33 +233,78 @@ Authenticated via Bearer token (API key). See `docs/openapi.yaml` for full spec.
 | `/api/inngest` | Inngest event handler |
 | `/api/admin/login` | Cookie-based admin authentication |
 
-## Database Schema (Key Tables)
+## Database Schema
 
 ### Supabase (PostgreSQL)
 
-31 migration files (`supabase/migration.sql` through `migration-v31-auth.sql`).
+42 migration files (`supabase/migration.sql` through `migration-v42-data-quality-fixes.sql`). 32 tables, 5 views, 32 RPCs.
 
 **Core Tables:**
 
 | Table | Purpose |
 |-------|---------|
 | `verified_scams` | Confirmed HIGH_RISK submissions (PII-scrubbed) |
-| `scam_urls` | Known malicious URLs with enrichment data |
-| `scam_contacts` | Reported phone numbers and emails |
+| `scam_urls` | Known malicious URLs with enrichment data (164K+) |
+| `scam_ips` | Malicious IP intelligence (140K+) |
+| `scam_crypto_wallets` | Scam-associated crypto wallet addresses |
+| `scam_reports` | Central report node for all user analyses (v21) |
+| `scam_entities` | Unified entity lookup layer — phone, email, URL, domain, IP, crypto, bank account (v21, 14K+) |
+| `report_entity_links` | Many-to-many junction between reports and entities (v21) |
+| `scam_clusters` | Groups of related scam reports by shared entities (v22) |
+| `cluster_members` | Cluster membership junction table (v22) |
 | `check_stats` | Daily analysis counters by verdict and region |
 | `api_keys` | B2B API key hashes, tiers, daily limits |
 | `subscriptions` | Paddle subscription records linked to API keys |
 | `user_profiles` | User profiles (role, display name, company) linked to auth.users |
 | `api_usage_log` | Per-key, per-endpoint, per-day API usage tracking |
-| `subscribers` | Newsletter subscribers |
-| `blog_posts` | Blog content with categories |
+| `email_subscribers` | Newsletter subscribers |
+| `blog_posts` | Blog content with categories and full-text search |
 | `blog_categories` | Blog category taxonomy |
 | `bot_message_queue` | Async bot message processing queue |
-| `ip_addresses` | Malicious IP intelligence |
-| `crypto_wallets` | Scam-associated crypto wallets |
-| `feed_timestamps` | Scraper last-run tracking |
-| `feed_references` | Scraper source attribution |
+| `feed_ingestion_log` | Scraper run tracking with record counts |
 | `phone_lookups` | Twilio phone intelligence results (risk score, CNAM, carrier) |
+| `media_analyses` | Uploaded media analysis jobs (deepfake detection) |
+| `sites` | Website audit targets with grades |
+| `site_audits` | Individual audit results with test scores |
+| `device_push_tokens` | Expo push notification tokens (v32) |
+| `family_groups` | Family protection groups (v33) |
+| `family_members` | Family group membership (v33) |
+| `family_activity_log` | Family check activity (v33) |
+| `extension_subscriptions` | Extension tier tracking (v34) |
+| `phone_reputation` | Community phone reputation data (v35) |
+| `reddit_processed_posts` | Reddit scraper deduplication (v36) |
+| `provider_reports` | Reports submitted to ACCC/AFP/banks/telcos (v39) |
+| `provider_actions` | Provider response actions (v39) |
+
+**Views (v38–v40):**
+
+| View | Purpose |
+|------|---------|
+| `threat_intel_entities` | High-value entities (report_count >= 2 OR risk HIGH/CRITICAL) for government export |
+| `threat_intel_urls` | Active, high-confidence URLs for blocklist feeds |
+| `threat_intel_daily_summary` | Daily trends by region from check_stats and scam_reports |
+| `threat_intel_scam_campaigns` | Campaign-level reporting from scam_clusters |
+| `financial_impact_summary` | Loss aggregates by date, scam_type, channel, region, currency (v40) |
+
+**Key RPCs (32 total):**
+
+| RPC | Purpose |
+|-----|---------|
+| `create_scam_report` | Insert report row, return ID (v21) |
+| `upsert_scam_entity` | Upsert entity, bump report_count (v21) |
+| `link_report_entity` | Idempotent junction insert (v21) |
+| `upsert_scam_url` | Upsert URL with feed attribution (v3) |
+| `compute_entity_risk_score` | Composite 0-100 risk score per entity (v27) |
+| `bulk_upsert_feed_url` | Batch feed URL ingestion (v15) |
+| `bulk_upsert_feed_ip` | Batch feed IP ingestion (v15) |
+| `bulk_upsert_feed_entity` | Batch feed entity ingestion (v36) |
+| `get_threat_intel_export` | Paginated JSONB entity export for government (v38) |
+| `submit_provider_report` | Create provider report with duplicate check (v39) |
+| `get_unreported_entities` | Find HIGH+ risk entities not yet reported (v39) |
+| `record_financial_impact` | Attach loss data to a report (v40) |
+| `get_jurisdiction_summary` | Per-region loss aggregates for state police (v40) |
+| `generate_api_key_record` | Create API key with user ownership (v30) |
+| `increment_check_stats` | Atomic daily counter increment (v2) |
 
 ### Upstash Redis
 
@@ -290,10 +335,12 @@ Nine event-driven functions registered in `@askarthur/scam-engine/inngest/functi
 
 ## Threat Intelligence Pipeline
 
-14 Python scrapers in `pipeline/scrapers/` ingest from external threat feeds:
+16 Python scrapers in `pipeline/scrapers/` ingest from external threat feeds:
 
 | Scraper | Feed |
 |---------|------|
+| `abuseipdb.py` | AbuseIPDB malicious IP reports |
+| `cert_au.py` | CERT Australia advisories |
 | `crtsh.py` | Certificate Transparency logs (brand impersonation) |
 | `cryptoscamdb.py` | Crypto scam database |
 | `feodo.py` | Feodo botnet C2 tracker |
@@ -303,10 +350,13 @@ Nine event-driven functions registered in `@askarthur/scam-engine/inngest/functi
 | `phishing_database.py` | Phishing Database feed |
 | `phishstats.py` | PhishStats API |
 | `phishtank.py` | PhishTank community DB |
+| `reddit_scams.py` | Reddit scam subreddit scraper |
+| `scamwatch_rss.py` | ACCC Scamwatch RSS feed |
+| `spamhaus.py` | Spamhaus DROP/EDROP blocklists |
 | `threatfox.py` | ThreatFox malware/C2 IOCs |
 | `urlhaus.py` | URLhaus malware hosting |
 
-Scrapers run on GitHub Actions (scheduled, gated by `ENABLE_SCRAPER` repo variable). They use a shared `common/` library for URL normalization, database operations, and validation.
+Scrapers run on GitHub Actions (scheduled, gated by `ENABLE_SCRAPER` repo variable). They use a shared `common/` library for URL normalization, database operations, validation, and R2 evidence storage.
 
 ## Deep Investigation Pipeline
 
@@ -324,6 +374,34 @@ Weekly passive reconnaissance on CRITICAL/HIGH risk entities using Linux securit
 | `curl -sI` | URL | Security headers, redirect chain |
 
 Results stored in `scam_entities.investigation_data` JSONB. Max 50 entities/run, 1s delay between targets, private IP filtering, no active exploitation.
+
+## Government & Provider Reporting
+
+Infrastructure for submitting scam intelligence to Australian government agencies, banks, and telcos (v38–v40).
+
+### Threat Intel Export (v38)
+
+Four views provide pre-formatted data for government/law-enforcement consumption:
+- `threat_intel_entities` — high-value entities with linked report aggregates
+- `threat_intel_urls` — active, high-confidence URLs for blocklist feeds
+- `threat_intel_daily_summary` — daily trends by region
+- `threat_intel_scam_campaigns` — campaign-level reporting from clusters
+
+All views use `security_invoker = true` (caller's RLS, not definer's).
+
+`get_threat_intel_export()` RPC provides paginated JSONB export with filtering by entity type, risk level, date range, and scam type.
+
+### Provider Reporting (v39)
+
+Two tables track outbound reports to providers (ACCC, AFP, ACSC, big-4 banks, Telstra, Optus):
+- `provider_reports` — report lifecycle (queued → submitted → acknowledged → actioned → closed)
+- `provider_actions` — actions taken by providers (blocked, suspended, takedown, etc.)
+
+RPCs: `submit_provider_report()` (with duplicate detection), `get_unreported_entities()` (finds reportable entities by risk level).
+
+### Financial Impact Tracking (v40)
+
+Scam reports can include financial loss data (`estimated_loss`, `loss_currency`, `target_region`, `target_country`). The `financial_impact_summary` view aggregates losses by date, scam type, channel, and region. `get_jurisdiction_summary()` provides per-state aggregates for police coordination.
 
 ## Bot Architecture
 

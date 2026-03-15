@@ -42,9 +42,9 @@ ask-arthur/
 │   └── typescript/             # @askarthur/tsconfig — Shared TS configs
 │
 ├── pipeline/
-│   └── scrapers/               # Python threat feed scrapers (14 feeds)
+│   └── scrapers/               # Python threat feed scrapers (16 feeds)
 │
-├── supabase/                   # Migration SQL files (v2–v19)
+├── supabase/                   # Migration SQL files (v2–v42)
 ├── docs/                       # OpenAPI spec, setup guides
 ├── turbo.json                  # Turborepo task config
 ├── pnpm-workspace.yaml         # Workspace manifest

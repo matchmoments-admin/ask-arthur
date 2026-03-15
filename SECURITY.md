@@ -11,12 +11,16 @@ Threat model, mandatory defenses, and compliance status for Ask Arthur.
 | Asset | Sensitivity | Location |
 |-------|------------|----------|
 | User-submitted scam content | Medium | Supabase (PII-scrubbed) |
-| Subscriber emails | High | Supabase `subscribers` table |
+| Subscriber emails | High | Supabase `email_subscribers` table |
 | API keys (B2B) | Critical | Supabase `api_keys` (SHA-256 hashed) |
 | Admin credentials | Critical | Environment variable (`ADMIN_SECRET`) |
 | Extension secrets | High | Environment variable (`EXTENSION_SECRET`) |
 | Claude API key | Critical | Environment variable |
 | Redis credentials | High | Environment variables |
+| Threat intel export data | High | Supabase views (`threat_intel_*`), service-role only |
+| Provider report payloads | High | Supabase `provider_reports.payload` JSONB |
+| Financial loss data | Medium | Supabase `scam_reports` (estimated_loss, loss_currency) |
+| Evidence files | Medium | Cloudflare R2 (`evidence_r2_key` on scam_entities) |
 
 ### Attack Vectors
 
@@ -33,6 +37,9 @@ Threat model, mandatory defenses, and compliance status for Ask Arthur.
 | Clickjacking | Low | `X-Frame-Options: DENY`, `frame-ancestors 'none'` |
 | Man-in-the-middle | Low | HSTS (2 years, preload), `upgrade-insecure-requests` |
 | PII leakage in stored scams | Medium | 12-pattern PII scrubbing pipeline before storage |
+| Threat intel data exfiltration | Medium | Views use `security_invoker = true`; service-role access only; no public API exposure |
+| Provider report tampering | Medium | RLS on `provider_reports`/`provider_actions` (service-role only); JSONB payloads validated by RPC |
+| Financial data manipulation | Low | `record_financial_impact` RPC enforces non-negative loss, valid ISO 4217 currency; CHECK constraints on `estimated_loss >= 0` |
 
 ## Mandatory Defenses
 
@@ -164,6 +171,13 @@ All priority-zero security issues have been resolved:
 - Redis cache keys based on content hash (not raw text)
 - Supabase RLS (Row Level Security) for multi-tenant isolation
 - `createServiceClient()` returns null when credentials missing (graceful degradation)
+
+### Government Reporting Data
+
+- **Threat intel views** (`threat_intel_entities`, `threat_intel_urls`, `threat_intel_daily_summary`, `threat_intel_scam_campaigns`) all use `security_invoker = true` — queries run with the caller's permissions, not the view creator's
+- **Provider reports** (`provider_reports`, `provider_actions`) have RLS enabled with service-role-only policies. No public/anon access
+- **Financial impact data** validated by `record_financial_impact` RPC: non-negative `estimated_loss`, ISO 4217 `loss_currency`, CHECK constraints at the database level
+- **Evidence storage** via `evidence_r2_key` on `scam_entities` — R2 bucket is private, accessed only through service-role authenticated server-side code
 
 ### Dependency Security
 

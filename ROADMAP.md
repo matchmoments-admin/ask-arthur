@@ -72,7 +72,7 @@ Building a comprehensive threat database.
 | Feature | Status |
 |---------|--------|
 | Python scraper framework with shared utilities | ✅ Done |
-| 14 threat feed integrations (see ARCHITECTURE.md) | ✅ Done |
+| 16 threat feed integrations (see ARCHITECTURE.md) | ✅ Done |
 | URL normalization (Python + TypeScript parity) | ✅ Done |
 | GitHub Actions scheduled scraping | ✅ Done |
 | Feed timestamp tracking | ✅ Done |
@@ -202,8 +202,8 @@ Future priorities. Items here may move to `BACKLOG.md` if deprioritized.
 |---------|--------|
 | Premium tier with rate limit tiers (Paddle) | ✅ Done |
 | User auth + dashboard + API key self-service (Supabase Auth) | ✅ Done |
-| Family protection plan (shared check routing) | Planned |
-| Push scam alerts (FCM/APNs) | Planned |
+| Family protection plan (shared check routing) | Backend ✅ (v33), UI pending |
+| Push scam alerts (FCM/APNs) | Backend ✅ (v32), UI pending |
 | Background SMS scanning (Android NotificationListenerService / iOS ILMessageFilterExtension) | Planned |
 | Call screening (Android CallScreeningService / iOS CallKit) | Planned |
 | Deepfake detection pipeline wiring (Reality Defender / Resemble AI) | Planned |
@@ -245,6 +245,21 @@ Building Ask Arthur into a recognised contributor/consumer in Australia's anti-s
 | GASA membership + Global Signal Exchange accreditation (320M+ signals) | Planned |
 | Upgrade ASD to Network Partner (CTIS STIX machine-speed exchange) | Planned |
 | Explore Twilio Marketplace Publisher (AU scam intelligence add-on) | Planned |
+
+## Phase 10 — Government Partnerships & Data Exports ✅
+
+Database infrastructure for government reporting, provider coordination, and financial impact tracking.
+
+| Feature | Status |
+|---------|--------|
+| Threat intel export views (4 views for government/law-enforcement) | ✅ Done (v38) |
+| `get_threat_intel_export` RPC with filtering and pagination | ✅ Done (v38) |
+| Provider reporting tables (`provider_reports`, `provider_actions`) | ✅ Done (v39) |
+| `submit_provider_report` + `get_unreported_entities` RPCs | ✅ Done (v39) |
+| Financial impact tracking on `scam_reports` (loss, currency, target region) | ✅ Done (v40) |
+| `financial_impact_summary` view + `get_jurisdiction_summary` RPC | ✅ Done (v40) |
+| Database consolidation — migrate `scam_contacts` → `scam_entities`, drop 4 legacy tables | ✅ Done (v41) |
+| Data quality backfill — 14K+ entities from canonical tables, risk scoring, confidence promotion | ✅ Done (v42) |
 
 ---
 
