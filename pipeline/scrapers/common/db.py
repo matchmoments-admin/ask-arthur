@@ -90,6 +90,7 @@ def bulk_upsert_urls(
                 item.get("brand"),
                 item.get("feed_reported_at"),
                 item.get("feed_reference_url"),
+                item.get("country_code"),
             ))
 
         if rows:
@@ -100,9 +101,9 @@ def bulk_upsert_urls(
                     """
                     SELECT bulk_upsert_feed_url(
                         t.c1, t.c2, t.c3, t.c4, t.c5, t.c6, t.c7, t.c8,
-                        t.c9::timestamptz, t.c10
+                        t.c9::timestamptz, t.c10, t.c11
                     )
-                    FROM (VALUES %s) AS t(c1, c2, c3, c4, c5, c6, c7, c8, c9, c10)
+                    FROM (VALUES %s) AS t(c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11)
                     """,
                     rows,
                     fetch=True,
@@ -123,7 +124,7 @@ def bulk_upsert_urls(
                 for row in rows:
                     try:
                         cursor.execute(
-                            "SELECT bulk_upsert_feed_url(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                            "SELECT bulk_upsert_feed_url(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                             row,
                         )
                         r = cursor.fetchone()
@@ -350,6 +351,7 @@ def bulk_upsert_crypto_wallets(
                 feed_name,
                 item.get("feed_reported_at"),
                 item.get("feed_reference_url"),
+                item.get("country_code"),
             ))
 
         if rows:
@@ -359,9 +361,9 @@ def bulk_upsert_crypto_wallets(
                     """
                     SELECT bulk_upsert_feed_crypto_wallet(
                         t.c1, t.c2, t.c3, t.c4, t.c5, t.c6,
-                        t.c7::timestamptz, t.c8
+                        t.c7::timestamptz, t.c8, t.c9
                     )
-                    FROM (VALUES %s) AS t(c1, c2, c3, c4, c5, c6, c7, c8)
+                    FROM (VALUES %s) AS t(c1, c2, c3, c4, c5, c6, c7, c8, c9)
                     """,
                     rows,
                     fetch=True,
@@ -382,7 +384,7 @@ def bulk_upsert_crypto_wallets(
                     try:
                         cursor.execute(
                             "SELECT bulk_upsert_feed_crypto_wallet("
-                            "%s, %s, %s, %s, %s, %s, %s::timestamptz, %s)",
+                            "%s, %s, %s, %s, %s, %s, %s::timestamptz, %s, %s)",
                             row,
                         )
                         r = cursor.fetchone()
@@ -469,6 +471,7 @@ def bulk_upsert_entities(
                 item.get("feed_reference_url"),
                 item.get("feed_reported_at"),
                 item.get("evidence_r2_key"),
+                item.get("country_code"),
             ))
 
         if rows:
@@ -478,9 +481,9 @@ def bulk_upsert_entities(
                     """
                     SELECT bulk_upsert_feed_entity(
                         t.c1, t.c2, t.c3, t.c4,
-                        t.c5::timestamptz, t.c6
+                        t.c5::timestamptz, t.c6, t.c7
                     )
-                    FROM (VALUES %s) AS t(c1, c2, c3, c4, c5, c6)
+                    FROM (VALUES %s) AS t(c1, c2, c3, c4, c5, c6, c7)
                     """,
                     rows,
                     fetch=True,
@@ -501,7 +504,7 @@ def bulk_upsert_entities(
                     try:
                         cursor.execute(
                             "SELECT bulk_upsert_feed_entity("
-                            "%s, %s, %s, %s, %s::timestamptz, %s)",
+                            "%s, %s, %s, %s, %s::timestamptz, %s, %s)",
                             row,
                         )
                         r = cursor.fetchone()

@@ -109,6 +109,7 @@ def _fetch_json_api() -> list[dict]:
             "brand": None,
             "feed_reported_at": advisory.get("date") or advisory.get("published_at"),
             "feed_reference_url": url,
+            "country_code": "AU",
         })
 
     logger.info(f"Parsed {len(urls)} advisories from CERT AU JSON API")
@@ -147,6 +148,7 @@ def _fetch_rss() -> list[dict]:
             "brand": None,
             "feed_reported_at": pub_date or None,
             "feed_reference_url": link,
+            "country_code": "AU",
         })
 
     logger.info(f"Parsed {len(urls)} advisories from CERT AU RSS")

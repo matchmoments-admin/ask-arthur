@@ -61,6 +61,7 @@ def scrape() -> None:
                 "brand": _extract_brand(title),
                 "feed_reported_at": pub_date or None,
                 "feed_reference_url": link,
+                "country_code": "AU",
             })
 
         logger.info(f"Parsed {len(urls)} alerts from Scamwatch RSS")

@@ -10,6 +10,7 @@ import requests
 from reddit_scams import (
     _scrub_usernames,
     _detect_au_relevance,
+    _detect_country,
     _map_flair,
     _extract_iocs,
     _extract_first_image,
@@ -82,8 +83,129 @@ class TestAURelevance:
         assert _detect_au_relevance("CENTRELINK scam") is True
 
 
+class TestDetectCountry:
+    """Country detection from title tags, subreddit defaults, and AU keywords."""
+
+    # ── Title tag detection ──
+
+    def test_us_tag(self):
+        assert _detect_country("[US] Got a scam call", "Scams") == "US"
+
+    def test_au_tag(self):
+        assert _detect_country("[AU] Fake ATO email", "Scams") == "AU"
+
+    def test_uk_tag_maps_to_gb(self):
+        assert _detect_country("[UK] HMRC scam text", "Scams") == "GB"
+
+    def test_usa_alias(self):
+        assert _detect_country("[USA] IRS phishing", "Scams") == "US"
+
+    def test_ca_tag(self):
+        assert _detect_country("[CA] CRA scam email", "Scams") == "CA"
+
+    def test_nz_tag(self):
+        assert _detect_country("[NZ] IRD scam", "Scams") == "NZ"
+
+    def test_case_insensitive_tag(self):
+        assert _detect_country("[us] lowercase tag", "Scams") == "US"
+
+    def test_tag_in_middle_of_title(self):
+        assert _detect_country("Scam call [DE] from Berlin", "Scams") == "DE"
+
+    # ── Title tag overrides ──
+
+    def test_title_tag_overrides_au_keywords(self):
+        """[US] post mentioning ATO should be US, not AU."""
+        assert _detect_country("[US] Fake ATO email scam", "Scams") == "US"
+
+    def test_title_tag_overrides_subreddit_default(self):
+        """[US] in r/AusFinance should be US, not AU."""
+        assert _detect_country("[US] Investment advice needed", "AusFinance") == "US"
+
+    # ── Subreddit default ──
+
+    def test_ausfinance_subreddit_default(self):
+        assert _detect_country("Is this investment legit?", "AusFinance") == "AU"
+
+    def test_subreddit_case_insensitive(self):
+        assert _detect_country("Some post", "ausfinance") == "AU"
+
+    # ── AU keyword fallback ──
+
+    def test_au_keyword_fallback_centrelink(self):
+        assert _detect_country("Centrelink SMS scam", "Scams") == "AU"
+
+    def test_au_keyword_fallback_commbank(self):
+        assert _detect_country("Fake CommBank text", "Scams") == "AU"
+
+    # ── No signal ──
+
+    def test_no_signals_returns_none(self):
+        assert _detect_country("Got a PayPal phishing email", "Scams") is None
+
+    def test_empty_title_returns_none(self):
+        assert _detect_country("", "Scams") is None
+
+    # ── Edge cases ──
+
+    def test_invalid_country_code_ignored(self):
+        """[XZ] is not a valid ISO code, should not match."""
+        assert _detect_country("[XZ] Random post", "Scams") is None
+
+    def test_brackets_without_country(self):
+        """[HELP] should not match as a country."""
+        assert _detect_country("[HELP] I got scammed", "Scams") is None
+
+
 class TestFlairMapping:
     """Reddit flair to scam_type taxonomy mapping."""
+
+    # ── Live r/Scams flairs ──
+
+    def test_is_this_a_scam(self):
+        assert _map_flair("Is this a scam?") == "other"
+
+    def test_scam_report(self):
+        assert _map_flair("Scam report") == "other"
+
+    def test_help_needed(self):
+        assert _map_flair("Help Needed") == "other"
+
+    def test_victim_of_a_scam(self):
+        assert _map_flair("Victim of a scam") == "other"
+
+    def test_solved(self):
+        assert _map_flair("Solved") == "other"
+
+    def test_informational_post(self):
+        assert _map_flair("Informational post") == "informational"
+
+    # ── Live r/phishing flairs ──
+
+    def test_gmail_flair(self):
+        assert _map_flair("GMail") == "phishing"
+
+    def test_hotmail_flair(self):
+        assert _map_flair("Hotmail") == "phishing"
+
+    def test_facebook_flair(self):
+        assert _map_flair("Facebook") == "phishing"
+
+    def test_amazon_flair(self):
+        assert _map_flair("Amazon") == "phishing"
+
+    # ── Live r/scambait flairs ──
+
+    def test_completed_bait(self):
+        assert _map_flair("Completed Bait") == "other"
+
+    def test_bait_in_progress(self):
+        assert _map_flair("Bait in Progress") == "other"
+
+    def test_scambait_question(self):
+        assert _map_flair("Scambait Question") == "other"
+
+    # ── Legacy flairs (backward compat) ──
 
     def test_phishing_flair(self):
         assert _map_flair("Phishing") == "phishing"
@@ -108,6 +230,8 @@ class TestFlairMapping:
 
     def test_sextortion(self):
         assert _map_flair("Sextortion") == "sextortion"
+
+    # ── Edge cases ──
 
     def test_unknown_flair(self):
         assert _map_flair("Random Flair") is None
@@ -249,6 +373,33 @@ class TestExtractIOCs:
         text = "From: scammer@example.com"
         iocs = _extract_iocs(text, self.POST_URL, None, "reddit_rscams")
         assert iocs.emails[0]["feed_reported_at"] is None
+
+    # ── country_code propagation ──
+
+    def test_country_code_flows_to_url(self):
+        text = "Bad URL: https://evil.com/steal"
+        iocs = _extract_iocs(text, self.POST_URL, None, "reddit_rscams", country_code="US")
+        assert iocs.urls[0]["country_code"] == "US"
+
+    def test_country_code_flows_to_wallet(self):
+        text = "Send ETH to 0xde0B295669a9FD93d5F28D9Ec85E40f4cb697BAe"
+        iocs = _extract_iocs(text, self.POST_URL, None, "reddit_rscams", country_code="AU")
+        assert iocs.wallets[0]["country_code"] == "AU"
+
+    def test_country_code_flows_to_phone(self):
+        text = "Scam call from 0412345678"
+        iocs = _extract_iocs(text, self.POST_URL, None, "reddit_rscams", country_code="GB")
+        assert iocs.phones[0]["country_code"] == "GB"
+
+    def test_country_code_flows_to_email(self):
+        text = "From: scammer@evil.com"
+        iocs = _extract_iocs(text, self.POST_URL, None, "reddit_rscams", country_code="CA")
+        assert iocs.emails[0]["country_code"] == "CA"
+
+    def test_country_code_defaults_to_none(self):
+        text = "Bad URL: https://evil.com"
+        iocs = _extract_iocs(text, self.POST_URL, None, "reddit_rscams")
+        assert iocs.urls[0]["country_code"] is None
 
 
 class TestExtractFirstImage:

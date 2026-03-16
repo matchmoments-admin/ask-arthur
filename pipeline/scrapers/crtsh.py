@@ -163,6 +163,7 @@ def scrape() -> None:
                         "brand": keyword,
                         "feed_reported_at": not_before,
                         "feed_reference_url": ref_url,
+                        "country_code": "AU",
                     }
                 )
 

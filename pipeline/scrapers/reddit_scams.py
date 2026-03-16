@@ -61,8 +61,30 @@ SUBREDDITS = [
     {"name": "AusFinance", "limit": 100},
 ]
 
-# Flair-to-scam_type taxonomy mapping (r/Scams uses structured flair)
+# Flair-to-scam_type taxonomy mapping
+# Includes both live Reddit flairs (2025+) and legacy flairs for backward compat.
 FLAIR_MAP: dict[str, str] = {
+    # ── Live r/Scams flairs ──
+    "is this a scam?": "other",
+    "scam report": "other",
+    "help needed": "other",
+    "victim of a scam": "other",
+    "solved": "other",
+    "informational post": "informational",
+    # ── Live r/phishing flairs ──
+    "gmail": "phishing",
+    "hotmail": "phishing",
+    "facebook": "phishing",
+    "twitter": "phishing",
+    "amazon": "phishing",
+    "other": "phishing",
+    # ── Live r/scambait flairs ──
+    "completed bait": "other",
+    "bait in progress": "other",
+    "incomplete bait": "other",
+    "funny": "other",
+    "scambait question": "other",
+    # ── Legacy flairs (backward compat) ──
     "phishing": "phishing",
     "smishing": "phishing",
     "vishing": "phishing",
@@ -89,6 +111,82 @@ AU_KEYWORDS = [
     "+61", "com.au", ".gov.au", "abn", "tfn", "tax file number",
     "australian", "sydney", "melbourne", "brisbane", "perth", "adelaide",
 ]
+
+# ── Country detection ──
+
+# ISO 3166-1 alpha-2 codes (complete set)
+VALID_COUNTRY_CODES: frozenset[str] = frozenset({
+    "AD", "AE", "AF", "AG", "AI", "AL", "AM", "AO", "AQ", "AR", "AS", "AT",
+    "AU", "AW", "AX", "AZ", "BA", "BB", "BD", "BE", "BF", "BG", "BH", "BI",
+    "BJ", "BL", "BM", "BN", "BO", "BR", "BS", "BT", "BV", "BW", "BY", "BZ",
+    "CA", "CC", "CD", "CF", "CG", "CH", "CI", "CK", "CL", "CM", "CN", "CO",
+    "CR", "CU", "CV", "CW", "CX", "CY", "CZ", "DE", "DJ", "DK", "DM", "DO",
+    "DZ", "EC", "EE", "EG", "EH", "ER", "ES", "ET", "FI", "FJ", "FK", "FM",
+    "FO", "FR", "GA", "GB", "GD", "GE", "GF", "GG", "GH", "GI", "GL", "GM",
+    "GN", "GP", "GQ", "GR", "GS", "GT", "GU", "GW", "GY", "HK", "HM", "HN",
+    "HR", "HT", "HU", "ID", "IE", "IL", "IM", "IN", "IO", "IQ", "IR", "IS",
+    "IT", "JE", "JM", "JO", "JP", "KE", "KG", "KH", "KI", "KM", "KN", "KP",
+    "KR", "KW", "KY", "KZ", "LA", "LB", "LC", "LI", "LK", "LR", "LS", "LT",
+    "LU", "LV", "LY", "MA", "MC", "MD", "ME", "MF", "MG", "MH", "MK", "ML",
+    "MM", "MN", "MO", "MP", "MQ", "MR", "MS", "MT", "MU", "MV", "MW", "MX",
+    "MY", "MZ", "NA", "NC", "NE", "NF", "NG", "NI", "NL", "NO", "NP", "NR",
+    "NU", "NZ", "OM", "PA", "PE", "PF", "PG", "PH", "PK", "PL", "PM", "PN",
+    "PR", "PS", "PT", "PW", "PY", "QA", "RE", "RO", "RS", "RU", "RW", "SA",
+    "SB", "SC", "SD", "SE", "SG", "SH", "SI", "SJ", "SK", "SL", "SM", "SN",
+    "SO", "SR", "SS", "ST", "SV", "SX", "SY", "SZ", "TC", "TD", "TF", "TG",
+    "TH", "TJ", "TK", "TL", "TM", "TN", "TO", "TR", "TT", "TV", "TW", "TZ",
+    "UA", "UG", "UM", "US", "UY", "UZ", "VA", "VC", "VE", "VG", "VI", "VN",
+    "VU", "WF", "WS", "YE", "YT", "ZA", "ZM", "ZW",
+})
+
+# Common aliases → canonical ISO alpha-2
+_COUNTRY_ALIASES: dict[str, str] = {
+    "UK": "GB",
+    "USA": "US",
+    "AUS": "AU",
+    "CAN": "CA",
+    "NZL": "NZ",
+}
+
+# Regex: [US], [UK], [AU], [USA] etc. in post titles
+_COUNTRY_TAG_RE = re.compile(r"\[([A-Za-z]{2,3})\]")
+
+# Subreddits with inherent country attribution
+_SUBREDDIT_COUNTRY_MAP: dict[str, str] = {
+    "ausfinance": "AU",
+}
+
+
+def _detect_country(title: str, subreddit: str) -> str | None:
+    """Detect country from post title tag, subreddit default, or AU keyword fallback.
+
+    Priority:
+      1. Explicit title tag: [US], [UK], [AU] etc. — highest confidence
+      2. Subreddit default: r/AusFinance → "AU"
+      3. AU keyword fallback: _detect_au_relevance(title) — secondary only
+
+    Returns ISO 3166-1 alpha-2 code or None.
+    """
+    # Layer 1: Title tag
+    match = _COUNTRY_TAG_RE.search(title)
+    if match:
+        tag = match.group(1).upper()
+        # Check alias first, then valid code
+        code = _COUNTRY_ALIASES.get(tag, tag)
+        if code in VALID_COUNTRY_CODES:
+            return code
+
+    # Layer 2: Subreddit default
+    sub_lower = subreddit.lower()
+    if sub_lower in _SUBREDDIT_COUNTRY_MAP:
+        return _SUBREDDIT_COUNTRY_MAP[sub_lower]
+
+    # Layer 3: AU keyword fallback
+    if _detect_au_relevance(title):
+        return "AU"
+
+    return None
+
 
 # Regex patterns for IOC extraction
 _URL_RE = re.compile(
@@ -158,6 +256,7 @@ def _extract_iocs(
     scam_type: str | None,
     feed_name: str,
     post_time: str | None = None,
+    country_code: str | None = None,
 ) -> ExtractedIOCs:
     """Extract all IOC types from post text."""
     urls: list[dict] = []
@@ -182,6 +281,7 @@ def _extract_iocs(
                 "scam_type": scam_type,
                 "feed_reported_at": post_time,
                 "feed_reference_url": post_url,
+                "country_code": country_code,
             })
 
     # Extract crypto wallets
@@ -194,6 +294,7 @@ def _extract_iocs(
                 "scam_type": scam_type,
                 "feed_reported_at": post_time,
                 "feed_reference_url": post_url,
+                "country_code": country_code,
             })
     for match in _BTC_RE.findall(text):
         if match not in seen_wallets and validate_btc_address(match):
@@ -204,6 +305,7 @@ def _extract_iocs(
                 "scam_type": scam_type,
                 "feed_reported_at": post_time,
                 "feed_reference_url": post_url,
+                "country_code": country_code,
             })
 
     # Extract phone numbers (focus on Australian)
@@ -216,6 +318,7 @@ def _extract_iocs(
                 "normalized_value": validated,
                 "feed_reference_url": post_url,
                 "feed_reported_at": post_time,
+                "country_code": country_code,
             })
 
     # Extract emails
@@ -228,6 +331,7 @@ def _extract_iocs(
                 "normalized_value": validated,
                 "feed_reference_url": post_url,
                 "feed_reported_at": post_time,
+                "country_code": country_code,
             })
 
     return ExtractedIOCs(urls=urls, wallets=wallets, phones=phones, emails=emails)
@@ -628,7 +732,8 @@ def scrape() -> None:
                 ).isoformat()
 
                 feed_name = f"reddit_r{sub_name.lower()}"
-                iocs = _extract_iocs(text, post_url, scam_type, feed_name, post_time)
+                country_code = _detect_country(post.get("title", ""), sub_name)
+                iocs = _extract_iocs(text, post_url, scam_type, feed_name, post_time, country_code)
 
                 # Evidence image capture
                 evidence_r2_key = None
