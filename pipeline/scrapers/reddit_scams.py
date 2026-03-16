@@ -1,12 +1,20 @@
 """Reddit r/Scams scraper — IOC extraction from scam report subreddits.
 
-Data source: Reddit public JSON API — r/Scams, r/phishing, r/scambait, r/AusFinance
+Data source: Reddit JSON API (multi-endpoint fallback) + RSS
 IOCs extracted: URLs, phone numbers, email addresses, crypto wallet addresses
 Rate limit: 10 req/min (7s delay between requests)
+
+Endpoint priority:
+  1. OAuth (oauth.reddit.com) — full data, requires credentials
+  2. old.reddit.com JSON — full data, bypasses some cloud IP blocks
+  3. www.reddit.com JSON — full data, known 403 on cloud IPs
+  4. RSS feed — degraded data (no flair, no images, max ~25 posts)
 """
 
+import html
 import re
 import time
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from typing import NamedTuple
 
@@ -37,9 +45,14 @@ logger = get_logger(__name__)
 # ── Configuration ──
 
 _REDDIT_JSON_BASE = "https://www.reddit.com/r/{subreddit}/new.json"
+_REDDIT_OLD_JSON = "https://old.reddit.com/r/{subreddit}/new.json"
 _REDDIT_OAUTH_BASE = "https://oauth.reddit.com/r/{subreddit}/new"
+_REDDIT_RSS = "https://www.reddit.com/r/{subreddit}/new/.rss"
 _USER_AGENT = "AskArthur-ThreatFeed/1.0 (+https://askarthur.au)"
 _REQUEST_DELAY_SECONDS = 7  # Stay under 10 req/min limit
+_MAX_RETRIES = 2
+_RETRY_BASE_DELAY = 3  # seconds
+_RETRYABLE_STATUSES = {429, 500, 502, 503, 504}  # 403 is NOT retried
 
 SUBREDDITS = [
     {"name": "Scams", "limit": 100},
@@ -299,49 +312,252 @@ def _get_oauth_token() -> str | None:
     return resp.json().get("access_token")
 
 
-# Module-level token cache (refreshed per scrape run)
+# Module-level state (reset per test via _reset_fetch_state)
 _oauth_token: str | None = None
+_working_endpoint: str | None = None  # Cache which endpoint succeeded
+
+
+def _reset_fetch_state() -> None:
+    """Reset module-level fetch state. Used by tests."""
+    global _oauth_token, _working_endpoint
+    _oauth_token = None
+    _working_endpoint = None
+
+
+def _fetch_json_endpoint(
+    url: str, params: dict, headers: dict,
+) -> list[dict] | None:
+    """Fetch posts from a single JSON endpoint with retry for transient errors.
+
+    Returns list of post dicts on success, None on 403 (fast-fail to next tier).
+    Raises on non-retryable errors after exhausting retries.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(_MAX_RETRIES + 1):
+        try:
+            resp = requests.get(url, params=params, headers=headers, timeout=60)
+            if resp.status_code == 200:
+                children = resp.json().get("data", {}).get("children", [])
+                return [
+                    child["data"]
+                    for child in children
+                    if child.get("kind") == "t3"
+                ]
+            if resp.status_code == 403:
+                # 403 = blocked, don't retry — fall through to next endpoint
+                return None
+            if resp.status_code in _RETRYABLE_STATUSES and attempt < _MAX_RETRIES:
+                delay = _RETRY_BASE_DELAY * (2 ** attempt)
+                logger.warning(
+                    f"Reddit {resp.status_code} from {url}, "
+                    f"retrying in {delay}s (attempt {attempt + 1}/{_MAX_RETRIES})"
+                )
+                time.sleep(delay)
+                continue
+            # Non-retryable HTTP error
+            resp.raise_for_status()
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            last_exc = e
+            if attempt < _MAX_RETRIES:
+                delay = _RETRY_BASE_DELAY * (2 ** attempt)
+                logger.warning(
+                    f"Reddit {type(e).__name__} from {url}, "
+                    f"retrying in {delay}s (attempt {attempt + 1}/{_MAX_RETRIES})"
+                )
+                time.sleep(delay)
+                continue
+            raise
+
+    # Exhausted retries on retryable status codes
+    if last_exc:
+        raise last_exc
+    raise requests.RequestException(
+        f"Failed after {_MAX_RETRIES} retries: {url}"
+    )
+
+
+def _extract_post_id_from_permalink(permalink: str) -> str:
+    """Extract Reddit post ID from a permalink path.
+
+    Example: '/r/Scams/comments/1abc123/some_title/' → '1abc123'
+    """
+    parts = permalink.strip("/").split("/")
+    # permalink format: r/{sub}/comments/{id}/{slug}
+    try:
+        idx = parts.index("comments")
+        return parts[idx + 1]
+    except (ValueError, IndexError):
+        return ""
+
+
+def _fetch_rss_endpoint(subreddit: str, limit: int) -> list[dict] | None:
+    """Fetch posts via RSS/Atom feed and normalize to JSON post dict shape.
+
+    Returns list of post-like dicts on success, None on 403.
+    Flair is always None (not in RSS). Image fields are absent.
+    """
+    url = _REDDIT_RSS.format(subreddit=subreddit)
+    try:
+        resp = requests.get(
+            url, headers={"User-Agent": _USER_AGENT}, timeout=60,
+        )
+    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+        return None
+
+    if resp.status_code == 403:
+        return None
+    if resp.status_code != 200:
+        resp.raise_for_status()
+
+    try:
+        root = ET.fromstring(resp.content)
+    except ET.ParseError as e:
+        logger.warning(f"RSS XML parse error for r/{subreddit}: {e}")
+        return None
+
+    # Atom namespace
+    ns = {"atom": "http://www.w3.org/2005/Atom"}
+    entries = root.findall("atom:entry", ns)
+
+    posts: list[dict] = []
+    for entry in entries[:limit]:
+        title_el = entry.find("atom:title", ns)
+        content_el = entry.find("atom:content", ns)
+        link_el = entry.find("atom:link", ns)
+        updated_el = entry.find("atom:updated", ns)
+
+        title = title_el.text if title_el is not None and title_el.text else ""
+        # Content is HTML in Atom — strip tags for selftext equivalent
+        raw_content = content_el.text if content_el is not None and content_el.text else ""
+        selftext = html.unescape(re.sub(r"<[^>]+>", "", raw_content))
+
+        permalink = ""
+        if link_el is not None:
+            href = link_el.get("href", "")
+            # Extract path from full URL
+            if href.startswith("https://www.reddit.com"):
+                permalink = href[len("https://www.reddit.com"):]
+            elif href.startswith("https://old.reddit.com"):
+                permalink = href[len("https://old.reddit.com"):]
+
+        post_id = _extract_post_id_from_permalink(permalink)
+
+        created_utc = 0.0
+        if updated_el is not None and updated_el.text:
+            try:
+                dt = datetime.fromisoformat(updated_el.text.replace("Z", "+00:00"))
+                created_utc = dt.timestamp()
+            except ValueError:
+                pass
+
+        posts.append({
+            "id": post_id,
+            "title": title,
+            "selftext": selftext,
+            "permalink": permalink,
+            "link_flair_text": None,  # Not available in RSS
+            "created_utc": created_utc,
+            "url": "",  # No direct URL in RSS
+        })
+
+    return posts
 
 
 def _fetch_subreddit_posts(subreddit: str, limit: int) -> list[dict]:
-    """Fetch posts from a subreddit. Uses OAuth API if credentials available,
-    falls back to public JSON API."""
-    global _oauth_token
+    """Fetch posts from a subreddit using cascading endpoint fallback.
 
-    # Try OAuth first (avoids 403 blocks on cloud IPs)
+    Priority: OAuth → old.reddit JSON → www.reddit JSON → RSS feed.
+    Caches which endpoint works across subreddits within a scrape run.
+    """
+    global _oauth_token, _working_endpoint
+
+    json_params = {"limit": limit, "raw_json": 1}
+    public_headers = {"User-Agent": _USER_AGENT}
+
+    # ── If we have a cached working endpoint, try it first ──
+    if _working_endpoint:
+        result = _try_endpoint(_working_endpoint, subreddit, limit, json_params, public_headers)
+        if result is not None:
+            return result
+        # Cached endpoint failed — reset and try full chain
+        logger.warning(
+            f"Cached endpoint '{_working_endpoint}' failed for r/{subreddit}, "
+            "retrying full chain"
+        )
+        _working_endpoint = None
+
+    # ── Tier 1: OAuth ──
     if _oauth_token is None:
         try:
             _oauth_token = _get_oauth_token() or ""
         except Exception as e:
-            logger.warning(f"OAuth token fetch failed, using public API: {e}")
+            logger.warning(f"OAuth token fetch failed: {e}")
             _oauth_token = ""
 
     if _oauth_token:
         url = _REDDIT_OAUTH_BASE.format(subreddit=subreddit)
-        resp = requests.get(
-            url,
-            params={"limit": limit, "raw_json": 1},
-            headers={
-                "User-Agent": _USER_AGENT,
-                "Authorization": f"Bearer {_oauth_token}",
-            },
-            timeout=60,
-        )
-        resp.raise_for_status()
-        children = resp.json().get("data", {}).get("children", [])
-        return [child["data"] for child in children if child.get("kind") == "t3"]
+        oauth_headers = {
+            "User-Agent": _USER_AGENT,
+            "Authorization": f"Bearer {_oauth_token}",
+        }
+        result = _fetch_json_endpoint(url, json_params, oauth_headers)
+        if result is not None:
+            _working_endpoint = "oauth"
+            return result
+        logger.warning("OAuth endpoint returned 403, trying old.reddit.com")
 
-    # Fallback: public JSON API (may be blocked on cloud IPs)
+    # ── Tier 2: old.reddit.com JSON ──
+    url = _REDDIT_OLD_JSON.format(subreddit=subreddit)
+    result = _fetch_json_endpoint(url, json_params, public_headers)
+    if result is not None:
+        _working_endpoint = "old_json"
+        return result
+    logger.warning("old.reddit.com returned 403, trying www.reddit.com")
+
+    # ── Tier 3: www.reddit.com JSON ──
     url = _REDDIT_JSON_BASE.format(subreddit=subreddit)
-    resp = requests.get(
-        url,
-        params={"limit": limit, "raw_json": 1},
-        headers={"User-Agent": _USER_AGENT},
-        timeout=60,
+    result = _fetch_json_endpoint(url, json_params, public_headers)
+    if result is not None:
+        _working_endpoint = "www_json"
+        return result
+    logger.warning("www.reddit.com returned 403, trying RSS feed")
+
+    # ── Tier 4: RSS feed (degraded) ──
+    result = _fetch_rss_endpoint(subreddit, limit)
+    if result is not None:
+        _working_endpoint = "rss"
+        logger.info(
+            f"Using RSS feed for r/{subreddit} (degraded: no flair, no images, max ~25 posts)"
+        )
+        return result
+
+    raise requests.RequestException(
+        f"All Reddit endpoints failed for r/{subreddit}"
     )
-    resp.raise_for_status()
-    children = resp.json().get("data", {}).get("children", [])
-    return [child["data"] for child in children if child.get("kind") == "t3"]
+
+
+def _try_endpoint(
+    endpoint: str, subreddit: str, limit: int,
+    json_params: dict, public_headers: dict,
+) -> list[dict] | None:
+    """Attempt fetch using a previously-cached endpoint name."""
+    global _oauth_token
+    if endpoint == "oauth" and _oauth_token:
+        url = _REDDIT_OAUTH_BASE.format(subreddit=subreddit)
+        oauth_headers = {
+            "User-Agent": _USER_AGENT,
+            "Authorization": f"Bearer {_oauth_token}",
+        }
+        return _fetch_json_endpoint(url, json_params, oauth_headers)
+    elif endpoint == "old_json":
+        url = _REDDIT_OLD_JSON.format(subreddit=subreddit)
+        return _fetch_json_endpoint(url, json_params, public_headers)
+    elif endpoint == "www_json":
+        url = _REDDIT_JSON_BASE.format(subreddit=subreddit)
+        return _fetch_json_endpoint(url, json_params, public_headers)
+    elif endpoint == "rss":
+        return _fetch_rss_endpoint(subreddit, limit)
+    return None
 
 
 def scrape() -> None:
@@ -452,6 +668,10 @@ def scrape() -> None:
             if i < len(SUBREDDITS) - 1:
                 time.sleep(_REQUEST_DELAY_SECONDS)
 
+        logger.info(
+            f"Reddit fetch strategy: {_working_endpoint or 'none'}",
+            extra={"metadata": {"endpoint": _working_endpoint or "none"}},
+        )
         logger.info(
             f"Reddit total: {total_posts} posts across "
             f"{len(SUBREDDITS)} subreddits — "

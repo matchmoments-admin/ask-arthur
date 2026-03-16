@@ -112,6 +112,23 @@ jobs:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: python -m cryptoscamdb
 
+      - name: Probe Reddit endpoints
+        if: github.event.inputs.feed == 'all' || github.event.inputs.feed == 'reddit' || github.event_name == 'schedule'
+        continue-on-error: true
+        run: |
+          echo "=== Reddit endpoint probe ($(date -u +%Y-%m-%dT%H:%M:%SZ)) ==="
+          echo "Runner IP: $(curl -sf https://api.ipify.org || echo 'unknown')"
+          echo ""
+          for endpoint in \
+            "https://old.reddit.com/r/Scams/new.json?limit=1&raw_json=1" \
+            "https://www.reddit.com/r/Scams/new.json?limit=1&raw_json=1" \
+            "https://www.reddit.com/r/Scams/new/.rss"; do
+            status=$(curl -sf -o /dev/null -w "%{http_code}" \
+              -H "User-Agent: AskArthur-ThreatFeed/1.0 (+https://askarthur.au)" \
+              --max-time 15 "$endpoint" || echo "000")
+            echo "$status $endpoint"
+          done
+
       - name: Scrape Reddit r/Scams
         if: github.event.inputs.feed == 'all' || github.event.inputs.feed == 'reddit' || github.event_name == 'schedule'
         env:

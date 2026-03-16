@@ -3,6 +3,8 @@
 Pure unit tests with no database or network calls.
 """
 
+import json
+import pytest
 import requests
 
 from reddit_scams import (
@@ -11,7 +13,12 @@ from reddit_scams import (
     _map_flair,
     _extract_iocs,
     _extract_first_image,
+    _fetch_json_endpoint,
+    _fetch_rss_endpoint,
+    _extract_post_id_from_permalink,
     _fetch_subreddit_posts,
+    _reset_fetch_state,
+    _USER_AGENT,
 )
 
 
@@ -332,27 +339,449 @@ class TestExtractFirstImage:
         assert _extract_first_image({}) is None
 
 
-class TestFetchSubredditPosts:
-    """JSON API response parsing for _fetch_subreddit_posts."""
+# ── Helpers for mock responses ──
 
-    def _mock_response(self, json_data, status_code=200):
-        """Create a mock requests.Response."""
-        resp = requests.Response()
-        resp.status_code = status_code
-        resp._content = __import__("json").dumps(json_data).encode()
-        return resp
+def _make_json_response(json_data, status_code=200):
+    """Create a mock requests.Response with JSON body."""
+    resp = requests.Response()
+    resp.status_code = status_code
+    resp._content = json.dumps(json_data).encode()
+    resp.headers["Content-Type"] = "application/json"
+    return resp
+
+
+def _make_response(content, status_code=200, content_type="text/plain"):
+    """Create a mock requests.Response with raw content."""
+    resp = requests.Response()
+    resp.status_code = status_code
+    if isinstance(content, str):
+        resp._content = content.encode()
+    else:
+        resp._content = content
+    resp.headers["Content-Type"] = content_type
+    return resp
+
+
+# Sample Atom XML for RSS tests
+_SAMPLE_ATOM = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>newest submissions : Scams</title>
+  <entry>
+    <title>Got a scam call from 0412345678</title>
+    <content type="html">&lt;p&gt;They claimed to be from the ATO. URL was https://evil.example.com&lt;/p&gt;</content>
+    <link href="https://www.reddit.com/r/Scams/comments/1abc123/got_a_scam_call/"/>
+    <updated>2025-06-15T10:30:00+00:00</updated>
+  </entry>
+  <entry>
+    <title>Is this &amp; legit?</title>
+    <content type="html">&lt;b&gt;Bold text&lt;/b&gt; check https://dodgy.site.com</content>
+    <link href="https://www.reddit.com/r/Scams/comments/2def456/is_this_legit/"/>
+    <updated>2025-06-15T09:00:00+00:00</updated>
+  </entry>
+</feed>"""
+
+_VALID_JSON_DATA = {
+    "data": {
+        "children": [
+            {"kind": "t3", "data": {"id": "abc", "title": "Scam post"}},
+            {"kind": "t3", "data": {"id": "def", "title": "Another scam"}},
+        ]
+    }
+}
+
+
+class TestExtractPostIdFromPermalink:
+    """Post ID extraction from Reddit permalink paths."""
+
+    def test_standard_permalink(self):
+        assert _extract_post_id_from_permalink(
+            "/r/Scams/comments/1abc123/some_title/"
+        ) == "1abc123"
+
+    def test_no_trailing_slash(self):
+        assert _extract_post_id_from_permalink(
+            "/r/Scams/comments/xyz789/title"
+        ) == "xyz789"
+
+    def test_empty_string(self):
+        assert _extract_post_id_from_permalink("") == ""
+
+    def test_no_comments_segment(self):
+        assert _extract_post_id_from_permalink("/r/Scams/new/") == ""
+
+
+class TestFetchJsonEndpoint:
+    """_fetch_json_endpoint: single-endpoint fetch with retry logic."""
+
+    def setup_method(self):
+        _reset_fetch_state()
+
+    def test_200_success(self, monkeypatch):
+        monkeypatch.setattr(
+            requests, "get",
+            lambda *a, **kw: _make_json_response(_VALID_JSON_DATA),
+        )
+        result = _fetch_json_endpoint(
+            "https://old.reddit.com/r/Scams/new.json",
+            {"limit": 100, "raw_json": 1},
+            {"User-Agent": _USER_AGENT},
+        )
+        assert result is not None
+        assert len(result) == 2
+        assert result[0]["id"] == "abc"
+
+    def test_403_returns_none_no_retry(self, monkeypatch):
+        call_count = 0
+
+        def mock_get(*a, **kw):
+            nonlocal call_count
+            call_count += 1
+            return _make_json_response({}, 403)
+
+        monkeypatch.setattr(requests, "get", mock_get)
+        result = _fetch_json_endpoint(
+            "https://www.reddit.com/r/Scams/new.json",
+            {"limit": 100}, {"User-Agent": _USER_AGENT},
+        )
+        assert result is None
+        assert call_count == 1  # No retries on 403
+
+    def test_429_retried(self, monkeypatch):
+        """429 is retried up to _MAX_RETRIES, then raises."""
+        monkeypatch.setattr("reddit_scams._RETRY_BASE_DELAY", 0)
+        call_count = 0
+
+        def mock_get(*a, **kw):
+            nonlocal call_count
+            call_count += 1
+            resp = requests.Response()
+            resp.status_code = 429
+            resp._content = b"Too Many Requests"
+            resp.url = "https://old.reddit.com/r/Scams/new.json"
+            return resp
+
+        monkeypatch.setattr(requests, "get", mock_get)
+        with pytest.raises(requests.HTTPError):
+            _fetch_json_endpoint(
+                "https://old.reddit.com/r/Scams/new.json",
+                {"limit": 100}, {"User-Agent": _USER_AGENT},
+            )
+        assert call_count == 3  # 1 initial + 2 retries
+
+    def test_503_then_success(self, monkeypatch):
+        """503 on first attempt, 200 on second."""
+        monkeypatch.setattr("reddit_scams._RETRY_BASE_DELAY", 0)
+        call_count = 0
+
+        def mock_get(*a, **kw):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _make_json_response({}, 503)
+            return _make_json_response(_VALID_JSON_DATA)
+
+        monkeypatch.setattr(requests, "get", mock_get)
+        result = _fetch_json_endpoint(
+            "https://old.reddit.com/r/Scams/new.json",
+            {"limit": 100}, {"User-Agent": _USER_AGENT},
+        )
+        assert result is not None
+        assert len(result) == 2
+        assert call_count == 2
+
+    def test_timeout_retried(self, monkeypatch):
+        """Timeout is retried, then raised if exhausted."""
+        monkeypatch.setattr("reddit_scams._RETRY_BASE_DELAY", 0)
+        call_count = 0
+
+        def mock_get(*a, **kw):
+            nonlocal call_count
+            call_count += 1
+            raise requests.exceptions.Timeout("timed out")
+
+        monkeypatch.setattr(requests, "get", mock_get)
+        with pytest.raises(requests.exceptions.Timeout):
+            _fetch_json_endpoint(
+                "https://old.reddit.com/r/Scams/new.json",
+                {"limit": 100}, {"User-Agent": _USER_AGENT},
+            )
+        assert call_count == 3  # 1 initial + 2 retries
+
+    def test_404_raises_immediately(self, monkeypatch):
+        """Non-retryable status (404) raises immediately."""
+        call_count = 0
+
+        def mock_get(*a, **kw):
+            nonlocal call_count
+            call_count += 1
+            resp = requests.Response()
+            resp.status_code = 404
+            resp._content = b"Not Found"
+            resp.url = "https://old.reddit.com/r/Scams/new.json"
+            return resp
+
+        monkeypatch.setattr(requests, "get", mock_get)
+        with pytest.raises(requests.HTTPError):
+            _fetch_json_endpoint(
+                "https://old.reddit.com/r/Scams/new.json",
+                {"limit": 100}, {"User-Agent": _USER_AGENT},
+            )
+        assert call_count == 1
+
+
+class TestFetchRssEndpoint:
+    """_fetch_rss_endpoint: RSS/Atom feed parsing and normalization."""
+
+    def setup_method(self):
+        _reset_fetch_state()
+
+    def test_valid_atom_parsing(self, monkeypatch):
+        monkeypatch.setattr(
+            requests, "get",
+            lambda *a, **kw: _make_response(
+                _SAMPLE_ATOM, 200, "application/atom+xml"
+            ),
+        )
+        result = _fetch_rss_endpoint("Scams", 100)
+        assert result is not None
+        assert len(result) == 2
+        assert result[0]["title"] == "Got a scam call from 0412345678"
+        assert result[0]["id"] == "1abc123"
+
+    def test_403_returns_none(self, monkeypatch):
+        monkeypatch.setattr(
+            requests, "get",
+            lambda *a, **kw: _make_response("Forbidden", 403),
+        )
+        result = _fetch_rss_endpoint("Scams", 100)
+        assert result is None
+
+    def test_flair_always_none(self, monkeypatch):
+        monkeypatch.setattr(
+            requests, "get",
+            lambda *a, **kw: _make_response(
+                _SAMPLE_ATOM, 200, "application/atom+xml"
+            ),
+        )
+        result = _fetch_rss_endpoint("Scams", 100)
+        assert result is not None
+        for post in result:
+            assert post["link_flair_text"] is None
+
+    def test_html_tags_stripped_from_content(self, monkeypatch):
+        monkeypatch.setattr(
+            requests, "get",
+            lambda *a, **kw: _make_response(
+                _SAMPLE_ATOM, 200, "application/atom+xml"
+            ),
+        )
+        result = _fetch_rss_endpoint("Scams", 100)
+        assert result is not None
+        # Second entry has <b>Bold text</b> — tags should be stripped
+        selftext = result[1]["selftext"]
+        assert "<b>" not in selftext
+        assert "Bold text" in selftext
+
+    def test_html_entities_unescaped(self, monkeypatch):
+        monkeypatch.setattr(
+            requests, "get",
+            lambda *a, **kw: _make_response(
+                _SAMPLE_ATOM, 200, "application/atom+xml"
+            ),
+        )
+        result = _fetch_rss_endpoint("Scams", 100)
+        assert result is not None
+        # Second entry title has &amp; in source XML — should be decoded
+        assert result[1]["title"] == "Is this & legit?"
+
+    def test_post_id_extraction(self, monkeypatch):
+        monkeypatch.setattr(
+            requests, "get",
+            lambda *a, **kw: _make_response(
+                _SAMPLE_ATOM, 200, "application/atom+xml"
+            ),
+        )
+        result = _fetch_rss_endpoint("Scams", 100)
+        assert result is not None
+        assert result[0]["id"] == "1abc123"
+        assert result[1]["id"] == "2def456"
+
+    def test_limit_respected(self, monkeypatch):
+        monkeypatch.setattr(
+            requests, "get",
+            lambda *a, **kw: _make_response(
+                _SAMPLE_ATOM, 200, "application/atom+xml"
+            ),
+        )
+        result = _fetch_rss_endpoint("Scams", 1)
+        assert result is not None
+        assert len(result) == 1
+
+    def test_connection_error_returns_none(self, monkeypatch):
+        def mock_get(*a, **kw):
+            raise requests.exceptions.ConnectionError("refused")
+
+        monkeypatch.setattr(requests, "get", mock_get)
+        result = _fetch_rss_endpoint("Scams", 100)
+        assert result is None
+
+
+class TestFetchSubredditPosts:
+    """Cascading endpoint fallback for _fetch_subreddit_posts."""
+
+    def setup_method(self):
+        _reset_fetch_state()
+
+    def _mock_get_by_url(self, url_responses):
+        """Return a mock that dispatches by URL substring."""
+        def mock_get(url, *a, **kw):
+            for pattern, response in url_responses.items():
+                if pattern in url:
+                    if callable(response):
+                        return response()
+                    return response
+            # Default: 403
+            return _make_json_response({}, 403)
+        return mock_get
+
+    def test_oauth_first_path(self, monkeypatch):
+        """When OAuth creds are available and work, use oauth endpoint."""
+        monkeypatch.setenv("REDDIT_CLIENT_ID", "test_id")
+        monkeypatch.setenv("REDDIT_CLIENT_SECRET", "test_secret")
+        # Mock token fetch
+        monkeypatch.setattr(
+            requests, "post",
+            lambda *a, **kw: _make_json_response({"access_token": "tok123"}),
+        )
+        monkeypatch.setattr(
+            requests, "get",
+            self._mock_get_by_url({
+                "oauth.reddit.com": _make_json_response(_VALID_JSON_DATA),
+            }),
+        )
+        posts = _fetch_subreddit_posts("Scams", 100)
+        assert len(posts) == 2
+
+    def test_fallthrough_oauth_to_old_reddit(self, monkeypatch):
+        """When OAuth 403s, fall through to old.reddit.com."""
+        monkeypatch.setenv("REDDIT_CLIENT_ID", "test_id")
+        monkeypatch.setenv("REDDIT_CLIENT_SECRET", "test_secret")
+        monkeypatch.setattr(
+            requests, "post",
+            lambda *a, **kw: _make_json_response({"access_token": "tok123"}),
+        )
+        monkeypatch.setattr(
+            requests, "get",
+            self._mock_get_by_url({
+                "oauth.reddit.com": _make_json_response({}, 403),
+                "old.reddit.com": _make_json_response(_VALID_JSON_DATA),
+            }),
+        )
+        posts = _fetch_subreddit_posts("Scams", 100)
+        assert len(posts) == 2
+
+    def test_fallthrough_to_www(self, monkeypatch):
+        """When OAuth not configured and old.reddit 403s, try www."""
+        monkeypatch.delenv("REDDIT_CLIENT_ID", raising=False)
+        monkeypatch.delenv("REDDIT_CLIENT_SECRET", raising=False)
+        monkeypatch.setattr("reddit_scams._RETRY_BASE_DELAY", 0)
+        monkeypatch.setattr(
+            requests, "get",
+            self._mock_get_by_url({
+                "old.reddit.com": _make_json_response({}, 403),
+                "www.reddit.com": _make_json_response(_VALID_JSON_DATA),
+            }),
+        )
+        posts = _fetch_subreddit_posts("Scams", 100)
+        assert len(posts) == 2
+
+    def test_fallthrough_to_rss(self, monkeypatch):
+        """When all JSON endpoints 403, fall through to RSS."""
+        monkeypatch.delenv("REDDIT_CLIENT_ID", raising=False)
+        monkeypatch.delenv("REDDIT_CLIENT_SECRET", raising=False)
+
+        def mock_get(url, *a, **kw):
+            if ".rss" in url:
+                return _make_response(
+                    _SAMPLE_ATOM, 200, "application/atom+xml"
+                )
+            return _make_json_response({}, 403)
+
+        monkeypatch.setattr(requests, "get", mock_get)
+        posts = _fetch_subreddit_posts("Scams", 100)
+        assert len(posts) == 2
+        # RSS posts have no flair
+        assert posts[0]["link_flair_text"] is None
+
+    def test_all_endpoints_fail_raises(self, monkeypatch):
+        """When every endpoint fails, raises RequestException."""
+        monkeypatch.delenv("REDDIT_CLIENT_ID", raising=False)
+        monkeypatch.delenv("REDDIT_CLIENT_SECRET", raising=False)
+
+        def mock_get(url, *a, **kw):
+            if ".rss" in url:
+                return _make_response("Forbidden", 403)
+            return _make_json_response({}, 403)
+
+        monkeypatch.setattr(requests, "get", mock_get)
+        with pytest.raises(requests.RequestException, match="All Reddit endpoints failed"):
+            _fetch_subreddit_posts("Scams", 100)
+
+    def test_endpoint_cache_reused(self, monkeypatch):
+        """After first subreddit succeeds on old_json, second skips OAuth."""
+        monkeypatch.delenv("REDDIT_CLIENT_ID", raising=False)
+        monkeypatch.delenv("REDDIT_CLIENT_SECRET", raising=False)
+        call_urls = []
+
+        def mock_get(url, *a, **kw):
+            call_urls.append(url)
+            if "old.reddit.com" in url:
+                return _make_json_response(_VALID_JSON_DATA)
+            return _make_json_response({}, 403)
+
+        monkeypatch.setattr(requests, "get", mock_get)
+        # First call: tries old.reddit (after no OAuth)
+        _fetch_subreddit_posts("Scams", 100)
+        call_urls.clear()
+        # Second call: should go straight to old.reddit (cached)
+        _fetch_subreddit_posts("phishing", 100)
+        assert len(call_urls) == 1
+        assert "old.reddit.com" in call_urls[0]
+
+    def test_endpoint_cache_reset_on_failure(self, monkeypatch):
+        """If cached endpoint fails for a later subreddit, reset and try chain."""
+        monkeypatch.delenv("REDDIT_CLIENT_ID", raising=False)
+        monkeypatch.delenv("REDDIT_CLIENT_SECRET", raising=False)
+        first_call = True
+
+        def mock_get(url, *a, **kw):
+            nonlocal first_call
+            if "old.reddit.com" in url:
+                if first_call:
+                    return _make_json_response(_VALID_JSON_DATA)
+                return _make_json_response({}, 403)
+            if "www.reddit.com" in url and ".rss" not in url:
+                return _make_json_response(_VALID_JSON_DATA)
+            if ".rss" in url:
+                return _make_response("Forbidden", 403)
+            return _make_json_response({}, 403)
+
+        monkeypatch.setattr(requests, "get", mock_get)
+        # First subreddit: old.reddit works, gets cached
+        posts1 = _fetch_subreddit_posts("Scams", 100)
+        assert len(posts1) == 2
+        first_call = False
+        # Second subreddit: old.reddit now 403s, should fall through to www
+        posts2 = _fetch_subreddit_posts("phishing", 100)
+        assert len(posts2) == 2
 
     def test_parses_valid_response(self, monkeypatch):
-        json_data = {
-            "data": {
-                "children": [
-                    {"kind": "t3", "data": {"id": "abc", "title": "Scam post"}},
-                    {"kind": "t3", "data": {"id": "def", "title": "Another scam"}},
-                ]
-            }
-        }
+        """Backward compat: basic JSON parsing still works."""
+        monkeypatch.delenv("REDDIT_CLIENT_ID", raising=False)
+        monkeypatch.delenv("REDDIT_CLIENT_SECRET", raising=False)
         monkeypatch.setattr(
-            requests, "get", lambda *a, **kw: self._mock_response(json_data)
+            requests, "get",
+            lambda *a, **kw: _make_json_response(_VALID_JSON_DATA),
         )
         posts = _fetch_subreddit_posts("Scams", 100)
         assert len(posts) == 2
@@ -360,6 +789,8 @@ class TestFetchSubredditPosts:
         assert posts[1]["title"] == "Another scam"
 
     def test_filters_non_t3_kinds(self, monkeypatch):
+        monkeypatch.delenv("REDDIT_CLIENT_ID", raising=False)
+        monkeypatch.delenv("REDDIT_CLIENT_SECRET", raising=False)
         json_data = {
             "data": {
                 "children": [
@@ -370,36 +801,30 @@ class TestFetchSubredditPosts:
             }
         }
         monkeypatch.setattr(
-            requests, "get", lambda *a, **kw: self._mock_response(json_data)
+            requests, "get",
+            lambda *a, **kw: _make_json_response(json_data),
         )
         posts = _fetch_subreddit_posts("Scams", 100)
         assert len(posts) == 2
         assert all(p["id"].startswith("post") for p in posts)
 
     def test_handles_empty_response(self, monkeypatch):
+        monkeypatch.delenv("REDDIT_CLIENT_ID", raising=False)
+        monkeypatch.delenv("REDDIT_CLIENT_SECRET", raising=False)
         json_data = {"data": {"children": []}}
         monkeypatch.setattr(
-            requests, "get", lambda *a, **kw: self._mock_response(json_data)
+            requests, "get",
+            lambda *a, **kw: _make_json_response(json_data),
         )
         posts = _fetch_subreddit_posts("Scams", 100)
         assert posts == []
 
     def test_handles_missing_data_key(self, monkeypatch):
-        json_data = {}
+        monkeypatch.delenv("REDDIT_CLIENT_ID", raising=False)
+        monkeypatch.delenv("REDDIT_CLIENT_SECRET", raising=False)
         monkeypatch.setattr(
-            requests, "get", lambda *a, **kw: self._mock_response(json_data)
+            requests, "get",
+            lambda *a, **kw: _make_json_response({}),
         )
         posts = _fetch_subreddit_posts("Scams", 100)
         assert posts == []
-
-    def test_raises_on_http_error(self, monkeypatch):
-        resp = requests.Response()
-        resp.status_code = 429
-        resp._content = b"Too Many Requests"
-        resp.url = "https://www.reddit.com/r/Scams/new.json"
-        monkeypatch.setattr(requests, "get", lambda *a, **kw: resp)
-        try:
-            _fetch_subreddit_posts("Scams", 100)
-            assert False, "Should have raised"
-        except requests.HTTPError:
-            pass
