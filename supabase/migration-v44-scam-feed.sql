@@ -53,8 +53,8 @@ CREATE INDEX idx_feed_items_source ON feed_items (source);
 CREATE INDEX idx_feed_items_category ON feed_items (category);
 CREATE INDEX idx_feed_items_country ON feed_items (country_code) WHERE country_code IS NOT NULL;
 
--- Published filter (most queries filter on this)
-CREATE INDEX idx_feed_items_published ON feed_items (published) WHERE published = TRUE;
+-- Composite: published + sort (covers main query pattern)
+CREATE INDEX idx_feed_items_published_sort ON feed_items (source_created_at DESC) WHERE published = TRUE;
 
 -- Dedup: one feed_item per source+external_id
 CREATE UNIQUE INDEX idx_feed_items_external ON feed_items (source, external_id) WHERE external_id IS NOT NULL;
@@ -104,6 +104,7 @@ CREATE OR REPLACE FUNCTION upsert_feed_item(
 RETURNS JSON
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public
 AS $$
 DECLARE
   v_id      BIGINT;

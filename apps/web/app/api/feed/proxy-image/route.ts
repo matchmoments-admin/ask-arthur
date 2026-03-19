@@ -32,7 +32,48 @@ export async function GET(req: NextRequest) {
         "User-Agent": "AskArthur-ImageProxy/1.0",
       },
       signal: AbortSignal.timeout(10000),
+      redirect: "manual",
     });
+
+    // Handle redirects — re-validate the target domain
+    if (upstream.status >= 300 && upstream.status < 400) {
+      const location = upstream.headers.get("location");
+      if (!location) {
+        return NextResponse.json({ error: "Redirect with no location" }, { status: 502 });
+      }
+      try {
+        const redirectParsed = new URL(location, imageUrl);
+        if (!ALLOWED_DOMAINS.has(redirectParsed.hostname)) {
+          return NextResponse.json({ error: "Redirect to disallowed domain" }, { status: 403 });
+        }
+        // Follow the redirect to the allowed domain
+        const redirected = await fetch(redirectParsed.toString(), {
+          headers: { "User-Agent": "AskArthur-ImageProxy/1.0" },
+          signal: AbortSignal.timeout(10000),
+          redirect: "error",
+        });
+        if (!redirected.ok) {
+          return NextResponse.json({ error: "Upstream fetch failed" }, { status: redirected.status });
+        }
+        const rContentType = redirected.headers.get("content-type") || "image/jpeg";
+        if (!rContentType.startsWith("image/")) {
+          return NextResponse.json({ error: "Not an image" }, { status: 400 });
+        }
+        const rBody = redirected.body;
+        if (!rBody) {
+          return NextResponse.json({ error: "Empty response" }, { status: 502 });
+        }
+        return new NextResponse(rBody, {
+          headers: {
+            "Content-Type": rContentType,
+            "Cache-Control": "public, s-maxage=3600, stale-while-revalidate=1800",
+            "X-Content-Type-Options": "nosniff",
+          },
+        });
+      } catch {
+        return NextResponse.json({ error: "Invalid redirect URL" }, { status: 502 });
+      }
+    }
 
     if (!upstream.ok) {
       return NextResponse.json(

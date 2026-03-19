@@ -64,7 +64,7 @@ ask-arthur/
 │       ├── common/             # Shared utilities (db, normalize, validate)
 │       └── tests/              # Pytest suite
 │
-├── supabase/                   # Migration SQL files (v2–v42)
+├── supabase/                   # Migration SQL files (v2–v44)
 ├── docs/                       # OpenAPI spec, setup guides, pitch materials
 │
 ├── turbo.json                  # Turborepo task configuration
@@ -164,6 +164,8 @@ Request
 | `/api/subscribe` | POST | Newsletter subscription |
 | `/api/unsubscribe` | GET | Newsletter unsubscribe |
 | `/api/unsubscribe-one-click` | POST | RFC 8058 one-click unsubscribe |
+| `/api/feed` | GET | Public paginated scam feed (filters, FTS, country) |
+| `/api/feed/proxy-image` | GET | Reddit image proxy (CORS/hotlink bypass) |
 
 ### Scam Data Routes
 
@@ -237,7 +239,7 @@ Authenticated via Bearer token (API key). See `docs/openapi.yaml` for full spec.
 
 ### Supabase (PostgreSQL)
 
-42 migration files (`supabase/migration.sql` through `migration-v42-data-quality-fixes.sql`). 32 tables, 5 views, 32 RPCs.
+44 migration files (`supabase/migration.sql` through `migration-v44-scam-feed.sql`). 33 tables, 5 views, 33 RPCs.
 
 **Core Tables:**
 
@@ -273,6 +275,7 @@ Authenticated via Bearer token (API key). See `docs/openapi.yaml` for full spec.
 | `extension_subscriptions` | Extension tier tracking (v34) |
 | `phone_reputation` | Community phone reputation data (v35) |
 | `reddit_processed_posts` | Reddit scraper deduplication (v36) |
+| `feed_items` | Unified public scam feed — Reddit posts, verified scams, user reports (v44) |
 | `provider_reports` | Reports submitted to ACCC/AFP/banks/telcos (v39) |
 | `provider_actions` | Provider response actions (v39) |
 
@@ -305,6 +308,7 @@ Authenticated via Bearer token (API key). See `docs/openapi.yaml` for full spec.
 | `get_jurisdiction_summary` | Per-region loss aggregates for state police (v40) |
 | `generate_api_key_record` | Create API key with user ownership (v30) |
 | `increment_check_stats` | Atomic daily counter increment (v2) |
+| `upsert_feed_item` | Upsert feed item on (source, external_id) conflict (v44) |
 
 ### Upstash Redis
 
@@ -319,7 +323,7 @@ Authenticated via Bearer token (API key). See `docs/openapi.yaml` for full spec.
 
 ## Inngest Background Functions
 
-Nine event-driven functions registered in `@askarthur/scam-engine/inngest/functions`:
+Eleven event-driven functions registered in `@askarthur/scam-engine/inngest/functions`:
 
 | Function | Schedule | Purpose |
 |----------|----------|---------|
@@ -332,6 +336,8 @@ Nine event-driven functions registered in `@askarthur/scam-engine/inngest/functi
 | URLScan Enrichment | Every 4 hours (+30 min) | Tier 2 async: submits URLs to URLScan.io, waits 60s, retrieves results |
 | Cluster Builder | Daily 4am UTC | Groups related scam reports by shared entities |
 | Risk Scorer | Every 6 hours | Computes composite 0-100 risk scores per entity via SQL RPC |
+| Feed Sync — Verified Scams | Every 15 minutes | Syncs recent verified_scams into feed_items table |
+| Feed Sync — User Reports | Every 15 minutes | Syncs HIGH_RISK user reports into feed_items table |
 
 ## Threat Intelligence Pipeline
 
@@ -462,7 +468,7 @@ Supabase Auth with PKCE flow, feature-flagged behind `NEXT_PUBLIC_FF_AUTH`.
 | Supabase | PostgreSQL database + auth |
 | Upstash | Redis cache + rate limiting |
 | Vercel | Hosting + serverless functions |
-| Cloudflare R2 | Media storage |
+| Cloudflare R2 | Media storage + public CDN for feed images |
 | Google Safe Browsing | URL reputation |
 | Resend | Transactional email |
 | Twilio | Phone number lookup |

@@ -40,6 +40,8 @@ Threat model, mandatory defenses, and compliance status for Ask Arthur.
 | Threat intel data exfiltration | Medium | Views use `security_invoker = true`; service-role access only; no public API exposure |
 | Provider report tampering | Medium | RLS on `provider_reports`/`provider_actions` (service-role only); JSONB payloads validated by RPC |
 | Financial data manipulation | Low | `record_financial_impact` RPC enforces non-negative loss, valid ISO 4217 currency; CHECK constraints on `estimated_loss >= 0` |
+| Image proxy SSRF | Medium | Domain allowlist (3 domains), `redirect: "manual"` with re-validation, content-type check, 5MB limit, 10s timeout |
+| Feed data exposure | Low | Only `published = TRUE` items visible via RLS; PII-scrubbed descriptions; no raw user content |
 
 ## Mandatory Defenses
 
@@ -185,6 +187,13 @@ All priority-zero security issues have been resolved:
 - `pip audit` for Python pipeline dependencies
 - Lockfiles committed (`pnpm-lock.yaml`, `requirements.txt`)
 - Minimal dependency surface (prefer built-in Node crypto over external packages)
+
+### Public Feed Security
+
+- **Image proxy** (`/api/feed/proxy-image`) — strict domain allowlist (`preview.redd.it`, `i.redd.it`, `i.imgur.com`), manual redirect handling with re-validation, content-type must start with `image/`, 5MB max, 10s timeout
+- **Feed API** (`/api/feed`) — public read-only, RLS enforces `published = TRUE`, NaN-safe pagination defaults, feature-flagged (`NEXT_PUBLIC_FF_SCAM_FEED`)
+- **`upsert_feed_item` RPC** — `SECURITY DEFINER` with `SET search_path = public`, service-role only
+- **Feed descriptions** — all content PII-scrubbed at source (Reddit usernames stripped, user reports use `scrubbed_content`, verified scams use AI-generated summaries)
 
 ### Extension Security
 

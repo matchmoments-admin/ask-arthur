@@ -115,7 +115,7 @@ import { verifyAdminToken } from "@/lib/adminAuth";
 - Columns: `snake_case` (`created_at`, `confidence_score`, `brand_impersonated`)
 - RPC functions: `snake_case` verb prefix (`increment_check_stats`, `mark_stale_urls`)
 - Views: `snake_case` descriptive (`threat_intel_entities`, `financial_impact_summary`)
-- Migrations: 42 files (`supabase/migration.sql` through `migration-v42-data-quality-fixes.sql`)
+- Migrations: 44 files (`supabase/migration.sql` through `migration-v44-scam-feed.sql`)
 
 **JSONB-returning RPC pattern** (used in v38–v40 government reporting RPCs):
 ```sql

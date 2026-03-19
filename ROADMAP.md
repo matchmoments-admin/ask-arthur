@@ -214,7 +214,7 @@ Future priorities. Items here may move to `BACKLOG.md` if deprioritized.
 | Carrier feeds integration (Telstra/Optus) | Planned |
 | White-label embed widget | Planned |
 | Webhook notifications for new threats | Planned |
-| Community scam reports feed | Planned |
+| Public scam feed (`/scam-feed` + `/api/feed`, feature-flagged) | ✅ Done (v44) |
 | SOC/SIEM integration | Planned |
 
 ## Phase 9 — Data Partnerships & External Intelligence

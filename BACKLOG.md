@@ -106,7 +106,7 @@ Infrastructure is in place (v38–v40). Future work:
 - [x] Scam Report Card integrated into result view (contact/URL reporting)
 - [ ] Breach check page (use /api/breach-check from web UI)
 - [ ] Bot setup wizard (guided Telegram/WhatsApp/Slack setup)
-- [ ] Community scam reports feed
+- [x] Public scam feed (`/scam-feed` + `/api/feed`, v44 `feed_items` table, Reddit + verified + user reports)
 - [ ] Scam trend analytics dashboard
 - [ ] Email forwarding analysis (forward scam emails to check@askarthur.au)
 - [ ] Website permission check (web version) — let users paste a URL to audit its requested browser permissions. Report card showing which permissions the site requests and whether they're justified for the site's purpose
