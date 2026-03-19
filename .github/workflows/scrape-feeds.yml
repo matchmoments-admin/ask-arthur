@@ -140,3 +140,31 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
         run: python -m reddit_scams
+
+  # -----------------------------------------------------------------------
+  # Notify on failure — posts to Slack incoming webhook
+  # -----------------------------------------------------------------------
+  notify-failure:
+    needs: scrape
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Slack notification
+        if: vars.SLACK_WEBHOOK_URL != ''
+        env:
+          SLACK_WEBHOOK_URL: ${{ vars.SLACK_WEBHOOK_URL }}
+        run: |
+          curl -sf -X POST "$SLACK_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"text\": \":rotating_light: *Scraper failed* — <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View logs>\",
+              \"blocks\": [
+                {
+                  \"type\": \"section\",
+                  \"text\": {
+                    \"type\": \"mrkdwn\",
+                    \"text\": \":rotating_light: *Threat Feed Scraper Failed*\n\n*Trigger:* ${{ github.event_name }} (${{ github.event.schedule || github.event.inputs.feed || 'manual' }})\n*Run:* <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View logs>\"
+                  }
+                }
+              ]
+            }"

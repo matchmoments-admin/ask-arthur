@@ -22,6 +22,18 @@ const securityHeaders = [
     value: "camera=(self), microphone=(), geolocation=(), payment=(self)",
   },
   {
+    key: "Cross-Origin-Embedder-Policy",
+    value: "credentialless",
+  },
+  {
+    key: "Cross-Origin-Opener-Policy",
+    value: "same-origin",
+  },
+  {
+    key: "Cross-Origin-Resource-Policy",
+    value: "same-origin",
+  },
+  {
     key: "Content-Security-Policy",
     value: [
       "default-src 'self'",
@@ -50,6 +62,16 @@ const nextConfig: NextConfig = {
         source: "/(.*)",
         headers: securityHeaders,
       },
+      // Sensitive API routes — prevent caching
+      {
+        source: "/api/((?!feed|inngest|cron).*)",
+        headers: [
+          { key: "Cache-Control", value: "no-store, no-cache, must-revalidate, proxy-revalidate" },
+          { key: "Pragma", value: "no-cache" },
+        ],
+      },
+      // Extension CORS — wildcard needed for chrome-extension:// origins
+      // (auth enforced via X-Extension-Secret, not CORS)
       {
         source: "/api/extension/:path*",
         headers: [
