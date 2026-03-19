@@ -22,6 +22,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Invalid URL" }, { status: 400 });
   }
 
+  if (parsed.protocol !== "https:") {
+    return NextResponse.json({ error: "Only HTTPS URLs allowed" }, { status: 400 });
+  }
+
   if (!ALLOWED_DOMAINS.has(parsed.hostname)) {
     return NextResponse.json({ error: "Domain not allowed" }, { status: 403 });
   }
@@ -98,7 +102,21 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Empty response" }, { status: 502 });
     }
 
-    return new NextResponse(body, {
+    // Enforce size limit on streamed responses (chunked transfer without content-length)
+    let bytesRead = 0;
+    const sizeLimit = new TransformStream({
+      transform(chunk, controller) {
+        bytesRead += chunk.byteLength;
+        if (bytesRead > MAX_SIZE) {
+          controller.error(new Error("Image too large"));
+          return;
+        }
+        controller.enqueue(chunk);
+      },
+    });
+    const limitedBody = body.pipeThrough(sizeLimit);
+
+    return new NextResponse(limitedBody, {
       headers: {
         "Content-Type": contentType,
         "Cache-Control": "public, s-maxage=3600, stale-while-revalidate=1800",

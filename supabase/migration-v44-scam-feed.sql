@@ -59,9 +59,9 @@ CREATE INDEX idx_feed_items_published_sort ON feed_items (source_created_at DESC
 -- Dedup: one feed_item per source+external_id
 CREATE UNIQUE INDEX idx_feed_items_external ON feed_items (source, external_id) WHERE external_id IS NOT NULL;
 
--- Full-text search
+-- Full-text search (matches Supabase .textSearch("title", ...) which generates to_tsvector('english', title))
 CREATE INDEX idx_feed_items_fts ON feed_items
-  USING GIN (to_tsvector('english', title || ' ' || COALESCE(description, '')));
+  USING GIN (to_tsvector('english', title));
 
 -- ============================================================
 -- 3. Row-Level Security

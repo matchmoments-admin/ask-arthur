@@ -79,7 +79,8 @@ export async function GET(req: NextRequest) {
         },
       }
     );
-  } catch {
+  } catch (err) {
+    logger.error("Feed route error", { error: String(err) });
     return NextResponse.json(
       { items: [], total: 0, page: 1, limit: 20, hasMore: false },
       { status: 200 }

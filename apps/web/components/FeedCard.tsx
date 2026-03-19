@@ -138,7 +138,7 @@ export default function FeedCard({ item }: { item: FeedItem }) {
               {item.impersonated_brand}
             </span>
           )}
-          {item.source_url && (
+          {item.source_url && item.source_url.startsWith("https://") && (
             <a
               href={item.source_url}
               target="_blank"
