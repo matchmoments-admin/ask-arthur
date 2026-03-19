@@ -48,7 +48,7 @@ export default async function ScamFeedPage() {
   return (
     <>
       <Nav />
-      <main id="main-content" className="max-w-6xl mx-auto px-4 py-8">
+      <main id="main-content" className="max-w-4xl mx-auto px-4 py-8">
         {/* Hero */}
         <section className="mb-8">
           <h1 className="text-3xl font-bold text-deep-navy mb-2">

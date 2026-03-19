@@ -1,17 +1,20 @@
 // Feed sync crons — sync verified_scams and user reports into feed_items table
-// for the public scam feed. Runs every 15 minutes.
+// for the public scam feed. Runs weekly (Sunday 07:00 UTC, after Reddit scraper).
 
 import { inngest } from "./client";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 
+const LOOKBACK_DAYS = 30;
+const LIMIT_PER_RUN = 50;
+
 export const syncVerifiedScamsToFeed = inngest.createFunction(
   {
     id: "feed-sync-verified-scams",
     name: "Feed: Sync Verified Scams",
   },
-  { cron: "*/15 * * * *" },
+  { cron: "0 7 * * 0" },
   async ({ step }) => {
     if (!featureFlags.dataPipeline) {
       return { skipped: true, reason: "dataPipeline feature flag disabled" };
@@ -21,89 +24,58 @@ export const syncVerifiedScamsToFeed = inngest.createFunction(
       const supabase = createServiceClient();
       if (!supabase) {
         logger.warn("Supabase not configured, skipping verified scams sync");
-        return { skipped: true };
+        return { skipped: true, inserted: 0 };
       }
 
-      const { data, error } = await supabase.rpc("exec_sql", {
-        query: `
-          INSERT INTO feed_items (source, external_id, title, description, category, channel,
-            r2_image_key, impersonated_brand, country_code, verified, source_created_at)
-          SELECT
-            'verified_scam',
-            vs.id::text,
-            COALESCE(vs.impersonated_brand, vs.scam_type, 'Scam') || ' scam alert',
-            vs.summary,
-            vs.scam_type,
-            vs.channel,
-            vs.screenshot_key,
-            vs.impersonated_brand,
-            COALESCE(vs.region, 'AU'),
-            TRUE,
-            vs.created_at
-          FROM verified_scams vs
-          LEFT JOIN feed_items fi ON fi.source = 'verified_scam' AND fi.external_id = vs.id::text
-          WHERE fi.id IS NULL
-            AND vs.created_at > NOW() - INTERVAL '7 days'
-          LIMIT 50
-          RETURNING id
-        `,
-      });
+      const cutoff = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
-      if (error) {
-        // exec_sql may not exist — fall back to raw SQL via postgrest
-        logger.warn("exec_sql RPC not available, using direct insert", {
-          error: String(error),
+      const { data: scams, error: fetchErr } = await supabase
+        .from("verified_scams")
+        .select("id, impersonated_brand, scam_type, summary, channel, screenshot_key, region, created_at")
+        .gte("created_at", cutoff)
+        .order("created_at", { ascending: false })
+        .limit(LIMIT_PER_RUN);
+
+      if (fetchErr || !scams) {
+        logger.error("Failed to fetch verified scams", { error: String(fetchErr) });
+        throw new Error(`Fetch verified scams failed: ${fetchErr?.message}`);
+      }
+
+      if (scams.length === 0) {
+        logger.info("No verified scams to sync");
+        return { inserted: 0 };
+      }
+
+      let inserted = 0;
+      for (const vs of scams) {
+        const { data, error: upsertErr } = await supabase.rpc("upsert_feed_item", {
+          p_source: "verified_scam",
+          p_external_id: String(vs.id),
+          p_title: `${vs.impersonated_brand || vs.scam_type || "Scam"} scam alert`,
+          p_description: vs.summary || null,
+          p_category: vs.scam_type || null,
+          p_channel: vs.channel || null,
+          p_r2_image_key: vs.screenshot_key || null,
+          p_impersonated_brand: vs.impersonated_brand || null,
+          p_country_code: vs.region || "AU",
+          p_verified: true,
+          p_source_created_at: vs.created_at,
         });
 
-        // Use direct Supabase query as fallback
-        const { data: scams, error: fetchErr } = await supabase
-          .from("verified_scams")
-          .select("id, impersonated_brand, scam_type, summary, channel, screenshot_key, region, created_at")
-          .gte("created_at", new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
-          .order("created_at", { ascending: false })
-          .limit(50);
-
-        if (fetchErr || !scams) {
-          logger.error("Failed to fetch verified scams", { error: String(fetchErr) });
-          throw new Error(`Fetch verified scams failed: ${fetchErr?.message}`);
-        }
-
-        let inserted = 0;
-        for (const vs of scams) {
-          // Check if already synced
-          const { data: existing } = await supabase
-            .from("feed_items")
-            .select("id")
-            .eq("source", "verified_scam")
-            .eq("external_id", String(vs.id))
-            .limit(1);
-
-          if (existing && existing.length > 0) continue;
-
-          const { error: insertErr } = await supabase.from("feed_items").insert({
-            source: "verified_scam",
-            external_id: String(vs.id),
-            title: `${vs.impersonated_brand || vs.scam_type || "Scam"} scam alert`,
-            description: vs.summary,
-            category: vs.scam_type,
-            channel: vs.channel,
-            r2_image_key: vs.screenshot_key,
-            impersonated_brand: vs.impersonated_brand,
-            country_code: vs.region || "AU",
-            verified: true,
-            source_created_at: vs.created_at,
+        if (upsertErr) {
+          logger.warn("Failed to upsert verified scam feed item", {
+            scamId: vs.id,
+            error: String(upsertErr),
           });
-
-          if (!insertErr) inserted++;
+          continue;
         }
 
-        logger.info("Verified scams synced to feed (fallback)", { inserted });
-        return { inserted };
+        const result = typeof data === "string" ? JSON.parse(data) : data;
+        if (result?.is_new) inserted++;
       }
 
-      const count = Array.isArray(data) ? data.length : 0;
-      logger.info("Verified scams synced to feed", { count });
-      return { inserted: count };
+      logger.info("Verified scams synced to feed", { total: scams.length, inserted });
+      return { total: scams.length, inserted };
     });
 
     return result;
@@ -115,7 +87,7 @@ export const syncUserReportsToFeed = inngest.createFunction(
     id: "feed-sync-user-reports",
     name: "Feed: Sync User Reports",
   },
-  { cron: "*/15 * * * *" },
+  { cron: "0 7 * * 0" },
   async ({ step }) => {
     if (!featureFlags.dataPipeline) {
       return { skipped: true, reason: "dataPipeline feature flag disabled" };
@@ -125,52 +97,58 @@ export const syncUserReportsToFeed = inngest.createFunction(
       const supabase = createServiceClient();
       if (!supabase) {
         logger.warn("Supabase not configured, skipping user reports sync");
-        return { skipped: true };
+        return { skipped: true, inserted: 0 };
       }
+
+      const cutoff = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
       // Only sync HIGH_RISK reports (quality filter)
       const { data: reports, error: fetchErr } = await supabase
         .from("scam_reports")
         .select("id, impersonated_brand, scam_type, scrubbed_content, channel, country_code, source, created_at")
         .eq("verdict", "HIGH_RISK")
-        .gte("created_at", new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
+        .gte("created_at", cutoff)
         .order("created_at", { ascending: false })
-        .limit(50);
+        .limit(LIMIT_PER_RUN);
 
       if (fetchErr || !reports) {
         logger.error("Failed to fetch user reports", { error: String(fetchErr) });
         throw new Error(`Fetch user reports failed: ${fetchErr?.message}`);
       }
 
-      let inserted = 0;
-      for (const sr of reports) {
-        // Check if already synced
-        const { data: existing } = await supabase
-          .from("feed_items")
-          .select("id")
-          .eq("source", "user_report")
-          .eq("external_id", String(sr.id))
-          .limit(1);
-
-        if (existing && existing.length > 0) continue;
-
-        const { error: insertErr } = await supabase.from("feed_items").insert({
-          source: "user_report",
-          external_id: String(sr.id),
-          title: `${sr.impersonated_brand || sr.scam_type || "Scam"} reported via ${sr.source || "web"}`,
-          description: sr.scrubbed_content ? sr.scrubbed_content.slice(0, 500) : null,
-          category: sr.scam_type,
-          channel: sr.channel,
-          impersonated_brand: sr.impersonated_brand,
-          country_code: sr.country_code,
-          source_created_at: sr.created_at,
-        });
-
-        if (!insertErr) inserted++;
+      if (reports.length === 0) {
+        logger.info("No user reports to sync");
+        return { inserted: 0 };
       }
 
-      logger.info("User reports synced to feed", { inserted });
-      return { inserted };
+      let inserted = 0;
+      for (const sr of reports) {
+        const { data, error: upsertErr } = await supabase.rpc("upsert_feed_item", {
+          p_source: "user_report",
+          p_external_id: String(sr.id),
+          p_title: `${sr.impersonated_brand || sr.scam_type || "Scam"} reported via ${sr.source || "web"}`,
+          p_description: sr.scrubbed_content ? sr.scrubbed_content.slice(0, 500) : null,
+          p_category: sr.scam_type || null,
+          p_channel: sr.channel || null,
+          p_impersonated_brand: sr.impersonated_brand || null,
+          p_country_code: sr.country_code || null,
+          p_source_created_at: sr.created_at,
+        });
+
+        if (upsertErr) {
+          logger.warn("Failed to upsert user report feed item", {
+            reportId: sr.id,
+            error: String(upsertErr),
+          });
+          continue;
+        }
+
+        const result = typeof data === "string" ? JSON.parse(data) : data;
+        if (result?.is_new) inserted++;
+      }
+
+      logger.info("User reports synced to feed", { total: reports.length, inserted });
+      return { total: reports.length, inserted };
     });
 
     return result;
