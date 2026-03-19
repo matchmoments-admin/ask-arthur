@@ -25,6 +25,7 @@ from common.db import (
     bulk_upsert_urls,
     bulk_upsert_crypto_wallets,
     bulk_upsert_entities,
+    bulk_upsert_feed_items,
     log_ingestion,
     get_processed_reddit_posts,
     mark_reddit_posts_processed,
@@ -670,6 +671,7 @@ def scrape() -> None:
     all_urls: list[dict] = []
     all_wallets: list[dict] = []
     all_entities: list[dict] = []  # phones + emails
+    all_feed_items: list[dict] = []
     new_post_ids: list[tuple[str, str]] = []  # (post_id, subreddit)
     error_msg: str | None = None
     status = "success"
@@ -753,6 +755,30 @@ def scrape() -> None:
                 all_entities.extend(iocs.phones)
                 all_entities.extend(iocs.emails)
 
+                # Build feed item for the public scam feed
+                scrubbed_title = _scrub_usernames(post.get("title", ""))
+                scrubbed_body = _scrub_usernames(post.get("selftext", ""))
+                first_url = iocs.urls[0]["url"] if iocs.urls else None
+                image_url_for_feed = _extract_first_image(post)
+
+                all_feed_items.append({
+                    "source": "reddit",
+                    "external_id": post_id,
+                    "title": scrubbed_title[:300],
+                    "description": scrubbed_body[:500] if scrubbed_body else None,
+                    "url": first_url,
+                    "source_url": post_url,
+                    "category": scam_type,
+                    "channel": None,
+                    "r2_image_key": evidence_r2_key,
+                    "reddit_image_url": image_url_for_feed if not evidence_r2_key else None,
+                    "impersonated_brand": None,
+                    "country_code": country_code,
+                    "upvotes": post.get("score", 0),
+                    "verified": False,
+                    "source_created_at": post_time,
+                })
+
                 sub_urls += len(iocs.urls)
                 sub_wallets += len(iocs.wallets)
                 sub_phones += len(iocs.phones)
@@ -822,6 +848,17 @@ def scrape() -> None:
                 status = "partial" if status != "error" else status
                 entity_stats = {"new": 0, "updated": 0, "skipped": len(all_entities)}
                 logger.error(f"Reddit entity upsert failed: {e}")
+
+        # Upsert feed items for the public scam feed
+        if all_feed_items:
+            try:
+                feed_stats = bulk_upsert_feed_items(conn, all_feed_items, "reddit")
+                logger.info(
+                    f"Reddit feed items: {feed_stats['new']} new, "
+                    f"{feed_stats['updated']} updated, {feed_stats['skipped']} skipped"
+                )
+            except Exception as e:
+                logger.error(f"Reddit feed item upsert failed: {e}")
 
         # Mark new posts as processed for future dedup
         if new_post_ids:

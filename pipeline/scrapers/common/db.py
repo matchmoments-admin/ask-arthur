@@ -543,6 +543,146 @@ def bulk_upsert_entities(
     return stats
 
 
+def bulk_upsert_feed_items(
+    conn,
+    items: list[dict],
+    feed_name: str,
+) -> dict:
+    """Upsert a batch of feed items via the upsert_feed_item() RPC.
+
+    Same 500/batch pattern as bulk_upsert_urls().
+
+    Each item in `items` should have:
+        - source: str (reddit, user_report, verified_scam, scamwatch)
+        - external_id: str
+        - title: str
+    Optional:
+        - description: str
+        - url: str
+        - source_url: str
+        - category: str
+        - channel: str
+        - r2_image_key: str
+        - reddit_image_url: str
+        - impersonated_brand: str
+        - country_code: str
+        - upvotes: int
+        - verified: bool
+        - source_created_at: str (ISO 8601)
+
+    Returns stats: {new: int, updated: int, skipped: int}
+    """
+    stats = {"new": 0, "updated": 0, "skipped": 0}
+    total = len(items)
+    total_batches = (total + BATCH_SIZE - 1) // BATCH_SIZE
+    cursor = conn.cursor()
+    upsert_start = time.time()
+
+    logger.info(
+        f"Starting feed item upsert: {total} items in {total_batches} batches of {BATCH_SIZE}",
+        extra={"metadata": {"feed": feed_name}},
+    )
+
+    for batch_num, i in enumerate(range(0, total, BATCH_SIZE), start=1):
+        batch = items[i : i + BATCH_SIZE]
+        batch_start = time.time()
+
+        rows = []
+        for item in batch:
+            title = (item.get("title") or "").strip()
+            external_id = (item.get("external_id") or "").strip()
+            if not title or not external_id:
+                stats["skipped"] += 1
+                continue
+            rows.append((
+                item.get("source", "reddit"),
+                external_id,
+                title,
+                item.get("description"),
+                item.get("url"),
+                item.get("source_url"),
+                item.get("category"),
+                item.get("channel"),
+                item.get("r2_image_key"),
+                item.get("reddit_image_url"),
+                item.get("impersonated_brand"),
+                item.get("country_code"),
+                item.get("upvotes", 0),
+                item.get("verified", False),
+                item.get("source_created_at"),
+            ))
+
+        if rows:
+            try:
+                results = psycopg2.extras.execute_values(
+                    cursor,
+                    """
+                    SELECT upsert_feed_item(
+                        t.c1, t.c2, t.c3, t.c4, t.c5, t.c6, t.c7, t.c8,
+                        t.c9, t.c10, t.c11, t.c12, t.c13::int, t.c14::boolean,
+                        t.c15::timestamptz
+                    )
+                    FROM (VALUES %s) AS t(c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15)
+                    """,
+                    rows,
+                    fetch=True,
+                )
+                for row in results:
+                    data = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+                    if data.get("is_new"):
+                        stats["new"] += 1
+                    else:
+                        stats["updated"] += 1
+            except Exception as e:
+                conn.rollback()
+                logger.warning(
+                    f"Feed item batch {batch_num} failed, falling back to row-by-row: {e}",
+                    extra={"metadata": {"feed": feed_name}},
+                )
+                for row in rows:
+                    try:
+                        cursor.execute(
+                            "SELECT upsert_feed_item("
+                            "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+                            "%s::int, %s::boolean, %s::timestamptz)",
+                            row,
+                        )
+                        r = cursor.fetchone()
+                        if r:
+                            data = r[0] if isinstance(r[0], dict) else json.loads(r[0])
+                            if data.get("is_new"):
+                                stats["new"] += 1
+                            else:
+                                stats["updated"] += 1
+                    except Exception as e2:
+                        logger.error(
+                            f"Failed to upsert feed item: {row[1]}",
+                            extra={"metadata": {"error": str(e2)}},
+                        )
+                        stats["skipped"] += 1
+                        conn.rollback()
+
+        conn.commit()
+        batch_ms = int((time.time() - batch_start) * 1000)
+        processed = stats["new"] + stats["updated"] + stats["skipped"]
+        logger.info(
+            f"Feed item batch {batch_num}/{total_batches} committed: "
+            f"{len(batch)} items in {batch_ms}ms "
+            f"(progress: {processed}/{total}, "
+            f"new={stats['new']}, updated={stats['updated']}, skipped={stats['skipped']})",
+            extra={"metadata": {"feed": feed_name, "batch": batch_num}},
+        )
+
+    cursor.close()
+    total_ms = int((time.time() - upsert_start) * 1000)
+    logger.info(
+        f"Feed item upsert complete: {total_ms}ms total — "
+        f"{stats['new']} new, {stats['updated']} updated, {stats['skipped']} skipped",
+        extra={"metadata": {"feed": feed_name, "duration_ms": total_ms}},
+    )
+    return stats
+
+
 # ── Reddit deduplication helpers ──
 
 

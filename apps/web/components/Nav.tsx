@@ -36,6 +36,14 @@ export default async function Nav() {
             Pricing
           </Link>
         )}
+        {featureFlags.scamFeed && (
+          <Link
+            href="/scam-feed"
+            className="text-deep-navy font-bold text-sm hover:text-action-teal transition-colors py-3 px-2"
+          >
+            Scam Feed
+          </Link>
+        )}
         <Link
           href="/blog"
           className="text-deep-navy font-bold text-sm hover:text-action-teal transition-colors py-3 px-2"

@@ -27,6 +27,7 @@
     "./deepfake-detect": "./src/deepfake-detect.ts",
     "./push-sender": "./src/push-sender.ts",
     "./inngest/scam-alerts": "./src/inngest/scam-alerts.ts",
+    "./inngest/feed-sync": "./src/inngest/feed-sync.ts",
     "./ipqualityscore": "./src/ipqualityscore.ts"
   },
   "dependencies": {

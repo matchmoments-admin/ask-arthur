@@ -11,6 +11,7 @@ import { clusterBuilder } from "./cluster-builder";
 import { riskScorer } from "./risk-scorer";
 import { urlscanEnrichment } from "./urlscan-enrichment";
 import { scamAlertCron } from "./scam-alerts";
+import { syncVerifiedScamsToFeed, syncUserReportsToFeed } from "./feed-sync";
 
 export const inngestFunctions = [
   stalenessCheck,
@@ -23,4 +24,6 @@ export const inngestFunctions = [
   riskScorer,
   urlscanEnrichment,
   scamAlertCron,
+  syncVerifiedScamsToFeed,
+  syncUserReportsToFeed,
 ];

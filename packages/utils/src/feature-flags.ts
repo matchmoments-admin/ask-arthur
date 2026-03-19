@@ -95,6 +95,9 @@ export const featureFlags = {
 
   /** Family protection plan: shared dashboard + activity log */
   familyPlan: process.env.NEXT_PUBLIC_FF_FAMILY_PLAN === "true",
+
+  /** Public scam feed: browsable threat intelligence from Reddit, verified scams, user reports */
+  scamFeed: process.env.NEXT_PUBLIC_FF_SCAM_FEED === "true",
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;
