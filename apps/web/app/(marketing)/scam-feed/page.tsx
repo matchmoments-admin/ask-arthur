@@ -6,6 +6,8 @@ import FeedList from "@/components/FeedList";
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
 
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = {
   title: "Scam Feed — Latest Australian Scam Alerts | Ask Arthur",
   description:
@@ -48,13 +50,13 @@ export default async function ScamFeedPage() {
   return (
     <>
       <Nav />
-      <main id="main-content" className="max-w-4xl mx-auto px-4 py-8">
+      <main id="main-content">
         {/* Hero */}
-        <section className="mb-8">
-          <h1 className="text-3xl font-bold text-deep-navy mb-2">
+        <section className="max-w-[640px] mx-auto px-5 pt-16 mb-8">
+          <h1 className="text-deep-navy text-4xl md:text-5xl font-extrabold mb-4 leading-tight text-center">
             Scam Feed
           </h1>
-          <p className="text-gov-slate max-w-2xl">
+          <p className="text-lg text-gov-slate max-w-2xl mx-auto text-center leading-relaxed">
             Real-time scam intelligence from Reddit, verified analysis, and
             community reports. Stay informed about the latest threats targeting
             Australians.
@@ -62,7 +64,9 @@ export default async function ScamFeedPage() {
         </section>
 
         {/* Feed */}
-        <FeedList initialItems={items} initialTotal={total} />
+        <section className="max-w-4xl mx-auto px-4 pb-8">
+          <FeedList initialItems={items} initialTotal={total} />
+        </section>
       </main>
       <Footer />
     </>
