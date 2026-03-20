@@ -97,6 +97,10 @@ Infrastructure is in place (v38–v40). Future work:
 - [ ] AFP ReportCyber integration
 - [ ] State police jurisdiction routing (using `get_jurisdiction_summary` data)
 
+## Pipeline / Scrapers
+
+- [ ] Fix broken scrapers (manual-only, low priority): ThreatFox (401 — API key expired), crt.sh (NoneType `.strip()` — null domain bug), PhishStats (95s timeout — upstream slow/down), CryptoScamDB (404 — GitHub source gone, likely dead)
+
 ## Web App
 
 - [x] Phone intelligence in analysis pipeline (Twilio Lookup v2)
