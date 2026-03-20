@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { searchPosts } from "@/lib/blog";
-import CategoryPill from "@/components/CategoryPill";
+import Pill from "@/components/Pill";
 import type { Metadata } from "next";
 
 interface PageProps {
@@ -50,7 +50,7 @@ export default async function BlogSearchPage({ searchParams }: PageProps) {
               <Link href={`/blog/${post.slug}`} className="block group">
                 {post.categoryName && (
                   <span className="block mb-1">
-                    <CategoryPill name={post.categoryName} />
+                    <Pill label={post.categoryName} slug={post.categorySlug} />
                   </span>
                 )}
                 <h2 className="text-deep-navy text-lg font-bold leading-snug group-hover:text-action-teal transition-colors">

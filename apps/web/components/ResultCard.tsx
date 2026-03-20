@@ -157,6 +157,27 @@ export default function ResultCard({
           </div>
         )}
 
+        {/* Brand verification prompt */}
+        {verdict !== "SAFE" && impersonatedBrand && (
+          <div className="mt-5 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+            <p className="text-amber-900 text-sm font-semibold mb-1">
+              If you use {impersonatedBrand}:
+            </p>
+            <p className="text-amber-900 text-sm leading-relaxed">
+              Check the official app or website directly, review your recent activity,
+              and contact {impersonatedBrand} using the number or address on their
+              official site — not anything in this message.
+            </p>
+          </div>
+        )}
+        {verdict !== "SAFE" && !impersonatedBrand && (
+          <p className="text-sm text-gov-slate mt-3 leading-relaxed">
+            If this message mentions a service you actually use — bank, telco,
+            delivery, or government — check that service&apos;s official app or website
+            directly and review your recent activity before dismissing it.
+          </p>
+        )}
+
         {/* Recovery guidance for HIGH_RISK / SUSPICIOUS (feature-gated) */}
         {featureFlags.recoveryGuidance && recovery && (verdict === "HIGH_RISK" || verdict === "SUSPICIOUS") && (
           <RecoveryGuide recovery={recovery} verdict={verdict} />

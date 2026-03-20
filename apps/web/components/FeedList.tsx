@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { Search, SlidersHorizontal, Loader2 } from "lucide-react";
 import FeedCard from "./FeedCard";
+import Pill from "./Pill";
 import { CATEGORY_CONFIG, COUNTRY_OPTIONS, SOURCE_CONFIG } from "@/lib/feed";
 import type { FeedItem } from "@/lib/feed";
 
@@ -166,17 +167,12 @@ export default function FeedList({ initialItems, initialTotal }: FeedListProps) 
       {/* Source filter chips */}
       <div className="flex gap-2 mb-4 flex-wrap">
         {SOURCE_FILTERS.map((f) => (
-          <button
+          <Pill
             key={f.value}
+            label={f.label}
+            active={source === f.value}
             onClick={() => handleSourceChange(f.value)}
-            className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-              source === f.value
-                ? "bg-deep-navy text-white"
-                : "bg-slate-100 text-gov-slate hover:bg-slate-200"
-            }`}
-          >
-            {f.label}
-          </button>
+          />
         ))}
       </div>
 

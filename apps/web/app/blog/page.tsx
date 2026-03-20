@@ -3,7 +3,7 @@ import { X } from "lucide-react";
 import { getAllPosts, getCategories } from "@/lib/blog";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import SubscribeForm from "@/components/SubscribeForm";
-import CategoryPill from "@/components/CategoryPill";
+import Pill from "@/components/Pill";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -52,10 +52,10 @@ export default async function BlogPage({ searchParams }: PageProps) {
     <div>
       {/* ── Header ── */}
       <header className="mb-10">
-        <h1 className="text-deep-navy text-[2rem] font-extrabold tracking-tight leading-tight mb-2">
+        <h1 className="text-deep-navy text-4xl md:text-5xl font-extrabold leading-tight text-center mb-2">
           Blog
         </h1>
-        <p className="text-slate-500 text-sm leading-relaxed mb-6">
+        <p className="text-slate-500 text-sm leading-relaxed mb-6 text-center">
           Scam alerts, protection guides, and product updates.
         </p>
 
@@ -117,7 +117,7 @@ export default async function BlogPage({ searchParams }: PageProps) {
               <Link href={`/blog/${post.slug}`} className="block group">
                 {post.categoryName && (
                   <span className="block mb-1.5">
-                    <CategoryPill name={post.categoryName} />
+                    <Pill label={post.categoryName} slug={post.categorySlug} />
                   </span>
                 )}
                 <h2 className="text-deep-navy text-xl font-bold leading-snug mb-1 group-hover:text-action-teal transition-colors">

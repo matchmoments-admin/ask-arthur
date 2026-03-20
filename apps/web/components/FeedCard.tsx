@@ -20,7 +20,6 @@ import {
   Flag,
   ShieldCheck,
   Shield,
-  ExternalLink,
   ArrowUp,
   BadgeCheck,
 } from "lucide-react";
@@ -32,6 +31,7 @@ import {
   relativeTime,
 } from "@/lib/feed";
 import type { FeedItem } from "@/lib/feed";
+import Pill from "./Pill";
 
 const ICON_MAP: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
   Fish, HeartCrack, TrendingUp, Monitor, Theater, ShoppingBag,
@@ -57,8 +57,10 @@ export default function FeedCard({ item }: { item: FeedItem }) {
 
   const countryFlag = item.country_code ? COUNTRY_FLAGS[item.country_code] : null;
 
-  return (
-    <article className="bg-white border border-border-light rounded-xl shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all overflow-hidden">
+  const isLinked = item.source_url?.startsWith("https://") ?? false;
+
+  const card = (
+    <article className={`bg-white border border-border-light rounded-xl shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all overflow-hidden${isLinked ? " cursor-pointer" : ""}`}>
       {/* Image or category tile */}
       {imageUrl ? (
         <div className="aspect-video bg-slate-100 overflow-hidden">
@@ -120,36 +122,26 @@ export default function FeedCard({ item }: { item: FeedItem }) {
           </p>
         )}
 
-        {/* Bottom row: badges + link */}
+        {/* Bottom row: badges */}
         <div className="flex items-center gap-2 flex-wrap">
           {categoryConfig && (
-            <span
-              className="rounded-full px-2 py-0.5 text-xs font-medium"
-              style={{
-                backgroundColor: `${categoryConfig.color}15`,
-                color: categoryConfig.color,
-              }}
-            >
-              {categoryConfig.label}
-            </span>
+            <Pill label={categoryConfig.label} color={categoryConfig.color} />
           )}
           {item.impersonated_brand && (
-            <span className="rounded-full px-2 py-0.5 text-xs font-medium bg-slate-100 text-slate-600">
-              {item.impersonated_brand}
-            </span>
-          )}
-          {item.source_url && item.source_url.startsWith("https://") && (
-            <a
-              href={item.source_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="ml-auto text-xs text-action-teal-text hover:underline flex items-center gap-1"
-            >
-              View <ExternalLink size={10} />
-            </a>
+            <Pill label={item.impersonated_brand} />
           )}
         </div>
       </div>
     </article>
   );
+
+  if (isLinked) {
+    return (
+      <a href={item.source_url!} target="_blank" rel="noopener noreferrer" className="block">
+        {card}
+      </a>
+    );
+  }
+
+  return card;
 }

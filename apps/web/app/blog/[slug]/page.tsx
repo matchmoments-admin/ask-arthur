@@ -6,7 +6,7 @@ import { getPostBySlug, getAllSlugs, getRelatedPosts } from "@/lib/blog";
 import { renderMarkdown } from "@/lib/blogRenderer";
 import CopyLinkButton from "@/components/CopyLinkButton";
 import SubscribeForm from "@/components/SubscribeForm";
-import CategoryPill from "@/components/CategoryPill";
+import Pill from "@/components/Pill";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import type { Metadata } from "next";
 
@@ -171,8 +171,9 @@ export default async function BlogPostPage({ params }: PageProps) {
               <span className="text-slate-400 text-xs uppercase tracking-wider block mb-0.5">
                 Category
               </span>
-              <CategoryPill
-                name={post.categoryName}
+              <Pill
+                label={post.categoryName}
+                slug={post.categorySlug}
                 href={`/blog?category=${post.categorySlug}`}
               />
             </div>
@@ -266,7 +267,7 @@ export default async function BlogPostPage({ params }: PageProps) {
                 </h3>
                 {rp.categoryName && (
                   <span className="mt-1 block">
-                    <CategoryPill name={rp.categoryName} />
+                    <Pill label={rp.categoryName} slug={rp.categorySlug} />
                   </span>
                 )}
               </Link>

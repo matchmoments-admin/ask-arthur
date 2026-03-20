@@ -9,7 +9,7 @@
  */
 export function normalizePhoneE164(raw: string): string | null {
   // Strip whitespace, dots, dashes, parens
-  const cleaned = raw.replace(/[\s.\-()]/g, "");
+  const cleaned = raw.replace(/[\s\u00A0\u2009\u202F.\-()]/g, "");
 
   // Already valid E.164 (international)
   if (/^\+\d{10,15}$/.test(cleaned)) return cleaned;

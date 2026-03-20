@@ -4,7 +4,7 @@ import { waitUntil } from "@vercel/functions";
 import { checkRateLimit } from "@askarthur/utils/rate-limit";
 import { analyzeWithClaude, detectInjectionAttempt, type Verdict } from "@askarthur/scam-engine/claude";
 import { featureFlags } from "@askarthur/utils/feature-flags";
-import { extractContactsFromText } from "@askarthur/scam-engine/phone-normalize";
+import { extractContactsFromText, normalizePhoneE164 } from "@askarthur/scam-engine/phone-normalize";
 import { extractURLs, checkURLReputation } from "@askarthur/scam-engine/safebrowsing";
 import { resolveRedirects, extractFinalUrls } from "@askarthur/scam-engine/redirect-resolver";
 import { geolocateIP } from "@askarthur/scam-engine/geolocate";
@@ -228,7 +228,13 @@ export async function POST(req: NextRequest) {
         try {
           const ai = aiResult.scammerContacts;
           if (ai.phoneNumbers.length > 0 || ai.emailAddresses.length > 0) {
-            scammerContacts = ai;
+            scammerContacts = {
+              phoneNumbers: ai.phoneNumbers.map((p) => ({
+                ...p,
+                value: normalizePhoneE164(p.value) ?? p.value,
+              })),
+              emailAddresses: ai.emailAddresses,
+            };
             console.log("[phone-debug] contacts from vision fallback", {
               phones: ai.phoneNumbers.map((p) => p.value),
               emails: ai.emailAddresses.map((e) => e.value),

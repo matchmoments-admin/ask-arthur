@@ -10,7 +10,6 @@ import {
   normalizePhoneE164,
   normalizeEmail,
   extractEmailDomain,
-  isValidPhoneFormat,
   isValidEmailFormat,
 } from "@askarthur/scam-engine/phone-normalize";
 import { logger } from "@askarthur/utils/logger";
@@ -90,9 +89,6 @@ export async function POST(req: NextRequest) {
       let normalizedValue: string | null = null;
 
       if (contact.type === "phone") {
-        if (!isValidPhoneFormat(contact.value)) {
-          continue; // Skip invalid phone numbers
-        }
         normalizedValue = normalizePhoneE164(contact.value);
         if (!normalizedValue) continue;
       } else {
