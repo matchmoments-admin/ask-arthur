@@ -119,7 +119,7 @@ async function checkGoogleSafeBrowsing(urls: string[]): Promise<Set<string>> {
     );
 
     if (res.ok) {
-      const data = await res.json();
+      const data = (await res.json()) as { matches?: Array<{ threat: { url: string } }> };
       if (data.matches) {
         for (const match of data.matches) {
           malicious.add(match.threat.url);
@@ -157,7 +157,7 @@ async function checkVirusTotal(urls: string[]): Promise<Set<string>> {
         );
 
         if (res.ok) {
-          const data = await res.json();
+          const data = (await res.json()) as { data?: { attributes?: { last_analysis_stats?: { malicious: number; suspicious: number } } } };
           const stats = data.data?.attributes?.last_analysis_stats;
           if (stats && stats.malicious + stats.suspicious > 2) {
             malicious.add(url);
