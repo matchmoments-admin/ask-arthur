@@ -22,6 +22,8 @@ const PII_PATTERNS: [RegExp, string][] = [
   [/(\+?61\s?)?0?4\d{2}[\s.-]?\d{3}[\s.-]?\d{3}/g, "[AU_PHONE]"],
   // Australian landline (0x xxxx xxxx) (must run before generic phone)
   [/0[2-9]\s?\d{4}\s?\d{4}/g, "[AU_PHONE]"],
+  // Partial card references ("card ending 8279", "account last four 5678")
+  [/\b(card|account)\s+(ending|ending in|last four|last 4)\s+\d{4}\b/gi, "[CARD_REF]"],
   // Phone numbers — generic catch-all (runs last among digit patterns)
   [/(\+?1?\s?)?(\(?\d{3}\)?[\s.-]?)?\d{3}[\s.-]?\d{4}/g, "[PHONE]"],
   // IP addresses
@@ -30,8 +32,8 @@ const PII_PATTERNS: [RegExp, string][] = [
   [/\b\d{3}-\d{3}\b/g, "[BSB]"],
   // Street addresses (basic, AU and US)
   [/\b\d{1,5}\s+[A-Za-z]+\s+(Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Lane|Ln|Court|Ct|Crescent|Cres|Parade|Pde|Terrace|Tce|Highway|Hwy)\b/gi, "[ADDRESS]"],
-  // Names after common prefixes
-  [/\b(Dear|Hi|Hello|Mr\.?|Mrs\.?|Ms\.?|Dr\.?)\s+[A-Z][a-z]+(\s+[A-Z][a-z]+)?\b/g, "[NAME]"],
+  // Names after common prefixes (handles all-caps like "Hi ANA", title-case, mixed)
+  [/\b(Dear|Hi|Hello|Mr\.?|Mrs\.?|Ms\.?|Dr\.?)\s+[A-Z][a-zA-Z]+(\s+[A-Z][a-zA-Z]+)?\b/g, "[NAME]"],
 ];
 
 export function scrubPII(text: string): string {

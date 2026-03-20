@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createServiceClient } from "@askarthur/supabase/server";
+import { scrubPII } from "@askarthur/scam-engine/pipeline";
 import { getCategories } from "@/lib/blog";
 import { requireAdmin, verifyAdminToken, COOKIE_NAME, MAX_AGE } from "@/lib/adminAuth";
 import { cookies } from "next/headers";
@@ -61,9 +62,19 @@ export default async function AdminBlogPage() {
       updated_at: new Date().toISOString(),
     };
 
-    // Set published_at when first published
+    // Set published_at when first published; scrub PII as a safety net
     if (status === "published") {
       updateData.published_at = new Date().toISOString();
+      const { data: post } = await sb
+        .from("blog_posts")
+        .select("content, title, excerpt")
+        .eq("id", postId)
+        .single();
+      if (post) {
+        updateData.content = scrubPII(post.content || "");
+        updateData.title = scrubPII(post.title || "");
+        updateData.excerpt = scrubPII(post.excerpt || "");
+      }
     }
 
     await sb.from("blog_posts").update(updateData).eq("id", postId);

@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { createServiceClient } from "@askarthur/supabase/server";
+import { scrubPII } from "@askarthur/scam-engine/pipeline";
 import { logger } from "@askarthur/utils/logger";
 
 interface ScamGroup {
@@ -152,7 +153,12 @@ Return ONLY valid JSON:
         .replace(/^-|-$/g, "")
         .slice(0, 60);
 
-    const content = parsed.content || "";
+    // Scrub any PII that Claude may have echoed from scam summaries
+    const title = scrubPII(parsed.title || "");
+    const subtitle = scrubPII(parsed.subtitle || "");
+    const excerpt = scrubPII(parsed.excerpt || "");
+    const content = scrubPII(parsed.content || "");
+
     const readingTimeMinutes = Math.max(
       1,
       Math.ceil(content.split(/\s+/).length / 200)
@@ -171,9 +177,9 @@ Return ONLY valid JSON:
 
     return {
       slug,
-      title: parsed.title,
-      subtitle: parsed.subtitle || "",
-      excerpt: parsed.excerpt,
+      title,
+      subtitle,
+      excerpt,
       content,
       tags: Array.isArray(parsed.tags) ? parsed.tags : [],
       category,
