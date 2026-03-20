@@ -59,7 +59,6 @@ SUBREDDITS = [
     {"name": "Scams", "limit": 100},
     {"name": "phishing", "limit": 100},
     {"name": "scambait", "limit": 100},
-    {"name": "AusFinance", "limit": 100},
 ]
 
 # Flair-to-scam_type taxonomy mapping
