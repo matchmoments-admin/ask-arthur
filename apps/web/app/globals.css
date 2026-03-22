@@ -210,7 +210,9 @@ h1, h2, h3 {
 /* Blockquotes — soft left border, no background */
 .blog-content blockquote {
   border-left: 3px solid var(--color-action-teal);
-  padding-left: 1.25em;
+  padding: 0.75em 1.25em;
+  margin-top: 1.5em;
+  margin-bottom: 1.5em;
   margin-left: 0;
   margin-right: 0;
   color: var(--color-gov-slate);
@@ -220,70 +222,34 @@ h1, h2, h3 {
   margin: 0;
 }
 
-/* Info/tip/warning panels — soft, minimal
-   Use in markdown as:
-   > **Warning:** Don't share your banking PIN
-   > **Tip:** Always verify the sender
-   > **Important:** Report scams to Scamwatch
-*/
-.blog-content blockquote:has(strong:first-child) {
-  font-style: normal;
-  border-left: 3px solid var(--color-border-light);
-  background-color: #f8fafc;
-  padding: 1em 1.25em;
-  border-radius: 0 2px 2px 0;
-}
-
 /* GitHub-style admonition callouts: [!TIP], [!WARNING], [!DANGER] */
 .blog-content .callout {
-  font-style: normal;
+  font-style: italic;
   border-left: 3px solid;
-  background-color: #f8fafc;
-  padding: 1em 1.25em;
-  border-radius: 0 2px 2px 0;
+  background-color: transparent;
+  padding: 0.75em 1.25em;
+  border-radius: 0;
   margin-top: 1.5em;
   margin-bottom: 1.5em;
 }
 .blog-content .callout-title {
-  display: flex;
-  align-items: center;
-  gap: 0.5em;
-  font-weight: 600;
-  font-size: 0.875rem;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  margin-bottom: 0.5em;
+  display: none;
 }
 .blog-content .callout-body p {
   margin: 0;
+  color: var(--color-gov-slate);
 }
 .blog-content .callout-tip {
   border-color: #388E3C;
-  background-color: #ECFDF5;
-}
-.blog-content .callout-tip .callout-title {
-  color: #388E3C;
 }
 .blog-content .callout-warning {
   border-color: #F57C00;
-  background-color: #FFF8E1;
-}
-.blog-content .callout-warning .callout-title {
-  color: #F57C00;
 }
 .blog-content .callout-danger {
   border-color: #D32F2F;
-  background-color: #FEF2F2;
-}
-.blog-content .callout-danger .callout-title {
-  color: #D32F2F;
 }
 .blog-content .callout-note {
   border-color: var(--color-action-teal);
-  background-color: #F0FDFA;
-}
-.blog-content .callout-note .callout-title {
-  color: var(--color-action-teal);
 }
 
 /* Horizontal rules */

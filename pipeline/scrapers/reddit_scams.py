@@ -240,6 +240,33 @@ def _map_flair(flair: str | None) -> str | None:
     return FLAIR_MAP.get(flair.lower().strip())
 
 
+# Keyword-based category classifier — fallback when flair yields None or "other"
+_CATEGORY_KEYWORDS: list[tuple[str, list[str]]] = [
+    ("phishing", ["phishing", "phish", "fake email", "fake login", "spoofed email", "credential"]),
+    ("romance_scam", ["romance", "dating", "tinder", "bumble", "hinge", "catfish", "love scam", "pig butchering", "sugar mama", "sugar daddy", "sugar mommy"]),
+    ("investment_fraud", ["investment", "crypto", "bitcoin", "ethereum", "trading", "forex", "stock", "nft", "ponzi", "pyramid", "returns guaranteed", "passive income"]),
+    ("tech_support", ["tech support", "microsoft", "apple support", "remote access", "teamviewer", "anydesk", "your computer has"]),
+    ("impersonation", ["impersonat", "pretending to be", "fake government", "fake police", "fake irs", "fake ato", "fake bank call", "posing as"]),
+    ("shopping_scam", ["fake website", "fake store", "never arrived", "fake shop", "online shopping", "too good to be true", "marketplace", "facebook marketplace"]),
+    ("phone_scam", ["phone call", "phone scam", "robocall", "spoofed number", "called me", "voicemail", "vishing"]),
+    ("email_scam", ["email scam", "spam email", "suspicious email", "fake invoice", "business email"]),
+    ("sms_scam", ["sms", "text message", "smishing", "fake text", "text scam"]),
+    ("employment_scam", ["job scam", "employment", "fake job", "hiring scam", "work from home", "job offer", "recruitment"]),
+    ("advance_fee", ["advance fee", "pay upfront", "processing fee", "clearance fee", "inheritance", "lottery winner", "nigerian prince"]),
+    ("rental_scam", ["rental", "rent scam", "fake listing", "apartment scam", "deposit scam", "lease"]),
+    ("sextortion", ["sextortion", "nude", "intimate", "webcam", "blackmail", "explicit"]),
+]
+
+
+def _classify_by_keywords(title: str, body: str | None) -> str | None:
+    """Infer scam category from title/body keywords when flair is unhelpful."""
+    text = (title + " " + (body or "")).lower()
+    for category, keywords in _CATEGORY_KEYWORDS:
+        if any(kw in text for kw in keywords):
+            return category
+    return None
+
+
 def _should_skip_url(url: str) -> bool:
     """Check if URL is a Reddit-internal or image host link."""
     try:
@@ -726,6 +753,13 @@ def scrape() -> None:
                 post_url = f"https://reddit.com{permalink}"
                 flair = post.get("link_flair_text")
                 scam_type = _map_flair(flair)
+                # Fallback: keyword classification when flair is unhelpful
+                if not scam_type or scam_type == "other":
+                    keyword_type = _classify_by_keywords(
+                        post.get("title", ""), post.get("selftext", "")
+                    )
+                    if keyword_type:
+                        scam_type = keyword_type
 
                 created_utc = post.get("created_utc", 0)
                 post_time = datetime.fromtimestamp(
