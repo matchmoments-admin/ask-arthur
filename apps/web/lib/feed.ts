@@ -72,6 +72,31 @@ export type FeedItem = {
   source_created_at: string | null;
 };
 
+const CATEGORY_ILLUSTRATIONS: Record<string, string> = {
+  phishing: "/illustrations/category-phishing.jpg",
+  romance_scam: "/illustrations/category-romance-scam.jpg",
+  investment_fraud: "/illustrations/category-investment-crypto.jpg",
+  tech_support: "/illustrations/category-tech-support.jpg",
+  impersonation: "/illustrations/category-impersonation.jpg",
+  shopping_scam: "/illustrations/category-shopping-scam.jpg",
+  phone_scam: "/illustrations/category-phone-sms.jpg",
+  email_scam: "/illustrations/category-phishing.jpg",
+  sms_scam: "/illustrations/category-phone-sms.jpg",
+  employment_scam: "/illustrations/category-employment-scam.jpg",
+  advance_fee: "/illustrations/category-advance-fee.jpg",
+  rental_scam: "/illustrations/category-rental-scam.jpg",
+  sextortion: "/illustrations/category-sextortion.jpg",
+  informational: "/illustrations/category-default.jpg",
+  other: "/illustrations/category-default.jpg",
+};
+
+export function getCategoryIllustration(category: string | null): string {
+  if (category && CATEGORY_ILLUSTRATIONS[category]) {
+    return CATEGORY_ILLUSTRATIONS[category];
+  }
+  return "/illustrations/category-default.jpg";
+}
+
 export function getImageUrl(item: FeedItem): string | null {
   if (item.r2_image_key) {
     const cdnUrl = process.env.NEXT_PUBLIC_CDN_URL;

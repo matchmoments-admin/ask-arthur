@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import {
   Fish,
   HeartCrack,
@@ -28,6 +29,7 @@ import {
   SOURCE_CONFIG,
   COUNTRY_FLAGS,
   getImageUrl,
+  getCategoryIllustration,
   relativeTime,
 } from "@/lib/feed";
 import type { FeedItem } from "@/lib/feed";
@@ -72,14 +74,13 @@ export default function FeedCard({ item }: { item: FeedItem }) {
           />
         </div>
       ) : (
-        <div
-          className="aspect-video flex items-center justify-center"
-          style={{ backgroundColor: `${categoryConfig?.color || "#9CA3AF"}15` }}
-        >
-          <CategoryIcon
-            size={48}
-            className="opacity-30"
-            style={{ color: categoryConfig?.color || "#9CA3AF" }}
+        <div className="aspect-video bg-[#EFF4F8] overflow-hidden relative" aria-hidden="true">
+          <Image
+            src={getCategoryIllustration(item.category)}
+            alt=""
+            fill
+            sizes="(max-width: 640px) 100vw, 50vw"
+            className="object-cover"
           />
         </div>
       )}

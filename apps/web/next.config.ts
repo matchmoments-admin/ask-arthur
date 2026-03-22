@@ -56,6 +56,11 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   transpilePackages: ["@askarthur/types", "@askarthur/supabase", "@askarthur/utils", "@askarthur/scam-engine", "@askarthur/bot-core"],
   poweredByHeader: false,
+  images: {
+    formats: ["image/avif", "image/webp"],
+    deviceSizes: [640, 750, 828, 1080, 1200],
+    imageSizes: [128, 256, 384],
+  },
   async headers() {
     return [
       {
