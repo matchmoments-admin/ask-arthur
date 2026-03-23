@@ -8,7 +8,11 @@ type UploadScreenshotFn = (buffer: Buffer, contentType: string) => Promise<strin
 // ORDER MATTERS: More specific patterns (card, Medicare, TFN) must run BEFORE the
 // generic phone pattern, which is greedy and would otherwise consume their digits.
 const PII_PATTERNS: [RegExp, string][] = [
-  // Email addresses
+  // Email with display name: "John Smith <john@example.com>" or "johnsmith <john@example.com>"
+  [/[a-zA-Z0-9_.+-]+\s*<[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}>/g, "[EMAIL]"],
+  // Name or username before [EMAIL] placeholder (left by prior scrub or partial replacement)
+  [/[a-zA-Z0-9_.+-]+\s*<\[EMAIL\]>/g, "[EMAIL]"],
+  // Standalone email addresses
   [/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, "[EMAIL]"],
   // Credit card numbers (must run before generic phone)
   [/\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b/g, "[CARD]"],
@@ -41,6 +45,9 @@ export function scrubPII(text: string): string {
   for (const [pattern, replacement] of PII_PATTERNS) {
     scrubbed = scrubbed.replace(pattern, replacement);
   }
+  // Post-scrub cleanup: catch any name/username still attached to [EMAIL] placeholders
+  // Handles "jacobovers [EMAIL]", "jacobovers<[EMAIL]>", "Spam jacobovers [EMAIL]" etc.
+  scrubbed = scrubbed.replace(/\b[a-zA-Z][a-zA-Z0-9_.+-]*\s*(?:<)?\[EMAIL\](?:>)?/g, "[EMAIL]");
   return scrubbed;
 }
 
