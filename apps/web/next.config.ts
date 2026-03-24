@@ -54,7 +54,7 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
-  transpilePackages: ["@askarthur/types", "@askarthur/supabase", "@askarthur/utils", "@askarthur/scam-engine", "@askarthur/bot-core", "@askarthur/extension-audit"],
+  transpilePackages: ["@askarthur/types", "@askarthur/supabase", "@askarthur/utils", "@askarthur/scam-engine", "@askarthur/bot-core", "@askarthur/extension-audit", "@askarthur/mcp-audit"],
   poweredByHeader: false,
   images: {
     formats: ["image/avif", "image/webp"],

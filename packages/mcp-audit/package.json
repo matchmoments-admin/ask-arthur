@@ -1,0 +1,23 @@
+{
+  "name": "@askarthur/mcp-audit",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./scanner": "./src/scanner.ts",
+    "./skill-scanner": "./src/skill-scanner.ts",
+    "./patterns": "./src/patterns.ts"
+  },
+  "dependencies": {
+    "@askarthur/types": "workspace:*",
+    "@askarthur/utils": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^4.0.18",
+    "typescript": "^5"
+  }
+}
