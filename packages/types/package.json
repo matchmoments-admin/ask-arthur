@@ -7,7 +7,8 @@
     "./analysis": "./src/analysis.ts",
     "./billing": "./src/billing.ts",
     "./extension-security": "./src/extension-security.ts",
-    "./intelligence": "./src/intelligence.ts"
+    "./intelligence": "./src/intelligence.ts",
+    "./scanner": "./src/scanner.ts"
   },
   "dependencies": {
     "zod": "^4.3.6"
