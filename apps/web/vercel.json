@@ -26,7 +26,7 @@
       "maxDuration": 30
     },
     "app/api/skill-audit/route.ts": {
-      "maxDuration": 30
+      "maxDuration": 45
     }
   }
 }

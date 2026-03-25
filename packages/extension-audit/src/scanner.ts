@@ -9,7 +9,7 @@ import type { CRXManifest, ExtCheckCategory, ExtensionAuditOptions } from "./typ
 // ── CRX Download + Parse ──
 
 const CRX_MAGIC = 0x34327243;
-const MAX_CRX_SIZE = 50 * 1024 * 1024;
+const MAX_CRX_SIZE = 20 * 1024 * 1024; // 20 MB — covers 99%+ of extensions
 
 async function fetchCRX(extensionId: string): Promise<ArrayBuffer> {
   const url = `https://clients2.google.com/service/update2/crx?response=redirect&prodversion=130.0&acceptformat=crx3&x=id%3D${encodeURIComponent(extensionId)}%26uc`;

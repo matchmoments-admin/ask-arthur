@@ -73,28 +73,28 @@ export type FeedItem = {
 };
 
 const CATEGORY_ILLUSTRATIONS: Record<string, string> = {
-  phishing: "/illustrations/category-phishing.jpg",
-  romance_scam: "/illustrations/category-romance-scam.jpg",
-  investment_fraud: "/illustrations/category-investment-crypto.jpg",
-  tech_support: "/illustrations/category-tech-support.jpg",
-  impersonation: "/illustrations/category-impersonation.jpg",
-  shopping_scam: "/illustrations/category-shopping-scam.jpg",
-  phone_scam: "/illustrations/category-phone-sms.jpg",
-  email_scam: "/illustrations/category-phishing.jpg",
-  sms_scam: "/illustrations/category-phone-sms.jpg",
-  employment_scam: "/illustrations/category-employment-scam.jpg",
-  advance_fee: "/illustrations/category-advance-fee.jpg",
-  rental_scam: "/illustrations/category-rental-scam.jpg",
-  sextortion: "/illustrations/category-sextortion.jpg",
-  informational: "/illustrations/category-default.jpg",
-  other: "/illustrations/category-default.jpg",
+  phishing: "/illustrations/category-phishing.webp",
+  romance_scam: "/illustrations/category-romance-scam.webp",
+  investment_fraud: "/illustrations/category-investment-crypto.webp",
+  tech_support: "/illustrations/category-tech-support.webp",
+  impersonation: "/illustrations/category-impersonation.webp",
+  shopping_scam: "/illustrations/category-shopping-scam.webp",
+  phone_scam: "/illustrations/category-phone-sms.webp",
+  email_scam: "/illustrations/category-phishing.webp",
+  sms_scam: "/illustrations/category-phone-sms.webp",
+  employment_scam: "/illustrations/category-employment-scam.webp",
+  advance_fee: "/illustrations/category-advance-fee.webp",
+  rental_scam: "/illustrations/category-rental-scam.webp",
+  sextortion: "/illustrations/category-sextortion.webp",
+  informational: "/illustrations/category-default.webp",
+  other: "/illustrations/category-default.webp",
 };
 
 export function getCategoryIllustration(category: string | null): string {
   if (category && CATEGORY_ILLUSTRATIONS[category]) {
     return CATEGORY_ILLUSTRATIONS[category];
   }
-  return "/illustrations/category-default.jpg";
+  return "/illustrations/category-default.webp";
 }
 
 export function getImageUrl(item: FeedItem): string | null {

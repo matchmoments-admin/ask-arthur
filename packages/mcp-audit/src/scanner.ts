@@ -230,9 +230,12 @@ export async function scanMcpServer(opts: McpAuditOptions): Promise<UnifiedScanR
 
   // Dependency vulnerabilities (OSV.dev)
   let vulnMap = new Map<string, OsvVuln[]>();
+  let osvFailed = false;
   try {
     vulnMap = await queryOsv(allDeps);
-  } catch { /* OSV unavailable — skip */ }
+  } catch {
+    osvFailed = true;
+  }
 
   const totalVulns = Array.from(vulnMap.values()).reduce((sum, v) => sum + v.length, 0);
   const criticalVulns = Array.from(vulnMap.values())
@@ -243,12 +246,14 @@ export async function scanMcpServer(opts: McpAuditOptions): Promise<UnifiedScanR
     id: "MCP-SC-001",
     category: "supply_chain",
     label: "Dependency vulnerabilities",
-    status: totalVulns === 0 ? "pass" : criticalVulns.length > 0 ? "fail" : "warn",
-    score: totalVulns === 0 ? 15 : criticalVulns.length > 0 ? 0 : 5,
+    status: osvFailed ? "error" : totalVulns === 0 ? "pass" : criticalVulns.length > 0 ? "fail" : "warn",
+    score: osvFailed ? 0 : totalVulns === 0 ? 15 : criticalVulns.length > 0 ? 0 : 5,
     maxScore: 15,
-    details: totalVulns === 0
-      ? `${Object.keys(allDeps).length} dependencies checked — no known vulnerabilities.`
-      : `${totalVulns} vulnerability/ies in ${vulnMap.size} package(s)${criticalVulns.length > 0 ? ` (${criticalVulns.length} critical)` : ""}.`,
+    details: osvFailed
+      ? `Vulnerability database (OSV.dev) unavailable — ${Object.keys(allDeps).length} dependencies could not be checked.`
+      : totalVulns === 0
+        ? `${Object.keys(allDeps).length} dependencies checked — no known vulnerabilities.`
+        : `${totalVulns} vulnerability/ies in ${vulnMap.size} package(s)${criticalVulns.length > 0 ? ` (${criticalVulns.length} critical)` : ""}.`,
     reference: "MCP04",
   });
 
