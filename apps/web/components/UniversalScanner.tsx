@@ -13,9 +13,11 @@ import {
 import { detectInput, SCAN_TYPE_LABELS, INPUT_EXAMPLES } from "@/lib/input-detector";
 import type { DetectedInput } from "@/lib/input-detector";
 import type { ScanType } from "@askarthur/types/scanner";
+import type { UnifiedScanResult } from "@askarthur/types/scanner";
 import SiteAuditProgress from "./SiteAuditProgress";
 import SiteAuditReport from "./SiteAuditReport";
 import type { SiteAuditResult } from "./SiteAuditReport";
+import ScanResultReport from "./ScanResultReport";
 
 type Status = "idle" | "scanning" | "complete" | "error" | "rate_limited";
 
@@ -305,7 +307,7 @@ export default function UniversalScanner() {
         </div>
       )}
 
-      {/* Results — other scan types (placeholder until engines are built) */}
+      {/* Results — extension, MCP, skill scans */}
       {status === "complete" && result && detected?.type !== "website" && (
         <div className="mt-6">
           <button
@@ -314,11 +316,10 @@ export default function UniversalScanner() {
           >
             ← Scan another
           </button>
-          <div className="p-8 border border-border-light rounded-xl bg-white text-center">
-            <p className="text-gov-slate">
-              {chipLabel.label} scanning coming soon.
-            </p>
-          </div>
+          <ScanResultReport
+            result={result as unknown as UnifiedScanResult}
+            shareUrl={shareUrl}
+          />
         </div>
       )}
     </div>
