@@ -195,6 +195,17 @@ Authenticated via `X-Extension-Secret` + `X-Extension-Id` headers. CORS enabled.
 | `/api/extension/heartbeat` | GET | Health check / keep-alive |
 | `/api/extension/report-email` | POST | Report suspicious email |
 
+### Security Scanner API
+
+| Route | Method | Purpose |
+|-------|--------|---------|
+| `/api/site-audit/stream` | POST | Website health check (SSE streaming) |
+| `/api/extension-audit` | POST | Chrome extension security scan (CRX analysis, 20+ checks) |
+| `/api/mcp-audit` | POST | MCP server/npm package scan (OSV.dev, OWASP MCP Top 10) |
+| `/api/skill-audit` | POST | OpenClaw/Claude skill scan (prompt injection, malware detection) |
+| `/api/badge` | GET | Embeddable SVG security badge (shield/pill/cert styles) |
+| `/api/og/scan` | GET | Dynamic OG image for scan result sharing |
+
 ### Bot Webhooks
 
 | Route | Method | Purpose |

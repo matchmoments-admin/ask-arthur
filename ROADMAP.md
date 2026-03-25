@@ -261,6 +261,27 @@ Database infrastructure for government reporting, provider coordination, and fin
 | Database consolidation — migrate `scam_contacts` → `scam_entities`, drop 4 legacy tables | ✅ Done (v41) |
 | Data quality backfill — 14K+ entities from canonical tables, risk scoring, confidence promotion | ✅ Done (v42) |
 
+## Phase 11 — Unified Security Scanner ✅
+
+Multi-type security scanner covering websites, Chrome extensions, MCP servers, and AI skills — all graded A+ to F.
+
+| Feature | Status |
+|---------|--------|
+| Universal input bar with auto-detection (website/extension/MCP/skill) | ✅ Done |
+| Chrome extension audit — CRX download, manifest + source analysis, 20+ checks, 8 categories | ✅ Done |
+| MCP server audit — npm registry + OSV.dev vulnerability queries, OWASP MCP Top 10, 24+ checks | ✅ Done |
+| AI skill audit — prompt injection, malware/AMOS indicators, ClickFix detection, 16+ checks | ✅ Done |
+| Shared pattern library — 60+ detection patterns (injection, secrets, exfiltration, typosquatting) | ✅ Done |
+| Embeddable SVG badges — shield, pill, cert styles at `/api/badge` | ✅ Done |
+| Dynamic OG images for scan result sharing at `/api/og/scan` | ✅ Done |
+| Scan result persistence (`scan_results` table, `upsert_scan_result` RPC) | ✅ Done |
+| Permalink scan result pages at `/scan/result/[token]` | ✅ Done |
+| Public scan feed at `/health/feed` | ✅ Done |
+| Unified ScanResultReport component (grade ring, category breakdown, recommendations) | ✅ Done |
+| Reddit scraper keyword-based category classifier (backfill + future posts) | ✅ Done |
+| Scam feed category illustrations — 13 AI-generated images (no-leaf, centered) | ✅ Done |
+| Blog/character illustration system — faceless flat vector characters, 4 variants | ✅ Done |
+
 ---
 
 ## Status Key

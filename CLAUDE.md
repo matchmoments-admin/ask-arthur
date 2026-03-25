@@ -36,7 +36,9 @@ ask-arthur/
 │   ├── supabase/               # @askarthur/supabase — Client factories (server/browser)
 │   ├── utils/                  # @askarthur/utils — Logger, hash, rate-limit, feature-flags
 │   ├── scam-engine/            # @askarthur/scam-engine — Claude analysis, pipeline, Inngest
-│   └── bot-core/               # @askarthur/bot-core — Bot formatters, webhook verify, queue
+│   ├── bot-core/               # @askarthur/bot-core — Bot formatters, webhook verify, queue
+│   ├── extension-audit/        # @askarthur/extension-audit — Chrome extension security scanner
+│   └── mcp-audit/              # @askarthur/mcp-audit — MCP server + AI skill security scanner
 │
 ├── tooling/
 │   └── typescript/             # @askarthur/tsconfig — Shared TS configs
@@ -89,6 +91,9 @@ import { storeVerifiedScam } from "@askarthur/scam-engine/pipeline";
 import { analyzeForBot } from "@askarthur/bot-core/analyze";
 import { toTelegramMessage } from "@askarthur/bot-core/format-telegram";
 import { TIER_LIMITS } from "@askarthur/types/billing";
+import type { UnifiedScanResult } from "@askarthur/types/scanner";
+import { scanExtension } from "@askarthur/extension-audit";
+import { scanMcpServer, scanSkill } from "@askarthur/mcp-audit";
 ```
 
 Within the web app, use `@/` for local imports:
