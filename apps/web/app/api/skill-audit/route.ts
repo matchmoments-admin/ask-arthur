@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import JSZip from "jszip";
 import { scanSkill } from "@askarthur/mcp-audit";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
@@ -76,20 +77,31 @@ export async function POST(req: NextRequest) {
         const version: ClawHubVersionResponse | null = versionRes.ok ? await versionRes.json() : null;
         name = meta.skill.displayName || cleanSlug;
 
-        // ClawHub doesn't serve raw SKILL.md content via public API.
-        // Build a synthetic content string from metadata for our scanner,
-        // and enrich with ClawHub's own security scan results.
-        const syntheticContent = [
-          `---`,
-          `name: ${meta.skill.slug}`,
-          `description: ${meta.skill.summary || ""}`,
-          `---`,
-          `# ${meta.skill.displayName}`,
-          ``,
-          meta.skill.summary || "",
-        ].join("\n");
+        // Download actual SKILL.md content from ClawHub ZIP endpoint
+        const downloadUrl = `https://clawhub.ai/api/v1/download?slug=${cleanSlug}`;
+        const dlRes = await fetch(downloadUrl, { signal: AbortSignal.timeout(15000) });
 
-        content = syntheticContent;
+        if (dlRes.ok) {
+          const zipBuffer = await dlRes.arrayBuffer();
+          const zip = await JSZip.loadAsync(zipBuffer);
+          const skillFile = zip.file("SKILL.md");
+          if (skillFile) {
+            content = await skillFile.async("text");
+          }
+        }
+
+        // Fallback: build from metadata if download failed
+        if (!content) {
+          content = [
+            `---`,
+            `name: ${meta.skill.slug}`,
+            `description: ${meta.skill.summary || ""}`,
+            `---`,
+            `# ${meta.skill.displayName}`,
+            ``,
+            meta.skill.summary || "",
+          ].join("\n");
+        }
 
         // Run our scan on the metadata
         const result = await scanSkill({ skillContent: content, skillName: name });
