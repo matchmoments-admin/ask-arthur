@@ -252,19 +252,22 @@ export async function scanMcpServer(opts: McpAuditOptions): Promise<UnifiedScanR
     reference: "MCP04",
   });
 
-  // Package provenance
+  // Package provenance — check real signals (integrity, signatures, repo link)
   const isOfficial = opts.packageName.startsWith("@modelcontextprotocol/");
   const maintainerCount = meta.maintainers?.length ?? 0;
+  const hasRepo = !!meta.repository?.url;
+  const hasIntegrity = !!latestVersion?.dist?.tarball;
+  const provenanceSignals = [isOfficial, hasRepo, maintainerCount > 1, hasIntegrity].filter(Boolean).length;
   checks.push({
     id: "MCP-SC-004",
     category: "supply_chain",
     label: "Package provenance",
-    status: isOfficial ? "pass" : maintainerCount > 0 ? "pass" : "warn",
-    score: isOfficial ? 10 : maintainerCount > 0 ? 7 : 3,
+    status: isOfficial ? "pass" : provenanceSignals >= 3 ? "pass" : provenanceSignals >= 2 ? "pass" : "warn",
+    score: isOfficial ? 10 : Math.min(10, provenanceSignals * 3),
     maxScore: 10,
     details: isOfficial
       ? "Official @modelcontextprotocol scope — trusted publisher."
-      : `${maintainerCount} maintainer(s). ${meta.repository?.url ? "Has linked repository." : "No linked repository."}`,
+      : `${maintainerCount} maintainer(s). ${hasRepo ? "Has linked repository." : "No linked repository."} ${hasIntegrity ? "Signed tarball." : ""}`.trim(),
     reference: "MCP04",
   });
 

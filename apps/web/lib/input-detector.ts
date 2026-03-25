@@ -11,10 +11,10 @@ export type DetectedInput =
   | { type: "website"; value: string; domain: string }
   | { type: "unknown"; value: string };
 
-// Chrome extension ID: 32 lowercase alphanumeric characters
-const EXTENSION_ID_RE = /^[a-z]{32}$/;
-const CHROME_STORE_RE = /chrome\.google\.com\/webstore\/detail\/[^/]+\/([a-z]{32})/;
-const EDGE_STORE_RE = /microsoftedge\.microsoft\.com\/addons\/detail\/[^/]+\/([a-z]{32})/;
+// Bug #7 fix: extension IDs can contain lowercase letters AND digits
+const EXTENSION_ID_RE = /^[a-z0-9]{32}$/;
+const CHROME_STORE_RE = /chrome\.google\.com\/webstore\/detail\/[^/]+\/([a-z0-9]{32})/;
+const EDGE_STORE_RE = /microsoftedge\.microsoft\.com\/addons\/detail\/[^/]+\/([a-z0-9]{32})/;
 
 // ClawHub skill references
 const CLAWHUB_RE = /clawhub\.ai\/skills\/([a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_-]+)?)/;
@@ -24,6 +24,15 @@ const SKILL_SCOPE_RE = /^@[a-zA-Z0-9_-]+\/skill-[a-zA-Z0-9_-]+$/;
 const NPM_SCOPED_RE = /^@[a-zA-Z0-9_-]+\/[a-zA-Z0-9._-]+$/;
 const MCP_SERVER_RE = /^mcp-server-[a-zA-Z0-9._-]+$/;
 const GITHUB_MCP_RE = /github\.com\/[^/]+\/([^/]*mcp[^/]*)/i;
+
+// Plain npm package name (unscoped): starts with letter, allows letters/digits/hyphens/dots/underscores
+const NPM_PLAIN_RE = /^[a-z][a-z0-9._-]*$/;
+
+// Known npm packages with dots that look like domains (avoid website misdetection)
+const NPM_DOT_PACKAGES = new Set([
+  "socket.io", "socket.io-client", "socket.io-adapter", "socket.io-parser",
+  "is.js", "date-fns", "co.js", "run.js", "pm2.io",
+]);
 
 // MCP config JSON
 const MCP_CONFIG_RE = /^\s*\{[\s\S]*"mcpServers"\s*:/;
@@ -51,30 +60,29 @@ export function detectInput(raw: string): DetectedInput {
     return { type: "skill", value, skillId: clawMatch[1] };
   }
   if (SKILL_SCOPE_RE.test(value)) {
-    return { type: "skill", value, skillId: value };
+    // Bug #2 fix: strip @scope/ prefix, pass only the slug
+    const slug = value.replace(/^@[^/]+\/skill-/, "");
+    return { type: "skill", value, skillId: slug };
   }
 
-  // 3. MCP server — npm scoped package or mcp-server-* pattern
+  // 3. MCP server — explicit mcp-server-* pattern
   if (MCP_SERVER_RE.test(value)) {
     return { type: "mcp-server", value, packageName: value };
   }
+
+  // 4. Scoped npm packages (@scope/name)
   if (NPM_SCOPED_RE.test(value) && !SKILL_SCOPE_RE.test(value)) {
-    // Scoped npm package — could be MCP or general; classify as MCP if name hints
-    const isMcp = /mcp|model-context|server/i.test(value);
-    if (isMcp) {
-      return { type: "mcp-server", value, packageName: value };
-    }
-    // Generic scoped package — still route to MCP scanner for npm analysis
+    // All scoped packages route to npm scanner (works for MCP and non-MCP alike)
     return { type: "mcp-server", value, packageName: value };
   }
 
-  // 4. GitHub repo URL containing "mcp"
+  // 5. GitHub repo URL containing "mcp"
   const ghMatch = value.match(GITHUB_MCP_RE);
   if (ghMatch) {
     return { type: "mcp-server", value, packageName: ghMatch[1] };
   }
 
-  // 5. MCP config JSON
+  // 6. MCP config JSON
   if (MCP_CONFIG_RE.test(value)) {
     try {
       const parsed = JSON.parse(value);
@@ -85,7 +93,19 @@ export function detectInput(raw: string): DetectedInput {
     }
   }
 
-  // 6. URL or domain → website
+  // 7. Bug #5 fix: known npm packages with dots (socket.io etc) before domain check
+  if (NPM_DOT_PACKAGES.has(value.toLowerCase())) {
+    return { type: "mcp-server", value, packageName: value };
+  }
+
+  // 8. Bug #4 fix: plain npm package names (lodash, express, axios)
+  //    Must check BEFORE domain detection to avoid false positives
+  //    Only matches if it has NO dots (otherwise falls through to domain check)
+  if (NPM_PLAIN_RE.test(value) && !value.includes(".")) {
+    return { type: "mcp-server", value, packageName: value };
+  }
+
+  // 9. URL or domain → website
   if (URL_RE.test(value)) {
     try {
       const domain = new URL(value).hostname;
@@ -105,7 +125,7 @@ export function detectInput(raw: string): DetectedInput {
 export const SCAN_TYPE_LABELS: Record<ScanType | "mcp-config" | "unknown", { label: string; icon: string }> = {
   website: { label: "Website", icon: "🌐" },
   extension: { label: "Extension", icon: "🧩" },
-  "mcp-server": { label: "MCP Server", icon: "🔌" },
+  "mcp-server": { label: "npm Package", icon: "📦" },
   skill: { label: "AI Skill", icon: "⚡" },
   "mcp-config": { label: "MCP Config", icon: "📋" },
   unknown: { label: "Unknown", icon: "❓" },
@@ -116,5 +136,6 @@ export const INPUT_EXAMPLES = [
   { text: "example.com", type: "website" as const },
   { text: "nkbihfbeogaeaoehlefnkodbefgpgknn", type: "extension" as const },
   { text: "@modelcontextprotocol/server-filesystem", type: "mcp-server" as const },
-  { text: "clawhub.ai/skills/web-search", type: "skill" as const },
+  { text: "clawhub.ai/skills/sonoscli", type: "skill" as const },
+  { text: "lodash", type: "mcp-server" as const },
 ];

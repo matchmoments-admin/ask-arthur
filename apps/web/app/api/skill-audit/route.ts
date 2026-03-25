@@ -4,7 +4,33 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { checkRateLimit } from "@askarthur/utils/rate-limit";
 
-const SKILL_ID_RE = /^[a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_-]+)?$/;
+const SKILL_SLUG_RE = /^[a-zA-Z0-9_-]+$/;
+
+interface ClawHubSkillResponse {
+  skill: {
+    slug: string;
+    displayName: string;
+    summary: string;
+    tags: { latest: string };
+    stats: { downloads: number; installsAllTime: number; stars: number };
+  };
+  latestVersion: { version: string };
+  owner: { handle: string; displayName: string };
+  moderation: unknown;
+}
+
+interface ClawHubVersionResponse {
+  version: { version: string };
+  files: Array<{ path: string; size: number; sha256: string }>;
+  security: {
+    status: string;
+    hasWarnings: boolean;
+    scanners?: {
+      vt?: { status: string; verdict: string; analysis: string };
+      llm?: { status: string; verdict: string; summary: string; guidance: string };
+    };
+  };
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -22,38 +48,128 @@ export async function POST(req: NextRequest) {
     let name = skillName;
 
     if (skillId && !content) {
-      const cleanId = skillId.replace(/^clawhub\.ai\/skills\//, "");
+      // Clean the slug — strip @scope/skill- prefix, clawhub.ai/skills/ prefix
+      const cleanSlug = skillId
+        .replace(/^@[^/]+\/skill-/, "")
+        .replace(/^clawhub\.ai\/skills\//, "")
+        .replace(/\//g, "");
 
-      if (!SKILL_ID_RE.test(cleanId)) {
-        return NextResponse.json(
-          { error: "Invalid skill ID format." },
-          { status: 400 }
-        );
+      if (!SKILL_SLUG_RE.test(cleanSlug)) {
+        return NextResponse.json({ error: "Invalid skill ID format." }, { status: 400 });
       }
 
-      const rawUrl = `https://raw.githubusercontent.com/openclaw/clawhub/main/skills/${cleanId}/SKILL.md`;
-
+      // Fetch from ClawHub API (not GitHub)
       try {
-        const res = await fetch(rawUrl, { signal: AbortSignal.timeout(10000) });
-        if (!res.ok) {
+        const [metaRes, versionRes] = await Promise.all([
+          fetch(`https://clawhub.ai/api/v1/skills/${cleanSlug}`, { signal: AbortSignal.timeout(10000) }),
+          fetch(`https://clawhub.ai/api/v1/skills/${cleanSlug}/versions/latest`, { signal: AbortSignal.timeout(10000) }),
+        ]);
+
+        if (!metaRes.ok) {
           return NextResponse.json(
-            { error: `Skill "${cleanId}" not found on ClawHub (${res.status}).` },
+            { error: `Skill "${cleanSlug}" not found on ClawHub (${metaRes.status}).` },
             { status: 404 }
           );
         }
-        content = await res.text();
-        name = name || cleanId;
+
+        const meta: ClawHubSkillResponse = await metaRes.json();
+        const version: ClawHubVersionResponse | null = versionRes.ok ? await versionRes.json() : null;
+        name = meta.skill.displayName || cleanSlug;
+
+        // ClawHub doesn't serve raw SKILL.md content via public API.
+        // Build a synthetic content string from metadata for our scanner,
+        // and enrich with ClawHub's own security scan results.
+        const syntheticContent = [
+          `---`,
+          `name: ${meta.skill.slug}`,
+          `description: ${meta.skill.summary || ""}`,
+          `---`,
+          `# ${meta.skill.displayName}`,
+          ``,
+          meta.skill.summary || "",
+        ].join("\n");
+
+        content = syntheticContent;
+
+        // Run our scan on the metadata
+        const result = await scanSkill({ skillContent: content, skillName: name });
+
+        // Enrich with ClawHub's own security assessment
+        if (version?.security) {
+          const chSecurity = version.security;
+          result.meta = {
+            ...result.meta,
+            clawhubSecurityStatus: chSecurity.status,
+            clawhubHasWarnings: chSecurity.hasWarnings,
+            clawhubVtVerdict: chSecurity.scanners?.vt?.verdict,
+            clawhubLlmVerdict: chSecurity.scanners?.llm?.verdict,
+            clawhubLlmSummary: chSecurity.scanners?.llm?.summary,
+            clawhubGuidance: chSecurity.scanners?.llm?.guidance,
+            owner: meta.owner.handle,
+            downloads: meta.skill.stats.downloads,
+            installs: meta.skill.stats.installsAllTime,
+            stars: meta.skill.stats.stars,
+            version: meta.skill.tags.latest,
+          };
+
+          // Add ClawHub's security assessment as a check
+          const vtClean = chSecurity.scanners?.vt?.status === "clean";
+          const llmClean = chSecurity.scanners?.llm?.status === "clean";
+
+          result.checks.push({
+            id: "SKILL-CH-VT",
+            category: "metadata",
+            label: "ClawHub VirusTotal scan",
+            status: vtClean ? "pass" : "warn",
+            score: vtClean ? 5 : 0,
+            maxScore: 5,
+            details: vtClean
+              ? "VirusTotal scan: clean"
+              : `VirusTotal scan: ${chSecurity.scanners?.vt?.verdict || "unknown"}`,
+          });
+
+          result.checks.push({
+            id: "SKILL-CH-LLM",
+            category: "metadata",
+            label: "ClawHub AI security review",
+            status: llmClean ? "pass" : chSecurity.scanners?.llm?.status === "suspicious" ? "warn" : "fail",
+            score: llmClean ? 5 : 2,
+            maxScore: 5,
+            details: chSecurity.scanners?.llm?.summary || "No AI review available.",
+          });
+        }
+
+        // Persist
+        const supabase = createServiceClient();
+        if (supabase) {
+          supabase.rpc("upsert_scan_result", {
+            p_scan_type: "skill",
+            p_target: cleanSlug,
+            p_target_display: name,
+            p_overall_score: result.overallScore,
+            p_grade: result.grade,
+            p_result: result,
+          }).then(({ error }) => {
+            if (error) logger.error("Failed to store skill scan", { error: error.message });
+          });
+        }
+
+        return NextResponse.json(result, {
+          headers: { "Cache-Control": "public, s-maxage=300, stale-while-revalidate=60" },
+        });
+
       } catch (fetchErr) {
         return NextResponse.json(
-          { error: `Could not fetch skill from ClawHub: ${fetchErr instanceof Error ? fetchErr.message : "network error"}` },
+          { error: `Could not reach ClawHub: ${fetchErr instanceof Error ? fetchErr.message : "network error"}` },
           { status: 502 }
         );
       }
     }
 
+    // Direct content submission (raw SKILL.md paste)
     if (!content || typeof content !== "string") {
       return NextResponse.json(
-        { error: "Provide skillContent (raw SKILL.md) or skillId (ClawHub reference)." },
+        { error: "Provide skillContent (raw SKILL.md) or skillId (ClawHub slug)." },
         { status: 400 }
       );
     }
@@ -64,7 +180,6 @@ export async function POST(req: NextRequest) {
 
     const result = await scanSkill({ skillContent: content, skillName: name || "unknown" });
 
-    // Persist (fire-and-forget)
     const supabase = createServiceClient();
     if (supabase) {
       supabase.rpc("upsert_scan_result", {
