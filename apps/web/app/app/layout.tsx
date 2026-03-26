@@ -12,12 +12,9 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen flex flex-col bg-[#EFF4F8]">
       <Nav />
-      <main
-        id="main-content"
-        className="flex-1 w-full max-w-[640px] mx-auto px-5 py-8"
-      >
+      <main id="main-content" className="flex-1 w-full max-w-6xl mx-auto px-5 py-6">
         <DashboardNav />
         {children}
       </main>

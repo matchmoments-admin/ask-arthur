@@ -1,87 +1,71 @@
 import { requireAuth } from "@/lib/auth";
-import { createAuthServerClient } from "@askarthur/supabase/server-auth";
+import {
+  getDashboardKPIs,
+  getScamTypeBreakdown,
+  getChannelSplit,
+  getRecentThreats,
+  getRecentScans,
+} from "@/lib/dashboard";
+import KPICards from "@/components/dashboard/KPICards";
+import ScamTypeBreakdown from "@/components/dashboard/ScamTypeBreakdown";
+import SourceSplit from "@/components/dashboard/SourceSplit";
+import ThreatFeed from "@/components/dashboard/ThreatFeed";
+import RecentScans from "@/components/dashboard/RecentScans";
 import Link from "next/link";
 
 export default async function DashboardPage() {
   const user = await requireAuth();
-  const supabase = await createAuthServerClient();
 
-  let keyCount = 0;
-  let activeSubscription: { plan: string; status: string } | null = null;
-
-  if (supabase) {
-    const { count } = await supabase
-      .from("api_keys")
-      .select("*", { count: "exact", head: true })
-      .eq("is_active", true);
-
-    keyCount = count ?? 0;
-
-    const { data: subs } = await supabase
-      .from("subscriptions")
-      .select("plan, status")
-      .in("status", ["active", "trialing"])
-      .limit(1);
-
-    if (subs && subs.length > 0) {
-      activeSubscription = subs[0];
-    }
-  }
+  const [kpis, scamTypes, channels, threats, scans] = await Promise.all([
+    getDashboardKPIs(7),
+    getScamTypeBreakdown(30),
+    getChannelSplit(),
+    getRecentThreats(8),
+    getRecentScans(6),
+  ]);
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-deep-navy text-xl font-extrabold mb-1">
-          Welcome{user.displayName ? `, ${user.displayName}` : ""}
-        </h1>
-        <p className="text-gov-slate text-sm">{user.email}</p>
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-lg font-semibold text-deep-navy">
+            {user.displayName ? `Welcome, ${user.displayName}` : "Dashboard"}
+          </h1>
+          <p className="text-xs text-slate-500">
+            Threat intelligence overview — last 7 days
+          </p>
+        </div>
+        <Link
+          href="/app/keys"
+          className="rounded-lg bg-deep-navy text-white text-xs font-medium px-4 py-2 hover:bg-navy transition-colors"
+        >
+          API Keys
+        </Link>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        {/* API Keys card */}
-        <div className="rounded-xl border border-border-light bg-white p-5">
-          <p className="text-gov-slate text-xs font-bold uppercase tracking-wider mb-1">
-            Active API Keys
-          </p>
-          <p className="text-deep-navy text-2xl font-extrabold">{keyCount}</p>
-          <Link
-            href="/app/keys"
-            className="text-action-teal text-sm font-bold hover:underline mt-2 inline-block"
-          >
-            Manage keys
-          </Link>
-        </div>
+      {/* Row 1: KPI Cards */}
+      <KPICards kpis={kpis} />
 
-        {/* Plan card */}
-        <div className="rounded-xl border border-border-light bg-white p-5">
-          <p className="text-gov-slate text-xs font-bold uppercase tracking-wider mb-1">
-            Current Plan
-          </p>
-          <p className="text-deep-navy text-2xl font-extrabold capitalize">
-            {activeSubscription?.plan ?? "Free"}
-          </p>
-          <Link
-            href="/app/billing"
-            className="text-action-teal text-sm font-bold hover:underline mt-2 inline-block"
-          >
-            {activeSubscription ? "Manage billing" : "Upgrade"}
-          </Link>
+      {/* Row 2: Scam Types + Source Split */}
+      <div className="grid gap-6 lg:grid-cols-5">
+        <div className="lg:col-span-3">
+          <ScamTypeBreakdown data={scamTypes} />
+        </div>
+        <div className="lg:col-span-2">
+          <SourceSplit data={channels} />
         </div>
       </div>
 
-      {keyCount === 0 && (
-        <div className="rounded-xl border border-border-light bg-slate-50 p-5 text-center">
-          <p className="text-gov-slate text-sm mb-3">
-            Get started by creating your first API key.
-          </p>
-          <Link
-            href="/app/keys"
-            className="inline-block rounded-lg bg-action-teal text-white font-bold text-sm px-5 py-2.5 hover:bg-action-teal/90 transition-colors"
-          >
-            Create API Key
-          </Link>
+      {/* Row 3: Threat Feed + Recent Scans */}
+      <div className="grid gap-6 lg:grid-cols-5">
+        <div className="lg:col-span-3">
+          <ThreatFeed entities={threats} />
         </div>
-      )}
+        <div className="lg:col-span-2">
+          <RecentScans scans={scans} />
+        </div>
+      </div>
     </div>
   );
 }
