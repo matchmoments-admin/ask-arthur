@@ -29,12 +29,25 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Extract user_id from auth header if present (Security Fix #6: device binding)
+  let userId: string | null = null;
+  const authHeader = req.headers.get("authorization");
+  if (authHeader?.startsWith("Bearer ")) {
+    try {
+      const { data: { user } } = await supabase.auth.getUser(authHeader.slice(7));
+      userId = user?.id ?? null;
+    } catch {
+      // Anonymous registration — continue without user binding
+    }
+  }
+
   try {
     const { error } = await supabase.rpc("upsert_push_token", {
       p_expo_token: body.expoToken,
       p_platform: body.platform,
       p_device_id: body.deviceId,
       p_region: body.region ?? null,
+      ...(userId ? { p_user_id: userId } : {}),
     });
 
     if (error) {

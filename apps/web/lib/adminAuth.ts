@@ -12,29 +12,54 @@ function getSecret(): string {
   return secret;
 }
 
-/** Create an HMAC-signed token: timestamp:hmac */
+/** Create an HMAC-signed token with nonce: timestamp:nonce:hmac */
 export function createAdminToken(): string {
   const timestamp = Date.now().toString();
+  const nonce = crypto.randomBytes(16).toString("hex");
+  const payload = `${timestamp}:${nonce}`;
   const hmac = crypto
     .createHmac("sha256", getSecret())
-    .update(timestamp)
+    .update(payload)
     .digest("hex");
-  return `${timestamp}:${hmac}`;
+  return `${payload}:${hmac}`;
 }
 
-/** Verify an HMAC-signed admin token */
+/** Verify an HMAC-signed admin token with nonce */
 export function verifyAdminToken(token: string): boolean {
   try {
-    const [timestamp, signature] = token.split(":");
-    if (!timestamp || !signature) return false;
+    const parts = token.split(":");
 
-    // Reject tokens older than 24h
+    // Support both old format (timestamp:hmac) and new (timestamp:nonce:hmac)
+    if (parts.length === 2) {
+      // Legacy format — verify but with shorter window (1h)
+      const [timestamp, signature] = parts;
+      if (!timestamp || !signature) return false;
+      const age = Date.now() - Number(timestamp);
+      if (isNaN(age) || age > 3600 * 1000 || age < 0) return false;
+      const expected = crypto
+        .createHmac("sha256", getSecret())
+        .update(timestamp)
+        .digest("hex");
+      return crypto.timingSafeEqual(
+        Buffer.from(signature, "hex"),
+        Buffer.from(expected, "hex")
+      );
+    }
+
+    if (parts.length !== 3) return false;
+    const [timestamp, nonce, signature] = parts;
+    if (!timestamp || !nonce || !signature) return false;
+
+    // Reject tokens older than MAX_AGE
     const age = Date.now() - Number(timestamp);
     if (isNaN(age) || age > MAX_AGE * 1000 || age < 0) return false;
 
+    // Validate nonce format (32 hex chars)
+    if (!/^[0-9a-f]{32}$/.test(nonce)) return false;
+
     const expected = crypto
       .createHmac("sha256", getSecret())
-      .update(timestamp)
+      .update(`${timestamp}:${nonce}`)
       .digest("hex");
 
     return crypto.timingSafeEqual(

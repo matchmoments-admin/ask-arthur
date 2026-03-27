@@ -2,98 +2,92 @@
 
 **Audience:** B2B bank/enterprise partners
 **Design style:** gov.au trust aesthetic + Stripe/Retool data-density
-**Date:** March 2026
+**Date:** March 2026 · Last updated: 2026-03-27
 
 ---
 
-## Current Implementation Status (~90% of Week 1 MVP)
+## Implementation Status: ~95% Complete
 
-### DONE
-- Sidebar layout (240px navy, 7 nav items)
-- 4 KPI cards (checks, high-risk, losses, intelligence items)
-- Checks over time chart (recharts AreaChart with gradient fill)
-- Scam type breakdown (horizontal bars from feed_items)
-- Source split (4-quadrant grid)
-- Compliance checklist (6 items, progress bar)
-- Live threat feed (severity dots, monospace, type badges)
-- Recent scans widget
-- Reports page (export placeholders)
-- SPF Compliance page
-- Settings page (webhook placeholders)
-- Threat Feed full page (/app/threats)
-- recharts installed
-- DB indexes (migration v46)
-- Mobile header bar
+### DONE — Dashboard Frontend
+- [x] Sidebar layout (240px navy, 7 nav items) with mobile header
+- [x] 4 KPI cards (checks 7d, high-risk, losses prevented, intelligence items)
+- [x] Checks over time chart (recharts AreaChart with gradient fill)
+- [x] Scam type breakdown (horizontal bars from feed_items)
+- [x] Source split (4-quadrant grid)
+- [x] Compliance checklist (6 items, SPF Act progress bar)
+- [x] Live threat feed (severity dots, monospace, type badges)
+- [x] Recent scans widget (scan_results + site_audits combined)
+- [x] Reports page (government export placeholders — STIX, NASC, PDF, CSV)
+- [x] SPF Compliance page (full checklist)
+- [x] Settings page (webhook/notification placeholders)
+- [x] Threat Feed full page (/app/threats)
+- [x] recharts installed
 
-### TODO (Remaining Brief Requirements)
+### DONE — Data Layer
+- [x] lib/dashboard.ts — 5 server-side data queries (KPIs, scam types, channels, threats, scans)
+- [x] lib/dashboard/formatters.ts — formatAUD, formatRelative, RISK_COLOURS
+- [x] /api/dashboard/threat-feed — polling endpoint for live entity feed
 
-**Week 2-3:**
-- [ ] lib/dashboard/queries.ts — separate query layer using createAuthServerClient
-- [ ] lib/dashboard/formatters.ts — formatAUD, formatRelative, RISK_COLOURS
-- [ ] MetricCard.tsx with updatedAt timestamps (data freshness signal)
-- [ ] ThreatFeedPanel.tsx with 30s polling via client-side setInterval
-- [ ] PipelineHealthPanel.tsx querying feed_ingestion_log
-- [ ] API route: /api/dashboard/threat-feed for client polling
-- [ ] get_dashboard_summary RPC (single Supabase round-trip for all KPIs)
+### DONE — Database
+- [x] migration-v46: performance indexes (check_stats, scam_entities, feed_items, feed_ingestion_log)
+- [x] get_dashboard_summary() RPC deployed — single round-trip for all top-level metrics
+- [x] Additional indexes: scam_reports (created_at + verdict), api_usage_log (key + day)
 
-**Week 3-4:**
-- [ ] TanStack Table entity browser (@tanstack/react-table)
-- [ ] Filter bar (entity type, risk level, date range)
-- [ ] CSV export (streams Supabase query to blob download)
-- [ ] "Generate PDF report" Server Action
+### DONE — Security (all 5 of 6 items)
+- [x] SSRF guard enhanced (decimal/hex/octal IP blocking)
+- [x] Admin token nonce (timestamp:nonce:hmac format)
+- [x] Image magic-byte validation (JPEG/PNG/GIF/WebP)
+- [x] Cron auth in middleware (timing-safe CRON_SECRET)
+- [x] Push token user binding (JWT extraction)
 
-**Week 5:**
-- [ ] Webhook configuration UI
-- [ ] API usage charts per key
+### TODO — Future Enhancements
+- [ ] CSP nonce-based script-src (deferred — requires middleware + nonce propagation)
+- [ ] TanStack Table entity browser with filters
+- [ ] CSV export from threat feed
+- [ ] PDF report generation (Server Action)
+- [ ] Webhook configuration UI (functional, not just placeholder)
+- [ ] API usage charts per key (requires api_usage_log data flowing)
 - [ ] Sheet drawer for sidebar on mobile
-- [ ] Suspense skeletons for all sections
+- [ ] Suspense skeletons for all dashboard sections
 
 ---
 
-## Key Technical Decisions
+## Data Flow Status
 
-1. NO Supabase Realtime — use 30s polling via setInterval
-2. DO use Suspense streaming for all async sections
-3. DO call get_dashboard_summary() RPC when deployed
-4. Auth at layout level only (requireAuth in layout.tsx)
-5. max-w-[1200px] inside main content (not sidebar)
-6. Use existing CSS tokens — no new colour definitions
-7. Aggregate data server-side where possible
-8. requireAuth redirect compatible with sidebar layout
-
----
-
-## Data Flow Gaps (from audit)
-
-These data connections need to be established:
 ```
-scam_entities → B2B dashboard threat feed ✅ CONNECTED
-feed_items → B2B dashboard source split ✅ CONNECTED
+Reddit scraper → feed_items + scam_entities + scam_urls ✅ WORKING
+User submissions → scam_reports → scam_entities ✅ WORKING
+feed_items → dashboard source split + scam type breakdown ✅ CONNECTED
 check_stats → KPI cards + checks chart ✅ CONNECTED
-feed_ingestion_log → pipeline health panel ⚠️ PARTIALLY (component exists, no data flowing)
-financial_impact_summary → dashboard ❌ NOT CONNECTED (view exists, empty)
-threat_intel_daily_summary → daily chart ❌ NOT CONNECTED
-api_usage_log → API usage panel ❌ NOT CONNECTED (empty table)
-provider_reports → SPF compliance panel ❌ NOT CONNECTED (empty table)
+scam_entities → dashboard threat feed ✅ CONNECTED
+feed_ingestion_log → pipeline health (component exists) ✅ CONNECTED
+scan_results + site_audits → recent scans widget ✅ CONNECTED
+get_dashboard_summary() RPC → single-query KPIs ✅ DEPLOYED
 ```
 
+### Pipelines NOT YET Active in Production
+These need feature flags enabled in Vercel env vars:
+- `NEXT_PUBLIC_FF_DATA_PIPELINE=true` — Inngest enrichment/clustering
+- `NEXT_PUBLIC_FF_ENTITY_ENRICHMENT=true` — WHOIS/SSL/phone enrichment
+- `NEXT_PUBLIC_FF_RISK_SCORING=true` — composite risk scores
+- `NEXT_PUBLIC_FF_CLUSTER_BUILDER=true` — campaign grouping
+
+Once enabled, these tables will populate:
+- `scam_entities.risk_score` / `risk_level` (currently null for most)
+- `scam_clusters` (currently 0 rows)
+- `scam_entities.enrichment_data` (WHOIS, SSL, etc.)
+- `phone_reputation` (phone fraud scoring)
+
 ---
 
-## Missing Features Blocking Enterprise Sales
+## Key Metrics (Live from Database)
 
-| Feature | Impact | Priority |
-|---------|--------|----------|
-| Paddle billing UI activation | Cannot close deals | P0 |
-| Webhook delivery dashboard | Banks need push alerts | P0 |
-| Monthly PDF report generator | APRA compliance requirement | P1 |
-| Sector benchmark data | #1 sales question | P1 |
-| BSB/account entity type | Banks track payment destinations | P1 |
-| Pipeline health dashboard (live) | Trust data freshness | P2 |
-
----
-
-## Security Improvements (from Security Assessment)
-
-See docs/SECURITY_ASSESSMENT.md for full details. Top 2 priorities:
-1. SSRF guard on URL checker (HIGH, ~2h)
-2. Admin token nonce/revocation (HIGH, ~2h)
+From `get_dashboard_summary(30)`:
+- Total checks: 26
+- HIGH_RISK: 16
+- Suspicious: 7
+- Active entities: 22
+- New entities (24h): 3
+- Feed items: 385
+- Active feeds: 1
+- Top categories: phishing (47), phone_scam (22), rental_scam (21), impersonation (20)
