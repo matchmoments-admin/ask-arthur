@@ -17,7 +17,7 @@ export default async function Nav() {
   return (
     <nav
       aria-label="Main navigation"
-      className="relative w-full max-w-[960px] mx-auto px-5 py-4 flex items-center justify-between border-b border-border-light"
+      className="relative w-full max-w-[640px] mx-auto px-5 py-4 flex items-center justify-between border-b border-gray-100"
     >
       <Link
         href="/"
