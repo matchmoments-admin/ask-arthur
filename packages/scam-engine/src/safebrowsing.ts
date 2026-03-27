@@ -74,6 +74,15 @@ export function isPrivateURL(urlString: string): boolean {
       if (pattern.test(hostname)) return true;
     }
 
+    // Block alternative IP notations (decimal, hex, octal)
+    // e.g., http://2130706433 (= 127.0.0.1), http://0x7f000001
+    if (/^\d+$/.test(hostname)) return true;  // decimal IP
+    if (/^0x[0-9a-f]+$/i.test(hostname)) return true;  // hex IP
+    if (/^0[0-7]+$/.test(hostname)) return true;  // octal IP
+
+    // Block metadata.goog (GCP alternate)
+    if (hostname === "metadata.goog") return true;
+
     return false;
   } catch {
     // Malformed URL — block it

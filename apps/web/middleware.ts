@@ -6,8 +6,28 @@ import { logger } from "@askarthur/utils/logger";
 // Coexists with per-route limits in lib/rateLimit.ts (defense-in-depth)
 
 export async function middleware(req: NextRequest) {
-  // Skip cron routes (authenticated separately via CRON_SECRET)
+  // Cron routes — defense-in-depth auth check before skipping rate limiting
   if (req.nextUrl.pathname.startsWith("/api/cron")) {
+    const cronSecret = req.headers.get("x-cron-secret")
+      ?? req.headers.get("authorization")?.replace("Bearer ", "");
+    const expected = process.env.CRON_SECRET;
+
+    if (!expected || !cronSecret || cronSecret.length !== expected.length) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // Timing-safe comparison
+    const encoder = new TextEncoder();
+    const a = encoder.encode(cronSecret);
+    const b = encoder.encode(expected);
+    let mismatch = a.length !== b.length ? 1 : 0;
+    for (let i = 0; i < Math.min(a.length, b.length); i++) {
+      mismatch |= a[i] ^ b[i];
+    }
+    if (mismatch !== 0) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     return NextResponse.next();
   }
 

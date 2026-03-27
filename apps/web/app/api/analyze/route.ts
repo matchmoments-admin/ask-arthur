@@ -77,7 +77,21 @@ export async function POST(req: NextRequest) {
       ? rawImages
       : image ? [image] : [];
 
-    // 2b. Pre-filter for prompt injection attempts
+    // 2b. Validate image magic bytes (prevent disguised file uploads)
+    if (images.length > 0) {
+      const { validateImageMagicBytes } = await import("@askarthur/scam-engine/image-validate");
+      for (const img of images) {
+        const { valid } = validateImageMagicBytes(img);
+        if (!valid) {
+          return NextResponse.json(
+            { error: "validation_error", message: "Invalid image format. Supported: JPEG, PNG, GIF, WebP." },
+            { status: 400 }
+          );
+        }
+      }
+    }
+
+    // 2c. Pre-filter for prompt injection attempts
     const injectionCheck = text ? detectInjectionAttempt(text) : { detected: false, patterns: [] };
 
     // 3. Check cache for text-only requests (skip for images — content-addressable hashing is complex)

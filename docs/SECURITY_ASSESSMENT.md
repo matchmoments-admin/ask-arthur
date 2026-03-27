@@ -10,11 +10,11 @@
 
 | # | Issue | Severity | Effort | Status |
 |---|-------|----------|--------|--------|
-| 1 | SSRF guard on URL checker | HIGH | ~2h | TODO |
+| 1 | SSRF guard on URL checker | HIGH | ~2h | DONE — enhanced isPrivateURL() with decimal/hex/octal IP blocking |
 | 2 | Admin token nonce/revocation | HIGH | ~2h | TODO |
 | 3 | CSP nonce-based script-src | MEDIUM | ~3h | TODO |
-| 4 | Image magic-byte validation | MEDIUM | ~1h | TODO |
-| 5 | Cron auth in middleware | MEDIUM | ~30min | TODO |
+| 4 | Image magic-byte validation | MEDIUM | ~1h | DONE — image-validate.ts + wired into /api/analyze |
+| 5 | Cron auth in middleware | MEDIUM | ~30min | DONE — timing-safe CRON_SECRET check in middleware |
 | 6 | Push token user binding | LOW | ~1h | TODO |
 
 ---
