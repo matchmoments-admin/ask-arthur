@@ -32,7 +32,7 @@ export default function RecentScans({ scans }: { scans: RecentScan[] }) {
   if (scans.length === 0) return null;
 
   return (
-    <div className="rounded-lg border border-slate-200/60 bg-white">
+    <div className="bg-white border border-border-light rounded-xl shadow-sm">
       <div className="border-b border-slate-100 px-5 py-3">
         <h3 className="text-sm font-semibold text-deep-navy">Recent Security Scans</h3>
       </div>

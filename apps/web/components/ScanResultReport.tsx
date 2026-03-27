@@ -188,7 +188,7 @@ export default function ScanResultReport({
       </div>
 
       {/* Category breakdown */}
-      <div className="border border-slate-100 rounded-xl overflow-hidden bg-white">
+      <div className="bg-white border border-border-light rounded-xl shadow-sm overflow-hidden">
         {result.categories
           .filter((c) => c.checks.length > 0)
           .map((cat, i) => (

@@ -31,7 +31,7 @@ const TYPE_LABEL: Record<string, string> = {
 
 export default function ThreatFeed({ entities }: { entities: ThreatEntity[] }) {
   return (
-    <div className="rounded-lg border border-slate-200/60 bg-white">
+    <div className="bg-white border border-border-light rounded-xl shadow-sm">
       <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
         <h3 className="text-sm font-semibold text-deep-navy">Threat Entities</h3>
         {entities.length > 0 && (

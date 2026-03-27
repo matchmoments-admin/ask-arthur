@@ -69,7 +69,7 @@ export default function ComplianceChecklist() {
   const completed = ITEMS.filter((i) => i.status === "complete").length;
 
   return (
-    <div className="rounded-lg border border-slate-200/60 bg-white">
+    <div className="bg-white border border-border-light rounded-xl shadow-sm">
       <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
         <h3 className="text-sm font-semibold text-deep-navy">SPF Compliance</h3>
         <span

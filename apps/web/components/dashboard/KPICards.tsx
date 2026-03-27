@@ -54,7 +54,7 @@ export default function KPICards({ kpis }: { kpis: DashboardKPIs }) {
         return (
           <div
             key={card.label}
-            className="rounded-lg border border-slate-200/60 bg-white px-5 py-4"
+            className="bg-white border border-border-light rounded-xl shadow-sm px-5 py-4"
           >
             <div className="flex items-center gap-2 mb-1">
               <Icon size={14} className="text-slate-400" />

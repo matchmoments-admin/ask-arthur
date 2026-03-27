@@ -71,7 +71,7 @@ export default async function DashboardPage() {
 
       {/* Row 2: Charts — Checks Over Time + Scam Type Breakdown */}
       <div className="grid gap-4 lg:grid-cols-2 mt-6">
-        <div className="rounded-lg border border-slate-200/60 bg-white p-5">
+        <div className="bg-white border border-border-light rounded-xl shadow-sm p-5">
           <h2 className="text-xs font-medium uppercase tracking-wider text-slate-500 mb-4">
             Checks Over Time (30d)
           </h2>

@@ -13,13 +13,13 @@ export default async function DashboardLayout({
   const user = await requireAuth();
 
   return (
-    <div className="min-h-screen flex bg-[#EFF4F8]">
+    <div className="min-h-screen flex bg-white">
       <DashboardSidebar userEmail={user.email} userRole={user.role || "user"} />
 
-      {/* Mobile header (shown when sidebar is hidden) */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-deep-navy text-white px-4 py-3 flex items-center justify-between">
-        <span className="font-extrabold text-sm uppercase tracking-wider">Ask Arthur</span>
-        <span className="text-xs text-white/50">{user.email}</span>
+      {/* Mobile header */}
+      <div className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-white border-b border-border-light px-4 py-3 flex items-center justify-between">
+        <span className="font-extrabold text-sm uppercase tracking-wide text-deep-navy">Ask Arthur</span>
+        <span className="text-xs text-slate-400">{user.email}</span>
       </div>
 
       <main className="flex-1 min-w-0 overflow-auto lg:pt-0 pt-14">

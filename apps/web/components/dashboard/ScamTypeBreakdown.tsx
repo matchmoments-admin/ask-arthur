@@ -4,7 +4,7 @@ import { getCategoryLabel } from "@/lib/dashboard";
 export default function ScamTypeBreakdown({ data }: { data: ScamTypeRow[] }) {
   if (data.length === 0) {
     return (
-      <div className="rounded-lg border border-slate-200/60 bg-white p-5">
+      <div className="bg-white border border-border-light rounded-xl shadow-sm p-5">
         <h3 className="text-sm font-semibold text-deep-navy">Scam Types</h3>
         <p className="text-xs text-slate-400 mt-4">No data yet.</p>
       </div>
@@ -14,7 +14,7 @@ export default function ScamTypeBreakdown({ data }: { data: ScamTypeRow[] }) {
   const maxCount = data[0]?.count || 1;
 
   return (
-    <div className="rounded-lg border border-slate-200/60 bg-white p-5">
+    <div className="bg-white border border-border-light rounded-xl shadow-sm p-5">
       <div className="flex items-center justify-between mb-4">
         <div>
           <h3 className="text-sm font-semibold text-deep-navy">Top Scam Types</h3>
