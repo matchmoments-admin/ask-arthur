@@ -48,6 +48,7 @@
     "react-dom": "^19.2.4",
     "react-minimal-pie-chart": "^9.1.2",
     "reading-time": "^1.5.0",
+    "recharts": "^3.8.1",
     "resend": "^6.9.2",
     "sanitize-html": "^2.17.1",
     "server-only": "^0.0.1",

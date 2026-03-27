@@ -1,24 +1,30 @@
-import Nav from "@/components/Nav";
-import Footer from "@/components/Footer";
-import DashboardNav from "@/components/DashboardNav";
+import { requireAuth } from "@/lib/auth";
+import DashboardSidebar from "@/components/dashboard/DashboardSidebar";
 
 export const metadata = {
-  title: "Dashboard — Ask Arthur",
+  title: "Intelligence Dashboard — Ask Arthur",
 };
 
-export default function DashboardLayout({
+export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const user = await requireAuth();
+
   return (
-    <div className="min-h-screen flex flex-col bg-[#EFF4F8]">
-      <Nav />
-      <main id="main-content" className="flex-1 w-full max-w-6xl mx-auto px-5 py-6">
-        <DashboardNav />
+    <div className="min-h-screen flex bg-[#EFF4F8]">
+      <DashboardSidebar userEmail={user.email} userRole={user.role || "user"} />
+
+      {/* Mobile header (shown when sidebar is hidden) */}
+      <div className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-deep-navy text-white px-4 py-3 flex items-center justify-between">
+        <span className="font-extrabold text-sm uppercase tracking-wider">Ask Arthur</span>
+        <span className="text-xs text-white/50">{user.email}</span>
+      </div>
+
+      <main className="flex-1 min-w-0 overflow-auto lg:pt-0 pt-14">
         {children}
       </main>
-      <Footer />
     </div>
   );
 }
