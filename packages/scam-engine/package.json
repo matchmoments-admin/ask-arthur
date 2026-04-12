@@ -21,6 +21,7 @@
     "./image-validate": "./src/image-validate.ts",
     "./ssrf-guard": "./src/ssrf-guard.ts",
     "./brand-alerts": "./src/brand-alerts.ts",
+    "./social-post": "./src/social-post.ts",
     "./local-intel": "./src/local-intel.ts",
     "./abuseipdb": "./src/abuseipdb.ts",
     "./hibp": "./src/hibp.ts",
