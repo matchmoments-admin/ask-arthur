@@ -8,6 +8,7 @@ export default async function Nav() {
   if (featureFlags.siteAudit) {
     links.push({ href: "/health", label: "Health" });
   }
+  links.push({ href: "/persona-check", label: "Persona Check" });
   if (featureFlags.scamFeed) {
     links.push({ href: "/scam-feed", label: "Scam Feed" });
   }
