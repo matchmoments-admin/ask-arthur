@@ -366,6 +366,24 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // 8e. Brand impersonation alert (fire-and-forget)
+    if (aiResult.impersonatedBrand && finalVerdict !== "SAFE") {
+      import("@askarthur/scam-engine/brand-alerts").then(({ createBrandAlert }) => {
+        waitUntil(
+          createBrandAlert({
+            brandName: aiResult.impersonatedBrand!,
+            scamType: aiResult.scamType,
+            channel: aiResult.channel,
+            confidence: aiResult.confidence,
+            scammerPhones: scammerContacts?.phoneNumbers?.map(p => p.value) || [],
+            scammerUrls: allUrls.slice(0, 10),
+            scammerEmails: scammerContacts?.emailAddresses?.map(e => e.value) || [],
+            summary: aiResult.summary,
+          }).catch(err => logger.error("Brand alert failed", { error: String(err) }))
+        );
+      });
+    }
+
     // 9. Return result
     return NextResponse.json(
       {

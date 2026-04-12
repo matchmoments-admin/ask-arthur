@@ -9,5 +9,6 @@ export { getCachedAnalysis, setCachedAnalysis } from "./analysis-cache";
 export { geolocateIP } from "./geolocate";
 export { validateImageMagicBytes } from "./image-validate";
 export { assertSafeURL, filterSafeURLs } from "./ssrf-guard";
+export { createBrandAlert } from "./brand-alerts";
 export { storeScamReport, buildEntities } from "./report-store";
 export type { EntityToLink, StoreScamReportParams } from "./report-store";

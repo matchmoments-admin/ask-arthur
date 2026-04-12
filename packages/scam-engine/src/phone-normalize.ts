@@ -8,23 +8,29 @@
  * Returns null if the number can't be normalized.
  */
 export function normalizePhoneE164(raw: string): string | null {
-  // Strip whitespace, dots, dashes, parens
-  const cleaned = raw.replace(/[\s\u00A0\u2009\u202F.\-()]/g, "");
+  // Strip all non-digit characters except leading +
+  const hasPlus = raw.trimStart().startsWith("+");
+  const digits = raw.replace(/\D/g, "");
 
-  // Already valid E.164 (international)
-  if (/^\+\d{10,15}$/.test(cleaned)) return cleaned;
+  if (!digits || digits.length < 8) return null;
 
-  // AU mobile: 04xx or 05xx (10 digits)
-  if (/^0[45]\d{8}$/.test(cleaned)) return `+61${cleaned.slice(1)}`;
+  // Already valid E.164 with + (international)
+  if (hasPlus && digits.length >= 10 && digits.length <= 15) return `+${digits}`;
 
-  // AU landline: 02, 03, 07, 08 (10 digits)
-  if (/^0[2378]\d{8}$/.test(cleaned)) return `+61${cleaned.slice(1)}`;
+  // AU mobile: 04xx or 05xx (10 digits starting with 0)
+  if (/^0[45]\d{8}$/.test(digits)) return `+61${digits.slice(1)}`;
 
-  // AU with country code but no +
-  if (/^61[2-578]\d{8}$/.test(cleaned)) return `+${cleaned}`;
+  // AU landline: 02, 03, 07, 08 (10 digits starting with 0)
+  if (/^0[2378]\d{8}$/.test(digits)) return `+61${digits.slice(1)}`;
+
+  // AU with country code 61 (11 digits)
+  if (/^61[2-578]\d{8}$/.test(digits)) return `+${digits}`;
 
   // 13/1300/1800 — short codes, not E.164 compatible
-  if (/^1[38]\d{4,8}$/.test(cleaned)) return null;
+  if (/^1[38]\d{4,8}$/.test(digits)) return null;
+
+  // Generic international (10-15 digits, assume + prefix)
+  if (digits.length >= 10 && digits.length <= 15) return `+${digits}`;
 
   return null;
 }
