@@ -15,7 +15,10 @@ import {
 export { PROMPT_VERSION };
 export type { Verdict, AnalysisMode, AnalysisResult, ScammerContacts, InjectionCheckResult };
 
-const VALID_VERDICTS: readonly string[] = ["SAFE", "SUSPICIOUS", "HIGH_RISK"];
+const VALID_VERDICTS: readonly string[] = ["SAFE", "UNCERTAIN", "SUSPICIOUS", "HIGH_RISK"];
+
+// Confidence threshold: if Claude is less than 60% confident, downgrade to UNCERTAIN
+const UNCERTAIN_CONFIDENCE_THRESHOLD = 0.6;
 
 /** Strip invisible Unicode characters that can bypass prompt injection detection */
 export function sanitizeUnicode(text: string): string {
@@ -169,6 +172,12 @@ export function validateResult(parsed: Record<string, unknown>): AnalysisResult 
 
   // Clamp confidence to 0-1
   const confidence = Math.max(0, Math.min(1, Number(parsed.confidence) || 0.5));
+
+  // Apply confidence threshold: low confidence → UNCERTAIN verdict
+  // This prevents false positives on legitimate messages when Claude isn't sure
+  if (confidence < UNCERTAIN_CONFIDENCE_THRESHOLD && verdict !== "SAFE") {
+    verdict = "UNCERTAIN";
+  }
 
   // Sanitize and cap string arrays
   const redFlags = (Array.isArray(parsed.redFlags) ? parsed.redFlags : [])

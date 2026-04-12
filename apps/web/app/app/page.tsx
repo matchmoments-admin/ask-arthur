@@ -13,6 +13,7 @@ import ThreatFeed from "@/components/dashboard/ThreatFeed";
 import ComplianceChecklist from "@/components/dashboard/ComplianceChecklist";
 import RecentScans from "@/components/dashboard/RecentScans";
 import ChecksChart from "@/components/dashboard/ChecksChart";
+import EntityFrequency from "@/components/dashboard/EntityFrequency";
 import { createServiceClient } from "@askarthur/supabase/server";
 
 async function getCheckTimeSeries(days = 30) {
@@ -90,14 +91,19 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      {/* Row 4: Threat Feed + Recent Scans */}
+      {/* Row 4: Threat Feed + Entity Frequency */}
       <div className="grid gap-4 lg:grid-cols-5 mt-6">
         <div className="lg:col-span-3">
           <ThreatFeed entities={threats} />
         </div>
         <div className="lg:col-span-2">
-          <RecentScans scans={scans} />
+          <EntityFrequency entities={threats} />
         </div>
+      </div>
+
+      {/* Row 5: Recent Scans (full width) */}
+      <div className="mt-6">
+        <RecentScans scans={scans} />
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 export const PROMPT_VERSION = "2.0.0";
 
-export type Verdict = "SAFE" | "SUSPICIOUS" | "HIGH_RISK";
+export type Verdict = "SAFE" | "UNCERTAIN" | "SUSPICIOUS" | "HIGH_RISK";
 export type AnalysisMode = "text" | "image" | "qrcode";
 
 export interface ScammerContact {
