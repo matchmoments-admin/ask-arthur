@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { verifyAdminToken } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { publishToSocial } from "@/lib/social-publish";
 import { logger } from "@askarthur/utils/logger";
 
 export async function POST(req: NextRequest) {
-  // Admin auth check via cookie
+  // Verify admin HMAC token (not just cookie presence)
   const adminCookie = req.cookies.get("__aa_admin")?.value;
-  if (!adminCookie) {
+  if (!adminCookie || !verifyAdminToken(adminCookie)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

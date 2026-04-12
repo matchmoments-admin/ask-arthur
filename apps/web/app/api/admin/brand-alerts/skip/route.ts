@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { verifyAdminToken } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
 
 export async function POST(req: NextRequest) {
   const adminCookie = req.cookies.get("__aa_admin")?.value;
-  if (!adminCookie) {
+  if (!adminCookie || !verifyAdminToken(adminCookie)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
