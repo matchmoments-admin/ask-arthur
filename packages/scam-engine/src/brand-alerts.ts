@@ -1,9 +1,8 @@
-// Brand impersonation alert system — auto-creates alerts with draft social posts
-// when Claude detects a known brand being impersonated in a scam.
+// Brand impersonation alert system — creates individual alert rows silently.
+// Social posts are generated as weekly summaries, not per-alert.
 
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
-import { generateDraftPosts } from "./social-post";
 
 export interface BrandAlertInput {
   brandName: string;
@@ -18,29 +17,18 @@ export interface BrandAlertInput {
 }
 
 /**
- * Create a brand impersonation alert with draft social posts.
- * Called fire-and-forget from the analysis pipeline.
+ * Create a brand impersonation alert row. Individual alerts accumulate
+ * silently — social posts are generated as weekly summaries via admin dashboard.
  */
 export async function createBrandAlert(input: BrandAlertInput): Promise<void> {
   const supabase = createServiceClient();
   if (!supabase) return;
 
-  // Look up brand category from known_brands table
   const { data: brand } = await supabase
     .from("known_brands")
     .select("brand_category, security_contact_email")
     .eq("brand_name", input.brandName)
     .single();
-
-  // Generate draft social media posts
-  const drafts = generateDraftPosts({
-    brandName: input.brandName,
-    scamType: input.scamType,
-    channel: input.channel,
-    summary: input.summary,
-    scammerPhones: input.scammerPhones,
-    scammerUrls: input.scammerUrls,
-  });
 
   const { error } = await supabase
     .from("brand_impersonation_alerts")
@@ -57,13 +45,11 @@ export async function createBrandAlert(input: BrandAlertInput): Promise<void> {
       evidence_summary: input.summary || null,
       outreach_contact: brand?.security_contact_email || null,
       outreach_status: "pending",
-      draft_post_short: drafts.short,
-      draft_post_long: drafts.long,
     });
 
   if (error) {
     logger.error("Failed to create brand alert", { error: error.message, brand: input.brandName });
   } else {
-    logger.info("Brand alert created with social draft", { brand: input.brandName });
+    logger.info("Brand alert created", { brand: input.brandName, confidence: input.confidence });
   }
 }

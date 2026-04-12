@@ -112,3 +112,68 @@ export function generateDraftPosts(input: DraftPostInput): DraftPosts {
 
   return { short, long };
 }
+
+// ── Weekly Summary Post Generator ──
+
+export interface WeeklySummaryInput {
+  totalAlerts: number;
+  totalChecks: number;
+  brandCounts: Array<{ brand: string; count: number }>;
+  topDeliveryMethod: string;
+  topDeliveryPct: number;
+  newCampaigns: number;
+  period: string; // e.g. "7–13 Apr 2026"
+}
+
+export function generateWeeklySummary(input: WeeklySummaryInput): DraftPosts {
+  const topBrands = input.brandCounts.slice(0, 3);
+  const brandTags = topBrands
+    .map((b) => `${getBrandHandle(b.brand)} (${b.count})`)
+    .join(", ");
+
+  // Twitter (280 chars)
+  const short = [
+    `🚨 Weekly Scam Intelligence — ${input.period}`,
+    "",
+    `📊 ${input.totalAlerts} brand impersonation alerts`,
+    `🏦 Most targeted: ${brandTags}`,
+    `📱 ${input.topDeliveryMethod} is #1 method (${input.topDeliveryPct}%)`,
+    "",
+    `🔍 Free scam checker: askarthur.au`,
+    "",
+    `#ScamAlert #Australia #AskArthur`,
+  ].join("\n").slice(0, 280);
+
+  // LinkedIn / Facebook (long form)
+  const allBrandLines = input.brandCounts.slice(0, 8).map(
+    (b, i) => `${i + 1}. ${b.brand} — ${b.count} scam${b.count !== 1 ? "s" : ""} detected`
+  );
+
+  const long = [
+    `🚨 Ask Arthur Weekly Scam Intelligence Report`,
+    `📅 ${input.period}`,
+    "",
+    `This week, Ask Arthur analysed ${input.totalChecks.toLocaleString()} suspicious messages and detected ${input.totalAlerts} brand impersonation scams targeting Australians.`,
+    "",
+    `📊 Most Impersonated Brands:`,
+    ...allBrandLines,
+    "",
+    `📱 Primary delivery method: ${input.topDeliveryMethod} (${input.topDeliveryPct}% of attacks)`,
+    input.newCampaigns > 0 ? `🆕 ${input.newCampaigns} new scam campaign${input.newCampaigns !== 1 ? "s" : ""} identified` : "",
+    "",
+    `🛡️ How to protect yourself:`,
+    `• Never click links in unexpected messages`,
+    `• Verify directly via official websites or apps`,
+    `• Report suspicious messages to Scamwatch (scamwatch.gov.au)`,
+    `• Check any message free at askarthur.au`,
+    "",
+    `Ask Arthur is an AI-powered scam detection platform helping Australians stay safe from fraud. Our intelligence pipeline monitors 16+ threat feeds and analyses user-submitted scam reports in real time.`,
+    "",
+    `🔍 Check a suspicious message now: askarthur.au`,
+    `📰 Browse the live scam feed: askarthur.au/scam-feed`,
+    "",
+    `#ScamAlert #CyberSecurity #Australia #ScamPrevention #AskArthur #FraudPrevention`,
+  ].filter(Boolean).join("\n");
+
+  return { short, long };
+}

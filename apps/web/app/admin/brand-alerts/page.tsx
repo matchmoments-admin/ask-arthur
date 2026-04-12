@@ -1,37 +1,38 @@
 import { requireAdmin } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
-import BrandAlertsList from "./BrandAlertsList";
+import BrandAlertsDashboard from "./BrandAlertsDashboard";
 
 export default async function BrandAlertsPage() {
   await requireAdmin();
 
   const supabase = createServiceClient();
   let alerts: Array<Record<string, unknown>> = [];
+  let totalChecks = 0;
 
   if (supabase) {
     const { data } = await supabase
       .from("brand_impersonation_alerts")
       .select("*")
       .order("created_at", { ascending: false })
-      .limit(50);
+      .limit(200);
 
     alerts = data || [];
+
+    const { data: stats } = await supabase
+      .from("check_stats")
+      .select("total_checks")
+      .gte("date", new Date(Date.now() - 7 * 86400000).toISOString().split("T")[0]);
+
+    totalChecks = (stats || []).reduce((sum: number, r: Record<string, unknown>) => sum + ((r.total_checks as number) || 0), 0);
   }
 
   return (
     <div className="max-w-4xl mx-auto px-5 py-8">
-      <h1 className="text-deep-navy text-xl font-extrabold mb-1">Brand Impersonation Alerts</h1>
+      <h1 className="text-deep-navy text-xl font-extrabold mb-1">Brand Intelligence</h1>
       <p className="text-gov-slate text-sm mb-6">
-        Review and publish social media alerts when brands are impersonated in scams.
+        Weekly scam intelligence summaries. Generate social posts and brand reports.
       </p>
-
-      {alerts.length === 0 ? (
-        <div className="text-center py-16 text-slate-400 text-sm">
-          No brand alerts yet. Alerts are auto-created when scam submissions detect brand impersonation.
-        </div>
-      ) : (
-        <BrandAlertsList initialAlerts={alerts} />
-      )}
+      <BrandAlertsDashboard initialAlerts={alerts} totalChecks={totalChecks} />
     </div>
   );
 }
