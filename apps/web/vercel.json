@@ -27,6 +27,12 @@
     },
     "app/api/skill-audit/route.ts": {
       "maxDuration": 45
+    },
+    "app/api/persona-check/route.ts": {
+      "maxDuration": 30
+    },
+    "app/api/feedback/route.ts": {
+      "maxDuration": 10
     }
   }
 }
