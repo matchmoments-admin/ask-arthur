@@ -77,29 +77,59 @@ export async function POST(req: NextRequest) {
 
     const scrubbed = scrubPII(parsed.data.text);
 
-    const client = new Anthropic({ apiKey });
-    const response = await client.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 800,
-      system: PERSONA_SYSTEM_PROMPT,
-      messages: [
-        {
-          role: "user",
-          content: `Persona type: ${parsed.data.type}\n\nContent to analyse:\n${scrubbed}`,
-        },
-      ],
-    });
+    // If input is just a URL with minimal text, ask for more detail
+    const isJustUrl = /^https?:\/\/\S+$/.test(scrubbed.trim());
+    if (isJustUrl) {
+      return NextResponse.json({
+        verdict: "UNCERTAIN",
+        confidence: 0.3,
+        riskLevel: "Insufficient Information",
+        summary: "A URL alone isn't enough for a thorough persona check. Please paste the person's profile text, messages, or describe the situation in detail.",
+        redFlags: [],
+        greenFlags: [],
+        recommendations: [
+          "Copy and paste the person's profile bio or 'About' section",
+          "Include any messages or chat history you've received",
+          "Describe how you met and what they've asked you to do",
+        ],
+        inferredType: parsed.data.type,
+      });
+    }
 
-    const text = response.content[0]?.type === "text" ? response.content[0].text : "";
+    let responseText: string;
+    try {
+      const client = new Anthropic({ apiKey });
+      const response = await client.messages.create({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 800,
+        system: PERSONA_SYSTEM_PROMPT,
+        messages: [
+          {
+            role: "user",
+            content: `Persona type: ${parsed.data.type}\n\nContent to analyse:\n${scrubbed}`,
+          },
+        ],
+      });
+      responseText = response.content[0]?.type === "text" ? response.content[0].text : "";
+    } catch (claudeErr) {
+      logger.error("Claude API call failed", { error: String(claudeErr) });
+      return NextResponse.json({ error: "Analysis service temporarily unavailable. Please try again." }, { status: 503 });
+    }
 
     // Extract JSON from response
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      logger.error("Persona check: no JSON in response", { text: text.slice(0, 200) });
+      logger.error("Persona check: no JSON in response", { text: responseText.slice(0, 200) });
       return NextResponse.json({ error: "Analysis failed — please try again." }, { status: 500 });
     }
 
-    const result = JSON.parse(jsonMatch[0]);
+    let result: Record<string, unknown>;
+    try {
+      result = JSON.parse(jsonMatch[0]);
+    } catch {
+      logger.error("Persona check: invalid JSON", { text: jsonMatch[0].slice(0, 200) });
+      return NextResponse.json({ error: "Analysis failed — please try again." }, { status: 500 });
+    }
 
     // Validate required fields
     if (!result.verdict || !result.summary) {

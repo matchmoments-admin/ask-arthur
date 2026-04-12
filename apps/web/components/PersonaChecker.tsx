@@ -135,10 +135,10 @@ export default function PersonaChecker() {
           onChange={(e) => setInput(e.target.value)}
           placeholder={
             personaType === "romance"
-              ? "Paste their profile, messages, or describe what happened..."
+              ? "Paste their profile bio, messages they sent you, or describe the situation in detail. Don't just paste a URL — copy the actual text content."
               : personaType === "employment"
-                ? "Paste the job listing, recruiter message, or their LinkedIn profile..."
-                : "Describe the situation or paste their details..."
+                ? "Paste the job listing text, recruiter's message, their LinkedIn bio, or describe what happened. Copy the actual content, not just a link."
+                : "Describe the situation in detail — paste their messages, profile text, or what they've asked you to do."
           }
           className="w-full min-h-[200px] rounded-xl border border-border-light p-4 text-base text-deep-navy placeholder:text-slate-400 resize-y focus:outline-none focus:border-deep-navy focus:ring-1 focus:ring-deep-navy/10"
           maxLength={10000}
