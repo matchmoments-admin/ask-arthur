@@ -9,7 +9,7 @@
 - **Funder**: Australian Government (Department of Industry)
 - **Amount**: $50K-$250K (Early-Stage Commercialisation grant; 50% cash co-contribution required)
 - **Median grant**: $249,519 — 68% of grants fall in the $200K-$250K range
-- **Status**: ~90% of the $392.4M allocation projected to be exhausted by June 2026. Apply NOW.
+- **Status**: January 2026 MYEFO cut $102M in uncommitted IGP funding. Remaining funds severely constrained. Apply immediately but do not depend on IGP.
 - **Process**: Two steps:
   1. Apply to **IGP Advisory Service** (rolling at business.gov.au) — confirmation in ~10 working days, adviser match in 2-4 weeks
   2. After receiving adviser report, apply for **Early-Stage Commercialisation grant**
@@ -34,13 +34,11 @@
 
 ## Priority 2: Apply This Month
 
-### CyRise Cybersecurity Accelerator
+### CyRise Cybersecurity Accelerator — CLOSED
 
-- **Location**: Melbourne
-- **Amount**: $50K seed funding + 14-week programme
-- **Includes**: Deakin University research access, cybersecurity expert mentorship, international trips
-- **Why**: Only dedicated cybersecurity accelerator in APAC. Single highest-value programme for Ask Arthur.
-- **Priority**: HIGH
+- **Status**: Permanently closed (May 2023) after 7 cohorts and 39 investments. No Australian replacement exists.
+- **Alternative**: Stone & Chalk Cyber (Sydney) — AustCyber is now a wholly-owned subsidiary since July 2024. Offers residency programs, Venture Connect for corporate-startup partnerships, and dedicated cybersecurity sector support.
+- **Priority**: Join Stone & Chalk Cyber as resident instead
 
 ### Startmate Accelerator
 

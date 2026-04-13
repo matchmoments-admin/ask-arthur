@@ -533,27 +533,26 @@ How Ask Arthur's capabilities map to the six SPF principles:
 
 | Investor | Cheque Size | Why |
 |----------|-------------|-----|
-| CyRise | $50K + accelerator | Only APAC cybersecurity accelerator |
+| Tidal Ventures | $250K-$2.5M | Invested in SecurePII (Oct 2025); strongest thesis fit; operator-led (ex-Atlassian); QIC-backed |
 | Startmate | $120K | Most active Australian early-stage investor |
-| Main Sequence (CSIRO-backed) | $250K-$2M | Cybersecurity priority; backed Kasada; invests pre-revenue |
-| Tidal Ventures | $250K-$2.5M | Cybersecurity focus; prefers to lead |
+| Main Sequence (CSIRO-backed) | $250K-$2M | Led Kasada ($300M+ valuation, US$20M Feb 2026); cybersecurity explicitly named; invests pre-revenue |
+| Sydney Angels | $10K-$20K (individual) | Sidecar Fund ($10M) co-invests 50/50; invested in Apollo Secure ($600K cybersecurity) |
 
 ### Tier 2 — Build relationships now
 
 | Investor | Cheque Size | Why |
 |----------|-------------|-----|
-| Sydney Angels | $10K-$20K (individual) | Invested in cybersecurity startups (Apollo Secure) |
-| Brisbane Angels | $10K-$20K (individual) | Regional network; cybersecurity precedent |
-| Black Sheep Capital | Angel/seed | RegTech portfolio (Haast AI compliance) |
-| Blackbird Ventures | $149K+ | Backed Kasada; 80% pre-seed/seed; "never too early to pitch" |
-| AirTree Ventures | $100K+ (Sprout) | 48% of Fund IV pre-revenue; micro-cheques available |
+| AirTree Ventures | $250K-$500K pre-seed | Fund V closed Aug 2025 at A$650M; cybersecurity focus; co-invested in Darwinium; targets 15-25% at seed |
+| Blackbird Ventures | Seed avg $2.96M | Invested in Darwinium ($18M Series A, digital security) and Bugcrowd (unicorn); 29 investments in 2025 |
+| Square Peg Capital | $5M+ | US$3.6B AUM; invested in UpGuard (cybersecurity GRC); 50%+ recent dollars in AI |
+| Stone & Chalk Cyber | Residency (non-dilutive) | AustCyber subsidiary; cybersecurity sector support; CyRise closed permanently May 2023 |
 
 ### Tier 3 — Seed/Series A relationships
 
 | Investor | Cheque Size | Why |
 |----------|-------------|-----|
 | Titanium Ventures (ex-Telstra Ventures) | $5M-$20M | Invested in CrowdStrike, Auth0, GitLab |
-| Square Peg Capital | $5M+ | Invested in UpGuard |
+| Folklore Ventures | Raising up to $350M | 47 investments, early-stage ANZ focus |
 | King River Capital | $5M+ | Building AI-specific fund |
 
 ---
