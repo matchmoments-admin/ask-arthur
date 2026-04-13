@@ -1,93 +1,168 @@
 # Grant Strategy — Ask Arthur
 
-## Target Grants
+*Updated April 2026*
 
-### 1. Cyber Security Business Connect and Protect Program
+## Priority 1: Apply Immediately
 
-- **Funder**: Australian Government (Department of Home Affairs)
-- **Alignment**: Directly supports small businesses and consumers in identifying cyber threats
-- **Amount**: $10K-$50K
-- **Status**: Rolling applications
-- **Our angle**: Community-sourced scam intelligence platform protecting Australian consumers and providing threat data to businesses
+### Industry Growth Program (IGP)
 
-### 2. Sovereign Tech Fund (Prototype Australia / CSIRO)
+- **Funder**: Australian Government (Department of Industry)
+- **Amount**: $50K-$250K (Early-Stage Commercialisation grant; 50% cash co-contribution required)
+- **Median grant**: $249,519 — 68% of grants fall in the $200K-$250K range
+- **Status**: ~90% of the $392.4M allocation projected to be exhausted by June 2026. Apply NOW.
+- **Process**: Two steps:
+  1. Apply to **IGP Advisory Service** (rolling at business.gov.au) — confirmation in ~10 working days, adviser match in 2-4 weeks
+  2. After receiving adviser report, apply for **Early-Stage Commercialisation grant**
+- **Our angle**: Enabling Capabilities NRF priority (AI + cybersecurity); sovereign Australian capability to protect citizens from $2.18B annual scam crisis; directly enables SPF Act compliance; exportable cybersecurity product
+- **Priority**: CRITICAL — funding running out
 
-- **Funder**: Various state and federal programs
-- **Alignment**: Australian-built technology reducing dependency on foreign platforms
-- **Amount**: $25K-$100K
-- **Our angle**: Zero-knowledge architecture, Australian-hosted, no US data dependency. Sovereign threat intelligence for Australian institutions.
+### R&D Tax Incentive (RDTI)
 
-### 3. Cyber Security Cooperative Research Centre (CSCRC)
+- **Funder**: AusIndustry / ATO
+- **Amount**: 43.5% refundable tax offset on eligible R&D spend (cash back regardless of tax liability)
+- **Deadline**: FY24-25 registration by **30 April 2026**
+- **Eligible activities**:
+  - Novel ML architectures for scam detection
+  - Proprietary NLP pipelines for suspicious communication analysis
+  - Training data curation methods research
+  - Real-time scam pattern recognition algorithms
+  - Adversarial-resistant detection approaches
+  - Custom data pipelines for threat intelligence processing
+- **NOT eligible**: routine bug fixes, using off-the-shelf LLMs without modification, prompt engineering alone, standard UI development
+- **Critical requirement**: Contemporaneous documentation (created during R&D, not retrospective). Need: descriptive Git commits, experiment tracking, hypothesis docs before experiments, training curves
+- **Priority**: CRITICAL — deadline imminent
 
-- **Funder**: Australian Government
-- **Alignment**: Research and development in cybersecurity
-- **Amount**: Project-dependent
-- **Our angle**: Novel approach to community-sourced threat intelligence with AI analysis
+## Priority 2: Apply This Month
 
-### 4. AustCyber Projects Fund
+### CyRise Cybersecurity Accelerator
 
-- **Funder**: AustCyber (Australian Cyber Security Growth Network)
-- **Alignment**: Growing Australian cyber security industry
-- **Amount**: $50K-$250K
-- **Our angle**: B2B threat API creating new revenue streams for Australian cyber security exports
+- **Location**: Melbourne
+- **Amount**: $50K seed funding + 14-week programme
+- **Includes**: Deakin University research access, cybersecurity expert mentorship, international trips
+- **Why**: Only dedicated cybersecurity accelerator in APAC. Single highest-value programme for Ask Arthur.
+- **Priority**: HIGH
 
-### 5. Commercialisation Australia / ARENA Equivalent
+### Startmate Accelerator
 
-- **Funder**: Department of Industry
-- **Alignment**: Commercialising Australian innovation
-- **Amount**: $50K-$250K matched funding
-- **Our angle**: Data velocity flywheel as novel commercialisation model
+- **Amount**: $120K at $1.5M post-money valuation + 12-week accelerator
+- **Why**: Australia's most active early-stage investor. Credibility boost justifies the dilution. Ecosystem access and co-founder matching.
+- **Priority**: HIGH
+
+## Priority 3: Apply Within 60 Days
+
+### NSW MVP Ventures
+
+- **Funder**: NSW Government
+- **Amount**: $20K-$50K (Stream 1) or up to $75K (Stream 2: women-owned, regional, or Aboriginal/Torres Strait Islander businesses)
+- **Coverage**: 50-75% of eligible costs
+- **Status**: Round 3 closed April 2026. Programme continues until June 2027 — future rounds expected.
+- **Eligibility**: Turnover under $400K, 10 or fewer FTEs, NSW-based, 80%+ of project spend in NSW
+- **Precedent**: Cybersecurity startup (One-Touch Business Technology Solutions) funded in recent round
+- **Priority**: MEDIUM — monitor for next round
+
+### CSIRO Kick-Start
+
+- **Funder**: CSIRO
+- **Amount**: Matched funding for startup-CSIRO research collaborations
+- **Our angle**: AI/deep-tech angle; novel community-sourced threat intelligence with AI analysis
+- **Priority**: MEDIUM
+
+## Priority 4: Medium-Term (3-6 Months)
+
+### QLD Ignite Ideas Fund
+
+- **Amount**: Up to $100K (Tier 1) or $200K (Tier 2) with 20%+ co-contribution
+- **Status**: Currently closed (Round 13 concluded 2025). Monitor advance.qld.gov.au for next round.
+- **Requirements**: QLD headquarters, MVP-stage product, identified customer/industry partner
+- **Priority**: MEDIUM (if QLD-based)
+
+### Export Market Development Grants (EMDG)
+
+- **Amount**: Reimburses 50% of overseas marketing expenses
+- **When**: Relevant once Ask Arthur begins APAC expansion
+- **Priority**: LOW (future)
+
+## Strategic Ecosystem Programmes (Non-Grant)
+
+### Stone & Chalk (absorbed AustCyber)
+
+- **Type**: Incubator / ecosystem
+- **Value**: Cybersecurity industry networking, credibility, workspace
+- **No direct grant funding remaining** but valuable for positioning
+- **Priority**: MEDIUM
+
+### ASD Cyber Security Business Partner
+
+- **Type**: Government partnership
+- **Value**: Credibility signal for enterprise and government sales
+- **Process**: Register at cyber.gov.au/partnershipprogram
+- **Priority**: MEDIUM
+
+### GASA (Global Anti-Scam Alliance) Membership
+
+- **Type**: Industry membership
+- **Value**: Thought leadership, regulator networking, global intelligence access
+- **Pricing**: Flexible; open to qualified organisations
+- **Priority**: HIGH
+
+### AFCX (Australian Financial Crimes Exchange)
+
+- **Type**: Intelligence-sharing membership
+- **Value**: Mandated infrastructure for all ABA/COBA banks under Scam-Safe Accord. If Ask Arthur feeds into/consumes from AFCX's intelligence loop, it becomes essential infrastructure.
+- **Priority**: CRITICAL (strategic, not a grant)
+
+## Alignment with SPF Act 2025
+
+The Scams Prevention Framework Act 2025 (Royal Assent 21 February 2025) mandates six principles for banks, telcos, and digital platforms from 1 July 2026. Ask Arthur directly enables:
+
+| SPF Principle | How Ask Arthur Enables It |
+|---------------|--------------------------|
+| **Detect** | Threat API provides Actionable Scam Intelligence feeds; 16 threat feeds + entity enrichment |
+| **Report** | Government export views; structured data aligned to Scamwatch categories; provider reporting RPCs |
+| **Disrupt** | Entity intelligence (phone, URL, email, IP) with risk scores enables blocking decisions |
+| **Prevent** | Consumer scam checker; security scanner; real-time warnings |
+
+This alignment is central to all grant narratives and investor pitches.
 
 ## Alignment with AU Cyber Security Strategy 2023-2030
-
-The Australian Cyber Security Strategy identifies six key shields. Ask Arthur aligns with:
 
 | Shield | Our Alignment |
 |--------|--------------|
 | **Shield 1: Strong businesses and citizens** | Free consumer scam checker empowers everyday Australians |
-| **Shield 2: Safe technology** | AI-powered detection of emerging scam techniques |
-| **Shield 3: World-class threat sharing** | B2B Threat API provides real-time intelligence to ADIs |
+| **Shield 2: Safe technology** | AI-powered detection of emerging scam techniques; security scanner for extensions/MCP/AI skills |
+| **Shield 3: World-class threat sharing** | B2B Threat API provides real-time intelligence to regulated entities |
 | **Shield 5: Sovereign capabilities** | Australian-built, Australian-hosted, zero US data dependency |
 
-## Supporting Evidence for Applications
+## Grant Application Scoring Tips
 
-### Privacy Architecture
-Our `docs/privacy-flow.md` documents our zero-knowledge approach:
-- No user accounts, no cookies, no IP storage
-- PII scrubbing before any data retention
-- Ephemeral analysis (messages never stored)
-- UUID-based screenshot storage with no metadata
+**Score well on:**
+- Clear NRF priority alignment with specific Australian capability uplift
+- Named customers or LOIs with dates
+- Specific TRL current-to-target with evidence
+- Budget-to-milestone mapping with owners
+- Quantified metrics (FTEs by year, revenue projections, export potential)
 
-This directly supports grant narratives around:
-- Privacy-by-design (APP 3 compliance)
-- Data minimisation
-- Consumer trust
+**Score poorly on:**
+- Business-as-usual activities dressed as innovation
+- Hand-wavy market claims without named customers
+- Weak additionality arguments ("what happens with vs without this grant")
+- Unclear IP ownership
+- Budget items not tied to milestones
 
-### Community Impact
-- Free tool requiring no signup (maximum accessibility)
-- Plain-language verdicts (designed for elderly users)
-- Australian-specific scam patterns (MyGov, ATO, Big 4 banks, Australia Post)
-- Official contact numbers for Australian institutions in recommendations
+## Action Timeline
 
-### Technical Innovation
-- Community-sourced threat intelligence (novel data collection model)
-- AI-powered analysis with injection defence (novel security architecture)
-- Real-time threat aggregation API (novel B2B product)
-- Automated content generation from threat data (novel SEO flywheel)
+| Action | Deadline | Priority |
+|--------|----------|----------|
+| Apply to IGP Advisory Service | This week | CRITICAL |
+| Register FY24-25 R&D activities (RDTI) | 30 April 2026 | CRITICAL |
+| Begin contemporaneous R&D documentation | Immediately | CRITICAL |
+| Apply to CyRise | Next cohort opening | HIGH |
+| Apply to Startmate | Next cohort opening | HIGH |
+| AFCX membership enquiry | This month | HIGH |
+| GASA membership application | Within 60 days | HIGH |
+| ASD Business Partner registration | Within 60 days | MEDIUM |
+| Monitor NSW MVP Ventures next round | Ongoing (until June 2027) | MEDIUM |
+| Submit IGP grant (after Advisory Service report) | ~8 weeks from now | HIGH |
+| Monitor QLD Ignite Ideas | Ongoing | MEDIUM |
 
-## Application Timeline
-
-| Grant | Application Window | Decision Timeline | Priority |
-|-------|-------------------|-------------------|----------|
-| Cyber Security Business Connect | Rolling | 4-6 weeks | HIGH |
-| AustCyber Projects Fund | Quarterly | 8-12 weeks | HIGH |
-| CSCRC Partnership | By arrangement | 12-16 weeks | MEDIUM |
-| Sovereign Tech Fund | Annual | 12-20 weeks | MEDIUM |
-| Commercialisation Australia | Rolling | 8-12 weeks | LOW (early stage) |
-
-## Recommended Approach
-
-1. **Immediate** (Month 1): Apply to Cyber Security Business Connect — lowest barrier, fastest decision
-2. **Short-term** (Month 2-3): Apply to AustCyber Projects Fund with B2B API demo and initial customer LOIs
-3. **Medium-term** (Month 4-6): Approach CSCRC for research partnership once threat database has 1,000+ verified scams
-4. **Long-term** (Month 6-12): Sovereign Tech Fund application with full data velocity metrics and bank customer case studies
+**Important caveat**: Government grants received for the same R&D activity reduce eligible RDTI expenditure. Plan grant and RDTI claims in coordination.
