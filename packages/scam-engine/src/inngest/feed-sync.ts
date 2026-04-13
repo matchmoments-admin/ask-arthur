@@ -102,11 +102,13 @@ export const syncUserReportsToFeed = inngest.createFunction(
 
       const cutoff = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
-      // Only sync HIGH_RISK reports (quality filter)
+      // Only sync HIGH_RISK reports without a verified_scams counterpart
+      // (reports linked to verified_scams are covered by syncVerifiedScamsToFeed)
       const { data: reports, error: fetchErr } = await supabase
         .from("scam_reports")
         .select("id, impersonated_brand, scam_type, scrubbed_content, channel, country_code, source, created_at")
         .eq("verdict", "HIGH_RISK")
+        .is("verified_scam_id", null)
         .gte("created_at", cutoff)
         .order("created_at", { ascending: false })
         .limit(LIMIT_PER_RUN);
