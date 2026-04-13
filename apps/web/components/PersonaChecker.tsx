@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Heart, Briefcase, HelpCircle, Loader2, ShieldAlert, ShieldCheck, AlertTriangle } from "lucide-react";
+import { Heart, Briefcase, HelpCircle, Loader2, ShieldAlert, ShieldCheck, AlertTriangle, Link, Mail } from "lucide-react";
 
 type PersonaType = "romance" | "employment" | "general" | null;
 type Status = "idle" | "selecting" | "input" | "analyzing" | "complete" | "error";
@@ -45,10 +45,29 @@ const VERDICT_STYLES: Record<string, { icon: React.ComponentType<{ size?: number
   "SAFE": { icon: ShieldCheck, bg: "bg-green-50", border: "border-green-200", text: "text-green-800" },
 };
 
+const URL_REGEX = /https?:\/\/[^\s<>"']+/gi;
+
+function extractUrls(text: string): string[] {
+  const matches = text.match(URL_REGEX);
+  if (!matches) return [];
+  // Deduplicate and limit to 3
+  return [...new Set(matches)].slice(0, 3);
+}
+
+const PLACEHOLDERS: Record<string, string> = {
+  romance:
+    "Paste their profile URL, messages, bio, or describe the situation...\n\nYou can paste LinkedIn, Instagram, or dating profile URLs — we'll fetch and analyse them.",
+  employment:
+    "Paste the job listing, recruiter's LinkedIn URL, their message, or company website...\n\nURLs are welcome — we'll fetch the page and check it.",
+  general:
+    "Paste their profile URL, messages, email, or describe what happened...\n\nYou can include URLs — we'll fetch and analyse the page content.",
+};
+
 export default function PersonaChecker() {
   const [status, setStatus] = useState<Status>("idle");
   const [personaType, setPersonaType] = useState<PersonaType>(null);
   const [input, setInput] = useState("");
+  const [email, setEmail] = useState("");
   const [result, setResult] = useState<PersonaResult | null>(null);
   const [error, setError] = useState("");
 
@@ -57,19 +76,28 @@ export default function PersonaChecker() {
     setStatus("input");
   };
 
+  const hasInput = input.trim().length >= 5 || extractUrls(input).length > 0 || email.trim().length > 0;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || !personaType) return;
+    if (!hasInput || !personaType) return;
 
     setStatus("analyzing");
     setError("");
     setResult(null);
 
+    const urls = extractUrls(input);
+
     try {
       const res = await fetch("/api/persona-check", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: input, type: personaType }),
+        body: JSON.stringify({
+          text: input.trim() || undefined,
+          urls: urls.length > 0 ? urls : undefined,
+          email: email.trim() || undefined,
+          type: personaType,
+        }),
       });
 
       if (!res.ok) {
@@ -116,6 +144,8 @@ export default function PersonaChecker() {
   // Input form
   if (status === "input") {
     const typeLabel = TYPE_OPTIONS.find((o) => o.type === personaType)?.label || "Person";
+    const detectedUrls = extractUrls(input);
+
     return (
       <form onSubmit={handleSubmit} className="space-y-4">
         <button
@@ -133,20 +163,46 @@ export default function PersonaChecker() {
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={
-            personaType === "romance"
-              ? "Paste their profile bio, messages they sent you, or describe the situation in detail. Don't just paste a URL — copy the actual text content."
-              : personaType === "employment"
-                ? "Paste the job listing text, recruiter's message, their LinkedIn bio, or describe what happened. Copy the actual content, not just a link."
-                : "Describe the situation in detail — paste their messages, profile text, or what they've asked you to do."
-          }
+          placeholder={PLACEHOLDERS[personaType || "general"]}
           className="w-full min-h-[200px] rounded-xl border border-border-light p-4 text-base text-deep-navy placeholder:text-slate-400 resize-y focus:outline-none focus:border-deep-navy focus:ring-1 focus:ring-deep-navy/10"
           maxLength={10000}
         />
 
+        {/* Detected URLs indicator */}
+        {detectedUrls.length > 0 && (
+          <div className="flex items-center gap-2 text-xs text-gov-slate">
+            <Link size={14} className="text-action-teal shrink-0" />
+            <span>
+              {detectedUrls.length === 1 ? "1 URL detected" : `${detectedUrls.length} URLs detected`}
+              {` — we\u2019ll fetch and analyse ${detectedUrls.length === 1 ? "it" : "them"}`}
+            </span>
+          </div>
+        )}
+
+        {/* Optional email field */}
+        <div>
+          <label htmlFor="persona-email" className="flex items-center gap-1.5 text-xs font-medium text-gov-slate mb-1.5">
+            <Mail size={14} />
+            Their email address <span className="text-slate-400 font-normal">(optional)</span>
+          </label>
+          <input
+            id="persona-email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="e.g. recruiter@company.com"
+            className="w-full rounded-xl border border-border-light px-4 py-2.5 text-sm text-deep-navy placeholder:text-slate-400 focus:outline-none focus:border-deep-navy focus:ring-1 focus:ring-deep-navy/10"
+          />
+          {email.trim() && (
+            <p className="text-xs text-gov-slate mt-1">
+              We'll check domain age, email authentication records, and disposable address databases.
+            </p>
+          )}
+        </div>
+
         <button
           type="submit"
-          disabled={!input.trim()}
+          disabled={!hasInput}
           className="w-full rounded-xl bg-deep-navy text-white font-bold text-sm py-3 hover:bg-navy transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           Analyse Person
@@ -190,7 +246,7 @@ export default function PersonaChecker() {
     return (
       <div className="space-y-4">
         <button
-          onClick={() => { setStatus("idle"); setPersonaType(null); setInput(""); setResult(null); }}
+          onClick={() => { setStatus("idle"); setPersonaType(null); setInput(""); setEmail(""); setResult(null); }}
           className="text-sm text-gov-slate hover:text-deep-navy transition-colors"
         >
           ← Check another
