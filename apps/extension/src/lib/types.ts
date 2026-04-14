@@ -10,7 +10,8 @@ export type MessageType =
   | "SCAN_EXTENSIONS"
   | "DEEP_SCAN_EXTENSIONS"
   | "ANALYZE_AD"
-  | "FLAG_AD";
+  | "FLAG_AD"
+  | "ANALYZE_MARKETPLACE";
 
 export interface CheckURLMessage {
   type: "CHECK_URL";
@@ -71,6 +72,17 @@ export interface FlagAdMessage {
   riskScore?: number;
 }
 
+export interface AnalyzeMarketplaceMessage {
+  type: "ANALYZE_MARKETPLACE";
+  listingTitle: string;
+  listingDescription: string;
+  sellerName: string;
+  landingUrl: string | null;
+  imageUrls: string[];
+  context: "marketplace-listing" | "marketplace-chat";
+  chatText?: string;
+}
+
 export type ExtensionMessage =
   | CheckURLMessage
   | CheckTextMessage
@@ -80,7 +92,8 @@ export type ExtensionMessage =
   | ScanExtensionsMessage
   | DeepScanExtensionsMessage
   | AnalyzeAdMessage
-  | FlagAdMessage;
+  | FlagAdMessage
+  | AnalyzeMarketplaceMessage;
 
 export interface MessageResponse<T = unknown> {
   success: boolean;

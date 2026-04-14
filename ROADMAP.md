@@ -282,6 +282,19 @@ Multi-type security scanner covering websites, Chrome extensions, MCP servers, a
 | Scam feed category illustrations — 13 AI-generated images (no-leaf, centered) | ✅ Done |
 | Blog/character illustration system — faceless flat vector characters, 4 variants | ✅ Done |
 
+## Phase 11b — Facebook Marketplace Scam Detection
+
+Chrome extension content script for Marketplace listing analysis and Messenger PayID scam detection.
+
+| Feature | Status |
+|---------|--------|
+| Marketplace listing seller trust scoring (join date, ratings, location mismatch) | 🔄 In progress |
+| Trust badge injection on listing pages (green/amber/red, shadow DOM) | 🔄 In progress |
+| PayID scam pattern detection in Messenger chat (6 patterns, client-side) | 🔄 In progress |
+| Chat warning banner injection (shadow DOM) | 🔄 In progress |
+| Background API analysis via existing analyze-ad endpoint | 🔄 In progress |
+| SPA navigation resilience (MutationObserver + URL heartbeat) | 🔄 In progress |
+
 ## Phase 12 — Enterprise Readiness & Certifications
 
 Security certifications, SLA infrastructure, and procurement readiness for mid-tier bank and telco sales.

@@ -236,8 +236,40 @@ async function handleMessage(
       return { success: true };
     }
 
+    case "ANALYZE_MARKETPLACE": {
+      const { listingDescription, chatText, sellerName, landingUrl, context } = message;
+
+      // Build text for analysis: combine listing description + chat if available
+      const textToAnalyze =
+        context === "marketplace-chat" && chatText
+          ? chatText
+          : `Facebook Marketplace listing by "${sellerName}": ${listingDescription}`;
+
+      const adTextHash = await hashText(textToAnalyze);
+
+      // Reuse analyzeAd endpoint
+      const { data } = await analyzeAd({
+        adText: textToAnalyze,
+        landingUrl,
+        imageUrl: null,
+        advertiserName: sellerName,
+        adTextHash,
+      });
+
+      return { success: true, data };
+    }
+
     default:
       return { success: false, error: "Unknown message type" };
   }
+}
+
+async function hashText(text: string): Promise<string> {
+  const normalized = text.toLowerCase().trim().replace(/\s+/g, " ");
+  const data = new TextEncoder().encode(normalized);
+  const buf = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 

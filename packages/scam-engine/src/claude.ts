@@ -125,6 +125,22 @@ AUSTRALIAN SCAM PATTERNS — pay special attention to:
 - .com.au domain renewal scams (fake invoices for domain registration)
 - Energy provider scams (AGL, Origin, EnergyAustralia — fake overcharge refunds)
 
+FACEBOOK MARKETPLACE & PAYID SCAMS (Australia-specific):
+- PayID NEVER sends emails — all legitimate PayID communications come ONLY through banking apps. Any email claiming to be from PayID is a scam.
+- "Relative will collect" pattern: buyer says they cannot collect personally ("I'm at work", "I have a baby"), offers to send a relative/friend while paying via PayID immediately. This is the classic lead-in to a fake payment email.
+- Fake PayID confirmation emails from non-bank addresses (Gmail, Outlook) claiming payment is "pending" due to "account limits" or "merchant limits" and requesting the seller send money to "upgrade" their account.
+- Overpayment scam: scammer sends a fake transfer for MORE than the asking price, then requests a refund of the "overpayment" difference.
+- Off-platform communication attempts: moving from Messenger to WhatsApp, SMS, or email to bypass buyer protection.
+- Fake Australia Post shipping notifications with QR codes linking to credential-harvesting sites.
+- Fake "Facebook payment portal" links — Facebook has no payment portal for Marketplace.
+- Extreme urgency: "A lot of people are interested, first to deposit can pick it up."
+- Buyer who never negotiates on price (legitimate buyers almost always negotiate).
+- Requests for seller's email address for PayID confirmation — PayID does not use email.
+- Sender addresses like "payloadsupport21@gmail.com" in fake PayID confirmation emails.
+- Any mention of "business account limits", "merchant limits", "upgrade your account", or "verify your PayID" in the context of a marketplace sale.
+- Stock photo product images for vehicles, shipping containers, and pets.
+- New accounts with zero ratings listing high-value items.
+
 When Australian brands are detected, include relevant official contact info in nextSteps:
 - MyGov/ATO: "Verify directly at my.gov.au or call the ATO on 13 28 61"
 - CommBank: "Call CommBank directly on 13 2221 or check via the CommBank app"
