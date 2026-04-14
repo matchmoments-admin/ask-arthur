@@ -8,6 +8,8 @@ const FlagAdSchema = z.object({
   advertiserName: z.string().min(1).max(500),
   landingUrl: z.string().url().max(2048).nullable(),
   adTextHash: z.string().min(16).max(128),
+  verdict: z.string().max(20).optional(),
+  riskScore: z.number().min(0).max(100).optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -36,7 +38,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { advertiserName, landingUrl, adTextHash } = parsed.data;
+    const { advertiserName, landingUrl, adTextHash, verdict, riskScore } = parsed.data;
 
     // 3. Hash the reporter for dedup (don't store raw install ID)
     const reporterData = new TextEncoder().encode(auth.installId);
@@ -103,6 +105,9 @@ export async function POST(req: NextRequest) {
           ad_text_hash: adTextHash,
           advertiser_name: advertiserName,
           landing_url: landingUrl,
+          landing_page_domain: landingUrl ? new URL(landingUrl).hostname : null,
+          verdict: verdict ?? null,
+          risk_score: riskScore ?? 0,
           flag_count: 1,
           reporter_hashes: [reporterHash],
         })

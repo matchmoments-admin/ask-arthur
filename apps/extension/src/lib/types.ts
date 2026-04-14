@@ -66,6 +66,8 @@ export interface FlagAdMessage {
   advertiserName: string;
   landingUrl: string | null;
   adTextHash: string;
+  verdict?: string;
+  riskScore?: number;
 }
 
 export type ExtensionMessage =

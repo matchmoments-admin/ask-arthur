@@ -50,10 +50,48 @@ export function detectSponsoredPost(element: HTMLElement): boolean {
     }
   }
 
+  // Method 2b: Fragmented span reconstruction (Facebook's primary obfuscation)
+  // Facebook splits "Sponsored" across multiple spans, hiding decoys
+  const fragmentedSpans = element.querySelectorAll(
+    'a[href="#"] > span[aria-labelledby] > span > span'
+  );
+  if (fragmentedSpans.length > 0) {
+    let reconstructed = "";
+    fragmentedSpans.forEach((span) => {
+      const style = getComputedStyle(span as HTMLElement);
+      if (
+        style.display === "none" || style.visibility === "hidden" ||
+        parseFloat(style.opacity) <= 0 || parseFloat(style.fontSize) <= 0 ||
+        style.position === "absolute" ||
+        (span as HTMLElement).offsetWidth <= 0
+      ) return;
+      reconstructed += span.textContent?.toLowerCase() ?? "";
+    });
+    if (reconstructed.includes("ponsored")) return true;
+  }
+
   // Method 3: Structural — ad-specific data attributes and patterns
   if (element.querySelector("[data-ad-preview]")) return true;
   if (element.querySelector("[data-testid='ad_creative']")) return true;
   if (element.querySelector("a[aria-label='Sponsored']")) return true;
+
+  // Method 4: Canvas/SVG detection — Facebook renders "Sponsored" as canvas
+  const canvases = element.querySelectorAll("canvas");
+  for (const c of canvases) {
+    if (c.width < 150 && c.height < 30) {
+      const parentLink = c.closest("a");
+      if (parentLink?.href?.includes("/ads/about")) return true;
+    }
+  }
+  // SVG-rendered "Sponsored" label near ad header
+  const svgs = element.querySelectorAll("svg");
+  for (const svg of svgs) {
+    const rect = svg.getBoundingClientRect();
+    if (rect.width < 150 && rect.height < 30) {
+      const parentLink = svg.closest("a");
+      if (parentLink?.href?.includes("/ads/about")) return true;
+    }
+  }
 
   return false;
 }
@@ -73,7 +111,10 @@ function getVisibleText(node: Node): string {
   if (
     style.display === "none" ||
     style.visibility === "hidden" ||
-    style.opacity === "0" ||
+    parseFloat(style.opacity) <= 0 ||
+    parseFloat(style.fontSize) <= 0 ||
+    style.position === "absolute" ||
+    el.offsetWidth <= 0 ||
     (style.width === "0px" && style.overflow === "hidden") ||
     (style.height === "0px" && style.overflow === "hidden")
   ) {

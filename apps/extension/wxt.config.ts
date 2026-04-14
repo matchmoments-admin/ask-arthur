@@ -26,7 +26,11 @@ export default defineConfig({
     host_permissions: [
       "https://askarthur.au/api/extension/*",
       ...(urlGuardEnabled ? ["<all_urls>" as const] : []),
-      ...(facebookAdsEnabled ? ["https://www.facebook.com/*" as const] : []),
+      ...(facebookAdsEnabled ? [
+        "https://www.facebook.com/*" as const,
+        "https://m.facebook.com/*" as const,
+        "https://web.facebook.com/*" as const,
+      ] : []),
     ],
     icons: {
       "16": "icon/16.png",
