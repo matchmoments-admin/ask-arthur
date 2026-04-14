@@ -20,6 +20,9 @@ const EDGE_STORE_RE = /microsoftedge\.microsoft\.com\/addons\/detail\/[^/]+\/([a
 const CLAWHUB_RE = /clawhub\.ai\/skills\/([a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_-]+)?)/;
 const SKILL_SCOPE_RE = /^@[a-zA-Z0-9_-]+\/skill-[a-zA-Z0-9_-]+$/;
 
+// GitHub repo URL for AI skill scanning (any GitHub repo not matching MCP pattern)
+const GITHUB_SKILL_RE = /github\.com\/([a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+)/;
+
 // npm package patterns
 const NPM_SCOPED_RE = /^@[a-zA-Z0-9_-]+\/[a-zA-Z0-9._-]+$/;
 const MCP_SERVER_RE = /^mcp-server-[a-zA-Z0-9._-]+$/;
@@ -82,6 +85,12 @@ export function detectInput(raw: string): DetectedInput {
     return { type: "mcp-server", value, packageName: ghMatch[1] };
   }
 
+  // 5b. GitHub repo URL (non-MCP) → AI Skill scan
+  const ghSkillMatch = value.match(GITHUB_SKILL_RE);
+  if (ghSkillMatch) {
+    return { type: "skill", value, skillId: `github:${ghSkillMatch[1]}` };
+  }
+
   // 6. MCP config JSON
   if (MCP_CONFIG_RE.test(value)) {
     try {
@@ -137,5 +146,6 @@ export const INPUT_EXAMPLES = [
   { text: "nkbihfbeogaeaoehlefnkodbefgpgknn", type: "extension" as const },
   { text: "@modelcontextprotocol/server-filesystem", type: "mcp-server" as const },
   { text: "clawhub.ai/skills/sonoscli", type: "skill" as const },
+  { text: "github.com/user/startup-skill", type: "skill" as const },
   { text: "lodash", type: "mcp-server" as const },
 ];

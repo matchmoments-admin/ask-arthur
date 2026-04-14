@@ -1,3 +1,8 @@
+---
+name: generate-illustration
+description: Generate faceless flat-vector illustrations for Ask Arthur using Gemini MCP
+---
+
 # generate-illustration
 
 Generate illustrations for Ask Arthur using the Gemini MCP. Outputs WebP to `apps/web/public/illustrations/`.

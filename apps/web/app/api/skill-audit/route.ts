@@ -6,6 +6,34 @@ import { logger } from "@askarthur/utils/logger";
 import { checkRateLimit } from "@askarthur/utils/rate-limit";
 
 const SKILL_SLUG_RE = /^[a-zA-Z0-9_-]+$/;
+const GITHUB_PREFIX = "github:";
+const GITHUB_REPO_RE = /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/;
+
+/** Try to fetch a skill definition file from a GitHub repo.
+ *  Tries main then master branch; tries SKILL.md, skill.md, then README.md. */
+async function fetchSkillFromGithub(owner: string, repo: string): Promise<{ content: string; filename: string } | null> {
+  const branches = ["main", "master"];
+  const filenames = ["SKILL.md", "skill.md", "README.md"];
+
+  for (const branch of branches) {
+    for (const filename of filenames) {
+      const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${filename}`;
+      try {
+        const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+        if (res.ok) {
+          const content = await res.text();
+          if (content && content.length > 0) {
+            return { content, filename };
+          }
+        }
+      } catch {
+        // Network error — try next combination
+      }
+    }
+  }
+
+  return null;
+}
 
 interface ClawHubSkillResponse {
   skill: {
@@ -49,6 +77,71 @@ export async function POST(req: NextRequest) {
     let name = skillName;
 
     if (skillId && !content) {
+      // ── GitHub repo skill scan ──
+      if (skillId.startsWith(GITHUB_PREFIX)) {
+        const repoPath = skillId.slice(GITHUB_PREFIX.length);
+        if (!GITHUB_REPO_RE.test(repoPath)) {
+          return NextResponse.json({ error: "Invalid GitHub repository format. Expected owner/repo." }, { status: 400 });
+        }
+
+        const [owner, repo] = repoPath.split("/");
+        name = name || repo;
+
+        try {
+          const fetched = await fetchSkillFromGithub(owner, repo);
+          if (!fetched) {
+            return NextResponse.json(
+              { error: `Could not find SKILL.md or README.md in ${owner}/${repo}. Tried main and master branches.` },
+              { status: 404 }
+            );
+          }
+
+          content = fetched.content;
+
+          if (content.length > 500_000) {
+            return NextResponse.json({ error: "Skill content too large (max 500KB)." }, { status: 400 });
+          }
+
+          const result = await scanSkill({ skillContent: content, skillName: name });
+
+          // Enrich meta with GitHub source info
+          result.meta = {
+            ...result.meta,
+            source: "github",
+            githubRepo: `${owner}/${repo}`,
+            sourceFile: fetched.filename,
+          };
+
+          result.target = `${owner}/${repo}`;
+          result.targetDisplay = `${owner}/${repo}`;
+
+          // Persist (fire-and-forget)
+          const supabase = createServiceClient();
+          if (supabase) {
+            supabase.rpc("upsert_scan_result", {
+              p_scan_type: "skill",
+              p_target: `github:${owner}/${repo}`,
+              p_target_display: `${owner}/${repo}`,
+              p_overall_score: result.overallScore,
+              p_grade: result.grade,
+              p_result: result,
+            }).then(({ error }) => {
+              if (error) logger.error("Failed to store GitHub skill scan", { error: error.message });
+            });
+          }
+
+          return NextResponse.json(result, {
+            headers: { "Cache-Control": "public, s-maxage=300, stale-while-revalidate=60" },
+          });
+        } catch (fetchErr) {
+          return NextResponse.json(
+            { error: `Could not fetch from GitHub: ${fetchErr instanceof Error ? fetchErr.message : "network error"}` },
+            { status: 502 }
+          );
+        }
+      }
+
+      // ── ClawHub skill scan ──
       // Clean the slug — strip @scope/skill- prefix, clawhub.ai/skills/ prefix
       const cleanSlug = skillId
         .replace(/^@[^/]+\/skill-/, "")
