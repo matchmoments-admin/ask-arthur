@@ -1,5 +1,5 @@
 import { setInstallId, getInstallId, setContextMenuText } from "@/lib/storage";
-import { checkURL, analyzeText, analyzeExtensionsCRX, fetchThreatDBUpdate, ExtensionApiError } from "@/lib/api";
+import { checkURL, analyzeText, analyzeExtensionsCRX, fetchThreatDBUpdate, checkAdCommunityFlags, flagAd, ExtensionApiError } from "@/lib/api";
 import { getCachedScanReport, setCachedScanReport } from "@/lib/extension-scan-cache";
 import { scanInstalledExtensions, buildSecurityReport } from "@/lib/extension-scanner";
 import { setupThreatDBRefresh, getThreatDB } from "@/lib/threat-db";
@@ -10,6 +10,7 @@ import type { ExtensionMessage, MessageResponse } from "@/lib/types";
 declare const __EXTENSION_SECRET__: string;
 declare const __URL_GUARD_ENABLED__: boolean;
 declare const __EXTENSION_SECURITY_ENABLED__: boolean;
+declare const __FACEBOOK_ADS_ENABLED__: boolean;
 
 export default defineBackground(() => {
   // --- onInstalled: generate UUID + create context menu ---
@@ -197,6 +198,64 @@ async function handleMessage(
       // Merge additional risk factors from CRX analysis into scan results
       return { success: true, data: data.results };
     }
+    case "ANALYZE_AD": {
+      const { adText, landingUrl, advertiserName, adTextHash } = message;
+
+      // Check community flags first (cheap)
+      const communityCheck = await checkAdCommunityFlags(adTextHash, landingUrl).catch(() => ({
+        flagCount: 0,
+        verdict: null,
+      }));
+
+      // If already flagged 3+ times, return immediately
+      if (communityCheck.flagCount >= 3 && communityCheck.verdict) {
+        return {
+          success: true,
+          data: {
+            verdict: communityCheck.verdict,
+            confidence: 0.8,
+            summary: `This ad has been flagged by ${communityCheck.flagCount} users as suspicious.`,
+            redFlags: ["Multiple community reports"],
+            urlMalicious: false,
+            communityFlagCount: communityCheck.flagCount,
+          },
+        };
+      }
+
+      // Run text analysis + URL check in parallel
+      const [textResult, urlResult] = await Promise.allSettled([
+        analyzeText(adText, "facebook-ad"),
+        landingUrl ? checkURL(landingUrl) : Promise.resolve({ data: { found: false }, remaining: null }),
+      ]);
+
+      const analysis = textResult.status === "fulfilled" ? textResult.value.data : null;
+      const urlCheck = urlResult.status === "fulfilled" ? urlResult.value.data : null;
+
+      // Merge: URL threats escalate verdict
+      let verdict = analysis?.verdict ?? "SAFE";
+      if (urlCheck && "found" in urlCheck && urlCheck.found && "threatLevel" in urlCheck && urlCheck.threatLevel === "HIGH") {
+        verdict = "HIGH_RISK";
+      }
+
+      return {
+        success: true,
+        data: {
+          verdict,
+          confidence: analysis?.confidence ?? 0.5,
+          summary: analysis?.summary ?? "Unable to analyze this ad.",
+          redFlags: analysis?.redFlags ?? [],
+          urlMalicious: urlCheck ? "found" in urlCheck && urlCheck.found : false,
+          communityFlagCount: communityCheck.flagCount,
+        },
+      };
+    }
+
+    case "FLAG_AD": {
+      const { advertiserName, landingUrl, adTextHash } = message;
+      await flagAd(advertiserName, landingUrl, adTextHash);
+      return { success: true };
+    }
+
     default:
       return { success: false, error: "Unknown message type" };
   }

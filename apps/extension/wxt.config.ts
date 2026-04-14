@@ -2,6 +2,7 @@ import { defineConfig } from "wxt";
 
 const urlGuardEnabled = process.env.WXT_URL_GUARD === "true";
 const extensionSecurityEnabled = process.env.WXT_EXTENSION_SECURITY !== "false";
+const facebookAdsEnabled = process.env.WXT_FACEBOOK_ADS === "true";
 
 export default defineConfig({
   modules: ["@wxt-dev/module-react"],
@@ -25,6 +26,7 @@ export default defineConfig({
     host_permissions: [
       "https://askarthur.au/api/extension/*",
       ...(urlGuardEnabled ? ["<all_urls>" as const] : []),
+      ...(facebookAdsEnabled ? ["https://www.facebook.com/*" as const] : []),
     ],
     icons: {
       "16": "icon/16.png",
@@ -46,6 +48,7 @@ export default defineConfig({
       ),
       __URL_GUARD_ENABLED__: urlGuardEnabled,
       __EXTENSION_SECURITY_ENABLED__: extensionSecurityEnabled,
+      __FACEBOOK_ADS_ENABLED__: facebookAdsEnabled,
     },
   }),
 });

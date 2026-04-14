@@ -131,4 +131,27 @@ export async function fetchThreatDBUpdate(
   }
 }
 
+export async function checkAdCommunityFlags(
+  adTextHash: string,
+  landingUrl: string | null
+): Promise<{ flagCount: number; verdict: string | null }> {
+  const params = new URLSearchParams({ hash: adTextHash });
+  if (landingUrl) params.set("url", landingUrl);
+  const { data } = await request<{ flagCount: number; verdict: string | null }>(
+    `/check-ad?${params.toString()}`
+  );
+  return data;
+}
+
+export async function flagAd(
+  advertiserName: string,
+  landingUrl: string | null,
+  adTextHash: string
+): Promise<void> {
+  await request("/flag-ad", {
+    method: "POST",
+    body: JSON.stringify({ advertiserName, landingUrl, adTextHash }),
+  });
+}
+
 export { ExtensionApiError };

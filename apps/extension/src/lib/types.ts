@@ -8,7 +8,9 @@ export type MessageType =
   | "CHECK_URL_PASSIVE"
   | "SHOW_PHISHING_WARNING"
   | "SCAN_EXTENSIONS"
-  | "DEEP_SCAN_EXTENSIONS";
+  | "DEEP_SCAN_EXTENSIONS"
+  | "ANALYZE_AD"
+  | "FLAG_AD";
 
 export interface CheckURLMessage {
   type: "CHECK_URL";
@@ -51,6 +53,21 @@ export interface DeepScanExtensionsMessage {
   }>;
 }
 
+export interface AnalyzeAdMessage {
+  type: "ANALYZE_AD";
+  adText: string;
+  landingUrl: string | null;
+  advertiserName: string;
+  adTextHash: string;
+}
+
+export interface FlagAdMessage {
+  type: "FLAG_AD";
+  advertiserName: string;
+  landingUrl: string | null;
+  adTextHash: string;
+}
+
 export type ExtensionMessage =
   | CheckURLMessage
   | CheckTextMessage
@@ -58,7 +75,9 @@ export type ExtensionMessage =
   | CheckURLPassiveMessage
   | ShowPhishingWarningMessage
   | ScanExtensionsMessage
-  | DeepScanExtensionsMessage;
+  | DeepScanExtensionsMessage
+  | AnalyzeAdMessage
+  | FlagAdMessage;
 
 export interface MessageResponse<T = unknown> {
   success: boolean;
