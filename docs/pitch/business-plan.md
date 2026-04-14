@@ -70,9 +70,15 @@ The **Scams Prevention Framework Act 2025** (Royal Assent 21 February 2025) crea
 - **Telcos** (ACMA-regulated): Monitor calls/texts for scam indicators, verify sender IDs via Australian Sender ID Registry, block confirmed scam numbers
 - **Digital platforms** (ACCC-regulated): Verify advertiser credentials, verify new accounts, suspend scam accounts
 
-Six overarching principles — Govern, Prevent, Detect, Report, Disrupt, Respond — apply to all regulated entities.
+Six overarching principles — Govern, Prevent, Detect, Report, Disrupt, Respond — apply to all regulated entities. Sector designation is expected 1 July 2026 (draft instrument consulted 28 November 2025 – 5 January 2026). Sector codes remain under development — the overarching principles will apply first.
 
-**Penalties create genuine urgency.** Tier 1 penalties (Prevent, Detect, Disrupt, Respond violations) reach the greater of ~A$52.7 million, three times the benefit obtained, or 30% of adjusted turnover. A private right of action allows consumers to sue for damages, creating class-action risk. AFCA will accept SPF complaints from 1 January 2027.
+**Actionable Scam Intelligence (ASI).** Section 58AI of the amended CCA defines ASI through an objective "reasonable grounds to suspect" test. Relevant information explicitly includes URLs, email addresses, phone numbers, social media profiles, digital wallets, and bank account information. Critically, the SPF Rules — still being drafted — will formally authorise **third-party data gateways, portals or websites** that give access to ASI. This creates a first-mover window to shape the regulatory landscape before rules are finalised.
+
+**Safe harbour.** Section 58BZA protects entities acting on ASI from liability for disruption actions for up to 28 days, creating strong incentive for regulated entities to maintain robust ASI sources including third-party feeds.
+
+**Penalties create genuine urgency.** Tier 1 penalties (Prevent, Detect, Disrupt, Respond violations) reach the greater of ~A$52.7 million (159,745 penalty units), three times the benefit obtained, or 30% of adjusted turnover. A private right of action allows consumers to sue for damages, creating class-action risk. AFCA EDR scheme authorised from 1 September 2026; AFCA begins formally hearing SPF complaints from 1 January 2027. Current AFCA compensation cap: $631,500 per claim (indexed). AFCA can now name non-compliant businesses and apportion liability across multiple entities.
+
+**Compliance documentation.** Entities must provide a statement of compliance within 30 days of receiving a scam complaint. This statement is admissible in EDR and court proceedings — false/misleading statements may be referred to ACCC. Banks that demonstrate they used external scam intelligence feeds will be better positioned to defend against fines and reimbursement claims.
 
 This regulatory mandate transforms scam detection from a "nice to have" into a "must have" for 200+ regulated entities — creating forced compliance demand that de-risks the investment thesis.
 

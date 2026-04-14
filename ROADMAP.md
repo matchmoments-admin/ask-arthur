@@ -282,6 +282,26 @@ Multi-type security scanner covering websites, Chrome extensions, MCP servers, a
 | Scam feed category illustrations — 13 AI-generated images (no-leaf, centered) | ✅ Done |
 | Blog/character illustration system — faceless flat vector characters, 4 variants | ✅ Done |
 
+## Phase 12 — Enterprise Readiness & Certifications
+
+Security certifications, SLA infrastructure, and procurement readiness for mid-tier bank and telco sales.
+
+| Feature | Status |
+|---------|--------|
+| Essential Eight ML1 self-assessment | Planned |
+| Compliance automation platform (Vanta/Sprinto) setup | Planned |
+| SOC 2 Type I (point-in-time) | Planned |
+| ISO 27001:2022 implementation | Planned |
+| SOC 2 Type II (12-month observation) | Planned |
+| SLA monitoring and uptime dashboard (99.9% target) | Planned |
+| Security whitepaper for bank procurement | Planned |
+| STIX/TAXII export for government-standard threat sharing | Planned |
+| AFCX Intel Loop integration format | Planned |
+| Sender ID Register verification endpoint | Planned |
+| IRAP assessment (when government contracts imminent) | Planned |
+
+See `docs/pitch/certification-roadmap.md` for detailed sequence, costs, and timelines.
+
 ---
 
 ## Status Key

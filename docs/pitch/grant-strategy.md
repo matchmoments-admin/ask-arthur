@@ -147,6 +147,19 @@ This alignment is central to all grant narratives and investor pitches.
 - Unclear IP ownership
 - Budget items not tied to milestones
 
+## SPF Rulemaking Engagement (Structural Competitive Advantage)
+
+The SPF Rules — which will formally authorise third-party data gateways as Actionable Scam Intelligence (ASI) sources — **have not yet been finalised**. Gilbert + Tobin's analysis specifically notes the development of rules including "the authorisation of any third party data gateways, portals or websites that give access to actionable scam intelligence."
+
+This creates a first-mover opportunity:
+- **Engage Treasury and ACCC/NASC during the rulemaking process** to shape how providers like Ask Arthur are formally recognised
+- Submit to any open Treasury SPF consultations (position paper was 28 November 2025)
+- Contact NASC about fusion cell participation (investment scam, job scam, romance scam fusion cells have run since launch)
+- Position as a candidate "authorised third-party ASI gateway" before rules are locked in
+- This structural advantage would be nearly impossible to replicate once rules are finalised
+
+**Priority: HIGH — the rulemaking window is closing. Supplementary rules on intelligence sharing expected by end of 2027.**
+
 ## Action Timeline
 
 | Action | Deadline | Priority |
@@ -154,8 +167,9 @@ This alignment is central to all grant narratives and investor pitches.
 | Apply to IGP Advisory Service | This week | CRITICAL |
 | Register FY24-25 R&D activities (RDTI) | 30 April 2026 | CRITICAL |
 | Begin contemporaneous R&D documentation | Immediately | CRITICAL |
-| Apply to CyRise | Next cohort opening | HIGH |
 | Apply to Startmate | Next cohort opening | HIGH |
+| Submit to Treasury SPF consultation (rulemaking) | This month | HIGH |
+| Contact NASC about fusion cell participation | This month | HIGH |
 | AFCX membership enquiry | This month | HIGH |
 | GASA membership application | Within 60 days | HIGH |
 | ASD Business Partner registration | Within 60 days | MEDIUM |
