@@ -1,65 +1,60 @@
 @import "tailwindcss";
 
 @theme inline {
-  --color-background: #ffffff;
-  --color-foreground: #171717;
+  /* New palette — Bitwarden-inspired */
+  --color-background: #FFFFFF;
+  --color-surface: #F8FAFC;
+  --color-primary: #2563EB;
+  --color-primary-hover: #1D4ED8;
+  --color-primary-light: #EFF6FF;
+  --color-header-bg: #0A2540;
+  --color-text-primary: #0F172A;
+  --color-text-secondary: #64748B;
+  --color-text-muted: #94A3B8;
+  --color-border: #E2E8F0;
+  --color-safe: #16A34A;
+  --color-safe-bg: #F0FDF4;
+  --color-warn: #EA580C;
+  --color-warn-bg: #FFF7ED;
+  --color-danger: #DC2626;
+  --color-danger-bg: #FEF2F2;
 
-  /* Primary */
-  --color-deep-navy: #001F3F;
-  --color-navy: #002B45;
-
-  /* Accent */
-  --color-action-teal: #008A98;
-  --color-action-teal-text: #006B75;
-
-  /* Text */
-  --color-text-primary: #1A1D21;
-  --color-text-secondary: #5E6C84;
-  --color-text-tertiary: #8993A4;
-  --color-gov-slate: #42526E;
+  /* Legacy aliases — keep ExtensionSecurityTab + other components working */
+  --color-deep-navy: #0A2540;
+  --color-navy: #0F3460;
+  --color-foreground: #0F172A;
+  --color-action-teal: #2563EB;
+  --color-action-teal-text: #1D4ED8;
+  --color-gov-slate: #64748B;
   --color-slate-500: #64748B;
   --color-slate-400: #94A3B8;
-
-  /* Surfaces */
-  --color-surface: #F7F8FA;
-
-  /* Borders */
   --color-border-light: #E2E8F0;
-  --color-border-default: hsla(226, 57%, 10%, 0.14);
-
-  /* Verdict: Safe */
-  --color-safe-bg: #ECFDF5;
-  --color-safe-border: #A7F3D0;
-  --color-safe-text: #388E3C;
-  --color-safe-heading: #1B5E20;
-
-  /* Verdict: Suspicious */
-  --color-warn-bg: #FFF8E1;
-  --color-warn-border: #FFE082;
-  --color-warn-text: #F57C00;
-  --color-warn-heading: #E65100;
-
-  /* Verdict: High Risk */
-  --color-danger-bg: #FEF2F2;
+  --color-border-default: #E2E8F0;
+  --color-safe-border: #BBF7D0;
+  --color-safe-text: #16A34A;
+  --color-safe-heading: #15803D;
+  --color-warn-border: #FED7AA;
+  --color-warn-text: #EA580C;
+  --color-warn-heading: #C2410C;
   --color-danger-border: #FECACA;
-  --color-danger-text: #D32F2F;
-  --color-danger-heading: #B71C1C;
+  --color-danger-text: #DC2626;
+  --color-danger-heading: #B91C1C;
 
   --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
 body {
   background: var(--color-background);
-  color: var(--color-gov-slate);
+  color: var(--color-text-primary);
   font-family: var(--font-sans);
 }
 
-/* Focus ring — deep navy */
+/* Focus ring — primary blue */
 textarea:focus,
 input:focus {
   outline: none;
-  border-color: var(--color-deep-navy);
-  box-shadow: 0 0 0 3px rgba(0, 31, 63, 0.12);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 
 /* Heading letter-spacing */
@@ -104,10 +99,24 @@ h1, h2, h3 {
 
 /* CTA glow on hover */
 .cta-glow:hover {
-  box-shadow: 0 0 0 3px rgba(0, 31, 63, 0.15), 0 4px 12px rgba(0, 31, 63, 0.18);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15), 0 4px 12px rgba(37, 99, 235, 0.18);
 }
 
-/* Loom-style multi-layer card shadow */
+/* Card shadow */
 .card-shadow {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 8px 32px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 4px 16px rgba(0, 0, 0, 0.03);
+}
+
+/* Scrollbar styling */
+.overflow-y-auto::-webkit-scrollbar {
+  width: 4px;
+}
+
+.overflow-y-auto::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.overflow-y-auto::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 4px;
 }

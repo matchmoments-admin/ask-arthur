@@ -99,11 +99,11 @@ export function ExtensionSecurityTab() {
 
   if (error) {
     return (
-      <div className="p-4 bg-warn-bg border border-warn-border rounded-xl">
-        <p className="text-warn-heading text-sm">{error}</p>
+      <div className="m-4 p-3 bg-warn-bg border border-warn-border rounded-[10px]">
+        <p className="text-warn-heading text-[13px]">{error}</p>
         <button
           onClick={runScan}
-          className="mt-3 h-9 px-5 bg-deep-navy text-white font-semibold rounded-xl cta-glow hover:bg-navy transition-colors text-xs"
+          className="mt-3 h-9 px-5 bg-primary text-white font-semibold rounded-[8px] cta-glow hover:bg-primary-hover transition-colors duration-150 text-[11px]"
         >
           Try Again
         </button>
@@ -116,13 +116,13 @@ export function ExtensionSecurityTab() {
   // All safe
   if (report.overallRiskLevel === "LOW" && report.riskBreakdown.MEDIUM === 0) {
     return (
-      <div className="space-y-3">
-        <div className="rounded-xl bg-green-50 border border-green-200 p-4 text-center space-y-2">
-          <ShieldCheck size={32} className="mx-auto text-green-600" />
-          <p className="text-sm font-semibold text-green-800">
+      <div className="p-4 space-y-3">
+        <div className="rounded-[10px] bg-safe-bg border border-safe-border p-4 text-center space-y-2">
+          <ShieldCheck size={32} className="mx-auto text-safe" />
+          <p className="text-[13px] font-semibold text-safe-heading">
             All extensions look safe
           </p>
-          <p className="text-xs text-green-700">
+          <p className="text-[11px] text-safe-text">
             {report.totalExtensions} extension
             {report.totalExtensions !== 1 ? "s" : ""} scanned
             {report.enabledExtensions < report.totalExtensions &&
@@ -131,7 +131,7 @@ export function ExtensionSecurityTab() {
         </div>
         <button
           onClick={runScan}
-          className="w-full h-9 px-5 bg-white border border-border-default text-deep-navy font-semibold rounded-xl hover:bg-surface transition-colors text-xs"
+          className="w-full h-9 px-5 bg-background border border-border text-text-primary font-semibold rounded-[8px] hover:bg-surface transition-colors duration-150 text-[11px]"
         >
           Scan Again
         </button>
@@ -141,9 +141,9 @@ export function ExtensionSecurityTab() {
 
   // Results with issues
   return (
-    <div className="space-y-3">
+    <div className="p-4 space-y-3">
       {/* Summary card */}
-      <div className="rounded-xl card-shadow overflow-hidden">
+      <div className="rounded-[10px] border border-border overflow-hidden">
         <div
           className={`px-4 py-3 flex items-center justify-between ${
             report.overallRiskLevel === "CRITICAL"
@@ -165,14 +165,14 @@ export function ExtensionSecurityTab() {
           </div>
           <ExtensionRiskBadge level={report.overallRiskLevel} />
         </div>
-        <div className="bg-white px-4 py-3">
-          <div className="flex gap-4 text-xs text-gov-slate">
+        <div className="bg-background px-4 py-3">
+          <div className="flex gap-4 text-[11px] text-text-secondary">
             <span>
-              <strong className="text-deep-navy">{report.totalExtensions}</strong>{" "}
+              <strong className="text-text-primary">{report.totalExtensions}</strong>{" "}
               total
             </span>
             <span>
-              <strong className="text-deep-navy">{report.enabledExtensions}</strong>{" "}
+              <strong className="text-text-primary">{report.enabledExtensions}</strong>{" "}
               enabled
             </span>
             {report.riskBreakdown.CRITICAL > 0 && (
@@ -193,7 +193,7 @@ export function ExtensionSecurityTab() {
 
       <button
         onClick={runScan}
-        className="w-full h-9 px-5 bg-white border border-border-default text-deep-navy font-semibold rounded-xl hover:bg-surface transition-colors text-xs"
+        className="w-full h-9 px-5 bg-background border border-border text-text-primary font-semibold rounded-[8px] hover:bg-surface transition-colors duration-150 text-[11px]"
       >
         Scan Again
       </button>
@@ -235,12 +235,12 @@ function ExtensionItem({ extension }: { extension: ExtensionScanResult }) {
 
   return (
     <div
-      className={`rounded-xl border overflow-hidden ${
+      className={`rounded-[10px] border overflow-hidden ${
         extension.isKnownMalicious
-          ? "border-red-300 bg-red-50"
+          ? "border-red-300 bg-danger-bg"
           : isRisky
-            ? "border-amber-200 bg-amber-50"
-            : "border-border-default bg-white"
+            ? "border-amber-200 bg-warn-bg"
+            : "border-border bg-background"
       }`}
     >
       <button
@@ -258,27 +258,27 @@ function ExtensionItem({ extension }: { extension: ExtensionScanResult }) {
         )}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-deep-navy truncate">
+            <span className="text-[13px] font-medium text-text-primary truncate">
               {extension.name}
             </span>
             {!extension.enabled && (
-              <span className="text-[10px] text-slate-400">(disabled)</span>
+              <span className="text-[10px] text-text-muted">(disabled)</span>
             )}
           </div>
-          <span className="text-[10px] text-slate-400">
+          <span className="text-[10px] text-text-muted">
             v{extension.version}
           </span>
         </div>
         <ExtensionRiskBadge level={extension.riskLevel} />
         {expanded ? (
-          <ChevronUp size={14} className="text-slate-400 flex-shrink-0" />
+          <ChevronUp size={14} className="text-text-muted flex-shrink-0" />
         ) : (
-          <ChevronDown size={14} className="text-slate-400 flex-shrink-0" />
+          <ChevronDown size={14} className="text-text-muted flex-shrink-0" />
         )}
       </button>
 
       {expanded && (
-        <div className="px-3 pb-3 space-y-2 border-t border-border-default pt-2">
+        <div className="px-3 pb-3 space-y-2 border-t border-border pt-2">
           {extension.isKnownMalicious && (
             <div className="flex items-start gap-2 text-red-700 bg-red-100 rounded-lg p-2">
               <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
@@ -291,7 +291,7 @@ function ExtensionItem({ extension }: { extension: ExtensionScanResult }) {
 
           {extension.riskFactors.length > 0 && (
             <div className="space-y-1.5">
-              <p className="text-[10px] font-semibold text-deep-navy uppercase tracking-wide">
+              <p className="text-[10px] font-semibold text-text-primary uppercase tracking-wide">
                 Risk Factors
               </p>
               {extension.riskFactors.map((factor) => (
@@ -308,10 +308,10 @@ function ExtensionItem({ extension }: { extension: ExtensionScanResult }) {
                     }`}
                   />
                   <div>
-                    <p className="text-xs font-medium text-deep-navy">
+                    <p className="text-[11px] font-medium text-text-primary">
                       {factor.label}
                     </p>
-                    <p className="text-[10px] text-gov-slate">
+                    <p className="text-[10px] text-text-secondary">
                       {factor.description}
                     </p>
                   </div>
@@ -322,8 +322,8 @@ function ExtensionItem({ extension }: { extension: ExtensionScanResult }) {
 
           {/* Deep scan results */}
           {deepScanResult && deepScanResult.additionalRiskFactors.length > 0 && (
-            <div className="space-y-1.5 pt-1 border-t border-border-default">
-              <p className="text-[10px] font-semibold text-deep-navy uppercase tracking-wide">
+            <div className="space-y-1.5 pt-1 border-t border-border">
+              <p className="text-[10px] font-semibold text-text-primary uppercase tracking-wide">
                 Deep Scan Results
               </p>
               {deepScanResult.additionalRiskFactors.map((factor) => (
@@ -340,10 +340,10 @@ function ExtensionItem({ extension }: { extension: ExtensionScanResult }) {
                     }`}
                   />
                   <div>
-                    <p className="text-xs font-medium text-deep-navy">
+                    <p className="text-[11px] font-medium text-text-primary">
                       {factor.label}
                     </p>
-                    <p className="text-[10px] text-gov-slate">
+                    <p className="text-[10px] text-text-secondary">
                       {factor.description}
                     </p>
                   </div>
@@ -357,7 +357,7 @@ function ExtensionItem({ extension }: { extension: ExtensionScanResult }) {
             <button
               onClick={handleDeepScan}
               disabled={deepScanLoading}
-              className="w-full h-8 px-4 bg-deep-navy text-white font-semibold rounded-lg text-xs hover:bg-navy transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
+              className="w-full h-8 px-4 bg-primary text-white font-semibold rounded-[8px] text-[11px] hover:bg-primary-hover transition-colors duration-150 disabled:opacity-50 flex items-center justify-center gap-1.5"
             >
               <Search size={12} />
               {deepScanLoading ? "Analyzing..." : "Deep Scan"}
@@ -365,7 +365,7 @@ function ExtensionItem({ extension }: { extension: ExtensionScanResult }) {
           )}
 
           {/* Score */}
-          <p className="text-[10px] text-slate-400">
+          <p className="text-[10px] text-text-muted">
             Risk score: {extension.riskScore}/100
           </p>
         </div>

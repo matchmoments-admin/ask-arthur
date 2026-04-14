@@ -3,9 +3,10 @@ import { ShieldCheck, TriangleAlert, Gauge, ExternalLink } from "lucide-react";
 import { VerdictHeader, VERDICT_CONFIG } from "./VerdictBadge";
 
 const VERDICT_COLORS: Record<Verdict, string> = {
-  SAFE: "#388E3C",
-  SUSPICIOUS: "#F57C00",
-  HIGH_RISK: "#D32F2F",
+  SAFE: "#16A34A",
+  SUSPICIOUS: "#EA580C",
+  HIGH_RISK: "#DC2626",
+  UNCERTAIN: "#64748B",
 };
 
 interface URLResultProps {
@@ -31,22 +32,22 @@ function URLResult({ result }: { result: ExtensionURLCheckResponse }) {
   if (!result.found) {
     // Safe — use the same card structure as web app
     return (
-      <div role="alert" className="rounded-xl card-shadow overflow-hidden">
-        <div className="bg-[#388E3C] px-4 py-3 flex items-center gap-2 rounded-t-xl">
+      <div role="alert" className="rounded-[10px] border border-border overflow-hidden">
+        <div className="bg-safe px-4 py-3 flex items-center gap-2 rounded-t-[10px]">
           <ShieldCheck size={20} className="text-white" />
-          <h2 className="text-sm font-semibold text-white">No Threats Found</h2>
+          <h2 className="text-[13px] font-semibold text-white">No Threats Found</h2>
         </div>
-        <div className="bg-white px-4 py-4">
-          <p className="text-deep-navy text-sm leading-relaxed">
+        <div className="bg-background px-4 py-4">
+          <p className="text-text-primary text-[13px] leading-relaxed">
             This URL hasn&apos;t been reported as a scam.
           </p>
           {result.domain && (
-            <p className="text-gov-slate text-sm mt-1">
-              Domain: <strong className="text-deep-navy">{result.domain}</strong>
+            <p className="text-text-secondary text-[13px] mt-1">
+              Domain: <strong className="text-text-primary">{result.domain}</strong>
             </p>
           )}
           {result.safeBrowsing && !result.safeBrowsing.isMalicious && (
-            <p className="text-slate-400 text-xs mt-2">
+            <p className="text-text-muted text-[11px] mt-2">
               Verified clean by Google Safe Browsing
             </p>
           )}
@@ -66,26 +67,26 @@ function URLResult({ result }: { result: ExtensionURLCheckResponse }) {
   const config = VERDICT_CONFIG[verdict];
 
   return (
-    <div role="alert" className="rounded-xl card-shadow overflow-hidden">
-      <div className={`${config.bg} px-4 py-3 flex items-center gap-2 rounded-t-xl`}>
+    <div role="alert" className="rounded-[10px] border border-border overflow-hidden">
+      <div className={`${config.bg} px-4 py-3 flex items-center gap-2 rounded-t-[10px]`}>
         <config.icon size={20} className="text-white" />
-        <h2 className="text-sm font-semibold text-white">Threat Detected</h2>
+        <h2 className="text-[13px] font-semibold text-white">Threat Detected</h2>
       </div>
-      <div className="bg-white px-4 py-4">
+      <div className="bg-background px-4 py-4">
         {result.domain && (
-          <p className="text-deep-navy text-sm leading-relaxed">
+          <p className="text-text-primary text-[13px] leading-relaxed">
             Domain: <strong>{result.domain}</strong>
           </p>
         )}
         {result.reportCount && result.reportCount > 0 && (
-          <p className="text-gov-slate text-sm mt-1">
+          <p className="text-text-secondary text-[13px] mt-1">
             Reported {result.reportCount} time{result.reportCount > 1 ? "s" : ""}
           </p>
         )}
         {result.safeBrowsing?.isMalicious && (
           <div className="flex items-start gap-2 mt-2">
-            <TriangleAlert size={14} className="text-[#F57C00] mt-0.5" />
-            <span className="text-gov-slate text-sm">
+            <TriangleAlert size={14} className="text-warn mt-0.5" />
+            <span className="text-text-secondary text-[13px]">
               Flagged by {result.safeBrowsing.sources.join(" and ")}
             </span>
           </div>
@@ -99,19 +100,19 @@ function TextResult({ result }: { result: AnalysisResult }) {
   const config = VERDICT_CONFIG[result.verdict];
 
   return (
-    <div role="alert" className="rounded-xl card-shadow overflow-hidden">
+    <div role="alert" className="rounded-[10px] border border-border overflow-hidden">
       {/* Colored header bar — matches web app ResultCard */}
       <VerdictHeader verdict={result.verdict} />
 
       {/* Body */}
-      <div className="bg-white px-4 py-4">
+      <div className="bg-background px-4 py-4">
         {/* Summary */}
-        <p className="text-deep-navy text-sm leading-relaxed mb-3">{result.summary}</p>
+        <p className="text-text-primary text-[13px] leading-relaxed mb-3">{result.summary}</p>
 
         {/* Confidence */}
         <div className={`flex items-center gap-2 mb-4 ${config.textColor}`}>
           <Gauge size={16} />
-          <span className="text-xs font-semibold">
+          <span className="text-[11px] font-semibold">
             {Math.round(result.confidence * 100)}% confidence
           </span>
         </div>
@@ -119,12 +120,12 @@ function TextResult({ result }: { result: AnalysisResult }) {
         {/* Red Flags — "What We Found" */}
         {result.redFlags.length > 0 && (
           <div className="mb-4">
-            <h3 className="text-xs font-semibold text-deep-navy mb-2">
+            <h3 className="text-[11px] font-semibold text-text-primary mb-2">
               What We Found
             </h3>
             <ul className="space-y-1.5">
               {result.redFlags.map((flag, i) => (
-                <li key={i} className="flex items-start gap-2 text-gov-slate text-sm leading-relaxed">
+                <li key={i} className="flex items-start gap-2 text-text-secondary text-[13px] leading-relaxed">
                   <span
                     className="mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0"
                     style={{ backgroundColor: VERDICT_COLORS[result.verdict] }}
@@ -139,12 +140,12 @@ function TextResult({ result }: { result: AnalysisResult }) {
         {/* Next Steps — "What To Do" */}
         {result.nextSteps.length > 0 && (
           <div>
-            <h3 className="text-xs font-semibold text-deep-navy mb-2">
+            <h3 className="text-[11px] font-semibold text-text-primary mb-2">
               What To Do
             </h3>
             <ol className="space-y-1.5 list-decimal list-inside">
               {result.nextSteps.map((step, i) => (
-                <li key={i} className="text-gov-slate text-sm leading-relaxed">
+                <li key={i} className="text-text-secondary text-[13px] leading-relaxed">
                   {step}
                 </li>
               ))}
@@ -156,8 +157,8 @@ function TextResult({ result }: { result: AnalysisResult }) {
         <SecurityToolRecommendations />
 
         {/* Disclaimer */}
-        <div className="mt-4 pt-3 border-t border-border-default">
-          <p className="text-xs text-slate-400 leading-relaxed">
+        <div className="mt-4 pt-3 border-t border-border">
+          <p className="text-[11px] text-text-muted leading-relaxed">
             This analysis is AI-generated and advisory only. Always exercise
             your own judgment.
           </p>
@@ -175,8 +176,8 @@ const SECURITY_TOOLS = [
 
 function SecurityToolRecommendations() {
   return (
-    <div className="mt-4 pt-3 border-t border-border-default">
-      <h3 className="text-xs font-semibold text-deep-navy mb-2">
+    <div className="mt-4 pt-3 border-t border-border">
+      <h3 className="text-[11px] font-semibold text-text-primary mb-2">
         Recommended Security Tools
       </h3>
       <div className="space-y-1.5">
@@ -186,13 +187,13 @@ function SecurityToolRecommendations() {
             href={tool.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center justify-between text-sm text-gov-slate hover:text-action-teal-text transition-colors"
+            className="flex items-center justify-between text-[13px] text-text-secondary hover:text-primary transition-colors duration-150"
           >
             <span>
-              <strong className="text-deep-navy">{tool.name}</strong>
-              <span className="text-xs text-slate-400 ml-1.5">{tool.desc}</span>
+              <strong className="text-text-primary">{tool.name}</strong>
+              <span className="text-[11px] text-text-muted ml-1.5">{tool.desc}</span>
             </span>
-            <ExternalLink size={12} className="text-slate-400 flex-shrink-0" />
+            <ExternalLink size={12} className="text-text-muted flex-shrink-0" />
           </a>
         ))}
       </div>

@@ -4,22 +4,28 @@ import { ShieldCheck, TriangleAlert, ShieldAlert } from "lucide-react";
 
 const VERDICT_CONFIG: Record<Verdict, { bg: string; textColor: string; title: string; icon: LucideIcon }> = {
   SAFE: {
-    bg: "bg-[#388E3C]",
-    textColor: "text-[#388E3C]",
+    bg: "bg-safe",
+    textColor: "text-safe",
     title: "This Appears Safe",
     icon: ShieldCheck,
   },
   SUSPICIOUS: {
-    bg: "bg-[#F57C00]",
-    textColor: "text-[#F57C00]",
+    bg: "bg-warn",
+    textColor: "text-warn",
     title: "Proceed with Caution",
     icon: TriangleAlert,
   },
   HIGH_RISK: {
-    bg: "bg-[#D32F2F]",
-    textColor: "text-[#D32F2F]",
+    bg: "bg-danger",
+    textColor: "text-danger",
     title: "High Risk — Likely a Scam",
     icon: ShieldAlert,
+  },
+  UNCERTAIN: {
+    bg: "bg-text-secondary",
+    textColor: "text-text-secondary",
+    title: "Uncertain — Could Not Determine",
+    icon: TriangleAlert,
   },
 };
 
@@ -29,7 +35,7 @@ export { VERDICT_CONFIG };
 export function VerdictHeader({ verdict }: { verdict: Verdict }) {
   const config = VERDICT_CONFIG[verdict];
   return (
-    <div className={`${config.bg} px-4 py-3 flex items-center gap-2 rounded-t-xl`}>
+    <div className={`${config.bg} px-4 py-3 flex items-center gap-2 rounded-t-[10px]`}>
       <config.icon size={20} className="text-white" />
       <h2 className="text-sm font-semibold text-white">
         {config.title}
