@@ -4,9 +4,11 @@
   /* New palette — Bitwarden-inspired */
   --color-background: #FFFFFF;
   --color-surface: #F8FAFC;
-  --color-primary: #2563EB;
-  --color-primary-hover: #1D4ED8;
+  --color-primary: #0A2540;
+  --color-primary-hover: #0F3460;
   --color-primary-light: #EFF6FF;
+  --color-accent: #2563EB;
+  --color-accent-hover: #1D4ED8;
   --color-header-bg: #0A2540;
   --color-text-primary: #0F172A;
   --color-text-secondary: #64748B;
@@ -49,12 +51,12 @@ body {
   font-family: var(--font-sans);
 }
 
-/* Focus ring — primary blue */
+/* Focus ring — primary navy */
 textarea:focus,
 input:focus {
   outline: none;
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  box-shadow: 0 0 0 3px rgba(10, 37, 64, 0.12);
 }
 
 /* Heading letter-spacing */

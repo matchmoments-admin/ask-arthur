@@ -33,11 +33,11 @@ export function BottomNav({ active, onChange }: BottomNavProps) {
               key={tab.id}
               onClick={() => onChange(tab.id)}
               className={`flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[44px] transition-colors duration-150 relative ${
-                isActive ? "text-primary" : "text-text-muted hover:text-text-secondary"
+                isActive ? "text-accent" : "text-text-muted hover:text-text-secondary"
               }`}
             >
               {isActive && (
-                <span className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-[3px] rounded-b-full bg-primary" />
+                <span className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-[3px] rounded-b-full bg-accent" />
               )}
               <tab.icon size={20} strokeWidth={isActive ? 2.2 : 1.8} />
               <span className="text-[10px] font-medium leading-none">{tab.label}</span>
