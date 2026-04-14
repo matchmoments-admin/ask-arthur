@@ -10,6 +10,8 @@ export { geolocateIP } from "./geolocate";
 export { validateImageMagicBytes } from "./image-validate";
 export { assertSafeURL, filterSafeURLs } from "./ssrf-guard";
 export { createBrandAlert } from "./brand-alerts";
+export { checkHiveAI } from "./hive-ai";
+export type { HiveAIResult } from "./hive-ai";
 export { generateDraftPosts } from "./social-post";
 export { storeScamReport, buildEntities } from "./report-store";
 export type { EntityToLink, StoreScamReportParams } from "./report-store";

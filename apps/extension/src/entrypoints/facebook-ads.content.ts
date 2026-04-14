@@ -88,6 +88,7 @@ export default defineContentScript({
         type: "ANALYZE_AD",
         adText: ad.adText,
         landingUrl: ad.landingUrl,
+        imageUrl: ad.imageUrl,
         advertiserName: ad.advertiserName,
         adTextHash: hash,
       });

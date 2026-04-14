@@ -28,11 +28,13 @@
     "./ct-lookup": "./src/ct-lookup.ts",
     "./twilio-lookup": "./src/twilio-lookup.ts",
     "./urlscan": "./src/urlscan.ts",
+    "./hive-ai": "./src/hive-ai.ts",
     "./deepfake-detect": "./src/deepfake-detect.ts",
     "./push-sender": "./src/push-sender.ts",
     "./inngest/scam-alerts": "./src/inngest/scam-alerts.ts",
     "./inngest/feed-sync": "./src/inngest/feed-sync.ts",
-    "./ipqualityscore": "./src/ipqualityscore.ts"
+    "./ipqualityscore": "./src/ipqualityscore.ts",
+    "./inngest/meta-brp-report": "./src/inngest/meta-brp-report.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",

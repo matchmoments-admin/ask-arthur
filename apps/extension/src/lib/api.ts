@@ -154,4 +154,30 @@ export async function flagAd(
   });
 }
 
+export interface AdAnalysisResult {
+  verdict: "SAFE" | "SUSPICIOUS" | "HIGH_RISK";
+  confidence: number;
+  summary: string;
+  redFlags: string[];
+  urlMalicious: boolean;
+  communityFlagCount: number;
+  aiGeneratedImage?: boolean;
+  deepfakeDetected?: boolean;
+  impersonatedCelebrity?: string | null;
+  generatorSource?: string | null;
+}
+
+export async function analyzeAd(payload: {
+  adText: string;
+  landingUrl: string | null;
+  imageUrl: string | null;
+  advertiserName: string;
+  adTextHash: string;
+}): Promise<{ data: AdAnalysisResult; remaining: number | null }> {
+  return request<AdAnalysisResult>("/analyze-ad", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export { ExtensionApiError };

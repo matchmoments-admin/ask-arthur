@@ -12,6 +12,7 @@ import { riskScorer } from "./risk-scorer";
 import { urlscanEnrichment } from "./urlscan-enrichment";
 import { scamAlertCron } from "./scam-alerts";
 import { syncVerifiedScamsToFeed, syncUserReportsToFeed } from "./feed-sync";
+import { metaBrpReport } from "./meta-brp-report";
 
 export const inngestFunctions = [
   stalenessCheck,
@@ -26,4 +27,5 @@ export const inngestFunctions = [
   scamAlertCron,
   syncVerifiedScamsToFeed,
   syncUserReportsToFeed,
+  metaBrpReport,
 ];

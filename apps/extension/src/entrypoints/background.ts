@@ -1,5 +1,5 @@
 import { setInstallId, getInstallId, setContextMenuText } from "@/lib/storage";
-import { checkURL, analyzeText, analyzeExtensionsCRX, fetchThreatDBUpdate, checkAdCommunityFlags, flagAd, ExtensionApiError } from "@/lib/api";
+import { checkURL, analyzeText, analyzeExtensionsCRX, fetchThreatDBUpdate, checkAdCommunityFlags, flagAd, analyzeAd, ExtensionApiError } from "@/lib/api";
 import { getCachedScanReport, setCachedScanReport } from "@/lib/extension-scan-cache";
 import { scanInstalledExtensions, buildSecurityReport } from "@/lib/extension-scanner";
 import { setupThreatDBRefresh, getThreatDB } from "@/lib/threat-db";
@@ -199,7 +199,7 @@ async function handleMessage(
       return { success: true, data: data.results };
     }
     case "ANALYZE_AD": {
-      const { adText, landingUrl, advertiserName, adTextHash } = message;
+      const { adText, landingUrl, advertiserName, adTextHash, imageUrl } = message;
 
       // Check community flags first (cheap)
       const communityCheck = await checkAdCommunityFlags(adTextHash, landingUrl).catch(() => ({
@@ -222,32 +222,12 @@ async function handleMessage(
         };
       }
 
-      // Run text analysis + URL check in parallel
-      const [textResult, urlResult] = await Promise.allSettled([
-        analyzeText(adText, "facebook-ad"),
-        landingUrl ? checkURL(landingUrl) : Promise.resolve({ data: { found: false }, remaining: null }),
-      ]);
+      // Use dedicated ad analysis endpoint (handles text + URL + Hive AI server-side)
+      const { data } = await analyzeAd({
+        adText, landingUrl, imageUrl, advertiserName, adTextHash,
+      });
 
-      const analysis = textResult.status === "fulfilled" ? textResult.value.data : null;
-      const urlCheck = urlResult.status === "fulfilled" ? urlResult.value.data : null;
-
-      // Merge: URL threats escalate verdict
-      let verdict = analysis?.verdict ?? "SAFE";
-      if (urlCheck && "found" in urlCheck && urlCheck.found && "threatLevel" in urlCheck && urlCheck.threatLevel === "HIGH") {
-        verdict = "HIGH_RISK";
-      }
-
-      return {
-        success: true,
-        data: {
-          verdict,
-          confidence: analysis?.confidence ?? 0.5,
-          summary: analysis?.summary ?? "Unable to analyze this ad.",
-          redFlags: analysis?.redFlags ?? [],
-          urlMalicious: urlCheck ? "found" in urlCheck && urlCheck.found : false,
-          communityFlagCount: communityCheck.flagCount,
-        },
-      };
+      return { success: true, data };
     }
 
     case "FLAG_AD": {

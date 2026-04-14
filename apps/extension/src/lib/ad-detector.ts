@@ -2,6 +2,7 @@ export interface AdContent {
   advertiserName: string;
   adText: string;
   landingUrl: string | null;
+  imageUrl: string | null;
   feedUnitElement: HTMLElement;
 }
 
@@ -12,6 +13,10 @@ export interface AdAnalysisResult {
   redFlags: string[];
   urlMalicious: boolean;
   communityFlagCount: number;
+  aiGeneratedImage?: boolean;
+  deepfakeDetected?: boolean;
+  impersonatedCelebrity?: string | null;
+  generatorSource?: string | null;
 }
 
 /**
@@ -184,10 +189,23 @@ export function extractAdContent(feedUnit: HTMLElement): AdContent | null {
     }
   }
 
+  // Ad image: first large image with Facebook CDN src
+  let imageUrl: string | null = null;
+  const adImages = feedUnit.querySelectorAll<HTMLImageElement>(
+    'img[src*="scontent"], img[src*="fbcdn"]'
+  );
+  for (const img of adImages) {
+    if (img.naturalWidth >= 100 && img.naturalHeight >= 100) {
+      imageUrl = img.src;
+      break;
+    }
+  }
+
   return {
     advertiserName,
     adText: adText.slice(0, 5000), // Cap length
     landingUrl,
+    imageUrl,
     feedUnitElement: feedUnit,
   };
 }
@@ -213,6 +231,12 @@ export function createWarningBanner(
   const textColor = isHighRisk ? "#B71C1C" : "#E65100";
   const icon = isHighRisk ? "\u26D4" : "\u26A0\uFE0F";
   const title = isHighRisk ? "This ad may be a scam" : "This ad has suspicious characteristics";
+
+  const deepfakeHtml = result.deepfakeDetected
+    ? `<div class="deepfake-badge">Deepfake Detected${result.impersonatedCelebrity ? ` — Impersonating ${escapeHtml(result.impersonatedCelebrity)}` : ''}</div>`
+    : result.aiGeneratedImage
+    ? `<div class="ai-badge">AI-Generated Image Detected</div>`
+    : '';
 
   const flagsHtml = result.redFlags
     .slice(0, 2)
@@ -289,11 +313,32 @@ export function createWarningBanner(
         color: #999;
         margin-top: 2px;
       }
+      .deepfake-badge {
+        display: inline-block;
+        background: #7C3AED;
+        color: white;
+        padding: 2px 10px;
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: 700;
+        margin-top: 4px;
+      }
+      .ai-badge {
+        display: inline-block;
+        background: #6366F1;
+        color: white;
+        padding: 2px 10px;
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: 700;
+        margin-top: 4px;
+      }
     </style>
     <div class="banner">
       <span class="icon">${icon}</span>
       <div class="content">
         <div class="title">${escapeHtml(title)}</div>
+        ${deepfakeHtml}
         <div class="summary">${escapeHtml(result.summary)}</div>
         ${flagsHtml ? `<ul class="flags">${flagsHtml}</ul>` : ""}
         <div class="advertiser">Advertiser: ${escapeHtml(advertiserName)}${result.communityFlagCount > 0 ? ` \u2022 ${result.communityFlagCount} community report${result.communityFlagCount > 1 ? "s" : ""}` : ""}</div>

@@ -57,6 +57,7 @@ export interface AnalyzeAdMessage {
   type: "ANALYZE_AD";
   adText: string;
   landingUrl: string | null;
+  imageUrl: string | null;
   advertiserName: string;
   adTextHash: string;
 }
