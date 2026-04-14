@@ -14,8 +14,10 @@ export default function App() {
     <div className="w-[380px] h-[540px] flex flex-col bg-background animate-slide-up">
       {/* Compact header */}
       <header className="bg-header-bg px-4 py-2.5 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-2">
-          <img src="/icon/48.png" alt="" className="h-6 w-6" />
+        <div className="flex items-center gap-2.5">
+          <div className="h-7 w-7 bg-[#0A2540] rounded-lg flex items-center justify-center border border-white/10">
+            <span className="text-white text-[15px] font-bold leading-none">A</span>
+          </div>
           <span className="text-[15px] font-semibold text-white">Ask Arthur</span>
         </div>
         <div className="flex items-center gap-2">
