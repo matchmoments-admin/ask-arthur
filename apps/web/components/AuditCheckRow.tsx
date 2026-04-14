@@ -10,6 +10,7 @@ interface AuditCheckRowProps {
   score: number;
   maxScore: number;
   learnMoreUrl?: string;
+  evidence?: string;
 }
 
 const STATUS_CONFIG: Record<string, { icon: LucideIcon; color: string; bg: string }> = {
@@ -27,6 +28,7 @@ export default function AuditCheckRow({
   score,
   maxScore,
   learnMoreUrl,
+  evidence,
 }: AuditCheckRowProps) {
   const config = STATUS_CONFIG[status] || STATUS_CONFIG.error;
 
@@ -56,6 +58,16 @@ export default function AuditCheckRow({
             </>
           )}
         </p>
+        {evidence && (
+          <details className="mt-1.5 text-xs text-gov-slate">
+            <summary className="cursor-pointer hover:text-deep-navy font-medium">
+              View evidence
+            </summary>
+            <pre className="mt-1 p-2 bg-white/60 rounded font-mono whitespace-pre-wrap break-all text-[11px] max-h-32 overflow-y-auto">
+              {evidence}
+            </pre>
+          </details>
+        )}
       </div>
     </div>
   );

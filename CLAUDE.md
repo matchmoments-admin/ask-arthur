@@ -143,6 +143,8 @@ import { validateApiKey } from "@/lib/apiAuth";
 - Return structured JSON errors from API routes
 - Use `import type` for type-only imports
 - Run `pnpm turbo build` to verify changes don't break the build
+- Write descriptive Git commit messages that explain technical decisions (not just "fix bug") — these serve as contemporaneous R&D documentation for RDTI claims
+- When solving a non-obvious technical problem, note the hypothesis, approach, and outcome in the commit message body — this evidences "technical uncertainty" and "new knowledge generated"
 
 ## Deployment
 

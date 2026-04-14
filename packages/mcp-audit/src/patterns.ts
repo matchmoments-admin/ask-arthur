@@ -17,7 +17,7 @@ export const INJECTION_PATTERNS: Array<{ id: string; pattern: RegExp; label: str
 // ── Obfuscation Detection ──
 
 export const OBFUSCATION_PATTERNS: Array<{ id: string; pattern: RegExp; label: string }> = [
-  { id: "OBF-001", pattern: /[A-Za-z0-9+/]{40,}={0,2}/, label: "Base64-encoded payload (40+ chars)" },
+  { id: "OBF-001", pattern: /(?:[A-Za-z0-9+/]{4}){15,}(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)/, label: "Base64-encoded payload (60+ chars with padding)" },
   { id: "OBF-002", pattern: /[\u200B\u200C\u200D\uFEFF]{2,}/, label: "Zero-width Unicode characters" },
   { id: "OBF-003", pattern: /\u202E/, label: "Right-to-left override character" },
   { id: "OBF-004", pattern: /\s{50,}/, label: "Excessive whitespace (viewport pushing)" },

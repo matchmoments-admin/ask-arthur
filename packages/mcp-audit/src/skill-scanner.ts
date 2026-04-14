@@ -102,26 +102,99 @@ export async function scanSkill(opts: SkillAuditOptions): Promise<UnifiedScanRes
     });
   }
 
-  // Obfuscation
+  // Obfuscation — context-aware pipeline to avoid false positives
   let obfFound = false;
-  for (const { pattern, label } of OBFUSCATION_PATTERNS) {
-    if (pattern.test(allText)) {
-      obfFound = true;
-      checks.push({
-        id: "SKILL-OBF",
-        category: "prompt_injection",
-        label: `Obfuscation: ${label}`,
-        status: "fail",
-        score: 0,
-        maxScore: 10,
-        details: `Hidden content detected: ${label}`,
-        severity: "critical",
-      });
-      autoFail = true;
-      autoFailReason = autoFailReason || `Obfuscation: ${label}`;
-      break;
+
+  // Strip safe contexts before base64 scanning (OBF-001 only)
+  const strippedText = allText
+    .replace(/https?:\/\/[^\s)>\]"']+/g, "")           // URLs
+    .replace(/`[^`]+`/g, "")                             // Inline code
+    .replace(/```[\s\S]*?```/g, "")                      // Fenced code blocks
+    .replace(/^( {4}|\t)[^\n]+/gm, "")                   // Indented code blocks
+    .replace(/\b[0-9a-f]{40}\b/gi, "")                   // Git SHAs
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, "") // UUIDs
+    .replace(/\[.*?\]\(.*?\)/g, "")                      // Markdown links
+    .replace(/<!--[\s\S]*?-->/g, "");                    // HTML comments
+
+  for (const { id, pattern, label } of OBFUSCATION_PATTERNS) {
+    // OBF-001 (base64) runs against stripped text; others run against full text
+    const textToScan = id === "OBF-001" ? strippedText : allText;
+    const match = textToScan.match(pattern);
+
+    if (!match) continue;
+
+    // For base64 (OBF-001), validate by attempting to decode
+    if (id === "OBF-001") {
+      const candidate = match[0];
+      let isSuspicious = false;
+      let evidence: string | undefined;
+
+      try {
+        const decoded = atob(candidate);
+        const chars = [...decoded];
+        const nonPrintable = chars.filter(
+          (c) => c.charCodeAt(0) < 32 && !/[\n\r\t]/.test(c)
+        ).length;
+
+        if (nonPrintable / chars.length > 0.1) {
+          isSuspicious = true;
+          evidence = `[binary: ${decoded.length} bytes]`;
+        } else {
+          const suspiciousDecoded = [
+            /ignore\s+previous/i, /system\s*prompt/i,
+            /fetch\s*\(/i, /exec\s*\(/i, /eval\s*\(/i,
+            /require\s*\(/i, /child_process/i,
+          ];
+          const hit = suspiciousDecoded.find((p) => p.test(decoded));
+          if (hit) {
+            isSuspicious = true;
+            evidence = decoded.slice(0, 120) + (decoded.length > 120 ? "..." : "");
+          }
+        }
+      } catch {
+        // atob failed — not valid base64, skip
+        continue;
+      }
+
+      if (isSuspicious) {
+        obfFound = true;
+        checks.push({
+          id: "SKILL-OBF",
+          category: "prompt_injection",
+          label: `Obfuscation: ${label}`,
+          status: "fail",
+          score: 0,
+          maxScore: 10,
+          details: `Confirmed base64 payload with suspicious decoded content.`,
+          severity: "critical",
+          evidence,
+        });
+        autoFail = true;
+        autoFailReason = autoFailReason || `Obfuscation: ${label}`;
+        break;
+      }
+      // Base64 matched but decoded to benign content — not a threat, skip
+      continue;
     }
+
+    // Non-base64 obfuscation (zero-width, RTL, whitespace) — always critical
+    obfFound = true;
+    checks.push({
+      id: "SKILL-OBF",
+      category: "prompt_injection",
+      label: `Obfuscation: ${label}`,
+      status: "fail",
+      score: 0,
+      maxScore: 10,
+      details: `Hidden content detected: ${label}`,
+      severity: "critical",
+      evidence: match[0].slice(0, 200),
+    });
+    autoFail = true;
+    autoFailReason = autoFailReason || `Obfuscation: ${label}`;
+    break;
   }
+
   if (!obfFound) {
     checks.push({
       id: "SKILL-OBF",

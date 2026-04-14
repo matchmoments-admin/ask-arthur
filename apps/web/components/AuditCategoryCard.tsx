@@ -10,6 +10,7 @@ interface CategoryCheck {
   details: string;
   score: number;
   maxScore: number;
+  evidence?: string;
 }
 
 interface AuditCategoryCardProps {
@@ -71,6 +72,7 @@ export default function AuditCategoryCard({
             score={check.score}
             maxScore={check.maxScore}
             learnMoreUrl={LEARN_MORE_URLS[check.id]}
+            evidence={check.evidence}
           />
         ))}
       </div>

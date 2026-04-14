@@ -19,6 +19,8 @@ export interface ScanCheck {
   severity?: Severity;
   /** OWASP or standard reference (e.g. "MCP03", "EXT-010") */
   reference?: string;
+  /** Matched text that triggered the check (for evidence display) */
+  evidence?: string;
 }
 
 export interface ScanCategory {
