@@ -1,3 +1,5 @@
+import { EXT_COLORS } from "./extension-colors";
+
 // --- Types ---
 
 export interface SellerProfile {
@@ -230,20 +232,21 @@ export function createTrustBadge(
   const isCaution = trust.level === "caution";
   const isTrusted = trust.level === "trusted";
 
+  const palette = isWarning
+    ? EXT_COLORS.highRisk
+    : isCaution
+      ? EXT_COLORS.suspicious
+      : EXT_COLORS.safe;
   const bgColor = isWarning
     ? "rgba(211, 47, 47, 0.12)"
     : isCaution
       ? "rgba(245, 124, 0, 0.12)"
       : "rgba(56, 142, 60, 0.12)";
-  const borderColor = isWarning
-    ? "#D32F2F"
-    : isCaution
-      ? "#F57C00"
-      : "#388E3C";
+  const borderColor = palette.border;
   const textColor = isWarning
-    ? "#B71C1C"
+    ? palette.text
     : isCaution
-      ? "#E65100"
+      ? palette.text
       : "#2E7D32";
   const icon = isWarning ? "\u26D4" : isCaution ? "\u26A0\uFE0F" : "\u2705";
   const label = isWarning
@@ -378,8 +381,8 @@ export function createChatWarningBanner(patterns: string[]): HTMLElement {
         align-items: flex-start;
         gap: 10px;
         padding: 10px 16px;
-        background: rgba(211, 47, 47, 0.08);
-        border: 2px solid #D32F2F;
+        background: ${EXT_COLORS.highRisk.bg};
+        border: 2px solid ${EXT_COLORS.highRisk.border};
         border-radius: 10px;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 13px;
@@ -391,7 +394,7 @@ export function createChatWarningBanner(patterns: string[]): HTMLElement {
       .title {
         font-weight: 700;
         font-size: 13px;
-        color: #B71C1C;
+        color: ${EXT_COLORS.highRisk.text};
         margin-bottom: 4px;
       }
       .patterns {
@@ -403,7 +406,7 @@ export function createChatWarningBanner(patterns: string[]): HTMLElement {
       }
       .patterns li::before {
         content: "\\26A0 ";
-        color: #D32F2F;
+        color: ${EXT_COLORS.highRisk.border};
       }
       .advice {
         font-size: 11px;

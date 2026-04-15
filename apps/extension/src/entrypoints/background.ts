@@ -26,6 +26,8 @@ export default defineBackground(() => {
       contexts: ["selection"],
     });
 
+    chrome.storage.local.set({ showSafeIndicator: false });
+
     // Set up threat DB refresh for extension security scanner
     if (typeof __EXTENSION_SECURITY_ENABLED__ !== "undefined" && __EXTENSION_SECURITY_ENABLED__) {
       setupThreatDBRefresh(async () => {

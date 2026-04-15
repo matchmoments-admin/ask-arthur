@@ -9,6 +9,15 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { validateExtensionRequest } from "../_lib/auth";
 
+function isFacebookCDN(url: string): boolean {
+  try {
+    const { hostname } = new URL(url);
+    return hostname.endsWith(".fbcdn.net") || hostname.endsWith(".facebook.com") || hostname.endsWith(".cdninstagram.com");
+  } catch {
+    return false;
+  }
+}
+
 const AnalyzeAdSchema = z.object({
   adText: z.string().min(1).max(10000),
   landingUrl: z.string().url().nullish(),
@@ -88,23 +97,32 @@ export async function POST(req: NextRequest) {
     }
 
     const { adText, landingUrl, imageUrl, advertiserName, adTextHash } = parsed.data;
+    const safeImageUrl = imageUrl && isFacebookCDN(imageUrl) ? imageUrl : null;
 
     // 3. Check image rate limit if image provided
     let imageAllowed = false;
-    if (imageUrl) {
+    if (safeImageUrl) {
       imageAllowed = await checkImageRateLimit(auth.installId);
     }
 
-    // 4. Run analysis in parallel: text (Claude) + URL reputation + Hive AI
-    const [textResult, urlResult, hiveResult] = await Promise.allSettled([
+    // 4. Phase 1: text (Claude) + URL reputation in parallel (always run)
+    const [textResult, urlResult] = await Promise.allSettled([
       analyzeWithClaude(adText),
       landingUrl ? checkURLReputation(extractURLs(landingUrl)) : Promise.resolve([]),
-      imageUrl && imageAllowed ? checkHiveAI(imageUrl) : Promise.resolve(null),
     ]);
 
     const analysis = textResult.status === "fulfilled" ? textResult.value : null;
     const urlChecks = urlResult.status === "fulfilled" ? urlResult.value : [];
-    const hive = hiveResult.status === "fulfilled" ? hiveResult.value : null;
+
+    // Phase 2: Hive AI only if text verdict is not SAFE and image is available
+    let hive: Awaited<ReturnType<typeof checkHiveAI>> | null = null;
+    if (analysis?.verdict !== "SAFE" && safeImageUrl && imageAllowed) {
+      try {
+        hive = await checkHiveAI(safeImageUrl);
+      } catch {
+        hive = null;
+      }
+    }
 
     // 5. Merge verdicts
     let verdict: Verdict = analysis?.verdict ?? "SAFE";
@@ -165,7 +183,7 @@ export async function POST(req: NextRequest) {
                 .insert({
                   celebrity_id: celebrity.id,
                   celebrity_name: celebrity.name,
-                  image_url: imageUrl!,
+                  image_url: safeImageUrl!,
                   hive_result: hive,
                   ai_confidence: hive!.aiConfidence,
                   deepfake_confidence: hive!.deepfakeConfidence,

@@ -50,7 +50,7 @@ Not sure if your other browser extensions are safe? Ask Arthur can audit them fo
 
 ### Detect deepfake images
 
-Those AI-generated celebrity endorsement ads? Ask Arthur is building detection for synthetic images so you can tell what's real and what's been fabricated to take your money.
+Those AI-generated celebrity endorsement ads? Ask Arthur detects AI-generated and deepfake images in sponsored posts in real time, flagging celebrity impersonation scams before you click.
 
 ---
 

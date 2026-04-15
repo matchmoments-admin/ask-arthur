@@ -19,6 +19,7 @@ export function CheckTab() {
   const [urlResult, setUrlResult] = useState<ExtensionURLCheckResponse | null>(null);
   const [textResult, setTextResult] = useState<AnalysisResult | null>(null);
   const [remaining, setRemaining] = useState<number | null>(null);
+  const [shareLabel, setShareLabel] = useState("Share result");
 
   // On mount: get current tab URL + check for context menu text
   useEffect(() => {
@@ -220,19 +221,18 @@ export function CheckTab() {
 
       {/* Upgrade prompt when rate-limited */}
       {isRateLimit && (
-        <div className="bg-warn-bg border border-warn-border rounded-[10px] p-3 space-y-2">
-          <p className="text-[13px] font-semibold text-warn-heading">
-            Daily limit reached
+        <div className="bg-primary-light border border-primary/20 rounded-[10px] p-4 text-center space-y-2 mt-3">
+          <p className="text-[13px] font-semibold text-text-primary">
+            You've used your free checks for today
           </p>
-          <p className="text-[11px] text-warn-text">
-            Upgrade to Pro for 500 checks/day, real-time URL protection, and
-            email scanning.
+          <p className="text-[11px] text-text-secondary">
+            Upgrade to Ask Arthur Pro for unlimited protection
           </p>
           <a
-            href="https://askarthur.au/extension/upgrade"
+            href="https://askarthur.au/pricing?ref=extension_limit"
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-block w-full text-center py-2 bg-primary text-white font-semibold rounded-[8px] text-[13px] hover:bg-primary-hover transition-colors duration-150"
+            className="inline-block w-full py-2.5 bg-primary text-white font-semibold rounded-[8px] text-[13px] hover:bg-primary-hover transition-colors duration-150"
           >
             Upgrade to Pro
           </a>
@@ -251,13 +251,30 @@ export function CheckTab() {
       {/* Results */}
       <div className="animate-fade-in">
         {urlResult && <ResultDisplay type="url" result={urlResult} />}
-        {textResult && <ResultDisplay type="text" result={textResult} />}
+        {textResult && (
+          <>
+            <ResultDisplay type="text" result={textResult} />
+            <button
+              onClick={async () => {
+                const text = `Ask Arthur verdict: ${textResult.verdict}\n\n${textResult.summary}\n\nCheck it yourself: https://askarthur.au`;
+                await navigator.clipboard.writeText(text);
+                setShareLabel("Copied!");
+                setTimeout(() => setShareLabel("Share result"), 2000);
+              }}
+              className="w-full mt-2 py-2 text-[11px] font-medium text-text-secondary border border-border rounded-[8px] hover:bg-surface transition-colors duration-150"
+            >
+              {shareLabel}
+            </button>
+          </>
+        )}
       </div>
 
       {/* Remaining count */}
-      {remaining !== null && (
-        <p className="text-center text-[11px] text-text-muted">
-          {remaining} check{remaining !== 1 ? "s" : ""} remaining today
+      {remaining !== null && remaining <= 10 && (
+        <p className="text-[11px] text-text-muted text-center mt-2">
+          {remaining > 0
+            ? `${remaining} free checks remaining today`
+            : "Daily limit reached"}
         </p>
       )}
     </div>

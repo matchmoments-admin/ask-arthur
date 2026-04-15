@@ -43,6 +43,10 @@ export default defineContentScript({
     }
 
     async function setCachedResult(hash: string, result: AdAnalysisResult): Promise<void> {
+      if (resultCache.size >= 200) {
+        const keys = [...resultCache.keys()].slice(0, 50);
+        keys.forEach((k) => resultCache.delete(k));
+      }
       resultCache.set(hash, result);
       try {
         await chrome.storage.session.set({ [`ad-${hash}`]: result });
@@ -100,7 +104,7 @@ export default defineContentScript({
       }
     }
 
-    function injectOverlay(
+    async function injectOverlay(
       feedUnit: HTMLElement,
       result: AdAnalysisResult,
       advertiserName: string,
@@ -115,7 +119,11 @@ export default defineContentScript({
         const banner = createWarningBanner(result, advertiserName, hash, landingUrl);
         feedUnit.prepend(banner);
       } else {
-        feedUnit.appendChild(createSafeIndicator());
+        // Only show safe indicator if user opted in
+        const { showSafeIndicator } = await chrome.storage.local.get("showSafeIndicator");
+        if (showSafeIndicator) {
+          feedUnit.appendChild(createSafeIndicator());
+        }
       }
     }
 

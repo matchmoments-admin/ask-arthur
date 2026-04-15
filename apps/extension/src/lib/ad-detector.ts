@@ -1,3 +1,5 @@
+import { EXT_COLORS } from "./extension-colors";
+
 export interface AdContent {
   advertiserName: string;
   adText: string;
@@ -23,13 +25,20 @@ export interface AdAnalysisResult {
  * Checks if a feed unit is a sponsored/ad post using multiple detection methods.
  */
 export function detectSponsoredPost(element: HTMLElement): boolean {
-  // Method 1: Link-based — anchor tags with "/ads/about" href
+  // Method 1: Direct text scan — aria-label (most reliable)
+  if (element.querySelector("a[aria-label='Sponsored']")) return true;
+
+  // Method 2: Structural — ad-specific data attributes and patterns
+  if (element.querySelector("[data-ad-preview]")) return true;
+  if (element.querySelector("[data-testid='ad_creative']")) return true;
+
+  // Method 3: Link-based — anchor tags with "/ads/about" href
   const links = element.querySelectorAll<HTMLAnchorElement>("a[href]");
   for (const link of links) {
     if (link.href.includes("/ads/about")) return true;
   }
 
-  // Method 2: Text reconstruction — walk header DOM, filter hidden nodes, match "Sponsored"
+  // Method 4: Text reconstruction — walk header DOM, filter hidden nodes, match "Sponsored"
   const headerArea = element.querySelector('[data-ad-preview="message"]')?.parentElement
     ?? element.querySelector("h4")?.closest("div")
     ?? element;
@@ -55,7 +64,7 @@ export function detectSponsoredPost(element: HTMLElement): boolean {
     }
   }
 
-  // Method 2b: Fragmented span reconstruction (Facebook's primary obfuscation)
+  // Method 5: Fragmented span reconstruction (Facebook's primary obfuscation)
   // Facebook splits "Sponsored" across multiple spans, hiding decoys
   const fragmentedSpans = element.querySelectorAll(
     'a[href="#"] > span[aria-labelledby] > span > span'
@@ -75,12 +84,7 @@ export function detectSponsoredPost(element: HTMLElement): boolean {
     if (reconstructed.includes("ponsored")) return true;
   }
 
-  // Method 3: Structural — ad-specific data attributes and patterns
-  if (element.querySelector("[data-ad-preview]")) return true;
-  if (element.querySelector("[data-testid='ad_creative']")) return true;
-  if (element.querySelector("a[aria-label='Sponsored']")) return true;
-
-  // Method 4: Canvas/SVG detection — Facebook renders "Sponsored" as canvas
+  // Method 6: Canvas/SVG heuristic — LAST resort only
   const canvases = element.querySelectorAll("canvas");
   for (const c of canvases) {
     if (c.width < 150 && c.height < 30) {
@@ -139,7 +143,7 @@ function getVisibleText(node: Node): string {
 export function extractAdContent(feedUnit: HTMLElement): AdContent | null {
   // Advertiser name: usually the first strong/header link that is NOT "Sponsored"
   let advertiserName = "";
-  const headerLinks = feedUnit.querySelectorAll<HTMLAnchorElement>("a[role='link'], h4 a, strong");
+  const headerLinks = feedUnit.querySelectorAll<HTMLAnchorElement>("a[role='link'], h4 a, strong, [data-ad-comet-preview] a");
   for (const link of headerLinks) {
     const text = link.textContent?.trim() ?? "";
     if (text && !/^Sponsored$/i.test(text) && text.length > 1 && text.length < 100) {
@@ -181,7 +185,8 @@ export function extractAdContent(feedUnit: HTMLElement): AdContent | null {
       }
       // Check l.facebook.com redirect links
       if (hostname === "l.facebook.com" && url.searchParams.has("u")) {
-        landingUrl = url.searchParams.get("u");
+        const raw = url.searchParams.get("u");
+        landingUrl = raw ? decodeURIComponent(raw) : null;
         break;
       }
     } catch {
@@ -226,9 +231,10 @@ export function createWarningBanner(
   const shadow = host.attachShadow({ mode: "closed" });
 
   const isHighRisk = result.verdict === "HIGH_RISK";
-  const borderColor = isHighRisk ? "#D32F2F" : "#F57C00";
-  const bgColor = isHighRisk ? "rgba(211, 47, 47, 0.08)" : "rgba(245, 124, 0, 0.08)";
-  const textColor = isHighRisk ? "#B71C1C" : "#E65100";
+  const palette = isHighRisk ? EXT_COLORS.highRisk : EXT_COLORS.suspicious;
+  const borderColor = palette.border;
+  const bgColor = palette.bg;
+  const textColor = palette.text;
   const icon = isHighRisk ? "\u26D4" : "\u26A0\uFE0F";
   const title = isHighRisk ? "This ad may be a scam" : "This ad has suspicious characteristics";
 
@@ -315,7 +321,7 @@ export function createWarningBanner(
       }
       .deepfake-badge {
         display: inline-block;
-        background: #7C3AED;
+        background: ${EXT_COLORS.deepfake.badge};
         color: white;
         padding: 2px 10px;
         border-radius: 12px;
@@ -325,7 +331,7 @@ export function createWarningBanner(
       }
       .ai-badge {
         display: inline-block;
-        background: #6366F1;
+        background: ${EXT_COLORS.aiGenerated.badge};
         color: white;
         padding: 2px 10px;
         border-radius: 12px;
@@ -379,7 +385,7 @@ export function createSafeIndicator(): HTMLElement {
       .shield {
         width: 20px;
         height: 20px;
-        background: #388E3C;
+        background: ${EXT_COLORS.safe.border};
         border-radius: 50%;
         display: flex;
         align-items: center;
