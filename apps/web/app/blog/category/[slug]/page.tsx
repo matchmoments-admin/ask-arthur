@@ -18,6 +18,9 @@ export async function generateMetadata({
   return {
     title: `${cat.name} — Ask Arthur Blog`,
     description: cat.description || `${cat.name} posts from Ask Arthur.`,
+    alternates: {
+      canonical: `https://askarthur.au/blog/category/${slug}`,
+    },
   };
 }
 

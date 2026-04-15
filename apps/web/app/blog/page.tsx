@@ -10,6 +10,9 @@ export const metadata: Metadata = {
   title: "Blog — Ask Arthur",
   description:
     "Scam alerts, security guides, and product updates. Stay protected with the latest threat intelligence from Ask Arthur.",
+  alternates: {
+    canonical: "https://askarthur.au/blog",
+  },
   openGraph: {
     title: "Blog — Ask Arthur",
     description: "Scam alerts, security guides, and product updates.",

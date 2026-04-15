@@ -1,5 +1,14 @@
 import Footer from "@/components/Footer";
 import Nav from "@/components/Nav";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  alternates: {
+    types: {
+      "application/rss+xml": "https://askarthur.au/blog/feed.xml",
+    },
+  },
+};
 
 export default function BlogLayout({
   children,

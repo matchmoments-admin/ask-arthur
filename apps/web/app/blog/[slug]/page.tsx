@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import "highlight.js/styles/github.css";
 import sanitizeHtml from "sanitize-html";
 import { getPostBySlug, getAllSlugs, getRelatedPosts } from "@/lib/blog";
@@ -32,6 +33,9 @@ export async function generateMetadata({
   return {
     title: `${post.seoTitle || post.title} — Ask Arthur`,
     description: post.metaDescription || post.excerpt,
+    alternates: {
+      canonical: `https://askarthur.au/blog/${slug}`,
+    },
     openGraph: {
       title: post.seoTitle || post.title,
       description: post.metaDescription || post.excerpt,
@@ -99,22 +103,36 @@ export default async function BlogPostPage({ params }: PageProps) {
     item: `https://askarthur.au/blog/${slug}`,
   });
 
+  const wordCount = post.content.split(/\s+/).length;
+
   const jsonLd = {
     "@context": "https://schema.org",
     "@graph": [
       {
-        "@type": "Article",
+        "@type": "BlogPosting",
         headline: post.title,
         description: post.metaDescription || post.excerpt,
-        author: { "@type": "Organization", name: "Ask Arthur" },
+        author: {
+          "@type": "Person",
+          name: "Brendan Milton",
+          url: "https://askarthur.au/about",
+          jobTitle: "Founder & Technical Lead",
+        },
         datePublished: post.publishedAt,
         ...(post.updatedAt ? { dateModified: post.updatedAt } : {}),
         publisher: {
           "@type": "Organization",
           name: "Ask Arthur",
           url: "https://askarthur.au",
+          logo: {
+            "@type": "ImageObject",
+            url: "https://askarthur.au/icon/128.png",
+          },
         },
         ...(post.heroImageUrl && { image: post.heroImageUrl }),
+        wordCount,
+        ...(post.categoryName && { articleSection: post.categoryName }),
+        ...(post.tags.length > 0 && { keywords: post.tags.join(", ") }),
       },
       {
         "@type": "BreadcrumbList",
@@ -145,10 +163,13 @@ export default async function BlogPostPage({ params }: PageProps) {
       {/* Hero image */}
       {post.heroImageUrl && (
         <div className="mb-8 rounded-sm overflow-hidden bg-slate-50">
-          <img
+          <Image
             src={post.heroImageUrl}
             alt={post.heroImageAlt || post.title}
-            className="w-full h-auto"
+            width={1200}
+            height={630}
+            className="w-full h-auto rounded-xl"
+            priority
           />
         </div>
       )}

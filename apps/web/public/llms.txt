@@ -1,0 +1,30 @@
+# Ask Arthur
+> AI-powered scam detection platform for Australia
+
+## Main Pages
+- [Home](https://askarthur.au/): Free AI scam checker — paste suspicious messages for instant analysis
+- [About](https://askarthur.au/about): About Ask Arthur, mission, and team
+- [Pricing](https://askarthur.au/pricing): API pricing tiers (Free, Pro, Enterprise)
+- [Chrome Extension](https://askarthur.au/extension): Browser extension for Facebook scam ad detection
+
+## Blog
+- [Blog](https://askarthur.au/blog): Scam alerts, protection guides, compliance, and intelligence reports
+- [Scam Alerts](https://askarthur.au/blog/category/scam-alerts): Weekly threat intelligence from real scams
+- [Protection Guides](https://askarthur.au/blog/category/guides): Step-by-step scam protection guides
+- [Compliance](https://askarthur.au/blog/category/compliance): SPF Act compliance for regulated entities
+- [Intelligence](https://askarthur.au/blog/category/intelligence): Data-driven scam trend reports
+- [Product Updates](https://askarthur.au/blog/category/product): Features and platform updates
+
+## Tools
+- [Scam Checker](https://askarthur.au/): Paste text, URLs, or images for AI analysis
+- [Website Audit](https://askarthur.au/audit): Security header and TLS scanner
+- [Persona Check](https://askarthur.au/persona-check): Verify if online profiles are legitimate
+- [Security Scanner](https://askarthur.au/health): Scan websites, extensions, MCP servers, AI skills
+- [Scam Feed](https://askarthur.au/scam-feed): Public scam intelligence feed
+
+## API Documentation
+- [API Docs](https://askarthur.au/api/docs): B2B Threat Intelligence API (OpenAPI 3.0)
+
+## Legal
+- [Privacy Policy](https://askarthur.au/privacy)
+- [Terms of Service](https://askarthur.au/terms)
