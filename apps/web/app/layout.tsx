@@ -11,24 +11,33 @@ const publicSans = Public_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "Ask Arthur — Free AI Scam Checker",
+  metadataBase: new URL("https://askarthur.au"),
+  title: {
+    default: "Ask Arthur — Free AI Scam Checker",
+    template: "%s — Ask Arthur",
+  },
   description:
-    "Paste a suspicious message, email, or URL and get an instant AI-powered verdict. Free, private, no signup required.",
+    "Australia's AI-powered scam detection platform. Check suspicious messages, links, phone numbers and more — free, private, no sign-up required.",
   openGraph: {
-    title: "Ask Arthur — Free AI Scam Checker",
-    description:
-      "Paste a suspicious message and find out if it's a scam — instantly, for free.",
-    url: "https://askarthur.au",
     siteName: "Ask Arthur",
+    locale: "en_AU",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Ask Arthur — Free AI Scam Checker",
-    description:
-      "Paste a suspicious message and find out if it's a scam — instantly, for free.",
+    site: "@askarthur_au",
   },
-  robots: "index, follow",
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-video-preview": -1,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+    },
+  },
 };
 
 export default function RootLayout({

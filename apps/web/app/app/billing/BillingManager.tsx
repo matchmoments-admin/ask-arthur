@@ -17,8 +17,6 @@ interface SubscriptionRecord {
   plan: string;
   status: string;
   stripe_subscription_id: string | null;
-  paddle_subscription_id: string | null;
-  billing_provider: string;
   current_period_end: string | null;
 }
 
@@ -124,26 +122,12 @@ export default function BillingManager({
                   {sub.current_period_end &&
                     ` · Renews ${new Date(sub.current_period_end).toLocaleDateString("en-AU")}`}
                 </p>
-                {sub.billing_provider === "stripe" && (
-                  <button
+                <button
                     onClick={openPortal}
                     className="text-xs text-action-teal font-medium underline"
                   >
                     Manage subscription
                   </button>
-                )}
-                {sub.billing_provider === "paddle" && (
-                  <p className="text-xs text-gov-slate">
-                    Legacy Paddle subscription &mdash; contact{" "}
-                    <a
-                      href="mailto:enterprise@askarthur.com.au"
-                      className="text-action-teal"
-                    >
-                      enterprise@askarthur.com.au
-                    </a>{" "}
-                    to manage.
-                  </p>
-                )}
               </div>
             ) : (
               <div className="flex gap-2 flex-wrap">

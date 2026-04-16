@@ -10,22 +10,55 @@ const jsonLd = {
   "@graph": [
     {
       "@type": "Organization",
+      "@id": "https://askarthur.au/#organization",
       name: "Ask Arthur",
       url: "https://askarthur.au",
+      logo: {
+        "@type": "ImageObject",
+        url: "https://askarthur.au/icon/128.png",
+        width: 128,
+        height: 128,
+      },
       description:
-        "Free AI-powered scam detection tool helping Australians identify fraudulent messages, emails, and images.",
+        "Australia's AI-powered scam detection platform helping Australians identify fraudulent messages, emails, and images.",
+      sameAs: [
+        "https://www.linkedin.com/company/askarthur",
+      ],
+      contactPoint: {
+        "@type": "ContactPoint",
+        email: "hello@askarthur.au",
+        contactType: "customer support",
+        availableLanguage: "English",
+        areaServed: "AU",
+      },
+      address: {
+        "@type": "PostalAddress",
+        addressCountry: "AU",
+      },
     },
     {
-      "@type": "WebApplication",
+      "@type": "WebSite",
+      "@id": "https://askarthur.au/#website",
+      url: "https://askarthur.au",
+      name: "Ask Arthur",
+      description: "Australia's AI-powered scam detection platform",
+      publisher: { "@id": "https://askarthur.au/#organization" },
+      inLanguage: "en-AU",
+    },
+    {
+      "@type": "SoftwareApplication",
       name: "Ask Arthur",
       url: "https://askarthur.au",
       applicationCategory: "SecurityApplication",
-      operatingSystem: "Any",
+      operatingSystem: "Web, iOS, Android",
       offers: {
         "@type": "Offer",
         price: "0",
         priceCurrency: "AUD",
       },
+      description:
+        "AI-powered scam detection for Australians. Check messages, links, phone numbers and images instantly.",
+      publisher: { "@id": "https://askarthur.au/#organization" },
     },
   ],
 };

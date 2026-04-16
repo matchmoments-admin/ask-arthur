@@ -69,7 +69,7 @@ export const featureFlags = {
   /** IPQualityScore phone number fraud scoring during enrichment */
   ipqualityScore: process.env.NEXT_PUBLIC_FF_IPQS === "true",
 
-  /** Paddle billing — pricing page and checkout */
+  /** Stripe billing — pricing page and checkout */
   billing: process.env.NEXT_PUBLIC_FF_BILLING === "true",
 
   /** User auth, dashboard, and API key self-service */

@@ -20,6 +20,9 @@ export default function Footer() {
           <Link href="/about" className="text-xs font-bold uppercase tracking-widest text-gov-slate hover:text-action-teal transition-colors py-3">
             About
           </Link>
+          <Link href="/trust" className="text-xs font-bold uppercase tracking-widest text-gov-slate hover:text-action-teal transition-colors py-3">
+            Security
+          </Link>
           <Link href="/privacy" className="text-xs font-bold uppercase tracking-widest text-gov-slate hover:text-action-teal transition-colors py-3">
             Privacy
           </Link>

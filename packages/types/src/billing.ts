@@ -26,7 +26,7 @@ export type SubscriptionStatus = z.infer<typeof SubscriptionStatusSchema>;
 export const ApiTierSchema = z.enum(["free", "pro", "business", "enterprise", "custom"]);
 export type ApiTier = z.infer<typeof ApiTierSchema>;
 
-export const BillingProviderSchema = z.enum(["paddle", "stripe", "manual"]);
+export const BillingProviderSchema = z.enum(["stripe", "manual"]);
 export type BillingProvider = z.infer<typeof BillingProviderSchema>;
 
 // ---------------------------------------------------------------------------
@@ -37,15 +37,9 @@ export interface Subscription {
   id: number;
   api_key_id: number;
   user_id: string | null;
-  // Paddle fields (nullable for Stripe records)
-  paddle_subscription_id: string | null;
-  paddle_customer_id: string | null;
-  paddle_price_id: string | null;
-  // Stripe fields (nullable for Paddle records)
   stripe_subscription_id: string | null;
   stripe_customer_id: string | null;
   stripe_price_id: string | null;
-  billing_provider: BillingProvider;
   plan: SubscriptionPlan;
   status: SubscriptionStatus;
   current_period_start: string | null;

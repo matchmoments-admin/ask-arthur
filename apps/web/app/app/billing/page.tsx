@@ -29,8 +29,6 @@ export default async function BillingPage() {
     plan: string;
     status: string;
     stripe_subscription_id: string | null;
-    paddle_subscription_id: string | null;
-    billing_provider: string;
     current_period_end: string | null;
   }> = [];
 
@@ -46,7 +44,7 @@ export default async function BillingPage() {
     const { data: subData } = await supabase
       .from("subscriptions")
       .select(
-        "id, api_key_id, plan, status, stripe_subscription_id, paddle_subscription_id, billing_provider, current_period_end"
+        "id, api_key_id, plan, status, stripe_subscription_id, current_period_end"
       )
       .order("created_at", { ascending: false });
 

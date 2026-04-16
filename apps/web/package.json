@@ -29,6 +29,7 @@
     "@stripe/stripe-js": "^9.2.0",
     "@supabase/supabase-js": "^2.95.3",
     "@svg-maps/australia": "^2.0.0",
+    "@svg-maps/world": "^2.0.0",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.36.2",
     "@vercel/functions": "^3.4.2",

@@ -118,7 +118,7 @@ import { validateApiKey } from "@/lib/apiAuth";
 | Background jobs | Inngest | Event-driven, cron, fan-out |
 | Analytics | Plausible | Privacy-first, no cookies |
 | Email | Resend + React Email | Modern transactional email |
-| Billing | Paddle | Merchant-of-record, handles tax/compliance |
+| Billing | Stripe | Direct billing, Stripe Tax for AU GST |
 
 ## Critical Rules
 
@@ -168,6 +168,6 @@ import { validateApiKey } from "@/lib/apiAuth";
 - **Bots**: `TELEGRAM_*`, `WHATSAPP_*`, `SLACK_*`, `MESSENGER_*`
 - **Extension**: `WXT_EXTENSION_SECRET`, `WXT_INBOXSDK_APP_ID`
 - **Admin**: `ADMIN_SECRET`
-- **Billing**: `PADDLE_API_KEY`, `PADDLE_WEBHOOK_SECRET`, `NEXT_PUBLIC_PADDLE_CLIENT_TOKEN`, `NEXT_PUBLIC_PADDLE_ENV`, `PADDLE_PRO_PRICE_ID`, `PADDLE_ENTERPRISE_PRICE_ID`
+- **Billing**: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `NEXT_PUBLIC_STRIPE_PRO_MONTHLY`, `NEXT_PUBLIC_STRIPE_PRO_ANNUAL`, `NEXT_PUBLIC_STRIPE_BUSINESS_MONTHLY`, `NEXT_PUBLIC_STRIPE_BUSINESS_ANNUAL`
 - **Auth**: `NEXT_PUBLIC_FF_AUTH`
 - **External APIs**: `SAFE_BROWSING_API_KEY`, `TWILIO_*`

@@ -184,6 +184,9 @@ importers:
       '@svg-maps/australia':
         specifier: ^2.0.0
         version: 2.0.0
+      '@svg-maps/world':
+        specifier: ^2.0.0
+        version: 2.0.0
       '@upstash/ratelimit':
         specifier: ^2.0.8
         version: 2.0.8(@upstash/redis@1.36.2)
@@ -3312,6 +3315,9 @@ packages:
 
   '@svg-maps/australia@2.0.0':
     resolution: {integrity: sha512-hJP4S/IEnqsHeglwpxXxZsYIW7mjNlG8gUP7LurBMCaGY1ZK5JRuWYtY0sVkT33hkplm7jDGE/oN72/NNpw/CQ==}
+
+  '@svg-maps/world@2.0.0':
+    resolution: {integrity: sha512-VmYYnyygJ5Zhr48xPqukFBoq4aCBgVNIjBzqBnWKXSdHhrRK3pntdvbCa8lMsxwVCFzEw9a+smIMEGI2sC1xcQ==}
 
   '@swc/helpers@0.5.15':
     resolution: {integrity: sha512-JQ5TuMi45Owi4/BIMAJBoSQoOJu12oOk/gADqlcUL9JEdHB8vyjUSsxqeNXnmXHjYKMi2WcYtezGEEhqUI/E2g==}
@@ -12436,6 +12442,8 @@ snapshots:
       - utf-8-validate
 
   '@svg-maps/australia@2.0.0': {}
+
+  '@svg-maps/world@2.0.0': {}
 
   '@swc/helpers@0.5.15':
     dependencies:

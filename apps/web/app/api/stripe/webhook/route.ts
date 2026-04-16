@@ -132,7 +132,6 @@ async function upsertSubscription(
       stripe_price_id: priceId,
       plan,
       status,
-      billing_provider: "stripe",
       current_period_start: currentPeriodStart
         ? new Date(currentPeriodStart * 1000).toISOString()
         : null,
