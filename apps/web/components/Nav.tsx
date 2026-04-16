@@ -14,6 +14,7 @@ export default async function Nav() {
   }
   links.push({ href: "/blog", label: "Blog" });
   links.push({ href: "/about", label: "About" });
+  links.push({ href: "/contact", label: "Contact" });
 
   return (
     <nav

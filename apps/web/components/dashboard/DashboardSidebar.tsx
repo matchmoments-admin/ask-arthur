@@ -6,29 +6,84 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
   ShieldAlert,
+  ShieldCheck,
   FileText,
-  CheckSquare,
   Key,
   CreditCard,
   Settings,
   Menu,
   X,
+  Users,
+  Code,
+  BarChart3,
+  Search,
 } from "lucide-react";
 
-const navItems: Array<{ label: string; href: string; icon: typeof LayoutDashboard; exact?: boolean }> = [
+interface NavItem {
+  label: string;
+  href: string;
+  icon: typeof LayoutDashboard;
+  exact?: boolean;
+  roles?: string[];
+}
+
+const baseNavItems: NavItem[] = [
   { label: "Overview", href: "/app", icon: LayoutDashboard, exact: true },
+  { label: "Compliance", href: "/app/compliance", icon: ShieldCheck },
+  { label: "Fraud Manager", href: "/app/fraud-manager", icon: Search, roles: ["owner", "admin", "fraud_analyst", "compliance_officer"] },
+  { label: "Investigations", href: "/app/investigations", icon: ShieldAlert, roles: ["owner", "admin", "fraud_analyst"] },
+  { label: "Developer", href: "/app/developer", icon: Code, roles: ["owner", "admin", "developer"] },
+  { label: "Executive", href: "/app/executive", icon: BarChart3, roles: ["owner", "admin", "compliance_officer"] },
   { label: "Threat Feed", href: "/app/threats", icon: ShieldAlert },
   { label: "Reports", href: "/app/reports", icon: FileText },
-  { label: "Compliance", href: "/app/spf-compliance", icon: CheckSquare },
+  { label: "Team", href: "/app/team", icon: Users, roles: ["owner", "admin"] },
   { label: "API Keys", href: "/app/keys", icon: Key },
-  { label: "Billing", href: "/app/billing", icon: CreditCard },
+  { label: "Billing", href: "/app/billing", icon: CreditCard, roles: ["owner", "admin"] },
   { label: "Settings", href: "/app/settings", icon: Settings },
 ];
 
-function NavContent({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
+function getVisibleNavItems(orgRole: string | null): NavItem[] {
+  if (!orgRole) {
+    // No org — show consumer nav (backwards compatible)
+    return [
+      { label: "Overview", href: "/app", icon: LayoutDashboard, exact: true },
+      { label: "Threat Feed", href: "/app/threats", icon: ShieldAlert },
+      { label: "Reports", href: "/app/reports", icon: FileText },
+      { label: "Compliance", href: "/app/spf-compliance", icon: ShieldCheck },
+      { label: "API Keys", href: "/app/keys", icon: Key },
+      { label: "Billing", href: "/app/billing", icon: CreditCard },
+      { label: "Settings", href: "/app/settings", icon: Settings },
+    ];
+  }
+
+  return baseNavItems.filter(
+    (item) => !item.roles || item.roles.includes(orgRole)
+  );
+}
+
+const ROLE_LABELS: Record<string, string> = {
+  owner: "Owner",
+  admin: "Admin",
+  compliance_officer: "Compliance",
+  fraud_analyst: "Analyst",
+  developer: "Developer",
+  viewer: "Viewer",
+};
+
+function NavContent({
+  pathname,
+  orgRole,
+  onNavigate,
+}: {
+  pathname: string;
+  orgRole: string | null;
+  onNavigate?: () => void;
+}) {
+  const items = getVisibleNavItems(orgRole);
+
   return (
     <nav className="flex-1 py-3 px-3">
-      {navItems.map(({ label, href, icon: Icon, exact }) => {
+      {items.map(({ label, href, icon: Icon, exact }) => {
         const isActive = exact ? pathname === href : pathname.startsWith(href);
         return (
           <Link
@@ -50,16 +105,24 @@ function NavContent({ pathname, onNavigate }: { pathname: string; onNavigate?: (
   );
 }
 
-export default function DashboardSidebar({ userEmail, userRole }: { userEmail: string; userRole: string }) {
+export default function DashboardSidebar({
+  userEmail,
+  userRole,
+  orgName,
+  orgRole,
+}: {
+  userEmail: string;
+  userRole: string;
+  orgName?: string | null;
+  orgRole?: string | null;
+}) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  // Close on navigation
   useEffect(() => {
     setMobileOpen(false);
   }, [pathname]);
 
-  // Prevent scroll when mobile menu open
   useEffect(() => {
     if (mobileOpen) {
       document.body.style.overflow = "hidden";
@@ -77,26 +140,43 @@ export default function DashboardSidebar({ userEmail, userRole }: { userEmail: s
           <Link href="/" className="font-extrabold text-sm uppercase tracking-wide text-deep-navy">
             Ask Arthur
           </Link>
-          <span className="block text-[10px] text-slate-400 mt-0.5 uppercase tracking-widest">
-            Intelligence
-          </span>
+          {orgName ? (
+            <span className="block text-[10px] text-trust-teal mt-0.5 uppercase tracking-widest font-semibold truncate">
+              {orgName}
+            </span>
+          ) : (
+            <span className="block text-[10px] text-slate-400 mt-0.5 uppercase tracking-widest">
+              Intelligence
+            </span>
+          )}
         </div>
 
-        <NavContent pathname={pathname} />
+        <NavContent pathname={pathname} orgRole={orgRole ?? null} />
 
         <div className="px-5 py-3 border-t border-border-light">
           <p className="text-xs text-slate-400 truncate">{userEmail}</p>
           <p className="text-[10px] text-slate-300 uppercase tracking-wider mt-0.5">
-            {userRole === "admin" ? "Admin" : "Partner"}
+            {orgRole
+              ? ROLE_LABELS[orgRole] ?? orgRole
+              : userRole === "admin"
+                ? "Admin"
+                : "Partner"}
           </p>
         </div>
       </aside>
 
       {/* Mobile header bar */}
       <div className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-white border-b border-border-light px-4 py-3 flex items-center justify-between">
-        <Link href="/" className="font-extrabold text-sm uppercase tracking-wide text-deep-navy">
-          Ask Arthur
-        </Link>
+        <div>
+          <Link href="/" className="font-extrabold text-sm uppercase tracking-wide text-deep-navy">
+            Ask Arthur
+          </Link>
+          {orgName && (
+            <span className="block text-[9px] text-trust-teal uppercase tracking-widest font-semibold truncate max-w-[180px]">
+              {orgName}
+            </span>
+          )}
+        </div>
         <button
           type="button"
           aria-label={mobileOpen ? "Close menu" : "Open menu"}
@@ -127,9 +207,15 @@ export default function DashboardSidebar({ userEmail, userRole }: { userEmail: s
             <span className="font-extrabold text-sm uppercase tracking-wide text-deep-navy">
               Ask Arthur
             </span>
-            <span className="block text-[10px] text-slate-400 mt-0.5 uppercase tracking-widest">
-              Intelligence
-            </span>
+            {orgName ? (
+              <span className="block text-[10px] text-trust-teal mt-0.5 uppercase tracking-widest font-semibold truncate">
+                {orgName}
+              </span>
+            ) : (
+              <span className="block text-[10px] text-slate-400 mt-0.5 uppercase tracking-widest">
+                Intelligence
+              </span>
+            )}
           </div>
           <button
             type="button"
@@ -141,10 +227,15 @@ export default function DashboardSidebar({ userEmail, userRole }: { userEmail: s
           </button>
         </div>
 
-        <NavContent pathname={pathname} onNavigate={() => setMobileOpen(false)} />
+        <NavContent pathname={pathname} orgRole={orgRole ?? null} onNavigate={() => setMobileOpen(false)} />
 
         <div className="px-5 py-3 border-t border-border-light">
           <p className="text-xs text-slate-400 truncate">{userEmail}</p>
+          {orgRole && (
+            <p className="text-[10px] text-slate-300 uppercase tracking-wider mt-0.5">
+              {ROLE_LABELS[orgRole] ?? orgRole}
+            </p>
+          )}
         </div>
       </div>
     </>

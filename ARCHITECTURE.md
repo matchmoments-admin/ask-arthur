@@ -217,6 +217,18 @@ Authenticated via `X-Extension-Secret` + `X-Extension-Id` headers. CORS enabled.
 | `/api/webhooks/messenger` | POST | Facebook Messenger webhook |
 | `/api/webhooks/paddle` | POST | Paddle subscription webhook |
 
+### Corporate Onboarding & Organization API
+
+| Route | Method | Purpose |
+|-------|--------|---------|
+| `/api/org/create` | POST | Create organization + owner membership |
+| `/api/org/members` | GET/PATCH | List/update org members |
+| `/api/org/invite` | POST | Send team invitation email |
+| `/api/org/invite/accept` | POST | Accept invitation via hashed token |
+| `/api/leads` | POST | Corporate lead capture (Zod-validated, Slack notification) |
+| `/api/abn-lookup` | GET | Australian Business Number verification (ABR API) |
+| `/api/cron/nurture` | GET | Daily nurture email delivery (6-email sequence) |
+
 ### B2B Threat Intelligence API (v1)
 
 Authenticated via Bearer token (API key). See `docs/openapi.yaml` for full spec.
@@ -238,6 +250,7 @@ Authenticated via Bearer token (API key). See `docs/openapi.yaml` for full spec.
 | `/api/cron/weekly-blog` | Weekly | Generate blog posts |
 | `/api/cron/pipeline-health` | Periodic | Monitor threat pipeline |
 | `/api/cron/process-bot-queue` | Periodic | Process async bot messages |
+| `/api/cron/nurture` | Daily 9am AEST | Corporate lead nurture email sequence |
 
 ### Internal
 
@@ -250,7 +263,7 @@ Authenticated via Bearer token (API key). See `docs/openapi.yaml` for full spec.
 
 ### Supabase (PostgreSQL)
 
-44 migration files (`supabase/migration.sql` through `migration-v44-scam-feed.sql`). 33 tables, 5 views, 33 RPCs.
+56 migration files (`supabase/migration.sql` through `migration-v56-leads.sql`). 36+ tables, 5 views, 36+ RPCs.
 
 **Core Tables:**
 
@@ -269,6 +282,10 @@ Authenticated via Bearer token (API key). See `docs/openapi.yaml` for full spec.
 | `api_keys` | B2B API key hashes, tiers, daily limits |
 | `subscriptions` | Paddle subscription records linked to API keys |
 | `user_profiles` | User profiles (role, display name, company) linked to auth.users |
+| `organizations` | Corporate client organizations with ABN, sector, tier (v55) |
+| `org_members` | Organization membership with 6-role RBAC (v55) |
+| `org_invitations` | Pending team invitations with hashed tokens (v55) |
+| `leads` | Corporate sales pipeline with nurture tracking (v56) |
 | `api_usage_log` | Per-key, per-endpoint, per-day API usage tracking |
 | `email_subscribers` | Newsletter subscribers |
 | `blog_posts` | Blog content with categories and full-text search |

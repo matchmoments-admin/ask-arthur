@@ -295,6 +295,64 @@ Chrome extension content script for Marketplace listing analysis and Messenger P
 | Background API analysis via existing analyze-ad endpoint | 🔄 In progress |
 | SPA navigation resilience (MutationObserver + URL heartbeat) | 🔄 In progress |
 
+## Phase 11c — B2B Corporate Onboarding & Go-to-Market ✅
+
+Multi-tenant organization support, persona-based dashboards, sector landing pages, and sales funnel infrastructure for the SPF Act compliance market.
+
+### Data Foundation ✅
+
+| Feature | Status |
+|---------|--------|
+| Organizations table with ABN, sector, tier, settings (v55) | ✅ Done |
+| Org members with 6-role RBAC (owner/admin/compliance/fraud/dev/viewer) | ✅ Done |
+| Org invitations with hashed tokens and email delivery | ✅ Done |
+| Org-scoped API keys (backward-compatible with user-scoped) | ✅ Done |
+| Leads table with nurture tracking and UTM (v56) | ✅ Done |
+| Organization types package (Zod schemas, role permissions) | ✅ Done |
+| Feature flags: multiTenancy, corporateOnboarding | ✅ Done |
+| Auth layer extended with orgId, orgRole, orgName | ✅ Done |
+| Org helpers: getOrg, requireOrg, requireOrgRole, requireOrgPermission | ✅ Done |
+
+### Corporate Onboarding ✅
+
+| Feature | Status |
+|---------|--------|
+| ABN Lookup integration (ABR XML API, Redis cached) | ✅ Done |
+| Multi-step onboarding wizard (4 steps) | ✅ Done |
+| Lead capture API with Slack notifications | ✅ Done |
+| Team invitation system with email delivery + acceptance | ✅ Done |
+| Team management UI (member list, role badges, invite form) | ✅ Done |
+| Dashboard layout updated with org context + role-aware nav | ✅ Done |
+
+### Persona Dashboards ✅
+
+| Feature | Status |
+|---------|--------|
+| Compliance Officer dashboard (SPF principle tracker, evidence export) | ✅ Done |
+| Fraud Analyst dashboard (threat investigations, entity explorer, clusters) | ✅ Done |
+| Developer dashboard (API usage charts, endpoint breakdown) | ✅ Done |
+| Executive dashboard (ROI summary, compliance gauge, trends) | ✅ Done |
+
+### Go-to-Market Pages ✅
+
+| Feature | Status |
+|---------|--------|
+| Banking sector landing page (/banking) | ✅ Done |
+| Telco sector landing page (/telco) | ✅ Done |
+| Digital platforms landing page (/digital-platforms) | ✅ Done |
+| Reusable SectorHero, SPFMappingTable, LeadCaptureForm components | ✅ Done |
+| SPF Compliance Readiness Assessment (interactive lead magnet) | ✅ Done |
+| Cost of Non-Compliance Calculator (interactive lead magnet) | ✅ Done |
+| "Regulated Entity" custom tier on pricing page | ✅ Done |
+
+### Email Nurture ✅
+
+| Feature | Status |
+|---------|--------|
+| 6-email SPF compliance nurture sequence | ✅ Done |
+| Daily nurture cron job (/api/cron/nurture) | ✅ Done |
+| Templates: SPF Intro, Reasonable Steps, Collective Intelligence, Case Study, Technical Overview, Deadline | ✅ Done |
+
 ## Phase 12 — Enterprise Readiness & Certifications
 
 Security certifications, SLA infrastructure, and procurement readiness for mid-tier bank and telco sales.
@@ -312,6 +370,9 @@ Security certifications, SLA infrastructure, and procurement readiness for mid-t
 | AFCX Intel Loop integration format | Planned |
 | Sender ID Register verification endpoint | Planned |
 | IRAP assessment (when government contracts imminent) | Planned |
+| Stripe billing migration (replace Paddle) | Planned |
+| Pricing overhaul (Pro $99, Business $449, Enterprise custom) | Planned |
+| Fraud Manager dashboard (entity search, alerts, CSV export) | Planned |
 
 See `docs/pitch/certification-roadmap.md` for detailed sequence, costs, and timelines.
 

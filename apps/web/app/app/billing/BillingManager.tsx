@@ -1,14 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { initializePaddle } from "@paddle/paddle-js";
-import type { Paddle } from "@paddle/paddle-js";
 import { TIER_LIMITS } from "@askarthur/types/billing";
-
-const proPriceId = process.env.NEXT_PUBLIC_PADDLE_PRO_PRICE_ID ?? "";
-const enterprisePriceId =
-  process.env.NEXT_PUBLIC_PADDLE_ENTERPRISE_PRICE_ID ?? "";
 
 interface ApiKey {
   id: number;
@@ -21,9 +16,14 @@ interface SubscriptionRecord {
   api_key_id: number;
   plan: string;
   status: string;
-  paddle_subscription_id: string;
+  stripe_subscription_id: string | null;
+  paddle_subscription_id: string | null;
+  billing_provider: string;
   current_period_end: string | null;
 }
+
+const proPriceMonthly = process.env.NEXT_PUBLIC_STRIPE_PRO_MONTHLY ?? "";
+const businessPriceMonthly = process.env.NEXT_PUBLIC_STRIPE_BUSINESS_MONTHLY ?? "";
 
 export default function BillingManager({
   userId,
@@ -36,33 +36,37 @@ export default function BillingManager({
   keys: ApiKey[];
   subscriptions: SubscriptionRecord[];
 }) {
-  const [paddle, setPaddle] = useState<Paddle>();
+  const router = useRouter();
+  const [loading, setLoading] = useState<number | null>(null);
 
-  useEffect(() => {
-    const token = process.env.NEXT_PUBLIC_PADDLE_CLIENT_TOKEN;
-    if (!token) return;
-
-    const env =
-      (process.env.NEXT_PUBLIC_PADDLE_ENV as "sandbox" | "production") ??
-      "sandbox";
-
-    initializePaddle({ token, environment: env }).then((instance) => {
-      if (instance) setPaddle(instance);
-    });
-  }, []);
-
-  function openCheckout(priceId: string, apiKeyId: number) {
-    if (!paddle) return;
-    paddle.Checkout.open({
-      items: [{ priceId, quantity: 1 }],
-      customer: { email: userEmail },
-      customData: { apiKeyId: String(apiKeyId), userId },
-    });
+  async function openCheckout(priceId: string, apiKeyId: number) {
+    setLoading(apiKeyId);
+    try {
+      const res = await fetch("/api/stripe/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ priceId, apiKeyId }),
+      });
+      const data = await res.json();
+      if (data.url) router.push(data.url);
+    } catch {
+      alert("Failed to open checkout. Please try again.");
+    } finally {
+      setLoading(null);
+    }
   }
 
-  function getSubscriptionForKey(
-    keyId: number
-  ): SubscriptionRecord | undefined {
+  async function openPortal() {
+    try {
+      const res = await fetch("/api/stripe/portal", { method: "POST" });
+      const data = await res.json();
+      if (data.url) router.push(data.url);
+    } catch {
+      alert("Failed to open billing portal.");
+    }
+  }
+
+  function getSubForKey(keyId: number): SubscriptionRecord | undefined {
     return subscriptions.find(
       (s) => s.api_key_id === keyId && ["active", "trialing"].includes(s.status)
     );
@@ -76,7 +80,7 @@ export default function BillingManager({
         </p>
         <Link
           href="/app/keys"
-          className="inline-block rounded-lg bg-action-teal text-white font-bold text-sm px-5 py-2.5 hover:bg-action-teal/90 transition-colors"
+          className="inline-block rounded-lg bg-action-teal text-white font-bold text-sm px-5 py-2.5"
         >
           Create API Key
         </Link>
@@ -87,9 +91,10 @@ export default function BillingManager({
   return (
     <div className="space-y-6">
       {keys.map((key) => {
-        const sub = getSubscriptionForKey(key.id);
-        const tierLimits =
-          TIER_LIMITS[key.tier as keyof typeof TIER_LIMITS] ?? TIER_LIMITS.free;
+        const sub = getSubForKey(key.id);
+        const tierKey = key.tier as keyof typeof TIER_LIMITS;
+        const limits = TIER_LIMITS[tierKey] ?? TIER_LIMITS.free;
+        const isLoading = loading === key.id;
 
         return (
           <div
@@ -102,8 +107,8 @@ export default function BillingManager({
                   {key.org_name}
                 </h3>
                 <p className="text-gov-slate text-xs">
-                  {tierLimits.dailyLimit} req/day · {tierLimits.ratePerMinute}{" "}
-                  RPM
+                  {limits.requestsPerDay} req/day &middot;{" "}
+                  {limits.requestsPerMinute} RPM
                 </p>
               </div>
               <span className="text-xs font-bold uppercase px-2 py-0.5 rounded-full bg-teal-50 text-action-teal">
@@ -112,38 +117,74 @@ export default function BillingManager({
             </div>
 
             {sub ? (
-              <div className="text-sm text-gov-slate">
-                <p>
-                  Active <strong className="capitalize">{sub.plan}</strong>{" "}
-                  subscription
-                  {sub.current_period_end && (
-                    <>
-                      {" "}
-                      · Renews{" "}
-                      {new Date(sub.current_period_end).toLocaleDateString()}
-                    </>
-                  )}
+              <div className="space-y-2">
+                <p className="text-sm text-gov-slate">
+                  <strong className="capitalize">{sub.plan}</strong> plan &mdash;{" "}
+                  {sub.status}
+                  {sub.current_period_end &&
+                    ` · Renews ${new Date(sub.current_period_end).toLocaleDateString("en-AU")}`}
                 </p>
-              </div>
-            ) : (
-              <div className="flex gap-2">
-                {key.tier !== "pro" && key.tier !== "enterprise" && (
+                {sub.billing_provider === "stripe" && (
                   <button
-                    onClick={() => openCheckout(proPriceId, key.id)}
-                    disabled={!paddle}
-                    className="rounded-lg bg-action-teal text-white font-bold text-xs px-4 py-2 hover:bg-action-teal/90 transition-colors disabled:opacity-50"
+                    onClick={openPortal}
+                    className="text-xs text-action-teal font-medium underline"
                   >
-                    Upgrade to Pro ($49/mo)
+                    Manage subscription
                   </button>
                 )}
-                {key.tier !== "enterprise" && (
+                {sub.billing_provider === "paddle" && (
+                  <p className="text-xs text-gov-slate">
+                    Legacy Paddle subscription &mdash; contact{" "}
+                    <a
+                      href="mailto:enterprise@askarthur.com.au"
+                      className="text-action-teal"
+                    >
+                      enterprise@askarthur.com.au
+                    </a>{" "}
+                    to manage.
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="flex gap-2 flex-wrap">
+                {key.tier === "free" && (
+                  <>
+                    <button
+                      onClick={() => openCheckout(proPriceMonthly, key.id)}
+                      disabled={isLoading}
+                      className="rounded-lg bg-action-teal text-white font-bold text-xs px-4 py-2 disabled:opacity-50"
+                    >
+                      {isLoading ? "Loading..." : "Upgrade to Pro (A$99/mo)"}
+                    </button>
+                    <button
+                      onClick={() => openCheckout(businessPriceMonthly, key.id)}
+                      disabled={isLoading}
+                      className="rounded-lg bg-deep-navy text-white font-bold text-xs px-4 py-2 disabled:opacity-50"
+                    >
+                      Upgrade to Business (A$449/mo)
+                    </button>
+                  </>
+                )}
+                {key.tier === "pro" && (
                   <button
-                    onClick={() => openCheckout(enterprisePriceId, key.id)}
-                    disabled={!paddle}
-                    className="rounded-lg bg-deep-navy text-white font-bold text-xs px-4 py-2 hover:bg-deep-navy/90 transition-colors disabled:opacity-50"
+                    onClick={() => openCheckout(businessPriceMonthly, key.id)}
+                    disabled={isLoading}
+                    className="rounded-lg bg-deep-navy text-white font-bold text-xs px-4 py-2 disabled:opacity-50"
                   >
-                    Upgrade to Enterprise ($249/mo)
+                    Upgrade to Business (A$449/mo)
                   </button>
+                )}
+                {(key.tier === "enterprise" || key.tier === "custom") && (
+                  <p className="text-xs text-gov-slate">
+                    Enterprise plan &mdash; contact{" "}
+                    <a
+                      href="mailto:enterprise@askarthur.com.au"
+                      className="text-action-teal"
+                    >
+                      enterprise@askarthur.com.au
+                    </a>{" "}
+                    to manage billing.
+                  </p>
                 )}
               </div>
             )}

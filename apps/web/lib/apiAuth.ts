@@ -5,6 +5,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 export interface ApiKeyValidation {
   valid: boolean;
   orgName?: string;
+  orgId?: string;
   tier?: string;
   dailyRemaining?: number;
   rateLimited?: boolean;
@@ -114,7 +115,7 @@ export async function validateApiKey(
   const { data, error } = await supabase
     .from("api_keys")
     .select(
-      "org_name, tier, is_active, daily_limit, rate_limit_per_minute, max_batch_size, allowed_endpoints"
+      "org_name, org_id, tier, is_active, daily_limit, rate_limit_per_minute, max_batch_size, allowed_endpoints"
     )
     .eq("key_hash", keyHash)
     .single();
@@ -134,6 +135,7 @@ export async function validateApiKey(
     return {
       valid: true,
       orgName: data.org_name,
+      orgId: data.org_id ?? undefined,
       tier: data.tier,
       keyHash,
       endpointBlocked: true,
@@ -147,6 +149,7 @@ export async function validateApiKey(
     return {
       valid: true,
       orgName: data.org_name,
+      orgId: data.org_id ?? undefined,
       tier: data.tier,
       keyHash,
       minuteRateLimited: true,
@@ -161,6 +164,7 @@ export async function validateApiKey(
     return {
       valid: true,
       orgName: data.org_name,
+      orgId: data.org_id ?? undefined,
       tier: data.tier,
       dailyRemaining: 0,
       rateLimited: true,
@@ -183,6 +187,7 @@ export async function validateApiKey(
   return {
     valid: true,
     orgName: data.org_name,
+    orgId: data.org_id ?? undefined,
     tier: data.tier,
     dailyRemaining: remaining,
     keyHash,

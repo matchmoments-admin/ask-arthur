@@ -6,6 +6,7 @@ import { z } from "zod";
 
 export const SubscriptionPlanSchema = z.enum([
   "pro",
+  "business",
   "enterprise",
   "extension_pro",
   "mobile_premium",
@@ -22,8 +23,11 @@ export const SubscriptionStatusSchema = z.enum([
 ]);
 export type SubscriptionStatus = z.infer<typeof SubscriptionStatusSchema>;
 
-export const ApiTierSchema = z.enum(["free", "pro", "enterprise"]);
+export const ApiTierSchema = z.enum(["free", "pro", "business", "enterprise", "custom"]);
 export type ApiTier = z.infer<typeof ApiTierSchema>;
+
+export const BillingProviderSchema = z.enum(["paddle", "stripe", "manual"]);
+export type BillingProvider = z.infer<typeof BillingProviderSchema>;
 
 // ---------------------------------------------------------------------------
 // Subscription (mirrors subscriptions DB table)
@@ -33,9 +37,15 @@ export interface Subscription {
   id: number;
   api_key_id: number;
   user_id: string | null;
-  paddle_subscription_id: string;
-  paddle_customer_id: string;
-  paddle_price_id: string;
+  // Paddle fields (nullable for Stripe records)
+  paddle_subscription_id: string | null;
+  paddle_customer_id: string | null;
+  paddle_price_id: string | null;
+  // Stripe fields (nullable for Paddle records)
+  stripe_subscription_id: string | null;
+  stripe_customer_id: string | null;
+  stripe_price_id: string | null;
+  billing_provider: BillingProvider;
   plan: SubscriptionPlan;
   status: SubscriptionStatus;
   current_period_start: string | null;
@@ -58,6 +68,7 @@ export interface UserProfile {
   display_name: string | null;
   company_name: string | null;
   billing_email: string | null;
+  stripe_customer_id: string | null;
   role: "user" | "admin";
   created_at: string;
   updated_at: string;
@@ -78,24 +89,65 @@ export interface ApiKey {
   max_batch_size: number;
   allowed_endpoints: string[];
   user_id: string | null;
+  org_id: string | null;
   created_at: string;
   last_used_at: string | null;
 }
 
 // ---------------------------------------------------------------------------
-// Tier limits
+// Tier limits — new pricing (April 2026)
 // ---------------------------------------------------------------------------
 
 export interface TierLimit {
-  dailyLimit: number;
-  ratePerMinute: number;
-  maxBatchSize: number;
+  requestsPerDay: number;
+  requestsPerMinute: number;
+  batchSize: number;
+  apiKeys: number;
+  orgSeats: number;
+  monthlyPriceAud?: number;
+  annualPriceAud?: number;
 }
 
-export const TIER_LIMITS: Record<ApiTier, TierLimit> = {
-  free: { dailyLimit: 25, ratePerMinute: 60, maxBatchSize: 10 },
-  pro: { dailyLimit: 100, ratePerMinute: 60, maxBatchSize: 100 },
-  enterprise: { dailyLimit: 5000, ratePerMinute: 300, maxBatchSize: 500 },
+export const TIER_LIMITS = {
+  free: {
+    requestsPerDay: 25,
+    requestsPerMinute: 60,
+    batchSize: 10,
+    apiKeys: 1,
+    orgSeats: 1,
+  },
+  pro: {
+    requestsPerDay: 200,
+    requestsPerMinute: 120,
+    batchSize: 100,
+    apiKeys: 3,
+    orgSeats: 1,
+    monthlyPriceAud: 99,
+    annualPriceAud: 990,
+  },
+  business: {
+    requestsPerDay: 2000,
+    requestsPerMinute: 300,
+    batchSize: 500,
+    apiKeys: 10,
+    orgSeats: 10,
+    monthlyPriceAud: 449,
+    annualPriceAud: 4490,
+  },
+  enterprise: {
+    requestsPerDay: 10000,
+    requestsPerMinute: 500,
+    batchSize: 2000,
+    apiKeys: 999,
+    orgSeats: 999,
+  },
+  custom: {
+    requestsPerDay: 25000,
+    requestsPerMinute: 600,
+    batchSize: 2000,
+    apiKeys: 999,
+    orgSeats: 999,
+  },
 } as const;
 
 // ---------------------------------------------------------------------------

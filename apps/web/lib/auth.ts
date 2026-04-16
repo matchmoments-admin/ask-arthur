@@ -8,6 +8,9 @@ export interface AuthUser {
   email: string;
   role: "user" | "admin";
   displayName: string | null;
+  orgId: string | null;
+  orgRole: string | null;
+  orgName: string | null;
 }
 
 /**
@@ -32,6 +35,9 @@ export async function getUser(): Promise<AuthUser | null> {
         ? "admin"
         : "user",
     displayName: (user.user_metadata?.display_name as string) ?? null,
+    orgId: null,
+    orgRole: null,
+    orgName: null,
   };
 }
 

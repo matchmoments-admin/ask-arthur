@@ -98,6 +98,12 @@ export const featureFlags = {
 
   /** Public scam feed: browsable threat intelligence from Reddit, verified scams, user reports */
   scamFeed: process.env.NEXT_PUBLIC_FF_SCAM_FEED === "true",
+
+  /** B2B multi-tenancy: organizations, team management, org-scoped dashboards */
+  multiTenancy: process.env.NEXT_PUBLIC_FF_MULTI_TENANCY === "true",
+
+  /** Corporate onboarding flow with ABN verification */
+  corporateOnboarding: process.env.NEXT_PUBLIC_FF_CORPORATE_ONBOARDING === "true",
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;

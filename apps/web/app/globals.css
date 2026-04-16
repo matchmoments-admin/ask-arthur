@@ -17,6 +17,11 @@
   --color-slate-500: #64748B;
   --color-slate-400: #94A3B8;
 
+  /* CTA / Trust */
+  --color-trust-teal: #0D9488;
+  --color-alert-amber: #D97706;
+  --color-safe-green: #059669;
+
   /* Borders */
   --color-border-light: #E2E8F0;
 

@@ -46,8 +46,8 @@ ask-arthur/
 ├── pipeline/
 │   └── scrapers/               # Python threat feed scrapers (16 feeds)
 │
-├── supabase/                   # Migration SQL files (v2–v44)
-├── docs/                       # OpenAPI spec, setup guides
+├── supabase/                   # Migration SQL files (v2–v56)
+├── docs/                       # OpenAPI spec, setup guides, compliance
 ├── turbo.json                  # Turborepo task config
 ├── pnpm-workspace.yaml         # Workspace manifest
 └── .npmrc                      # pnpm settings
