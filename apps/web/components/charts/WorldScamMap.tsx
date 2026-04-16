@@ -64,10 +64,22 @@ export default function WorldScamMap({ countryData }: Props) {
               fill={isHovered ? "#FFB300" : fill}
               stroke="#fff"
               strokeWidth={0.3}
+              tabIndex={0}
+              role="button"
+              aria-label={`Filter scam feed by ${location.name}${count > 0 ? `: ${count.toLocaleString()} reports` : ": no reports yet"}`}
               onMouseEnter={() => setHovered({ id: location.id, name: location.name })}
               onMouseLeave={() => setHovered(null)}
+              onFocus={() => setHovered({ id: location.id, name: location.name })}
+              onBlur={() => setHovered(null)}
               onClick={() => handleClick(location.id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  handleClick(location.id);
+                }
+              }}
               style={{ transition: "fill 0.15s ease", cursor: "pointer" }}
+              className="focus:outline-none focus-visible:[outline:2px_solid_#008A98] focus-visible:[outline-offset:1px]"
             >
               <title>
                 {location.name}: {count > 0 ? `${count.toLocaleString()} reports` : "No reports yet"}

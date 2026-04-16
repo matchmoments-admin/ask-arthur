@@ -1,19 +1,5 @@
 import type { Metadata } from "next";
-import Link from "next/link";
-import {
-  Shield,
-  ShieldCheck,
-  Globe,
-  Zap,
-  Search,
-  Bell,
-  CheckCircle,
-  Smartphone,
-  Bot,
-  Chrome,
-  Code2,
-  MessageSquare,
-} from "lucide-react";
+import { ShieldCheck, Search, Zap, CheckCircle } from "lucide-react";
 import Footer from "@/components/Footer";
 import Nav from "@/components/Nav";
 import ChartsSection from "@/components/charts/ChartsSection";
@@ -24,13 +10,13 @@ import { parseStateFromRegion } from "@/lib/chart-tokens";
 export const revalidate = 3600;
 
 export const metadata: Metadata = {
-  title: "About Ask Arthur — Australia's Scam Detection Platform",
+  title: "About Ask Arthur — A quiet second opinion on scams",
   description:
-    "Ask Arthur was built by someone who got scammed twice. Now we help Australians spot scams before they strike — free, private, powered by AI.",
+    "Ask Arthur is the pause. Paste a message, link, or screenshot and get a calm second opinion before you click, transfer, or sign in.",
   openGraph: {
     title: "About Ask Arthur",
     description:
-      "Built by someone who got scammed. Now protecting Australians from scams — one check at a time.",
+      "Ask Arthur is the pause — a calm second opinion before you click, transfer, or sign in.",
     url: "https://askarthur.au/about",
   },
   alternates: { canonical: "https://askarthur.au/about" },
@@ -108,15 +94,6 @@ const aboutJsonLd = {
   mainEntity: { "@id": "https://askarthur.au/#organization" },
 };
 
-const platforms = [
-  { icon: Globe, name: "Web App", description: "Check anything instantly at askarthur.au", href: "/" },
-  { icon: Smartphone, name: "Mobile App", description: "iOS & Android — check on the go", href: "#" },
-  { icon: Bot, name: "Telegram Bot", description: "Forward suspicious messages directly", href: "#" },
-  { icon: MessageSquare, name: "WhatsApp Bot", description: "Check scams where you chat most", href: "#" },
-  { icon: Chrome, name: "Chrome Extension", description: "Protect yourself while you browse", href: "#" },
-  { icon: Code2, name: "Developer API", description: "Embed scam intelligence into your product", href: "/api-docs" },
-];
-
 const partners = [
   { name: "ACCC Scamwatch", url: "https://www.scamwatch.gov.au" },
   { name: "IDCARE", url: "https://www.idcare.org" },
@@ -134,21 +111,6 @@ export default async function AboutPage() {
   const totalChecks = safeCount + suspiciousCount + highRiskCount;
   const hasData = totalChecks > 0;
 
-  const impactStats = [
-    {
-      value: totalChecks > 1000 ? `${(totalChecks / 1000).toFixed(0)}K+` : totalChecks > 0 ? `${totalChecks}+` : "10,000+",
-      label: "Scam checks completed",
-      icon: Shield,
-    },
-    {
-      value: highRiskCount > 1000 ? `${(highRiskCount / 1000).toFixed(0)}K+` : highRiskCount > 0 ? `${highRiskCount}+` : "2,000+",
-      label: "High-risk threats flagged",
-      icon: ShieldCheck,
-    },
-    { value: "14+", label: "Threat intelligence feeds", icon: Bell },
-    { value: "190+", label: "Countries with scam data", icon: Globe },
-  ];
-
   return (
     <div className="min-h-screen flex flex-col">
       <Nav />
@@ -160,106 +122,79 @@ export default async function AboutPage() {
         }}
       />
 
-      {/* Hero */}
-      <section className="bg-deep-navy text-white py-20 px-5">
-        <div className="max-w-2xl mx-auto text-center">
-          <div className="inline-flex items-center gap-2 bg-white/10 rounded-full px-4 py-1.5 text-sm font-medium mb-6">
-            <Shield size={14} />
-            Australia&apos;s scam detection platform
-          </div>
-          <h1 className="text-4xl md:text-5xl font-extrabold leading-tight tracking-tight mb-4">
-            Protecting Australians
-            <br />
-            from scams
-          </h1>
-          <p className="text-white/75 text-lg leading-relaxed mb-8 max-w-xl mx-auto">
-            Free. Private. Powered by AI. Built because someone on our team got
-            scammed — and realised too many people have no one to ask.
-          </p>
-          <Link
-            href="/"
-            className="inline-block bg-action-teal text-white font-bold px-8 py-3.5 rounded-xl hover:bg-action-teal/90 transition-colors"
-          >
-            Check something now
-          </Link>
-        </div>
-      </section>
-
       <main id="main-content" className="flex-1">
-        {/* Impact Stats */}
-        <section className="py-16 px-5 border-b border-border-light">
-          <div className="max-w-2xl mx-auto">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-              {impactStats.map(({ value, label, icon: Icon }) => (
-                <div key={label} className="text-center">
-                  <Icon size={24} className="text-action-teal mx-auto mb-2" strokeWidth={1.5} />
-                  <div className="text-3xl font-extrabold text-deep-navy tracking-tight">{value}</div>
-                  <div className="text-xs text-gov-slate mt-1 leading-snug">{label}</div>
-                </div>
-              ))}
-            </div>
+        {/* Quiet intro */}
+        <section className="bg-white border-b border-border-light">
+          <div className="max-w-3xl mx-auto px-5 py-12 md:py-16">
+            <p className="text-lg md:text-xl text-gov-slate leading-relaxed">
+              Ask Arthur helps Australians stop and check before they click,
+              transfer, or sign in — a quiet second opinion when something
+              doesn&apos;t quite feel right.
+            </p>
           </div>
         </section>
 
-        {/* Founder Story */}
-        <section className="py-16 px-5 bg-slate-50">
-          <div className="max-w-2xl mx-auto">
-            <div className="flex flex-col md:flex-row gap-8 items-start">
-              <div className="flex-shrink-0">
-                <div className="w-20 h-20 rounded-2xl bg-deep-navy/10 flex items-center justify-center">
-                  <Shield size={36} className="text-deep-navy" strokeWidth={1.5} />
-                </div>
-              </div>
-              <div>
-                <p className="text-xs font-bold uppercase tracking-widest text-action-teal mb-3">
-                  Why I built Ask Arthur
-                </p>
-                <h2 className="text-2xl font-extrabold text-deep-navy mb-5 leading-snug">
-                  I got scammed. Twice.
-                </h2>
-                <div className="space-y-4 text-gov-slate text-base leading-relaxed">
-                  <p>
-                    The first time, I clicked a link I shouldn&apos;t have. It looked
-                    real — official branding, urgent language, a familiar sender.
-                    The second time, an investment scheme took advantage of me.
-                    Convincing people, plausible returns, a polished pitch. Both
-                    times, I handed over something I shouldn&apos;t have.
-                  </p>
-                  <p>
-                    What I keep coming back to is this: in both cases, a brief
-                    pause might have changed everything. A second opinion. Someone
-                    — or something — to say:{" "}
-                    <em>
-                      &quot;Hold on. This looks suspicious. Here&apos;s what to do next.&quot;
-                    </em>
-                  </p>
-                  <p>
-                    A lot of people don&apos;t have that. They don&apos;t have a trusted
-                    friend who knows about scams, or the confidence to question
-                    something that feels slightly off. So I built Ask Arthur.
-                  </p>
-                  <p className="font-medium text-deep-navy">
-                    Worst case, we advise caution — talk to your bank, download
-                    the official app, speak to Scamwatch. Best case, we can report
-                    the number and pass it on to the bank, telco, or company on
-                    your behalf. Simple. Effective. Free.
-                  </p>
-                  <p>
-                    Ask Arthur exists to help Australians spot scams before they
-                    strike — and to raise awareness so fewer people go through what
-                    I did.
-                  </p>
-                </div>
-                <p className="mt-6 text-sm font-bold text-deep-navy">
-                  — Founder, Ask Arthur
-                </p>
-              </div>
+        {/* A note from the founder */}
+        <section className="bg-slate-50 border-b border-border-light">
+          <div className="max-w-prose mx-auto px-5 py-16 md:py-20">
+            <h2 className="text-deep-navy text-2xl md:text-3xl font-extrabold mb-8">
+              A note from the founder
+            </h2>
+
+            <div className="space-y-6 text-base md:text-lg text-gov-slate leading-relaxed">
+              <p>
+                Every scam story I&apos;ve heard shares one thing: urgency. A
+                message that tells you to act now. A phone call that won&apos;t
+                let you hang up. A link you must click before the
+                &ldquo;offer&rdquo; disappears, the &ldquo;account&rdquo;
+                closes, or the &ldquo;fine&rdquo; doubles. Urgency is the
+                scammer&apos;s most reliable tool, because a person who&apos;s
+                rushing is a person who isn&apos;t thinking.
+              </p>
+
+              <p className="text-xl md:text-2xl font-semibold text-deep-navy py-2">
+                Ask Arthur is the pause.
+              </p>
+
+              <p>
+                It&apos;s the moment you step back, take a breath, and get a
+                second opinion before you click, transfer, or sign in. Paste
+                the message in, read what Arthur has to say, and give yourself
+                time to think. When Arthur isn&apos;t sure, Arthur will say so
+                — and always err on the side of caution. That caution is the
+                whole point.
+              </p>
+
+              <p>
+                Everyone deserves that pause. Not just the tech-savvy, not just
+                people with a family member who works in cyber, and not just
+                those who already know the tricks. Anyone with a phone and a
+                bank account is a target now, every single day. Being scammed
+                is never your fault — scammers are skilled professionals who
+                deceive people of every age.
+              </p>
+
+              <p>
+                The act of asking is itself protective. When you stop to check,
+                you break the spell the scammer is relying on. You can always
+                take time to check with someone you trust. If something
+                doesn&apos;t feel right or doesn&apos;t quite add up — if
+                something feels off or you aren&apos;t sure — just ask Arthur.
+                We&apos;ll take a look together.
+              </p>
             </div>
+
+            <p className="mt-10 text-sm text-gov-slate italic">
+              — Founder, Ask Arthur
+            </p>
           </div>
         </section>
 
         {/* How It Works */}
-        <section id="how-it-works" className="py-16 px-5 border-b border-border-light">
+        <section
+          id="how-it-works"
+          className="py-16 px-5 border-b border-border-light"
+        >
           <div className="max-w-2xl mx-auto">
             <h2 className="text-2xl font-extrabold text-deep-navy mb-2 text-center">
               How Ask Arthur works
@@ -269,9 +204,27 @@ export default async function AboutPage() {
             </p>
             <div className="grid md:grid-cols-3 gap-8">
               {[
-                { step: "1", icon: Search, title: "Check", description: "Paste a message, link, phone number, or image. No account needed." },
-                { step: "2", icon: Zap, title: "Analyse", description: "Our AI cross-references 14+ threat feeds, community reports, and known scam patterns." },
-                { step: "3", icon: CheckCircle, title: "Protect", description: "Get a clear verdict — Safe, Suspicious, or High Risk — with actionable next steps." },
+                {
+                  step: "1",
+                  icon: Search,
+                  title: "Check",
+                  description:
+                    "Paste a message, link, phone number, or image. No account needed.",
+                },
+                {
+                  step: "2",
+                  icon: Zap,
+                  title: "Analyse",
+                  description:
+                    "Our AI cross-references threat feeds, community reports, and known scam patterns.",
+                },
+                {
+                  step: "3",
+                  icon: CheckCircle,
+                  title: "Protect",
+                  description:
+                    "Get a clear verdict — Safe, Suspicious, or High Risk — with actionable next steps.",
+                },
               ].map(({ step, icon: Icon, title, description }) => (
                 <div key={step} className="text-center">
                   <div className="w-12 h-12 rounded-full bg-action-teal/10 flex items-center justify-center mx-auto mb-3">
@@ -280,8 +233,12 @@ export default async function AboutPage() {
                   <div className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-1">
                     Step {step}
                   </div>
-                  <h3 className="font-extrabold text-deep-navy text-lg mb-2">{title}</h3>
-                  <p className="text-gov-slate text-sm leading-relaxed">{description}</p>
+                  <h3 className="font-extrabold text-deep-navy text-lg mb-2">
+                    {title}
+                  </h3>
+                  <p className="text-gov-slate text-sm leading-relaxed">
+                    {description}
+                  </p>
                 </div>
               ))}
             </div>
@@ -315,39 +272,14 @@ export default async function AboutPage() {
               Scams around the world
             </h2>
             <p className="text-gov-slate text-center text-sm mb-8">
-              Live scam report data from our community. Click any country to see
-              the latest threats.
+              Live scam reports from over 190 countries. Click any country to
+              see the latest threats.
             </p>
             <WorldScamMap countryData={worldData} />
           </div>
         </section>
 
-        {/* Platforms */}
-        <section className="py-16 px-5 bg-slate-50">
-          <div className="max-w-2xl mx-auto">
-            <h2 className="text-2xl font-extrabold text-deep-navy mb-2 text-center">
-              Protect yourself everywhere
-            </h2>
-            <p className="text-gov-slate text-center text-sm mb-8">
-              Ask Arthur works across every platform you use.
-            </p>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              {platforms.map(({ icon: Icon, name, description, href }) => (
-                <Link
-                  key={name}
-                  href={href}
-                  className="rounded-xl border border-border-light bg-white p-4 hover:border-action-teal/40 hover:shadow-sm transition-all group"
-                >
-                  <Icon size={20} className="text-action-teal mb-2 group-hover:scale-110 transition-transform" />
-                  <div className="font-bold text-deep-navy text-sm">{name}</div>
-                  <div className="text-xs text-gov-slate mt-0.5 leading-snug">{description}</div>
-                </Link>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* Data Sources */}
+        {/* Aligned with Australia's authorities */}
         <section className="py-16 px-5 border-b border-border-light">
           <div className="max-w-2xl mx-auto text-center">
             <h2 className="text-2xl font-extrabold text-deep-navy mb-2">
@@ -371,43 +303,6 @@ export default async function AboutPage() {
                 </a>
               ))}
             </div>
-          </div>
-        </section>
-
-        {/* Press / Media */}
-        <section className="py-12 px-5 bg-slate-50">
-          <div className="max-w-2xl mx-auto text-center">
-            <h2 className="text-lg font-extrabold text-deep-navy mb-2">
-              Media & press
-            </h2>
-            <p className="text-gov-slate text-sm mb-4">
-              Writing about scams, cybersecurity, or Ask Arthur?
-            </p>
-            <a
-              href="mailto:media@askarthur.au"
-              className="inline-block text-action-teal font-bold text-sm hover:underline"
-            >
-              media@askarthur.au
-            </a>
-          </div>
-        </section>
-
-        {/* CTA */}
-        <section className="py-20 px-5 bg-deep-navy text-white text-center">
-          <div className="max-w-xl mx-auto">
-            <Shield size={40} className="mx-auto mb-4 opacity-60" strokeWidth={1.5} />
-            <h2 className="text-3xl font-extrabold mb-3 leading-tight">
-              Start protecting yourself — free
-            </h2>
-            <p className="text-white/70 mb-8">
-              No account. No sign-up. Just paste and check.
-            </p>
-            <Link
-              href="/"
-              className="inline-block bg-action-teal text-white font-bold px-8 py-3.5 rounded-xl hover:bg-action-teal/90 transition-colors"
-            >
-              Check a message now
-            </Link>
           </div>
         </section>
       </main>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { Search, SlidersHorizontal, Loader2 } from "lucide-react";
 import FeedCard from "./FeedCard";
 import Pill from "./Pill";
@@ -20,18 +21,29 @@ const SOURCE_FILTERS = [
 ];
 
 export default function FeedList({ initialItems, initialTotal }: FeedListProps) {
+  const searchParams = useSearchParams();
+  const initialSource = searchParams.get("source") ?? "";
+  const initialCategory = searchParams.get("category") ?? "";
+  const initialCountry = (searchParams.get("country") ?? "").toUpperCase();
+  const initialSearch = searchParams.get("search") ?? "";
+  const hasUrlFilter = Boolean(
+    initialSource || initialCategory || initialCountry || initialSearch
+  );
+
   const [items, setItems] = useState<FeedItem[]>(initialItems);
   const [total, setTotal] = useState(initialTotal);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
 
-  // Filters
-  const [source, setSource] = useState("");
-  const [category, setCategory] = useState("");
-  const [country, setCountry] = useState("");
-  const [search, setSearch] = useState("");
-  const [showFilters, setShowFilters] = useState(false);
+  // Filters — seeded from URL on mount so deep-links auto-apply
+  const [source, setSource] = useState(initialSource);
+  const [category, setCategory] = useState(initialCategory);
+  const [country, setCountry] = useState(initialCountry);
+  const [search, setSearch] = useState(initialSearch);
+  const [showFilters, setShowFilters] = useState(
+    Boolean(initialCategory || initialCountry)
+  );
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -122,6 +134,20 @@ export default function FeedList({ initialItems, initialTotal }: FeedListProps) 
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
+  }, []);
+
+  // Apply URL-derived filters on mount (server only sends unfiltered initial items)
+  useEffect(() => {
+    if (hasUrlFilter) {
+      fetchFeed({
+        page: 1,
+        source: initialSource,
+        category: initialCategory,
+        country: initialCountry,
+        search: initialSearch,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleLoadMore = () => {

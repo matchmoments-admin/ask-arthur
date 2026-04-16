@@ -205,7 +205,7 @@ export default function ContactForm() {
       <button
         type="submit"
         disabled={submitting}
-        className="w-full py-2.5 rounded-lg bg-action-teal text-white text-sm font-medium hover:bg-action-teal/90 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center justify-center gap-2"
+        className="w-full py-2.5 rounded-lg bg-deep-navy text-white text-sm font-medium hover:bg-deep-navy/90 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center justify-center gap-2"
       >
         {submitting ? (
           <>
