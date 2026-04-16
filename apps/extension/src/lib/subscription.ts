@@ -13,7 +13,7 @@ const CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
  */
 export async function getSubscription(): Promise<SubscriptionState | null> {
   const result = await chrome.storage.local.get(STORAGE_KEY);
-  return result[STORAGE_KEY] ?? null;
+  return (result[STORAGE_KEY] as SubscriptionState | undefined) ?? null;
 }
 
 /**

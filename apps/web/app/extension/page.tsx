@@ -202,13 +202,23 @@ export default function ExtensionPage() {
         <p className="text-gov-slate mb-6">
           Works on Chrome, Edge, Brave, and any Chromium browser.
         </p>
-        {/* TODO: Replace # with actual Chrome Web Store URL */}
-        <a
-          href="#"
-          className="inline-flex items-center justify-center h-14 px-10 bg-deep-navy text-white font-semibold rounded-full hover:bg-navy transition-colors text-lg"
-        >
-          Add to Chrome — It&apos;s Free
-        </a>
+        {process.env.NEXT_PUBLIC_CHROME_WEB_STORE_URL ? (
+          <a
+            href={process.env.NEXT_PUBLIC_CHROME_WEB_STORE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center justify-center h-14 px-10 bg-deep-navy text-white font-semibold rounded-full hover:bg-navy transition-colors text-lg"
+          >
+            Add to Chrome — It&apos;s Free
+          </a>
+        ) : (
+          <span
+            aria-disabled="true"
+            className="inline-flex items-center justify-center h-14 px-10 bg-slate-300 text-slate-600 font-semibold rounded-full text-lg cursor-not-allowed"
+          >
+            Launching soon — check back shortly
+          </span>
+        )}
         <p className="text-xs text-slate-400 mt-3">
           No signup. No credit card. 50 free checks per day.
         </p>
