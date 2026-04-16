@@ -2,6 +2,12 @@
 
 import type { LucideIcon } from "lucide-react";
 import { ShieldCheck, TriangleAlert, ShieldAlert, Gauge, Flag } from "lucide-react";
+
+function getConfidenceLabel(confidence: number): string {
+  if (confidence >= 0.85) return "High confidence";
+  if (confidence >= 0.6) return "Moderate confidence";
+  return "Low confidence";
+}
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { getRecoverySteps } from "@/lib/recoverySteps";
 import DeepfakeGauge from "./DeepfakeGauge";
@@ -96,7 +102,7 @@ export default function ResultCard({
         <div className={`flex items-center gap-2 mb-5 ${config.textColor}`}>
           <Gauge size={18} />
           <span className="text-sm font-bold uppercase tracking-widest">
-            {Math.round(confidence * 100)}% confidence
+            {getConfidenceLabel(confidence)}
           </span>
         </div>
 

@@ -261,7 +261,7 @@ export default function PersonaChecker() {
             </p>
             <p className="text-sm text-gov-slate mt-1">{result.summary}</p>
             <p className="text-xs text-slate-400 mt-1" style={{ fontVariantNumeric: "tabular-nums" }}>
-              Confidence: {Math.round(result.confidence * 100)}%
+              {result.confidence >= 0.85 ? "High confidence" : result.confidence >= 0.6 ? "Moderate confidence" : "Low confidence"}
             </p>
           </div>
         </div>

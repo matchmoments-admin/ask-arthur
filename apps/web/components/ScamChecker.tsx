@@ -18,7 +18,7 @@ type Status = "idle" | "analyzing" | "complete" | "error" | "rate_limited";
 const MEDIA_STATUS_LABELS: Record<string, string> = {
   uploading: "Uploading audio...",
   transcribing: "Transcribing audio...",
-  analyzing: "Analyzing for scams...",
+  analyzing: "Analysing for scams...",
 };
 
 export default function ScamChecker() {
@@ -348,7 +348,7 @@ export default function ScamChecker() {
                 disabled={isAnyActive || (!text.trim() && images.length === 0)}
                 className="h-11 px-6 bg-deep-navy text-white font-bold uppercase tracking-widest rounded-full hover:bg-navy transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
               >
-                {isTextActive ? "Analyzing..." : "Check Now"}
+                {isTextActive ? "Analysing..." : "Check Now"}
               </button>
             )}
           </div>

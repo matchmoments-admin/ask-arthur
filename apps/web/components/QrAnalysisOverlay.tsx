@@ -40,7 +40,7 @@ const VERDICT_CONFIG: Record<string, { icon: LucideIcon; iconColor: string; icon
 const ANALYSIS_STEPS = [
   "Decoding QR content...",
   "Checking URL reputation...",
-  "Analyzing with AI...",
+  "Analysing with AI...",
 ];
 
 export default function QrAnalysisOverlay({
@@ -131,7 +131,7 @@ export default function QrAnalysisOverlay({
 
           {/* Scrollable content */}
           <div className="flex-1 overflow-y-auto px-5 pb-safe-bottom">
-            {/* Analyzing state */}
+            {/* Analysing state */}
             {step === "analyzing" && (
               <div className="flex flex-col items-center gap-4 pb-6">
                 <div className="w-10 h-10 border-3 border-deep-navy border-t-transparent rounded-full animate-spin" />
@@ -247,7 +247,7 @@ function VerdictContent({
       <div className="animate-verdict-content text-center space-y-2">
         <p className="text-gov-slate text-base leading-relaxed">{result.summary}</p>
         <p className={`text-sm font-bold uppercase tracking-widest ${config.iconColor}`}>
-          {Math.round(result.confidence * 100)}% confidence
+          {result.confidence >= 0.85 ? "High confidence" : result.confidence >= 0.6 ? "Moderate confidence" : "Low confidence"}
         </p>
       </div>
 

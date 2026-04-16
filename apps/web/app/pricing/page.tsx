@@ -14,7 +14,7 @@ export default function PricingPage() {
     <div className="min-h-screen flex flex-col">
       <Nav />
 
-      <main className="flex-1 w-full max-w-[640px] mx-auto px-5 pt-16 pb-12">
+      <main className="flex-1 w-full max-w-4xl mx-auto px-5 pt-16 pb-12">
         <h1 className="text-deep-navy text-3xl font-extrabold mb-3">
           API Pricing
         </h1>

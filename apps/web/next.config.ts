@@ -101,6 +101,11 @@ const nextConfig: NextConfig = {
         destination: "/health",
         permanent: true,
       },
+      {
+        source: "/scanner",
+        destination: "/health",
+        permanent: true,
+      },
     ];
   },
 };

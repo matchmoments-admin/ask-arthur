@@ -6,7 +6,7 @@ export default async function Nav() {
   const links: { href: string; label: string }[] = [];
 
   if (featureFlags.siteAudit) {
-    links.push({ href: "/health", label: "Health" });
+    links.push({ href: "/health", label: "Scanner" });
   }
   links.push({ href: "/persona-check", label: "Persona Check" });
   if (featureFlags.scamFeed) {
@@ -14,7 +14,6 @@ export default async function Nav() {
   }
   links.push({ href: "/blog", label: "Blog" });
   links.push({ href: "/about", label: "About" });
-  links.push({ href: "/contact", label: "Contact" });
 
   return (
     <nav

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
 
 const STEPS = [
-  "Analyzing message content...",
+  "Analysing message content...",
   "Checking for scam patterns...",
   "Verifying URLs against databases...",
   "Generating safety report...",

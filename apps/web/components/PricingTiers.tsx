@@ -23,11 +23,9 @@ const TIERS = [
     limits: { requestsPerDay: 25, rpm: 60, batch: 10 },
     features: [
       { text: "All 6 API endpoints", available: true },
-      { text: "Risk score (0-100) + Low/Med/High/Critical", available: true },
+      { text: "Risk score + Low/Med/High/Critical", available: true },
       { text: "Australian scam taxonomy", available: true },
       { text: "1 API key", available: true },
-      { text: "Full enrichment data (5 sources)", available: false },
-      { text: "14 Australian threat feeds", available: false },
     ],
   },
   {
@@ -44,12 +42,10 @@ const TIERS = [
     stripePriceAnnual: process.env.NEXT_PUBLIC_STRIPE_PRO_ANNUAL ?? "",
     limits: { requestsPerDay: 200, rpm: 120, batch: 100 },
     features: [
-      { text: "All 6 API endpoints", available: true },
       { text: "Full enrichment: AbuseIPDB, HIBP, Twilio, URLScan, CT logs", available: true },
       { text: "14 Australian threat feeds + Scamwatch categories", available: true },
       { text: "3 API keys + analytics dashboard", available: true },
       { text: "Email support (48h AEST)", available: true },
-      { text: "Fraud manager dashboard", available: false },
     ],
   },
   {
@@ -66,11 +62,9 @@ const TIERS = [
     stripePriceAnnual: process.env.NEXT_PUBLIC_STRIPE_BUSINESS_ANNUAL ?? "",
     limits: { requestsPerDay: 2000, rpm: 300, batch: 500 },
     features: [
-      { text: "Everything in Pro", available: true },
-      { text: "Fraud manager dashboard (search, alerts, reports)", available: true },
+      { text: "Everything in Pro + fraud manager dashboard", available: true },
       { text: "10 team seats with role-based access", available: true },
       { text: "Webhook delivery for high-risk alerts", available: true },
-      { text: "SPF Act compliance dashboard", comingSoon: true },
       { text: "Priority support (24h) + Slack channel", available: true },
     ],
   },
@@ -88,11 +82,9 @@ const TIERS = [
     stripePriceAnnual: null,
     limits: { requestsPerDay: 10000, rpm: 500, batch: 2000 },
     features: [
-      { text: "Everything in Business", available: true },
-      { text: "Custom volume + SLA (99.9% uptime guarantee)", available: true },
+      { text: "Custom volume + SLA (99.9% uptime)", available: true },
       { text: "Australian data residency (Sydney region)", available: true },
       { text: "STIX 2.1 export for SIEM integration", comingSoon: true },
-      { text: "White-label scam checker embed", comingSoon: true },
       { text: "Dedicated account manager", available: true },
     ],
   },
@@ -136,7 +128,7 @@ export default function PricingTiers({
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       {/* Billing toggle */}
       <div className="flex justify-center">
         <div className="inline-flex rounded-lg border border-border-light bg-white p-1 gap-1">
@@ -152,7 +144,7 @@ export default function PricingTiers({
             >
               {int === "monthly" ? "Monthly" : "Annual"}{" "}
               {int === "annual" && (
-                <span className="text-xs text-action-teal font-bold">
+                <span className="text-xs text-emerald-600 font-bold">
                   (2 months free)
                 </span>
               )}
@@ -161,8 +153,8 @@ export default function PricingTiers({
         </div>
       </div>
 
-      {/* Tier cards */}
-      <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5">
+      {/* Tier cards — horizontal stacked */}
+      <div className="flex flex-col gap-4">
         {TIERS.map((tier) => {
           const price =
             tier.monthlyAud === null
@@ -174,119 +166,105 @@ export default function PricingTiers({
           return (
             <div
               key={tier.id}
-              className={`rounded-xl border-2 bg-white p-5 flex flex-col ${
+              className={`rounded-xl border bg-white p-6 flex flex-col md:flex-row md:items-center gap-5 md:gap-8 ${
                 tier.highlight
-                  ? "border-action-teal shadow-lg scale-[1.02]"
+                  ? "border-deep-navy shadow-md"
                   : "border-border-light"
               }`}
             >
-              {tier.highlight && (
-                <div className="text-xs font-bold uppercase tracking-widest text-action-teal mb-3">
-                  Most Popular
+              {/* Left: Name + tagline + limits */}
+              <div className="md:w-48 flex-shrink-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <h2 className="text-deep-navy font-extrabold text-lg">
+                    {tier.name}
+                  </h2>
+                  {tier.highlight && (
+                    <span className="bg-deep-navy text-white text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full">
+                      Popular
+                    </span>
+                  )}
                 </div>
-              )}
-              <h2 className="text-deep-navy font-extrabold text-lg">
-                {tier.name}
-              </h2>
-              <p className="text-gov-slate text-xs mt-0.5 mb-4">
-                {tier.tagline}
-              </p>
+                <p className="text-gov-slate text-xs">{tier.tagline}</p>
+                <div className="text-[10px] text-slate-400 mt-2 space-y-0.5">
+                  <div>{tier.limits.requestsPerDay.toLocaleString()} req/day</div>
+                  <div>{tier.limits.rpm} RPM &middot; batch {tier.limits.batch}</div>
+                </div>
+              </div>
 
-              <div className="mb-4">
+              {/* Center: Price */}
+              <div className="md:w-32 flex-shrink-0">
                 {price === null ? (
-                  <span className="text-deep-navy font-extrabold text-2xl">
-                    Custom
-                  </span>
+                  <span className="text-deep-navy font-extrabold text-2xl">Custom</span>
                 ) : price === 0 ? (
-                  <span className="text-deep-navy font-extrabold text-2xl">
-                    Free
-                  </span>
+                  <span className="text-deep-navy font-extrabold text-2xl">Free</span>
                 ) : (
-                  <>
+                  <div>
                     <span className="text-deep-navy font-extrabold text-2xl">
                       A${price}
                     </span>
                     <span className="text-gov-slate text-xs"> /mo</span>
                     {interval === "annual" && tier.annualAud !== null && tier.annualAud > 0 && (
-                      <div className="text-xs text-gov-slate mt-0.5">
+                      <div className="text-[10px] text-slate-400 mt-0.5">
                         A${tier.annualAud.toLocaleString()}/year
                       </div>
                     )}
-                  </>
+                  </div>
                 )}
               </div>
 
-              <div className="text-xs text-gov-slate mb-4 space-y-0.5">
-                <div>
-                  {tier.limits.requestsPerDay.toLocaleString()} req/day
-                </div>
-                <div>
-                  {tier.limits.rpm} RPM &middot; batch {tier.limits.batch}
-                </div>
+              {/* Right: Features */}
+              <div className="flex-1 min-w-0">
+                <ul className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
+                  {tier.features.map((f) => (
+                    <li key={f.text} className="flex items-start gap-1.5 text-xs">
+                      {f.available ? (
+                        <CheckCircle size={13} className="text-emerald-500 flex-shrink-0 mt-0.5" />
+                      ) : "comingSoon" in f && f.comingSoon ? (
+                        <Clock size={13} className="text-amber-400 flex-shrink-0 mt-0.5" />
+                      ) : (
+                        <span className="w-3 h-3 flex-shrink-0 mt-0.5 rounded-full border-2 border-slate-200" />
+                      )}
+                      <span className={f.available || ("comingSoon" in f && f.comingSoon) ? "text-gov-slate" : "text-slate-300"}>
+                        {f.text}
+                        {"comingSoon" in f && f.comingSoon && (
+                          <span className="ml-1 text-amber-500 font-medium">(soon)</span>
+                        )}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
               </div>
 
-              {tier.ctaAction ? (
-                <button
-                  onClick={() => handleCheckout(tier)}
-                  disabled={loading === tier.id}
-                  className={`w-full text-center rounded-lg font-bold text-sm py-2.5 mb-4 transition-colors ${
-                    tier.highlight
-                      ? "bg-action-teal text-white hover:bg-action-teal/90"
-                      : "border-2 border-deep-navy text-deep-navy hover:bg-deep-navy/5"
-                  } disabled:opacity-50`}
-                >
-                  {loading === tier.id ? "Loading..." : tier.cta}
-                </button>
-              ) : tier.ctaHref ? (
-                <Link
-                  href={tier.ctaHref}
-                  className="block w-full text-center rounded-lg border-2 border-deep-navy text-deep-navy font-bold text-sm py-2.5 mb-4 hover:bg-deep-navy/5"
-                >
-                  {tier.cta}
-                </Link>
-              ) : null}
-
-              <ul className="space-y-2 flex-1">
-                {tier.features.map((f) => (
-                  <li key={f.text} className="flex items-start gap-2 text-xs">
-                    {f.available ? (
-                      <CheckCircle
-                        size={14}
-                        className="text-emerald-500 flex-shrink-0 mt-0.5"
-                      />
-                    ) : "comingSoon" in f && f.comingSoon ? (
-                      <Clock
-                        size={14}
-                        className="text-amber-400 flex-shrink-0 mt-0.5"
-                      />
-                    ) : (
-                      <span className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 rounded-full border-2 border-slate-200" />
-                    )}
-                    <span
-                      className={
-                        f.available || ("comingSoon" in f && f.comingSoon)
-                          ? "text-gov-slate"
-                          : "text-slate-300"
-                      }
-                    >
-                      {f.text}
-                      {"comingSoon" in f && f.comingSoon && (
-                        <span className="ml-1 text-amber-500 font-medium">
-                          (soon)
-                        </span>
-                      )}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+              {/* Far right: CTA */}
+              <div className="md:w-44 flex-shrink-0">
+                {tier.ctaAction ? (
+                  <button
+                    onClick={() => handleCheckout(tier)}
+                    disabled={loading === tier.id}
+                    className="w-full text-center rounded-lg bg-deep-navy text-white font-bold text-sm py-2.5 px-6 hover:bg-deep-navy/90 transition-colors disabled:opacity-50"
+                  >
+                    {loading === tier.id ? "Loading..." : tier.cta}
+                  </button>
+                ) : tier.ctaHref ? (
+                  <Link
+                    href={tier.ctaHref}
+                    className={`block w-full text-center rounded-lg font-bold text-sm py-2.5 px-6 transition-colors ${
+                      tier.id === "free"
+                        ? "border-2 border-deep-navy text-deep-navy hover:bg-deep-navy/5"
+                        : "bg-deep-navy text-white hover:bg-deep-navy/90"
+                    }`}
+                  >
+                    {tier.cta}
+                  </Link>
+                ) : null}
+              </div>
             </div>
           );
         })}
       </div>
 
       <p className="text-center text-xs text-gov-slate">
-        All prices in AUD + GST. 14-day money-back guarantee on Pro and Business
-        plans.
+        Start with a 14-day free trial. Cancel anytime. All prices in AUD + GST.
       </p>
     </div>
   );
