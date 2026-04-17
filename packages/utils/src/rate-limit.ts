@@ -10,6 +10,7 @@ import { hashIdentifier } from "./hash";
 let _burstLimiter: Ratelimit | null = null;
 let _dailyLimiter: Ratelimit | null = null;
 let _formLimiter: Ratelimit | null = null;
+let _imageUploadLimiter: Ratelimit | null = null;
 
 function getBurstLimiter() {
   if (!_burstLimiter) {
@@ -51,6 +52,22 @@ function getFormLimiter() {
     });
   }
   return _formLimiter;
+}
+
+function getImageUploadLimiter() {
+  if (!_imageUploadLimiter) {
+    _imageUploadLimiter = new Ratelimit({
+      redis: new Redis({
+        url: process.env.UPSTASH_REDIS_REST_URL!,
+        token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+      }),
+      limiter: Ratelimit.slidingWindow(5, "1 h"),
+      prefix: "askarthur:image-upload",
+      analytics: true,
+      timeout: 1000,
+    });
+  }
+  return _imageUploadLimiter;
 }
 
 export type RateLimitResult = {
@@ -105,6 +122,35 @@ export async function checkRateLimit(
     remaining: Math.min(burst.remaining, daily.remaining),
     resetAt: null,
   };
+}
+
+export async function checkImageUploadRateLimit(
+  ip: string
+): Promise<RateLimitResult> {
+  // Image vision calls cost ~$0.002-$0.01 each; this is defence-in-depth on top
+  // of the existing UA+IP hash limiter to cap abuse on an expensive endpoint.
+  // Fail-open: legit users > abuse protection at current scale.
+  if (!process.env.UPSTASH_REDIS_REST_URL) {
+    return { allowed: true, remaining: 99, resetAt: null };
+  }
+
+  try {
+    const result = await getImageUploadLimiter().limit(`ip:${ip}`);
+    if (!result.success) {
+      return {
+        allowed: false,
+        remaining: 0,
+        resetAt: new Date(result.reset),
+        message: "Too many image uploads. Try again later.",
+      };
+    }
+    return { allowed: true, remaining: result.remaining, resetAt: null };
+  } catch (err) {
+    logger.warn("Image upload rate limiter error — failing open", {
+      error: String(err),
+    });
+    return { allowed: true, remaining: 99, resetAt: null };
+  }
 }
 
 export async function checkFormRateLimit(ip: string): Promise<RateLimitResult> {

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { waitUntil } from "@vercel/functions";
-import { checkRateLimit } from "@askarthur/utils/rate-limit";
+import { checkRateLimit, checkImageUploadRateLimit } from "@askarthur/utils/rate-limit";
 import { analyzeWithClaude, detectInjectionAttempt, type Verdict } from "@askarthur/scam-engine/claude";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { extractContactsFromText, normalizePhoneE164 } from "@askarthur/scam-engine/phone-normalize";
@@ -76,6 +76,27 @@ export async function POST(req: NextRequest) {
     const images: string[] = rawImages && rawImages.length > 0
       ? rawImages
       : image ? [image] : [];
+
+    // 2a. Image-upload specific rate limit (5 per IP per hour, sliding window).
+    // Vision calls are ~$0.002-$0.01 each — this is defence-in-depth on top of
+    // the UA+IP hash limit applied above.
+    if (images.length > 0) {
+      const imgRl = await checkImageUploadRateLimit(ip);
+      if (!imgRl.allowed) {
+        return NextResponse.json(
+          { error: "rate_limited", message: imgRl.message, resetAt: imgRl.resetAt?.toISOString() },
+          {
+            status: 429,
+            headers: {
+              "X-RateLimit-Remaining": "0",
+              "Retry-After": imgRl.resetAt
+                ? String(Math.max(1, Math.ceil((imgRl.resetAt.getTime() - Date.now()) / 1000)))
+                : "3600",
+            },
+          }
+        );
+      }
+    }
 
     // 2b. Validate image magic bytes (prevent disguised file uploads)
     if (images.length > 0) {
