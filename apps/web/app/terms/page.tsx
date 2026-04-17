@@ -14,7 +14,7 @@ export default function TermsPage() {
       <Nav />
 
       <main className="flex-1 w-full max-w-[640px] mx-auto px-5 pt-16 pb-12">
-        <h1 className="text-deep-navy text-3xl font-extrabold mb-8">
+        <h1 className="text-deep-navy text-4xl md:text-5xl font-extrabold mb-8 leading-tight text-center">
           Terms of Service
         </h1>
 

@@ -48,27 +48,20 @@ export default async function ScamFeedPage() {
   const { items, total } = await getInitialFeed();
 
   return (
-    <>
+    <div className="min-h-screen flex flex-col">
       <Nav />
-      <main id="main-content">
-        {/* Hero */}
-        <section className="max-w-[640px] mx-auto px-5 pt-16 mb-8">
-          <h1 className="text-deep-navy text-4xl md:text-5xl font-extrabold mb-4 leading-tight text-center">
-            Feed
-          </h1>
-          <p className="text-lg text-gov-slate max-w-2xl mx-auto text-center leading-relaxed">
-            Real-time scam intelligence from Reddit, verified analysis, and
-            community reports. Stay informed about the latest threats targeting
-            Australians.
-          </p>
-        </section>
-
-        {/* Feed */}
-        <section className="max-w-4xl mx-auto px-4 pb-8">
-          <FeedList initialItems={items} initialTotal={total} />
-        </section>
+      <main id="main-content" className="flex-1 w-full max-w-[640px] mx-auto px-5 pt-16 pb-16">
+        <h1 className="text-deep-navy text-4xl md:text-5xl font-extrabold mb-4 leading-tight text-center">
+          Feed
+        </h1>
+        <p className="text-lg text-gov-slate mb-10 leading-relaxed text-center">
+          Real-time scam intelligence from Reddit, verified analysis, and
+          community reports. Stay informed about the latest threats targeting
+          Australians.
+        </p>
+        <FeedList initialItems={items} initialTotal={total} />
       </main>
       <Footer />
-    </>
+    </div>
   );
 }
