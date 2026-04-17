@@ -3,11 +3,30 @@ import { defineConfig } from "wxt";
 const urlGuardEnabled = process.env.WXT_URL_GUARD === "true";
 const extensionSecurityEnabled = process.env.WXT_EXTENSION_SECURITY !== "false";
 const facebookAdsEnabled = process.env.WXT_FACEBOOK_ADS === "true";
+const siteAuditEnabled = process.env.WXT_SITE_AUDIT === "true";
+
+// WXT 0.20.x: `filterEntrypoints` is an INCLUSION list of entrypoint names
+// (file stem without `.content` suffix). Anything not listed is skipped.
+// Background + popup are always included; content scripts are gated on flags.
+const includedEntrypoints: string[] = ["background", "popup"];
+
+if (urlGuardEnabled) {
+  includedEntrypoints.push("url-guard");
+}
+
+if (facebookAdsEnabled) {
+  includedEntrypoints.push("facebook-ads", "facebook-marketplace");
+}
+
+if (siteAuditEnabled) {
+  includedEntrypoints.push("site-audit");
+}
 
 export default defineConfig({
   modules: ["@wxt-dev/module-react"],
   srcDir: "src",
   outDir: "dist",
+  filterEntrypoints: includedEntrypoints,
   manifest: {
     name: "Ask Arthur — Scam Detector",
     description:
