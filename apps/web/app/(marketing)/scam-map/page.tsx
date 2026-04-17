@@ -42,17 +42,15 @@ export default async function ScamMapPage() {
   return (
     <div className="min-h-screen flex flex-col">
       <Nav />
-      <main id="main-content" className="flex-1 py-12 px-5">
-        <div className="max-w-3xl mx-auto">
-          <h1 className="text-3xl font-extrabold text-deep-navy mb-2 text-center">
-            Global Scam Map
-          </h1>
-          <p className="text-gov-slate text-center text-sm mb-10">
-            Community-reported scams from around the world. Click any country to
-            explore threats.
-          </p>
-          <WorldScamMap countryData={countryData} />
-        </div>
+      <main id="main-content" className="flex-1 w-full max-w-3xl mx-auto px-5 pt-16 pb-16">
+        <h1 className="text-deep-navy text-4xl md:text-5xl font-extrabold mb-4 leading-tight text-center">
+          Global Scam Map
+        </h1>
+        <p className="text-lg text-gov-slate mb-10 leading-relaxed text-center">
+          Live scam reports from 190+ countries, sourced from our Feed. Click
+          any country to open it filtered to that location.
+        </p>
+        <WorldScamMap countryData={countryData} />
       </main>
       <Footer />
     </div>

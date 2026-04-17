@@ -43,6 +43,42 @@ Design tokens are defined in `app/globals.css` using CSS custom properties insid
 - Horizontal padding: `20px` (`px-5`)
 - Top accent bar: `6px` height (`h-1.5`) in `deep-navy`
 
+## Marketing Page Layout (quick reference)
+
+Every top-level marketing page (`/about`, `/health`, `/persona-check`, `/scam-feed`, `/blog`, `/terms`, `/privacy`, …) uses this exact shell. Canonical examples: `/health` and `/persona-check`.
+
+```tsx
+<div className="min-h-screen flex flex-col">
+  <Nav />
+  <main
+    id="main-content"
+    className="flex-1 w-full max-w-[640px] mx-auto px-5 pt-16 pb-16"
+  >
+    <h1 className="text-deep-navy text-4xl md:text-5xl font-extrabold mb-4 leading-tight text-center">
+      {/* Page title */}
+    </h1>
+    <p className="text-lg text-gov-slate mb-10 leading-relaxed text-center">
+      {/* One-sentence subtitle */}
+    </p>
+    {/* Sections below inherit the 640px column — no per-section max-w overrides */}
+  </main>
+  <Footer />
+</div>
+```
+
+**Rules:**
+- Container is `max-w-[640px]`. Not prose, not 2xl, not 3xl. No per-section overrides.
+- h1 centred, `text-4xl md:text-5xl font-extrabold text-deep-navy leading-tight`.
+- h2 centred, `text-2xl md:text-3xl font-extrabold text-deep-navy mb-3`.
+- Card/list pattern: `block p-4 bg-white border border-border-light rounded-xl hover:border-action-teal/40 hover:shadow-sm transition-all`.
+
+**Forbidden on marketing pages:** full-bleed coloured panels (`bg-slate-50`, `bg-white border-b`), mid-paragraph pull-quotes, section-level `py-16 px-5 border-b`, multiple container widths within one page, per-section `max-w-*` overrides.
+
+**Exceptions (closed list — don't add more):**
+- `/banking`, `/telco`, `/digital-platforms` — `max-w-[960px]` (B2B landing pages).
+- `/scam-map` — `max-w-3xl` (world choropleth needs horizontal room).
+- `/app/*` — dashboard, different rules.
+
 ## Component Library
 
 Components are in `/components/`:
