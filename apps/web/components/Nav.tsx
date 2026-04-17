@@ -10,7 +10,7 @@ export default async function Nav() {
   }
   links.push({ href: "/persona-check", label: "Persona Check" });
   if (featureFlags.scamFeed) {
-    links.push({ href: "/scam-feed", label: "Scam Feed" });
+    links.push({ href: "/scam-feed", label: "Feed" });
   }
   links.push({ href: "/blog", label: "Blog" });
   links.push({ href: "/about", label: "About" });
