@@ -4,7 +4,7 @@
 
 *April 2026*
 
-askarthur.au | hello@askarthur.au
+askarthur.au | brendan@askarthur.au
 
 ---
 
@@ -565,4 +565,4 @@ How Ask Arthur's capabilities map to the six SPF principles:
 
 *Ask Arthur — Protecting Australians from scams, one check at a time.*
 
-askarthur.au | hello@askarthur.au
+askarthur.au | brendan@askarthur.au

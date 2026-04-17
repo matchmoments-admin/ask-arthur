@@ -20,4 +20,4 @@ All Ask Arthur platform data is processed and stored within Australia.
 
 **Note on Upstash Redis:** Used for rate limiting and response caching only. No PII or scam report content is stored in Redis. Cache entries expire within 24 hours.
 
-Contact: security@askarthur.com.au
+Contact: brendan@askarthur.au

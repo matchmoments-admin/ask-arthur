@@ -43,7 +43,7 @@
 ## Incident Response
 - **P1 response target:** 30 minutes
 - **Breach notification:** Clients within 72 hours, OAIC within 30 days (per Notifiable Data Breaches scheme)
-- **Contact:** security@askarthur.com.au
+- **Contact:** brendan@askarthur.au
 
 ## Security Testing
 - **Dependency scanning:** GitHub Dependabot (automated)
@@ -68,4 +68,4 @@
 | Upstash | Rate limiting, cache | Hashed identifiers, counters | Available |
 | Stripe | Billing | Customer name, email, payment | Type II |
 
-Contact: security@askarthur.com.au
+Contact: brendan@askarthur.au

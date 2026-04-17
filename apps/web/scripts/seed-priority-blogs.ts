@@ -317,7 +317,7 @@ Ask Arthur maintains government-ready data export views aligned with Scamwatch c
 Entity intelligence with risk scores enables automated blocking decisions. When a URL, phone number, or email address exceeds a configurable risk threshold, your systems can automatically block, flag, or quarantine the associated communication or transaction — protected by the safe harbour provision.
 
 > [!TIP]
-> Ask Arthur's Threat API is available in three tiers: Free (25 calls/day for evaluation), Pro ($2,000/month, 100 calls/day), and Enterprise ($5,000-$15,000/month, 5,000 calls/day with dedicated support). Contact hello@askarthur.au for a compliance-focused proof of concept.
+> Ask Arthur's Threat API is available in three tiers: Free (25 calls/day for evaluation), Pro ($2,000/month, 100 calls/day), and Enterprise ($5,000-$15,000/month, 5,000 calls/day with dedicated support). Contact brendan@askarthur.au for a compliance-focused proof of concept.
 
 ## Key Dates Timeline
 
@@ -341,7 +341,7 @@ Compliance is not optional, and the deadline is approaching fast. Entities that 
 
 ---
 
-*Ask Arthur's Threat Intelligence API provides SPF-ready Actionable Scam Intelligence for banks, telcos, and digital platforms. Start a free evaluation at [askarthur.au](https://askarthur.au) or contact hello@askarthur.au for enterprise enquiries.*`;
+*Ask Arthur's Threat Intelligence API provides SPF-ready Actionable Scam Intelligence for banks, telcos, and digital platforms. Start a free evaluation at [askarthur.au](https://askarthur.au) or contact brendan@askarthur.au for enterprise enquiries.*`;
 
 const POST_2_CONTENT = `PayID scams have become one of Australia's fastest-growing marketplace fraud types. If you buy or sell anything on Facebook Marketplace, Gumtree, or other classifieds platforms, you need to understand how these scams work — because the scripts are polished, the fake emails are convincing, and thousands of Australians are falling for them every month.
 

@@ -78,10 +78,10 @@ export default function ContactPage() {
         <p className="text-center text-xs text-slate-500">
           Prefer email? Reach us at{" "}
           <a
-            href="mailto:enterprise@askarthur.com.au"
+            href="mailto:brendan@askarthur.au"
             className="text-action-teal hover:underline font-medium"
           >
-            enterprise@askarthur.com.au
+            brendan@askarthur.au
           </a>
         </p>
       </main>

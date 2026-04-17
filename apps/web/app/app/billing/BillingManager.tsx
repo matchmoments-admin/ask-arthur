@@ -162,10 +162,10 @@ export default function BillingManager({
                   <p className="text-xs text-gov-slate">
                     Enterprise plan &mdash; contact{" "}
                     <a
-                      href="mailto:enterprise@askarthur.com.au"
+                      href="mailto:brendan@askarthur.au"
                       className="text-action-teal"
                     >
-                      enterprise@askarthur.com.au
+                      brendan@askarthur.au
                     </a>{" "}
                     to manage billing.
                   </p>

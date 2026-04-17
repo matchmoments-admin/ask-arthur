@@ -6,7 +6,7 @@ Last updated: April 2026
 
 ---
 
-This document provides pre-filled responses to common security questionnaire topics for enterprise procurement and due diligence. For additional questions, contact security@askarthur.au.
+This document provides pre-filled responses to common security questionnaire topics for enterprise procurement and due diligence. For additional questions, contact brendan@askarthur.au.
 
 **Company:** Ask Arthur
 **ABN:** 72 695 772 313
@@ -57,7 +57,7 @@ This document provides pre-filled responses to common security questionnaire top
 | Question | Response |
 |----------|----------|
 | How are dependencies managed? | Automated dependency auditing via GitHub Dependabot and pnpm audit. Critical and high-severity vulnerabilities are patched within 48 hours. All dependencies are locked via pnpm lockfiles. |
-| Is there a vulnerability disclosure policy? | Yes. Security issues can be reported to security@askarthur.au. We acknowledge receipt within 24 hours and aim to provide an initial assessment within 72 hours. |
+| Is there a vulnerability disclosure policy? | Yes. Security issues can be reported to brendan@askarthur.au. We acknowledge receipt within 24 hours and aim to provide an initial assessment within 72 hours. |
 | Are penetration tests conducted? | Application security testing is conducted regularly. Results and remediation timelines are available to Enterprise clients under NDA upon request. |
 | How are security patches applied? | Critical patches: within 24 hours. High-severity: within 48 hours. Medium: within 7 days. Low: next scheduled release. Emergency patches may be deployed outside the standard maintenance window with best-effort notice. |
 | Is static code analysis used? | Yes. TypeScript strict mode is enforced across the codebase. ESLint with security-focused rulesets. All code changes require review before merge. |
@@ -140,10 +140,10 @@ This document provides pre-filled responses to common security questionnaire top
 
 For security enquiries, audit requests, or additional questionnaire responses:
 
-- **Security:** security@askarthur.au
-- **Enterprise sales:** enterprise@askarthur.au
-- **Privacy:** privacy@askarthur.au
+- **Security:** brendan@askarthur.au
+- **Enterprise sales:** brendan@askarthur.au
+- **Privacy:** brendan@askarthur.au
 
 ---
 
-*Ask Arthur (ABN 72 695 772 313) -- askarthur.au -- security@askarthur.au*
+*Ask Arthur (ABN 72 695 772 313) -- askarthur.au -- brendan@askarthur.au*

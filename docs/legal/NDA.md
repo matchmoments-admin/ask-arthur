@@ -150,9 +150,9 @@ All Confidential Information is provided "as is" without warranty of any kind, e
 | **Signature** | _________________________ | _________________________ |
 | **Name** | | |
 | **Title** | | |
-| **Email** | enterprise@askarthur.au | |
+| **Email** | brendan@askarthur.au | |
 | **Date** | | |
 
 ---
 
-*Ask Arthur (ABN 72 695 772 313) -- askarthur.au -- enterprise@askarthur.au*
+*Ask Arthur (ABN 72 695 772 313) -- askarthur.au -- brendan@askarthur.au*

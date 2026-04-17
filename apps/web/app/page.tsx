@@ -26,7 +26,7 @@ const jsonLd = {
       ],
       contactPoint: {
         "@type": "ContactPoint",
-        email: "hello@askarthur.au",
+        email: "brendan@askarthur.au",
         contactType: "customer support",
         availableLanguage: "English",
         areaServed: "AU",

@@ -18,7 +18,7 @@ function escapeHtml(str: string): string {
     .replace(/'/g, "&#39;");
 }
 
-const FROM = process.env.RESEND_FROM_EMAIL || "Ask Arthur <alerts@askarthur.au>";
+const FROM = process.env.RESEND_FROM_EMAIL || "Ask Arthur <brendan@askarthur.au>";
 
 export async function sendWelcomeEmail(email: string): Promise<void> {
   const resend = getResendClient();

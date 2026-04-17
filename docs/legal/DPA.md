@@ -299,10 +299,10 @@ This DPA is governed by the laws of New South Wales, Australia. Disputes are res
 
 For data protection enquiries:
 
-- **Privacy:** privacy@askarthur.au
-- **Security incidents:** security@askarthur.au
-- **Enterprise support:** enterprise@askarthur.au
+- **Privacy:** brendan@askarthur.au
+- **Security incidents:** brendan@askarthur.au
+- **Enterprise support:** brendan@askarthur.au
 
 ---
 
-*Ask Arthur (ABN 72 695 772 313) -- askarthur.au -- privacy@askarthur.au*
+*Ask Arthur (ABN 72 695 772 313) -- askarthur.au -- brendan@askarthur.au*

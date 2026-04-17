@@ -95,4 +95,4 @@ The Scams Prevention Framework creates the kind of forced compliance demand that
 
 *Ask Arthur — Protecting Australians from scams, one check at a time.*
 
-Contact: hello@askarthur.au | askarthur.au
+Contact: brendan@askarthur.au | askarthur.au

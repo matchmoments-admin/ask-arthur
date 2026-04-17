@@ -23,7 +23,7 @@ Would 20 minutes next week work to walk through the API and discuss scoping?
 
 Brendan Milton
 Founder, Ask Arthur
-hello@askarthur.au | askarthur.au
+brendan@askarthur.au | askarthur.au
 
 ---
 
@@ -59,7 +59,7 @@ Could we schedule a call to discuss how this maps to your SPF readiness programm
 
 Brendan Milton
 Founder, Ask Arthur
-hello@askarthur.au | askarthur.au
+brendan@askarthur.au | askarthur.au
 
 ---
 
@@ -121,7 +121,7 @@ Ask Arthur is a community-sourced scam intelligence platform. Consumers submit s
 4. Provide sample threat intelligence export for evaluation
 5. Scope a pilot data-sharing arrangement with NASC
 
-**Contact:** hello@askarthur.au | askarthur.au
+**Contact:** brendan@askarthur.au | askarthur.au
 
 ---
 
@@ -178,7 +178,7 @@ Our free pilot offer remains open. If the timing is not right now, I am happy to
 Best,
 Brendan Milton
 Founder, Ask Arthur
-hello@askarthur.au
+brendan@askarthur.au
 
 ---
 
@@ -231,4 +231,4 @@ Note: ROI calculation uses penalty avoidance as the value metric. Actual ROI dep
 
 *Ask Arthur -- pre-revenue, production-ready API. Honest about our stage, serious about the problem.*
 
-askarthur.au | hello@askarthur.au
+askarthur.au | brendan@askarthur.au

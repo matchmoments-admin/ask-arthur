@@ -187,8 +187,8 @@ export default function TrustPage() {
                 <div className="font-bold text-amber-900 mb-1">Security incident?</div>
                 <p className="text-amber-800 text-sm leading-relaxed">
                   Report suspected vulnerabilities or security incidents to{" "}
-                  <a href="mailto:security@askarthur.au" className="underline font-medium">
-                    security@askarthur.au
+                  <a href="mailto:brendan@askarthur.au" className="underline font-medium">
+                    brendan@askarthur.au
                   </a>
                   . We aim to respond within 24 hours and will notify affected clients
                   within 72 hours of confirming a breach.
@@ -216,7 +216,7 @@ export default function TrustPage() {
               ].map((doc) => (
                 <a
                   key={doc}
-                  href="mailto:enterprise@askarthur.au"
+                  href="mailto:brendan@askarthur.au"
                   className="flex items-center gap-2 p-3 rounded-xl border border-border-light bg-white hover:border-action-teal/40 transition-colors text-sm text-gov-slate"
                 >
                   <Shield size={14} className="text-action-teal flex-shrink-0" />
@@ -226,8 +226,8 @@ export default function TrustPage() {
             </div>
             <p className="text-xs text-gov-slate mt-3">
               Email{" "}
-              <a href="mailto:enterprise@askarthur.au" className="text-action-teal font-medium">
-                enterprise@askarthur.au
+              <a href="mailto:brendan@askarthur.au" className="text-action-teal font-medium">
+                brendan@askarthur.au
               </a>{" "}
               to request any document.
             </p>

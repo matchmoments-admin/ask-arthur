@@ -28,7 +28,7 @@ Happy to share our SPF compliance mapping and API docs. Worth a 20-minute call?
 
 Best,
 [Founder Name]
-hello@askarthur.au | askarthur.au
+brendan@askarthur.au | askarthur.au
 
 ---
 
@@ -52,7 +52,7 @@ Could we spend 20 minutes on the data velocity thesis? I have detailed unit econ
 
 Best,
 [Founder Name]
-hello@askarthur.au | askarthur.au
+brendan@askarthur.au | askarthur.au
 
 ---
 
@@ -76,7 +76,7 @@ Happy to demo the platform and walk through the business plan. Could we find 20 
 
 Best,
 [Founder Name]
-hello@askarthur.au | askarthur.au
+brendan@askarthur.au | askarthur.au
 
 ---
 
@@ -100,7 +100,7 @@ Raising A$500K-$1M pre-seed (SAFE, A$5M-$8M cap). Capital goes to sales and scal
 
 Best,
 [Founder Name]
-hello@askarthur.au | askarthur.au
+brendan@askarthur.au | askarthur.au
 
 ---
 
@@ -124,7 +124,7 @@ I'd welcome the chance to discuss the cohort and what a Startmate partnership co
 
 Best,
 [Founder Name]
-hello@askarthur.au | askarthur.au
+brendan@askarthur.au | askarthur.au
 
 ---
 
@@ -134,7 +134,7 @@ hello@askarthur.au | askarthur.au
 
 ### ASK ARTHUR — Scam Intelligence for Regulated Australia
 
-**askarthur.au** | hello@askarthur.au | Pre-seed, A$500K-$1M
+**askarthur.au** | brendan@askarthur.au | Pre-seed, A$500K-$1M
 
 ---
 
@@ -251,4 +251,4 @@ The product is built. 11 development phases, 44 database migrations, 7 consumer 
 
 *Ask Arthur — Protecting Australians from scams, one check at a time.*
 
-askarthur.au | hello@askarthur.au
+askarthur.au | brendan@askarthur.au

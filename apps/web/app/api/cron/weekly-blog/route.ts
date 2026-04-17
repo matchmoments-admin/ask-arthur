@@ -67,7 +67,7 @@ export async function GET(req: NextRequest) {
       const resend = new Resend(process.env.RESEND_API_KEY);
       resend.emails
         .send({
-          from: process.env.RESEND_FROM_EMAIL || "Ask Arthur <alerts@askarthur.au>",
+          from: process.env.RESEND_FROM_EMAIL || "Ask Arthur <brendan@askarthur.au>",
           to: process.env.ADMIN_EMAIL,
           subject: `New blog post needs review: ${post.title}`,
           html: `<p>A new blog post has been generated and needs review:</p>

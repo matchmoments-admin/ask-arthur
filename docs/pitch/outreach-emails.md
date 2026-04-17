@@ -24,7 +24,7 @@ You spoke at the Australian Financial Crime Summit about scaling detection [Data
 
 Brendan
 Founder, Ask Arthur
-hello@askarthur.au
+brendan@askarthur.au
 
 ---
 
@@ -46,7 +46,7 @@ This isn't about replacing what BOQ has built. It's about giving you evidence of
 
 Brendan
 Founder, Ask Arthur
-hello@askarthur.au
+brendan@askarthur.au
 
 ---
 
@@ -68,7 +68,7 @@ The SPF Detect principle requires external Actionable Scam Intelligence. This is
 
 Brendan
 Founder, Ask Arthur
-hello@askarthur.au
+brendan@askarthur.au
 
 ---
 
@@ -90,7 +90,7 @@ BioCatch tells you the person on the session is behaving abnormally. Ask Arthur 
 
 Brendan
 Founder, Ask Arthur
-hello@askarthur.au
+brendan@askarthur.au
 
 ---
 
@@ -114,7 +114,7 @@ The SPF Detect principle mandates external Actionable Scam Intelligence from 1 J
 
 Brendan
 Founder, Ask Arthur
-hello@askarthur.au
+brendan@askarthur.au
 
 ---
 
@@ -136,7 +136,7 @@ Either way — looking forward to your session.
 
 Brendan
 Founder, Ask Arthur
-hello@askarthur.au
+brendan@askarthur.au
 
 ---
 
@@ -156,7 +156,7 @@ You've seen both sides of the regulatory desk. I'd value 20 minutes to hear whet
 
 Brendan
 Founder, Ask Arthur
-hello@askarthur.au
+brendan@askarthur.au
 
 ---
 
@@ -178,7 +178,7 @@ You're rebuilding Optus's security posture from scratch. 20 minutes to see if th
 
 Brendan
 Founder, Ask Arthur
-hello@askarthur.au
+brendan@askarthur.au
 
 ---
 
@@ -200,7 +200,7 @@ The SPF deadline is 1 July 2026. TPG's blocking numbers are strong. The regulato
 
 Brendan
 Founder, Ask Arthur
-hello@askarthur.au
+brendan@askarthur.au
 
 ---
 
@@ -224,7 +224,7 @@ Pre-revenue, production-ready. 6 API endpoints [Data]. Designed to be a high-vol
 
 Brendan
 Founder, Ask Arthur
-hello@askarthur.au
+brendan@askarthur.au
 
 ---
 
@@ -271,7 +271,7 @@ Brendan
 
 I've reached out a few times about upstream scam intelligence for [company]'s SPF compliance. I don't want to add noise to your inbox.
 
-If this becomes relevant — particularly as the 1 July 2026 deadline approaches — I'm at hello@askarthur.au. The API docs are public at askarthur.au.
+If this becomes relevant — particularly as the 1 July 2026 deadline approaches — I'm at brendan@askarthur.au. The API docs are public at askarthur.au.
 
 Best of luck with the SPF implementation.
 

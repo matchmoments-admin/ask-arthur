@@ -233,7 +233,7 @@ Neither party shall be liable for failure or delay in performance due to causes 
 
 18.5. **Waiver.** Failure to enforce any right under this Agreement does not constitute a waiver of that right.
 
-18.6. **Notices.** All notices shall be in writing and sent to the addresses specified in the Order Form, or by email to enterprise@askarthur.au (for Provider) and the Client contact specified in the Order Form.
+18.6. **Notices.** All notices shall be in writing and sent to the addresses specified in the Order Form, or by email to brendan@askarthur.au (for Provider) and the Client contact specified in the Order Form.
 
 18.7. **Survival.** Sections 7, 8, 9, 11.3, 12, 13, 15, and 17 shall survive expiration or termination of this Agreement.
 
@@ -252,4 +252,4 @@ This Agreement is effective as of the date of the last signature below.
 
 ---
 
-*Ask Arthur (ABN 72 695 772 313) -- askarthur.au -- enterprise@askarthur.au*
+*Ask Arthur (ABN 72 695 772 313) -- askarthur.au -- brendan@askarthur.au*

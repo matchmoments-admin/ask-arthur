@@ -95,7 +95,7 @@ export async function POST(req: NextRequest) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        from: process.env.RESEND_FROM_EMAIL ?? "Ask Arthur <noreply@askarthur.au>",
+        from: process.env.RESEND_FROM_EMAIL ?? "Ask Arthur <brendan@askarthur.au>",
         to: [email],
         subject: `You've been invited to join ${org.orgName} on Ask Arthur`,
         html: `

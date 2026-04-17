@@ -61,7 +61,7 @@ The following are excluded from Downtime calculations:
 
 5.2. **Maximum Credit.** Total Service Credits for any calendar month shall not exceed **30%** of the monthly Subscription Fee for that month.
 
-5.3. **Claim Process.** Client must submit a Service Credit request within 30 days of the end of the affected month by emailing enterprise@askarthur.au with the dates and times of observed Downtime. Provider shall respond within 10 business days.
+5.3. **Claim Process.** Client must submit a Service Credit request within 30 days of the end of the affected month by emailing brendan@askarthur.au with the dates and times of observed Downtime. Provider shall respond within 10 business days.
 
 5.4. **Application.** Service Credits are applied to future invoices and are not redeemable for cash. Service Credits are Client's sole and exclusive remedy for failure to meet the uptime target.
 
@@ -121,7 +121,7 @@ The following are excluded from Downtime calculations:
 
 8.2. **Contact Details.** Support requests should be directed to:
 
-- Email: enterprise@askarthur.au
+- Email: brendan@askarthur.au
 - Help Centre: help.askarthur.au
 
 ---
@@ -149,7 +149,7 @@ The following are excluded from Downtime calculations:
 | **Resolution** | As soon as practicable | Confirmation of resolution via status page and email |
 | **Post-Incident Report** | Within 5 business days (P1) / 10 business days (P2) | Root cause analysis, timeline, remediation steps, and preventive measures |
 
-10.3. **Escalation.** Enterprise clients may escalate unresolved incidents through their dedicated Customer Success Manager or by contacting enterprise@askarthur.au with "ESCALATION" in the subject line.
+10.3. **Escalation.** Enterprise clients may escalate unresolved incidents through their dedicated Customer Success Manager or by contacting brendan@askarthur.au with "ESCALATION" in the subject line.
 
 10.4. **Post-Incident Reports.** For P1 incidents, Provider shall deliver a written post-incident report ("PIR") that includes:
 
@@ -197,4 +197,4 @@ This SLA may be updated by Provider with at least 30 days notice to Client. Mate
 
 ---
 
-*Ask Arthur (ABN 72 695 772 313) -- askarthur.au -- enterprise@askarthur.au*
+*Ask Arthur (ABN 72 695 772 313) -- askarthur.au -- brendan@askarthur.au*
