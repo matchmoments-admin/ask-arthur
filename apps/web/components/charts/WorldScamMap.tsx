@@ -66,7 +66,7 @@ export default function WorldScamMap({ countryData }: Props) {
               strokeWidth={0.3}
               tabIndex={0}
               role="button"
-              aria-label={`Filter scam feed by ${location.name}${count > 0 ? `: ${count.toLocaleString()} reports` : ": no reports yet"}`}
+              aria-label={`Filter Feed by ${location.name}${count > 0 ? `: ${count.toLocaleString()} reports this month` : ": no reports yet"}`}
               onMouseEnter={() => setHovered({ id: location.id, name: location.name })}
               onMouseLeave={() => setHovered(null)}
               onFocus={() => setHovered({ id: location.id, name: location.name })}
@@ -82,7 +82,7 @@ export default function WorldScamMap({ countryData }: Props) {
               className="focus:outline-none focus-visible:[outline:2px_solid_#008A98] focus-visible:[outline-offset:1px]"
             >
               <title>
-                {location.name}: {count > 0 ? `${count.toLocaleString()} reports` : "No reports yet"}
+                {location.name}: {count > 0 ? `${count.toLocaleString()} reports this month` : "No reports yet"}
               </title>
             </path>
           );
@@ -95,14 +95,19 @@ export default function WorldScamMap({ countryData }: Props) {
           <p className="text-sm text-deep-navy font-medium">
             <span className="font-extrabold">{hovered.name}</span>
             {" — "}
-            {(countryData[hovered.id.toUpperCase()] ?? 0) > 0
-              ? `${(countryData[hovered.id.toUpperCase()] ?? 0).toLocaleString()} reports`
-              : "No reports yet"}
-            <span className="text-xs text-action-teal ml-2">Click to view</span>
+            {(countryData[hovered.id.toUpperCase()] ?? 0) > 0 ? (
+              <>
+                {(countryData[hovered.id.toUpperCase()] ?? 0).toLocaleString()}{" "}
+                reports this month
+                <span className="text-xs text-action-teal ml-2">open Feed</span>
+              </>
+            ) : (
+              "No reports yet"
+            )}
           </p>
         ) : (
           <p className="text-xs text-gov-slate">
-            Hover a country to see details — click to view the scam feed
+            Click a country to see its Feed
           </p>
         )}
       </div>
