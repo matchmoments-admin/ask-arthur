@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { ShieldCheck, Search, Zap, CheckCircle } from "lucide-react";
+import { ShieldCheck, Search, ScanSearch, UserCheck, Rss, Database } from "lucide-react";
 import Footer from "@/components/Footer";
 import Nav from "@/components/Nav";
 import ChartsSection from "@/components/charts/ChartsSection";
@@ -12,7 +12,7 @@ export const revalidate = 3600;
 export const metadata: Metadata = {
   title: "About Ask Arthur — A quiet second opinion on scams",
   description:
-    "Ask Arthur is the pause. Paste a message, link, or screenshot and get a calm second opinion before you click, transfer, or sign in.",
+    "Ask Arthur helps Australians pause before they click, transfer, or sign in. A suite of tools — scam checker, security scanner, persona check, feed — built around a simple idea: asking is protective.",
   openGraph: {
     title: "About Ask Arthur",
     description:
@@ -101,6 +101,39 @@ const partners = [
   { name: "GASA", url: "https://www.gasa.org" },
 ];
 
+const tools = [
+  {
+    icon: Search,
+    name: "Scam Checker",
+    href: "/",
+    desc: "Paste a message, link, or screenshot. Get a plain-English verdict in seconds.",
+  },
+  {
+    icon: ScanSearch,
+    name: "Security Scanner",
+    href: "/health",
+    desc: "Grade any website, Chrome extension, MCP server, or AI skill A+ to F.",
+  },
+  {
+    icon: UserCheck,
+    name: "Persona Check",
+    href: "/persona-check",
+    desc: "Check if someone online is who they claim to be — romance, recruiting, and identity fraud.",
+  },
+  {
+    icon: Rss,
+    name: "Feed",
+    href: "/scam-feed",
+    desc: "A daily, location-aware feed of the scams doing the rounds right now in Australia.",
+  },
+  {
+    icon: Database,
+    name: "Intelligence API",
+    href: "/api-docs",
+    desc: "For organisations: real-time threat intelligence linking companies to the domains impersonating them.",
+  },
+];
+
 export default async function AboutPage() {
   const [chartData, worldData] = await Promise.all([
     getChartData(),
@@ -122,187 +155,165 @@ export default async function AboutPage() {
         }}
       />
 
-      <main id="main-content" className="flex-1">
-        {/* Quiet intro */}
-        <section className="bg-white border-b border-border-light">
-          <div className="max-w-3xl mx-auto px-5 py-12 md:py-16">
-            <p className="text-lg md:text-xl text-gov-slate leading-relaxed">
-              Ask Arthur helps Australians stop and check before they click,
-              transfer, or sign in — a quiet second opinion when something
-              doesn&apos;t quite feel right.
+      <main id="main-content" className="flex-1 w-full max-w-[640px] mx-auto px-5 pt-16 pb-16">
+        <h1 className="text-deep-navy text-4xl md:text-5xl font-extrabold mb-4 leading-tight text-center">
+          About Ask Arthur
+        </h1>
+        <p className="text-lg text-gov-slate mb-16 leading-relaxed text-center">
+          A quiet second opinion when something doesn&apos;t quite feel right —
+          before you click, transfer, or sign in.
+        </p>
+
+        <section className="mb-20">
+          <h2 className="text-deep-navy text-2xl md:text-3xl font-extrabold mb-8 text-center">
+            A note from the founder
+          </h2>
+
+          <div className="space-y-5 text-base md:text-lg text-gov-slate leading-relaxed italic">
+            <p>
+              Every scam story I&apos;ve heard shares one thing: urgency. A
+              message that tells you to act now. A phone call that won&apos;t
+              let you hang up. A link you must click before the
+              &ldquo;offer&rdquo; disappears, the &ldquo;account&rdquo; closes,
+              or the &ldquo;fine&rdquo; doubles. Urgency is the scammer&apos;s
+              most reliable tool, because a person who&apos;s rushing is a
+              person who isn&apos;t thinking.
             </p>
-          </div>
-        </section>
 
-        {/* A note from the founder */}
-        <section className="bg-slate-50 border-b border-border-light">
-          <div className="max-w-prose mx-auto px-5 py-16 md:py-20">
-            <h2 className="text-deep-navy text-2xl md:text-3xl font-extrabold mb-8">
-              A note from the founder
-            </h2>
-
-            <div className="space-y-6 text-base md:text-lg text-gov-slate leading-relaxed">
-              <p>
-                Every scam story I&apos;ve heard shares one thing: urgency. A
-                message that tells you to act now. A phone call that won&apos;t
-                let you hang up. A link you must click before the
-                &ldquo;offer&rdquo; disappears, the &ldquo;account&rdquo;
-                closes, or the &ldquo;fine&rdquo; doubles. Urgency is the
-                scammer&apos;s most reliable tool, because a person who&apos;s
-                rushing is a person who isn&apos;t thinking.
-              </p>
-
-              <p className="text-xl md:text-2xl font-semibold text-deep-navy py-2">
+            <p>
+              <strong className="not-italic font-semibold text-deep-navy">
                 Ask Arthur is the pause.
-              </p>
+              </strong>{" "}
+              It&apos;s the moment you step back, take a breath, and get a
+              second opinion before you click, transfer, or sign in. Paste the
+              message in, read what Arthur has to say, and give yourself time
+              to think. When Arthur isn&apos;t sure, Arthur will say so — and
+              always err on the side of caution. That caution is the whole
+              point.
+            </p>
 
-              <p>
-                It&apos;s the moment you step back, take a breath, and get a
-                second opinion before you click, transfer, or sign in. Paste
-                the message in, read what Arthur has to say, and give yourself
-                time to think. When Arthur isn&apos;t sure, Arthur will say so
-                — and always err on the side of caution. That caution is the
-                whole point.
-              </p>
+            <p>
+              Everyone deserves that pause. Not just the tech-savvy, not just
+              people with a family member who works in cyber, and not just
+              those who already know the tricks. Anyone with a phone and a
+              bank account is a target now, every single day. Being scammed is
+              never your fault — scammers are skilled professionals who
+              deceive people of every age.
+            </p>
 
-              <p>
-                Everyone deserves that pause. Not just the tech-savvy, not just
-                people with a family member who works in cyber, and not just
-                those who already know the tricks. Anyone with a phone and a
-                bank account is a target now, every single day. Being scammed
-                is never your fault — scammers are skilled professionals who
-                deceive people of every age.
-              </p>
+            <p>
+              The act of asking is itself protective. When you stop to check,
+              you break the spell the scammer is relying on. And you&apos;re
+              not just protecting yourself — every scam you report helps
+              someone further behind you on the same path. Maybe you
+              weren&apos;t fooled, but reporting it might save someone who
+              would have been.
+            </p>
 
-              <p>
-                The act of asking is itself protective. When you stop to check,
-                you break the spell the scammer is relying on. You can always
-                take time to check with someone you trust. If something
-                doesn&apos;t feel right or doesn&apos;t quite add up — if
-                something feels off or you aren&apos;t sure — just ask Arthur.
-                We&apos;ll take a look together.
-              </p>
-            </div>
-
-            <p className="mt-10 text-sm text-gov-slate italic">
-              — Founder, Ask Arthur
+            <p>
+              If something doesn&apos;t feel right or doesn&apos;t quite add up
+              — just ask Arthur. We&apos;ll take a look together.
             </p>
           </div>
+
+          <p className="mt-8 text-sm text-gov-slate not-italic">
+            — Brendan Milton, Founder
+          </p>
         </section>
 
-        {/* How It Works */}
-        <section
-          id="how-it-works"
-          className="py-16 px-5 border-b border-border-light"
-        >
-          <div className="max-w-2xl mx-auto">
-            <h2 className="text-2xl font-extrabold text-deep-navy mb-2 text-center">
-              How Ask Arthur works
-            </h2>
-            <p className="text-gov-slate text-center mb-10 text-sm">
-              Three steps. Under 10 seconds.
-            </p>
-            <div className="grid md:grid-cols-3 gap-8">
-              {[
-                {
-                  step: "1",
-                  icon: Search,
-                  title: "Check",
-                  description:
-                    "Paste a message, link, phone number, or image. No account needed.",
-                },
-                {
-                  step: "2",
-                  icon: Zap,
-                  title: "Analyse",
-                  description:
-                    "Our AI cross-references threat feeds, community reports, and known scam patterns.",
-                },
-                {
-                  step: "3",
-                  icon: CheckCircle,
-                  title: "Protect",
-                  description:
-                    "Get a clear verdict — Safe, Suspicious, or High Risk — with actionable next steps.",
-                },
-              ].map(({ step, icon: Icon, title, description }) => (
-                <div key={step} className="text-center">
-                  <div className="w-12 h-12 rounded-full bg-action-teal/10 flex items-center justify-center mx-auto mb-3">
-                    <Icon size={22} className="text-action-teal" />
+        <section className="mb-20">
+          <h2 className="text-deep-navy text-2xl md:text-3xl font-extrabold mb-3 text-center">
+            A suite of tools, one idea
+          </h2>
+          <p className="text-gov-slate text-center mb-10 leading-relaxed">
+            Every tool is built around the same pause — give people a moment
+            to check before they act.
+          </p>
+
+          <div className="space-y-3">
+            {tools.map(({ icon: Icon, name, href, desc }) => (
+              <a
+                key={name}
+                href={href}
+                className="block p-4 bg-white border border-border-light rounded-xl hover:border-action-teal/40 hover:shadow-sm transition-all"
+              >
+                <div className="flex items-start gap-4">
+                  <Icon size={22} className="text-action-teal shrink-0 mt-1" />
+                  <div>
+                    <p className="font-semibold text-deep-navy">{name}</p>
+                    <p className="text-sm text-gov-slate mt-1 leading-relaxed">
+                      {desc}
+                    </p>
                   </div>
-                  <div className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-1">
-                    Step {step}
-                  </div>
-                  <h3 className="font-extrabold text-deep-navy text-lg mb-2">
-                    {title}
-                  </h3>
-                  <p className="text-gov-slate text-sm leading-relaxed">
-                    {description}
-                  </p>
                 </div>
-              ))}
-            </div>
+              </a>
+            ))}
           </div>
         </section>
 
-        {/* Australian Scam Insights */}
+        <section className="mb-20">
+          <h2 className="text-deep-navy text-2xl md:text-3xl font-extrabold mb-3 text-center">
+            Reporting helps the next person
+          </h2>
+          <p className="text-gov-slate leading-relaxed text-center">
+            Scams evolve daily. Our Feed pulls signals from Reddit, public
+            reports, and our own users to surface what&apos;s active right
+            now — so the next person who sees the same message already has the
+            answer. Every check you run, every scam you flag, strengthens the
+            pause for someone behind you. You don&apos;t have to have been
+            fooled to help. Asking is enough.
+          </p>
+        </section>
+
         {hasData && (
-          <section className="py-16 px-5 bg-slate-50">
-            <div className="max-w-2xl mx-auto">
-              <h2 className="text-2xl font-extrabold text-deep-navy mb-2 text-center">
-                Australian scam insights
-              </h2>
-              <p className="text-gov-slate text-center text-sm mb-8">
-                A snapshot of how Australians are using Ask Arthur to stay safe.
-              </p>
-              <ChartsSection
-                safeCount={safeCount}
-                suspiciousCount={suspiciousCount}
-                highRiskCount={highRiskCount}
-                stateData={stateData}
-              />
-            </div>
+          <section className="mb-20">
+            <h2 className="text-deep-navy text-2xl md:text-3xl font-extrabold mb-3 text-center">
+              Australian scam insights
+            </h2>
+            <p className="text-gov-slate text-center mb-8 leading-relaxed">
+              A snapshot of how Australians are using Ask Arthur to stay safe.
+            </p>
+            <ChartsSection
+              safeCount={safeCount}
+              suspiciousCount={suspiciousCount}
+              highRiskCount={highRiskCount}
+              stateData={stateData}
+            />
           </section>
         )}
 
-        {/* World Scam Map */}
-        <section className="py-16 px-5 border-b border-border-light">
-          <div className="max-w-2xl mx-auto">
-            <h2 className="text-2xl font-extrabold text-deep-navy mb-2 text-center">
-              Scams around the world
-            </h2>
-            <p className="text-gov-slate text-center text-sm mb-8">
-              Live scam reports from over 190 countries. Click any country to
-              see the latest threats.
-            </p>
-            <WorldScamMap countryData={worldData} />
-          </div>
+        <section className="mb-20">
+          <h2 className="text-deep-navy text-2xl md:text-3xl font-extrabold mb-3 text-center">
+            Scams around the world
+          </h2>
+          <p className="text-gov-slate text-center mb-8 leading-relaxed">
+            Live scam reports from 190+ countries, sourced from our Feed.
+            Click any country to open it filtered to that location.
+          </p>
+          <WorldScamMap countryData={worldData} />
         </section>
 
-        {/* Aligned with Australia's authorities */}
-        <section className="py-16 px-5 border-b border-border-light">
-          <div className="max-w-2xl mx-auto text-center">
-            <h2 className="text-2xl font-extrabold text-deep-navy mb-2">
-              Aligned with Australia&apos;s authorities
-            </h2>
-            <p className="text-gov-slate text-sm mb-8">
-              Our threat intelligence references official Australian and
-              international scam-fighting bodies.
-            </p>
-            <div className="flex flex-wrap justify-center gap-3">
-              {partners.map(({ name, url }) => (
-                <a
-                  key={name}
-                  href={url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full border border-border-light bg-white text-sm font-medium text-gov-slate hover:border-action-teal/40 hover:text-deep-navy transition-colors"
-                >
-                  <ShieldCheck size={13} className="text-action-teal" />
-                  {name}
-                </a>
-              ))}
-            </div>
+        <section>
+          <h2 className="text-deep-navy text-2xl md:text-3xl font-extrabold mb-3 text-center">
+            Aligned with Australia&apos;s authorities
+          </h2>
+          <p className="text-gov-slate text-center mb-8 leading-relaxed">
+            Our threat intelligence references official Australian and
+            international scam-fighting bodies.
+          </p>
+          <div className="flex flex-wrap justify-center gap-3">
+            {partners.map(({ name, url }) => (
+              <a
+                key={name}
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full border border-border-light bg-white text-sm font-medium text-gov-slate hover:border-action-teal/40 hover:text-deep-navy transition-colors"
+              >
+                <ShieldCheck size={13} className="text-action-teal" />
+                {name}
+              </a>
+            ))}
           </div>
         </section>
       </main>
