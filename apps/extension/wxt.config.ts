@@ -35,7 +35,7 @@ export default defineConfig({
     name: "Ask Arthur — Scam Detector",
     description:
       "Check URLs and suspicious messages for scams with AI-powered analysis. Free, no account required.",
-    version: "1.0.0",
+    version: "1.0.1",
     permissions: [
       "activeTab",
       "contextMenus",

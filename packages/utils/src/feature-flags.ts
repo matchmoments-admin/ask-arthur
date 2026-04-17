@@ -78,6 +78,13 @@ export const featureFlags = {
   /** Extension: real-time URL checking on page navigation */
   urlGuard: process.env.NEXT_PUBLIC_FF_URL_GUARD === "true",
 
+  /** Extension: Facebook ad scanning + marketplace trust scoring.
+   *  Must match the client-side build-time flag WXT_FACEBOOK_ADS. When off,
+   *  /api/extension/analyze-ad returns 503 even for authenticated requests —
+   *  defence in depth in case the extension bundle is unpacked and the
+   *  endpoint is probed directly with a valid install-id signature. */
+  facebookAds: process.env.NEXT_PUBLIC_FF_FACEBOOK_ADS === "true",
+
   /** Mobile: scam alert push notifications */
   pushAlerts: process.env.NEXT_PUBLIC_FF_PUSH_ALERTS === "true",
 

@@ -7,6 +7,7 @@ import { extractURLs, checkURLReputation } from "@askarthur/scam-engine/safebrow
 import { checkHiveAI } from "@askarthur/scam-engine/hive-ai";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 import { validateExtensionRequest } from "../_lib/auth";
 import { logCost, claudeHaikuCostUsd } from "@/lib/cost-telemetry";
 
@@ -71,6 +72,17 @@ export async function POST(req: NextRequest) {
     const contentLength = parseInt(req.headers.get("content-length") || "0");
     if (contentLength > 15_000) {
       return NextResponse.json({ error: "payload_too_large" }, { status: 413 });
+    }
+
+    // 0b. Server-side feature gate. Even if an unpacked extension bundle
+    // is used to forge a valid signed request, this endpoint returns 503
+    // until NEXT_PUBLIC_FF_FACEBOOK_ADS=true in Vercel. Keeps Claude + Hive
+    // spend at zero while Facebook Ads scanning is still being launched.
+    if (!featureFlags.facebookAds) {
+      return NextResponse.json(
+        { error: "feature_disabled", message: "Facebook ad scanning is not currently enabled." },
+        { status: 503 },
+      );
     }
 
     // 1. Auth + rate limit
