@@ -104,6 +104,96 @@ Use Tailwind 4 spacing utilities. Prefer consistent spacing:
 - Element gaps: `gap-4` to `gap-6`
 - Inline spacing: `gap-2` to `gap-3`
 
+## Marketing Page Layout
+
+Rules for every consumer-facing top-level page (`/about`, `/health`, `/persona-check`, `/scam-feed`, `/blog`, `/terms`, `/privacy`, and similar). The canonical examples are `/health` (Scanner) and `/persona-check` — mirror those.
+
+### Page shell (non-negotiable)
+
+Every marketing page uses this skeleton:
+
+```tsx
+<div className="min-h-screen flex flex-col">
+  <Nav />
+  <main
+    id="main-content"
+    className="flex-1 w-full max-w-[640px] mx-auto px-5 pt-16 pb-16"
+  >
+    <h1 className="text-deep-navy text-4xl md:text-5xl font-extrabold mb-4 leading-tight text-center">
+      {/* Page title */}
+    </h1>
+    <p className="text-lg text-gov-slate mb-10 leading-relaxed text-center">
+      {/* One-sentence subtitle, neutral tone */}
+    </p>
+    {/* Page content — sections flow in the same 640px column */}
+  </main>
+  <Footer />
+</div>
+```
+
+**Key properties:**
+
+- **Container width: `max-w-[640px]`** for the entire `main`. Not `max-w-prose`, not `max-w-2xl`, not `max-w-3xl`. Section-level inner containers do not override this — they inherit.
+- **Horizontal padding: `px-5`** (20px). Applied once at `main`, not repeated per section.
+- **Vertical padding: `pt-16 pb-16`**. Sections inside use `mb-16` or `mb-20` for rhythm, never their own `py-16`.
+- **Page title: `h1` centred, `text-4xl md:text-5xl font-extrabold`, colour `text-deep-navy`, `leading-tight`, `mb-4`**. One `h1` per page. No coloured hero background behind it.
+- **Subtitle: `p` centred, `text-lg text-gov-slate mb-10 leading-relaxed`**. One sentence, neutral, no marketing voice.
+- **Section headings (`h2`): centred, `text-2xl md:text-3xl font-extrabold text-deep-navy mb-3`**. Lead paragraph below is centred, same `gov-slate` colour.
+
+### Forbidden patterns
+
+These have caused drift on the About page in the past. Do not use on marketing pages:
+
+- **Full-bleed coloured section backgrounds** (`bg-slate-50`, `bg-white border-b border-border-light` used as a section separator). Marketing pages are white end-to-end. Dashboard pages (`/app/*`) may use surface colours; marketing pages may not.
+- **Multiple container widths within one page** (`max-w-prose`, then `max-w-2xl`, then `max-w-3xl`). Pick 640px and stay there.
+- **Inline pull-quotes styled as mini-headings** (`text-xl md:text-2xl font-semibold` in the middle of a paragraph block). If a sentence needs emphasis, bold it inline. We do not use pull-quotes.
+- **Section-level `py-16 px-5 border-b`**. The main container owns vertical and horizontal spacing; sections only own margin-between.
+- **Per-section `max-w-*` overrides** (e.g. a section using `max-w-prose` because its prose "needs it"). If the copy feels cramped at 640px, the copy is too long — rewrite it, don't widen the page.
+
+### Typography anchors
+
+- **H1:** `text-4xl md:text-5xl font-extrabold text-deep-navy leading-tight`
+- **H2:** `text-2xl md:text-3xl font-extrabold text-deep-navy`
+- **Lead paragraph under H1:** `text-lg text-gov-slate leading-relaxed`
+- **Lead paragraph under H2:** default size `text-gov-slate leading-relaxed`
+- **Body copy:** default, `text-gov-slate leading-relaxed`, no colour overrides
+- **Small meta text:** `text-sm text-slate-500` or `text-xs text-slate-400`
+
+Italics are allowed for editorial voice (e.g. the founder note on `/about`). Never use italics for UI labels or metadata.
+
+### Card / list pattern
+
+When listing items (tools, categories, options), use the pattern from `PersonaChecker.tsx`:
+
+```tsx
+<a
+  href={...}
+  className="block p-4 bg-white border border-border-light rounded-xl hover:border-action-teal/40 hover:shadow-sm transition-all"
+>
+  <div className="flex items-start gap-4">
+    <Icon size={22} className="text-action-teal shrink-0 mt-1" />
+    <div>
+      <p className="font-semibold text-deep-navy">{label}</p>
+      <p className="text-sm text-gov-slate mt-1 leading-relaxed">{desc}</p>
+    </div>
+  </div>
+</a>
+```
+
+Not `rounded-2xl`, not `shadow-md`, not `hover:-translate-y-0.5`. The Persona Check card is the canonical pattern.
+
+### Exceptions (closed list)
+
+The following pages are allowed to deviate from the 640px rule. **Do not add more without a written justification in this table.**
+
+| Page | Allowed width | Reason |
+|---|---|---|
+| `/banking` | `max-w-[960px]` | B2B landing page with side-by-side product/value-prop copy |
+| `/telco` | `max-w-[960px]` | B2B landing page |
+| `/digital-platforms` | `max-w-[960px]` | B2B landing page |
+| `/scam-map` | `max-w-3xl` | World choropleth needs horizontal room; shrinking makes the map unreadable |
+| `/app/*` | varies | Dashboard — different surface, different rules (not a marketing page) |
+
 ## Component Patterns
 
 ### Verdict Card
