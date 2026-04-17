@@ -186,7 +186,7 @@ Request
 
 ### Extension API
 
-Authenticated via per-install ECDSA P-256 signature (`X-Extension-Install-Id`, `X-Extension-Timestamp`, `X-Extension-Nonce`, `X-Extension-Signature`). The legacy `X-Extension-Secret` header is still accepted during Phase 1 for backward compatibility with pre-upgrade installs. CORS is wildcard (auth is enforced in the headers, not at the origin). See "Extension identity & request signing" below for the full flow.
+Authenticated via per-install ECDSA P-256 signature (`X-Extension-Install-Id`, `X-Extension-Timestamp`, `X-Extension-Nonce`, `X-Extension-Signature`). CORS is wildcard (auth is enforced in the headers, not at the origin). See "Extension identity & request signing" below for the full flow.
 
 | Route | Method | Purpose |
 |-------|--------|---------|
@@ -483,8 +483,7 @@ Chrome (and the CRX format) gives a server no way to cryptographically verify th
 
 1. **Keypair generation** (`apps/extension/src/lib/identity.ts`) — on first run, `crypto.subtle.generateKey({name:'ECDSA', namedCurve:'P-256'}, extractable=false, ['sign','verify'])`. The keypair is persisted in IndexedDB; non-extractable `CryptoKey` handles survive MV3 service-worker restarts via structured clone.
 2. **Registration** (`apps/extension/src/lib/register.ts` + `src/entrypoints/offscreen/`) — a one-shot MV3 offscreen document iframes `https://askarthur.au/extension-turnstile`, the Turnstile widget runs, the token is `postMessage`d back and forwarded to the background via `chrome.runtime.sendMessage`. Background POSTs `{installId, publicKeyJwk, turnstileToken}` to `/api/extension/register`. The server verifies the token via Cloudflare siteverify and upserts the public key into `extension_installs`. Turnstile rejects `chrome-extension://` origins directly — hosting the bridge iframe on our own domain is the supported workaround.
-3. **Request signing** (`apps/extension/src/lib/sign.ts`) — every API call signs `${METHOD}\n${PATH}\n${TIMESTAMP}\n${NONCE}\n${BASE64(SHA256(BODY))}` with the private key and attaches four `X-Extension-*` headers. Server-side verification (`apps/web/app/api/extension/_lib/signature.ts`) checks a ±5 min clock-skew window, rejects replayed nonces via Upstash SETNX (10 min TTL), fetches the public key from `extension_installs` (cached in Redis 5 min), and verifies the signature. The install ID stays a random UUID stored in `chrome.storage.local` so existing `extension_subscriptions` mappings survive the migration.
-4. **Phased rollout** — `validateExtensionRequest` accepts either a valid signature or the legacy shared secret. A signature failure of type "Unknown install id" soft-falls-through to the secret path (bootstrap case for upgraded installs whose public key isn't registered yet). All other signature failures (skew, replay, tamper) hard-reject even if the secret is valid. Phase 2 will drop the secret fallback once ≥98% of traffic is signed; Phase 3 removes the extraction-prone constant from the bundle entirely.
+3. **Request signing** (`apps/extension/src/lib/sign.ts`) — every API call signs `${METHOD}\n${PATH}\n${TIMESTAMP}\n${NONCE}\n${BASE64(SHA256(BODY))}` with the private key and attaches four `X-Extension-*` headers. Server-side verification (`apps/web/app/api/extension/_lib/signature.ts`) checks a ±5 min clock-skew window, rejects replayed nonces via Upstash SETNX (10 min TTL), fetches the public key from `extension_installs` (cached in Redis 5 min), and verifies the signature. The install ID is a random UUID stored in `chrome.storage.local` so existing `extension_subscriptions` mappings key the same way.
 
 ## User Authentication
 

@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
 import { logger } from "@askarthur/utils/logger";
-import { hasSignatureHeaders, verifyExtensionSignature } from "./signature";
+import { verifyExtensionSignature } from "./signature";
 
 export type ExtensionAuthResult =
   | {
@@ -10,7 +10,6 @@ export type ExtensionAuthResult =
       installId: string;
       remaining: number;
       requestId: string | null;
-      authMethod: "signature" | "secret";
     }
   | { valid: false; error: string; status: number; retryAfter?: string };
 
@@ -73,100 +72,35 @@ function getEmailDailyLimiter() {
   return _emailDailyLimiter;
 }
 
-function timingSafeEqual(a: string, b: string): boolean {
-  const encoder = new TextEncoder();
-  const bufA = encoder.encode(a);
-  const bufB = encoder.encode(b);
-  if (bufA.byteLength !== bufB.byteLength) return false;
-
-  // Use crypto.subtle for timing-safe comparison
-  let result = 0;
-  for (let i = 0; i < bufA.byteLength; i++) {
-    result |= bufA[i]! ^ bufB[i]!;
-  }
-  return result === 0;
-}
-
 export async function validateExtensionRequest(
   req: NextRequest
 ): Promise<ExtensionAuthResult> {
-  // 0. Extract request ID for tracing
   const requestId = req.headers.get("x-request-id");
   if (requestId) {
     logger.info("Extension request", { requestId });
   }
 
-  // 1. Authenticate via signature (preferred) or legacy shared secret (Phase 1).
-  //
-  // Phase 1 bootstrap: an upgraded install may send signature headers before
-  // its public key is registered. We treat "Unknown install id" as a soft
-  // failure and fall through to the legacy secret path so the call still
-  // succeeds. Any other signature failure (skew, replay, tampering) is a
-  // hard reject — those represent active misuse, not bootstrapping.
-  let installId: string | null = null;
-  let authMethod: "signature" | "secret" | null = null;
-
-  if (hasSignatureHeaders(req)) {
-    const sig = await verifyExtensionSignature(req);
-    if (sig.ok) {
-      installId = sig.installId;
-      authMethod = "signature";
-    } else if (sig.reason !== "Unknown install id") {
-      return { valid: false, error: sig.reason, status: sig.status };
-    }
+  const sig = await verifyExtensionSignature(req);
+  if (!sig.ok) {
+    return { valid: false, error: sig.reason, status: sig.status };
   }
+  const installId = sig.installId;
 
-  if (!installId || !authMethod) {
-    const secret = req.headers.get("x-extension-secret");
-    const expectedSecret = process.env.EXTENSION_SECRET;
-
-    if (!expectedSecret) {
-      if (process.env.NODE_ENV === "production") {
-        logger.error("EXTENSION_SECRET not set in production");
-        return { valid: false, error: "Service unavailable", status: 503 };
-      }
-      logger.warn("EXTENSION_SECRET not set — skipping auth in dev");
-    } else if (!secret || !timingSafeEqual(secret, expectedSecret)) {
-      return { valid: false, error: "Unauthorized", status: 401 };
-    }
-
-    const headerInstallId =
-      req.headers.get("x-extension-install-id") ||
-      req.headers.get("x-extension-id");
-    if (!headerInstallId || headerInstallId.length < 10 || headerInstallId.length > 64) {
-      return { valid: false, error: "Invalid extension ID", status: 400 };
-    }
-    installId = headerInstallId;
-    authMethod = "secret";
-  }
-
-  const resolvedInstallId: string = installId;
-  const resolvedAuthMethod: "signature" | "secret" = authMethod;
-  logger.info("Extension auth", { requestId, authMethod: resolvedAuthMethod });
-
-  // 3. Rate limit on hashed installation ID
+  // Rate limit on hashed installation ID
   if (!process.env.UPSTASH_REDIS_REST_URL) {
     if (process.env.NODE_ENV === "production") {
       logger.error("UPSTASH_REDIS_REST_URL not set in production — blocking");
       return { valid: false, error: "Service unavailable", status: 503 };
     }
-    return {
-      valid: true,
-      installId: resolvedInstallId,
-      remaining: 99,
-      requestId,
-      authMethod: resolvedAuthMethod,
-    };
+    return { valid: true, installId, remaining: 99, requestId };
   }
 
-  // Hash the install ID for privacy
-  const data = new TextEncoder().encode(resolvedInstallId);
+  const data = new TextEncoder().encode(installId);
   const hashBuf = await crypto.subtle.digest("SHA-256", data);
   const identifier = Array.from(new Uint8Array(hashBuf))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 
-  // Select rate limit buckets based on scan source
   const scanSource = req.headers.get("x-scan-source");
   const isEmailScan = scanSource === "email";
 
@@ -174,12 +108,9 @@ export async function validateExtensionRequest(
   const dailyLimiter = isEmailScan ? getEmailDailyLimiter() : getDailyLimiter();
   const dailyLimit = isEmailScan ? 200 : 50;
 
-  // Check burst limit first
   const burst = await burstLimiter.limit(identifier);
   if (!burst.success) {
-    const retryAfter = String(
-      Math.ceil((burst.reset - Date.now()) / 1000)
-    );
+    const retryAfter = String(Math.ceil((burst.reset - Date.now()) / 1000));
     return {
       valid: false,
       error: "Too many requests. Please slow down.",
@@ -188,12 +119,9 @@ export async function validateExtensionRequest(
     };
   }
 
-  // Check daily limit
   const daily = await dailyLimiter.limit(identifier);
   if (!daily.success) {
-    const retryAfter = String(
-      Math.ceil((daily.reset - Date.now()) / 1000)
-    );
+    const retryAfter = String(Math.ceil((daily.reset - Date.now()) / 1000));
     return {
       valid: false,
       error: `Daily limit reached (${dailyLimit} checks). Come back tomorrow — we keep this free for everyone!`,
@@ -204,9 +132,8 @@ export async function validateExtensionRequest(
 
   return {
     valid: true,
-    installId: resolvedInstallId,
+    installId,
     remaining: Math.min(burst.remaining, daily.remaining),
     requestId,
-    authMethod: resolvedAuthMethod,
   };
 }

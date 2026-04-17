@@ -14,7 +14,7 @@
 - **User authentication:** Supabase Auth (PKCE flow, server-side JWT validation)
 - **Admin panel:** Dual-mode auth (Supabase Auth + HMAC-signed cookies, 24h TTL)
 - **Organization RBAC:** 6 roles (owner, admin, compliance_officer, fraud_analyst, developer, viewer) with permission matrix
-- **Extension auth:** Per-install ECDSA P-256 signature (install-specific non-extractable keypair, Cloudflare Turnstile-gated registration, ±5 min skew window, Redis nonce-replay protection). Legacy shared-secret header retained as a Phase-1 fallback for unupgraded installs; removal scheduled once ≥98% of extension traffic is signature-authed.
+- **Extension auth:** Per-install ECDSA P-256 signature (install-specific non-extractable keypair, Cloudflare Turnstile-gated registration, ±5 min skew window, Redis nonce-replay protection).
 
 ## Rate Limiting
 - **Global:** 60 requests/minute per IP (sliding window, Upstash Redis)

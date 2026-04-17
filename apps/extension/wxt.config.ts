@@ -71,9 +71,6 @@ export default defineConfig({
   },
   vite: () => ({
     define: {
-      __EXTENSION_SECRET__: JSON.stringify(
-        process.env.WXT_EXTENSION_SECRET ?? ""
-      ),
       __TURNSTILE_BRIDGE_URL__: JSON.stringify(turnstileBridgeUrl),
       __URL_GUARD_ENABLED__: urlGuardEnabled,
       __EXTENSION_SECURITY_ENABLED__: extensionSecurityEnabled,

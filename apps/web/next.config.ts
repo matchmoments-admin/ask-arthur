@@ -104,8 +104,8 @@ const nextConfig: NextConfig = {
           { key: "Pragma", value: "no-cache" },
         ],
       },
-      // Extension CORS — wildcard needed for chrome-extension:// origins
-      // (auth enforced via signature or legacy shared secret, not CORS).
+      // Extension CORS — wildcard needed for chrome-extension:// origins.
+      // Auth is enforced via the per-install ECDSA signature, not CORS.
       {
         source: "/api/extension/:path*",
         headers: [
@@ -115,8 +115,6 @@ const nextConfig: NextConfig = {
             key: "Access-Control-Allow-Headers",
             value: [
               "Content-Type",
-              "X-Extension-Secret",
-              "X-Extension-Id",
               "X-Extension-Install-Id",
               "X-Extension-Timestamp",
               "X-Extension-Nonce",

@@ -8,12 +8,12 @@ import { getInstallId } from "./storage";
 import { signRequest } from "./sign";
 import { ensureRegistered } from "./register";
 
-declare const __EXTENSION_SECRET__: string;
-
 const API_BASE = "https://askarthur.au/api/extension";
 
-// Kick off registration once per service-worker lifetime — fire and forget so
-// the first few API calls still work via the Phase-1 legacy secret fallback.
+// Kick off registration once per service-worker lifetime. Requests made before
+// registration completes will 401 ("Unknown install id") and the caller
+// retries; this is rare and acceptable — the popup does nothing on the very
+// first frame anyway.
 let registrationKick: Promise<boolean> | null = null;
 function kickRegistration(): Promise<boolean> {
   if (!registrationKick) {
@@ -47,26 +47,16 @@ async function getHeaders(
   kickRegistration();
 
   const installId = await getInstallId();
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    "X-Extension-Secret": __EXTENSION_SECRET__,
-    "X-Request-ID": crypto.randomUUID(),
-    ...(installId && { "X-Extension-Id": installId }),
-  };
-
-  // Attach signature headers once the keypair exists. Signing failure is
-  // non-fatal — the legacy shared secret keeps the request working during
-  // Phase 1.
-  if (installId) {
-    try {
-      const signed = await signRequest(installId, method, path, body);
-      Object.assign(headers, signed);
-    } catch (err) {
-      console.warn("[askarthur] signing failed", err);
-    }
+  if (!installId) {
+    throw new ExtensionApiError("Extension not initialized", 0);
   }
 
-  return headers;
+  const signed = await signRequest(installId, method, path, body);
+  return {
+    "Content-Type": "application/json",
+    "X-Request-ID": crypto.randomUUID(),
+    ...signed,
+  };
 }
 
 async function request<T>(

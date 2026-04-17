@@ -85,10 +85,6 @@ vi.mock("@askarthur/utils/logger", () => ({
 // Env
 process.env.UPSTASH_REDIS_REST_URL = "https://test-redis";
 process.env.UPSTASH_REDIS_REST_TOKEN = "test-token";
-process.env.EXTENSION_SECRET = "legacy-secret";
-// vi swaps NODE_ENV under the hood — assign via index access to sidestep the
-// readonly type.
-(process.env as Record<string, string>).NODE_ENV = "test";
 
 const { verifyExtensionSignature } = await import(
   "@/app/api/extension/_lib/signature"
@@ -245,39 +241,17 @@ describe("verifyExtensionSignature", () => {
   });
 });
 
-describe("validateExtensionRequest — phased rollout", () => {
+describe("validateExtensionRequest", () => {
   it("accepts a valid signature", async () => {
     const pair = await makeKeypair();
     mockKeyJwk = await crypto.subtle.exportKey("jwk", pair.publicKey);
     const req = await buildSignedRequest({ privateKey: pair.privateKey });
     const result = await validateExtensionRequest(req);
     expect(result.valid).toBe(true);
-    if (result.valid) {
-      expect(result.authMethod).toBe("signature");
-      expect(result.installId).toBe(INSTALL_ID);
-    }
+    if (result.valid) expect(result.installId).toBe(INSTALL_ID);
   });
 
-  it("falls back to legacy secret when signature is from an unknown install", async () => {
-    mockKeyJwk = null; // Pubkey not registered yet
-    const pair = await makeKeypair();
-    const signed = await buildSignedRequest({ privateKey: pair.privateKey });
-    // Add the legacy headers too
-    const req = new NextRequest(signed.url, {
-      method: signed.method,
-      headers: {
-        ...Object.fromEntries(signed.headers.entries()),
-        "x-extension-secret": "legacy-secret",
-        "x-extension-id": INSTALL_ID,
-      },
-      body: JSON.stringify({ text: "hello" }),
-    });
-    const result = await validateExtensionRequest(req);
-    expect(result.valid).toBe(true);
-    if (result.valid) expect(result.authMethod).toBe("secret");
-  });
-
-  it("rejects a request with no auth at all", async () => {
+  it("rejects a request with no signature headers", async () => {
     const req = new NextRequest("http://localhost/api/extension/analyze", {
       method: "POST",
       body: JSON.stringify({ text: "hi" }),
@@ -285,40 +259,6 @@ describe("validateExtensionRequest — phased rollout", () => {
     });
     const result = await validateExtensionRequest(req);
     expect(result.valid).toBe(false);
-  });
-
-  it("accepts a legacy-only request during Phase 1", async () => {
-    const req = new NextRequest("http://localhost/api/extension/analyze", {
-      method: "POST",
-      body: JSON.stringify({ text: "hi" }),
-      headers: {
-        "content-type": "application/json",
-        "x-extension-secret": "legacy-secret",
-        "x-extension-id": INSTALL_ID,
-      },
-    });
-    const result = await validateExtensionRequest(req);
-    expect(result.valid).toBe(true);
-    if (result.valid) expect(result.authMethod).toBe("secret");
-  });
-
-  it("hard-rejects a signature with skew even if a valid secret is present", async () => {
-    const pair = await makeKeypair();
-    mockKeyJwk = await crypto.subtle.exportKey("jwk", pair.publicKey);
-    const stale = await buildSignedRequest({
-      privateKey: pair.privateKey,
-      timestamp: Math.floor(Date.now() / 1000) - 600,
-    });
-    const req = new NextRequest(stale.url, {
-      method: stale.method,
-      body: JSON.stringify({ text: "hello" }),
-      headers: {
-        ...Object.fromEntries(stale.headers.entries()),
-        "x-extension-secret": "legacy-secret",
-        "x-extension-id": INSTALL_ID,
-      },
-    });
-    const result = await validateExtensionRequest(req);
-    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.status).toBe(401);
   });
 });

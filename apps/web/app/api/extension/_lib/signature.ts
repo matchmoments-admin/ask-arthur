@@ -31,15 +31,6 @@ function getRedis(): Redis | null {
   return _redis;
 }
 
-export function hasSignatureHeaders(req: NextRequest): boolean {
-  return (
-    req.headers.has("x-extension-install-id") &&
-    req.headers.has("x-extension-timestamp") &&
-    req.headers.has("x-extension-nonce") &&
-    req.headers.has("x-extension-signature")
-  );
-}
-
 async function sha256Base64(input: string): Promise<string> {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
   return btoa(String.fromCharCode(...new Uint8Array(buf)));

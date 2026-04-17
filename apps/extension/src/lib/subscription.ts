@@ -33,36 +33,24 @@ export async function setSubscription(
  */
 export async function checkSubscription(
   installId: string,
-  apiBase: string,
-  secret: string
+  apiBase: string
 ): Promise<SubscriptionState> {
   const cached = await getSubscription();
 
-  // Return cached if fresh enough
   if (cached && Date.now() - cached.checkedAt < CHECK_INTERVAL_MS) {
     return cached;
   }
 
   try {
-    const headers: Record<string, string> = {
-      "X-Extension-Secret": secret,
-      "X-Extension-Id": installId,
-    };
-    try {
-      const signed = await signRequest(
-        installId,
-        "GET",
-        "/api/extension/subscription",
-        ""
-      );
-      Object.assign(headers, signed);
-    } catch {
-      // Signing optional during Phase 1 — legacy secret still works.
-    }
-
+    const signed = await signRequest(
+      installId,
+      "GET",
+      "/api/extension/subscription",
+      ""
+    );
     const res = await fetch(
       `${apiBase}/api/extension/subscription?installId=${encodeURIComponent(installId)}`,
-      { headers }
+      { headers: { ...signed } }
     );
 
     if (res.ok) {
@@ -76,7 +64,7 @@ export async function checkSubscription(
       return state;
     }
   } catch {
-    // Network error — return cached or default to free
+    // Network or signing error — fall through to cached/free below.
   }
 
   const fallback: SubscriptionState = {

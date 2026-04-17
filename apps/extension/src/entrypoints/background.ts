@@ -5,10 +5,8 @@ import { getCachedScanReport, setCachedScanReport } from "@/lib/extension-scan-c
 import { scanInstalledExtensions, buildSecurityReport } from "@/lib/extension-scanner";
 import { setupThreatDBRefresh, getThreatDB } from "@/lib/threat-db";
 import { urlCache } from "@/lib/url-cache";
-import { checkSubscription } from "@/lib/subscription";
 import type { ExtensionMessage, MessageResponse } from "@/lib/types";
 
-declare const __EXTENSION_SECRET__: string;
 declare const __URL_GUARD_ENABLED__: boolean;
 declare const __EXTENSION_SECURITY_ENABLED__: boolean;
 declare const __FACEBOOK_ADS_ENABLED__: boolean;
@@ -29,11 +27,9 @@ export default defineBackground(() => {
 
     chrome.storage.local.set({ showSafeIndicator: false });
 
-    // Register a per-install WebCrypto keypair — best effort, legacy secret
-    // path covers failures until Phase 2.
-    ensureRegistered().catch(() => {
-      // Swallowed on purpose; retried on next service-worker start.
-    });
+    // Register a per-install WebCrypto keypair. Best effort — retried on next
+    // service-worker start if it fails (e.g. offline, Turnstile blocked).
+    ensureRegistered().catch(() => {});
 
     // Set up threat DB refresh for extension security scanner
     if (typeof __EXTENSION_SECURITY_ENABLED__ !== "undefined" && __EXTENSION_SECURITY_ENABLED__) {

@@ -15,7 +15,6 @@ Threat model, mandatory defenses, and compliance status for Ask Arthur.
 | API keys (B2B) | Critical | Supabase `api_keys` (SHA-256 hashed) |
 | Admin credentials | Critical | Environment variable (`ADMIN_SECRET`) |
 | Extension install public keys | Medium | Supabase `extension_installs.public_key_jwk` (non-secret; the private half is non-extractable and never leaves the browser) |
-| Extension shared secret (legacy, Phase 1 only) | High | `EXTENSION_SECRET` env var. Scheduled for removal once ≥98% of extension traffic is signature-authed. |
 | Turnstile secret | High | `TURNSTILE_SECRET_KEY` env var (server-side only; verifies registration tokens) |
 | Claude API key | Critical | Environment variable |
 | Redis credentials | High | Environment variables |
@@ -88,7 +87,7 @@ All user text is sanitized before Claude analysis:
 | Admin panel | Dual-mode | Supabase Auth (admin role in `app_metadata`) with HMAC cookie fallback, dual-mode in `lib/adminAuth.ts` |
 | Session refresh | Edge middleware | `createMiddlewareClient()` refreshes expired tokens on every request |
 | Route protection | Middleware | `/app/*` requires authenticated user, `/admin/*` requires admin role |
-| Extension API | Per-install ECDSA P-256 signature | `X-Extension-Install-Id`, `X-Extension-Timestamp`, `X-Extension-Nonce`, `X-Extension-Signature`; ±5 min skew window, Redis nonce-replay protection, public keys registered through a Cloudflare Turnstile-gated endpoint. Legacy `X-Extension-Secret` still accepted during Phase 1 for unupgraded installs. |
+| Extension API | Per-install ECDSA P-256 signature | `X-Extension-Install-Id`, `X-Extension-Timestamp`, `X-Extension-Nonce`, `X-Extension-Signature`; ±5 min skew window, Redis nonce-replay protection, public keys registered through a Cloudflare Turnstile-gated endpoint. |
 | B2B API | Bearer token | API key hashed with SHA-256, compared against `api_keys.key_hash` |
 | Bot webhooks | Platform HMAC | Telegram secret token, WhatsApp SHA-256 signature, Slack v0 signature with replay protection (5-min window) |
 

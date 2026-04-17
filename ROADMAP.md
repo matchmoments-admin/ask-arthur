@@ -38,8 +38,7 @@ Bringing scam detection to users where they are.
 | Phase 2: Gmail email scanning (InboxSDK) | Removed — shifting to email-forwarding model |
 | WXT framework (Chrome + Firefox support) | ✅ Done |
 | Extension API with dedicated auth + rate limits | ✅ Done |
-| Per-install WebCrypto keypair + Turnstile-gated registration (replaces shared secret, Phase 1 dual-path) | ✅ Done — 2026-04 |
-| Drop shared secret once ≥98% traffic is signed (Phase 2 cutover, then Phase 3 bundle cleanup) | Pending — follow-up |
+| Per-install WebCrypto keypair + Turnstile-gated registration (replaces shared secret) | ✅ Done — 2026-04 |
 | Segmented tabs, rounded corners, animations | ✅ Done |
 
 ### Mobile App ✅
