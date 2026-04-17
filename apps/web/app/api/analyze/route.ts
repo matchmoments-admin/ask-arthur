@@ -17,6 +17,7 @@ import type { PhoneLookupResult } from "@askarthur/types";
 import { lookupPhoneNumber, extractPhoneNumbers } from "@/lib/twilioLookup";
 import { uploadScreenshot } from "@/lib/r2";
 import { logger } from "@askarthur/utils/logger";
+import { logCost, claudeHaikuCostUsd } from "@/lib/cost-telemetry";
 
 const RequestSchema = z.object({
   text: z.string().max(10000).optional(),
@@ -159,6 +160,28 @@ export async function POST(req: NextRequest) {
       geolocateIP(ip),
     ]);
     const { region, countryCode } = geo;
+
+    // 5b. Cost telemetry — fire-and-forget, wrapped in waitUntil internally.
+    if (aiResult.usage) {
+      logCost({
+        feature: "web_analyze",
+        provider: "anthropic",
+        operation: "claude-haiku-4-5-20251001",
+        units: aiResult.usage.inputTokens + aiResult.usage.outputTokens,
+        estimatedCostUsd: claudeHaikuCostUsd(
+          aiResult.usage.inputTokens,
+          aiResult.usage.outputTokens,
+        ),
+        metadata: {
+          input_tokens: aiResult.usage.inputTokens,
+          output_tokens: aiResult.usage.outputTokens,
+          cache_read: aiResult.usage.cacheReadInputTokens ?? 0,
+          has_images: images.length > 0,
+          image_count: images.length,
+          mode: mode ?? "text",
+        },
+      });
+    }
 
     // Debug: log whether Claude returned scammer contacts (useful for screenshot submissions)
     console.log("[phone-debug] Claude result", {

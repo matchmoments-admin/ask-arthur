@@ -25,6 +25,13 @@ export interface AnalysisResult {
   scammerContacts?: ScammerContacts;
   redirects?: RedirectChain[];
   phoneIntelligence?: PhoneLookupResult;
+  // Token usage surfaced so callsites can emit cost telemetry.
+  // Populated by analyzeWithClaude; absent on cached/mock paths.
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadInputTokens?: number;
+  };
 }
 
 export interface InjectionCheckResult {

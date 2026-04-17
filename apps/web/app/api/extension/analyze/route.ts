@@ -10,6 +10,7 @@ import type { RedirectChain } from "@askarthur/types";
 import { storeVerifiedScam, incrementStats } from "@askarthur/scam-engine/pipeline";
 import { stripEmailHtml } from "@askarthur/scam-engine/html-sanitize";
 import { logger } from "@askarthur/utils/logger";
+import { logCost, claudeHaikuCostUsd } from "@/lib/cost-telemetry";
 import { validateExtensionRequest } from "../_lib/auth";
 
 const AnalyzeSchema = z.object({
@@ -89,6 +90,27 @@ export async function POST(req: NextRequest) {
       analyzeWithClaude(text, undefined, undefined, redirectChains.length > 0 ? redirectChains : undefined),
       checkURLReputation(allUrls),
     ]);
+
+    // 5c. Cost telemetry — fire-and-forget, wrapped in waitUntil internally.
+    if (aiResult.usage) {
+      logCost({
+        feature: "extension_analyze",
+        provider: "anthropic",
+        operation: "claude-haiku-4-5-20251001",
+        units: aiResult.usage.inputTokens + aiResult.usage.outputTokens,
+        estimatedCostUsd: claudeHaikuCostUsd(
+          aiResult.usage.inputTokens,
+          aiResult.usage.outputTokens,
+        ),
+        metadata: {
+          input_tokens: aiResult.usage.inputTokens,
+          output_tokens: aiResult.usage.outputTokens,
+          cache_read: aiResult.usage.cacheReadInputTokens ?? 0,
+          install_id: auth.installId,
+        },
+        requestId: auth.requestId,
+      });
+    }
 
     // 6. Merge verdicts — URL threats escalate AI verdict
     let finalVerdict: Verdict = aiResult.verdict;

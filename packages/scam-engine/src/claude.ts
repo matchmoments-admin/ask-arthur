@@ -399,5 +399,12 @@ export async function analyzeWithClaude(
 
   const parsed = JSON.parse(jsonMatch[0]);
 
-  return validateResult(parsed);
+  const result = validateResult(parsed);
+  result.usage = {
+    inputTokens: response.usage.input_tokens,
+    outputTokens: response.usage.output_tokens,
+    cacheReadInputTokens:
+      (response.usage as { cache_read_input_tokens?: number }).cache_read_input_tokens,
+  };
+  return result;
 }
