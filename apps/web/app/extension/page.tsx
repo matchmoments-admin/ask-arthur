@@ -220,7 +220,7 @@ export default function ExtensionPage() {
           </span>
         )}
         <p className="text-xs text-slate-400 mt-3">
-          No signup. No credit card. 50 free checks per day.
+          No signup. No credit card. Free to use every day.
         </p>
       </section>
 
