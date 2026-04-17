@@ -9,11 +9,11 @@ import Footer from "@/components/Footer";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Scam Feed — Latest Australian Scam Alerts | Ask Arthur",
+  title: "Feed — Latest Australian Scam Alerts | Ask Arthur",
   description:
     "Browse the latest scam reports from Reddit, verified intelligence, and community reports. Filter by category, country, and search for specific threats.",
   openGraph: {
-    title: "Scam Feed — Latest Australian Scam Alerts",
+    title: "Feed — Latest Australian Scam Alerts",
     description:
       "Real-time scam intelligence feed. See what scams are trending right now in Australia and worldwide.",
     url: "https://askarthur.au/scam-feed",
@@ -54,7 +54,7 @@ export default async function ScamFeedPage() {
         {/* Hero */}
         <section className="max-w-[640px] mx-auto px-5 pt-16 mb-8">
           <h1 className="text-deep-navy text-4xl md:text-5xl font-extrabold mb-4 leading-tight text-center">
-            Scam Feed
+            Feed
           </h1>
           <p className="text-lg text-gov-slate max-w-2xl mx-auto text-center leading-relaxed">
             Real-time scam intelligence from Reddit, verified analysis, and
