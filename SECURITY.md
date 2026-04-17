@@ -14,7 +14,9 @@ Threat model, mandatory defenses, and compliance status for Ask Arthur.
 | Subscriber emails | High | Supabase `email_subscribers` table |
 | API keys (B2B) | Critical | Supabase `api_keys` (SHA-256 hashed) |
 | Admin credentials | Critical | Environment variable (`ADMIN_SECRET`) |
-| Extension secrets | High | Environment variable (`EXTENSION_SECRET`) |
+| Extension install public keys | Medium | Supabase `extension_installs.public_key_jwk` (non-secret; the private half is non-extractable and never leaves the browser) |
+| Extension shared secret (legacy, Phase 1 only) | High | `EXTENSION_SECRET` env var. Scheduled for removal once ≥98% of extension traffic is signature-authed. |
+| Turnstile secret | High | `TURNSTILE_SECRET_KEY` env var (server-side only; verifies registration tokens) |
 | Claude API key | Critical | Environment variable |
 | Redis credentials | High | Environment variables |
 | Threat intel export data | High | Supabase views (`threat_intel_*`), service-role only |
@@ -86,7 +88,7 @@ All user text is sanitized before Claude analysis:
 | Admin panel | Dual-mode | Supabase Auth (admin role in `app_metadata`) with HMAC cookie fallback, dual-mode in `lib/adminAuth.ts` |
 | Session refresh | Edge middleware | `createMiddlewareClient()` refreshes expired tokens on every request |
 | Route protection | Middleware | `/app/*` requires authenticated user, `/admin/*` requires admin role |
-| Extension API | Shared secret | `X-Extension-Secret` header, timing-safe comparison |
+| Extension API | Per-install ECDSA P-256 signature | `X-Extension-Install-Id`, `X-Extension-Timestamp`, `X-Extension-Nonce`, `X-Extension-Signature`; ±5 min skew window, Redis nonce-replay protection, public keys registered through a Cloudflare Turnstile-gated endpoint. Legacy `X-Extension-Secret` still accepted during Phase 1 for unupgraded installs. |
 | B2B API | Bearer token | API key hashed with SHA-256, compared against `api_keys.key_hash` |
 | Bot webhooks | Platform HMAC | Telegram secret token, WhatsApp SHA-256 signature, Slack v0 signature with replay protection (5-min window) |
 
@@ -197,10 +199,14 @@ All priority-zero security issues have been resolved:
 
 ### Extension Security
 
-- Minimal permissions: `activeTab`, `contextMenus`, `storage`
-- Host permissions scoped to `askarthur.au/api/extension/*` and `mail.google.com/*`
-- Installation ID generated on first run (not linked to user identity)
+- Minimal permissions: `activeTab`, `contextMenus`, `storage`, `offscreen` (offscreen is used exclusively to host the one-time Turnstile iframe during registration)
+- Host permissions scoped to `askarthur.au/api/extension/*` (plus `<all_urls>` only when URL Guard is enabled)
+- Per-install ECDSA P-256 keypair generated with `extractable: false` — the private key is stored in IndexedDB and never leaves the browser, even the extension's own code cannot export it (`crypto.subtle.exportKey` throws)
+- Request signatures verified against `extension_installs.public_key_jwk`. Public keys are registered through `/api/extension/register`, which is Turnstile-gated and IP rate-limited (5/hr) to raise the cost of identity farming
+- Replay protection: every signed request carries a nonce; the server SETNX-locks each nonce in Upstash Redis with a 10-minute TTL, aligned with the ±5 minute timestamp skew window
+- Installation ID remains a random UUID stored in `chrome.storage.local` (not linked to user identity), which preserves the `extension_subscriptions` mapping for Pro users across the auth migration
 - Email scan results cached locally (not sent to server unless reported)
+- Known non-mitigation: no Chrome platform primitive cryptographically binds a request to a CWS-installed extension (WEI was abandoned 2023; Verified Access is ChromeOS-only). The real defense against API abuse remains server-side rate limiting keyed to the per-install identity; the signature scheme exists to make that identity revocable and to remove the extractable-secret finding from static analysis of the bundle.
 
 ## Compliance Notes
 

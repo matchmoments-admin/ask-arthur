@@ -4,11 +4,15 @@ const urlGuardEnabled = process.env.WXT_URL_GUARD === "true";
 const extensionSecurityEnabled = process.env.WXT_EXTENSION_SECURITY !== "false";
 const facebookAdsEnabled = process.env.WXT_FACEBOOK_ADS === "true";
 const siteAuditEnabled = process.env.WXT_SITE_AUDIT === "true";
+const turnstileBridgeUrl =
+  process.env.WXT_TURNSTILE_BRIDGE_URL ??
+  "https://askarthur.au/extension-turnstile";
 
 // WXT 0.20.x: `filterEntrypoints` is an INCLUSION list of entrypoint names
 // (file stem without `.content` suffix). Anything not listed is skipped.
-// Background + popup are always included; content scripts are gated on flags.
-const includedEntrypoints: string[] = ["background", "popup"];
+// Background + popup + offscreen (for the Turnstile bot-gate) are always
+// included; content scripts are gated on flags.
+const includedEntrypoints: string[] = ["background", "popup", "offscreen"];
 
 if (urlGuardEnabled) {
   includedEntrypoints.push("url-guard");
@@ -36,6 +40,7 @@ export default defineConfig({
       "activeTab",
       "contextMenus",
       "storage",
+      "offscreen",
       ...(urlGuardEnabled ? ["webNavigation" as const] : []),
       ...(extensionSecurityEnabled ? ["alarms" as const] : []),
     ],
@@ -69,6 +74,7 @@ export default defineConfig({
       __EXTENSION_SECRET__: JSON.stringify(
         process.env.WXT_EXTENSION_SECRET ?? ""
       ),
+      __TURNSTILE_BRIDGE_URL__: JSON.stringify(turnstileBridgeUrl),
       __URL_GUARD_ENABLED__: urlGuardEnabled,
       __EXTENSION_SECURITY_ENABLED__: extensionSecurityEnabled,
       __FACEBOOK_ADS_ENABLED__: facebookAdsEnabled,

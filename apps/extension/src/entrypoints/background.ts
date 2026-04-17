@@ -1,4 +1,5 @@
 import { setInstallId, getInstallId, setContextMenuText } from "@/lib/storage";
+import { ensureRegistered } from "@/lib/register";
 import { checkURL, analyzeText, analyzeExtensionsCRX, fetchThreatDBUpdate, checkAdCommunityFlags, flagAd, analyzeAd, ExtensionApiError } from "@/lib/api";
 import { getCachedScanReport, setCachedScanReport } from "@/lib/extension-scan-cache";
 import { scanInstalledExtensions, buildSecurityReport } from "@/lib/extension-scanner";
@@ -28,6 +29,12 @@ export default defineBackground(() => {
 
     chrome.storage.local.set({ showSafeIndicator: false });
 
+    // Register a per-install WebCrypto keypair — best effort, legacy secret
+    // path covers failures until Phase 2.
+    ensureRegistered().catch(() => {
+      // Swallowed on purpose; retried on next service-worker start.
+    });
+
     // Set up threat DB refresh for extension security scanner
     if (typeof __EXTENSION_SECURITY_ENABLED__ !== "undefined" && __EXTENSION_SECURITY_ENABLED__) {
       setupThreatDBRefresh(async () => {
@@ -35,6 +42,12 @@ export default defineBackground(() => {
         return fetchThreatDBUpdate(db.updatedAt);
       });
     }
+  });
+
+  // Existing installs that upgraded to this version will not fire onInstalled
+  // with "install" reason — register on every startup instead (idempotent).
+  chrome.runtime.onStartup.addListener(() => {
+    ensureRegistered().catch(() => {});
   });
 
   // --- Context menu click: store text for popup ---

@@ -1,5 +1,27 @@
 import type { NextConfig } from "next";
 
+// CSP shared by the Turnstile bridge page. Extensions must be allowed to
+// iframe the bridge, and Cloudflare Turnstile must be allowed to load scripts
+// + open its own iframe. Everything else stays locked down.
+const turnstileCsp = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "connect-src 'self' https://challenges.cloudflare.com",
+  "frame-src https://challenges.cloudflare.com",
+  "frame-ancestors chrome-extension://* moz-extension://*",
+  "form-action 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+].join("; ");
+
+const turnstilePageHeaders = [
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "no-referrer" },
+  { key: "Content-Security-Policy", value: turnstileCsp },
+];
+
 const securityHeaders = [
   {
     key: "X-Frame-Options",
@@ -63,9 +85,16 @@ const nextConfig: NextConfig = {
   },
   async headers() {
     return [
+      // Global security headers — exclude /extension-turnstile which needs a
+      // relaxed CSP so extensions can iframe it.
       {
-        source: "/(.*)",
+        source: "/((?!extension-turnstile).*)",
         headers: securityHeaders,
+      },
+      // Turnstile bridge page — framed by chrome-extension:// and moz-extension://
+      {
+        source: "/extension-turnstile",
+        headers: turnstilePageHeaders,
       },
       // Sensitive API routes — prevent caching
       {
@@ -76,13 +105,26 @@ const nextConfig: NextConfig = {
         ],
       },
       // Extension CORS — wildcard needed for chrome-extension:// origins
-      // (auth enforced via X-Extension-Secret, not CORS)
+      // (auth enforced via signature or legacy shared secret, not CORS).
       {
         source: "/api/extension/:path*",
         headers: [
           { key: "Access-Control-Allow-Origin", value: "*" },
           { key: "Access-Control-Allow-Methods", value: "GET, POST, OPTIONS" },
-          { key: "Access-Control-Allow-Headers", value: "Content-Type, X-Extension-Secret, X-Extension-Id" },
+          {
+            key: "Access-Control-Allow-Headers",
+            value: [
+              "Content-Type",
+              "X-Extension-Secret",
+              "X-Extension-Id",
+              "X-Extension-Install-Id",
+              "X-Extension-Timestamp",
+              "X-Extension-Nonce",
+              "X-Extension-Signature",
+              "X-Request-ID",
+              "X-Scan-Source",
+            ].join(", "),
+          },
           { key: "Access-Control-Max-Age", value: "86400" },
         ],
       },

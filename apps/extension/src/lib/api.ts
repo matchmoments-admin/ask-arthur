@@ -5,10 +5,22 @@ import type {
   ExtensionAnalyzeResponse,
 } from "@askarthur/types";
 import { getInstallId } from "./storage";
+import { signRequest } from "./sign";
+import { ensureRegistered } from "./register";
 
 declare const __EXTENSION_SECRET__: string;
 
 const API_BASE = "https://askarthur.au/api/extension";
+
+// Kick off registration once per service-worker lifetime — fire and forget so
+// the first few API calls still work via the Phase-1 legacy secret fallback.
+let registrationKick: Promise<boolean> | null = null;
+function kickRegistration(): Promise<boolean> {
+  if (!registrationKick) {
+    registrationKick = ensureRegistered().catch(() => false);
+  }
+  return registrationKick;
+}
 
 interface ApiError {
   error: string;
@@ -27,21 +39,46 @@ class ExtensionApiError extends Error {
   }
 }
 
-async function getHeaders(): Promise<Record<string, string>> {
+async function getHeaders(
+  method: string,
+  path: string,
+  body: string
+): Promise<Record<string, string>> {
+  kickRegistration();
+
   const installId = await getInstallId();
-  return {
+  const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "X-Extension-Secret": __EXTENSION_SECRET__,
     "X-Request-ID": crypto.randomUUID(),
     ...(installId && { "X-Extension-Id": installId }),
   };
+
+  // Attach signature headers once the keypair exists. Signing failure is
+  // non-fatal — the legacy shared secret keeps the request working during
+  // Phase 1.
+  if (installId) {
+    try {
+      const signed = await signRequest(installId, method, path, body);
+      Object.assign(headers, signed);
+    } catch (err) {
+      console.warn("[askarthur] signing failed", err);
+    }
+  }
+
+  return headers;
 }
 
 async function request<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<{ data: T; remaining: number | null }> {
-  const headers = await getHeaders();
+  const method = (options.method ?? "GET").toUpperCase();
+  const body = typeof options.body === "string" ? options.body : "";
+  // The signature is over the pathname only (no query string), matching the
+  // server's URL parsing.
+  const pathname = `/api/extension${path.split("?")[0] ?? ""}`;
+  const headers = await getHeaders(method, pathname, body);
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: { ...headers, ...options.headers },
@@ -119,7 +156,11 @@ export async function fetchThreatDBUpdate(
 } | null> {
   try {
     const params = since ? `?since=${encodeURIComponent(since)}` : "";
-    const headers = await getHeaders();
+    const headers = await getHeaders(
+      "GET",
+      "/api/extension/extension-security/threat-db",
+      ""
+    );
     const res = await fetch(
       `${API_BASE}/extension-security/threat-db${params}`,
       { headers }

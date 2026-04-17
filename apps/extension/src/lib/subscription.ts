@@ -1,3 +1,5 @@
+import { signRequest } from "./sign";
+
 const STORAGE_KEY = "arthur_subscription";
 
 interface SubscriptionState {
@@ -42,14 +44,25 @@ export async function checkSubscription(
   }
 
   try {
+    const headers: Record<string, string> = {
+      "X-Extension-Secret": secret,
+      "X-Extension-Id": installId,
+    };
+    try {
+      const signed = await signRequest(
+        installId,
+        "GET",
+        "/api/extension/subscription",
+        ""
+      );
+      Object.assign(headers, signed);
+    } catch {
+      // Signing optional during Phase 1 — legacy secret still works.
+    }
+
     const res = await fetch(
       `${apiBase}/api/extension/subscription?installId=${encodeURIComponent(installId)}`,
-      {
-        headers: {
-          "X-Extension-Secret": secret,
-          "X-Extension-Id": installId,
-        },
-      }
+      { headers }
     );
 
     if (res.ok) {

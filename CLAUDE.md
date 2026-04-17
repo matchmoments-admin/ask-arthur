@@ -166,7 +166,8 @@ import { validateApiKey } from "@/lib/apiAuth";
 - **Storage**: `R2_*` (Cloudflare R2)
 - **Email**: `RESEND_API_KEY`
 - **Bots**: `TELEGRAM_*`, `WHATSAPP_*`, `SLACK_*`, `MESSENGER_*`
-- **Extension**: `WXT_EXTENSION_SECRET`, `WXT_INBOXSDK_APP_ID`
+- **Extension**: `WXT_EXTENSION_SECRET` (legacy, Phase 1 fallback), `WXT_INBOXSDK_APP_ID`, `WXT_TURNSTILE_BRIDGE_URL` (optional local-dev override — defaults to `https://askarthur.au/extension-turnstile`)
+- **Turnstile (extension registration bot-gate)**: `TURNSTILE_SECRET_KEY`, `NEXT_PUBLIC_TURNSTILE_SITE_KEY`
 - **Admin**: `ADMIN_SECRET`
 - **Billing**: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `NEXT_PUBLIC_STRIPE_PRO_MONTHLY`, `NEXT_PUBLIC_STRIPE_PRO_ANNUAL`, `NEXT_PUBLIC_STRIPE_BUSINESS_MONTHLY`, `NEXT_PUBLIC_STRIPE_BUSINESS_ANNUAL`
 - **Auth**: `NEXT_PUBLIC_FF_AUTH`

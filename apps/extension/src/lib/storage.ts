@@ -13,6 +13,15 @@ export async function setInstallId(id: string): Promise<void> {
   await chrome.storage.local.set({ installId: id });
 }
 
+export async function getRegistered(): Promise<boolean> {
+  const result = await chrome.storage.local.get("registered");
+  return result.registered === true;
+}
+
+export async function setRegistered(value: boolean): Promise<void> {
+  await chrome.storage.local.set({ registered: value });
+}
+
 // --- chrome.storage.session (transient, cleared on browser close) ---
 
 export interface LastResult {

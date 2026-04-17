@@ -2,9 +2,16 @@ import { NextRequest } from "next/server";
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
 import { logger } from "@askarthur/utils/logger";
+import { hasSignatureHeaders, verifyExtensionSignature } from "./signature";
 
 export type ExtensionAuthResult =
-  | { valid: true; installId: string; remaining: number; requestId: string | null }
+  | {
+      valid: true;
+      installId: string;
+      remaining: number;
+      requestId: string | null;
+      authMethod: "signature" | "secret";
+    }
   | { valid: false; error: string; status: number; retryAfter?: string };
 
 // Manual checks: 10/min burst, 50/day
@@ -89,25 +96,53 @@ export async function validateExtensionRequest(
     logger.info("Extension request", { requestId });
   }
 
-  // 1. Validate extension secret
-  const secret = req.headers.get("x-extension-secret");
-  const expectedSecret = process.env.EXTENSION_SECRET;
+  // 1. Authenticate via signature (preferred) or legacy shared secret (Phase 1).
+  //
+  // Phase 1 bootstrap: an upgraded install may send signature headers before
+  // its public key is registered. We treat "Unknown install id" as a soft
+  // failure and fall through to the legacy secret path so the call still
+  // succeeds. Any other signature failure (skew, replay, tampering) is a
+  // hard reject — those represent active misuse, not bootstrapping.
+  let installId: string | null = null;
+  let authMethod: "signature" | "secret" | null = null;
 
-  if (!expectedSecret) {
-    if (process.env.NODE_ENV === "production") {
-      logger.error("EXTENSION_SECRET not set in production");
-      return { valid: false, error: "Service unavailable", status: 503 };
+  if (hasSignatureHeaders(req)) {
+    const sig = await verifyExtensionSignature(req);
+    if (sig.ok) {
+      installId = sig.installId;
+      authMethod = "signature";
+    } else if (sig.reason !== "Unknown install id") {
+      return { valid: false, error: sig.reason, status: sig.status };
     }
-    logger.warn("EXTENSION_SECRET not set — skipping auth in dev");
-  } else if (!secret || !timingSafeEqual(secret, expectedSecret)) {
-    return { valid: false, error: "Unauthorized", status: 401 };
   }
 
-  // 2. Extract installation ID
-  const installId = req.headers.get("x-extension-id");
-  if (!installId || installId.length < 10 || installId.length > 64) {
-    return { valid: false, error: "Invalid extension ID", status: 400 };
+  if (!installId || !authMethod) {
+    const secret = req.headers.get("x-extension-secret");
+    const expectedSecret = process.env.EXTENSION_SECRET;
+
+    if (!expectedSecret) {
+      if (process.env.NODE_ENV === "production") {
+        logger.error("EXTENSION_SECRET not set in production");
+        return { valid: false, error: "Service unavailable", status: 503 };
+      }
+      logger.warn("EXTENSION_SECRET not set — skipping auth in dev");
+    } else if (!secret || !timingSafeEqual(secret, expectedSecret)) {
+      return { valid: false, error: "Unauthorized", status: 401 };
+    }
+
+    const headerInstallId =
+      req.headers.get("x-extension-install-id") ||
+      req.headers.get("x-extension-id");
+    if (!headerInstallId || headerInstallId.length < 10 || headerInstallId.length > 64) {
+      return { valid: false, error: "Invalid extension ID", status: 400 };
+    }
+    installId = headerInstallId;
+    authMethod = "secret";
   }
+
+  const resolvedInstallId: string = installId;
+  const resolvedAuthMethod: "signature" | "secret" = authMethod;
+  logger.info("Extension auth", { requestId, authMethod: resolvedAuthMethod });
 
   // 3. Rate limit on hashed installation ID
   if (!process.env.UPSTASH_REDIS_REST_URL) {
@@ -115,11 +150,17 @@ export async function validateExtensionRequest(
       logger.error("UPSTASH_REDIS_REST_URL not set in production — blocking");
       return { valid: false, error: "Service unavailable", status: 503 };
     }
-    return { valid: true, installId, remaining: 99, requestId };
+    return {
+      valid: true,
+      installId: resolvedInstallId,
+      remaining: 99,
+      requestId,
+      authMethod: resolvedAuthMethod,
+    };
   }
 
   // Hash the install ID for privacy
-  const data = new TextEncoder().encode(installId);
+  const data = new TextEncoder().encode(resolvedInstallId);
   const hashBuf = await crypto.subtle.digest("SHA-256", data);
   const identifier = Array.from(new Uint8Array(hashBuf))
     .map((b) => b.toString(16).padStart(2, "0"))
@@ -163,8 +204,9 @@ export async function validateExtensionRequest(
 
   return {
     valid: true,
-    installId,
+    installId: resolvedInstallId,
     remaining: Math.min(burst.remaining, daily.remaining),
     requestId,
+    authMethod: resolvedAuthMethod,
   };
 }
