@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { createServiceClient } from "@askarthur/supabase/server";
-import WorldScamMap from "@/components/charts/WorldScamMap";
+import WorldScamMapWithHighlights from "@/components/charts/WorldScamMapWithHighlights";
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
 
@@ -50,7 +50,7 @@ export default async function ScamMapPage() {
           Live scam reports from 190+ countries, sourced from our Feed. Click
           any country to open it filtered to that location.
         </p>
-        <WorldScamMap countryData={countryData} />
+        <WorldScamMapWithHighlights countryData={countryData} />
       </main>
       <Footer />
     </div>

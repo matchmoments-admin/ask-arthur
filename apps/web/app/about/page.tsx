@@ -3,7 +3,7 @@ import { ShieldCheck, Search, ScanSearch, UserCheck, Rss, Database } from "lucid
 import Footer from "@/components/Footer";
 import Nav from "@/components/Nav";
 import ChartsSection from "@/components/charts/ChartsSection";
-import WorldScamMap from "@/components/charts/WorldScamMap";
+import WorldScamMapWithHighlights from "@/components/charts/WorldScamMapWithHighlights";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { parseStateFromRegion } from "@/lib/chart-tokens";
 
@@ -290,7 +290,7 @@ export default async function AboutPage() {
             Live scam reports from 190+ countries, sourced from our Feed.
             Click any country to open it filtered to that location.
           </p>
-          <WorldScamMap countryData={worldData} />
+          <WorldScamMapWithHighlights countryData={worldData} />
         </section>
 
         <section>
