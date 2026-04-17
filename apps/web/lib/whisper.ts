@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { logger } from "@askarthur/utils/logger";
+import { logCost, PRICING } from "@/lib/cost-telemetry";
 
 const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB — Whisper API limit
 
@@ -53,6 +54,19 @@ export async function transcribeAudio(
     filename,
     durationSeconds,
     textLength: text.length,
+  });
+
+  logCost({
+    feature: "transcription",
+    provider: "openai",
+    operation: "whisper-1",
+    units: durationSeconds,
+    unitCostUsd: PRICING.OPENAI_WHISPER_USD_PER_SECOND,
+    metadata: {
+      duration_seconds: durationSeconds,
+      text_length: text.length,
+      filename,
+    },
   });
 
   return { text, durationSeconds };

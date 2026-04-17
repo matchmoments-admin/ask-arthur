@@ -2,6 +2,7 @@
 // Requires: RESEMBLE_AI_API_TOKEN env var. Called via lib/deepfakeDetection.ts.
 
 import { logger } from "@askarthur/utils/logger";
+import { logCost, PRICING } from "@/lib/cost-telemetry";
 
 // Corrected endpoint: /api/v2/intelligence (not /api/v2/detect)
 const RESEMBLE_API = "https://app.resemble.ai/api/v2";
@@ -62,6 +63,25 @@ export async function detectDeepfakeResemble(
   }
 
   const aggregatedScore = parseFloat(result.metrics?.aggregated_score ?? "0.5");
+
+  // Log cost. Duration is not returned by Resemble — if their response shape
+  // starts including a duration field, update `units` to use it so the
+  // estimated_cost_usd reflects per-second billing accurately. For now we
+  // log `units: 1` + the aggregated score as metadata so totals undercount
+  // until we can compute duration client-side from the audio buffer.
+  logCost({
+    feature: "deepfake_audio",
+    provider: "resemble",
+    operation: "intelligence",
+    units: 1,
+    unitCostUsd: PRICING.RESEMBLE_AI_USD_PER_SECOND,
+    metadata: {
+      uuid: item.uuid,
+      label: result.metrics?.label ?? "real",
+      aggregated_score: aggregatedScore,
+      note: "units=1 placeholder; refine when duration is available",
+    },
+  });
 
   return {
     isLikelyDeepfake: result.metrics?.label === "fake",

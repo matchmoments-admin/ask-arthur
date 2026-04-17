@@ -8,6 +8,7 @@ import { checkHiveAI } from "@askarthur/scam-engine/hive-ai";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { validateExtensionRequest } from "../_lib/auth";
+import { logCost, claudeHaikuCostUsd } from "@/lib/cost-telemetry";
 
 function isFacebookCDN(url: string): boolean {
   try {
@@ -114,11 +115,57 @@ export async function POST(req: NextRequest) {
     const analysis = textResult.status === "fulfilled" ? textResult.value : null;
     const urlChecks = urlResult.status === "fulfilled" ? urlResult.value : [];
 
+    // 4b. Cost telemetry — Claude analyse for ad text.
+    if (analysis?.usage) {
+      logCost({
+        feature: "extension_analyze_ad",
+        provider: "anthropic",
+        operation: "claude-haiku-4-5-20251001",
+        units: analysis.usage.inputTokens + analysis.usage.outputTokens,
+        estimatedCostUsd: claudeHaikuCostUsd(
+          analysis.usage.inputTokens,
+          analysis.usage.outputTokens,
+        ),
+        metadata: {
+          input_tokens: analysis.usage.inputTokens,
+          output_tokens: analysis.usage.outputTokens,
+          cache_read: analysis.usage.cacheReadInputTokens ?? 0,
+          install_id: auth.installId,
+          advertiser_name: advertiserName,
+          has_image: !!safeImageUrl,
+          has_landing_url: !!landingUrl,
+        },
+        requestId: auth.requestId,
+      });
+    }
+
     // Phase 2: Hive AI only if text verdict is not SAFE and image is available
     let hive: Awaited<ReturnType<typeof checkHiveAI>> | null = null;
     if (analysis?.verdict !== "SAFE" && safeImageUrl && imageAllowed) {
       try {
         hive = await checkHiveAI(safeImageUrl);
+        // Cost telemetry — Hive AI image scan. unitCostUsd=0 is a deliberate
+        // placeholder: Hive's per-image rate is not documented in the repo
+        // and must be set once the pricing contract is signed (see Tier 3
+        // feature-flag-flip playbook). The row still captures that a scan
+        // happened, tagged by installId + result shape.
+        logCost({
+          feature: "hive_ai",
+          provider: "hive",
+          operation: "sync-task",
+          units: 1,
+          unitCostUsd: 0,
+          metadata: {
+            has_result: hive !== null,
+            is_ai_generated: hive?.isAiGenerated ?? false,
+            is_deepfake: hive?.isDeepfake ?? false,
+            ai_confidence: hive?.aiConfidence ?? null,
+            deepfake_confidence: hive?.deepfakeConfidence ?? null,
+            generator_source: hive?.generatorSource ?? null,
+            install_id: auth.installId,
+          },
+          requestId: auth.requestId,
+        });
       } catch {
         hive = null;
       }
