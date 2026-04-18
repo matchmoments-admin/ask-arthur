@@ -97,7 +97,109 @@ export default function PrivacyPage() {
 
           <section>
             <h2 className="text-deep-navy text-lg font-bold mb-3">
-              4. Data Retention
+              4. Chrome Extension
+            </h2>
+            <p className="text-gov-slate text-base leading-relaxed mb-3">
+              The Ask Arthur Chrome extension is an optional companion to the
+              web app. This section describes what the extension reads, what it
+              sends to our API, and what it does not.
+            </p>
+
+            <p className="text-gov-slate text-base leading-relaxed mb-2 font-semibold">
+              Permissions and what they are used for:
+            </p>
+            <ul className="list-disc list-inside text-gov-slate text-base leading-relaxed space-y-2 mb-4">
+              <li>
+                <strong>activeTab</strong> — reads the URL of the current tab
+                only when you click the popup or trigger the right-click
+                &ldquo;Check with Ask Arthur&rdquo; menu.
+              </li>
+              <li>
+                <strong>contextMenus</strong> — registers the right-click menu
+                item.
+              </li>
+              <li>
+                <strong>storage</strong> — local, on-device preferences only
+                (daily check count, dismissed warnings). Nothing is synced
+                off-device.
+              </li>
+              <li>
+                <strong>alarms</strong> — resets the daily check counter once
+                per day.
+              </li>
+              <li>
+                <strong>management</strong> (optional, opt-in) — requested only
+                when you open the Extension Security Scanner tab. Reads the
+                list of installed extension IDs so they can be audited for
+                known risks. No extension content or user data is transmitted.
+              </li>
+              <li>
+                <strong>Facebook host permissions</strong>
+                {" ("}
+                <code className="text-sm">
+                  www.facebook.com, m.facebook.com, web.facebook.com
+                </code>
+                {") "}
+                — used by the Facebook Ads scanner to inspect sponsored posts
+                for scam signals. Posts are reduced to structural fingerprints
+                before being sent to our API. Personal posts, direct messages,
+                and general browsing history are never read or transmitted.
+              </li>
+            </ul>
+
+            <p className="text-gov-slate text-base leading-relaxed mb-2 font-semibold">
+              What is sent to https://askarthur.au/api/extension/*:
+            </p>
+            <ul className="list-disc list-inside text-gov-slate text-base leading-relaxed space-y-2 mb-4">
+              <li>
+                URL or text you explicitly submit via the popup or right-click
+                menu
+              </li>
+              <li>Extension IDs when you run the Security Scanner</li>
+              <li>
+                Ad fingerprints (structural representations, not raw post
+                contents) when Facebook scanning is active
+              </li>
+              <li>
+                A per-install public key (ECDSA P-256) used to authenticate
+                requests
+              </li>
+            </ul>
+
+            <p className="text-gov-slate text-base leading-relaxed mb-2 font-semibold">
+              What is not sent:
+            </p>
+            <ul className="list-disc list-inside text-gov-slate text-base leading-relaxed space-y-2 mb-4">
+              <li>Personal posts, direct messages, private browsing history</li>
+              <li>
+                Full page contents outside the Facebook sponsored-post
+                fingerprinting flow
+              </li>
+              <li>
+                Any identifying information beyond the per-install public key
+              </li>
+            </ul>
+
+            <p className="text-gov-slate text-base leading-relaxed mb-3">
+              <strong>Authentication model.</strong> Each install generates an
+              ECDSA P-256 keypair on first run. The private key is
+              non-extractable and stored in the browser&apos;s local IndexedDB
+              — it never leaves your device. All API requests are signed with
+              the private key and verified server-side using the stored public
+              key, with a short-lived nonce to prevent replay attacks.
+            </p>
+
+            <p className="text-gov-slate text-base leading-relaxed">
+              <strong>Retention.</strong> Requests to the extension API are
+              processed identically to web-app submissions — the analysed
+              content is discarded after analysis; only aggregated,
+              PII-scrubbed statistics are retained.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-deep-navy text-lg font-bold mb-3">
+              5. Data Retention
             </h2>
             <ul className="list-disc list-inside text-gov-slate text-base leading-relaxed space-y-2">
               <li>
@@ -117,7 +219,7 @@ export default function PrivacyPage() {
 
           <section>
             <h2 className="text-deep-navy text-lg font-bold mb-3">
-              5. Cookies &amp; Tracking
+              6. Cookies &amp; Tracking
             </h2>
             <p className="text-gov-slate text-base leading-relaxed">
               Ask Arthur does not use cookies. We use Plausible Analytics, which
@@ -129,7 +231,7 @@ export default function PrivacyPage() {
 
           <section>
             <h2 className="text-deep-navy text-lg font-bold mb-3">
-              6. Your Rights
+              7. Your Rights
             </h2>
             <p className="text-gov-slate text-base leading-relaxed mb-3">
               Under the Privacy Act 1988 (Cth), you have the right to:
@@ -156,22 +258,22 @@ export default function PrivacyPage() {
 
           <section>
             <h2 className="text-deep-navy text-lg font-bold mb-3">
-              7. Contact
+              8. Contact
             </h2>
             <p className="text-gov-slate text-base leading-relaxed">
               For privacy inquiries, contact us at{" "}
               <a
-                href="mailto:arthur.ask@outlook.com"
+                href="mailto:brendan@askarthur.au"
                 className="text-action-teal hover:underline"
               >
-                arthur.ask@outlook.com
+                brendan@askarthur.au
               </a>
             </p>
           </section>
 
           <section>
             <p className="text-sm text-slate-400">
-              Last updated: February 2025
+              Last updated: April 2026
             </p>
           </section>
         </div>

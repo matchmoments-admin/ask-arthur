@@ -140,17 +140,17 @@ export default function TermsPage() {
             <p className="text-gov-slate text-base leading-relaxed">
               For questions about these terms, contact us at{" "}
               <a
-                href="mailto:arthur.ask@outlook.com"
+                href="mailto:brendan@askarthur.au"
                 className="text-action-teal hover:underline"
               >
-                arthur.ask@outlook.com
+                brendan@askarthur.au
               </a>
             </p>
           </section>
 
           <section>
             <p className="text-sm text-slate-400">
-              Last updated: February 2025
+              Last updated: April 2026
             </p>
           </section>
         </div>
