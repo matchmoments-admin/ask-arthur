@@ -225,7 +225,7 @@ export default function ExtensionPage() {
       </section>
 
       {/* Blog link */}
-      <section className="text-center border-t border-border-default pt-8">
+      <section className="text-center border-t border-border-default pt-8 mb-8">
         <p className="text-gov-slate text-sm">
           Want the full story?{" "}
           <Link
@@ -234,6 +234,26 @@ export default function ExtensionPage() {
           >
             Read our launch blog post
           </Link>
+        </p>
+      </section>
+
+      {/* Legal / contact — helps CWS reviewers cross-verify the listing */}
+      <section className="text-center text-xs text-slate-400">
+        <p className="space-x-3">
+          <Link href="/privacy" className="hover:text-gov-slate hover:underline">
+            Privacy
+          </Link>
+          <span aria-hidden>·</span>
+          <Link href="/terms" className="hover:text-gov-slate hover:underline">
+            Terms
+          </Link>
+          <span aria-hidden>·</span>
+          <a
+            href="mailto:brendan@askarthur.au"
+            className="hover:text-gov-slate hover:underline"
+          >
+            brendan@askarthur.au
+          </a>
         </p>
       </section>
     </main>
