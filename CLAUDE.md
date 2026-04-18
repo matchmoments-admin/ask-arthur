@@ -46,7 +46,7 @@ ask-arthur/
 ├── pipeline/
 │   └── scrapers/               # Python threat feed scrapers (16 feeds)
 │
-├── supabase/                   # Migration SQL files (v2–v56)
+├── supabase/                   # Migration SQL files (v2–v62)
 ├── docs/                       # OpenAPI spec, setup guides, compliance
 ├── turbo.json                  # Turborepo task config
 ├── pnpm-workspace.yaml         # Workspace manifest
@@ -119,6 +119,8 @@ import { validateApiKey } from "@/lib/apiAuth";
 | Analytics | Plausible | Privacy-first, no cookies |
 | Email | Resend + React Email | Modern transactional email |
 | Billing | Stripe | Direct billing, Stripe Tax for AU GST |
+| Bot queue dispatch | Supabase Database Webhook (pg_net on `bot_message_queue` INSERT) + 10-min safety sweeper | Event-driven, avoids polling cost; pg_net is unmetered on Supabase Pro |
+| Cost observability | `cost_telemetry` table (v62) + `logCost()` helper + `/admin/costs` dashboard + Telegram digests | Per-call AI/paid-API spend tagged by feature/provider; daily threshold alerts + weekly WoW digest |
 
 ## Critical Rules
 
@@ -151,7 +153,7 @@ import { validateApiKey } from "@/lib/apiAuth";
 | Platform | Target | Config |
 |----------|--------|--------|
 | Web app | Vercel | Root: `apps/web`, Build: `cd ../.. && pnpm turbo build --filter=@askarthur/web` |
-| Extension | Chrome Web Store | `pnpm --filter @askarthur/extension build && zip` |
+| Extension | Chrome Web Store | Minimal v1.0.0: `pnpm --filter @askarthur/extension zip`. Full-featured v1.0.1 (with Facebook ads): `WXT_FACEBOOK_ADS=true pnpm --filter @askarthur/extension zip`. New host permissions → 1–3 day re-review. |
 | Mobile | App Store / Play Store | EAS Build via Expo |
 | Pipeline | GitHub Actions | Scheduled cron, gated by `ENABLE_SCRAPER` |
 | Bots | Vercel (webhooks) | Webhook URLs registered per platform |
@@ -166,9 +168,11 @@ import { validateApiKey } from "@/lib/apiAuth";
 - **Storage**: `R2_*` (Cloudflare R2)
 - **Email**: `RESEND_API_KEY`
 - **Bots**: `TELEGRAM_*`, `WHATSAPP_*`, `SLACK_*`, `MESSENGER_*`
-- **Extension**: `WXT_INBOXSDK_APP_ID`, `WXT_TURNSTILE_BRIDGE_URL` (optional local-dev override — defaults to `https://askarthur.au/extension-turnstile`)
+- **Extension**: `WXT_INBOXSDK_APP_ID`, `WXT_TURNSTILE_BRIDGE_URL` (optional local-dev override — defaults to `https://askarthur.au/extension-turnstile`), `WXT_FACEBOOK_ADS` (build-time flag for Facebook ad scanning content scripts), `WXT_URL_GUARD`, `WXT_SITE_AUDIT` (other extension feature flags)
 - **Turnstile (extension registration bot-gate)**: `TURNSTILE_SECRET_KEY`, `NEXT_PUBLIC_TURNSTILE_SITE_KEY`
 - **Admin**: `ADMIN_SECRET`
 - **Billing**: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `NEXT_PUBLIC_STRIPE_PRO_MONTHLY`, `NEXT_PUBLIC_STRIPE_PRO_ANNUAL`, `NEXT_PUBLIC_STRIPE_BUSINESS_MONTHLY`, `NEXT_PUBLIC_STRIPE_BUSINESS_ANNUAL`
-- **Auth**: `NEXT_PUBLIC_FF_AUTH`
-- **External APIs**: `SAFE_BROWSING_API_KEY`, `TWILIO_*`
+- **Auth / feature flags**: `NEXT_PUBLIC_FF_AUTH`, `NEXT_PUBLIC_FF_FACEBOOK_ADS` (server-side gate matching WXT_FACEBOOK_ADS), `NEXT_PUBLIC_FF_MEDIA_ANALYSIS`, `NEXT_PUBLIC_FF_DEEPFAKE`, `NEXT_PUBLIC_FF_PHONE_INTEL` (see `packages/utils/src/feature-flags.ts` for the full list)
+- **External APIs**: `SAFE_BROWSING_API_KEY`, `TWILIO_ACCOUNT_SID` + `TWILIO_AUTH_TOKEN`, `OPENAI_API_KEY` (Whisper), `HIVE_API_KEY` (Facebook ad image scanning — pricing contract required), `REALITY_DEFENDER_API_KEY` + `RESEMBLE_AI_API_TOKEN` (deepfake detection), `ABN_LOOKUP_GUID` (ABR Web Services)
+- **Bot webhook dispatch**: `SUPABASE_WEBHOOK_SECRET` (HMAC secret on `bot_message_queue` INSERT trigger — see `/api/bot-webhook/route.ts`)
+- **Cost alerts**: `TELEGRAM_ADMIN_CHAT_ID` (personal chat ID via @userinfobot), `DAILY_COST_THRESHOLD_USD` (default 2)

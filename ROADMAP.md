@@ -124,8 +124,11 @@ Building a comprehensive threat database.
 |---------|--------|
 | Media upload to Cloudflare R2 | ✅ Done |
 | Media analysis endpoints (upload, analyze, status) | ✅ Done |
-| Deepfake detection integration (Reality Defender / Resemble AI) | 🔄 In progress |
+| Deepfake detection provider SDKs (Reality Defender / Resemble AI) | ✅ Done (client code in `lib/realityDefender.ts`, `lib/resembleDetect.ts`, orchestrator in `lib/deepfakeDetection.ts`) |
+| **Deepfake detection wiring into `runMediaAnalysis`** | 🚧 Orphan code — `detectDeepfake()` exists but is never called from the media pipeline. Needs `/tmp` buffer write (Reality Defender) + presigned R2 GET URL (Resemble fallback) before flipping `NEXT_PUBLIC_FF_DEEPFAKE=true`. ~2 hours of wiring in `lib/mediaAnalysis.ts`. |
+| `logCost` instrumentation on Reality Defender + Resemble + Whisper callsites | ✅ Done (2026-04) |
 | Multi-image analysis (up to 10 images per request) | ✅ Done |
+| Per-IP sliding-window rate limit on image uploads (5/hour) | ✅ Done (2026-04) |
 | Breach check API endpoint | ✅ Done |
 
 ## Phase 5b — Soft Launch Readiness ✅
@@ -207,9 +210,12 @@ Future priorities. Items here may move to `BACKLOG.md` if deprioritized.
 | Push scam alerts (FCM/APNs) | Backend ✅ (v32), UI pending |
 | Background SMS scanning (Android NotificationListenerService / iOS ILMessageFilterExtension) | Planned |
 | Call screening (Android CallScreeningService / iOS CallKit) | Planned |
-| Deepfake detection pipeline wiring (Reality Defender / Resemble AI) | Planned |
+| Deepfake detection pipeline wiring (Reality Defender / Resemble AI) | See Phase 5 — orphan code, needs wiring into runMediaAnalysis |
 | Automated decision-making disclosure (Privacy Act tranche 1, Dec 2026) | Planned |
-| Chrome Web Store / Google Play submissions | Planned |
+| Chrome Web Store submission — v1.0.0 minimal zip | ✅ Ready (zip built, assets staged at `apps/extension/dist/cws-assets/`, listing content drafted; user action required to upload) |
+| Chrome Web Store submission — v1.0.1 with Facebook Ads + server gate | ✅ Built (`askarthurextension-1.0.1-chrome.zip`, 98.73 kB; requires Hive pricing contract + `HIVE_API_KEY` + `NEXT_PUBLIC_FF_FACEBOOK_ADS=true` in Vercel; 1–3 day CWS re-review for new Facebook host permissions) |
+| Firefox / AMO submission (same source tree) | Planned — v1.1.0 |
+| Google Play (Android mobile) submission | Planned |
 | Public threat intelligence feeds (real-time) | Planned |
 | Brand monitoring (impersonation detection) | Planned |
 | Carrier feeds integration (Telstra/Optus) | Planned |
@@ -285,16 +291,20 @@ Multi-type security scanner covering websites, Chrome extensions, MCP servers, a
 
 ## Phase 11b — Facebook Marketplace Scam Detection
 
-Chrome extension content script for Marketplace listing analysis and Messenger PayID scam detection.
+Chrome extension content script for Marketplace listing analysis and Messenger PayID scam detection. Code is shipped in the v1.0.1 extension bundle but **gated off** behind `WXT_FACEBOOK_ADS` (build-time) + `NEXT_PUBLIC_FF_FACEBOOK_ADS` (server-side gate on `/api/extension/analyze-ad`). Flip both to activate.
 
 | Feature | Status |
 |---------|--------|
-| Marketplace listing seller trust scoring (join date, ratings, location mismatch) | 🔄 In progress |
-| Trust badge injection on listing pages (green/amber/red, shadow DOM) | 🔄 In progress |
-| PayID scam pattern detection in Messenger chat (6 patterns, client-side) | 🔄 In progress |
-| Chat warning banner injection (shadow DOM) | 🔄 In progress |
-| Background API analysis via existing analyze-ad endpoint | 🔄 In progress |
-| SPA navigation resilience (MutationObserver + URL heartbeat) | 🔄 In progress |
+| Marketplace listing seller trust scoring (join date, ratings, location mismatch) | ✅ Code shipped, flag-gated off |
+| Trust badge injection on listing pages (green/amber/red, shadow DOM) | ✅ Code shipped, flag-gated off |
+| PayID scam pattern detection in Messenger chat (6 patterns, client-side) | ✅ Code shipped, flag-gated off |
+| Chat warning banner injection (shadow DOM) | ✅ Code shipped, flag-gated off |
+| Background API analysis via `/api/extension/analyze-ad` | ✅ Code shipped, server-side `NEXT_PUBLIC_FF_FACEBOOK_ADS` gate added (returns 503 when flag is off — defence against extracted-secret abuse) |
+| SPA navigation resilience (MutationObserver + URL heartbeat) | ✅ Code shipped, flag-gated off |
+| Hive AI cost instrumentation (`logCost` on every sync-task call) | ✅ Done, `unitCostUsd: 0` placeholder pending pricing contract |
+| Hive AI pricing contract + `PRICING.HIVE_AI_USD_PER_IMAGE` constant | 🚧 Planned — negotiate with Hive commercial, update `apps/web/lib/cost-telemetry.ts` + `analyze-ad/route.ts:155` |
+| Selector regression tests for `ad-detector.ts` | 🚧 Planned — Facebook restructures feed DOM ~monthly; capture 5–10 real feed HTML fixtures + write assertions against `detectSponsoredPost()` |
+| Per-install hourly cap on `/api/extension/analyze-ad` (60/hour) | 🚧 Planned — defence-in-depth atop the existing 50/day bucket, bounds MutationObserver runaway |
 
 ## Phase 11c — B2B Corporate Onboarding & Go-to-Market ✅
 
@@ -376,6 +386,44 @@ Security certifications, SLA infrastructure, and procurement readiness for mid-t
 | Fraud Manager dashboard (entity search, alerts, CSV export) | Planned |
 
 See `docs/pitch/certification-roadmap.md` for detailed sequence, costs, and timelines.
+
+## Phase 13 — Cost Observability & Infrastructure Hardening
+
+Introduced 2026-04 to close the loop between "paid API call" and "visible spend". Cost-attributable operations emit telemetry rows tagged by feature + provider; admin dashboard surfaces them; Telegram alerts catch anomalies.
+
+### Tier 1 — Ground truth ✅
+
+| Feature | Status |
+|---------|--------|
+| `cost_telemetry` table + `daily_cost_summary` / `today_cost_total` views (migration v62) | ✅ Done |
+| `logCost()` fire-and-forget helper wrapped in `waitUntil` (`apps/web/lib/cost-telemetry.ts`) | ✅ Done |
+| `PRICING` constants — Claude Haiku 4.5, Twilio Lookup v2, Resemble, OpenAI Whisper | ✅ Done |
+| `AnalysisResult.usage` surfaces token counts from `analyzeWithClaude` | ✅ Done |
+| Per-IP sliding-window rate limit on `/api/analyze` image uploads (5/h) | ✅ Done |
+| Bot queue → Supabase Database Webhook (event-driven, unmetered); deleted polling handler | ✅ Done |
+| `/api/bot-webhook` receiver + `/api/cron/bot-queue-sweep` safety-net (every 10 min) | ✅ Done |
+
+### Tier 2 — Observability surfaces ✅
+
+| Feature | Status |
+|---------|--------|
+| `logCost` instrumentation on 7 paid-API callsites: `web_analyze`, `extension_analyze`, `extension_analyze_ad`, `hive_ai`, `twilio_lookup`, `deepfake_audio` (Resemble), `deepfake_image` (Reality Defender), `transcription` (Whisper) | ✅ Done |
+| Admin cost dashboard at `/admin/costs` (today + last-7d + WoW delta + top-5 features + 30-day breakdown) | ✅ Done |
+| Daily Telegram threshold alert (every 6h, fires only when today > `DAILY_COST_THRESHOLD_USD`) | ✅ Done |
+| Weekly Telegram WoW digest (Sunday 22:00 UTC = Monday 08:00 AEST) | ✅ Done |
+| `sendAdminTelegramMessage` helper in `apps/web/lib/bots/telegram/sendAdminMessage.ts` | ✅ Done |
+| Server-side `NEXT_PUBLIC_FF_FACEBOOK_ADS` gate on `/api/extension/analyze-ad` (503 until flipped, prevents extracted-secret abuse) | ✅ Done |
+
+### Tier 3 — Conditional future work
+
+Triggered by specific events. Do not schedule speculatively.
+
+| Feature | Trigger |
+|---------|---------|
+| Threat-DB endpoint → Supabase Edge Function + Cloudflare CDN (scales daily-refresh fan-out to $0 at 10K+ installs) | `/api/extension/extension-security/threat-db` starts returning non-stub data |
+| `cost_telemetry` retention job (180-day `pg_cron` delete, or archive to R2) | Row count exceeds ~20M (~6 GB; Supabase Pro storage quota is 8 GB) |
+| Automated budget caps / kill-switches (hourly cron flips a Redis kill-switch at `DAILY_HARD_CAP_USD`) | 2+ weeks of steady-state telemetry gives a baseline to alarm against |
+| Per-flag flip playbooks (Hive pricing → PRICING update → flag flip checklist, per Phase 5/11b) | Each paid-API feature flag flip |
 
 ---
 
