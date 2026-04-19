@@ -1,0 +1,26 @@
+name: Deploy
+on:
+  workflow_dispatch:
+    inputs:
+      triggered_by:
+        description: 'Who triggered this deploy'
+        required: false
+        default: 'manual'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log trigger
+        run: echo "Deploy triggered by ${{ github.event.inputs.triggered_by }}"
+
+      # TODO: Add your actual build + deploy steps here
+      # Example for Vercel:
+      # - uses: amondnet/vercel-action@v25
+      #   with:
+      #     vercel-token: ${{ secrets.VERCEL_TOKEN }}
+      #     vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+      #     vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+      #     vercel-args: '--prod'
