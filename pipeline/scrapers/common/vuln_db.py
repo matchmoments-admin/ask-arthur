@@ -259,6 +259,34 @@ def bulk_upsert_vulnerabilities(
     return stats
 
 
+def merge_external_references(
+    existing: list[dict] | None,
+    incoming: list[dict] | None,
+) -> list[dict]:
+    """Merge two lists of {url, source} refs, deduplicating by url.
+
+    When the same CVE is reported by multiple feeds (e.g. NVD lists an advisory,
+    GHSA lists the npm package page, CISA lists exploitation notes), each source
+    contributes distinct URLs that are valuable to keep. This helper lets scrapers
+    preserve refs from previous runs rather than overwriting them.
+
+    Order is preserved: existing refs first, then any new refs with urls not
+    already present. Sources are kept as-provided; callers should not try to
+    reconcile conflicting `source` tags for the same URL (first write wins).
+    """
+    seen: set[str] = set()
+    merged: list[dict] = []
+    for ref in (existing or []) + (incoming or []):
+        if not isinstance(ref, dict):
+            continue
+        url = (ref.get("url") or "").strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        merged.append(ref)
+    return merged
+
+
 def log_vuln_ingestion(
     conn,
     feed_name: str,

@@ -1,7 +1,7 @@
 name: Scrape Vulnerability Feeds
 
-# Weekly vulnerability intelligence scrapers (Phase 14 Sprint 1).
-# First feed: CISA KEV. NVD, GHSA, OSV, CERT AU follow in Sprint 2.
+# Weekly vulnerability intelligence scrapers (Phase 14).
+# Sprint 1: CISA KEV. Sprint 2: NVD, GHSA, OSV, CERT AU.
 
 on:
   schedule:
@@ -17,6 +17,10 @@ on:
         options:
           - all
           - cisa_kev
+          - nvd_recent
+          - github_advisory
+          - osv_feed
+          - cert_au_vulns
 
 jobs:
   scrape:
@@ -48,6 +52,37 @@ jobs:
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: python -m vulnerabilities.cisa_kev
+
+      - name: Scrape NVD (lastModStartDate last 7 days)
+        if: github.event.inputs.feed == 'all' || github.event.inputs.feed == 'nvd_recent' || github.event_name == 'schedule'
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: python -m vulnerabilities.nvd_recent
+
+      # GHSA requires a fine-grained PAT with read:security_events scope.
+      # The scraper no-ops cleanly when GHSA_PAT is empty, but we also gate
+      # the step itself so the run log stays clean until the secret lands.
+      - name: Scrape GitHub Security Advisories
+        if: (github.event.inputs.feed == 'all' || github.event.inputs.feed == 'github_advisory' || github.event_name == 'schedule') && env.GHSA_PAT != ''
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GHSA_PAT: ${{ secrets.GHSA_PAT }}
+        run: python -m vulnerabilities.github_advisory
+
+      - name: Scrape OSV.dev (npm + pypi ecosystems)
+        if: github.event.inputs.feed == 'all' || github.event.inputs.feed == 'osv_feed' || github.event_name == 'schedule'
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: python -m vulnerabilities.osv_feed
+
+      # CERT AU vuln scraper imports scrape_vulnerabilities() from cert_au.py;
+      # the original URL-based scrape() runs separately in scrape-feeds.yml.
+      - name: Scrape CERT AU vulnerability advisories
+        if: github.event.inputs.feed == 'all' || github.event.inputs.feed == 'cert_au_vulns' || github.event_name == 'schedule'
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: python -c "from cert_au import scrape_vulnerabilities; scrape_vulnerabilities()"
 
   # -----------------------------------------------------------------------
   # Notify on failure — posts to Slack incoming webhook
