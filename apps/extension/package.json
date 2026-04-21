@@ -6,7 +6,7 @@
     "build": "wxt build",
     "build:firefox": "wxt build -b firefox",
     "zip": "wxt zip",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "wxt prepare && tsc --noEmit"
   },
   "dependencies": {
     "@askarthur/types": "workspace:*",

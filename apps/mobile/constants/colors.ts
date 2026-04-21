@@ -23,6 +23,8 @@ export const Colors = {
   // Verdict
   safe: "#388E3C",
   safeBg: "#ECFDF5",
+  uncertain: "#6B7C93",
+  uncertainBg: "#F0F2F5",
   suspicious: "#F57C00",
   suspiciousBg: "#FFF8E1",
   highRisk: "#D32F2F",
@@ -37,6 +39,7 @@ export const Colors = {
 
 export const VerdictColors = {
   SAFE: { text: Colors.safe, bg: Colors.safeBg },
+  UNCERTAIN: { text: Colors.uncertain, bg: Colors.uncertainBg },
   SUSPICIOUS: { text: Colors.suspicious, bg: Colors.suspiciousBg },
   HIGH_RISK: { text: Colors.highRisk, bg: Colors.highRiskBg },
 } as const;

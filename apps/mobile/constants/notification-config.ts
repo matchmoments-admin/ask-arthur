@@ -14,12 +14,14 @@ export const CHANNEL_CONFIG = {
 export const VERDICT_NOTIFICATION_COLOR: Record<Verdict, string> = {
   HIGH_RISK: "#D32F2F",
   SUSPICIOUS: "#F57C00",
+  UNCERTAIN: "#6B7C93",
   SAFE: "#388E3C",
 };
 
 export const VERDICT_NOTIFICATION_TITLE: Record<Verdict, string> = {
   HIGH_RISK: "High Risk Detected",
   SUSPICIOUS: "Suspicious Content",
+  UNCERTAIN: "Couldn't Determine Risk",
   SAFE: "Message Appears Safe",
 };
 

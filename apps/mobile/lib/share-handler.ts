@@ -9,19 +9,23 @@ export interface NormalizedSharedContent {
 /**
  * Convert an expo-share-intent payload into a normalized shape
  * consumable by the home screen analysis flow.
+ *
+ * expo-share-intent 4.x ShareIntent shape: text/files/webUrl/type are all
+ * `T | null | undefined` (not just `T | undefined`). Accept the wider input
+ * type and normalise on the way out.
  */
 export function normalizeSharedContent(intent: {
-  text?: string;
-  files?: ShareIntentFile[];
-  weblinkUrl?: string;
-  type?: string;
+  text?: string | null;
+  files?: ShareIntentFile[] | null;
+  webUrl?: string | null;
+  type?: string | null;
 }): NormalizedSharedContent {
   const result: NormalizedSharedContent = {};
 
   // URL from share sheet
-  if (intent.weblinkUrl) {
-    result.url = intent.weblinkUrl;
-    result.text = intent.weblinkUrl;
+  if (intent.webUrl) {
+    result.url = intent.webUrl;
+    result.text = intent.webUrl;
   }
 
   // Plain text

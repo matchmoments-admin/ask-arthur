@@ -1,4 +1,4 @@
-import { initializeSslPinning, fetch as pinnedFetch } from "react-native-ssl-public-key-pinning";
+import { initializeSslPinning } from "react-native-ssl-public-key-pinning";
 
 /**
  * SHA-256 public key hashes for askarthur.au.
@@ -38,9 +38,9 @@ export async function initCertPinning(): Promise<void> {
   if (initialized) return;
 
   try {
-    await initializeSslPinning({
-      domainPinningPolicies: CERT_PINS,
-    });
+    // react-native-ssl-public-key-pinning 1.x applies pinning globally to fetch
+    // after initializeSslPinning() resolves — no separate pinned-fetch export.
+    await initializeSslPinning(CERT_PINS);
     initialized = true;
   } catch (err) {
     // Don't crash the app if pinning fails — log and continue
@@ -48,9 +48,3 @@ export async function initCertPinning(): Promise<void> {
     console.warn("SSL pinning initialization failed:", err);
   }
 }
-
-/**
- * Pinned fetch — use this instead of global fetch for API calls.
- * Falls back to regular fetch if pinning is not initialized.
- */
-export { pinnedFetch };
