@@ -2,14 +2,26 @@
 
 import { useCallback, useEffect, useReducer, useRef } from "react";
 
-const STEPS = [
+// Legacy labels (used when no currentStep prop is passed — keeps pre-V2
+// behaviour identical for the flag-off path).
+const LEGACY_STEPS = [
   "Analysing message content...",
   "Checking for scam patterns...",
   "Verifying URLs against databases...",
   "Generating safety report...",
 ];
 
+// V2 honest labels — tied to real fetch boundaries by the caller.
+const V2_STEPS: Array<{ key: Step; label: string }> = [
+  { key: "upload", label: "Uploading what you sent" },
+  { key: "lookup", label: "Checking it against known scams" },
+  { key: "analyse", label: "Looking for tell-tale signs" },
+  { key: "write", label: "Writing your answer" },
+];
+
 const STEP_DELAYS = [0, 1200, 2800, 4500];
+
+export type Step = "upload" | "lookup" | "analyse" | "write" | "done";
 
 type StepState = "pending" | "active" | "done";
 
@@ -30,7 +42,7 @@ function reducer(state: State, action: Action): State {
     case "ADVANCE":
       return { ...state, activeStepIndex: action.index };
     case "DONE":
-      return { phase: "done", activeStepIndex: STEPS.length - 1 };
+      return { phase: "done", activeStepIndex: LEGACY_STEPS.length - 1 };
     default:
       return state;
   }
@@ -38,9 +50,107 @@ function reducer(state: State, action: Action): State {
 
 interface Props {
   status: "idle" | "analyzing" | "complete" | "error" | "rate_limited";
+  /** When provided, drives the UI from honest caller-emitted transitions and
+   *  the legacy timer-based reducer is bypassed. Use V2 step labels. */
+  currentStep?: Step;
 }
 
-export default function AnalysisProgress({ status }: Props) {
+export default function AnalysisProgress({ status, currentStep }: Props) {
+  if (currentStep) {
+    return <V2Progress currentStep={currentStep} />;
+  }
+  return <LegacyProgress status={status} />;
+}
+
+// ---------------------------------------------------------------------------
+// V2 — honest, prop-driven progress. No fake timers.
+// ---------------------------------------------------------------------------
+
+function V2Progress({ currentStep }: { currentStep: Step }) {
+  const slowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [showSlow, setShowSlow] = useReducer(
+    (_: boolean, next: boolean) => next,
+    false,
+  );
+
+  useEffect(() => {
+    if (currentStep === "done") {
+      if (slowTimerRef.current) clearTimeout(slowTimerRef.current);
+      return;
+    }
+    slowTimerRef.current = setTimeout(() => setShowSlow(true), 15000);
+    return () => {
+      if (slowTimerRef.current) clearTimeout(slowTimerRef.current);
+    };
+  }, [currentStep]);
+
+  const activeIndex = V2_STEPS.findIndex((s) => s.key === currentStep);
+  const isDone = currentStep === "done";
+  const announced = isDone
+    ? "Done."
+    : V2_STEPS[Math.max(0, activeIndex)]?.label ?? "";
+
+  return (
+    <section
+      aria-busy={!isDone}
+      aria-labelledby="analysis-progress-heading"
+      className="mt-6 rounded-lg border border-slate-200 bg-white p-5"
+    >
+      <h2
+        id="analysis-progress-heading"
+        className="text-sm font-bold uppercase tracking-widest text-deep-navy"
+      >
+        Checking what you sent…
+      </h2>
+      <ol aria-hidden="true" className="mt-3 space-y-2">
+        {V2_STEPS.map((s, i) => {
+          const state: StepState = isDone
+            ? "done"
+            : i < activeIndex
+              ? "done"
+              : i === activeIndex
+                ? "active"
+                : "pending";
+          return (
+            <li key={s.key} className="flex items-center gap-3">
+              <StepIndicator state={state} />
+              <span
+                className={`text-sm ${
+                  state === "pending"
+                    ? "text-slate-400"
+                    : state === "active"
+                      ? "text-deep-navy"
+                      : "text-slate-500"
+                }`}
+              >
+                {s.label}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+      <p
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {announced}
+      </p>
+      {showSlow && !isDone && (
+        <p className="mt-4 text-sm text-gov-slate">
+          Still working on it — deep checks can take up to 30 seconds.
+        </p>
+      )}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Legacy — fake-timer based. Unchanged behaviour for pre-V2 callers.
+// ---------------------------------------------------------------------------
+
+function LegacyProgress({ status }: { status: Props["status"] }) {
   const [state, dispatch] = useReducer(reducer, {
     phase: "idle",
     activeStepIndex: 0,
@@ -52,7 +162,6 @@ export default function AnalysisProgress({ status }: Props) {
     timersRef.current = [];
   }, []);
 
-  // Start timers when analyzing begins
   useEffect(() => {
     if (status !== "analyzing") {
       clearTimers();
@@ -65,7 +174,7 @@ export default function AnalysisProgress({ status }: Props) {
     STEP_DELAYS.slice(1).forEach((delay, i) => {
       const timer = setTimeout(
         () => dispatch({ type: "ADVANCE", index: i + 1 }),
-        delay
+        delay,
       );
       timersRef.current.push(timer);
     });
@@ -73,7 +182,6 @@ export default function AnalysisProgress({ status }: Props) {
     return clearTimers;
   }, [status, clearTimers]);
 
-  // Mark done when analysis completes (transition from analyzing to complete/error)
   useEffect(() => {
     if (status === "complete" || status === "error" || status === "rate_limited") {
       const timer = setTimeout(() => dispatch({ type: "DONE" }), 0);
@@ -81,8 +189,7 @@ export default function AnalysisProgress({ status }: Props) {
     }
   }, [status]);
 
-  // Derive visual step states from reducer state
-  const stepStates: StepState[] = STEPS.map((_, i) => {
+  const stepStates: StepState[] = LEGACY_STEPS.map((_, i) => {
     if (state.phase === "idle") return "pending";
     if (state.phase === "done") return "done";
     if (i < state.activeStepIndex) return "done";
@@ -94,7 +201,7 @@ export default function AnalysisProgress({ status }: Props) {
 
   return (
     <div className="py-4 space-y-3">
-      {STEPS.map((step, i) => (
+      {LEGACY_STEPS.map((step, i) => (
         <div key={i} className="flex items-center gap-3">
           <StepIndicator state={stepStates[i]} />
           <span
@@ -102,8 +209,8 @@ export default function AnalysisProgress({ status }: Props) {
               stepStates[i] === "pending"
                 ? "text-slate-400"
                 : stepStates[i] === "active"
-                ? "text-deep-navy"
-                : "text-slate-500"
+                  ? "text-deep-navy"
+                  : "text-slate-500"
             }`}
           >
             {step}

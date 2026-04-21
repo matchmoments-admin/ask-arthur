@@ -8,11 +8,14 @@ function getConfidenceLabel(confidence: number): string {
   if (confidence >= 0.6) return "Moderate confidence";
   return "Low confidence";
 }
+import { useRef } from "react";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { getRecoverySteps } from "@/lib/recoverySteps";
 import DeepfakeGauge from "./DeepfakeGauge";
 import RecoveryGuide from "./RecoveryGuide";
 import ScamReportCard from "./ScamReportCard";
+import ResultFeedback from "./result/ResultFeedback";
+import ResultActionButtons from "./result/ResultActionButtons";
 import type { ScammerContacts } from "@askarthur/types";
 
 type Verdict = "SAFE" | "SUSPICIOUS" | "HIGH_RISK";
@@ -36,6 +39,11 @@ interface ResultCardProps {
   scammerUrls?: Array<{ url: string; isMalicious: boolean; sources: string[] }>;
   channel?: string;
   inputMode?: string;
+  // Result Screen V2 additions (gated by featureFlags.resultScreenV2)
+  onCheckAnother?: () => void;
+  contentHash?: string;
+  analysisId?: string;
+  scamReportId?: number;
 }
 
 const VERDICT_CONFIG: Record<Verdict, { color: string; bg: string; textColor: string; title: string; icon: LucideIcon }> = {
@@ -79,9 +87,37 @@ export default function ResultCard({
   scammerUrls,
   channel,
   inputMode,
+  onCheckAnother,
+  contentHash,
+  analysisId,
+  scamReportId,
 }: ResultCardProps) {
   const config = VERDICT_CONFIG[verdict];
   const recovery = getRecoverySteps(scamType, impersonatedBrand, verdict);
+  const scamReportRef = useRef<HTMLDivElement | null>(null);
+  const scamwatchRef = useRef<HTMLDivElement | null>(null);
+
+  const scamReportCardVisible = Boolean(
+    featureFlags.scamContactReporting && (scammerContacts || scammerUrls),
+  );
+  const scamwatchCtaVisible = verdict === "HIGH_RISK" && countryCode === "AU";
+  const hasReportSurface = scamReportCardVisible || scamwatchCtaVisible;
+
+  function handleReport() {
+    const target = scamReportRef.current ?? scamwatchRef.current;
+    if (target) {
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    // Fallback: open Scamwatch portal in a new tab.
+    if (typeof window !== "undefined") {
+      window.open(
+        "https://portal.scamwatch.gov.au/report-a-scam/",
+        "_blank",
+        "noopener,noreferrer",
+      );
+    }
+  }
 
   return (
     <div role="alert" className="mt-6 rounded-sm border border-slate-200 overflow-hidden">
@@ -114,8 +150,8 @@ export default function ResultCard({
         )}
 
         {/* Scam Report Card — help protect others */}
-        {featureFlags.scamContactReporting && (scammerContacts || scammerUrls) && (
-          <div className="mb-5">
+        {scamReportCardVisible && (
+          <div className="mb-5" ref={scamReportRef}>
             <ScamReportCard
               contacts={scammerContacts}
               scammerUrls={scammerUrls}
@@ -190,8 +226,8 @@ export default function ResultCard({
         )}
 
         {/* Scamwatch reporting CTA for Australian users on HIGH_RISK */}
-        {verdict === "HIGH_RISK" && countryCode === "AU" && (
-          <div className="mt-5 p-4 bg-danger-bg border border-danger-border rounded-lg">
+        {scamwatchCtaVisible && (
+          <div ref={scamwatchRef} className="mt-5 p-4 bg-danger-bg border border-danger-border rounded-lg">
             <p className="text-deep-navy text-base font-bold mb-2">
               Report this scam to Scamwatch
             </p>
@@ -226,6 +262,26 @@ export default function ResultCard({
             .
           </p>
         </div>
+
+        {/* Result Screen V2: thumbs feedback + two-button footer. Gated off
+            by default — safe to ship ahead of v66 DB migration application. */}
+        {featureFlags.resultScreenV2 && (
+          <>
+            <ResultFeedback
+              verdictGiven={verdict}
+              analysisId={analysisId}
+              scamReportId={scamReportId}
+              contentHash={contentHash}
+            />
+            {onCheckAnother && (
+              <ResultActionButtons
+                onCheckAnother={onCheckAnother}
+                onReport={verdict === "SAFE" ? undefined : handleReport}
+                showReport={verdict !== "SAFE" && hasReportSurface}
+              />
+            )}
+          </>
+        )}
       </div>
     </div>
   );

@@ -117,6 +117,12 @@ export const featureFlags = {
    *  Keep OFF until PR B3's $5/day cost brake is live — the enrichment fans
    *  out to every new CVE so a large NVD catch-up can spend quickly. */
   vulnAuEnrichment: process.env.NEXT_PUBLIC_FF_VULN_AU_ENRICHMENT === "true",
+
+  /** Result Screen V2: thumbs feedback widget, two-button action footer,
+   *  invalid-submission info panel, and honest 4-step progress tied to real
+   *  fetch boundaries. Gates the P0 UX refresh. Keep OFF until v66 migration
+   *  is applied to every environment and privacy-page copy has had legal review. */
+  resultScreenV2: process.env.NEXT_PUBLIC_FF_RESULT_SCREEN_V2 === "true",
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;

@@ -4,6 +4,31 @@ Deferred features organized by platform. Items here are validated ideas that did
 
 ---
 
+## Result Screen V2 — follow-up sprints
+
+P0 (feedback widget, two-button footer, invalid-state, honest progress) ships
+behind `NEXT_PUBLIC_FF_RESULT_SCREEN_V2` on v66. These are the queued follow-ups:
+
+- **P1 onward-reporting (v67)** — destination picker `OnwardReportingCard`,
+  `onward_report_log` + `brand_abuse_contacts` tables + `get_onward_destinations`
+  RPC, Inngest workers for brand-abuse email + ACMA spam forwarding + Scamwatch/
+  ReportCyber/IDCARE deep-link handoffs, Resend templates (`brand-abuse-report.tsx`,
+  `acma-spam-forward.tsx`), SPF/DKIM/DMARC for `reports@askarthur.au`,
+  `NEXT_PUBLIC_FF_ONWARD_REPORTING` flag.
+- **P2 governance + self-service** — `/settings/my-data` (view + delete feedback
+  and submissions), quarterly brand-contacts staleness cron, nightly SMTP probe
+  on abuse inboxes, PIA document + public summary, admin triage queue for
+  false-positive feedback, unsubscribe/encryption helper for `followup_email`.
+- **Extension + mobile parity** — thumbs widget + destination picker on both
+  `apps/extension/src/components/ResultDisplay.tsx` and
+  `apps/mobile/components/AnalysisResult.tsx`. Neither surface has any feedback
+  UI today.
+- **Honest progress via streaming** — current P0 approximates with client-side
+  fetch-boundary transitions. If `/api/analyze` gains SSE or streaming JSON,
+  swap `AnalysisProgress`'s `currentStep` prop to read actual server events.
+
+---
+
 ## Mobile
 
 - [x] AI consent modal (Apple Guideline 5.1.2(i) compliance)

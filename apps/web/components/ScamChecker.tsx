@@ -3,10 +3,11 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { X, ScanLine, Paperclip, Mic, Lock, EyeOff } from "lucide-react";
-import AnalysisProgress from "./AnalysisProgress";
+import AnalysisProgress, { type Step as ProgressStep } from "./AnalysisProgress";
 import ResultCard from "./ResultCard";
 import ScreenshotDrawer from "./ScreenshotDrawer";
 import QrScanFlow from "./QrScanFlow";
+import InvalidSubmissionState from "./result/InvalidSubmissionState";
 import { compressImage } from "@/lib/compressImage";
 import { tryDecodeQR } from "@/lib/qrDecode";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -14,6 +15,11 @@ import { useMediaAnalysis } from "@/lib/hooks/useMediaAnalysis";
 import type { AnalysisResponse } from "@/types/analysis";
 
 type Status = "idle" | "analyzing" | "complete" | "error" | "rate_limited";
+
+function makeReferenceId(): string {
+  const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `ASK-${rand}`;
+}
 
 const MEDIA_STATUS_LABELS: Record<string, string> = {
   uploading: "Uploading audio...",
@@ -35,6 +41,9 @@ export default function ScamChecker() {
   const [inputMode, setInputMode] = useState<"text" | "image" | "qrcode">("text");
   const [qrDecodedUrl, setQrDecodedUrl] = useState<string | null>(null);
   const [qrError, setQrError] = useState<string | null>(null);
+  const [progressStep, setProgressStep] = useState<ProgressStep | undefined>(undefined);
+  const [errorAttempts, setErrorAttempts] = useState(0);
+  const [errorRef, setErrorRef] = useState<string | null>(null);
   const searchParams = useSearchParams();
 
   // Media analysis hook
@@ -158,9 +167,10 @@ export default function ScamChecker() {
     setStatus("analyzing");
     setResult(null);
     setErrorMsg("");
+    setProgressStep("upload");
 
     try {
-      const res = await fetch("/api/analyze", {
+      const fetchPromise = fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -169,10 +179,16 @@ export default function ScamChecker() {
           mode: inputMode !== "text" ? inputMode : undefined,
         }),
       });
+      // Request is in-flight — advance to "lookup" (visible for the bulk of
+      // the Claude round-trip since headers only return once the body is ready).
+      setProgressStep("lookup");
+
+      const res = await fetchPromise;
 
       if (res.status === 429) {
         const data = await res.json();
         setStatus("rate_limited");
+        setProgressStep(undefined);
         setErrorMsg(data.message || "Too many requests. Please try again later.");
         return;
       }
@@ -181,12 +197,20 @@ export default function ScamChecker() {
         throw new Error("Analysis failed");
       }
 
+      setProgressStep("analyse");
       const data: AnalysisResponse = await res.json();
+      setProgressStep("write");
       setResult(data);
       setStatus("complete");
+      setProgressStep("done");
+      setErrorAttempts(0);
+      setErrorRef(null);
       window.dispatchEvent(new Event("safeverify:check-complete"));
     } catch {
       setStatus("error");
+      setProgressStep(undefined);
+      setErrorAttempts((n) => n + 1);
+      setErrorRef(makeReferenceId());
       setErrorMsg("Something went wrong. Please try again.");
     }
   }
@@ -213,6 +237,9 @@ export default function ScamChecker() {
     setStatus("idle");
     setResult(null);
     setErrorMsg("");
+    setProgressStep(undefined);
+    setErrorAttempts(0);
+    setErrorRef(null);
     media.reset();
   }
 
@@ -407,7 +434,10 @@ export default function ScamChecker() {
       )}
 
       {/* Text analysis progress */}
-      <AnalysisProgress status={status} />
+      <AnalysisProgress
+        status={status}
+        currentStep={featureFlags.resultScreenV2 ? progressStep : undefined}
+      />
 
       {/* Result */}
       <div aria-live="polite">
@@ -428,6 +458,7 @@ export default function ScamChecker() {
             scammerUrls={result.scammerUrls}
             channel={result.channel}
             inputMode={result.inputMode || inputMode}
+            onCheckAnother={handleReset}
           />
       )}
 
@@ -442,11 +473,26 @@ export default function ScamChecker() {
           deepfakeScore={media.result.deepfakeScore}
           deepfakeProvider={media.result.deepfakeProvider}
           phoneRiskFlags={media.result.phoneRiskFlags}
+          onCheckAnother={handleReset}
         />
       )}
 
-      {/* Error / rate limit messages (text analysis) */}
-      {(status === "error" || status === "rate_limited") && (
+      {/* Error: info-blue invalid-state panel when V2 is on, plain warn
+          banner otherwise. Rate-limit always uses the warn banner — info-blue
+          is reserved for scrape / parse failures, not throttling. */}
+      {status === "error" && featureFlags.resultScreenV2 && (
+        <InvalidSubmissionState
+          referenceId={errorRef ?? undefined}
+          attemptCount={errorAttempts}
+          onRetry={() => {
+            setStatus("idle");
+            setErrorMsg("");
+          }}
+          onUploadScreenshot={() => setDrawerOpen(true)}
+        />
+      )}
+      {((status === "error" && !featureFlags.resultScreenV2) ||
+        status === "rate_limited") && (
         <div role="alert" className="mt-6 p-4 bg-warn-bg border border-warn-border rounded-[4px]">
           <p className="text-warn-heading text-base">{errorMsg}</p>
           {status === "rate_limited" && (
