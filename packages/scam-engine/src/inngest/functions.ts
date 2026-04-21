@@ -13,7 +13,7 @@ import { urlscanEnrichment } from "./urlscan-enrichment";
 import { scamAlertCron } from "./scam-alerts";
 import { syncVerifiedScamsToFeed, syncUserReportsToFeed } from "./feed-sync";
 import { metaBrpReport } from "./meta-brp-report";
-import { enrichVulnerability } from "./enrich-vulnerability";
+import { enrichVulnerability, enrichVulnerabilitiesCron } from "./enrich-vulnerability";
 
 export const inngestFunctions = [
   stalenessCheck,
@@ -30,4 +30,5 @@ export const inngestFunctions = [
   syncUserReportsToFeed,
   metaBrpReport,
   enrichVulnerability,
+  enrichVulnerabilitiesCron,
 ];

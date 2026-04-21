@@ -17,8 +17,23 @@ interface CriticalRow {
   cisa_kev: boolean;
   exploited_in_wild: boolean;
   lifecycle_status: string;
-  banks_affected: string[] | null;
-  gov_affected: string[] | null;
+  // critical_vulnerabilities_au view exposes these as JSONB (extracted from
+  // au_context). enrichVulnerability writes banks_affected: string[] and
+  // gov_affected: boolean; older CERT AU pre-enrichment might have left
+  // them as other shapes, so we accept `unknown` here and narrow in render.
+  banks_affected: unknown;
+  gov_affected: unknown;
+}
+
+function banksArray(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter((x): x is string => typeof x === "string");
+}
+
+function isGovAffected(v: unknown): boolean {
+  if (v === true) return true;
+  if (Array.isArray(v) && v.length > 0) return true;
+  return false;
 }
 
 function epssLabel(score: number | null): string {
@@ -95,24 +110,21 @@ export default async function VulnerabilitiesPage({ searchParams }: PageProps) {
   let ingestionRows: IngestionRow[] = [];
 
   if (supabase) {
-    let criticalQuery = supabase
-      .from("critical_vulnerabilities_au")
-      .select("identifier, title, cvss_score, epss_score, epss_percentile, severity, category, affected_products, patched_in_versions, published_at, cisa_kev, exploited_in_wild, lifecycle_status, banks_affected, gov_affected");
-
-    if (banksFilter && banksFilter.length > 0) {
-      // banks_affected is a text[] column; `overlaps` returns rows whose array
-      // shares at least one bank with the filter list.
-      criticalQuery = criticalQuery.overlaps("banks_affected", banksFilter);
-    }
-    if (govFilter) {
-      criticalQuery = criticalQuery.not("gov_affected", "is", null);
-    }
+    // Fetch a wider set when a filter is active so the top-50 isn't empty
+    // just because the top-by-EPSS rows happen to not be AU-relevant.
+    // banks_affected / gov_affected are JSONB extractions from au_context,
+    // which postgREST can't cleanly filter on — so we filter in-memory
+    // below against the widened result set.
+    const fetchLimit = banksFilter || govFilter ? 500 : 50;
 
     const [totalRes, kevRes, wildRes, criticalRes, logRes] = await Promise.all([
       supabase.from("vulnerabilities").select("*", { count: "exact", head: true }),
       supabase.from("vulnerabilities").select("*", { count: "exact", head: true }).eq("cisa_kev", true),
       supabase.from("vulnerabilities").select("*", { count: "exact", head: true }).eq("exploited_in_wild", true),
-      criticalQuery.limit(50),
+      supabase
+        .from("critical_vulnerabilities_au")
+        .select("identifier, title, cvss_score, epss_score, epss_percentile, severity, category, affected_products, patched_in_versions, published_at, cisa_kev, exploited_in_wild, lifecycle_status, banks_affected, gov_affected")
+        .limit(fetchLimit),
       supabase
         .from("vulnerability_ingestion_log")
         .select("feed_name, status, records_fetched, records_new, records_updated, records_skipped, duration_ms, error_message, run_at")
@@ -123,7 +135,19 @@ export default async function VulnerabilitiesPage({ searchParams }: PageProps) {
     totalCount = totalRes.count ?? 0;
     kevCount = kevRes.count ?? 0;
     inWildCount = wildRes.count ?? 0;
-    criticalRows = (criticalRes.data ?? []) as unknown as CriticalRow[];
+    let rows = (criticalRes.data ?? []) as unknown as CriticalRow[];
+
+    if (banksFilter && banksFilter.length > 0) {
+      rows = rows.filter((r) => {
+        const banks = banksArray(r.banks_affected);
+        return banks.some((b) => banksFilter.includes(b));
+      });
+    }
+    if (govFilter) {
+      rows = rows.filter((r) => isGovAffected(r.gov_affected));
+    }
+
+    criticalRows = rows.slice(0, 50);
     ingestionRows = (logRes.data ?? []) as unknown as IngestionRow[];
   }
 
@@ -273,6 +297,7 @@ export default async function VulnerabilitiesPage({ searchParams }: PageProps) {
                   <th className="px-4 py-3 font-semibold">CVSS</th>
                   <th className="px-4 py-3 font-semibold">EPSS</th>
                   <th className="px-4 py-3 font-semibold">Category</th>
+                  <th className="px-4 py-3 font-semibold">AU</th>
                   <th className="px-4 py-3 font-semibold">Flags</th>
                   <th className="px-4 py-3 font-semibold">Published</th>
                 </tr>
@@ -305,6 +330,39 @@ export default async function VulnerabilitiesPage({ searchParams }: PageProps) {
                       {epssLabel(r.epss_score)}
                     </td>
                     <td className="px-4 py-3 text-gov-slate">{categoryLabel(r.category)}</td>
+                    <td className="px-4 py-3 text-xs">
+                      {(() => {
+                        const banks = banksArray(r.banks_affected);
+                        const gov = isGovAffected(r.gov_affected);
+                        if (banks.length === 0 && !gov) {
+                          return <span className="text-gov-slate">—</span>;
+                        }
+                        return (
+                          <div className="flex flex-wrap gap-1">
+                            {banks.slice(0, 3).map((b) => (
+                              <span
+                                key={b}
+                                className="rounded bg-safe-green-bg px-1.5 py-0.5 font-medium text-safe-green"
+                                title={`Enriched by Claude Haiku: affects ${b}`}
+                              >
+                                {b}
+                              </span>
+                            ))}
+                            {banks.length > 3 && (
+                              <span className="text-gov-slate">+{banks.length - 3}</span>
+                            )}
+                            {gov && (
+                              <span
+                                className="rounded bg-deep-navy px-1.5 py-0.5 font-medium text-white"
+                                title="AU gov / essential service affected"
+                              >
+                                gov
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </td>
                     <td className="px-4 py-3 text-xs">
                       {r.cisa_kev && (
                         <span className="mr-1 rounded bg-danger-bg px-1.5 py-0.5 font-medium text-danger-text">
