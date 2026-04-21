@@ -58,7 +58,7 @@ export async function GET(req: Request) {
     .select("feature, provider, event_count, total_cost_usd")
     .eq("day", todayUtc)
     .order("total_cost_usd", { ascending: false })
-    .limit(3);
+    .limit(10);
 
   const top = (topRows ?? []).map((r) => ({
     feature: r.feature as string,
@@ -66,6 +66,52 @@ export async function GET(req: Request) {
     events: Number(r.event_count),
     cost: Number(r.total_cost_usd),
   }));
+
+  // Phase 14 Sprint 2 PR B3: per-feature cost brake. If vuln_au_enrichment
+  // exceeds the per-feature threshold, write a feature_brakes row so the
+  // enrich-vulnerability Inngest function short-circuits until tomorrow.
+  // The threshold is intentionally separate from DAILY_COST_THRESHOLD_USD —
+  // a $5 burst on enrichment alone should pause enrichment even if total
+  // spend is nowhere near the $2 Telegram threshold.
+  const vulnEnrichThresholdUsd = parseFloat(
+    process.env.VULN_AU_ENRICHMENT_CAP_USD ?? "5",
+  );
+  const vulnEnrichCost = top.find(
+    (t) => t.feature === "vuln_au_enrichment",
+  )?.cost ?? 0;
+  let brakeSet = false;
+  if (vulnEnrichCost > vulnEnrichThresholdUsd) {
+    const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const { error: brakeError } = await supabase
+      .from("feature_brakes")
+      .upsert(
+        {
+          feature: "vuln_au_enrichment",
+          paused_until: pausedUntil,
+          reason: `Daily spend $${vulnEnrichCost.toFixed(2)} exceeded $${vulnEnrichThresholdUsd} cap`,
+          set_by: "cost-daily-check",
+          set_cost_usd: vulnEnrichCost,
+          set_threshold_usd: vulnEnrichThresholdUsd,
+          set_at: new Date().toISOString(),
+        },
+        { onConflict: "feature" },
+      );
+    if (brakeError) {
+      logger.error("failed to set vuln_au_enrichment brake", {
+        error: brakeError.message,
+      });
+    } else {
+      brakeSet = true;
+      logger.warn("vuln_au_enrichment brake engaged", {
+        costUsd: vulnEnrichCost,
+        thresholdUsd: vulnEnrichThresholdUsd,
+        pausedUntil,
+      });
+    }
+  }
+
+  // Truncate to top 3 for the Telegram message (UX — keep it scannable).
+  const topForTelegram = top.slice(0, 3);
 
   const lines: string[] = [
     `⚠️ <b>Ask Arthur daily cost alert</b>`,
@@ -75,11 +121,17 @@ export async function GET(req: Request) {
     ``,
     `<b>Top features today:</b>`,
   ];
-  for (const t of top) {
+  for (const t of topForTelegram) {
     lines.push(
       `• ${t.feature} (${t.provider}) — $${t.cost.toFixed(
         2,
       )} · ${t.events.toLocaleString()} events`,
+    );
+  }
+  if (brakeSet) {
+    lines.push(
+      "",
+      `🛑 <b>vuln_au_enrichment brake engaged</b> — paused for 24h (spend $${vulnEnrichCost.toFixed(2)} > $${vulnEnrichThresholdUsd} cap)`,
     );
   }
   lines.push("", `Full breakdown: https://askarthur.au/admin/costs`);
@@ -91,6 +143,8 @@ export async function GET(req: Request) {
     totalCostUsd,
     thresholdUsd,
     eventCount,
-    top,
+    top: topForTelegram,
+    brakeSet,
+    vulnEnrichCost,
   });
 }
