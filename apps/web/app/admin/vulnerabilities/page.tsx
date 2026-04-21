@@ -74,8 +74,18 @@ function categoryLabel(c: string): string {
   return map[c] ?? c;
 }
 
-export default async function VulnerabilitiesPage() {
+interface PageProps {
+  searchParams: Promise<{ banks?: string; gov?: string }>;
+}
+
+export default async function VulnerabilitiesPage({ searchParams }: PageProps) {
   await requireAdmin();
+
+  const { banks: banksParam, gov: govParam } = await searchParams;
+  const banksFilter = banksParam
+    ? banksParam.split(",").map((s) => s.trim()).filter(Boolean)
+    : null;
+  const govFilter = govParam === "true";
 
   const supabase = createServiceClient();
   let totalCount = 0;
@@ -85,14 +95,24 @@ export default async function VulnerabilitiesPage() {
   let ingestionRows: IngestionRow[] = [];
 
   if (supabase) {
+    let criticalQuery = supabase
+      .from("critical_vulnerabilities_au")
+      .select("identifier, title, cvss_score, epss_score, epss_percentile, severity, category, affected_products, patched_in_versions, published_at, cisa_kev, exploited_in_wild, lifecycle_status, banks_affected, gov_affected");
+
+    if (banksFilter && banksFilter.length > 0) {
+      // banks_affected is a text[] column; `overlaps` returns rows whose array
+      // shares at least one bank with the filter list.
+      criticalQuery = criticalQuery.overlaps("banks_affected", banksFilter);
+    }
+    if (govFilter) {
+      criticalQuery = criticalQuery.not("gov_affected", "is", null);
+    }
+
     const [totalRes, kevRes, wildRes, criticalRes, logRes] = await Promise.all([
       supabase.from("vulnerabilities").select("*", { count: "exact", head: true }),
       supabase.from("vulnerabilities").select("*", { count: "exact", head: true }).eq("cisa_kev", true),
       supabase.from("vulnerabilities").select("*", { count: "exact", head: true }).eq("exploited_in_wild", true),
-      supabase
-        .from("critical_vulnerabilities_au")
-        .select("identifier, title, cvss_score, epss_score, epss_percentile, severity, category, affected_products, patched_in_versions, published_at, cisa_kev, exploited_in_wild, lifecycle_status, banks_affected, gov_affected")
-        .limit(50),
+      criticalQuery.limit(50),
       supabase
         .from("vulnerability_ingestion_log")
         .select("feed_name, status, records_fetched, records_new, records_updated, records_skipped, duration_ms, error_message, run_at")
@@ -106,6 +126,8 @@ export default async function VulnerabilitiesPage() {
     criticalRows = (criticalRes.data ?? []) as unknown as CriticalRow[];
     ingestionRows = (logRes.data ?? []) as unknown as IngestionRow[];
   }
+
+  const filterActive = (banksFilter && banksFilter.length > 0) || govFilter;
 
   return (
     <div className="mx-auto max-w-5xl px-5 py-8">
@@ -204,6 +226,39 @@ export default async function VulnerabilitiesPage() {
           will be exploited in the next 30 days. Rows highlighted when EPSS percentile ≥ 95% (top 5%
           riskiest) or ≥ 80%.
         </p>
+
+        {/* AU context filter chips — query-string driven so the page stays a
+            pure Server Component; admins bookmark a filtered URL or wire it
+            to a client form later. */}
+        <div className="mb-4 flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-gov-slate">Filter:</span>
+          {["CBA", "Westpac", "ANZ", "NAB", "Macquarie"].map((bank) => {
+            const active = banksFilter?.includes(bank);
+            const href = active
+              ? `?${new URLSearchParams({ ...(govFilter ? { gov: "true" } : {}) }).toString()}`
+              : `?banks=${bank}${govFilter ? "&gov=true" : ""}`;
+            return (
+              <a
+                key={bank}
+                href={href}
+                className={`rounded border px-2 py-1 ${active ? "border-deep-navy bg-deep-navy text-white" : "border-border-light text-gov-slate hover:border-deep-navy"}`}
+              >
+                {bank}
+              </a>
+            );
+          })}
+          <a
+            href={govFilter ? (banksFilter ? `?banks=${banksFilter.join(",")}` : "?") : `?gov=true${banksFilter ? `&banks=${banksFilter.join(",")}` : ""}`}
+            className={`rounded border px-2 py-1 ${govFilter ? "border-deep-navy bg-deep-navy text-white" : "border-border-light text-gov-slate hover:border-deep-navy"}`}
+          >
+            gov_affected
+          </a>
+          {filterActive && (
+            <a href="?" className="text-deep-navy underline">
+              clear
+            </a>
+          )}
+        </div>
         {criticalRows.length === 0 ? (
           <div className="rounded-xl border border-border-light bg-white p-5 text-sm text-gov-slate">
             No entries yet. First scraper run will populate this list.
