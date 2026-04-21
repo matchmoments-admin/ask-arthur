@@ -5,22 +5,26 @@ import { calculateGrade } from "@askarthur/types/scanner";
 import {
   INJECTION_PATTERNS,
   OBFUSCATION_PATTERNS,
+  POISONING_PATTERNS,
   SECRET_PATTERNS,
   EXFIL_PATTERNS,
   SUSPICIOUS_SCRIPTS,
   KNOWN_C2_INDICATORS,
   detectTyposquatting,
 } from "./patterns";
+import { matchCve, cvssToSeverity, type McpCveRule } from "./cve-rulepack";
 
 interface NpmPackageMeta {
   name: string;
   description?: string;
+  readme?: string;
   "dist-tags"?: { latest?: string };
   versions?: Record<string, {
     scripts?: Record<string, string>;
     dependencies?: Record<string, string>;
     devDependencies?: Record<string, string>;
     dist?: { tarball?: string };
+    readme?: string;
   }>;
   maintainers?: Array<{ name: string }>;
   time?: Record<string, string>;
@@ -147,6 +151,60 @@ export async function scanMcpServer(opts: McpAuditOptions): Promise<UnifiedScanR
     });
   }
 
+  // README poisoning scan — MCP tool descriptions are embedded in README text,
+  // not in the npm registry metadata. Scan up to 32 KB of README for tool-poisoning
+  // and prompt-injection patterns targeted at agent readers (Invariant Labs, Apr 2025).
+  const readmeRaw = meta.readme ?? latestVersion?.readme ?? "";
+  const readme = readmeRaw.length > 32_768 ? readmeRaw.slice(0, 32_768) : readmeRaw;
+  const readmeFindings: Array<{ id: string; label: string; severity: "critical" | "high" | "medium" }> = [];
+
+  if (readme) {
+    for (const { id, pattern, label, severity } of POISONING_PATTERNS) {
+      if (pattern.test(readme)) readmeFindings.push({ id, label, severity });
+    }
+    // Also run INJECTION_PATTERNS on README — same patterns, different context.
+    for (const { id, pattern, label, severity } of INJECTION_PATTERNS) {
+      if (pattern.test(readme)) readmeFindings.push({ id, label: `README: ${label}`, severity });
+    }
+  }
+
+  if (readmeFindings.length === 0) {
+    checks.push({
+      id: "MCP-TP-README-CLEAN",
+      category: "tool_poisoning",
+      label: readme ? "No poisoning patterns in README" : "README not available",
+      status: readme ? "pass" : "warn",
+      score: readme ? 10 : 5,
+      maxScore: 10,
+      details: readme
+        ? `Scanned ${readme.length} bytes of README — no tool-poisoning patterns detected.`
+        : "npm registry did not return README content for this package.",
+      reference: "MCP03",
+    });
+  } else {
+    // Emit up to 5 distinct findings to avoid a wall of check rows.
+    const seen = new Set<string>();
+    for (const finding of readmeFindings) {
+      if (seen.has(finding.id) || seen.size >= 5) continue;
+      seen.add(finding.id);
+      checks.push({
+        id: `MCP-TP-README-${finding.id}`,
+        category: "tool_poisoning",
+        label: `README poisoning: ${finding.label}`,
+        status: finding.severity === "medium" ? "warn" : "fail",
+        score: 0,
+        maxScore: 5,
+        details: `README contains ${finding.label.toLowerCase()} — consistent with MCP tool-description poisoning.`,
+        reference: "MCP03",
+        severity: finding.severity,
+      });
+    }
+    if (readmeFindings.some((f) => f.severity === "critical")) {
+      autoFail = true;
+      autoFailReason = autoFailReason ?? "Critical tool-poisoning pattern in README";
+    }
+  }
+
   // Obfuscation check
   let obfuscationFound = false;
   for (const { pattern, label } of OBFUSCATION_PATTERNS) {
@@ -256,6 +314,52 @@ export async function scanMcpServer(opts: McpAuditOptions): Promise<UnifiedScanR
         : `${totalVulns} vulnerability/ies in ${vulnMap.size} package(s)${criticalVulns.length > 0 ? ` (${criticalVulns.length} critical)` : ""}.`,
     reference: "MCP04",
   });
+
+  // MCP-specific CVE rulepack — catches MCP server CVEs that aren't always in OSV.
+  const rulepackMatches: Array<{ pkg: string; version: string; rule: McpCveRule }> = [];
+  if (latest) {
+    for (const rule of matchCve(opts.packageName, latest)) {
+      rulepackMatches.push({ pkg: opts.packageName, version: latest, rule });
+    }
+  }
+  for (const [depName, depRange] of Object.entries(allDeps)) {
+    for (const rule of matchCve(depName, depRange)) {
+      rulepackMatches.push({ pkg: depName, version: depRange, rule });
+    }
+  }
+
+  if (rulepackMatches.length === 0) {
+    checks.push({
+      id: "MCP-SC-005",
+      category: "supply_chain",
+      label: "MCP CVE rulepack",
+      status: "pass",
+      score: 10,
+      maxScore: 10,
+      details: `No known MCP-specific CVEs matched the target or its ${Object.keys(allDeps).length} dependencies.`,
+      reference: "MCP04",
+    });
+  } else {
+    const criticalRulepack = rulepackMatches.filter((m) => m.rule.cvss >= 9.0);
+    for (const [i, match] of rulepackMatches.entries()) {
+      const severity = cvssToSeverity(match.rule.cvss);
+      checks.push({
+        id: `MCP-SC-005-${i + 1}`,
+        category: "supply_chain",
+        label: `${match.rule.cve} — ${match.rule.summary}`,
+        status: match.rule.cvss >= 9.0 ? "fail" : match.rule.cvss >= 7.0 ? "fail" : "warn",
+        score: 0,
+        maxScore: 10,
+        details: `${match.pkg}@${match.version} matches ${match.rule.vulnerableRange} (CVSS ${match.rule.cvss}). ${match.rule.reference}`,
+        reference: "MCP04",
+        severity,
+      });
+    }
+    if (criticalRulepack.length > 0) {
+      autoFail = true;
+      autoFailReason = `Critical MCP CVE match: ${criticalRulepack.map((m) => m.rule.cve).join(", ")}`;
+    }
+  }
 
   // Package provenance — check real signals (integrity, signatures, repo link)
   const isOfficial = opts.packageName.startsWith("@modelcontextprotocol/");

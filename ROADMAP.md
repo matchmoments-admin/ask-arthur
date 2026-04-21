@@ -425,6 +425,76 @@ Triggered by specific events. Do not schedule speculatively.
 | Automated budget caps / kill-switches (hourly cron flips a Redis kill-switch at `DAILY_HARD_CAP_USD`) | 2+ weeks of steady-state telemetry gives a baseline to alarm against |
 | Per-flag flip playbooks (Hive pricing → PRICING update → flag flip checklist, per Phase 5/11b) | Each paid-API feature flag flip |
 
+## Phase 14 — Vulnerability Intelligence
+
+New data asset turning the 2026 vulnerability research (`docs/vulnerability-atlas-2026.md`) into a maintained DB that feeds all scanners and a B2B exposure product. Planning details in `docs/vulnerability-tooling-expansion.md` and `/Users/brendanmilton/.claude/plans/steady-wondering-lark.md`.
+
+### Sprint 0 — Preconditions
+
+| Feature | Status |
+|---------|--------|
+| `docs/vulnerability-atlas-2026.md` stub | ✅ Done (2026-04-21) |
+| Phase 14 section added to ROADMAP | ✅ Done (2026-04-21) |
+| URL Security Report entry in BACKLOG.md | Planned |
+| Decision: Claude-vision text extraction vs local tesseract.js for image-injection scan | Planned |
+| Decision: `prompt_injection` category weight in mcp-audit (align with skill-scanner at 0.25, rebalance existing 6 categories) | Planned |
+
+### Sprint 1 — MCP surface + VIDB foundation
+
+| Feature | Status |
+|---------|--------|
+| Add `semver` to `@askarthur/mcp-audit` dependencies | Planned |
+| MCP CVE rulepack (`packages/mcp-audit/src/cve-rulepack.ts`, 12 CVEs, semver range matching) | Planned |
+| MCP tool-description poisoning scanner (1a: README-scanning on npm package README) | Planned |
+| Image-embedded prompt injection scan (Claude-vision path — extract text in existing analyze call) | Planned |
+| VIDB schema migration v63: `vulnerabilities`, `vulnerability_exposure_checks`, `vulnerability_detections`, `vulnerability_ingestion_log` | Planned |
+| `pipeline/scrapers/vulnerabilities/cisa_kev.py` — first scraper | Planned |
+
+### Sprint 2 — VIDB fill-in
+
+| Feature | Status |
+|---------|--------|
+| NVD, GHSA, OSV, enhanced CERT AU scrapers | Planned |
+| `common/vuln_db.py::bulk_upsert_vulnerabilities` helper | Planned |
+| `.github/workflows/scrape-vulnerabilities.yml` (weekly, gated by `vars.ENABLE_VULN_SCRAPER`) | Planned |
+| Inngest AU-context enrichment (banks/gov affected, modeled after existing `ct-monitor.ts`) | Planned |
+| Admin vulnerability dashboard stub at `/admin/vulnerabilities` | Planned |
+
+### Sprint 3 — Extension hardening
+
+| Feature | Status |
+|---------|--------|
+| Migration v64: `extension_version_history` + `compare_extension_versions` RPC | Planned |
+| Extension hollowing detector — `scanExtension()` accepts `previousVersion`, hashes worker/content scripts | Planned |
+| DOM-clickjacking detector (EXT-062, references VU#516608) | Planned |
+| Indirect injection scan on fetched URLs in `resolveRedirects` | Planned |
+
+### Sprint 4 — B2B surface
+
+| Feature | Status |
+|---------|--------|
+| MCP lethal-trifecta composition scanner (`packages/mcp-audit/src/trifecta.ts`) | Planned |
+| `/api/v1/vulnerabilities/*` — search, get, exposure-report, inventory, webhooks (reuses `validateApiKey`) | Planned |
+| `docs/openapi.yaml` updated with vulnerability schemas | Planned |
+| B2B webhook on new matching CVE (Inngest event-driven) | Planned |
+
+### Sprint 5 — Consumer tools
+
+| Feature | Status |
+|---------|--------|
+| URL Security Report deep scan — **only 7 net-new checks** (SEC-001..SEC-004, SEC-006..SEC-008); others already in `packages/site-audit` | Planned |
+| MCP Config Safety Check (`/tools/mcp-config-check`, `packages/mcp-audit/src/config-audit.ts`) | Planned |
+| Tool-poisoning scan on pasted config (deferred 1b — realistic data source for `packageData.tools` checks) | Planned |
+
+### Later (post-monetisation)
+
+| Feature | Trigger |
+|---------|---------|
+| Scam-Site Technical Fingerprint (pig butchering, wallet drainer, AiTM kit) | Demand from bank customer conversations |
+| Deepfake advisory (mobile) | Mobile install base crosses threshold |
+| Supply-Chain Exposure Check (developer-facing) | Developer audience becomes strategic |
+| Crescendo / session-state detection for bots | Bot abuse signals warrant it |
+
 ---
 
 ## Status Key
