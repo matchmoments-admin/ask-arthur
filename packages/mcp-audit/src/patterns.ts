@@ -14,6 +14,21 @@ export const INJECTION_PATTERNS: Array<{ id: string; pattern: RegExp; label: str
   { id: "INJ-008", pattern: /Human:\s*|Assistant:\s*|###\s*(?:System|User|Assistant)/i, label: "Conversation format injection", severity: "high" },
 ];
 
+// ── Tool Poisoning Patterns ──
+// Specific to MCP tool-description poisoning (README / tool metadata). Complements
+// INJECTION_PATTERNS + OBFUSCATION_PATTERNS, which cover the shared attack surface.
+
+export const POISONING_PATTERNS: Array<{ id: string; pattern: RegExp; label: string; severity: "critical" | "high" | "medium" }> = [
+  { id: "POI-001", pattern: /\b(IMPORTANT|CRITICAL|ATTENTION|URGENT|NOTE)\s*[:\-]\s*(?=\S)/i, label: "Directive marker addressed to agent", severity: "high" },
+  { id: "POI-002", pattern: /\byou\s+(must|should|will|need to)\s+(first|always|never|before|after)\b/i, label: "Imperative agent directive", severity: "high" },
+  { id: "POI-003", pattern: /(send|post|upload|exfiltrate|forward|transmit)\s+[^\n]{0,80}?(to|at)\s+https?:\/\//i, label: "Exfiltration instruction", severity: "critical" },
+  { id: "POI-004", pattern: /[\u{E0000}-\u{E007F}]/u, label: "Unicode tag character (invisible to user)", severity: "critical" },
+  { id: "POI-005", pattern: /[‪-‮⁦-⁩]/, label: "Bidirectional override character", severity: "high" },
+  { id: "POI-006", pattern: /(?:when|if|after|before)\s+(?:calling|using|invoking|the user asks for)\s+(?:(?:the|a|an)\s+)?["'`]?[\w-]+["'`]?\s+(?:tool|server)/i, label: "Tool-shadowing reference", severity: "medium" },
+  { id: "POI-007", pattern: /\b(?:call|invoke|use)\s+["'`]?[\w-]+["'`]?\s+(?:tool|server)\s+(?:first|instead|silently)/i, label: "Cross-tool redirection", severity: "high" },
+  { id: "POI-008", pattern: /(?:read|access|fetch)\s+["'`]?(?:\.env|\.ssh|integration_tokens|service_role|\.gnupg)["'`]?/i, label: "Sensitive path reference", severity: "critical" },
+];
+
 // ── Obfuscation Detection ──
 
 export const OBFUSCATION_PATTERNS: Array<{ id: string; pattern: RegExp; label: string }> = [

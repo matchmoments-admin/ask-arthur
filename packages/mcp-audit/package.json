@@ -14,10 +14,12 @@
   },
   "dependencies": {
     "@askarthur/types": "workspace:*",
-    "@askarthur/utils": "workspace:*"
+    "@askarthur/utils": "workspace:*",
+    "semver": "^7.6.0"
   },
   "devDependencies": {
     "vitest": "^4.0.18",
-    "typescript": "^5"
+    "typescript": "^5",
+    "@types/semver": "^7.5.8"
   }
 }
