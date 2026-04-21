@@ -194,7 +194,7 @@ describe("storeVerifiedScam", () => {
 
   it("calls uploadScreenshot when imageBase64 is provided and under 4MB", async () => {
     const smallImage = Buffer.from("tiny png data").toString("base64");
-    await storeVerifiedScam(makeAnalysis(), "AU", smallImage);
+    await storeVerifiedScam(makeAnalysis(), "AU", [smallImage], uploadScreenshot);
 
     expect(uploadScreenshot).toHaveBeenCalledWith(
       expect.any(Buffer),
@@ -206,7 +206,7 @@ describe("storeVerifiedScam", () => {
 
   it("skips upload when imageBase64 exceeds 4MB", async () => {
     const largeImage = Buffer.alloc(5 * 1024 * 1024).toString("base64");
-    await storeVerifiedScam(makeAnalysis(), "AU", largeImage);
+    await storeVerifiedScam(makeAnalysis(), "AU", [largeImage], uploadScreenshot);
 
     expect(uploadScreenshot).not.toHaveBeenCalled();
     expect(logger.info).toHaveBeenCalledWith(
@@ -217,7 +217,7 @@ describe("storeVerifiedScam", () => {
 
   it("detects JPEG content type from base64 header", async () => {
     const jpegImage = "/9j/" + Buffer.from("jpeg data").toString("base64");
-    await storeVerifiedScam(makeAnalysis(), "AU", jpegImage);
+    await storeVerifiedScam(makeAnalysis(), "AU", [jpegImage], uploadScreenshot);
 
     expect(uploadScreenshot).toHaveBeenCalledWith(
       expect.any(Buffer),
@@ -255,12 +255,18 @@ describe("storePhoneLookups", () => {
   it("inserts phone lookup rows with scrubbed phone numbers", async () => {
     await storePhoneLookups("analysis-123", [
       {
+        valid: true,
         phoneNumber: "+61412345678",
         countryCode: "AU",
+        nationalFormat: "0412 345 678",
         lineType: "mobile",
         carrier: "Telstra",
         isVoip: false,
         riskFlags: ["suspicious_carrier"],
+        riskScore: 0,
+        riskLevel: "LOW",
+        callerName: null,
+        callerNameType: null,
       },
     ]);
 
@@ -277,12 +283,18 @@ describe("storePhoneLookups", () => {
 
     await storePhoneLookups("analysis-123", [
       {
+        valid: true,
         phoneNumber: "+61412345678",
         countryCode: "AU",
+        nationalFormat: "0412 345 678",
         lineType: "mobile",
         carrier: "Telstra",
         isVoip: false,
         riskFlags: [],
+        riskScore: 0,
+        riskLevel: "LOW",
+        callerName: null,
+        callerNameType: null,
       },
     ]);
 
@@ -305,12 +317,18 @@ describe("storePhoneLookups", () => {
 
     await storePhoneLookups("analysis-123", [
       {
+        valid: true,
         phoneNumber: "+61412345678",
         countryCode: "AU",
+        nationalFormat: "0412 345 678",
         lineType: "mobile",
         carrier: "Telstra",
         isVoip: false,
         riskFlags: [],
+        riskScore: 0,
+        riskLevel: "LOW",
+        callerName: null,
+        callerNameType: null,
       },
     ]);
 

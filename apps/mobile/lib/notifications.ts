@@ -10,10 +10,13 @@ import {
   ACTION_IDS,
 } from "@/constants/notification-config";
 
-// Configure notification behavior when app is in foreground
+// Configure notification behavior when app is in foreground.
+// expo-notifications 0.30+ split shouldShowAlert into shouldShowBanner + shouldShowList.
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
     shouldShowInForeground: true,

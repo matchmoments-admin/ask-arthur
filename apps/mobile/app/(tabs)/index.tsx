@@ -15,7 +15,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { XCircle, Paperclip, Lock, EyeOff } from "lucide-react-native";
 import * as ImagePicker from "expo-image-picker";
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import { AnalysisResultView } from "@/components/AnalysisResult";
 import { AIConsentModal } from "@/components/AIConsentModal";
 import { LoadingOverlay } from "@/components/LoadingOverlay";
