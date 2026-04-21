@@ -11,7 +11,11 @@ import requests
 
 from common.db import get_db
 from common.logging_config import get_logger
-from common.vuln_db import bulk_upsert_vulnerabilities, log_vuln_ingestion
+from common.vuln_db import (
+    bulk_upsert_vulnerabilities,
+    fetch_epss_scores,
+    log_vuln_ingestion,
+)
 
 logger = get_logger(__name__)
 
@@ -95,6 +99,17 @@ def scrape() -> None:
             })
 
         logger.info(f"Parsed {len(records)} CISA KEV entries")
+
+        # EPSS enrichment — populate the per-CVE exploitation probability so the
+        # admin dashboard can sort by "most likely to be exploited next 30 days".
+        # Failures here are non-fatal; missing scores stay NULL in the DB.
+        if records:
+            epss_map = fetch_epss_scores(r["identifier"] for r in records)
+            for r in records:
+                hit = epss_map.get(r["identifier"])
+                if hit:
+                    r["epss_score"] = hit[0]
+                    r["epss_percentile"] = hit[1]
 
     except Exception as e:
         error_msg = str(e)

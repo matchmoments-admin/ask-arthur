@@ -7,14 +7,31 @@ interface CriticalRow {
   identifier: string;
   title: string;
   cvss_score: number | null;
+  epss_score: number | null;
+  epss_percentile: number | null;
   severity: string;
   category: string;
   affected_products: string[] | null;
+  patched_in_versions: Array<{ product?: string; version?: string }> | null;
   published_at: string | null;
   cisa_kev: boolean;
   exploited_in_wild: boolean;
+  lifecycle_status: string;
   banks_affected: string[] | null;
   gov_affected: string[] | null;
+}
+
+function epssLabel(score: number | null): string {
+  if (score === null || score === undefined) return "—";
+  // EPSS is a probability 0-1. Convert to "X% chance in 30d".
+  return `${(score * 100).toFixed(1)}%`;
+}
+
+function epssColor(percentile: number | null): string {
+  if (percentile === null || percentile === undefined) return "text-gov-slate";
+  if (percentile >= 0.95) return "text-danger-text font-semibold";
+  if (percentile >= 0.8) return "text-warn-text font-semibold";
+  return "text-gov-slate";
 }
 
 interface IngestionRow {
@@ -74,7 +91,7 @@ export default async function VulnerabilitiesPage() {
       supabase.from("vulnerabilities").select("*", { count: "exact", head: true }).eq("exploited_in_wild", true),
       supabase
         .from("critical_vulnerabilities_au")
-        .select("identifier, title, cvss_score, severity, category, affected_products, published_at, cisa_kev, exploited_in_wild, banks_affected, gov_affected")
+        .select("identifier, title, cvss_score, epss_score, epss_percentile, severity, category, affected_products, patched_in_versions, published_at, cisa_kev, exploited_in_wild, lifecycle_status, banks_affected, gov_affected")
         .limit(50),
       supabase
         .from("vulnerability_ingestion_log")
@@ -180,8 +197,13 @@ export default async function VulnerabilitiesPage() {
       {/* Critical vulns */}
       <section>
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gov-slate">
-          Critical vulnerabilities (KEV or in-wild, top 50)
+          Critical vulnerabilities (KEV or in-wild, top 50 by EPSS)
         </h2>
+        <p className="mb-3 text-xs text-gov-slate">
+          <strong>EPSS</strong> = FIRST.org Exploit Prediction Scoring System — probability this CVE
+          will be exploited in the next 30 days. Rows highlighted when EPSS percentile ≥ 95% (top 5%
+          riskiest) or ≥ 80%.
+        </p>
         {criticalRows.length === 0 ? (
           <div className="rounded-xl border border-border-light bg-white p-5 text-sm text-gov-slate">
             No entries yet. First scraper run will populate this list.
@@ -194,6 +216,7 @@ export default async function VulnerabilitiesPage() {
                   <th className="px-4 py-3 font-semibold">CVE</th>
                   <th className="px-4 py-3 font-semibold">Title</th>
                   <th className="px-4 py-3 font-semibold">CVSS</th>
+                  <th className="px-4 py-3 font-semibold">EPSS</th>
                   <th className="px-4 py-3 font-semibold">Category</th>
                   <th className="px-4 py-3 font-semibold">Flags</th>
                   <th className="px-4 py-3 font-semibold">Published</th>
@@ -216,6 +239,16 @@ export default async function VulnerabilitiesPage() {
                     <td className="px-4 py-3 font-semibold text-danger-text">
                       {r.cvss_score ?? "—"}
                     </td>
+                    <td
+                      className={`px-4 py-3 ${epssColor(r.epss_percentile)}`}
+                      title={
+                        r.epss_percentile !== null
+                          ? `Percentile: ${(r.epss_percentile * 100).toFixed(1)}%`
+                          : "Not in EPSS dataset"
+                      }
+                    >
+                      {epssLabel(r.epss_score)}
+                    </td>
                     <td className="px-4 py-3 text-gov-slate">{categoryLabel(r.category)}</td>
                     <td className="px-4 py-3 text-xs">
                       {r.cisa_kev && (
@@ -224,8 +257,13 @@ export default async function VulnerabilitiesPage() {
                         </span>
                       )}
                       {r.exploited_in_wild && (
-                        <span className="rounded bg-warn-bg px-1.5 py-0.5 font-medium text-warn-text">
+                        <span className="mr-1 rounded bg-warn-bg px-1.5 py-0.5 font-medium text-warn-text">
                           in wild
+                        </span>
+                      )}
+                      {r.lifecycle_status === "modified" && (
+                        <span className="rounded bg-slate-100 px-1.5 py-0.5 font-medium text-gov-slate">
+                          modified
                         </span>
                       )}
                     </td>

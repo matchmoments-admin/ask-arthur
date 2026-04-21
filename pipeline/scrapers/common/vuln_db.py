@@ -1,22 +1,81 @@
-"""Vulnerability DB helpers — bulk upsert + ingestion logging.
+"""Vulnerability DB helpers — bulk upsert + ingestion logging + EPSS enrichment.
 
 Mirrors the bulk_upsert_urls/ips/wallets/entities pattern in db.py but for the
 v63 vulnerability tables. Direct INSERT ... ON CONFLICT (identifier) DO UPDATE
 instead of an RPC call — vulns are simpler than the URL/entity model and don't
 need server-side normalization or canonical-entity reconciliation.
+
+EPSS (Exploit Prediction Scoring System) enrichment is optional — fetch_epss_scores()
+returns a {cve: (score, percentile)} dict; scrapers merge this in before upsert.
+Free, unauthenticated FIRST.org endpoint.
 """
 
 import json
 import time
+from typing import Iterable
 
 import psycopg2
 import psycopg2.extras
+import requests
 
 from .logging_config import get_logger
 
 logger = get_logger(__name__)
 
 BATCH_SIZE = 200
+EPSS_API_URL = "https://api.first.org/data/v1/epss"
+EPSS_BATCH_SIZE = 100  # FIRST.org caps query string length
+
+
+def fetch_epss_scores(cves: Iterable[str]) -> dict[str, tuple[float, float]]:
+    """Fetch EPSS scores from FIRST.org for a batch of CVE identifiers.
+
+    Returns {cve_id: (epss_score, epss_percentile)}. CVEs not in the EPSS
+    dataset (e.g. very recent disclosures, non-CVE identifiers like GHSA) are
+    silently absent from the returned dict.
+
+    Network failures degrade gracefully — returns whatever was successfully
+    fetched. The caller treats missing scores as `None` and continues.
+    """
+    cve_list = [c for c in cves if c and c.startswith("CVE-")]
+    if not cve_list:
+        return {}
+
+    out: dict[str, tuple[float, float]] = {}
+    for i in range(0, len(cve_list), EPSS_BATCH_SIZE):
+        batch = cve_list[i : i + EPSS_BATCH_SIZE]
+        try:
+            resp = requests.get(
+                EPSS_API_URL,
+                params={"cve": ",".join(batch)},
+                timeout=30,
+                headers={"User-Agent": "AskArthur-VulnIntel/1.0 (+https://askarthur.au)"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            for row in data.get("data", []):
+                cve = row.get("cve")
+                if not cve:
+                    continue
+                try:
+                    epss = float(row.get("epss", 0))
+                    percentile = float(row.get("percentile", 0))
+                except (TypeError, ValueError):
+                    continue
+                # EPSS scores are 0.0-1.0; numeric(4,3) supports up to 9.999
+                # so clipping isn't strictly needed, but be defensive.
+                out[cve] = (min(epss, 0.999), min(percentile, 0.999))
+        except Exception as e:
+            logger.warning(
+                f"EPSS fetch failed for batch {i // EPSS_BATCH_SIZE + 1} "
+                f"({len(batch)} CVEs): {e}"
+            )
+
+    logger.info(
+        f"EPSS enrichment: requested {len(cve_list)} CVEs, "
+        f"got scores for {len(out)} ({100 * len(out) // max(len(cve_list), 1)}% coverage)"
+    )
+    return out
 
 
 def _ensure_jsonb(value) -> str:
@@ -80,7 +139,8 @@ def bulk_upsert_vulnerabilities(
             category, subcategory, tags, external_references,
             exploit_available, exploited_in_wild,
             cisa_kev, cisa_kev_added_at,
-            au_context, source_feeds
+            au_context, source_feeds,
+            patched_in_versions, epss_score, epss_percentile, lifecycle_status
         )
         VALUES %s
         ON CONFLICT (identifier) DO UPDATE SET
@@ -103,7 +163,11 @@ def bulk_upsert_vulnerabilities(
             au_context         = EXCLUDED.au_context,
             source_feeds       = (
                 SELECT ARRAY(SELECT DISTINCT unnest(vulnerabilities.source_feeds || EXCLUDED.source_feeds))
-            )
+            ),
+            patched_in_versions = COALESCE(NULLIF(EXCLUDED.patched_in_versions, '[]'::jsonb), vulnerabilities.patched_in_versions),
+            epss_score          = COALESCE(EXCLUDED.epss_score, vulnerabilities.epss_score),
+            epss_percentile     = COALESCE(EXCLUDED.epss_percentile, vulnerabilities.epss_percentile),
+            lifecycle_status    = EXCLUDED.lifecycle_status
         RETURNING (xmax = 0) AS is_new
     """
 
@@ -139,6 +203,10 @@ def bulk_upsert_vulnerabilities(
                 r.get("cisa_kev_added_at"),
                 _ensure_jsonb(r.get("au_context", {})),
                 _ensure_array(r.get("source_feeds", [feed_name])),
+                _ensure_jsonb(r.get("patched_in_versions", [])),
+                r.get("epss_score"),
+                r.get("epss_percentile"),
+                r.get("lifecycle_status", "disclosed"),
             ))
 
         if not rows:
