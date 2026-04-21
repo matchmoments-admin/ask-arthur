@@ -197,49 +197,9 @@ export default function PrivacyPage() {
             </p>
           </section>
 
-          {/* TODO(legal-review): section 5 copy was drafted against OAIC's
-              October 2024 AI guidance. Run past Australian privacy counsel
-              (Clayton Utz / MinterEllison) before enabling the training_consent
-              pipeline in P2. */}
           <section>
             <h2 className="text-deep-navy text-lg font-bold mb-3">
-              5. How We Use Your Feedback
-            </h2>
-            <p className="text-gov-slate text-base leading-relaxed mb-3">
-              When you rate a check with thumbs-up or thumbs-down, we store:
-              your rating, any reason chips you selected, any optional comment,
-              and a hashed identifier derived from your IP address and browser.
-              We do <strong>not</strong> store your original submission alongside
-              the rating — only a short content hash so we can link the rating
-              to the verdict you saw.
-            </p>
-            <p className="text-gov-slate text-base leading-relaxed mb-3">
-              If you tick{" "}
-              <strong>
-                &ldquo;Help Arthur get better — use my de-identified check to
-                train our models&rdquo;
-              </strong>
-              , we retain a PII-redacted copy of the check for up to 24 months
-              to improve the classifier. This checkbox is opt-in and defaults
-              off. Under the Privacy Act 1988 (Cth), hashing is not
-              anonymisation where re-identification is reasonably possible, so
-              we treat training-consent records as personal information: we
-              redact names, emails, phone numbers, bank details and similar
-              identifiers before retention, and you may request deletion at any
-              time by emailing{" "}
-              <a
-                href="mailto:brendan@askarthur.au"
-                className="text-action-teal hover:underline"
-              >
-                brendan@askarthur.au
-              </a>
-              . A self-service dashboard is planned.
-            </p>
-          </section>
-
-          <section>
-            <h2 className="text-deep-navy text-lg font-bold mb-3">
-              6. Data Retention
+              5. Data Retention
             </h2>
             <ul className="list-disc list-inside text-gov-slate text-base leading-relaxed space-y-2">
               <li>
@@ -259,7 +219,7 @@ export default function PrivacyPage() {
 
           <section>
             <h2 className="text-deep-navy text-lg font-bold mb-3">
-              7. Cookies &amp; Tracking
+              6. Cookies &amp; Tracking
             </h2>
             <p className="text-gov-slate text-base leading-relaxed">
               Ask Arthur does not use cookies. We use Plausible Analytics, which
@@ -271,7 +231,7 @@ export default function PrivacyPage() {
 
           <section>
             <h2 className="text-deep-navy text-lg font-bold mb-3">
-              8. Your Rights
+              7. Your Rights
             </h2>
             <p className="text-gov-slate text-base leading-relaxed mb-3">
               Under the Privacy Act 1988 (Cth), you have the right to:
@@ -298,7 +258,7 @@ export default function PrivacyPage() {
 
           <section>
             <h2 className="text-deep-navy text-lg font-bold mb-3">
-              9. Contact
+              8. Contact
             </h2>
             <p className="text-gov-slate text-base leading-relaxed">
               For privacy inquiries, contact us at{" "}

@@ -5,36 +5,12 @@ import { logger } from "@askarthur/utils/logger";
 import { checkRateLimit } from "@askarthur/utils/rate-limit";
 import { z } from "zod";
 
-const REASON_CODES = [
-  "not_a_scam",
-  "missed_something",
-  "too_confusing",
-  "wrong_details",
-  "other",
-] as const;
-
 const FeedbackSchema = z.object({
   verdictGiven: z.enum(["SAFE", "UNCERTAIN", "SUSPICIOUS", "HIGH_RISK"]),
   userSays: z.enum(["correct", "false_positive", "false_negative"]),
-  comment: z.string().max(2000).optional(),
+  comment: z.string().max(500).optional(),
   contentHash: z.string().max(64).optional(),
-  // P0 V2 additions — all optional so pre-V2 clients keep working
-  scamReportId: z.coerce.number().int().positive().optional(),
-  analysisId: z.string().max(128).optional(),
-  reasonCodes: z.array(z.enum(REASON_CODES)).max(10).optional(),
-  trainingConsent: z.boolean().optional(),
-  locale: z.string().max(16).optional(),
 });
-
-function parseUserAgentFamily(ua: string): string {
-  if (/edg\//i.test(ua)) return "edge";
-  if (/chrome\//i.test(ua) && !/chromium/i.test(ua)) return "chrome";
-  if (/firefox\//i.test(ua)) return "firefox";
-  if (/safari\//i.test(ua) && !/chrome/i.test(ua)) return "safari";
-  if (/crios\//i.test(ua)) return "chrome-ios";
-  if (/fxios\//i.test(ua)) return "firefox-ios";
-  return "other";
-}
 
 export async function POST(req: NextRequest) {
   try {
@@ -64,12 +40,6 @@ export async function POST(req: NextRequest) {
       user_says: parsed.data.userSays,
       comment: parsed.data.comment || null,
       submitted_content_hash: parsed.data.contentHash || null,
-      scam_report_id: parsed.data.scamReportId ?? null,
-      analysis_id: parsed.data.analysisId ?? null,
-      reason_codes: parsed.data.reasonCodes ?? [],
-      training_consent: parsed.data.trainingConsent ?? false,
-      user_agent_family: parseUserAgentFamily(ua),
-      locale: parsed.data.locale ?? "en-AU",
     });
 
     if (error) {
