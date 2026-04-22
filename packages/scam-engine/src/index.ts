@@ -4,7 +4,7 @@ export { extractURLs, checkURLReputation } from "./safebrowsing";
 export { lookupWhois } from "./whois";
 export { checkSSL } from "./ssl";
 export { normalizeURL, extractDomain } from "./url-normalize";
-export { normalizePhoneNumber, extractContactsFromText } from "./phone-normalize";
+export { normalizePhoneE164, extractContactsFromText } from "./phone-normalize";
 export { getCachedAnalysis, setCachedAnalysis } from "./analysis-cache";
 export { geolocateIP, geolocateFromHeaders } from "./geolocate";
 export { validateImageMagicBytes } from "./image-validate";

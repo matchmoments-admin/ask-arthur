@@ -20,11 +20,21 @@ const VALID_VERDICTS: readonly string[] = ["SAFE", "UNCERTAIN", "SUSPICIOUS", "H
 // Confidence threshold: if Claude is less than 60% confident, downgrade to UNCERTAIN
 const UNCERTAIN_CONFIDENCE_THRESHOLD = 0.6;
 
-/** Strip invisible Unicode characters that can bypass prompt injection detection */
+/**
+ * Strip invisible Unicode characters that can bypass prompt injection
+ * detection, then normalize to NFKC.
+ *
+ * NFKC (Compatibility Composition) canonicalises fullwidth, circled, and
+ * compatibility variants into their base forms — so fullwidth "ignore" and
+ * mathematical-alphanumeric "ignore" both collapse to plain "ignore",
+ * making them visible to the downstream regex injection scanner. Plain NFC
+ * only canonicalises composed/decomposed form without mapping these
+ * variants, leaving a known evasion surface.
+ */
 export function sanitizeUnicode(text: string): string {
   return text
     .replace(/[\u200B\u200C\u200D\uFEFF\u2060\u2062-\u2064\u{E0000}-\u{E007F}]/gu, "")
-    .normalize("NFC");
+    .normalize("NFKC");
 }
 
 /** Escape XML-sensitive characters in user input to prevent delimiter breakout */

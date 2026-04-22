@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import { waitUntil, ipAddress } from "@vercel/functions";
 import { checkRateLimit, checkImageUploadRateLimit } from "@askarthur/utils/rate-limit";
 import { analyzeWithClaude, detectInjectionAttempt, type Verdict } from "@askarthur/scam-engine/claude";
@@ -8,7 +7,7 @@ import { extractContactsFromText, normalizePhoneE164 } from "@askarthur/scam-eng
 import { extractURLs, checkURLReputation } from "@askarthur/scam-engine/safebrowsing";
 import { resolveRedirects, extractFinalUrls } from "@askarthur/scam-engine/redirect-resolver";
 import { geolocateFromHeaders } from "@askarthur/scam-engine/geolocate";
-import type { RedirectChain } from "@askarthur/types";
+import { WebAnalyzeInputSchema, type RedirectChain } from "@askarthur/types";
 import { storeVerifiedScam, incrementStats } from "@askarthur/scam-engine/pipeline";
 import { storeScamReport, buildEntities } from "@askarthur/scam-engine/report-store";
 import { hashIdentifier } from "@askarthur/utils/hash";
@@ -18,15 +17,6 @@ import { lookupPhoneNumber, extractPhoneNumbers } from "@/lib/twilioLookup";
 import { uploadScreenshot } from "@/lib/r2";
 import { logger, maskE164 } from "@askarthur/utils/logger";
 import { logCost, claudeHaikuCostUsd } from "@/lib/cost-telemetry";
-
-const RequestSchema = z.object({
-  text: z.string().max(10000).optional(),
-  image: z.string().max(5_000_000).optional(), // backward compat: single image
-  images: z.array(z.string().max(5_000_000)).max(10).optional(), // multi-image
-  mode: z.enum(["text", "image", "qrcode"]).optional(),
-}).refine((data) => data.text || data.image || (data.images && data.images.length > 0), {
-  message: "Either text or image(s) is required",
-});
 
 /**
  * Resolve the client IP from request headers.
@@ -101,7 +91,7 @@ export async function POST(req: NextRequest) {
 
     // 2. Validate input
     const body = await req.json();
-    const parsed = RequestSchema.safeParse(body);
+    const parsed = WebAnalyzeInputSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
         { error: "validation_error", message: parsed.error.issues[0]?.message },
