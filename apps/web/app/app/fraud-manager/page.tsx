@@ -7,6 +7,10 @@ export const metadata = {
   title: "Fraud Manager — Ask Arthur",
 };
 
+function twentyFourHoursAgoIso(): string {
+  return new Date(Date.now() - 86400000).toISOString();
+}
+
 export default async function FraudManagerPage() {
   const user = await requireAuth();
   const org = await getOrg(user.id);
@@ -38,7 +42,7 @@ export default async function FraudManagerPage() {
     const { count } = await supabase
       .from("scam_entities")
       .select("*", { count: "exact", head: true })
-      .gte("last_seen", new Date(Date.now() - 86400000).toISOString());
+      .gte("last_seen", twentyFourHoursAgoIso());
 
     alertCount = count ?? 0;
   }

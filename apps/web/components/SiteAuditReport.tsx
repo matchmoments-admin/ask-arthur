@@ -6,7 +6,7 @@ import AuditGradeRing from "./AuditGradeRing";
 import AuditCategoryCard from "./AuditCategoryCard";
 import AuditRawHeaders from "./AuditRawHeaders";
 
-interface CheckResult {
+export interface CheckResult {
   id: string;
   category: string;
   label: string;
@@ -16,7 +16,7 @@ interface CheckResult {
   details: string;
 }
 
-interface CategoryScore {
+export interface CategoryScore {
   category: string;
   label: string;
   score: number;

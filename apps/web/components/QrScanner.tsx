@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { X, VideoOff } from "lucide-react";
 import { decodeQR } from "qr/decode.js";
 
@@ -13,135 +13,32 @@ interface QrScannerProps {
 
 type ScannerState = "initializing" | "scanning" | "error";
 
-export default function QrScanner({ open, onClose, onScan, frozen }: QrScannerProps) {
+export default function QrScanner(props: QrScannerProps) {
+  // Gate rendering on `open` so QrScannerInner mounts fresh each time the scanner opens.
+  // Its useState initializers reset `state` to "initializing" without needing a sync
+  // setState inside an effect body (react-hooks/set-state-in-effect).
+  if (!props.open) return null;
+  return <QrScannerInner {...props} />;
+}
+
+function QrScannerInner({ onClose, onScan, frozen }: QrScannerProps) {
   const [state, setState] = useState<ScannerState>("initializing");
   const [errorMessage, setErrorMessage] = useState("");
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const rafRef = useRef<number>(0);
   const detectorRef = useRef<BarcodeDetector | null>(null);
-  const lastFallbackTime = useRef(0);
-  const hasScanned = useRef(false);
+  const onScanRef = useRef(onScan);
 
-  const cleanup = useCallback(() => {
-    if (rafRef.current) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = 0;
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-    detectorRef.current = null;
-    hasScanned.current = false;
-  }, []);
-
-  const handleDetection = useCallback(
-    (rawValue: string) => {
-      if (hasScanned.current) return;
-      hasScanned.current = true;
-
-      // Haptic feedback on supported devices
-      if (navigator.vibrate) {
-        navigator.vibrate(100);
-      }
-
-      // Stop scanning but keep camera stream alive
-      if (rafRef.current) {
-        cancelAnimationFrame(rafRef.current);
-        rafRef.current = 0;
-      }
-      onScan(rawValue);
-    },
-    [onScan]
-  );
-
-  const scanFrame = useCallback(() => {
-    if (hasScanned.current) return;
-
-    const video = videoRef.current;
-    if (!video || video.readyState < video.HAVE_ENOUGH_DATA) {
-      rafRef.current = requestAnimationFrame(scanFrame);
-      return;
-    }
-
-    // Primary path: BarcodeDetector API
-    if (detectorRef.current) {
-      detectorRef.current
-        .detect(video)
-        .then((barcodes) => {
-          if (hasScanned.current) return;
-          if (barcodes.length > 0 && barcodes[0].rawValue) {
-            handleDetection(barcodes[0].rawValue);
-            return;
-          }
-          rafRef.current = requestAnimationFrame(scanFrame);
-        })
-        .catch(() => {
-          if (!hasScanned.current) {
-            rafRef.current = requestAnimationFrame(scanFrame);
-          }
-        });
-      return;
-    }
-
-    // Fallback path: decodeQR via canvas, throttled to ~10fps
-    const now = performance.now();
-    if (now - lastFallbackTime.current < 100) {
-      rafRef.current = requestAnimationFrame(scanFrame);
-      return;
-    }
-    lastFallbackTime.current = now;
-
-    const canvas = canvasRef.current;
-    if (!canvas) {
-      rafRef.current = requestAnimationFrame(scanFrame);
-      return;
-    }
-
-    const w = video.videoWidth;
-    const h = video.videoHeight;
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    if (!ctx) {
-      rafRef.current = requestAnimationFrame(scanFrame);
-      return;
-    }
-
-    ctx.drawImage(video, 0, 0, w, h);
-    const imageData = ctx.getImageData(0, 0, w, h);
-
-    try {
-      const result = decodeQR({
-        data: imageData.data,
-        width: w,
-        height: h,
-      });
-      if (result) {
-        handleDetection(result);
-        return;
-      }
-    } catch {
-      // decodeQR failed — continue scanning
-    }
-
-    rafRef.current = requestAnimationFrame(scanFrame);
-  }, [handleDetection]);
-
-  // Main setup effect: start camera when open, full cleanup on close/unmount
+  // Latest-ref for onScan: keeps the callback fresh across renders without restarting the camera.
   useEffect(() => {
-    if (!open) {
-      cleanup();
-      setState("initializing");
-      return;
-    }
+    onScanRef.current = onScan;
+  }, [onScan]);
 
-    hasScanned.current = false;
-    setState("initializing");
+  // Camera lifecycle: request stream on mount, tear down on unmount.
+  useEffect(() => {
+    let cancelled = false;
 
-    // Check for BarcodeDetector support
     if (typeof BarcodeDetector !== "undefined") {
       try {
         detectorRef.current = new BarcodeDetector({ formats: ["qr_code"] });
@@ -159,18 +56,18 @@ export default function QrScanner({ open, onClose, onScan, frozen }: QrScannerPr
         },
       })
       .then((stream) => {
-        if (!videoRef.current) {
+        if (cancelled || !videoRef.current) {
           stream.getTracks().forEach((t) => t.stop());
           return;
         }
         streamRef.current = stream;
         videoRef.current.srcObject = stream;
-        videoRef.current.play().then(() => {
-          setState("scanning");
-          rafRef.current = requestAnimationFrame(scanFrame);
+        return videoRef.current.play().then(() => {
+          if (!cancelled) setState("scanning");
         });
       })
       .catch((err) => {
+        if (cancelled) return;
         const msg =
           err.name === "NotAllowedError"
             ? "Camera permission was denied. Please allow camera access and try again."
@@ -181,18 +78,116 @@ export default function QrScanner({ open, onClose, onScan, frozen }: QrScannerPr
         setState("error");
       });
 
-    return cleanup;
-  }, [open, cleanup, scanFrame]);
+    return () => {
+      cancelled = true;
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
+      detectorRef.current = null;
+    };
+  }, []);
 
-  // Restart scanning when frozen transitions from true → false ("Scan Another")
+  // Scanning loop: declared as a plain `tick` function inside the effect so self-reference
+  // via requestAnimationFrame(tick) is legal (react-hooks/immutability). Runs only while
+  // camera is ready and not frozen — `frozen` transitions restart scanning without
+  // disturbing the camera stream.
   useEffect(() => {
-    if (!frozen && hasScanned.current && streamRef.current && state === "scanning") {
-      hasScanned.current = false;
-      rafRef.current = requestAnimationFrame(scanFrame);
-    }
-  }, [frozen, scanFrame, state]);
+    if (state !== "scanning" || frozen) return;
 
-  if (!open) return null;
+    let rafId = 0;
+    let cancelled = false;
+    let hasScanned = false;
+    let lastFallbackTime = 0;
+
+    function handleHit(value: string): void {
+      if (hasScanned) return;
+      hasScanned = true;
+      if (navigator.vibrate) navigator.vibrate(100);
+      if (rafId) cancelAnimationFrame(rafId);
+      onScanRef.current(value);
+    }
+
+    function tick(): void {
+      if (cancelled || hasScanned) return;
+
+      const video = videoRef.current;
+      if (!video || video.readyState < video.HAVE_ENOUGH_DATA) {
+        rafId = requestAnimationFrame(tick);
+        return;
+      }
+
+      // Primary path: BarcodeDetector API
+      if (detectorRef.current) {
+        detectorRef.current
+          .detect(video)
+          .then((barcodes) => {
+            if (cancelled || hasScanned) return;
+            if (barcodes.length > 0 && barcodes[0].rawValue) {
+              handleHit(barcodes[0].rawValue);
+              return;
+            }
+            rafId = requestAnimationFrame(tick);
+          })
+          .catch(() => {
+            if (!cancelled && !hasScanned) {
+              rafId = requestAnimationFrame(tick);
+            }
+          });
+        return;
+      }
+
+      // Fallback path: decodeQR via canvas, throttled to ~10fps
+      const now = performance.now();
+      if (now - lastFallbackTime < 100) {
+        rafId = requestAnimationFrame(tick);
+        return;
+      }
+      lastFallbackTime = now;
+
+      const canvas = canvasRef.current;
+      if (!canvas) {
+        rafId = requestAnimationFrame(tick);
+        return;
+      }
+
+      const w = video.videoWidth;
+      const h = video.videoHeight;
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      if (!ctx) {
+        rafId = requestAnimationFrame(tick);
+        return;
+      }
+
+      ctx.drawImage(video, 0, 0, w, h);
+      const imageData = ctx.getImageData(0, 0, w, h);
+
+      try {
+        const result = decodeQR({
+          data: imageData.data,
+          width: w,
+          height: h,
+        });
+        if (result) {
+          handleHit(result);
+          return;
+        }
+      } catch {
+        // decodeQR failed — continue scanning
+      }
+
+      rafId = requestAnimationFrame(tick);
+    }
+
+    rafId = requestAnimationFrame(tick);
+
+    return () => {
+      cancelled = true;
+      if (rafId) cancelAnimationFrame(rafId);
+    };
+  }, [state, frozen]);
 
   return (
     <div className="fixed inset-0 z-50 bg-black flex flex-col">
@@ -201,10 +196,7 @@ export default function QrScanner({ open, onClose, onScan, frozen }: QrScannerPr
         <div className="relative flex items-center justify-center px-4 pt-safe-top h-14 shrink-0">
           <button
             type="button"
-            onClick={() => {
-              cleanup();
-              onClose();
-            }}
+            onClick={onClose}
             className="absolute left-3 top-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center rounded-full text-white/80 hover:text-white hover:bg-white/10 transition-colors"
             aria-label="Close scanner"
           >
@@ -242,10 +234,7 @@ export default function QrScanner({ open, onClose, onScan, frozen }: QrScannerPr
             <p className="text-white text-base">{errorMessage}</p>
             <button
               type="button"
-              onClick={() => {
-                cleanup();
-                onClose();
-              }}
+              onClick={onClose}
               className="mt-2 px-6 py-2.5 bg-white text-deep-navy font-semibold rounded-full text-sm hover:bg-white/90 transition-colors"
             >
               Go Back

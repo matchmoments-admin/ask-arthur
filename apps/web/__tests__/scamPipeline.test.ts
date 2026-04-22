@@ -142,7 +142,7 @@ describe("storeVerifiedScam", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockInsert.mockResolvedValue({ error: null });
-    vi.mocked(createServiceClient).mockReturnValue({ from: mockFrom } as any);
+    vi.mocked(createServiceClient).mockReturnValue({ from: mockFrom } as unknown as ReturnType<typeof createServiceClient>);
     vi.mocked(uploadScreenshot).mockResolvedValue("screenshots/2025-01-01/abc.png");
   });
 
@@ -249,7 +249,7 @@ describe("storePhoneLookups", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockInsert.mockResolvedValue({ error: null });
-    vi.mocked(createServiceClient).mockReturnValue({ from: mockFrom } as any);
+    vi.mocked(createServiceClient).mockReturnValue({ from: mockFrom } as unknown as ReturnType<typeof createServiceClient>);
   });
 
   it("inserts phone lookup rows with scrubbed phone numbers", async () => {

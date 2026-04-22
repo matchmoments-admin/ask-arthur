@@ -195,7 +195,7 @@ export default function PersonaChecker() {
           />
           {email.trim() && (
             <p className="text-xs text-gov-slate mt-1">
-              We'll check domain age, email authentication records, and disposable address databases.
+              We&apos;ll check domain age, email authentication records, and disposable address databases.
             </p>
           )}
         </div>

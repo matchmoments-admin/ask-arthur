@@ -2,7 +2,10 @@ import { notFound } from "next/navigation";
 import { createServiceClient } from "@askarthur/supabase/server";
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
-import SiteAuditReport from "@/components/SiteAuditReport";
+import SiteAuditReport, {
+  type CategoryScore,
+  type CheckResult,
+} from "@/components/SiteAuditReport";
 import type { Metadata } from "next";
 
 interface PageProps {
@@ -92,11 +95,11 @@ export default async function ReportPage({ params }: PageProps) {
     durationMs: audit.duration_ms ?? 0,
     overallScore: audit.overall_score,
     grade: audit.grade,
-    categories: audit.category_scores as any[],
-    checks: audit.test_results as any[],
+    categories: audit.category_scores as CategoryScore[],
+    checks: audit.test_results as CheckResult[],
     recommendations: audit.recommendations ?? [],
     ssl: null,
-    rawHeaders: (audit as any).raw_headers ?? null,
+    rawHeaders: null,
   };
 
   const shareUrl = audit.share_token

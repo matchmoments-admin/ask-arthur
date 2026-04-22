@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Menu, X } from "lucide-react";
@@ -15,14 +15,14 @@ interface MobileMenuProps {
   authLink?: ReactNode;
 }
 
-export default function MobileMenu({ links, authLink }: MobileMenuProps) {
-  const [open, setOpen] = useState(false);
+export default function MobileMenu(props: MobileMenuProps) {
+  // Remount on pathname change so `open` resets to false on navigation.
   const pathname = usePathname();
+  return <MobileMenuInner key={pathname} {...props} />;
+}
 
-  // Close menu on navigation
-  useEffect(() => {
-    setOpen(false);
-  }, [pathname]);
+function MobileMenuInner({ links, authLink }: MobileMenuProps) {
+  const [open, setOpen] = useState(false);
 
   return (
     <>

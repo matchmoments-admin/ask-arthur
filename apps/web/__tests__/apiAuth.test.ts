@@ -60,7 +60,7 @@ describe("validateApiKey", () => {
     mockEq.mockReturnValue({ single: mockSingle });
     mockUpdate.mockReturnValue({ eq: mockUpdateEq });
     mockUpdateEq.mockReturnValue({ then: vi.fn((cb: () => void) => cb()) });
-    vi.mocked(createServiceClient).mockReturnValue({ from: mockFrom } as any);
+    vi.mocked(createServiceClient).mockReturnValue({ from: mockFrom } as unknown as ReturnType<typeof createServiceClient>);
   });
 
   // B-01: Missing API key → invalid

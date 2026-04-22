@@ -60,7 +60,7 @@ describe("generateWeeklyBlogPost", () => {
     process.env.ANTHROPIC_API_KEY = "test-key";
     mockSelect.mockReturnValue({ gte: mockGte });
     mockGte.mockReturnValue({ order: mockOrder });
-    vi.mocked(createServiceClient).mockReturnValue({ from: mockFrom } as any);
+    vi.mocked(createServiceClient).mockReturnValue({ from: mockFrom } as unknown as ReturnType<typeof createServiceClient>);
 
     // Reset the mock to default valid JSON response
     mockCreate.mockImplementation(() =>
