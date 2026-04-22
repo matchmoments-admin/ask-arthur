@@ -7,6 +7,9 @@ vi.mock("@askarthur/utils/rate-limit", () => ({
   checkRateLimit: vi.fn(() =>
     Promise.resolve({ allowed: true, remaining: 9, resetAt: null })
   ),
+  checkImageUploadRateLimit: vi.fn(() =>
+    Promise.resolve({ allowed: true, remaining: 4, resetAt: null })
+  ),
 }));
 
 vi.mock("@askarthur/scam-engine/claude", () => ({
@@ -37,6 +40,7 @@ vi.mock("@askarthur/scam-engine/geolocate", () => ({
   geolocateIP: vi.fn(() =>
     Promise.resolve({ region: "AU", countryCode: "AU" })
   ),
+  geolocateFromHeaders: vi.fn(() => ({ region: "AU", countryCode: "AU" })),
 }));
 
 vi.mock("@askarthur/scam-engine/pipeline", () => ({
@@ -59,6 +63,11 @@ vi.mock("@askarthur/utils/logger", () => ({
 
 vi.mock("@vercel/functions", () => ({
   waitUntil: vi.fn((p: Promise<unknown>) => p),
+  ipAddress: vi.fn(
+    (req: Request) =>
+      req.headers.get("x-vercel-forwarded-for")?.split(",")[0]?.trim() ||
+      undefined
+  ),
 }));
 
 const { checkRateLimit } = await import("@askarthur/utils/rate-limit");

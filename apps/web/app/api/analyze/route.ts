@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { waitUntil } from "@vercel/functions";
+import { waitUntil, ipAddress } from "@vercel/functions";
 import { checkRateLimit, checkImageUploadRateLimit } from "@askarthur/utils/rate-limit";
 import { analyzeWithClaude, detectInjectionAttempt, type Verdict } from "@askarthur/scam-engine/claude";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { extractContactsFromText, normalizePhoneE164 } from "@askarthur/scam-engine/phone-normalize";
 import { extractURLs, checkURLReputation } from "@askarthur/scam-engine/safebrowsing";
 import { resolveRedirects, extractFinalUrls } from "@askarthur/scam-engine/redirect-resolver";
-import { geolocateIP } from "@askarthur/scam-engine/geolocate";
+import { geolocateFromHeaders } from "@askarthur/scam-engine/geolocate";
 import type { RedirectChain } from "@askarthur/types";
 import { storeVerifiedScam, incrementStats } from "@askarthur/scam-engine/pipeline";
 import { storeScamReport, buildEntities } from "@askarthur/scam-engine/report-store";
@@ -28,6 +28,27 @@ const RequestSchema = z.object({
   message: "Either text or image(s) is required",
 });
 
+/**
+ * Resolve the client IP from request headers.
+ * Priority: Vercel-trusted header → standard proxy header → legacy x-real-ip.
+ * Returns null when none are present (prod: reject; dev: fall through to loopback).
+ */
+function extractClientIp(req: NextRequest): string | null {
+  const vercelIp = ipAddress(req);
+  if (vercelIp) return vercelIp;
+
+  const xff = req.headers.get("x-forwarded-for");
+  if (xff) {
+    const first = xff.split(",")[0]?.trim();
+    if (first) return first;
+  }
+
+  const xRealIp = req.headers.get("x-real-ip");
+  if (xRealIp) return xRealIp;
+
+  return null;
+}
+
 export async function POST(req: NextRequest) {
   try {
     // 0. Reject oversized payloads (defense against oversized base64)
@@ -37,12 +58,28 @@ export async function POST(req: NextRequest) {
     }
 
     // 1. Rate limit check
-    const ip = req.headers.get("x-real-ip")
-      || req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
-      || "unknown";
+    //
+    // Prefer Vercel's trusted `x-vercel-forwarded-for` via ipAddress() — it
+    // cannot be spoofed by origin traffic. Fall back to the standard proxy
+    // headers for non-Vercel environments (dev, tests). NEVER use a literal
+    // "unknown" bucket: that would let any client strip their IP headers and
+    // share a fate-bucket with every other unidentifiable request, DoSing
+    // legit users off the rate limiter.
+    const ip = extractClientIp(req);
+    if (!ip) {
+      if (process.env.NODE_ENV === "production") {
+        logger.error("analyze.ip_extraction_failed");
+        return NextResponse.json(
+          { error: "bad_request", message: "Could not identify client." },
+          { status: 400 }
+        );
+      }
+      // Dev: allow the request with a loopback identity
+    }
+    const clientIp = ip ?? "127.0.0.1";
     const ua = req.headers.get("user-agent") || "unknown";
 
-    const rateCheck = await checkRateLimit(ip, ua);
+    const rateCheck = await checkRateLimit(clientIp, ua);
     if (!rateCheck.allowed) {
       return NextResponse.json(
         {
@@ -82,7 +119,7 @@ export async function POST(req: NextRequest) {
     // Vision calls are ~$0.002-$0.01 each — this is defence-in-depth on top of
     // the UA+IP hash limit applied above.
     if (images.length > 0) {
-      const imgRl = await checkImageUploadRateLimit(ip);
+      const imgRl = await checkImageUploadRateLimit(clientIp);
       if (!imgRl.allowed) {
         return NextResponse.json(
           { error: "rate_limited", message: imgRl.message, resetAt: imgRl.resetAt?.toISOString() },
@@ -121,7 +158,7 @@ export async function POST(req: NextRequest) {
     if (isTextOnly) {
       const cached = await getCachedAnalysis(text);
       if (cached) {
-        const geo = await geolocateIP(ip);
+        const geo = geolocateFromHeaders(req.headers);
         waitUntil(incrementStats(cached.verdict, geo.region));
         return NextResponse.json(
           {
@@ -153,13 +190,15 @@ export async function POST(req: NextRequest) {
       allUrls = [...new Set([...urls, ...finalUrls])];
     }
 
-    // 5. Run AI analysis + URL reputation checks in parallel
-    const [aiResult, urlResults, geo] = await Promise.all([
+    // 5. Run AI analysis + URL reputation checks in parallel.
+    // Geolocation is now synchronous (Vercel edge headers), so it no longer
+    // belongs in Promise.all — resolve it inline above the fan-out.
+    const geo = geolocateFromHeaders(req.headers);
+    const { region, countryCode } = geo;
+    const [aiResult, urlResults] = await Promise.all([
       analyzeWithClaude(text, images.length > 0 ? images : undefined, mode, redirectChains.length > 0 ? redirectChains : undefined),
       checkURLReputation(allUrls),
-      geolocateIP(ip),
     ]);
-    const { region, countryCode } = geo;
 
     // 5b. Cost telemetry — fire-and-forget, wrapped in waitUntil internally.
     if (aiResult.usage) {
@@ -397,7 +436,7 @@ export async function POST(req: NextRequest) {
 
     // 8d. Intelligence Core: store unified report + entity linkage (behind feature flag)
     if (featureFlags.intelligenceCore) {
-      const reporterHash = await hashIdentifier(ip, ua);
+      const reporterHash = await hashIdentifier(clientIp, ua);
       const entitiesToLink = buildEntities({
         phones: scammerContacts?.phoneNumbers,
         emails: scammerContacts?.emailAddresses,

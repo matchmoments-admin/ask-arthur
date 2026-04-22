@@ -6,7 +6,7 @@ export { checkSSL } from "./ssl";
 export { normalizeURL, extractDomain } from "./url-normalize";
 export { normalizePhoneNumber, extractContactsFromText } from "./phone-normalize";
 export { getCachedAnalysis, setCachedAnalysis } from "./analysis-cache";
-export { geolocateIP } from "./geolocate";
+export { geolocateIP, geolocateFromHeaders } from "./geolocate";
 export { validateImageMagicBytes } from "./image-validate";
 export { assertSafeURL, filterSafeURLs } from "./ssrf-guard";
 export { createBrandAlert } from "./brand-alerts";
