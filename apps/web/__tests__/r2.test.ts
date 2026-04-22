@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { PutObjectCommandInput, GetObjectCommandInput } from "@aws-sdk/client-s3";
 
 const mockSend = vi.fn().mockResolvedValue({});
 
@@ -18,10 +19,10 @@ describe("uploadScreenshot", () => {
         send = mockSend;
       },
       PutObjectCommand: class MockPutObjectCommand {
-        constructor(public args: any) {}
+        constructor(public args: PutObjectCommandInput) {}
       },
       GetObjectCommand: class MockGetObjectCommand {
-        constructor(public args: any) {}
+        constructor(public args: GetObjectCommandInput) {}
       },
     }));
     vi.doMock("@aws-sdk/s3-request-presigner", () => ({

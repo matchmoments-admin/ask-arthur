@@ -110,7 +110,7 @@ describe("resolveRedirectChain", () => {
 
   it("follows a single 301 redirect", async () => {
     let callCount = 0;
-    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+    globalThis.fetch = vi.fn().mockImplementation((_url: string) => {
       callCount++;
       if (callCount === 1) {
         return Promise.resolve(

@@ -6,7 +6,6 @@ import { normalizeURL, isURLFormat } from "@askarthur/scam-engine/url-normalize"
 import {
   normalizeEmail,
   isValidEmailFormat,
-  extractEmailDomain,
 } from "@askarthur/scam-engine/phone-normalize";
 import { logger } from "@askarthur/utils/logger";
 import { validateExtensionRequest } from "../_lib/auth";
@@ -50,7 +49,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { senderEmail, subject, urls, verdict, confidence } = parsed.data;
+    const { senderEmail, urls } = parsed.data;
 
     // 3. Reporter hash from install ID (already SHA-256'd in auth)
     const reporterHash = auth.installId;
@@ -67,7 +66,6 @@ export async function POST(req: NextRequest) {
     // 5. Report sender email as scam contact
     if (isValidEmailFormat(senderEmail)) {
       const normalizedEmail = normalizeEmail(senderEmail);
-      const domain = extractEmailDomain(normalizedEmail);
 
       const { error: contactError } = await supabase.rpc(
         "upsert_scam_contact",

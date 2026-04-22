@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { Search, SlidersHorizontal, Loader2 } from "lucide-react";
 import FeedCard from "./FeedCard";
 import Pill from "./Pill";
-import { CATEGORY_CONFIG, COUNTRY_OPTIONS, SOURCE_CONFIG } from "@/lib/feed";
+import { CATEGORY_CONFIG, COUNTRY_OPTIONS } from "@/lib/feed";
 import type { FeedItem } from "@/lib/feed";
 
 type FeedListProps = {

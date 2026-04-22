@@ -4,42 +4,77 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+  TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+  TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
+  TURBO_RUN_SUMMARY: "true"
+  TURBO_TELEMETRY_DISABLED: "1"
+  DO_NOT_TRACK: "1"
 
 jobs:
   ci:
+    name: Lint • Typecheck • Test • Build
     runs-on: ubuntu-latest
-
+    timeout-minutes: 20
+    if: github.event.pull_request.draft == false
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Required for `--filter="...[origin/<base>]"` to resolve the diff base.
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v4
+        # Version is read from the `packageManager` field in package.json
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Typecheck
-        run: pnpm turbo typecheck
+      - name: Lint / Typecheck / Test / Build (PR — affected only)
+        if: github.event_name == 'pull_request'
+        run: |
+          pnpm turbo run lint typecheck test build \
+            --filter="...[origin/${{ github.base_ref }}]" \
+            --summarize
 
-      - name: Lint
-        run: pnpm turbo lint
+      - name: Lint / Typecheck / Test / Build (main — full, warms cache)
+        if: github.event_name == 'push'
+        run: pnpm turbo run lint typecheck test build --summarize
 
-      - name: Test
-        run: pnpm turbo test
+      - name: Upload turbo run summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: turbo-run-summary-${{ github.run_id }}
+          path: .turbo/runs/
+          if-no-files-found: ignore
+          retention-days: 7
 
   pipeline-test:
+    name: Python scraper tests
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event.pull_request.draft == false
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
           cache: pip
           cache-dependency-path: pipeline/scrapers/requirements.txt
 

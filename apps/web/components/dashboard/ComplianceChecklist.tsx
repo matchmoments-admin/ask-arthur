@@ -59,12 +59,6 @@ const STATUS_ICONS = {
   "not-started": <Circle size={16} className="text-slate-300 shrink-0" />,
 };
 
-const STATUS_LABELS: Record<string, string> = {
-  "complete": "Done",
-  "in-progress": "Active",
-  "not-started": "Pending",
-};
-
 export default function ComplianceChecklist() {
   const completed = ITEMS.filter((i) => i.status === "complete").length;
 

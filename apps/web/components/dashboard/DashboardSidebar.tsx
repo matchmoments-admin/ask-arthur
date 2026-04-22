@@ -105,23 +105,27 @@ function NavContent({
   );
 }
 
-export default function DashboardSidebar({
-  userEmail,
-  userRole,
-  orgName,
-  orgRole,
-}: {
+interface DashboardSidebarProps {
   userEmail: string;
   userRole: string;
   orgName?: string | null;
   orgRole?: string | null;
-}) {
+}
+
+export default function DashboardSidebar(props: DashboardSidebarProps) {
+  // Remount on pathname change so `mobileOpen` resets to false on navigation.
+  const pathname = usePathname();
+  return <DashboardSidebarInner key={pathname} {...props} />;
+}
+
+function DashboardSidebarInner({
+  userEmail,
+  userRole,
+  orgName,
+  orgRole,
+}: DashboardSidebarProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
-
-  useEffect(() => {
-    setMobileOpen(false);
-  }, [pathname]);
 
   useEffect(() => {
     if (mobileOpen) {

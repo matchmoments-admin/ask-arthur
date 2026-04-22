@@ -4,7 +4,7 @@ import { createAuthServerClient } from "@askarthur/supabase/server-auth";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 
-export async function GET(req: NextRequest) {
+export async function GET(_req: NextRequest) {
   if (!featureFlags.familyPlan) {
     return NextResponse.json({ error: "Not available" }, { status: 404 });
   }

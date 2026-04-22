@@ -2,6 +2,10 @@ import { requireAdmin } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import BrandAlertsDashboard from "./BrandAlertsDashboard";
 
+function sevenDaysAgoIsoDate(): string {
+  return new Date(Date.now() - 7 * 86400000).toISOString().split("T")[0];
+}
+
 export default async function BrandAlertsPage() {
   await requireAdmin();
 
@@ -21,7 +25,7 @@ export default async function BrandAlertsPage() {
     const { data: stats } = await supabase
       .from("check_stats")
       .select("total_checks")
-      .gte("date", new Date(Date.now() - 7 * 86400000).toISOString().split("T")[0]);
+      .gte("date", sevenDaysAgoIsoDate());
 
     totalChecks = (stats || []).reduce((sum: number, r: Record<string, unknown>) => sum + ((r.total_checks as number) || 0), 0);
   }

@@ -6,26 +6,41 @@ Deferred features organized by platform. Items here are validated ideas that did
 
 ## Result Screen V2 — follow-up sprints
 
-P0 (feedback widget, two-button footer, invalid-state, honest progress) ships
-behind `NEXT_PUBLIC_FF_RESULT_SCREEN_V2` on v66. These are the queued follow-ups:
+P0 (feedback widget, two-button footer, invalid-state, honest progress) is now
+the default experience — the `NEXT_PUBLIC_FF_RESULT_SCREEN_V2` flag was retired
+alongside the AskSilver-inspired simplification (v67 migration widens the
+`verdict_feedback.user_says` CHECK to accept `user_reported`). Queued follow-ups:
 
-- **P1 onward-reporting (v67)** — destination picker `OnwardReportingCard`,
+- **Structured red-flag payload** — `redFlags` is currently a flat `string[]` and
+  `ResultCard.splitFlag()` heuristically splits on the first sentence boundary
+  to derive `{ heading, body }` for the left-bar cards. Update the Claude
+  analyze prompt + `@askarthur/types` schema to return `Array<{ heading, body }>`
+  directly, then retire `splitFlag()`.
+- **P1 onward-reporting** — destination picker `OnwardReportingCard`,
   `onward_report_log` + `brand_abuse_contacts` tables + `get_onward_destinations`
   RPC, Inngest workers for brand-abuse email + ACMA spam forwarding + Scamwatch/
   ReportCyber/IDCARE deep-link handoffs, Resend templates (`brand-abuse-report.tsx`,
   `acma-spam-forward.tsx`), SPF/DKIM/DMARC for `reports@askarthur.au`,
-  `NEXT_PUBLIC_FF_ONWARD_REPORTING` flag.
+  `NEXT_PUBLIC_FF_ONWARD_REPORTING` flag. Currently "Report this scam" POSTs
+  `userSays: "user_reported"` to `/api/feedback` and opens the Scamwatch portal
+  in a new tab — the picker replaces that with a structured handoff.
 - **P2 governance + self-service** — `/settings/my-data` (view + delete feedback
   and submissions), quarterly brand-contacts staleness cron, nightly SMTP probe
   on abuse inboxes, PIA document + public summary, admin triage queue for
   false-positive feedback, unsubscribe/encryption helper for `followup_email`.
-- **Extension + mobile parity** — thumbs widget + destination picker on both
-  `apps/extension/src/components/ResultDisplay.tsx` and
+- **Extension + mobile parity** — thumbs widget + simplified card + destination
+  picker on both `apps/extension/src/components/ResultDisplay.tsx` and
   `apps/mobile/components/AnalysisResult.tsx`. Neither surface has any feedback
-  UI today.
+  UI today; both still render the pre-simplification layout (confidence meter,
+  next steps, brand prompt, recovery guide).
 - **Honest progress via streaming** — current P0 approximates with client-side
   fetch-boundary transitions. If `/api/analyze` gains SSE or streaming JSON,
   swap `AnalysisProgress`'s `currentStep` prop to read actual server events.
+- **Restore deferred signals** — confidence meter, deepfake gauge, scam-report
+  card, brand verification prompt, recovery guide, and Scamwatch CTA were
+  removed from the hero web card to match competitor simplicity. Components
+  remain on disk (`DeepfakeGauge.tsx`, `RecoveryGuide.tsx`, `ScamReportCard.tsx`)
+  for reuse in the B2B dashboard, audit reports, or the extension popup.
 
 ---
 

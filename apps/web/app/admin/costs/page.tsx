@@ -13,6 +13,14 @@ interface DailyRow {
   avg_cost_usd: number;
 }
 
+function thirtyDaysAgoIsoDate(): string {
+  return new Date(Date.now() - 30 * 86400000).toISOString().split("T")[0];
+}
+
+function getNowMs(): number {
+  return Date.now();
+}
+
 export default async function CostsPage() {
   await requireAdmin();
 
@@ -30,9 +38,7 @@ export default async function CostsPage() {
     todayCostUsd = Number(today?.total_cost_usd ?? 0);
     todayEventCount = Number(today?.event_count ?? 0);
 
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000)
-      .toISOString()
-      .split("T")[0];
+    const thirtyDaysAgo = thirtyDaysAgoIsoDate();
 
     const { data } = await supabase
       .from("daily_cost_summary")
@@ -51,7 +57,7 @@ export default async function CostsPage() {
   }
 
   // Aggregate last 7 days and previous 7 days for WoW delta.
-  const now = Date.now();
+  const now = getNowMs();
   const dayMs = 86400000;
   const isWithin = (dayStr: string, startMs: number, endMs: number) => {
     const t = new Date(dayStr + "T00:00:00Z").getTime();

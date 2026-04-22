@@ -3,19 +3,38 @@
   "version": "0.1.0",
   "private": true,
   "packageManager": "pnpm@10.5.2",
+  "engines": {
+    "node": ">=22",
+    "pnpm": ">=10"
+  },
   "scripts": {
     "dev": "turbo run dev",
     "build": "turbo run build",
     "lint": "turbo run lint",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
+    "check": "turbo run lint typecheck test",
     "clean": "turbo run clean",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "dev:web": "pnpm --filter @askarthur/web dev",
     "dev:mobile": "pnpm --filter @askarthur/mobile dev",
     "dev:telegram": "pnpm --filter @askarthur/web telegram:dev",
-    "pipeline-test": "cd pipeline/scrapers && python -m pytest tests/ -v"
+    "pipeline-test": "cd pipeline/scrapers && python -m pytest tests/ -v",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx,mjs,cjs}": [
+      "eslint --fix --cache --cache-location node_modules/.cache/eslint/"
+    ],
+    "*.{json,md,yml,yaml,css}": [
+      "prettier --write"
+    ]
   },
   "devDependencies": {
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
+    "prettier": "^3.8.3",
     "turbo": "^2.8.10"
   },
   "pnpm": {

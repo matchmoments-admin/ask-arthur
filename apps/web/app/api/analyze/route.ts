@@ -16,7 +16,7 @@ import { getCachedAnalysis, setCachedAnalysis } from "@askarthur/scam-engine/ana
 import type { PhoneLookupResult } from "@askarthur/types";
 import { lookupPhoneNumber, extractPhoneNumbers } from "@/lib/twilioLookup";
 import { uploadScreenshot } from "@/lib/r2";
-import { logger } from "@askarthur/utils/logger";
+import { logger, maskE164 } from "@askarthur/utils/logger";
 import { logCost, claudeHaikuCostUsd } from "@/lib/cost-telemetry";
 
 const RequestSchema = z.object({
@@ -183,8 +183,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Debug: log whether Claude returned scammer contacts (useful for screenshot submissions)
-    console.log("[phone-debug] Claude result", {
+    logger.info("analyze.claude_result", {
       verdict: aiResult.verdict,
       hasText: !!text,
       imageCount: images.length,
@@ -275,7 +274,7 @@ export async function POST(req: NextRequest) {
         const extracted = extractContactsFromText(text);
         if (extracted.phoneNumbers.length > 0 || extracted.emailAddresses.length > 0) {
           scammerContacts = extracted;
-          console.log("[phone-debug] contacts extracted from text", {
+          logger.info("analyze.contacts_from_text", {
             phones: extracted.phoneNumbers.length,
             emails: extracted.emailAddresses.length,
           });
@@ -293,13 +292,13 @@ export async function POST(req: NextRequest) {
               })),
               emailAddresses: ai.emailAddresses,
             };
-            console.log("[phone-debug] contacts from vision fallback", {
-              phones: ai.phoneNumbers.map((p) => p.value),
-              emails: ai.emailAddresses.map((e) => e.value),
+            logger.info("analyze.contacts_from_vision", {
+              phones: ai.phoneNumbers.length,
+              emails: ai.emailAddresses.length,
             });
           }
         } catch (err) {
-          console.log("[phone-debug] vision contact extraction failed", String(err));
+          logger.warn("analyze.vision_contact_extract_failed", { error: String(err) });
         }
       }
     }
@@ -319,7 +318,7 @@ export async function POST(req: NextRequest) {
       // Try text extraction first
       if (text) {
         phones = extractPhoneNumbers(text);
-        console.log("[phone-debug] phones extracted from text for intel", phones);
+        logger.info("analyze.phones_from_text", { count: phones.length });
       }
       // Fall through to vision if text extraction found nothing (or no text)
       if (phones.length === 0 && aiResult.scammerContacts?.phoneNumbers?.length) {
@@ -328,9 +327,9 @@ export async function POST(req: NextRequest) {
             const normalized = extractPhoneNumbers(p.value);
             phones.push(...normalized);
           }
-          console.log("[phone-debug] phones from vision fallback for intel", phones);
+          logger.info("analyze.phones_from_vision", { count: phones.length });
         } catch (err) {
-          console.log("[phone-debug] vision phone normalization failed", String(err));
+          logger.warn("analyze.vision_phone_normalize_failed", { error: String(err) });
         }
       }
 
@@ -340,7 +339,7 @@ export async function POST(req: NextRequest) {
       const lookupTarget = phones.find((p) => p.e164 && /^\+61[45]/.test(p.e164));
       if (lookupTarget?.e164) {
         try {
-          console.log("[phone-debug] Twilio lookup for mobile", lookupTarget.e164);
+          logger.info("analyze.twilio_lookup", { masked: maskE164(lookupTarget.e164) });
           const lookup = await lookupPhoneNumber(lookupTarget.e164);
           phoneIntelligence = lookup;
 

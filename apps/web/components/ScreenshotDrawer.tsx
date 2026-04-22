@@ -3,6 +3,7 @@
 import { useRef, useState, useEffect, useCallback } from "react";
 import { ClipboardPaste, Images, Camera, FolderOpen, ScanLine } from "lucide-react";
 import { Drawer } from "vaul";
+import { useIsMobile } from "@/hooks/useIsMobile";
 
 interface ScreenshotDrawerProps {
   open: boolean;
@@ -21,15 +22,21 @@ export default function ScreenshotDrawer({
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const qrInputRef = useRef<HTMLInputElement>(null);
-  const [isMobile, setIsMobile] = useState(false);
-  const [clipboardAvailable, setClipboardAvailable] = useState(false);
+  const isMobile = useIsMobile();
+  // Initial value computed synchronously at mount: when the permission API is unavailable
+  // we optimistically assume clipboard.read() is allowed. The effect below refines this
+  // via the async permission query when available. Avoids sync setState inside useEffect.
+  const [clipboardAvailable, setClipboardAvailable] = useState(() => {
+    if (typeof navigator === "undefined") return false;
+    const hasRead =
+      !!navigator.clipboard && typeof navigator.clipboard.read === "function";
+    if (!hasRead) return false;
+    // If permission query isn't available, assume clipboard read is allowed.
+    return !navigator.permissions || !navigator.permissions.query;
+  });
   const [hasCamera, setHasCamera] = useState(false);
 
   useEffect(() => {
-    setIsMobile(
-      "ontouchstart" in window || navigator.maxTouchPoints > 0
-    );
-
     // Check camera availability
     if (navigator.mediaDevices?.enumerateDevices) {
       navigator.mediaDevices
@@ -40,24 +47,21 @@ export default function ScreenshotDrawer({
         .catch(() => setHasCamera(false));
     }
 
-    // Check clipboard read availability
-    if (navigator.clipboard && typeof navigator.clipboard.read === "function") {
-      // Try permission query first, fall back to assuming available
-      if (navigator.permissions && navigator.permissions.query) {
-        navigator.permissions
-          .query({ name: "clipboard-read" as PermissionName })
-          .then((result) => {
-            setClipboardAvailable(
-              result.state === "granted" || result.state === "prompt"
-            );
-          })
-          .catch(() => {
-            // Permission query not supported — assume available
-            setClipboardAvailable(true);
-          });
-      } else {
-        setClipboardAvailable(true);
-      }
+    // Refine clipboard availability via async permission query when supported.
+    if (
+      navigator.clipboard &&
+      typeof navigator.clipboard.read === "function" &&
+      navigator.permissions &&
+      navigator.permissions.query
+    ) {
+      navigator.permissions
+        .query({ name: "clipboard-read" as PermissionName })
+        .then((result) => {
+          setClipboardAvailable(
+            result.state === "granted" || result.state === "prompt"
+          );
+        })
+        .catch(() => setClipboardAvailable(true));
     }
   }, []);
 

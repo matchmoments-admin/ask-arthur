@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useSearchParams } from "next/navigation";
+import Image from "next/image";
 import { X, ScanLine, Paperclip, Mic, Lock, EyeOff } from "lucide-react";
 import AnalysisProgress, { type Step as ProgressStep } from "./AnalysisProgress";
 import ResultCard from "./ResultCard";
@@ -273,10 +274,13 @@ export default function ScamChecker() {
             <div className="flex items-center gap-2 px-4 pt-3 overflow-x-auto">
               {images.map((img, i) => (
                 <div key={i} className="relative flex-shrink-0 group">
-                  <img
+                  <Image
                     src={img.preview}
                     alt={img.name || `Screenshot ${i + 1}`}
+                    width={64}
+                    height={64}
                     className="w-16 h-16 rounded-lg object-cover border border-gray-200"
+                    unoptimized
                   />
                   <span className="absolute -top-1.5 -left-1.5 w-5 h-5 bg-deep-navy text-white text-[10px] font-bold rounded-full flex items-center justify-center">
                     {i + 1}
@@ -436,7 +440,7 @@ export default function ScamChecker() {
       {/* Text analysis progress */}
       <AnalysisProgress
         status={status}
-        currentStep={featureFlags.resultScreenV2 ? progressStep : undefined}
+        currentStep={progressStep}
       />
 
       {/* Result */}
@@ -477,10 +481,10 @@ export default function ScamChecker() {
         />
       )}
 
-      {/* Error: info-blue invalid-state panel when V2 is on, plain warn
-          banner otherwise. Rate-limit always uses the warn banner — info-blue
-          is reserved for scrape / parse failures, not throttling. */}
-      {status === "error" && featureFlags.resultScreenV2 && (
+      {/* Error: info-blue invalid-state panel for parse/scrape failures.
+          Rate-limit gets the plain warn banner — info-blue is reserved for
+          content issues, not throttling. */}
+      {status === "error" && (
         <InvalidSubmissionState
           referenceId={errorRef ?? undefined}
           attemptCount={errorAttempts}
@@ -491,15 +495,12 @@ export default function ScamChecker() {
           onUploadScreenshot={() => setDrawerOpen(true)}
         />
       )}
-      {((status === "error" && !featureFlags.resultScreenV2) ||
-        status === "rate_limited") && (
+      {status === "rate_limited" && (
         <div role="alert" className="mt-6 p-4 bg-warn-bg border border-warn-border rounded-[4px]">
           <p className="text-warn-heading text-base">{errorMsg}</p>
-          {status === "rate_limited" && (
-            <p className="text-gov-slate text-sm mt-2">
-              This limit helps us keep the service free for everyone.
-            </p>
-          )}
+          <p className="text-gov-slate text-sm mt-2">
+            This limit helps us keep the service free for everyone.
+          </p>
         </div>
       )}
 

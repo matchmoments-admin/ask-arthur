@@ -79,15 +79,14 @@ export default function ResultFeedback({
   }
 
   return (
-    <section className="mt-6" aria-labelledby="result-feedback-label">
-      <div className="flex items-center gap-3 flex-wrap">
-        <span
-          id="result-feedback-label"
-          className="text-sm font-semibold text-deep-navy"
-        >
-          Was this check helpful?
-        </span>
-
+    <section className="mt-6 text-center" aria-labelledby="result-feedback-label">
+      <span
+        id="result-feedback-label"
+        className="block text-sm font-semibold text-deep-navy mb-3"
+      >
+        How did we do?
+      </span>
+      <div className="flex items-center justify-center gap-3">
         <button
           type="button"
           aria-pressed={vote === "up"}

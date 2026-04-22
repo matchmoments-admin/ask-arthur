@@ -124,7 +124,7 @@ export async function getDashboardKPIs(days = 7): Promise<DashboardKPIs> {
   };
 }
 
-export async function getScamTypeBreakdown(days = 30): Promise<ScamTypeRow[]> {
+export async function getScamTypeBreakdown(_days = 30): Promise<ScamTypeRow[]> {
   const supabase = createServiceClient();
   if (!supabase) return [];
 

@@ -59,6 +59,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@askarthur/eslint-config": "workspace:*",
     "@tailwindcss/postcss": "^4",
     "@types/marked": "^5.0.2",
     "@types/node": "^20",

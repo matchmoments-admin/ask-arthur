@@ -12,7 +12,6 @@ import {
 } from "lucide-react";
 import { detectInput, SCAN_TYPE_LABELS, INPUT_EXAMPLES } from "@/lib/input-detector";
 import type { DetectedInput } from "@/lib/input-detector";
-import type { ScanType } from "@askarthur/types/scanner";
 import type { UnifiedScanResult } from "@askarthur/types/scanner";
 import SiteAuditProgress from "./SiteAuditProgress";
 import SiteAuditReport from "./SiteAuditReport";

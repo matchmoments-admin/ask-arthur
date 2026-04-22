@@ -59,29 +59,39 @@ export default function QrAnalysisOverlay({
 
   const isHighRisk = step === "verdict" && result?.verdict === "HIGH_RISK";
 
+  // Derived-state pattern: reset analysisStep to 0 during render when step changes to "analyzing".
+  // This avoids a synchronous setState inside useEffect (react-hooks/set-state-in-effect).
+  const [prevAnalyzingStep, setPrevAnalyzingStep] = useState(step);
+  if (prevAnalyzingStep !== step) {
+    setPrevAnalyzingStep(step);
+    if (step === "analyzing") setAnalysisStep(0);
+  }
+
   // Animate through analysis steps
   useEffect(() => {
     if (step !== "analyzing") return;
-    setAnalysisStep(0);
     const interval = setInterval(() => {
       setAnalysisStep((prev) => (prev < ANALYSIS_STEPS.length - 1 ? prev + 1 : prev));
     }, 1200);
     return () => clearInterval(interval);
   }, [step]);
 
+  // Derived-state pattern for auto-open countdown: seed it to 3 during render on the
+  // transition into "countdown active" so setState doesn't happen inside the effect body.
+  const shouldAutoOpen =
+    step === "verdict" &&
+    result?.verdict === "SAFE" &&
+    !!scannedUrl &&
+    !autoOpenCancelled;
+  const [prevShouldAutoOpen, setPrevShouldAutoOpen] = useState(false);
+  if (prevShouldAutoOpen !== shouldAutoOpen) {
+    setPrevShouldAutoOpen(shouldAutoOpen);
+    if (shouldAutoOpen) setAutoOpenCountdown(3);
+  }
+
   // Auto-open timer for SAFE verdict with a URL
   useEffect(() => {
-    if (
-      step !== "verdict" ||
-      !result ||
-      result.verdict !== "SAFE" ||
-      !scannedUrl ||
-      autoOpenCancelled
-    ) {
-      return;
-    }
-
-    setAutoOpenCountdown(3);
+    if (!shouldAutoOpen || !scannedUrl) return;
 
     countdownRef.current = setInterval(() => {
       setAutoOpenCountdown((prev) => {
@@ -98,7 +108,7 @@ export default function QrAnalysisOverlay({
       if (autoOpenTimerRef.current) clearTimeout(autoOpenTimerRef.current);
       if (countdownRef.current) clearInterval(countdownRef.current);
     };
-  }, [step, result, scannedUrl, autoOpenCancelled]);
+  }, [shouldAutoOpen, scannedUrl]);
 
   function cancelAutoOpen() {
     setAutoOpenCancelled(true);

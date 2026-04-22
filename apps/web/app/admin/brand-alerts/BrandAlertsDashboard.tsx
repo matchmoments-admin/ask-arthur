@@ -15,12 +15,6 @@ interface BrandAlert {
   created_at: string;
 }
 
-interface BrandCount {
-  brand: string;
-  count: number;
-  category: string | null;
-}
-
 export default function BrandAlertsDashboard({
   initialAlerts,
   totalChecks,
