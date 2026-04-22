@@ -6,15 +6,15 @@ Master reference for AI assistants and contributors working on this codebase. St
 
 ## Quick Reference
 
-| What | Where |
-|------|-------|
-| Architecture & data flows | [ARCHITECTURE.md](./ARCHITECTURE.md) |
-| Code standards & patterns | [CONVENTIONS.md](./CONVENTIONS.md) |
-| Design tokens & UI rules | [DESIGN_SYSTEM.md](./DESIGN_SYSTEM.md) |
-| Security & threat model | [SECURITY.md](./SECURITY.md) |
-| Roadmap & status | [ROADMAP.md](./ROADMAP.md) |
-| Deferred features | [BACKLOG.md](./BACKLOG.md) |
-| OpenAPI spec | [docs/openapi.yaml](./docs/openapi.yaml) |
+| What                      | Where                                    |
+| ------------------------- | ---------------------------------------- |
+| Architecture & data flows | [ARCHITECTURE.md](./ARCHITECTURE.md)     |
+| Code standards & patterns | [CONVENTIONS.md](./CONVENTIONS.md)       |
+| Design tokens & UI rules  | [DESIGN_SYSTEM.md](./DESIGN_SYSTEM.md)   |
+| Security & threat model   | [SECURITY.md](./SECURITY.md)             |
+| Roadmap & status          | [ROADMAP.md](./ROADMAP.md)               |
+| Deferred features         | [BACKLOG.md](./BACKLOG.md)               |
+| OpenAPI spec              | [docs/openapi.yaml](./docs/openapi.yaml) |
 
 ## What Is This?
 
@@ -104,23 +104,23 @@ import { validateApiKey } from "@/lib/apiAuth";
 
 ## Key Technical Decisions
 
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| Package manager | pnpm | Fast, strict, workspace support |
-| Build orchestration | Turborepo | Caching, parallel builds |
-| Web framework | Next.js 16 (Turbopack) | SSR, API routes, Vercel deployment |
-| AI model | Claude Haiku 4.5 | Fast, cost-effective for classification |
-| Database | Supabase (PostgreSQL) | Managed, RPC support, auth |
-| Cache / Rate limit | Upstash Redis | Serverless-compatible |
-| Extension framework | WXT | Cross-browser, modern DX |
-| Mobile framework | Expo 54 | Cross-platform, OTA updates |
-| Bot formatting | Per-platform formatters | Telegram HTML, WhatsApp markdown, Slack Block Kit, Messenger plain text |
-| Background jobs | Inngest | Event-driven, cron, fan-out |
-| Analytics | Plausible | Privacy-first, no cookies |
-| Email | Resend + React Email | Modern transactional email |
-| Billing | Stripe | Direct billing, Stripe Tax for AU GST |
-| Bot queue dispatch | Supabase Database Webhook (pg_net on `bot_message_queue` INSERT) + 10-min safety sweeper | Event-driven, avoids polling cost; pg_net is unmetered on Supabase Pro |
-| Cost observability | `cost_telemetry` table (v62) + `logCost()` helper + `/admin/costs` dashboard + Telegram digests | Per-call AI/paid-API spend tagged by feature/provider; daily threshold alerts + weekly WoW digest |
+| Decision            | Choice                                                                                          | Rationale                                                                                         |
+| ------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Package manager     | pnpm                                                                                            | Fast, strict, workspace support                                                                   |
+| Build orchestration | Turborepo                                                                                       | Caching, parallel builds                                                                          |
+| Web framework       | Next.js 16 (Turbopack)                                                                          | SSR, API routes, Vercel deployment                                                                |
+| AI model            | Claude Haiku 4.5                                                                                | Fast, cost-effective for classification                                                           |
+| Database            | Supabase (PostgreSQL)                                                                           | Managed, RPC support, auth                                                                        |
+| Cache / Rate limit  | Upstash Redis                                                                                   | Serverless-compatible                                                                             |
+| Extension framework | WXT                                                                                             | Cross-browser, modern DX                                                                          |
+| Mobile framework    | Expo 54                                                                                         | Cross-platform, OTA updates                                                                       |
+| Bot formatting      | Per-platform formatters                                                                         | Telegram HTML, WhatsApp markdown, Slack Block Kit, Messenger plain text                           |
+| Background jobs     | Inngest                                                                                         | Event-driven, cron, fan-out                                                                       |
+| Analytics           | Plausible                                                                                       | Privacy-first, no cookies                                                                         |
+| Email               | Resend + React Email                                                                            | Modern transactional email                                                                        |
+| Billing             | Stripe                                                                                          | Direct billing, Stripe Tax for AU GST                                                             |
+| Bot queue dispatch  | Supabase Database Webhook (pg_net on `bot_message_queue` INSERT) + 10-min safety sweeper        | Event-driven, avoids polling cost; pg_net is unmetered on Supabase Pro                            |
+| Cost observability  | `cost_telemetry` table (v62) + `logCost()` helper + `/admin/costs` dashboard + Telegram digests | Per-call AI/paid-API spend tagged by feature/provider; daily threshold alerts + weekly WoW digest |
 
 ## Critical Rules
 
@@ -150,13 +150,56 @@ import { validateApiKey } from "@/lib/apiAuth";
 
 ## Deployment
 
-| Platform | Target | Config |
-|----------|--------|--------|
-| Web app | Vercel | Root: `apps/web`, Build: `cd ../.. && pnpm turbo build --filter=@askarthur/web` |
-| Extension | Chrome Web Store | Minimal v1.0.0: `pnpm --filter @askarthur/extension zip`. Full-featured v1.0.1 (with Facebook ads): `WXT_FACEBOOK_ADS=true pnpm --filter @askarthur/extension zip`. New host permissions → 1–3 day re-review. |
-| Mobile | App Store / Play Store | EAS Build via Expo |
-| Pipeline | GitHub Actions | Scheduled cron, gated by `ENABLE_SCRAPER` |
-| Bots | Vercel (webhooks) | Webhook URLs registered per platform |
+| Platform  | Target                 | Config                                                                                                                                                                                                        |
+| --------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Web app   | Vercel                 | Root: `apps/web`, Build: `cd ../.. && pnpm turbo build --filter=@askarthur/web`                                                                                                                               |
+| Extension | Chrome Web Store       | Minimal v1.0.0: `pnpm --filter @askarthur/extension zip`. Full-featured v1.0.1 (with Facebook ads): `WXT_FACEBOOK_ADS=true pnpm --filter @askarthur/extension zip`. New host permissions → 1–3 day re-review. |
+| Mobile    | App Store / Play Store | EAS Build via Expo                                                                                                                                                                                            |
+| Pipeline  | GitHub Actions         | Scheduled cron, gated by `ENABLE_SCRAPER`                                                                                                                                                                     |
+| Bots      | Vercel (webhooks)      | Webhook URLs registered per platform                                                                                                                                                                          |
+
+### Standard ship workflow (code + schema)
+
+The ordering below exists to avoid the DB-ahead-of-code skew that leaves
+production using new tables before the code that reads them ships, or vice
+versa. Follow it for any change that touches SQL and TypeScript together.
+
+1. **Typecheck locally** — `pnpm turbo typecheck`. Also `pytest` under
+   `pipeline/scrapers/` if the change touches Python.
+2. **Stage explicit files** — never `git add -A` (the repo has several in-progress
+   trees like `apps/web/app/ai-statement/`, `for-business/`, that are not
+   meant for your commit).
+3. **Commit with a HEREDOC message** — include WHY (R&D documentation), reference
+   any migration versions touched, and the `Co-Authored-By: Claude Opus 4.7 (1M context)` trailer.
+4. **Push to a feature branch** — never push directly to `main`.
+5. **Apply migrations to the Supabase prod project** via
+   `mcp__supabase__apply_migration` on project `rquomhcgnodxzkhokwni`.
+   Migrations should be idempotent (`CREATE TABLE IF NOT EXISTS`, `DROP POLICY IF
+EXISTS ... CREATE POLICY ...`, etc.) so re-running is safe.
+6. **Check advisors** — `mcp__supabase__get_advisors` (type: security and performance).
+   New ERRORs introduced by the migration must be fixed before merging the PR;
+   pre-existing ERRORs can be documented in `ROADMAP.md` and deferred.
+7. **Open or update a PR** — `gh pr create --base main --head <branch>` (or
+   `gh pr edit <n> --title/--body` if one exists). Body should list migration
+   versions touched and whether they're already applied, plus a post-merge
+   verification checklist.
+8. **Wait for Vercel preview** — the PR check `Vercel` must be green. A failing
+   preview means the merge will break production.
+9. **Merge with `gh pr merge <n> --squash --delete-branch=false`**. Use
+   `--admin` _only_ when CI is red for reasons demonstrably unrelated to the
+   PR (e.g., pre-existing flaky tests that are also red on `main`); flag this
+   explicitly in the PR body before merging.
+10. **Verify prod deploy** — `gh run list --branch main --limit 1` confirms the
+    Vercel deploy kicked off. Smoke-test the touched surfaces on prod.
+
+**Migrations that require special handling** — destructive, table-rewriting, or
+long-running (>1 min) migrations should be run during a maintenance window and
+documented with an operator runbook (see `docs/partitioning-runbook.md` for the
+template). Never auto-apply these via the MCP.
+
+**Rollback plan** — every migration must be idempotent-re-applyable OR ship
+alongside a documented reverse script. For archive-to-cold-table patterns, the
+reverse is `INSERT ... SELECT` from the archive back to the hot table.
 
 ## Environment Variables
 
