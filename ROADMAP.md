@@ -523,6 +523,24 @@ layer) landing on B+/C+/C+. Remaining operator/product work:
 | Cache hit-rate telemetry (Redis)                                          | Planned            | Upstash doesn't instrument; would need wrapper counters in `getCachedAnalysis`               |
 | DLQ table for Inngest / bot-queue terminal failures                       | Planned            | `bot_message_queue.status='failed'` partly covers; Inngest max-retry failures still silent   |
 
+### Pre-existing Supabase security-advisor findings
+
+Surfaced by `mcp__supabase__get_advisors` on 2026-04-22 after the hardening
+sprint. These predate v68–v72 and are out of scope for the sprint but worth
+closing in a follow-up pass.
+
+**ERROR — tables without RLS** (each is `public` and should have RLS enabled):
+`device_push_tokens`, `scan_results`, `known_brands`, `extension_subscriptions`,
+`phone_reputation`, `feed_summaries`, `brand_impersonation_alerts`,
+`extension_installs`, `feature_brakes`, `verdict_feedback`.
+
+**ERROR — views with SECURITY DEFINER** (convert to `security_invoker=true`):
+`today_cost_total`, `daily_cost_summary`, `threat_intel_urls`.
+
+**WARN** — 42 functions with mutable `search_path` (add `SET search_path = public` to each SECURITY DEFINER function), 16 `rls_policy_always_true` (review whether the permissive policy is intentional), leaked-password protection disabled in Auth settings.
+
+**INFO** — 23 `rls_enabled_no_policy` (mostly the new partition children from v71/v72 where the parent policy applies but per-child explicit policies would silence the advisor).
+
 ---
 
 ## Status Key
