@@ -49,7 +49,6 @@ vi.mock("@anthropic-ai/sdk", () => {
 });
 
 const { createServiceClient } = await import("@askarthur/supabase/server");
-const { logger } = await import("@askarthur/utils/logger");
 const { generateWeeklyBlogPost } = await import("@/lib/blogGenerator");
 
 // ── Tests ──

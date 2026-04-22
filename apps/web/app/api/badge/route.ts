@@ -17,7 +17,7 @@ function getGradeColor(grade: string): string {
 
 // ── Shield Badge (240x72, for website footers) ──
 
-function shieldBadge(grade: string, label: string): string {
+function shieldBadge(grade: string, _label: string): string {
   const color = getGradeColor(grade);
   return `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="72" viewBox="0 0 240 72">
   <defs>

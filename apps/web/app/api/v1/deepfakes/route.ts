@@ -53,7 +53,6 @@ export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
   const celebrity = searchParams.get("celebrity");
   const period = searchParams.get("period");
-  const isTrending = req.nextUrl.pathname.endsWith("/trending");
 
   const days = parsePeriodDays(period);
   const since = new Date();

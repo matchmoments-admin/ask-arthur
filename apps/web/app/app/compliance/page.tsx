@@ -6,7 +6,6 @@ import {
   getComplianceTimeline,
   getEvidenceItems,
 } from "@/lib/dashboard/compliance";
-import type { ComplianceKPIs } from "@/lib/dashboard/compliance";
 import {
   ShieldCheck,
   ShieldAlert,

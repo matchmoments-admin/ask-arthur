@@ -267,10 +267,13 @@ export default async function BlogPostPage({ params }: PageProps) {
               >
                 {rp.heroImageUrl && (
                   <div className="mb-3 rounded-sm overflow-hidden bg-slate-50 aspect-[16/10]">
-                    <img
+                    <Image
                       src={rp.heroImageUrl}
                       alt={rp.heroImageAlt || rp.title}
+                      width={800}
+                      height={500}
                       className="w-full h-full object-cover"
+                      unoptimized
                     />
                   </div>
                 )}

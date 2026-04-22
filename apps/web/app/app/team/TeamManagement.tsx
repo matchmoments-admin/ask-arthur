@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { UserPlus, Mail, Shield, Clock, MoreVertical } from "lucide-react";
+import { UserPlus, Mail, Clock } from "lucide-react";
 import type { OrgMemberInfo } from "@/lib/org";
 
 const ROLE_LABELS: Record<string, string> = {
@@ -44,7 +44,7 @@ export default function TeamManagement({
   invitations,
   canManage,
   currentUserId,
-  orgName,
+  orgName: _orgName,
 }: TeamManagementProps) {
   const [showInvite, setShowInvite] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");

@@ -119,7 +119,7 @@ export async function POST(req: NextRequest) {
 
 async function storeAuditResult(
   result: import("@askarthur/site-audit/types").SiteAuditResult,
-  originalUrl: string
+  _originalUrl: string
 ): Promise<string | undefined> {
   const supabase = createServiceClient();
   if (!supabase) return undefined;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Send, X, CheckCircle2, Clock, Eye } from "lucide-react";
+import { Send, X, Clock, Eye } from "lucide-react";
 
 interface BrandAlert {
   id: number;

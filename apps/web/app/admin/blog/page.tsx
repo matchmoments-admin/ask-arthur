@@ -3,7 +3,7 @@ import { revalidatePath } from "next/cache";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { scrubPII } from "@askarthur/scam-engine/pipeline";
 import { getCategories } from "@/lib/blog";
-import { requireAdmin, verifyAdminToken, COOKIE_NAME, MAX_AGE } from "@/lib/adminAuth";
+import { requireAdmin, verifyAdminToken, COOKIE_NAME } from "@/lib/adminAuth";
 import { cookies } from "next/headers";
 
 export default async function AdminBlogPage() {

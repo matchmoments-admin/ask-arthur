@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
   let body: z.infer<typeof RegisterSchema>;
   try {
     body = RegisterSchema.parse(await req.json());
-  } catch (err) {
+  } catch {
     return NextResponse.json(
       { error: "Invalid request body" },
       { status: 400 }

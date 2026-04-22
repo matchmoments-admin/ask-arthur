@@ -24,8 +24,8 @@ const proPriceMonthly = process.env.NEXT_PUBLIC_STRIPE_PRO_MONTHLY ?? "";
 const businessPriceMonthly = process.env.NEXT_PUBLIC_STRIPE_BUSINESS_MONTHLY ?? "";
 
 export default function BillingManager({
-  userId,
-  userEmail,
+  userId: _userId,
+  userEmail: _userEmail,
   keys,
   subscriptions,
 }: {

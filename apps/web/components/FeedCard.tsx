@@ -47,10 +47,6 @@ export default function FeedCard({ item }: { item: FeedItem }) {
   const sourceConfig = SOURCE_CONFIG[item.source] || SOURCE_CONFIG.reddit;
   const imageUrl = getImageUrl(item);
 
-  const CategoryIcon = categoryConfig
-    ? ICON_MAP[categoryConfig.icon] || AlertTriangle
-    : AlertTriangle;
-
   const SourceIcon = ICON_MAP[sourceConfig.icon] || MessageCircle;
 
   const timeStr = item.source_created_at
@@ -65,12 +61,15 @@ export default function FeedCard({ item }: { item: FeedItem }) {
     <article className={`bg-white border border-border-light rounded-xl shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all overflow-hidden${isLinked ? " cursor-pointer" : ""}`}>
       {/* Image or category tile */}
       {imageUrl ? (
-        <div className="aspect-video bg-slate-100 overflow-hidden">
-          <img
+        <div className="aspect-video bg-slate-100 overflow-hidden relative">
+          <Image
             src={imageUrl}
             alt=""
-            className="w-full h-full object-cover"
+            fill
+            sizes="(max-width: 768px) 100vw, 50vw"
+            className="object-cover"
             loading="lazy"
+            unoptimized
           />
         </div>
       ) : (

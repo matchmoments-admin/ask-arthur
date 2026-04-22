@@ -65,7 +65,7 @@ function trafficLabel(score: number, max: number): string {
 
 export function AssessmentResults({
   answers,
-  questions,
+  questions: _questions,
   onRestart,
 }: AssessmentResultsProps) {
   const [formState, setFormState] = useState<

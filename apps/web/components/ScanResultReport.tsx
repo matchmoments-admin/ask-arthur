@@ -16,7 +16,7 @@ import {
   Check,
   ShieldAlert,
 } from "lucide-react";
-import type { UnifiedScanResult, ScanCategory, ScanCheck, SecurityGrade } from "@askarthur/types/scanner";
+import type { UnifiedScanResult, ScanCategory, SecurityGrade } from "@askarthur/types/scanner";
 import { GRADE_COLORS } from "@askarthur/types/scanner";
 
 const STATUS_ICONS: Record<string, React.ReactNode> = {
@@ -71,7 +71,6 @@ function GradeRing({ grade, score }: { grade: SecurityGrade; score: number }) {
 
 function CategoryRow({ category, defaultOpen = false }: { category: ScanCategory; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
-  const pct = category.maxScore > 0 ? Math.round((category.score / category.maxScore) * 100) : 100;
   const colors = GRADE_COLORS[category.grade] || GRADE_COLORS["F"];
 
   return (

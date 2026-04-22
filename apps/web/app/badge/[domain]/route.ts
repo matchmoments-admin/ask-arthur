@@ -14,7 +14,7 @@ const GRADE_COLORS: Record<string, string> = {
 const ELIGIBLE_GRADES = new Set(["A+", "A", "B"]);
 
 function buildSvgBadge(
-  domain: string,
+  _domain: string,
   grade: string,
   score: number
 ): string {
