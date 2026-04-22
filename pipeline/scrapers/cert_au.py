@@ -6,14 +6,31 @@ License: CC BY 4.0
 
 Extracts cybersecurity advisories from ACSC (the Australian government CERT).
 These are high-quality, manually-curated threat alerts.
+
+Two entry points:
+- `scrape()` — the original URL-based scrape that populates the `urls` table
+  for site-audit / scan-and-verify. Preserved for backwards compatibility.
+- `scrape_vulnerabilities()` — Sprint 2 addition. Parses CVE identifiers out of
+  ACSC advisory titles + descriptions and upserts into `vulnerabilities` with
+  `au_context.gov_affected = true` + `au_context.source = 'cert_au_advisory'`.
+  This lets the AU enrichment Inngest function (PR B2) skip the Claude call
+  for ACSC-curated advisories — we already know they're Australia-relevant.
 """
 
+import re
 import time
+from datetime import datetime, timezone
 
 import requests
 
 from common.db import get_db, bulk_upsert_urls, log_ingestion
 from common.logging_config import get_logger
+from common.vuln_db import (
+    bulk_upsert_vulnerabilities,
+    fetch_epss_scores,
+    log_vuln_ingestion,
+    merge_external_references,
+)
 
 logger = get_logger(__name__)
 
@@ -169,6 +186,173 @@ def _classify_advisory(title: str, description: str) -> str:
     if any(w in text for w in ["ddos", "denial of service"]):
         return "ddos"
     return "advisory"
+
+
+VULN_FEED_NAME = "cert_au_vulns"
+CVE_RE = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.IGNORECASE)
+
+
+def _classify_category(text: str) -> str:
+    """Category heuristic for vulnerabilities extracted from ACSC advisories.
+    Kept lightweight — ACSC advisories are often mixed-subject, so we bias
+    toward 'infra' as a safe default."""
+    t = text.lower()
+    if any(x in t for x in ["ivanti", "fortinet", "palo alto", "cisco", "citrix", "sonicwall"]):
+        return "network"
+    if any(x in t for x in ["chrome", "firefox", "safari", "edge"]):
+        return "browser"
+    if any(x in t for x in ["windows", "linux", "macos", "android", "ios"]):
+        return "os"
+    if any(x in t for x in ["apache", "nginx", "wordpress", "drupal"]):
+        return "web"
+    if any(x in t for x in ["aws", "azure", "gcp", "kubernetes"]):
+        return "cloud"
+    return "infra"
+
+
+def _severity_from_text(text: str) -> str | None:
+    """ACSC grades advisories Critical/High/Medium/Low in its own schema.
+    We try title-match first; else None (vulnerabilities table accepts NULL)."""
+    t = text.lower()
+    if "critical" in t:
+        return "critical"
+    if "high severity" in t or "high-severity" in t:
+        return "high"
+    if "medium severity" in t:
+        return "medium"
+    if "low severity" in t:
+        return "low"
+    return None
+
+
+def scrape_vulnerabilities() -> None:
+    """Fetch ACSC advisories and extract CVE-referenced vulnerabilities.
+
+    The same JSON API feeds both scrape() and this function; we call
+    _fetch_json_api_raw() to avoid re-deriving scam_type fields we don't need
+    here. If the API call fails, we log a skipped run and exit cleanly — the
+    CISA/NVD/GHSA scrapers still run and the workflow stays green.
+    """
+    start = time.time()
+    records: list[dict] = []
+    error_msg: str | None = None
+    status = "success"
+
+    try:
+        logger.info(f"Fetching CERT AU advisories (for vuln extraction) from {FEED_URL}")
+        resp = requests.get(
+            FEED_URL,
+            timeout=60,
+            headers={"User-Agent": "AskArthur-VulnIntel/1.0 (+https://askarthur.au)"},
+            params={"limit": "50", "sort": "-date"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        advisories = data if isinstance(data, list) else data.get("data", data.get("results", []))
+
+        for advisory in advisories:
+            title = advisory.get("title", "") or ""
+            description = advisory.get("description", "") or ""
+            body = f"{title}\n\n{description}"
+            url = advisory.get("url") or advisory.get("link") or (
+                f"https://www.cyber.gov.au/about-us/advisories/{advisory.get('id') or advisory.get('slug')}"
+                if (advisory.get('id') or advisory.get('slug')) else None
+            )
+            published = advisory.get("date") or advisory.get("published_at")
+            if isinstance(published, (int, float)):
+                published = datetime.fromtimestamp(published, tz=timezone.utc).isoformat()
+
+            cves = set(m.group(0).upper() for m in CVE_RE.finditer(body))
+            for cve in cves:
+                refs = [{"url": f"https://nvd.nist.gov/vuln/detail/{cve}", "source": "nvd"}]
+                if url:
+                    refs.append({"url": url, "source": "cert_au_advisory"})
+
+                records.append({
+                    "identifier": cve,
+                    "identifier_type": "cve",
+                    "title": title[:200] or cve,
+                    "summary": description or None,
+                    "severity": _severity_from_text(body),
+                    "published_at": published,
+                    "last_modified_at": published,
+                    "affected_products": [],
+                    "category": _classify_category(body),
+                    "subcategory": "cert_au",
+                    "tags": ["cert_au_advisory", "au_gov"],
+                    "external_references": refs,
+                    "au_context": {
+                        "gov_affected": True,
+                        "source": "cert_au_advisory",
+                    },
+                    "source_feeds": [VULN_FEED_NAME],
+                })
+
+        logger.info(
+            f"Extracted {len(records)} CVE references from "
+            f"{len(advisories)} ACSC advisories"
+        )
+
+        if records:
+            epss_map = fetch_epss_scores(r["identifier"] for r in records)
+            for r in records:
+                hit = epss_map.get(r["identifier"])
+                if hit:
+                    r["epss_score"] = hit[0]
+                    r["epss_percentile"] = hit[1]
+
+    except Exception as e:
+        error_msg = str(e)
+        status = "error"
+        logger.error(f"CERT AU vuln extraction failed: {e}")
+
+    with get_db() as conn:
+        upsert_stats = {"new": 0, "updated": 0, "skipped": 0}
+        if records:
+            try:
+                cursor = conn.cursor()
+                identifiers = [r["identifier"] for r in records]
+                cursor.execute(
+                    "SELECT identifier, external_references, au_context "
+                    "FROM vulnerabilities WHERE identifier = ANY(%s)",
+                    (identifiers,),
+                )
+                existing = {row[0]: (row[1], row[2]) for row in cursor.fetchall()}
+                cursor.close()
+                for r in records:
+                    row = existing.get(r["identifier"])
+                    if row:
+                        r["external_references"] = merge_external_references(
+                            row[0], r["external_references"]
+                        )
+                        # Merge au_context — preserve Claude-enriched bank list etc.
+                        existing_ctx = row[1] if isinstance(row[1], dict) else {}
+                        merged_ctx = {**existing_ctx, **r["au_context"]}
+                        r["au_context"] = merged_ctx
+
+                upsert_stats = bulk_upsert_vulnerabilities(conn, records, VULN_FEED_NAME)
+            except Exception as e:
+                error_msg = str(e)
+                status = "error"
+                logger.error(f"CERT AU vuln upsert failed: {e}")
+
+        duration_ms = int((time.time() - start) * 1000)
+        log_vuln_ingestion(
+            conn,
+            feed_name=VULN_FEED_NAME,
+            status=status,
+            records_fetched=len(records),
+            records_new=upsert_stats["new"],
+            records_updated=upsert_stats["updated"],
+            records_skipped=upsert_stats["skipped"],
+            duration_ms=duration_ms,
+            error_message=error_msg,
+        )
+
+    logger.info(
+        f"CERT AU vuln scrape complete: {upsert_stats['new']} new, "
+        f"{upsert_stats['updated']} updated, {upsert_stats['skipped']} skipped in {duration_ms}ms"
+    )
 
 
 if __name__ == "__main__":
