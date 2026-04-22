@@ -156,6 +156,7 @@ Pre-launch compliance, security hardening, and competitive feature parity.
 | Website Safety Audit — security header/TLS scanner with letter grade (`/audit` page) | ✅ Done |
 | Scam Report Card — moved inside ResultCard for prominence, with contact/URL reporting | ✅ Done |
 | PhoneIntelCard — hidden for high-confidence HIGH_RISK to avoid mixed signals | ✅ Done |
+| Hero ResultCard simplification (AskSilver-inspired) — bordered verdict chip, left-bar red-flag cards, "Remember" disclaimer, centered "How did we do?" thumbs, full-width Report + Check-something-else pills. Two amber levels + red (never "safe"). Dropped: confidence meter, summary line, next steps, brand verification prompt, recovery guide, Scamwatch CTA, AI disclaimer. `NEXT_PUBLIC_FF_RESULT_SCREEN_V2` retired. Report button POSTs `userSays: "user_reported"` to `/api/feedback` + opens Scamwatch (migration v67 widens the `user_says` CHECK). | ✅ Done (2026-04-22) |
 
 ## Phase 7 — Intelligence Pipeline & External Enrichment ✅
 

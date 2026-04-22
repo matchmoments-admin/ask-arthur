@@ -62,12 +62,12 @@ export default function ResultActionButtons({
         </div>
       )}
 
-      <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+      <div className="flex flex-col-reverse gap-3">
         {showReport && onReport && (
           <button
             type="button"
             onClick={() => setConfirming(true)}
-            className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-full border-2 border-gov-slate bg-white px-5 py-2 text-sm font-bold uppercase tracking-widest text-deep-navy hover:bg-slate-50"
+            className="inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-full border-2 border-danger-text bg-white px-5 py-3 text-base font-bold text-danger-text hover:bg-danger-bg"
           >
             <Flag size={18} aria-hidden="true" />
             Report this scam
@@ -76,7 +76,7 @@ export default function ResultActionButtons({
         <button
           type="button"
           onClick={onCheckAnother}
-          className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-full bg-deep-navy px-5 py-2 text-sm font-bold uppercase tracking-widest text-white hover:bg-navy"
+          className="inline-flex min-h-[52px] w-full items-center justify-center gap-2 rounded-full bg-deep-navy px-5 py-3 text-base font-bold text-white hover:bg-navy"
         >
           Check something else
           <ArrowRight size={18} aria-hidden="true" />

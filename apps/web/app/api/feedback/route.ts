@@ -15,7 +15,7 @@ const REASON_CODES = [
 
 const FeedbackSchema = z.object({
   verdictGiven: z.enum(["SAFE", "UNCERTAIN", "SUSPICIOUS", "HIGH_RISK"]),
-  userSays: z.enum(["correct", "false_positive", "false_negative"]),
+  userSays: z.enum(["correct", "false_positive", "false_negative", "user_reported"]),
   comment: z.string().max(2000).optional(),
   contentHash: z.string().max(64).optional(),
   // P0 V2 additions — all optional so pre-V2 clients keep working
