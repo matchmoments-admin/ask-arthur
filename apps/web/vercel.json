@@ -17,6 +17,10 @@
       "schedule": "*/10 * * * *"
     },
     {
+      "path": "/api/cron/bot-queue-cleanup",
+      "schedule": "0 4 * * *"
+    },
+    {
       "path": "/api/cron/cost-daily-check",
       "schedule": "0 */6 * * *"
     },
@@ -27,6 +31,14 @@
     {
       "path": "/api/cron/vuln-retention",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/scam-reports-retention",
+      "schedule": "30 3 * * *"
+    },
+    {
+      "path": "/api/cron/ensure-partitions",
+      "schedule": "0 2 * * *"
     }
   ],
   "functions": {

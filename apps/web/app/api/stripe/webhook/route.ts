@@ -37,6 +37,31 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Idempotency gate: claim event.id via insert-with-conflict. If another
+  // delivery of the same event already landed, skip the switch below and
+  // return 200 so Stripe doesn't retry forever.
+  const { data: claimed, error: claimErr } = await supabase
+    .from("stripe_event_log")
+    .insert({
+      event_id: event.id,
+      event_type: event.type,
+      api_version: event.api_version ?? null,
+    })
+    .select("event_id")
+    .maybeSingle();
+
+  if (claimErr && claimErr.code !== "23505") {
+    // 23505 is the duplicate-key error code we intentionally swallow below;
+    // any other error means the log table itself is broken — surface it so
+    // Stripe retries rather than letting the event silently drop.
+    logger.error("Stripe idempotency claim failed", { error: claimErr });
+    return NextResponse.json({ error: "idempotency_claim_failed" }, { status: 500 });
+  }
+  if (!claimed) {
+    logger.info("Stripe webhook duplicate event — skipping", { eventId: event.id });
+    return NextResponse.json({ received: true, duplicate: true });
+  }
+
   try {
     switch (event.type) {
       case "checkout.session.completed":
@@ -65,11 +90,20 @@ export async function POST(req: NextRequest) {
     }
   } catch (err) {
     logger.error("Stripe webhook handler error", { error: err });
+    // Roll the idempotency claim back so Stripe's retry can try again; a
+    // stuck row in stripe_event_log would otherwise block reprocessing after
+    // we fix whatever downstream failure caused the throw.
+    await supabase.from("stripe_event_log").delete().eq("event_id", event.id);
     return NextResponse.json(
       { error: "Webhook processing failed" },
       { status: 500 }
     );
   }
+
+  await supabase
+    .from("stripe_event_log")
+    .update({ processed_at: new Date().toISOString() })
+    .eq("event_id", event.id);
 
   return NextResponse.json({ received: true });
 }

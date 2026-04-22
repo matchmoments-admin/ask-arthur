@@ -85,22 +85,29 @@ export async function dequeueBatch(batchSize: number = 5): Promise<QueuedMessage
   return data as QueuedMessage[];
 }
 
-/**
- * Mark a queued message as completed.
- */
+// On terminal state (completed/failed), clear raw user input so bot_message_queue
+// stops persisting PII. The row is kept for audit (status, retries, timings,
+// error_message) and is hard-deleted by the cleanup cron after 24h.
 export async function markCompleted(id: string): Promise<void> {
   const supabase = createServiceClient();
   if (!supabase) return;
 
   await supabase
     .from("bot_message_queue")
-    .update({ status: "completed", completed_at: new Date().toISOString() })
+    .update({
+      status: "completed",
+      completed_at: new Date().toISOString(),
+      message_text: "",
+      images: [],
+      reply_to: null,
+    })
     .eq("id", id);
 }
 
 /**
  * Mark a queued message as failed, incrementing retry count.
- * If retries exhausted, marks as permanently failed.
+ * If retries exhausted, marks as permanently failed and clears PII.
+ * If still retryable, keeps message_text/images intact for the next attempt.
  */
 export async function markFailed(
   id: string,
@@ -111,14 +118,22 @@ export async function markFailed(
   const supabase = createServiceClient();
   if (!supabase) return;
 
-  const newStatus = retries + 1 >= maxRetries ? "failed" : "pending";
+  const exhausted = retries + 1 >= maxRetries;
+  const newStatus = exhausted ? "failed" : "pending";
+
+  const patch: Record<string, unknown> = {
+    status: newStatus,
+    retries: retries + 1,
+    error_message: errorMessage,
+  };
+  if (exhausted) {
+    patch.message_text = "";
+    patch.images = [];
+    patch.reply_to = null;
+  }
 
   await supabase
     .from("bot_message_queue")
-    .update({
-      status: newStatus,
-      retries: retries + 1,
-      error_message: errorMessage,
-    })
+    .update(patch)
     .eq("id", id);
 }

@@ -207,6 +207,42 @@ _BTC_RE = re.compile(
 # Reddit user mention pattern (PII scrubbing)
 _USERNAME_RE = re.compile(r"(?:/?u/)\w+", re.IGNORECASE)
 
+# Role classification — identify whether a PII token matched in a post is the
+# victim's own contact info (skip) or the scammer's (keep). Context window is
+# ~80 chars before the match. Conservative: ambiguous matches default to
+# "mentioned" and are kept, since r/Scams posts almost always name the
+# scammer's contact in some form.
+_VICTIM_CUES = (
+    "my number", "my phone", "my email", "my address",
+    "called me", "texted me", "messaged me", "emailed me", "contacted me",
+    "sent to me", "sent me", "reached me", "got me at",
+    "i received", "i got", "i was called", "i'm the victim",
+    "reply to me", "i gave them",
+)
+_SCAMMER_CUES = (
+    "called from", "message from", "email from", "text from", "sms from",
+    "scammer's", "the scammer", "scam number", "scam email", "scam address",
+    "their number", "their email", "they called", "they texted", "they emailed",
+    "claiming to be", "pretending to be", "posing as",
+    "fake number", "fake email",
+)
+
+def _classify_role(text_lower: str, match_start: int) -> str:
+    """Return 'victim', 'scammer', or 'mentioned' based on context around the match.
+
+    Uses a simple window-of-80 lookback. This is a heuristic — we accept that
+    r/Scams posts are noisy. False-negative scammers are fine; false-positive
+    victims are what we're protecting against, so the rule is: only skip a
+    match when the victim signal is unambiguous.
+    """
+    window_start = max(0, match_start - 80)
+    window = text_lower[window_start:match_start]
+    if any(cue in window for cue in _VICTIM_CUES):
+        return "victim"
+    if any(cue in window for cue in _SCAMMER_CUES):
+        return "scammer"
+    return "mentioned"
+
 # URLs to skip (internal Reddit and common image hosts)
 _SKIP_DOMAINS = {
     "reddit.com", "www.reddit.com", "old.reddit.com", "redd.it",
@@ -335,8 +371,15 @@ def _extract_iocs(
                 "country_code": country_code,
             })
 
-    # Extract phone numbers (focus on Australian)
-    for match in _AU_PHONE_RE.findall(text):
+    text_lower = text.lower()
+
+    # Extract phone numbers (focus on Australian). Skip matches that clearly
+    # belong to the victim's own contact info — a Reddit user's published
+    # victim number does not belong in a scammer-facing threat feed.
+    for m in _AU_PHONE_RE.finditer(text):
+        match = m.group(0)
+        if _classify_role(text_lower, m.start()) == "victim":
+            continue
         validated = validate_phone(match)
         if validated and validated not in seen_phones:
             seen_phones.add(validated)
@@ -348,8 +391,11 @@ def _extract_iocs(
                 "country_code": country_code,
             })
 
-    # Extract emails
-    for match in _EMAIL_RE.findall(text):
+    # Extract emails (same victim-exclusion rule as phones).
+    for m in _EMAIL_RE.finditer(text):
+        match = m.group(0)
+        if _classify_role(text_lower, m.start()) == "victim":
+            continue
         validated = validate_email(match)
         if validated and validated not in seen_emails:
             seen_emails.add(validated)

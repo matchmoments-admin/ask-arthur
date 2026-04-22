@@ -30,6 +30,11 @@ export const PRICING = {
   // OpenAI Whisper: $0.006 per minute.
   OPENAI_WHISPER_USD_PER_SECOND: 0.006 / 60,
 
+  // Resend: Pro plan is $20/50k = $0.0004 per outbound email. Cheap per-unit
+  // but we send batched digests so the monthly aggregate matters for the
+  // cost dashboard — without instrumentation these sends were invisible.
+  RESEND_USD_PER_EMAIL: 20 / 50_000,
+
   // Google Safe Browsing is free up to very high limits.
   // Reality Defender free tier = 50/month, paid rates not public — log units
   // without a unit_cost when we actually start calling it.

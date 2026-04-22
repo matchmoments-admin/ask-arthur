@@ -3,6 +3,7 @@ import { render } from "@react-email/components";
 import Welcome from "@/emails/Welcome";
 import WeeklyDigest from "@/emails/WeeklyDigest";
 import { signUnsubscribeUrl } from "@/lib/unsubscribe";
+import { logCost, PRICING } from "@/lib/cost-telemetry";
 
 function getResendClient() {
   return new Resend(process.env.RESEND_API_KEY);
@@ -25,6 +26,13 @@ export async function sendWelcomeEmail(email: string): Promise<void> {
       "List-Unsubscribe": `<${unsubscribeUrl}>, <${oneClickUrl}>`,
       "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
     },
+  });
+  logCost({
+    feature: "email",
+    provider: "resend",
+    operation: "welcome",
+    units: 1,
+    unitCostUsd: PRICING.RESEND_USD_PER_EMAIL,
   });
 }
 
@@ -71,7 +79,7 @@ export async function sendWeeklyDigest(
   // Send in batches of 50
   for (let i = 0; i < emails.length; i += 50) {
     const batch = emails.slice(i, i + 50);
-    await Promise.allSettled(
+    const results = await Promise.allSettled(
       batch.map((email) => {
         const unsubscribeUrl = signUnsubscribeUrl(email, "https://askarthur.au/unsubscribe");
         const oneClickUrl = signUnsubscribeUrl(email, "https://askarthur.au/api/unsubscribe-one-click");
@@ -87,5 +95,16 @@ export async function sendWeeklyDigest(
         });
       })
     );
+    const fulfilled = results.filter((r) => r.status === "fulfilled").length;
+    if (fulfilled > 0) {
+      logCost({
+        feature: "email",
+        provider: "resend",
+        operation: "weekly-digest",
+        units: fulfilled,
+        unitCostUsd: PRICING.RESEND_USD_PER_EMAIL,
+        metadata: { batch_size: batch.length, failed: batch.length - fulfilled },
+      });
+    }
   }
 }

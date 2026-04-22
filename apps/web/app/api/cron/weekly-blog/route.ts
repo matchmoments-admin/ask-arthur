@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Resend } from "resend";
+import { logCost, PRICING } from "@/lib/cost-telemetry";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { generateWeeklyBlogPost } from "@/lib/blogGenerator";
 import { logger } from "@askarthur/utils/logger";
@@ -73,6 +74,15 @@ export async function GET(req: NextRequest) {
           html: `<p>A new blog post has been generated and needs review:</p>
 <p><strong>${escapeHtml(post.title)}</strong></p>
 <p><a href="${escapeHtml(adminUrl)}">Review in admin panel</a></p>`,
+        })
+        .then(() => {
+          logCost({
+            feature: "email",
+            provider: "resend",
+            operation: "admin-notification",
+            units: 1,
+            unitCostUsd: PRICING.RESEND_USD_PER_EMAIL,
+          });
         })
         .catch((err) => logger.error("Failed to send admin notification", { error: String(err) }));
     }
