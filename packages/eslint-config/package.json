@@ -1,0 +1,22 @@
+{
+  "name": "@askarthur/eslint-config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./base.js",
+    "./base": "./base.js",
+    "./next": "./next.js",
+    "./react": "./react.js",
+    "./node": "./node.js"
+  },
+  "files": [
+    "base.js",
+    "next.js",
+    "react.js",
+    "node.js"
+  ],
+  "peerDependencies": {
+    "eslint": ">=9"
+  }
+}
