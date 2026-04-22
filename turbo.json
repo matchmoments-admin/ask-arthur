@@ -1,25 +1,100 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "ui": "tui",
+  "globalDependencies": [
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    ".npmrc",
+    "turbo.json",
+    "packages/eslint-config/**",
+    "tooling/typescript/**"
+  ],
+  "globalPassThroughEnv": [
+    "GITHUB_TOKEN",
+    "TURBO_TOKEN",
+    "TURBO_TEAM",
+    "TURBO_API",
+    "TURBO_REMOTE_CACHE_SIGNATURE_KEY",
+    "VERCEL_TOKEN"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": [".next/**", "!.next/cache/**", "dist/**"]
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!**/*.test.{ts,tsx,js,jsx}",
+        "!**/*.spec.{ts,tsx,js,jsx}",
+        "!**/__tests__/**",
+        "!**/*.md"
+      ],
+      "outputs": [
+        ".next/**",
+        "!.next/cache/**",
+        "dist/**",
+        "build/**",
+        ".expo/**",
+        ".output/**"
+      ],
+      "outputLogs": "new-only"
     },
     "dev": {
       "cache": false,
       "persistent": true
     },
     "lint": {
-      "dependsOn": ["^build"]
+      "inputs": [
+        "src/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+        "app/**/*.{ts,tsx,js,jsx}",
+        "pages/**/*.{ts,tsx,js,jsx}",
+        "components/**/*.{ts,tsx,js,jsx}",
+        "lib/**/*.{ts,tsx,js,jsx}",
+        "hooks/**/*.{ts,tsx}",
+        "__tests__/**/*.{ts,tsx,js,jsx}",
+        "eslint.config.*",
+        "package.json",
+        "$TURBO_ROOT$/packages/eslint-config/**"
+      ],
+      "outputs": [],
+      "outputLogs": "errors-only"
     },
     "test": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", "vitest.config.*", "jest.config.*"],
+      "outputs": ["coverage/**"],
+      "outputLogs": "new-only"
     },
     "typecheck": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build"],
+      "inputs": [
+        "src/**/*.{ts,tsx}",
+        "app/**/*.{ts,tsx}",
+        "pages/**/*.{ts,tsx}",
+        "components/**/*.{ts,tsx}",
+        "lib/**/*.{ts,tsx}",
+        "hooks/**/*.{ts,tsx}",
+        "__tests__/**/*.{ts,tsx}",
+        "**/*.d.ts",
+        "tsconfig*.json",
+        "$TURBO_ROOT$/tooling/typescript/**"
+      ],
+      "outputs": [],
+      "outputLogs": "errors-only"
     },
     "clean": {
       "cache": false
+    },
+    "@askarthur/web#build": {
+      "dependsOn": ["^build"],
+      "env": ["NEXT_PUBLIC_*"],
+      "outputs": [".next/**", "!.next/cache/**"]
+    },
+    "@askarthur/mobile#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", ".expo/**"]
+    },
+    "@askarthur/extension#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", "*.zip"]
     }
   },
   "globalEnv": [
