@@ -16,6 +16,15 @@ Master reference for AI assistants and contributors working on this codebase. St
 | Deferred features         | [BACKLOG.md](./BACKLOG.md)               |
 | OpenAPI spec              | [docs/openapi.yaml](./docs/openapi.yaml) |
 
+> **Database hygiene note.** BACKLOG.md → `Database Hygiene & SPF Readiness`
+> tracks the deferred items from the 2026-04-23 advisor audit: 177 unused
+> indexes, 21 empty partitioned shadows, 16 `USING (true)` RLS rewrites,
+> multiple-permissive-policy consolidation, `pg_trgm` extension relocation,
+> and the Phase 1 commercial tables (`cases`, `audit_log`, `evidence`,
+> `spf_principle_events`, `api_usage_log` partitioning, webhook ledger,
+> tenant residency). Migration v78 clears the P0 advisor ERRORs only —
+> everything else lives there.
+
 ## What Is This?
 
 Ask Arthur is an Australian scam detection platform. Users submit suspicious content (text, URLs, images) via web app, browser extension, mobile app, or chat bots. The platform uses Claude AI + threat intelligence feeds to return a verdict (SAFE / SUSPICIOUS / HIGH_RISK).
