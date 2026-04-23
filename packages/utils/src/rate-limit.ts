@@ -259,20 +259,24 @@ function getPfLimiter(bucket: PfBucket): Ratelimit {
   //   msisdn_cross_ip: 3/24h distinct-IP count per msisdn_hash — stalker /
   //     enumeration defence. Exceed → route forces teaser-only for 24h.
   //   pdf_render: 5/day per user — R2 egress + memory cap.
-  const config: Record<PfBucket, { limit: Ratelimit["limit"]; prefix: string }> = {
-    anon_burst:       { limit: Ratelimit.slidingWindow(3,  "1 h")  as any, prefix: "askarthur:pf:anon:burst" },
-    anon_daily:       { limit: Ratelimit.slidingWindow(10, "24 h") as any, prefix: "askarthur:pf:anon:daily" },
-    user:             { limit: Ratelimit.slidingWindow(60, "1 m")  as any, prefix: "askarthur:pf:user" },
-    verify_otp_phone: { limit: Ratelimit.slidingWindow(3,  "24 h") as any, prefix: "askarthur:pf:otp:phone" },
-    verify_otp_ip:    { limit: Ratelimit.slidingWindow(10, "24 h") as any, prefix: "askarthur:pf:otp:ip" },
-    org_fleet_bulk:   { limit: Ratelimit.slidingWindow(3,  "1 h")  as any, prefix: "askarthur:pf:fleet:bulk" },
-    msisdn_cross_ip:  { limit: Ratelimit.slidingWindow(3,  "24 h") as any, prefix: "askarthur:pf:xip" },
-    pdf_render:       { limit: Ratelimit.slidingWindow(5,  "24 h") as any, prefix: "askarthur:pf:pdf" },
+  const slidingWindow = Ratelimit.slidingWindow.bind(Ratelimit);
+  const config: Record<
+    PfBucket,
+    { algo: ReturnType<typeof slidingWindow>; prefix: string }
+  > = {
+    anon_burst:       { algo: slidingWindow(3,  "1 h"),  prefix: "askarthur:pf:anon:burst" },
+    anon_daily:       { algo: slidingWindow(10, "24 h"), prefix: "askarthur:pf:anon:daily" },
+    user:             { algo: slidingWindow(60, "1 m"),  prefix: "askarthur:pf:user" },
+    verify_otp_phone: { algo: slidingWindow(3,  "24 h"), prefix: "askarthur:pf:otp:phone" },
+    verify_otp_ip:    { algo: slidingWindow(10, "24 h"), prefix: "askarthur:pf:otp:ip" },
+    org_fleet_bulk:   { algo: slidingWindow(3,  "1 h"),  prefix: "askarthur:pf:fleet:bulk" },
+    msisdn_cross_ip:  { algo: slidingWindow(3,  "24 h"), prefix: "askarthur:pf:xip" },
+    pdf_render:       { algo: slidingWindow(5,  "24 h"), prefix: "askarthur:pf:pdf" },
   };
 
   const lim = new Ratelimit({
     redis,
-    limiter: config[bucket].limit as unknown as Ratelimit["limit"],
+    limiter: config[bucket].algo,
     prefix: config[bucket].prefix,
     analytics: true,
   });
