@@ -541,6 +541,84 @@ closing in a follow-up pass.
 
 **INFO** — 23 `rls_enabled_no_policy` (mostly the new partition children from v71/v72 where the parent policy applies but per-child explicit policies would silence the advisor).
 
+## Phase 15 — Analyze Pipeline Refactor
+
+Introduced 2026-04 to close latent reliability/correctness gaps on `/api/analyze` and prepare for Structured Outputs (Phase 3) and the variant factory (Phase 5). Driven by the blueprint at `/Users/brendanmilton/.claude/projects/-Users-brendanmilton-Desktop-safeverify/memory/project_analyze_refactor_decisions.md`.
+
+### Phase 0 — Safety hotfixes ✅ (commit `57bfc51`)
+
+| Fix                                                                                               | Status  |
+| ------------------------------------------------------------------------------------------------- | ------- |
+| `checkImageUploadRateLimit` fails CLOSED in production (was fail-open; vision = $0.002-0.01/call) | ✅ Done |
+| `AbortSignal.timeout(30s vision / 15s text)` on Anthropic SDK call                                | ✅ Done |
+| `@vercel/functions.ipAddress()` replaces `x-real-ip → x-forwarded-for → "unknown"` (DoS pathway)  | ✅ Done |
+| `geolocateFromHeaders(req.headers)` reads Vercel edge headers; ip-api.com off the request path    | ✅ Done |
+| Base64 decoded-size pre-check before `Buffer.from` in `validateImageMagicBytes`                   | ✅ Done |
+| PII scrub moved inside `setCachedAnalysis` — cached entries can no longer leak victim PII         | ✅ Done |
+
+### Phase 1 — Core-analysis package + versioned cache key ✅ (commit `b0265c2`)
+
+| Fix                                                                                                                      | Status  |
+| ------------------------------------------------------------------------------------------------------------------------ | ------- |
+| New `@askarthur/core-analysis` package                                                                                   | ✅ Done |
+| Pure `mergeVerdict` with discriminated-union signals, `never` exhaustiveness, 20 fast-check property tests + 14 variants | ✅ Done |
+| Composite cache key (`analyze:p{VER}:m{model}:s{systemHash8}:t{textHash}:i{imagesHash}:f{flagsHash}:mode{T\|I\|TI\|U}`)  | ✅ Done |
+| Per-verdict TTL: SAFE 48h, UNCERTAIN 1h, SUSPICIOUS 6h, HIGH_RISK 15min                                                  | ✅ Done |
+| `FailMode = "open" \| "closed"` threaded through all rate-limit helpers                                                  | ✅ Done |
+| `SYSTEM_PROMPT_HASH` auto-derived at module load (catches prompt edits that skip a `PROMPT_VERSION` bump)                | ✅ Done |
+| Shared Zod I/O schemas in `@askarthur/types` (WebAnalyzeInputSchema + ExtensionAnalyzeInputSchema + AnalyzeOutputSchema) | ✅ Done |
+| `sanitizeUnicode` NFKC (was NFC) — closes fullwidth/mathematical evasion class                                           | ✅ Done |
+
+### Phase 2 — Durable Inngest fan-out (narrowed scope) ✅ (commits `3733675`, `13cb2f0`)
+
+| Fix                                                                                                     | Status             |
+| ------------------------------------------------------------------------------------------------------- | ------------------ |
+| Migration v73: `scam_reports.idempotency_key` + partial unique index + updated `create_scam_report` RPC | ✅ Applied to prod |
+| `resolveRequestId(headers)` — `Idempotency-Key` header with ULID fallback (+ `ulid` dep)                | ✅ Done            |
+| `analyze.completed.v1` event schema (Zod-validated)                                                     | ✅ Done            |
+| `analyze-completed-report` durable consumer (scam_reports + entity links via idempotent RPC)            | ✅ Done            |
+| `analyze-completed-brand` durable consumer                                                              | ✅ Done            |
+| `analyze-completed-cost` durable consumer                                                               | ✅ Done            |
+| `analyze-failure-subscriber` on `inngest/function.failed` (prefix-filtered to `analyze-*`)              | ✅ Done            |
+| Route wired behind `FF_ANALYZE_INNGEST_WEB` with legacy waitUntil preserved for canary                  | ✅ Done            |
+| `X-Request-Id` response header on both cache-hit and main paths                                         | ✅ Done            |
+
+### Phase 2b — Deferred verify consumer + R2 image staging
+
+| Scope                                                                                              | Trigger             |
+| -------------------------------------------------------------------------------------------------- | ------------------- |
+| `storeVerifiedScam` migration to Inngest (needs R2 image-staging design; content-addressable keys) | Queued              |
+| Restore `scam_reports.verified_scam_id` FK on HIGH_RISK cases post-migration                       | With Phase 2b       |
+| Twilio phone enrichment off request path (requires client SWR refetch for `phoneIntelligence`)     | Separate initiative |
+
+### Phase 3 — Upstream robustness
+
+| Fix                                                                                                | Status  |
+| -------------------------------------------------------------------------------------------------- | ------- |
+| Upstash-backed distributed circuit breaker wrapping Anthropic / GSB / VT                           | Planned |
+| DNS-pinned SSRF guard (undici Agent custom lookup, manual redirect walk)                           | Planned |
+| Anthropic Structured Outputs (`anthropic-beta: structured-outputs-2025-11-13`) — Zod → JSON Schema | Planned |
+| Spotlighting (delimiter + datamarking + Unicode NFKC stripping)                                    | Planned |
+| Image re-encode + EXIF strip (defer `sharp` vs EXIF-only decision to traffic data)                 | Planned |
+| OCR pre-scan via **Google Cloud Vision** ($0.0015/image) — user choice                             | Planned |
+| Verify SYSTEM_PROMPT ≥4,096 tokens for Haiku 4.5 caching; add `ttl: "1h"`                          | Planned |
+
+### Phase 4 — Observability (minimal)
+
+| Fix                                                                                           | Status   |
+| --------------------------------------------------------------------------------------------- | -------- |
+| `@vercel/otel` scaffolding + pino with PII redact paths                                       | Planned  |
+| Daily-spend kill-switch (Upstash counter + feature-flag gate) per-feature                     | Planned  |
+| Sentry adoption — flagged as a single-line import swap when adopted; not installed in Phase 4 | Deferred |
+
+### Phase 5 — Variant factory + delete duplication
+
+| Fix                                                                                                    | Status  |
+| ------------------------------------------------------------------------------------------------------ | ------- |
+| `buildAnalyze(config, deps)` factory composing stages per `VariantConfig`                              | Planned |
+| Migrate web / extension / bot / media / analyze-ad routes to the factory                               | Planned |
+| Delete the 5 copies of the verdict-merge logic (safety net: 14 variant contract tests from Phase 1.10) | Planned |
+
 ---
 
 ## Status Key

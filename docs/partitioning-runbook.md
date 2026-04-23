@@ -107,6 +107,16 @@ COMMIT;
 
 **`scam_reports`**: has FKs to it from `report_entity_links` (CASCADE) and `cluster_reports` (CASCADE) and `verdict_feedback_extension` (SET NULL). After the swap, the FKs still reference the renamed-to `scam_reports` table, so no relink required — but confirm with `\d report_entity_links` that the FK target is correct before retiring `scam_reports_old`.
 
+**`scam_reports` — idempotency_key carry-forward (v73).** The column plus a partial unique index on `WHERE idempotency_key IS NOT NULL` was added by `migration-v73-analyze-idempotency.sql` to make the analyze-pipeline fan-out safe on retry. Unique indexes on **partitioned** tables in Postgres must include every partition key column, so on `scam_reports_partitioned` the index takes a different form:
+
+```sql
+CREATE UNIQUE INDEX IF NOT EXISTS idx_scam_reports_idempotency_key
+  ON scam_reports_partitioned (idempotency_key, created_at)
+  WHERE idempotency_key IS NOT NULL;
+```
+
+Include this in the "copy data" and "swap tables" steps for `scam_reports` — the single-column heap-table index will NOT copy across automatically, and the `create_scam_report` RPC's `ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL` must continue to find a matching partial unique index after the swap, or every retry will return an error instead of dedup'ing.
+
 **`feed_items`**: has no known FKs inbound; lowest-risk of the three.
 
 **`cost_telemetry`**: referenced by views `daily_cost_summary` and `today_cost_total`. Re-run the view DDL (v62 migration) after the swap if the views disappear.
