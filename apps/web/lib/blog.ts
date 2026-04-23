@@ -7,6 +7,9 @@ export interface BlogPost {
   subtitle: string | null;
   excerpt: string;
   content: string;
+  // Pre-rendered HTML for posts mirrored from Ghost. Null for legacy
+  // markdown posts — those still go through renderMarkdown(content).
+  contentHtml: string | null;
   author: string;
   tags: string[];
   categorySlug: string | null;
@@ -35,6 +38,7 @@ interface BlogRow {
   subtitle: string | null;
   excerpt: string;
   content: string;
+  content_html: string | null;
   author: string;
   tags: string[];
   category_slug: string | null;
@@ -59,6 +63,7 @@ function rowToPost(row: BlogRow): BlogPost {
     subtitle: row.subtitle,
     excerpt: row.excerpt,
     content: row.content,
+    contentHtml: row.content_html ?? null,
     author: row.author,
     tags: row.tags || [],
     categorySlug: row.category_slug,
@@ -77,7 +82,7 @@ function rowToPost(row: BlogRow): BlogPost {
 }
 
 const POST_SELECT = `
-  slug, title, subtitle, excerpt, content, author, tags,
+  slug, title, subtitle, excerpt, content, content_html, author, tags,
   category_slug, product, hero_image_url, hero_image_alt,
   published_at, updated_at, reading_time_minutes, is_featured,
   seo_title, meta_description,
