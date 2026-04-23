@@ -173,6 +173,24 @@ The ordering below exists to avoid the DB-ahead-of-code skew that leaves
 production using new tables before the code that reads them ships, or vice
 versa. Follow it for any change that touches SQL and TypeScript together.
 
+**Start every new piece of work on a fresh branch off `main`.** Multiple
+concurrent agents (Claude sessions, lint-staged hooks, editor extensions)
+can all touch the working tree and the branch pointer mid-session; without
+an isolated branch, one agent's stash/reset can silently clobber another
+agent's in-flight edits or land a commit on the wrong branch. Before any
+code change:
+
+```bash
+git fetch origin && git checkout main && git pull --ff-only
+git checkout -b <scope>/<short-task-name>   # e.g. phone-footprint/sprint-2
+```
+
+Do NOT piggyback work onto someone else's feature branch, and do NOT
+continue committing on a branch you inherited from the previous session
+without verifying `git branch --show-current` first. Costs of a mis-placed
+commit are high — cherry-picking out of a stranger's branch is tedious and
+sometimes lossy if a subsequent rebase has rewritten hashes.
+
 1. **Typecheck locally** — `pnpm turbo typecheck`. Also `pytest` under
    `pipeline/scrapers/` if the change touches Python.
 2. **Stage explicit files** — never `git add -A` (the repo has several in-progress

@@ -217,3 +217,105 @@ export async function checkFormRateLimit(
     return storeUnavailable(failMode, "checkFormRateLimit");
   }
 }
+
+// =============================================================================
+// Phone Footprint — dedicated buckets
+// =============================================================================
+// Buckets are separate from the generic burst/daily limiters because the
+// Phone Footprint product has stricter per-tier rules and its own cost
+// exposure (Twilio Verify ~$0.10/OTP, Vonage NI ~$0.04, LeakCheck ~$0.002).
+// Abuse on these routes burns real money, so every bucket defaults to
+// fail-closed in production (see defaultFailMode).
+
+type PfBucket =
+  | "anon_burst"        // teaser lookup, unauthenticated
+  | "anon_daily"        // teaser lookup, unauthenticated — outer cap
+  | "user"              // authenticated paid lookup
+  | "verify_otp_phone"  // OTP send attempts per phone number
+  | "verify_otp_ip"     // OTP send attempts per IP
+  | "org_fleet_bulk"    // CSV bulk upload per org
+  | "msisdn_cross_ip"   // enumeration detection: N distinct IPs per msisdn
+  | "pdf_render";       // expensive PDF generation
+
+const _pfLimiters = new Map<PfBucket, Ratelimit>();
+
+function getPfLimiter(bucket: PfBucket): Ratelimit {
+  const existing = _pfLimiters.get(bucket);
+  if (existing) return existing;
+
+  const redis = new Redis({
+    url: process.env.UPSTASH_REDIS_REST_URL!,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+  });
+
+  // Per-bucket configuration. Window shapes chosen to match the abuse model
+  // described in docs/plans/phone-footprint-v2.md §9:
+  //   anon_burst: 3/hr (sliding) — covers legitimate "check my number" use
+  //   anon_daily: 10/day — outer safety cap for teaser
+  //   user: 60/min — plenty of headroom for UI autocompletion
+  //   verify_otp_phone: 3/day per phone — hard ceiling on OTP cost exposure
+  //   verify_otp_ip: 10/day per IP — bot throttle
+  //   org_fleet_bulk: 3/hr per org — CSV upload cadence
+  //   msisdn_cross_ip: 3/24h distinct-IP count per msisdn_hash — stalker /
+  //     enumeration defence. Exceed → route forces teaser-only for 24h.
+  //   pdf_render: 5/day per user — R2 egress + memory cap.
+  const slidingWindow = Ratelimit.slidingWindow.bind(Ratelimit);
+  const config: Record<
+    PfBucket,
+    { algo: ReturnType<typeof slidingWindow>; prefix: string }
+  > = {
+    anon_burst:       { algo: slidingWindow(3,  "1 h"),  prefix: "askarthur:pf:anon:burst" },
+    anon_daily:       { algo: slidingWindow(10, "24 h"), prefix: "askarthur:pf:anon:daily" },
+    user:             { algo: slidingWindow(60, "1 m"),  prefix: "askarthur:pf:user" },
+    verify_otp_phone: { algo: slidingWindow(3,  "24 h"), prefix: "askarthur:pf:otp:phone" },
+    verify_otp_ip:    { algo: slidingWindow(10, "24 h"), prefix: "askarthur:pf:otp:ip" },
+    org_fleet_bulk:   { algo: slidingWindow(3,  "1 h"),  prefix: "askarthur:pf:fleet:bulk" },
+    msisdn_cross_ip:  { algo: slidingWindow(3,  "24 h"), prefix: "askarthur:pf:xip" },
+    pdf_render:       { algo: slidingWindow(5,  "24 h"), prefix: "askarthur:pf:pdf" },
+  };
+
+  const lim = new Ratelimit({
+    redis,
+    limiter: config[bucket].algo,
+    prefix: config[bucket].prefix,
+    analytics: true,
+  });
+  _pfLimiters.set(bucket, lim);
+  return lim;
+}
+
+/**
+ * Check a Phone Footprint rate-limit bucket.
+ *
+ * All Phone Footprint routes default to fail-closed in production — a Redis
+ * outage must NOT open the floodgates on Twilio Verify or Vonage spend. In
+ * development, fail-open for local iteration without Redis.
+ */
+export async function checkPhoneFootprintRateLimit(
+  bucket: PfBucket,
+  identifier: string,
+  failMode: FailMode = defaultFailMode(),
+): Promise<RateLimitResult> {
+  if (!process.env.UPSTASH_REDIS_REST_URL) {
+    return storeUnavailable(failMode, `checkPhoneFootprintRateLimit:${bucket}`);
+  }
+  try {
+    const res = await getPfLimiter(bucket).limit(identifier);
+    if (!res.success) {
+      return {
+        allowed: false,
+        remaining: 0,
+        resetAt: new Date(res.reset),
+        message: "Too many requests. Please try again later.",
+      };
+    }
+    return {
+      allowed: true,
+      remaining: res.remaining,
+      resetAt: null,
+    };
+  } catch (err) {
+    logger.error(`checkPhoneFootprintRateLimit:${bucket}: store error`, { error: String(err) });
+    return storeUnavailable(failMode, `checkPhoneFootprintRateLimit:${bucket}`);
+  }
+}

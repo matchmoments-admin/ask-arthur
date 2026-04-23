@@ -124,6 +124,34 @@ export const featureFlags = {
    *  waitUntil block. Server-side only (no NEXT_PUBLIC_ prefix) — this
    *  controls backend routing, not client UI. */
   analyzeInngestWeb: process.env.FF_ANALYZE_INNGEST_WEB === "true",
+
+  /** Phone Footprint — consumer product (free teaser + paid self-lookup).
+   *  Client-side NEXT_PUBLIC_ so the UI can conditionally render entry
+   *  points. Default OFF until Sprint 2 end-to-end testing green. */
+  phoneFootprintConsumer:
+    process.env.NEXT_PUBLIC_FF_PHONE_FOOTPRINT_CONSUMER === "true",
+
+  /** Phone Footprint — Vonage provider (NI v2 fraud_score + CAMARA SIM Swap
+   *  + Device Swap). Server-side only — never exposed to the browser because
+   *  the Vonage API key is a server secret. Default OFF until VONAGE_API_KEY
+   *  + VONAGE_API_SECRET are set and the provider has been dry-tested.
+   *  When OFF, pillar 3 falls back to IPQS and pillar 4 reports
+   *  `available: false` so the scorer redistributes weight. */
+  vonageEnabled: process.env.FF_VONAGE_ENABLED === "true",
+
+  /** Phone Footprint — LeakCheck phone-breach lookup. Server-side only.
+   *  Default OFF until LeakCheck DPA is signed with APP-equivalent clauses
+   *  (APP 8 — overseas disclosure). When OFF, pillar 2 (breach) either
+   *  falls back to HIBP email-only coverage or reports `available: false`. */
+  leakcheckEnabled: process.env.FF_LEAKCHECK_ENABLED === "true",
+
+  /** Phone Footprint — Twilio Verify OTP for phone ownership proof.
+   *  Server-side only. Default OFF until TWILIO_VERIFY_SERVICE_SID is
+   *  provisioned in the Twilio console AND the /verify/{start,check}
+   *  endpoints have been tested end-to-end. This is the APP 3.5/3.6
+   *  compliance spine — the paid-tier lookup route falls back to
+   *  teaser-only output when OFF. */
+  twilioVerifyEnabled: process.env.FF_TWILIO_VERIFY_ENABLED === "true",
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;

@@ -35,7 +35,8 @@
     "./inngest/scam-alerts": "./src/inngest/scam-alerts.ts",
     "./inngest/feed-sync": "./src/inngest/feed-sync.ts",
     "./ipqualityscore": "./src/ipqualityscore.ts",
-    "./inngest/meta-brp-report": "./src/inngest/meta-brp-report.ts"
+    "./inngest/meta-brp-report": "./src/inngest/meta-brp-report.ts",
+    "./phone-footprint": "./src/phone-footprint/index.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",
