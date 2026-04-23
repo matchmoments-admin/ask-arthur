@@ -171,7 +171,10 @@ versa. Follow it for any change that touches SQL and TypeScript together.
    meant for your commit).
 3. **Commit with a HEREDOC message** — include WHY (R&D documentation), reference
    any migration versions touched, and the `Co-Authored-By: Claude Opus 4.7 (1M context)` trailer.
-4. **Push to a feature branch** — never push directly to `main`.
+4. **Push to a feature branch** — never push directly to `main`. If the branch
+   has fallen behind `main`, prefer `git rebase main` over a merge commit:
+   rebasing keeps the file tree linear so Turbo remote-cache hits from `main`'s
+   already-built tasks carry over cleanly to the next preview build.
 5. **Apply migrations to the Supabase prod project** via
    `mcp__supabase__apply_migration` on project `rquomhcgnodxzkhokwni`.
    Migrations should be idempotent (`CREATE TABLE IF NOT EXISTS`, `DROP POLICY IF
@@ -184,11 +187,16 @@ EXISTS ... CREATE POLICY ...`, etc.) so re-running is safe.
    versions touched and whether they're already applied, plus a post-merge
    verification checklist.
 8. **Wait for Vercel preview** — the PR check `Vercel` must be green. A failing
-   preview means the merge will break production.
+   preview means the merge will break production. The preview build also
+   populates the Turbo remote cache for every task in this PR's file tree;
+   because squash-merging preserves that tree, the post-merge production deploy
+   on `main` replays those cache entries instead of rebuilding from scratch.
 9. **Merge with `gh pr merge <n> --squash --delete-branch=false`**. Use
    `--admin` _only_ when CI is red for reasons demonstrably unrelated to the
    PR (e.g., pre-existing flaky tests that are also red on `main`); flag this
-   explicitly in the PR body before merging.
+   explicitly in the PR body before merging. Note that `--admin` skips the
+   preview build, so the remote cache is not warmed and the production deploy
+   that follows will be a full cold rebuild — use sparingly.
 10. **Verify prod deploy** — `gh run list --branch main --limit 1` confirms the
     Vercel deploy kicked off. Smoke-test the touched surfaces on prod.
 
@@ -216,6 +224,12 @@ reverse is `INSERT ... SELECT` from the archive back to the hot table.
 - **Admin**: `ADMIN_SECRET`
 - **Billing**: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `NEXT_PUBLIC_STRIPE_PRO_MONTHLY`, `NEXT_PUBLIC_STRIPE_PRO_ANNUAL`, `NEXT_PUBLIC_STRIPE_BUSINESS_MONTHLY`, `NEXT_PUBLIC_STRIPE_BUSINESS_ANNUAL`
 - **Auth / feature flags**: `NEXT_PUBLIC_FF_AUTH`, `NEXT_PUBLIC_FF_FACEBOOK_ADS` (server-side gate matching WXT_FACEBOOK_ADS), `NEXT_PUBLIC_FF_MEDIA_ANALYSIS`, `NEXT_PUBLIC_FF_DEEPFAKE`, `NEXT_PUBLIC_FF_PHONE_INTEL` (see `packages/utils/src/feature-flags.ts` for the full list)
+- **Analyze pipeline (Phase 2)**: `FF_ANALYZE_INNGEST_WEB` (server-side, no `NEXT_PUBLIC_` prefix). When `true`, `/api/analyze` emits `analyze.completed.v1` and durable Inngest consumers take over scam_reports / brand alerts / cost telemetry writes. When unset or `false`, the legacy waitUntil path runs. Canary separately from other flags.
+- **Inngest**: `INNGEST_EVENT_KEY`, `INNGEST_SIGNING_KEY` (existing; used by both the cron fans and the Phase 2 analyze consumers)
 - **External APIs**: `SAFE_BROWSING_API_KEY`, `TWILIO_ACCOUNT_SID` + `TWILIO_AUTH_TOKEN`, `OPENAI_API_KEY` (Whisper), `HIVE_API_KEY` (Facebook ad image scanning — pricing contract required), `REALITY_DEFENDER_API_KEY` + `RESEMBLE_AI_API_TOKEN` (deepfake detection), `ABN_LOOKUP_GUID` (ABR Web Services)
 - **Bot webhook dispatch**: `SUPABASE_WEBHOOK_SECRET` (HMAC secret on `bot_message_queue` INSERT trigger — see `/api/bot-webhook/route.ts`)
 - **Cost alerts**: `TELEGRAM_ADMIN_CHAT_ID` (personal chat ID via @userinfobot), `DAILY_COST_THRESHOLD_USD` (default 2)
+
+### Analyze request correlation
+
+Clients submitting to `/api/analyze` can send an `Idempotency-Key` header (Stripe-style, ULID or any 8-255 char alphanumeric/dash/underscore). The server echoes it back as `X-Request-Id`, threads it into the Inngest event id, and persists it as `scam_reports.idempotency_key` (v73 migration). Replaying the same request with the same key is safe — the `create_scam_report` RPC's `ON CONFLICT` clause returns the original row id without inserting. Absent the header, the server generates a ULID and returns it for client-side correlation.

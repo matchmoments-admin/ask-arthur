@@ -3,10 +3,13 @@ import { waitUntil, ipAddress } from "@vercel/functions";
 import { checkRateLimit, checkImageUploadRateLimit } from "@askarthur/utils/rate-limit";
 import { analyzeWithClaude, detectInjectionAttempt, type Verdict } from "@askarthur/scam-engine/claude";
 import { featureFlags } from "@askarthur/utils/feature-flags";
+import { resolveRequestId } from "@askarthur/utils/request-id";
 import { extractContactsFromText, normalizePhoneE164 } from "@askarthur/scam-engine/phone-normalize";
 import { extractURLs, checkURLReputation } from "@askarthur/scam-engine/safebrowsing";
 import { resolveRedirects, extractFinalUrls } from "@askarthur/scam-engine/redirect-resolver";
 import { geolocateFromHeaders } from "@askarthur/scam-engine/geolocate";
+import { inngest } from "@askarthur/scam-engine/inngest/client";
+import { ANALYZE_COMPLETED_EVENT } from "@askarthur/scam-engine/inngest/events";
 import { WebAnalyzeInputSchema, type RedirectChain } from "@askarthur/types";
 import { storeVerifiedScam, incrementStats } from "@askarthur/scam-engine/pipeline";
 import { storeScamReport, buildEntities } from "@askarthur/scam-engine/report-store";
@@ -68,6 +71,11 @@ export async function POST(req: NextRequest) {
     }
     const clientIp = ip ?? "127.0.0.1";
     const ua = req.headers.get("user-agent") || "unknown";
+
+    // Correlation id — client `Idempotency-Key` header if valid, else a
+    // server-generated ULID. Used as: X-Request-Id response header, the
+    // Inngest event id, and the scam_reports.idempotency_key column.
+    const requestId = resolveRequestId(req.headers);
 
     const rateCheck = await checkRateLimit(clientIp, ua);
     if (!rateCheck.allowed) {
@@ -162,7 +170,12 @@ export async function POST(req: NextRequest) {
             countryCode: geo.countryCode,
             cached: true,
           },
-          { headers: { "X-RateLimit-Remaining": String(rateCheck.remaining) } }
+          {
+            headers: {
+              "X-RateLimit-Remaining": String(rateCheck.remaining),
+              "X-Request-Id": requestId,
+            },
+          }
         );
       }
     }
@@ -191,7 +204,10 @@ export async function POST(req: NextRequest) {
     ]);
 
     // 5b. Cost telemetry — fire-and-forget, wrapped in waitUntil internally.
-    if (aiResult.usage) {
+    // When FF_ANALYZE_INNGEST_WEB is ON the Inngest `analyze-completed-cost`
+    // consumer owns this write (durable, retried). We still run the legacy
+    // path when OFF so nothing regresses during canary.
+    if (aiResult.usage && !featureFlags.analyzeInngestWeb) {
       logCost({
         feature: "web_analyze",
         provider: "anthropic",
@@ -209,6 +225,7 @@ export async function POST(req: NextRequest) {
           image_count: images.length,
           mode: mode ?? "text",
         },
+        requestId,
       });
     }
 
@@ -424,16 +441,30 @@ export async function POST(req: NextRequest) {
       }));
     }
 
-    // 8d. Intelligence Core: store unified report + entity linkage (behind feature flag)
-    if (featureFlags.intelligenceCore) {
-      const reporterHash = await hashIdentifier(clientIp, ua);
-      const entitiesToLink = buildEntities({
-        phones: scammerContacts?.phoneNumbers,
-        emails: scammerContacts?.emailAddresses,
-        urls: urlResults.length > 0 ? urlResults : undefined,
-        extractionMethod: images.length > 0 ? "claude" : "regex",
-      });
+    // 8d. Intelligence Core: store unified report + entity linkage.
+    //
+    // When FF_ANALYZE_INNGEST_WEB is ON the `analyze-completed-report`
+    // Inngest consumer owns this write (durable, retried, idempotent via
+    // v73 migration). Legacy waitUntil path runs only when the flag is
+    // OFF — gate per-flag to avoid dual-write during canary.
+    //
+    // HIGH_RISK storeVerifiedScam stays on waitUntil until Phase 2b
+    // (image-payload staging not yet designed). That means when the
+    // Inngest flag is ON, scam_reports rows for HIGH_RISK cases will not
+    // carry verified_scam_id. Phase 2b restores the link.
+    const reporterHash = featureFlags.intelligenceCore
+      ? await hashIdentifier(clientIp, ua)
+      : "";
+    const entitiesToLink = featureFlags.intelligenceCore
+      ? buildEntities({
+          phones: scammerContacts?.phoneNumbers,
+          emails: scammerContacts?.emailAddresses,
+          urls: urlResults.length > 0 ? urlResults : undefined,
+          extractionMethod: images.length > 0 ? "claude" : "regex",
+        })
+      : [];
 
+    if (featureFlags.intelligenceCore && !featureFlags.analyzeInngestWeb) {
       if (finalVerdict === "HIGH_RISK") {
         // Chain: store verified scam first to get ID, then store report with link
         waitUntil(
@@ -453,10 +484,19 @@ export async function POST(req: NextRequest) {
           }).catch(err => logger.error("storeScamReport failed", { error: String(err) }))
         );
       }
+    } else if (featureFlags.intelligenceCore && featureFlags.analyzeInngestWeb && finalVerdict === "HIGH_RISK") {
+      // Inngest path: storeVerifiedScam still runs via waitUntil (Phase 2b
+      // will move it). The report itself is emitted via the event below.
+      waitUntil(
+        storeVerifiedScam(aiResult, region, images.length > 0 ? images : undefined, uploadScreenshot).catch(err =>
+          logger.error("storeVerifiedScam failed (inngest path)", { error: String(err) })
+        )
+      );
     }
 
-    // 8e. Brand impersonation alert (fire-and-forget)
-    if (aiResult.impersonatedBrand && finalVerdict !== "SAFE") {
+    // 8e. Brand impersonation alert — handled by `analyze-completed-brand`
+    // when the Inngest flag is ON.
+    if (!featureFlags.analyzeInngestWeb && aiResult.impersonatedBrand && finalVerdict !== "SAFE") {
       import("@askarthur/scam-engine/brand-alerts").then(({ createBrandAlert }) => {
         waitUntil(
           createBrandAlert({
@@ -471,6 +511,53 @@ export async function POST(req: NextRequest) {
           }).catch(err => logger.error("Brand alert failed", { error: String(err) }))
         );
       });
+    }
+
+    // 8f. Emit analyze.completed.v1 — triggers durable fan-out to the
+    // report / brand / cost consumers. Gated so the legacy waitUntil paths
+    // above keep running when the flag is OFF.
+    if (featureFlags.analyzeInngestWeb) {
+      waitUntil(
+        inngest
+          .send({
+            name: ANALYZE_COMPLETED_EVENT,
+            id: requestId, // Inngest-level dedup on retries
+            data: {
+              requestId,
+              source: "web" as const,
+              verdict: aiResult.verdict,
+              confidence: aiResult.confidence,
+              summary: aiResult.summary,
+              redFlags: aiResult.redFlags,
+              nextSteps: aiResult.nextSteps,
+              scamType: aiResult.scamType,
+              channel: aiResult.channel,
+              impersonatedBrand: aiResult.impersonatedBrand,
+              reporterHash: reporterHash || (await hashIdentifier(clientIp, ua)),
+              inputMode: (mode ?? (images.length > 0 ? "image" : "text")) as "text" | "image" | "qrcode",
+              region,
+              countryCode,
+              text,
+              imageCount: images.length,
+              scammerContacts,
+              urlResults: urlResults.length > 0 ? urlResults : undefined,
+              usage: aiResult.usage,
+              cacheHit: false, // route returned cache hit earlier; reaching here means we called Claude
+              consumerFlags: {
+                intelligenceCore: featureFlags.intelligenceCore,
+                scamContactReporting: featureFlags.scamContactReporting,
+                scamUrlReporting: featureFlags.scamUrlReporting,
+                phoneIntelligence: featureFlags.phoneIntelligence,
+              },
+            },
+          })
+          .catch((err) =>
+            logger.error("analyze.completed.v1 send failed", {
+              error: String(err),
+              requestId,
+            })
+          )
+      );
     }
 
     // 9. Return result
@@ -498,6 +585,7 @@ export async function POST(req: NextRequest) {
       {
         headers: {
           "X-RateLimit-Remaining": String(rateCheck.remaining),
+          "X-Request-Id": requestId,
         },
       }
     );

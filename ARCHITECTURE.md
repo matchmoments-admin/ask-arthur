@@ -35,7 +35,7 @@ Ask Arthur is a multi-platform scam detection service. Users submit suspicious c
        │
 ┌──────┴───────────────────────────────────────────────────┐
 │              Background Processing                        │
-│  Inngest (9 functions)  │  Python Scrapers (16 feeds)    │
+│  Inngest (19 functions) │  Python Scrapers (16 feeds)    │
 │  GitHub Actions (cron)  │  Deep Investigation Pipeline   │
 └──────────────────────────────────────────────────────────┘
 ```
@@ -79,34 +79,47 @@ The main analysis pipeline (`/api/analyze`) processes user submissions:
 ```
 Request
   │
+  ├─ 0. IP extraction (@vercel/functions.ipAddress, fallback chain, 400 if unresolvable in prod)
+  ├─ 0a. Request id resolve (Idempotency-Key header → ULID fallback)
   ├─ 1. Payload size check (413 if >10MB)
-  ├─ 2. Rate limit check (429 if exceeded)
+  ├─ 2. Rate limit check (429 if exceeded; fail-CLOSED in prod via FailMode)
   │     └─ Two-tier: 3/hour burst + 10/day per IP+UA hash
-  ├─ 3. Input validation (Zod schema)
-  ├─ 4. Injection pattern detection (14 regex patterns)
-  ├─ 5. Cache lookup (text-only, Upstash Redis)
-  │     └─ Cache hit → return cached verdict, increment stats
-  ├─ 6. URL extraction & validation
+  ├─ 3. Input validation (shared WebAnalyzeInputSchema from @askarthur/types)
+  ├─ 3a. Image validation: base64 size pre-check + magic-byte sniff
+  ├─ 3b. Image-upload rate limit (5/h per IP, fail-CLOSED in prod)
+  ├─ 4. Injection pattern detection (14 regex patterns, NFKC-normalized)
+  ├─ 5. Cache lookup (Upstash Redis; composite versioned key, per-verdict TTL)
+  │     └─ Cache hit → return cached verdict with X-Request-Id, increment stats
+  ├─ 6. Geolocation (synchronous — x-vercel-ip-* headers, zero latency)
+  ├─ 7. URL extraction & validation
   │     ├─ Google Safe Browsing API check
   │     └─ Redirect chain resolution (if feature flag enabled)
-  ├─ 7. Parallel processing
-  │     ├─ Claude AI analysis (with images if provided)
-  │     ├─ URL reputation checks
-  │     └─ IP geolocation (ip-api.com)
-  ├─ 8. Verdict merging
+  ├─ 8. Parallel processing
+  │     ├─ Claude AI analysis with Anthropic timeout (30s vision / 15s text)
+  │     └─ URL reputation checks
+  ├─ 9. Verdict merging (mergeVerdict in @askarthur/core-analysis)
   │     ├─ Escalate to HIGH_RISK if any URL flagged
-  │     └─ Floor to SUSPICIOUS if injection detected
-  ├─ 9. Phone intelligence (HIGH_RISK/SUSPICIOUS only)
-  │     ├─ Extract phone numbers from text
-  │     ├─ Twilio Lookup v2 (line type + CNAM, $0.018/lookup)
-  │     ├─ Compute 0-100 risk score (VoIP, non-AU, unknown type, invalid, no carrier, no CNAM)
-  │     └─ Inject VoIP/non-AU findings as red flags
-  ├─ 10. Background work (Vercel waitUntil)
-  │     ├─ Store HIGH_RISK verdicts to Supabase
-  │     ├─ Increment statistics counters
-  │     └─ Cache text-only results in Redis
-  └─ 11. Response with rate limit headers
+  │     ├─ Floor to SUSPICIOUS if injection detected
+  │     └─ Tiered escalation on deepfake signals (boolean providers + score providers)
+  ├─ 10. Phone intelligence (HIGH_RISK/SUSPICIOUS only — stays inline this phase)
+  │     └─ Twilio Lookup v2 (line type + CNAM, $0.018/lookup, see Phase 2b for async move)
+  ├─ 11. Background work
+  │     ├─ If FF_ANALYZE_INNGEST_WEB=true (Phase 2):
+  │     │     └─ emit `analyze.completed.v1` Inngest event → fan-out to
+  │     │        report / brand / cost consumers (durable, retry, DB-idempotent)
+  │     ├─ Else (legacy waitUntil path):
+  │     │     └─ storeScamReport, createBrandAlert, logCost inline
+  │     ├─ storeVerifiedScam (waitUntil regardless — Phase 2b migrates this)
+  │     ├─ Cache text-only results in Redis (PII-scrubbed before write)
+  │     └─ Increment statistics counters
+  └─ 12. Response with X-Request-Id + X-RateLimit-Remaining headers
 ```
+
+**Idempotency layers** (three, each the safety net for the layer above):
+
+1. **HTTP** — `Idempotency-Key` header (Stripe-style) parsed to a canonical request id; auto-generates a ULID when absent. Echoed back as `X-Request-Id`.
+2. **Inngest** — event published with `id: requestId` (dedup within 24h); each consumer sets `idempotency: "event.data.requestId"` (function-level dedup).
+3. **Postgres** — `scam_reports.idempotency_key` partial unique index + `create_scam_report` RPC with `ON CONFLICT ... DO UPDATE` returning original id. Authoritative backstop (v73 migration).
 
 ### Request Schema
 
@@ -156,114 +169,114 @@ Request
 
 ### Public Web API
 
-| Route | Method | Purpose |
-|-------|--------|---------|
-| `/api/analyze` | POST | Main scam analysis endpoint |
-| `/api/breach-check` | POST | Check if email in data breach |
-| `/api/stats` | GET | Public threat statistics |
-| `/api/subscribe` | POST | Newsletter subscription |
-| `/api/unsubscribe` | GET | Newsletter unsubscribe |
-| `/api/unsubscribe-one-click` | POST | RFC 8058 one-click unsubscribe |
-| `/api/feed` | GET | Public paginated scam feed (filters, FTS, country) |
-| `/api/feed/proxy-image` | GET | Reddit image proxy (CORS/hotlink bypass) |
+| Route                        | Method | Purpose                                            |
+| ---------------------------- | ------ | -------------------------------------------------- |
+| `/api/analyze`               | POST   | Main scam analysis endpoint                        |
+| `/api/breach-check`          | POST   | Check if email in data breach                      |
+| `/api/stats`                 | GET    | Public threat statistics                           |
+| `/api/subscribe`             | POST   | Newsletter subscription                            |
+| `/api/unsubscribe`           | GET    | Newsletter unsubscribe                             |
+| `/api/unsubscribe-one-click` | POST   | RFC 8058 one-click unsubscribe                     |
+| `/api/feed`                  | GET    | Public paginated scam feed (filters, FTS, country) |
+| `/api/feed/proxy-image`      | GET    | Reddit image proxy (CORS/hotlink bypass)           |
 
 ### Scam Data Routes
 
-| Route | Method | Purpose |
-|-------|--------|---------|
-| `/api/scam-urls/lookup` | GET | Check if URL is a known scam |
-| `/api/scam-urls/report` | POST | Report new scam URL |
-| `/api/scam-contacts/lookup` | GET | Check phone number/email |
-| `/api/scam-contacts/report` | POST | Report malicious contact |
+| Route                       | Method | Purpose                      |
+| --------------------------- | ------ | ---------------------------- |
+| `/api/scam-urls/lookup`     | GET    | Check if URL is a known scam |
+| `/api/scam-urls/report`     | POST   | Report new scam URL          |
+| `/api/scam-contacts/lookup` | GET    | Check phone number/email     |
+| `/api/scam-contacts/report` | POST   | Report malicious contact     |
 
 ### Media Analysis
 
-| Route | Method | Purpose |
-|-------|--------|---------|
-| `/api/media/upload` | POST | Upload image/video for analysis |
-| `/api/media/analyze` | POST | Analyze deepfake media |
-| `/api/media/status` | GET | Check analysis progress |
+| Route                | Method | Purpose                         |
+| -------------------- | ------ | ------------------------------- |
+| `/api/media/upload`  | POST   | Upload image/video for analysis |
+| `/api/media/analyze` | POST   | Analyze deepfake media          |
+| `/api/media/status`  | GET    | Check analysis progress         |
 
 ### Extension API
 
 Authenticated via per-install ECDSA P-256 signature (`X-Extension-Install-Id`, `X-Extension-Timestamp`, `X-Extension-Nonce`, `X-Extension-Signature`). CORS is wildcard (auth is enforced in the headers, not at the origin). See "Extension identity & request signing" below for the full flow.
 
-| Route | Method | Purpose |
-|-------|--------|---------|
-| `/api/extension/register` | POST | One-time Turnstile-gated registration — stores the install's public key |
-| `/api/extension/url-check` | POST | Quick URL verification |
-| `/api/extension/analyze` | POST | Full analysis from extension |
-| `/api/extension/analyze-ad` | POST | Full ad analysis (text + landing URL + image) |
-| `/api/extension/check-ad` | GET | Community flag lookup by ad text hash |
-| `/api/extension/flag-ad` | POST | Community flag submission |
-| `/api/extension/extension-security/analyze` | POST | Scan installed extensions (CRX parsing) |
-| `/api/extension/extension-security/threat-db` | GET | Fetch malicious-extension threat DB |
-| `/api/extension/report-email` | POST | Report suspicious email |
-| `/api/extension/subscription` | GET | Extension tier lookup (Pro / free) |
-| `/api/extension/heartbeat` | GET | Health check / keep-alive |
+| Route                                         | Method | Purpose                                                                 |
+| --------------------------------------------- | ------ | ----------------------------------------------------------------------- |
+| `/api/extension/register`                     | POST   | One-time Turnstile-gated registration — stores the install's public key |
+| `/api/extension/url-check`                    | POST   | Quick URL verification                                                  |
+| `/api/extension/analyze`                      | POST   | Full analysis from extension                                            |
+| `/api/extension/analyze-ad`                   | POST   | Full ad analysis (text + landing URL + image)                           |
+| `/api/extension/check-ad`                     | GET    | Community flag lookup by ad text hash                                   |
+| `/api/extension/flag-ad`                      | POST   | Community flag submission                                               |
+| `/api/extension/extension-security/analyze`   | POST   | Scan installed extensions (CRX parsing)                                 |
+| `/api/extension/extension-security/threat-db` | GET    | Fetch malicious-extension threat DB                                     |
+| `/api/extension/report-email`                 | POST   | Report suspicious email                                                 |
+| `/api/extension/subscription`                 | GET    | Extension tier lookup (Pro / free)                                      |
+| `/api/extension/heartbeat`                    | GET    | Health check / keep-alive                                               |
 
 ### Security Scanner API
 
-| Route | Method | Purpose |
-|-------|--------|---------|
-| `/api/site-audit/stream` | POST | Website health check (SSE streaming) |
-| `/api/extension-audit` | POST | Chrome extension security scan (CRX analysis, 20+ checks) |
-| `/api/mcp-audit` | POST | MCP server/npm package scan (OSV.dev, OWASP MCP Top 10) |
-| `/api/skill-audit` | POST | OpenClaw/Claude skill scan (prompt injection, malware detection) |
-| `/api/badge` | GET | Embeddable SVG security badge (shield/pill/cert styles) |
-| `/api/og/scan` | GET | Dynamic OG image for scan result sharing |
+| Route                    | Method | Purpose                                                          |
+| ------------------------ | ------ | ---------------------------------------------------------------- |
+| `/api/site-audit/stream` | POST   | Website health check (SSE streaming)                             |
+| `/api/extension-audit`   | POST   | Chrome extension security scan (CRX analysis, 20+ checks)        |
+| `/api/mcp-audit`         | POST   | MCP server/npm package scan (OSV.dev, OWASP MCP Top 10)          |
+| `/api/skill-audit`       | POST   | OpenClaw/Claude skill scan (prompt injection, malware detection) |
+| `/api/badge`             | GET    | Embeddable SVG security badge (shield/pill/cert styles)          |
+| `/api/og/scan`           | GET    | Dynamic OG image for scan result sharing                         |
 
 ### Bot Webhooks
 
-| Route | Method | Purpose |
-|-------|--------|---------|
-| `/api/webhooks/telegram` | POST | Telegram bot webhook |
-| `/api/webhooks/whatsapp` | POST | WhatsApp bot webhook |
-| `/api/webhooks/slack` | POST | Slack event webhook |
-| `/api/webhooks/slack/shortcuts` | POST | Slack slash commands |
-| `/api/webhooks/messenger` | POST | Facebook Messenger webhook |
-| `/api/webhooks/paddle` | POST | Paddle subscription webhook |
+| Route                           | Method | Purpose                     |
+| ------------------------------- | ------ | --------------------------- |
+| `/api/webhooks/telegram`        | POST   | Telegram bot webhook        |
+| `/api/webhooks/whatsapp`        | POST   | WhatsApp bot webhook        |
+| `/api/webhooks/slack`           | POST   | Slack event webhook         |
+| `/api/webhooks/slack/shortcuts` | POST   | Slack slash commands        |
+| `/api/webhooks/messenger`       | POST   | Facebook Messenger webhook  |
+| `/api/webhooks/paddle`          | POST   | Paddle subscription webhook |
 
 ### Corporate Onboarding & Organization API
 
-| Route | Method | Purpose |
-|-------|--------|---------|
-| `/api/org/create` | POST | Create organization + owner membership |
-| `/api/org/members` | GET/PATCH | List/update org members |
-| `/api/org/invite` | POST | Send team invitation email |
-| `/api/org/invite/accept` | POST | Accept invitation via hashed token |
-| `/api/leads` | POST | Corporate lead capture (Zod-validated, Slack notification) |
-| `/api/abn-lookup` | GET | Australian Business Number verification (ABR API) |
-| `/api/cron/nurture` | GET | Daily nurture email delivery (6-email sequence) |
+| Route                    | Method    | Purpose                                                    |
+| ------------------------ | --------- | ---------------------------------------------------------- |
+| `/api/org/create`        | POST      | Create organization + owner membership                     |
+| `/api/org/members`       | GET/PATCH | List/update org members                                    |
+| `/api/org/invite`        | POST      | Send team invitation email                                 |
+| `/api/org/invite/accept` | POST      | Accept invitation via hashed token                         |
+| `/api/leads`             | POST      | Corporate lead capture (Zod-validated, Slack notification) |
+| `/api/abn-lookup`        | GET       | Australian Business Number verification (ABR API)          |
+| `/api/cron/nurture`      | GET       | Daily nurture email delivery (6-email sequence)            |
 
 ### B2B Threat Intelligence API (v1)
 
 Authenticated via Bearer token (API key). See `docs/openapi.yaml` for full spec.
 
-| Route | Method | Purpose |
-|-------|--------|---------|
-| `/api/v1/threats/trending` | GET | Trending scam types by period/region |
-| `/api/v1/threats/urls/lookup` | GET | Look up URL threat data |
-| `/api/v1/threats/urls/trending` | GET | Most-reported domains |
-| `/api/v1/threats/domains` | GET | Domain aggregation & WHOIS |
-| `/api/v1/threats/stats` | GET | Aggregate threat statistics |
-| `/api/v1/openapi.json` | GET | OpenAPI 3.0 spec (Scalar docs) |
+| Route                           | Method | Purpose                              |
+| ------------------------------- | ------ | ------------------------------------ |
+| `/api/v1/threats/trending`      | GET    | Trending scam types by period/region |
+| `/api/v1/threats/urls/lookup`   | GET    | Look up URL threat data              |
+| `/api/v1/threats/urls/trending` | GET    | Most-reported domains                |
+| `/api/v1/threats/domains`       | GET    | Domain aggregation & WHOIS           |
+| `/api/v1/threats/stats`         | GET    | Aggregate threat statistics          |
+| `/api/v1/openapi.json`          | GET    | OpenAPI 3.0 spec (Scalar docs)       |
 
 ### Cron Routes
 
-| Route | Schedule | Purpose |
-|-------|----------|---------|
-| `/api/cron/weekly-email` | Weekly | Send summary emails via Resend |
-| `/api/cron/weekly-blog` | Weekly | Generate blog posts |
-| `/api/cron/pipeline-health` | Periodic | Monitor threat pipeline |
-| `/api/cron/process-bot-queue` | Periodic | Process async bot messages |
-| `/api/cron/nurture` | Daily 9am AEST | Corporate lead nurture email sequence |
+| Route                         | Schedule       | Purpose                               |
+| ----------------------------- | -------------- | ------------------------------------- |
+| `/api/cron/weekly-email`      | Weekly         | Send summary emails via Resend        |
+| `/api/cron/weekly-blog`       | Weekly         | Generate blog posts                   |
+| `/api/cron/pipeline-health`   | Periodic       | Monitor threat pipeline               |
+| `/api/cron/process-bot-queue` | Periodic       | Process async bot messages            |
+| `/api/cron/nurture`           | Daily 9am AEST | Corporate lead nurture email sequence |
 
 ### Internal
 
-| Route | Purpose |
-|-------|---------|
-| `/api/inngest` | Inngest event handler |
+| Route              | Purpose                           |
+| ------------------ | --------------------------------- |
+| `/api/inngest`     | Inngest event handler             |
 | `/api/admin/login` | Cookie-based admin authentication |
 
 ## Database Schema
@@ -274,76 +287,76 @@ Authenticated via Bearer token (API key). See `docs/openapi.yaml` for full spec.
 
 **Core Tables:**
 
-| Table | Purpose |
-|-------|---------|
-| `verified_scams` | Confirmed HIGH_RISK submissions (PII-scrubbed) |
-| `scam_urls` | Known malicious URLs with enrichment data (164K+) |
-| `scam_ips` | Malicious IP intelligence (140K+) |
-| `scam_crypto_wallets` | Scam-associated crypto wallet addresses |
-| `scam_reports` | Central report node for all user analyses (v21) |
-| `scam_entities` | Unified entity lookup layer — phone, email, URL, domain, IP, crypto, bank account (v21, 14K+) |
-| `report_entity_links` | Many-to-many junction between reports and entities (v21) |
-| `scam_clusters` | Groups of related scam reports by shared entities (v22) |
-| `cluster_members` | Cluster membership junction table (v22) |
-| `check_stats` | Daily analysis counters by verdict and region |
-| `api_keys` | B2B API key hashes, tiers, daily limits |
-| `subscriptions` | Paddle subscription records linked to API keys |
-| `user_profiles` | User profiles (role, display name, company) linked to auth.users |
-| `organizations` | Corporate client organizations with ABN, sector, tier (v55) |
-| `org_members` | Organization membership with 6-role RBAC (v55) |
-| `org_invitations` | Pending team invitations with hashed tokens (v55) |
-| `leads` | Corporate sales pipeline with nurture tracking (v56) |
-| `api_usage_log` | Per-key, per-endpoint, per-day API usage tracking |
-| `email_subscribers` | Newsletter subscribers |
-| `blog_posts` | Blog content with categories and full-text search |
-| `blog_categories` | Blog category taxonomy |
-| `bot_message_queue` | Async bot message processing queue |
-| `feed_ingestion_log` | Scraper run tracking with record counts |
-| `phone_lookups` | Twilio phone intelligence results (risk score, CNAM, carrier) |
-| `media_analyses` | Uploaded media analysis jobs (deepfake detection) |
-| `sites` | Website audit targets with grades |
-| `site_audits` | Individual audit results with test scores |
-| `device_push_tokens` | Expo push notification tokens (v32) |
-| `family_groups` | Family protection groups (v33) |
-| `family_members` | Family group membership (v33) |
-| `family_activity_log` | Family check activity (v33) |
-| `extension_subscriptions` | Extension tier tracking (v34) |
-| `phone_reputation` | Community phone reputation data (v35) |
-| `reddit_processed_posts` | Reddit scraper deduplication (v36) |
-| `feed_items` | Unified public scam feed — Reddit posts, verified scams, user reports (v44) |
-| `provider_reports` | Reports submitted to ACCC/AFP/banks/telcos (v39) |
-| `provider_actions` | Provider response actions (v39) |
+| Table                     | Purpose                                                                                       |
+| ------------------------- | --------------------------------------------------------------------------------------------- |
+| `verified_scams`          | Confirmed HIGH_RISK submissions (PII-scrubbed)                                                |
+| `scam_urls`               | Known malicious URLs with enrichment data (164K+)                                             |
+| `scam_ips`                | Malicious IP intelligence (140K+)                                                             |
+| `scam_crypto_wallets`     | Scam-associated crypto wallet addresses                                                       |
+| `scam_reports`            | Central report node for all user analyses (v21)                                               |
+| `scam_entities`           | Unified entity lookup layer — phone, email, URL, domain, IP, crypto, bank account (v21, 14K+) |
+| `report_entity_links`     | Many-to-many junction between reports and entities (v21)                                      |
+| `scam_clusters`           | Groups of related scam reports by shared entities (v22)                                       |
+| `cluster_members`         | Cluster membership junction table (v22)                                                       |
+| `check_stats`             | Daily analysis counters by verdict and region                                                 |
+| `api_keys`                | B2B API key hashes, tiers, daily limits                                                       |
+| `subscriptions`           | Paddle subscription records linked to API keys                                                |
+| `user_profiles`           | User profiles (role, display name, company) linked to auth.users                              |
+| `organizations`           | Corporate client organizations with ABN, sector, tier (v55)                                   |
+| `org_members`             | Organization membership with 6-role RBAC (v55)                                                |
+| `org_invitations`         | Pending team invitations with hashed tokens (v55)                                             |
+| `leads`                   | Corporate sales pipeline with nurture tracking (v56)                                          |
+| `api_usage_log`           | Per-key, per-endpoint, per-day API usage tracking                                             |
+| `email_subscribers`       | Newsletter subscribers                                                                        |
+| `blog_posts`              | Blog content with categories and full-text search                                             |
+| `blog_categories`         | Blog category taxonomy                                                                        |
+| `bot_message_queue`       | Async bot message processing queue                                                            |
+| `feed_ingestion_log`      | Scraper run tracking with record counts                                                       |
+| `phone_lookups`           | Twilio phone intelligence results (risk score, CNAM, carrier)                                 |
+| `media_analyses`          | Uploaded media analysis jobs (deepfake detection)                                             |
+| `sites`                   | Website audit targets with grades                                                             |
+| `site_audits`             | Individual audit results with test scores                                                     |
+| `device_push_tokens`      | Expo push notification tokens (v32)                                                           |
+| `family_groups`           | Family protection groups (v33)                                                                |
+| `family_members`          | Family group membership (v33)                                                                 |
+| `family_activity_log`     | Family check activity (v33)                                                                   |
+| `extension_subscriptions` | Extension tier tracking (v34)                                                                 |
+| `phone_reputation`        | Community phone reputation data (v35)                                                         |
+| `reddit_processed_posts`  | Reddit scraper deduplication (v36)                                                            |
+| `feed_items`              | Unified public scam feed — Reddit posts, verified scams, user reports (v44)                   |
+| `provider_reports`        | Reports submitted to ACCC/AFP/banks/telcos (v39)                                              |
+| `provider_actions`        | Provider response actions (v39)                                                               |
 
 **Views (v38–v40):**
 
-| View | Purpose |
-|------|---------|
-| `threat_intel_entities` | High-value entities (report_count >= 2 OR risk HIGH/CRITICAL) for government export |
-| `threat_intel_urls` | Active, high-confidence URLs for blocklist feeds |
-| `threat_intel_daily_summary` | Daily trends by region from check_stats and scam_reports |
-| `threat_intel_scam_campaigns` | Campaign-level reporting from scam_clusters |
-| `financial_impact_summary` | Loss aggregates by date, scam_type, channel, region, currency (v40) |
+| View                          | Purpose                                                                             |
+| ----------------------------- | ----------------------------------------------------------------------------------- |
+| `threat_intel_entities`       | High-value entities (report_count >= 2 OR risk HIGH/CRITICAL) for government export |
+| `threat_intel_urls`           | Active, high-confidence URLs for blocklist feeds                                    |
+| `threat_intel_daily_summary`  | Daily trends by region from check_stats and scam_reports                            |
+| `threat_intel_scam_campaigns` | Campaign-level reporting from scam_clusters                                         |
+| `financial_impact_summary`    | Loss aggregates by date, scam_type, channel, region, currency (v40)                 |
 
 **Key RPCs (32 total):**
 
-| RPC | Purpose |
-|-----|---------|
-| `create_scam_report` | Insert report row, return ID (v21) |
-| `upsert_scam_entity` | Upsert entity, bump report_count (v21) |
-| `link_report_entity` | Idempotent junction insert (v21) |
-| `upsert_scam_url` | Upsert URL with feed attribution (v3) |
-| `compute_entity_risk_score` | Composite 0-100 risk score per entity (v27) |
-| `bulk_upsert_feed_url` | Batch feed URL ingestion (v15) |
-| `bulk_upsert_feed_ip` | Batch feed IP ingestion (v15) |
-| `bulk_upsert_feed_entity` | Batch feed entity ingestion (v36) |
-| `get_threat_intel_export` | Paginated JSONB entity export for government (v38) |
-| `submit_provider_report` | Create provider report with duplicate check (v39) |
-| `get_unreported_entities` | Find HIGH+ risk entities not yet reported (v39) |
-| `record_financial_impact` | Attach loss data to a report (v40) |
-| `get_jurisdiction_summary` | Per-region loss aggregates for state police (v40) |
-| `generate_api_key_record` | Create API key with user ownership (v30) |
-| `increment_check_stats` | Atomic daily counter increment (v2) |
-| `upsert_feed_item` | Upsert feed item on (source, external_id) conflict (v44) |
+| RPC                         | Purpose                                                  |
+| --------------------------- | -------------------------------------------------------- |
+| `create_scam_report`        | Insert report row, return ID (v21)                       |
+| `upsert_scam_entity`        | Upsert entity, bump report_count (v21)                   |
+| `link_report_entity`        | Idempotent junction insert (v21)                         |
+| `upsert_scam_url`           | Upsert URL with feed attribution (v3)                    |
+| `compute_entity_risk_score` | Composite 0-100 risk score per entity (v27)              |
+| `bulk_upsert_feed_url`      | Batch feed URL ingestion (v15)                           |
+| `bulk_upsert_feed_ip`       | Batch feed IP ingestion (v15)                            |
+| `bulk_upsert_feed_entity`   | Batch feed entity ingestion (v36)                        |
+| `get_threat_intel_export`   | Paginated JSONB entity export for government (v38)       |
+| `submit_provider_report`    | Create provider report with duplicate check (v39)        |
+| `get_unreported_entities`   | Find HIGH+ risk entities not yet reported (v39)          |
+| `record_financial_impact`   | Attach loss data to a report (v40)                       |
+| `get_jurisdiction_summary`  | Per-region loss aggregates for state police (v40)        |
+| `generate_api_key_record`   | Create API key with user ownership (v30)                 |
+| `increment_check_stats`     | Atomic daily counter increment (v2)                      |
+| `upsert_feed_item`          | Upsert feed item on (source, external_id) conflict (v44) |
 
 ### Upstash Redis
 
@@ -358,44 +371,63 @@ Authenticated via Bearer token (API key). See `docs/openapi.yaml` for full spec.
 
 ## Inngest Background Functions
 
-Eleven event-driven functions registered in `@askarthur/scam-engine/inngest/functions`:
+Nineteen functions registered in `@askarthur/scam-engine/inngest/functions` — 15 cron/enrichment fans and 4 event-driven consumers for the analyze pipeline (Phase 2).
 
-| Function | Schedule | Purpose |
-|----------|----------|---------|
-| Staleness — URLs | Daily 3am UTC | Mark URLs inactive after 7 days |
-| Staleness — IPs | Daily 3am UTC | Mark IPs inactive after 7 days |
-| Staleness — Wallets | Daily 3am UTC | Mark wallets inactive after 14 days |
-| Enrichment Fan-Out | Every 6 hours | WHOIS + SSL enrichment for pending URLs (20 domains/run) |
-| CT Monitor | Every 12 hours | Certificate Transparency monitoring for AU brand impersonation |
-| Entity Enrichment | Every 4 hours | Two-tier enrichment for entities with 3+ reports. Tier 1 (inline): local intel + AbuseIPDB + HIBP + crt.sh + Twilio. All via Promise.allSettled |
-| URLScan Enrichment | Every 4 hours (+30 min) | Tier 2 async: submits URLs to URLScan.io, waits 60s, retrieves results |
-| Cluster Builder | Daily 4am UTC | Groups related scam reports by shared entities |
-| Risk Scorer | Every 6 hours | Computes composite 0-100 risk scores per entity via SQL RPC |
-| Feed Sync — Verified Scams | Every 15 minutes | Syncs recent verified_scams into feed_items table |
-| Feed Sync — User Reports | Every 15 minutes | Syncs HIGH_RISK user reports into feed_items table |
+### Cron & pipeline functions
+
+| Function                                           | Schedule                   | Purpose                                                        |
+| -------------------------------------------------- | -------------------------- | -------------------------------------------------------------- |
+| Staleness — URLs                                   | Daily 3am UTC              | Mark URLs inactive after 7 days                                |
+| Staleness — IPs                                    | Daily 3am UTC              | Mark IPs inactive after 7 days                                 |
+| Staleness — Wallets                                | Daily 3am UTC              | Mark wallets inactive after 14 days                            |
+| Enrichment Fan-Out                                 | Every 6 hours              | WHOIS + SSL enrichment for pending URLs (20 domains/run)       |
+| CT Monitor                                         | Every 12 hours             | Certificate Transparency monitoring for AU brand impersonation |
+| Entity Enrichment                                  | Every 4 hours              | Two-tier enrichment for entities with 3+ reports               |
+| URLScan Enrichment                                 | Every 4 hours (+30 min)    | Tier 2 async URLScan.io submission + retrieval                 |
+| Cluster Builder                                    | Daily 4am UTC              | Groups related scam reports by shared entities                 |
+| Risk Scorer                                        | Every 6 hours              | Composite 0-100 risk scores per entity via SQL RPC             |
+| Feed Sync — Verified Scams                         | Every 15 minutes           | Syncs verified_scams into feed_items                           |
+| Feed Sync — User Reports                           | Every 15 minutes           | Syncs HIGH_RISK user reports into feed_items                   |
+| Scam Alert Push Notifications                      | Every 3 hours              | Mobile push fan-out for newly verified scams                   |
+| Meta BRP Deepfake Reporter                         | Hourly                     | Reports deepfake assets to Meta Brand Rights Protection        |
+| Vuln Intel: enrich pending (cron sweep)            | Every 15 min               | Sweeps vulnerabilities.au_context for Claude Haiku enrichment  |
+| Vuln Intel: enrich with Australian context (event) | On `vulnerability.created` | Per-CVE AU-context enrichment                                  |
+
+### Analyze pipeline event-driven consumers (Phase 2)
+
+Triggered by `analyze.completed.v1` emitted from `/api/analyze` when `FF_ANALYZE_INNGEST_WEB=true`. Each consumer sets `idempotency: "event.data.requestId"` and uses Inngest's native retry policy.
+
+| Function                     | Event                     | Purpose                                                                                        |
+| ---------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------- |
+| `analyze-completed-report`   | `analyze.completed.v1`    | Writes scam_reports + entity links via idempotent `create_scam_report` RPC (v73)               |
+| `analyze-completed-brand`    | `analyze.completed.v1`    | Creates `brand_impersonation_alerts` row when `impersonatedBrand` present and verdict non-SAFE |
+| `analyze-completed-cost`     | `analyze.completed.v1`    | Inserts `cost_telemetry` row tagged by source + Claude token counts                            |
+| `analyze-failure-subscriber` | `inngest/function.failed` | Logs failures from `analyze-*` functions (prefix-filtered). Sentry hook deferred               |
+
+**Not yet migrated** (Phase 2b backlog): `storeVerifiedScam` stays on the route's `waitUntil` pending an R2 image-staging design. Consequence: while `FF_ANALYZE_INNGEST_WEB=true`, `scam_reports` rows for HIGH_RISK cases do not carry `verified_scam_id`. Phase 2b restores the link.
 
 ## Threat Intelligence Pipeline
 
 16 Python scrapers in `pipeline/scrapers/` ingest from external threat feeds:
 
-| Scraper | Feed |
-|---------|------|
-| `abuseipdb.py` | AbuseIPDB malicious IP reports |
-| `cert_au.py` | CERT Australia advisories |
-| `crtsh.py` | Certificate Transparency logs (brand impersonation) |
-| `cryptoscamdb.py` | Crypto scam database |
-| `feodo.py` | Feodo botnet C2 tracker |
-| `ipsum.py` | IPSUM proxy detection |
-| `openphish.py` | OpenPhish phishing URLs |
-| `phishing_army.py` | Phishing Army blocklist |
-| `phishing_database.py` | Phishing Database feed |
-| `phishstats.py` | PhishStats API |
-| `phishtank.py` | PhishTank community DB |
-| `reddit_scams.py` | Reddit scam subreddit scraper |
-| `scamwatch_rss.py` | ACCC Scamwatch RSS feed |
-| `spamhaus.py` | Spamhaus DROP/EDROP blocklists |
-| `threatfox.py` | ThreatFox malware/C2 IOCs |
-| `urlhaus.py` | URLhaus malware hosting |
+| Scraper                | Feed                                                |
+| ---------------------- | --------------------------------------------------- |
+| `abuseipdb.py`         | AbuseIPDB malicious IP reports                      |
+| `cert_au.py`           | CERT Australia advisories                           |
+| `crtsh.py`             | Certificate Transparency logs (brand impersonation) |
+| `cryptoscamdb.py`      | Crypto scam database                                |
+| `feodo.py`             | Feodo botnet C2 tracker                             |
+| `ipsum.py`             | IPSUM proxy detection                               |
+| `openphish.py`         | OpenPhish phishing URLs                             |
+| `phishing_army.py`     | Phishing Army blocklist                             |
+| `phishing_database.py` | Phishing Database feed                              |
+| `phishstats.py`        | PhishStats API                                      |
+| `phishtank.py`         | PhishTank community DB                              |
+| `reddit_scams.py`      | Reddit scam subreddit scraper                       |
+| `scamwatch_rss.py`     | ACCC Scamwatch RSS feed                             |
+| `spamhaus.py`          | Spamhaus DROP/EDROP blocklists                      |
+| `threatfox.py`         | ThreatFox malware/C2 IOCs                           |
+| `urlhaus.py`           | URLhaus malware hosting                             |
 
 Scrapers run on GitHub Actions (scheduled, gated by `ENABLE_SCRAPER` repo variable). They use a shared `common/` library for URL normalization, database operations, validation, and R2 evidence storage.
 
@@ -403,16 +435,16 @@ Scrapers run on GitHub Actions (scheduled, gated by `ENABLE_SCRAPER` repo variab
 
 Weekly passive reconnaissance on CRITICAL/HIGH risk entities using Linux security tools. Runs on GitHub Actions (Sunday 2am UTC, gated by `ENABLE_DEEP_INVESTIGATION` repo variable).
 
-| Tool | Entity Types | What It Produces |
-|------|-------------|-----------------|
-| `nmap -sV` | IP | Open ports, service versions, OS guess |
-| `nmap --script ssl-enum-ciphers` | IP | Weak ciphers, deprecated TLS |
-| `whois` | IP | ASN, network name, bulletproof hosting detection |
-| `dnsrecon` | Domain | Subdomains, zone transfer, wildcard DNS |
-| `whatweb` | Domain | Technology fingerprinting (CMS, frameworks) |
-| `sslscan` | Domain | Protocol support, self-signed certs |
-| `nikto` | URL | Exposed admin panels, directory listings |
-| `curl -sI` | URL | Security headers, redirect chain |
+| Tool                             | Entity Types | What It Produces                                 |
+| -------------------------------- | ------------ | ------------------------------------------------ |
+| `nmap -sV`                       | IP           | Open ports, service versions, OS guess           |
+| `nmap --script ssl-enum-ciphers` | IP           | Weak ciphers, deprecated TLS                     |
+| `whois`                          | IP           | ASN, network name, bulletproof hosting detection |
+| `dnsrecon`                       | Domain       | Subdomains, zone transfer, wildcard DNS          |
+| `whatweb`                        | Domain       | Technology fingerprinting (CMS, frameworks)      |
+| `sslscan`                        | Domain       | Protocol support, self-signed certs              |
+| `nikto`                          | URL          | Exposed admin panels, directory listings         |
+| `curl -sI`                       | URL          | Security headers, redirect chain                 |
 
 Results stored in `scam_entities.investigation_data` JSONB. Max 50 entities/run, 1s delay between targets, private IP filtering, no active exploitation.
 
@@ -423,6 +455,7 @@ Infrastructure for submitting scam intelligence to Australian government agencie
 ### Threat Intel Export (v38)
 
 Four views provide pre-formatted data for government/law-enforcement consumption:
+
 - `threat_intel_entities` — high-value entities with linked report aggregates
 - `threat_intel_urls` — active, high-confidence URLs for blocklist feeds
 - `threat_intel_daily_summary` — daily trends by region
@@ -435,6 +468,7 @@ All views use `security_invoker = true` (caller's RLS, not definer's).
 ### Provider Reporting (v39)
 
 Two tables track outbound reports to providers (ACCC, AFP, ACSC, big-4 banks, Telstra, Optus):
+
 - `provider_reports` — report lifecycle (queued → submitted → acknowledged → actioned → closed)
 - `provider_actions` — actions taken by providers (blocked, suspended, takedown, etc.)
 
@@ -449,6 +483,7 @@ Scam reports can include financial loss data (`estimated_loss`, `loss_currency`,
 ### Shared Bot Core (`@askarthur/bot-core`)
 
 All four bot platforms share:
+
 - **Analysis**: `analyzeForBot()` — runs Claude + URL checks in parallel
 - **Formatting**: Platform-specific formatters (Telegram HTML, WhatsApp markdown, Slack Block Kit, Messenger plain text)
 - **Webhook verification**: HMAC-SHA256 signature validation per platform
@@ -489,16 +524,17 @@ Chrome (and the CRX format) gives a server no way to cryptographically verify th
 
 Supabase Auth with PKCE flow, feature-flagged behind `NEXT_PUBLIC_FF_AUTH`.
 
-| Component | File |
-|-----------|------|
-| Auth server client (RLS-aware) | `packages/supabase/src/server-auth.ts` |
-| Middleware client (token refresh) | `packages/supabase/src/middleware.ts` |
-| Browser client (cookie auth) | `packages/supabase/src/browser.ts` |
-| Auth helpers (`getUser`, `requireAuth`) | `apps/web/lib/auth.ts` |
-| Session refresh + route protection | `apps/web/middleware.ts` |
-| Admin dual-mode (Supabase + HMAC) | `apps/web/lib/adminAuth.ts` |
+| Component                               | File                                   |
+| --------------------------------------- | -------------------------------------- |
+| Auth server client (RLS-aware)          | `packages/supabase/src/server-auth.ts` |
+| Middleware client (token refresh)       | `packages/supabase/src/middleware.ts`  |
+| Browser client (cookie auth)            | `packages/supabase/src/browser.ts`     |
+| Auth helpers (`getUser`, `requireAuth`) | `apps/web/lib/auth.ts`                 |
+| Session refresh + route protection      | `apps/web/middleware.ts`               |
+| Admin dual-mode (Supabase + HMAC)       | `apps/web/lib/adminAuth.ts`            |
 
 **Protected routes:**
+
 - `/app/*` — requires authenticated user (redirects to `/login`)
 - `/admin/*` — requires admin role (Supabase Auth) or HMAC cookie (legacy)
 
@@ -506,18 +542,18 @@ Supabase Auth with PKCE flow, feature-flagged behind `NEXT_PUBLIC_FF_AUTH`.
 
 ## External Services
 
-| Service | Purpose |
-|---------|---------|
-| Anthropic (Claude) | AI scam analysis (claude-haiku-4-5) |
-| Supabase | PostgreSQL database + auth |
-| Upstash | Redis cache + rate limiting |
-| Vercel | Hosting + serverless functions |
-| Cloudflare R2 | Media storage + public CDN for feed images |
-| Google Safe Browsing | URL reputation |
-| Resend | Transactional email |
-| Twilio | Phone number lookup |
-| Inngest | Background job orchestration |
-| Plausible | Privacy-first analytics |
-| InboxSDK | Gmail extension integration |
-| Paddle | Merchant-of-record billing (B2B API subscriptions) |
-| Reality Defender / Resemble AI | Deepfake detection (media analysis) |
+| Service                        | Purpose                                            |
+| ------------------------------ | -------------------------------------------------- |
+| Anthropic (Claude)             | AI scam analysis (claude-haiku-4-5)                |
+| Supabase                       | PostgreSQL database + auth                         |
+| Upstash                        | Redis cache + rate limiting                        |
+| Vercel                         | Hosting + serverless functions                     |
+| Cloudflare R2                  | Media storage + public CDN for feed images         |
+| Google Safe Browsing           | URL reputation                                     |
+| Resend                         | Transactional email                                |
+| Twilio                         | Phone number lookup                                |
+| Inngest                        | Background job orchestration                       |
+| Plausible                      | Privacy-first analytics                            |
+| InboxSDK                       | Gmail extension integration                        |
+| Paddle                         | Merchant-of-record billing (B2B API subscriptions) |
+| Reality Defender / Resemble AI | Deepfake detection (media analysis)                |

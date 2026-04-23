@@ -34,6 +34,13 @@ export interface StoreScamReportParams {
   countryCode: string | null;
   verifiedScamId?: number | null;
   entities: EntityToLink[];
+  /**
+   * Stable key across retries. If present, the RPC uses ON CONFLICT to
+   * return the original row id rather than inserting a duplicate. Enables
+   * safe Inngest-driven calls (Phase 2) and client `Idempotency-Key`
+   * header handling. See supabase/migration-v73-analyze-idempotency.sql.
+   */
+  idempotencyKey?: string;
 }
 
 /**
@@ -75,6 +82,7 @@ export async function storeScamReport(
         p_verified_scam_id: params.verifiedScamId ?? null,
         p_region: params.region,
         p_country_code: params.countryCode,
+        p_idempotency_key: params.idempotencyKey ?? null,
       }
     );
 

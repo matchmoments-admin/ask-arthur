@@ -117,6 +117,13 @@ export const featureFlags = {
    *  Keep OFF until PR B3's $5/day cost brake is live — the enrichment fans
    *  out to every new CVE so a large NVD catch-up can spend quickly. */
   vulnAuEnrichment: process.env.NEXT_PUBLIC_FF_VULN_AU_ENRICHMENT === "true",
+
+  /** Phase 2 of the /api/analyze refactor: route emits analyze.completed.v1
+   *  and durable Inngest consumers take over scam_reports writes, brand
+   *  alerts, and cost telemetry. When OFF, falls back to the legacy
+   *  waitUntil block. Server-side only (no NEXT_PUBLIC_ prefix) — this
+   *  controls backend routing, not client UI. */
+  analyzeInngestWeb: process.env.FF_ANALYZE_INNGEST_WEB === "true",
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;
