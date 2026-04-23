@@ -63,7 +63,7 @@ const securityHeaders = [
       "script-src 'self' 'unsafe-inline' https://plausible.io https://cdn.jsdelivr.net https://js.stripe.com",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net",
       "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net",
-      "img-src 'self' data: blob: https://*.r2.cloudflarestorage.com https://*.stripe.com",
+      "img-src 'self' data: blob: https://*.r2.cloudflarestorage.com https://*.stripe.com https://blog.askarthur.au",
       "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://plausible.io https://cdn.jsdelivr.net https://api.stripe.com",
       "frame-src https://js.stripe.com https://hooks.stripe.com",
       "frame-ancestors 'none'",

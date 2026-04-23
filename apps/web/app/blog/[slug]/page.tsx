@@ -55,8 +55,11 @@ export default async function BlogPostPage({ params }: PageProps) {
   if (!post) notFound();
 
   const related = await getRelatedPosts(slug, post.categorySlug);
-  const rawHtml = await renderMarkdown(post.content);
-  const htmlContent = sanitizeHtml(rawHtml, {
+  // Ghost-mirrored posts arrive as pre-rendered HTML; legacy posts are
+  // markdown. Sanitize either source uniformly so trust boundaries don't
+  // shift based on origin.
+  const sourceHtml = post.contentHtml ?? (await renderMarkdown(post.content));
+  const htmlContent = sanitizeHtml(sourceHtml, {
     allowedTags: [
       ...sanitizeHtml.defaults.allowedTags,
       "figure",
