@@ -6,15 +6,17 @@ Master reference for AI assistants and contributors working on this codebase. St
 
 ## Quick Reference
 
-| What                      | Where                                    |
-| ------------------------- | ---------------------------------------- |
-| Architecture & data flows | [ARCHITECTURE.md](./ARCHITECTURE.md)     |
-| Code standards & patterns | [CONVENTIONS.md](./CONVENTIONS.md)       |
-| Design tokens & UI rules  | [DESIGN_SYSTEM.md](./DESIGN_SYSTEM.md)   |
-| Security & threat model   | [SECURITY.md](./SECURITY.md)             |
-| Roadmap & status          | [ROADMAP.md](./ROADMAP.md)               |
-| Deferred features         | [BACKLOG.md](./BACKLOG.md)               |
-| OpenAPI spec              | [docs/openapi.yaml](./docs/openapi.yaml) |
+| What                         | Where                                                                                                                                                                                                                                     |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Architecture & data flows    | [ARCHITECTURE.md](./ARCHITECTURE.md)                                                                                                                                                                                                      |
+| Code standards & patterns    | [CONVENTIONS.md](./CONVENTIONS.md)                                                                                                                                                                                                        |
+| Design tokens & UI rules     | [DESIGN_SYSTEM.md](./DESIGN_SYSTEM.md)                                                                                                                                                                                                    |
+| Security & threat model      | [SECURITY.md](./SECURITY.md)                                                                                                                                                                                                              |
+| Roadmap & status             | [ROADMAP.md](./ROADMAP.md)                                                                                                                                                                                                                |
+| Deferred features            | [BACKLOG.md](./BACKLOG.md)                                                                                                                                                                                                                |
+| OpenAPI spec                 | [docs/openapi.yaml](./docs/openapi.yaml)                                                                                                                                                                                                  |
+| Phone Footprint — plan       | [docs/plans/phone-footprint-v2.md](./docs/plans/phone-footprint-v2.md)                                                                                                                                                                    |
+| Phone Footprint — ops config | [docs/ops/phone-footprint-config.md](./docs/ops/phone-footprint-config.md) — env vars, feature flags, Stripe prices, vendor setup, UI integration points. **Check here first for any UI toggle, flag flip, or key integration question.** |
 
 > **Database hygiene note.** BACKLOG.md → `Database Hygiene & SPF Readiness`
 > tracks the deferred items from the 2026-04-23 advisor audit: 177 unused
