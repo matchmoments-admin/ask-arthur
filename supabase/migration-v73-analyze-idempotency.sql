@@ -52,10 +52,22 @@ COMMENT ON COLUMN scam_reports.idempotency_key IS
 -- 2. Updated create_scam_report RPC — idempotent on (idempotency_key)
 -- =============================================================================
 --
+-- Postgres identifies functions by (name, arg types), so adding a new arg
+-- creates an overload rather than replacing the v21 definition. Drop the
+-- old 14-arg signature explicitly before creating the new 15-arg version —
+-- the new function has a default on the idempotency_key arg, so all
+-- existing callers (web, bot, extension) continue to work by name.
+--
 -- The DO UPDATE is a no-op (SET idempotency_key = EXCLUDED.idempotency_key
 -- which is identical to the existing value on conflict). This idiom is
 -- needed because ON CONFLICT DO NOTHING does not return rows — we want
 -- RETURNING id to fire whether we inserted or hit an existing row.
+
+DROP FUNCTION IF EXISTS create_scam_report(
+  TEXT, TEXT, TEXT, TEXT, REAL,
+  TEXT, TEXT, TEXT, TEXT, TEXT,
+  JSONB, BIGINT, TEXT, TEXT
+);
 
 CREATE OR REPLACE FUNCTION create_scam_report(
   p_reporter_hash TEXT,
