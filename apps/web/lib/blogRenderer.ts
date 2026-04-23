@@ -5,13 +5,22 @@ import javascript from "highlight.js/lib/languages/javascript";
 import python from "highlight.js/lib/languages/python";
 import bash from "highlight.js/lib/languages/bash";
 import json from "highlight.js/lib/languages/json";
+import plaintext from "highlight.js/lib/languages/plaintext";
 import { youtubeHtml } from "@/components/blog/YouTubeEmbed";
 
-// Register highlight.js languages
+// Register highlight.js languages.
+// `plaintext` is required because the highlight() callback below falls back
+// to it when the author-specified language isn't registered. Without this
+// registration the fallback throws `Unknown language: "plaintext"` at
+// pre-render time — which broke the prod Vercel build on /blog/how-ask-arthur-works
+// (any code fence tagged ```plaintext triggered it). Registering the
+// built-in plaintext language (an identity highlighter) makes the fallback
+// a safe no-op instead of a throw.
 hljs.registerLanguage("javascript", javascript);
 hljs.registerLanguage("python", python);
 hljs.registerLanguage("bash", bash);
 hljs.registerLanguage("json", json);
+hljs.registerLanguage("plaintext", plaintext);
 
 // GitHub-style admonition callouts: [!TIP], [!WARNING], [!DANGER], etc.
 const CALLOUT_CONFIG: Record<string, { label: string; icon: string; cls: string }> = {
