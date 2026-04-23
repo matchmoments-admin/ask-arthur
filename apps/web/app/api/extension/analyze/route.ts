@@ -1,21 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import { waitUntil } from "@vercel/functions";
 import { analyzeWithClaude, detectInjectionAttempt, type Verdict } from "@askarthur/scam-engine/claude";
 import { extractURLs, checkURLReputation } from "@askarthur/scam-engine/safebrowsing";
 import { resolveRedirects, extractFinalUrls } from "@askarthur/scam-engine/redirect-resolver";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { getCachedAnalysis, setCachedAnalysis } from "@askarthur/scam-engine/analysis-cache";
-import type { RedirectChain } from "@askarthur/types";
+import { ExtensionAnalyzeInputSchema, type RedirectChain } from "@askarthur/types";
 import { storeVerifiedScam, incrementStats } from "@askarthur/scam-engine/pipeline";
 import { stripEmailHtml } from "@askarthur/scam-engine/html-sanitize";
 import { logger } from "@askarthur/utils/logger";
 import { logCost, claudeHaikuCostUsd } from "@/lib/cost-telemetry";
 import { validateExtensionRequest } from "../_lib/auth";
-
-const AnalyzeSchema = z.object({
-  text: z.string().min(1).max(10000),
-});
 
 export async function POST(req: NextRequest) {
   try {
@@ -41,7 +36,7 @@ export async function POST(req: NextRequest) {
 
     // 2. Validate input
     const body = await req.json();
-    const parsed = AnalyzeSchema.safeParse(body);
+    const parsed = ExtensionAnalyzeInputSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
         { error: "validation_error", message: parsed.error.issues[0]?.message },

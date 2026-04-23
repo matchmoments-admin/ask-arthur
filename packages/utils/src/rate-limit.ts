@@ -77,61 +77,96 @@ export type RateLimitResult = {
   message?: string;
 };
 
+/**
+ * Behaviour when the rate-limit store (Upstash Redis) is unreachable or
+ * misconfigured:
+ * - **"closed"**: deny the request (HTTP 503). Use when the cost of a missed
+ *   block dominates the cost of a rare false reject — e.g. Claude vision,
+ *   Twilio lookups, anything where an attacker can spend your money.
+ * - **"open"**: allow the request. Use for cheap / high-volume paths where
+ *   legit users > abuse protection — e.g. marketing form submissions.
+ */
+export type FailMode = "open" | "closed";
+
+/**
+ * Default failure behaviour for a bucket: closed in production (prefer
+ * safety), open in dev (don't block local iteration when Redis isn't
+ * configured). Callers can override at the call site per the blueprint's
+ * policy table.
+ */
+function defaultFailMode(): FailMode {
+  return process.env.NODE_ENV === "production" ? "closed" : "open";
+}
+
+function storeUnavailable(mode: FailMode, label: string): RateLimitResult {
+  if (mode === "closed") {
+    logger.error(`${label}: store unavailable — failing CLOSED`);
+    return {
+      allowed: false,
+      remaining: 0,
+      resetAt: null,
+      message: "Service temporarily unavailable.",
+    };
+  }
+  return { allowed: true, remaining: 99, resetAt: null };
+}
+
 export async function checkRateLimit(
   ip: string,
-  userAgent: string
+  userAgent: string,
+  failMode: FailMode = defaultFailMode()
 ): Promise<RateLimitResult> {
-  // Fail-closed in production, fail-open in dev
   if (!process.env.UPSTASH_REDIS_REST_URL) {
-    if (process.env.NODE_ENV === "production") {
-      logger.error("UPSTASH_REDIS_REST_URL not set in production — blocking request");
-      return { allowed: false, remaining: 0, resetAt: null, message: "Service temporarily unavailable." };
-    }
-    logger.warn("Rate limiting disabled — UPSTASH_REDIS_REST_URL not set");
-    return { allowed: true, remaining: 99, resetAt: null };
+    return storeUnavailable(failMode, "checkRateLimit");
   }
 
   const identifier = await hashIdentifier(ip, userAgent || "unknown");
 
-  // Check burst limit first (stricter)
-  const burst = await getBurstLimiter().limit(identifier);
-  if (!burst.success) {
-    return {
-      allowed: false,
-      remaining: 0,
-      resetAt: new Date(burst.reset),
-      message:
-        "You've checked a few messages already — come back in a bit! The limit resets every hour.",
-    };
-  }
+  try {
+    // Check burst limit first (stricter)
+    const burst = await getBurstLimiter().limit(identifier);
+    if (!burst.success) {
+      return {
+        allowed: false,
+        remaining: 0,
+        resetAt: new Date(burst.reset),
+        message:
+          "You've checked a few messages already — come back in a bit! The limit resets every hour.",
+      };
+    }
 
-  // Check daily limit
-  const daily = await getDailyLimiter().limit(identifier);
-  if (!daily.success) {
-    return {
-      allowed: false,
-      remaining: 0,
-      resetAt: new Date(daily.reset),
-      message:
-        "You've reached today's limit of 10 checks. Come back tomorrow for more — we want to keep this free for everyone!",
-    };
-  }
+    // Check daily limit
+    const daily = await getDailyLimiter().limit(identifier);
+    if (!daily.success) {
+      return {
+        allowed: false,
+        remaining: 0,
+        resetAt: new Date(daily.reset),
+        message:
+          "You've reached today's limit of 10 checks. Come back tomorrow for more — we want to keep this free for everyone!",
+      };
+    }
 
-  return {
-    allowed: true,
-    remaining: Math.min(burst.remaining, daily.remaining),
-    resetAt: null,
-  };
+    return {
+      allowed: true,
+      remaining: Math.min(burst.remaining, daily.remaining),
+      resetAt: null,
+    };
+  } catch (err) {
+    logger.error("checkRateLimit: store error", { error: String(err) });
+    return storeUnavailable(failMode, "checkRateLimit");
+  }
 }
 
 export async function checkImageUploadRateLimit(
-  ip: string
+  ip: string,
+  failMode: FailMode = defaultFailMode()
 ): Promise<RateLimitResult> {
-  // Image vision calls cost ~$0.002-$0.01 each; this is defence-in-depth on top
-  // of the existing UA+IP hash limiter to cap abuse on an expensive endpoint.
-  // Fail-open: legit users > abuse protection at current scale.
+  // Image vision calls cost ~$0.002-$0.01 each. Default failMode is "closed"
+  // in production — the cost of a miss (unbounded Anthropic spend) far
+  // exceeds the cost of a rare false block during a Redis blip.
   if (!process.env.UPSTASH_REDIS_REST_URL) {
-    return { allowed: true, remaining: 99, resetAt: null };
+    return storeUnavailable(failMode, "checkImageUploadRateLimit");
   }
 
   try {
@@ -146,39 +181,39 @@ export async function checkImageUploadRateLimit(
     }
     return { allowed: true, remaining: result.remaining, resetAt: null };
   } catch (err) {
-    logger.warn("Image upload rate limiter error — failing open", {
-      error: String(err),
-    });
-    return { allowed: true, remaining: 99, resetAt: null };
+    logger.error("checkImageUploadRateLimit: store error", { error: String(err) });
+    return storeUnavailable(failMode, "checkImageUploadRateLimit");
   }
 }
 
-export async function checkFormRateLimit(ip: string): Promise<RateLimitResult> {
-  // Fail-closed in production, fail-open in dev
+export async function checkFormRateLimit(
+  ip: string,
+  failMode: FailMode = defaultFailMode()
+): Promise<RateLimitResult> {
   if (!process.env.UPSTASH_REDIS_REST_URL) {
-    if (process.env.NODE_ENV === "production") {
-      logger.error("UPSTASH_REDIS_REST_URL not set in production — blocking request");
-      return { allowed: false, remaining: 0, resetAt: null, message: "Service temporarily unavailable." };
+    return storeUnavailable(failMode, "checkFormRateLimit");
+  }
+
+  try {
+    const identifier = ip;
+    const result = await getFormLimiter().limit(identifier);
+
+    if (!result.success) {
+      return {
+        allowed: false,
+        remaining: 0,
+        resetAt: new Date(result.reset),
+        message: "Too many submissions. Please try again later.",
+      };
     }
-    logger.warn("Form rate limiting disabled — UPSTASH_REDIS_REST_URL not set");
-    return { allowed: true, remaining: 99, resetAt: null };
-  }
 
-  const identifier = ip;
-  const result = await getFormLimiter().limit(identifier);
-
-  if (!result.success) {
     return {
-      allowed: false,
-      remaining: 0,
-      resetAt: new Date(result.reset),
-      message: "Too many submissions. Please try again later.",
+      allowed: true,
+      remaining: result.remaining,
+      resetAt: null,
     };
+  } catch (err) {
+    logger.error("checkFormRateLimit: store error", { error: String(err) });
+    return storeUnavailable(failMode, "checkFormRateLimit");
   }
-
-  return {
-    allowed: true,
-    remaining: result.remaining,
-    resetAt: null,
-  };
 }

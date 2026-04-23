@@ -1,0 +1,22 @@
+{
+  "name": "@askarthur/core-analysis",
+  "version": "0.0.0",
+  "private": true,
+  "exports": {
+    ".": "./src/index.ts",
+    "./verdict": "./src/verdict.ts"
+  },
+  "dependencies": {
+    "@askarthur/types": "workspace:*",
+    "@askarthur/utils": "workspace:*"
+  },
+  "devDependencies": {
+    "fast-check": "^3.23.1",
+    "typescript": "^5",
+    "vitest": "^4.0.18"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  }
+}
