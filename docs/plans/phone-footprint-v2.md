@@ -330,18 +330,20 @@ specific pillar data affected.
 
 ## 11. Ten-week sprint sequence
 
-| Sprint | Weeks | Deliverable                                                                                                                                                  |
-| ------ | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| S1     | 1–2   | Migrations v75–v77, Twilio Verify, feature flags, Vonage mock adapter, internal provider, free-tier API route with OTP/Turnstile/rate-limit                  |
-| S2     | 3–4   | Free-tier end-to-end, footprint report page (redacted view), composite scorer with graceful degradation, cost_telemetry integration, admin live-lookups view |
-| S3     | 5–6   | LeakCheck (flag-gated), Stripe Personal + Family SKUs, entitlements sync, PDF export, Claude explanation module                                              |
-| S4     | 7–8   | Monitors fully wired, Inngest monthly-refresh, delta alerts, composite score v2 with telco_signal_history weights                                            |
-| S5     | 9–10  | PWA wrapper, Chrome+Firefox extension right-click lookup, SIM Swap Heartbeat push (mock), Vonage approval-landed Inngest backfill                            |
-| S6     | 11–12 | Vonage go-live: `FF_VONAGE_ENABLED=true` + `FF_VONAGE_MOCK_MODE=false` staging → backfill → prod flip. Buffer if approval slips.                             |
-| S7     | 13–14 | Fleet Starter foundations: SSO (Clerk/WorkOS), bulk CSV, per-org webhooks, Stripe SKU                                                                        |
-| S8     | 15–16 | Fleet features + Enterprise lane: 90-day audit, org PDF pack, manual Stripe invoicing, bank pilot outreach                                                   |
-| S9     | 17–18 | Compliance cutover: APP 1.7 ADM disclosure, "How we score" explainer, APP 8 appendix, NDB runbook, legal sign-off                                            |
-| S10    | 19–20 | Admin observability + launch: Vonage provider health, coverage heatmap, swap-swap correlation, cost-per-footprint, consumer launch                           |
+Status legend: ✅ shipped / ⏳ in progress / ❌ not started
+
+| Sprint | Weeks | Deliverable                                                                                                                                                  | Status |
+| ------ | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------ |
+| S1     | 1–2   | Migrations v75–v77, Twilio Verify, feature flags, real Vonage provider (mock-mode dropped — live key provisioned), internal provider, free-tier API route    | ✅     |
+| S2     | 3–4   | Free-tier end-to-end, footprint report components, consumer landing, composite scorer with graceful degradation, cost_telemetry integration, admin ops panel | ✅     |
+| S3     | 5–6   | Claude explanation module, Stripe Personal + Family + Fleet webhook → entitlements, PDF export via react-pdf + R2 + Resend                                   | ✅     |
+| S4     | 7–8   | Monitors CRUD fully wired, Inngest monthly-refresh cron, delta alerts (email + webhook), composite score v2 with telco_signal_history weights                | ⏳     |
+| S5     | 9–10  | PWA wrapper, Chrome+Firefox extension right-click lookup, SIM Swap Heartbeat push notifications, Vonage CAMARA-landed Inngest backfill                       | ❌     |
+| S6     | 11–12 | Vonage CAMARA go-live: staging → backfill → prod flip. Buffer if CAMARA approval slips.                                                                      | ❌     |
+| S7     | 13–14 | Fleet Starter foundations: SSO (Clerk/WorkOS), bulk CSV, per-org webhooks, Stripe Fleet checkout flow                                                        | ❌     |
+| S8     | 15–16 | Fleet features + Enterprise lane: 90-day audit trail, org PDF pack, manual Stripe invoicing, bank pilot outreach                                             | ❌     |
+| S9     | 17–18 | Compliance cutover: APP 1.7 ADM disclosure, "How we score" explainer, APP 8 appendix, NDB runbook, legal sign-off. **Hard deadline 10 Dec 2026.**            | ❌     |
+| S10    | 19–20 | Admin observability deepening: Vonage coverage heatmap, MCC/MNC health, cost-per-footprint trend, consumer launch                                            | ❌     |
 
 ## 12. Cost model
 
