@@ -15,6 +15,13 @@ import { syncVerifiedScamsToFeed, syncUserReportsToFeed } from "./feed-sync";
 import { metaBrpReport } from "./meta-brp-report";
 import { enrichVulnerability, enrichVulnerabilitiesCron } from "./enrich-vulnerability";
 
+// Phase 2: analyze.completed.v1 fan-out — durable replacements for the
+// ad-hoc waitUntil writes that used to hang off /api/analyze.
+import { handleAnalyzeCompletedReport } from "./analyze-report";
+import { handleAnalyzeCompletedBrand } from "./analyze-brand";
+import { handleAnalyzeCompletedCost } from "./analyze-cost";
+import { onAnalyzeFailed } from "./analyze-failure";
+
 export const inngestFunctions = [
   stalenessCheck,
   stalenessCheckIPs,
@@ -31,4 +38,9 @@ export const inngestFunctions = [
   metaBrpReport,
   enrichVulnerability,
   enrichVulnerabilitiesCron,
+  // Phase 2 analyze fan-out
+  handleAnalyzeCompletedReport,
+  handleAnalyzeCompletedBrand,
+  handleAnalyzeCompletedCost,
+  onAnalyzeFailed,
 ];
