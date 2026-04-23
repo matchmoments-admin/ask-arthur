@@ -150,10 +150,18 @@ cost at scale is amortised ~AUD $0.003.
 
 - [ ] Stripe Dashboard → Products → New Product per row of §2 above (7 new prices).
 - [ ] Copy each Price ID into the corresponding Vercel env var.
-- [ ] Sprint 3: wire `app/api/stripe/webhook/route.ts` to call
-      `sync_phone_footprint_entitlements` RPC when `customer.subscription.{created,updated}`
-      events carry one of the new price IDs. **Do not touch** the existing
-      `sync_subscription_tier` flow — the entitlements table is independent.
+- [x] Webhook wired. `apps/web/app/api/stripe/webhook/route.ts` now
+      dispatches PF price IDs into `upsertPhoneFootprintSubscription` which
+      calls `sync_phone_footprint_entitlements` RPC. `sync_subscription_tier`
+      (B2B) path untouched. SKU entitlement templates live in
+      `apps/web/lib/phoneFootprintSkus.ts`. Safe to merge before envs
+      are set — with no price IDs present, `isPhoneFootprintPrice` returns
+      false for every webhook and the B2B path runs unchanged.
+- Stripe metadata required on subscription creation:
+  - Consumer SKUs → `metadata.user_id` (UUID of user_profiles.id)
+  - Fleet SKUs → `metadata.org_id` (UUID of organizations.id)
+  - Missing metadata → webhook logs warn + skip (manual reconciliation
+    via admin preferable to Stripe retry loop)
 
 ---
 
@@ -180,8 +188,12 @@ invisible to users until the flag flips.
 | ---------------------------------------------------------------- | ------------------------------------------------------------- | ----------- |
 | `apps/web/app/api/phone-footprint/[msisdn]/route.ts`             | Primary lookup endpoint                                       | ✅ Sprint 1 |
 | `apps/web/app/api/phone-footprint/verify/{start,check}/route.ts` | OTP endpoints                                                 | ✅ Sprint 1 |
+| `apps/web/app/api/phone-footprint/[id]/pdf/route.ts`             | PDF export (enqueues Inngest render)                          | ✅ Sprint 3 |
+| `apps/web/app/api/inngest/functions/phone-footprint-pdf.ts`      | Inngest function — render + R2 upload + email                 | ✅ Sprint 3 |
+| `apps/web/app/api/stripe/webhook/route.ts`                       | PF SKU branch (entitlements upsert + cancel)                  | ✅ Sprint 3 |
+| `apps/web/lib/phoneFootprintSkus.ts`                             | SKU registry + entitlement templates                          | ✅ Sprint 3 |
 | `apps/web/app/phone-footprint/[id]/page.tsx`                     | Consumer report page                                          | ⏳ Sprint 2 |
-| `apps/web/app/phone-footprint/page.tsx`                          | Landing / lookup form                                         | ⏳ Sprint 2 |
+| `apps/web/app/phone-footprint/page.tsx`                          | Landing / lookup form                                         | ✅ Sprint 2 |
 | `apps/web/app/admin/phone-footprint/page.tsx`                    | Admin metrics panel                                           | ⏳ Sprint 2 |
 | `apps/web/app/app/phone-footprint/monitors/page.tsx`             | Saved-numbers CRUD                                            | ❌ Sprint 4 |
 | `apps/web/app/app/phone-footprint/monitors/[id]/page.tsx`        | Per-monitor detail                                            | ❌ Sprint 4 |
@@ -232,6 +244,18 @@ first, match the pattern in `apps/web/app/api/phone-footprint/[msisdn]/route.ts`
 - [ ] Legal sign-off on marketing copy ("SIM Swap Heartbeat", "phone footprint", etc).
 - [ ] `cost_telemetry` daily spend < AUD $30 threshold under test load.
 
+### Before the first Stripe Phone Footprint checkout
+
+Even with `NEXT_PUBLIC_FF_PHONE_FOOTPRINT_CONSUMER=true`, the billing
+flow doesn't work until:
+
+- [ ] 7 Stripe Products + Prices created (see §2 Stripe Price IDs)
+- [ ] Price IDs pasted into Vercel env
+- [ ] Checkout creation sets `metadata.user_id` (consumer) or `metadata.org_id` (fleet)
+- [ ] `customer.subscription.created` webhook → `phone_footprint_entitlements` row inserted with correct saved_numbers_limit / monthly_lookup_limit / features JSONB
+- [ ] Cancel flow → row status flips to `canceled`
+- [ ] Resend from-address configured so the PDF-email Inngest function can send (`RESEND_API_KEY` + `RESEND_FROM_EMAIL`)
+
 ---
 
 ## 7. Compliance artefacts
@@ -280,13 +304,32 @@ cron. No migration data backfill needed.
 
 ---
 
-## 9. Pointers
+## 9. Sprint ledger
+
+| Sprint | Shipped                                                                                        | Status |
+| ------ | ---------------------------------------------------------------------------------------------- | ------ |
+| 1      | v75/v76/v77 migrations, provider package (5 providers incl. real Vonage), Twilio Verify OTP    | ✅     |
+| 2      | Consumer UI (landing + report components), admin ops panel, config doc + CLAUDE.md cross-link  | ✅     |
+| 3      | Claude explanation, Stripe PF webhook → entitlements RPC, PDF export (react-pdf + R2 + Resend) | ✅     |
+| 4      | Monitors CRUD, Inngest monthly refresh, delta alerts                                           | ⏳     |
+| 5      | PWA wrapper, extension + mobile entry points, SIM Swap Heartbeat push                          | ❌     |
+| 6      | Vonage CAMARA go-live (if approval lands); backfill existing footprints                        | ❌     |
+| 7      | Fleet Starter: SSO, bulk CSV, per-org webhooks                                                 | ❌     |
+| 8      | Fleet audit trail, Enterprise quote/invoice flow                                               | ❌     |
+| 9      | Compliance cutover (APP 1.7 ADM notice, NDB runbook, SPF s58BT statement)                      | ❌     |
+| 10     | Admin observability deepening, consumer launch                                                 | ❌     |
+
+## 10. Pointers
 
 - **Full sprint plan:** [`docs/plans/phone-footprint-v2.md`](../plans/phone-footprint-v2.md)
 - **Migration SQL:** `supabase/migration-v75-phone-footprint-core.sql`, `-v76-vonage-telco.sql`, `-v77-phone-verified-fleet.sql`
-- **Code:** `packages/scam-engine/src/phone-footprint/` (orchestrator, scorer, providers)
-- **API routes:** `apps/web/app/api/phone-footprint/`
+- **Code:** `packages/scam-engine/src/phone-footprint/` (orchestrator, scorer, providers, explain, pdf)
+- **API routes:** `apps/web/app/api/phone-footprint/` (lookup, verify, pdf)
 - **OTP wrapper:** `apps/web/lib/twilioVerify.ts`
+- **Stripe SKU registry:** `apps/web/lib/phoneFootprintSkus.ts`
+- **PDF Inngest function:** `apps/web/app/api/inngest/functions/phone-footprint-pdf.ts`
+- **R2 upload helpers:** `apps/web/lib/r2.ts` (uploadFootprintPdf, getFootprintPdfUrl)
+- **Admin dashboard:** `apps/web/app/admin/phone-footprint/page.tsx`
 
 Keep this doc updated. Any new env var, flag, Stripe price, vendor
 integration, or UI entry point gets a row here with its status marker.
