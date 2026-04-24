@@ -9,7 +9,8 @@
 // Full Turnstile widget integration comes in Sprint 3 when we have a
 // real abuse-prone UX to defend.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import type { Footprint } from "@askarthur/scam-engine/phone-footprint";
 import { FootprintReport } from "@/components/phone-footprint/FootprintReport";
 
@@ -25,12 +26,27 @@ type Status =
   | { kind: "error"; message: string; needsTurnstile?: boolean };
 
 export function LookupForm() {
-  const [msisdn, setMsisdn] = useState("");
+  const params = useSearchParams();
+  const initialMsisdn = params?.get("msisdn") ?? "";
+  const initialSrc = params?.get("src") ?? "";
+  const [msisdn, setMsisdn] = useState(initialMsisdn);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
+  const autoSubmitted = useRef(false);
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    const trimmed = msisdn.trim();
+  // Auto-submit when arriving from the extension (?msisdn=…&src=ext) so
+  // the right-click context menu lands on a result, not on a form the
+  // user has to click. Guarded by a ref so a re-render doesn't re-fire.
+  useEffect(() => {
+    if (autoSubmitted.current) return;
+    if (!initialMsisdn) return;
+    if (initialSrc !== "ext") return; // only auto-submit from trusted entry
+    autoSubmitted.current = true;
+    runLookup(initialMsisdn);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function runLookup(value: string) {
+    const trimmed = value.trim();
     if (!trimmed) return;
     setStatus({ kind: "loading" });
 
@@ -72,6 +88,11 @@ export function LookupForm() {
         message: `Network error: ${err instanceof Error ? err.message : String(err)}`,
       });
     }
+  }
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    runLookup(msisdn);
   }
 
   return (
