@@ -6,6 +6,10 @@ import {
   phoneFootprintRefreshClaimer,
   phoneFootprintRefreshMonitor,
 } from "./functions/phone-footprint-refresh";
+import {
+  phoneFootprintVonageBackfillPager,
+  phoneFootprintVonageBackfillMonitor,
+} from "./functions/phone-footprint-vonage-backfill";
 
 // App-layer Inngest functions live here because they cross apps/web-only
 // primitives (R2 upload, Resend, local auth helpers) that shouldn't leak
@@ -16,6 +20,8 @@ const appFunctions = [
   phoneFootprintPdfRender,
   phoneFootprintRefreshClaimer,
   phoneFootprintRefreshMonitor,
+  phoneFootprintVonageBackfillPager,
+  phoneFootprintVonageBackfillMonitor,
 ];
 
 export const { GET, POST, PUT } = serve({
