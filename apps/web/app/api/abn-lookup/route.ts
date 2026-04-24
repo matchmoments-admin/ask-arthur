@@ -67,7 +67,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    return NextResponse.json({ data: result });
+    return NextResponse.json(result);
   } catch {
     return NextResponse.json(
       { error: "Something went wrong. Please try again." },

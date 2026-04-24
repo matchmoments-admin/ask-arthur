@@ -2,13 +2,13 @@
 
 import type { OnboardingState } from "@/app/onboarding/page";
 
-const SECTORS = [
-  "Banking",
-  "Telecommunications",
-  "Digital Platform",
-  "Insurance",
-  "Superannuation",
-  "Other",
+const SECTORS: Array<{ value: string; label: string }> = [
+  { value: "banking", label: "Banking" },
+  { value: "telco", label: "Telecommunications" },
+  { value: "digital_platform", label: "Digital Platform" },
+  { value: "insurance", label: "Insurance" },
+  { value: "superannuation", label: "Superannuation" },
+  { value: "other", label: "Other" },
 ];
 
 interface Props {
@@ -98,8 +98,8 @@ export default function StepCompanyDetails({ state, update, onNext }: Props) {
         >
           <option value="">Select a sector</option>
           {SECTORS.map((s) => (
-            <option key={s} value={s}>
-              {s}
+            <option key={s.value} value={s.value}>
+              {s.label}
             </option>
           ))}
         </select>

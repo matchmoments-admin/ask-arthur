@@ -24,6 +24,7 @@ File: supabase/migration-v55-organizations.sql
 ```
 
 Creates:
+
 - `organizations` table (UUID PK, name, slug, ABN, sector, tier, status)
 - `org_members` table (6-role RBAC: owner/admin/compliance_officer/fraud_analyst/developer/viewer)
 - `org_invitations` table (hashed tokens, 7-day expiry)
@@ -33,6 +34,7 @@ Creates:
 - Updated timestamp trigger on organizations
 
 **Verify after running:**
+
 ```sql
 SELECT * FROM organizations LIMIT 1;  -- should return empty, no error
 SELECT * FROM org_members LIMIT 1;
@@ -46,12 +48,14 @@ File: supabase/migration-v56-leads.sql
 ```
 
 Creates:
+
 - `leads` table (name, email, company, ABN, sector, source, score, status, nurture tracking)
 - Indexes for email, status, source, nurture scheduling
 - Service-role only RLS
 - Updated timestamp trigger
 
 **Verify after running:**
+
 ```sql
 SELECT * FROM leads LIMIT 1;  -- should return empty, no error
 ```
@@ -75,7 +79,7 @@ NEXT_PUBLIC_FF_CORPORATE_ONBOARDING=true
 ```env
 # Australian Business Register API
 # Get free GUID at: https://abr.business.gov.au/Tools/AbnLookup
-ABR_GUID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+ABN_LOOKUP_GUID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ```
 
 ### Optional (Recommended)
@@ -91,6 +95,7 @@ NEXT_PUBLIC_SITE_URL=https://askarthur.au
 ### Already Set (Verify)
 
 These should already be configured from previous deployments:
+
 - `RESEND_API_KEY` — for nurture emails and invitation emails
 - `RESEND_FROM_EMAIL` — sender address
 - `CRON_SECRET` — for nurture cron authentication
@@ -175,58 +180,66 @@ git push origin main
 ## New Routes Summary
 
 ### Public Pages
-| Route | Purpose |
-|-------|---------|
-| `/banking` | Banking sector landing page |
-| `/telco` | Telco sector landing page |
-| `/digital-platforms` | Digital platforms landing page |
-| `/spf-assessment` | SPF compliance readiness assessment (lead magnet) |
-| `/compliance-calculator` | Non-compliance cost calculator (lead magnet) |
-| `/onboarding` | Corporate onboarding wizard (auth required) |
-| `/invite/[token]` | Invitation acceptance page |
+
+| Route                    | Purpose                                           |
+| ------------------------ | ------------------------------------------------- |
+| `/banking`               | Banking sector landing page                       |
+| `/telco`                 | Telco sector landing page                         |
+| `/digital-platforms`     | Digital platforms landing page                    |
+| `/spf-assessment`        | SPF compliance readiness assessment (lead magnet) |
+| `/compliance-calculator` | Non-compliance cost calculator (lead magnet)      |
+| `/onboarding`            | Corporate onboarding wizard (auth required)       |
+| `/invite/[token]`        | Invitation acceptance page                        |
 
 ### Dashboard Pages (auth required)
-| Route | Purpose |
-|-------|---------|
-| `/app/compliance` | Compliance Officer dashboard |
-| `/app/compliance/evidence` | Evidence export page |
-| `/app/investigations` | Fraud Analyst dashboard |
-| `/app/developer` | Developer dashboard |
-| `/app/executive` | Executive summary |
-| `/app/team` | Team management |
+
+| Route                      | Purpose                      |
+| -------------------------- | ---------------------------- |
+| `/app/compliance`          | Compliance Officer dashboard |
+| `/app/compliance/evidence` | Evidence export page         |
+| `/app/investigations`      | Fraud Analyst dashboard      |
+| `/app/developer`           | Developer dashboard          |
+| `/app/executive`           | Executive summary            |
+| `/app/team`                | Team management              |
 
 ### API Routes
-| Route | Method | Purpose |
-|-------|--------|---------|
-| `/api/org/create` | POST | Create organization |
-| `/api/org/members` | GET/PATCH | Manage org members |
-| `/api/org/invite` | POST | Send invitation |
-| `/api/org/invite/accept` | POST | Accept invitation |
-| `/api/leads` | POST | Lead capture |
-| `/api/abn-lookup` | GET | ABN verification |
-| `/api/cron/nurture` | GET | Nurture email delivery |
+
+| Route                    | Method    | Purpose                |
+| ------------------------ | --------- | ---------------------- |
+| `/api/org/create`        | POST      | Create organization    |
+| `/api/org/members`       | GET/PATCH | Manage org members     |
+| `/api/org/invite`        | POST      | Send invitation        |
+| `/api/org/invite/accept` | POST      | Accept invitation      |
+| `/api/leads`             | POST      | Lead capture           |
+| `/api/abn-lookup`        | GET       | ABN verification       |
+| `/api/cron/nurture`      | GET       | Nurture email delivery |
 
 ---
 
 ## Database Changes Summary
 
 ### New Tables (v55)
+
 - `organizations` — corporate client entities
 - `org_members` — user-to-org membership with roles
 - `org_invitations` — pending team invitations
 
 ### New Tables (v56)
+
 - `leads` — corporate sales pipeline
 
 ### Modified Tables (v55)
+
 - `api_keys` — added `org_id` column (nullable UUID FK)
 
 ### New RPCs (v55)
+
 - `create_organization(p_user_id, p_name, p_slug, p_sector, p_abn)` → UUID
 - `get_user_org(p_user_id)` → org context
 - `generate_org_api_key(p_user_id, p_org_id, p_key_hash, p_org_name)` → key record
 
 ### New Feature Flags
+
 - `NEXT_PUBLIC_FF_MULTI_TENANCY` — gates org features
 - `NEXT_PUBLIC_FF_CORPORATE_ONBOARDING` — gates onboarding wizard
 

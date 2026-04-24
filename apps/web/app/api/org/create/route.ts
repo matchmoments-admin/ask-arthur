@@ -120,6 +120,7 @@ export async function POST(req: NextRequest) {
       p_org_id: orgId,
       p_user_id: user.id,
       p_key_hash: keyHash,
+      p_org_name: name,
     }
   );
 
@@ -130,22 +131,8 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (invites && invites.length > 0) {
-    await serviceClient
-      .from("org_invites")
-      .insert(
-        invites.map((inv) => ({
-          org_id: orgId,
-          email: inv.email,
-          role: inv.role,
-          invited_by: user.id,
-        }))
-      )
-      .then(() => {});
-  }
-
   return NextResponse.json(
-    { orgId, orgSlug: slug, apiKey: rawKey },
+    { orgId, orgSlug: slug, apiKey: rawKey, invites: invites ?? [] },
     { status: 201 }
   );
 }

@@ -60,9 +60,9 @@ export async function lookupABN(abn: string): Promise<ABNLookupResult | null> {
     }
   }
 
-  const guid = process.env.ABR_GUID;
+  const guid = process.env.ABN_LOOKUP_GUID;
   if (!guid) {
-    logger.error("ABR_GUID not configured");
+    logger.error("ABN_LOOKUP_GUID not configured");
     return null;
   }
 

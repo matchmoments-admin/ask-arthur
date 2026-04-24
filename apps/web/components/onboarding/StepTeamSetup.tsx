@@ -3,12 +3,12 @@
 import { useState } from "react";
 import type { OnboardingState } from "@/app/onboarding/page";
 
-const ROLES = [
-  "Admin",
-  "Compliance Officer",
-  "Fraud Analyst",
-  "Developer",
-  "Viewer",
+const ROLES: Array<{ value: string; label: string }> = [
+  { value: "admin", label: "Admin" },
+  { value: "compliance_officer", label: "Compliance Officer" },
+  { value: "fraud_analyst", label: "Fraud Analyst" },
+  { value: "developer", label: "Developer" },
+  { value: "viewer", label: "Viewer" },
 ];
 
 const MAX_INVITES = 10;
@@ -23,7 +23,7 @@ export default function StepTeamSetup({ state, update, onNext }: Props) {
   const [invites, setInvites] = useState<Array<{ email: string; role: string }>>(
     state.invites.length > 0
       ? state.invites
-      : [{ email: "", role: "Viewer" }]
+      : [{ email: "", role: "viewer" }]
   );
 
   function updateInvite(
@@ -40,7 +40,7 @@ export default function StepTeamSetup({ state, update, onNext }: Props) {
 
   function addRow() {
     if (invites.length >= MAX_INVITES) return;
-    setInvites((prev) => [...prev, { email: "", role: "Viewer" }]);
+    setInvites((prev) => [...prev, { email: "", role: "viewer" }]);
   }
 
   function removeRow(index: number) {
@@ -82,8 +82,8 @@ export default function StepTeamSetup({ state, update, onNext }: Props) {
               className="rounded-md border border-border-light px-3 py-2 text-sm text-deep-navy bg-white focus:outline-none focus:ring-2 focus:ring-trust-teal focus:border-transparent"
             >
               {ROLES.map((r) => (
-                <option key={r} value={r}>
-                  {r}
+                <option key={r.value} value={r.value}>
+                  {r.label}
                 </option>
               ))}
             </select>
