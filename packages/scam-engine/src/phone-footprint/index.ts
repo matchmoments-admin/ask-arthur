@@ -32,6 +32,10 @@ export {
 
 export { computeDelta } from "./delta";
 
+export { explainFootprint } from "./explain";
+
+export { renderFootprintPdf } from "./pdf/render";
+
 export {
   hashMsisdn,
   hashIdentifierForPf,

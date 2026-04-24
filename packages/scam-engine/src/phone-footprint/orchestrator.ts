@@ -13,6 +13,7 @@ import type {
 } from "./types";
 import { computeCompositeScore, initialCoverage, redactForFree } from "./scorer";
 import { hashMsisdn } from "./normalize";
+import { explainFootprint } from "./explain";
 import { internalProvider } from "./providers/internal";
 import { twilioProvider } from "./providers/twilio";
 import { ipqsProvider } from "./providers/ipqs";
@@ -171,7 +172,7 @@ export async function buildPhoneFootprint(
       : pillars;
 
   const ttl = ctx.tier === "teaser" ? TEASER_TTL_MS : ctx.tier === "basic" ? BASIC_TTL_MS : FULL_TTL_MS;
-  const footprint: Footprint = {
+  const baseFootprint: Footprint = {
     msisdn_e164: msisdn,
     msisdn_hash: msisdnHash,
     tier: ctx.tier,
@@ -180,13 +181,21 @@ export async function buildPhoneFootprint(
     pillars: finalPillars,
     coverage,
     providers_used: providersUsed,
-    explanation: null, // Claude-generated in a later phase; cheap templated copy injected by the route for teaser.
+    explanation: null,
     generated_at: now.toISOString(),
     expires_at: new Date(now.getTime() + ttl).toISOString(),
     request_id: ctx.requestId,
   };
 
-  return footprint;
+  // Explanation: templated for teaser (no Claude cost), Haiku 4.5 for
+  // basic/full. Never throws — explain.ts falls back to a template on any
+  // upstream failure. Runs AFTER scoring so it sees the final composite
+  // and every redaction decision.
+  const explanation = await explainFootprint(baseFootprint, {
+    ownershipProven: ctx.ownershipProven,
+  });
+
+  return { ...baseFootprint, explanation };
 }
 
 /**

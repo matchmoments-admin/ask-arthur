@@ -40,12 +40,13 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",
-    "libphonenumber-js": "^1.11.0",
+    "@askarthur/supabase": "workspace:*",
     "@askarthur/types": "workspace:*",
     "@askarthur/utils": "workspace:*",
-    "@askarthur/supabase": "workspace:*",
+    "@react-pdf/renderer": "^4.0.0",
     "@upstash/redis": "^1.36.2",
     "inngest": "^3.27.0",
+    "libphonenumber-js": "^1.11.0",
     "tldts": "^7.0.23",
     "twilio": "^5.4.0"
   },

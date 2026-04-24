@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { stripe } from "@/lib/stripe";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
+import {
+  resolvePhoneFootprintEntitlement,
+  isPhoneFootprintPrice,
+} from "@/lib/phoneFootprintSkus";
 
 export const runtime = "nodejs";
 
@@ -136,6 +140,20 @@ async function upsertSubscription(
   supabase: SupabaseService
 ) {
   const metadata = sub.metadata as Record<string, string> | undefined;
+  const items = sub.items as { data: Array<{ price: { id: string } }> };
+  const priceId = items?.data?.[0]?.price?.id ?? "";
+
+  // Phone Footprint branch: separate entitlements table, separate RPC.
+  // Dispatches BEFORE the api_keys.tier path so a PF-only subscription
+  // without api_key_id metadata doesn't get rejected. The two paths are
+  // orthogonal and a customer could in principle hold both (Business API
+  // + Personal PF), so we don't early-return — but today in practice a
+  // given subscription is one or the other.
+  if (isPhoneFootprintPrice(priceId)) {
+    await upsertPhoneFootprintSubscription(sub, supabase, priceId);
+    return;
+  }
+
   const apiKeyId = metadata?.api_key_id
     ? parseInt(metadata.api_key_id, 10)
     : null;
@@ -148,8 +166,6 @@ async function upsertSubscription(
     return;
   }
 
-  const items = sub.items as { data: Array<{ price: { id: string } }> };
-  const priceId = items?.data?.[0]?.price?.id ?? "";
   const plan = getPlan(priceId);
   const status = sub.status as string;
   const currentPeriodStart = sub.current_period_start as number | undefined;
@@ -192,10 +208,115 @@ async function upsertSubscription(
   await syncTier(supabase, apiKeyId, plan, status);
 }
 
+// ---------------------------------------------------------------------------
+// Phone Footprint — parallel entitlement path
+// ---------------------------------------------------------------------------
+// Does NOT touch api_keys.tier or sync_subscription_tier. Writes to the
+// dedicated phone_footprint_entitlements table via the
+// sync_phone_footprint_entitlements RPC shipped in migration v75.
+//
+// Metadata expected on Stripe subscription:
+//   - user_id: UUID (for consumer SKUs)
+//   - org_id:  UUID (for fleet SKUs) — required by the table's
+//              pfe_single_owner check constraint
+// If neither is present we log-and-skip (rather than throwing into the
+// webhook retry loop) — manual reconciliation via the admin console is
+// preferable to a stuck Stripe event.
+async function upsertPhoneFootprintSubscription(
+  sub: Record<string, unknown>,
+  supabase: SupabaseService,
+  priceId: string,
+) {
+  const entitlement = resolvePhoneFootprintEntitlement(priceId);
+  if (!entitlement) return; // Defensive — caller already gated
+
+  const metadata = sub.metadata as Record<string, string> | undefined;
+  const userId = entitlement.isFleet ? null : (metadata?.user_id ?? null);
+  const orgId = entitlement.isFleet ? (metadata?.org_id ?? null) : null;
+
+  if (!userId && !orgId) {
+    logger.warn(
+      "Phone Footprint subscription missing user_id/org_id metadata — manual reconciliation required",
+      {
+        subscriptionId: sub.id,
+        sku: entitlement.sku,
+        fleet: entitlement.isFleet,
+      },
+    );
+    return;
+  }
+
+  const status = sub.status as string;
+  const currentPeriodEnd = sub.current_period_end as number | undefined;
+
+  const { error } = await supabase.rpc("sync_phone_footprint_entitlements", {
+    p_user_id: userId,
+    p_org_id: orgId,
+    p_stripe_subscription_id: sub.id as string,
+    p_stripe_price_id: priceId,
+    p_sku: entitlement.sku,
+    p_status: status,
+    p_current_period_end: currentPeriodEnd
+      ? new Date(currentPeriodEnd * 1000).toISOString()
+      : null,
+    p_saved_numbers_limit: entitlement.saved_numbers_limit,
+    p_monthly_lookup_limit: entitlement.monthly_lookup_limit,
+    p_refresh_cadence_min: entitlement.refresh_cadence_min,
+    p_features: entitlement.features,
+  });
+
+  if (error) {
+    logger.error("Failed to sync phone-footprint entitlement", {
+      error,
+      subscriptionId: sub.id,
+      sku: entitlement.sku,
+    });
+    throw error;
+  }
+
+  logger.info("Phone Footprint entitlement synced", {
+    subscriptionId: sub.id,
+    sku: entitlement.sku,
+    status,
+    scope: entitlement.isFleet ? "org" : "user",
+  });
+}
+
 async function handleSubscriptionDeleted(
   sub: Record<string, unknown>,
   supabase: SupabaseService
 ) {
+  const items = sub.items as { data: Array<{ price: { id: string } }> };
+  const priceId = items?.data?.[0]?.price?.id ?? "";
+
+  // Phone Footprint branch: flip entitlement to canceled. Don't mutate
+  // the B2B subscriptions table since this row was never written there.
+  if (isPhoneFootprintPrice(priceId)) {
+    const entitlement = resolvePhoneFootprintEntitlement(priceId);
+    if (!entitlement) return;
+
+    const { error } = await supabase
+      .from("phone_footprint_entitlements")
+      .update({
+        status: "canceled",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("stripe_subscription_id", sub.id as string);
+
+    if (error) {
+      logger.error("Failed to cancel phone-footprint entitlement", {
+        error,
+        subscriptionId: sub.id,
+      });
+      throw error;
+    }
+    logger.info("Phone Footprint entitlement canceled", {
+      subscriptionId: sub.id,
+      sku: entitlement.sku,
+    });
+    return;
+  }
+
   const { error } = await supabase
     .from("subscriptions")
     .update({

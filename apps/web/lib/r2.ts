@@ -79,6 +79,60 @@ export async function getScreenshotUrl(key: string): Promise<string | null> {
   return url;
 }
 
+// ── Phone Footprint PDFs ──
+
+/**
+ * Upload a Phone Footprint PDF to R2 under a keyed path. Returns the key
+ * for later signed-URL generation. Path shape:
+ *   phone-footprint/pdf/{YYYY-MM-DD}/{footprint_id}-{short_uuid}.pdf
+ * Date-prefixed so lifecycle rules (e.g., 30-day delete) are one-liners.
+ */
+export async function uploadFootprintPdf(
+  buffer: Buffer,
+  footprintId: number | string,
+): Promise<string | null> {
+  const client = getR2Client();
+  if (!client) return null;
+
+  const date = new Date().toISOString().split("T")[0];
+  const shortId = crypto.randomUUID().slice(0, 8);
+  const key = `phone-footprint/pdf/${date}/${footprintId}-${shortId}.pdf`;
+
+  await client.send(
+    new PutObjectCommand({
+      Bucket: getBucket(),
+      Key: key,
+      Body: buffer,
+      ContentType: "application/pdf",
+      // Cache-Control lets the signed URL be followed and cached briefly
+      // by the user's browser without exposing the content to anyone who
+      // doesn't have the URL — private for defence in depth.
+      CacheControl: "private, max-age=3600",
+    }),
+  );
+  return key;
+}
+
+/**
+ * Signed-URL fetcher for Phone Footprint PDFs. Default 1 hour expiry
+ * matches uploadFootprintPdf's Cache-Control.
+ */
+export async function getFootprintPdfUrl(
+  key: string,
+  expiresInSeconds = 3600,
+): Promise<string | null> {
+  const client = getR2Client();
+  if (!client) return null;
+  return getSignedUrl(
+    client,
+    new GetObjectCommand({
+      Bucket: getBucket(),
+      Key: key,
+    }),
+    { expiresIn: expiresInSeconds },
+  );
+}
+
 // ── Media Analysis (Phase 1) ──
 
 const ACCEPTED_AUDIO_TYPES = new Set([
