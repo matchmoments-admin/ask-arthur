@@ -14,6 +14,7 @@ import type {
 import { computeCompositeScore, initialCoverage, redactForFree } from "./scorer";
 import { hashMsisdn } from "./normalize";
 import { explainFootprint } from "./explain";
+import { computeCarrierDrift } from "./providers/carrier-drift";
 import { internalProvider } from "./providers/internal";
 import { twilioProvider } from "./providers/twilio";
 import { ipqsProvider } from "./providers/ipqs";
@@ -160,6 +161,24 @@ export async function buildPhoneFootprint(
   }
   if (!providersUsed.includes("ipqs-phone") && coverage.ipqs === "disabled") {
     coverage.ipqs = "disabled";
+  }
+
+  // Carrier-drift fallback for pillar 4 — when Vonage CAMARA isn't
+  // available (no AU coverage today, plus any other Vonage-CAMARA-absent
+  // country), use Twilio Lookup carrier-string deltas against the
+  // previous footprint as a weak-but-real SIM-swap proxy. Only kicks in
+  // when (a) there IS a previous snapshot to diff against (refresh
+  // path, not first-time lookup), and (b) Vonage didn't already
+  // populate sim_swap as available.
+  if (!pillars.sim_swap.available && ctx.previousFootprint) {
+    const driftPillar = computeCarrierDrift({
+      current: pillars.identity,
+      previous: ctx.previousFootprint,
+    });
+    if (driftPillar.available) {
+      pillars.sim_swap = driftPillar;
+      providersUsed.push("carrier-drift");
+    }
   }
 
   // Compose the score from whatever pillars came back available.

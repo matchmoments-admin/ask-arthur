@@ -70,6 +70,11 @@ export interface FootprintRequestContext {
   userId?: string;
   orgId?: string;
   requestId?: string;
+  /** Previously-stored Footprint snapshot for this MSISDN, if available.
+   *  Threaded through by the refresh Inngest function so the orchestrator
+   *  can compute carrier-drift (pillar 4 fallback in countries without
+   *  Vonage CAMARA SIM Swap). Anonymous one-shot lookups omit this. */
+  previousFootprint?: Footprint | null;
   /** Whether the caller has proven ownership of the queried number (OTP
    *  verified, org fleet attestation, or entity already publicly attributed
    *  to a verified scam). Used by the scorer's redactForFree. */

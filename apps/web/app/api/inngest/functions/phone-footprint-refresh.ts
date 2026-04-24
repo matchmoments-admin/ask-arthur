@@ -156,6 +156,11 @@ export const phoneFootprintRefreshMonitor = inngest.createFunction(
         orgId: monitor.org_id ?? undefined,
         ownershipProven: true, // monitor existence implies prior OTP
         requestId: `refresh-${monitorId}-${Date.now()}`,
+        // Threading prev through enables the orchestrator's carrier-drift
+        // fallback for pillar 4 in countries without Vonage CAMARA
+        // (currently AU + most of the world). Cheap weak-signal detection
+        // from data Twilio Lookup already returns — no extra API spend.
+        previousFootprint: prev,
       }),
     );
 
