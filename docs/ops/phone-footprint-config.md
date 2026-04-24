@@ -520,6 +520,31 @@ research). Rather than wait, we ship internationally first.
   consent flow; international users get the same flow which is
   acceptable but not optimal.
 
+### Initial launch cohort — UK, Canada, Brazil
+
+First Vonage Network Registry application targets **United Kingdom,
+Canada, and Brazil**. Rationale:
+
+- **UK**: ~95% mobile coverage via Vonage CAMARA (BT/EE, Vodafone UK,
+  O2). UK GDPR ≈ AU APP — smallest compliance lift. High SIM-swap
+  fraud salience in UK consumer press.
+- **Canada**: ~90% coverage (Rogers, Bell, Telus). PIPEDA close to
+  GDPR, English-speaking, low competitive density.
+- **Brazil**: Strong carrier coverage; big market. LGPD compliance
+  achievable. Portuguese translation needed before serious marketing
+  spend — flagged as a Sprint 10+ investment.
+
+**US deferred**: Verizon requires operator-level per-customer consent
+flows in addition to Aduna approval — not proportional to projected US
+revenue at launch. Revisit when US waitlist > 500 customers. Partial
+US coverage via AT&T + T-Mobile only (no Verizon paperwork) is possible
+as a middle path — ~70% US mobile coverage.
+
+**Germany / France / Italy / Netherlands / Spain deferred**: GDPR
+compliance is already standard but non-English UIs would need
+translation before meaningful traction. Sprint 10+ if Brazil launch
+demonstrates translation ROI.
+
 ### Vendor status (per the 2026-04-24 research)
 
 | Provider            | AU SIM swap                                 | UK / US / CA / EU / BR SIM swap |
