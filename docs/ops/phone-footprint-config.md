@@ -109,7 +109,7 @@ Quick reference. Detail steps for each item live in the subsections below.
 - [ ] **Twilio Verify Service SID** provisioned → see "Twilio Verify" below.
 - [ ] **LeakCheck DPA + API key** → see "LeakCheck" below.
 - [ ] **7 Stripe Products + Prices** created and pasted into env → see "Stripe" below.
-- [ ] **Resend `RESEND_FROM_EMAIL`** configured → see "Resend" below.
+- [x] **Resend `RESEND_FROM_EMAIL`** configured → domain `askarthur.au` verified 2026-04-24 in the Ireland (eu-west-1) region via GoDaddy DNS; see "Resend" below for the smoke-test snippet.
 - [ ] **PADDLE\_\* envs deleted** from Vercel → see "Vercel env hygiene" below.
 
 ### Pepper generation (PHONE_FOOTPRINT_PEPPER)
@@ -272,23 +272,30 @@ B2B path unchanged.
 Already configured for `RESEND_API_KEY`. The PDF email and alert
 dispatch paths additionally need a verified `from` address.
 
+**Status (2026-04-24):** `askarthur.au` is **verified** in the Resend
+dashboard (region: Ireland / eu-west-1, DNS provider: GoDaddy).
+`RESEND_FROM_EMAIL` defaults in code to `Ask Arthur <brendan@askarthur.au>`
+(see `apps/web/app/api/leads/route.ts`) and can be overridden per-env in
+Vercel if we want a dedicated alerting mailbox later.
+
 ```
 1. Resend Dashboard → Domains → Add domain
    Domain: askarthur.au (or a subdomain like notify.askarthur.au)
 
-2. Add the published DKIM/SPF/DMARC DNS records to Cloudflare
+2. Add the published DKIM/SPF/DMARC DNS records to Cloudflare/GoDaddy
    (or wherever DNS lives). Wait for the green checkmark in Resend.
 
 3. Vercel → Project Settings → Environment Variables → Add
    Name: RESEND_FROM_EMAIL
    Value: alerts@askarthur.au   (or whichever verified address)
    Environments: Production + Preview
+   Note: only needed if overriding the code default.
 
-4. Smoke test:
+4. Smoke test (from a machine with RESEND_API_KEY exported):
    curl -X POST https://api.resend.com/emails \
      -H "Authorization: Bearer $RESEND_API_KEY" \
      -H "Content-Type: application/json" \
-     -d '{"from":"alerts@askarthur.au","to":"you@example.com",
+     -d '{"from":"brendan@askarthur.au","to":"brendan.milton1211@gmail.com",
           "subject":"Resend smoke","html":"<p>OK</p>"}'
 ```
 
