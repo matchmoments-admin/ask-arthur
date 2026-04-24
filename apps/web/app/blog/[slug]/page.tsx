@@ -6,6 +6,7 @@ import sanitizeHtml from "sanitize-html";
 import { getPostBySlug, getAllSlugs, getRelatedPosts } from "@/lib/blog";
 import { renderMarkdown } from "@/lib/blogRenderer";
 import CopyLinkButton from "@/components/CopyLinkButton";
+import MermaidDiagram from "@/components/blog/MermaidDiagram";
 import SubscribeForm from "@/components/SubscribeForm";
 import Pill from "@/components/Pill";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -80,7 +81,7 @@ export default async function BlogPostPage({ params }: PageProps) {
       img: ["src", "alt", "loading"],
       a: ["href", "target", "rel"],
       iframe: ["src", "title", "allow", "allowfullscreen"],
-      div: ["class"],
+      div: ["class", "data-mermaid-source"],
       svg: ["xmlns", "width", "height", "viewBox", "fill", "stroke", "stroke-width", "stroke-linecap", "stroke-linejoin"],
       path: ["d"],
       circle: ["cx", "cy", "r"],
@@ -254,6 +255,7 @@ export default async function BlogPostPage({ params }: PageProps) {
         className="blog-content"
         dangerouslySetInnerHTML={{ __html: htmlContent }}
       />
+      <MermaidDiagram />
 
       {/* Related posts */}
       {related.length > 0 && (
