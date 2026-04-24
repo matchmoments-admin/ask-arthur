@@ -5,7 +5,7 @@ import Footer from "@/components/Footer";
 export const metadata: Metadata = {
   title: "Privacy Policy — Ask Arthur",
   description:
-    "How Ask Arthur collects, uses, and protects your information under the Australian Privacy Act 1988.",
+    "How Ask Arthur collects, uses, and protects your information. Compliant with the Australian Privacy Act 1988 and equivalent regimes (UK GDPR, EU GDPR, Canadian PIPEDA, Brazilian LGPD).",
 };
 
 export default function PrivacyPage() {
@@ -66,11 +66,12 @@ export default function PrivacyPage() {
 
           <section>
             <h2 className="text-deep-navy text-lg font-bold mb-3">
-              3. Cross-Border Data Transfers (APP 8)
+              3. Cross-Border Data Transfers
             </h2>
             <p className="text-gov-slate text-base leading-relaxed mb-3">
-              To provide this service, your data may be processed by the
-              following overseas providers:
+              Ask Arthur is operated by Young Milton Pty Ltd, an Australian
+              company. To provide this service, your data may be processed by
+              the following overseas providers:
             </p>
             <ul className="list-disc list-inside text-gov-slate text-base leading-relaxed space-y-2">
               <li>
@@ -91,7 +92,9 @@ export default function PrivacyPage() {
             </ul>
             <p className="text-gov-slate text-base leading-relaxed mt-3">
               We take reasonable steps to ensure these providers handle your
-              information in accordance with the Australian Privacy Principles.
+              information in line with the Australian Privacy Principles
+              (APP 8) and equivalent overseas-transfer standards under UK GDPR,
+              EU GDPR, Canadian PIPEDA, and Brazilian LGPD.
             </p>
           </section>
 
@@ -221,12 +224,13 @@ export default function PrivacyPage() {
               </strong>
               , we retain a PII-redacted copy of the check for up to 24 months
               to improve the classifier. This checkbox is opt-in and defaults
-              off. Under the Privacy Act 1988 (Cth), hashing is not
-              anonymisation where re-identification is reasonably possible, so
-              we treat training-consent records as personal information: we
-              redact names, emails, phone numbers, bank details and similar
-              identifiers before retention, and you may request deletion at any
-              time by emailing{" "}
+              off. Under the Australian Privacy Act 1988 (Cth) — and
+              equivalent reasoning under UK GDPR, EU GDPR, and Canadian PIPEDA
+              — hashing is not anonymisation where re-identification is
+              reasonably possible, so we treat training-consent records as
+              personal information: we redact names, emails, phone numbers,
+              bank details and similar identifiers before retention, and you
+              may request deletion at any time by emailing{" "}
               <a
                 href="mailto:brendan@askarthur.au"
                 className="text-action-teal hover:underline"
@@ -274,24 +278,74 @@ export default function PrivacyPage() {
               8. Your Rights
             </h2>
             <p className="text-gov-slate text-base leading-relaxed mb-3">
-              Under the Privacy Act 1988 (Cth), you have the right to:
+              You have the right to access, correct, and request deletion of
+              personal information we hold about you. This applies under the
+              Australian Privacy Act 1988 (Cth) and equivalent regimes
+              including UK GDPR, EU GDPR, Canadian PIPEDA, and Brazilian LGPD,
+              depending on your jurisdiction.
             </p>
             <ul className="list-disc list-inside text-gov-slate text-base leading-relaxed space-y-2">
               <li>
                 Request access to any personal information we hold about you
               </li>
-              <li>Request correction of inaccurate information</li>
+              <li>Request correction or deletion of inaccurate information</li>
+              <li>Withdraw consent you previously gave</li>
               <li>
-                Lodge a complaint with the Office of the Australian Information
-                Commissioner (OAIC) at{" "}
-                <a
-                  href="https://www.oaic.gov.au"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-action-teal hover:underline"
-                >
-                  oaic.gov.au
-                </a>
+                Lodge a complaint with the relevant privacy regulator for your
+                jurisdiction:
+                <ul className="mt-1 ml-5 list-disc list-inside">
+                  <li>
+                    Australia — Office of the Australian Information Commissioner (
+                    <a
+                      href="https://www.oaic.gov.au"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-action-teal hover:underline"
+                    >
+                      oaic.gov.au
+                    </a>
+                    )
+                  </li>
+                  <li>
+                    United Kingdom — Information Commissioner&apos;s Office (
+                    <a
+                      href="https://ico.org.uk"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-action-teal hover:underline"
+                    >
+                      ico.org.uk
+                    </a>
+                    )
+                  </li>
+                  <li>
+                    European Union — your national Data Protection Authority
+                  </li>
+                  <li>
+                    Canada — Office of the Privacy Commissioner (
+                    <a
+                      href="https://www.priv.gc.ca"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-action-teal hover:underline"
+                    >
+                      priv.gc.ca
+                    </a>
+                    )
+                  </li>
+                  <li>
+                    Brazil — Autoridade Nacional de Proteção de Dados (
+                    <a
+                      href="https://www.gov.br/anpd"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-action-teal hover:underline"
+                    >
+                      gov.br/anpd
+                    </a>
+                    )
+                  </li>
+                </ul>
               </li>
             </ul>
           </section>
