@@ -22,32 +22,58 @@ export default function StepComplete({ state }: Props) {
   useEffect(() => {
     let cancelled = false;
 
-    fetch("/api/org/create", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: state.companyName,
-        abn: state.abn || undefined,
-        sector: state.sector || undefined,
-        roleTitle: state.roleTitle || undefined,
-        abnVerified: state.abnVerified,
-        abnEntityName: state.abnEntityName || undefined,
-        invites: state.invites.length > 0 ? state.invites : undefined,
-      }),
-    })
-      .then((res) => {
-        if (!res.ok) return res.json().then((d) => Promise.reject(d));
-        return res.json();
-      })
-      .then((data) => {
-        if (!cancelled) setResult(data);
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err.error || "Failed to create organization");
-      })
-      .finally(() => {
+    async function run() {
+      try {
+        const res = await fetch("/api/org/create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: state.companyName,
+            abn: state.abn || undefined,
+            sector: state.sector || undefined,
+            roleTitle: state.roleTitle || undefined,
+            abnVerified: state.abnVerified,
+            abnEntityName: state.abnEntityName || undefined,
+            invites: state.invites.length > 0 ? state.invites : undefined,
+          }),
+        });
+
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({}));
+          throw new Error(d.error || "Failed to create organization");
+        }
+
+        const data: CreateResult = await res.json();
+        if (cancelled) return;
+        setResult(data);
+
+        // Dispatch invites via the existing invite endpoint so the hashed
+        // token + Resend email path runs. Per-invite failures are logged
+        // to console but do not block onboarding — the user can retry
+        // from /app/team.
+        await Promise.all(
+          state.invites.map((inv) =>
+            fetch("/api/org/invite", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ email: inv.email, role: inv.role }),
+            }).catch((err) => {
+              console.error("Invite dispatch failed", inv.email, err);
+            })
+          )
+        );
+      } catch (err) {
+        if (!cancelled) {
+          const message =
+            err instanceof Error ? err.message : "Failed to create organization";
+          setError(message);
+        }
+      } finally {
         if (!cancelled) setLoading(false);
-      });
+      }
+    }
+
+    run();
 
     return () => {
       cancelled = true;
