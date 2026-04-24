@@ -7,14 +7,14 @@ import ContactForm from "./ContactForm";
 export const metadata: Metadata = {
   title: "Talk to an Expert — Ask Arthur",
   description:
-    "Get Australian scam intelligence delivered to your team. Book a call.",
+    "Get scam and phone-fraud intelligence delivered to your team. Book a call.",
 };
 
 const BENEFITS = [
-  "Weekly Australian scam intelligence report tailored to your sector",
+  "Weekly scam intelligence report tailored to your sector",
   "Real-time alerts when high-risk entities are detected",
   "Phone number, URL, and domain monitoring against 14 threat feeds",
-  "SPF Act compliance guidance included",
+  "Regulatory compliance guidance (Australian SPF Act, UK GDPR, and equivalents)",
   "Direct contact — respond to threats within the hour",
 ];
 
@@ -32,9 +32,9 @@ export default function ContactPage() {
           </h1>
         </div>
         <p className="text-gov-slate text-base leading-relaxed mb-8">
-          Our managed service puts Australian scam intelligence directly into
-          your workflow. We handle the monitoring, detection, and alerting so
-          your team can focus on response.
+          Our managed service puts scam and phone-fraud intelligence directly
+          into your workflow. We handle the monitoring, detection, and alerting
+          so your team can focus on response.
         </p>
 
         {/* What you get card */}
@@ -55,15 +55,6 @@ export default function ContactPage() {
               </li>
             ))}
           </ul>
-          <div className="mt-5 pt-4 border-t border-border-light">
-            <p className="text-xs text-slate-500">
-              Starting from{" "}
-              <span className="text-deep-navy font-semibold">
-                A$1,500/month
-              </span>
-              , no lock-in.
-            </p>
-          </div>
         </div>
 
         {/* Contact form */}
