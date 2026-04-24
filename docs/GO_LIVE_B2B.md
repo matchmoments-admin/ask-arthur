@@ -232,11 +232,11 @@ git push origin main
 
 - `api_keys` — added `org_id` column (nullable UUID FK)
 
-### New RPCs (v55)
+### RPCs
 
-- `create_organization(p_user_id, p_name, p_slug, p_sector, p_abn)` → UUID
-- `get_user_org(p_user_id)` → org context
-- `generate_org_api_key(p_user_id, p_org_id, p_key_hash, p_org_name)` → key record
+- `create_organization(p_abn, p_abn_entity_name, p_abn_verified, p_name, p_owner_id, p_role_title, p_sector, p_slug)` → UUID — v79 expanded the v55 5-param signature to persist ABN verification state and the onboarder's role_title.
+- `get_user_org(p_user_id)` → org context (v55)
+- `generate_org_api_key(p_user_id, p_org_id, p_key_hash, p_org_name)` → key record (v55)
 
 ### New Feature Flags
 
