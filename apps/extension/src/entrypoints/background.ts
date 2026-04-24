@@ -5,7 +5,10 @@ import { getCachedScanReport, setCachedScanReport } from "@/lib/extension-scan-c
 import { scanInstalledExtensions, buildSecurityReport } from "@/lib/extension-scanner";
 import { setupThreatDBRefresh, getThreatDB } from "@/lib/threat-db";
 import { urlCache } from "@/lib/url-cache";
+import { detectPhoneInSelection } from "@/lib/phone-detect";
 import type { ExtensionMessage, MessageResponse } from "@/lib/types";
+
+const WEB_APP_BASE = "https://askarthur.au";
 
 declare const __URL_GUARD_ENABLED__: boolean;
 declare const __EXTENSION_SECURITY_ENABLED__: boolean;
@@ -46,18 +49,29 @@ export default defineBackground(() => {
     ensureRegistered().catch(() => {});
   });
 
-  // --- Context menu click: store text for popup ---
+  // --- Context menu click: smart-route by selection type ---
+  // If the selection looks like a phone number, route to the Phone
+  // Footprint web app (richer UX than the popup, full report). Otherwise
+  // fall through to the existing text-analysis flow via the popup.
   chrome.contextMenus.onClicked.addListener(async (info) => {
-    if (info.menuItemId === "askarthur-check" && info.selectionText) {
-      await setContextMenuText(info.selectionText);
-      // Open the popup by triggering the action
-      // Note: chrome.action.openPopup() requires Chrome 127+
-      // Fallback: the text is stored and popup reads it on open
-      if (chrome.action.openPopup) {
-        chrome.action.openPopup().catch(() => {
-          // Silently fail — user can click the extension icon
-        });
-      }
+    if (info.menuItemId !== "askarthur-check" || !info.selectionText) return;
+
+    const phoneE164 = detectPhoneInSelection(info.selectionText);
+    if (phoneE164) {
+      // Open the web app's lookup page with the number pre-filled —
+      // the page reads ?msisdn= and auto-submits. Fresh tab so the
+      // user's source page is preserved.
+      const url = `${WEB_APP_BASE}/phone-footprint?msisdn=${encodeURIComponent(phoneE164)}&src=ext`;
+      chrome.tabs.create({ url }).catch(() => {});
+      return;
+    }
+
+    // Non-phone selection → existing popup-based text analysis flow.
+    await setContextMenuText(info.selectionText);
+    if (chrome.action.openPopup) {
+      chrome.action.openPopup().catch(() => {
+        // Silently fail — user can click the extension icon
+      });
     }
   });
 

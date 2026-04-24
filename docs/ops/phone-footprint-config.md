@@ -100,6 +100,85 @@ unchanged. Sprint 3 wires the Stripe webhook to call
 Each row is a self-contained checklist. Anything ticked ✅ is done; ❌
 still needs doing.
 
+### Vendor onboarding — top-level checklist
+
+Quick reference. Detail steps for each item live in the subsections below.
+
+- [ ] **PHONE_FOOTPRINT_PEPPER** env set in Vercel (Production + Preview) → see "Pepper generation" below.
+- [ ] **Vonage_Key → VONAGE_API_KEY** rename in Vercel; pair `VONAGE_API_SECRET` → see "Vercel env hygiene" below.
+- [ ] **Twilio Verify Service SID** provisioned → see "Twilio Verify" below.
+- [ ] **LeakCheck DPA + API key** → see "LeakCheck" below.
+- [ ] **7 Stripe Products + Prices** created and pasted into env → see "Stripe" below.
+- [ ] **Resend `RESEND_FROM_EMAIL`** configured → see "Resend" below.
+- [ ] **PADDLE\_\* envs deleted** from Vercel → see "Vercel env hygiene" below.
+
+### Pepper generation (PHONE_FOOTPRINT_PEPPER)
+
+`hashMsisdn()` uses HMAC-SHA256 with this pepper. Without it the lookup
+route throws on every call in production.
+
+```bash
+# 1. Generate a 256-bit pepper (one-time, never regenerate without
+#    coordinating a re-hash window — every existing msisdn_hash row
+#    becomes meaningless if the pepper changes).
+openssl rand -hex 32
+# → e.g. a1b2c3d4...64-char hex
+
+# 2. Store in Supabase Vault (canonical home; vault values are
+#    encrypted at rest and audit-logged).
+#    Supabase Studio → Project Settings → Vault → New secret
+#    Name: phone_footprint_pepper
+#    Value: <paste>
+
+# 3. Mirror to Vercel env so the application server can read it without
+#    a Vault round-trip on every request:
+#    Vercel → Project Settings → Environment Variables → Add
+#    Name: PHONE_FOOTPRINT_PEPPER
+#    Value: <same paste>
+#    Environments: Production + Preview (skip Development — local dev
+#                  uses the deterministic dev fallback in normalize.ts)
+```
+
+**Rotation policy.** Don't rotate without a planned re-hash. If you must
+(suspected pepper leak): generate the new pepper, deploy code that
+reads BOTH old and new for a window, re-hash all msisdn_hash columns
+via a backfill script, then swap to new-only. Single-shot rotation
+will break every existing monitor's cross-IP detection key and every
+ownership-proof Upstash session. Plan an hour-long maintenance window.
+
+### Vercel env hygiene
+
+**Delete orphaned Paddle envs** (v59 dropped Paddle from the codebase):
+
+```
+Vercel → Project Settings → Environment Variables
+Search "PADDLE" → delete:
+  - PADDLE_API_KEY
+  - PADDLE_WEBHOOK_SECRET
+  - PADDLE_PRO_PRICE_ID
+  - PADDLE_ENTERPRISE_PRICE_ID
+```
+
+These were warned about in PR #18's Vercel build logs as "set in
+project but missing from turbo.json". They're orphaned — no code
+reads them. Leaving them around is harmless but pollutes the env
+surface and the turbo.json warning list.
+
+**Rename misnamed Vonage env**:
+
+```
+Vercel → Project Settings → Environment Variables
+Find "Vonage_Key" → rename → VONAGE_API_KEY
+
+If a paired secret exists under similarly-misnamed casing (e.g.,
+"Vonage_Secret"), rename → VONAGE_API_SECRET.
+```
+
+The codebase reads `process.env.VONAGE_API_KEY` (uppercase, underscore-
+separated) per the convention used everywhere else. Until renamed, the
+Vonage provider returns `available: false` and the composite scorer
+falls back to IPQS for pillar 3.
+
 ### Twilio Verify (consumer OTP)
 
 - [ ] In Twilio console, navigate to **Verify → Services → Create Service**.
@@ -148,20 +227,79 @@ cost at scale is amortised ~AUD $0.003.
 
 ### Stripe (billing)
 
-- [ ] Stripe Dashboard → Products → New Product per row of §2 above (7 new prices).
-- [ ] Copy each Price ID into the corresponding Vercel env var.
-- [x] Webhook wired. `apps/web/app/api/stripe/webhook/route.ts` now
-      dispatches PF price IDs into `upsertPhoneFootprintSubscription` which
-      calls `sync_phone_footprint_entitlements` RPC. `sync_subscription_tier`
-      (B2B) path untouched. SKU entitlement templates live in
-      `apps/web/lib/phoneFootprintSkus.ts`. Safe to merge before envs
-      are set — with no price IDs present, `isPhoneFootprintPrice` returns
-      false for every webhook and the B2B path runs unchanged.
-- Stripe metadata required on subscription creation:
-  - Consumer SKUs → `metadata.user_id` (UUID of user_profiles.id)
-  - Fleet SKUs → `metadata.org_id` (UUID of organizations.id)
-  - Missing metadata → webhook logs warn + skip (manual reconciliation
-    via admin preferable to Stripe retry loop)
+**One-time product creation.** Stripe Dashboard → Products → New
+Product. Repeat 7 times per the table below. **Always set `Tax behavior:
+Inclusive`** (AU GST inclusive) and **Currency: AUD**.
+
+| Product name       | Recurring           | Price              | Suggested ID slug          | Env var                                   |
+| ------------------ | ------------------- | ------------------ | -------------------------- | ----------------------------------------- |
+| Footprint Personal | Monthly             | AUD $7.99          | `pf_personal_monthly`      | `STRIPE_PRICE_FOOTPRINT_PERSONAL_MONTHLY` |
+| Footprint Personal | Yearly              | AUD $79            | `pf_personal_annual`       | `STRIPE_PRICE_FOOTPRINT_PERSONAL_ANNUAL`  |
+| Footprint Family   | Monthly             | AUD $12.99         | `pf_family_monthly`        | `STRIPE_PRICE_FOOTPRINT_FAMILY_MONTHLY`   |
+| Footprint Family   | Yearly              | AUD $129           | `pf_family_annual`         | `STRIPE_PRICE_FOOTPRINT_FAMILY_ANNUAL`    |
+| Fleet Starter      | Monthly             | AUD $999           | `pf_fleet_starter_monthly` | `STRIPE_PRICE_FLEET_STARTER_MONTHLY`      |
+| Fleet Starter      | Yearly              | AUD $9,990         | `pf_fleet_starter_annual`  | `STRIPE_PRICE_FLEET_STARTER_ANNUAL`       |
+| Fleet Enterprise   | One-off / per quote | (manual invoicing) | `pf_fleet_enterprise`      | `STRIPE_PRICE_FLEET_ENTERPRISE`           |
+
+For each created Price:
+
+```
+1. Stripe Dashboard → Products → click the product → click the price row
+2. Copy the price ID (starts `price_...`)
+3. Vercel → Project Settings → Environment Variables → Add
+   Name: <env var from table>
+   Value: price_xxx
+   Environments: Production + Preview
+```
+
+**Metadata required on subscription creation** (caller responsibility —
+the checkout endpoint sets these). Without them the webhook logs a
+warn and skips:
+
+| SKU type | Required metadata         | Why                                   |
+| -------- | ------------------------- | ------------------------------------- |
+| Consumer | `metadata.user_id` (UUID) | links entitlement to user_profiles.id |
+| Fleet    | `metadata.org_id` (UUID)  | links entitlement to organizations.id |
+
+Webhook code: `apps/web/app/api/stripe/webhook/route.ts` →
+`upsertPhoneFootprintSubscription`. SKU registry + entitlement
+templates: `apps/web/lib/phoneFootprintSkus.ts`. Safe to ship before
+envs are set — with no price IDs present, every webhook runs the
+B2B path unchanged.
+
+### Resend (email delivery)
+
+Already configured for `RESEND_API_KEY`. The PDF email and alert
+dispatch paths additionally need a verified `from` address.
+
+```
+1. Resend Dashboard → Domains → Add domain
+   Domain: askarthur.au (or a subdomain like notify.askarthur.au)
+
+2. Add the published DKIM/SPF/DMARC DNS records to Cloudflare
+   (or wherever DNS lives). Wait for the green checkmark in Resend.
+
+3. Vercel → Project Settings → Environment Variables → Add
+   Name: RESEND_FROM_EMAIL
+   Value: alerts@askarthur.au   (or whichever verified address)
+   Environments: Production + Preview
+
+4. Smoke test:
+   curl -X POST https://api.resend.com/emails \
+     -H "Authorization: Bearer $RESEND_API_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{"from":"alerts@askarthur.au","to":"you@example.com",
+          "subject":"Resend smoke","html":"<p>OK</p>"}'
+```
+
+Without `RESEND_FROM_EMAIL`, the alert dispatch and PDF email Inngest
+functions silently no-op (logged as warn). The rest of the product
+keeps working — alerts just don't reach the user's inbox.
+
+**Cost:** Pro $20/month for 50,000 emails. PAYG above $0.001/email.
+For phone-footprint alerts, expect ≤ 1 email per monitor per refresh
+(monthly cadence default), so a Personal user is ~5 emails/month, a
+Family user ~25, a Fleet Starter org ~5,000 — well within Pro.
 
 ---
 
@@ -184,29 +322,34 @@ Places in `apps/web` where Phone Footprint shows up. All are currently
 behind `NEXT_PUBLIC_FF_PHONE_FOOTPRINT_CONSUMER=false`, so they're
 invisible to users until the flag flips.
 
-| Where                                                            | What                                                          | Status      |
-| ---------------------------------------------------------------- | ------------------------------------------------------------- | ----------- |
-| `apps/web/app/api/phone-footprint/[msisdn]/route.ts`             | Primary lookup endpoint                                       | ✅ Sprint 1 |
-| `apps/web/app/api/phone-footprint/verify/{start,check}/route.ts` | OTP endpoints                                                 | ✅ Sprint 1 |
-| `apps/web/app/api/phone-footprint/[id]/pdf/route.ts`             | PDF export (enqueues Inngest render)                          | ✅ Sprint 3 |
-| `apps/web/app/api/inngest/functions/phone-footprint-pdf.ts`      | Inngest function — render + R2 upload + email                 | ✅ Sprint 3 |
-| `apps/web/app/api/inngest/functions/phone-footprint-refresh.ts`  | Inngest cron + per-monitor refresh worker                     | ✅ Sprint 4 |
-| `apps/web/lib/phone-footprint/alert-dispatch.ts`                 | Email + HMAC-signed webhook delivery                          | ✅ Sprint 4 |
-| `apps/web/app/api/phone-footprint/monitors/route.ts`             | Monitors list + create (OTP-gated, entitlement-checked)       | ✅ Sprint 4 |
-| `apps/web/app/api/phone-footprint/monitors/[id]/route.ts`        | Monitor read / patch / soft-delete                            | ✅ Sprint 4 |
-| `apps/web/app/api/phone-footprint/monitors/[id]/alerts/route.ts` | Per-monitor alerts history (paginated)                        | ✅ Sprint 4 |
-| `apps/web/app/api/stripe/webhook/route.ts`                       | PF SKU branch (entitlements upsert + cancel)                  | ✅ Sprint 3 |
-| `apps/web/lib/phoneFootprintSkus.ts`                             | SKU registry + entitlement templates                          | ✅ Sprint 3 |
-| `apps/web/app/phone-footprint/[id]/page.tsx`                     | Consumer report page                                          | ⏳ Sprint 2 |
-| `apps/web/app/phone-footprint/page.tsx`                          | Landing / lookup form                                         | ✅ Sprint 2 |
-| `apps/web/app/admin/phone-footprint/page.tsx`                    | Admin metrics panel                                           | ⏳ Sprint 2 |
-| `apps/web/app/app/phone-footprint/monitors/page.tsx`             | Saved-numbers dashboard (list + add/remove flow)              | ✅ Sprint 4 |
-| `apps/web/app/app/phone-footprint/monitors/[id]/page.tsx`        | Per-monitor detail                                            | ❌ Sprint 5 |
-| `apps/web/app/pricing/page.tsx`                                  | Add Footprint tiers to pricing                                | ❌ Sprint 3 |
-| `apps/web/components/FootprintBandBadge.tsx`                     | Reusable `safe/caution/high/critical` chip                    | ⏳ Sprint 2 |
-| `apps/web/components/CoverageChips.tsx`                          | Per-provider coverage badges (live/pending/degraded/disabled) | ⏳ Sprint 2 |
-| Chrome extension                                                 | Right-click lookup (defer)                                    | ❌ Sprint 5 |
-| Mobile app (Expo)                                                | Phone Footprint tab + SIM Swap Heartbeat push                 | ❌ Sprint 5 |
+| Where                                                                   | What                                                            | Status      |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------- | ----------- |
+| `apps/web/app/api/phone-footprint/[msisdn]/route.ts`                    | Primary lookup endpoint                                         | ✅ Sprint 1 |
+| `apps/web/app/api/phone-footprint/verify/{start,check}/route.ts`        | OTP endpoints                                                   | ✅ Sprint 1 |
+| `apps/web/app/api/phone-footprint/[id]/pdf/route.ts`                    | PDF export (enqueues Inngest render)                            | ✅ Sprint 3 |
+| `apps/web/app/api/inngest/functions/phone-footprint-pdf.ts`             | Inngest function — render + R2 upload + email                   | ✅ Sprint 3 |
+| `apps/web/app/api/inngest/functions/phone-footprint-refresh.ts`         | Inngest cron + per-monitor refresh worker                       | ✅ Sprint 4 |
+| `apps/web/app/api/inngest/functions/phone-footprint-vonage-backfill.ts` | Vonage CAMARA-landed pager + per-monitor backfill               | ✅ Sprint 5 |
+| `apps/extension/src/lib/phone-detect.ts`                                | Extension-side phone-in-selection detector                      | ✅ Sprint 5 |
+| `apps/extension/src/entrypoints/background.ts` (PF branch)              | Right-click "Check with Ask Arthur" → web app for phone numbers | ✅ Sprint 5 |
+| `apps/web/app/phone-footprint/LookupForm.tsx` (auto-submit)             | Reads ?msisdn=&src=ext, auto-fires lookup on mount              | ✅ Sprint 5 |
+| `apps/web/app/manifest.ts` (shortcuts)                                  | PWA shortcut to /app/phone-footprint/monitors                   | ✅ Sprint 5 |
+| `apps/web/lib/phone-footprint/alert-dispatch.ts`                        | Email + HMAC-signed webhook delivery                            | ✅ Sprint 4 |
+| `apps/web/app/api/phone-footprint/monitors/route.ts`                    | Monitors list + create (OTP-gated, entitlement-checked)         | ✅ Sprint 4 |
+| `apps/web/app/api/phone-footprint/monitors/[id]/route.ts`               | Monitor read / patch / soft-delete                              | ✅ Sprint 4 |
+| `apps/web/app/api/phone-footprint/monitors/[id]/alerts/route.ts`        | Per-monitor alerts history (paginated)                          | ✅ Sprint 4 |
+| `apps/web/app/api/stripe/webhook/route.ts`                              | PF SKU branch (entitlements upsert + cancel)                    | ✅ Sprint 3 |
+| `apps/web/lib/phoneFootprintSkus.ts`                                    | SKU registry + entitlement templates                            | ✅ Sprint 3 |
+| `apps/web/app/phone-footprint/[id]/page.tsx`                            | Consumer report page                                            | ⏳ Sprint 2 |
+| `apps/web/app/phone-footprint/page.tsx`                                 | Landing / lookup form                                           | ✅ Sprint 2 |
+| `apps/web/app/admin/phone-footprint/page.tsx`                           | Admin metrics panel                                             | ⏳ Sprint 2 |
+| `apps/web/app/app/phone-footprint/monitors/page.tsx`                    | Saved-numbers dashboard (list + add/remove flow)                | ✅ Sprint 4 |
+| `apps/web/app/app/phone-footprint/monitors/[id]/page.tsx`               | Per-monitor detail                                              | ❌ Sprint 5 |
+| `apps/web/app/pricing/page.tsx`                                         | Add Footprint tiers to pricing                                  | ❌ Sprint 3 |
+| `apps/web/components/FootprintBandBadge.tsx`                            | Reusable `safe/caution/high/critical` chip                      | ⏳ Sprint 2 |
+| `apps/web/components/CoverageChips.tsx`                                 | Per-provider coverage badges (live/pending/degraded/disabled)   | ⏳ Sprint 2 |
+| Chrome extension                                                        | Right-click lookup (defer)                                      | ❌ Sprint 5 |
+| Mobile app (Expo)                                                       | Phone Footprint tab + SIM Swap Heartbeat push                   | ❌ Sprint 5 |
 
 **When adding a new UI entry point**: verify `featureFlags.phoneFootprintConsumer`
 first, match the pattern in `apps/web/app/api/phone-footprint/[msisdn]/route.ts`.
@@ -317,8 +460,8 @@ cron. No migration data backfill needed.
 | 2      | Consumer UI (landing + report components), admin ops panel, config doc + CLAUDE.md cross-link                                | ✅     |
 | 3      | Claude explanation, Stripe PF webhook → entitlements RPC, PDF export (react-pdf + R2 + Resend)                               | ✅     |
 | 4      | Monitors CRUD, Inngest hourly cron + per-monitor refresh worker, email + HMAC-signed webhook alerts, saved-numbers dashboard | ✅     |
-| 5      | PWA wrapper, extension + mobile entry points, SIM Swap Heartbeat push                                                        | ⏳     |
-| 6      | Vonage CAMARA go-live (if approval lands); backfill existing footprints                                                      | ❌     |
+| 5      | Extension right-click → web-app footprint, Vonage CAMARA-landed Inngest backfill (pager + per-monitor), PWA shortcuts        | ✅     |
+| 6      | Vonage CAMARA go-live (when approval lands); fire vonage.backfill.requested.v1 to upgrade existing footprints                | ⏳     |
 | 7      | Fleet Starter: SSO, bulk CSV, per-org webhooks                                                                               | ❌     |
 | 8      | Fleet audit trail, Enterprise quote/invoice flow                                                                             | ❌     |
 | 9      | Compliance cutover (APP 1.7 ADM notice, NDB runbook, SPF s58BT statement)                                                    | ❌     |

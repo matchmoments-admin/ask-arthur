@@ -14,6 +14,24 @@ export default function manifest(): MetadataRoute.Manifest {
       { src: "/icon", sizes: "32x32", type: "image/png" },
       { src: "/apple-icon", sizes: "180x180", type: "image/png" },
     ],
+    // PWA shortcuts — surfaced in the long-press menu on Android home
+    // screens and the right-click menu on Windows/Chrome OS taskbars.
+    // Two entries: the headline check action and Phone Footprint's
+    // saved-numbers dashboard. Both deep-link straight into the app.
+    shortcuts: [
+      {
+        name: "Check a message",
+        short_name: "Check",
+        description: "Paste suspicious text or a URL for instant analysis.",
+        url: "/?utm_source=pwa_shortcut",
+      },
+      {
+        name: "Phone Footprint — saved numbers",
+        short_name: "Footprint",
+        description: "View your saved numbers and recent alerts.",
+        url: "/app/phone-footprint/monitors?utm_source=pwa_shortcut",
+      },
+    ],
     // Android Web Share Target — receive shared text/URLs from other apps
     share_target: {
       action: "/share-target",
