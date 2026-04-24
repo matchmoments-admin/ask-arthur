@@ -322,34 +322,36 @@ Places in `apps/web` where Phone Footprint shows up. All are currently
 behind `NEXT_PUBLIC_FF_PHONE_FOOTPRINT_CONSUMER=false`, so they're
 invisible to users until the flag flips.
 
-| Where                                                                   | What                                                            | Status      |
-| ----------------------------------------------------------------------- | --------------------------------------------------------------- | ----------- |
-| `apps/web/app/api/phone-footprint/[msisdn]/route.ts`                    | Primary lookup endpoint                                         | ✅ Sprint 1 |
-| `apps/web/app/api/phone-footprint/verify/{start,check}/route.ts`        | OTP endpoints                                                   | ✅ Sprint 1 |
-| `apps/web/app/api/phone-footprint/[id]/pdf/route.ts`                    | PDF export (enqueues Inngest render)                            | ✅ Sprint 3 |
-| `apps/web/app/api/inngest/functions/phone-footprint-pdf.ts`             | Inngest function — render + R2 upload + email                   | ✅ Sprint 3 |
-| `apps/web/app/api/inngest/functions/phone-footprint-refresh.ts`         | Inngest cron + per-monitor refresh worker                       | ✅ Sprint 4 |
-| `apps/web/app/api/inngest/functions/phone-footprint-vonage-backfill.ts` | Vonage CAMARA-landed pager + per-monitor backfill               | ✅ Sprint 5 |
-| `apps/extension/src/lib/phone-detect.ts`                                | Extension-side phone-in-selection detector                      | ✅ Sprint 5 |
-| `apps/extension/src/entrypoints/background.ts` (PF branch)              | Right-click "Check with Ask Arthur" → web app for phone numbers | ✅ Sprint 5 |
-| `apps/web/app/phone-footprint/LookupForm.tsx` (auto-submit)             | Reads ?msisdn=&src=ext, auto-fires lookup on mount              | ✅ Sprint 5 |
-| `apps/web/app/manifest.ts` (shortcuts)                                  | PWA shortcut to /app/phone-footprint/monitors                   | ✅ Sprint 5 |
-| `apps/web/lib/phone-footprint/alert-dispatch.ts`                        | Email + HMAC-signed webhook delivery                            | ✅ Sprint 4 |
-| `apps/web/app/api/phone-footprint/monitors/route.ts`                    | Monitors list + create (OTP-gated, entitlement-checked)         | ✅ Sprint 4 |
-| `apps/web/app/api/phone-footprint/monitors/[id]/route.ts`               | Monitor read / patch / soft-delete                              | ✅ Sprint 4 |
-| `apps/web/app/api/phone-footprint/monitors/[id]/alerts/route.ts`        | Per-monitor alerts history (paginated)                          | ✅ Sprint 4 |
-| `apps/web/app/api/stripe/webhook/route.ts`                              | PF SKU branch (entitlements upsert + cancel)                    | ✅ Sprint 3 |
-| `apps/web/lib/phoneFootprintSkus.ts`                                    | SKU registry + entitlement templates                            | ✅ Sprint 3 |
-| `apps/web/app/phone-footprint/[id]/page.tsx`                            | Consumer report page                                            | ⏳ Sprint 2 |
-| `apps/web/app/phone-footprint/page.tsx`                                 | Landing / lookup form                                           | ✅ Sprint 2 |
-| `apps/web/app/admin/phone-footprint/page.tsx`                           | Admin metrics panel                                             | ⏳ Sprint 2 |
-| `apps/web/app/app/phone-footprint/monitors/page.tsx`                    | Saved-numbers dashboard (list + add/remove flow)                | ✅ Sprint 4 |
-| `apps/web/app/app/phone-footprint/monitors/[id]/page.tsx`               | Per-monitor detail                                              | ❌ Sprint 5 |
-| `apps/web/app/pricing/page.tsx`                                         | Add Footprint tiers to pricing                                  | ❌ Sprint 3 |
-| `apps/web/components/FootprintBandBadge.tsx`                            | Reusable `safe/caution/high/critical` chip                      | ⏳ Sprint 2 |
-| `apps/web/components/CoverageChips.tsx`                                 | Per-provider coverage badges (live/pending/degraded/disabled)   | ⏳ Sprint 2 |
-| Chrome extension                                                        | Right-click lookup (defer)                                      | ❌ Sprint 5 |
-| Mobile app (Expo)                                                       | Phone Footprint tab + SIM Swap Heartbeat push                   | ❌ Sprint 5 |
+| Where                                                                   | What                                                                            | Status      |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------- | ----------- |
+| `apps/web/app/api/phone-footprint/[msisdn]/route.ts`                    | Primary lookup endpoint                                                         | ✅ Sprint 1 |
+| `apps/web/app/api/phone-footprint/verify/{start,check}/route.ts`        | OTP endpoints                                                                   | ✅ Sprint 1 |
+| `apps/web/app/api/phone-footprint/[id]/pdf/route.ts`                    | PDF export (enqueues Inngest render)                                            | ✅ Sprint 3 |
+| `apps/web/app/api/inngest/functions/phone-footprint-pdf.ts`             | Inngest function — render + R2 upload + email                                   | ✅ Sprint 3 |
+| `apps/web/app/api/inngest/functions/phone-footprint-refresh.ts`         | Inngest cron + per-monitor refresh worker                                       | ✅ Sprint 4 |
+| `apps/web/app/api/inngest/functions/phone-footprint-vonage-backfill.ts` | Vonage CAMARA-landed pager + per-monitor backfill                               | ✅ Sprint 5 |
+| `apps/web/lib/region.ts`                                                | Caller-country detection + Vonage CAMARA country set + regional coverage helper | ✅ Sprint 6 |
+| `packages/scam-engine/src/phone-footprint/providers/carrier-drift.ts`   | Pillar 4 fallback — Twilio Lookup carrier-string + line-type delta              | ✅ Sprint 6 |
+| `apps/extension/src/lib/phone-detect.ts`                                | Extension-side phone-in-selection detector                                      | ✅ Sprint 5 |
+| `apps/extension/src/entrypoints/background.ts` (PF branch)              | Right-click "Check with Ask Arthur" → web app for phone numbers                 | ✅ Sprint 5 |
+| `apps/web/app/phone-footprint/LookupForm.tsx` (auto-submit)             | Reads ?msisdn=&src=ext, auto-fires lookup on mount                              | ✅ Sprint 5 |
+| `apps/web/app/manifest.ts` (shortcuts)                                  | PWA shortcut to /app/phone-footprint/monitors                                   | ✅ Sprint 5 |
+| `apps/web/lib/phone-footprint/alert-dispatch.ts`                        | Email + HMAC-signed webhook delivery                                            | ✅ Sprint 4 |
+| `apps/web/app/api/phone-footprint/monitors/route.ts`                    | Monitors list + create (OTP-gated, entitlement-checked)                         | ✅ Sprint 4 |
+| `apps/web/app/api/phone-footprint/monitors/[id]/route.ts`               | Monitor read / patch / soft-delete                                              | ✅ Sprint 4 |
+| `apps/web/app/api/phone-footprint/monitors/[id]/alerts/route.ts`        | Per-monitor alerts history (paginated)                                          | ✅ Sprint 4 |
+| `apps/web/app/api/stripe/webhook/route.ts`                              | PF SKU branch (entitlements upsert + cancel)                                    | ✅ Sprint 3 |
+| `apps/web/lib/phoneFootprintSkus.ts`                                    | SKU registry + entitlement templates                                            | ✅ Sprint 3 |
+| `apps/web/app/phone-footprint/[id]/page.tsx`                            | Consumer report page                                                            | ⏳ Sprint 2 |
+| `apps/web/app/phone-footprint/page.tsx`                                 | Landing / lookup form                                                           | ✅ Sprint 2 |
+| `apps/web/app/admin/phone-footprint/page.tsx`                           | Admin metrics panel                                                             | ⏳ Sprint 2 |
+| `apps/web/app/app/phone-footprint/monitors/page.tsx`                    | Saved-numbers dashboard (list + add/remove flow)                                | ✅ Sprint 4 |
+| `apps/web/app/app/phone-footprint/monitors/[id]/page.tsx`               | Per-monitor detail                                                              | ❌ Sprint 5 |
+| `apps/web/app/pricing/page.tsx`                                         | Add Footprint tiers to pricing                                                  | ❌ Sprint 3 |
+| `apps/web/components/FootprintBandBadge.tsx`                            | Reusable `safe/caution/high/critical` chip                                      | ⏳ Sprint 2 |
+| `apps/web/components/CoverageChips.tsx`                                 | Per-provider coverage badges (live/pending/degraded/disabled)                   | ⏳ Sprint 2 |
+| Chrome extension                                                        | Right-click lookup (defer)                                                      | ❌ Sprint 5 |
+| Mobile app (Expo)                                                       | Phone Footprint tab + SIM Swap Heartbeat push                                   | ❌ Sprint 5 |
 
 **When adding a new UI entry point**: verify `featureFlags.phoneFootprintConsumer`
 first, match the pattern in `apps/web/app/api/phone-footprint/[msisdn]/route.ts`.
@@ -454,20 +456,82 @@ cron. No migration data backfill needed.
 
 ## 9. Sprint ledger
 
-| Sprint | Shipped                                                                                                                      | Status |
-| ------ | ---------------------------------------------------------------------------------------------------------------------------- | ------ |
-| 1      | v75/v76/v77 migrations, provider package (5 providers incl. real Vonage), Twilio Verify OTP                                  | ✅     |
-| 2      | Consumer UI (landing + report components), admin ops panel, config doc + CLAUDE.md cross-link                                | ✅     |
-| 3      | Claude explanation, Stripe PF webhook → entitlements RPC, PDF export (react-pdf + R2 + Resend)                               | ✅     |
-| 4      | Monitors CRUD, Inngest hourly cron + per-monitor refresh worker, email + HMAC-signed webhook alerts, saved-numbers dashboard | ✅     |
-| 5      | Extension right-click → web-app footprint, Vonage CAMARA-landed Inngest backfill (pager + per-monitor), PWA shortcuts        | ✅     |
-| 6      | Vonage CAMARA go-live (when approval lands); fire vonage.backfill.requested.v1 to upgrade existing footprints                | ⏳     |
-| 7      | Fleet Starter: SSO, bulk CSV, per-org webhooks                                                                               | ❌     |
-| 8      | Fleet audit trail, Enterprise quote/invoice flow                                                                             | ❌     |
-| 9      | Compliance cutover (APP 1.7 ADM notice, NDB runbook, SPF s58BT statement)                                                    | ❌     |
-| 10     | Admin observability deepening, consumer launch                                                                               | ❌     |
+| Sprint | Shipped                                                                                                                                                             | Status |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| 1      | v75/v76/v77 migrations, provider package (5 providers incl. real Vonage), Twilio Verify OTP                                                                         | ✅     |
+| 2      | Consumer UI (landing + report components), admin ops panel, config doc + CLAUDE.md cross-link                                                                       | ✅     |
+| 3      | Claude explanation, Stripe PF webhook → entitlements RPC, PDF export (react-pdf + R2 + Resend)                                                                      | ✅     |
+| 4      | Monitors CRUD, Inngest hourly cron + per-monitor refresh worker, email + HMAC-signed webhook alerts, saved-numbers dashboard                                        | ✅     |
+| 5      | Extension right-click → web-app footprint, Vonage CAMARA-landed Inngest backfill (pager + per-monitor), PWA shortcuts                                               | ✅     |
+| 6      | International launch foundations: caller-country detection, regional coverage in lookup response, carrier-drift fallback for pillar 4, international marketing copy | ✅     |
+| 7      | UK soft launch + Fleet Starter foundations: SSO (Clerk/WorkOS), bulk CSV, per-org webhooks                                                                          | ⏳     |
+| 8      | Fleet audit trail, Enterprise quote/invoice flow                                                                                                                    | ❌     |
+| 9      | Compliance cutover (APP 1.7 ADM notice, NDB runbook, SPF s58BT statement)                                                                                           | ❌     |
+| 10     | Admin observability deepening, consumer launch                                                                                                                      | ❌     |
 
-## 10. Pointers
+## 10. International launch — coverage matrix
+
+Sprint 6 pivoted the launch geography. AU SIM swap is blocked on
+Vonage adding Australia to its Network Registry (Telstra is live on
+Aduna as of 21 Nov 2025 but no CPaaS partner has provisioned the
+signal to end customers yet — see Sprint 6 commit notes for full
+research). Rather than wait, we ship internationally first.
+
+### Per-country signal availability
+
+| Country                      | Pillar 1 (scam reports)     | Pillar 2 (breach) | Pillar 3 (reputation) | Pillar 4 (SIM swap)         | Pillar 5 (identity) | Notes                                                                                                                            |
+| ---------------------------- | --------------------------- | ----------------- | --------------------- | --------------------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| **GB** (UK)                  | ✅ low corpus               | ✅                | ✅ Vonage NI          | ✅ Vonage CAMARA            | ✅ Twilio           | **First international launch target.** UK GDPR ≈ AU APP — minimal compliance lift. SIM swap fraud high salience in news.         |
+| **US**                       | ✅ low corpus               | ✅                | ✅ Vonage NI          | ✅ Vonage CAMARA            | ✅ Twilio           | Sprint 8 — needs CCPA/CPRA disclosure review.                                                                                    |
+| **CA**                       | ✅ low corpus               | ✅                | ✅ Vonage NI          | ✅ Vonage CAMARA            | ✅ Twilio           | Sprint 8 — PIPEDA close to GDPR.                                                                                                 |
+| **DE/FR/IT/ES/NL**           | ✅ low corpus               | ✅                | ✅ Vonage NI          | ✅ Vonage CAMARA            | ✅ Twilio           | Sprint 10 — translated UI optional. GDPR standard.                                                                               |
+| **BR**                       | ✅ low corpus               | ✅                | ✅ Vonage NI          | ✅ Vonage CAMARA            | ✅ Twilio           | Sprint 10+ — LGPD + Portuguese translation.                                                                                      |
+| **AU**                       | ✅ **strong corpus (moat)** | ✅                | ✅ Vonage NI          | ⚠️ carrier-drift proxy only | ✅ Twilio           | Telstra direct + Optus/TPG via Aduna are the path. Pillar 4 currently runs the Twilio-deltas fallback for OTP-verified monitors. |
+| **JP/IN/ZA/everywhere else** | ⚠️ no corpus                | ✅                | ✅ Vonage NI          | ⚠️ carrier-drift proxy only | ✅ Twilio           | Lookup works; localised market entry deferred.                                                                                   |
+
+### What Sprint 6 shipped to enable this
+
+- `apps/web/lib/region.ts` — reads Vercel's `x-vercel-ip-country` header,
+  exports `VONAGE_CAMARA_COUNTRIES` set, returns a `RegionalCoverage`
+  object describing whether the caller's country has carrier-authoritative
+  SIM swap or only the carrier-drift proxy.
+- `/api/phone-footprint/[msisdn]` adds `regional` to the response payload
+  so the UI can render honest per-country copy.
+- `packages/scam-engine/src/phone-footprint/providers/carrier-drift.ts`
+  — pillar 4 fallback pure function. Runs inside the orchestrator after
+  the main fan-out completes IF Vonage CAMARA didn't fire AND a previous
+  footprint exists (refresh path). Compares this run's Twilio identity
+  pillar to prev's; emits `sim_swap` pillar with score 0–100 and
+  confidence 0.5 (vs Vonage's 0.95).
+- `apps/web/app/phone-footprint/page.tsx` — landing copy refreshed:
+  drops AU-specific framing, leads with universal "what does your
+  number know about you?", surfaces a coverage-note callout for users
+  in non-CAMARA countries.
+
+### What's NOT yet shipped for international launch
+
+- **Multi-currency Stripe Prices** — still AUD-only. Need GBP/USD/CAD
+  variants (Sprint 7).
+- **Per-jurisdiction privacy policy disclosures** — UK GDPR /
+  CCPA-CPRA / PIPEDA / LGPD paragraphs not yet drafted (Sprint 7-8).
+- **DSAR + erasure endpoints** — UK GDPR has 30-day response window;
+  needs an export endpoint per user + hard-delete cascade (Sprint 7).
+- **Country-aware consent capture at signup** — currently single AU
+  consent flow; international users get the same flow which is
+  acceptable but not optimal.
+
+### Vendor status (per the 2026-04-24 research)
+
+| Provider            | AU SIM swap                                 | UK / US / CA / EU / BR SIM swap |
+| ------------------- | ------------------------------------------- | ------------------------------- |
+| Vonage CAMARA       | ❌ Not in Network Registry                  | ✅ Production, primary path     |
+| Telstra direct      | ⏳ Application in progress                  | n/a                             |
+| TeleSign (Proximus) | ⚠️ Public docs unclear; sales call required | ✅                              |
+| Sinch via Aduna     | ⚠️ Aduna partner; AU provisioning unclear   | ✅ via Aduna                    |
+| Infobip via Aduna   | ⚠️ Aduna partner; AU provisioning unclear   | ✅ via Aduna                    |
+| Twilio              | ❌ AU explicitly not in country list        | ✅                              |
+
+## 11. Pointers
 
 - **Full sprint plan:** [`docs/plans/phone-footprint-v2.md`](../plans/phone-footprint-v2.md)
 - **Migration SQL:** `supabase/migration-v75-phone-footprint-core.sql`, `-v76-vonage-telco.sql`, `-v77-phone-verified-fleet.sql`
