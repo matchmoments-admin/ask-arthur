@@ -337,8 +337,8 @@ Status legend: ✅ shipped / ⏳ in progress / ❌ not started
 | S1     | 1–2   | Migrations v75–v77, Twilio Verify, feature flags, real Vonage provider (mock-mode dropped — live key provisioned), internal provider, free-tier API route    | ✅     |
 | S2     | 3–4   | Free-tier end-to-end, footprint report components, consumer landing, composite scorer with graceful degradation, cost_telemetry integration, admin ops panel | ✅     |
 | S3     | 5–6   | Claude explanation module, Stripe Personal + Family + Fleet webhook → entitlements, PDF export via react-pdf + R2 + Resend                                   | ✅     |
-| S4     | 7–8   | Monitors CRUD fully wired, Inngest monthly-refresh cron, delta alerts (email + webhook), composite score v2 with telco_signal_history weights                | ⏳     |
-| S5     | 9–10  | PWA wrapper, Chrome+Firefox extension right-click lookup, SIM Swap Heartbeat push notifications, Vonage CAMARA-landed Inngest backfill                       | ❌     |
+| S4     | 7–8   | Monitors CRUD fully wired, Inngest hourly cron + per-monitor refresh worker, email + HMAC-signed webhook alert dispatch, saved-numbers dashboard             | ✅     |
+| S5     | 9–10  | PWA wrapper, Chrome+Firefox extension right-click lookup, SIM Swap Heartbeat push notifications, Vonage CAMARA-landed Inngest backfill                       | ⏳     |
 | S6     | 11–12 | Vonage CAMARA go-live: staging → backfill → prod flip. Buffer if CAMARA approval slips.                                                                      | ❌     |
 | S7     | 13–14 | Fleet Starter foundations: SSO (Clerk/WorkOS), bulk CSV, per-org webhooks, Stripe Fleet checkout flow                                                        | ❌     |
 | S8     | 15–16 | Fleet features + Enterprise lane: 90-day audit trail, org PDF pack, manual Stripe invoicing, bank pilot outreach                                             | ❌     |
