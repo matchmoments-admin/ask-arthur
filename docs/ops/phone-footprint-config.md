@@ -556,6 +556,163 @@ demonstrates translation ROI.
 | Infobip via Aduna   | ⚠️ Aduna partner; AU provisioning unclear   | ✅ via Aduna                    |
 | Twilio              | ❌ AU explicitly not in country list        | ✅                              |
 
+### Post-approval runbook — when Vonage Network Registry approval lands
+
+Vonage typically reviews applications in 2–5 business days. When the
+approval email arrives, work through this list in order. Everything
+here is dashboard work or a one-line shell command — the code to
+consume it is already shipped (Sprints 1, 5, 6).
+
+**1. Confirm approval per-country and per-feature.**
+
+```
+Vonage Dashboard → Network Registry → Applications → Ask Arthur
+  Confirm status is "Approved" or "Active" for each:
+    - United Kingdom + SIM Swap
+    - United Kingdom + Silent Authentication
+    - Canada + SIM Swap
+    - Canada + Silent Authentication
+    - Brazil + SIM Swap
+    - Brazil + Silent Authentication
+  If any country/feature pair is still "Pending", treat it as not
+  approved — the orchestrator will gracefully degrade per-country
+  via the region helper, so partial approval is fine to ship on.
+```
+
+**2. Create a Vonage Application for CAMARA auth.**
+
+Pre-approval, Vonage's Applications → Capabilities dropdown only shows
+All / Messages / Verify / Voice / VBC / RTC / Video. Post-approval,
+**SIM Swap** and **Device Swap** become selectable capabilities:
+
+```
+Vonage Dashboard → Applications → Create new application
+  Name:          ask-arthur-phone-footprint
+  Capabilities:  ✓ SIM Swap
+                 ✓ Device Swap
+                 (leave everything else off)
+
+Scroll to "Generate public and private key pair" → click Generate
+  → downloads private.key to your machine.
+  ⚠ SAVE IMMEDIATELY to your password manager. Vonage does not retain
+    a copy. If you lose it, regenerate which invalidates the old pair.
+
+Copy the Application ID (UUID, starts with a letter or digit).
+```
+
+**3. Add CAMARA envs to Vercel.**
+
+```
+Vercel → Project Settings → Environment Variables → Add
+
+Variable 1:
+  Name:          VONAGE_APPLICATION_ID
+  Value:         <UUID from step 2>
+  Environments:  Production, Preview
+
+Variable 2:
+  Name:          VONAGE_PRIVATE_KEY
+  Value:         <flattened PEM — see below>
+  Environments:  Production, Preview
+
+# Flatten PEM to single line (macOS):
+awk 'BEGIN{ORS="\\n"} {print}' ~/Downloads/private.key | pbcopy
+# Paste result into Vercel value box. Code does
+# privateKey.replace(/\\n/g, "\n") at runtime.
+```
+
+**4. Redeploy and smoke-test.**
+
+```bash
+# Redeploy main via Vercel (or push any branch to trigger). Then
+# against a verified phone in an approved country:
+
+curl https://askarthur.au/api/phone-footprint/+<verified-number> \
+  -H "Cookie: <your auth cookie>"
+
+# Look for in the response:
+#   coverage.vonage:              "live"
+#   pillars.reputation.detail.source: "vonage"
+#   pillars.sim_swap.available:   true
+#   pillars.sim_swap.detail.source: omitted (Vonage doesn't tag; just
+#                                  check it's not "carrier_drift")
+```
+
+If `pillars.sim_swap.available` is `false` with `reason: "camara_not_configured"` → envs not loaded, redeploy. Any `camara_*_403/404/422` reason → that specific country/carrier isn't enrolled in your application; chase Vonage support.
+
+**5. Fire the backfill event.**
+
+Existing monitors are still on carrier-drift (pillar 4 proxy from
+Sprint 6). Upgrade them to real CAMARA signals:
+
+```bash
+# Uses the phone-footprint-vonage-backfill-pager Inngest function
+# shipped in Sprint 5. Idempotent on requestId.
+curl -X POST https://inn.gs/e/$INNGEST_EVENT_KEY \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name":"phone-footprint/vonage.backfill.requested.v1",
+    "data":{"requestId":"vonage-approval-<YYYYMMDD>"}
+  }'
+
+# Watch progress in Inngest dashboard → Functions →
+# phone-footprint-vonage-backfill-monitor. At concurrency:5 and
+# ~AUD $0.12 per monitor, a 1,000-monitor fleet completes in ~5 min
+# at ~AUD $120 spend. Pause the function if unexpected volume.
+```
+
+**6. Flip the consumer flag in Preview, then Production.**
+
+`FF_VONAGE_ENABLED` may already be `true` from the NI v2 Track 1
+smoke test — confirm it's present in both environments. Then:
+
+```
+Vercel → Environment Variables → Add Variable
+  Name:          NEXT_PUBLIC_FF_PHONE_FOOTPRINT_CONSUMER
+  Value:         true
+  Environments:  Preview  (first)
+
+Redeploy a preview, verify /phone-footprint renders and the lookup
+route returns 200. Then:
+
+Vercel → Environment Variables → Edit NEXT_PUBLIC_FF_PHONE_FOOTPRINT_CONSUMER
+  Environments: add Production
+
+Redeploy main.
+```
+
+**7. Update the living docs to reflect the new reality.**
+
+```
+In docs/ops/phone-footprint-config.md:
+  §10 coverage matrix — flip rows for approved countries from ⚠️
+    "carrier-drift proxy only" to ✅ "Vonage CAMARA"
+  §10 vendor status table — flip Vonage CAMARA row to ✅ for the
+    approved countries
+  Note the approval date inline
+  Update §1 rollout order — NEXT_PUBLIC_FF_PHONE_FOOTPRINT_CONSUMER
+    can now flip last (all prerequisites live)
+
+Commit: docs(phone-footprint): Vonage CAMARA approved for <countries>
+  + backfill fired <date>
+```
+
+**8. Region helper list update (optional — only if approved countries differ from the Vonage Network Registry superset).**
+
+If Vonage onboards you to a country not in `apps/web/lib/region.ts`'s
+`VONAGE_CAMARA_COUNTRIES` set (currently DE, IT, US, GB, BR, ES, FR,
+NL, CA), add the ISO code to that set and redeploy. The region helper
+is the single source of truth for "this country has carrier-
+authoritative SIM swap" in the UI + response shape.
+
+**9. Announce.**
+
+Social / email / community. Suggested cadence: one-sentence Twitter/
+LinkedIn ping the day of launch, fuller Product Hunt / Reddit
+(r/UKPersonalFinance, r/PersonalFinanceCanada, r/Brasil or
+r/investimentos) post the week after once you have a handful of
+real-user footprints generated.
+
 ## 11. Pointers
 
 - **Full sprint plan:** [`docs/plans/phone-footprint-v2.md`](../plans/phone-footprint-v2.md)
