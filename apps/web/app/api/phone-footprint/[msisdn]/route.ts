@@ -39,6 +39,7 @@ import {
 import type { FootprintTier } from "@askarthur/scam-engine/phone-footprint";
 import { getUser } from "@/lib/auth";
 import { verifyTurnstileToken } from "@/app/api/extension/_lib/turnstile";
+import { describeRegionalCoverage, getCallerCountry } from "@/lib/region";
 
 export const runtime = "nodejs";
 export const maxDuration = 10;
@@ -207,6 +208,12 @@ export async function GET(
   // --- Persist snapshot (fire-and-forget; errors logged but don't block)
   void persistFootprint(footprint, { userId: user?.id });
 
+  // --- Regional coverage: tells the UI whether the caller's country has
+  // carrier-authoritative SIM swap (Vonage CAMARA — DE/IT/US/GB/BR/ES/FR/NL/CA)
+  // or only the carrier-drift proxy (everywhere else, including AU until
+  // Telstra-direct or Optus/TPG join Open Gateway).
+  const regional = describeRegionalCoverage(getCallerCountry(req));
+
   // --- Respond. The `crossip_downgrade` flag is surfaced so the UI can
   // explain why a paid user is seeing teaser output — "too many lookups
   // of this number from different sources, showing summary only."
@@ -214,5 +221,6 @@ export async function GET(
     ...footprint,
     ownership_proven: ownershipProven,
     crossip_downgrade: crossIpDowngrade,
+    regional,
   });
 }

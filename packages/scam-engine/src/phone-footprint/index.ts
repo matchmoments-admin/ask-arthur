@@ -36,6 +36,8 @@ export { explainFootprint } from "./explain";
 
 export { renderFootprintPdf } from "./pdf/render";
 
+export { computeCarrierDrift } from "./providers/carrier-drift";
+
 export {
   hashMsisdn,
   hashIdentifierForPf,
