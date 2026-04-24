@@ -5,43 +5,43 @@
   --color-foreground: #171717;
 
   /* Primary */
-  --color-deep-navy: #001F3F;
-  --color-navy: #002B45;
+  --color-deep-navy: #001f3f;
+  --color-navy: #002b45;
 
   /* Accent */
-  --color-action-teal: #008A98;
-  --color-action-teal-text: #006B75;
+  --color-action-teal: #008a98;
+  --color-action-teal-text: #006b75;
 
   /* Text */
-  --color-gov-slate: #42526E;
-  --color-slate-500: #64748B;
-  --color-slate-400: #94A3B8;
+  --color-gov-slate: #42526e;
+  --color-slate-500: #64748b;
+  --color-slate-400: #94a3b8;
 
   /* CTA / Trust */
-  --color-trust-teal: #0D9488;
-  --color-alert-amber: #D97706;
+  --color-trust-teal: #0d9488;
+  --color-alert-amber: #d97706;
   --color-safe-green: #059669;
 
   /* Borders */
-  --color-border-light: #E2E8F0;
+  --color-border-light: #e2e8f0;
 
   /* Verdict: Safe */
-  --color-safe-bg: #ECFDF5;
-  --color-safe-border: #A7F3D0;
-  --color-safe-text: #388E3C;
-  --color-safe-heading: #1B5E20;
+  --color-safe-bg: #ecfdf5;
+  --color-safe-border: #a7f3d0;
+  --color-safe-text: #388e3c;
+  --color-safe-heading: #1b5e20;
 
   /* Verdict: Suspicious */
-  --color-warn-bg: #FFF8E1;
-  --color-warn-border: #FFE082;
-  --color-warn-text: #F57C00;
-  --color-warn-heading: #E65100;
+  --color-warn-bg: #fff8e1;
+  --color-warn-border: #ffe082;
+  --color-warn-text: #f57c00;
+  --color-warn-heading: #e65100;
 
   /* Verdict: High Risk */
-  --color-danger-bg: #FEF2F2;
-  --color-danger-border: #FECACA;
-  --color-danger-text: #D32F2F;
-  --color-danger-heading: #B71C1C;
+  --color-danger-bg: #fef2f2;
+  --color-danger-border: #fecaca;
+  --color-danger-text: #d32f2f;
+  --color-danger-heading: #b71c1c;
 
   --font-sans: var(--font-public-sans), sans-serif;
 }
@@ -62,13 +62,17 @@ input:focus {
 }
 
 /* Heading letter-spacing */
-h1, h2, h3 {
+h1,
+h2,
+h3 {
   letter-spacing: -0.01em;
 }
 
 /* Spinner animation for analysis progress */
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .animate-spin {
@@ -77,14 +81,28 @@ h1, h2, h3 {
 
 /* QR verdict animations */
 @keyframes verdict-icon-scale-in {
-  0% { transform: scale(0); opacity: 0; }
-  60% { transform: scale(1.15); }
-  100% { transform: scale(1); opacity: 1; }
+  0% {
+    transform: scale(0);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.15);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 @keyframes verdict-content-fade-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .animate-verdict-icon {
@@ -105,7 +123,7 @@ h1, h2, h3 {
    ============================================================ */
 
 .blog-content {
-  font-size: 1.0625rem;       /* 17px */
+  font-size: 1.0625rem; /* 17px */
   line-height: 1.75;
   color: var(--color-gov-slate);
 }
@@ -227,34 +245,49 @@ h1, h2, h3 {
   margin: 0;
 }
 
-/* GitHub-style admonition callouts: [!TIP], [!WARNING], [!DANGER] */
+/* GitHub-style admonition callouts: [!TIP], [!WARNING], [!DANGER], [!NOTE] */
 .blog-content .callout {
-  font-style: italic;
+  position: relative;
   border-left: 3px solid;
-  background-color: transparent;
-  padding: 0.75em 1.25em;
-  border-radius: 0;
-  margin-top: 1.5em;
-  margin-bottom: 1.5em;
+  border-radius: 6px;
+  padding: 1.25em 1.25em 1.25em 4.5em;
+  margin-top: 1.75em;
+  margin-bottom: 1.75em;
+  min-height: 3.5rem;
+  background-repeat: no-repeat;
+  background-position: 1em 1em;
+  background-size: 2.5rem 2.5rem;
 }
 .blog-content .callout-title {
   display: none;
 }
 .blog-content .callout-body p {
   margin: 0;
-  color: var(--color-gov-slate);
+  color: var(--color-deep-navy);
+  font-style: normal;
+}
+.blog-content .callout-body p + p {
+  margin-top: 0.6em;
 }
 .blog-content .callout-tip {
-  border-color: #388E3C;
+  border-color: #388e3c;
+  background-color: rgba(56, 142, 60, 0.06);
+  background-image: url("/illustrations/callout-tip.webp");
 }
 .blog-content .callout-warning {
-  border-color: #F57C00;
+  border-color: #f57c00;
+  background-color: rgba(245, 124, 0, 0.06);
+  background-image: url("/illustrations/callout-warning.webp");
 }
 .blog-content .callout-danger {
-  border-color: #D32F2F;
+  border-color: #d32f2f;
+  background-color: rgba(211, 47, 47, 0.06);
+  background-image: url("/illustrations/callout-danger.webp");
 }
 .blog-content .callout-note {
   border-color: var(--color-action-teal);
+  background-color: rgba(13, 148, 136, 0.06);
+  background-image: url("/illustrations/callout-info.webp");
 }
 
 /* Horizontal rules */

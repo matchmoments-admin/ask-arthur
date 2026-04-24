@@ -67,17 +67,45 @@ function extractRawText(tokens: Token[]): string {
     .join("");
 }
 
+// Base64-encode a UTF-8 string (Node + modern browsers).
+// Used for Mermaid source transport through the sanitizer.
+function encodeBase64Utf8(input: string): string {
+  const bytes = new TextEncoder().encode(input);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return typeof btoa === "function"
+    ? btoa(binary)
+    : Buffer.from(binary, "binary").toString("base64");
+}
+
 const marked = new Marked(
   markedHighlight({
     emptyLangClass: "hljs",
     langPrefix: "hljs language-",
     highlight(code, lang) {
+      // Mermaid fences are hydrated client-side via <MermaidDiagram/>. The
+      // `code()` renderer below short-circuits them before this runs, but
+      // guard here too in case marked's traversal order changes.
+      if (lang === "mermaid") return code;
       const language = hljs.getLanguage(lang) ? lang : "plaintext";
       return hljs.highlight(code, { language }).value;
     },
   }),
   {
     renderer: {
+      // Mermaid fences — emit a hydration sentinel. The body is base64-encoded
+      // so %%, <, >, and HTML-entity edge cases survive the sanitizer.
+      code({ text, lang }: Tokens.Code) {
+        if (lang === "mermaid") {
+          const encoded = encodeBase64Utf8(text);
+          return `<div class="mermaid-diagram" data-mermaid-source="${encoded}"></div>\n`;
+        }
+        // Fall through to the default markedHighlight-driven output.
+        const language = hljs.getLanguage(lang || "") ? lang! : "plaintext";
+        const highlighted = hljs.highlight(text, { language }).value;
+        return `<pre><code class="hljs language-${language}">${highlighted}</code></pre>\n`;
+      },
+
       // Auto-detect YouTube URLs in paragraphs and convert to embeds
       paragraph(token: Tokens.Paragraph) {
         const text = token.text;
