@@ -322,29 +322,34 @@ Places in `apps/web` where Phone Footprint shows up. All are currently
 behind `NEXT_PUBLIC_FF_PHONE_FOOTPRINT_CONSUMER=false`, so they're
 invisible to users until the flag flips.
 
-| Where                                                            | What                                                          | Status      |
-| ---------------------------------------------------------------- | ------------------------------------------------------------- | ----------- |
-| `apps/web/app/api/phone-footprint/[msisdn]/route.ts`             | Primary lookup endpoint                                       | ✅ Sprint 1 |
-| `apps/web/app/api/phone-footprint/verify/{start,check}/route.ts` | OTP endpoints                                                 | ✅ Sprint 1 |
-| `apps/web/app/api/phone-footprint/[id]/pdf/route.ts`             | PDF export (enqueues Inngest render)                          | ✅ Sprint 3 |
-| `apps/web/app/api/inngest/functions/phone-footprint-pdf.ts`      | Inngest function — render + R2 upload + email                 | ✅ Sprint 3 |
-| `apps/web/app/api/inngest/functions/phone-footprint-refresh.ts`  | Inngest cron + per-monitor refresh worker                     | ✅ Sprint 4 |
-| `apps/web/lib/phone-footprint/alert-dispatch.ts`                 | Email + HMAC-signed webhook delivery                          | ✅ Sprint 4 |
-| `apps/web/app/api/phone-footprint/monitors/route.ts`             | Monitors list + create (OTP-gated, entitlement-checked)       | ✅ Sprint 4 |
-| `apps/web/app/api/phone-footprint/monitors/[id]/route.ts`        | Monitor read / patch / soft-delete                            | ✅ Sprint 4 |
-| `apps/web/app/api/phone-footprint/monitors/[id]/alerts/route.ts` | Per-monitor alerts history (paginated)                        | ✅ Sprint 4 |
-| `apps/web/app/api/stripe/webhook/route.ts`                       | PF SKU branch (entitlements upsert + cancel)                  | ✅ Sprint 3 |
-| `apps/web/lib/phoneFootprintSkus.ts`                             | SKU registry + entitlement templates                          | ✅ Sprint 3 |
-| `apps/web/app/phone-footprint/[id]/page.tsx`                     | Consumer report page                                          | ⏳ Sprint 2 |
-| `apps/web/app/phone-footprint/page.tsx`                          | Landing / lookup form                                         | ✅ Sprint 2 |
-| `apps/web/app/admin/phone-footprint/page.tsx`                    | Admin metrics panel                                           | ⏳ Sprint 2 |
-| `apps/web/app/app/phone-footprint/monitors/page.tsx`             | Saved-numbers dashboard (list + add/remove flow)              | ✅ Sprint 4 |
-| `apps/web/app/app/phone-footprint/monitors/[id]/page.tsx`        | Per-monitor detail                                            | ❌ Sprint 5 |
-| `apps/web/app/pricing/page.tsx`                                  | Add Footprint tiers to pricing                                | ❌ Sprint 3 |
-| `apps/web/components/FootprintBandBadge.tsx`                     | Reusable `safe/caution/high/critical` chip                    | ⏳ Sprint 2 |
-| `apps/web/components/CoverageChips.tsx`                          | Per-provider coverage badges (live/pending/degraded/disabled) | ⏳ Sprint 2 |
-| Chrome extension                                                 | Right-click lookup (defer)                                    | ❌ Sprint 5 |
-| Mobile app (Expo)                                                | Phone Footprint tab + SIM Swap Heartbeat push                 | ❌ Sprint 5 |
+| Where                                                                   | What                                                            | Status      |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------- | ----------- |
+| `apps/web/app/api/phone-footprint/[msisdn]/route.ts`                    | Primary lookup endpoint                                         | ✅ Sprint 1 |
+| `apps/web/app/api/phone-footprint/verify/{start,check}/route.ts`        | OTP endpoints                                                   | ✅ Sprint 1 |
+| `apps/web/app/api/phone-footprint/[id]/pdf/route.ts`                    | PDF export (enqueues Inngest render)                            | ✅ Sprint 3 |
+| `apps/web/app/api/inngest/functions/phone-footprint-pdf.ts`             | Inngest function — render + R2 upload + email                   | ✅ Sprint 3 |
+| `apps/web/app/api/inngest/functions/phone-footprint-refresh.ts`         | Inngest cron + per-monitor refresh worker                       | ✅ Sprint 4 |
+| `apps/web/app/api/inngest/functions/phone-footprint-vonage-backfill.ts` | Vonage CAMARA-landed pager + per-monitor backfill               | ✅ Sprint 5 |
+| `apps/extension/src/lib/phone-detect.ts`                                | Extension-side phone-in-selection detector                      | ✅ Sprint 5 |
+| `apps/extension/src/entrypoints/background.ts` (PF branch)              | Right-click "Check with Ask Arthur" → web app for phone numbers | ✅ Sprint 5 |
+| `apps/web/app/phone-footprint/LookupForm.tsx` (auto-submit)             | Reads ?msisdn=&src=ext, auto-fires lookup on mount              | ✅ Sprint 5 |
+| `apps/web/app/manifest.ts` (shortcuts)                                  | PWA shortcut to /app/phone-footprint/monitors                   | ✅ Sprint 5 |
+| `apps/web/lib/phone-footprint/alert-dispatch.ts`                        | Email + HMAC-signed webhook delivery                            | ✅ Sprint 4 |
+| `apps/web/app/api/phone-footprint/monitors/route.ts`                    | Monitors list + create (OTP-gated, entitlement-checked)         | ✅ Sprint 4 |
+| `apps/web/app/api/phone-footprint/monitors/[id]/route.ts`               | Monitor read / patch / soft-delete                              | ✅ Sprint 4 |
+| `apps/web/app/api/phone-footprint/monitors/[id]/alerts/route.ts`        | Per-monitor alerts history (paginated)                          | ✅ Sprint 4 |
+| `apps/web/app/api/stripe/webhook/route.ts`                              | PF SKU branch (entitlements upsert + cancel)                    | ✅ Sprint 3 |
+| `apps/web/lib/phoneFootprintSkus.ts`                                    | SKU registry + entitlement templates                            | ✅ Sprint 3 |
+| `apps/web/app/phone-footprint/[id]/page.tsx`                            | Consumer report page                                            | ⏳ Sprint 2 |
+| `apps/web/app/phone-footprint/page.tsx`                                 | Landing / lookup form                                           | ✅ Sprint 2 |
+| `apps/web/app/admin/phone-footprint/page.tsx`                           | Admin metrics panel                                             | ⏳ Sprint 2 |
+| `apps/web/app/app/phone-footprint/monitors/page.tsx`                    | Saved-numbers dashboard (list + add/remove flow)                | ✅ Sprint 4 |
+| `apps/web/app/app/phone-footprint/monitors/[id]/page.tsx`               | Per-monitor detail                                              | ❌ Sprint 5 |
+| `apps/web/app/pricing/page.tsx`                                         | Add Footprint tiers to pricing                                  | ❌ Sprint 3 |
+| `apps/web/components/FootprintBandBadge.tsx`                            | Reusable `safe/caution/high/critical` chip                      | ⏳ Sprint 2 |
+| `apps/web/components/CoverageChips.tsx`                                 | Per-provider coverage badges (live/pending/degraded/disabled)   | ⏳ Sprint 2 |
+| Chrome extension                                                        | Right-click lookup (defer)                                      | ❌ Sprint 5 |
+| Mobile app (Expo)                                                       | Phone Footprint tab + SIM Swap Heartbeat push                   | ❌ Sprint 5 |
 
 **When adding a new UI entry point**: verify `featureFlags.phoneFootprintConsumer`
 first, match the pattern in `apps/web/app/api/phone-footprint/[msisdn]/route.ts`.
@@ -455,8 +460,8 @@ cron. No migration data backfill needed.
 | 2      | Consumer UI (landing + report components), admin ops panel, config doc + CLAUDE.md cross-link                                | ✅     |
 | 3      | Claude explanation, Stripe PF webhook → entitlements RPC, PDF export (react-pdf + R2 + Resend)                               | ✅     |
 | 4      | Monitors CRUD, Inngest hourly cron + per-monitor refresh worker, email + HMAC-signed webhook alerts, saved-numbers dashboard | ✅     |
-| 5      | PWA wrapper, extension + mobile entry points, SIM Swap Heartbeat push                                                        | ⏳     |
-| 6      | Vonage CAMARA go-live (if approval lands); backfill existing footprints                                                      | ❌     |
+| 5      | Extension right-click → web-app footprint, Vonage CAMARA-landed Inngest backfill (pager + per-monitor), PWA shortcuts        | ✅     |
+| 6      | Vonage CAMARA go-live (when approval lands); fire vonage.backfill.requested.v1 to upgrade existing footprints                | ⏳     |
 | 7      | Fleet Starter: SSO, bulk CSV, per-org webhooks                                                                               | ❌     |
 | 8      | Fleet audit trail, Enterprise quote/invoice flow                                                                             | ❌     |
 | 9      | Compliance cutover (APP 1.7 ADM notice, NDB runbook, SPF s58BT statement)                                                    | ❌     |
