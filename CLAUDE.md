@@ -262,3 +262,16 @@ reverse is `INSERT ... SELECT` from the archive back to the hot table.
 ### Analyze request correlation
 
 Clients submitting to `/api/analyze` can send an `Idempotency-Key` header (Stripe-style, ULID or any 8-255 char alphanumeric/dash/underscore). The server echoes it back as `X-Request-Id`, threads it into the Inngest event id, and persists it as `scam_reports.idempotency_key` (v73 migration). Replaying the same request with the same key is safe — the `create_scam_report` RPC's `ON CONFLICT` clause returns the original row id without inserting. Absent the header, the server generates a ULID and returns it for client-side correlation.
+
+### v1 API response conventions
+
+All authenticated `/api/v1/*` endpoints follow these conventions (introduced in the 2026-04 enrichment-layer hardening pass):
+
+- **`lastUpdated` field** on every success response body (top-level, ISO-8601). Reflects when the underlying data was queried; cached responses carry the cached timestamp so consumers can gauge data-layer staleness independent of wall clock. Implementation: `apps/web/app/api/v1/_lib/json-response.ts` exports `jsonV1<T>(body, init?)` which spreads the timestamp in. Error responses (4xx/5xx) deliberately do NOT include `lastUpdated`.
+- **`X-RateLimit-*` response headers** on both successes and the daily-quota 429: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset` (epoch seconds at midnight UTC). Once daily usage crosses 80%, an `X-RateLimit-Warning: approaching daily quota` header fires so callers can throttle gracefully before the cliff. Implementation: `rateLimitHeaders(auth)` next to `validateApiKey` in `apps/web/lib/apiAuth.ts`. Convention follows Stripe / GitHub / standard B2B.
+- **Provenance tier** (`provenanceTier`) on entity payloads — five-tier ladder ordered by trust: `tier_1_regulator` (ASIC/NASC/AFCX), `tier_2_industry`, `tier_3_curated` (PhishTank/URLhaus/verified_scams), `tier_4_osint` (crt.sh/URLScan/ThreatFox), `tier_5_community` (Reddit/user reports). Backed by the `provenance_tier_t` enum in v81. `feed_items` was backfilled at apply time; `scam_entities.provenance_tier` is nullable and only populated when producer code (Inngest enrichment, RPCs) explicitly sets it.
+
+### Recent migration applies (2026-04)
+
+- **v80 — `scam_entities.legal_basis` + `consent_basis`** (`public_interest_research_unverified` default). Records the basis under which deep-investigation outputs (nmap/nikto/sslscan/whois) were collected. The `vars.ENABLE_DEEP_INVESTIGATION` GitHub Actions variable defaults unset (= false) for the deep-investigation workflow's _scheduled_ runs; manual `workflow_dispatch` is retained as an incident-response safety valve. Do not flip the var to `'true'` for sustained operations without external AU legal sign-off documented in writing.
+- **v81 — `provenance_tier_t` enum + column on `feed_items` + `scam_entities`** (5-tier source-quality ladder). `feed_items` backfilled at apply: `scamwatch`→tier_1, `verified_scam`→tier_3, `reddit`/`user_report`→tier_5. Partial indexes on both tables `WHERE provenance_tier IS NOT NULL`.
