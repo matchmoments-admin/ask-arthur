@@ -16,13 +16,12 @@ export default async function DashboardLayout({
   const user = await requireAuth();
   const org = await getOrg(user.id);
 
-  // If multi-tenancy is enabled and user has no org, redirect to onboarding
   if (featureFlags.multiTenancy && !org) {
     redirect("/onboarding");
   }
 
   return (
-    <div className="min-h-screen flex bg-white">
+    <div className="min-h-screen flex" style={{ background: "#fbfbfa" }}>
       <DashboardSidebar
         userEmail={user.email}
         userRole={user.role || "user"}
