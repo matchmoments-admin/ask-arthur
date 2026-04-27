@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { validateApiKey } from "@/lib/apiAuth";
+import { validateApiKey, rateLimitHeaders } from "@/lib/apiAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import type { EntityType } from "@askarthur/types";
 import { logger } from "@askarthur/utils/logger";
@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
   if (auth.rateLimited) {
     return NextResponse.json(
       { error: "Daily API limit exceeded. Resets at midnight UTC." },
-      { status: 429, headers: { "Retry-After": "3600" } }
+      { status: 429, headers: { "Retry-After": "3600", ...rateLimitHeaders(auth) } }
     );
   }
 
@@ -163,11 +163,14 @@ export async function POST(req: NextRequest) {
 
     const foundCount = results.filter((r) => r.found).length;
 
-    return NextResponse.json({
-      total: items.length,
-      found: foundCount,
-      results,
-    });
+    return NextResponse.json(
+      {
+        total: items.length,
+        found: foundCount,
+        results,
+      },
+      { headers: rateLimitHeaders(auth) }
+    );
   } catch (err) {
     logger.error("Batch entity lookup error", { error: String(err) });
     return NextResponse.json(

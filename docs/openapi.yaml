@@ -18,10 +18,26 @@ info:
     | Pro | 100 | 60 | 100 |
     | Enterprise | 5,000 | 300 | 500 |
 
+    Every authenticated v1 response (both successes and 429s) returns these
+    headers so callers can pace themselves before hitting the hard cap:
+
+    | Header | Meaning |
+    |--------|---------|
+    | `X-RateLimit-Limit` | Your tier's daily quota |
+    | `X-RateLimit-Remaining` | Calls remaining today |
+    | `X-RateLimit-Reset` | Unix epoch seconds at which the daily quota resets (midnight UTC) |
+    | `X-RateLimit-Warning` | Present only when ≥80% of daily quota is consumed; value is `approaching daily quota`. Use this as a soft signal to back off |
+
+    On a 429 response, `Retry-After` is also returned in seconds.
+
     ## Caching
     Most GET endpoints return `Cache-Control: public, s-maxage=300` headers.
 
     ## Changelog
+    - **v2.4.0**: All v1 responses (success + 429) now include
+      `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset`
+      headers. When daily usage crosses 80%, an `X-RateLimit-Warning` header
+      is emitted so callers can back off before the hard cap.
     - **v2.2.0**: `enrichmentData` now includes additional namespaces from external
       intelligence integrations (all additive, backwards-compatible):
       - `abuseIPDB`: IP abuse reputation (confidence score, total reports, ISP, usage type)
@@ -226,7 +242,8 @@ components:
             properties:
               type:
                 type: string
-                enum: [phone, email, url, domain, ip, crypto_wallet, bank_account]
+                enum:
+                  [phone, email, url, domain, ip, crypto_wallet, bank_account]
               value:
                 type: string
 
