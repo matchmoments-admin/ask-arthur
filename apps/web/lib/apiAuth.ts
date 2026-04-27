@@ -7,12 +7,58 @@ export interface ApiKeyValidation {
   orgName?: string;
   orgId?: string;
   tier?: string;
+  dailyLimit?: number;
   dailyRemaining?: number;
   rateLimited?: boolean;
   minuteRateLimited?: boolean;
   endpointBlocked?: boolean;
   keyHash?: string;
   maxBatchSize?: number;
+}
+
+/**
+ * Standard rate-limit response headers for v1 API consumers, emitted on
+ * BOTH success responses (so callers can pace themselves) and 429 responses
+ * (so callers know when to retry). Convention follows the de-facto
+ * `X-RateLimit-*` cluster used by Stripe / GitHub / most B2B APIs.
+ *
+ * Adds `X-RateLimit-Warning: approaching daily quota` once daily usage
+ * crosses 80% — gives the consumer a soft signal to back off before they
+ * hit the hard 429.
+ */
+export function rateLimitHeaders(auth: ApiKeyValidation): Record<string, string> {
+  if (!auth.valid || auth.dailyLimit === undefined) return {};
+
+  const limit = auth.dailyLimit;
+  const remaining = auth.dailyRemaining ?? 0;
+  const used = Math.max(0, limit - remaining);
+
+  const now = new Date();
+  const tomorrowUtc = new Date(
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate() + 1,
+      0,
+      0,
+      0,
+      0
+    )
+  );
+  const resetEpoch = Math.floor(tomorrowUtc.getTime() / 1000);
+
+  const headers: Record<string, string> = {
+    "X-RateLimit-Limit": String(limit),
+    "X-RateLimit-Remaining": String(remaining),
+    "X-RateLimit-Reset": String(resetEpoch),
+  };
+
+  // 80% threshold: warn once used / limit >= 0.8 (and there's still room left)
+  if (limit > 0 && used / limit >= 0.8 && remaining > 0) {
+    headers["X-RateLimit-Warning"] = "approaching daily quota";
+  }
+
+  return headers;
 }
 
 async function hashKey(key: string): Promise<string> {
@@ -166,6 +212,7 @@ export async function validateApiKey(
       orgName: data.org_name,
       orgId: data.org_id ?? undefined,
       tier: data.tier,
+      dailyLimit,
       dailyRemaining: 0,
       rateLimited: true,
       keyHash,
@@ -189,6 +236,7 @@ export async function validateApiKey(
     orgName: data.org_name,
     orgId: data.org_id ?? undefined,
     tier: data.tier,
+    dailyLimit,
     dailyRemaining: remaining,
     keyHash,
     maxBatchSize: data.max_batch_size ?? 10,
