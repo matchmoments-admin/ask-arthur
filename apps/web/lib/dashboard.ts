@@ -233,6 +233,214 @@ export async function getRecentScans(limit = 10): Promise<RecentScan[]> {
   return results.slice(0, limit);
 }
 
+export interface KpiTimeSeries {
+  checks: number[];
+  highRisk: number[];
+  losses: number[];
+  intel: number[];
+}
+
+export async function getKpiTimeSeries(days = 30): Promise<KpiTimeSeries> {
+  const supabase = createServiceClient();
+  const empty: KpiTimeSeries = { checks: [], highRisk: [], losses: [], intel: [] };
+  if (!supabase) return empty;
+
+  const since = new Date(Date.now() - days * 86400000).toISOString().split("T")[0];
+
+  const { data: stats } = await supabase
+    .from("check_stats")
+    .select("date, total_checks, high_risk_count")
+    .gte("date", since)
+    .order("date", { ascending: true });
+
+  const byDate = new Map<string, { total: number; high: number }>();
+  for (const r of stats || []) {
+    const cur = byDate.get(r.date) || { total: 0, high: 0 };
+    byDate.set(r.date, {
+      total: cur.total + (r.total_checks || 0),
+      high: cur.high + (r.high_risk_count || 0),
+    });
+  }
+  const sorted = Array.from(byDate.entries()).sort(([a], [b]) => a.localeCompare(b));
+  const checks = sorted.map(([, v]) => v.total);
+  const highRisk = sorted.map(([, v]) => v.high);
+  const losses = highRisk.map((h) => h * AVG_LOSS_PER_SCAM);
+
+  const { data: intelRows } = await supabase
+    .from("scam_entities")
+    .select("first_seen")
+    .gte("first_seen", since);
+  const intelByDate = new Map<string, number>();
+  for (const r of intelRows || []) {
+    const d = (r.first_seen as string).slice(0, 10);
+    intelByDate.set(d, (intelByDate.get(d) || 0) + 1);
+  }
+  const intel = sorted.map(([d]) => intelByDate.get(d) || 0);
+
+  return { checks, highRisk, losses, intel };
+}
+
+export interface TriageItem {
+  id: string;
+  severity: "critical" | "high" | "medium";
+  kind: string;
+  title: string;
+  detail: string;
+  ageMinutes: number;
+}
+
+export async function getTriageItems(limit = 6): Promise<TriageItem[]> {
+  const supabase = createServiceClient();
+  if (!supabase) return [];
+
+  const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+
+  const { data } = await supabase
+    .from("scam_entities")
+    .select(
+      "id, entity_type, normalized_value, risk_level, risk_score, report_count, last_seen, first_seen",
+    )
+    .gte("last_seen", since)
+    .in("risk_level", ["CRITICAL", "HIGH", "MEDIUM"])
+    .order("risk_score", { ascending: false, nullsFirst: false })
+    .order("report_count", { ascending: false })
+    .limit(limit);
+
+  if (!data) return [];
+
+  return data.map((e) => {
+    const sev =
+      e.risk_level === "CRITICAL"
+        ? "critical"
+        : e.risk_level === "HIGH"
+          ? "high"
+          : "medium";
+    const ageMs = Date.now() - new Date(e.last_seen as string).getTime();
+    const ageMinutes = Math.max(1, Math.round(ageMs / 60000));
+    const newWindow = Date.now() - new Date(e.first_seen as string).getTime() < 6 * 3600 * 1000;
+    const kind = newWindow ? "New entity" : "Active";
+    return {
+      id: String(e.id),
+      severity: sev as "critical" | "high" | "medium",
+      kind,
+      title: e.normalized_value as string,
+      detail: `${(e.entity_type as string).toUpperCase()} · score ${e.risk_score ?? "—"} · ${e.report_count ?? 0} reports`,
+      ageMinutes,
+    };
+  });
+}
+
+export interface ActivityItem {
+  id: string;
+  kind: "scan" | "detect" | "report";
+  text: string;
+  meta: string;
+  ageSeconds: number;
+}
+
+export async function getRecentActivity(limit = 7): Promise<ActivityItem[]> {
+  const supabase = createServiceClient();
+  if (!supabase) return [];
+
+  const [{ data: scans }, { data: entities }] = await Promise.all([
+    supabase
+      .from("scan_results")
+      .select("id, scan_type, target_display, target, grade, scanned_at")
+      .order("scanned_at", { ascending: false })
+      .limit(limit),
+    supabase
+      .from("scam_entities")
+      .select("id, entity_type, normalized_value, risk_level, risk_score, first_seen")
+      .order("first_seen", { ascending: false })
+      .limit(limit),
+  ]);
+
+  const items: ActivityItem[] = [];
+  for (const s of scans || []) {
+    items.push({
+      id: `scan-${s.id}`,
+      kind: "scan",
+      text: `Scan ${s.grade ?? "completed"}`,
+      meta: `${s.target_display ?? s.target} · ${s.scan_type}`,
+      ageSeconds: Math.max(1, Math.round((Date.now() - new Date(s.scanned_at as string).getTime()) / 1000)),
+    });
+  }
+  for (const e of entities || []) {
+    items.push({
+      id: `entity-${e.id}`,
+      kind: "detect",
+      text: `New ${e.risk_level ?? ""} entity detected`.trim(),
+      meta: `${e.normalized_value} · ${e.entity_type} · score ${e.risk_score ?? "—"}`,
+      ageSeconds: Math.max(1, Math.round((Date.now() - new Date(e.first_seen as string).getTime()) / 1000)),
+    });
+  }
+  items.sort((a, b) => a.ageSeconds - b.ageSeconds);
+  return items.slice(0, limit);
+}
+
+export interface SpfPrinciple {
+  key: "prevent" | "detect" | "report" | "disrupt" | "respond" | "govern";
+  label: string;
+  status: "met" | "partial" | "missed";
+  pct: number;
+  desc: string;
+}
+
+export function getSpfPosture(): { principles: SpfPrinciple[]; overallPct: number } {
+  // Aggregated view of the SPF Act 2025 six principles. Status here is curated,
+  // grounded in the existing ComplianceChecklist (apps/web/components/dashboard/
+  // ComplianceChecklist.tsx) and the live data layer; surfaces the framework
+  // shape on the home dashboard. Long-term, replace with a dedicated
+  // spf_principle_events table per BACKLOG.md "Database Hygiene & SPF Readiness".
+  const principles: SpfPrinciple[] = [
+    {
+      key: "prevent",
+      label: "Prevent",
+      status: "met",
+      pct: 1.0,
+      desc: "Proactive detection across user channels (web, ext, bots, mobile)",
+    },
+    {
+      key: "detect",
+      label: "Detect",
+      status: "met",
+      pct: 0.92,
+      desc: "Claude verdict pipeline + 16 threat-feed scrapers",
+    },
+    {
+      key: "report",
+      label: "Report",
+      status: "partial",
+      pct: 0.45,
+      desc: "Monthly + NASC submission pipelines pending",
+    },
+    {
+      key: "disrupt",
+      label: "Disrupt",
+      status: "partial",
+      pct: 0.6,
+      desc: "AFCX intel sharing in design; takedown bridges queued",
+    },
+    {
+      key: "respond",
+      label: "Respond",
+      status: "met",
+      pct: 0.88,
+      desc: "Ops respond to triage queue and live alerts",
+    },
+    {
+      key: "govern",
+      label: "Govern",
+      status: "partial",
+      pct: 0.7,
+      desc: "APRA CPS 230 audit log in progress",
+    },
+  ];
+  const overallPct =
+    principles.reduce((s, p) => s + p.pct, 0) / principles.length;
+  return { principles, overallPct };
+}
+
 const CATEGORY_LABELS: Record<string, string> = {
   phishing: "Phishing",
   romance_scam: "Romance / Pig Butchering",
