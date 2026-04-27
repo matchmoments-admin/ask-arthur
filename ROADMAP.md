@@ -70,14 +70,14 @@ Building a comprehensive threat database.
 
 ### Data Pipeline ✅
 
-| Feature                                           | Status  |
-| ------------------------------------------------- | ------- |
-| Python scraper framework with shared utilities    | ✅ Done |
-| 16 threat feed integrations (see ARCHITECTURE.md) | ✅ Done |
-| URL normalization (Python + TypeScript parity)    | ✅ Done |
-| GitHub Actions scheduled scraping                 | ✅ Done |
-| Feed timestamp tracking                           | ✅ Done |
-| IP address and crypto wallet intelligence         | ✅ Done |
+| Feature                                                                                                                                                                                                                     | Status  |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| Python scraper framework with shared utilities                                                                                                                                                                              | ✅ Done |
+| 16 threat feed integrations (see ARCHITECTURE.md)                                                                                                                                                                           | ✅ Done |
+| URL normalization (Python + TypeScript parity)                                                                                                                                                                              | ✅ Done |
+| GitHub Actions scheduled scraping — staggered crons across 06:00–07:00 UTC (Reddit 06:00, urlhaus/threatfox 06:15, openphish/phishstats 06:30, crtsh/phishing_database 06:45, ipsum/feodo/phishing_army/cryptoscamdb 07:00) | ✅ Done |
+| Feed timestamp tracking                                                                                                                                                                                                     | ✅ Done |
+| IP address and crypto wallet intelligence                                                                                                                                                                                   | ✅ Done |
 
 ### Inngest Background Processing ✅
 

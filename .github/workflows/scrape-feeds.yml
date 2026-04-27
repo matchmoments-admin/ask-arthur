@@ -2,14 +2,20 @@ name: Scrape Threat Feeds
 
 on:
   schedule:
-    # Daily at 06:00 UTC — Reddit only (short half-life content)
-    - cron: '0 6 * * *'
+    # Daily, staggered across the hour so feed_items don't all spike in the same
+    # minute and the dashboard's source-mix doesn't flatten to "Reddit at any hour".
+    # Each non-Reddit step below gates on its assigned `github.event.schedule`.
+    - cron: "0 6 * * *" # Reddit r/Scams (short half-life)
+    - cron: "15 6 * * *" # urlhaus, threatfox
+    - cron: "30 6 * * *" # openphish, phishstats
+    - cron: "45 6 * * *" # crtsh, phishing_database
+    - cron: "0 7 * * *" # ipsum, feodo, phishing_army, cryptoscamdb
   workflow_dispatch:
     inputs:
       feed:
         description: 'Which feed to scrape (or "all")'
         required: true
-        default: 'all'
+        default: "all"
         type: choice
         options:
           - all
@@ -43,7 +49,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
           cache: pip
           cache-dependency-path: pipeline/scrapers/requirements.txt
 
@@ -51,61 +57,61 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Scrape URLhaus
-        if: github.event.inputs.feed == 'all' || github.event.inputs.feed == 'urlhaus'
+        if: github.event.inputs.feed == 'all' || github.event.inputs.feed == 'urlhaus' || (github.event_name == 'schedule' && github.event.schedule == '15 6 * * *')
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: python -m urlhaus
 
       - name: Scrape PhishStats
-        if: github.event.inputs.feed == 'all' || github.event.inputs.feed == 'phishstats'
+        if: github.event.inputs.feed == 'all' || github.event.inputs.feed == 'phishstats' || (github.event_name == 'schedule' && github.event.schedule == '30 6 * * *')
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: python -m phishstats
 
       - name: Scrape Phishing.Database
-        if: github.event.inputs.feed == 'all' || github.event.inputs.feed == 'phishing_database'
+        if: github.event.inputs.feed == 'all' || github.event.inputs.feed == 'phishing_database' || (github.event_name == 'schedule' && github.event.schedule == '45 6 * * *')
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: python -m phishing_database
 
       - name: Scrape crt.sh
-        if: github.event.inputs.feed == 'all' || github.event.inputs.feed == 'crtsh'
+        if: github.event.inputs.feed == 'all' || github.event.inputs.feed == 'crtsh' || (github.event_name == 'schedule' && github.event.schedule == '45 6 * * *')
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: python -m crtsh
 
       - name: Scrape ThreatFox
-        if: github.event.inputs.feed == 'all' || github.event.inputs.feed == 'threatfox'
+        if: github.event.inputs.feed == 'all' || github.event.inputs.feed == 'threatfox' || (github.event_name == 'schedule' && github.event.schedule == '15 6 * * *')
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: python -m threatfox
 
       - name: Scrape OpenPhish
-        if: github.event.inputs.feed == 'all' || github.event.inputs.feed == 'openphish'
+        if: github.event.inputs.feed == 'all' || github.event.inputs.feed == 'openphish' || (github.event_name == 'schedule' && github.event.schedule == '30 6 * * *')
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: python -m openphish
 
       - name: Scrape Phishing Army
-        if: github.event.inputs.feed == 'all' || github.event.inputs.feed == 'phishing_army'
+        if: github.event.inputs.feed == 'all' || github.event.inputs.feed == 'phishing_army' || (github.event_name == 'schedule' && github.event.schedule == '0 7 * * *')
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: python -m phishing_army
 
       - name: Scrape IPsum
-        if: github.event.inputs.feed == 'all' || github.event.inputs.feed == 'ipsum'
+        if: github.event.inputs.feed == 'all' || github.event.inputs.feed == 'ipsum' || (github.event_name == 'schedule' && github.event.schedule == '0 7 * * *')
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: python -m ipsum
 
       - name: Scrape Feodo Tracker
-        if: github.event.inputs.feed == 'all' || github.event.inputs.feed == 'feodo'
+        if: github.event.inputs.feed == 'all' || github.event.inputs.feed == 'feodo' || (github.event_name == 'schedule' && github.event.schedule == '0 7 * * *')
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: python -m feodo
 
       - name: Scrape CryptoScamDB
-        if: github.event.inputs.feed == 'all' || github.event.inputs.feed == 'cryptoscamdb'
+        if: github.event.inputs.feed == 'all' || github.event.inputs.feed == 'cryptoscamdb' || (github.event_name == 'schedule' && github.event.schedule == '0 7 * * *')
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: python -m cryptoscamdb
