@@ -3,13 +3,13 @@ name: Deep Investigation Scan
 on:
   schedule:
     # Sunday 2am UTC (after scrape-feeds at midnight)
-    - cron: '0 2 * * 0'
+    - cron: "0 2 * * 0"
   workflow_dispatch:
     inputs:
       entity_type:
         description: 'Entity type to investigate (or "all")'
         required: true
-        default: 'all'
+        default: "all"
         type: choice
         options:
           - all
@@ -17,9 +17,9 @@ on:
           - domain
           - url
       risk_threshold:
-        description: 'Minimum risk level to investigate'
+        description: "Minimum risk level to investigate"
         required: true
-        default: 'HIGH'
+        default: "HIGH"
         type: choice
         options:
           - CRITICAL
@@ -29,6 +29,18 @@ jobs:
   investigate:
     # Set ENABLE_DEEP_INVESTIGATION to "true" in GitHub repo variables to allow scheduled runs.
     # Manual workflow_dispatch always runs regardless of this setting.
+    #
+    # ⚠️ LEGAL POSTURE — read before flipping the var to "true".
+    # This workflow runs nmap / nikto / sslscan / whois against third-party
+    # hosts. Under Australian law (Criminal Code Act s.477.1, Privacy Act 1988)
+    # the legal basis for *sustained* operations is unsettled — passive whois
+    # is low risk, active probing with nmap/nikto is greyer. The var is
+    # default-false on purpose. Each investigated entity's
+    # `scam_entities.legal_basis` (migration v80) defaults to
+    # 'public_interest_research_unverified' until counsel formally reviews.
+    # Do not flip ENABLE_DEEP_INVESTIGATION to 'true' for ongoing scheduled
+    # operations without external AU legal sign-off documented in writing.
+    # Manual one-off dispatches for incident response are the safety valve.
     if: github.event_name == 'workflow_dispatch' || vars.ENABLE_DEEP_INVESTIGATION == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -43,7 +55,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
           cache: pip
           cache-dependency-path: pipeline/investigation/requirements.txt
 
