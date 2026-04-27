@@ -127,6 +127,7 @@ export async function GET(
           riskScore: entity.risk_score,
           riskLevel: entity.risk_level,
           riskFactors: entity.risk_factors,
+          provenanceTier: entity.provenance_tier,
         },
         summary: {
           verdictDistribution: verdictCounts,

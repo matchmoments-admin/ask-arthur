@@ -175,13 +175,14 @@ Automated entity enrichment, external threat intelligence feeds, risk scoring wi
 
 ### Entity Enrichment Pipeline ✅
 
-| Feature                                                                         | Status  |
-| ------------------------------------------------------------------------------- | ------- |
-| Tier 1 inline enrichment (AbuseIPDB, HIBP, crt.sh, Twilio) in entity-enrichment | ✅ Done |
-| Tier 2 async enrichment (URLScan.io) via separate Inngest function              | ✅ Done |
-| Promise.allSettled — one API failure never blocks others                        | ✅ Done |
-| Extended risk scoring RPC (v27) with new external intel signals                 | ✅ Done |
-| Enrichment points cap raised 25 → 40                                            | ✅ Done |
+| Feature                                                                                                                                                           | Status  |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| Tier 1 inline enrichment (AbuseIPDB, HIBP, crt.sh, Twilio) in entity-enrichment                                                                                   | ✅ Done |
+| Tier 2 async enrichment (URLScan.io) via separate Inngest function                                                                                                | ✅ Done |
+| Promise.allSettled — one API failure never blocks others                                                                                                          | ✅ Done |
+| Extended risk scoring RPC (v27) with new external intel signals                                                                                                   | ✅ Done |
+| Enrichment points cap raised 25 → 40                                                                                                                              | ✅ Done |
+| Provenance tier enum + column on feed_items + scam_entities (v81; 5-tier ladder: tier_1_regulator → tier_5_community; surfaced in `/api/v1/entities/*` responses) | ✅ Done |
 
 ### Deep Investigation Pipeline ✅
 
