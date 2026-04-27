@@ -14,20 +14,14 @@
 -- lands, individual rows can be elevated to 'public_interest_research' or
 -- 'specific_consent', and the deep-investigation pipeline can be flipped
 -- on at scale via vars.ENABLE_DEEP_INVESTIGATION='true'.
---
--- Companion change: deep-investigation.yml gains a legal-posture comment
--- block warning operators not to enable scheduled runs without sign-off.
 
 ALTER TABLE scam_entities
   ADD COLUMN IF NOT EXISTS legal_basis TEXT NOT NULL DEFAULT 'public_interest_research_unverified',
   ADD COLUMN IF NOT EXISTS consent_basis TEXT;
 
-COMMENT ON COLUMN scam_entities.legal_basis IS
-  'Basis under which the most recent investigation_data was collected. ' ||
-  'Default ''public_interest_research_unverified'' means the basis has not ' ||
-  'been formally reviewed by counsel. Elevate per-row to ' ||
-  '''public_interest_research'' or ''specific_consent'' once advice lands.';
+-- COMMENT ON COLUMN requires a single string literal, not an expression,
+-- so we keep the comments as long single-line strings.
 
-COMMENT ON COLUMN scam_entities.consent_basis IS
-  'Optional reference (URL, ticket id, contract id) to the specific consent ' ||
-  'that authorised this investigation, when consent is the operative basis.';
+COMMENT ON COLUMN scam_entities.legal_basis IS 'Basis under which the most recent investigation_data was collected. Default ''public_interest_research_unverified'' means the basis has not been formally reviewed by counsel. Elevate per-row to ''public_interest_research'' or ''specific_consent'' once advice lands.';
+
+COMMENT ON COLUMN scam_entities.consent_basis IS 'Optional reference (URL, ticket id, contract id) to the specific consent that authorised this investigation, when consent is the operative basis.';
