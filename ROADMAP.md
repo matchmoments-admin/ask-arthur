@@ -185,12 +185,12 @@ Automated entity enrichment, external threat intelligence feeds, risk scoring wi
 
 ### Deep Investigation Pipeline ✅
 
-| Feature                                                                             | Status  |
-| ----------------------------------------------------------------------------------- | ------- |
-| GitHub Actions workflow (Sunday 2am UTC, gated by ENABLE_DEEP_INVESTIGATION)        | ✅ Done |
-| Python investigation script (nmap, dnsrecon, nikto, whatweb, sslscan, whois)        | ✅ Done |
-| investigation_data JSONB + investigated_at columns (v28)                            | ✅ Done |
-| Safety: max 50 entities/run, 1s delay, private IP filtering, no active exploitation | ✅ Done |
+| Feature                                                                                                                                            | Status  |
+| -------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| GitHub Actions workflow (Sunday 2am UTC, gated by ENABLE_DEEP_INVESTIGATION)                                                                       | ✅ Done |
+| Python investigation script (nmap, dnsrecon, nikto, whatweb, sslscan, whois)                                                                       | ✅ Done |
+| investigation_data JSONB + investigated_at columns (v28); legal_basis + consent_basis columns (v80, default `public_interest_research_unverified`) | ✅ Done |
+| Safety: max 50 entities/run, 1s delay, private IP filtering, no active exploitation                                                                | ✅ Done |
 
 ### UI Changes
 
