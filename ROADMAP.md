@@ -327,14 +327,14 @@ Multi-tenant organization support, persona-based dashboards, sector landing page
 
 ### Corporate Onboarding ✅
 
-| Feature                                                    | Status  |
-| ---------------------------------------------------------- | ------- |
-| ABN Lookup integration (ABR XML API, Redis cached)         | ✅ Done |
-| Multi-step onboarding wizard (4 steps)                     | ✅ Done |
-| Lead capture API with Slack notifications                  | ✅ Done |
-| Team invitation system with email delivery + acceptance    | ✅ Done |
-| Team management UI (member list, role badges, invite form) | ✅ Done |
-| Dashboard layout updated with org context + role-aware nav | ✅ Done |
+| Feature                                                                                             | Status  |
+| --------------------------------------------------------------------------------------------------- | ------- |
+| ABN Lookup integration (ABR XML API, Redis cached)                                                  | ✅ Done |
+| Multi-step onboarding wizard (4 steps)                                                              | ✅ Done |
+| Lead capture API with Slack notifications                                                           | ✅ Done |
+| Team invitation system with email delivery + invited-email-bound acceptance (403 on email mismatch) | ✅ Done |
+| Team management UI (member list, role badges, invite form)                                          | ✅ Done |
+| Dashboard layout updated with org context + role-aware nav                                          | ✅ Done |
 
 ### Persona Dashboards ✅
 
