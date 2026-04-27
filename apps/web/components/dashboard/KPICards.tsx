@@ -1,4 +1,5 @@
-import type { DashboardKPIs } from "@/lib/dashboard";
+import type { DashboardKPIs, KpiTimeSeries } from "@/lib/dashboard";
+import Sparkline from "./Sparkline";
 
 function formatNum(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -29,9 +30,16 @@ interface Card {
   delta?: { text: string; up: boolean } | null;
   /** When true, an "up" delta is good (green). When false, an "up" delta is bad (red). */
   goodWhenUp?: boolean;
+  series?: number[];
 }
 
-export default function KPICards({ kpis }: { kpis: DashboardKPIs }) {
+export default function KPICards({
+  kpis,
+  series,
+}: {
+  kpis: DashboardKPIs;
+  series?: KpiTimeSeries;
+}) {
   const cards: Card[] = [
     {
       label: "Checks (7d)",
@@ -39,6 +47,7 @@ export default function KPICards({ kpis }: { kpis: DashboardKPIs }) {
       sub: "vs prev 7d",
       delta: delta(kpis.totalChecks, kpis.prevTotalChecks),
       goodWhenUp: true,
+      series: series?.checks,
     },
     {
       label: "High-risk (7d)",
@@ -46,16 +55,19 @@ export default function KPICards({ kpis }: { kpis: DashboardKPIs }) {
       sub: "blocked or flagged",
       delta: delta(kpis.highRiskCount, kpis.prevHighRiskCount),
       goodWhenUp: false,
+      series: series?.highRisk,
     },
     {
       label: "Losses prevented",
       value: formatMoney(kpis.estimatedLossesPrevented),
       sub: "based on avg $540 / scam",
+      series: series?.losses,
     },
     {
       label: "Intelligence items",
       value: formatNum(kpis.feedItemCount + kpis.entityCount),
       sub: `${kpis.feedItemCount.toLocaleString()} feed · ${kpis.entityCount.toLocaleString()} entities`,
+      series: series?.intel,
     },
   ];
 
@@ -68,6 +80,11 @@ export default function KPICards({ kpis }: { kpis: DashboardKPIs }) {
             (!card.delta.up && card.goodWhenUp === false));
         const deltaPillBg = deltaIsGood ? "#f0fdf4" : "#fef2f2";
         const deltaPillFg = deltaIsGood ? "#16a34a" : "#dc2626";
+        const sparkColor = deltaIsGood
+          ? "#16a34a"
+          : card.delta && !deltaIsGood
+            ? "#dc2626"
+            : "#94a3b8";
 
         return (
           <div
@@ -77,7 +94,7 @@ export default function KPICards({ kpis }: { kpis: DashboardKPIs }) {
               border: "1px solid #eef0f3",
               borderRadius: 10,
               padding: 18,
-              minHeight: 120,
+              minHeight: 132,
             }}
           >
             <div className="flex items-center justify-between mb-3">
@@ -110,11 +127,22 @@ export default function KPICards({ kpis }: { kpis: DashboardKPIs }) {
             >
               {card.value}
             </div>
-            {card.sub ? (
-              <div className="text-[11px] text-slate-400 mt-auto pt-3">
-                {card.sub}
-              </div>
-            ) : null}
+            <div
+              className="flex items-end justify-between gap-3 mt-auto pt-3"
+              style={{ minHeight: 28 }}
+            >
+              <span className="text-[11px] text-slate-400">{card.sub}</span>
+              {card.series && card.series.length > 1 ? (
+                <span style={{ color: sparkColor }}>
+                  <Sparkline
+                    data={card.series}
+                    width={90}
+                    height={24}
+                    strokeWidth={1.5}
+                  />
+                </span>
+              ) : null}
+            </div>
           </div>
         );
       })}
