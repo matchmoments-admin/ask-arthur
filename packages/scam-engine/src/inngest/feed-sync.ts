@@ -1,20 +1,23 @@
 // Feed sync crons — sync verified_scams and user reports into feed_items table
-// for the public scam feed. Runs weekly (Sunday 07:00 UTC, after Reddit scraper).
+// for the public scam feed. Runs every 15 minutes; each tick processes records
+// created in the last LOOKBACK_MINUTES window. upsert_feed_item is idempotent on
+// (source, external_id) so the overlap between consecutive ticks is a safe no-op.
 
 import { inngest } from "./client";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 
-const LOOKBACK_DAYS = 30;
-const LIMIT_PER_RUN = 50;
+// 20 min > 15 min cadence — tolerates one missed cron tick before records fall off the window.
+const LOOKBACK_MINUTES = 20;
+const LIMIT_PER_RUN = 500;
 
 export const syncVerifiedScamsToFeed = inngest.createFunction(
   {
     id: "feed-sync-verified-scams",
     name: "Feed: Sync Verified Scams",
   },
-  { cron: "0 7 * * 0" },
+  { cron: "*/15 * * * *" },
   async ({ step }) => {
     if (!featureFlags.dataPipeline) {
       return { skipped: true, reason: "dataPipeline feature flag disabled" };
@@ -27,7 +30,7 @@ export const syncVerifiedScamsToFeed = inngest.createFunction(
         return { skipped: true, inserted: 0 };
       }
 
-      const cutoff = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
+      const cutoff = new Date(Date.now() - LOOKBACK_MINUTES * 60 * 1000).toISOString();
 
       const { data: scams, error: fetchErr } = await supabase
         .from("verified_scams")
@@ -87,7 +90,7 @@ export const syncUserReportsToFeed = inngest.createFunction(
     id: "feed-sync-user-reports",
     name: "Feed: Sync User Reports",
   },
-  { cron: "0 7 * * 0" },
+  { cron: "*/15 * * * *" },
   async ({ step }) => {
     if (!featureFlags.dataPipeline) {
       return { skipped: true, reason: "dataPipeline feature flag disabled" };
@@ -100,7 +103,7 @@ export const syncUserReportsToFeed = inngest.createFunction(
         return { skipped: true, inserted: 0 };
       }
 
-      const cutoff = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
+      const cutoff = new Date(Date.now() - LOOKBACK_MINUTES * 60 * 1000).toISOString();
 
       // Only sync HIGH_RISK reports without a verified_scams counterpart
       // (reports linked to verified_scams are covered by syncVerifiedScamsToFeed)
