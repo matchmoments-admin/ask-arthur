@@ -105,6 +105,7 @@ export async function POST(req: NextRequest) {
         lastSeen: string;
         riskScore: number;
         riskLevel: string;
+        provenanceTier: string | null;
       }
     > = {};
 
@@ -114,7 +115,7 @@ export async function POST(req: NextRequest) {
         const { data, error } = await supabase
           .from("scam_entities")
           .select(
-            "id, entity_type, normalized_value, report_count, first_seen, last_seen, risk_score, risk_level"
+            "id, entity_type, normalized_value, report_count, first_seen, last_seen, risk_score, risk_level, provenance_tier"
           )
           .eq("entity_type", entityType)
           .in("normalized_value", values);
@@ -136,6 +137,7 @@ export async function POST(req: NextRequest) {
             lastSeen: row.last_seen,
             riskScore: row.risk_score,
             riskLevel: row.risk_level,
+            provenanceTier: row.provenance_tier ?? null,
           };
         }
       })
@@ -156,6 +158,7 @@ export async function POST(req: NextRequest) {
           lastSeen: match.lastSeen,
           riskScore: match.riskScore,
           riskLevel: match.riskLevel,
+          provenanceTier: match.provenanceTier,
         };
       }
       return { type: item.type, value: item.value, found: false };
