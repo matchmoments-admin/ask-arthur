@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateApiKey } from "@/lib/apiAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
+import { jsonV1 } from "@/app/api/v1/_lib/json-response";
 
 const CACHE_HEADERS = {
   "Cache-Control": "public, s-maxage=300, stale-while-revalidate=60",
@@ -113,7 +114,7 @@ export async function GET(
       ),
     ];
 
-    return NextResponse.json(
+    return jsonV1(
       {
         entity: {
           id: entity.id,

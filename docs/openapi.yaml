@@ -21,7 +21,17 @@ info:
     ## Caching
     Most GET endpoints return `Cache-Control: public, s-maxage=300` headers.
 
+    ## Response freshness
+    All v1 success responses include a top-level `lastUpdated` field with an
+    ISO-8601 timestamp indicating when the underlying data was queried. When
+    a response is served from CDN cache, `lastUpdated` reflects the moment
+    the cache entry was populated — use it to gauge how stale the data layer
+    is, independent of the wall-clock time you receive the response. Error
+    responses (4xx/5xx) do not include `lastUpdated`.
+
     ## Changelog
+    - **v2.3.0**: All v1 success responses now include a `lastUpdated`
+      ISO-8601 timestamp at the top level. Additive, backwards-compatible.
     - **v2.2.0**: `enrichmentData` now includes additional namespaces from external
       intelligence integrations (all additive, backwards-compatible):
       - `abuseIPDB`: IP abuse reputation (confidence score, total reports, ISP, usage type)
@@ -226,7 +236,8 @@ components:
             properties:
               type:
                 type: string
-                enum: [phone, email, url, domain, ip, crypto_wallet, bank_account]
+                enum:
+                  [phone, email, url, domain, ip, crypto_wallet, bank_account]
               value:
                 type: string
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { validateApiKey } from "@/lib/apiAuth";
+import { jsonV1 } from "@/app/api/v1/_lib/json-response";
 
 export async function GET(req: NextRequest) {
   const authResult = await validateApiKey(req, "threats.read");
@@ -28,10 +29,10 @@ export async function GET(req: NextRequest) {
     .single();
 
   if (error || !data) {
-    return NextResponse.json({ found: false, address: address.trim() });
+    return jsonV1({ found: false, address: address.trim() });
   }
 
-  return NextResponse.json({
+  return jsonV1({
     found: true,
     wallet: data,
   }, {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateApiKey } from "@/lib/apiAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
+import { jsonV1 } from "@/app/api/v1/_lib/json-response";
 
 export async function GET(req: NextRequest) {
   // API key authentication
@@ -171,7 +172,7 @@ export async function GET(req: NextRequest) {
         }
       : null;
 
-    return NextResponse.json(
+    return jsonV1(
       {
         meta: {
           period_days: days,

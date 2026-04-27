@@ -3,6 +3,7 @@ import { validateApiKey } from "@/lib/apiAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import type { EntityType } from "@askarthur/types";
 import { logger } from "@askarthur/utils/logger";
+import { jsonV1 } from "@/app/api/v1/_lib/json-response";
 
 const VALID_ENTITY_TYPES: Set<string> = new Set([
   "phone",
@@ -163,7 +164,7 @@ export async function POST(req: NextRequest) {
 
     const foundCount = results.filter((r) => r.found).length;
 
-    return NextResponse.json({
+    return jsonV1({
       total: items.length,
       found: foundCount,
       results,
