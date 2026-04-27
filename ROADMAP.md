@@ -336,14 +336,37 @@ Multi-tenant organization support, persona-based dashboards, sector landing page
 | Team management UI (member list, role badges, invite form) | ✅ Done |
 | Dashboard layout updated with org context + role-aware nav | ✅ Done |
 
-### Persona Dashboards ✅
+### Persona Dashboards ✅ (consolidated 2026-04 — see Phase 11d)
 
-| Feature                                                                    | Status  |
-| -------------------------------------------------------------------------- | ------- |
-| Compliance Officer dashboard (SPF principle tracker, evidence export)      | ✅ Done |
-| Fraud Analyst dashboard (threat investigations, entity explorer, clusters) | ✅ Done |
-| Developer dashboard (API usage charts, endpoint breakdown)                 | ✅ Done |
-| Executive dashboard (ROI summary, compliance gauge, trends)                | ✅ Done |
+Originally shipped as four separate top-level routes (`/app/compliance`, `/app/fraud-manager`, `/app/developer`, `/app/executive`), each with its own KPIs and layout. The Safe-variant redesign (Phase 11d, 2026-04-27) consolidated the home `/app` view into a single Stripe-style overview with **persona pills as in-page filters** rather than dedicated pages — mirroring how Stripe handles role-based views. The four routes still exist for deep-dive access.
+
+| Feature                                                                    | Status                                              |
+| -------------------------------------------------------------------------- | --------------------------------------------------- |
+| Compliance Officer dashboard (SPF principle tracker, evidence export)      | ✅ Done — sub-page retained at `/app/compliance`    |
+| Fraud Analyst dashboard (threat investigations, entity explorer, clusters) | ✅ Done — sub-page retained at `/app/fraud-manager` |
+| Developer dashboard (API usage charts, endpoint breakdown)                 | ✅ Done — sub-page retained at `/app/developer`     |
+| Executive dashboard (ROI summary, compliance gauge, trends)                | ✅ Done — sub-page retained at `/app/executive`     |
+| Unified `/app` overview with persona pills as in-page filters              | ✅ Done — Phase 11d                                 |
+
+## Phase 11d — Stripe-clean Safe variant redesign ✅
+
+Visual refresh of authenticated surfaces (`/login`, `/signup`, `/app`) to match the Claude Design Stripe-inspired Safe variant. Built from the design handoff bundle `mEK4uGHCZ0yH_ZCXItWzyA` (2026-04-24).
+
+| Feature                                                                                                  | Status                                                                                                                               |
+| -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Auth pages (`/login`, `/signup`) — cream backdrop, navy primary, refined card                            | ✅ Done — PR #35                                                                                                                     |
+| Dashboard sidebar — `#fbfbfa` surface, grouped nav, lighter active state                                 | ✅ Done — PR #35                                                                                                                     |
+| DashboardHeader — topbar (search, bell, calendar, navy Export) + greeting + status pulse + persona pills | ✅ Done — PR #35                                                                                                                     |
+| KPI cards — 1px `#eef0f3` border, no shadow, color-coded delta pills, sparklines                         | ✅ Done — sparklines added in PR #39                                                                                                 |
+| `SafeTrend` — pure-SVG dual-series area+line chart for /app                                              | ✅ Done — PR #39                                                                                                                     |
+| `SafeSpfPosture` — 96px compliance ring + 6-cell SPF principle grid                                      | ✅ Done — PR #39 (status data curated; long-term `spf_principle_events` table tracked in BACKLOG → Database Hygiene & SPF Readiness) |
+| `SafeTriage` — "Needs attention" severity-coded list with empty state                                    | ✅ Done — PR #39                                                                                                                     |
+| `SafeScamTypes`, `SafeLiveActivity`, `SafeEntityTable`                                                   | ✅ Done — PR #39                                                                                                                     |
+| Project-scope branch-check hook (`.claude/hooks/branch-check.sh`)                                        | ✅ Done — PR #35; enforces "fresh branch off main" rule                                                                              |
+| Marketing surfaces (`/about`, `/health`, `/persona-check`, etc.)                                         | Out of scope — existing rules in `DESIGN_SYSTEM.md` still apply                                                                      |
+| Older dashboard sub-page inner cards (`ChecksChart`, `ComplianceChecklist`, etc.)                        | Deferred — refresh those when their sub-pages come up next                                                                           |
+
+See `DESIGN_SYSTEM.md` → "Dashboard Surfaces (Safe Variant)" for the canonical chrome / token reference.
 
 ### Go-to-Market Pages ✅
 
