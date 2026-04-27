@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateApiKey } from "@/lib/apiAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
+import { jsonV1 } from "@/app/api/v1/_lib/json-response";
 
 export async function GET(req: NextRequest) {
   // API key authentication
@@ -123,7 +124,7 @@ export async function GET(req: NextRequest) {
     threats,
   };
 
-  return NextResponse.json(response, {
+  return jsonV1(response, {
     headers: {
       "Cache-Control": "public, s-maxage=300, stale-while-revalidate=60",
     },

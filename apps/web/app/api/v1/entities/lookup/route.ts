@@ -3,6 +3,7 @@ import { validateApiKey } from "@/lib/apiAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import type { EntityType } from "@askarthur/types";
 import { logger } from "@askarthur/utils/logger";
+import { jsonV1 } from "@/app/api/v1/_lib/json-response";
 
 const VALID_ENTITY_TYPES: EntityType[] = [
   "phone",
@@ -66,7 +67,7 @@ export async function GET(req: NextRequest) {
       .single();
 
     if (error || !data) {
-      return NextResponse.json(
+      return jsonV1(
         { found: false, entityType: type, value },
         { headers: CACHE_HEADERS }
       );
@@ -98,7 +99,7 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    return NextResponse.json(
+    return jsonV1(
       {
         found: true,
         entity: {

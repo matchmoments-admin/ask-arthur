@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateApiKey, logApiUsage } from "@/lib/apiAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
+import { jsonV1 } from "@/app/api/v1/_lib/json-response";
 
 function parsePeriodDays(period: string | null): number {
   if (!period) return 30;
@@ -84,7 +85,7 @@ export async function GET(req: NextRequest) {
         );
       }
 
-      return NextResponse.json(
+      return jsonV1(
         {
           meta: {
             celebrity,
@@ -118,7 +119,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    return NextResponse.json(
+    return jsonV1(
       {
         meta: {
           period_days: days,

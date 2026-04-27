@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateApiKey } from "@/lib/apiAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
+import { jsonV1 } from "@/app/api/v1/_lib/json-response";
 
 export async function GET(req: NextRequest) {
   const auth = await validateApiKey(req, "/v1/usage");
@@ -71,7 +72,7 @@ export async function GET(req: NextRequest) {
       byDay[row.day] = (byDay[row.day] || 0) + row.call_count;
     }
 
-    return NextResponse.json({
+    return jsonV1({
       period: { days, since: since.toISOString().slice(0, 10) },
       totalCalls,
       dailyRemaining: auth.dailyRemaining,
