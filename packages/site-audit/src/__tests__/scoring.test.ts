@@ -97,7 +97,7 @@ describe("generateRecommendations", () => {
     ];
     const recs = generateRecommendations(checks);
     expect(recs.length).toBeGreaterThan(0);
-    expect(recs[0]).toContain("Strict-Transport-Security");
+    expect(recs[0].text).toContain("Strict-Transport-Security");
   });
 
   it("returns empty array for all passing checks", () => {
@@ -114,6 +114,6 @@ describe("generateRecommendations", () => {
       { id: "hsts", category: "headers", label: "HSTS", status: "fail", score: 0, maxScore: 15, details: "" },
     ];
     const recs = generateRecommendations(checks);
-    expect(recs[0]).toContain("Strict-Transport-Security");
+    expect(recs[0].text).toContain("Strict-Transport-Security");
   });
 });

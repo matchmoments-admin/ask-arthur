@@ -122,9 +122,16 @@ describe("checkReferrerPolicy", () => {
 });
 
 describe("checkSecurityHeaders", () => {
-  it("returns 4 results", () => {
+  it("returns 5 results (HSTS, XCTO, XFO, ReferrerPolicy, CacheControl)", () => {
     const headers = makeHeaders({});
     const results = checkSecurityHeaders(headers);
-    expect(results).toHaveLength(4);
+    expect(results).toHaveLength(5);
+    expect(results.map((r) => r.id)).toEqual([
+      "hsts",
+      "x-content-type-options",
+      "x-frame-options",
+      "referrer-policy",
+      "cache-control",
+    ]);
   });
 });

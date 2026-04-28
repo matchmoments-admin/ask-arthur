@@ -119,9 +119,14 @@ describe("runSiteAudit", () => {
   it("handles fetch failure gracefully", async () => {
     mockFetch.mockRejectedValue(new Error("Network error"));
 
-    await expect(
-      runSiteAudit({ url: "https://example.com" })
-    ).rejects.toThrow("Failed to fetch");
+    // Scanner no longer throws on fetch failure — it returns a partial result
+    // with fetchError populated and partial=true so async TLS/SSL/admin-path
+    // checks can still run on the domain.
+    const result = await runSiteAudit({ url: "https://example.com" });
+    expect(result.partial).toBe(true);
+    expect(result.fetchError).toMatchObject({ type: "network_error" });
+    expect(result.url).toBe("https://example.com");
+    expect(result.domain).toBe("example.com");
   });
 
   it("generates recommendations for failing checks", async () => {
