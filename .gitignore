@@ -66,3 +66,6 @@ apps/mobile/ios/
 # WXT (Chrome extension)
 apps/extension/.wxt/
 apps/extension/dist/
+
+# Salesforce DX cache (stray — not a Salesforce project; auto-created by IDE/CLI)
+.sfdx/
