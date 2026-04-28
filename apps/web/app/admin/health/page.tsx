@@ -109,8 +109,12 @@ export default async function HealthPage() {
     getStripeEventStats(svc),
   ]);
 
+  // Async Server Component: this function executes once per request, not on
+  // every React render, so Date.now() here is deterministic for the response.
+  // The react-hooks/purity rule can't tell the difference, so disable inline.
   const feedStale = feedRuns.filter((r) => {
     if (!r.started_at) return true;
+    // eslint-disable-next-line react-hooks/purity
     const ageHours = (Date.now() - new Date(r.started_at).getTime()) / 3_600_000;
     return ageHours > 36 || r.status === "error";
   });

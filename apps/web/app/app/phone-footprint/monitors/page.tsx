@@ -61,7 +61,7 @@ export default async function MonitorsPage() {
   const monitorIds = rows.map((m) => m.id);
 
   let footprintsById = new Map<number, FootprintMini>();
-  let alertCounts = new Map<number, number>();
+  const alertCounts = new Map<number, number>();
   if (footprintIds.length > 0) {
     const { data: fps } = await supa
       .from("phone_footprints")
@@ -70,7 +70,9 @@ export default async function MonitorsPage() {
     footprintsById = new Map((fps ?? []).map((f) => [f.id, f as FootprintMini]));
   }
   if (monitorIds.length > 0) {
-    // Count last-30-day alerts per monitor.
+    // Count last-30-day alerts per monitor. Async Server Component runs once
+    // per request — Date.now() here is deterministic for the response.
+    // eslint-disable-next-line react-hooks/purity
     const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
     const { data: alerts } = await supa
       .from("phone_footprint_alerts")
