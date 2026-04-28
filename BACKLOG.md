@@ -2,6 +2,67 @@
 
 Deferred features organized by platform. Items here are validated ideas that didn't make MVP but are worth building.
 
+The "Audit Remediation Roadmap" below is the prioritized cross-cutting work
+queue derived from the 2026-04-28 per-feature flow audit; everything beneath
+it stays organized by platform/area.
+
+---
+
+## Audit Remediation Roadmap (2026-04-28 flow audit)
+
+The 2026-04-28 per-feature flow audit (~100 findings across 41 features)
+produced this prioritized work queue. Full plan with verification matrix:
+`~/.claude/plans/smooth-seeking-lerdorf.md`.
+
+**Tier 0** (branch-check hook scope fix + `.sfdx` ignore) shipped as PR #41
+(squash commit `e04fe51`). Items below are P0 → P4 by blast radius.
+
+### P0 — Critical security (Tier 1; 5 separate PRs)
+
+1. **Mobile device attestation hard-disable** — `apps/web/app/api/mobile/attest/route.ts:30-42` issues a server-signed `deviceToken` for _any_ input because both verifiers are TODOs. Flag is default-off, but flag-flip = auth bypass. Replace iOS/Android branches with `501 device_attestation_not_implemented`, make the 501 unconditional (ignores the FF), add a guard test. Track Apple `data.appattest.apple.com/v1/attestKey` + Google Play Integrity v1 verifiers as a separate "Device attestation hardening" backlog item.
+2. **Stripe webhook ownership cross-check** — `apps/web/app/api/stripe/webhook/route.ts:138-209` feeds `metadata.api_key_id` into `syncTier` without proving the customer owns that key. `SELECT user_id FROM api_keys WHERE id = $1`, compare with `metadata.user_id` (and `auth.users.id` mapped from `stripe_customer_id` if a mapping table exists), reject mismatches with error log + no tier mutation. Same gate in `handleSubscriptionDeleted`. **Open decision:** verify whether a `user_stripe_customers` table exists before opening the PR; if not, add it via migration in the same PR.
+3. **Org invite email binding** — `apps/web/app/api/org/invite/accept/route.ts:37-75` accepts an invitation if the caller is signed in and possesses the token, never compares `invitation.email` to `user.email`. Leaked token + any account = stolen role. Add case-insensitive email match → 403 on mismatch (don't leak invited email back). Bonus: 10/hour per-user invite-accept rate-limit (`R:askarthur:invite-accept:{userId}`).
+4. **Slack `response_url` outbound SSRF guard** — Slack signature verifies inbound, but the response_url string is then fetched without a hostname allow-list. Wrap the outbound `fetch` (likely `apps/web/lib/bots/slack/sender.ts`) with `hostname === 'hooks.slack.com'` or `assertSafeURL`. Defense-in-depth — current threat requires `SLACK_SIGNING_SECRET` leak.
+5. **Audit doc corrections** — record §35 image proxy and §13 Messenger verifier as **resolved** (both already implemented; audit was wrong on these — see `proxy-image/route.ts:3-7` and `webhooks/messenger/route.ts:53-69`). Add a "Remediation status" column for cross-cutting findings so future readers can diff against this audit. Doc-only.
+
+### P1 — Reliability hardening (Tier 2; 4 PRs)
+
+6. **HIBP client consolidation** — `packages/scam-engine/src/hibp.ts:checkHIBP` gains a `{ truncate?: boolean }` option (default `true`); the raw fetch in `apps/web/app/api/breach-check/route.ts` is replaced with the engine call. Route gets the existing 24h cache + 5s `AbortSignal.timeout` for free. Widen `HIBPResult` with optional `breaches: Array<{name, title, breachDate, dataClasses}>` populated only when `truncate=false`.
+7. **Coalesce hot writes on `last_used_at` / `last_seen_at`** — `apiAuth.ts:175-178` (api_keys) and `extension/_lib/signature.ts:189` (extension_installs) update on every request. Wrap each with a Redis SETNX gate (`askarthur:touch:apikey:$id`, `ex 3600 nx`) so the UPDATE fires at most once per hour per key/install. Eliminates a row-contention hotspot at scale.
+8. **ip-api timeout + Twilio async** — `geolocateIP` gains a 2s `AbortSignal.timeout` + Redis circuit breaker (5 consecutive failures → 60s cool). `/api/analyze` Twilio path moves out of the sync request via Inngest event `analyze.phone-intel.requested`; consumer updates `scam_reports.phone_intelligence` JSONB. Gated on `FF_ANALYZE_PHONE_INTEL_ASYNC` (canary pattern matching `FF_ANALYZE_INNGEST_WEB`). **Open decision:** confirm UX is acceptable (verdict response no longer carries phone-intel synchronously), or take the smaller 1.5s in-line timeout instead.
+9. **`mark_stale_*` batched updates + bot queue retry alerting** — three RPCs (`mark_stale_urls`/`_ips`/`_wallets`) rewritten to loop in 5,000-row batches with COMMIT between, bounding WAL per batch. `bot_message_queue`'s `markFailed` path (in `packages/bot-core/src/queue.ts`) fires a throttled (1/hour/platform) Telegram admin alert when `retries+1 >= max_retries`. Reuse `sendAdminTelegramMessage` from `apps/web/lib/cost-telemetry.ts`.
+
+### P2 — Architectural consolidation (Tier 3; 3 PRs)
+
+10. **Verdict-merge module extraction** — new `packages/scam-engine/src/verdict.ts` exports `mergeVerdict(analysis, urlResults, injection)` and `isElevated(verdict)`. Migrate four call-sites: `apps/web/app/api/analyze/route.ts`, `apps/web/app/api/extension/analyze/route.ts`, `packages/bot-core/src/analyze.ts:30-46`, `apps/web/lib/mediaAnalysis.ts`. Lock the rules with a 10-test (verdict × URL × injection) matrix; verify byte-identical output via golden-file tests on recorded analyze inputs.
+11. **Deepfake direction decision (open)** — overlaps with existing **"Deepfake detection wiring into `runMediaAnalysis`"** in the [Web App](#web-app) section. Today: `apps/web/lib/deepfakeDetection.ts:detectDeepfake` is exported but never imported in source; `FF:deepfakeDetection` is a no-op flag (and a foot-gun if anyone flips it expecting it to do something). Three options: **park-with-guardrail** (recommended; banner comment + warn on FF-on, no code wiring), **delete** (drop file + flag, defer to BACKLOG), or **wire it up** (integrate behind FF with `/tmp` quota guard, RD quota probe, Resemble fallback). Decide before P2 starts.
+12. **Rate-limit fail-policy + cache versioning + positional indexing fix** — single rule documented in `packages/utils/src/rate-limit.ts`: fail-closed in prod for paths touching a paid downstream (AI calls, Twilio, RD); fail-open for read-only/telemetry. `checkImageUploadRateLimit` flips from fail-open to fail-closed (paid Claude vision). Cache key in `apps/web/lib/analysis-cache.ts` includes `PROMPT_VERSION` from `packages/scam-engine/src/claude.ts` (today: silent cross-prompt cache poisoning). Entity-enrichment `Promise.allSettled` indexing in `entity-enrichment.ts:242` switches from positional (`results[2]?.status`) to a keyed `Record<string, PromiseSettledResult>`.
+
+### P3 — Documentation reconciliation (Tier 4; 1 PR)
+
+13. **ARCHITECTURE.md / BACKLOG.md / CLAUDE.md doc sweep** — partial overlap with existing **"Reconcile feed cadence docs"** under [Database Hygiene → Non-schema advisor TODOs](#non-schema-advisor-todos). Specifics: remove all Paddle references (v59 migrated to Stripe); correct feed-sync to weekly Sunday 07:00 UTC (not 15-min); update Inngest function count to actual (13: staleness×3, enrichment, ct-monitor, entity-enrichment, urlscan, cluster-builder, risk-scorer, scam-alerts, feed-sync×2, meta-brp); update table count to current migration tip; add legacy admin-token EOL date (e.g. 2026-05-28) in `apps/web/lib/adminAuth.ts` top-comment + ops runbook.
+
+### P4 — Lower-priority cleanups (Tier 5; backlog candidates, no PRs scheduled)
+
+- **§7 architectural** — collapse synchronous WHOIS/SSL writes in `/api/scam-urls/report` to use the same `enrichment_status='pending'` CAS path the Inngest fan-out uses, eliminating the race
+- **§27 reliability** — invitation resend throttle (per-(org, email) per hour) on top of the P0.3 accept-rate-limit
+- **§9 security** — replace `extension_installs.status != 'revoked'` (blacklist) with `status = 'active'` (whitelist); a future status value would otherwise implicitly pass
+- **§15 reliability** — `mark_stale_*` runs at 03:00 UTC; pick a WAL-aware time slot
+- **§3 security** — extension `/api/extension/analyze` route doesn't store `verified_scams`; product call on whether extension HIGH_RISK should contribute to the threat DB (currently silent)
+- **§1 security** — `scrubPII` before caching (low risk; cached SUSPICIOUS entry may echo user PII back to a SHA-collision caller — practically the same caller, but defense-in-depth)
+- **§1 reliability** — base64 image size check happens _after_ decode; reorder so the 4 MB cap applies to base64 length (~5.6 MB threshold) before allocation
+- **§38 reliability** — most threat-feed scrapers are manual-dispatch only in `.github/workflows/scrape-feeds.yml`; ARCHITECTURE.md narrative implies daily-fresh threat intel, but only the Reddit scraper is on cron. Add per-feed schedules
+
+### CI hygiene (separate, not part of any tier)
+
+- **`autofix` CI failing on every PR** — pre-existing across #35/#39/#40/#41 (this PR will hit it too). The autofix-ci action runs a formatter that wants to reformat ~80 files across `packages/scam-engine/`, `packages/site-audit/`, `packages/types/`, `packages/utils/` but its own safety rule forbids touching `.github/`, so the run errors out without writing fixes. One-shot fix: run the formatter locally (`pnpm turbo lint --fix` or per-package equivalents), commit the diff, restore green check on subsequent PRs
+
+### Open decisions (block the corresponding tier)
+
+1. **Deepfake direction** (blocks P2.11) — park / delete / wire. Park is the recommended least-regret option (preserves the work, removes the foot-gun).
+2. **Stripe customer-mapping table existence** (blocks P0.2) — verify whether a `user_stripe_customers` (or similar) mapping table is already in `supabase/`. Run `mcp__supabase__list_tables` filtered for `stripe`/`customer`, or `ls supabase/ | grep -i customer`. If absent, the migration is part of the same PR.
+3. **Async Twilio UX call** (blocks P1.8) — moving Twilio off the sync path means the verdict response no longer carries `phoneIntelligence`; UI either polls or shows a "checking phone…" pill. Confirm UX, or take the smaller 1.5s in-line timeout instead.
+
 ---
 
 ## Result Screen V2 — follow-up sprints
