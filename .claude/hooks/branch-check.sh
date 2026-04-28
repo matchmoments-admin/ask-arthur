@@ -18,15 +18,23 @@
 
 set -uo pipefail
 
-# Best-effort stdin parse — Claude Code sends a JSON payload with session_id.
-# Falls back to "default" if Python isn't available, so the hook stays usable.
+# Best-effort stdin parse — Claude Code sends a JSON payload with session_id
+# and the tool's parameters under tool_input. We grab both in a single python
+# call: session_id (for the per-session marker) and the target file path
+# (Write/Edit/MultiEdit -> file_path; NotebookEdit -> notebook_path).
 input="$(cat 2>/dev/null || echo '{}')"
-session_id="$(printf '%s' "$input" \
+parsed="$(printf '%s' "$input" \
   | python3 -c 'import json,sys
 try:
-  print(json.load(sys.stdin).get("session_id",""))
+  d = json.load(sys.stdin)
+  ti = d.get("tool_input") or {}
+  print(d.get("session_id",""))
+  print(ti.get("file_path") or ti.get("notebook_path") or "")
 except Exception:
-  pass' 2>/dev/null || echo "")"
+  print("")
+  print("")' 2>/dev/null || printf '\n\n')"
+session_id="$(printf '%s\n' "$parsed" | sed -n '1p')"
+target="$(printf '%s\n' "$parsed" | sed -n '2p')"
 session_id="${session_id:-default}"
 
 marker="/tmp/.claude-branch-checked-${session_id}"
@@ -34,6 +42,18 @@ marker="/tmp/.claude-branch-checked-${session_id}"
 # Already checked this session? Allow without re-running.
 if [ -f "$marker" ]; then
   exit 0
+fi
+
+# Target is outside the project root? The branch is irrelevant for files that
+# can't be committed (e.g. ~/.claude/plans/, /tmp/, other repos). Only enforce
+# when the path is absolute AND inside $CLAUDE_PROJECT_DIR; unknown/relative
+# paths fall through to the git checks (safe default).
+if [ -n "$target" ] && [[ "$target" == /* ]]; then
+  project_root="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+  project_root="${project_root%/}"
+  if [[ "$target" != "$project_root" && "$target" != "$project_root/"* ]]; then
+    exit 0
+  fi
 fi
 
 # Not in a git repo (e.g. plain workspace)? Nothing to enforce.
