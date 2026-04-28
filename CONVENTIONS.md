@@ -6,12 +6,12 @@ Standards and patterns for the Ask Arthur monorepo. All contributors (human and 
 
 ## Language & Runtime
 
-| Tool | Version | Notes |
-|------|---------|-------|
-| TypeScript | 5.x | Strict mode, all packages |
-| Node.js | 22 LTS | Minimum runtime target |
-| Python | 3.11+ | Pipeline scrapers only |
-| React | 19 | Web + extension + mobile |
+| Tool       | Version | Notes                     |
+| ---------- | ------- | ------------------------- |
+| TypeScript | 5.x     | Strict mode, all packages |
+| Node.js    | 22 LTS  | Minimum runtime target    |
+| Python     | 3.11+   | Pipeline scrapers only    |
+| React      | 19      | Web + extension + mobile  |
 
 ## Package Manager
 
@@ -89,25 +89,25 @@ import { verifyAdminToken } from "@/lib/adminAuth";
 
 ### Files & Directories
 
-| Context | Convention | Example |
-|---------|-----------|---------|
-| React components | PascalCase | `VerdictBadge.tsx`, `ResultDisplay.tsx` |
-| Utility modules | kebab-case | `rate-limit.ts`, `feature-flags.ts`, `url-normalize.ts` |
-| API routes | kebab-case directories | `api/scam-urls/lookup/route.ts` |
-| Test files | `*.test.ts` | `format-slack.test.ts`, `webhook-verify.test.ts` |
-| Types-only files | kebab-case | `email-scan.ts`, `extension.ts` |
-| Python scrapers | snake_case | `phishing_army.py`, `phishing_database.py` |
+| Context          | Convention             | Example                                                 |
+| ---------------- | ---------------------- | ------------------------------------------------------- |
+| React components | PascalCase             | `VerdictBadge.tsx`, `ResultDisplay.tsx`                 |
+| Utility modules  | kebab-case             | `rate-limit.ts`, `feature-flags.ts`, `url-normalize.ts` |
+| API routes       | kebab-case directories | `api/scam-urls/lookup/route.ts`                         |
+| Test files       | `*.test.ts`            | `format-slack.test.ts`, `webhook-verify.test.ts`        |
+| Types-only files | kebab-case             | `email-scan.ts`, `extension.ts`                         |
+| Python scrapers  | snake_case             | `phishing_army.py`, `phishing_database.py`              |
 
 ### TypeScript
 
-| Element | Convention | Example |
-|---------|-----------|---------|
-| Interfaces/Types | PascalCase | `AnalysisResult`, `BotMessage`, `QueuedMessage` |
-| Zod schemas | PascalCase + `Schema` | `AnalysisRequestSchema` |
-| Functions | camelCase | `analyzeWithClaude()`, `checkRateLimit()` |
-| Constants | UPPER_SNAKE | `VERDICT_EMOJI`, `MAX_TOKENS` |
-| Env vars | UPPER_SNAKE | `ANTHROPIC_API_KEY`, `UPSTASH_REDIS_REST_URL` |
-| Boolean vars | `is`/`has` prefix | `isActive`, `hasReachedLimit` |
+| Element          | Convention            | Example                                         |
+| ---------------- | --------------------- | ----------------------------------------------- |
+| Interfaces/Types | PascalCase            | `AnalysisResult`, `BotMessage`, `QueuedMessage` |
+| Zod schemas      | PascalCase + `Schema` | `AnalysisRequestSchema`                         |
+| Functions        | camelCase             | `analyzeWithClaude()`, `checkRateLimit()`       |
+| Constants        | UPPER_SNAKE           | `VERDICT_EMOJI`, `MAX_TOKENS`                   |
+| Env vars         | UPPER_SNAKE           | `ANTHROPIC_API_KEY`, `UPSTASH_REDIS_REST_URL`   |
+| Boolean vars     | `is`/`has` prefix     | `isActive`, `hasReachedLimit`                   |
 
 ### Database (Supabase)
 
@@ -117,7 +117,24 @@ import { verifyAdminToken } from "@/lib/adminAuth";
 - Views: `snake_case` descriptive (`threat_intel_entities`, `financial_impact_summary`)
 - Migrations: 44 files (`supabase/migration.sql` through `migration-v44-scam-feed.sql`)
 
+### Python scrapers — layout
+
+Scrapers under `pipeline/scrapers/` use one of two layouts depending on whether they're standalone or part of a related group:
+
+| When                                               | Layout                                                                                           | Invocation                             |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------- |
+| Standalone source (one feed, one file)             | Flat top-level `<source>.py`                                                                     | `python -m crtsh`                      |
+| Grouped sources (≥2 related feeds sharing helpers) | Subdir `<group>/` with `__init__.py`, `common.py` for shared helpers, one `<source>.py` per feed | `python -m ransomware_dls.dragonforce` |
+
+**Examples:**
+
+- Flat (existing convention): `crtsh.py`, `abuseipdb.py`, `phishstats.py`, `urlhaus.py`
+- Grouped (Breach Defence Suite onward): `ransomware_dls/{dragonforce.py, akira.py, qilin.py, …, common.py}`, `oaic_ndb/oaic_ndb.py`, `class_actions/{auslii.py, oaic_complaints.py, firms.py, common.py}`
+
+Existing flat scrapers stay flat. Don't migrate them retroactively — only adopt subdirs when introducing a new group of ≥2 related feeds.
+
 **JSONB-returning RPC pattern** (used in v38–v40 government reporting RPCs):
+
 ```sql
 CREATE OR REPLACE FUNCTION get_threat_intel_export(
   p_entity_type TEXT DEFAULT NULL,
@@ -166,23 +183,27 @@ $$;
 ### Icons — Lucide
 
 All apps use [Lucide](https://lucide.dev) for icons:
+
 - **Web + Extension:** `lucide-react` — inline SVG components, tree-shakeable
 - **Mobile:** `lucide-react-native` — uses `color` prop instead of className
 
 **Usage:**
+
 ```tsx
 // Web / Extension
 import { ShieldCheck } from "lucide-react";
-<ShieldCheck className="text-deep-navy" size={18} />
+<ShieldCheck className="text-deep-navy" size={18} />;
 
 // Mobile
 import { ShieldCheck } from "lucide-react-native";
-<ShieldCheck size={18} color={Colors.primary} />
+<ShieldCheck size={18} color={Colors.primary} />;
 
 // Config-driven (type-safe)
 import type { LucideIcon } from "lucide-react";
-const CONFIG: Record<string, { icon: LucideIcon }> = { SAFE: { icon: ShieldCheck } };
-<config.icon className="text-white" size={24} />
+const CONFIG: Record<string, { icon: LucideIcon }> = {
+  SAFE: { icon: ShieldCheck },
+};
+<config.icon className="text-white" size={24} />;
 ```
 
 ### Error Handling
@@ -217,7 +238,9 @@ vi.mock("@askarthur/supabase/server", () => ({
 }));
 
 // Test data factories
-const makeResult = (overrides: Partial<AnalysisResult> = {}): AnalysisResult => ({
+const makeResult = (
+  overrides: Partial<AnalysisResult> = {},
+): AnalysisResult => ({
   verdict: "HIGH_RISK",
   confidence: 0.88,
   summary: "This is a phishing attempt",

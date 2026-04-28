@@ -319,3 +319,91 @@ export async function checkPhoneFootprintRateLimit(
     return storeUnavailable(failMode, `checkPhoneFootprintRateLimit:${bucket}`);
   }
 }
+
+// =============================================================================
+// Breach Defence — dedicated buckets
+// =============================================================================
+// Same rationale as the Phone Footprint section: separate per-route rate
+// limits because the breach-defence endpoints have distinct abuse models
+// and distinct cost exposure (lookup hits Supabase directly, extension is
+// CORS-anonymous + chatty, B2B is API-key-gated and high-volume).
+//
+//   bd_lookup    — public /api/breach/lookup (consumer email/phone/ID hash
+//                  search). 5/hr/IP. Mirrors HIBP's polite cap; a real user
+//                  rarely needs more than a handful of checks.
+//   bd_extension — /api/breach-extension called by the WXT content script.
+//                  60/min/IP — chatty by design (every domain visit) but
+//                  bounded to keep abusive scraping in check.
+//   bd_b2b       — /api/v1/breach/exposure POST. 30/min/key (validateApiKey
+//                  also applies its own daily cap on top). Identifier is
+//                  the API key hash, not IP.
+
+type BdBucket = "bd_lookup" | "bd_extension" | "bd_b2b";
+
+const _bdLimiters = new Map<BdBucket, Ratelimit>();
+
+function getBdLimiter(bucket: BdBucket): Ratelimit {
+  const existing = _bdLimiters.get(bucket);
+  if (existing) return existing;
+
+  const redis = new Redis({
+    url: process.env.UPSTASH_REDIS_REST_URL!,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+  });
+
+  const slidingWindow = Ratelimit.slidingWindow.bind(Ratelimit);
+  const config: Record<
+    BdBucket,
+    { algo: ReturnType<typeof slidingWindow>; prefix: string }
+  > = {
+    bd_lookup:    { algo: slidingWindow(5,  "1 h"),  prefix: "askarthur:bd:lookup" },
+    bd_extension: { algo: slidingWindow(60, "1 m"),  prefix: "askarthur:bd:ext" },
+    bd_b2b:       { algo: slidingWindow(30, "1 m"),  prefix: "askarthur:bd:b2b" },
+  };
+
+  const lim = new Ratelimit({
+    redis,
+    limiter: config[bucket].algo,
+    prefix: config[bucket].prefix,
+    analytics: true,
+  });
+  _bdLimiters.set(bucket, lim);
+  return lim;
+}
+
+/**
+ * Check a Breach Defence rate-limit bucket.
+ *
+ * Defaults to fail-closed in production. The bd_lookup bucket in particular
+ * is a privacy-sensitive surface (user types email or AU identity number);
+ * a Redis outage allowing unbounded requests is worse than the rare false
+ * reject during a Redis blip.
+ */
+export async function checkBreachDefenceRateLimit(
+  bucket: BdBucket,
+  identifier: string,
+  failMode: FailMode = defaultFailMode(),
+): Promise<RateLimitResult> {
+  if (!process.env.UPSTASH_REDIS_REST_URL) {
+    return storeUnavailable(failMode, `checkBreachDefenceRateLimit:${bucket}`);
+  }
+  try {
+    const res = await getBdLimiter(bucket).limit(identifier);
+    if (!res.success) {
+      return {
+        allowed: false,
+        remaining: 0,
+        resetAt: new Date(res.reset),
+        message: "Too many requests. Please try again later.",
+      };
+    }
+    return {
+      allowed: true,
+      remaining: res.remaining,
+      resetAt: null,
+    };
+  } catch (err) {
+    logger.error(`checkBreachDefenceRateLimit:${bucket}: store error`, { error: String(err) });
+    return storeUnavailable(failMode, `checkBreachDefenceRateLimit:${bucket}`);
+  }
+}

@@ -42,6 +42,8 @@ The _Targeting Scams Report 2025_ from the National Anti-Scam Centre records A$2
 
 ## What the Register interacts with
 
+![Three regulatory regimes converge on 1 July 2026: the SPF Act commencement (Tier 1 maximum penalty greater of A$52.7M, 3× benefit, or 30% of turnover), the SMS Sender ID Register mandatory enforcement, and the section 4AA Crimes Act penalty unit indexation. Treasury, ACMA, and the Attorney-General co-ordinated the timeline — the simultaneity is not an accident.](/illustrations/blog/spf-pillar-2026-04/1-july-2026-simultaneity.webp)
+
 This is the part that most compliance roadmaps under-weight. From 1 July 2026, three regulatory regimes converge:
 
 - **The Sender ID Register** comes into mandatory enforcement.
