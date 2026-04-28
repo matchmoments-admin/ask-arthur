@@ -644,6 +644,34 @@ Introduced 2026-04 to close latent reliability/correctness gaps on `/api/analyze
 
 ---
 
+## Phase 16 — Breach Defence Suite ⏸ Paused
+
+19-PR pillar covering what happens _after_ a breach — second-wave phishing, identity recovery, brand impersonation, class-action awareness, B2B exposure intel — built around a public Australian Breach Index spine. **Paused 2026-04-29 after PR 2** over an OAIC NDB data-availability finding (per-incident filings are not public). All 11 `NEXT_PUBLIC_FF_BD_*` flags ship default OFF; schema is live in prod with zero rows; nothing consumer-visible is exposed. See [`docs/plans/breach-defence-suite.md`](./docs/plans/breach-defence-suite.md) §1b "Pause notes" before resuming.
+
+| PR  | Title                                                              | Status                          | Merge           |
+| --- | ------------------------------------------------------------------ | ------------------------------- | --------------- |
+| 1   | Scaffold breach-defence package + cross-cutting setup              | ✅ Shipped 2026-04-29           | `5da00e0` (#46) |
+| 2   | Migration v80 — breach index spine (3 tables + RPC + RLS)          | ✅ Shipped 2026-04-29           | `10cc7a5` (#47) |
+| 3   | OAIC NDB scraper                                                   | ⏸ Paused (data-availability)    | —               |
+| 4   | `hashBreachIdentifier` helper + lookup RPC client                  | ⏸ Paused                        | —               |
+| 5   | Admin UI for editing breaches (incl. court-suppression toggle)     | ⏸ Paused                        | —               |
+| 6   | Public `/breach` + `/breach/[slug]` ISR pages                      | ⏸ Paused                        | —               |
+| 7   | `/api/breach/lookup` + 30-breach backfill review                   | ⏸ Paused                        | —               |
+| 8   | F2 — Browser-extension breach warning ribbon                       | ⏸ Paused                        | —               |
+| 9   | F3 — Auto-rotate compromised credentials (1Password deep link)     | ⏸ Paused                        | —               |
+| 10  | F5 — B2B aggregated breach exposure endpoint + OpenAPI             | ⏸ Paused                        | —               |
+| 11  | F1 — DNS / SPF / DMARC / NS drift monitor (migration v81)          | ⏸ Paused                        | —               |
+| 12  | F8 — Typosquat / lookalike domain pre-registration alerter (v82)   | ⏸ Paused                        | —               |
+| 13  | F9 — Embeddable Breach Score badge (A+→F grade) (v85)              | ⏸ Paused                        | —               |
+| 14  | F6 — "Arthur Class Watch" class-action awareness alerts (v83)      | ⏸ Paused                        | —               |
+| 15  | F10 — Post-breach recovery playbooks (15 playbooks, v84)           | ⏸ Paused                        | —               |
+| 16  | F11 — Second-wave phishing correlation (v86)                       | ⏸ Paused                        | —               |
+| 17  | F7 — "Arthur Aftermath" per-breach companion page wiring           | ⏸ Paused                        | —               |
+| 18  | Ransomware DLS GitHub Actions scrapers                             | ⏸ Paused (Tor-decision-blocked) | —               |
+| 19  | Documentation pages (`/docs/api/breach-exposure`, `/breach-score`) | ⏸ Paused                        | —               |
+
+---
+
 ## Status Key
 
 | Icon    | Meaning                  |

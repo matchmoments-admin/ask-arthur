@@ -283,49 +283,52 @@ Authenticated via Bearer token (API key). See `docs/openapi.yaml` for full spec.
 
 ### Supabase (PostgreSQL)
 
-56 migration files (`supabase/migration.sql` through `migration-v56-leads.sql`). 36+ tables, 5 views, 36+ RPCs.
+80+ migration files (`supabase/migration.sql` through `migration-v80-breach-index.sql`). 39+ tables, 5 views, 38+ RPCs.
 
 **Core Tables:**
 
-| Table                     | Purpose                                                                                       |
-| ------------------------- | --------------------------------------------------------------------------------------------- |
-| `verified_scams`          | Confirmed HIGH_RISK submissions (PII-scrubbed)                                                |
-| `scam_urls`               | Known malicious URLs with enrichment data (164K+)                                             |
-| `scam_ips`                | Malicious IP intelligence (140K+)                                                             |
-| `scam_crypto_wallets`     | Scam-associated crypto wallet addresses                                                       |
-| `scam_reports`            | Central report node for all user analyses (v21)                                               |
-| `scam_entities`           | Unified entity lookup layer — phone, email, URL, domain, IP, crypto, bank account (v21, 14K+) |
-| `report_entity_links`     | Many-to-many junction between reports and entities (v21)                                      |
-| `scam_clusters`           | Groups of related scam reports by shared entities (v22)                                       |
-| `cluster_members`         | Cluster membership junction table (v22)                                                       |
-| `check_stats`             | Daily analysis counters by verdict and region                                                 |
-| `api_keys`                | B2B API key hashes, tiers, daily limits                                                       |
-| `subscriptions`           | Paddle subscription records linked to API keys                                                |
-| `user_profiles`           | User profiles (role, display name, company) linked to auth.users                              |
-| `organizations`           | Corporate client organizations with ABN, sector, tier (v55)                                   |
-| `org_members`             | Organization membership with 6-role RBAC (v55)                                                |
-| `org_invitations`         | Pending team invitations with hashed tokens (v55)                                             |
-| `leads`                   | Corporate sales pipeline with nurture tracking (v56)                                          |
-| `api_usage_log`           | Per-key, per-endpoint, per-day API usage tracking                                             |
-| `email_subscribers`       | Newsletter subscribers                                                                        |
-| `blog_posts`              | Blog content with categories and full-text search                                             |
-| `blog_categories`         | Blog category taxonomy                                                                        |
-| `bot_message_queue`       | Async bot message processing queue                                                            |
-| `feed_ingestion_log`      | Scraper run tracking with record counts                                                       |
-| `phone_lookups`           | Twilio phone intelligence results (risk score, CNAM, carrier)                                 |
-| `media_analyses`          | Uploaded media analysis jobs (deepfake detection)                                             |
-| `sites`                   | Website audit targets with grades                                                             |
-| `site_audits`             | Individual audit results with test scores                                                     |
-| `device_push_tokens`      | Expo push notification tokens (v32)                                                           |
-| `family_groups`           | Family protection groups (v33)                                                                |
-| `family_members`          | Family group membership (v33)                                                                 |
-| `family_activity_log`     | Family check activity (v33)                                                                   |
-| `extension_subscriptions` | Extension tier tracking (v34)                                                                 |
-| `phone_reputation`        | Community phone reputation data (v35)                                                         |
-| `reddit_processed_posts`  | Reddit scraper deduplication (v36)                                                            |
-| `feed_items`              | Unified public scam feed — Reddit posts, verified scams, user reports (v44)                   |
-| `provider_reports`        | Reports submitted to ACCC/AFP/banks/telcos (v39)                                              |
-| `provider_actions`        | Provider response actions (v39)                                                               |
+| Table                     | Purpose                                                                                                                                                                 |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `verified_scams`          | Confirmed HIGH_RISK submissions (PII-scrubbed)                                                                                                                          |
+| `scam_urls`               | Known malicious URLs with enrichment data (164K+)                                                                                                                       |
+| `scam_ips`                | Malicious IP intelligence (140K+)                                                                                                                                       |
+| `scam_crypto_wallets`     | Scam-associated crypto wallet addresses                                                                                                                                 |
+| `scam_reports`            | Central report node for all user analyses (v21)                                                                                                                         |
+| `scam_entities`           | Unified entity lookup layer — phone, email, URL, domain, IP, crypto, bank account (v21, 14K+)                                                                           |
+| `report_entity_links`     | Many-to-many junction between reports and entities (v21)                                                                                                                |
+| `scam_clusters`           | Groups of related scam reports by shared entities (v22)                                                                                                                 |
+| `cluster_members`         | Cluster membership junction table (v22)                                                                                                                                 |
+| `check_stats`             | Daily analysis counters by verdict and region                                                                                                                           |
+| `api_keys`                | B2B API key hashes, tiers, daily limits                                                                                                                                 |
+| `subscriptions`           | Paddle subscription records linked to API keys                                                                                                                          |
+| `user_profiles`           | User profiles (role, display name, company) linked to auth.users                                                                                                        |
+| `organizations`           | Corporate client organizations with ABN, sector, tier (v55)                                                                                                             |
+| `org_members`             | Organization membership with 6-role RBAC (v55)                                                                                                                          |
+| `org_invitations`         | Pending team invitations with hashed tokens (v55)                                                                                                                       |
+| `leads`                   | Corporate sales pipeline with nurture tracking (v56)                                                                                                                    |
+| `breaches`                | AU Breach Index — canonical record per notifiable AU data breach (v80, paused suite — see [`docs/plans/breach-defence-suite.md`](./docs/plans/breach-defence-suite.md)) |
+| `breach_victims_index`    | Pseudonymous victim lookup (SHA-256 of email/phone/AU-doc-number); service-role-only RLS, accessed via `check_breach_exposure()` RPC (v80)                              |
+| `breach_sources_raw`      | Ingest provenance — raw scraper output reviewed by editors before publishing to `breaches` (v80)                                                                        |
+| `api_usage_log`           | Per-key, per-endpoint, per-day API usage tracking                                                                                                                       |
+| `email_subscribers`       | Newsletter subscribers                                                                                                                                                  |
+| `blog_posts`              | Blog content with categories and full-text search                                                                                                                       |
+| `blog_categories`         | Blog category taxonomy                                                                                                                                                  |
+| `bot_message_queue`       | Async bot message processing queue                                                                                                                                      |
+| `feed_ingestion_log`      | Scraper run tracking with record counts                                                                                                                                 |
+| `phone_lookups`           | Twilio phone intelligence results (risk score, CNAM, carrier)                                                                                                           |
+| `media_analyses`          | Uploaded media analysis jobs (deepfake detection)                                                                                                                       |
+| `sites`                   | Website audit targets with grades                                                                                                                                       |
+| `site_audits`             | Individual audit results with test scores                                                                                                                               |
+| `device_push_tokens`      | Expo push notification tokens (v32)                                                                                                                                     |
+| `family_groups`           | Family protection groups (v33)                                                                                                                                          |
+| `family_members`          | Family group membership (v33)                                                                                                                                           |
+| `family_activity_log`     | Family check activity (v33)                                                                                                                                             |
+| `extension_subscriptions` | Extension tier tracking (v34)                                                                                                                                           |
+| `phone_reputation`        | Community phone reputation data (v35)                                                                                                                                   |
+| `reddit_processed_posts`  | Reddit scraper deduplication (v36)                                                                                                                                      |
+| `feed_items`              | Unified public scam feed — Reddit posts, verified scams, user reports (v44)                                                                                             |
+| `provider_reports`        | Reports submitted to ACCC/AFP/banks/telcos (v39)                                                                                                                        |
+| `provider_actions`        | Provider response actions (v39)                                                                                                                                         |
 
 **Views (v38–v40):**
 
