@@ -58,6 +58,8 @@ Read together, the chronology is unambiguous. Industry self-regulation has been 
 
 ## What 1 July 2026 actually changes
 
+![The Australian scam-prevention regulatory architecture from 1 July 2026: ACCC as SPF General Regulator, ACMA at the telco layer, ASIC at the banking layer, AFCA as the EDR scheme led by inaugural Chief Scams Officer David Lacey, NASC as the consumer-facing centre, and IDCARE as the identity-fraud restoration hotline.](/illustrations/blog/spf-pillar-2026-04/regulatory-architecture.webp)
+
 The SPF Act commences on 1 July 2026. From that date, three designated sectors — banks, telcos, and certain digital platforms — have legally enforceable obligations across six principles: Govern, Prevent, Detect, Report, Disrupt, Respond. AFCA is authorised as the SPF external dispute resolution scheme on 1 September 2026 and begins accepting complaints on 1 January 2027. The reporting and disrupt rules are due to be finalised by 31 March 2027. Full implementation across the three designated sectors is targeted for end of 2027.
 
 The penalty regime is what gets the attention. A Tier 1 contravention — failure to comply with a core obligation under Prevent, Detect, Disrupt, or Respond — exposes a regulated entity to the _greater_ of:
@@ -85,6 +87,8 @@ The simultaneity is not an accident. The SPF Act is the principles-and-penalty l
 ---
 
 ## Telstra, the only Australian telco that builds
+
+![Buyer vs builder map of the Australian telco scam-intelligence market: Telstra (with Cleaner Pipes, Quantium Telstra's Scam Indicator and Fraud Indicator products) is the only builder; TPG, Vocus, Optus, and the long tail of MVNOs are structurally buyers from a small set of vendors (Mavenir, Apate.ai, Tollring).](/illustrations/blog/spf-pillar-2026-04/buyer-vs-builder.webp)
 
 Here is where I am going to say something that nobody who works in Australian telco strategy will say in writing, even though everyone who works on the buying side of trust-and-safety knows it.
 

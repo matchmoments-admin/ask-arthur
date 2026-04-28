@@ -12,6 +12,8 @@ This is the column.
 > - ACMA rejected the industry's draft consumer code twice (24 Oct 2025, 27 Mar 2026); now drafting a mandatory standard.
 > - The 1 July 2026 SPF commencement, Sender ID Register enforcement, and AFCA EDR scheme commencement converge on the same architectural moment.
 
+![Six ACMA telco penalties on a timeline from July 2024 to February 2026: Telstra A$1.55M, Circles.Life A$413K, Exetel A$695K, Southern Phone A$2.50M, Optus Mobile A$826K (max penalty), Lycamobile A$376K. Regulator's voice escalates across the series from "unacceptable" to "all telcos on notice"; ACMA rejected the ATA's draft TCP Code twice (24 Oct 2025, 27 Mar 2026) before drafting a mandatory standard.](/illustrations/blog/spf-pillar-2026-04/acma-fines-timeline.webp)
+
 ## The pattern
 
 | Telco          | Date     | Penalty     | Contraventions            | Consumer losses                                |

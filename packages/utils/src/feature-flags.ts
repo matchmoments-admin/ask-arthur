@@ -152,6 +152,75 @@ export const featureFlags = {
    *  compliance spine — the paid-tier lookup route falls back to
    *  teaser-only output when OFF. */
   twilioVerifyEnabled: process.env.FF_TWILIO_VERIFY_ENABLED === "true",
+
+  // ===========================================================================
+  // Breach Defence Suite — gates each feature in the F1–F11 build. Default OFF
+  // until the corresponding migration + route + UI ship and the smoke test
+  // listed in the source spec passes. Each flag gates *consumer-visible*
+  // surfaces; back-end Inngest crons run on their own schedule and are gated
+  // by env-var presence, not these flags.
+  // ===========================================================================
+
+  /** Breach Defence F1 — DNS / SPF / DMARC / NS drift monitor for watched
+   *  domains. Gates the /dashboard/domains UI and email/webhook fan-out. The
+   *  bd-dns-drift Inngest cron runs whenever the function is registered. */
+  bdDnsDrift: process.env.NEXT_PUBLIC_FF_BD_DNS_DRIFT === "true",
+
+  /** Breach Defence F4 — public Australian Breach Index (/breach index page,
+   *  /breach/[slug] companion pages, /api/breach/lookup). Gate stays OFF until
+   *  ≥30 historical breaches are reviewed and is_published=true in v80. */
+  bdBreachIndex: process.env.NEXT_PUBLIC_FF_BD_BREACH_INDEX === "true",
+
+  /** Breach Defence F2 — browser-extension proactive breach warning ribbon.
+   *  Server-side gate paired with the WXT build-time WXT_BD_BREACH_WARNING
+   *  flag; both must be on for the ribbon to render. */
+  bdExtensionWarning: process.env.NEXT_PUBLIC_FF_BD_EXTENSION_WARNING === "true",
+
+  /** Breach Defence F3 — auto-rotate compromised credentials via password-
+   *  manager deep links (1Password / Bitwarden / Apple Keychain). Gates the
+   *  rotateActions array in the /api/breach-check response and the UI button
+   *  list on the breach-check page. */
+  bdPwdRotate: process.env.NEXT_PUBLIC_FF_BD_PWD_ROTATE === "true",
+
+  /** Breach Defence F5 — B2B aggregated breach exposure endpoint at
+   *  /api/v1/breach/exposure. Gates the route entirely (returns 503 when off);
+   *  validateApiKey is checked first regardless. */
+  bdB2bExposure: process.env.NEXT_PUBLIC_FF_BD_B2B_EXPOSURE === "true",
+
+  /** Breach Defence F6 — class-action awareness alerts ("Arthur Class Watch").
+   *  Gates /class-actions portal, subscribe flow, and email fan-out. The
+   *  AusLII / OAIC / firm-portal scrapers run independently of this flag. */
+  bdClassActions: process.env.NEXT_PUBLIC_FF_BD_CLASS_ACTIONS === "true",
+
+  /** Breach Defence F7 — "Arthur Aftermath" per-breach companion page wiring.
+   *  Gates the embedded recovery wizard, second-wave feed, class action card,
+   *  and subscribe form on /breach/[slug]. Independent of bdBreachIndex (the
+   *  page renders without these sections when the flag is off). */
+  bdAftermath: process.env.NEXT_PUBLIC_FF_BD_AFTERMATH === "true",
+
+  /** Breach Defence F8 — typosquat / lookalike domain pre-registration
+   *  alerter. Gates /dashboard/brands, the bd-typosquat-cron, and the auDA
+   *  takedown template generator. WHOIS spend is capped per-customer in
+   *  cost-telemetry; pausing here also pauses spend. */
+  bdTyposquat: process.env.NEXT_PUBLIC_FF_BD_TYPOSQUAT === "true",
+
+  /** Breach Defence F9 — embeddable Breach Score badge (A+→F grade).
+   *  Gates the /api/breach-score/[domain] SVG endpoint and the public
+   *  /breach-score landing page. The score-compute Inngest function runs
+   *  on its own schedule. */
+  bdBreachScore: process.env.NEXT_PUBLIC_FF_BD_BREACH_SCORE === "true",
+
+  /** Breach Defence F10 — post-breach recovery playbooks. Gates the
+   *  /recovery/[breach] wizard and the /api/recovery-playbook routes. The
+   *  15 playbook JSON files are seeded at deploy regardless of this flag —
+   *  the gate just hides the UI until the editorial review is complete. */
+  bdRecovery: process.env.NEXT_PUBLIC_FF_BD_RECOVERY === "true",
+
+  /** Breach Defence F11 — second-wave phishing correlation tags on
+   *  verified_scams.metadata.breach_slug. Gates rendering of the "Active
+   *  scams referencing this breach" section on /breach/[slug]; the
+   *  correlate cron runs whenever its function is registered. */
+  bdSecondWave: process.env.NEXT_PUBLIC_FF_BD_SECOND_WAVE === "true",
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;
