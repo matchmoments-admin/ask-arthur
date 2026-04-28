@@ -1,9 +1,8 @@
 import Link from "next/link";
-import { X } from "lucide-react";
+import Image from "next/image";
 import { getAllPosts, getCategories } from "@/lib/blog";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import SubscribeForm from "@/components/SubscribeForm";
-import Pill from "@/components/Pill";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -54,59 +53,45 @@ export default async function BlogPage({ searchParams }: PageProps) {
   return (
     <div>
       {/* ── Header ── */}
-      <header className="mb-10">
-        <h1 className="text-deep-navy text-4xl md:text-5xl font-extrabold leading-tight text-center mb-2">
+      <header className="mb-10 text-center">
+        <h1 className="text-deep-navy text-4xl md:text-5xl font-extrabold leading-tight mb-3">
           Blog
         </h1>
-        <p className="text-slate-500 text-sm leading-relaxed mb-6 text-center">
+        <p className="text-slate-500 text-base leading-relaxed max-w-xl mx-auto">
           Scam alerts, protection guides, and product updates.
         </p>
-
-        {/* Stacked category heading links — only categories with posts */}
-        {activeCategories.length > 0 && (
-          <nav className="flex flex-col items-start">
-            {activeCategories.map((cat) => (
-              <Link
-                key={cat.slug}
-                href={`/blog?category=${cat.slug}`}
-                className={`text-[2rem] md:text-[2.75rem] font-extrabold tracking-tight leading-[1.2] transition-colors group ${
-                  category === cat.slug
-                    ? "text-deep-navy"
-                    : "text-slate-300 hover:text-deep-navy"
-                }`}
-              >
-                {cat.name}
-                <span className="inline-block ml-1.5 text-[0.6em] transition-transform group-hover:translate-x-1">
-                  →
-                </span>
-              </Link>
-            ))}
-          </nav>
-        )}
       </header>
 
-      {/* ── Filter indicator ── */}
-      <div className="flex items-center border-b border-border-light pb-3 mb-8">
-        {category ? (
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-slate-400">Showing:</span>
-            <span className="text-deep-navy font-semibold">
-              {categories.find((c) => c.slug === category)?.name}
-            </span>
+      {/* ── Category tabs ── */}
+      {activeCategories.length > 0 && (
+        <nav className="flex items-center gap-1 border-b border-border-light mb-10 overflow-x-auto">
+          <Link
+            href="/blog"
+            className={`px-3 py-2.5 text-sm font-medium whitespace-nowrap transition-colors relative ${
+              !category
+                ? "text-deep-navy after:absolute after:bottom-0 after:left-0 after:right-0 after:h-[2px] after:bg-deep-navy"
+                : "text-slate-400 hover:text-deep-navy"
+            }`}
+          >
+            All
+          </Link>
+          {activeCategories.map((cat) => (
             <Link
-              href="/blog"
-              className="text-slate-400 hover:text-deep-navy transition-colors"
-              title="Clear filter"
+              key={cat.slug}
+              href={`/blog?category=${cat.slug}`}
+              className={`px-3 py-2.5 text-sm font-medium whitespace-nowrap transition-colors relative ${
+                category === cat.slug
+                  ? "text-deep-navy after:absolute after:bottom-0 after:left-0 after:right-0 after:h-[2px] after:bg-deep-navy"
+                  : "text-slate-400 hover:text-deep-navy"
+              }`}
             >
-              <X size={16} />
+              {cat.name}
             </Link>
-          </div>
-        ) : (
-          <span className="text-sm text-slate-400">All posts</span>
-        )}
-      </div>
+          ))}
+        </nav>
+      )}
 
-      {/* ── Post list ── */}
+      {/* ── Post grid ── */}
       {posts.length === 0 ? (
         <div className="py-20 text-center">
           <p className="text-slate-400 text-base">
@@ -114,22 +99,39 @@ export default async function BlogPage({ searchParams }: PageProps) {
           </p>
         </div>
       ) : (
-        <div className="divide-y divide-border-light">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {posts.map((post) => (
-            <article key={post.slug} className="py-6 first:pt-0">
-              <Link href={`/blog/${post.slug}`} className="block group">
-                {post.categoryName && (
-                  <span className="block mb-1.5">
-                    <Pill label={post.categoryName} slug={post.categorySlug} />
-                  </span>
-                )}
-                <h2 className="text-deep-navy text-xl font-bold leading-snug mb-1 group-hover:text-action-teal transition-colors">
+            <Link
+              key={post.slug}
+              href={`/blog/${post.slug}`}
+              className="group bg-white border border-border-light rounded-xl shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all overflow-hidden flex flex-col"
+            >
+              {post.heroImageUrl ? (
+                <div className="relative aspect-[16/10] bg-slate-50 overflow-hidden">
+                  <Image
+                    src={post.heroImageUrl}
+                    alt={post.heroImageAlt || post.title}
+                    fill
+                    sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
+                    className="object-cover group-hover:scale-[1.02] transition-transform duration-300"
+                  />
+                </div>
+              ) : (
+                <div className="aspect-[16/10] bg-cream flex items-center justify-center p-6">
+                  <p className="text-deep-navy font-bold text-base text-center line-clamp-3">
+                    {post.title}
+                  </p>
+                </div>
+              )}
+
+              <div className="p-5 flex flex-col flex-1">
+                <h2 className="text-deep-navy text-lg font-bold leading-snug line-clamp-2 group-hover:text-action-teal transition-colors">
                   {post.title}
                 </h2>
-                <p className="text-slate-500 text-[15px] leading-relaxed mb-2.5 line-clamp-2">
+                <p className="text-slate-500 text-sm leading-relaxed line-clamp-2 mt-2">
                   {post.excerpt}
                 </p>
-                <div className="flex items-center gap-2 text-xs text-slate-400">
+                <div className="flex items-center gap-2 text-xs text-slate-400 mt-4 pt-4 border-t border-border-light/60">
                   <time dateTime={post.publishedAt}>
                     {new Date(post.publishedAt).toLocaleDateString("en-AU", {
                       day: "numeric",
@@ -137,11 +139,11 @@ export default async function BlogPage({ searchParams }: PageProps) {
                       year: "numeric",
                     })}
                   </time>
-                  <span>·</span>
+                  <span>&middot;</span>
                   <span>{post.readingTimeMinutes} min</span>
                 </div>
-              </Link>
-            </article>
+              </div>
+            </Link>
           ))}
         </div>
       )}

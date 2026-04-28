@@ -167,55 +167,49 @@ export default async function ScannerPage() {
           </div>
         </section>
 
-        {/* Recent scans feed */}
+        {/* Recent scans — persona-style cards, no heading */}
         {recentScans.length > 0 && (
-          <section className="mt-12 pb-16">
-            <h2 className="text-sm font-bold text-deep-navy uppercase tracking-wider mb-4">
-              Recent Scans
-            </h2>
-            <div className="divide-y divide-slate-100 border-t border-slate-100">
-              {recentScans.map((scan) => {
-                const href = scan.scan_type === "website" && scan.share_token
+          <section className="mt-12 pb-16 space-y-3">
+            {recentScans.map((scan) => {
+              const href =
+                scan.scan_type === "website" && scan.share_token
                   ? `/scan/${scan.share_token}`
                   : scan.share_token
                     ? `/scan/result/${scan.share_token}`
                     : "#";
 
-                return (
-                  <a
-                    key={scan.id}
-                    href={href}
-                    className="flex items-center justify-between py-3 hover:bg-slate-50/50 transition-colors -mx-2 px-2 rounded"
+              return (
+                <a
+                  key={scan.id}
+                  href={href}
+                  className="flex items-center gap-4 p-4 bg-white border border-border-light rounded-xl shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all"
+                >
+                  <span
+                    className={`inline-flex items-center justify-center w-10 h-10 rounded-lg text-sm font-bold shrink-0 ${GRADE_PILL[scan.grade] || "bg-slate-100 text-slate-600"}`}
+                    style={{ fontVariantNumeric: "tabular-nums" }}
                   >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span
-                        className={`inline-flex items-center justify-center w-9 h-9 rounded-lg text-sm font-bold shrink-0 ${GRADE_PILL[scan.grade] || "bg-slate-100 text-slate-600"}`}
-                        style={{ fontVariantNumeric: "tabular-nums" }}
-                      >
-                        {scan.grade}
-                      </span>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-deep-navy truncate">
-                          {scan.target_display || scan.target}
-                        </p>
-                        <div className="flex items-center gap-1.5 text-xs text-slate-400 mt-0.5">
-                          {TYPE_ICONS[scan.scan_type]}
-                          <span>{TYPE_LABELS[scan.scan_type] || scan.scan_type}</span>
-                          <span>&middot;</span>
-                          <span>{relativeTime(scan.scanned_at)}</span>
-                        </div>
-                      </div>
+                    {scan.grade}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-deep-navy text-sm truncate">
+                      {scan.target_display || scan.target}
+                    </p>
+                    <div className="flex items-center gap-1.5 text-xs text-gov-slate mt-0.5">
+                      {TYPE_ICONS[scan.scan_type]}
+                      <span>{TYPE_LABELS[scan.scan_type] || scan.scan_type}</span>
+                      <span>&middot;</span>
+                      <span>{relativeTime(scan.scanned_at)}</span>
                     </div>
-                    <span
-                      className="text-xs text-slate-400 shrink-0"
-                      style={{ fontVariantNumeric: "tabular-nums" }}
-                    >
-                      {scan.overall_score}/100
-                    </span>
-                  </a>
-                );
-              })}
-            </div>
+                  </div>
+                  <span
+                    className="text-xs text-slate-400 shrink-0"
+                    style={{ fontVariantNumeric: "tabular-nums" }}
+                  >
+                    {scan.overall_score}/100
+                  </span>
+                </a>
+              );
+            })}
           </section>
         )}
       </main>
