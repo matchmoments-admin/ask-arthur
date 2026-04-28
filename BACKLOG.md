@@ -261,6 +261,33 @@ that needs its own PR because the blast radius or scope is larger.
 - [ ] **Run vulnerability enrichment pipeline end-to-end** — 2,139 rows ingested into `vulnerabilities` but `vulnerability_detections` and `vulnerability_exposure_checks` still at 0. `/admin/vulnerabilities` shows CVE ingestion is working; the `match-b2b-exposure` Inngest function is either not firing or has no sites to match against
 - [ ] **Reconcile feed cadence docs** — `ARCHITECTURE.md` claims 15-minute feed sync; production runs weekly via GitHub Actions cron. Either lift the cadence or correct the doc
 
+## Breach Defence Suite — paused after PR 2 (2026-04-29)
+
+19-PR pillar (F1–F11). Spine schema is shipped to prod (v80, three tables + RPC + RLS, all flags default OFF, zero rows, harmless if it stays paused). Full plan + pause rationale + lessons learned: [`docs/plans/breach-defence-suite.md`](./docs/plans/breach-defence-suite.md). Tracked in ROADMAP.md → Phase 16.
+
+**Pause trigger:** original spec assumed an OAIC NDB scraper would backfill ~30 historical AU breaches (Optus, Medibank, Latitude, Genea, Gelatissimo, …). OAIC does **not** publish per-incident NDB filings publicly — only aggregate 6-monthly statistical reports. The 30-breach backfill assumption is invalidated. Three forward paths captured in plan §1b; user opted to stop and revisit.
+
+- [ ] **Decide F4 backfill path** — three options in plan §1b: (1) build OAIC scraper for aggregate stats + curated seed for 10–30 well-known cases; (2) OAIC scraper only, defer backfill until admin UI lets editors hand-curate; (3) skip OAIC, jump to curated seed file. **Blocks PR 3 onward.**
+- [ ] **PR 3 — OAIC NDB scraper** — `pipeline/scrapers/oaic_ndb/oaic_ndb.py`, weekly GH Action, populates `breach_sources_raw` with `is_verified=false`. Adds `pdfplumber` to requirements. Needs GH repo var `ENABLE_OAIC_NDB_SCRAPER=true`
+- [ ] **PR 4 — `hashBreachIdentifier` helper + lookup RPC client** in `packages/breach-defence/src/breach-index.ts`
+- [ ] **PR 5 — Admin UI** for `/admin/breaches/{list,[id]/edit,sources/review}`. Includes `is_redacted` toggle for court-suppressed cases (Genea precedent)
+- [ ] **PR 6 — Public `/breach` + `/breach/[slug]` ISR pages** with JSON-LD Article schema + sitemap
+- [ ] **PR 7 — `/api/breach/lookup` endpoint** + 30-breach backfill review. **Privacy-impact assessment required before launching identity-document hashing** (Medicare/TFN/passport) — block on legal review; ship email-only first
+- [ ] **PR 8 — F2 extension breach warning ribbon** (WXT entrypoint + CORS endpoint)
+- [ ] **PR 9 — F3 auto-rotate deep links** (1Password / Bitwarden / Apple Keychain) extending `/api/breach-check` response
+- [ ] **PR 10 — F5 B2B aggregated breach exposure endpoint** (`/api/v1/breach/exposure`, `validateApiKey` gate, 500-item batches, OpenAPI update)
+- [ ] **PR 11 — F1 DNS / SPF / DMARC / NS drift monitor** (migration v81, Inngest 6h cron, `/dashboard/domains`, email/webhook fan-out)
+- [ ] **PR 12 — F8 typosquat / lookalike domain alerter** (migration v82, dnstwist permutation port, auDA takedown templates, $5/customer/day cost cap)
+- [ ] **PR 13 — F9 Breach Score badge** (migration v85, SVG endpoint, embed bootstrapper, public `/breach-score` landing). Depends on PRs 2/11/12
+- [ ] **PR 14 — F6 class actions** (migration v83, AusLII + OAIC + 5 firm-portal scrapers, anonymous-subscribe with double opt-in). Confirm 5 firms list + ToS at PR time
+- [ ] **PR 15 — F10 recovery playbooks** (migration v84, 15 playbooks seeded as JSON, wizard UI). Editorial review (IDCare partnership?) flagged as post-launch task
+- [ ] **PR 16 — F11 second-wave correlation** (migration v86, `verified_scams.metadata.breach_slug` GIN index, 15-min Inngest cron)
+- [ ] **PR 17 — F7 Aftermath companion page wiring** — integration PR for PRs 14/15/16 + OG image route at `/api/og/breach/[slug]`
+- [ ] **PR 18 — Ransomware DLS GitHub Actions scrapers** — 15+ scrapers in `pipeline/scrapers/ransomware_dls/`. **Blocked on Tor proxy decision** (VPS vs hosted Tor.taxi/Onion.live)
+- [ ] **PR 19 — Documentation pages** (`/docs/api/breach-exposure`, `/breach-score` landing, sitemap updates, R&D CHANGELOG)
+
+**Unship-the-spine option** — schema is harmless empty but if reclaiming the migration slots is preferred: drop the four objects per the rollback block in v80's commit message (#47), and remove the 11 `NEXT_PUBLIC_FF_BD_*` flags via a small follow-up to `feature-flags.ts`/`turbo.json`/`rate-limit.ts`.
+
 ## Web App
 
 - [x] Phone intelligence in analysis pipeline (Twilio Lookup v2)
