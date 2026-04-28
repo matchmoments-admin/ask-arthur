@@ -16,93 +16,15 @@ This post walks through what happens in those few seconds, and what the rest of 
 
 At the highest level, Ask Arthur has four surfaces users can touch, one AI model that does classification, a handful of third-party APIs that do enrichment, a Postgres database that stores everything, and a small army of Python scrapers that pull threat intelligence from 16 external feeds.
 
-```mermaid
-%%{init: {'theme':'base', 'themeVariables': {
-  'background':'#FAF6EF',
-  'primaryColor':'#FAF6EF',
-  'primaryBorderColor':'#001F3F',
-  'primaryTextColor':'#001F3F',
-  'lineColor':'#001F3F',
-  'secondaryColor':'#F4C9B8',
-  'tertiaryColor':'#D9A441',
-  'fontFamily':'Inter, system-ui, sans-serif'
-}}}%%
-C4Context
-    title System Context — Ask Arthur
+![System Context — Ask Arthur platform with two user types and eight external integrations including Claude, Google Safe Browsing, Twilio, Supabase, Upstash, Inngest, Cloudflare R2, and 16 threat feeds.](/illustrations/blog/how-ask-arthur-works/01-system-context.webp)
 
-    Person(user, "Consumer user", "Submits suspicious content via web, extension, mobile, or bot")
-    Person(biz, "Business customer", "Queries threat data via signed API")
-
-    System(askarthur, "Ask Arthur", "Scam detection platform")
-
-    System_Ext(claude, "Claude Haiku 4.5", "Anthropic — AI classification")
-    System_Ext(safebrowsing, "Google Safe Browsing", "URL reputation")
-    System_Ext(twilio, "Twilio Lookup v2", "Phone line-type and carrier enrichment")
-    System_Ext(supabase, "Supabase", "Managed Postgres + auth + storage")
-    System_Ext(upstash, "Upstash Redis", "Cache and rate limit")
-    System_Ext(inngest, "Inngest", "Durable background jobs")
-    System_Ext(r2, "Cloudflare R2", "Media and evidence storage")
-    System_Ext(feeds, "Threat feeds", "PhishTank, URLhaus, OpenPhish, ThreatFox, ACCC Scamwatch, 11 more")
-
-    Rel(user, askarthur, "Submits content", "HTTPS")
-    Rel(biz, askarthur, "Threat queries", "Bearer-auth REST")
-    Rel(askarthur, claude, "Classifies text and images")
-    Rel(askarthur, safebrowsing, "URL reputation")
-    Rel(askarthur, twilio, "Phone lookups")
-    Rel(askarthur, supabase, "Reads and writes")
-    Rel(askarthur, upstash, "Caches, rate limits")
-    Rel(askarthur, inngest, "Publishes events")
-    Rel(askarthur, r2, "Stores media")
-    Rel(feeds, askarthur, "Bulk ingestion via scrapers")
-```
+<!-- Source: docs/blog/diagrams/how-ask-arthur-works/01-system-context.excalidraw · regenerate via build_haa_diagrams.py -->
 
 One level down, Ask Arthur itself is a monorepo with three user-facing apps and seven shared packages, plus a Python pipeline and a set of durable Inngest functions.
 
-```mermaid
-%%{init: {'theme':'base', 'themeVariables': {
-  'background':'#FAF6EF',
-  'primaryColor':'#FAF6EF',
-  'primaryBorderColor':'#001F3F',
-  'primaryTextColor':'#001F3F',
-  'lineColor':'#001F3F',
-  'secondaryColor':'#F4C9B8',
-  'tertiaryColor':'#D9A441',
-  'fontFamily':'Inter, system-ui, sans-serif'
-}}}%%
-C4Container
-    title Container view — Ask Arthur platform
+![Container view — Ask Arthur platform with User on the left, the platform boundary containing four consumer surfaces (web, extension, mobile, chat bots), three backend containers (scam engine, threat pipeline, Inngest consumers), and the Supabase Postgres database; Upstream APIs sit outside the boundary on the right.](/illustrations/blog/how-ask-arthur-works/02-container-view.webp)
 
-    Person(user, "User")
-
-    Container_Boundary(platform, "Ask Arthur") {
-        Container(web, "Web app", "Next.js 16 + React 19", "askarthur.au, dashboards, submission UI")
-        Container(ext, "Browser extension", "WXT + React 19", "Chrome, Firefox — inline page scans")
-        Container(mobile, "Mobile app", "Expo 54 + React Native", "iOS, Android")
-        Container(bots, "Chat bots", "Telegram, WhatsApp, Slack, Messenger", "Webhook-driven")
-        Container(engine, "Scam engine", "TypeScript package", "Claude calls, URL reputation, pipeline, Inngest definitions")
-        Container(scrapers, "Threat pipeline", "Python 3.x", "16 scrapers on GitHub Actions cron")
-        ContainerDb(db, "Supabase Postgres", "Managed", "scam_reports, scam_urls, scam_entities, cost_telemetry, …")
-        Container(jobs, "Inngest consumers", "Event-driven + cron", "Enrichment, staleness, fan-out, reporting")
-    }
-
-    System_Ext(upstream, "Upstream APIs", "Claude, Twilio, Safe Browsing, URLScan, Reality Defender, …")
-
-    Rel(user, web, "HTTPS")
-    Rel(user, ext, "Installed from store")
-    Rel(user, mobile, "App stores")
-    Rel(user, bots, "Native chat client")
-
-    Rel(web, engine, "Imports")
-    Rel(ext, engine, "Signed API calls")
-    Rel(mobile, engine, "Bearer API")
-    Rel(bots, engine, "Via queue + fan-out")
-
-    Rel(engine, upstream, "")
-    Rel(engine, db, "")
-    Rel(engine, jobs, "Publishes events")
-    Rel(jobs, db, "Idempotent writes")
-    Rel(scrapers, db, "Bulk RPC upserts")
-```
+<!-- Source: docs/blog/diagrams/how-ask-arthur-works/02-container-view.excalidraw · regenerate via build_haa_diagrams.py -->
 
 If you remember two things about this stack: **the request path is kept short and fast, and everything slow or retryable is pushed onto Inngest**. The rest of the post is that sentence, elaborated.
 
@@ -135,29 +57,9 @@ The naive approach is to do all of that inside the request handler, usually hidd
 
 The better approach, and the one we've moved to, is to publish a single event — `analyze.completed.v1` — and let durable, retryable consumers do the rest. This is gated behind a feature flag (`FF_ANALYZE_INNGEST_WEB`) so we can roll it back with an env var change, but in practice it's on.
 
-```mermaid
-%%{init: {'theme':'base', 'themeVariables': {
-  'background':'#FAF6EF',
-  'primaryColor':'#F4C9B8',
-  'primaryBorderColor':'#001F3F',
-  'primaryTextColor':'#001F3F',
-  'lineColor':'#001F3F',
-  'secondaryColor':'#D9A441',
-  'tertiaryColor':'#7A8B5C',
-  'fontFamily':'Inter, system-ui, sans-serif',
-  'edgeLabelBackground':'#FAF6EF'
-}}}%%
-flowchart LR
-    A["/api/analyze<br/>HTTP handler"] -->|verdict JSON| U[User]
-    A -->|analyze.completed.v1<br/>id = requestId| I[Inngest]
-    I --> C1["analyze-completed-report<br/>scam_reports + entities"]
-    I --> C2["analyze-completed-brand<br/>brand_impersonation_alerts"]
-    I --> C3["analyze-completed-cost<br/>cost_telemetry"]
-    I --> C4["analyze-failure-subscriber<br/>failure logging"]
-    C1 --> DB[(Postgres)]
-    C2 --> DB
-    C3 --> DB
-```
+![analyze.completed.v1 fan-out — the /api/analyze HTTP handler returns the verdict JSON to the user and publishes a single event to Inngest, which fans out to four idempotent consumers (report, brand, cost, failure-subscriber). The first three write to Postgres; the failure subscriber logs only.](/illustrations/blog/how-ask-arthur-works/03-analyze-fanout.webp)
+
+<!-- Source: docs/blog/diagrams/how-ask-arthur-works/03-analyze-fanout.excalidraw · regenerate via build_haa_diagrams.py -->
 
 Each consumer is independently retryable. Each is idempotent, because the event ID is the request ID, and the Postgres RPCs use `ON CONFLICT` on a partial unique index over `idempotency_key`. Any of them can fail and retry and the end state is identical.
 
