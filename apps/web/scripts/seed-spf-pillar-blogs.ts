@@ -15,7 +15,8 @@
  */
 import { createClient } from "@supabase/supabase-js";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const supabaseUrl =
   process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -32,8 +33,16 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 // Content loading — reads canonical markdown, strips header block
 // ---------------------------------------------------------------------------
 
+// Resolve relative to this script's location, not cwd, so the seed runs
+// correctly from any working directory (project root, apps/web, …).
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
 const CAMPAIGN_DIR = join(
-  process.cwd(),
+  __dirname,
+  "..",
+  "..",
+  "..",
   "docs/campaigns/spf-pillar-2026-04"
 );
 
