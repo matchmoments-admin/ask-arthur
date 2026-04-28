@@ -2,7 +2,15 @@ import "server-only";
 import Stripe from "stripe";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? "");
+// Next.js page-data collection imports this module at build time. The Stripe
+// SDK rejects empty-string keys with "Neither apiKey nor config.authenticator
+// provided", so env-less CI builds break unless we provide a placeholder.
+// `||` (not `??`) because we want to coalesce on falsy *including empty
+// string*. The real key wins in any environment that configures it; the
+// placeholder is only ever exercised at build time when no Stripe call fires.
+export const stripe = new Stripe(
+  process.env.STRIPE_SECRET_KEY || "sk_test_buildtime_placeholder"
+);
 
 export async function getOrCreateStripeCustomer(
   userId: string,
