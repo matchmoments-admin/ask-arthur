@@ -133,8 +133,13 @@ describe("/api/analyze input validation", () => {
   });
 
   // A-03: Image-only analysis → 200
+  // Note: validateImageMagicBytes is now applied to every image — fixtures
+  // need a valid PNG/JPEG/GIF/WebP signature, not arbitrary bytes.
   it("returns 200 for image-only analysis", async () => {
-    const smallImage = Buffer.from("fake-png-data").toString("base64");
+    const smallImage = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), // PNG magic
+      Buffer.from("payload"),
+    ]).toString("base64");
     const res = await POST(makeRequest({ image: smallImage }));
     expect(res.status).toBe(200);
     const data = await res.json();
@@ -143,7 +148,10 @@ describe("/api/analyze input validation", () => {
 
   // A-04: Text + image combined → 200
   it("returns 200 for text + image combined analysis", async () => {
-    const smallImage = Buffer.from("fake-png-data").toString("base64");
+    const smallImage = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      Buffer.from("payload"),
+    ]).toString("base64");
     const res = await POST(
       makeRequest({ text: "Check this screenshot", image: smallImage })
     );

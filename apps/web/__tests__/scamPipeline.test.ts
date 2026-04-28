@@ -4,7 +4,12 @@ import type { AnalysisResult } from "@askarthur/types";
 
 // ── Mocks ──
 
-const mockInsert = vi.fn();
+// pipeline.ts now does:
+//   supabase.from("verified_scams").insert({...}).select("id").single()
+// so the mock chain has to expose .select(...).single() after .insert(...).
+const mockSingle = vi.fn();
+const mockSelect = vi.fn(() => ({ single: mockSingle }));
+const mockInsert = vi.fn(() => ({ select: mockSelect }));
 const mockFrom = vi.fn(() => ({ insert: mockInsert }));
 
 vi.mock("@askarthur/supabase/server", () => ({
@@ -141,7 +146,12 @@ describe("scrubPII", () => {
 describe("storeVerifiedScam", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockInsert.mockResolvedValue({ error: null });
+    // Set the terminal of the insert→select→single chain. clearAllMocks
+    // preserves the factory implementations on mockInsert/mockSelect
+    // (set at vi.fn() construction time), but we re-seed the resolved
+    // value on mockSingle here so each test starts with a successful
+    // insert by default.
+    mockSingle.mockResolvedValue({ data: { id: "fake-id" }, error: null });
     vi.mocked(createServiceClient).mockReturnValue({ from: mockFrom } as unknown as ReturnType<typeof createServiceClient>);
     vi.mocked(uploadScreenshot).mockResolvedValue("screenshots/2025-01-01/abc.png");
   });
@@ -177,7 +187,13 @@ describe("storeVerifiedScam", () => {
   });
 
   it("logs error when Supabase insert fails", async () => {
-    mockInsert.mockResolvedValue({
+    // Override the terminal of the chain so the inner-try error path fires
+    // (logger.error("verified_scams insert failed", ...)). Mocking
+    // mockInsert.mockResolvedValue would replace the factory and break
+    // the .select().single() chain — the mockSingle override is the
+    // right level for "the insert query resolved to an error".
+    mockSingle.mockResolvedValue({
+      data: null,
       error: { message: "RLS violation", code: "42501" },
     });
 

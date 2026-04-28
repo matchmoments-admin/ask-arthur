@@ -130,8 +130,13 @@ describe("validateApiKey", () => {
 
     await validateApiKey(makeRequest("Bearer sk_test_hashcheck"));
 
-    // Verify the select() was called and eq was called with key_hash
-    expect(mockSelect).toHaveBeenCalledWith("org_name, tier, is_active, daily_limit");
+    // Verify the select() was called and eq was called with key_hash.
+    // Column list expanded over time (org_id, rate_limit_per_minute,
+    // max_batch_size, allowed_endpoints) — keep the assertion in sync with
+    // apps/web/lib/apiAuth.ts so column drift surfaces here.
+    expect(mockSelect).toHaveBeenCalledWith(
+      "org_name, org_id, tier, is_active, daily_limit, rate_limit_per_minute, max_batch_size, allowed_endpoints"
+    );
     expect(mockEq).toHaveBeenCalledWith("key_hash", expect.any(String));
 
     // The hash should NOT be the raw key

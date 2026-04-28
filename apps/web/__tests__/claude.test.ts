@@ -189,9 +189,12 @@ describe("validateResult", () => {
   });
 
   it("defaults to SUSPICIOUS for invalid verdict", () => {
+    // Confidence 0.8 stays above the UNCERTAIN_CONFIDENCE_THRESHOLD (0.6),
+    // so an invalid verdict ("DANGER") falls back to the SUSPICIOUS default
+    // without being downgraded to UNCERTAIN by the confidence check.
     const result = validateResult({
       verdict: "DANGER",
-      confidence: 0.5,
+      confidence: 0.8,
       summary: "Test",
       redFlags: [],
       nextSteps: [],
