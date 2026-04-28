@@ -4,12 +4,16 @@ import type { AnalysisResult } from "@askarthur/types";
 
 // ── Mocks ──
 
-// pipeline.ts now does:
-//   supabase.from("verified_scams").insert({...}).select("id").single()
-// so the mock chain has to expose .select(...).single() after .insert(...).
+// pipeline.ts uses two different shapes:
+//   verified_scams: from(...).insert({...}).select("id").single()  → chained
+//   phone_lookups : from(...).insert(rows)                          → flat
+// mockInsert is intentionally untyped (`vi.fn()`) so TypeScript doesn't infer
+// `Parameters<>` as an empty tuple; without that, `mockInsert.mock.calls[0][0]`
+// trips TS2493 ("tuple of length 0 has no element at index 0"). Each describe
+// block's beforeEach configures mockInsert for the shape it needs.
 const mockSingle = vi.fn();
 const mockSelect = vi.fn(() => ({ single: mockSingle }));
-const mockInsert = vi.fn(() => ({ select: mockSelect }));
+const mockInsert = vi.fn();
 const mockFrom = vi.fn(() => ({ insert: mockInsert }));
 
 vi.mock("@askarthur/supabase/server", () => ({
@@ -146,11 +150,11 @@ describe("scrubPII", () => {
 describe("storeVerifiedScam", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Set the terminal of the insert→select→single chain. clearAllMocks
-    // preserves the factory implementations on mockInsert/mockSelect
-    // (set at vi.fn() construction time), but we re-seed the resolved
-    // value on mockSingle here so each test starts with a successful
-    // insert by default.
+    // Wire the chain: insert() returns { select }, select() returns { single }.
+    // mockSingle resolves with a successful row by default so the inner-try
+    // path completes; the "logs error" test overrides mockSingle for its own
+    // failure scenario.
+    mockInsert.mockReturnValue({ select: mockSelect });
     mockSingle.mockResolvedValue({ data: { id: "fake-id" }, error: null });
     vi.mocked(createServiceClient).mockReturnValue({ from: mockFrom } as unknown as ReturnType<typeof createServiceClient>);
     vi.mocked(uploadScreenshot).mockResolvedValue("screenshots/2025-01-01/abc.png");
