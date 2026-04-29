@@ -199,7 +199,7 @@ export default function SecurityOverviewPage() {
                 <tr><td>Input validation</td><td>All external input validated with Zod schemas; 10MB payload cap</td></tr>
                 <tr><td>Prompt-injection defence</td><td>Unicode sanitization (11 invisible-char classes), nonce-based XML delimiters, sandwich defence, 14 regex pattern detectors</td></tr>
                 <tr><td>HTML sanitization</td><td>Email scans strip comments, style/script blocks, hidden elements, and data attributes server-side before AI analysis</td></tr>
-                <tr><td>Content Security Policy</td><td>No <code>unsafe-eval</code>; <code>frame-ancestors 'none'</code>; explicit allowlist for connect/script/style</td></tr>
+                <tr><td>Content Security Policy</td><td>No <code>unsafe-eval</code>; <code>frame-ancestors &apos;none&apos;</code>; explicit allowlist for connect/script/style</td></tr>
                 <tr><td>Rate limiting</td><td>Two layers: edge middleware (60/min per IP on API routes) + per-route burst+daily limits keyed to install/IP/key. Fail-closed in production.</td></tr>
                 <tr><td>Code review</td><td>All changes via GitHub PR; required Vercel preview deploy gating; squash-merge to main</td></tr>
                 <tr><td>Dependency scanning</td><td><code>pnpm audit</code> for Node; <code>pip audit</code> for Python pipeline; lockfiles committed</td></tr>
