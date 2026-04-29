@@ -134,6 +134,9 @@ async function storeAuditResult(
       p_category_scores: result.categories,
       p_recommendations: result.recommendations,
       p_duration_ms: result.durationMs,
+      p_partial: result.partial,
+      p_fetch_error: result.fetchError,
+      p_raw_headers: result.rawHeaders,
     });
 
     if (error) {

@@ -24,13 +24,48 @@ async function getAuditByToken(token: string) {
   const { data, error } = await supabase
     .from("site_audits")
     .select(
-      "id, overall_score, grade, test_results, category_scores, recommendations, duration_ms, scanned_at, site_id, sites!inner(domain, normalized_url)"
+      "id, overall_score, grade, test_results, category_scores, recommendations, recommendations_v2, partial, fetch_error, raw_headers, duration_ms, scanned_at, site_id, sites!inner(domain, normalized_url)"
     )
     .eq("share_token", token)
     .single();
 
   if (error || !data) return null;
   return data;
+}
+
+interface FetchErrorRow {
+  type: "timeout" | "blocked" | "dns_error" | "tls_error" | "network_error";
+  message: string;
+}
+
+interface RecommendationRow {
+  text: string;
+  severity: "critical" | "high" | "medium" | "low";
+  snippet?: string;
+}
+
+function tryParseRecommendation(s: string): RecommendationRow | null {
+  if (!s.startsWith("{")) return null;
+  try {
+    const parsed = JSON.parse(s);
+    if (parsed && typeof parsed === "object" && typeof parsed.text === "string") {
+      return parsed as RecommendationRow;
+    }
+  } catch {
+    // fall through — treat as plain text
+  }
+  return null;
+}
+
+function pickRecommendations(
+  v2: unknown,
+  legacy: string[] | null | undefined
+): (string | RecommendationRow)[] {
+  if (Array.isArray(v2) && v2.length > 0) return v2 as RecommendationRow[];
+  if (!legacy || legacy.length === 0) return [];
+  // Legacy TEXT[] may contain JSON-stringified Recommendation objects from
+  // the pre-v81 era when supabase-js coerced objects into JSON strings.
+  return legacy.map((s) => tryParseRecommendation(s) ?? s);
 }
 
 export async function generateMetadata({
@@ -90,11 +125,11 @@ export default async function ScanPage({ params }: PageProps) {
     grade: audit.grade,
     categories: audit.category_scores as CategoryScore[],
     checks: audit.test_results as CheckResult[],
-    recommendations: audit.recommendations ?? [],
+    recommendations: pickRecommendations(audit.recommendations_v2, audit.recommendations),
     ssl: null,
-    rawHeaders: null,
-    partial: false,
-    fetchError: null,
+    rawHeaders: (audit.raw_headers as Record<string, string> | null) ?? null,
+    partial: audit.partial ?? false,
+    fetchError: (audit.fetch_error as FetchErrorRow | null) ?? null,
   };
 
   const shareUrl = `https://askarthur.au/scan/${token}`;
