@@ -14,9 +14,6 @@ export default function Footer() {
           <Link href="/api-docs" className="text-xs font-bold uppercase tracking-widest text-gov-slate hover:text-action-teal transition-colors py-3">
             API
           </Link>
-          <Link href="/pricing" className="text-xs font-bold uppercase tracking-widest text-gov-slate hover:text-action-teal transition-colors py-3">
-            Pricing
-          </Link>
           <Link href="/trust" className="text-xs font-bold uppercase tracking-widest text-gov-slate hover:text-action-teal transition-colors py-3">
             Security
           </Link>
