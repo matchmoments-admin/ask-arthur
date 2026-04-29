@@ -1,0 +1,403 @@
+/* Security Overview document — print + screen styles
+ *
+ * The same markup is rendered in two contexts:
+ *   1. Screen: a normal Next.js page with Nav + Footer chrome around it.
+ *   2. Print: chrome is hidden via @media print + .screen-only utility class;
+ *      the .document container becomes a sequence of A4 pages with a running
+ *      footer.
+ *
+ * The .document layout intentionally avoids any tailwind classes so the same
+ * CSS rules apply identically when puppeteer renders to PDF.
+ */
+
+/* ------------------------------------------------------------------ */
+/* Screen + print shared                                              */
+/* ------------------------------------------------------------------ */
+
+.document {
+  --doc-ink: #001f3f;
+  --doc-body: #2d3a4f;
+  --doc-muted: #5b6b80;
+  --doc-rule: #d9dfe8;
+  --doc-bg-soft: #f6f8fb;
+  --doc-accent: #008a98;
+  --doc-page-w: 800px;
+  --doc-page-pad: 56px;
+
+  max-width: var(--doc-page-w);
+  margin: 0 auto;
+  padding: 0 24px;
+  color: var(--doc-body);
+  font-family:
+    var(--font-public-sans, "Public Sans"),
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    system-ui,
+    sans-serif;
+  font-size: 10.5pt;
+  line-height: 1.55;
+}
+
+.document .page,
+.document .cover {
+  padding: 40px 0;
+}
+
+.document p {
+  margin: 0 0 0.7em 0;
+  color: var(--doc-body);
+}
+
+.document a {
+  color: var(--doc-accent);
+  text-decoration: none;
+}
+
+.document code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.86em;
+  background: var(--doc-bg-soft);
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--doc-ink);
+}
+
+.document strong {
+  color: var(--doc-ink);
+  font-weight: 700;
+}
+
+.document .page-h2 {
+  font-size: 18pt;
+  font-weight: 800;
+  color: var(--doc-ink);
+  margin: 0 0 18px 0;
+  padding-bottom: 8px;
+  border-bottom: 2px solid var(--doc-ink);
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+
+.document .page-h2.mt-section {
+  margin-top: 36px;
+}
+
+.document .page-h3 {
+  font-size: 12pt;
+  font-weight: 700;
+  color: var(--doc-ink);
+  margin: 22px 0 10px 0;
+  letter-spacing: -0.005em;
+}
+
+.document ul.bullet-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px 0;
+}
+
+.document ul.bullet-list li {
+  position: relative;
+  padding-left: 18px;
+  margin-bottom: 6px;
+}
+
+.document ul.bullet-list li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.55em;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--doc-accent);
+}
+
+/* Table of contents */
+.document ol.toc {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  counter-reset: none;
+  font-size: 11pt;
+}
+
+.document ol.toc li {
+  display: flex;
+  justify-content: space-between;
+  padding: 9px 0;
+  border-bottom: 1px dotted var(--doc-rule);
+  color: var(--doc-ink);
+}
+
+.document ol.toc li span:first-child {
+  font-weight: 600;
+}
+
+.document ol.toc li span:last-child {
+  color: var(--doc-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Data tables */
+.document .data-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0 18px 0;
+  font-size: 9.5pt;
+  border: 1px solid var(--doc-rule);
+}
+
+.document .data-table thead th {
+  background: var(--doc-bg-soft);
+  color: var(--doc-ink);
+  text-align: left;
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 8.5pt;
+  letter-spacing: 0.04em;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--doc-rule);
+}
+
+.document .data-table tbody th {
+  background: var(--doc-bg-soft);
+  color: var(--doc-ink);
+  text-align: left;
+  font-weight: 600;
+  padding: 9px 12px;
+  border-right: 1px solid var(--doc-rule);
+  width: 35%;
+  vertical-align: top;
+}
+
+.document .data-table td {
+  padding: 9px 12px;
+  vertical-align: top;
+  color: var(--doc-body);
+  border-top: 1px solid var(--doc-rule);
+}
+
+.document .data-table tbody tr:first-child td,
+.document .data-table tbody tr:first-child th {
+  border-top: none;
+}
+
+.document .closing-note {
+  margin-top: 28px;
+  padding-top: 18px;
+  border-top: 1px solid var(--doc-rule);
+  color: var(--doc-muted);
+  font-style: italic;
+  font-size: 10pt;
+}
+
+/* ------------------------------------------------------------------ */
+/* Cover page                                                         */
+/* ------------------------------------------------------------------ */
+
+.document .cover {
+  min-height: 980px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  text-align: center;
+  padding: 80px 0 40px 0;
+}
+
+.document .cover-inner {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 18px;
+}
+
+.document .cover-mark {
+  margin-bottom: 24px;
+}
+
+.document .cover-eyebrow {
+  font-size: 10pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--doc-accent);
+}
+
+.document .cover-title {
+  font-size: 38pt;
+  font-weight: 800;
+  color: var(--doc-ink);
+  margin: 4px 0 8px 0;
+  letter-spacing: -0.025em;
+  line-height: 1.05;
+}
+
+.document .cover-subtitle {
+  font-size: 13pt;
+  color: var(--doc-body);
+  max-width: 480px;
+  margin: 0;
+  line-height: 1.45;
+}
+
+.document .cover-classification {
+  margin-top: 28px;
+  display: inline-block;
+  padding: 6px 14px;
+  font-size: 9pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--doc-ink);
+  background: var(--doc-bg-soft);
+  border: 1px solid var(--doc-rule);
+  border-radius: 999px;
+}
+
+.document .cover-disclaimer {
+  margin-top: 18px;
+  max-width: 460px;
+  font-size: 9pt;
+  color: var(--doc-muted);
+  line-height: 1.5;
+  font-style: italic;
+}
+
+.document .cover-meta {
+  margin-top: 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 10.5pt;
+  color: var(--doc-muted);
+}
+
+.document .cover-footer {
+  font-size: 9pt;
+  color: var(--doc-muted);
+  border-top: 1px solid var(--doc-rule);
+  padding-top: 16px;
+  margin-top: 40px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Print-specific                                                     */
+/* ------------------------------------------------------------------ */
+
+@media print {
+  @page {
+    size: A4;
+    margin: 18mm 16mm 22mm 16mm;
+    @bottom-left {
+      content: "Ask Arthur · askarthur.au";
+      font-family: "Public Sans", system-ui, sans-serif;
+      font-size: 8pt;
+      color: #5b6b80;
+    }
+    @bottom-center {
+      content: counter(page) " of " counter(pages);
+      font-family: "Public Sans", system-ui, sans-serif;
+      font-size: 8pt;
+      color: #5b6b80;
+    }
+    @bottom-right {
+      content: "Confidential · See cover for version";
+      font-family: "Public Sans", system-ui, sans-serif;
+      font-size: 8pt;
+      color: #5b6b80;
+    }
+  }
+
+  @page :first {
+    margin: 0;
+    @bottom-left {
+      content: "";
+    }
+    @bottom-center {
+      content: "";
+    }
+    @bottom-right {
+      content: "";
+    }
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .screen-only {
+    display: none !important;
+  }
+
+  .document {
+    max-width: none;
+    padding: 0;
+    margin: 0;
+  }
+
+  .document .page {
+    page-break-before: always;
+    break-before: page;
+    padding: 0;
+    min-height: calc(100vh - 40mm);
+  }
+
+  .document .cover {
+    page-break-after: always;
+    break-after: page;
+    min-height: 100vh;
+    padding: 0;
+  }
+
+  /* Avoid orphan headings + table breaks where possible */
+  .document .page-h2,
+  .document .page-h3 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  .document .data-table {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .document a {
+    color: var(--doc-accent);
+    text-decoration: none;
+  }
+}
+
+/* When opened on screen, give some visual page separation */
+@media screen {
+  .document {
+    background: #fff;
+    margin-top: 24px;
+    margin-bottom: 48px;
+  }
+
+  .document .page,
+  .document .cover {
+    border-bottom: 1px dashed var(--doc-rule);
+  }
+
+  .document .page:last-child {
+    border-bottom: none;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Utility                                                            */
+/* ------------------------------------------------------------------ */
+
+@media print {
+  .screen-only {
+    display: none !important;
+  }
+}

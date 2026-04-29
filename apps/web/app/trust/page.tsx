@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Shield, Lock, Server, Eye, AlertTriangle, CheckCircle, Clock } from "lucide-react";
+import { Shield, Lock, Server, Eye, AlertTriangle, CheckCircle, Clock, Download, FileText, Table as TableIcon, History } from "lucide-react";
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
 
@@ -197,39 +197,71 @@ export default function TrustPage() {
             </div>
           </section>
 
-          {/* Enterprise docs */}
+          {/* Trust documents */}
           <section>
             <h2 className="text-xl font-extrabold text-deep-navy mb-2">
-              Enterprise documentation
+              Trust documents
             </h2>
             <p className="text-gov-slate text-sm mb-5">
-              Available on request for enterprise clients and vendors conducting due diligence.
+              Direct downloads for vendor due-diligence and procurement reviews.
             </p>
-            <div className="grid md:grid-cols-2 gap-3">
-              {[
-                "Data Processing Agreement (DPA)",
-                "Master Service Agreement (MSA)",
-                "Service Level Agreement (SLA)",
-                "Security Questionnaire (SIG Lite)",
-                "Architecture overview",
-                "Penetration test report (available Q3 2026)",
-              ].map((doc) => (
-                <a
-                  key={doc}
-                  href="mailto:brendan@askarthur.au"
-                  className="flex items-center gap-2 p-3 rounded-xl border border-border-light bg-white hover:border-action-teal/40 transition-colors text-sm text-gov-slate"
-                >
-                  <Shield size={14} className="text-action-teal flex-shrink-0" />
-                  {doc}
-                </a>
-              ))}
+            <div className="space-y-3">
+              <a
+                href="/legal/ask-arthur-security-overview-v1.pdf"
+                className="flex items-center gap-3 p-4 rounded-xl border border-border-light bg-white hover:border-action-teal/40 transition-colors"
+              >
+                <FileText size={20} className="text-action-teal flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="font-bold text-deep-navy text-sm">Security Overview</div>
+                  <div className="text-xs text-gov-slate">Architecture, controls, data residency · PDF · v1.0</div>
+                </div>
+                <Download size={16} className="text-gov-slate flex-shrink-0" />
+              </a>
+
+              <a
+                href="/legal/ask-arthur-dpa-template-v1.pdf"
+                className="flex items-center gap-3 p-4 rounded-xl border border-border-light bg-white hover:border-action-teal/40 transition-colors"
+              >
+                <FileText size={20} className="text-action-teal flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="font-bold text-deep-navy text-sm">Data Processing Agreement <span className="text-amber-700 font-semibold">· Draft</span></div>
+                  <div className="text-xs text-gov-slate">APP 1988 + GDPR-aligned sample · subject to legal review · PDF · v1.0</div>
+                </div>
+                <Download size={16} className="text-gov-slate flex-shrink-0" />
+              </a>
+
+              <a
+                href="/legal/ask-arthur-sub-processors-v1.csv"
+                className="flex items-center gap-3 p-4 rounded-xl border border-border-light bg-white hover:border-action-teal/40 transition-colors"
+              >
+                <TableIcon size={20} className="text-action-teal flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="font-bold text-deep-navy text-sm">Sub-Processor List</div>
+                  <div className="text-xs text-gov-slate">All third parties processing customer data · CSV</div>
+                </div>
+                <Download size={16} className="text-gov-slate flex-shrink-0" />
+              </a>
+
+              <a
+                href="/trust/changelog"
+                className="flex items-center gap-3 p-4 rounded-xl border border-border-light bg-white hover:border-action-teal/40 transition-colors"
+              >
+                <History size={20} className="text-action-teal flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="font-bold text-deep-navy text-sm">Security Changelog</div>
+                  <div className="text-xs text-gov-slate">Append-only log of security and compliance updates</div>
+                </div>
+                <span className="text-xs text-action-teal font-medium flex-shrink-0">View →</span>
+              </a>
             </div>
-            <p className="text-xs text-gov-slate mt-3">
+
+            <p className="text-xs text-gov-slate mt-4">
+              Need a SIG Lite, MSA, SLA, pen-test report, or signed DPA?
               Email{" "}
               <a href="mailto:brendan@askarthur.au" className="text-action-teal font-medium">
                 brendan@askarthur.au
-              </a>{" "}
-              to request any document.
+              </a>
+              . Pen-test report and SOC 2 attestation available on completion (target Q3 2026).
             </p>
           </section>
 

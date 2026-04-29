@@ -18,6 +18,29 @@ export default function PrivacyPage() {
           Privacy Policy
         </h1>
 
+        <div className="rounded-xl border border-border-light bg-slate-50 p-4 mb-8 text-sm text-gov-slate">
+          <p className="leading-relaxed">
+            <strong className="text-deep-navy">For procurement and vendor due-diligence:</strong>{" "}
+            our{" "}
+            <a href="/legal/ask-arthur-security-overview-v1.pdf" className="text-action-teal font-medium hover:underline">
+              Security Overview
+            </a>
+            ,{" "}
+            <a href="/legal/ask-arthur-dpa-template-v1.pdf" className="text-action-teal font-medium hover:underline">
+              DPA template
+            </a>
+            , and{" "}
+            <a href="/legal/ask-arthur-sub-processors-v1.csv" className="text-action-teal font-medium hover:underline">
+              sub-processor list
+            </a>{" "}
+            are available alongside this policy. See{" "}
+            <a href="/trust" className="text-action-teal font-medium hover:underline">
+              /trust
+            </a>{" "}
+            for the full pack.
+          </p>
+        </div>
+
         <div className="prose-arthur space-y-8">
           <section>
             <h2 className="text-deep-navy text-lg font-bold mb-3">

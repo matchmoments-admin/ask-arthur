@@ -2,7 +2,7 @@ import "server-only";
 
 // Inngest function: phone-footprint/pdf.render.v1
 //
-// Triggered by POST /api/phone-footprint/[id]/pdf — renders the footprint
+// Triggered by POST /api/phone-footprint/[msisdn]/pdf — renders the footprint
 // to PDF, uploads to R2, emails the signed URL to the user. Lives in
 // apps/web (not @askarthur/scam-engine/inngest) because it crosses two
 // app-scoped primitives: R2 upload (apps/web/lib/r2) and Resend email

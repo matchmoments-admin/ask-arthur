@@ -21,6 +21,7 @@
     "dev:mobile": "pnpm --filter @askarthur/mobile dev",
     "dev:telegram": "pnpm --filter @askarthur/web telegram:dev",
     "pipeline-test": "cd pipeline/scrapers && python -m pytest tests/ -v",
+    "trust:pdfs": "node scripts/generate-trust-pdfs.mjs",
     "prepare": "husky"
   },
   "lint-staged": {
@@ -35,11 +36,13 @@
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
     "prettier": "^3.8.3",
+    "puppeteer": "^24.10.0",
     "turbo": "^2.8.10"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild",
+      "puppeteer",
       "sharp",
       "unrs-resolver"
     ]
