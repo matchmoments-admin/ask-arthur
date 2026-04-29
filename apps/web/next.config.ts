@@ -149,6 +149,15 @@ const nextConfig: NextConfig = {
         destination: "/health",
         permanent: true,
       },
+      // Pricing is hidden until there's a paid product worth showing — until
+      // then anyone interested in commercial terms goes through /contact.
+      // Temporary (307) so search engines don't drop /pricing from the index
+      // when we bring it back.
+      {
+        source: "/pricing",
+        destination: "/contact",
+        permanent: false,
+      },
     ];
   },
 };
