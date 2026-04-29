@@ -333,7 +333,7 @@ invisible to users until the flag flips.
 | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------- | ----------- |
 | `apps/web/app/api/phone-footprint/[msisdn]/route.ts`                    | Primary lookup endpoint                                                         | ✅ Sprint 1 |
 | `apps/web/app/api/phone-footprint/verify/{start,check}/route.ts`        | OTP endpoints                                                                   | ✅ Sprint 1 |
-| `apps/web/app/api/phone-footprint/[id]/pdf/route.ts`                    | PDF export (enqueues Inngest render)                                            | ✅ Sprint 3 |
+| `apps/web/app/api/phone-footprint/[msisdn]/pdf/route.ts`                | PDF export (enqueues Inngest render — looks up latest full snapshot by msisdn)  | ✅ Sprint 3 |
 | `apps/web/app/api/inngest/functions/phone-footprint-pdf.ts`             | Inngest function — render + R2 upload + email                                   | ✅ Sprint 3 |
 | `apps/web/app/api/inngest/functions/phone-footprint-refresh.ts`         | Inngest cron + per-monitor refresh worker                                       | ✅ Sprint 4 |
 | `apps/web/app/api/inngest/functions/phone-footprint-vonage-backfill.ts` | Vonage CAMARA-landed pager + per-monitor backfill                               | ✅ Sprint 5 |

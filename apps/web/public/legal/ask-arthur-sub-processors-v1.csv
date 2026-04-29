@@ -1,0 +1,9 @@
+provider,region,purpose,certifications
+"Supabase, Inc.",USA / Sydney,Database hosting,SOC 2 Type II
+"Vercel, Inc.",USA / Sydney,Application hosting,SOC 2 + ISO 27001
+"Cloudflare, Inc.",USA / Oceania,CDN + object storage,SOC 2 + ISO 27001
+"Anthropic, PBC",USA,AI analysis,Enterprise DPA; SOC 2
+"Twilio, Inc.",USA,Phone intelligence,SOC 2 Type II
+"Upstash, Inc.",Singapore,Rate limiting,SOC 2
+"Resend, Inc.",USA,Email delivery,SOC 2
+"Stripe, Inc.",USA,Billing,PCI DSS Level 1; SOC 2
