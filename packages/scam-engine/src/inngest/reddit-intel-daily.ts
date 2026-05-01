@@ -104,7 +104,14 @@ After all per-post entries, produce ONE aggregate covering the batch:
   stats              — object: { totalPosts, topCategories: {label: count}, topBrands: {brand: count} }
 
 OUTPUT FORMAT
-Return a single JSON object with two keys: "perPost" (array, one entry per input post) and "dailySummary" (one object). The output WILL be validated against a Zod schema and any extra/missing/wrong-shape fields will cause failure. Match the field names exactly.`;
+Return a single JSON object with two keys: "perPost" (array, one entry per input post) and "dailySummary" (one object). The output WILL be validated against a Zod schema and any extra/missing/wrong-shape fields will cause failure. Match the field names exactly.
+
+CRITICAL — FORMATTING RULES
+- Output ONLY the JSON object. Start your response with the opening "{" character.
+- NO markdown code fences (do not wrap in \`\`\`json or \`\`\`).
+- NO leading or trailing prose, explanation, apology, or commentary.
+- NO trailing comments after the closing "}".
+- camelCase field names exactly as listed (e.g. "feedItemId" not "feed_item_id").`;
 
 // ── Zod schema for Sonnet's output ────────────────────────────────────────
 
@@ -203,6 +210,45 @@ async function logCost(args: {
   });
 }
 
+/**
+ * Diagnostic error sink. Anything thrown inside classify or upsert is
+ * recorded here BEFORE re-throwing, so future failures are SQL-queryable
+ * via cost_telemetry without needing Inngest dashboard access:
+ *
+ *   SELECT created_at, operation, metadata
+ *   FROM cost_telemetry
+ *   WHERE feature = 'reddit-intel-error'
+ *   ORDER BY created_at DESC
+ *   LIMIT 5;
+ */
+async function logFunctionError(args: {
+  step: string;
+  cohortDate: string;
+  postCount: number;
+  error: unknown;
+}) {
+  const supabase = createServiceClient();
+  if (!supabase) return;
+
+  const err = args.error;
+  await supabase.from("cost_telemetry").insert({
+    feature: "reddit-intel-error",
+    provider: "diagnostic",
+    operation: args.step,
+    units: 0,
+    estimated_cost_usd: 0,
+    metadata: {
+      error_message: err instanceof Error ? err.message : String(err),
+      error_name: err instanceof Error ? err.name : "Unknown",
+      error_stack:
+        err instanceof Error ? (err.stack ?? "").slice(0, 2000) : "",
+      cohort_date: args.cohortDate,
+      post_count: args.postCount,
+      prompt_version: PROMPT_VERSION,
+    },
+  });
+}
+
 // ── The Inngest function ──────────────────────────────────────────────────
 
 export const redditIntelDaily = inngest.createFunction(
@@ -267,6 +313,9 @@ export const redditIntelDaily = inngest.createFunction(
     }
 
     // ── Step 2: single Sonnet call ───────────────────────────────────────
+    const cohortDateForLog = new Date(data.triggeredAt)
+      .toISOString()
+      .slice(0, 10);
     const classification = await step.run("classify", async () => {
       // Build the user payload as a JSON envelope. The wrapper auto-applies
       // sandwich-defence: even though we trust the envelope structure, the
@@ -286,25 +335,35 @@ export const redditIntelDaily = inngest.createFunction(
         })),
       };
 
-      const response = await callClaudeJson<SonnetOutput>({
-        model: "SONNET_4_6",
-        system: SYSTEM_PROMPT,
-        user: JSON.stringify(envelope),
-        schema: SonnetOutputSchema,
-        // Per-post output ~150 tokens × 40 max + summary ~600 = 6,600.
-        // Cap at 12k for ~80% headroom — Sonnet billing is on actual
-        // usage so over-allocating costs nothing.
-        maxTokens: 12_000,
-        // 240s = 4 min. Sonnet 4.6 outputs at ~50-100 tokens/sec, so 12k
-        // worst-case output finishes in ~4 min. The original 90s timeout
-        // killed the first prod fire of a 200-post batch (output would
-        // have taken ~6 min). Inngest function-level limit is 15 min so
-        // we still have headroom to retry without hitting that ceiling.
-        timeoutMs: 240_000,
-        cacheSystem: true,
-      });
-
-      return response;
+      try {
+        const response = await callClaudeJson<SonnetOutput>({
+          model: "SONNET_4_6",
+          system: SYSTEM_PROMPT,
+          user: JSON.stringify(envelope),
+          schema: SonnetOutputSchema,
+          // Per-post output ~150 tokens × 40 max + summary ~600 = 6,600.
+          // Cap at 12k for ~80% headroom — Sonnet billing is on actual
+          // usage so over-allocating costs nothing.
+          maxTokens: 12_000,
+          // 240s = 4 min. Sonnet 4.6 outputs at ~50-100 tokens/sec, so 12k
+          // worst-case output finishes in ~4 min. Inngest function-level
+          // limit is 15 min so retries still have headroom.
+          timeoutMs: 240_000,
+          // No assistant prefill in the wrapper anymore (Sonnet 4.6 rejects
+          // it). cacheSystem stays on — wrapper still requests cache, just
+          // without the prefill scaffolding.
+          cacheSystem: true,
+        });
+        return response;
+      } catch (err) {
+        await logFunctionError({
+          step: "classify",
+          cohortDate: cohortDateForLog,
+          postCount: posts.length,
+          error: err,
+        });
+        throw err;
+      }
     });
 
     // ── Step 3: filter hallucinated post IDs ─────────────────────────────
