@@ -95,7 +95,7 @@ For each post, return:
   tacticTags         — array of social-engineering tactics: urgency_window, authority_appeal, celebrity_endorsement, reciprocity, scarcity, fear_of_missing_out, isolation, time_pressure, fake_legitimacy, account_takeover_threat, romance_grooming.
   countryHints       — array of ISO 3166-1 alpha-2 country codes inferred from the post (e.g. ["AU"], ["AU", "NZ"]). Empty if not inferrable.
   narrativeSummary   — one neutral sentence (≤30 words) describing what happened.
-  quotes             — array of up to 3 PII-scrubbed verbatim quotes from the post. Each quote ≤140 characters. Pick quotes that are characteristic of the scam tactic (e.g. exact pressure phrases used by the scammer). NEVER include the victim's name, location, employer, or other identifying info. Each quote object: { text, speakerRole: 'victim'|'scammer'|'witness'|'unknown', themeTag, confidence }.
+  quotes             — array of up to 3 PII-scrubbed verbatim quotes from the post. **HARD LIMIT: each quote MUST be ≤140 characters. Count carefully — quotes longer than 140 chars will be truncated. Trim aggressively if needed.** Pick quotes that are characteristic of the scam tactic (e.g. exact pressure phrases used by the scammer). NEVER include the victim's name, location, employer, or other identifying info. Each quote object: { text, speakerRole: 'victim'|'scammer'|'witness'|'unknown', themeTag, confidence }.
 
 DAILY AGGREGATE OUTPUT
 After all per-post entries, produce ONE aggregate covering the batch:
@@ -117,7 +117,16 @@ CRITICAL — FORMATTING RULES
 // ── Zod schema for Sonnet's output ────────────────────────────────────────
 
 const QuoteSchema = z.object({
-  text: z.string().min(1).max(140),
+  // Truncate to 140 chars rather than reject the whole batch. Sonnet's
+  // prompt asks for ≤140 but it occasionally violates (~3/40 in the
+  // 2026-05-02 prod batch). Schema rejecting the whole response means
+  // re-trying 3× and burning ~$0.50 of Sonnet on the same violation.
+  // The DB CHECK constraint stays at 140, so truncated values land
+  // cleanly in reddit_intel_quotes.quote_text without further pruning.
+  text: z
+    .string()
+    .min(1)
+    .transform((s) => (s.length <= 140 ? s : s.slice(0, 137) + "…")),
   speakerRole: z.enum(["victim", "scammer", "witness", "unknown"]).default("unknown"),
   themeTag: z.string().max(60).nullish(),
   confidence: z.number().min(0).max(1).default(0.7),
