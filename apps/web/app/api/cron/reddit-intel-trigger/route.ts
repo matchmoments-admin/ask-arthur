@@ -27,7 +27,20 @@ export const dynamic = "force-dynamic";
 // Gate: featureFlags.redditIntelIngest. When OFF the cron returns
 // `skipped: true` without querying — cheap and safe.
 
-const BATCH_SIZE = 200; // Matches RedditIntelBatchReadyDataSchema.feedItemIds max.
+// Sized for the daily Sonnet 4.6 call: at ~150 output tokens per post + a
+// 200-300 word daily summary (~600 tokens), 40 posts produces ~7k output
+// tokens which Sonnet 4.6 streams in ~90-120s. Combined with the 240s SDK
+// timeout in reddit-intel-daily.ts that leaves ~50% headroom for slow
+// Sonnet days and the ~30s of input upload + JSON parse overhead. Going
+// higher risks SDK-timeout / output-truncation cascades that burn tokens
+// on retries with no successful outcome.
+//
+// At ~38 posts/day actual Reddit volume, one cron tick per day is the
+// steady state. Backlog from a longer outage is drained at 40 posts every
+// 6 hours = 160/day catch-up rate. The original BATCH_SIZE=200 looked
+// reasonable on paper but caused the first prod fire to time out — see
+// the v82-followup PR description for the post-mortem.
+const BATCH_SIZE = 40;
 const CANDIDATE_WINDOW = 1_000; // Candidates examined per run before NOT-IN filter.
 
 export async function GET(req: Request) {

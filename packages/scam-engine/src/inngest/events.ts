@@ -125,9 +125,12 @@ export function parseAnalyzeCompletedData(raw: unknown): AnalyzeCompletedData {
 // row is updated between trigger and consume.
 
 export const RedditIntelBatchReadyDataSchema = z.object({
-  // feed_items.id is bigint; pass as JS numbers. Cap batches at 200 because
-  // a single Sonnet call's prompt budget caps out around there.
-  feedItemIds: z.array(z.number().int().positive()).min(1).max(200),
+  // feed_items.id is bigint; pass as JS numbers. Schema-level guardrail at 60
+  // sits just above the cron's BATCH_SIZE=40 — refuses oversized batches
+  // even if the cron is mis-tuned, but allows the backfill script's manual
+  // dispatches small headroom. The original max(200) caused a prod timeout;
+  // see apps/web/app/api/cron/reddit-intel-trigger/route.ts for details.
+  feedItemIds: z.array(z.number().int().positive()).min(1).max(60),
   triggeredAt: z.string().datetime(),
 });
 export type RedditIntelBatchReadyData = z.infer<

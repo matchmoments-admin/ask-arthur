@@ -291,10 +291,16 @@ export const redditIntelDaily = inngest.createFunction(
         system: SYSTEM_PROMPT,
         user: JSON.stringify(envelope),
         schema: SonnetOutputSchema,
-        // Per-post output ~150 tokens × 200 max + summary ~600 = 30,600 cap.
-        // Round up for safety; Sonnet billing is on actual usage.
-        maxTokens: 32_000,
-        timeoutMs: 90_000,
+        // Per-post output ~150 tokens × 40 max + summary ~600 = 6,600.
+        // Cap at 12k for ~80% headroom — Sonnet billing is on actual
+        // usage so over-allocating costs nothing.
+        maxTokens: 12_000,
+        // 240s = 4 min. Sonnet 4.6 outputs at ~50-100 tokens/sec, so 12k
+        // worst-case output finishes in ~4 min. The original 90s timeout
+        // killed the first prod fire of a 200-post batch (output would
+        // have taken ~6 min). Inngest function-level limit is 15 min so
+        // we still have headroom to retry without hitting that ceiling.
+        timeoutMs: 240_000,
         cacheSystem: true,
       });
 
