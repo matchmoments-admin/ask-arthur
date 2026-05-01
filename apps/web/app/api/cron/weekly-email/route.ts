@@ -55,19 +55,56 @@ export async function GET(req: NextRequest) {
 
       const tweetDraft = buildWeeklyTweetDraft(intel);
 
-      await sendWeeklyIntelDigest(recipients, {
-        weekStart: intel.weekStart,
-        weekEnd: intel.weekEnd,
-        totalPostsClassified: intel.totalPostsClassified,
-        leadNarrative: intel.latestLeadNarrative,
-        emergingThemes: intel.emergingThemes,
-        topBrands: intel.topBrands,
-        topCategories: intel.topCategories,
-        scamOfTheWeekQuote: intel.scamOfTheWeekQuote,
-        tweetDraft,
-        modelVersion: intel.modelVersion,
-        promptVersion: intel.promptVersion,
-      });
+      try {
+        await sendWeeklyIntelDigest(recipients, {
+          weekStart: intel.weekStart,
+          weekEnd: intel.weekEnd,
+          totalPostsClassified: intel.totalPostsClassified,
+          leadNarrative: intel.latestLeadNarrative,
+          emergingThemes: intel.emergingThemes,
+          topBrands: intel.topBrands,
+          topCategories: intel.topCategories,
+          scamOfTheWeekQuote: intel.scamOfTheWeekQuote,
+          tweetDraft,
+          modelVersion: intel.modelVersion,
+          promptVersion: intel.promptVersion,
+        });
+      } catch (err) {
+        // Log the failure to cost_telemetry so it's queryable alongside
+        // the Inngest function errors at feature='reddit-intel-error'.
+        // Keep the original error in the response body so the cron's
+        // failed-status visibility surfaces it immediately.
+        const errorMessage =
+          err instanceof Error ? err.message : String(err);
+        const errorStack =
+          err instanceof Error ? (err.stack ?? "").slice(0, 2000) : "";
+        logger.error("weekly-email: intel digest send failed", {
+          error: errorMessage,
+          recipients: recipients.length,
+        });
+        await supabase.from("cost_telemetry").insert({
+          feature: "reddit-intel-error",
+          provider: "diagnostic",
+          operation: "weekly-email-send",
+          units: 0,
+          estimated_cost_usd: 0,
+          metadata: {
+            error_message: errorMessage,
+            error_stack: errorStack,
+            recipients_count: recipients.length,
+            cohort_range: `${intel.weekStart} → ${intel.weekEnd}`,
+            themes: intel.emergingThemes.length,
+          },
+        });
+        return NextResponse.json(
+          {
+            error: "weekly_intel_send_failed",
+            message: errorMessage,
+            cohortRange: `${intel.weekStart} → ${intel.weekEnd}`,
+          },
+          { status: 500 },
+        );
+      }
 
       return NextResponse.json({
         message: `Sent weekly intel digest to ${recipients.length} recipient${recipients.length === 1 ? "" : "s"}`,
