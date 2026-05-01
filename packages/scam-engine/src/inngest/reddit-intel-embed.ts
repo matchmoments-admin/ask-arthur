@@ -27,6 +27,7 @@ import {
   parseRedditIntelSummarisedData,
 } from "./events";
 import { embed } from "../embeddings";
+import { logFunctionError } from "./reddit-intel-error-log";
 
 interface IntelRowForEmbed {
   id: string;
@@ -142,9 +143,27 @@ export const redditIntelEmbed = inngest.createFunction(
     }
 
     // ── Step 2: call Voyage / OpenAI ─────────────────────────────────────
+    // Most likely failure mode: VOYAGE_API_KEY missing from Vercel env, or
+    // Voyage hits a rate-limit / outage. The catch writes the error to
+    // cost_telemetry feature='reddit-intel-error' so it's SQL-queryable.
+    // Inngest still retries 3x per its function-level config — the catch
+    // is purely additive logging.
     const result = await step.run("embed", async () => {
-      const texts = rows.map(buildEmbedText);
-      return embed(texts);
+      try {
+        const texts = rows.map(buildEmbedText);
+        return await embed(texts);
+      } catch (err) {
+        await logFunctionError({
+          step: "embed",
+          cohortDate: data.cohortDate,
+          postCount: rows.length,
+          error: err,
+          extra: {
+            embedding_provider: process.env.EMBEDDING_PROVIDER ?? "voyage",
+          },
+        });
+        throw err;
+      }
     });
 
     if (result.vectors.length !== rows.length) {
