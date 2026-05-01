@@ -42,7 +42,7 @@ export function buildWeeklyTweetDraft(intel: WeeklyRedditIntel): string {
   lines.push(`- ${intel.totalPostsClassified} posts classified`);
   lines.push(`More: ${LINK}`);
 
-  let draft = lines.join("\n");
+  const draft = lines.join("\n");
   if (draft.length <= MAX_CHARS) return draft;
 
   // Over budget — drop lines from the bottom (keep header + first signal +
