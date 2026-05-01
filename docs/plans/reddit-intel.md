@@ -1,9 +1,12 @@
 # Reddit Scam Intelligence — Build Plan
 
-**Status:** **CODE COMPLETE 2026-05-01** — all 10 PRs merged, awaiting (a)
-operator Resync click in Inngest dashboard for `reddit-intel-daily` /
-`-embed` / `-cluster` to register, (b) privacy advisor sign-off on the
-180d/365d retention windows before pre-180d data is reachable.
+**Status:** **CODE COMPLETE 2026-05-02** — 14 PRs merged, Inngest functions
+registered + producing data in prod (Wave 1 verified: 40 intel rows + 6
+quotes + 1 daily summary on first successful classifier run). Awaiting:
+(a) cluster pipeline producing first themes (depends on Voyage embed
+succeeding now that VOYAGE_API_KEY is set),
+(b) privacy advisor sign-off on the 180d/365d retention windows before
+pre-180d data is reachable.
 **Owner:** brendan
 **Source brief:** internal design brief dated 30 April 2026 — 13 prioritised
 features (F-01..F-13) across three waves, narrative-extraction layer over the
@@ -21,6 +24,10 @@ Shipped commits on `main`:
 - `6d55665` #64 Wave 3 PR2 — retention cron + PIA + Reddit-ToS docs
 - `362246d` #61 Wave 2 PR2 — RedditIntelPanel dashboard widget
 - `23668c2` #62 Wave 2 PR3 — weekly email v2 + tweet draft generator
+- `0036bb3` #65 Plan doc status update
+- `68bdff6` #66 Drop assistant prefill (Sonnet 4.6 rejects it) + JSON extraction
+- `281ae17` #67 Unify diagnostic error sink across daily/embed/cluster
+- (this PR) #68 reddit-intel cost brake — auto-pauses pipeline at $10/day
 
 Feature flags (all default OFF, flip in Vercel env):
 
@@ -31,6 +38,27 @@ Feature flags (all default OFF, flip in Vercel env):
 
 Steady-state cost projection: **~A\$10–12/month** Anthropic + Voyage,
 well below the A\$50 cost-daily-check alert.
+
+Cost safety nets (defence-in-depth):
+
+1. **Per-call timeouts + maxTokens caps** on every Sonnet call.
+2. **Inngest retries hard-capped at 3** per event — no infinite loops.
+3. **`feature_brakes.reddit_intel`** auto-engages when a day's
+   reddit-intel-\* spend exceeds `REDDIT_INTEL_CAP_USD` (default \$10).
+   Sets `paused_until = now() + 24h`. All three Inngest functions check
+   this at the top of their handler and short-circuit. Operator override:
+   `DELETE FROM feature_brakes WHERE feature='reddit_intel'`.
+4. **Telegram alert** at \$2 USD/day total spend (existing
+   `cost-daily-check` cron, every 6h).
+5. **Diagnostic error log** at `cost_telemetry WHERE
+feature='reddit-intel-error'` — every classify/embed/name failure
+   writes a row with the error message + stack for SQL-queryable triage
+   without needing Inngest dashboard access.
+
+Worst-case bound if everything fails permanently: ~\$3/day until the
+brake fires at \$10/day OR the Telegram alert triggers at \$2/day —
+whichever comes first. Total uncontrolled burn: **<\$3 USD before any
+human intervention**.
 
 This document is the durable working plan. It captures locked decisions,
 codebase reality checks, the executable sequence, and the ops constraints

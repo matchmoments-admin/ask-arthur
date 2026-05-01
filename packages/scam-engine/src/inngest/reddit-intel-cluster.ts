@@ -35,7 +35,7 @@ import {
   parseRedditIntelEmbeddedData,
 } from "./events";
 import { callClaudeJson } from "../anthropic";
-import { logFunctionError } from "./reddit-intel-error-log";
+import { logFunctionError, isRedditIntelBraked } from "./reddit-intel-error-log";
 
 const COSINE_THRESHOLD = 0.78;
 const MIN_MEMBERS_FOR_NAMING = 3;
@@ -184,6 +184,11 @@ export const redditIntelCluster = inngest.createFunction(
   async ({ event, step }) => {
     if (!featureFlags.redditIntelIngest) {
       return { skipped: true, reason: "redditIntelIngest flag off" };
+    }
+
+    const braked = await step.run("check-cost-brake", isRedditIntelBraked);
+    if (braked) {
+      return { paused: true, reason: "feature_brakes.reddit_intel is set" };
     }
 
     const data = await step.run("parse-event", () =>

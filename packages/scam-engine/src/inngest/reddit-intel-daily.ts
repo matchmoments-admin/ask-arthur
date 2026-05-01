@@ -33,7 +33,7 @@ import {
   parseRedditIntelBatchReadyData,
 } from "./events";
 import { callClaudeJson } from "../anthropic";
-import { logFunctionError } from "./reddit-intel-error-log";
+import { logFunctionError, isRedditIntelBraked } from "./reddit-intel-error-log";
 
 // ── Versioning ────────────────────────────────────────────────────────────
 // Bump PROMPT_VERSION whenever the system prompt or output schema changes.
@@ -230,6 +230,16 @@ export const redditIntelDaily = inngest.createFunction(
   async ({ event, step }) => {
     if (!featureFlags.redditIntelIngest) {
       return { skipped: true, reason: "redditIntelIngest flag off" };
+    }
+
+    // Cost brake — cost-daily-check sets feature_brakes.reddit_intel when
+    // the day's reddit-intel-* spend crosses REDDIT_INTEL_CAP_USD (default
+    // $10). Returning early here prevents continued Sonnet/Voyage burn
+    // until the brake expires (24h later). Operator overrides via DELETE
+    // FROM feature_brakes WHERE feature='reddit_intel'.
+    const braked = await step.run("check-cost-brake", isRedditIntelBraked);
+    if (braked) {
+      return { paused: true, reason: "feature_brakes.reddit_intel is set" };
     }
 
     const data = await step.run("parse-event", () =>
