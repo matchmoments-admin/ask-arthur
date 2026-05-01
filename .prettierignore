@@ -1,0 +1,10 @@
+.github/
+node_modules/
+.next/
+.turbo/
+.vercel/
+dist/
+build/
+out/
+coverage/
+pnpm-lock.yaml
