@@ -33,6 +33,7 @@ import {
   parseRedditIntelBatchReadyData,
 } from "./events";
 import { callClaudeJson } from "../anthropic";
+import { logFunctionError } from "./reddit-intel-error-log";
 
 // ── Versioning ────────────────────────────────────────────────────────────
 // Bump PROMPT_VERSION whenever the system prompt or output schema changes.
@@ -210,44 +211,9 @@ async function logCost(args: {
   });
 }
 
-/**
- * Diagnostic error sink. Anything thrown inside classify or upsert is
- * recorded here BEFORE re-throwing, so future failures are SQL-queryable
- * via cost_telemetry without needing Inngest dashboard access:
- *
- *   SELECT created_at, operation, metadata
- *   FROM cost_telemetry
- *   WHERE feature = 'reddit-intel-error'
- *   ORDER BY created_at DESC
- *   LIMIT 5;
- */
-async function logFunctionError(args: {
-  step: string;
-  cohortDate: string;
-  postCount: number;
-  error: unknown;
-}) {
-  const supabase = createServiceClient();
-  if (!supabase) return;
-
-  const err = args.error;
-  await supabase.from("cost_telemetry").insert({
-    feature: "reddit-intel-error",
-    provider: "diagnostic",
-    operation: args.step,
-    units: 0,
-    estimated_cost_usd: 0,
-    metadata: {
-      error_message: err instanceof Error ? err.message : String(err),
-      error_name: err instanceof Error ? err.name : "Unknown",
-      error_stack:
-        err instanceof Error ? (err.stack ?? "").slice(0, 2000) : "",
-      cohort_date: args.cohortDate,
-      post_count: args.postCount,
-      prompt_version: PROMPT_VERSION,
-    },
-  });
-}
+// logFunctionError is now shared with the embed and cluster functions —
+// see ./reddit-intel-error-log.ts. Same cost_telemetry feature tag, same
+// SQL-queryable diagnostic format.
 
 // ── The Inngest function ──────────────────────────────────────────────────
 
@@ -361,6 +327,7 @@ export const redditIntelDaily = inngest.createFunction(
           cohortDate: cohortDateForLog,
           postCount: posts.length,
           error: err,
+          promptVersion: PROMPT_VERSION,
         });
         throw err;
       }

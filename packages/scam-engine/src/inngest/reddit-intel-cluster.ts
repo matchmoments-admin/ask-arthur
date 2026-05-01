@@ -35,6 +35,7 @@ import {
   parseRedditIntelEmbeddedData,
 } from "./events";
 import { callClaudeJson } from "../anthropic";
+import { logFunctionError } from "./reddit-intel-error-log";
 
 const COSINE_THRESHOLD = 0.78;
 const MIN_MEMBERS_FOR_NAMING = 3;
@@ -447,24 +448,41 @@ export const redditIntelCluster = inngest.createFunction(
         }));
       }
 
-      const namingResponse = await callClaudeJson<
-        z.infer<typeof NamingOutputSchema>
-      >({
-        model: "SONNET_4_6",
-        system: NAMING_SYSTEM_PROMPT,
-        user: JSON.stringify({
-          instruction:
-            "Name each theme cluster. Match the input themeIds exactly.",
-          themes: themeIds.map((tid) => ({
-            themeId: tid,
-            samples: samples[tid],
-          })),
-        }),
-        schema: NamingOutputSchema,
-        maxTokens: 4_000,
-        timeoutMs: 60_000,
-        cacheSystem: true,
-      });
+      // Wrap Sonnet naming so any failure (model rejecting prefill, schema
+      // validation fail, JSON parse fail, rate-limit) lands in cost_telemetry
+      // feature='reddit-intel-error' for SQL-queryable triage. Inngest still
+      // retries via the function-level retries: 3 — the catch is additive.
+      let namingResponse;
+      try {
+        namingResponse = await callClaudeJson<
+          z.infer<typeof NamingOutputSchema>
+        >({
+          model: "SONNET_4_6",
+          system: NAMING_SYSTEM_PROMPT,
+          user: JSON.stringify({
+            instruction:
+              "Name each theme cluster. Match the input themeIds exactly.",
+            themes: themeIds.map((tid) => ({
+              themeId: tid,
+              samples: samples[tid],
+            })),
+          }),
+          schema: NamingOutputSchema,
+          maxTokens: 4_000,
+          timeoutMs: 60_000,
+          cacheSystem: true,
+        });
+      } catch (err) {
+        await logFunctionError({
+          step: "name-pending-themes",
+          cohortDate: data.cohortDate,
+          postCount: themeIds.length,
+          error: err,
+          promptVersion: NAMING_PROMPT_VERSION,
+          extra: { theme_count: themeIds.length },
+        });
+        throw err;
+      }
 
       let named = 0;
       const validInputIds = new Set(themeIds);
