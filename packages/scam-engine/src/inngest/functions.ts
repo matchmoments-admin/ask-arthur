@@ -25,6 +25,11 @@ import { onAnalyzeFailed } from "./analyze-failure";
 // Reddit Intel Wave 1: daily batched classifier triggered by cron poller.
 import { redditIntelDaily } from "./reddit-intel-daily";
 
+// Reddit Intel Wave 2: embed newly classified posts (Voyage 3 default)
+// then greedy-cluster them into themes + name pending themes via Sonnet.
+import { redditIntelEmbed } from "./reddit-intel-embed";
+import { redditIntelCluster } from "./reddit-intel-cluster";
+
 export const inngestFunctions = [
   stalenessCheck,
   stalenessCheckIPs,
@@ -48,4 +53,7 @@ export const inngestFunctions = [
   onAnalyzeFailed,
   // Reddit Intel Wave 1
   redditIntelDaily,
+  // Reddit Intel Wave 2
+  redditIntelEmbed,
+  redditIntelCluster,
 ];

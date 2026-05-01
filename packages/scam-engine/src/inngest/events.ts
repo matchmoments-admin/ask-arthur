@@ -183,6 +183,38 @@ export function parseRedditIntelSummarisedData(
   return RedditIntelSummarisedDataSchema.parse(raw);
 }
 
+// ── reddit.intel.embedded.v1 ─────────────────────────────────────────────
+//
+// Emitted by the embed function after writing Voyage 3 (or OpenAI fallback)
+// vectors back to reddit_post_intel.embedding for a cohort of newly
+// classified posts. The cluster function listens to this and runs greedy
+// theme assignment.
+
+export const RedditIntelEmbeddedDataSchema = z.object({
+  cohortDate: z.string().date(),
+  postsEmbedded: z.number().int().nonnegative(),
+  embeddingProvider: z.enum(["voyage", "openai"]),
+  modelId: z.string(),
+});
+export type RedditIntelEmbeddedData = z.infer<
+  typeof RedditIntelEmbeddedDataSchema
+>;
+
+export const REDDIT_INTEL_EMBEDDED_EVENT =
+  "reddit.intel.embedded.v1" as const;
+
+export interface RedditIntelEmbeddedEvent {
+  name: typeof REDDIT_INTEL_EMBEDDED_EVENT;
+  id: string;
+  data: RedditIntelEmbeddedData;
+}
+
+export function parseRedditIntelEmbeddedData(
+  raw: unknown,
+): RedditIntelEmbeddedData {
+  return RedditIntelEmbeddedDataSchema.parse(raw);
+}
+
 // ── reddit.intel.themes_recomputed.v1 ────────────────────────────────────
 //
 // Emitted by the weekly clustering function after refreshing
