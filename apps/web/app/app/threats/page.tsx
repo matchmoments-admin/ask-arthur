@@ -1,6 +1,8 @@
 import { requireAuth } from "@/lib/auth";
 import { getRecentThreats } from "@/lib/dashboard";
 import ThreatFeed from "@/components/dashboard/ThreatFeed";
+import RedditIntelPanel from "@/components/dashboard/RedditIntelPanel";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 
 export default async function ThreatsPage() {
   await requireAuth();
@@ -14,6 +16,8 @@ export default async function ThreatsPage() {
           All detected threat entities across scam reports, ordered by most recent activity.
         </p>
       </div>
+
+      {featureFlags.redditIntelDashboard && <RedditIntelPanel />}
 
       <ThreatFeed entities={threats} />
     </div>
