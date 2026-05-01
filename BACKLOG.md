@@ -207,6 +207,17 @@ Infrastructure is in place (v38–v40). Future work:
 
 - [ ] Fix broken scrapers (manual-only, low priority): ThreatFox (401 — API key expired), crt.sh (NoneType `.strip()` — null domain bug), PhishStats (95s timeout — upstream slow/down), CryptoScamDB (404 — GitHub source gone, likely dead)
 
+## Reddit Scam Intelligence — priority watch
+
+Plan: [docs/plans/reddit-intel.md](./docs/plans/reddit-intel.md). All 14 PRs (#55–#68) merged 2026-05-02; pipeline is live and producing data within cost budget. Active watch items:
+
+- [ ] **🔴 Cluster threshold tuning** (priority: HIGH) — initial 0.78 produced 77 themes for 77 posts (1:1 ratio, no grouping). Lowered to 0.62 empirically on 2026-05-02 (this commit). After ~3 days of fresh batches at the new threshold, query `SELECT count(*) AS themes, max(member_count), avg(member_count), percentile_cont(0.5) WITHIN GROUP (ORDER BY member_count) AS p50_size FROM reddit_intel_themes WHERE is_active=true`. Healthy distribution: 5–15 themes per batch with a long tail of single-post outliers and the top 3 themes having 5+ members each. If still 1:1 → drop to 0.55 OR simplify embed text to narrative-only (requires bulk re-embed). If themes balloon to 50+ members → bump back to 0.70.
+- [ ] **OpenAPI spec rewrite** for `/api/v1/intel/*` endpoints — `apps/web/app/api/v1/openapi.json` predates v82. Tracked in PR #63 description as low-priority.
+- [ ] **B2B exec brief variant** of the weekly email — F-10 from the original brief proposed a separate audience='b2b' digest with sector-exposure framing. Defer until first paying B2B customer asks; current digest is operator-only.
+- [ ] **Privacy advisor sign-off** on retention windows (180d body NULL, 365d quote DELETE) — non-blocking until first row hits 180d (~Nov 2026 at earliest). Docs at `docs/compliance/reddit-intel-privacy-impact.md`.
+- [ ] **Reddit OAuth migration** — current scraper uses unauthenticated JSON endpoints; migrate to PRAW-style OAuth when subscriber count crosses 1k or Reddit's Public Content Policy materially tightens. Roadmap in `docs/compliance/reddit-intel-reddit-tos.md`.
+- [ ] **Formal takedown runbook** — currently described as "manual SQL" in the Reddit ToS doc §6. Could formalise into a step-by-step ops playbook when the first takedown notice arrives.
+
 ## Cost Observability & Infrastructure
 
 Related to Phase 13 in `ROADMAP.md`. Items that need action before (or as) we hit the relevant trigger.

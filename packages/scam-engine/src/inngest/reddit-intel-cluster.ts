@@ -13,11 +13,24 @@
 //   * Stays out of Postgres-stored-procedure-debugging hell.
 //   * pgvector strings (`[1.2,3.4,...]`) are easy to parse / serialise.
 //
-// The threshold is intentionally tuned for stable, narrow themes:
-//   * 0.78 = "same scam pattern, possibly different brand"
-//   * 0.85 = "near-duplicate"
-//   * 0.65 = "loosely related" (too loose — produces blob clusters)
-// Revisit only if the Wave 2 dashboard surfaces theme drift.
+// Threshold history (empirical, BACKLOG.md tracks this as priority watch):
+//   * 0.78 (initial) — TOO STRICT. First two prod batches produced 77 themes
+//     for 77 clustered posts, biggest theme = 1 member. Naming never fired
+//     because no theme reached the ≥3-member threshold.
+//   * 0.62 (current, 2026-05-02) — empirical compromise. The composite embed
+//     text we use (`category:X | brands:Y | tactic:Z | narrative:...`)
+//     varies per-post even when narratives are similar; 0.78 was capturing
+//     "near-duplicate" rather than "same scam family". Revisit if either
+//     (a) themes start ballooning (member_count >50 each — too loose) or
+//     (b) themes still don't form (still 1-1 ratio — try 0.55 or simplify
+//         embed text to narrative-only).
+//
+// Reference points on Voyage 3's distribution:
+//   ~0.85+ = near-duplicate text
+//   ~0.78  = same scam, possibly different brand
+//   ~0.62  = same scam family / category
+//   ~0.50  = loosely topical
+//   ~0.30  = unrelated
 //
 // Idempotency: a post is only assigned if reddit_post_intel.theme_id IS
 // NULL. Re-firing the same event for the same cohort assigns nothing new.
@@ -37,7 +50,7 @@ import {
 import { callClaudeJson } from "../anthropic";
 import { logFunctionError, isRedditIntelBraked } from "./reddit-intel-error-log";
 
-const COSINE_THRESHOLD = 0.78;
+const COSINE_THRESHOLD = 0.62;
 const MIN_MEMBERS_FOR_NAMING = 3;
 const NAMING_PROMPT_VERSION = "reddit-cluster-naming-v1@2026-05-01";
 
