@@ -1,14 +1,40 @@
 # Reddit Scam Intelligence — Build Plan
 
-**Status:** active, pre-work scaffolding in flight (2026-05-01)
+**Status:** **CODE COMPLETE 2026-05-01** — all 10 PRs merged, awaiting (a)
+operator Resync click in Inngest dashboard for `reddit-intel-daily` /
+`-embed` / `-cluster` to register, (b) privacy advisor sign-off on the
+180d/365d retention windows before pre-180d data is reachable.
 **Owner:** brendan
 **Source brief:** internal design brief dated 30 April 2026 — 13 prioritised
 features (F-01..F-13) across three waves, narrative-extraction layer over the
 existing daily Reddit scrape.
 
-This document is the durable working plan, not the source brief. It captures
-locked decisions, codebase reality checks, the executable sequence, and the
-ops constraints that informed each call. Read this before resuming work.
+Shipped commits on `main`:
+
+- `c434058` #55 pre-work scaffolding (v82 migration, helpers, flags)
+- `01508a5` #56 Wave 1 — daily Sonnet classifier + cron trigger
+- `9502492` #57 Wave 1 hotfix — BATCH_SIZE 200→40, timeout 90s→240s
+- `bd00bee` #58 Inngest SDK 3.27→3.54 (CVE-2026-42047)
+- `d0f5a56` #59 phone-footprint concurrency 10→5 (Inngest plan limit)
+- `3232683` #60 Wave 2 PR1 — Voyage embed + greedy pgvector clustering
+- `35f6259` #63 Wave 3 PR1 — `/api/v1/intel/*` B2B API
+- `6d55665` #64 Wave 3 PR2 — retention cron + PIA + Reddit-ToS docs
+- `362246d` #61 Wave 2 PR2 — RedditIntelPanel dashboard widget
+- `23668c2` #62 Wave 2 PR3 — weekly email v2 + tweet draft generator
+
+Feature flags (all default OFF, flip in Vercel env):
+
+- `FF_REDDIT_INTEL_INGEST` — gates the cron trigger + daily classifier
+- `NEXT_PUBLIC_FF_REDDIT_INTEL_DASHBOARD` — gates the threats-page widget
+- `FF_REDDIT_INTEL_EMAIL` — gates the weekly intel digest send
+- `NEXT_PUBLIC_FF_REDDIT_INTEL_B2B_API` — gates `/api/v1/intel/*` (returns 503 when off)
+
+Steady-state cost projection: **~A\$10–12/month** Anthropic + Voyage,
+well below the A\$50 cost-daily-check alert.
+
+This document is the durable working plan. It captures locked decisions,
+codebase reality checks, the executable sequence, and the ops constraints
+that informed each call. Read this before any future work in the area.
 
 ---
 
