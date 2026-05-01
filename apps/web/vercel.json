@@ -39,6 +39,10 @@
     {
       "path": "/api/cron/ensure-partitions",
       "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/cron/reddit-intel-trigger",
+      "schedule": "0 */6 * * *"
     }
   ],
   "functions": {

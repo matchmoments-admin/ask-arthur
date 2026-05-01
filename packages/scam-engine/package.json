@@ -36,6 +36,7 @@
     "./push-sender": "./src/push-sender.ts",
     "./inngest/scam-alerts": "./src/inngest/scam-alerts.ts",
     "./inngest/feed-sync": "./src/inngest/feed-sync.ts",
+    "./inngest/reddit-intel-daily": "./src/inngest/reddit-intel-daily.ts",
     "./ipqualityscore": "./src/ipqualityscore.ts",
     "./inngest/meta-brp-report": "./src/inngest/meta-brp-report.ts",
     "./phone-footprint": "./src/phone-footprint/index.ts"
