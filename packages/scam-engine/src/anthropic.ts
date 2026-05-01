@@ -167,17 +167,17 @@ export async function callClaudeJson<T>(
       ]
     : system;
 
+  // No assistant prefill — Sonnet 4.6 (and likely future models) reject the
+  // pattern with `400 invalid_request_error: This model does not support
+  // assistant message prefill`. We rely on the system prompt's "Return JSON
+  // only" instruction + extractJson() below, which tolerates markdown
+  // fences and leading prose if the model decides to add them.
   const response = await client.messages.create(
     {
       model: spec.id,
       max_tokens: maxTokens,
       system: systemBlock,
-      messages: [
-        { role: "user", content: userContent },
-        // Assistant prefill — forces JSON output. The leading `{` is stripped
-        // from the response by the SDK, so we re-prepend before parsing.
-        { role: "assistant", content: [{ type: "text", text: "{" }] },
-      ],
+      messages: [{ role: "user", content: userContent }],
     },
     { timeout: timeoutMs },
   );
@@ -196,12 +196,15 @@ export async function callClaudeJson<T>(
     usage.cacheWriteTokens * spec.cacheWriteUsdPerToken +
     usage.cacheReadTokens * spec.cacheReadUsdPerToken;
 
-  // Concatenate text blocks and re-prepend the prefilled `{`.
+  // Concatenate text blocks. Without prefill, models may emit markdown
+  // fences (```json ... ```) or leading prose before the JSON. extractJson
+  // finds the first `{` to its matching last `}` (or `[` to `]`) and
+  // tolerates both wrappers.
   const rawText = response.content
     .filter((b): b is Anthropic.Messages.TextBlock => b.type === "text")
     .map((b) => b.text)
     .join("");
-  const jsonText = "{" + rawText;
+  const jsonText = extractJson(rawText);
 
   let parsed: unknown;
   try {
@@ -210,7 +213,7 @@ export async function callClaudeJson<T>(
     logger.error("Claude returned non-JSON output", {
       requestId,
       modelId: spec.id,
-      preview: jsonText.slice(0, 200),
+      preview: rawText.slice(0, 200),
     });
     throw new Error(
       `Claude JSON parse failed (${spec.id}): ${(err as Error).message}`,
@@ -240,4 +243,48 @@ export async function callClaudeJson<T>(
     estimatedCostUsd,
     modelId: spec.id,
   };
+}
+
+/**
+ * Extract a JSON object or array from the model's raw text. Handles:
+ *   - bare JSON: `{...}` or `[...]`
+ *   - fenced JSON: ```json\n{...}\n```
+ *   - leading or trailing prose: `Here is your output:\n{...}`
+ *
+ * Returns the substring from the first `{` (or `[`) to the matching last
+ * `}` (or `]`) — naive but works for well-formed outputs and is robust to
+ * the common ways models pad responses. If neither delimiter is found,
+ * returns the original text so the JSON.parse caller surfaces a clear
+ * error.
+ */
+function extractJson(raw: string): string {
+  const trimmed = raw.trim();
+
+  // Common cases: already a JSON object or array.
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    return trimmed;
+  }
+
+  // Find the earliest opening delimiter and matching last closer.
+  const objStart = trimmed.indexOf("{");
+  const arrStart = trimmed.indexOf("[");
+  let start = -1;
+  let endChar = "";
+  if (objStart === -1 && arrStart === -1) return trimmed;
+  if (objStart === -1) {
+    start = arrStart;
+    endChar = "]";
+  } else if (arrStart === -1) {
+    start = objStart;
+    endChar = "}";
+  } else if (objStart < arrStart) {
+    start = objStart;
+    endChar = "}";
+  } else {
+    start = arrStart;
+    endChar = "]";
+  }
+  const end = trimmed.lastIndexOf(endChar);
+  if (end <= start) return trimmed;
+  return trimmed.slice(start, end + 1);
 }
