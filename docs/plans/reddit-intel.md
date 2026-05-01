@@ -37,8 +37,11 @@ Feature flags (all default OFF, flip in Vercel env):
 - `FF_REDDIT_INTEL_EMAIL` — gates the weekly intel digest send
 - `NEXT_PUBLIC_FF_REDDIT_INTEL_B2B_API` — gates `/api/v1/intel/*` (returns 503 when off)
 
-Steady-state cost projection: **~A\$10–12/month** Anthropic + Voyage,
-well below the A\$50 cost-daily-check alert.
+Steady-state cost projection: **~A\$0.30/day = ~A\$9/month** Anthropic +
+Voyage, well below the A\$50 cost-daily-check alert. Cron runs once
+daily at 08:00 UTC (post Reddit scrape at 06:00 UTC) processing one
+~38-post batch per day. Earlier 6-hourly cadence was wasteful — same
+fixed system-prompt overhead across 4 small batches.
 
 Cost safety nets (defence-in-depth):
 

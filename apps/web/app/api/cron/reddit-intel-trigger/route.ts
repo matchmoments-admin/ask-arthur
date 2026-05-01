@@ -10,10 +10,22 @@ export const dynamic = "force-dynamic";
 
 // Reddit Intelligence — trigger cron.
 //
-// Schedule (vercel.json): 0 */6 * * * (every 6h, on the hour). Polls
-// feed_items for Reddit rows that don't yet have a reddit_post_intel row,
-// batches up to 200, and emits reddit.intel.batch_ready.v1 — which the
-// Inngest function reddit-intel-daily.ts consumes.
+// Schedule (vercel.json): 0 8 * * * (daily 08:00 UTC = 6pm AEST).
+//
+// Why daily not 6-hourly: Reddit's natural scrape rate is ~38 posts/day,
+// matching one batch (BATCH_SIZE=40). Running 4× per day produces 4
+// small batches with the same fixed system-prompt overhead — about 4×
+// the cost for the same throughput. Once-daily amortises the system
+// prompt across the full ~38-post batch and halves steady-state spend.
+//
+// Timing dependency: GitHub Actions runs the Reddit scrape at 06:00 UTC.
+// Firing this cron at 08:00 UTC gives the scrape 2h to complete and
+// land rows in feed_items before we try to classify them.
+//
+// Polls feed_items for Reddit rows that don't yet have a
+// reddit_post_intel row, batches up to BATCH_SIZE, and emits
+// reddit.intel.batch_ready.v1 — which the Inngest function
+// reddit-intel-daily.ts consumes.
 //
 // Why polling instead of event-on-write: pipeline/scrapers/reddit_scams.py
 // is Python and writes to feed_items via psycopg directly. Wiring an
