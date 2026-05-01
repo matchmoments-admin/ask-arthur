@@ -22,6 +22,9 @@ import { handleAnalyzeCompletedBrand } from "./analyze-brand";
 import { handleAnalyzeCompletedCost } from "./analyze-cost";
 import { onAnalyzeFailed } from "./analyze-failure";
 
+// Reddit Intel Wave 1: daily batched classifier triggered by cron poller.
+import { redditIntelDaily } from "./reddit-intel-daily";
+
 export const inngestFunctions = [
   stalenessCheck,
   stalenessCheckIPs,
@@ -43,4 +46,6 @@ export const inngestFunctions = [
   handleAnalyzeCompletedBrand,
   handleAnalyzeCompletedCost,
   onAnalyzeFailed,
+  // Reddit Intel Wave 1
+  redditIntelDaily,
 ];
