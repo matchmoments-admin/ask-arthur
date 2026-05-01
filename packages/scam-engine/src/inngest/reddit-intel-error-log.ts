@@ -17,6 +17,36 @@
 
 import { createServiceClient } from "@askarthur/supabase/server";
 
+/**
+ * Read-side check for the reddit-intel cost brake. Mirrors the
+ * vuln_au_enrichment pattern: cost-daily-check writes a row to
+ * feature_brakes when the day's reddit-intel-* spend exceeds
+ * REDDIT_INTEL_CAP_USD (default $10), and all three Reddit-intel Inngest
+ * functions check this at the top of their handler.
+ *
+ * Returns true if the brake is engaged (paused_until > now()), false
+ * otherwise. Best-effort: any DB failure returns false (don't block the
+ * pipeline if the brake check itself fails).
+ */
+export async function isRedditIntelBraked(): Promise<boolean> {
+  const supabase = createServiceClient();
+  if (!supabase) return false;
+  try {
+    const { data } = await supabase
+      .from("feature_brakes")
+      .select("paused_until")
+      .eq("feature", "reddit_intel")
+      .maybeSingle();
+    if (!data) return false;
+    const pausedUntil = data.paused_until
+      ? new Date(data.paused_until as string)
+      : null;
+    return !!(pausedUntil && pausedUntil.getTime() > Date.now());
+  } catch {
+    return false;
+  }
+}
+
 export interface FunctionErrorContext {
   /** The Inngest step name where the failure occurred. */
   step: string;

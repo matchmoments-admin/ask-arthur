@@ -27,7 +27,7 @@ import {
   parseRedditIntelSummarisedData,
 } from "./events";
 import { embed } from "../embeddings";
-import { logFunctionError } from "./reddit-intel-error-log";
+import { logFunctionError, isRedditIntelBraked } from "./reddit-intel-error-log";
 
 interface IntelRowForEmbed {
   id: string;
@@ -100,6 +100,11 @@ export const redditIntelEmbed = inngest.createFunction(
   async ({ event, step }) => {
     if (!featureFlags.redditIntelIngest) {
       return { skipped: true, reason: "redditIntelIngest flag off" };
+    }
+
+    const braked = await step.run("check-cost-brake", isRedditIntelBraked);
+    if (braked) {
+      return { paused: true, reason: "feature_brakes.reddit_intel is set" };
     }
 
     const data = await step.run("parse-event", () =>

@@ -73,13 +73,31 @@ export async function GET(req: Request) {
   // The threshold is intentionally separate from DAILY_COST_THRESHOLD_USD —
   // a $5 burst on enrichment alone should pause enrichment even if total
   // spend is nowhere near the $2 Telegram threshold.
+  //
+  // Reddit Intel uses the same pattern: aggregate today's spend across
+  // reddit-intel-classify + reddit-intel-embed + reddit-intel-name-themes
+  // (excluding reddit-intel-error which is $0 diagnostic). If sum exceeds
+  // REDDIT_INTEL_CAP_USD, brake the whole pipeline for 24h.
   const vulnEnrichThresholdUsd = parseFloat(
     process.env.VULN_AU_ENRICHMENT_CAP_USD ?? "5",
   );
   const vulnEnrichCost = top.find(
     (t) => t.feature === "vuln_au_enrichment",
   )?.cost ?? 0;
+
+  const redditIntelThresholdUsd = parseFloat(
+    process.env.REDDIT_INTEL_CAP_USD ?? "10",
+  );
+  const redditIntelCost = top
+    .filter(
+      (t) =>
+        t.feature === "reddit-intel-classify" ||
+        t.feature === "reddit-intel-embed" ||
+        t.feature === "reddit-intel-name-themes",
+    )
+    .reduce((sum, t) => sum + t.cost, 0);
   let brakeSet = false;
+  let redditBrakeSet = false;
   if (vulnEnrichCost > vulnEnrichThresholdUsd) {
     const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     const { error: brakeError } = await supabase
@@ -110,6 +128,38 @@ export async function GET(req: Request) {
     }
   }
 
+  if (redditIntelCost > redditIntelThresholdUsd) {
+    const pausedUntil = new Date(
+      Date.now() + 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const { error: brakeError } = await supabase
+      .from("feature_brakes")
+      .upsert(
+        {
+          feature: "reddit_intel",
+          paused_until: pausedUntil,
+          reason: `Daily spend $${redditIntelCost.toFixed(2)} exceeded $${redditIntelThresholdUsd} cap`,
+          set_by: "cost-daily-check",
+          set_cost_usd: redditIntelCost,
+          set_threshold_usd: redditIntelThresholdUsd,
+          set_at: new Date().toISOString(),
+        },
+        { onConflict: "feature" },
+      );
+    if (brakeError) {
+      logger.error("failed to set reddit_intel brake", {
+        error: brakeError.message,
+      });
+    } else {
+      redditBrakeSet = true;
+      logger.warn("reddit_intel brake engaged", {
+        costUsd: redditIntelCost,
+        thresholdUsd: redditIntelThresholdUsd,
+        pausedUntil,
+      });
+    }
+  }
+
   // Truncate to top 3 for the Telegram message (UX — keep it scannable).
   const topForTelegram = top.slice(0, 3);
 
@@ -134,6 +184,12 @@ export async function GET(req: Request) {
       `🛑 <b>vuln_au_enrichment brake engaged</b> — paused for 24h (spend $${vulnEnrichCost.toFixed(2)} > $${vulnEnrichThresholdUsd} cap)`,
     );
   }
+  if (redditBrakeSet) {
+    lines.push(
+      "",
+      `🛑 <b>reddit_intel brake engaged</b> — paused for 24h (spend $${redditIntelCost.toFixed(2)} > $${redditIntelThresholdUsd} cap)`,
+    );
+  }
   lines.push("", `Full breakdown: https://askarthur.au/admin/costs`);
 
   await sendAdminTelegramMessage(lines.join("\n"));
@@ -146,5 +202,7 @@ export async function GET(req: Request) {
     top: topForTelegram,
     brakeSet,
     vulnEnrichCost,
+    redditBrakeSet,
+    redditIntelCost,
   });
 }
