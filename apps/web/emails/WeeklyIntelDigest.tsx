@@ -1,15 +1,21 @@
-// React Email template for the Reddit-intel weekly digest.
+// Reddit-intel weekly digest — editorial briefing template.
 //
-// Replaces the verified_scams-only WeeklyDigest when redditIntelEmail
-// flag is on. Renders the lead narrative, top brands, emerging themes,
-// scam-of-the-week quote, and a copy-paste tweet draft.
+// Adapted from the AskArthurBriefing reference design (navy + white only,
+// Georgia serif headings + Arial sans labels, 640px max width). Replaces
+// the previous teal-accented intel template so the intel digest reads as
+// part of the same Ask Arthur newsletter family rather than a one-off
+// styling.
 //
-// Design notes:
-//   * Same brand colour palette as WeeklyDigest (deep-navy header, teal
-//     CTAs) so subscribers don't see jarring restyling.
-//   * Anti-FUD subject line: numeric specificity ("X emerging scams in
-//     AU this week") beats generic urgency per the source brief.
-//   * Tweet draft inside a <pre>-styled box for easy copy-paste.
+// Slot mapping (intel data → briefing slots):
+//   leadNarrative           → intro paragraphs
+//   emergingThemes[0].title → headline (or fallback by post count)
+//   emergingThemes[1..]     → numbered list, "Emerging this week"
+//   topBrands               → sentence in "Brands impersonated"
+//   scamOfTheWeekQuote      → tip callout (white card, navy border)
+//   topCategories           → "By the numbers" sentence
+//   tweetDraft              → monospace card with char counter
+//   stats summary           → 3-column stats card (replaces hero image —
+//                              we don't have a generic intel illustration)
 
 import {
   Html,
@@ -22,6 +28,9 @@ import {
   Link,
   Hr,
   Heading,
+  Button,
+  Row,
+  Column,
 } from "@react-email/components";
 
 interface EmergingTheme {
@@ -55,6 +64,30 @@ export interface WeeklyIntelDigestProps {
   promptVersion: string;
 }
 
+// ── Brand palette (matches AskArthurBriefing) ─────────────────────────────
+const NAVY = "#1B2A4A";
+const NAVY_SOFT = "#B8C1D1";
+const WHITE = "#FFFFFF";
+const DIVIDER = "#E2E8F0";
+const SURFACE_TINT = "#F8FAFC";
+const SERIF = "Georgia, 'Times New Roman', serif";
+const SANS = "Arial, Helvetica, sans-serif";
+const MONO = "'SF Mono', 'Monaco', 'Roboto Mono', monospace";
+
+function humaniseDate(iso: string): string {
+  // ISO date → "1 May" — short form for the briefing date band.
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-AU", { day: "numeric", month: "long" });
+}
+
+function humaniseCategory(label: string): string {
+  return label
+    .split("_")
+    .map((w) => (w.length ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(" ");
+}
+
 export default function WeeklyIntelDigest({
   weekStart,
   weekEnd,
@@ -65,358 +98,651 @@ export default function WeeklyIntelDigest({
   topCategories = [],
   scamOfTheWeekQuote,
   tweetDraft,
-  // Identity fields rendered only in the footer for debugging — not used
-  // in any of the headline copy.
-  modelVersion: _modelVersion,
-  promptVersion: _promptVersion,
+  modelVersion,
+  promptVersion,
 }: WeeklyIntelDigestProps) {
-  const previewLine =
+  const headline =
     emergingThemes[0]?.title ??
     `${totalPostsClassified} scam reports analysed this week`;
+  const previewLine =
+    emergingThemes[0]?.narrative ??
+    `${totalPostsClassified} scam reports analysed across ${emergingThemes.length} active themes`;
+  const intro = leadNarrative
+    .split(/\n{2,}/)
+    .filter((p) => p.trim().length > 0);
 
   return (
     <Html>
-      <Head>
-        <style>{`@import url('https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;600;700&display=swap');`}</style>
-      </Head>
+      <Head />
       <Preview>{previewLine}</Preview>
       <Body
         style={{
-          backgroundColor: "#F8FAFC",
-          fontFamily:
-            "'Public Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          backgroundColor: WHITE,
+          fontFamily: SERIF,
+          margin: 0,
+          padding: 0,
         }}
       >
         <Container
           style={{
-            maxWidth: "560px",
+            maxWidth: "640px",
             margin: "0 auto",
-            padding: "40px 20px",
+            padding: 0,
+            width: "100%",
           }}
         >
-          {/* Header */}
+          {/* ================= HEADER ================= */}
+          <Section style={{ backgroundColor: NAVY, padding: "28px 36px" }}>
+            <Row>
+              <Column
+                style={{
+                  textAlign: "left" as const,
+                  verticalAlign: "middle",
+                }}
+              >
+                <Link
+                  href="https://askarthur.au"
+                  style={{ textDecoration: "none", color: WHITE }}
+                >
+                  <Text
+                    style={{
+                      margin: 0,
+                      color: WHITE,
+                      fontFamily: SERIF,
+                      fontSize: "22px",
+                      fontWeight: 700,
+                      letterSpacing: "0.5px",
+                      lineHeight: 1,
+                    }}
+                  >
+                    Ask Arthur
+                  </Text>
+                </Link>
+              </Column>
+              <Column
+                style={{
+                  textAlign: "right" as const,
+                  verticalAlign: "middle",
+                }}
+              >
+                <Text
+                  style={{
+                    margin: 0,
+                    color: WHITE,
+                    fontFamily: SANS,
+                    fontSize: "11px",
+                    fontWeight: 600,
+                    letterSpacing: "2px",
+                    textTransform: "uppercase" as const,
+                    opacity: 0.85,
+                  }}
+                >
+                  Weekly Intel
+                </Text>
+              </Column>
+            </Row>
+          </Section>
+
+          {/* ================= CONTENT ================= */}
           <Section
-            style={{
-              backgroundColor: "#1B2A4A",
-              borderRadius: "8px 8px 0 0",
-              padding: "24px 28px",
-            }}
+            style={{ backgroundColor: WHITE, padding: "32px 36px 36px" }}
           >
+            {/* Issue meta */}
             <Text
               style={{
-                color: "#FFFFFF",
+                margin: "0 0 12px 0",
+                padding: 0,
+                fontFamily: SANS,
                 fontSize: "12px",
-                fontWeight: 700,
+                fontWeight: 600,
                 letterSpacing: "2px",
                 textTransform: "uppercase" as const,
-                margin: 0,
+                color: NAVY,
+                opacity: 0.7,
               }}
             >
-              Ask Arthur · Scam Intelligence
+              Briefing · {humaniseDate(weekStart)} – {humaniseDate(weekEnd)}
             </Text>
+
+            {/* H1 — top emerging theme or fallback */}
             <Heading
               as="h1"
               style={{
-                color: "#FFFFFF",
-                fontSize: "22px",
-                fontWeight: 700,
-                margin: "8px 0 0 0",
+                margin: 0,
+                padding: 0,
+                fontSize: "34px",
+                lineHeight: "40px",
+                fontFamily: SERIF,
+                fontWeight: 500,
+                color: NAVY,
               }}
             >
-              {weekStart} → {weekEnd}
+              {headline}
             </Heading>
-            <Text
-              style={{
-                color: "#94A3B8",
-                fontSize: "12px",
-                margin: "6px 0 0 0",
-              }}
-            >
-              {totalPostsClassified} posts classified · {emergingThemes.length} active themes
-            </Text>
-          </Section>
 
-          {/* Body */}
-          <Section
-            style={{
-              backgroundColor: "#FFFFFF",
-              borderRadius: "0 0 8px 8px",
-              padding: "28px",
-              border: "1px solid #E2E8F0",
-              borderTop: "none",
-            }}
-          >
-            {/* Lead narrative */}
-            {leadNarrative.split(/\n{2,}/).map((para, i) => (
-              <Text
-                key={i}
+            {/* Intro paragraphs (lead narrative) */}
+            {intro.length > 0 && (
+              <div style={{ paddingTop: "18px" }}>
+                {intro.map((para, i) => (
+                  <Text
+                    key={i}
+                    style={{
+                      margin: i === 0 ? 0 : "14px 0 0 0",
+                      padding: 0,
+                      fontFamily: SERIF,
+                      fontSize: "16px",
+                      lineHeight: "26px",
+                      color: NAVY,
+                      fontWeight: 400,
+                    }}
+                  >
+                    {para}
+                  </Text>
+                ))}
+              </div>
+            )}
+
+            {/* Stats card (replaces hero image) — three columns */}
+            <div style={{ paddingTop: "28px", paddingBottom: "28px" }}>
+              <Section
                 style={{
-                  color: "#334155",
-                  fontSize: "15px",
-                  lineHeight: "1.6",
-                  margin: "0 0 14px 0",
+                  backgroundColor: SURFACE_TINT,
+                  border: `1px solid ${DIVIDER}`,
+                  borderRadius: "10px",
+                  padding: "24px 20px",
                 }}
               >
-                {para}
-              </Text>
-            ))}
+                <Row>
+                  <Column
+                    style={{ width: "33%", textAlign: "center" as const }}
+                  >
+                    <Text
+                      style={{
+                        margin: 0,
+                        padding: 0,
+                        fontFamily: SERIF,
+                        fontSize: "32px",
+                        lineHeight: "36px",
+                        fontWeight: 600,
+                        color: NAVY,
+                      }}
+                    >
+                      {totalPostsClassified}
+                    </Text>
+                    <Text
+                      style={{
+                        margin: "4px 0 0 0",
+                        padding: 0,
+                        fontFamily: SANS,
+                        fontSize: "11px",
+                        fontWeight: 600,
+                        letterSpacing: "1.5px",
+                        textTransform: "uppercase" as const,
+                        color: NAVY,
+                        opacity: 0.7,
+                      }}
+                    >
+                      Posts analysed
+                    </Text>
+                  </Column>
+                  <Column
+                    style={{ width: "34%", textAlign: "center" as const }}
+                  >
+                    <Text
+                      style={{
+                        margin: 0,
+                        padding: 0,
+                        fontFamily: SERIF,
+                        fontSize: "32px",
+                        lineHeight: "36px",
+                        fontWeight: 600,
+                        color: NAVY,
+                      }}
+                    >
+                      {emergingThemes.length}
+                    </Text>
+                    <Text
+                      style={{
+                        margin: "4px 0 0 0",
+                        padding: 0,
+                        fontFamily: SANS,
+                        fontSize: "11px",
+                        fontWeight: 600,
+                        letterSpacing: "1.5px",
+                        textTransform: "uppercase" as const,
+                        color: NAVY,
+                        opacity: 0.7,
+                      }}
+                    >
+                      Active themes
+                    </Text>
+                  </Column>
+                  <Column
+                    style={{ width: "33%", textAlign: "center" as const }}
+                  >
+                    <Text
+                      style={{
+                        margin: 0,
+                        padding: 0,
+                        fontFamily: SERIF,
+                        fontSize: "32px",
+                        lineHeight: "36px",
+                        fontWeight: 600,
+                        color: NAVY,
+                      }}
+                    >
+                      {topBrands.length}
+                    </Text>
+                    <Text
+                      style={{
+                        margin: "4px 0 0 0",
+                        padding: 0,
+                        fontFamily: SANS,
+                        fontSize: "11px",
+                        fontWeight: 600,
+                        letterSpacing: "1.5px",
+                        textTransform: "uppercase" as const,
+                        color: NAVY,
+                        opacity: 0.7,
+                      }}
+                    >
+                      Brands flagged
+                    </Text>
+                  </Column>
+                </Row>
+              </Section>
+            </div>
 
-            {/* Emerging themes */}
+            {/* Emerging themes section */}
             {emergingThemes.length > 0 && (
               <>
-                <Hr style={{ borderColor: "#E2E8F0", margin: "20px 0" }} />
                 <Heading
                   as="h2"
                   style={{
-                    color: "#1B2A4A",
-                    fontSize: "14px",
-                    fontWeight: 700,
-                    textTransform: "uppercase" as const,
-                    letterSpacing: "1.5px",
-                    margin: "0 0 12px 0",
+                    margin: 0,
+                    padding: 0,
+                    fontSize: "22px",
+                    lineHeight: "28px",
+                    fontFamily: SERIF,
+                    fontWeight: 600,
+                    color: NAVY,
                   }}
                 >
                   Emerging this week
                 </Heading>
-                {emergingThemes.map((t, i) => (
-                  <Section key={i} style={{ marginBottom: "14px" }}>
-                    <Text
+                <div style={{ paddingTop: "16px" }}>
+                  {emergingThemes.map((theme, i) => (
+                    <div
+                      key={i}
                       style={{
-                        color: "#1B2A4A",
-                        fontSize: "15px",
-                        fontWeight: 600,
-                        margin: "0 0 4px 0",
+                        marginTop: i === 0 ? 0 : "20px",
+                        paddingBottom:
+                          i === emergingThemes.length - 1 ? 0 : "16px",
+                        borderBottom:
+                          i === emergingThemes.length - 1
+                            ? "none"
+                            : `1px solid ${DIVIDER}`,
                       }}
                     >
-                      {i + 1}. {t.title}
-                      <span
-                        style={{
-                          color: "#94A3B8",
-                          fontWeight: 400,
-                          marginLeft: "8px",
-                          fontSize: "12px",
-                        }}
-                      >
-                        ({t.memberCount} reports)
-                      </span>
-                    </Text>
-                    {t.narrative && (
                       <Text
                         style={{
-                          color: "#475569",
-                          fontSize: "14px",
-                          lineHeight: "1.5",
-                          margin: "0",
+                          margin: 0,
+                          padding: 0,
+                          fontFamily: SERIF,
+                          fontSize: "17px",
+                          lineHeight: "24px",
+                          fontWeight: 600,
+                          color: NAVY,
                         }}
                       >
-                        {t.narrative}
+                        {i + 1}. {theme.title}
                       </Text>
-                    )}
-                  </Section>
-                ))}
+                      {theme.narrative && (
+                        <Text
+                          style={{
+                            margin: "6px 0 0 0",
+                            padding: 0,
+                            fontFamily: SERIF,
+                            fontSize: "15px",
+                            lineHeight: "23px",
+                            color: NAVY,
+                            fontWeight: 400,
+                            opacity: 0.85,
+                          }}
+                        >
+                          {theme.narrative}
+                        </Text>
+                      )}
+                      <Text
+                        style={{
+                          margin: "8px 0 0 0",
+                          padding: 0,
+                          fontFamily: SANS,
+                          fontSize: "11px",
+                          fontWeight: 600,
+                          letterSpacing: "1.5px",
+                          textTransform: "uppercase" as const,
+                          color: NAVY,
+                          opacity: 0.7,
+                        }}
+                      >
+                        {theme.memberCount}{" "}
+                        {theme.memberCount === 1 ? "report" : "reports"}
+                        {theme.representativeBrands.length > 0 && (
+                          <>
+                            {" · "}
+                            {theme.representativeBrands.slice(0, 3).join(" · ")}
+                          </>
+                        )}
+                      </Text>
+                    </div>
+                  ))}
+                </div>
               </>
             )}
 
-            {/* Brand watchlist */}
+            {/* Brand watchlist sentence */}
             {topBrands.length > 0 && (
-              <>
-                <Hr style={{ borderColor: "#E2E8F0", margin: "20px 0" }} />
+              <div style={{ paddingTop: "32px" }}>
                 <Heading
                   as="h2"
                   style={{
-                    color: "#1B2A4A",
-                    fontSize: "14px",
-                    fontWeight: 700,
-                    textTransform: "uppercase" as const,
-                    letterSpacing: "1.5px",
-                    margin: "0 0 12px 0",
+                    margin: 0,
+                    padding: 0,
+                    fontSize: "22px",
+                    lineHeight: "28px",
+                    fontFamily: SERIF,
+                    fontWeight: 600,
+                    color: NAVY,
                   }}
                 >
                   Brands impersonated
                 </Heading>
                 <Text
                   style={{
-                    color: "#475569",
-                    fontSize: "14px",
-                    lineHeight: "1.7",
-                    margin: 0,
+                    margin: "12px 0 0 0",
+                    padding: 0,
+                    fontFamily: SERIF,
+                    fontSize: "16px",
+                    lineHeight: "26px",
+                    color: NAVY,
+                    fontWeight: 400,
                   }}
                 >
                   {topBrands
                     .map((b) => `${b.brand} (×${b.mentionCount})`)
                     .join(" · ")}
                 </Text>
-              </>
+              </div>
             )}
 
-            {/* Scam of the week */}
+            {/* Scam of the week — tip callout style */}
             {scamOfTheWeekQuote && (
-              <>
-                <Hr style={{ borderColor: "#E2E8F0", margin: "20px 0" }} />
-                <Heading
-                  as="h2"
-                  style={{
-                    color: "#1B2A4A",
-                    fontSize: "14px",
-                    fontWeight: 700,
-                    textTransform: "uppercase" as const,
-                    letterSpacing: "1.5px",
-                    margin: "0 0 12px 0",
-                  }}
-                >
-                  Scam of the week
-                </Heading>
+              <div style={{ paddingTop: "32px" }}>
                 <Section
                   style={{
-                    borderLeft: "3px solid #0D9488",
-                    backgroundColor: "#F0FDFA",
-                    padding: "12px 16px",
+                    backgroundColor: WHITE,
+                    border: `1px solid ${NAVY}`,
+                    borderRadius: "12px",
+                    padding: "28px 28px 24px 28px",
                   }}
                 >
                   <Text
                     style={{
-                      color: "#0F766E",
-                      fontSize: "15px",
-                      fontStyle: "italic",
-                      lineHeight: "1.5",
-                      margin: 0,
+                      margin: "0 0 10px 0",
+                      padding: 0,
+                      fontFamily: SANS,
+                      fontSize: "11px",
+                      lineHeight: "14px",
+                      fontWeight: 700,
+                      letterSpacing: "2px",
+                      textTransform: "uppercase" as const,
+                      color: NAVY,
+                    }}
+                  >
+                    Scam of the week
+                  </Text>
+                  <Text
+                    style={{
+                      margin: "0 0 12px 0",
+                      padding: 0,
+                      fontFamily: SERIF,
+                      fontSize: "17px",
+                      lineHeight: "26px",
+                      color: NAVY,
+                      fontWeight: 400,
+                      fontStyle: "italic" as const,
                     }}
                   >
                     &ldquo;{scamOfTheWeekQuote.text}&rdquo;
                   </Text>
                   <Text
                     style={{
-                      color: "#94A3B8",
-                      fontSize: "11px",
-                      margin: "6px 0 0 0",
+                      margin: 0,
+                      padding: 0,
+                      fontFamily: SANS,
+                      fontSize: "12px",
+                      lineHeight: "16px",
+                      color: NAVY,
+                      fontWeight: 600,
+                      opacity: 0.75,
                     }}
                   >
-                    — {scamOfTheWeekQuote.speakerRole}
+                    &mdash; {scamOfTheWeekQuote.speakerRole} report
                   </Text>
                 </Section>
-              </>
+              </div>
             )}
 
             {/* By the numbers */}
             {topCategories.length > 0 && (
-              <>
-                <Hr style={{ borderColor: "#E2E8F0", margin: "20px 0" }} />
+              <div style={{ paddingTop: "32px" }}>
                 <Heading
                   as="h2"
                   style={{
-                    color: "#1B2A4A",
-                    fontSize: "14px",
-                    fontWeight: 700,
-                    textTransform: "uppercase" as const,
-                    letterSpacing: "1.5px",
-                    margin: "0 0 12px 0",
+                    margin: 0,
+                    padding: 0,
+                    fontSize: "22px",
+                    lineHeight: "28px",
+                    fontFamily: SERIF,
+                    fontWeight: 600,
+                    color: NAVY,
                   }}
                 >
                   By the numbers
                 </Heading>
                 <Text
                   style={{
-                    color: "#475569",
-                    fontSize: "14px",
-                    lineHeight: "1.7",
-                    margin: 0,
+                    margin: "12px 0 0 0",
+                    padding: 0,
+                    fontFamily: SERIF,
+                    fontSize: "16px",
+                    lineHeight: "26px",
+                    color: NAVY,
+                    fontWeight: 400,
                   }}
                 >
                   {topCategories
-                    .map((c) => `${c.label.replace(/_/g, " ")} (${c.count})`)
+                    .map((c) => `${humaniseCategory(c.label)} (${c.count})`)
                     .join(" · ")}
                 </Text>
-              </>
+              </div>
             )}
 
-            {/* Tweet draft */}
-            <Hr style={{ borderColor: "#E2E8F0", margin: "20px 0" }} />
-            <Heading
-              as="h2"
-              style={{
-                color: "#1B2A4A",
-                fontSize: "14px",
-                fontWeight: 700,
-                textTransform: "uppercase" as const,
-                letterSpacing: "1.5px",
-                margin: "0 0 12px 0",
-              }}
-            >
-              Copy-paste tweet
-            </Heading>
-            <Section
-              style={{
-                backgroundColor: "#F1F5F9",
-                border: "1px solid #CBD5E1",
-                borderRadius: "6px",
-                padding: "14px 16px",
-                fontFamily:
-                  "'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace",
-              }}
-            >
+            {/* Tweet draft — utility callout, monochrome */}
+            <div style={{ paddingTop: "32px" }}>
               <Text
                 style={{
-                  color: "#0F172A",
-                  fontSize: "13px",
-                  lineHeight: "1.6",
-                  margin: 0,
-                  whiteSpace: "pre-wrap" as const,
+                  margin: "0 0 8px 0",
+                  padding: 0,
+                  fontFamily: SANS,
+                  fontSize: "11px",
+                  fontWeight: 700,
+                  letterSpacing: "2px",
+                  textTransform: "uppercase" as const,
+                  color: NAVY,
+                  opacity: 0.75,
                 }}
               >
-                {tweetDraft}
+                Copy-paste tweet
               </Text>
-            </Section>
-            <Text
-              style={{
-                color: "#94A3B8",
-                fontSize: "11px",
-                margin: "6px 0 0 0",
-              }}
-            >
-              {tweetDraft.length}/280 characters
-            </Text>
-
-            {/* Footer */}
-            <Hr style={{ borderColor: "#E2E8F0", margin: "24px 0" }} />
-            <Text
-              style={{
-                color: "#334155",
-                fontSize: "14px",
-                lineHeight: "1.6",
-              }}
-            >
-              See the full breakdown at{" "}
-              <Link
-                href="https://askarthur.au/app/threats"
-                style={{ color: "#0D9488" }}
+              <Section
+                style={{
+                  backgroundColor: SURFACE_TINT,
+                  border: `1px solid ${DIVIDER}`,
+                  borderRadius: "8px",
+                  padding: "16px 18px",
+                }}
               >
-                askarthur.au/app/threats
-              </Link>
+                <Text
+                  style={{
+                    margin: 0,
+                    padding: 0,
+                    fontFamily: MONO,
+                    fontSize: "13px",
+                    lineHeight: "20px",
+                    color: NAVY,
+                    whiteSpace: "pre-wrap" as const,
+                  }}
+                >
+                  {tweetDraft}
+                </Text>
+              </Section>
+              <Text
+                style={{
+                  margin: "6px 0 0 0",
+                  padding: 0,
+                  fontFamily: SANS,
+                  fontSize: "11px",
+                  color: NAVY,
+                  opacity: 0.6,
+                }}
+              >
+                {tweetDraft.length}/280 characters
+              </Text>
+            </div>
+
+            {/* Primary CTA */}
+            <div style={{ paddingTop: "32px" }}>
+              <Button
+                href="https://askarthur.au/app/threats"
+                style={{
+                  backgroundColor: NAVY,
+                  color: WHITE,
+                  fontFamily: SANS,
+                  fontSize: "15px",
+                  fontWeight: 600,
+                  lineHeight: "18px",
+                  padding: "14px 26px",
+                  borderRadius: "8px",
+                  textDecoration: "none",
+                  display: "inline-block",
+                }}
+              >
+                View full intel on Ask Arthur
+              </Button>
+            </div>
+
+            {/* Sign-off */}
+            <Hr style={{ borderColor: DIVIDER, margin: "36px 0 28px 0" }} />
+            <Text
+              style={{
+                margin: 0,
+                padding: 0,
+                fontFamily: SERIF,
+                fontSize: "15px",
+                lineHeight: "24px",
+                color: NAVY,
+                fontWeight: 400,
+              }}
+            >
+              Stay safe out there,
+              <br />
+              <strong>The Ask Arthur team</strong>
+            </Text>
+          </Section>
+
+          {/* ================= FOOTER ================= */}
+          <Section style={{ backgroundColor: NAVY, padding: "32px 36px" }}>
+            <Text
+              style={{
+                margin: "0 0 6px 0",
+                padding: 0,
+                fontFamily: SERIF,
+                fontSize: "16px",
+                fontWeight: 700,
+                color: WHITE,
+                lineHeight: "20px",
+              }}
+            >
+              Ask Arthur
             </Text>
             <Text
               style={{
-                color: "#94A3B8",
-                fontSize: "11px",
-                margin: "16px 0 0 0",
+                margin: 0,
+                padding: 0,
+                fontFamily: SANS,
+                fontSize: "12px",
+                lineHeight: "18px",
+                color: NAVY_SOFT,
               }}
             >
-              You&apos;re receiving this because you subscribed to weekly
-              scam alerts.{" "}
+              Australia&apos;s free AI scam checker · askarthur.au
+            </Text>
+            <Text
+              style={{
+                margin: "20px 0 0 0",
+                padding: 0,
+                fontFamily: SANS,
+                fontSize: "12px",
+                lineHeight: "18px",
+                color: NAVY_SOFT,
+              }}
+            >
+              Ask Arthur · ABN 72 695 772 313 · Sydney, Australia
+            </Text>
+            <Text
+              style={{
+                margin: "8px 0 0 0",
+                padding: 0,
+                fontFamily: SANS,
+                fontSize: "12px",
+                lineHeight: "18px",
+                color: NAVY_SOFT,
+              }}
+            >
+              You&apos;re receiving this because you subscribed to Ask
+              Arthur&apos;s weekly intel.
+              <br />
               <Link
                 href="https://askarthur.au/unsubscribe"
-                style={{ color: "#94A3B8" }}
+                style={{ color: NAVY_SOFT, textDecoration: "underline" }}
               >
                 Unsubscribe
               </Link>
+              {" · "}
+              <Link
+                href="https://askarthur.au"
+                style={{ color: NAVY_SOFT, textDecoration: "underline" }}
+              >
+                askarthur.au
+              </Link>
             </Text>
+            {/* Operator-only debug strip — pixel-tiny so it doesn't clutter
+                the consumer footer when subscribers exist. Useful for prompt
+                regression triage when something looks off. */}
             <Text
               style={{
-                color: "#94A3B8",
-                fontSize: "11px",
-                margin: "8px 0 0 0",
+                margin: "16px 0 0 0",
+                padding: 0,
+                fontFamily: SANS,
+                fontSize: "10px",
+                lineHeight: "14px",
+                color: NAVY_SOFT,
+                opacity: 0.5,
               }}
             >
-              Ask Arthur | ABN 72 695 772 313 | Sydney, Australia
+              {modelVersion} · {promptVersion}
             </Text>
           </Section>
         </Container>
