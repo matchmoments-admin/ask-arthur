@@ -35,8 +35,15 @@ jobs:
         run: |
           pnpm turbo run lint --filter="...[origin/${{ github.base_ref }}]" -- --fix || true
 
-      - name: Prettier --write
-        run: pnpm exec prettier --write . || true
+      - name: Prettier --write (changed files only)
+        run: |
+          BASE_SHA=$(git merge-base origin/${{ github.base_ref }} HEAD)
+          CHANGED=$(git diff --name-only --diff-filter=ACMR "$BASE_SHA"...HEAD -- ':!.github')
+          if [ -n "$CHANGED" ]; then
+            echo "$CHANGED" | xargs pnpm exec prettier --write --ignore-unknown
+          else
+            echo "No non-.github files changed; skipping prettier."
+          fi
 
       - uses: autofix-ci/action@v1
         with:
