@@ -4,6 +4,8 @@
   "private": true,
   "exports": {
     ".": "./src/index.ts",
+    "./anthropic": "./src/anthropic.ts",
+    "./embeddings": "./src/embeddings.ts",
     "./claude": "./src/claude.ts",
     "./pipeline": "./src/pipeline.ts",
     "./safebrowsing": "./src/safebrowsing.ts",

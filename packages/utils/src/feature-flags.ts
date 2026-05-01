@@ -221,6 +221,40 @@ export const featureFlags = {
    *  scams referencing this breach" section on /breach/[slug]; the
    *  correlate cron runs whenever its function is registered. */
   bdSecondWave: process.env.NEXT_PUBLIC_FF_BD_SECOND_WAVE === "true",
+
+  // ===========================================================================
+  // Reddit Scam Intelligence — gates the narrative-extraction layer over the
+  // existing daily Reddit scrape. Build sequence: pre-work → Wave 1 (ingest)
+  // → Wave 2 (dashboard + email) → Wave 3 (B2B API + retention).
+  // Plan: docs/plans/reddit-intel.md.
+  // ===========================================================================
+
+  /** Reddit Intel Wave 1 — daily Sonnet batch classifier + IOC linker.
+   *  Gates the cron trigger that polls feed_items for unprocessed Reddit rows
+   *  and the Inngest function that writes reddit_post_intel /
+   *  reddit_intel_daily_summary / reddit_intel_quotes. Server-side only —
+   *  this controls backend processing, not UI. Costs ~A$5-15/month at current
+   *  ~270 posts/week volume; daily cost-telemetry alert set at A$50. */
+  redditIntelIngest: process.env.FF_REDDIT_INTEL_INGEST === "true",
+
+  /** Reddit Intel Wave 2 — dashboard widgets (RedditIntelPanel, theme cards,
+   *  brand watchlist, theme-velocity drill-down). Independent of the ingest
+   *  flag — when ingest is on but dashboard is off, data is collected but
+   *  not surfaced. Safe to flip on read-side once Wave 1 has produced ≥7 days
+   *  of summaries. */
+  redditIntelDashboard:
+    process.env.NEXT_PUBLIC_FF_REDDIT_INTEL_DASHBOARD === "true",
+
+  /** Reddit Intel Wave 2 — weekly email digest variant sourced from
+   *  reddit_intel_daily_summary. When OFF, weekly-email cron falls back to
+   *  the legacy verified_scams template. Server-side only — the cron route
+   *  is the only consumer. */
+  redditIntelEmail: process.env.FF_REDDIT_INTEL_EMAIL === "true",
+
+  /** Reddit Intel Wave 3 — public B2B API at /api/v1/intel/* (themes, digest,
+   *  quotes). Returns 503 when off; validateApiKey is checked first regardless. */
+  redditIntelB2bApi:
+    process.env.NEXT_PUBLIC_FF_REDDIT_INTEL_B2B_API === "true",
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;
