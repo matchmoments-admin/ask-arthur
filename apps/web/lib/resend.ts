@@ -2,6 +2,9 @@ import { Resend } from "resend";
 import { render } from "@react-email/components";
 import Welcome from "@/emails/Welcome";
 import WeeklyDigest from "@/emails/WeeklyDigest";
+import WeeklyIntelDigest, {
+  type WeeklyIntelDigestProps,
+} from "@/emails/WeeklyIntelDigest";
 import { signUnsubscribeUrl } from "@/lib/unsubscribe";
 import { logCost, PRICING } from "@/lib/cost-telemetry";
 
@@ -104,6 +107,62 @@ export async function sendWeeklyDigest(
         units: fulfilled,
         unitCostUsd: PRICING.RESEND_USD_PER_EMAIL,
         metadata: { batch_size: batch.length, failed: batch.length - fulfilled },
+      });
+    }
+  }
+}
+
+/**
+ * Sends the Reddit-intel weekly digest. Subject is intentionally specific
+ * (numeric specificity beats generic urgency per the source brief). Skips
+ * the unsubscribe header on the brendan-only fallback path because the
+ * recipient is the operator, not a list subscriber.
+ */
+export async function sendWeeklyIntelDigest(
+  emails: string[],
+  payload: WeeklyIntelDigestProps,
+): Promise<void> {
+  const resend = getResendClient();
+  const html = await render(WeeklyIntelDigest(payload));
+
+  const themeCount = payload.emergingThemes.length;
+  const subject =
+    themeCount > 0
+      ? `[${themeCount} emerging scam${themeCount === 1 ? "" : "s"} in AU this week] — Ask Arthur Intel`
+      : `Ask Arthur Intel — ${payload.totalPostsClassified} posts analysed this week`;
+
+  for (let i = 0; i < emails.length; i += 50) {
+    const batch = emails.slice(i, i + 50);
+    const results = await Promise.allSettled(
+      batch.map((email) => {
+        const unsubscribeUrl = signUnsubscribeUrl(email, "https://askarthur.au/unsubscribe");
+        const oneClickUrl = signUnsubscribeUrl(email, "https://askarthur.au/api/unsubscribe-one-click");
+        return resend.emails.send({
+          from: FROM,
+          to: email,
+          subject,
+          html,
+          headers: {
+            "List-Unsubscribe": `<${unsubscribeUrl}>, <${oneClickUrl}>`,
+            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+          },
+        });
+      }),
+    );
+    const fulfilled = results.filter((r) => r.status === "fulfilled").length;
+    if (fulfilled > 0) {
+      logCost({
+        feature: "email",
+        provider: "resend",
+        operation: "weekly-intel-digest",
+        units: fulfilled,
+        unitCostUsd: PRICING.RESEND_USD_PER_EMAIL,
+        metadata: {
+          batch_size: batch.length,
+          failed: batch.length - fulfilled,
+          model_version: payload.modelVersion,
+          prompt_version: payload.promptVersion,
+        },
       });
     }
   }
