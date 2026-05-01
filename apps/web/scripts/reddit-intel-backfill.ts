@@ -24,8 +24,11 @@ import "dotenv/config";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 
-const BATCH_SIZE = 200;
-const SLEEP_MS = 30_000;
+// Matches the cron route's BATCH_SIZE — see route.ts for sizing rationale.
+const BATCH_SIZE = 40;
+// 240s SDK timeout in the consumer + ~30s slack = wait at least 5 min
+// between batches so consecutive Sonnet calls don't queue behind each other.
+const SLEEP_MS = 300_000;
 
 async function main() {
   const days = Number(process.argv[2] ?? 30);
