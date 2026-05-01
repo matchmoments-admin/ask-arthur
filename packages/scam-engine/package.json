@@ -48,7 +48,7 @@
     "@askarthur/utils": "workspace:*",
     "@react-pdf/renderer": "^4.0.0",
     "@upstash/redis": "^1.36.2",
-    "inngest": "^3.27.0",
+    "inngest": "^3.54.2",
     "libphonenumber-js": "^1.11.0",
     "tldts": "^7.0.23",
     "twilio": "^5.4.0"
