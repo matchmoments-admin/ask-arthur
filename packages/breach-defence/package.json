@@ -11,7 +11,7 @@
     "@askarthur/supabase": "workspace:*",
     "@askarthur/types": "workspace:*",
     "@askarthur/utils": "workspace:*",
-    "inngest": "^3.27.0"
+    "inngest": "^3.54.2"
   },
   "devDependencies": {
     "typescript": "^5",
