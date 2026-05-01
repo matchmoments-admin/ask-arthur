@@ -126,7 +126,12 @@ export const phoneFootprintRefreshMonitor = inngest.createFunction(
     name: "Phone Footprint: refresh one monitor",
     idempotency: "event.data.queueId", // one refresh per claimed queue row
     retries: 2,
-    concurrency: { limit: 10 }, // cap concurrent provider fan-outs
+    // Inngest plan caps function-level concurrency at 5; the original
+    // limit:10 was rejected by the resync validator after the v3.54
+    // SDK upgrade. Halving max parallelism here just means refreshes
+    // queue up — no functional regression, only throughput. Bump back
+    // to 10 if/when we move to a higher Inngest plan.
+    concurrency: { limit: 5 },
   },
   { event: REFRESH_MONITOR_EVENT },
   async ({ event, step }) => {
