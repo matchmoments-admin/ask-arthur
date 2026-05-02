@@ -310,20 +310,18 @@
 }
 
 /* ---------- summary strip ---------- */
+/* Default 2-up: the result page lives in a 640px container (site-wide
+   width), and 4-up at that width gives ~150px cells — too tight for the
+   "Security Headers" label. 2x2 reads cleanly at the available width.
+   Single-category shows 1-up; everything else collapses to 2 columns. */
 .audit-report .ar-summary-strip {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 32px;
 }
 .audit-report .ar-summary-strip.cols-1 {
   grid-template-columns: 1fr;
-}
-.audit-report .ar-summary-strip.cols-2 {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-.audit-report .ar-summary-strip.cols-3 {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 .audit-report .ar-summary-cell {
   background: #fff;
@@ -766,9 +764,8 @@
   .audit-report .ar-score-rank {
     display: none;
   }
-  .audit-report .ar-summary-strip,
-  .audit-report .ar-summary-strip.cols-3,
-  .audit-report .ar-summary-strip.cols-4 {
+  /* summary-strip default is already 2-up; mobile keeps it 2-up */
+  .audit-report .ar-summary-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .audit-report .ar-check {

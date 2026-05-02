@@ -120,11 +120,11 @@ export default async function ScannerPage() {
     <div className="min-h-screen flex flex-col">
       <Nav />
 
-      <main id="main-content" className="flex-1 w-full max-w-[880px] mx-auto px-5 pt-16">
+      <main id="main-content" className="flex-1 w-full max-w-[640px] mx-auto px-5 pt-16">
         <h1 className="text-deep-navy text-4xl md:text-5xl font-extrabold mb-4 leading-tight text-center">
           Security Scanner
         </h1>
-        <p className="text-lg text-gov-slate mb-10 leading-relaxed text-center max-w-2xl mx-auto">
+        <p className="text-lg text-gov-slate mb-10 leading-relaxed text-center">
           Scan any website, Chrome extension, MCP server, or AI skill.
           Get a safety grade with actionable recommendations.
         </p>
