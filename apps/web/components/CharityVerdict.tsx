@@ -18,17 +18,23 @@ export interface CharityCheckResult {
     acnc_registration: PillarPayload;
     abr_dgr: PillarPayload;
     donation_url: PillarPayload;
+    pfra: PillarPayload;
   };
   coverage: {
     acnc: "live" | "degraded" | "disabled";
     abr: "live" | "degraded" | "disabled";
     donation_url: "live" | "degraded" | "disabled";
+    pfra: "live" | "degraded" | "disabled";
   };
   providers_used: string[];
   explanation: string;
   official_donation_url: string | null;
   generated_at: string;
   request_id?: string;
+  scamwatch_alerts?: {
+    count: number;
+    recent: Array<{ title: string; url: string; publishedAt: string | null }>;
+  };
 }
 
 interface PillarPayload {
@@ -115,6 +121,15 @@ export default function CharityVerdict({
     !donationSafeBrowsingMalicious &&
     (donationAgeBand === "established_90d_plus" || donationAgeBand === "unknown");
 
+  // PFRA pillar (v0.2c). PFRA membership is additive only — when present,
+  // it's a positive signal. The 5th tick reads as a green ✓ when the
+  // charity is a PFRA member, and a neutral "—" when it isn't (no
+  // penalty for non-membership).
+  const pfraDetail = (result.pillars.pfra?.detail ?? {}) as Record<string, unknown>;
+  const pfraIsMember = result.pillars.pfra.available;
+  const pfraMemberType = pfraDetail.member_type as "charity" | "agency" | undefined;
+  const pfraSourceUrl = (pfraDetail.source_url as string | undefined) ?? null;
+
   return (
     <div className="space-y-6">
       <button
@@ -136,8 +151,8 @@ export default function CharityVerdict({
         </div>
       </div>
 
-      {/* 4-fact icon strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      {/* 5-fact icon strip — fits as a 2-col grid on mobile, 5-col on desktop */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <Fact label="ACNC registered" pass={acncRegistered} unavailable={!result.pillars.acnc_registration.available} />
         <Fact label="ABN active" pass={abnActive} unavailable={!result.pillars.abr_dgr.available} />
         <Fact label="DGR endorsed" pass={dgrEndorsed} unavailable={!result.pillars.abr_dgr.available} />
@@ -145,6 +160,11 @@ export default function CharityVerdict({
           label="Donation URL"
           pass={donationUrlPassed}
           unavailable={!result.pillars.donation_url.available}
+        />
+        <Fact
+          label={pfraMemberType === "agency" ? "PFRA agency" : "PFRA member"}
+          pass={pfraIsMember}
+          unavailable={!pfraIsMember}
         />
       </div>
 
@@ -260,8 +280,68 @@ export default function CharityVerdict({
         </details>
       )}
 
+      {/* PFRA explainer when membership IS present */}
+      {pfraIsMember && pfraSourceUrl && (
+        <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-900">
+          <p className="font-medium mb-1">
+            {pfraMemberType === "agency"
+              ? "PFRA-accredited fundraising agency"
+              : "PFRA-aligned charity"}
+          </p>
+          <p>
+            This {pfraMemberType === "agency" ? "agency" : "charity"} is a member of the
+            Public Fundraising Regulatory Association — its face-to-face fundraisers
+            carry numbered ID badges and follow the PFRA Standard.{" "}
+            <a
+              href={pfraSourceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline inline-flex items-center gap-1"
+            >
+              Member directory <ExternalLink size={12} aria-hidden />
+            </a>
+          </p>
+        </div>
+      )}
+
+      {/* Scamwatch alerts — context only, NOT a verdict input. Surfaces
+          recent (≤365d) alerts that mention the charity name so the user
+          can make an informed call. */}
+      {result.scamwatch_alerts && result.scamwatch_alerts.count > 0 && (
+        <details className="border border-amber-200 bg-amber-50/50 rounded-lg">
+          <summary className="cursor-pointer px-4 py-3 font-medium text-amber-900">
+            Recent Scamwatch alerts mentioning this name ({result.scamwatch_alerts.count})
+          </summary>
+          <div className="px-4 pb-4 text-sm">
+            <p className="text-xs text-amber-800 mb-3 italic">
+              These alerts may describe scammers <em>impersonating</em> this charity —
+              not the charity itself. Read each one to judge.
+            </p>
+            <ul className="space-y-2">
+              {result.scamwatch_alerts.recent.map((alert, i) => (
+                <li key={i}>
+                  <a
+                    href={alert.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-amber-900 underline inline-flex items-start gap-1"
+                  >
+                    {alert.title} <ExternalLink size={12} aria-hidden className="shrink-0 mt-1" />
+                  </a>
+                  {alert.publishedAt && (
+                    <span className="block text-xs text-amber-700">
+                      {new Date(alert.publishedAt).toLocaleDateString("en-AU", { year: "numeric", month: "short", day: "numeric" })}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </details>
+      )}
+
       <p className="text-xs text-gov-slate text-center">
-        Powered by ACNC Charity Register · ABR Lookup · {result.providers_used.length} sources checked
+        Powered by ACNC Charity Register · ABR Lookup · PFRA · Scamwatch · {result.providers_used.length} sources checked
       </p>
     </div>
   );

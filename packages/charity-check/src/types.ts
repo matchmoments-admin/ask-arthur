@@ -14,17 +14,17 @@
 
 import type { Verdict } from "@askarthur/types";
 
-/** v0.1 pillars feeding the composite legitimacy score.
+/** Pillars feeding the composite legitimacy score.
  *
- * Three slots — `acnc_registration` and `abr_dgr` are wired in v0.1;
- * `donation_url` is reserved (always reports `available: false` until v0.2
- * adds Safe Browsing + WHOIS + /health-scanner pillars). Keeping the slot
- * declared lets the scorer's weight-redistribution logic stay stable when
- * v0.2 ships without a contract change. */
+ * Four pillars as of v0.2c. PFRA membership is additive only — when a
+ * charity IS a PFRA member it contributes a positive (low-risk) signal,
+ * but non-membership is NOT penalised because PFRA only covers face-
+ * to-face fundraising and many legitimate charities never join. */
 export type CharityPillarId =
-  | "acnc_registration" // ACNC Charity Register lookup
-  | "abr_dgr" //          ABR Lookup + DGR endorsement
-  | "donation_url"; //    Safe Browsing + WHOIS + headers (v0.2)
+  | "acnc_registration" // ACNC Charity Register lookup            (v0.1)
+  | "abr_dgr" //          ABR Lookup + DGR endorsement             (v0.1)
+  | "donation_url" //     Safe Browsing + WHOIS + headers          (v0.2a)
+  | "pfra"; //            Public Fundraising Regulatory Association (v0.2c)
 
 /** Per-pillar output from a provider. Score is 0..100 where higher = more
  *  risk (matches Phone Footprint convention so future shared abstraction
@@ -55,9 +55,25 @@ export interface CharityCoverage {
   /** ABR Lookup web service. 'live' on success; 'degraded' on transient
    *  errors or rate limiting; 'disabled' when ABN_LOOKUP_GUID is unset. */
   abr: "live" | "degraded" | "disabled";
-  /** v0.2 placeholder — Safe Browsing + WHOIS + headers. 'disabled'
-   *  in v0.1 since no provider is wired. */
+  /** Safe Browsing + WHOIS donation-URL pillar (v0.2a). */
   donation_url: "live" | "degraded" | "disabled";
+  /** PFRA local mirror in `pfra_members` (v0.2c). 'disabled' before the
+   *  scraper has populated rows; 'live' once members are present. */
+  pfra: "live" | "degraded" | "disabled";
+}
+
+/** Recent Scamwatch alerts mentioning the charity by name. Surfaces as
+ *  context on the verdict screen — explicitly NOT a pillar / score input,
+ *  because Scamwatch alerts often describe the impersonator (not the
+ *  legitimate charity), so flagging the legitimate charity for them
+ *  would be a false positive. */
+export interface ScamwatchAlertContext {
+  count: number;
+  recent: Array<{
+    title: string;
+    url: string;
+    publishedAt: string | null;
+  }>;
 }
 
 /** Final composite charity check returned to API callers. */
@@ -87,6 +103,9 @@ export interface CharityCheckResult {
   generated_at: string;
   /** Optional caller-supplied or server-generated correlation id. */
   request_id?: string;
+  /** Recent Scamwatch alerts mentioning the charity name (v0.2c). NOT
+   *  a pillar — context for the verdict screen's collapsible section. */
+  scamwatch_alerts?: ScamwatchAlertContext;
 }
 
 /** Minimal shape consumed by the orchestrator at the API/route boundary.
