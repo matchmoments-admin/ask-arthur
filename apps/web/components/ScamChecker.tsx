@@ -462,6 +462,7 @@ export default function ScamChecker() {
             scammerUrls={result.scammerUrls}
             channel={result.channel}
             inputMode={result.inputMode || inputMode}
+            charityIntent={result.charityIntent}
             onCheckAnother={handleReset}
           />
       )}
