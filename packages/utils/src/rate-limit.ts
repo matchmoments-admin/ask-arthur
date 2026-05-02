@@ -407,3 +407,86 @@ export async function checkBreachDefenceRateLimit(
     return storeUnavailable(failMode, `checkBreachDefenceRateLimit:${bucket}`);
   }
 }
+
+// =============================================================================
+// Charity Check — dedicated buckets
+// =============================================================================
+// Same rationale as Phone Footprint / Breach Defence: each surface has a
+// distinct abuse model.
+//
+//   cc_lookup        — POST /api/charity-check (the verdict request).
+//                      5/hr/IP. The route is the only thing that calls
+//                      ABR Lookup, so this caps third-party-API exposure
+//                      per-IP. Mirrors HIBP-style polite caps.
+//   cc_autocomplete  — GET /api/charity-check/autocomplete (typeahead).
+//                      60/min/IP. High frequency by design (one call per
+//                      keystroke after the debounce window) but still
+//                      bounded — autocomplete hitting a local Postgres
+//                      RPC, so the abuse cost is DB CPU, not paid API.
+
+type CcBucket = "cc_lookup" | "cc_autocomplete";
+
+const _ccLimiters = new Map<CcBucket, Ratelimit>();
+
+function getCcLimiter(bucket: CcBucket): Ratelimit {
+  const existing = _ccLimiters.get(bucket);
+  if (existing) return existing;
+
+  const redis = new Redis({
+    url: process.env.UPSTASH_REDIS_REST_URL!,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+  });
+
+  const slidingWindow = Ratelimit.slidingWindow.bind(Ratelimit);
+  const config: Record<
+    CcBucket,
+    { algo: ReturnType<typeof slidingWindow>; prefix: string }
+  > = {
+    cc_lookup:       { algo: slidingWindow(5,  "1 h"), prefix: "askarthur:cc:lookup" },
+    cc_autocomplete: { algo: slidingWindow(60, "1 m"), prefix: "askarthur:cc:autocomplete" },
+  };
+
+  const lim = new Ratelimit({
+    redis,
+    limiter: config[bucket].algo,
+    prefix: config[bucket].prefix,
+    analytics: true,
+  });
+  _ccLimiters.set(bucket, lim);
+  return lim;
+}
+
+/**
+ * Check a Charity Check rate-limit bucket. Defaults to fail-closed in
+ * production — same reasoning as Breach Defence: a Redis blip allowing
+ * unbounded ABR API calls would amount to free credential-stuffing of the
+ * paid third-party endpoint.
+ */
+export async function checkCharityCheckRateLimit(
+  bucket: CcBucket,
+  identifier: string,
+  failMode: FailMode = defaultFailMode(),
+): Promise<RateLimitResult> {
+  if (!process.env.UPSTASH_REDIS_REST_URL) {
+    return storeUnavailable(failMode, `checkCharityCheckRateLimit:${bucket}`);
+  }
+  try {
+    const res = await getCcLimiter(bucket).limit(identifier);
+    if (!res.success) {
+      return {
+        allowed: false,
+        remaining: 0,
+        resetAt: new Date(res.reset),
+        message: "Too many requests. Please try again later.",
+      };
+    }
+    return {
+      allowed: true,
+      remaining: res.remaining,
+      resetAt: null,
+    };
+  } catch (err) {
+    logger.error(`checkCharityCheckRateLimit:${bucket}: store error`, { error: String(err) });
+    return storeUnavailable(failMode, `checkCharityCheckRateLimit:${bucket}`);
+  }
+}
