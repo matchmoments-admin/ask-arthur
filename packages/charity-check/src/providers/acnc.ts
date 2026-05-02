@@ -5,20 +5,31 @@
 //   1. ABN provided → exact PK lookup. Cheap, deterministic.
 //   2. Name provided (no ABN) → search_charities() RPC (trigram + ILIKE
 //      prefix). The top result is the candidate; if its similarity score
-//      is < 1.0 (i.e. not an exact match) but >= 0.85, we flag a
-//      potential typosquat / impersonation in detail.typosquat_match.
+//      is < 1.0 (i.e. not an exact match) but ≥ TYPOSQUAT_SIMILARITY_THRESHOLD
+//      AND the Levenshtein edit distance to the nearest match is ≤
+//      TYPOSQUAT_LEVENSHTEIN_MAX, we flag a potential typosquat /
+//      impersonation in detail.typosquat_match.
+//
+// Two-signal calibration (v0.2a) — the v0.1 single-threshold approach
+// (sim ≥ 0.85) almost never fired because real-world spoofs hit 0.42-0.60
+// trigram similarity. Lowering the trigram threshold alone would create
+// false positives ("Cancer Foundation" colliding with anything cancer-
+// adjacent), so we AND it with a Levenshtein edit distance gate. The
+// combination catches genuine typo/letter-swap impersonations
+// ("Astralian Red Cross" → "Australian Red Cross", 1 edit) without
+// flagging legitimately-different charities sharing keywords.
 //
 // Risk mapping (0..100, higher = more risk):
-//   * Exact match, registered                      →  0   (SAFE pillar)
-//   * Match by name, similarity 0.85..0.99         → 100  (typosquat hard-floor)
-//   * No match found                               → 100  (SUSPICIOUS upstream)
-//   * RPC failure / Supabase down                  → unavailable (degraded)
+//   * Exact match, registered                       →  0   (SAFE pillar)
+//   * Near-miss meeting BOTH typosquat conditions   → 100  (HIGH_RISK floor)
+//   * Near-miss not meeting both                    → 100  (SUSPICIOUS, no floor)
+//   * No match found                                → 100  (SUSPICIOUS)
+//   * RPC failure / Supabase down                   → unavailable (degraded)
 //
 // detail payload exposes:
 //   - charity_legal_name, charity_website, town_city, state, charity_size
-//   - typosquat_match (bool), nearest_match (string)
-// The route may redact some of this for non-paid tiers in v0.2; v0.1
-// returns it all.
+//   - typosquat_match (bool), nearest_match (string),
+//     nearest_match_similarity (number), nearest_match_edit_distance (number)
 
 import { logger } from "@askarthur/utils/logger";
 import { createServiceClient } from "@askarthur/supabase/server";
@@ -28,11 +39,16 @@ import type { CharityCheckInput, CharityPillarResult } from "../types";
 
 const PROVIDER_ID = "acnc";
 
-/** Minimum trigram similarity to flag a name-only lookup as a typosquat
- *  match. Calibrated empirically: < 0.85 produces too many false positives
- *  on common words ("Cancer Foundation"); ≥ 1.0 means an exact match
- *  (handled separately as SAFE). */
-const TYPOSQUAT_SIMILARITY_THRESHOLD = 0.85;
+/** Minimum trigram similarity AND maximum Levenshtein distance to flag a
+ *  name-only lookup as a typosquat match. Both must hold (AND), not either
+ *  (OR) — see the file header for the calibration rationale.
+ *
+ *  Trigram threshold lowered from v0.1's 0.85 to 0.65 because real-world
+ *  spoofs (verified against the live 63k-row register on 2026-05-02) cluster
+ *  in the 0.42-0.60 range; the Levenshtein gate is what stops false
+ *  positives from creeping in below 0.85. */
+const TYPOSQUAT_SIMILARITY_THRESHOLD = 0.65;
+const TYPOSQUAT_LEVENSHTEIN_MAX = 3;
 
 interface SearchCharitiesRow {
   abn: string;
@@ -171,10 +187,17 @@ export const acncProvider: CharityProviderContract = {
           };
         }
 
-        // Near-miss but not exact: typosquat-like impersonation pattern.
-        // The scorer's hard-floor rule will escalate this to HIGH_RISK
-        // even though the score itself is what triggers it visually.
-        const typosquatMatch = top.similarity_score >= TYPOSQUAT_SIMILARITY_THRESHOLD;
+        // Near-miss but not exact: check BOTH trigram similarity AND
+        // Levenshtein edit distance. Both must clear their thresholds
+        // for typosquat_match=true (which the scorer floor escalates to
+        // HIGH_RISK). Either alone is too permissive.
+        const editDistance = levenshtein(
+          input.name.toLowerCase().trim(),
+          top.charity_legal_name.toLowerCase().trim(),
+        );
+        const typosquatMatch =
+          top.similarity_score >= TYPOSQUAT_SIMILARITY_THRESHOLD &&
+          editDistance <= TYPOSQUAT_LEVENSHTEIN_MAX;
         return {
           id: "acnc_registration",
           score: 100,
@@ -186,6 +209,7 @@ export const acncProvider: CharityProviderContract = {
             nearest_match: top.charity_legal_name,
             nearest_match_abn: top.abn,
             nearest_match_similarity: top.similarity_score,
+            nearest_match_edit_distance: editDistance,
             typosquat_match: typosquatMatch,
           },
         };
@@ -199,3 +223,40 @@ export const acncProvider: CharityProviderContract = {
     }
   },
 };
+
+/**
+ * Standard Levenshtein edit distance — minimum number of single-character
+ * insertions, deletions, or substitutions to turn `a` into `b`. O(n*m)
+ * time, O(min(n,m)) space (single rolling row). Inputs are expected to
+ * be already case-normalised by the caller. Inlined here rather than
+ * pulled from a util because the only consumer is the typosquat path.
+ */
+export function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+
+  // Always iterate over the shorter string for the rolling row to keep
+  // memory bounded.
+  const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
+  const m = shorter.length;
+  const n = longer.length;
+
+  let prev = new Array<number>(m + 1);
+  let curr = new Array<number>(m + 1);
+  for (let i = 0; i <= m; i++) prev[i] = i;
+
+  for (let j = 1; j <= n; j++) {
+    curr[0] = j;
+    for (let i = 1; i <= m; i++) {
+      const cost = shorter[i - 1] === longer[j - 1] ? 0 : 1;
+      curr[i] = Math.min(
+        curr[i - 1] + 1, // insertion
+        prev[i] + 1, // deletion
+        prev[i - 1] + cost, // substitution
+      );
+    }
+    [prev, curr] = [curr, prev];
+  }
+  return prev[m]!;
+}
