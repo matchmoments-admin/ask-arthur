@@ -151,6 +151,9 @@ importers:
       '@askarthur/bot-core':
         specifier: workspace:*
         version: link:../../packages/bot-core
+      '@askarthur/charity-check':
+        specifier: workspace:*
+        version: link:../../packages/charity-check
       '@askarthur/extension-audit':
         specifier: workspace:^
         version: link:../../packages/extension-audit

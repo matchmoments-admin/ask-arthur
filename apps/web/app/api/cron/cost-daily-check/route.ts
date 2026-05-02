@@ -129,9 +129,20 @@ export async function GET(req: Request) {
     top.find((t) => t.feature === "phone_footprint")?.cost ?? 0;
   const phoneFootprintCost = vonageCost + phoneFootprintTelemetryCost;
 
+  // Charity Check — v0.1 has zero marginal external cost (ACNC is a local
+  // Postgres mirror, ABR is free + Redis-cached). The brake exists ahead
+  // of v0.2's image OCR (Claude Vision ~$0.002–$0.01/image) so the
+  // threshold is wired before the spend appears. Default $5/day matches
+  // the per-feature pattern used elsewhere.
+  const charityCheckThresholdUsd = parseFloat(
+    process.env.CHARITY_CHECK_CAP_USD ?? "5",
+  );
+  const charityCheckCost = top.find((t) => t.feature === "charity_check")?.cost ?? 0;
+
   let brakeSet = false;
   let redditBrakeSet = false;
   let phoneFootprintBrakeSet = false;
+  let charityCheckBrakeSet = false;
   if (vulnEnrichCost > vulnEnrichThresholdUsd) {
     const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     const { error: brakeError } = await supabase
@@ -189,6 +200,34 @@ export async function GET(req: Request) {
       logger.warn("reddit_intel brake engaged", {
         costUsd: redditIntelCost,
         thresholdUsd: redditIntelThresholdUsd,
+        pausedUntil,
+      });
+    }
+  }
+
+  if (charityCheckCost > charityCheckThresholdUsd) {
+    const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const { error: brakeError } = await supabase
+      .from("feature_brakes")
+      .upsert(
+        {
+          feature: "charity_check",
+          paused_until: pausedUntil,
+          reason: `Daily spend $${charityCheckCost.toFixed(2)} exceeded $${charityCheckThresholdUsd} cap`,
+          set_by: "cost-daily-check",
+          set_cost_usd: charityCheckCost,
+          set_threshold_usd: charityCheckThresholdUsd,
+          set_at: new Date().toISOString(),
+        },
+        { onConflict: "feature" },
+      );
+    if (brakeError) {
+      logger.error("failed to set charity_check brake", { error: brakeError.message });
+    } else {
+      charityCheckBrakeSet = true;
+      logger.warn("charity_check brake engaged", {
+        costUsd: charityCheckCost,
+        thresholdUsd: charityCheckThresholdUsd,
         pausedUntil,
       });
     }
@@ -261,6 +300,12 @@ export async function GET(req: Request) {
     lines.push(
       "",
       `🛑 <b>phone_footprint brake engaged</b> — paused for 24h (spend $${phoneFootprintCost.toFixed(2)} > $${phoneFootprintThresholdUsd} cap)`,
+    );
+  }
+  if (charityCheckBrakeSet) {
+    lines.push(
+      "",
+      `🛑 <b>charity_check brake engaged</b> — paused for 24h (spend $${charityCheckCost.toFixed(2)} > $${charityCheckThresholdUsd} cap)`,
     );
   }
   lines.push("", `Full breakdown: https://askarthur.au/admin/costs`);
