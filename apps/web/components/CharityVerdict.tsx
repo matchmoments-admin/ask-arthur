@@ -93,6 +93,28 @@ export default function CharityVerdict({
   const charityName = (acncDetail.charity_legal_name as string | undefined) ?? null;
   const stateRegistry = registrySourceForState(charityState);
 
+  // Donation URL pillar (v0.2a). Two checks roll into one tick:
+  //   - safe_browsing_malicious must NOT be true
+  //   - domain_age_band must be "established_90d_plus" (or unknown WHOIS
+  //     when Safe Browsing is clean)
+  const donationDetail = (result.pillars.donation_url?.detail ?? {}) as Record<string, unknown>;
+  const donationDomain = (donationDetail.domain as string | undefined) ?? null;
+  const donationAgeDays =
+    typeof donationDetail.domain_age_days === "number"
+      ? (donationDetail.domain_age_days as number)
+      : null;
+  const donationAgeBand = (donationDetail.domain_age_band as string | undefined) ?? null;
+  const donationRegistrar = (donationDetail.whois_registrar as string | undefined) ?? null;
+  const donationCountry = (donationDetail.whois_country as string | undefined) ?? null;
+  const donationSafeBrowsingChecked = donationDetail.safe_browsing_checked === true;
+  const donationSafeBrowsingMalicious = donationDetail.safe_browsing_malicious === true;
+  const donationSafeBrowsingSources =
+    (donationDetail.safe_browsing_sources as string[] | undefined) ?? [];
+  const donationUrlPassed =
+    result.pillars.donation_url.available &&
+    !donationSafeBrowsingMalicious &&
+    (donationAgeBand === "established_90d_plus" || donationAgeBand === "unknown");
+
   return (
     <div className="space-y-6">
       <button
@@ -119,8 +141,43 @@ export default function CharityVerdict({
         <Fact label="ACNC registered" pass={acncRegistered} unavailable={!result.pillars.acnc_registration.available} />
         <Fact label="ABN active" pass={abnActive} unavailable={!result.pillars.abr_dgr.available} />
         <Fact label="DGR endorsed" pass={dgrEndorsed} unavailable={!result.pillars.abr_dgr.available} />
-        <Fact label="Donation URL" pass={false} unavailable={true} />
+        <Fact
+          label="Donation URL"
+          pass={donationUrlPassed}
+          unavailable={!result.pillars.donation_url.available}
+        />
       </div>
+
+      {/* Donation-URL detail — collapsible, shown only when the user gave a
+          URL so the pillar actually ran. */}
+      {result.pillars.donation_url.available && donationDomain && (
+        <details className="border border-slate-200 rounded-lg">
+          <summary className="cursor-pointer px-4 py-3 font-medium text-deep-navy">
+            Donation URL details
+          </summary>
+          <dl className="px-4 pb-4 text-sm space-y-2">
+            <Detail term="Domain" desc={donationDomain} />
+            {donationSafeBrowsingChecked && (
+              <Detail
+                term="Safe Browsing"
+                desc={
+                  donationSafeBrowsingMalicious
+                    ? `Flagged (${donationSafeBrowsingSources.join(", ") || "Google"})`
+                    : "Clean"
+                }
+              />
+            )}
+            {donationAgeDays !== null && (
+              <Detail
+                term="Domain age"
+                desc={`${donationAgeDays} day${donationAgeDays === 1 ? "" : "s"} (${formatAgeBand(donationAgeBand ?? undefined)})`}
+              />
+            )}
+            {donationRegistrar && <Detail term="Registrar" desc={donationRegistrar} />}
+            {donationCountry && <Detail term="Registrant country" desc={donationCountry} />}
+          </dl>
+        </details>
+      )}
 
       {/* Official donation URL CTA — only on SAFE / UNCERTAIN with a known URL */}
       {(result.verdict === "SAFE" || result.verdict === "UNCERTAIN") && result.official_donation_url && (
@@ -232,4 +289,17 @@ function Detail({ term, desc }: { term: string; desc: string }) {
       <dd className="text-deep-navy font-medium text-right">{desc}</dd>
     </div>
   );
+}
+
+function formatAgeBand(band: string | undefined): string {
+  switch (band) {
+    case "fresh_under_30d":
+      return "very fresh — high risk";
+    case "fresh_30_to_90d":
+      return "fresh — caution";
+    case "established_90d_plus":
+      return "established";
+    default:
+      return "unknown";
+  }
 }

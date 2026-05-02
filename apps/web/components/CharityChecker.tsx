@@ -6,6 +6,7 @@ import {
   Search,
   Hash,
   CreditCard,
+  Link as LinkIcon,
 } from "lucide-react";
 
 import CharityVerdict, { type CharityCheckResult } from "@/components/CharityVerdict";
@@ -30,6 +31,7 @@ export default function CharityChecker() {
   const [name, setName] = useState("");
   const [abn, setAbn] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("");
+  const [donationUrl, setDonationUrl] = useState("");
   const [autocomplete, setAutocomplete] = useState<AutocompleteRow[]>([]);
   const [acIndex, setAcIndex] = useState<number | null>(null);
   const [status, setStatus] = useState<Status>("idle");
@@ -79,6 +81,7 @@ export default function CharityChecker() {
     if (mode === "abn") body.abn = formattedAbn;
     if (mode === "name") body.name = name.trim();
     if (paymentMethod) body.paymentMethod = paymentMethod;
+    if (donationUrl.trim()) body.donationUrl = donationUrl.trim();
 
     try {
       const res = await fetch("/api/charity-check", {
@@ -134,6 +137,7 @@ export default function CharityChecker() {
     setName("");
     setAbn("");
     setPaymentMethod("");
+    setDonationUrl("");
     setAutocomplete([]);
   };
 
@@ -260,6 +264,36 @@ export default function CharityChecker() {
           </p>
         </div>
       )}
+
+      {/* Optional donation-URL field — when provided, the engine runs the
+          donation_url pillar (Safe Browsing + WHOIS domain age) on it.
+          Often the URL on a fundraiser's flyer or QR is the easiest thing
+          to copy-paste, and a brand-new domain on a "bushfire appeal" is
+          one of the highest-fidelity scam signals available. */}
+      <div>
+        <label
+          htmlFor="cc-donation-url"
+          className="block text-sm font-medium text-deep-navy mb-2 inline-flex items-center gap-1.5"
+        >
+          <LinkIcon size={16} aria-hidden /> Donation URL{" "}
+          <span className="text-gov-slate font-normal">(optional)</span>
+        </label>
+        <input
+          id="cc-donation-url"
+          type="url"
+          inputMode="url"
+          value={donationUrl}
+          onChange={(e) => setDonationUrl(e.target.value)}
+          placeholder="https://example.org.au/donate"
+          className="w-full px-4 py-3 border border-slate-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-deep-navy"
+          autoComplete="off"
+          aria-describedby="cc-donation-url-hint"
+        />
+        <p id="cc-donation-url-hint" className="mt-1 text-xs text-gov-slate">
+          The page they want you to visit. We&rsquo;ll check it for safety
+          warnings and how recently the domain was registered.
+        </p>
+      </div>
 
       {/* Optional behavioural micro-flow — payment method.
           Cash / gift cards / crypto / bank-transfer trigger the HIGH_RISK

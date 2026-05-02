@@ -2,16 +2,23 @@
 // timeouts inside an overall budget. Mirrors phone-footprint/orchestrator.ts
 // in shape; ADR-0002 documents the "two adapters → real seam" decision.
 //
-// Wiring order:
-//   acnc — local Postgres lookup (always runs; v0.1 weight 0.5)
-//   abr  — ABR Lookup with DGR fields  (always runs; v0.1 weight 0.3)
-//   donation_url — v0.2 placeholder; reports unavailable so the scorer
-//                  redistributes weight to acnc + abr (v0.1 weight 0.2)
+// Wiring order (v0.2a):
+//   acnc         — local Postgres lookup        (weight 0.5; runs when name OR abn)
+//   abr          — ABR Lookup with DGR fields   (weight 0.3; runs when abn supplied)
+//   donation_url — Safe Browsing + WHOIS age    (weight 0.2; runs when donationUrl supplied)
+//
+// Each provider self-reports `available: false` when its prerequisite input
+// isn't present (e.g. abr returns `no_abn_provided` when only a name was
+// given); the scorer redistributes weight pro-rata across pillars that did
+// run. Coverage stays "live" for non-running providers when the omission is
+// caller-controlled (no abn supplied), "degraded" when the upstream actually
+// failed.
 
 import { logger } from "@askarthur/utils/logger";
 
 import { acncProvider } from "./providers/acnc";
 import { abrProvider } from "./providers/abr";
+import { donationUrlProvider } from "./providers/donation-url";
 import {
   unavailablePillar,
   withTimeout,
@@ -32,7 +39,11 @@ import type {
 
 const BATCH_TIMEOUT_MS = 5000;
 
-const PROVIDERS: CharityProviderContract[] = [acncProvider, abrProvider];
+const PROVIDERS: CharityProviderContract[] = [
+  acncProvider,
+  abrProvider,
+  donationUrlProvider,
+];
 
 /**
  * Run every provider in parallel inside a single 5s budget. Providers that
@@ -67,12 +78,12 @@ export async function runCharityCheck(
   const pillars: Record<CharityPillarId, CharityPillarResult> = {
     acnc_registration: unavailablePillar("acnc_registration", "not_run"),
     abr_dgr: unavailablePillar("abr_dgr", "not_run"),
-    donation_url: unavailablePillar("donation_url", "not_implemented_v0_1"),
+    donation_url: unavailablePillar("donation_url", "not_run"),
   };
   const coverage: CharityCoverage = {
     acnc: "live",
     abr: "live",
-    donation_url: "disabled",
+    donation_url: "live",
   };
   const providersUsed: string[] = [];
 
@@ -135,6 +146,12 @@ function stampCoverageDown(
       break;
     case "abr":
       coverage.abr = reason === "no_abn_provided" ? "disabled" : "degraded";
+      break;
+    case "donation_url":
+      // "no_url_provided" is a clean disable (caller didn't supply a URL).
+      // "all_legs_failed" / "invalid_url" / "private_or_invalid_url" mean
+      // we tried but couldn't get a useful answer — degraded.
+      coverage.donation_url = reason === "no_url_provided" ? "disabled" : "degraded";
       break;
   }
 }
