@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Clock, ClipboardCheck, Lock, Link2, Share2, Code2, ChevronDown, AlertTriangle } from "lucide-react";
-import AuditGradeRing from "./AuditGradeRing";
-import AuditCategoryCard from "./AuditCategoryCard";
+import Link from "next/link";
+import { LEARN_MORE_URLS } from "@askarthur/site-audit/learn-more";
 import AuditRawHeaders from "./AuditRawHeaders";
+import "./site-audit-report.css";
 
 export interface CheckResult {
   id: string;
@@ -14,6 +14,7 @@ export interface CheckResult {
   score: number;
   maxScore: number;
   details: string;
+  evidence?: string;
 }
 
 export interface CategoryScore {
@@ -65,15 +66,6 @@ interface SiteAuditReportProps {
   previousScan?: { grade: string; score: number } | null;
 }
 
-const GRADE_HEADER_COLORS: Record<string, string> = {
-  "A+": "bg-green-50 border-green-200",
-  A: "bg-green-50 border-green-200",
-  B: "bg-teal-50 border-teal-200",
-  C: "bg-amber-50 border-amber-200",
-  D: "bg-orange-50 border-orange-200",
-  F: "bg-red-50 border-red-200",
-};
-
 const FETCH_ERROR_MESSAGES: Record<string, string> = {
   blocked: "This site's firewall blocked our scanner, but we still checked what we could.",
   dns_error: "This domain doesn't appear to exist. We checked DNS records anyway.",
@@ -82,107 +74,197 @@ const FETCH_ERROR_MESSAGES: Record<string, string> = {
   network_error: "We couldn't connect to this site, but we checked what we could via DNS.",
 };
 
-const SEVERITY_COLORS: Record<string, string> = {
-  critical: "bg-red-100 text-red-800 border-red-200",
-  high: "bg-orange-100 text-orange-800 border-orange-200",
-  medium: "bg-amber-100 text-amber-800 border-amber-200",
-  low: "bg-blue-100 text-blue-800 border-blue-200",
-};
-
-function normalizeRecommendation(rec: string | Recommendation): Recommendation {
-  if (typeof rec === "string") {
-    return { text: rec, severity: "medium" };
-  }
+function normalizeRec(rec: string | Recommendation): Recommendation {
+  if (typeof rec === "string") return { text: rec, severity: "medium" };
   return rec;
 }
 
-function PartialScanBanner({ fetchError }: { fetchError: FetchError }) {
-  const message = FETCH_ERROR_MESSAGES[fetchError.type] || FETCH_ERROR_MESSAGES.network_error;
-
-  return (
-    <div className="rounded-xl border-2 border-amber-200 bg-amber-50 p-4 flex gap-3 items-start">
-      <AlertTriangle className="text-amber-600 flex-shrink-0 mt-0.5" size={20} />
-      <div>
-        <p className="text-sm font-semibold text-amber-900">Partial Scan</p>
-        <p className="text-sm text-amber-800 mt-0.5">{message}</p>
-      </div>
-    </div>
-  );
+function rankLabel(grade: string): string {
+  if (grade.startsWith("A")) return "Excellent";
+  if (grade.startsWith("B")) return "Above average";
+  if (grade.startsWith("C")) return "Needs work";
+  if (grade === "D") return "Poor";
+  return "Critical";
 }
 
-function SeverityPill({ severity }: { severity: string }) {
-  const colors = SEVERITY_COLORS[severity] || SEVERITY_COLORS.medium;
-  return (
-    <span className={`inline-flex items-center px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-full border ${colors}`}>
-      {severity}
-    </span>
-  );
+function statusKey(grade: string): "ok" | "warn" | "err" {
+  if (grade.startsWith("A") || grade.startsWith("B")) return "ok";
+  if (grade.startsWith("C") || grade === "D") return "warn";
+  return "err";
 }
 
-function SnippetBlock({ snippet }: { snippet: string }) {
-  const [expanded, setExpanded] = useState(false);
-  const [copied, setCopied] = useState(false);
+function sectionStatusKey(score: number, maxScore: number): "ok" | "warn" | "err" {
+  if (maxScore === 0) return "ok";
+  const pct = score / maxScore;
+  if (pct >= 0.8) return "ok";
+  if (pct >= 0.5) return "warn";
+  return "err";
+}
 
-  function handleCopy() {
-    navigator.clipboard.writeText(snippet).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+function checkStatusKey(status: string): "ok" | "warn" | "err" | "skipped" {
+  if (status === "pass") return "ok";
+  if (status === "warn") return "warn";
+  if (status === "fail") return "err";
+  return "skipped";
+}
+
+function summaryTagFor(s: "ok" | "warn" | "err"): { cls: string; label: string } {
+  if (s === "ok") return { cls: "ar-tag-ok", label: "All passing" };
+  if (s === "warn") return { cls: "ar-tag-warn", label: "Needs work" };
+  return { cls: "ar-tag-err", label: "Critical" };
+}
+
+function formatScannedDate(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString("en-AU", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
     });
+  } catch {
+    return iso;
+  }
+}
+
+function IconCheck() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} aria-hidden="true">
+      <circle cx="12" cy="12" r="10" strokeWidth="1.5" />
+      <polyline points="8 12 11 15 16 9" />
+    </svg>
+  );
+}
+function IconX() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} aria-hidden="true">
+      <circle cx="12" cy="12" r="10" strokeWidth="1.5" />
+      <line x1="9" y1="9" x2="15" y2="15" />
+      <line x1="15" y1="9" x2="9" y2="15" />
+    </svg>
+  );
+}
+function IconWarn() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} aria-hidden="true">
+      <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+      <line x1="12" y1="9" x2="12" y2="13" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
+    </svg>
+  );
+}
+function IconMinus() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+      <circle cx="12" cy="12" r="10" />
+      <line x1="8" y1="12" x2="16" y2="12" />
+    </svg>
+  );
+}
+function CheckStatusIcon({ k }: { k: "ok" | "warn" | "err" | "skipped" }) {
+  if (k === "ok") return <IconCheck />;
+  if (k === "warn") return <IconWarn />;
+  if (k === "err") return <IconX />;
+  return <IconMinus />;
+}
+
+const CATEGORY_ICON_PATHS: Record<string, string> = {
+  "https-tls": "M3 11h18v11H3zM7 11V7a5 5 0 0110 0v4",
+  tls: "M3 11h18v11H3zM7 11V7a5 5 0 0110 0v4",
+  "security-headers": "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z",
+  headers: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z",
+  "content-security": "M12 2L2 7l10 5 10-5zM2 17l10 5 10-5M2 12l10 5 10-5",
+  csp: "M12 2L2 7l10 5 10-5zM2 17l10 5 10-5M2 12l10 5 10-5",
+  "email-security": "M4 4h16a2 2 0 012 2v12a2 2 0 01-2 2H4a2 2 0 01-2-2V6a2 2 0 012-2zM22 6L12 13 2 6",
+  email: "M4 4h16a2 2 0 012 2v12a2 2 0 01-2 2H4a2 2 0 01-2-2V6a2 2 0 012-2zM22 6L12 13 2 6",
+  dmarc: "M4 4h16a2 2 0 012 2v12a2 2 0 01-2 2H4a2 2 0 01-2-2V6a2 2 0 012-2zM22 6L12 13 2 6",
+  dns: "M2 12h20M12 2a15 15 0 010 20M12 2a15 15 0 000 20",
+  domain: "M2 12h20M12 2a15 15 0 010 20M12 2a15 15 0 000 20",
+};
+
+function CategoryIcon({ category }: { category: string }) {
+  const d = CATEGORY_ICON_PATHS[category] ?? "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z";
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d={d} />
+    </svg>
+  );
+}
+
+function ExternalArrow() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} aria-hidden="true">
+      <path d="M7 17L17 7M7 7h10v10" />
+    </svg>
+  );
+}
+
+function CheckDetails({ details, learnMoreUrl }: { details: string; learnMoreUrl?: string }) {
+  // Render `like this` as <code>; everything else as plain text. Simple, no nesting/escapes.
+  const parts: Array<{ kind: "text" | "code"; value: string }> = [];
+  let i = 0;
+  while (i < details.length) {
+    const open = details.indexOf("`", i);
+    if (open === -1) {
+      parts.push({ kind: "text", value: details.slice(i) });
+      break;
+    }
+    if (open > i) parts.push({ kind: "text", value: details.slice(i, open) });
+    const close = details.indexOf("`", open + 1);
+    if (close === -1) {
+      parts.push({ kind: "text", value: details.slice(open) });
+      break;
+    }
+    parts.push({ kind: "code", value: details.slice(open + 1, close) });
+    i = close + 1;
   }
 
   return (
-    <div className="mt-2">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="text-xs text-action-teal font-semibold hover:underline flex items-center gap-1"
-      >
-        <Code2 size={12} />
-        {expanded ? "Hide" : "Show"} fix
-        <ChevronDown size={10} className={`transition-transform ${expanded ? "rotate-180" : ""}`} />
-      </button>
-      {expanded && (
-        <div className="mt-1.5 relative">
-          <pre className="text-xs bg-slate-100 p-3 rounded-lg font-mono overflow-x-auto text-deep-navy whitespace-pre-wrap">
-            {snippet}
-          </pre>
-          <button
-            onClick={handleCopy}
-            className="absolute top-2 right-2 text-[10px] font-bold uppercase tracking-widest px-2 py-1 bg-white border border-gray-200 rounded hover:bg-gray-50 transition-colors"
-          >
-            {copied ? "Copied!" : "Copy"}
-          </button>
-        </div>
+    <div className="ar-check-desc">
+      {parts.map((p, idx) =>
+        p.kind === "code" ? <code key={idx}>{p.value}</code> : <span key={idx}>{p.value}</span>
+      )}
+      {learnMoreUrl && (
+        <>
+          {" "}
+          <a href={learnMoreUrl} target="_blank" rel="noopener noreferrer">
+            Learn more
+            <ExternalArrow />
+          </a>
+        </>
       )}
     </div>
-  );
-}
-
-function PreviousScanComparison({
-  previous,
-  current,
-}: {
-  previous: { grade: string; score: number };
-  current: { grade: string; score: number };
-}) {
-  const diff = current.score - previous.score;
-  const arrow = diff > 0 ? "\u2191" : diff < 0 ? "\u2193" : "\u2014";
-  const color = diff > 0 ? "text-green-700" : diff < 0 ? "text-red-700" : "text-slate-500";
-
-  return (
-    <p className={`text-xs font-semibold ${color} mt-1`}>
-      Previous scan: {previous.grade} ({previous.score}) → Today: {current.grade} ({current.score}) {arrow}
-    </p>
   );
 }
 
 export default function SiteAuditReport({ result, shareUrl, previousScan }: SiteAuditReportProps) {
   const [copied, setCopied] = useState(false);
   const [showBadge, setShowBadge] = useState(false);
-  const headerColor = GRADE_HEADER_COLORS[result.grade] || "bg-slate-50 border-slate-200";
 
-  const badgeUrl = `https://askarthur.au/badge/${encodeURIComponent(result.domain)}`;
+  const overall = statusKey(result.grade);
+  const reportId = (shareUrl?.split("/").pop() || "").slice(0, 8);
+
   const reportUrl = `https://askarthur.au/report/${encodeURIComponent(result.domain)}`;
+  const badgeUrl = `https://askarthur.au/badge/${encodeURIComponent(result.domain)}`;
   const badgeSnippet = `<a href="${reportUrl}"><img src="${badgeUrl}" alt="${result.domain} safety grade" /></a>`;
+
+  const twitterText = encodeURIComponent(
+    `${result.domain} scored ${result.grade} (${result.overallScore}/100) on the Ask Arthur Website Health Check`
+  );
+  const twitterUrl = shareUrl ? `https://twitter.com/intent/tweet?text=${twitterText}&url=${encodeURIComponent(shareUrl)}` : null;
+  const linkedInUrl = shareUrl
+    ? `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(shareUrl)}`
+    : null;
 
   function handleCopyLink() {
     if (!shareUrl) return;
@@ -192,167 +274,321 @@ export default function SiteAuditReport({ result, shareUrl, previousScan }: Site
     });
   }
 
-  const twitterText = encodeURIComponent(
-    `${result.domain} scored ${result.grade} (${result.overallScore}/100) on the Ask Arthur Website Health Check`
-  );
-  const twitterUrl = shareUrl
-    ? `https://twitter.com/intent/tweet?text=${twitterText}&url=${encodeURIComponent(shareUrl)}`
-    : null;
-  const linkedInUrl = shareUrl
-    ? `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(shareUrl)}`
-    : null;
+  const ringRadius = 42;
+  const ringCircumference = 2 * Math.PI * ringRadius;
+  const ringOffset =
+    ringCircumference - (Math.max(0, Math.min(100, result.overallScore)) / 100) * ringCircumference;
+  const ringStroke = `var(--ar-${overall === "ok" ? "ok" : overall === "warn" ? "warn" : "err"})`;
 
-  const recommendations = result.recommendations.map(normalizeRecommendation);
+  const categories = result.categories.filter((c) => c.checks.length > 0);
+  const summaryColsClass =
+    categories.length === 1
+      ? "cols-1"
+      : categories.length === 2
+        ? "cols-2"
+        : categories.length === 3
+          ? "cols-3"
+          : "";
+
+  const recs = result.recommendations.map(normalizeRec);
+  const totalChecks = result.checks.length;
 
   return (
-    <div className="mt-8 space-y-6">
-      {/* Partial scan banner */}
+    <div className="audit-report">
       {result.partial && result.fetchError && (
-        <PartialScanBanner fetchError={result.fetchError} />
+        <div className="ar-banner is-warn" role="status">
+          <span className="ar-banner-icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+              <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+              <line x1="12" y1="9" x2="12" y2="13" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+          </span>
+          <div>
+            <div className="ar-banner-title">Partial Scan</div>
+            <div>{FETCH_ERROR_MESSAGES[result.fetchError.type] || FETCH_ERROR_MESSAGES.network_error}</div>
+          </div>
+        </div>
       )}
 
-      {/* Grade header card */}
-      <div className={`rounded-2xl border-2 p-6 ${headerColor}`}>
-        <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start">
-          <AuditGradeRing grade={result.grade} score={result.overallScore} />
-          <div className="flex-1 text-center sm:text-left">
-            <h2 className="text-xl font-extrabold text-deep-navy mb-1">
-              {result.domain}
-            </h2>
-            <p className="text-sm text-gov-slate mb-2">{result.url}</p>
-            {previousScan && (
-              <PreviousScanComparison
-                previous={previousScan}
-                current={{ grade: result.grade, score: result.overallScore }}
+      <header className="ar-header">
+        <div className="ar-eyebrow">
+          <span className={`ar-eyebrow-dot${overall === "warn" ? " is-warn" : overall === "err" ? " is-err" : ""}`} />
+          <span>Scan complete · {formatScannedDate(result.scannedAt)}</span>
+        </div>
+        <h1 className="ar-title">Website Health Check</h1>
+        <div className="ar-meta-line">
+          <span>Comprehensive security &amp; integrity audit</span>
+          {reportId && (
+            <>
+              <span className="ar-dot" aria-hidden="true" />
+              <span>
+                Report ID <code>{reportId}</code>
+              </span>
+            </>
+          )}
+        </div>
+      </header>
+
+      <section className="ar-score-card">
+        <div className="ar-accent">
+          <div
+            className="ar-accent-fill"
+            style={{
+              width: `${Math.max(0, Math.min(100, result.overallScore))}%`,
+              background: ringStroke,
+            }}
+          />
+        </div>
+
+        <div className="ar-score-grid">
+          <div className="ar-ring-wrap">
+            <svg className="ar-ring-svg" width="96" height="96" viewBox="0 0 96 96" aria-hidden="true">
+              <circle className="ar-ring-track" cx="48" cy="48" r={ringRadius} strokeWidth="6" fill="none" />
+              <circle
+                className="ar-ring-fill"
+                cx="48"
+                cy="48"
+                r={ringRadius}
+                strokeWidth="6"
+                fill="none"
+                stroke={ringStroke}
+                strokeDasharray={ringCircumference.toFixed(2)}
+                strokeDashoffset={ringOffset.toFixed(2)}
+                strokeLinecap="round"
               />
-            )}
-            <div className="flex flex-wrap items-center justify-center sm:justify-start gap-3 text-xs text-gov-slate">
-              <span className="flex items-center gap-1">
-                <Clock size={14} />
-                {(result.durationMs / 1000).toFixed(1)}s
-              </span>
-              <span className="flex items-center gap-1">
-                <ClipboardCheck size={14} />
-                {result.checks.length} checks
-              </span>
-              {result.ssl?.valid && (
-                <span className="flex items-center gap-1">
-                  <Lock size={14} />
-                  {result.ssl.protocol || "TLS"}
-                  {result.ssl.daysRemaining != null && ` (${result.ssl.daysRemaining}d)`}
+            </svg>
+            <div className="ar-ring-label">
+              <div className="ar-ring-grade">{result.grade}</div>
+              <div className="ar-ring-score">{result.overallScore} / 100</div>
+            </div>
+          </div>
+
+          <div className="ar-site-info">
+            <div className="ar-site-name">{result.domain}</div>
+            <div className="ar-site-url">{result.url}</div>
+            <div className="ar-site-stats">
+              <div className="ar-stat">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M12 7v5l3 2" />
+                </svg>
+                <span>
+                  <span className="ar-stat-value">{(result.durationMs / 1000).toFixed(1)}s</span> scan time
                 </span>
+              </div>
+              <div className="ar-stat">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                  <path d="M9 11l3 3L22 4" />
+                  <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
+                </svg>
+                <span>
+                  <span className="ar-stat-value">{totalChecks}</span> checks performed
+                </span>
+              </div>
+              {result.ssl?.valid && (
+                <div className="ar-stat">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                    <rect x="3" y="11" width="18" height="11" rx="2" />
+                    <path d="M7 11V7a5 5 0 0110 0v4" />
+                  </svg>
+                  <span>
+                    <span className="ar-stat-value">{result.ssl.protocol || "TLS"}</span>
+                    {result.ssl.daysRemaining != null && ` · ${result.ssl.daysRemaining}d`}
+                  </span>
+                </div>
+              )}
+              {previousScan && (
+                <div className="ar-stat">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                    <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
+                    <polyline points="17 6 23 6 23 12" />
+                  </svg>
+                  <span>
+                    Previous{" "}
+                    <span className="ar-stat-value">
+                      {previousScan.grade} ({previousScan.score})
+                    </span>
+                  </span>
+                </div>
               )}
             </div>
           </div>
+
+          <div className="ar-score-rank">
+            <div className="ar-rank-num">{result.grade}</div>
+            <div className="ar-rank-label">{rankLabel(result.grade)}</div>
+          </div>
         </div>
 
-        {/* Share section */}
         {shareUrl && (
-          <div className="mt-4 pt-4 border-t border-black/10 flex flex-wrap items-center justify-center sm:justify-start gap-2">
-            <button
-              onClick={handleCopyLink}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold uppercase tracking-widest bg-deep-navy text-white rounded-full hover:bg-navy transition-colors"
-            >
-              <Link2 size={12} />
-              {copied ? "Copied!" : "Copy Link"}
-            </button>
-            {twitterUrl && (
-              <a
-                href={twitterUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold uppercase tracking-widest bg-white text-deep-navy border border-gray-200 rounded-full hover:bg-gray-50 transition-colors"
-              >
-                <Share2 size={12} />
-                Twitter
-              </a>
+          <>
+            <div className="ar-share-row">
+              <button type="button" className="ar-btn is-primary" onClick={handleCopyLink}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                  <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
+                  <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
+                </svg>
+                {copied ? "Copied" : "Copy link"}
+              </button>
+              {twitterUrl && (
+                <a href={twitterUrl} target="_blank" rel="noopener noreferrer" className="ar-btn">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+                  </svg>
+                  Share on X
+                </a>
+              )}
+              {linkedInUrl && (
+                <a href={linkedInUrl} target="_blank" rel="noopener noreferrer" className="ar-btn">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <path d="M20.45 20.45h-3.55v-5.57c0-1.33-.03-3.04-1.85-3.04-1.85 0-2.14 1.45-2.14 2.94v5.67H9.36V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.46v6.28zM5.34 7.43a2.06 2.06 0 11.0-4.13 2.06 2.06 0 010 4.13zM7.12 20.45H3.56V9h3.56v11.45zM22.23 0H1.77C.79 0 0 .77 0 1.72v20.56C0 23.23.79 24 1.77 24h20.46c.98 0 1.77-.77 1.77-1.72V1.72C24 .77 23.21 0 22.23 0z" />
+                  </svg>
+                  LinkedIn
+                </a>
+              )}
+              <button type="button" className="ar-btn" onClick={() => setShowBadge((b) => !b)}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                  <polyline points="16 18 22 12 16 6" />
+                  <polyline points="8 6 2 12 8 18" />
+                </svg>
+                Embed badge
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  style={{ transform: showBadge ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}
+                  aria-hidden="true"
+                >
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+              <div className="ar-share-trail">
+                <Link className="ar-btn" href="/scan">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                    <polyline points="23 4 23 10 17 10" />
+                    <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
+                  </svg>
+                  Re-scan
+                </Link>
+              </div>
+            </div>
+            {showBadge && (
+              <div className="ar-badge-popover">
+                <div className="ar-badge-popover-label">Embed this badge</div>
+                <code>{badgeSnippet}</code>
+              </div>
             )}
-            {linkedInUrl && (
-              <a
-                href={linkedInUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold uppercase tracking-widest bg-white text-deep-navy border border-gray-200 rounded-full hover:bg-gray-50 transition-colors"
-              >
-                <Share2 size={12} />
-                LinkedIn
-              </a>
-            )}
-            <button
-              onClick={() => setShowBadge(!showBadge)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold uppercase tracking-widest bg-white text-deep-navy border border-gray-200 rounded-full hover:bg-gray-50 transition-colors"
-            >
-              <Code2 size={12} />
-              Badge
-              <ChevronDown size={10} className={`transition-transform ${showBadge ? "rotate-180" : ""}`} />
-            </button>
-          </div>
+          </>
         )}
+      </section>
 
-        {/* Badge embed snippet */}
-        {showBadge && (
-          <div className="mt-3 p-3 bg-white/60 rounded-lg border border-black/10">
-            <p className="text-xs text-gov-slate mb-2">
-              Embed this badge on your site:
-            </p>
-            <code className="block text-xs bg-slate-100 p-2 rounded font-mono break-all text-deep-navy select-all">
-              {badgeSnippet}
-            </code>
-          </div>
-        )}
-      </div>
+      {categories.length > 0 && (
+        <section className={`ar-summary-strip ${summaryColsClass}`}>
+          {categories.map((cat) => {
+            const s = sectionStatusKey(cat.score, cat.maxScore);
+            const tag = summaryTagFor(s);
+            const pct = cat.maxScore > 0 ? Math.round((cat.score / cat.maxScore) * 100) : 0;
+            return (
+              <div key={cat.category} className="ar-summary-cell">
+                <div className="ar-summary-cell-label">{cat.label}</div>
+                <div className="ar-summary-cell-row">
+                  <span className="ar-summary-cell-value">{cat.grade}</span>
+                  <span className="ar-summary-cell-suffix">{pct}%</span>
+                </div>
+                <span className={`ar-summary-cell-tag ${tag.cls}`}>{tag.label}</span>
+              </div>
+            );
+          })}
+        </section>
+      )}
 
-      {/* Category cards */}
-      <div className="space-y-4">
-        {result.categories
-          .filter((cat) => cat.checks.length > 0)
-          .map((cat) => (
-            <AuditCategoryCard
-              key={cat.category}
-              label={cat.label}
-              grade={cat.grade}
-              score={cat.score}
-              maxScore={cat.maxScore}
-              checks={cat.checks}
-            />
-          ))}
-      </div>
+      {categories.map((cat) => {
+        const s = sectionStatusKey(cat.score, cat.maxScore);
+        const pct = cat.maxScore > 0 ? Math.round((cat.score / cat.maxScore) * 100) : 0;
+        return (
+          <section key={cat.category} className="ar-section">
+            <div className="ar-section-head">
+              <div className="ar-section-head-row">
+                <div className="ar-section-title">
+                  <span className="ar-section-title-icon">
+                    <CategoryIcon category={cat.category} />
+                  </span>
+                  {cat.label}
+                </div>
+                <div className="ar-section-grade">
+                  <span className={`ar-grade-letter${s === "warn" ? " is-warn" : s === "err" ? " is-err" : ""}`}>
+                    {cat.grade}
+                  </span>
+                  <span className="ar-grade-pct">{pct}%</span>
+                </div>
+              </div>
+              <div className="ar-progress-bar">
+                <div className={`ar-progress-fill is-${s}`} style={{ width: `${pct}%` }} />
+              </div>
+            </div>
 
-      {/* Raw Headers */}
+            <div className="ar-checks">
+              {cat.checks.map((check) => {
+                const ck = checkStatusKey(check.status);
+                const rowCls = ck === "warn" ? " is-warn" : ck === "err" ? " is-err" : "";
+                return (
+                  <div key={check.id} className={`ar-check${rowCls}`}>
+                    <div className={`ar-check-icon is-${ck}`}>
+                      <CheckStatusIcon k={ck} />
+                    </div>
+                    <div className="ar-check-body">
+                      <div className="ar-check-name">{check.label}</div>
+                      <CheckDetails details={check.details} learnMoreUrl={LEARN_MORE_URLS[check.id]} />
+                      {check.evidence && (
+                        <details className="ar-check-evidence">
+                          <summary>View evidence</summary>
+                          <pre>{check.evidence}</pre>
+                        </details>
+                      )}
+                    </div>
+                    <div className="ar-check-score">
+                      <span className="ar-num">{check.score}</span>/{check.maxScore}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        );
+      })}
+
       <AuditRawHeaders rawHeaders={result.rawHeaders} />
 
-      {/* Recommendations */}
-      {recommendations.length > 0 && (
-        <div className="border border-gray-200 rounded-xl overflow-hidden">
-          <div className="px-4 py-3 bg-slate-50 border-b border-gray-200">
-            <h3 className="text-sm font-bold text-deep-navy uppercase tracking-widest">
-              Recommendations
-            </h3>
-          </div>
-          <ol className="p-4 space-y-4">
-            {recommendations.map((rec, i) => (
-              <li key={i} className="flex gap-3 text-sm text-gov-slate">
-                <span className="flex-shrink-0 w-6 h-6 rounded-full bg-deep-navy text-white text-xs font-bold flex items-center justify-center mt-0.5">
-                  {i + 1}
-                </span>
-                <div className="flex-1">
-                  <div className="flex items-start gap-2">
-                    <SeverityPill severity={rec.severity} />
-                    <span className="leading-relaxed">{rec.text}</span>
-                  </div>
-                  {rec.snippet && <SnippetBlock snippet={rec.snippet} />}
+      {recs.length > 0 && (
+        <section className="ar-recs">
+          <div className="ar-recs-head">Recommendations</div>
+          <ol className="ar-recs-list">
+            {recs.map((rec, i) => (
+              <li key={i} className={`ar-rec is-${rec.severity}`}>
+                <span className="ar-rec-num">{i + 1}</span>
+                <div className="ar-rec-body">
+                  <span className={`ar-rec-severity is-${rec.severity}`}>{rec.severity}</span>
+                  <span>{rec.text}</span>
+                  {rec.snippet && (
+                    <details className="ar-rec-snippet">
+                      <summary>Show fix</summary>
+                      <pre>{rec.snippet}</pre>
+                    </details>
+                  )}
                 </div>
               </li>
             ))}
           </ol>
-        </div>
+        </section>
       )}
 
-      {/* Disclaimer */}
-      <p className="text-[11px] text-slate-400 text-center leading-relaxed">
-        This scan checks publicly observable security configuration. It does not test for
-        application-level vulnerabilities, perform penetration testing, or access any private data.
-        Results are informational only.
+      <p className="ar-disclaimer">
+        This scan checks publicly observable security configuration. It does not test for application-level
+        vulnerabilities, perform penetration testing, or access any private data. Results are informational only.
       </p>
     </div>
   );
