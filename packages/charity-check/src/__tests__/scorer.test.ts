@@ -194,6 +194,43 @@ describe("applyVerdictFloors", () => {
     expect(out).toBe("SAFE");
   });
 
+  // v0.2d behavioural floors
+  it("v0.2d: idShown=refused + inPersonContext → HIGH_RISK", () => {
+    expect(
+      applyVerdictFloors("SAFE", { ...baseInput, idShown: "refused", inPersonContext: true }, make()),
+    ).toBe("HIGH_RISK");
+  });
+
+  it("v0.2d: idShown=refused without inPersonContext → no floor", () => {
+    expect(
+      applyVerdictFloors("SAFE", { ...baseInput, idShown: "refused" }, make()),
+    ).toBe("SAFE");
+  });
+
+  it("v0.2d: idShown=no + inPersonContext escalates one step", () => {
+    expect(
+      applyVerdictFloors("SAFE", { ...baseInput, idShown: "no", inPersonContext: true }, make()),
+    ).toBe("UNCERTAIN");
+    expect(
+      applyVerdictFloors("UNCERTAIN", { ...baseInput, idShown: "no", inPersonContext: true }, make()),
+    ).toBe("SUSPICIOUS");
+    expect(
+      applyVerdictFloors("SUSPICIOUS", { ...baseInput, idShown: "no", inPersonContext: true }, make()),
+    ).toBe("SUSPICIOUS");
+  });
+
+  it("v0.2d: idShown=yes is benign", () => {
+    expect(
+      applyVerdictFloors("SAFE", { ...baseInput, idShown: "yes", inPersonContext: true }, make()),
+    ).toBe("SAFE");
+  });
+
+  it("v0.2d: idShown=skipped is benign", () => {
+    expect(
+      applyVerdictFloors("SAFE", { ...baseInput, idShown: "skipped", inPersonContext: true }, make()),
+    ).toBe("SAFE");
+  });
+
   it("escalates SAFE → HIGH_RISK on typosquat detection", () => {
     const pillars = make({
       acnc_registration: {

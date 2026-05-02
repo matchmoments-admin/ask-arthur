@@ -32,6 +32,8 @@ const CharityCheckBodySchema = z
     paymentMethod: z
       .enum(["card", "regular_debit", "cash", "gift_card", "crypto", "bank_transfer"])
       .optional(),
+    idShown: z.enum(["yes", "no", "refused", "skipped"]).optional(),
+    inPersonContext: z.boolean().optional(),
   })
   .refine((data) => Boolean((data.abn && data.abn.length === 11) || data.name), {
     message: "Either abn (11 digits) or name (≥2 chars) is required",
@@ -109,6 +111,8 @@ export async function POST(req: NextRequest) {
       name: input.name,
       donationUrl: input.donationUrl,
       paymentMethod: input.paymentMethod,
+      idShown: input.idShown,
+      inPersonContext: input.inPersonContext,
       requestId,
     });
 

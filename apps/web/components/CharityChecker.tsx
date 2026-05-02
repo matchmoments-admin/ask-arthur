@@ -14,6 +14,7 @@ import CharityVerdict, { type CharityCheckResult } from "@/components/CharityVer
 type Status = "idle" | "checking" | "complete" | "error";
 type InputMode = "name" | "abn";
 type PaymentMethod = "card" | "regular_debit" | "cash" | "gift_card" | "crypto" | "bank_transfer" | "";
+type IdShown = "yes" | "no" | "refused" | "skipped" | "";
 
 interface AutocompleteRow {
   abn: string;
@@ -32,6 +33,10 @@ export default function CharityChecker() {
   const [abn, setAbn] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("");
   const [donationUrl, setDonationUrl] = useState("");
+  // v0.2d behavioural micro-flow. inPersonContext defaults false ("online
+  // appeal") — when toggled on, the ID question becomes load-bearing.
+  const [inPersonContext, setInPersonContext] = useState(false);
+  const [idShown, setIdShown] = useState<IdShown>("");
   const [autocomplete, setAutocomplete] = useState<AutocompleteRow[]>([]);
   const [acIndex, setAcIndex] = useState<number | null>(null);
   const [status, setStatus] = useState<Status>("idle");
@@ -77,11 +82,13 @@ export default function CharityChecker() {
     setError("");
     setResult(null);
 
-    const body: Record<string, string> = {};
+    const body: Record<string, string | boolean> = {};
     if (mode === "abn") body.abn = formattedAbn;
     if (mode === "name") body.name = name.trim();
     if (paymentMethod) body.paymentMethod = paymentMethod;
     if (donationUrl.trim()) body.donationUrl = donationUrl.trim();
+    if (inPersonContext) body.inPersonContext = true;
+    if (idShown) body.idShown = idShown;
 
     try {
       const res = await fetch("/api/charity-check", {
@@ -138,6 +145,8 @@ export default function CharityChecker() {
     setAbn("");
     setPaymentMethod("");
     setDonationUrl("");
+    setInPersonContext(false);
+    setIdShown("");
     setAutocomplete([]);
   };
 
@@ -295,28 +304,73 @@ export default function CharityChecker() {
         </p>
       </div>
 
-      {/* Optional behavioural micro-flow — payment method.
-          Cash / gift cards / crypto / bank-transfer trigger the HIGH_RISK
-          hard-floor regardless of registration result. */}
-      <div>
-        <label htmlFor="cc-payment" className="block text-sm font-medium text-deep-navy mb-2 inline-flex items-center gap-1.5">
-          <CreditCard size={16} aria-hidden /> How are they asking you to pay? <span className="text-gov-slate font-normal">(optional)</span>
+      {/* Behavioural micro-flow (v0.2d). Three questions designed for the
+          street-fundraiser use case: in-person? ID shown? payment method?
+          Questions 2-3 only matter for in-person; otherwise we still ask
+          payment but skip the ID prompt. */}
+      <fieldset className="border border-slate-200 rounded-lg p-4 space-y-4">
+        <legend className="text-sm font-semibold text-deep-navy px-1">
+          Are they in front of you right now? <span className="text-gov-slate font-normal">(optional)</span>
+        </legend>
+
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={inPersonContext}
+            onChange={(e) => setInPersonContext(e.target.checked)}
+            className="h-4 w-4 rounded border-slate-300"
+          />
+          <span>
+            Yes — street fundraiser, door-knock, or kiosk.{" "}
+            <span className="text-gov-slate">(Otherwise we&rsquo;ll skip the ID question.)</span>
+          </span>
         </label>
-        <select
-          id="cc-payment"
-          value={paymentMethod}
-          onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
-          className="w-full px-4 py-3 border border-slate-300 rounded-lg text-base bg-white focus:outline-none focus:ring-2 focus:ring-deep-navy"
-        >
-          <option value="">— Skip / not applicable —</option>
-          <option value="card">Card (tap or insert)</option>
-          <option value="regular_debit">Regular monthly direct debit</option>
-          <option value="cash">Cash</option>
-          <option value="gift_card">Gift card / iTunes / Steam</option>
-          <option value="crypto">Cryptocurrency</option>
-          <option value="bank_transfer">Bank transfer to a personal account</option>
-        </select>
-      </div>
+
+        {inPersonContext && (
+          <div>
+            <label htmlFor="cc-id" className="block text-sm font-medium text-deep-navy mb-2">
+              Did they show ID when asked?
+            </label>
+            <select
+              id="cc-id"
+              value={idShown}
+              onChange={(e) => setIdShown(e.target.value as IdShown)}
+              className="w-full px-4 py-3 border border-slate-300 rounded-lg text-base bg-white focus:outline-none focus:ring-2 focus:ring-deep-navy"
+            >
+              <option value="">— Skip —</option>
+              <option value="yes">Yes — clearly visible numbered ID badge</option>
+              <option value="no">No — they didn&rsquo;t show one (didn&rsquo;t ask)</option>
+              <option value="refused">Refused when I asked</option>
+              <option value="skipped">I didn&rsquo;t ask</option>
+            </select>
+          </div>
+        )}
+
+        <div>
+          <label htmlFor="cc-payment" className="block text-sm font-medium text-deep-navy mb-2 inline-flex items-center gap-1.5">
+            <CreditCard size={16} aria-hidden /> How are they asking you to pay?
+          </label>
+          <select
+            id="cc-payment"
+            value={paymentMethod}
+            onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
+            className="w-full px-4 py-3 border border-slate-300 rounded-lg text-base bg-white focus:outline-none focus:ring-2 focus:ring-deep-navy"
+          >
+            <option value="">— Skip / not applicable —</option>
+            <option value="card">Card (tap or insert)</option>
+            <option value="regular_debit">Regular monthly direct debit</option>
+            <option value="cash">Cash</option>
+            <option value="gift_card">Gift card / iTunes / Steam</option>
+            <option value="crypto">Cryptocurrency</option>
+            <option value="bank_transfer">Bank transfer to a personal account</option>
+          </select>
+          <p className="mt-1 text-xs text-gov-slate">
+            Cash, gift cards, crypto, or transfers to a personal account
+            from a street fundraiser are scam red flags regardless of how
+            the registration check turns out.
+          </p>
+        </div>
+      </fieldset>
 
       <button
         type="submit"

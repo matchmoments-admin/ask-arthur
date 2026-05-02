@@ -105,7 +105,28 @@ export function applyVerdictFloors(
     pillars.acnc_registration.detail?.typosquat_match === true;
   if (typosquat) return "HIGH_RISK";
 
+  // v0.2d behavioural floors. Only fire on in-person encounters — online
+  // appeals don't have an "ID badge" concept.
+  if (input.inPersonContext) {
+    if (input.idShown === "refused") return "HIGH_RISK";
+    if (input.idShown === "no") return escalateOneStep(baseVerdict);
+  }
+
   return baseVerdict;
+}
+
+/** Verdict ladder: SAFE → UNCERTAIN → SUSPICIOUS → HIGH_RISK. Used by
+ *  behavioural floors that warrant escalation but not all the way to
+ *  HIGH_RISK. */
+function escalateOneStep(v: Verdict): Verdict {
+  switch (v) {
+    case "SAFE":
+      return "UNCERTAIN";
+    case "UNCERTAIN":
+      return "SUSPICIOUS";
+    default:
+      return v;
+  }
 }
 
 /** Build a plain-English summary from the pillar payloads. v0.1 is
