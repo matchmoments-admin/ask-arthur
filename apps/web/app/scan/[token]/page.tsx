@@ -139,7 +139,7 @@ export default async function ScanPage({ params }: PageProps) {
       <Nav />
       <main
         id="main-content"
-        className="flex-1 w-full max-w-[880px] mx-auto px-5 pt-14 pb-24"
+        className="flex-1 w-full max-w-[640px] mx-auto px-5 pt-14 pb-24"
       >
         <SiteAuditReport result={result} shareUrl={shareUrl} />
       </main>
