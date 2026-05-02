@@ -36,8 +36,16 @@ const make = (
     score: 0,
     confidence: 0,
     available: false,
-    reason: "not_implemented_v0_1",
+    reason: "no_url_provided",
     ...(overrides.donation_url ?? {}),
+  },
+  pfra: {
+    id: "pfra",
+    score: 0,
+    confidence: 0,
+    available: false,
+    reason: "not_a_member",
+    ...(overrides.pfra ?? {}),
   },
 });
 
@@ -70,45 +78,67 @@ describe("computeCompositeScore", () => {
     expect(verdict).toBe("SAFE");
   });
 
-  it("redistributes weight when donation_url is unavailable (v0.1 typical case)", () => {
-    // donation_url default-unavailable in `make()`. With acnc=100 and abr=0,
-    // available weight = 0.5 + 0.3 = 0.8; effective ACNC contribution =
-    // 100 * (0.5 / 0.8) = 62.5 → 63.
+  it("redistributes weight when donation_url + pfra unavailable (typical name-only run)", () => {
+    // v0.2c weights: acnc=0.45, abr=0.25, donation_url=0.20, pfra=0.10.
+    // donation_url + pfra default-unavailable in make(). With acnc=100 and
+    // abr=0, available weight = 0.70; effective ACNC contribution =
+    // 100 * (0.45 / 0.70) = 64.28 → 64.
     const pillars = make({
       acnc_registration: { score: 100 },
       abr_dgr: { score: 0 },
     });
     const { score, verdict } = computeCompositeScore(pillars);
-    expect(score).toBe(63);
+    expect(score).toBe(64);
     expect(verdict).toBe("SUSPICIOUS");
   });
 
-  it("uses all three weights when donation_url IS available (v0.2a)", () => {
-    // ACNC=100, ABR=0, donation_url=0 (clean URL). Total weighted:
-    // 100*0.5 + 0*0.3 + 0*0.2 = 50 → SUSPICIOUS by band threshold.
+  it("uses all weights when every pillar is available (v0.2c full)", () => {
+    // ACNC=100, ABR=0, donation_url=0, pfra=0. Total: 100*0.45 = 45.
     const pillars = make({
       acnc_registration: { score: 100 },
       abr_dgr: { score: 0 },
       donation_url: { available: true, score: 0, confidence: 0.9 },
+      pfra: { available: true, score: 0, confidence: 1 },
     });
     const { score, verdict } = computeCompositeScore(pillars);
-    expect(score).toBe(50);
-    expect(verdict).toBe("SUSPICIOUS");
+    expect(score).toBe(45);
+    expect(verdict).toBe("UNCERTAIN");
   });
 
-  it("escalates to HIGH_RISK when donation_url flags malicious + ACNC found", () => {
-    // ACNC=0 (registered), ABR=0 (active+match), donation_url=100 (Safe
-    // Browsing flagged the URL). Weighted: 0+0+20 = 20 → SAFE.
-    // The composite-score band is intentionally lenient here because a
-    // single-pillar 100 against two clean 0s shouldn't flip the verdict —
-    // the verdict copy will surface the URL warning regardless.
+  it("PFRA membership pulls a borderline charity towards SAFE (additive only)", () => {
+    // ACNC=50, ABR=0, donation_url=0, pfra ABSENT.
+    // Without PFRA: available weight = 0.45+0.25+0.20 = 0.90.
+    //   Contribution: 50 * 0.45/0.90 = 25 → UNCERTAIN.
+    // With PFRA available + score=0: available weight = 1.00.
+    //   Contribution: 50 * 0.45/1.00 = 22.5 → 23 → SAFE.
+    const without = computeCompositeScore(make({
+      acnc_registration: { score: 50 },
+      abr_dgr: { score: 0 },
+      donation_url: { available: true, score: 0, confidence: 0.9 },
+    }));
+    const withPfra = computeCompositeScore(make({
+      acnc_registration: { score: 50 },
+      abr_dgr: { score: 0 },
+      donation_url: { available: true, score: 0, confidence: 0.9 },
+      pfra: { available: true, score: 0, confidence: 1 },
+    }));
+    expect(without.score).toBeGreaterThan(withPfra.score);
+    expect(withPfra.verdict).toBe("SAFE");
+  });
+
+  it("malicious donation_url + clean ACNC: verdict copy surfaces URL warning, composite stays SAFE-band", () => {
+    // ACNC=0, ABR=0, donation_url=100, pfra absent. Weighted (avail = 0.9):
+    //   100 * 0.20/0.90 = 22.2 → 22 → SAFE (band).
+    // The composite-score band is intentionally lenient because a single-
+    // pillar 100 against two clean 0s shouldn't flip the verdict — the
+    // verdict copy + 4-fact strip will surface the URL warning regardless.
     const pillars = make({
       acnc_registration: { score: 0 },
       abr_dgr: { score: 0 },
       donation_url: { available: true, score: 100, confidence: 1 },
     });
     const { score } = computeCompositeScore(pillars);
-    expect(score).toBe(20);
+    expect(score).toBe(22);
   });
 
   it("returns 50/UNCERTAIN when every pillar is unavailable (fail-safe-ish)", () => {
@@ -122,15 +152,16 @@ describe("computeCompositeScore", () => {
   });
 
   it("blends scores by relative weight when multiple pillars available", () => {
-    // ACNC weight 0.5, ABR weight 0.3, donation_url weight 0.2 (unavail).
-    // Available weight = 0.8. ACNC contributes 50 * 0.5/0.8 = 31.25;
-    // ABR contributes 100 * 0.3/0.8 = 37.5. Sum 68.75 → 69 (SUSPICIOUS).
+    // ACNC=50, ABR=100, donation_url+pfra unavailable. Avail weight = 0.70.
+    // ACNC: 50 * 0.45/0.70 = 32.14
+    // ABR:  100 * 0.25/0.70 = 35.71
+    // Sum: 67.85 → 68 → SUSPICIOUS.
     const pillars = make({
       acnc_registration: { score: 50 },
       abr_dgr: { score: 100 },
     });
     const { score, verdict } = computeCompositeScore(pillars);
-    expect(score).toBe(69);
+    expect(score).toBe(68);
     expect(verdict).toBe("SUSPICIOUS");
   });
 });

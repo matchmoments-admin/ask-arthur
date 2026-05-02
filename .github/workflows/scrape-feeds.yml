@@ -25,6 +25,7 @@ on:
           - cryptoscamdb
           - reddit
           - acnc_register
+          - pfra_members
 
 jobs:
   scrape:
@@ -140,6 +141,16 @@ jobs:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           FF_CHARITY_CHECK_INGEST: 'true'
         run: python -m acnc_register
+
+      # PFRA member registry — same gate as ACNC. Source updates ~quarterly,
+      # scraper runs daily but is mostly a no-op (~70 rows total, hash-skip
+      # makes unchanged rows free).
+      - name: Scrape PFRA member registry
+        if: (github.event.inputs.feed == 'all' || github.event.inputs.feed == 'pfra_members' || (github.event_name == 'schedule' && github.event.schedule == '0 6 * * *')) && vars.ENABLE_CHARITY_CHECK_INGEST == 'true'
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          FF_CHARITY_CHECK_INGEST: 'true'
+        run: python -m pfra_members
 
       - name: Scrape Reddit r/Scams
         if: github.event.inputs.feed == 'all' || github.event.inputs.feed == 'reddit' || (github.event_name == 'schedule' && github.event.schedule == '0 6 * * *')

@@ -21,13 +21,17 @@ import type {
   CharityPillarResult,
 } from "./types";
 
-/** v0.1 weights. Sum = 1.0. donation_url is a v0.2 pillar that always
- *  reports `available: false` in v0.1, so its weight is redistributed to
- *  acnc_registration + abr_dgr at runtime. */
+/** Pillar weights as of v0.2c. Sum = 1.0.
+ *
+ * PFRA gets a small weight (0.1) and contributes ADDITIVELY ONLY (the
+ * PFRA pillar reports score=0 when the charity IS a member, and
+ * `available: false` when it isn't). So in practice PFRA either nudges
+ * the score down (towards SAFE) or doesn't fire at all — never up. */
 export const PILLAR_WEIGHTS: Record<CharityPillarId, number> = {
-  acnc_registration: 0.5,
-  abr_dgr: 0.3,
+  acnc_registration: 0.45,
+  abr_dgr: 0.25,
   donation_url: 0.2,
+  pfra: 0.1,
 };
 
 /** Bumped when the scoring algorithm or thresholds change so future

@@ -2,23 +2,22 @@
 // timeouts inside an overall budget. Mirrors phone-footprint/orchestrator.ts
 // in shape; ADR-0002 documents the "two adapters → real seam" decision.
 //
-// Wiring order (v0.2a):
-//   acnc         — local Postgres lookup        (weight 0.5; runs when name OR abn)
-//   abr          — ABR Lookup with DGR fields   (weight 0.3; runs when abn supplied)
-//   donation_url — Safe Browsing + WHOIS age    (weight 0.2; runs when donationUrl supplied)
+// Wiring order (v0.2c):
+//   acnc         — local Postgres lookup            (weight 0.45)
+//   abr          — ABR Lookup with DGR fields       (weight 0.25; runs when abn supplied)
+//   donation_url — Safe Browsing + WHOIS age        (weight 0.20; runs when donationUrl supplied)
+//   pfra         — PFRA membership (additive only)  (weight 0.10)
 //
-// Each provider self-reports `available: false` when its prerequisite input
-// isn't present (e.g. abr returns `no_abn_provided` when only a name was
-// given); the scorer redistributes weight pro-rata across pillars that did
-// run. Coverage stays "live" for non-running providers when the omission is
-// caller-controlled (no abn supplied), "degraded" when the upstream actually
-// failed.
+// Plus a non-pillar Scamwatch alert join that runs IN PARALLEL but feeds
+// the result.scamwatch_alerts field (UI context only, NOT score input).
 
 import { logger } from "@askarthur/utils/logger";
 
 import { acncProvider } from "./providers/acnc";
 import { abrProvider } from "./providers/abr";
 import { donationUrlProvider } from "./providers/donation-url";
+import { pfraProvider } from "./providers/pfra";
+import { loadScamwatchContext } from "./scamwatch-context";
 import {
   unavailablePillar,
   withTimeout,
@@ -35,6 +34,7 @@ import type {
   CharityCoverage,
   CharityPillarId,
   CharityPillarResult,
+  ScamwatchAlertContext,
 } from "./types";
 
 const BATCH_TIMEOUT_MS = 5000;
@@ -43,6 +43,7 @@ const PROVIDERS: CharityProviderContract[] = [
   acncProvider,
   abrProvider,
   donationUrlProvider,
+  pfraProvider,
 ];
 
 /**
@@ -65,25 +66,37 @@ export async function runCharityCheck(
     throw new Error("CharityCheckInput requires either abn or name");
   }
 
-  const settled = await Promise.allSettled(
-    PROVIDERS.map((p) =>
-      withTimeout(
-        Promise.resolve(p.run(input)),
-        Math.min(p.timeoutMs, BATCH_TIMEOUT_MS),
-        p.id,
+  // Run pillar providers + Scamwatch context in one parallel batch.
+  // Scamwatch context is non-blocking and never affects the verdict, but
+  // doing it here saves a serial round-trip.
+  const [settled, scamwatchAlerts] = await Promise.all([
+    Promise.allSettled(
+      PROVIDERS.map((p) =>
+        withTimeout(
+          Promise.resolve(p.run(input)),
+          Math.min(p.timeoutMs, BATCH_TIMEOUT_MS),
+          p.id,
+        ),
       ),
     ),
-  );
+    input.name
+      ? withTimeout(loadScamwatchContext(input.name), 1500, "scamwatch-context").catch(
+          () => null as ScamwatchAlertContext | null,
+        )
+      : Promise.resolve<ScamwatchAlertContext | null>(null),
+  ]);
 
   const pillars: Record<CharityPillarId, CharityPillarResult> = {
     acnc_registration: unavailablePillar("acnc_registration", "not_run"),
     abr_dgr: unavailablePillar("abr_dgr", "not_run"),
     donation_url: unavailablePillar("donation_url", "not_run"),
+    pfra: unavailablePillar("pfra", "not_run"),
   };
   const coverage: CharityCoverage = {
     acnc: "live",
     abr: "live",
     donation_url: "live",
+    pfra: "live",
   };
   const providersUsed: string[] = [];
 
@@ -132,6 +145,7 @@ export async function runCharityCheck(
     official_donation_url: officialDonationUrl,
     generated_at,
     request_id: input.requestId,
+    ...(scamwatchAlerts && { scamwatch_alerts: scamwatchAlerts }),
   };
 }
 
@@ -152,6 +166,16 @@ function stampCoverageDown(
       // "all_legs_failed" / "invalid_url" / "private_or_invalid_url" mean
       // we tried but couldn't get a useful answer — degraded.
       coverage.donation_url = reason === "no_url_provided" ? "disabled" : "degraded";
+      break;
+    case "pfra":
+      // "not_a_member" is the most common case for non-PFRA charities and
+      // shouldn't render as "degraded" in the UI. "supabase_client_unavailable"
+      // → disabled. Everything else (rpc_error, exception) → degraded.
+      coverage.pfra = reason === "not_a_member"
+        ? "live"
+        : reason === "supabase_client_unavailable"
+          ? "disabled"
+          : "degraded";
       break;
   }
 }
