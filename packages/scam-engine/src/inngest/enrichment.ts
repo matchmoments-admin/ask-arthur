@@ -16,6 +16,11 @@ export const enrichmentFanOut = inngest.createFunction(
     id: "pipeline-enrichment-fanout",
     name: "Pipeline: Enrich Pending URLs",
     concurrency: { limit: 1 }, // Only one enrichment run at a time
+    // Defence-in-depth against manual re-trigger storms from the Inngest
+    // dashboard. The 6h cron already paces itself; rateLimit blocks an
+    // analyst from clicking Trigger five times in a minute and fanning out
+    // 5×20 WHOIS+SSL lookups on the same domains. Cron-safe because 30m < 6h.
+    rateLimit: { limit: 1, period: "30m" },
   },
   { cron: "0 */6 * * *" }, // Every 6 hours
   async ({ step }) => {

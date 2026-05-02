@@ -250,6 +250,11 @@ export const entityEnrichmentFanOut = inngest.createFunction(
     id: "pipeline-entity-enrichment",
     name: "Pipeline: Enrich Pending Entities",
     concurrency: { limit: 1 },
+    // Each fan-out run triggers up to 30 × (Twilio Lookup + AbuseIPDB + IPQS +
+    // HIBP + WHOIS + SSL + crt.sh) — Twilio Lookup is the most expensive at
+    // ~A$0.005/call. A manual re-trigger storm could burn through the
+    // AbuseIPDB free-tier 1k/day cap in two clicks. Cron-safe (10m < 4h).
+    rateLimit: { limit: 1, period: "10m" },
   },
   { cron: "0 */4 * * *" }, // Every 4 hours
   async ({ step }) => {

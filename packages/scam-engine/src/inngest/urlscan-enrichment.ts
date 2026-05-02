@@ -15,6 +15,12 @@ export const urlscanEnrichment = inngest.createFunction(
     id: "pipeline-urlscan-enrichment",
     name: "Pipeline: URLScan.io Async Enrichment",
     concurrency: { limit: 1 },
+    // urlscan.io is metered (paid tier ~$0.03/scan; free tier ~100 scans/day).
+    // The cron paces submissions to ~20 URLs every 4h, but a manual re-trigger
+    // burst would blow through the free-tier budget in seconds. Outer rateLimit
+    // prevents storms; throttle caps submissions across runs as a global lid.
+    rateLimit: { limit: 1, period: "10m" },
+    throttle: { limit: 50, period: "1h", key: "urlscan-submissions" },
   },
   { cron: "30 */4 * * *" }, // 30 min after entity enrichment
   async ({ step }) => {

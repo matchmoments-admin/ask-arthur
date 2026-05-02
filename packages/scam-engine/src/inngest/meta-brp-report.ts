@@ -26,6 +26,13 @@ export const metaBrpReport = inngest.createFunction(
   {
     id: "meta-brp-report",
     name: "Meta BRP Deepfake Reporter",
+    concurrency: { limit: 1 },
+    // Cap daily Meta BRP submissions at 200. Once the stub becomes a real
+    // Graph API call, Meta's Business Use Case rate limits get punitive past
+    // a threshold — and a runaway loop fanning out reports against the same
+    // celebrity's deepfake_detections rows would burn rate-limit budget for
+    // hours. The key is shared across all invocations so the cap is global.
+    rateLimit: { limit: 200, period: "1d", key: "Meta-BRP-Daily" },
   },
   { cron: "0 */6 * * *" }, // every 6 hours
   async ({ step }) => {
