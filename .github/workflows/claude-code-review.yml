@@ -89,8 +89,11 @@ jobs:
               actually cover the change?
 
           # Cap turns to bound runtime + token spend per review.
-          # 8 turns is enough for a thorough multi-file investigation
-          # without runaway behaviour. Increase only if reviews of
-          # large refactors keep getting truncated.
+          # First production run (PR #83, 6 files incl. a 440-line Python
+          # scraper + SQL migration) hit error_max_turns at 9 turns with
+          # the original cap of 8. Bumped to 20 for ~2-3x headroom on
+          # typical multi-file PRs; cost is on the Plan subscription so
+          # the marginal turn is effectively free, and the agent still
+          # exits early on its own when the review is complete.
           claude_args: |
-            --max-turns 8
+            --max-turns 20
