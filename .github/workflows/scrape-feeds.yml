@@ -24,6 +24,7 @@ on:
           - feodo
           - cryptoscamdb
           - reddit
+          - acnc_register
 
 jobs:
   scrape:
@@ -126,6 +127,19 @@ jobs:
               --max-time 15 "$endpoint" || echo "000")
             echo "$status $endpoint"
           done
+
+      # ACNC Charity Register mirror. Gated by a *separate* repo variable
+      # (vars.ENABLE_CHARITY_CHECK_INGEST) on top of the workflow-level
+      # ENABLE_SCRAPER gate so this can be enabled/disabled independently of
+      # the threat feeds. The scraper itself also no-ops unless
+      # FF_CHARITY_CHECK_INGEST is set to "true" — defence in depth in case
+      # the workflow gate is loosened.
+      - name: Scrape ACNC Charity Register
+        if: (github.event.inputs.feed == 'all' || github.event.inputs.feed == 'acnc_register' || (github.event_name == 'schedule' && github.event.schedule == '0 6 * * *')) && vars.ENABLE_CHARITY_CHECK_INGEST == 'true'
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          FF_CHARITY_CHECK_INGEST: 'true'
+        run: python -m acnc_register
 
       - name: Scrape Reddit r/Scams
         if: github.event.inputs.feed == 'all' || github.event.inputs.feed == 'reddit' || (github.event_name == 'schedule' && github.event.schedule == '0 6 * * *')
