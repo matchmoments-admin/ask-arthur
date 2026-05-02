@@ -124,6 +124,13 @@ export interface CharityCheckInput {
   name?: string;
   donationUrl?: string;
   paymentMethod?: "card" | "regular_debit" | "cash" | "gift_card" | "crypto" | "bank_transfer";
+  /** v0.2d behavioural micro-flow: did the fundraiser show ID when asked?
+   *  `refused` is a strong negative signal — combined with
+   *  `inPersonContext: true` it forces HIGH_RISK. */
+  idShown?: "yes" | "no" | "refused" | "skipped";
+  /** v0.2d: is this an in-person encounter (street/door/kiosk)? When
+   *  true, ID + payment-method signals carry more weight. */
+  inPersonContext?: boolean;
   /** Optional caller-supplied correlation id (Stripe-style Idempotency-Key). */
   requestId?: string;
 }
