@@ -38,6 +38,14 @@ _Avoid_: group, campaign, ring.
 Output of a security audit (websites / Chrome extensions / MCP servers / AI skills): a letter grade `A+ → F` plus per-check severity. Distinct from a Verdict — Verdicts classify content; Unified Scan Results audit installable software.
 _Avoid_: audit, scan, scan output.
 
+**Pillar**:
+A single external-source contribution to a multi-pillar verification result, exposed as `{ id, score, confidence, available, reason?, detail? }`. Score is `0..100` where higher = more risk (matches the Phone Footprint convention). When `available: false` the scorer redistributes the pillar's weight pro-rata across the available pillars — this is the "graceful degradation" rule that lets a verdict render meaningfully when one upstream is down. Used by Phone Footprint and Charity Check; see ADR-0002 for the shared shape.
+_Avoid_: provider, signal, source, factor.
+
+**Charity Check Result**:
+Output of the `/charity-check` engine: a Verdict (canonical 4-level), a 0-100 composite score, the per-Pillar payloads (`acnc_registration`, `abr_dgr`, plus `donation_url` reserved for v0.2), a coverage map for UI hints, the official donation URL pulled from the ACNC register (so the verdict CTA never deep-links a fundraiser-supplied URL), and a plain-English explanation. Distinct from an Analysis Result — Analysis Results classify arbitrary user-submitted content; Charity Check Results verify a specific named-entity claim against authoritative registers.
+_Avoid_: charity result, charity score, charity verdict, "case".
+
 ## Relationships
 
 - An **Analysis Result** produces exactly one **Verdict**.
@@ -46,6 +54,8 @@ _Avoid_: audit, scan, scan output.
 - A **Scam Entity** appears in one or more **Scam Reports**; its risk score is a function of how many.
 - A **Scam Cluster** groups two or more **Scam Reports** by overlapping **Scam Entities** or matching impersonated brand.
 - A **Unified Scan Result** is independent of the Scam Report graph — different domain, same platform.
+- A **Charity Check Result** is independent of the Scam Report graph — it carries a Verdict but doesn't itself become a Scam Report unless the user separately submits the underlying claim. Its pillars are not Scam Entities; they're external-register lookups.
+- A **Pillar** belongs to exactly one multi-pillar result type (Phone Footprint or Charity Check). The id namespace is per-feature; pillar ids are not globally unique.
 
 ## Example dialogue
 
