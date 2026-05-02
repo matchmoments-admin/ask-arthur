@@ -255,6 +255,15 @@ export const featureFlags = {
    *  quotes). Returns 503 when off; validateApiKey is checked first regardless. */
   redditIntelB2bApi:
     process.env.NEXT_PUBLIC_FF_REDDIT_INTEL_B2B_API === "true",
+
+  /** Meta Brand Rights Protection (BRP) deepfake reporter. Server-side only —
+   *  the function is dormant in prod (Meta Graph API call is still a stub)
+   *  but the cron fires on schedule. Flag exists so the cost brake + kill
+   *  switch are wired *before* the stub is replaced with a billed Meta call.
+   *  Default OFF: leave off until META_BRP_ACCESS_TOKEN is granted, the
+   *  Trusted Partner application clears, and the cost-daily-check brake on
+   *  feature_brakes.meta_brp is in place. */
+  metaBrpReporter: process.env.FF_META_BRP_REPORTER === "true",
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;
