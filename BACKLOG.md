@@ -299,6 +299,37 @@ that needs its own PR because the blast radius or scope is larger.
 
 **Unship-the-spine option** — schema is harmless empty but if reclaiming the migration slots is preferred: drop the four objects per the rollback block in v80's commit message (#47), and remove the 11 `NEXT_PUBLIC_FF_BD_*` flags via a small follow-up to `feature-flags.ts`/`turbo.json`/`rate-limit.ts`.
 
+## Charity Legitimacy Check
+
+v0.1 + v0.2a code-complete + merged 2026-05-02 (#83 #85 #86 #87 #92). `acnc_charities` table populated (63,637 rows from data.gov.au CKAN, weekly source / daily scraper). Engine + page + routes live in main; consumer surface gated by `NEXT_PUBLIC_FF_CHARITY_CHECK` (default OFF). See [`docs/ops/charity-check-config.md`](./docs/ops/charity-check-config.md) for config + smoke-test checklist.
+
+### v0.2 — consumer launch (4 PRs remaining)
+
+- [ ] **v0.2c — PFRA + Scamwatch overlay** — migration v85 `pfra_members` table; weekly Python scraper for `pfra.org.au` member-charity + member-agency lists; new `providers/pfra.ts` (4th pillar, weight ~0.1, others rebalance); Scamwatch alert join from existing `feed_items` (recent alerts mentioning the charity name surface as non-pillar context, NOT score input). Differentiating face-to-face fundraiser layer per the strategy memo
+- [ ] **v0.2d — behavioural micro-flow (3-question)** — replace single payment-method dropdown with the strategy memo §5.2 three-question flow (ID shown? payment method? extracted name?); add `behaviouralFlags` array to input schema; wire to scorer hard-floors. ~1 file (CharityChecker.tsx)
+- [ ] **v0.2e — main-checker auto-detection deep-link** — detect charity-shaped inputs in `apps/web/app/api/analyze/route.ts` (regex/keyword: charity/donate/appeal/fundraiser/ABN/ACNC + 11-digit ABN extraction); attach `charityIntent: { extractedAbn?, extractedName? }` to the response and `analyze.completed.v1` event; render CTA in AnalysisResult component. Delivers the "hybrid placement" decision in the approved plan
+- [ ] **v0.2b — image OCR via Claude Vision (lanyard photo)** — `packages/charity-check/src/ocr-lanyard.ts` with specialised Claude Vision prompt extracting (charity name, ACNC number, ABN, fundraising-agency name, badge number); add image input to CharityChecker form; route OCRs first, then feeds typed-out fields into engine. ~$0.002–$0.01/image (already wired in cost telemetry; brake threshold $5/day)
+
+### v0.3 — Australia coverage (deferred)
+
+- [ ] State register scrapers for NSW (Service NSW), VIC (Consumer Affairs Victoria), WA (DEMIRS) — currently link-out only via `apps/web/lib/charityRegistrySources.ts`. NT/ACT/SA/TAS/QLD remain link-out; their volumes don't justify scrape automation
+- [ ] AIS (Annual Information Statement) financial overlay — separate annual dataset on data.gov.au; surface % revenue to programs vs admin, charity size sanity check
+- [ ] ACFID Code of Conduct signatory overlay — for charities claiming overseas activity (acfid.asn.au scrape, weekly)
+
+### v0.4 — B2B Intelligence API endpoint (deferred)
+
+- [ ] `POST /api/v1/charity/verify` — wraps the existing `runCharityCheck()` engine with `validateApiKey` auth, 30/min rate limit (`cc_b2b` bucket), OpenAPI spec entry. SPF Act 1 July 2026 alignment for bank/telco buyers. Engine reuse means this is mostly route + auth + spec (~2-3 files)
+
+### Calibration / known issues
+
+- [ ] **Typosquat threshold tuning** — current calibration is trigram ≥0.65 AND Levenshtein ≤3 (v0.2a, #92). Validated against three synthetic spoofs at smoke-test time; needs revisit once we have real user-input data to confirm false-positive / false-negative rates
+- [ ] **Data freshness operator alert** — daily scrape no-ops when nothing changed; if the scraper goes >7 days without a `records_new + records_updated > 0` outcome, OR the source `metadata_modified` timestamp drifts more than 14 days behind today, raise an operator alert. Currently zero monitoring; if data.gov.au stops publishing the resource we'd silently serve stale data
+
+### Operational follow-ups
+
+- [ ] Smoke-test in production after `NEXT_PUBLIC_FF_CHARITY_CHECK` flip — see `docs/ops/charity-check-config.md` §6 for the seven-step checklist
+- [ ] Cost telemetry verification on `/admin/costs` once real user traffic flows — confirm the `feature='charity_check'` rows aggregate correctly and the brake threshold isn't accidentally hit by autocomplete fan-out
+
 ## Web App
 
 - [x] Phone intelligence in analysis pipeline (Twilio Lookup v2)
