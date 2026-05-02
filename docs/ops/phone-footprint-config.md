@@ -321,6 +321,40 @@ Set these BEFORE flipping `NEXT_PUBLIC_FF_PHONE_FOOTPRINT_CONSUMER`:
 - [ ] Vonage Dashboard → Spending alert at USD $50/day.
 - [ ] Twilio → Usage trigger for Verify at AUD $100/day.
 
+### Auto-pause via `feature_brakes.phone_footprint`
+
+PR #79 wired an auto-pause brake into `cost-daily-check`. When today's
+combined Phone Footprint spend (Vonage NI v2 + CAMARA SIM Swap + CAMARA
+Device Swap from `telco_api_usage`, plus Resend dispatch emails tagged
+`feature='phone_footprint'` in `cost_telemetry`) exceeds the cap, the
+cron upserts a `feature_brakes` row with `paused_until = now() + 24h`.
+The next `phone-footprint-refresh-monitor` invocation reads the row,
+early-returns with `{ paused: true, reason: "feature_brakes.phone_footprint is set" }`,
+and marks the queue row completed so the claimer doesn't keep
+re-emitting events for the same monitor.
+
+**Env var:** `PHONE_FOOTPRINT_CAP_USD` (default `5`)
+
+- Set in Vercel → Settings → Environment Variables → Production + Preview.
+- Use a **bare number** (`5`, `10`, `15`). Non-numeric values silently
+  disable the brake because `parseFloat("$10")` is `NaN` and
+  `cost > NaN` is always false. The masked-value indicator in the
+  Vercel UI only shows character count, not the actual value — re-set
+  with a known value if you're not sure what's there.
+- Recommendation while Phone Footprint is dormant: `5`. Raise to `15`
+  or `25` once consumer flag is on and you've watched 7 days of real
+  spend on `/admin/costs`.
+- To **clear an engaged brake manually** (e.g. you raised the cap and
+  want to unblock immediately): `DELETE FROM feature_brakes WHERE feature='phone_footprint';`
+- To **verify the brake is currently engaged**:
+  `SELECT feature, paused_until, reason, set_cost_usd, set_threshold_usd FROM feature_brakes WHERE feature='phone_footprint';`
+
+The same pattern applies to `vuln_au_enrichment` (cap
+`VULN_AU_ENRICHMENT_CAP_USD`, default `5`) and `reddit_intel` (cap
+`REDDIT_INTEL_CAP_USD`, default `10`). Track C2 will extend it to
+`urlscan_io`, `entity_enrichment`, and `meta_brp` once their `logCost`
+call sites land.
+
 ---
 
 ## 5. UI integration points

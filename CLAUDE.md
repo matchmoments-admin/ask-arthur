@@ -265,6 +265,7 @@ reverse is `INSERT ... SELECT` from the archive back to the hot table.
 - **External APIs**: `SAFE_BROWSING_API_KEY`, `TWILIO_ACCOUNT_SID` + `TWILIO_AUTH_TOKEN`, `OPENAI_API_KEY` (Whisper), `HIVE_API_KEY` (Facebook ad image scanning — pricing contract required), `REALITY_DEFENDER_API_KEY` + `RESEMBLE_AI_API_TOKEN` (deepfake detection), `ABN_LOOKUP_GUID` (ABR Web Services)
 - **Bot webhook dispatch**: `SUPABASE_WEBHOOK_SECRET` (HMAC secret on `bot_message_queue` INSERT trigger — see `/api/bot-webhook/route.ts`)
 - **Cost alerts**: `TELEGRAM_ADMIN_CHAT_ID` (personal chat ID via @userinfobot), `DAILY_COST_THRESHOLD_USD` (default 2)
+- **Per-feature cost brakes**: `VULN_AU_ENRICHMENT_CAP_USD` (default 5), `REDDIT_INTEL_CAP_USD` (default 10), `PHONE_FOOTPRINT_CAP_USD` (default 5). When today's per-feature spend exceeds the cap, `cost-daily-check` upserts a `feature_brakes` row and the function early-returns until `paused_until` expires (24h). Phone Footprint sums Vonage `telco_api_usage` + `cost_telemetry`-tagged `phone_footprint`; the others read from `cost_telemetry` only. **Use bare numbers** (`5`, `10`) — non-numeric values silently disable the brake because `parseFloat("$10")` is `NaN`.
 
 ### Analyze request correlation
 
