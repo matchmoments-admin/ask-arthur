@@ -1,25 +1,38 @@
 import { inngest } from "./client";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 
 /**
  * Meta Brand Rights Protection (BRP) reporter.
  *
- * Runs every hour. Queries deepfake_detections that have not been reported
+ * Runs every 6 hours. Queries deepfake_detections that have not been reported
  * to Meta, where the celebrity has brp_enrolled = TRUE.
  *
  * For each unreported detection, submits to the Meta Graph API
  * and updates the reported_to_meta flag + meta_report_id.
  *
- * If META_BRP_ACCESS_TOKEN is not set, the function skips silently.
+ * Cadence: hourly polling burns Meta Graph API Business Use Case rate-limit
+ * headroom we'll need for the actual report submissions, and most hours have
+ * no actionable queue. 6h sweeps + an event-driven path (deferred) cover the
+ * ~10–30 detections/day expected once enrolment ramps.
+ *
+ * Gating order: featureFlags.metaBrpReporter → META_BRP_ACCESS_TOKEN env →
+ * Supabase available. The flag is the durable kill-switch; the env var
+ * presence check is defence in depth for environments where the flag is on
+ * but the secret hasn't been provisioned yet.
  */
 export const metaBrpReport = inngest.createFunction(
   {
     id: "meta-brp-report",
     name: "Meta BRP Deepfake Reporter",
   },
-  { cron: "0 * * * *" }, // every hour
+  { cron: "0 */6 * * *" }, // every 6 hours
   async ({ step }) => {
+    if (!featureFlags.metaBrpReporter) {
+      return { skipped: true, reason: "FF_META_BRP_REPORTER is off" };
+    }
+
     const accessToken = process.env.META_BRP_ACCESS_TOKEN;
     if (!accessToken) {
       return { skipped: true, reason: "META_BRP_ACCESS_TOKEN not configured" };
