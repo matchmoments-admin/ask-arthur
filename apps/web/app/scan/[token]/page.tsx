@@ -139,15 +139,8 @@ export default async function ScanPage({ params }: PageProps) {
       <Nav />
       <main
         id="main-content"
-        className="flex-1 w-full max-w-[640px] mx-auto px-5 pt-16"
+        className="flex-1 w-full max-w-[880px] mx-auto px-5 pt-14 pb-24"
       >
-        <h1 className="text-deep-navy text-3xl md:text-4xl font-extrabold mb-2 leading-tight text-center">
-          Website Health Check
-        </h1>
-        <p className="text-sm text-gov-slate text-center mb-6">
-          Scanned {new Date(audit.scanned_at).toLocaleDateString("en-AU")}
-        </p>
-
         <SiteAuditReport result={result} shareUrl={shareUrl} />
       </main>
       <Footer />
