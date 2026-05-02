@@ -41,7 +41,8 @@
     "./inngest/reddit-intel-cluster": "./src/inngest/reddit-intel-cluster.ts",
     "./ipqualityscore": "./src/ipqualityscore.ts",
     "./inngest/meta-brp-report": "./src/inngest/meta-brp-report.ts",
-    "./phone-footprint": "./src/phone-footprint/index.ts"
+    "./phone-footprint": "./src/phone-footprint/index.ts",
+    "./abr-lookup": "./src/abr-lookup.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",

@@ -1,0 +1,22 @@
+{
+  "name": "@askarthur/charity-check",
+  "version": "0.0.0",
+  "private": true,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@askarthur/scam-engine": "workspace:*",
+    "@askarthur/supabase": "workspace:*",
+    "@askarthur/types": "workspace:*",
+    "@askarthur/utils": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5",
+    "vitest": "^4.0.18"
+  },
+  "scripts": {
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit"
+  }
+}

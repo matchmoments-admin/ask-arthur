@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
-import { lookupABN } from "@/lib/abnLookup";
+import { lookupABN } from "@askarthur/scam-engine/abr-lookup";
 
 const ABNParamSchema = z.string().regex(/^\d{11}$/, "ABN must be exactly 11 digits");
 
