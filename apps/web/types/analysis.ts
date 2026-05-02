@@ -24,4 +24,11 @@ export interface AnalysisResponse {
   phoneRiskFlags?: string[];
   isVoipCaller?: boolean;
   phoneIntelligence?: PhoneLookupResult;
+  /** v0.2e — present when the input looked charity-shaped. Drives the
+   *  "Run a full charity check →" CTA above the verdict in ResultCard. */
+  charityIntent?: {
+    detected: true;
+    extractedAbn?: string;
+    extractedName?: string;
+  };
 }

@@ -10,6 +10,7 @@ import { resolveRedirects, extractFinalUrls } from "@askarthur/scam-engine/redir
 import { geolocateFromHeaders } from "@askarthur/scam-engine/geolocate";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { ANALYZE_COMPLETED_EVENT } from "@askarthur/scam-engine/inngest/events";
+import { detectCharityIntent, type CharityIntent } from "@askarthur/scam-engine/charity-intent";
 import { WebAnalyzeInputSchema, type RedirectChain } from "@askarthur/types";
 import { storeVerifiedScam, incrementStats } from "@askarthur/scam-engine/pipeline";
 import { storeScamReport, buildEntities } from "@askarthur/scam-engine/report-store";
@@ -112,6 +113,17 @@ export async function POST(req: NextRequest) {
     const images: string[] = rawImages && rawImages.length > 0
       ? rawImages
       : image ? [image] : [];
+
+    // Charity-intent detection (v0.2e). Pure regex; no I/O. When the input
+    // looks charity-shaped (keyword OR ABN), attach a small payload to the
+    // response so the result component can render a "Run a full charity
+    // check →" CTA deep-linking to /charity-check pre-filled. Doesn't
+    // change the verdict path — runs alongside the normal scam analysis.
+    // Gated on featureFlags.charityCheck so the CTA only appears when the
+    // /charity-check page itself is reachable.
+    const charityIntent: CharityIntent | null = featureFlags.charityCheck
+      ? detectCharityIntent(text)
+      : null;
 
     // 2a. Image-upload specific rate limit (5 per IP per hour, sliding window).
     // Vision calls are ~$0.002-$0.01 each — this is defence-in-depth on top of
@@ -581,6 +593,7 @@ export async function POST(req: NextRequest) {
         ...(phoneIntelligence && { phoneIntelligence }),
         ...(phoneRiskFlags && { phoneRiskFlags }),          // backward compat
         ...(isVoipCaller != null && { isVoipCaller }),       // backward compat
+        ...(charityIntent && { charityIntent }),
       },
       {
         headers: {

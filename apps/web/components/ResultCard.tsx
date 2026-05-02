@@ -1,7 +1,7 @@
 "use client";
 
 import type { LucideIcon } from "lucide-react";
-import { CircleX, Eye, TriangleAlert } from "lucide-react";
+import { ArrowRight, CircleX, Eye, HandCoins, TriangleAlert } from "lucide-react";
 import ResultFeedback from "./result/ResultFeedback";
 import ResultActionButtons from "./result/ResultActionButtons";
 import type { ScammerContacts } from "@askarthur/types";
@@ -29,6 +29,16 @@ interface ResultCardProps {
   contentHash?: string;
   analysisId?: string;
   scamReportId?: number;
+  /** v0.2e charity-intent CTA. When the analyze route detected
+   *  charity-shaped input (keyword or 11-digit ABN), this object surfaces
+   *  whatever was extractable so we can deep-link the user into the
+   *  dedicated /charity-check page pre-filled. Renders as a banner
+   *  ABOVE the verdict so users see the more-specific tool first. */
+  charityIntent?: {
+    detected: true;
+    extractedAbn?: string;
+    extractedName?: string;
+  };
 }
 
 interface VerdictStyle {
@@ -100,6 +110,7 @@ export default function ResultCard({
   contentHash,
   analysisId,
   scamReportId,
+  charityIntent,
 }: ResultCardProps) {
   const config = VERDICT_CONFIG[verdict];
   const title = resolveTitle(verdict, scamType);
@@ -145,11 +156,51 @@ export default function ResultCard({
           },
         ];
 
+  // Build a /charity-check?... URL pre-filled with whatever charity-intent
+  // detection extracted. Both fields optional — the dedicated page handles
+  // either, both, or neither.
+  const charityCheckHref = charityIntent
+    ? (() => {
+        const params = new URLSearchParams();
+        if (charityIntent.extractedAbn) params.set("abn", charityIntent.extractedAbn);
+        if (charityIntent.extractedName) params.set("name", charityIntent.extractedName);
+        const qs = params.toString();
+        return qs ? `/charity-check?${qs}` : "/charity-check";
+      })()
+    : null;
+
   return (
     <div
       role="alert"
       className="mt-6 rounded-lg border border-slate-200 bg-white px-5 py-5 sm:px-6 sm:py-6"
     >
+      {/* Charity-intent CTA — surfaced ABOVE the generic verdict because the
+          dedicated /charity-check tool is more specific to what the user is
+          asking about. Verdict still renders below as the safety net. */}
+      {charityIntent && charityCheckHref && (
+        <a
+          href={charityCheckHref}
+          className="mb-5 flex items-center justify-between gap-3 rounded-lg border-2 border-deep-navy bg-deep-navy/5 px-4 py-3 text-deep-navy hover:bg-deep-navy/10 transition"
+        >
+          <div className="flex items-center gap-3">
+            <HandCoins size={24} className="shrink-0" aria-hidden="true" />
+            <div>
+              <p className="text-sm font-bold leading-tight">
+                This looks like a charity request
+              </p>
+              <p className="text-xs text-gov-slate leading-snug mt-0.5">
+                {charityIntent.extractedName
+                  ? `Run a full check on "${charityIntent.extractedName}"`
+                  : charityIntent.extractedAbn
+                    ? `Run a full check on ABN ${charityIntent.extractedAbn}`
+                    : "Run a full check against the ACNC, ABR, and donation-URL safety registers"}
+              </p>
+            </div>
+          </div>
+          <ArrowRight size={20} className="shrink-0" aria-hidden="true" />
+        </a>
+      )}
+
       {/* Verdict chip */}
       <div
         className={`flex items-center gap-3 rounded-lg border-2 px-4 py-3 ${config.chipBg} ${config.chipBorder}`}
