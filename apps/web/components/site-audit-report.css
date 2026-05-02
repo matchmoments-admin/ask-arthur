@@ -45,8 +45,11 @@
 }
 
 /* ---------- header ---------- */
+/* Centered to match the scanner landing page (apps/web/app/health/page.tsx)
+   so /health and /scan/[token] share the same heading rhythm. */
 .audit-report .ar-header {
   margin-bottom: 28px;
+  text-align: center;
 }
 .audit-report .ar-eyebrow {
   display: inline-flex;
@@ -88,6 +91,7 @@
   font-size: 14px;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 16px;
   flex-wrap: wrap;
 }
