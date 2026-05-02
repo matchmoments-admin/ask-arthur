@@ -189,7 +189,10 @@ export const redditIntelEmbed = inngest.createFunction(
         const vec = vectorToPgString(result.vectors[i]);
         const { error } = await supabase
           .from("reddit_post_intel")
-          .update({ embedding: vec })
+          .update({
+            embedding: vec,
+            embedding_model_version: result.modelId,
+          })
           .eq("id", rows[i].id);
         if (error) {
           // Log and continue — a single-row failure shouldn't sink the batch.

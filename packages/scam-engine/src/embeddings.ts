@@ -1,14 +1,25 @@
-// Embedding provider abstraction — switches between Voyage 3 (default) and
+// Embedding provider abstraction — switches between Voyage (default) and
 // OpenAI text-embedding-3-small via the EMBEDDING_PROVIDER env var. Both
 // providers are normalised to 1024-dim vectors so the pgvector column type
 // stays stable across provider swaps.
 //
-// Why an abstraction: Voyage 3 leads MTEB on niche-text retrieval and is
+// Why an abstraction: Voyage leads MTEB on niche-text retrieval and is
 // 3x cheaper than the OpenAI fallback, but operationally the OpenAI API is
 // already familiar in adjacent codebases. Building a thin switch lets us
 // default to Voyage while retaining a one-env-var fallback if Voyage has an
 // outage or pricing changes adversely. New consumers should call `embed()`
-// — never the provider-specific functions directly.
+// (for documents to be stored) or `embedQuery()` (for one-off retrieval
+// queries) — never the provider-specific functions directly.
+//
+// Document vs query distinction: Voyage's models are trained with an
+// asymmetric prompt — `input_type=document` for indexed text, `input_type=
+// query` for the search-side text. Skipping the distinction silently halves
+// recall on retrieval. Encode it in the API surface so callers can't forget.
+// OpenAI embeddings are symmetric so the helper is a no-op there.
+//
+// Model versioning: every embedding written to a pgvector column MUST be
+// accompanied by the modelId from EmbedResult, persisted in a sibling
+// *_model_version column. See docs/adr/0003-embedding-model-versioning.md.
 //
 // Pricing constants here MUST be kept in sync with apps/web/lib/cost-
 // telemetry.ts PRICING. They are inlined because cost-telemetry lives in
@@ -29,7 +40,7 @@ interface ProviderSpec {
 const SPECS: Record<EmbeddingProvider, ProviderSpec> = {
   voyage: {
     name: "voyage",
-    modelId: "voyage-3",
+    modelId: "voyage-3.5",
     usdPerToken: 0.06 / 1_000_000,
   },
   openai: {
@@ -55,7 +66,13 @@ interface EmbedOptions {
 }
 
 /**
- * Embed a batch of texts. Returns 1024-dim vectors for both providers.
+ * Embed a batch of documents (text intended to be stored and searched
+ * against later). Returns 1024-dim vectors for both providers.
+ *
+ * For one-off retrieval queries, use `embedQuery()` instead — it sets
+ * Voyage's `input_type=query` so the embedding sits in the matched
+ * half of Voyage's asymmetric prompt space. Skipping that distinction
+ * silently halves recall.
  *
  * Throws on provider HTTP failure — Inngest's step.run boundary will retry
  * with exponential backoff. Don't swallow; let the framework handle it.
@@ -64,23 +81,54 @@ export async function embed(
   texts: string[],
   opts: EmbedOptions = {},
 ): Promise<EmbedResult> {
+  return embedInternal(texts, "document", opts);
+}
+
+/**
+ * Embed one or more retrieval queries. Returns 1024-dim vectors.
+ *
+ * For Voyage, sets `input_type=query` so the model uses the query-side
+ * prompt template; this is the matched counterpart to `embed()`'s
+ * `input_type=document`. For OpenAI (symmetric embeddings) this is
+ * functionally identical to `embed()`.
+ *
+ * Use this whenever the embedding is going to be cosine-compared against
+ * already-stored document vectors — search endpoints, similarity
+ * surfaces, reranker prep. Do NOT use for text that will itself be
+ * stored as a document.
+ */
+export async function embedQuery(
+  texts: string[],
+  opts: EmbedOptions = {},
+): Promise<EmbedResult> {
+  return embedInternal(texts, "query", opts);
+}
+
+type VoyageInputType = "document" | "query";
+
+async function embedInternal(
+  texts: string[],
+  inputType: VoyageInputType,
+  opts: EmbedOptions,
+): Promise<EmbedResult> {
+  const provider = opts.provider ?? selectProvider();
+
   if (texts.length === 0) {
     return {
       vectors: [],
-      provider: opts.provider ?? selectProvider(),
-      modelId: SPECS[opts.provider ?? selectProvider()].modelId,
+      provider,
+      modelId: SPECS[provider].modelId,
       totalTokens: 0,
       estimatedCostUsd: 0,
     };
   }
 
-  const provider = opts.provider ?? selectProvider();
   const spec = SPECS[provider];
 
   if (provider === "voyage") {
-    return embedVoyage(texts, spec, opts.requestId);
+    return callVoyage(texts, spec, inputType, opts.requestId);
   }
-  return embedOpenAI(texts, spec, opts.requestId);
+  return callOpenAI(texts, spec, opts.requestId);
 }
 
 function selectProvider(): EmbeddingProvider {
@@ -91,9 +139,10 @@ function selectProvider(): EmbeddingProvider {
   return "voyage";
 }
 
-async function embedVoyage(
+async function callVoyage(
   texts: string[],
   spec: ProviderSpec,
+  inputType: VoyageInputType,
   requestId?: string,
 ): Promise<EmbedResult> {
   const apiKey = process.env.VOYAGE_API_KEY;
@@ -111,7 +160,7 @@ async function embedVoyage(
       input: texts,
       model: spec.modelId,
       output_dimension: EMBEDDING_DIMENSIONS,
-      input_type: "document",
+      input_type: inputType,
     }),
   });
 
@@ -120,6 +169,7 @@ async function embedVoyage(
     logger.error("Voyage embeddings request failed", {
       requestId,
       status: res.status,
+      inputType,
       preview: body.slice(0, 200),
     });
     throw new Error(`Voyage embeddings ${res.status}: ${body.slice(0, 200)}`);
@@ -145,7 +195,7 @@ async function embedVoyage(
   };
 }
 
-async function embedOpenAI(
+async function callOpenAI(
   texts: string[],
   spec: ProviderSpec,
   requestId?: string,
