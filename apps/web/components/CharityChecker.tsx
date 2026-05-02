@@ -7,12 +7,14 @@ import {
   Hash,
   CreditCard,
   Link as LinkIcon,
+  Camera,
+  X as XIcon,
 } from "lucide-react";
 
 import CharityVerdict, { type CharityCheckResult } from "@/components/CharityVerdict";
 
 type Status = "idle" | "checking" | "complete" | "error";
-type InputMode = "name" | "abn";
+type InputMode = "name" | "abn" | "image";
 type PaymentMethod = "card" | "regular_debit" | "cash" | "gift_card" | "crypto" | "bank_transfer" | "";
 type IdShown = "yes" | "no" | "refused" | "skipped" | "";
 
@@ -33,8 +35,11 @@ export default function CharityChecker() {
   const [abn, setAbn] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("");
   const [donationUrl, setDonationUrl] = useState("");
-  // v0.2d behavioural micro-flow. inPersonContext defaults false ("online
-  // appeal") — when toggled on, the ID question becomes load-bearing.
+  // v0.2b — uploaded photo of a fundraiser lanyard / badge / flyer.
+  // Stored as a base64 string (without the data: prefix) when set.
+  const [imageBase64, setImageBase64] = useState<string | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  // v0.2d behavioural micro-flow.
   const [inPersonContext, setInPersonContext] = useState(false);
   const [idShown, setIdShown] = useState<IdShown>("");
   const [autocomplete, setAutocomplete] = useState<AutocompleteRow[]>([]);
@@ -72,7 +77,33 @@ export default function CharityChecker() {
   const abnIsValid = formattedAbn.length === 11;
   const nameIsValid = name.trim().length >= 2;
   const canSubmit =
-    (mode === "abn" && abnIsValid) || (mode === "name" && nameIsValid);
+    (mode === "abn" && abnIsValid) ||
+    (mode === "name" && nameIsValid) ||
+    (mode === "image" && Boolean(imageBase64));
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5_000_000) {
+      setError("Image too large — please upload under 5 MB.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      // Strip the "data:image/...;base64," prefix — backend expects raw.
+      const base64 = dataUrl.includes(",") ? dataUrl.split(",")[1]! : dataUrl;
+      setImageBase64(base64);
+      setImagePreview(dataUrl);
+      setError("");
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const clearImage = () => {
+    setImageBase64(null);
+    setImagePreview(null);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -85,6 +116,7 @@ export default function CharityChecker() {
     const body: Record<string, string | boolean> = {};
     if (mode === "abn") body.abn = formattedAbn;
     if (mode === "name") body.name = name.trim();
+    if (mode === "image" && imageBase64) body.image = imageBase64;
     if (paymentMethod) body.paymentMethod = paymentMethod;
     if (donationUrl.trim()) body.donationUrl = donationUrl.trim();
     if (inPersonContext) body.inPersonContext = true;
@@ -145,6 +177,8 @@ export default function CharityChecker() {
     setAbn("");
     setPaymentMethod("");
     setDonationUrl("");
+    setImageBase64(null);
+    setImagePreview(null);
     setInPersonContext(false);
     setIdShown("");
     setAutocomplete([]);
@@ -187,6 +221,19 @@ export default function CharityChecker() {
           onClick={() => setMode("abn")}
         >
           <Hash size={16} aria-hidden /> ABN
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "image"}
+          className={`px-4 py-2 text-sm font-semibold rounded-md inline-flex items-center gap-1.5 ${
+            mode === "image"
+              ? "bg-white text-deep-navy shadow-sm"
+              : "text-gov-slate hover:text-deep-navy"
+          }`}
+          onClick={() => setMode("image")}
+        >
+          <Camera size={16} aria-hidden /> Photo
         </button>
       </div>
 
@@ -270,6 +317,47 @@ export default function CharityChecker() {
           />
           <p id="cc-abn-hint" className="mt-1 text-xs text-gov-slate">
             Spaces and dashes are fine — we&rsquo;ll strip them.
+          </p>
+        </div>
+      )}
+
+      {/* Input — photo (v0.2b). Snap a fundraiser lanyard / badge / flyer;
+          we OCR the visible text via Claude Vision and pre-fill the ABN
+          and charity name from whatever's printed. */}
+      {mode === "image" && (
+        <div>
+          <label htmlFor="cc-image" className="block text-sm font-medium text-deep-navy mb-2 inline-flex items-center gap-1.5">
+            <Camera size={16} aria-hidden /> Photo of the lanyard, badge, or flyer
+          </label>
+          {imagePreview ? (
+            <div className="relative inline-block">
+              <img
+                src={imagePreview}
+                alt="Uploaded lanyard or badge"
+                className="max-h-64 rounded-lg border border-slate-300"
+              />
+              <button
+                type="button"
+                onClick={clearImage}
+                aria-label="Remove image"
+                className="absolute top-1 right-1 bg-white/90 hover:bg-white text-deep-navy rounded-full p-1 shadow"
+              >
+                <XIcon size={16} aria-hidden />
+              </button>
+            </div>
+          ) : (
+            <input
+              id="cc-image"
+              type="file"
+              accept="image/jpeg,image/png,image/gif,image/webp"
+              onChange={handleImageChange}
+              className="block w-full text-sm text-gov-slate file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border file:border-slate-300 file:text-sm file:font-semibold file:bg-white file:text-deep-navy hover:file:bg-slate-50"
+              aria-describedby="cc-image-hint"
+            />
+          )}
+          <p id="cc-image-hint" className="mt-1 text-xs text-gov-slate">
+            JPEG / PNG / GIF / WebP, under 5 MB. We&rsquo;ll read what&rsquo;s printed
+            and check it for you.
           </p>
         </div>
       )}

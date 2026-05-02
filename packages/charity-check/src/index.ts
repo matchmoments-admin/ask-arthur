@@ -20,5 +20,7 @@ export type {
   CharityCoverage,
   CharityPillarId,
   CharityPillarResult,
+  ScamwatchAlertContext,
 } from "./types";
 export type { CharityProviderContract } from "./provider-contract";
+export { ocrLanyard, type LanyardExtraction } from "./ocr-lanyard";

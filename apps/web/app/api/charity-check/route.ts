@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
-import { runCharityCheck } from "@askarthur/charity-check";
+import { runCharityCheck, ocrLanyard } from "@askarthur/charity-check";
+import { validateImageMagicBytes } from "@askarthur/scam-engine/image-validate";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { checkCharityCheckRateLimit } from "@askarthur/utils/rate-limit";
 import { resolveRequestId } from "@askarthur/utils/request-id";
 
-import { logCost } from "@/lib/cost-telemetry";
+import { logCost, PRICING } from "@/lib/cost-telemetry";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,11 +35,19 @@ const CharityCheckBodySchema = z
       .optional(),
     idShown: z.enum(["yes", "no", "refused", "skipped"]).optional(),
     inPersonContext: z.boolean().optional(),
+    /** v0.2b — base64 image (without data: prefix) of a fundraiser
+     *  lanyard / badge / flyer. When present, we OCR via Claude Vision
+     *  and pre-fill abn/name from the extracted fields. */
+    image: z.string().min(100).max(8_000_000).optional(),
   })
-  .refine((data) => Boolean((data.abn && data.abn.length === 11) || data.name), {
-    message: "Either abn (11 digits) or name (≥2 chars) is required",
-    path: ["abn"],
-  });
+  .refine(
+    (data) =>
+      Boolean((data.abn && data.abn.length === 11) || data.name || data.image),
+    {
+      message: "Either abn (11 digits), name (≥2 chars), or image is required",
+      path: ["abn"],
+    },
+  );
 
 export async function POST(req: NextRequest) {
   // Server-only flag — controls whether the route accepts traffic. The
@@ -106,9 +115,55 @@ export async function POST(req: NextRequest) {
   const input = parsed.data;
   const t0 = Date.now();
   try {
+    // v0.2b: when an image is supplied, OCR it via Claude Vision first
+    // and use the extracted fields to fill ABN/name when the user didn't
+    // type them explicitly. Explicit input always wins over OCR — the
+    // user typed it on purpose.
+    let ocrAbn: string | undefined;
+    let ocrName: string | undefined;
+    if (input.image) {
+      const magic = validateImageMagicBytes(input.image);
+      if (!magic.valid || !magic.detectedType) {
+        return NextResponse.json(
+          {
+            error: {
+              code: "invalid_input",
+              message: "Invalid image format. Supported: JPEG, PNG, GIF, WebP.",
+            },
+          },
+          { status: 400, headers: { "X-Request-Id": requestId } },
+        );
+      }
+      const ocrStart = Date.now();
+      const extracted = await ocrLanyard(
+        input.image,
+        magic.detectedType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
+      );
+      ocrAbn = extracted.abn;
+      ocrName = extracted.charity_name;
+      // Cost telemetry for the OCR call (separate row so /admin/costs
+      // surfaces image-spend distinctly from registry lookups).
+      logCost({
+        feature: "charity_check",
+        provider: "anthropic",
+        operation: "claude-haiku-4-5-ocr-lanyard",
+        // ~600 input tokens (image + system + user prompt) + ~150 output
+        units: 750,
+        unitCostUsd: PRICING.CLAUDE_HAIKU_4_5_INPUT_USD_PER_TOKEN,
+        requestId,
+        metadata: {
+          extracted: extracted.extracted,
+          had_charity_name: Boolean(extracted.charity_name),
+          had_abn: Boolean(extracted.abn),
+          ocr_latency_ms: Date.now() - ocrStart,
+        },
+      });
+    }
+
     const result = await runCharityCheck({
-      abn: input.abn || undefined,
-      name: input.name,
+      // Explicit input wins over OCR — user typed it on purpose.
+      abn: (input.abn || undefined) ?? ocrAbn,
+      name: input.name ?? ocrName,
       donationUrl: input.donationUrl,
       paymentMethod: input.paymentMethod,
       idShown: input.idShown,
@@ -134,6 +189,9 @@ export async function POST(req: NextRequest) {
         latency_ms: Date.now() - t0,
         had_abn: Boolean(input.abn),
         had_name: Boolean(input.name),
+        had_image: Boolean(input.image),
+        ocr_filled_abn: !input.abn && Boolean(ocrAbn),
+        ocr_filled_name: !input.name && Boolean(ocrName),
       },
     });
 
