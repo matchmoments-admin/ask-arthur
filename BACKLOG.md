@@ -218,6 +218,39 @@ Plan: [docs/plans/reddit-intel.md](./docs/plans/reddit-intel.md). All 14 PRs (#5
 - [ ] **Reddit OAuth migration** — current scraper uses unauthenticated JSON endpoints; migrate to PRAW-style OAuth when subscriber count crosses 1k or Reddit's Public Content Policy materially tightens. Roadmap in `docs/compliance/reddit-intel-reddit-tos.md`.
 - [ ] **Formal takedown runbook** — currently described as "manual SQL" in the Reddit ToS doc §6. Could formalise into a step-by-step ops playbook when the first takedown notice arrives.
 
+## Outreach & Partnerships
+
+Active outreach pipeline tracking. Email bodies and full pitch context live with the original campaign assets at `docs/campaigns/spf-pillar-2026-04/02-…`/`03-…`/`04-…` until the campaign is archived. Status flips here, not in the campaign folder.
+
+| Contact               | Role                    | Asset                                                                                                                                   | Status                      | Next action                                                                                                          | Sent | Response |
+| --------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------- | ---- | -------- |
+| David Lacey / IDCARE  | CEO                     | `02-email-davidson-idcare.md` (referrer-to-funder partnership: paid subscriber + co-branded referral + threat-data + SPF working group) | _unknown_                   | Confirm whether sent; if not, send before 1 Jul 2026 — gates Walsh/Vocus warm intro and the AEA Parwada conversation | —    | —        |
+| Iñaki Berroeta / TPG  | CEO                     | `03-email-chiarelli-tpg.md` (content-layer pitch complementary to Mavenir + Apate.ai, 90-day pilot at A$2k/mo)                          | _unknown_                   | Confirm whether sent                                                                                                 | —    | —        |
+| Kevin Russell / Vocus | CEO                     | `04-email-walsh-vocus.md` (warm-intro via IDCARE, content-layer pitch for Dodo/iPrimus/Commander)                                       | Blocked on IDCARE intro     | Wait for IDCARE acknowledgement before sending                                                                       | —    | —        |
+| Optus                 | Telco                   | (deferred from HANDOFF.md "What's NOT done")                                                                                            | Re-evaluate Q3 2026         | —                                                                                                                    | —    | —        |
+| Telstra               | Telco                   | (deferred)                                                                                                                              | Re-evaluate post-1-Jul-2026 | —                                                                                                                    | —    | —        |
+| Apate.ai              | Voice AI / scam baiting | (deferred — partnership rather than competition)                                                                                        | Re-evaluate post-1-Jul-2026 | —                                                                                                                    | —    | —        |
+| COBA / banking        | Industry body           | (deferred from HANDOFF.md banking workstream)                                                                                           | Out of scope until Q3 2026  | —                                                                                                                    | —    | —        |
+
+## Distribution
+
+Channel playbooks for the 2026-04 SPF pillar campaign. Reusable patterns for future campaigns; campaign-specific framings stay archived. See `docs/campaigns/spf-pillar-2026-04/distribution/` and `08-linkedin-series.md`.
+
+- [ ] **LinkedIn series — 6 posts on 4–5 day cadence** at `docs/campaigns/spf-pillar-2026-04/08-linkedin-series.md`. Status _unknown_; HANDOFF.md scheduled posts on Days 0/4/7/8/13/18/25 (campaign Day 0 = 28 Apr 2026). Confirm publication state, then mark complete or reschedule remainder.
+- [ ] **HN submission** — `docs/campaigns/spf-pillar-2026-04/distribution/hn-submission.md`. Status _unknown_. If posted, capture inbound traffic against pillar's 6 success metrics; if not, decide whether to submit pre or post 1 Jul 2026.
+- [ ] **r/AusFinance** — `docs/campaigns/spf-pillar-2026-04/distribution/reddit-r-AusFinance.md`. Same status check as HN.
+- [ ] **Extract channel-etiquette into reusable doc** — once first campaign concludes, lift HN lifecycle expectations + r/AusFinance disclosure pattern + LinkedIn cadence into a campaign-agnostic `docs/marketing/distribution-playbooks.md` so the next pillar inherits the playbook for free.
+
+## Grants & Funding
+
+- [ ] **AEA Seed application narrative drafted** at `docs/grants/aea-seed-narrative.md`. Blocked on UNSW / A/Prof Jerry Parwada partnership letter (HANDOFF Day 21 trigger ≈ 19 May 2026). Application targets 2026 round. Apate.ai is _not_ an AEA precedent (was VC seed, not AEA grant) — the narrative leans on academic-partnership criterion + regulatory tailwind, per the doc's verification note.
+- [ ] **CyberCon 2027 CFP** — submit when window opens (deferred from HANDOFF.md "What's NOT done"). Submission topic likely tracks the SPF compliance evidence we'll have built up by then.
+
+## Policy & Regulatory Submissions
+
+- [ ] **SPF subordinate-rules submission** template at `docs/policy/spf-submission-template.md` (6 recommendations, sovereign-tech-advocate framing). Submit to next open Treasury / ACCC / ACMA consultation. Watch for ACMA mandatory industry standard consultation post the 27 Mar 2026 TCP Code rejection.
+- [ ] **Penalty-units blog post staleness — hard date 2 Jul 2026** — `05-blog-supporting-1-penalty-units.md` quotes "A$52.7M" throughout. The 1 Jul 2026 indexation event will change the headline number on day one. Calendar a 30-Jun-2026 reminder to update the blog (and any LinkedIn quotes) within 24h of the indexation announcement.
+
 ## Cost Observability & Infrastructure
 
 Related to Phase 13 in `ROADMAP.md`. Items that need action before (or as) we hit the relevant trigger.

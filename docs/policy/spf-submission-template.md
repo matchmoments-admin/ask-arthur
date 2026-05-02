@@ -54,7 +54,7 @@ The subordinate rules are silent on this architecture. We recommend the rules sp
 
 A reasonable specification would require: at least three verdict states (binary verdicts are insufficient for policy nuance); a documented confidence calibration; named source attributions with timestamps; and a derivation trail accessible for AFCA EDR review for at least 7 years.
 
-This is not an exotic ask. AskArthur's three-tier verdict (SAFE / SUSPICIOUS / HIGH_RISK) with confidence score, source attribution, and full derivation trail is one of several reference implementations. Other vendors will have different but compatible architectures. The point is that the rules should _require_ the architecture exists, not specify which vendor produces it.
+This is not an exotic ask. AskArthur's three-tier verdict (SAFE / SUSPICIOUS / HIGH*RISK) with confidence score, source attribution, and full derivation trail is one of several reference implementations. Other vendors will have different but compatible architectures. The point is that the rules should \_require* the architecture exists, not specify which vendor produces it.
 
 ### 2. Latency budgets for time-bound obligations (~400 words)
 
