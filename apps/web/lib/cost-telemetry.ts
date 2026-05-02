@@ -39,6 +39,25 @@ export const PRICING = {
   // Twilio Lookup v2: ~$0.018 per lookup (line-type + carrier + CNAM).
   TWILIO_LOOKUP_V2_USD: 0.018,
 
+  // Twilio Verify (Phone Footprint OTP): ~$0.10 per verification cycle
+  // (start + check). One per paid-tier ownership-proof in the v2 spec.
+  TWILIO_VERIFY_USD: 0.1,
+
+  // Vonage Number Insight v2 (fraud_score): $0.04/lookup (PF v2 ops doc).
+  // Used by the vonage provider to feed Phone Footprint pillar 3.
+  VONAGE_NI_V2_USD: 0.04,
+
+  // Vonage CAMARA SIM Swap: $0.04/lookup. Pillar 4 primary.
+  VONAGE_CAMARA_SIM_SWAP_USD: 0.04,
+
+  // Vonage CAMARA Device Swap: $0.04/lookup. Pillar 4 corroborator —
+  // runs alongside SIM Swap, not in place of it.
+  VONAGE_CAMARA_DEVICE_SWAP_USD: 0.04,
+
+  // IPQualityScore phone-fraud: amortised AUD ~$0.003/call on the
+  // flat-rate enterprise plan. Pillar 3 fallback when Vonage NI is off.
+  IPQS_PHONE_FRAUD_USD: 0.003,
+
   // Resemble AI deepfake-audio detection: ~$2.40 per 1000 minutes = $0.086/min.
   RESEMBLE_AI_USD_PER_SECOND: 0.086 / 60,
 
