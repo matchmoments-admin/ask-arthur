@@ -245,12 +245,25 @@ h3 {
   margin: 0;
 }
 
-/* GitHub-style admonition callouts: [!TIP], [!WARNING], [!DANGER], [!NOTE] */
+/* GitHub-style admonition callouts: [!TIP], [!WARNING], [!DANGER], [!NOTE].
+ *
+ * Style note: the panels use a white card + soft raised shadow (matching
+ * the Persona Check tool's bg-white border-border-light rounded-xl
+ * shadow-sm pattern), with a 4px colored left stripe carrying the
+ * variant signal. The icon webp files are faceless-navy thumbnails on
+ * transparent backgrounds, sized 2.5rem and offset slightly inside the
+ * panel. Background-color tints removed (2026-05) so the icon tile
+ * reads cleanly against the card. */
 .blog-content .callout {
   position: relative;
-  border-left: 3px solid;
-  border-radius: 6px;
-  padding: 1.25em 1.25em 1.25em 4.5em;
+  background-color: #ffffff;
+  border: 1px solid var(--color-border-light);
+  border-left: 4px solid;
+  border-radius: 0.75rem;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 4px 12px rgba(15, 23, 42, 0.04);
+  padding: 1.25em 1.25em 1.25em 4.75em;
   margin-top: 1.75em;
   margin-bottom: 1.75em;
   min-height: 3.5rem;
@@ -270,23 +283,19 @@ h3 {
   margin-top: 0.6em;
 }
 .blog-content .callout-tip {
-  border-color: #388e3c;
-  background-color: rgba(56, 142, 60, 0.06);
+  border-left-color: #388e3c;
   background-image: url("/illustrations/callout-tip.webp");
 }
 .blog-content .callout-warning {
-  border-color: #f57c00;
-  background-color: rgba(245, 124, 0, 0.06);
+  border-left-color: #f57c00;
   background-image: url("/illustrations/callout-warning.webp");
 }
 .blog-content .callout-danger {
-  border-color: #d32f2f;
-  background-color: rgba(211, 47, 47, 0.06);
+  border-left-color: #d32f2f;
   background-image: url("/illustrations/callout-danger.webp");
 }
 .blog-content .callout-note {
-  border-color: var(--color-action-teal);
-  background-color: rgba(13, 148, 136, 0.06);
+  border-left-color: var(--color-action-teal);
   background-image: url("/illustrations/callout-info.webp");
 }
 
