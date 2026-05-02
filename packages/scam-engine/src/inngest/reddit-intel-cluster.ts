@@ -179,6 +179,12 @@ async function logNamingCost(args: {
 interface NewPost {
   id: string;
   embedding: number[];
+  /** The model that produced `embedding` (e.g. 'voyage-3.5'). Becomes the
+   *  centroid_embedding_model_version on the theme this post lands in. May
+   *  be null for legacy rows embedded before migration v86; treat as 'voyage-3'
+   *  by convention but don't blindly tag — leave null so the next post in the
+   *  theme can stamp it correctly. */
+  embeddingModelVersion: string | null;
 }
 
 interface ActiveTheme {
@@ -220,7 +226,7 @@ export const redditIntelCluster = inngest.createFunction(
 
       const { data: postRows, error: postErr } = await supabase
         .from("reddit_post_intel")
-        .select("id, embedding")
+        .select("id, embedding, embedding_model_version")
         .gte("processed_at", cohortStart)
         .lt("processed_at", cohortEnd)
         .is("theme_id", null)
@@ -242,6 +248,8 @@ export const redditIntelCluster = inngest.createFunction(
         .map((r) => ({
           id: r.id as string,
           embedding: parsePgVector(r.embedding as string | null) ?? [],
+          embeddingModelVersion:
+            (r.embedding_model_version as string | null) ?? null,
         }))
         .filter((p) => p.embedding.length > 0);
 
@@ -277,6 +285,10 @@ export const redditIntelCluster = inngest.createFunction(
       newCentroid: number[];
       newMemberCount: number;
       isNewTheme: boolean;
+      /** Model version that produced the post's embedding. Tagged onto the
+       *  centroid via centroid_embedding_model_version so a future model
+       *  rollout can detect mixed-model centroids and trigger re-embed. */
+      embeddingModelVersion: string | null;
     }> = [];
 
     for (const post of posts) {
@@ -303,6 +315,7 @@ export const redditIntelCluster = inngest.createFunction(
           newCentroid,
           newMemberCount,
           isNewTheme: false,
+          embeddingModelVersion: post.embeddingModelVersion,
         });
       } else {
         // No match → seed a new theme with this post as the centroid.
@@ -315,6 +328,7 @@ export const redditIntelCluster = inngest.createFunction(
           newCentroid: post.embedding.slice(),
           newMemberCount: 1,
           isNewTheme: true,
+          embeddingModelVersion: post.embeddingModelVersion,
         });
         themes.push({
           id: "<pending>", // not used — only needed if a later post in this batch could match it,
@@ -343,6 +357,7 @@ export const redditIntelCluster = inngest.createFunction(
               slug: placeholderSlug(),
               title: "Pending naming",
               centroid_embedding: vectorToPgString(a.newCentroid),
+              centroid_embedding_model_version: a.embeddingModelVersion,
               member_count: 1,
               first_seen_at: new Date().toISOString(),
               last_seen_at: new Date().toISOString(),
@@ -362,10 +377,17 @@ export const redditIntelCluster = inngest.createFunction(
           newThemeCount++;
         } else {
           // Existing theme: update centroid + bump member count + last_seen_at.
+          // Stamp the centroid's model version with the joining post's
+          // version. If old centroid was on voyage-3 and the new post is
+          // on voyage-3.5, the centroid is now mixed-model — the version
+          // column captures the most-recent contributor so a future
+          // re-embed sweep can detect mixed centroids and rebuild them.
+          // See ADR-0003.
           const { error: upErr } = await supabase
             .from("reddit_intel_themes")
             .update({
               centroid_embedding: vectorToPgString(a.newCentroid),
+              centroid_embedding_model_version: a.embeddingModelVersion,
               member_count: a.newMemberCount,
               last_seen_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
