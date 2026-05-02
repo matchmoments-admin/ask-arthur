@@ -264,6 +264,19 @@ export const featureFlags = {
    *  Trusted Partner application clears, and the cost-daily-check brake on
    *  feature_brakes.meta_brp is in place. */
   metaBrpReporter: process.env.FF_META_BRP_REPORTER === "true",
+
+  /** Charity Legitimacy Check — consumer page (/charity-check) + main-checker
+   *  deep-link CTA. Public flag so the UI can conditionally render entry
+   *  points. Default OFF until the v0.1 data spine has run for ≥1 cycle
+   *  (acnc_charities populated) AND the consumer surface PR has shipped. */
+  charityCheck: process.env.NEXT_PUBLIC_FF_CHARITY_CHECK === "true",
+
+  /** Charity Legitimacy Check — server-only ingest gate. When ON, the
+   *  pipeline/scrapers/acnc_register.py daily run actually fetches and
+   *  upserts. When OFF (or unset), the scraper logs a no-op and exits.
+   *  Wired in the GitHub Actions step env *and* checked at the top of
+   *  scrape() so an accidental local run is also a no-op. */
+  charityCheckIngest: process.env.FF_CHARITY_CHECK_INGEST === "true",
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;
