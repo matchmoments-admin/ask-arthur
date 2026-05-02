@@ -28,14 +28,20 @@ const TYPE_LABELS: Record<string, string> = {
   skill: "AI Skill",
 };
 
+// Audit-report palette — kept in sync with apps/web/components/site-audit-report.css
+// (--ar-ok-soft / --ar-ok-fg, --ar-warn-soft / --ar-warn-fg, --ar-err-soft / --ar-err-fg)
 const GRADE_PILL: Record<string, string> = {
-  "A+": "bg-green-100 text-green-800",
-  A: "bg-green-100 text-green-800",
-  "A-": "bg-green-50 text-green-700",
-  B: "bg-teal-100 text-teal-800",
-  C: "bg-amber-100 text-amber-800",
-  D: "bg-orange-100 text-orange-800",
-  F: "bg-red-100 text-red-800",
+  "A+": "bg-[#ECFDF5] text-[#065F46]",
+  A: "bg-[#ECFDF5] text-[#065F46]",
+  "A-": "bg-[#ECFDF5] text-[#065F46]",
+  "B+": "bg-[#ECFDF5] text-[#065F46]",
+  B: "bg-[#ECFDF5] text-[#065F46]",
+  "B-": "bg-[#ECFDF5] text-[#065F46]",
+  "C+": "bg-[#FFFBEB] text-[#92400E]",
+  C: "bg-[#FFFBEB] text-[#92400E]",
+  "C-": "bg-[#FFFBEB] text-[#92400E]",
+  D: "bg-[#FFFBEB] text-[#92400E]",
+  F: "bg-[#FEF2F2] text-[#991B1B]",
 };
 
 interface RecentScan {
@@ -114,11 +120,11 @@ export default async function ScannerPage() {
     <div className="min-h-screen flex flex-col">
       <Nav />
 
-      <main id="main-content" className="flex-1 w-full max-w-[640px] mx-auto px-5 pt-16">
+      <main id="main-content" className="flex-1 w-full max-w-[880px] mx-auto px-5 pt-16">
         <h1 className="text-deep-navy text-4xl md:text-5xl font-extrabold mb-4 leading-tight text-center">
           Security Scanner
         </h1>
-        <p className="text-lg text-gov-slate mb-10 leading-relaxed text-center">
+        <p className="text-lg text-gov-slate mb-10 leading-relaxed text-center max-w-2xl mx-auto">
           Scan any website, Chrome extension, MCP server, or AI skill.
           Get a safety grade with actionable recommendations.
         </p>
