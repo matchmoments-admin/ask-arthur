@@ -1,27 +1,34 @@
-name: Claude Code Review
+name: Claude Pre-Merge Review
+
+# Triggered only when the `claude-review` label is added to a PR (and on
+# subsequent pushes while the label is present, so iterative cleanup gets
+# re-reviewed). Removes the per-push spend you'd get with the default
+# `[opened, synchronize, ...]` trigger and ties review timing to "I think
+# this is ready to merge" intent.
+#
+# Cost is absorbed by the Plan subscription via CLAUDE_CODE_OAUTH_TOKEN
+# (set by `/install-github-app`), not a separate ANTHROPIC_API_KEY.
+#
+# To use: add the `claude-review` label to a PR. Claude reviews the diff
+# end-to-end against the project's conventions and posts a single review
+# comment. Push fixes; the synchronize trigger re-reviews while the label
+# stays on. Remove the label after merge (or leave it — labels don't
+# affect merging).
 
 on:
   pull_request:
-    types: [opened, synchronize, ready_for_review, reopened]
-    # Optional: Only run on specific file changes
-    # paths:
-    #   - "src/**/*.ts"
-    #   - "src/**/*.tsx"
-    #   - "src/**/*.js"
-    #   - "src/**/*.jsx"
+    types: [labeled, synchronize]
 
 jobs:
   claude-review:
-    # Optional: Filter by PR author
-    # if: |
-    #   github.event.pull_request.user.login == 'external-contributor' ||
-    #   github.event.pull_request.user.login == 'new-developer' ||
-    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
+    if: |
+      (github.event.action == 'labeled' && github.event.label.name == 'claude-review') ||
+      (github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'claude-review'))
 
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
+      pull-requests: write
       issues: read
       id-token: write
 
@@ -29,16 +36,61 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0
 
-      - name: Run Claude Code Review
+      - name: Run Claude pre-merge review
         id: claude-review
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
-          plugins: 'code-review@claude-code-plugins'
-          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
+          plugin_marketplaces: "https://github.com/anthropics/claude-code.git"
+          plugins: "code-review@claude-code-plugins"
+          prompt: |
+            /code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}
 
+            Additional project-specific context — apply alongside the
+            standard code review:
+
+            - Read CLAUDE.md, CONVENTIONS.md, and any docs/adr/ entries
+              relevant to the touched files. Flag deviations from the
+              "Critical Rules" section in CLAUDE.md (notably:
+              `@askarthur/*` import path with no hyphen, no `npm`/`yarn`,
+              no `ssr: false` in next/dynamic Server Components, no raw
+              user content stored, Zod validation on external input,
+              fail-closed rate limiting in production).
+            - **Migration safety**: if any `supabase/*.sql` files changed,
+              flag whether they are idempotent (`IF NOT EXISTS`,
+              `DROP POLICY IF EXISTS ... CREATE POLICY ...`), destructive,
+              or long-running. Long-running or destructive migrations
+              should ship with an operator runbook (see
+              `docs/partitioning-runbook.md` for the template).
+            - **Cost / brakes**: if new external-API call sites land,
+              verify `logCost()` is wired and the relevant feature has a
+              `feature_brakes` row pattern in
+              `apps/web/app/api/cron/cost-daily-check/route.ts`. Refer to
+              `docs/inngest-brakes.md` for the brake-coverage matrix —
+              any blank cell on a new function is a P1.
+            - **Security**: input validation, authn/authz, secrets in
+              logs, injection vectors. The platform handles scam-data
+              and PII under Australian Privacy Principles + the Scams
+              Prevention Framework Act 2025; treat data flows touching
+              user-submitted content with extra rigor.
+            - **R&D documentation**: commit messages should explain WHY
+              the change was made (RDTI evidence). Flag commits with
+              terse "fix bug" / "wip" / "update X" messages — they
+              don't disqualify the PR but should be reworded before
+              merge if material to a non-obvious technical decision.
+
+            Deliver one consolidated review comment with:
+            - **Verdict**: APPROVE / REQUEST CHANGES / COMMENT
+            - **Blocking** (if REQUEST CHANGES): file:line refs + fix
+            - **Non-blocking suggestions**: numbered, file:line refs
+            - **Test plan check**: does the PR description's checklist
+              actually cover the change?
+
+          # Cap turns to bound runtime + token spend per review.
+          # 8 turns is enough for a thorough multi-file investigation
+          # without runaway behaviour. Increase only if reviews of
+          # large refactors keep getting truncated.
+          claude_args: |
+            --max-turns 8
