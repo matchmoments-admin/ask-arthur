@@ -39,20 +39,38 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "query_failed" }, { status: 500 });
   }
 
-  const totalCostUsd = Number(today?.total_cost_usd ?? 0);
+  const costTelemetryUsd = Number(today?.total_cost_usd ?? 0);
   const eventCount = Number(today?.event_count ?? 0);
+
+  // Vonage Phone Footprint spend lives in telco_api_usage, not cost_telemetry,
+  // so query it independently and include it in the global threshold gate.
+  // Without this, a runaway Vonage refresh loop ($50+/day) could escape the
+  // alert/brake path entirely if cost_telemetry rows for the day stayed low.
+  const todayUtc = new Date().toISOString().slice(0, 10);
+  const todayStartIso = new Date(`${todayUtc}T00:00:00.000Z`).toISOString();
+  const { data: vonageRows } = await supabase
+    .from("telco_api_usage")
+    .select("cost_usd")
+    .gte("created_at", todayStartIso)
+    .eq("status", "ok");
+  const vonageCost = (vonageRows ?? []).reduce(
+    (sum, r) => sum + Number(r.cost_usd ?? 0),
+    0,
+  );
+  const totalCostUsd = costTelemetryUsd + vonageCost;
 
   if (totalCostUsd <= thresholdUsd) {
     return NextResponse.json({
       belowThreshold: true,
       totalCostUsd,
+      costTelemetryUsd,
+      vonageCost,
       thresholdUsd,
       eventCount,
     });
   }
 
   // Over threshold — fetch top 3 contributing features for context.
-  const todayUtc = new Date().toISOString().slice(0, 10);
   const { data: topRows } = await supabase
     .from("daily_cost_summary")
     .select("feature, provider, event_count, total_cost_usd")
@@ -96,8 +114,24 @@ export async function GET(req: Request) {
         t.feature === "reddit-intel-name-themes",
     )
     .reduce((sum, t) => sum + t.cost, 0);
+
+  // Phone Footprint runs Vonage NI v2 ($0.04) + CAMARA SIM Swap ($0.04) +
+  // CAMARA Device Swap ($0.04) per paid-tier refresh = ~$0.12/lookup. Vonage
+  // spend was already pulled from telco_api_usage above for the global gate;
+  // here we add Resend dispatch emails (tracked in cost_telemetry under
+  // feature='phone_footprint') for the brake calculation. Cap tighter than
+  // the per-feature plan ($5/day) — at 1k DAU a runaway refresh loop could
+  // rack up Vonage spend in minutes.
+  const phoneFootprintThresholdUsd = parseFloat(
+    process.env.PHONE_FOOTPRINT_CAP_USD ?? "5",
+  );
+  const phoneFootprintTelemetryCost =
+    top.find((t) => t.feature === "phone_footprint")?.cost ?? 0;
+  const phoneFootprintCost = vonageCost + phoneFootprintTelemetryCost;
+
   let brakeSet = false;
   let redditBrakeSet = false;
+  let phoneFootprintBrakeSet = false;
   if (vulnEnrichCost > vulnEnrichThresholdUsd) {
     const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     const { error: brakeError } = await supabase
@@ -160,6 +194,39 @@ export async function GET(req: Request) {
     }
   }
 
+  if (phoneFootprintCost > phoneFootprintThresholdUsd) {
+    const pausedUntil = new Date(
+      Date.now() + 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const { error: brakeError } = await supabase
+      .from("feature_brakes")
+      .upsert(
+        {
+          feature: "phone_footprint",
+          paused_until: pausedUntil,
+          reason: `Daily spend $${phoneFootprintCost.toFixed(2)} exceeded $${phoneFootprintThresholdUsd} cap (Vonage $${vonageCost.toFixed(2)} + telemetry $${phoneFootprintTelemetryCost.toFixed(2)})`,
+          set_by: "cost-daily-check",
+          set_cost_usd: phoneFootprintCost,
+          set_threshold_usd: phoneFootprintThresholdUsd,
+          set_at: new Date().toISOString(),
+        },
+        { onConflict: "feature" },
+      );
+    if (brakeError) {
+      logger.error("failed to set phone_footprint brake", {
+        error: brakeError.message,
+      });
+    } else {
+      phoneFootprintBrakeSet = true;
+      logger.warn("phone_footprint brake engaged", {
+        costUsd: phoneFootprintCost,
+        vonageCost,
+        thresholdUsd: phoneFootprintThresholdUsd,
+        pausedUntil,
+      });
+    }
+  }
+
   // Truncate to top 3 for the Telegram message (UX — keep it scannable).
   const topForTelegram = top.slice(0, 3);
 
@@ -190,6 +257,12 @@ export async function GET(req: Request) {
       `🛑 <b>reddit_intel brake engaged</b> — paused for 24h (spend $${redditIntelCost.toFixed(2)} > $${redditIntelThresholdUsd} cap)`,
     );
   }
+  if (phoneFootprintBrakeSet) {
+    lines.push(
+      "",
+      `🛑 <b>phone_footprint brake engaged</b> — paused for 24h (spend $${phoneFootprintCost.toFixed(2)} > $${phoneFootprintThresholdUsd} cap)`,
+    );
+  }
   lines.push("", `Full breakdown: https://askarthur.au/admin/costs`);
 
   await sendAdminTelegramMessage(lines.join("\n"));
@@ -204,5 +277,7 @@ export async function GET(req: Request) {
     vulnEnrichCost,
     redditBrakeSet,
     redditIntelCost,
+    phoneFootprintBrakeSet,
+    phoneFootprintCost,
   });
 }
