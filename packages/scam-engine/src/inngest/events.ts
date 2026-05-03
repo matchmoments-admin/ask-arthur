@@ -111,6 +111,49 @@ export function parseAnalyzeCompletedData(raw: unknown): AnalyzeCompletedData {
   return AnalyzeCompletedDataSchema.parse(raw);
 }
 
+// ── scam-report.stored.v1 ────────────────────────────────────────────────
+//
+// Emitted by analyze-report.ts after storeScamReport succeeds. Carries the
+// reportId so the embed consumer can look up the row's scrubbed_content
+// and structured fields without forwarding the full text via Inngest.
+// Splitting embed into a separate function (rather than chaining inside
+// analyze-report.ts) lets the embed call fail and retry independently of
+// the row-write step — same pattern as the Reddit Intel pipeline.
+
+export const ScamReportStoredDataSchema = z.object({
+  reportId: z.number().int().positive(),
+  verdict: VerdictSchema,
+  scamType: z.string().nullable(),
+  // The composite content length, used by the embed consumer to skip
+  // trivially-short reports (<= 40 chars) that have no useful retrieval
+  // signal. Avoids a Supabase round-trip just to check length.
+  contentLength: z.number().int().min(0),
+});
+export type ScamReportStoredData = z.infer<typeof ScamReportStoredDataSchema>;
+
+export const SCAM_REPORT_STORED_EVENT = "scam-report.stored.v1" as const;
+
+export interface ScamReportStoredEvent {
+  name: typeof SCAM_REPORT_STORED_EVENT;
+  id: string;
+  data: ScamReportStoredData;
+}
+
+export function parseScamReportStoredData(raw: unknown): ScamReportStoredData {
+  return ScamReportStoredDataSchema.parse(raw);
+}
+
+// ── scam-reports.backfill-embed.v1 ───────────────────────────────────────
+//
+// Manual-trigger event for the historical scam_reports + verified_scams
+// embedding backfill. Each invocation of the backfill function embeds up
+// to 5000 rows — operator fires the event repeatedly until the unembedded
+// counts hit zero. See packages/scam-engine/src/inngest/scam-reports-
+// backfill-embed.ts for the consumer.
+
+export const SCAM_REPORTS_BACKFILL_EMBED_EVENT =
+  "scam-reports.backfill-embed.v1" as const;
+
 // ── reddit.intel.batch_ready.v1 ──────────────────────────────────────────
 //
 // Emitted by the Reddit-intel trigger cron (apps/web/app/api/cron/reddit-

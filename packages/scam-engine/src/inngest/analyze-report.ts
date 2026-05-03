@@ -3,6 +3,7 @@ import { logger } from "@askarthur/utils/logger";
 import { storeScamReport, buildEntities } from "../report-store";
 import {
   ANALYZE_COMPLETED_EVENT,
+  SCAM_REPORT_STORED_EVENT,
   parseAnalyzeCompletedData,
 } from "./events";
 import type { InputMode, ReportSource } from "@askarthur/types";
@@ -88,6 +89,29 @@ export const handleAnalyzeCompletedReport = inngest.createFunction(
       source: data.source,
       entityCount: entities.length,
     });
+
+    // Emit a separate event so the embed consumer (scam-report-embed.ts)
+    // can fail/retry independently of the row write. Skip for SAFE
+    // verdicts and trivially-short content — neither carries useful
+    // retrieval signal and the embed cost (small but non-zero) is wasted.
+    const contentLength = data.text?.length ?? 0;
+    if (data.verdict !== "SAFE" && contentLength >= 40) {
+      await step.run("emit-scam-report-stored", () =>
+        inngest.send({
+          name: SCAM_REPORT_STORED_EVENT,
+          // Inngest dedups events with the same id within 24h. Using the
+          // reportId guarantees a single embed pass even if analyze-report
+          // retries.
+          id: `scam-report-stored-${reportId}`,
+          data: {
+            reportId,
+            verdict: data.verdict,
+            scamType: data.scamType ?? null,
+            contentLength,
+          },
+        })
+      );
+    }
 
     return { reportId, entityCount: entities.length };
   }
