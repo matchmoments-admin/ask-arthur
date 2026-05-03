@@ -53,6 +53,16 @@ export const PRICING = {
   // unchanged through Apr 2026). Fallback embedding provider.
   OPENAI_TEXT_EMBED_3_SMALL_USD_PER_TOKEN: 0.02 / 1_000_000,
 
+  // Voyage rerank-2.5-lite: $0.02/M tokens. Cost-pareto reranker for
+  // two-stage retrieval (ANN top-N → rerank top-K). Total tokens billed
+  // per call = (query × N) + sum(doc tokens), so the cost lands ~$0.002
+  // per call at 100 docs × 500 tokens average.
+  VOYAGE_RERANK_2_5_LITE_USD_PER_TOKEN: 0.02 / 1_000_000,
+
+  // Voyage rerank-2.5: $0.05/M tokens. Larger reranker — swap in only
+  // when the lite tier produces a measurable miss on the eval set.
+  VOYAGE_RERANK_2_5_USD_PER_TOKEN: 0.05 / 1_000_000,
+
   // Twilio Lookup v2: ~$0.018 per lookup (line-type + carrier + CNAM).
   TWILIO_LOOKUP_V2_USD: 0.018,
 
