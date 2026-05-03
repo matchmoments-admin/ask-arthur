@@ -398,3 +398,12 @@ v0.1 + v0.2a code-complete + merged 2026-05-02 (#83 #85 #86 #87 #92). `acnc_char
 - [ ] Email forwarding analysis (forward scam emails to check@askarthur.au)
 - [ ] Website permission check (web version) — let users paste a URL to audit its requested browser permissions. Report card showing which permissions the site requests and whether they're justified for the site's purpose
 - [ ] Website vulnerability check (web version) — let users paste a URL to get a security health report. Check TLS version, HSTS, CSP, mixed content, open redirects, exposed endpoints. Store results in `site_audits` for longitudinal tracking
+
+## Blog content
+
+A multi-PR restyle moved every published blog post onto the charity-check / SIM-swap structural standard (HRs between H2 sections, three callouts in DANGER → WARNING → TIP order, bold-lead bullets, italic close). Shipped as PRs #104–#107 plus the SPF telco-readiness restyle. **Two flagship deep-dives remain on the deferred pile** — both are long-form (17–24k chars) and were going to get the structural-only pass under the agreed 15–25k exception band, but were not started before the user paused the batch.
+
+- [ ] **`how-ask-arthur-works` (23,623 chars) — structural pass.** Currently 9 H2 sections, 0 HRs, 0 callouts. Needs HRs between every H2, plus 3 callouts (DANGER → WARNING → TIP) at strategic amplification points. Body voice (askarthur-house engineering deep-dive) should NOT be rewritten. Source mirror at `docs/blog/how-ask-arthur-works.md` already exists from a previous touch.
+- [ ] **`scams-prevention-framework-compliance-guide` (17,578 chars) — structural pass + callout reduction.** Currently 10 H2, 1 HR, 9 callouts (too many — B2B band caps at 0–3). Needs HRs added between every H2, callouts pruned to 3 keeping the strongest DANGER / WARNING / TIP, and `hero_image_alt` confirmed populated. Body voice unchanged.
+- [x] All other blog posts (15 of 18) restyled and live in prod via PRs #104–#107, plus SPF telco-readiness restyle as a partial Batch 5 (this PR).
+- [x] Charity-check stale `reading_time_minutes` corrected from 16 → 7 (the column was set before the post was rewritten in #99; live display was already recomputed correctly at request time).
