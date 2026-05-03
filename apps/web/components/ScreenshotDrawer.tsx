@@ -20,6 +20,11 @@ interface ScreenshotDrawerProps {
   onOpenChange: (open: boolean) => void;
   onFilesSelected: (files: File[], mode?: "image" | "qrcode") => void;
   onScanQrCode: () => void;
+  /** Optional. When supplied, the "Charity Upload Image" row becomes a
+   *  file picker that loads the photo into the homepage scanner with
+   *  charity-check intent set, instead of deep-linking to /charity-check.
+   *  Single file only — the charity-check engine accepts one image. */
+  onCharityImageSelected?: (file: File) => void;
 }
 
 export default function ScreenshotDrawer({
@@ -27,11 +32,13 @@ export default function ScreenshotDrawer({
   onOpenChange,
   onFilesSelected,
   onScanQrCode,
+  onCharityImageSelected,
 }: ScreenshotDrawerProps) {
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const qrInputRef = useRef<HTMLInputElement>(null);
+  const charityImageInputRef = useRef<HTMLInputElement>(null);
   const isMobile = useIsMobile();
   // Initial value computed synchronously at mount: when the permission API is unavailable
   // we optimistically assume clipboard.read() is allowed. The effect below refines this
@@ -273,26 +280,61 @@ export default function ScreenshotDrawer({
               className="hidden"
             />
 
-            {/* Charity check — deep-links to /charity-check with the right tab pre-selected. */}
+            {/* Charity check — Upload Image lands the photo in the homepage
+                scanner with charity-check intent set; Name/ABN deep-links to
+                the standalone /charity-check page so both flows can be
+                compared during the rollout. */}
             {featureFlags.charityCheck && (
               <>
                 <div className="mx-3 my-1 border-t border-slate-200" />
 
-                <Link
-                  href="/charity-check?mode=image"
-                  onClick={() => onOpenChange(false)}
-                  className="flex items-center gap-4 px-3 py-3 rounded-xl hover:bg-slate-50 transition-colors text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-deep-navy/20"
-                >
-                  <BadgeCheck className="text-action-teal" size={24} />
-                  <div>
-                    <div className="text-base font-semibold text-deep-navy">
-                      Charity Upload Image
+                {onCharityImageSelected ? (
+                  <button
+                    type="button"
+                    onClick={() => charityImageInputRef.current?.click()}
+                    className="flex items-center gap-4 px-3 py-3 rounded-xl hover:bg-slate-50 transition-colors text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-deep-navy/20"
+                  >
+                    <BadgeCheck className="text-action-teal" size={24} />
+                    <div>
+                      <div className="text-base font-semibold text-deep-navy">
+                        Charity Upload Image
+                      </div>
+                      <div className="text-sm text-gov-slate">
+                        Photo of a lanyard, badge, or flyer
+                      </div>
                     </div>
-                    <div className="text-sm text-gov-slate">
-                      Photo of a lanyard, badge, or flyer
+                  </button>
+                ) : (
+                  <Link
+                    href="/charity-check?mode=image"
+                    onClick={() => onOpenChange(false)}
+                    className="flex items-center gap-4 px-3 py-3 rounded-xl hover:bg-slate-50 transition-colors text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-deep-navy/20"
+                  >
+                    <BadgeCheck className="text-action-teal" size={24} />
+                    <div>
+                      <div className="text-base font-semibold text-deep-navy">
+                        Charity Upload Image
+                      </div>
+                      <div className="text-sm text-gov-slate">
+                        Photo of a lanyard, badge, or flyer
+                      </div>
                     </div>
-                  </div>
-                </Link>
+                  </Link>
+                )}
+                <input
+                  ref={charityImageInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = "";
+                    if (file && onCharityImageSelected) {
+                      onCharityImageSelected(file);
+                      onOpenChange(false);
+                    }
+                  }}
+                  className="hidden"
+                />
 
                 <Link
                   href="/charity-check?mode=name"
@@ -302,7 +344,7 @@ export default function ScreenshotDrawer({
                   <HeartHandshake className="text-action-teal" size={24} />
                   <div>
                     <div className="text-base font-semibold text-deep-navy">
-                      Check by name or ABN
+                      Charity Check Name or ABN
                     </div>
                     <div className="text-sm text-gov-slate">
                       Look up an Australian charity

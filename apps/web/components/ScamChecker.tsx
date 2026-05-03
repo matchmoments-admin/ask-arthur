@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import Image from "next/image";
-import { X, ScanLine, Paperclip, Mic, Lock, EyeOff } from "lucide-react";
+import { X, ScanLine, Paperclip, Mic, Lock, EyeOff, BadgeCheck } from "lucide-react";
 import AnalysisProgress, { type Step as ProgressStep } from "./AnalysisProgress";
 import ResultCard from "./ResultCard";
 import ScreenshotDrawer from "./ScreenshotDrawer";
@@ -12,8 +12,13 @@ import InvalidSubmissionState from "./result/InvalidSubmissionState";
 import { compressImage } from "@/lib/compressImage";
 import { tryDecodeQR } from "@/lib/qrDecode";
 import { featureFlags } from "@askarthur/utils/feature-flags";
+import { detectCharityIntent } from "@askarthur/scam-engine/charity-intent";
 import { useMediaAnalysis } from "@/lib/hooks/useMediaAnalysis";
 import type { AnalysisResponse } from "@/types/analysis";
+import type { CharityCheckResult } from "./CharityVerdict";
+import {
+  charityResultToResultCardProps,
+} from "@/lib/charityResultToResultCard";
 
 type Status = "idle" | "analyzing" | "complete" | "error" | "rate_limited";
 
@@ -39,9 +44,14 @@ export default function ScamChecker() {
   const [isDragging, setIsDragging] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [showQrScanner, setShowQrScanner] = useState(false);
-  const [inputMode, setInputMode] = useState<"text" | "image" | "qrcode">("text");
+  const [inputMode, setInputMode] = useState<"text" | "image" | "qrcode" | "charity-image">("text");
   const [qrDecodedUrl, setQrDecodedUrl] = useState<string | null>(null);
   const [qrError, setQrError] = useState<string | null>(null);
+  // Charity-check homepage flow (drawer → "Charity Upload Image"): the photo
+  // lives in the same `images` thumbnail strip; this flag tells the submit
+  // handler to route to /api/charity-check instead of /api/analyze.
+  const [charityIntent, setCharityIntent] = useState(false);
+  const [charityResult, setCharityResult] = useState<CharityCheckResult | null>(null);
   const [progressStep, setProgressStep] = useState<ProgressStep | undefined>(undefined);
   const [errorAttempts, setErrorAttempts] = useState(0);
   const [errorRef, setErrorRef] = useState<string | null>(null);
@@ -61,7 +71,36 @@ export default function ScamChecker() {
     }
   }, [searchParams]);
 
+  const handleCharityImageSelected = useCallback(async (file: File) => {
+    // Reset other modes — charity-image is a hard mode-switch (single image,
+    // routed to /api/charity-check). Other intents would conflict.
+    setQrError(null);
+    setQrDecodedUrl(null);
+    setResult(null);
+    setCharityResult(null);
+    setStatus("idle");
+    setInputMode("charity-image");
+    setCharityIntent(true);
+    const compressed = await compressImage(file);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const base64 = dataUrl.split(",")[1];
+      // Replace any prior images — charity-check accepts exactly one.
+      setImages([{ base64, preview: dataUrl, name: file.name }]);
+      setErrorMsg("");
+    };
+    reader.readAsDataURL(compressed);
+  }, []);
+
   const processFiles = useCallback(async (files: File[], mode?: "image" | "qrcode") => {
+    // A non-charity image picker overrides any prior charity-image selection
+    // so the regular /api/analyze pipeline takes over.
+    if (charityIntent) {
+      setCharityIntent(false);
+      setCharityResult(null);
+      setImages([]);
+    }
     // Reset QR state
     setQrError(null);
     setQrDecodedUrl(null);
@@ -112,7 +151,7 @@ export default function ScamChecker() {
       };
       reader.readAsDataURL(compressed);
     }
-  }, []);
+  }, [charityIntent]);
 
   function handlePaste(e: React.ClipboardEvent) {
     const items = e.clipboardData?.items;
@@ -164,6 +203,72 @@ export default function ScamChecker() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!text.trim() && images.length === 0) return;
+
+    // Charity-check branch: drawer's "Charity Upload Image" sets the intent
+    // flag. We POST to /api/charity-check (image required, name/abn pulled
+    // from the textarea via the same regex the analyze route uses for the
+    // CTA banner). All other Image #2 fields — donation URL / payment
+    // method / "are they in front of you" — are intentionally omitted.
+    if (charityIntent && images[0]) {
+      setStatus("analyzing");
+      setCharityResult(null);
+      setErrorMsg("");
+      setProgressStep("upload");
+
+      const trimmedText = text.trim();
+      const intent = trimmedText ? detectCharityIntent(trimmedText) : null;
+      const body: Record<string, string | boolean> = {
+        image: images[0].base64,
+      };
+      if (intent?.extractedAbn) body.abn = intent.extractedAbn;
+      if (intent?.extractedName) body.name = intent.extractedName;
+
+      try {
+        setProgressStep("lookup");
+        const res = await fetch("/api/charity-check", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+
+        if (res.status === 429) {
+          const data = await res.json().catch(() => ({}));
+          setStatus("rate_limited");
+          setProgressStep(undefined);
+          setErrorMsg(
+            (data?.error?.message as string | undefined) ??
+              "Too many requests. Please try again later.",
+          );
+          return;
+        }
+
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(
+            (data?.error?.message as string | undefined) ?? "Charity check failed",
+          );
+        }
+
+        setProgressStep("analyse");
+        const data = (await res.json()) as CharityCheckResult;
+        setProgressStep("write");
+        setCharityResult(data);
+        setStatus("complete");
+        setProgressStep("done");
+        setErrorAttempts(0);
+        setErrorRef(null);
+        window.dispatchEvent(new Event("safeverify:check-complete"));
+      } catch (err) {
+        setStatus("error");
+        setProgressStep(undefined);
+        setErrorAttempts((n) => n + 1);
+        setErrorRef(makeReferenceId());
+        setErrorMsg(
+          err instanceof Error ? err.message : "Something went wrong. Please try again.",
+        );
+      }
+      return;
+    }
 
     setStatus("analyzing");
     setResult(null);
@@ -241,6 +346,8 @@ export default function ScamChecker() {
     setProgressStep(undefined);
     setErrorAttempts(0);
     setErrorRef(null);
+    setCharityIntent(false);
+    setCharityResult(null);
     media.reset();
   }
 
@@ -314,13 +421,25 @@ export default function ScamChecker() {
             </div>
           )}
 
+          {/* Charity-image notice */}
+          {inputMode === "charity-image" && (
+            <div className="flex items-center gap-2 px-4 pt-2 text-sm text-action-teal font-medium">
+              <BadgeCheck size={16} />
+              Charity check — we&rsquo;ll verify against the ACNC and ABR registers
+            </div>
+          )}
+
           {/* Borderless textarea */}
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
             onFocus={() => setIsFocused(true)}
             onBlur={() => setIsFocused(false)}
-            placeholder="Paste the suspicious message, email, or URL here..."
+            placeholder={
+              inputMode === "charity-image"
+                ? "Add anything else (charity name, ABN) — optional"
+                : "Paste the suspicious message, email, or URL here..."
+            }
             aria-label="Suspicious message to check"
             rows={4}
             maxLength={10000}
@@ -406,6 +525,9 @@ export default function ScamChecker() {
           setDrawerOpen(false);
           setShowQrScanner(true);
         }}
+        onCharityImageSelected={
+          featureFlags.charityCheck ? handleCharityImageSelected : undefined
+        }
       />
 
       <QrScanFlow
@@ -445,8 +567,18 @@ export default function ScamChecker() {
 
       {/* Result */}
       <div aria-live="polite">
+      {/* Charity check result — homepage flow (drawer → Charity Upload Image).
+          Mapped onto the standard ResultCard so verdict + thumbs feedback +
+          report all behave identically to a normal scam check. */}
+      {charityResult && status === "complete" && (
+          <ResultCard
+            {...charityResultToResultCardProps(charityResult)}
+            inputMode="charity-image"
+            onCheckAnother={handleReset}
+          />
+      )}
       {/* Text analysis result */}
-      {result && status === "complete" && (
+      {result && status === "complete" && !charityResult && (
           <ResultCard
             verdict={result.verdict}
             confidence={result.confidence}
