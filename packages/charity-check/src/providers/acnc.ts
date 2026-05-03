@@ -3,52 +3,60 @@
 //
 // Two query paths:
 //   1. ABN provided → exact PK lookup. Cheap, deterministic.
-//   2. Name provided (no ABN) → search_charities() RPC (trigram + ILIKE
-//      prefix). The top result is the candidate; if its similarity score
-//      is < 1.0 (i.e. not an exact match) but ≥ TYPOSQUAT_SIMILARITY_THRESHOLD
-//      AND the Levenshtein edit distance to the nearest match is ≤
-//      TYPOSQUAT_LEVENSHTEIN_MAX, we flag a potential typosquat /
-//      impersonation in detail.typosquat_match.
+//   2. Name provided (no ABN) → trigram + Levenshtein + semantic hybrid:
+//      a. search_charities() RPC for trigram + ILIKE prefix
+//      b. If top trigram is exact → registered=true (no Voyage call)
+//      c. Otherwise embedQuery() + match_charities_by_embedding() RPC for
+//         the semantic signal that catches lookalike charities trigram
+//         misses (e.g. "AU Bushfire Relief Fund" vs "Australian Bushfire
+//         Relief Foundation"). The combined typosquat decision is the OR
+//         of lexical (trigram + Levenshtein) and semantic.
 //
-// Two-signal calibration (v0.2a) — the v0.1 single-threshold approach
-// (sim ≥ 0.85) almost never fired because real-world spoofs hit 0.42-0.60
-// trigram similarity. Lowering the trigram threshold alone would create
-// false positives ("Cancer Foundation" colliding with anything cancer-
-// adjacent), so we AND it with a Levenshtein edit distance gate. The
-// combination catches genuine typo/letter-swap impersonations
-// ("Astralian Red Cross" → "Australian Red Cross", 1 edit) without
-// flagging legitimately-different charities sharing keywords.
+// Three-signal calibration:
+//   * Lexical typosquat fires when trigram >= 0.65 AND Levenshtein <= 3
+//     (catches "Astralian Red Cross" → "Australian Red Cross", 1 edit;
+//     filters "Cancer Foundation" colliding with anything cancer-adjacent
+//     because the edit distance is too large).
+//   * Semantic typosquat fires when cosine >= 0.85 AND the query is NOT a
+//     substring/superstring of the matched name (catches paraphrase-style
+//     impersonators; rejects "Cancer Council" matching "Cancer Council
+//     Australia" — that's a less-specific name, not a typosquat).
 //
 // Risk mapping (0..100, higher = more risk):
 //   * Exact match, registered                       →  0   (SAFE pillar)
-//   * Near-miss meeting BOTH typosquat conditions   → 100  (HIGH_RISK floor)
-//   * Near-miss not meeting both                    → 100  (SUSPICIOUS, no floor)
+//   * Near-miss meeting EITHER typosquat condition  → 100  (HIGH_RISK floor)
+//   * Near-miss not meeting either                  → 100  (SUSPICIOUS, no floor)
 //   * No match found                                → 100  (SUSPICIOUS)
 //   * RPC failure / Supabase down                   → unavailable (degraded)
 //
 // detail payload exposes:
 //   - charity_legal_name, charity_website, town_city, state, charity_size
-//   - typosquat_match (bool), nearest_match (string),
-//     nearest_match_similarity (number), nearest_match_edit_distance (number)
+//   - typosquat_match (bool), typosquat_signal ("lexical" | "semantic" | "both" | null)
+//   - nearest_match (string), nearest_match_similarity (number),
+//     nearest_match_edit_distance (number)
+//   - semantic_match (string | null), semantic_similarity (number | null)
 
 import { logger } from "@askarthur/utils/logger";
 import { createServiceClient } from "@askarthur/supabase/server";
+import { embedQuery } from "@askarthur/scam-engine/embeddings";
 
 import { unavailablePillar, type CharityProviderContract } from "../provider-contract";
 import type { CharityCheckInput, CharityPillarResult } from "../types";
 
 const PROVIDER_ID = "acnc";
 
-/** Minimum trigram similarity AND maximum Levenshtein distance to flag a
- *  name-only lookup as a typosquat match. Both must hold (AND), not either
- *  (OR) — see the file header for the calibration rationale.
- *
- *  Trigram threshold lowered from v0.1's 0.85 to 0.65 because real-world
- *  spoofs (verified against the live 63k-row register on 2026-05-02) cluster
- *  in the 0.42-0.60 range; the Levenshtein gate is what stops false
- *  positives from creeping in below 0.85. */
+/** Lexical typosquat thresholds — both must hold (AND), not either (OR).
+ *  Trigram threshold is 0.65 because real-world spoofs cluster in 0.42-0.60;
+ *  the Levenshtein gate is what stops false positives below 0.85. */
 const TYPOSQUAT_SIMILARITY_THRESHOLD = 0.65;
 const TYPOSQUAT_LEVENSHTEIN_MAX = 3;
+
+/** Semantic typosquat threshold. 0.85 is the lower bound of the "same
+ *  campaign / narrative family" cosine band on voyage-3.5 — high enough to
+ *  filter out genuinely-different charities sharing keywords (e.g. "Cancer
+ *  Council Australia" vs "Cancer Society Australia" usually score ~0.80),
+ *  low enough to catch paraphrase impersonators. */
+const SEMANTIC_SIMILARITY_THRESHOLD = 0.85;
 
 interface SearchCharitiesRow {
   abn: string;
@@ -57,6 +65,15 @@ interface SearchCharitiesRow {
   state: string | null;
   charity_website: string | null;
   similarity_score: number;
+}
+
+interface MatchByEmbeddingRow {
+  abn: string;
+  charity_legal_name: string;
+  charity_website: string | null;
+  town_city: string | null;
+  state: string | null;
+  similarity: number;
 }
 
 interface AcncCharityRow {
@@ -75,7 +92,9 @@ interface AcncCharityRow {
 
 export const acncProvider: CharityProviderContract = {
   id: PROVIDER_ID,
-  timeoutMs: 2000,
+  // Bumped from 2000ms to 3000ms — semantic path adds one Voyage call
+  // (~150ms p95) plus one HNSW RPC (~5ms). Keeps headroom for tail latency.
+  timeoutMs: 3000,
   async run(input: CharityCheckInput): Promise<CharityPillarResult> {
     const supa = createServiceClient();
     if (!supa) {
@@ -99,9 +118,6 @@ export const acncProvider: CharityProviderContract = {
         }
 
         if (!data) {
-          // ABN not present in the register. The ABR pillar will still
-          // resolve the entity (or confirm cancelled) — this pillar just
-          // reports "not registered as a charity".
           return {
             id: "acnc_registration",
             score: 100,
@@ -136,23 +152,81 @@ export const acncProvider: CharityProviderContract = {
         };
       }
 
-      // Path 2: name only — trigram search via the search_charities RPC.
+      // Path 2: name only — trigram first, then semantic if no exact hit.
       if (input.name) {
-        const { data, error } = await supa.rpc("search_charities", {
-          p_query: input.name,
-          p_limit: 5,
-        });
+        const { data: trigramData, error: trigramErr } = await supa.rpc(
+          "search_charities",
+          { p_query: input.name, p_limit: 5 },
+        );
 
-        if (error) {
-          logger.warn("acnc search_charities RPC failed", { error: String(error.message) });
+        if (trigramErr) {
+          logger.warn("acnc search_charities RPC failed", {
+            error: String(trigramErr.message),
+          });
           return unavailablePillar("acnc_registration", "rpc_error");
         }
 
-        const rows = (data ?? []) as SearchCharitiesRow[];
-        const top = rows[0];
+        const trigramRows = (trigramData ?? []) as SearchCharitiesRow[];
+        const trigramTop = trigramRows[0];
 
-        if (!top) {
-          // No match at all — couldn't surface even a near-miss.
+        // Exact match short-circuits the semantic call — saves ~$0.0000006
+        // per query at scale and a Voyage round-trip.
+        if (trigramTop) {
+          const isExact =
+            trigramTop.similarity_score >= 1.0 ||
+            trigramTop.charity_legal_name.toLowerCase().trim() ===
+              input.name.toLowerCase().trim();
+
+          if (isExact) {
+            return {
+              id: "acnc_registration",
+              score: 0,
+              confidence: 1,
+              available: true,
+              detail: {
+                registered: true,
+                charity_legal_name: trigramTop.charity_legal_name,
+                charity_website: trigramTop.charity_website,
+                town_city: trigramTop.town_city,
+                state: trigramTop.state,
+                abn: trigramTop.abn,
+                typosquat_match: false,
+              },
+            };
+          }
+        }
+
+        // No exact trigram hit — run semantic in parallel with the
+        // Levenshtein computation. Either signal can independently fire
+        // typosquat_match.
+        const semanticTop = await runSemanticMatch(input.name);
+
+        // Lexical signal (trigram + Levenshtein).
+        const editDistance = trigramTop
+          ? levenshtein(
+              input.name.toLowerCase().trim(),
+              trigramTop.charity_legal_name.toLowerCase().trim(),
+            )
+          : null;
+        const lexicalTyposquat =
+          trigramTop !== undefined &&
+          editDistance !== null &&
+          trigramTop.similarity_score >= TYPOSQUAT_SIMILARITY_THRESHOLD &&
+          editDistance <= TYPOSQUAT_LEVENSHTEIN_MAX;
+
+        // Semantic signal — only fires if the matched name is not a
+        // substring/superstring of the query (otherwise it's a less-specific
+        // name match, not impersonation).
+        const semanticTyposquat =
+          semanticTop !== null &&
+          semanticTop.similarity >= SEMANTIC_SIMILARITY_THRESHOLD &&
+          !isSubstringRelated(input.name, semanticTop.charity_legal_name);
+
+        const typosquatMatch = lexicalTyposquat || semanticTyposquat;
+
+        // No nearest match at all — no trigram hit AND no semantic hit
+        // above the floor (0.55 in the RPC).
+        if (!trigramTop && !semanticTop) {
           return {
             id: "acnc_registration",
             score: 100,
@@ -165,39 +239,35 @@ export const acncProvider: CharityProviderContract = {
           };
         }
 
-        const isExact =
-          top.similarity_score >= 1.0 ||
-          top.charity_legal_name.toLowerCase().trim() === input.name.toLowerCase().trim();
+        const typosquatSignal: "lexical" | "semantic" | "both" | null =
+          lexicalTyposquat && semanticTyposquat
+            ? "both"
+            : lexicalTyposquat
+              ? "lexical"
+              : semanticTyposquat
+                ? "semantic"
+                : null;
 
-        if (isExact) {
-          return {
-            id: "acnc_registration",
-            score: 0,
-            confidence: 1,
-            available: true,
-            detail: {
-              registered: true,
-              charity_legal_name: top.charity_legal_name,
-              charity_website: top.charity_website,
-              town_city: top.town_city,
-              state: top.state,
-              abn: top.abn,
-              typosquat_match: false,
-            },
-          };
-        }
+        // Pick the "nearest_match" to surface — prefer the higher-confidence
+        // signal. If semantic fired and trigram didn't, surface the semantic
+        // hit; otherwise default to the trigram hit.
+        const surfaceTop =
+          semanticTyposquat && !lexicalTyposquat && semanticTop
+            ? {
+                charity_legal_name: semanticTop.charity_legal_name,
+                abn: semanticTop.abn,
+                similarity: semanticTop.similarity,
+                source: "semantic" as const,
+              }
+            : trigramTop
+              ? {
+                  charity_legal_name: trigramTop.charity_legal_name,
+                  abn: trigramTop.abn,
+                  similarity: trigramTop.similarity_score,
+                  source: "trigram" as const,
+                }
+              : null;
 
-        // Near-miss but not exact: check BOTH trigram similarity AND
-        // Levenshtein edit distance. Both must clear their thresholds
-        // for typosquat_match=true (which the scorer floor escalates to
-        // HIGH_RISK). Either alone is too permissive.
-        const editDistance = levenshtein(
-          input.name.toLowerCase().trim(),
-          top.charity_legal_name.toLowerCase().trim(),
-        );
-        const typosquatMatch =
-          top.similarity_score >= TYPOSQUAT_SIMILARITY_THRESHOLD &&
-          editDistance <= TYPOSQUAT_LEVENSHTEIN_MAX;
         return {
           id: "acnc_registration",
           score: 100,
@@ -206,11 +276,15 @@ export const acncProvider: CharityProviderContract = {
           detail: {
             registered: false,
             reason: typosquatMatch ? "typosquat_near_match" : "no_exact_name_match",
-            nearest_match: top.charity_legal_name,
-            nearest_match_abn: top.abn,
-            nearest_match_similarity: top.similarity_score,
+            nearest_match: surfaceTop?.charity_legal_name ?? null,
+            nearest_match_abn: surfaceTop?.abn ?? null,
+            nearest_match_similarity: surfaceTop?.similarity ?? null,
             nearest_match_edit_distance: editDistance,
+            nearest_match_source: surfaceTop?.source ?? null,
             typosquat_match: typosquatMatch,
+            typosquat_signal: typosquatSignal,
+            semantic_match: semanticTop?.charity_legal_name ?? null,
+            semantic_similarity: semanticTop?.similarity ?? null,
           },
         };
       }
@@ -225,6 +299,69 @@ export const acncProvider: CharityProviderContract = {
 };
 
 /**
+ * Run the semantic name match: embed the query, then call the
+ * match_charities_by_embedding RPC. Returns the top hit (or null on no
+ * match / failure). Failures are non-fatal — the lexical path still runs.
+ */
+async function runSemanticMatch(
+  name: string,
+): Promise<MatchByEmbeddingRow | null> {
+  try {
+    const supa = createServiceClient();
+    if (!supa) return null;
+
+    const result = await embedQuery([name], { domain: "generic" });
+    if (result.vectors.length === 0) return null;
+
+    // Cost is logged via cost_telemetry by the caller chain — for the
+    // consumer-path call here, the per-call $ is tiny (~$0.0000006) and
+    // the dashboard's daily aggregate matters more than per-call rows.
+    // Skipping insert here keeps the consumer path fast.
+
+    const { data, error } = await supa.rpc("match_charities_by_embedding", {
+      p_query_embedding: vectorToPgString(result.vectors[0]),
+      p_match_count: 5,
+      p_min_similarity: 0.55,
+    });
+
+    if (error) {
+      logger.warn("match_charities_by_embedding RPC failed", {
+        error: String(error.message),
+      });
+      return null;
+    }
+
+    const rows = (data ?? []) as MatchByEmbeddingRow[];
+    return rows[0] ?? null;
+  } catch (err) {
+    logger.warn("runSemanticMatch threw", { error: String(err) });
+    return null;
+  }
+}
+
+/**
+ * pgvector wire format — bracketed text `[1,2,3]` rather than the JSON
+ * array supabase-js would otherwise serialise. PostgREST forwards it as a
+ * string and pgvector parses it on receipt.
+ */
+function vectorToPgString(vec: number[]): string {
+  return "[" + vec.join(",") + "]";
+}
+
+/**
+ * True if either string contains the other after normalisation. Used to
+ * distinguish "less-specific name match" (legitimate) from "paraphrase
+ * impersonator" (suspicious). Example:
+ *   "Cancer Council" ⊂ "Cancer Council Australia" → true (don't flag)
+ *   "Save Australian Children" vs "Save the Children Australia" → false (flag)
+ */
+export function isSubstringRelated(a: string, b: string): boolean {
+  const na = a.toLowerCase().trim();
+  const nb = b.toLowerCase().trim();
+  return na.includes(nb) || nb.includes(na);
+}
+
+/**
  * Standard Levenshtein edit distance — minimum number of single-character
  * insertions, deletions, or substitutions to turn `a` into `b`. O(n*m)
  * time, O(min(n,m)) space (single rolling row). Inputs are expected to
@@ -236,8 +373,6 @@ export function levenshtein(a: string, b: string): number {
   if (a.length === 0) return b.length;
   if (b.length === 0) return a.length;
 
-  // Always iterate over the shorter string for the rolling row to keep
-  // memory bounded.
   const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
   const m = shorter.length;
   const n = longer.length;
@@ -251,9 +386,9 @@ export function levenshtein(a: string, b: string): number {
     for (let i = 1; i <= m; i++) {
       const cost = shorter[i - 1] === longer[j - 1] ? 0 : 1;
       curr[i] = Math.min(
-        curr[i - 1] + 1, // insertion
-        prev[i] + 1, // deletion
-        prev[i - 1] + cost, // substitution
+        curr[i - 1] + 1,
+        prev[i] + 1,
+        prev[i - 1] + cost,
       );
     }
     [prev, curr] = [curr, prev];
