@@ -1,9 +1,19 @@
 "use client";
 
 import { useRef, useState, useEffect, useCallback } from "react";
-import { ClipboardPaste, Images, Camera, FolderOpen, ScanLine } from "lucide-react";
+import Link from "next/link";
+import {
+  ClipboardPaste,
+  Images,
+  Camera,
+  FolderOpen,
+  ScanLine,
+  BadgeCheck,
+  HeartHandshake,
+} from "lucide-react";
 import { Drawer } from "vaul";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 
 interface ScreenshotDrawerProps {
   open: boolean;
@@ -115,7 +125,7 @@ export default function ScreenshotDrawer({
           <div className="mx-auto mt-3 h-1 w-10 rounded-full bg-slate-300" />
 
           <Drawer.Title className="px-5 pt-4 pb-2 text-xs font-bold uppercase tracking-widest text-gov-slate">
-            Add image
+            Add image or check a charity
           </Drawer.Title>
 
           <div className="px-3 pb-6 flex flex-col gap-1">
@@ -220,7 +230,7 @@ export default function ScreenshotDrawer({
             {/* Divider */}
             <div className="mx-3 my-1 border-t border-slate-200" />
 
-            {/* Scan with camera — only shown when camera is available */}
+            {/* QR Code Scanner — only shown when camera is available */}
             {hasCamera && (
               <button
                 type="button"
@@ -230,7 +240,7 @@ export default function ScreenshotDrawer({
                 <Camera className="text-action-teal" size={24} />
                 <div>
                   <div className="text-base font-semibold text-deep-navy">
-                    Scan with camera
+                    QR Code Scanner
                   </div>
                   <div className="text-sm text-gov-slate">
                     Point your camera at a QR code
@@ -239,7 +249,7 @@ export default function ScreenshotDrawer({
               </button>
             )}
 
-            {/* Upload QR image */}
+            {/* QR Upload Image */}
             <button
               type="button"
               onClick={() => qrInputRef.current?.click()}
@@ -248,10 +258,10 @@ export default function ScreenshotDrawer({
               <ScanLine className="text-action-teal" size={24} />
               <div>
                 <div className="text-base font-semibold text-deep-navy">
-                  Upload QR image
+                  QR Upload Image
                 </div>
                 <div className="text-sm text-gov-slate">
-                  Select a saved QR code image
+                  Use a saved QR code from your device
                 </div>
               </div>
             </button>
@@ -262,6 +272,45 @@ export default function ScreenshotDrawer({
               onChange={handleQrFile}
               className="hidden"
             />
+
+            {/* Charity check — deep-links to /charity-check with the right tab pre-selected. */}
+            {featureFlags.charityCheck && (
+              <>
+                <div className="mx-3 my-1 border-t border-slate-200" />
+
+                <Link
+                  href="/charity-check?mode=image"
+                  onClick={() => onOpenChange(false)}
+                  className="flex items-center gap-4 px-3 py-3 rounded-xl hover:bg-slate-50 transition-colors text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-deep-navy/20"
+                >
+                  <BadgeCheck className="text-action-teal" size={24} />
+                  <div>
+                    <div className="text-base font-semibold text-deep-navy">
+                      Charity Upload Image
+                    </div>
+                    <div className="text-sm text-gov-slate">
+                      Photo of a lanyard, badge, or flyer
+                    </div>
+                  </div>
+                </Link>
+
+                <Link
+                  href="/charity-check?mode=name"
+                  onClick={() => onOpenChange(false)}
+                  className="flex items-center gap-4 px-3 py-3 rounded-xl hover:bg-slate-50 transition-colors text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-deep-navy/20"
+                >
+                  <HeartHandshake className="text-action-teal" size={24} />
+                  <div>
+                    <div className="text-base font-semibold text-deep-navy">
+                      Check by name or ABN
+                    </div>
+                    <div className="text-sm text-gov-slate">
+                      Look up an Australian charity
+                    </div>
+                  </div>
+                </Link>
+              </>
+            )}
           </div>
         </Drawer.Content>
       </Drawer.Portal>

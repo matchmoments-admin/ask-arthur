@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Loader2,
   Search,
@@ -30,9 +31,16 @@ interface AutocompleteRow {
 const ABN_REGEX_DIGITS = /^\d{0,11}$/;
 
 export default function CharityChecker() {
-  const [mode, setMode] = useState<InputMode>("name");
-  const [name, setName] = useState("");
-  const [abn, setAbn] = useState("");
+  const searchParams = useSearchParams();
+  const [mode, setMode] = useState<InputMode>(() => {
+    const m = searchParams?.get("mode");
+    return m === "abn" || m === "image" || m === "name" ? m : "name";
+  });
+  const [name, setName] = useState(() => searchParams?.get("name") ?? "");
+  const [abn, setAbn] = useState(() => {
+    const raw = searchParams?.get("abn") ?? "";
+    return raw.replace(/\D/g, "").slice(0, 11);
+  });
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("");
   const [donationUrl, setDonationUrl] = useState("");
   // v0.2b — uploaded photo of a fundraiser lanyard / badge / flyer.
