@@ -30,6 +30,10 @@ import { redditIntelDaily } from "./reddit-intel-daily";
 import { redditIntelEmbed } from "./reddit-intel-embed";
 import { redditIntelCluster } from "./reddit-intel-cluster";
 
+// ACNC charity register: backfill + delta-embed name_mission_embedding
+// (powers the semantic typosquat signal in packages/charity-check).
+import { acncCharityBackfillEmbed } from "./acnc-charity-backfill-embed";
+
 export const inngestFunctions = [
   stalenessCheck,
   stalenessCheckIPs,
@@ -56,4 +60,6 @@ export const inngestFunctions = [
   // Reddit Intel Wave 2
   redditIntelEmbed,
   redditIntelCluster,
+  // Charity Check semantic
+  acncCharityBackfillEmbed,
 ];
