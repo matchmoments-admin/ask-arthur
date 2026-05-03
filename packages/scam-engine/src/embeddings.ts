@@ -28,6 +28,10 @@
 // the web app and packages/* must not import upward.
 
 import { logger } from "@askarthur/utils/logger";
+import {
+  getCachedEmbedding,
+  setCachedEmbedding,
+} from "./embedding-cache";
 
 export type EmbeddingProvider = "voyage" | "openai";
 export type EmbeddingDomain = "generic" | "finance" | "multimodal";
@@ -188,10 +192,41 @@ async function embedInternal(
     };
   }
 
-  if (spec.provider === "voyage") {
-    return callVoyage(texts, spec, inputType, opts.requestId);
+  // Single-text fast path: consult Redis cache. Skip for batches —
+  // they're typically backfill paths where every text is unique, so
+  // the MGET overhead doesn't earn its keep. Cache hit returns
+  // totalTokens=0 / estimatedCostUsd=0 so the cost-telemetry caller
+  // sees a free row (legitimate — no Voyage call was made).
+  if (texts.length === 1) {
+    const cached = await getCachedEmbedding(spec.modelId, inputType, texts[0]);
+    if (cached) {
+      return {
+        vectors: cached.vectors,
+        provider: spec.provider,
+        modelId: cached.modelId,
+        domain: spec.domain,
+        totalTokens: 0,
+        estimatedCostUsd: 0,
+      };
+    }
   }
-  return callOpenAI(texts, spec, opts.requestId);
+
+  const result =
+    spec.provider === "voyage"
+      ? await callVoyage(texts, spec, inputType, opts.requestId)
+      : await callOpenAI(texts, spec, opts.requestId);
+
+  // Populate cache on success — fire-and-forget, never blocks.
+  if (texts.length === 1 && result.vectors.length === 1) {
+    void setCachedEmbedding(
+      spec.modelId,
+      inputType,
+      texts[0],
+      result.vectors,
+    );
+  }
+
+  return result;
 }
 
 function resolveSpec(opts: EmbedOptions): ModelSpec {
