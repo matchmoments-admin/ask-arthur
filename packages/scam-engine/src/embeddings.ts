@@ -1,21 +1,23 @@
-// Embedding provider abstraction — switches between Voyage (default) and
-// OpenAI text-embedding-3-small via the EMBEDDING_PROVIDER env var. Both
-// providers are normalised to 1024-dim vectors so the pgvector column type
-// stays stable across provider swaps.
+// Embedding provider abstraction — routes by `domain` ("generic" | "finance"
+// | "multimodal") to a model-id-keyed registry. Generic defaults to Voyage
+// 3.5 with OpenAI text-embedding-3-small as a fallback (kept under the legacy
+// EMBEDDING_PROVIDER env var). Finance routes to voyage-finance-2 for
+// investment / crypto / BEC text where the generic model under-recalls
+// finance jargon. Multimodal is registered for forward-compat but throws on
+// call — the voyage-multimodal-3.5 request shape (interleaved image/video
+// content blocks) lands in a later phase.
 //
-// Why an abstraction: Voyage leads MTEB on niche-text retrieval and is
-// 3x cheaper than the OpenAI fallback, but operationally the OpenAI API is
-// already familiar in adjacent codebases. Building a thin switch lets us
-// default to Voyage while retaining a one-env-var fallback if Voyage has an
-// outage or pricing changes adversely. New consumers should call `embed()`
-// (for documents to be stored) or `embedQuery()` (for one-off retrieval
-// queries) — never the provider-specific functions directly.
+// All vectors are normalised to 1024 dim so the pgvector column type stays
+// stable across model swaps. voyage-3.5 / voyage-3.5-lite / voyage-multimodal
+// support Matryoshka so we explicitly request 1024; voyage-finance-2 returns
+// 1024 natively (no output_dimension param). text-embedding-3-small accepts
+// `dimensions: 1024` and produces a normalised 1024-dim vector.
 //
-// Document vs query distinction: Voyage's models are trained with an
-// asymmetric prompt — `input_type=document` for indexed text, `input_type=
-// query` for the search-side text. Skipping the distinction silently halves
-// recall on retrieval. Encode it in the API surface so callers can't forget.
-// OpenAI embeddings are symmetric so the helper is a no-op there.
+// Document vs query: Voyage models are trained with an asymmetric prompt —
+// `input_type=document` for stored text, `input_type=query` for retrieval
+// queries. Skipping the distinction silently halves recall. Encoded as the
+// embed() / embedQuery() split so callers can't forget. OpenAI is symmetric
+// so the helper is a no-op there.
 //
 // Model versioning: every embedding written to a pgvector column MUST be
 // accompanied by the modelId from EmbedResult, persisted in a sibling
@@ -28,46 +30,101 @@
 import { logger } from "@askarthur/utils/logger";
 
 export type EmbeddingProvider = "voyage" | "openai";
+export type EmbeddingDomain = "generic" | "finance" | "multimodal";
 
 export const EMBEDDING_DIMENSIONS = 1024;
 
-interface ProviderSpec {
-  name: EmbeddingProvider;
+interface ModelSpec {
+  provider: EmbeddingProvider;
   modelId: string;
+  domain: EmbeddingDomain;
   usdPerToken: number;
+  // True when the model supports the Matryoshka `output_dimension` (Voyage)
+  // or `dimensions` (OpenAI) param. False for fixed-dim models — request
+  // omits the param and uses the model's native dim.
+  supportsTruncation: boolean;
+  // False = registered for env-var routing but the call path isn't wired
+  // yet. Throws on invocation so a misconfigured env var fails loudly
+  // rather than silently routing to the wrong model.
+  callPathReady: boolean;
 }
 
-const SPECS: Record<EmbeddingProvider, ProviderSpec> = {
-  voyage: {
-    name: "voyage",
+const MODEL_REGISTRY: Record<string, ModelSpec> = {
+  "voyage-3.5": {
+    provider: "voyage",
     modelId: "voyage-3.5",
+    domain: "generic",
     usdPerToken: 0.06 / 1_000_000,
+    supportsTruncation: true,
+    callPathReady: true,
   },
-  openai: {
-    name: "openai",
-    modelId: "text-embedding-3-small",
+  "voyage-3.5-lite": {
+    provider: "voyage",
+    modelId: "voyage-3.5-lite",
+    domain: "generic",
     usdPerToken: 0.02 / 1_000_000,
+    supportsTruncation: true,
+    callPathReady: true,
   },
+  "voyage-finance-2": {
+    provider: "voyage",
+    modelId: "voyage-finance-2",
+    domain: "finance",
+    usdPerToken: 0.12 / 1_000_000,
+    supportsTruncation: false,
+    callPathReady: true,
+  },
+  "voyage-multimodal-3.5": {
+    provider: "voyage",
+    modelId: "voyage-multimodal-3.5",
+    domain: "multimodal",
+    // Text-only token rate; image inputs additionally bill per pixel via the
+    // multimodal endpoint when that path lands.
+    usdPerToken: 0.06 / 1_000_000,
+    supportsTruncation: true,
+    callPathReady: false,
+  },
+  "text-embedding-3-small": {
+    provider: "openai",
+    modelId: "text-embedding-3-small",
+    domain: "generic",
+    usdPerToken: 0.02 / 1_000_000,
+    supportsTruncation: true,
+    callPathReady: true,
+  },
+};
+
+const DOMAIN_DEFAULTS: Record<EmbeddingDomain, string> = {
+  generic: "voyage-3.5",
+  finance: "voyage-finance-2",
+  multimodal: "voyage-multimodal-3.5",
 };
 
 export interface EmbedResult {
   vectors: number[][];
   provider: EmbeddingProvider;
   modelId: string;
+  domain: EmbeddingDomain;
   totalTokens: number;
   estimatedCostUsd: number;
 }
 
 interface EmbedOptions {
-  /** Override the env-var-selected provider (rarely useful — testing only). */
-  provider?: EmbeddingProvider;
-  /** Optional correlation ID for log traces. */
+  // Domain selects which model id is used. Defaults to "generic". A
+  // per-domain env var (EMBEDDING_MODEL_GENERIC / _FINANCE / _MULTIMODAL)
+  // can override the default model id.
+  domain?: EmbeddingDomain;
+  // Direct model-id override — bypasses domain routing entirely. Use for
+  // pinned reindex jobs where the model must match what's already in the
+  // *_model_version column.
+  modelId?: string;
+  // Optional correlation ID for log traces.
   requestId?: string;
 }
 
 /**
  * Embed a batch of documents (text intended to be stored and searched
- * against later). Returns 1024-dim vectors for both providers.
+ * against later). Returns 1024-dim vectors for every supported model.
  *
  * For one-off retrieval queries, use `embedQuery()` instead — it sets
  * Voyage's `input_type=query` so the embedding sits in the matched
@@ -111,37 +168,79 @@ async function embedInternal(
   inputType: VoyageInputType,
   opts: EmbedOptions,
 ): Promise<EmbedResult> {
-  const provider = opts.provider ?? selectProvider();
+  const spec = resolveSpec(opts);
+
+  if (!spec.callPathReady) {
+    throw new Error(
+      `Embedding model "${spec.modelId}" (domain=${spec.domain}) is registered but its call path is not yet implemented. ` +
+        `For multimodal embeddings, the voyage-multimodal-3.5 request shape lands in a later phase.`,
+    );
+  }
 
   if (texts.length === 0) {
     return {
       vectors: [],
-      provider,
-      modelId: SPECS[provider].modelId,
+      provider: spec.provider,
+      modelId: spec.modelId,
+      domain: spec.domain,
       totalTokens: 0,
       estimatedCostUsd: 0,
     };
   }
 
-  const spec = SPECS[provider];
-
-  if (provider === "voyage") {
+  if (spec.provider === "voyage") {
     return callVoyage(texts, spec, inputType, opts.requestId);
   }
   return callOpenAI(texts, spec, opts.requestId);
 }
 
-function selectProvider(): EmbeddingProvider {
-  const raw = (process.env.EMBEDDING_PROVIDER ?? "voyage").toLowerCase();
-  if (raw === "openai") return "openai";
-  if (raw === "voyage") return "voyage";
-  logger.warn(`Unknown EMBEDDING_PROVIDER "${raw}", defaulting to voyage`);
-  return "voyage";
+function resolveSpec(opts: EmbedOptions): ModelSpec {
+  if (opts.modelId) {
+    const spec = MODEL_REGISTRY[opts.modelId];
+    if (!spec) {
+      throw new Error(
+        `Unknown modelId "${opts.modelId}" — not in MODEL_REGISTRY. Add it before embedding.`,
+      );
+    }
+    return spec;
+  }
+  return selectModelSpec(opts.domain ?? "generic");
+}
+
+function selectModelSpec(domain: EmbeddingDomain): ModelSpec {
+  const envKey = `EMBEDDING_MODEL_${domain.toUpperCase()}`;
+  const explicit = process.env[envKey];
+  if (explicit) {
+    const spec = MODEL_REGISTRY[explicit];
+    if (spec) return spec;
+    logger.warn(
+      `Unknown ${envKey}="${explicit}", falling back to default for domain=${domain}`,
+    );
+  }
+
+  // Backward-compat: EMBEDDING_PROVIDER applies only to the generic domain.
+  // It is the original "swap voyage for openai" lever from before domain
+  // routing existed; finance/multimodal never had an OpenAI counterpart.
+  if (domain === "generic") {
+    const raw = (process.env.EMBEDDING_PROVIDER ?? "voyage").toLowerCase();
+    if (raw === "openai") return MODEL_REGISTRY["text-embedding-3-small"];
+    if (raw !== "voyage") {
+      logger.warn(`Unknown EMBEDDING_PROVIDER "${raw}", defaulting to voyage`);
+    }
+  }
+
+  const fallback = MODEL_REGISTRY[DOMAIN_DEFAULTS[domain]];
+  if (!fallback) {
+    throw new Error(
+      `Internal error: domain "${domain}" has no default model registered`,
+    );
+  }
+  return fallback;
 }
 
 async function callVoyage(
   texts: string[],
-  spec: ProviderSpec,
+  spec: ModelSpec,
   inputType: VoyageInputType,
   requestId?: string,
 ): Promise<EmbedResult> {
@@ -150,29 +249,36 @@ async function callVoyage(
     throw new Error("VOYAGE_API_KEY not set — required for Voyage embeddings");
   }
 
+  const body: Record<string, unknown> = {
+    input: texts,
+    model: spec.modelId,
+    input_type: inputType,
+  };
+  if (spec.supportsTruncation) {
+    body.output_dimension = EMBEDDING_DIMENSIONS;
+  }
+
   const res = await fetch("https://api.voyageai.com/v1/embeddings", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({
-      input: texts,
-      model: spec.modelId,
-      output_dimension: EMBEDDING_DIMENSIONS,
-      input_type: inputType,
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
-    const body = await res.text().catch(() => "");
+    const errBody = await res.text().catch(() => "");
     logger.error("Voyage embeddings request failed", {
       requestId,
       status: res.status,
+      modelId: spec.modelId,
       inputType,
-      preview: body.slice(0, 200),
+      preview: errBody.slice(0, 200),
     });
-    throw new Error(`Voyage embeddings ${res.status}: ${body.slice(0, 200)}`);
+    throw new Error(
+      `Voyage embeddings ${res.status}: ${errBody.slice(0, 200)}`,
+    );
   }
 
   const json = (await res.json()) as {
@@ -190,6 +296,7 @@ async function callVoyage(
     vectors,
     provider: "voyage",
     modelId: spec.modelId,
+    domain: spec.domain,
     totalTokens: json.usage.total_tokens,
     estimatedCostUsd: json.usage.total_tokens * spec.usdPerToken,
   };
@@ -197,12 +304,20 @@ async function callVoyage(
 
 async function callOpenAI(
   texts: string[],
-  spec: ProviderSpec,
+  spec: ModelSpec,
   requestId?: string,
 ): Promise<EmbedResult> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY not set — required for OpenAI embeddings");
+  }
+
+  const body: Record<string, unknown> = {
+    input: texts,
+    model: spec.modelId,
+  };
+  if (spec.supportsTruncation) {
+    body.dimensions = EMBEDDING_DIMENSIONS;
   }
 
   const res = await fetch("https://api.openai.com/v1/embeddings", {
@@ -211,21 +326,20 @@ async function callOpenAI(
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({
-      input: texts,
-      model: spec.modelId,
-      dimensions: EMBEDDING_DIMENSIONS,
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
-    const body = await res.text().catch(() => "");
+    const errBody = await res.text().catch(() => "");
     logger.error("OpenAI embeddings request failed", {
       requestId,
       status: res.status,
-      preview: body.slice(0, 200),
+      modelId: spec.modelId,
+      preview: errBody.slice(0, 200),
     });
-    throw new Error(`OpenAI embeddings ${res.status}: ${body.slice(0, 200)}`);
+    throw new Error(
+      `OpenAI embeddings ${res.status}: ${errBody.slice(0, 200)}`,
+    );
   }
 
   const json = (await res.json()) as {
@@ -241,6 +355,7 @@ async function callOpenAI(
     vectors,
     provider: "openai",
     modelId: spec.modelId,
+    domain: spec.domain,
     totalTokens: json.usage.total_tokens,
     estimatedCostUsd: json.usage.total_tokens * spec.usdPerToken,
   };

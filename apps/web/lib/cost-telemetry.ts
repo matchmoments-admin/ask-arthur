@@ -28,9 +28,26 @@ export const PRICING = {
   CLAUDE_SONNET_4_6_CACHE_WRITE_USD_PER_TOKEN: 3.75 / 1_000_000,
   CLAUDE_SONNET_4_6_CACHE_READ_USD_PER_TOKEN: 0.3 / 1_000_000,
 
-  // Voyage 3 embeddings: ~$0.06/M tokens (1024-dim, AU/global, Jan 2026 list).
-  // Default embedding provider; OpenAI text-embedding-3-small is the swap-in.
+  // Voyage 3.5 embeddings: ~$0.06/M tokens (1024-dim, AU/global, Jan 2026 list).
+  // Default generic-domain embedding model; OpenAI text-embedding-3-small is
+  // the swap-in. Kept name VOYAGE_3_USD_PER_TOKEN for backward compat with
+  // existing cost_telemetry rows.
   VOYAGE_3_USD_PER_TOKEN: 0.06 / 1_000_000,
+
+  // Voyage 3.5 Lite: $0.02/M tokens. Used for query-side embeds where
+  // latency matters more than the marginal recall on long documents.
+  VOYAGE_3_5_LITE_USD_PER_TOKEN: 0.02 / 1_000_000,
+
+  // Voyage Finance 2: $0.12/M tokens. Domain-specific model for investment,
+  // crypto, BEC, and bank-impersonation text — beats voyage-3.5 on
+  // FinMTEB but costs 2x. Routed via embed(_, { domain: "finance" }).
+  VOYAGE_FINANCE_2_USD_PER_TOKEN: 0.12 / 1_000_000,
+
+  // Voyage Multimodal 3.5: $0.06/M tokens for text + per-pixel for images
+  // (50k-2M px range, ~$0.00003-$0.0012/image). Image-cost helper added when
+  // the multimodal call path lands; for now the constant is registered so
+  // alerts can be configured ahead of the rollout.
+  VOYAGE_MULTIMODAL_3_5_TEXT_USD_PER_TOKEN: 0.06 / 1_000_000,
 
   // OpenAI text-embedding-3-small: $0.02/M tokens (1536-dim, May 2024 list,
   // unchanged through Apr 2026). Fallback embedding provider.
