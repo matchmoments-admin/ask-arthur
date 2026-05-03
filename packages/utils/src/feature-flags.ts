@@ -256,6 +256,14 @@ export const featureFlags = {
   redditIntelB2bApi:
     process.env.NEXT_PUBLIC_FF_REDDIT_INTEL_B2B_API === "true",
 
+  /** B2B semantic search over scam_reports + verified_scams at
+   *  /api/v1/scams/search. Returns 503 when off; validateApiKey is
+   *  checked first regardless. Default OFF — turn on per-deployment once
+   *  the embedding backfill has run and there's enough corpus to retrieve
+   *  meaningful results. */
+  scamsSearchB2bApi:
+    process.env.NEXT_PUBLIC_FF_SCAMS_SEARCH_B2B_API === "true",
+
   /** Meta Brand Rights Protection (BRP) deepfake reporter. Server-side only —
    *  the function is dormant in prod (Meta Graph API call is still a stub)
    *  but the cron fires on schedule. Flag exists so the cost brake + kill

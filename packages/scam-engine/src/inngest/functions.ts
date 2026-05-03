@@ -34,6 +34,12 @@ import { redditIntelCluster } from "./reddit-intel-cluster";
 // (powers the semantic typosquat signal in packages/charity-check).
 import { acncCharityBackfillEmbed } from "./acnc-charity-backfill-embed";
 
+// scam_reports + verified_scams embeddings (Phase C):
+//   * scamReportEmbed runs per submission via scam-report.stored.v1
+//   * scamReportsBackfillEmbed is manual-trigger for the historical tail
+import { scamReportEmbed } from "./scam-report-embed";
+import { scamReportsBackfillEmbed } from "./scam-reports-backfill-embed";
+
 export const inngestFunctions = [
   stalenessCheck,
   stalenessCheckIPs,
@@ -62,4 +68,7 @@ export const inngestFunctions = [
   redditIntelCluster,
   // Charity Check semantic
   acncCharityBackfillEmbed,
+  // scam_reports + verified_scams embeddings
+  scamReportEmbed,
+  scamReportsBackfillEmbed,
 ];
