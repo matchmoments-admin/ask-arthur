@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
 import CharityChecker from "@/components/CharityChecker";
@@ -31,7 +32,9 @@ export default function CharityCheckPage() {
           ACNC register, the ATO&rsquo;s deductible-gift list, and Australia&rsquo;s
           fundraising regulator.
         </p>
-        <CharityChecker />
+        <Suspense>
+          <CharityChecker />
+        </Suspense>
       </main>
       <Footer />
     </div>
