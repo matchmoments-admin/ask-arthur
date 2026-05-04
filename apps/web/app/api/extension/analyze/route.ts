@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
     const injectionCheck = detectInjectionAttempt(text);
 
     // 4. Cache check
-    const cached = await getCachedAnalysis(text);
+    const cached = await getCachedAnalysis({ text, surface: "extension" });
     if (cached) {
       waitUntil(incrementStats(cached.verdict, "extension"));
       return NextResponse.json(
@@ -148,7 +148,7 @@ export async function POST(req: NextRequest) {
         logger.error("incrementStats failed", { error: String(err) })
       )
     );
-    waitUntil(setCachedAnalysis(text, aiResult));
+    waitUntil(setCachedAnalysis({ text, surface: "extension" }, aiResult));
 
     // 8. Return result
     return NextResponse.json(
