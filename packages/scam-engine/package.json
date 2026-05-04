@@ -46,7 +46,8 @@
     "./abr-lookup": "./src/abr-lookup.ts",
     "./charity-intent": "./src/charity-intent.ts",
     "./vuln-detect": "./src/vuln-detect.ts",
-    "./inngest/match-b2b-exposure": "./src/inngest/match-b2b-exposure.ts"
+    "./inngest/match-b2b-exposure": "./src/inngest/match-b2b-exposure.ts",
+    "./retrieval/similar-reports": "./src/retrieval/similar-reports.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",

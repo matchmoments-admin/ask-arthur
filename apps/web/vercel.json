@@ -73,6 +73,9 @@
     },
     "app/api/feedback/route.ts": {
       "maxDuration": 10
+    },
+    "app/api/analyze/similar/route.ts": {
+      "maxDuration": 10
     }
   }
 }
