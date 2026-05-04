@@ -31,8 +31,12 @@ export const metaBrpReport = inngest.createFunction(
     // Graph API call, Meta's Business Use Case rate limits get punitive past
     // a threshold — and a runaway loop fanning out reports against the same
     // celebrity's deepfake_detections rows would burn rate-limit budget for
-    // hours. The key is shared across all invocations so the cap is global.
-    rateLimit: { limit: 200, period: "1d", key: "Meta-BRP-Daily" },
+    // hours. No `key` field — Inngest's rateLimit.key is a CEL expression,
+    // and a constant key like "Meta-BRP-Daily" parses as `Meta - BRP - Daily`
+    // (subtraction of three undeclared identifiers) and fails the entire
+    // app sync. Omitting `key` gives a global cap, which is what we want
+    // for a singleton cron with concurrency.limit: 1 anyway.
+    rateLimit: { limit: 200, period: "1d" },
   },
   { cron: "0 */6 * * *" }, // every 6 hours
   async ({ step }) => {
