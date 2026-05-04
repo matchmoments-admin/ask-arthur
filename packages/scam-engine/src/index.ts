@@ -15,3 +15,9 @@ export type { HiveAIResult } from "./hive-ai";
 export { generateDraftPosts } from "./social-post";
 export { storeScamReport, buildEntities } from "./report-store";
 export type { EntityToLink, StoreScamReportParams } from "./report-store";
+export { recordDetection, recordDetections } from "./vuln-detect";
+export type {
+  DetectionCandidate,
+  DetectionScanner,
+  DetectionTargetType,
+} from "./vuln-detect";
