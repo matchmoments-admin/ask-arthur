@@ -288,3 +288,93 @@ export function parseRedditIntelThemesRecomputedData(
 ): RedditIntelThemesRecomputedData {
   return RedditIntelThemesRecomputedDataSchema.parse(raw);
 }
+
+// ── b2b/exposure.requested.v1 ────────────────────────────────────────────
+//
+// Emitted by the B2B exposure HTTP producer (planned as
+// /api/v1/exposure/check in a follow-up PR) carrying a customer's product
+// inventory. The match-b2b-exposure Inngest function consumes this:
+//   1. queries public.vulnerabilities where affected_products overlaps the
+//      requested product names (uses idx_vuln_products GIN)
+//   2. filters with semver.satisfies() against each vuln's affected_versions
+//   3. inserts matching rows into public.vulnerability_detections with
+//      target_type='npm_package', scan_id=requestId, evidence={orgId}
+//   4. emits b2b/exposure.matched.v1 for downstream webhook fan-out
+//
+// The orgId is opaque here — tenant scoping is enforced upstream by the
+// HTTP producer's API-key validation; this function trusts the caller. Do
+// NOT use orgId for any RLS check inside the Inngest body — service-role
+// writes bypass RLS anyway, so keep the trust boundary at the producer.
+
+export const ExposureProductSchema = z.object({
+  name: z.string().min(1).max(214), // npm name limit
+  version: z.string().min(1).max(64),
+});
+export type ExposureProduct = z.infer<typeof ExposureProductSchema>;
+
+export const B2bExposureRequestedDataSchema = z.object({
+  requestId: z.string().min(8).max(255),
+  orgId: z.string().min(1).max(255),
+  // Cap at 1000 products per request to keep the GIN query bounded.
+  // Larger inventories should chunk at the producer.
+  products: z.array(ExposureProductSchema).min(1).max(1000),
+  // Optional: only return matches at or above this severity. Defaults to
+  // 'high' (drops medium/low) to keep webhook payloads actionable.
+  minSeverity: z
+    .enum(["critical", "high", "medium", "low", "info"])
+    .default("high"),
+});
+export type B2bExposureRequestedData = z.infer<
+  typeof B2bExposureRequestedDataSchema
+>;
+
+export const B2B_EXPOSURE_REQUESTED_EVENT =
+  "b2b/exposure.requested.v1" as const;
+
+export interface B2bExposureRequestedEvent {
+  name: typeof B2B_EXPOSURE_REQUESTED_EVENT;
+  id: string;
+  data: B2bExposureRequestedData;
+}
+
+export function parseB2bExposureRequestedData(
+  raw: unknown,
+): B2bExposureRequestedData {
+  return B2bExposureRequestedDataSchema.parse(raw);
+}
+
+// ── b2b/exposure.matched.v1 ──────────────────────────────────────────────
+//
+// Emitted by match-b2b-exposure after detections are written. Consumers:
+// the planned webhook delivery ledger (separate PR), email digest builder,
+// admin alerting. Carries summarised match data only — full rows live in
+// vulnerability_detections.
+
+export const ExposureMatchSchema = z.object({
+  identifier: z.string(),
+  package: z.string(),
+  version: z.string(),
+  severity: z.string().nullable(),
+  cvssScore: z.number().nullable(),
+  cisaKev: z.boolean(),
+});
+export type ExposureMatch = z.infer<typeof ExposureMatchSchema>;
+
+export const B2bExposureMatchedDataSchema = z.object({
+  requestId: z.string().min(8).max(255),
+  orgId: z.string().min(1).max(255),
+  matchCount: z.number().int().nonnegative(),
+  matches: z.array(ExposureMatchSchema).max(500),
+  matchedAt: z.string().datetime(),
+});
+export type B2bExposureMatchedData = z.infer<
+  typeof B2bExposureMatchedDataSchema
+>;
+
+export const B2B_EXPOSURE_MATCHED_EVENT = "b2b/exposure.matched.v1" as const;
+
+export interface B2bExposureMatchedEvent {
+  name: typeof B2B_EXPOSURE_MATCHED_EVENT;
+  id: string;
+  data: B2bExposureMatchedData;
+}

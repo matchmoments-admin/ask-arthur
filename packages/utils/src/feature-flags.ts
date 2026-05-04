@@ -292,6 +292,16 @@ export const featureFlags = {
    *  DB writes after a scan completes; never blocks the user response. Default
    *  OFF until the helper has been smoke-tested in preview. */
   vulnDetectionRecording: process.env.FF_VULN_DETECTION_RECORDING === "true",
+
+  /** Phase 14 Sprint 4 — B2B exposure matcher. The match-b2b-exposure Inngest
+   *  function is triggered by b2b/exposure.requested.v1 events carrying a
+   *  product/version inventory; it queries vulnerabilities by affected_products
+   *  overlap, runs semver.satisfies on affected_versions, writes matching rows
+   *  to vulnerability_detections, and emits b2b/exposure.matched.v1 for
+   *  webhook fan-out. When OFF, the function returns {skipped:true} early.
+   *  Default OFF until the orgId tenant-scoping is confirmed safe and the
+   *  /api/v1/exposure HTTP producer (separate PR) is in place. */
+  vulnB2bExposure: process.env.FF_VULN_B2B_EXPOSURE === "true",
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;

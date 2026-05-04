@@ -45,7 +45,8 @@
     "./phone-footprint": "./src/phone-footprint/index.ts",
     "./abr-lookup": "./src/abr-lookup.ts",
     "./charity-intent": "./src/charity-intent.ts",
-    "./vuln-detect": "./src/vuln-detect.ts"
+    "./vuln-detect": "./src/vuln-detect.ts",
+    "./inngest/match-b2b-exposure": "./src/inngest/match-b2b-exposure.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",
@@ -56,10 +57,12 @@
     "@upstash/redis": "^1.36.2",
     "inngest": "^3.54.2",
     "libphonenumber-js": "^1.11.0",
+    "semver": "^7.6.0",
     "tldts": "^7.0.23",
     "twilio": "^5.4.0"
   },
   "devDependencies": {
+    "@types/semver": "^7.5.8",
     "typescript": "^5",
     "vitest": "^4.0.18"
   },

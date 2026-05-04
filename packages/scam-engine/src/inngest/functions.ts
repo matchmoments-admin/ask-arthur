@@ -14,6 +14,7 @@ import { scamAlertCron } from "./scam-alerts";
 import { syncVerifiedScamsToFeed, syncUserReportsToFeed } from "./feed-sync";
 import { metaBrpReport } from "./meta-brp-report";
 import { enrichVulnerability, enrichVulnerabilitiesCron } from "./enrich-vulnerability";
+import { matchB2bExposure } from "./match-b2b-exposure";
 
 // Phase 2: analyze.completed.v1 fan-out — durable replacements for the
 // ad-hoc waitUntil writes that used to hang off /api/analyze.
@@ -56,6 +57,7 @@ export const inngestFunctions = [
   metaBrpReport,
   enrichVulnerability,
   enrichVulnerabilitiesCron,
+  matchB2bExposure,
   // Phase 2 analyze fan-out
   handleAnalyzeCompletedReport,
   handleAnalyzeCompletedBrand,
