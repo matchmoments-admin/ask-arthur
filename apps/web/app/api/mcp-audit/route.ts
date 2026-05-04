@@ -1,10 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { scanMcpServer } from "@askarthur/mcp-audit";
+import { recordDetections } from "@askarthur/scam-engine/vuln-detect";
+import type { DetectionCandidate } from "@askarthur/scam-engine/vuln-detect";
 import { createServiceClient } from "@askarthur/supabase/server";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { checkRateLimit } from "@askarthur/utils/rate-limit";
 
 const PACKAGE_NAME_RE = /^(@[a-zA-Z0-9_-]+\/)?[a-zA-Z0-9._-]+$/;
+
+interface RulepackMatchMeta {
+  cve: string;
+  package: string;
+  version: string;
+  cvss?: number;
+  vulnerableRange?: string;
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -37,6 +49,31 @@ export async function POST(req: NextRequest) {
       }).then(({ error }) => {
         if (error) logger.error("Failed to store MCP scan", { error: error.message });
       });
+    }
+
+    // Phase 14 Sprint 1 closure — record any rulepack CVE matches into
+    // public.vulnerability_detections so the B2B exposure feed and the
+    // shared-infrastructure graph can see them. recordDetections is
+    // fire-and-forget by contract; waitUntil keeps the lambda alive past
+    // response without blocking the user.
+    if (featureFlags.vulnDetectionRecording) {
+      const matches = (result.meta?.rulepackMatches ?? []) as RulepackMatchMeta[];
+      if (matches.length > 0) {
+        const candidates: DetectionCandidate[] = matches.map((m) => ({
+          identifier: m.cve,
+          scanner: "mcp-audit",
+          targetType: "npm_package",
+          targetValue: m.package,
+          targetVersion: m.version,
+          evidence: {
+            scanned_package: packageName,
+            cvss: m.cvss,
+            vulnerable_range: m.vulnerableRange,
+          },
+          scanId: result.shareToken,
+        }));
+        waitUntil(recordDetections(candidates));
+      }
     }
 
     return NextResponse.json(result, {
