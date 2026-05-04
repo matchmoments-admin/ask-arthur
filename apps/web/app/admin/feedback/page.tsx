@@ -42,7 +42,7 @@ export default async function FeedbackTriagePage({
   const supabase = createServiceClient();
   let rows: TriageRow[] = [];
   let totalCount = 0;
-  let counts = { false_positive: 0, false_negative: 0, user_reported: 0 };
+  const counts = { false_positive: 0, false_negative: 0, user_reported: 0 };
 
   if (supabase) {
     let query = supabase
