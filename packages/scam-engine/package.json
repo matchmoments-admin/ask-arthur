@@ -44,7 +44,8 @@
     "./inngest/meta-brp-report": "./src/inngest/meta-brp-report.ts",
     "./phone-footprint": "./src/phone-footprint/index.ts",
     "./abr-lookup": "./src/abr-lookup.ts",
-    "./charity-intent": "./src/charity-intent.ts"
+    "./charity-intent": "./src/charity-intent.ts",
+    "./vuln-detect": "./src/vuln-detect.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",
