@@ -64,6 +64,7 @@ interface SearchCharitiesRow {
   town_city: string | null;
   state: string | null;
   charity_website: string | null;
+  is_delisted: boolean;
   similarity_score: number;
 }
 
@@ -88,6 +89,8 @@ interface AcncCharityRow {
   is_pbi: boolean;
   is_hpc: boolean;
   operates_in_states: string[];
+  is_delisted: boolean;
+  delisted_at: string | null;
 }
 
 export const acncProvider: CharityProviderContract = {
@@ -107,7 +110,7 @@ export const acncProvider: CharityProviderContract = {
         const { data, error } = await supa
           .from("acnc_charities")
           .select(
-            "abn, charity_legal_name, charity_website, town_city, state, postcode, charity_size, registration_date, is_pbi, is_hpc, operates_in_states",
+            "abn, charity_legal_name, charity_website, town_city, state, postcode, charity_size, registration_date, is_pbi, is_hpc, operates_in_states, is_delisted, delisted_at",
           )
           .eq("abn", input.abn)
           .maybeSingle<AcncCharityRow>();
@@ -126,6 +129,37 @@ export const acncProvider: CharityProviderContract = {
             detail: {
               registered: false,
               reason: "abn_not_in_acnc_register",
+            },
+          };
+        }
+
+        // Delisted charities: the ABN was once a registered charity but has
+        // since been removed from the ACNC register (e.g. regulator strip,
+        // voluntary deregistration, dissolution). Surface as HIGH_RISK with
+        // a distinct reason so the UI can render "DELISTED" rather than
+        // "VERIFIED" — the latter would be a false positive on a known
+        // ex-charity.
+        if (data.is_delisted) {
+          return {
+            id: "acnc_registration",
+            score: 100,
+            confidence: 1,
+            available: true,
+            detail: {
+              registered: false,
+              reason: "acnc_delisted",
+              charity_legal_name: data.charity_legal_name,
+              charity_website: data.charity_website,
+              town_city: data.town_city,
+              state: data.state,
+              postcode: data.postcode,
+              charity_size: data.charity_size,
+              registration_date: data.registration_date,
+              delisted_at: data.delisted_at,
+              is_pbi: data.is_pbi,
+              is_hpc: data.is_hpc,
+              operates_in_states: data.operates_in_states,
+              typosquat_match: false,
             },
           };
         }
@@ -178,6 +212,27 @@ export const acncProvider: CharityProviderContract = {
               input.name.toLowerCase().trim();
 
           if (isExact) {
+            // Even an exact-name match must surface delistment — a user
+            // typing the literal name of an ex-charity should see DELISTED,
+            // not VERIFIED.
+            if (trigramTop.is_delisted) {
+              return {
+                id: "acnc_registration",
+                score: 100,
+                confidence: 1,
+                available: true,
+                detail: {
+                  registered: false,
+                  reason: "acnc_delisted",
+                  charity_legal_name: trigramTop.charity_legal_name,
+                  charity_website: trigramTop.charity_website,
+                  town_city: trigramTop.town_city,
+                  state: trigramTop.state,
+                  abn: trigramTop.abn,
+                  typosquat_match: false,
+                },
+              };
+            }
             return {
               id: "acnc_registration",
               score: 0,
