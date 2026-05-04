@@ -99,70 +99,94 @@ export const acncCharityBackfillEmbed = inngest.createFunction(
     let lastProvider = "";
     let lastModelId = "";
 
+    // Each batch runs as ONE step.run that loads + embeds + writes,
+    // returning only a small summary. Splitting into three steps caused
+    // InngestErrStateOverflowed at ~13 batches because every step output
+    // is persisted as JSON state for replay; each `embed-batch-N` step
+    // returned 200 vectors × 1024 floats ≈ 2.5 MB, hitting the 32 MB
+    // state cap. Folding into one step keeps the vectors inside the
+    // closure; the only output is a 4-field count/tokens summary.
+    //
+    // Trade-off: lose per-step retry granularity. That's fine — Voyage
+    // and Supabase failures are transient and a whole-batch retry is
+    // correct (the load-step is idempotent on `IS NULL`, the write-step
+    // is per-row keyed and idempotent on the `embedding IS NULL` filter
+    // of the next load).
     for (let batchIdx = 0; batchIdx < MAX_BATCHES_PER_RUN; batchIdx++) {
-      const rows = await step.run(`load-batch-${batchIdx}`, async () => {
+      const summary = await step.run(`batch-${batchIdx}`, async () => {
         const supabase = createServiceClient();
         if (!supabase) throw new Error("Supabase service client unavailable");
 
-        const { data, error } = await supabase
+        const { data, error: loadErr } = await supabase
           .from("acnc_charities")
           .select("abn, charity_legal_name, other_names")
           .is("name_mission_embedding", null)
           .order("abn", { ascending: true })
           .limit(BATCH_SIZE);
 
-        if (error) {
-          throw new Error(`load-batch-${batchIdx} failed: ${error.message}`);
+        if (loadErr) {
+          throw new Error(`batch-${batchIdx} load failed: ${loadErr.message}`);
         }
-        return (data ?? []) as CharityRowForEmbed[];
-      });
+        const rows = (data ?? []) as CharityRowForEmbed[];
+        if (rows.length === 0) {
+          return {
+            written: 0,
+            totalTokens: 0,
+            estimatedCostUsd: 0,
+            provider: "",
+            modelId: "",
+            rowsRequested: 0,
+          };
+        }
 
-      if (rows.length === 0) break;
-
-      const result = await step.run(`embed-batch-${batchIdx}`, async () => {
         const texts = rows.map(buildEmbedText);
-        return await embed(texts, { domain: "generic" });
-      });
+        const result = await embed(texts, { domain: "generic" });
 
-      if (result.vectors.length !== rows.length) {
-        throw new Error(
-          `embed-batch-${batchIdx} count mismatch: ${result.vectors.length} vectors for ${rows.length} rows`,
-        );
-      }
+        if (result.vectors.length !== rows.length) {
+          throw new Error(
+            `batch-${batchIdx} embed count mismatch: ${result.vectors.length} vectors for ${rows.length} rows`,
+          );
+        }
 
-      const written = await step.run(`write-batch-${batchIdx}`, async () => {
-        const supabase = createServiceClient();
-        if (!supabase) throw new Error("Supabase service client unavailable");
-
-        let count = 0;
+        let written = 0;
         for (let i = 0; i < rows.length; i++) {
-          const { error } = await supabase
+          const { error: writeErr } = await supabase
             .from("acnc_charities")
             .update({
               name_mission_embedding: vectorToPgString(result.vectors[i]),
               embedding_model_version: result.modelId,
             })
             .eq("abn", rows[i].abn);
-          if (error) {
+          if (writeErr) {
             logger.warn("acnc-charity-backfill: row update failed", {
               abn: rows[i].abn,
-              error: error.message,
+              error: writeErr.message,
             });
             continue;
           }
-          count++;
+          written++;
         }
-        return count;
+
+        return {
+          written,
+          totalTokens: result.totalTokens,
+          estimatedCostUsd: result.estimatedCostUsd,
+          provider: result.provider,
+          modelId: result.modelId,
+          rowsRequested: rows.length,
+        };
       });
 
-      totalEmbedded += written;
-      totalTokens += result.totalTokens;
-      totalCostUsd += result.estimatedCostUsd;
-      lastProvider = result.provider;
-      lastModelId = result.modelId;
+      if (summary.rowsRequested === 0) break;
+
+      totalEmbedded += summary.written;
+      totalTokens += summary.totalTokens;
+      totalCostUsd += summary.estimatedCostUsd;
+      if (summary.provider) lastProvider = summary.provider;
+      if (summary.modelId) lastModelId = summary.modelId;
 
       // Last batch was partial — no more rows to embed.
-      if (rows.length < BATCH_SIZE) break;
+      if (summary.rowsRequested < BATCH_SIZE) break;
     }
 
     if (totalEmbedded > 0) {

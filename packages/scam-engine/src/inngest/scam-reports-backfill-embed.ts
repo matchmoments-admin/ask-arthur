@@ -123,113 +123,133 @@ export const scamReportsBackfillEmbed = inngest.createFunction(
     let totalCostUsd = 0;
     let lastModelId = "";
 
+    // Each batch is a SINGLE step.run that loads + embeds + writes,
+    // returning only a summary. The per-step state limit is 32 MB and
+    // every step output is persisted as JSON; returning the embed
+    // vectors (200 × 1024 floats ≈ 2.5 MB per batch) hit the cap on the
+    // ACNC backfill at ~13 batches with InngestErrStateOverflowed.
+    // Folding into one step keeps the vectors inside the closure; the
+    // step output is a tiny count/tokens summary.
+
     // ── Pass 1: scam_reports (skip SAFE, skip short content) ──────────
     for (let batchIdx = 0; batchIdx < MAX_BATCHES_PER_RUN; batchIdx++) {
-      const rows = await step.run(`load-scam-reports-${batchIdx}`, async () => {
-        const supabase = createServiceClient();
-        if (!supabase) throw new Error("Supabase service client unavailable");
+      const summaries = await step.run(
+        `scam-reports-batch-${batchIdx}`,
+        async () => {
+          const supabase = createServiceClient();
+          if (!supabase) throw new Error("Supabase service client unavailable");
 
-        const { data, error } = await supabase
-          .from("scam_reports")
-          .select(
-            "id, scrubbed_content, scam_type, channel, impersonated_brand, verdict",
-          )
-          .is("embedding", null)
-          .neq("verdict", "SAFE")
-          .not("scrubbed_content", "is", null)
-          .order("id", { ascending: true })
-          .limit(BATCH_SIZE);
+          const { data, error: loadErr } = await supabase
+            .from("scam_reports")
+            .select(
+              "id, scrubbed_content, scam_type, channel, impersonated_brand, verdict",
+            )
+            .is("embedding", null)
+            .neq("verdict", "SAFE")
+            .not("scrubbed_content", "is", null)
+            .order("id", { ascending: true })
+            .limit(BATCH_SIZE);
 
-        if (error) throw new Error(`load-scam-reports failed: ${error.message}`);
-        return ((data ?? []) as ScamReportRow[]).filter(
-          (r) => r.scrubbed_content && r.scrubbed_content.length >= 40,
-        );
-      });
-
-      if (rows.length === 0) break;
-
-      // Group by domain so each batch sends one model call.
-      const byDomain = new Map<EmbeddingDomain, ScamReportRow[]>();
-      for (const r of rows) {
-        const d = selectDomain(r.scam_type);
-        if (!byDomain.has(d)) byDomain.set(d, []);
-        byDomain.get(d)!.push(r);
-      }
-
-      for (const [domain, domainRows] of byDomain.entries()) {
-        const result = await step.run(
-          `embed-scam-reports-${batchIdx}-${domain}`,
-          async () => {
-            const texts = domainRows.map(buildScamReportText);
-            return await embed(texts, { domain });
-          },
-        );
-
-        if (result.vectors.length !== domainRows.length) {
-          throw new Error(
-            `embed-scam-reports-${batchIdx} count mismatch: ${result.vectors.length} for ${domainRows.length}`,
+          if (loadErr)
+            throw new Error(`load-scam-reports failed: ${loadErr.message}`);
+          const rows = ((data ?? []) as ScamReportRow[]).filter(
+            (r) => r.scrubbed_content && r.scrubbed_content.length >= 40,
           );
-        }
 
-        const written = await step.run(
-          `write-scam-reports-${batchIdx}-${domain}`,
-          async () => {
-            const supabase = createServiceClient();
-            if (!supabase) throw new Error("Supabase service client unavailable");
+          if (rows.length === 0) {
+            return { perDomain: [], rowsRequested: 0 };
+          }
 
-            let count = 0;
+          // Group by domain so each domain sends one model call.
+          const byDomain = new Map<EmbeddingDomain, ScamReportRow[]>();
+          for (const r of rows) {
+            const d = selectDomain(r.scam_type);
+            if (!byDomain.has(d)) byDomain.set(d, []);
+            byDomain.get(d)!.push(r);
+          }
+
+          const perDomain: Array<{
+            domain: EmbeddingDomain;
+            written: number;
+            totalTokens: number;
+            estimatedCostUsd: number;
+            provider: string;
+            modelId: string;
+          }> = [];
+
+          for (const [domain, domainRows] of byDomain.entries()) {
+            const texts = domainRows.map(buildScamReportText);
+            const result = await embed(texts, { domain });
+
+            if (result.vectors.length !== domainRows.length) {
+              throw new Error(
+                `embed-scam-reports count mismatch: ${result.vectors.length} for ${domainRows.length}`,
+              );
+            }
+
+            let written = 0;
             for (let i = 0; i < domainRows.length; i++) {
-              const { error } = await supabase
+              const { error: writeErr } = await supabase
                 .from("scam_reports")
                 .update({
                   embedding: vectorToPgString(result.vectors[i]),
                   embedding_model_version: result.modelId,
                 })
                 .eq("id", domainRows[i].id);
-              if (error) {
+              if (writeErr) {
                 logger.warn("scam-reports-backfill: row update failed", {
                   id: domainRows[i].id,
-                  error: error.message,
+                  error: writeErr.message,
                 });
                 continue;
               }
-              count++;
+              written++;
             }
-            return count;
-          },
-        );
 
-        await step.run(`log-cost-scam-reports-${batchIdx}-${domain}`, () =>
-          logCost({
-            estimatedCostUsd: result.estimatedCostUsd,
-            totalTokens: result.totalTokens,
-            provider: result.provider,
-            modelId: result.modelId,
-            table: "scam_reports",
-            domain,
-            rowsEmbedded: written,
-          }),
-        );
+            await logCost({
+              estimatedCostUsd: result.estimatedCostUsd,
+              totalTokens: result.totalTokens,
+              provider: result.provider,
+              modelId: result.modelId,
+              table: "scam_reports",
+              domain,
+              rowsEmbedded: written,
+            });
 
-        scamReportsEmbedded += written;
-        totalTokens += result.totalTokens;
-        totalCostUsd += result.estimatedCostUsd;
-        lastModelId = result.modelId;
+            perDomain.push({
+              domain,
+              written,
+              totalTokens: result.totalTokens,
+              estimatedCostUsd: result.estimatedCostUsd,
+              provider: result.provider,
+              modelId: result.modelId,
+            });
+          }
+
+          return { perDomain, rowsRequested: rows.length };
+        },
+      );
+
+      if (summaries.rowsRequested === 0) break;
+      for (const s of summaries.perDomain) {
+        scamReportsEmbedded += s.written;
+        totalTokens += s.totalTokens;
+        totalCostUsd += s.estimatedCostUsd;
+        if (s.modelId) lastModelId = s.modelId;
       }
-
-      if (rows.length < BATCH_SIZE) break;
+      if (summaries.rowsRequested < BATCH_SIZE) break;
     }
 
     // ── Pass 2: verified_scams (no SAFE filter — verified rows are
     //          authoritative anchors, all of them embed) ─────────────────
     for (let batchIdx = 0; batchIdx < MAX_BATCHES_PER_RUN; batchIdx++) {
-      const rows = await step.run(
-        `load-verified-scams-${batchIdx}`,
+      const summaries = await step.run(
+        `verified-scams-batch-${batchIdx}`,
         async () => {
           const supabase = createServiceClient();
           if (!supabase) throw new Error("Supabase service client unavailable");
 
-          const { data, error } = await supabase
+          const { data, error: loadErr } = await supabase
             .from("verified_scams")
             .select("id, summary, scam_type, channel, impersonated_brand")
             .is("embedding", null)
@@ -237,70 +257,61 @@ export const scamReportsBackfillEmbed = inngest.createFunction(
             .order("id", { ascending: true })
             .limit(BATCH_SIZE);
 
-          if (error)
-            throw new Error(`load-verified-scams failed: ${error.message}`);
-          return ((data ?? []) as VerifiedScamRow[]).filter(
+          if (loadErr)
+            throw new Error(`load-verified-scams failed: ${loadErr.message}`);
+          const rows = ((data ?? []) as VerifiedScamRow[]).filter(
             (r) => r.summary && r.summary.length >= 20,
           );
-        },
-      );
 
-      if (rows.length === 0) break;
+          if (rows.length === 0) {
+            return { perDomain: [], rowsRequested: 0 };
+          }
 
-      const byDomain = new Map<EmbeddingDomain, VerifiedScamRow[]>();
-      for (const r of rows) {
-        const d = selectDomain(r.scam_type);
-        if (!byDomain.has(d)) byDomain.set(d, []);
-        byDomain.get(d)!.push(r);
-      }
+          const byDomain = new Map<EmbeddingDomain, VerifiedScamRow[]>();
+          for (const r of rows) {
+            const d = selectDomain(r.scam_type);
+            if (!byDomain.has(d)) byDomain.set(d, []);
+            byDomain.get(d)!.push(r);
+          }
 
-      for (const [domain, domainRows] of byDomain.entries()) {
-        const result = await step.run(
-          `embed-verified-scams-${batchIdx}-${domain}`,
-          async () => {
+          const perDomain: Array<{
+            domain: EmbeddingDomain;
+            written: number;
+            totalTokens: number;
+            estimatedCostUsd: number;
+            modelId: string;
+          }> = [];
+
+          for (const [domain, domainRows] of byDomain.entries()) {
             const texts = domainRows.map(buildVerifiedScamText);
-            return await embed(texts, { domain });
-          },
-        );
+            const result = await embed(texts, { domain });
 
-        if (result.vectors.length !== domainRows.length) {
-          throw new Error(
-            `embed-verified-scams-${batchIdx} count mismatch: ${result.vectors.length} for ${domainRows.length}`,
-          );
-        }
+            if (result.vectors.length !== domainRows.length) {
+              throw new Error(
+                `embed-verified-scams count mismatch: ${result.vectors.length} for ${domainRows.length}`,
+              );
+            }
 
-        const written = await step.run(
-          `write-verified-scams-${batchIdx}-${domain}`,
-          async () => {
-            const supabase = createServiceClient();
-            if (!supabase) throw new Error("Supabase service client unavailable");
-
-            let count = 0;
+            let written = 0;
             for (let i = 0; i < domainRows.length; i++) {
-              const { error } = await supabase
+              const { error: writeErr } = await supabase
                 .from("verified_scams")
                 .update({
                   embedding: vectorToPgString(result.vectors[i]),
                   embedding_model_version: result.modelId,
                 })
                 .eq("id", domainRows[i].id);
-              if (error) {
+              if (writeErr) {
                 logger.warn("verified-scams-backfill: row update failed", {
                   id: domainRows[i].id,
-                  error: error.message,
+                  error: writeErr.message,
                 });
                 continue;
               }
-              count++;
+              written++;
             }
-            return count;
-          },
-        );
 
-        await step.run(
-          `log-cost-verified-scams-${batchIdx}-${domain}`,
-          () =>
-            logCost({
+            await logCost({
               estimatedCostUsd: result.estimatedCostUsd,
               totalTokens: result.totalTokens,
               provider: result.provider,
@@ -308,16 +319,29 @@ export const scamReportsBackfillEmbed = inngest.createFunction(
               table: "verified_scams",
               domain,
               rowsEmbedded: written,
-            }),
-        );
+            });
 
-        verifiedScamsEmbedded += written;
-        totalTokens += result.totalTokens;
-        totalCostUsd += result.estimatedCostUsd;
-        lastModelId = result.modelId;
+            perDomain.push({
+              domain,
+              written,
+              totalTokens: result.totalTokens,
+              estimatedCostUsd: result.estimatedCostUsd,
+              modelId: result.modelId,
+            });
+          }
+
+          return { perDomain, rowsRequested: rows.length };
+        },
+      );
+
+      if (summaries.rowsRequested === 0) break;
+      for (const s of summaries.perDomain) {
+        verifiedScamsEmbedded += s.written;
+        totalTokens += s.totalTokens;
+        totalCostUsd += s.estimatedCostUsd;
+        if (s.modelId) lastModelId = s.modelId;
       }
-
-      if (rows.length < BATCH_SIZE) break;
+      if (summaries.rowsRequested < BATCH_SIZE) break;
     }
 
     logger.info("scam-reports-backfill-embed: complete", {
