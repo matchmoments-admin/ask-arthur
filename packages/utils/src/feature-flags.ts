@@ -285,6 +285,13 @@ export const featureFlags = {
    *  Wired in the GitHub Actions step env *and* checked at the top of
    *  scrape() so an accidental local run is also a no-op. */
   charityCheckIngest: process.env.FF_CHARITY_CHECK_INGEST === "true",
+
+  /** Phase 14 Sprint 1 closure — write public.vulnerability_detections rows
+   *  from scanner runs. Currently mcp-audit only; extension-audit + skill-audit
+   *  pending CVE rulepack mappings. Server-side only — controls fire-and-forget
+   *  DB writes after a scan completes; never blocks the user response. Default
+   *  OFF until the helper has been smoke-tested in preview. */
+  vulnDetectionRecording: process.env.FF_VULN_DETECTION_RECORDING === "true",
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;

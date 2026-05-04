@@ -567,6 +567,13 @@ export async function scanMcpServer(opts: McpAuditOptions): Promise<UnifiedScanR
       maintainerCount,
       dependencyCount: Object.keys(allDeps).length,
       vulnerabilityCount: totalVulns,
+      rulepackMatches: rulepackMatches.map((m) => ({
+        cve: m.rule.cve,
+        package: m.pkg,
+        version: m.version,
+        cvss: m.rule.cvss,
+        vulnerableRange: m.rule.vulnerableRange,
+      })),
     },
   };
 }
