@@ -20,28 +20,78 @@ export const riskScorer = inngest.createFunction(
       return { skipped: true, reason: "riskScoring feature flag disabled" };
     }
 
-    // Step 1: Find entities needing re-scoring
-    // Entities where last_seen > risk_scored_at (or never scored)
+    // Step 1: Find entities needing re-scoring.
+    // Entities where last_seen > risk_scored_at OR never scored.
+    //
+    // Implementation note: PostgREST's `.or()` filter syntax is
+    // `column.op.value` and does NOT support cross-column comparisons —
+    // the third dot-segment is sent as a literal value, so an attempt
+    // like `.or("risk_scored_at.is.null,last_seen.gt.risk_scored_at")`
+    // makes Postgres try to coerce the string "risk_scored_at" into a
+    // timestamptz and fail. We split into two queries and merge in JS.
+    // Cross-column comparisons that need to live in SQL belong in an
+    // RPC; not worth the migration overhead for this small set.
     const entityIds = await step.run("fetch-entities-to-score", async () => {
       const supabase = createServiceClient();
       if (!supabase) return [];
 
-      const { data, error } = await supabase
+      // Query A: never scored — take by report_count desc.
+      const neverScored = await supabase
         .from("scam_entities")
-        .select("id")
-        .or("risk_scored_at.is.null,last_seen.gt.risk_scored_at")
+        .select("id, report_count")
+        .is("risk_scored_at", null)
         .gte("report_count", 1)
         .order("report_count", { ascending: false })
         .limit(MAX_ENTITIES_PER_RUN);
 
-      if (error) {
-        logger.error("Failed to fetch entities for scoring", {
-          error: String(error),
+      if (neverScored.error) {
+        logger.error("Failed to fetch never-scored entities", {
+          error: String(neverScored.error),
         });
-        throw new Error(error.message);
+        throw new Error(neverScored.error.message);
       }
 
-      return (data || []).map((row) => row.id as number);
+      // Query B: scored but stale — fetch a recent window (ordered by
+      // last_seen desc) then filter `last_seen > risk_scored_at` in JS.
+      // The window of MAX_ENTITIES_PER_RUN guarantees we don't miss any
+      // ranking-relevant rows: if more than that many are stale, the
+      // cron simply catches up over the next few runs.
+      const stale = await supabase
+        .from("scam_entities")
+        .select("id, last_seen, risk_scored_at")
+        .not("risk_scored_at", "is", null)
+        .gte("report_count", 1)
+        .order("last_seen", { ascending: false })
+        .limit(MAX_ENTITIES_PER_RUN);
+
+      if (stale.error) {
+        logger.error("Failed to fetch stale entities", {
+          error: String(stale.error),
+        });
+        throw new Error(stale.error.message);
+      }
+
+      const staleIds = (stale.data ?? [])
+        .filter((r) => {
+          if (!r.last_seen || !r.risk_scored_at) return false;
+          return new Date(r.last_seen) > new Date(r.risk_scored_at);
+        })
+        .map((r) => r.id as number);
+
+      const neverIds = (neverScored.data ?? []).map((r) => r.id as number);
+
+      // Merge, dedupe, cap at the per-run limit. Never-scored leads
+      // because a brand-new entity with high report_count is more
+      // urgent than a stale-but-already-scored one.
+      const seen = new Set<number>();
+      const merged: number[] = [];
+      for (const id of [...neverIds, ...staleIds]) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+        merged.push(id);
+        if (merged.length >= MAX_ENTITIES_PER_RUN) break;
+      }
+      return merged;
     });
 
     if (entityIds.length === 0) {
