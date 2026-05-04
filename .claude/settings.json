@@ -21,6 +21,12 @@
           {
             "type": "command",
             "command": "find /tmp -maxdepth 1 -name '.claude-branch-checked-*' -mtime +0 -delete 2>/dev/null; exit 0"
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/session-start.sh",
+            "timeout": 600,
+            "statusMessage": "Installing pnpm + Python deps (Claude Code on the web)…"
           }
         ]
       }
