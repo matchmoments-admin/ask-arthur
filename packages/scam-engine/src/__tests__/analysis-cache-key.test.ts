@@ -79,6 +79,27 @@ describe("buildAnalyzeCacheKey", () => {
     expect(a).not.toBe(b);
   });
 
+  it("surface axis separates web vs extension cache namespaces", async () => {
+    // Without this axis, /api/analyze and /api/extension/analyze share a
+    // cache. A future schema change to one path could leak into the other —
+    // e.g. extension adding an output field that web's render path doesn't
+    // expect, served from a cached response written by the extension.
+    const web = await buildAnalyzeCacheKey({ text: "hi", surface: "web" });
+    const ext = await buildAnalyzeCacheKey({ text: "hi", surface: "extension" });
+    expect(web).not.toBe(ext);
+    expect(web).toContain(":srfweb:");
+    expect(ext).toContain(":srfextension:");
+  });
+
+  it("legacy string-form input defaults surface to web", async () => {
+    // Backwards-compat: pre-W1.3 callers passed bare strings to
+    // get/setCachedAnalysis. Those continue to work and are scoped to the
+    // "web" surface, matching their original behaviour.
+    const explicit = await buildAnalyzeCacheKey({ text: "hi", surface: "web" });
+    const implicit = await buildAnalyzeCacheKey({ text: "hi" });
+    expect(implicit).toBe(explicit);
+  });
+
   it("key starts with the versioned prefix", async () => {
     const key = await buildAnalyzeCacheKey({ text: "hi" });
     expect(key.startsWith("askarthur:analysis:p")).toBe(true);

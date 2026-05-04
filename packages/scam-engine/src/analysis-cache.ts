@@ -11,10 +11,14 @@ import { SYSTEM_PROMPT_HASH } from "./claude";
 
 // ── Cache key design ────────────────────────────────────────────────────
 //
-//   askarthur:analysis:p{PROMPT_VERSION}:m{model}:s{systemHash8}:t{textHash}:i{imagesHash}:f{flagsHash}:mode{T|I|TI|U}
+//   askarthur:analysis:p{PROMPT_VERSION}:srf{surface}:m{model}:s{systemHash8}:t{textHash}:i{imagesHash}:f{flagsHash}:mode{T|I|TI|U}
 //
 // Axes included:
 //   - p{PROMPT_VERSION}    manual bump for model swaps / intentional prompt changes
+//   - srf{surface}         caller surface — keeps /api/analyze and /api/extension/analyze
+//                          in separate namespaces so a future schema divergence (e.g.
+//                          extension-specific output shape) can't leak across surfaces.
+//                          Defaults to "web" for legacy string-form callers.
 //   - s{systemHash8}       auto-derived; invalidates on any prompt edit (even typos)
 //   - m{model}             different Claude model families never conflate results
 //   - t{textHash}          normalized input text hash
@@ -26,7 +30,10 @@ import { SYSTEM_PROMPT_HASH } from "./claude";
 // happen fast because malicious infrastructure churns; SAFE holds longest.
 
 const DEFAULT_MODEL_SHORT = "haiku45";
+const DEFAULT_SURFACE = "web";
 const CACHE_PREFIX = `askarthur:analysis:p${PROMPT_VERSION}`;
+
+export type AnalyzeCacheSurface = "web" | "extension" | "media" | "bot";
 
 /**
  * Per-verdict TTL (seconds). Short HIGH_RISK holds prevent stale "scam"
@@ -104,6 +111,12 @@ export interface AnalyzeCacheInput {
   mode?: AnalysisMode;
   modelShort?: string;
   /**
+   * Caller surface. Defaults to "web". Ensures /api/analyze and
+   * /api/extension/analyze never share cache entries — prevents a future
+   * schema change to one path from leaking fields to the other.
+   */
+  surface?: AnalyzeCacheSurface;
+  /**
    * Caller-supplied feature flags that change Claude's output (e.g.
    * `{ redirectResolve: true }`). Only include flags that affect the
    * cached `AnalysisResult` — NOT flags that govern post-Claude enrichment.
@@ -125,13 +138,14 @@ function modeTag(input: AnalyzeCacheInput): string {
  * are async (Web Crypto `subtle.digest`).
  */
 export async function buildAnalyzeCacheKey(input: AnalyzeCacheInput): Promise<string> {
+  const surface = input.surface ?? DEFAULT_SURFACE;
   const model = input.modelShort ?? DEFAULT_MODEL_SHORT;
   const textHash = input.text ? (await sha256Hex(input.text)).slice(0, 16) : "0";
   const imagesHash = await hashImageList(input.images);
   const flagsHash = input.outputAffectingFlags
     ? (await sha256OfObject(input.outputAffectingFlags)).slice(0, 8)
     : "0";
-  return `${CACHE_PREFIX}:m${model}:s${SYSTEM_PROMPT_HASH}:t${textHash}:i${imagesHash}:f${flagsHash}:mode${modeTag(input)}`;
+  return `${CACHE_PREFIX}:srf${surface}:m${model}:s${SYSTEM_PROMPT_HASH}:t${textHash}:i${imagesHash}:f${flagsHash}:mode${modeTag(input)}`;
 }
 
 /**

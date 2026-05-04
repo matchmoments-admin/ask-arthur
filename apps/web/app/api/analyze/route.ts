@@ -166,7 +166,7 @@ export async function POST(req: NextRequest) {
     // 3. Check cache for text-only requests (skip for images — content-addressable hashing is complex)
     const isTextOnly = text && images.length === 0;
     if (isTextOnly) {
-      const cached = await getCachedAnalysis(text);
+      const cached = await getCachedAnalysis({ text, surface: "web" });
       if (cached) {
         const geo = geolocateFromHeaders(req.headers);
         waitUntil(incrementStats(cached.verdict, geo.region));
@@ -316,7 +316,7 @@ export async function POST(req: NextRequest) {
 
     // Cache text-only analysis results for future requests
     if (isTextOnly) {
-      waitUntil(setCachedAnalysis(text, aiResult));
+      waitUntil(setCachedAnalysis({ text, surface: "web" }, aiResult));
     }
 
     // 8. Extract scammer contacts when feature is on

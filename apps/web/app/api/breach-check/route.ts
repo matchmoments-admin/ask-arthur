@@ -1,21 +1,15 @@
 import { NextResponse } from "next/server";
 import { checkFormRateLimit } from "@askarthur/utils/rate-limit";
 import { logger } from "@askarthur/utils/logger";
-
-const HIBP_API_BASE = "https://haveibeenpwned.com/api/v3";
-
-interface BreachInfo {
-  Name: string;
-  Title: string;
-  Domain: string;
-  BreachDate: string;
-  DataClasses: string[];
-}
+import { checkHIBPDetailed } from "@askarthur/scam-engine/hibp";
 
 /**
  * POST /api/breach-check
  * Proxies to HIBP API to check if an email has been in data breaches.
- * Keeps the HIBP API key server-side.
+ * Backed by `checkHIBPDetailed` (Redis 24h cache + 5s timeout) — the route
+ * used to fetch HIBP directly with no cache and no timeout, which meant
+ * a slow HIBP response could pin the request indefinitely and repeated
+ * checks for the same email burned the API quota.
  */
 export async function POST(req: Request) {
   // Rate limit: 5/hour per IP
@@ -56,8 +50,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const apiKey = process.env.HIBP_API_KEY;
-  if (!apiKey) {
+  if (!process.env.HIBP_API_KEY) {
     logger.error("HIBP_API_KEY not configured");
     return NextResponse.json(
       { error: "service_unavailable", message: "Breach check is not available at this time" },
@@ -66,48 +59,11 @@ export async function POST(req: Request) {
   }
 
   try {
-    const response = await fetch(
-      `${HIBP_API_BASE}/breachedaccount/${encodeURIComponent(email)}?truncateResponse=false`,
-      {
-        headers: {
-          "hibp-api-key": apiKey,
-          "user-agent": "AskArthur-ScamChecker",
-        },
-      }
-    );
-
-    // 404 = no breaches found
-    if (response.status === 404) {
-      return NextResponse.json({
-        breached: false,
-        breachCount: 0,
-        breaches: [],
-      });
-    }
-
-    if (!response.ok) {
-      logger.error("HIBP API error", { status: response.status });
-      return NextResponse.json(
-        { error: "service_unavailable", message: "Breach check temporarily unavailable" },
-        { status: 502 }
-      );
-    }
-
-    const data: BreachInfo[] = await response.json();
-
-    return NextResponse.json({
-      breached: true,
-      breachCount: data.length,
-      breaches: data.map((b) => ({
-        name: b.Name,
-        title: b.Title,
-        domain: b.Domain,
-        date: b.BreachDate,
-        dataTypes: b.DataClasses,
-      })),
-    });
+    const result = await checkHIBPDetailed(email);
+    return NextResponse.json(result);
   } catch (err) {
-    logger.error("Breach check failed", { error: String(err) });
+    const isTimeout = err instanceof Error && err.name === "TimeoutError";
+    logger.error("Breach check failed", { error: String(err), timeout: isTimeout });
     return NextResponse.json(
       { error: "service_unavailable", message: "Breach check temporarily unavailable" },
       { status: 502 }
