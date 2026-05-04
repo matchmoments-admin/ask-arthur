@@ -97,7 +97,11 @@ BENEFICIARY_COLS: list[tuple[str, str]] = [
 ]
 
 # Single-statement upsert. WHERE clause makes content-equal rows return no
-# RETURNING row, which the caller treats as "skipped".
+# RETURNING row, which the caller treats as "skipped" for content purposes,
+# but every conflict path still bumps last_seen_in_register=NOW() — done in
+# a separate UPDATE after the upsert (see DELISTMENT SWEEP below). We can't
+# do it inside the WHERE-gated UPDATE because the gate skips writes when
+# content is unchanged.
 UPSERT_SQL = """
 INSERT INTO acnc_charities (
   abn, charity_legal_name, other_names, charity_website,
@@ -107,7 +111,8 @@ INSERT INTO acnc_charities (
   number_responsible_persons, financial_year_end,
   operates_in_states, operating_countries,
   is_pbi, is_hpc, purposes, beneficiaries,
-  source_resource_id, source_row_hash
+  source_resource_id, source_row_hash,
+  last_seen_in_register
 )
 VALUES %s
 ON CONFLICT (abn) DO UPDATE SET
@@ -134,9 +139,46 @@ ON CONFLICT (abn) DO UPDATE SET
   beneficiaries               = EXCLUDED.beneficiaries,
   source_resource_id          = EXCLUDED.source_resource_id,
   source_row_hash             = EXCLUDED.source_row_hash,
-  updated_at                  = NOW()
+  updated_at                  = NOW(),
+  last_seen_in_register       = EXCLUDED.last_seen_in_register
 WHERE acnc_charities.source_row_hash IS DISTINCT FROM EXCLUDED.source_row_hash
 RETURNING (xmax = 0) AS is_new
+"""
+
+# Bump last_seen_in_register for every ABN we DID see this run, including the
+# rows whose source_row_hash matched (which the WHERE-gated UPSERT skipped).
+# Without this, content-stable charities would gradually drift past the
+# delistment cutoff and get falsely flagged.
+TOUCH_LAST_SEEN_SQL = """
+UPDATE acnc_charities
+   SET last_seen_in_register = %s
+ WHERE abn = ANY(%s)
+"""
+
+# Re-list reset: any ABN we saw this run that was previously marked delisted
+# gets cleared. Run BEFORE the delistment sweep so an ABN that re-appears
+# isn't immediately re-flagged.
+RELIST_SQL = """
+UPDATE acnc_charities
+   SET is_delisted = false,
+       delisted_at = NULL
+ WHERE abn = ANY(%s)
+   AND is_delisted = true
+"""
+
+# Delistment sweep: mark any row whose last_seen_in_register predates the
+# start of THIS run as delisted. Using run_started_at (not NOW()) is what
+# prevents a long-running scrape from racing its own writes — every row we
+# touch in upsert_charities() gets last_seen_in_register set to a NOW()
+# strictly later than run_started_at, so they're safely outside the sweep.
+# Also bounds delisted_at to run_started_at for newly-flagged rows; existing
+# delisted rows keep their original delisted_at.
+DELIST_SWEEP_SQL = """
+UPDATE acnc_charities
+   SET is_delisted = true,
+       delisted_at = COALESCE(delisted_at, %s)
+ WHERE is_delisted = false
+   AND (last_seen_in_register IS NULL OR last_seen_in_register < %s)
 """
 
 
@@ -283,13 +325,19 @@ def fetch_all_records() -> list[dict]:
     return out
 
 
-def upsert_charities(conn, rows: list[dict]) -> dict:
+def upsert_charities(conn, rows: list[dict], run_now) -> dict:
     """Bulk upsert by ABN in 500-row batches.
 
     new vs updated is detected by RETURNING (xmax = 0): xmax is 0 for
     inserts, non-zero for ON CONFLICT updates. Rows whose source_row_hash
     is unchanged fall through the WHERE clause and produce no RETURNING
     row, which we count as 'skipped'.
+
+    `run_now` is a fixed datetime captured at the top of scrape() and reused
+    for every row's last_seen_in_register. Holding it constant across the
+    run is what makes the delistment sweep safe: every row we write here
+    has last_seen_in_register == run_now, and the sweep filters strictly
+    on `last_seen_in_register < run_started_at`, so we can't race ourselves.
     """
     stats = {"new": 0, "updated": 0, "skipped": 0}
     cursor = conn.cursor()
@@ -326,6 +374,7 @@ def upsert_charities(conn, rows: list[dict]) -> dict:
                 r["beneficiaries"],
                 RESOURCE_ID,
                 r["_hash"],
+                run_now,
             )
             for r in batch
         ]
@@ -360,6 +409,19 @@ def upsert_charities(conn, rows: list[dict]) -> dict:
             extra={"metadata": {"feed": FEED_NAME, "batch": batch_num}},
         )
 
+    # Touch last_seen_in_register for every ABN this run saw. The WHERE-gated
+    # UPSERT skipped rows whose hash was unchanged, so without this update
+    # those rows would drift past the delistment cutoff over time.
+    seen_abns = [r["abn"] for r in rows]
+    touch_start = time.time()
+    cursor.execute(TOUCH_LAST_SEEN_SQL, (run_now, seen_abns))
+    conn.commit()
+    logger.info(
+        f"ACNC last-seen touched: {cursor.rowcount} rows in "
+        f"{int((time.time() - touch_start) * 1000)}ms",
+        extra={"metadata": {"feed": FEED_NAME}},
+    )
+
     cursor.close()
     total_ms = int((time.time() - upsert_start) * 1000)
     logger.info(
@@ -370,6 +432,54 @@ def upsert_charities(conn, rows: list[dict]) -> dict:
     return stats
 
 
+def run_delistment_sweep(conn, seen_abns: list[str], run_started_at) -> dict:
+    """Two passes:
+      1. RELIST_SQL: re-listed charities (ABN reappeared → flip is_delisted off).
+      2. DELIST_SWEEP_SQL: anything not seen this run → flip is_delisted on.
+
+    Order matters: the relist runs first so that when a charity is delisted,
+    re-listed, and delisted again, the second delistment is captured by the
+    sweep rather than no-op'd by stale state.
+
+    Returns {"relisted": n, "newly_delisted": m, "still_delisted": k} for
+    the ingestion log.
+    """
+    cursor = conn.cursor()
+
+    relist_start = time.time()
+    cursor.execute(RELIST_SQL, (seen_abns,))
+    relisted = cursor.rowcount
+    conn.commit()
+
+    sweep_start = time.time()
+    cursor.execute(DELIST_SWEEP_SQL, (run_started_at, run_started_at))
+    newly_delisted = cursor.rowcount
+    conn.commit()
+
+    cursor.execute(
+        "SELECT COUNT(*) FROM acnc_charities WHERE is_delisted = true"
+    )
+    still_delisted_row = cursor.fetchone()
+    still_delisted = still_delisted_row[0] if still_delisted_row else 0
+
+    cursor.close()
+
+    logger.info(
+        f"ACNC delistment sweep: relisted={relisted} "
+        f"({int((time.time() - relist_start) * 1000)}ms relist); "
+        f"newly_delisted={newly_delisted} "
+        f"({int((time.time() - sweep_start) * 1000)}ms sweep); "
+        f"total_delisted={still_delisted}",
+        extra={"metadata": {"feed": FEED_NAME}},
+    )
+
+    return {
+        "relisted": relisted,
+        "newly_delisted": newly_delisted,
+        "still_delisted": still_delisted,
+    }
+
+
 def scrape() -> None:
     """Entry point. Gated by FF_CHARITY_CHECK_INGEST so an accidental run on
     a fresh checkout (or a partially-configured CI environment) is a no-op.
@@ -378,11 +488,20 @@ def scrape() -> None:
         logger.info("FF_CHARITY_CHECK_INGEST not set to 'true' — skipping ACNC scrape")
         return
 
+    from datetime import datetime, timezone
+
     start = time.time()
+    # Single timestamp captured at the top of the run. Used as
+    # last_seen_in_register for every upsert, AND as the cutoff for the
+    # delistment sweep. Holding it constant is the race-free invariant:
+    # any row with last_seen_in_register == run_started_at is "seen this run".
+    run_started_at = datetime.now(timezone.utc)
+
     error_msg: str | None = None
     status = "success"
     rows: list[dict] = []
     stats = {"new": 0, "updated": 0, "skipped": 0}
+    delistment_stats = {"relisted": 0, "newly_delisted": 0, "still_delisted": 0}
 
     try:
         logger.info(f"Fetching ACNC register (resource {RESOURCE_ID})")
@@ -406,7 +525,7 @@ def scrape() -> None:
     with get_db() as conn:
         if rows and status != "error":
             try:
-                stats = upsert_charities(conn, rows)
+                stats = upsert_charities(conn, rows, run_started_at)
                 # No-op refresh (every row hashed-equal) reports as 'partial'
                 # so the ingestion log distinguishes it from a fetch failure.
                 if stats["new"] == 0 and stats["updated"] == 0:
@@ -415,6 +534,23 @@ def scrape() -> None:
                 error_msg = str(e)
                 status = "error"
                 logger.error(f"ACNC upsert failed: {e}")
+
+        # Delistment sweep — only when the upsert succeeded. If we sweep on
+        # a partial-fetch (incomplete CKAN response) we'd flag thousands of
+        # legitimate charities as delisted. Status='error' protects us;
+        # status='partial' (every row unchanged) is fine because seen_abns
+        # still covers every active charity.
+        if rows and status != "error":
+            try:
+                delistment_stats = run_delistment_sweep(
+                    conn,
+                    [r["abn"] for r in rows],
+                    run_started_at,
+                )
+            except Exception as e:
+                error_msg = str(e)
+                status = "error"
+                logger.error(f"ACNC delistment sweep failed: {e}")
 
         duration_ms = int((time.time() - start) * 1000)
         log_ingestion(
@@ -432,7 +568,10 @@ def scrape() -> None:
 
     logger.info(
         f"ACNC scrape complete: {stats['new']} new, {stats['updated']} updated, "
-        f"{stats['skipped']} skipped in {duration_ms}ms"
+        f"{stats['skipped']} skipped, "
+        f"{delistment_stats['newly_delisted']} newly_delisted, "
+        f"{delistment_stats['relisted']} relisted "
+        f"in {duration_ms}ms"
     )
 
 
