@@ -41,6 +41,10 @@ import { acncCharityBackfillEmbed } from "./acnc-charity-backfill-embed";
 import { scamReportEmbed } from "./scam-report-embed";
 import { scamReportsBackfillEmbed } from "./scam-reports-backfill-embed";
 
+// Feedback learning loop (W1.1): refresh the feedback_triage_queue MV
+// every 5 min so /admin/feedback stays current.
+import { feedbackTriageRefresh } from "./feedback-triage-refresh";
+
 export const inngestFunctions = [
   stalenessCheck,
   stalenessCheckIPs,
@@ -73,4 +77,6 @@ export const inngestFunctions = [
   // scam_reports + verified_scams embeddings
   scamReportEmbed,
   scamReportsBackfillEmbed,
+  // Feedback learning loop
+  feedbackTriageRefresh,
 ];
