@@ -29,6 +29,7 @@ Shipped commits on `main`:
 - `281ae17` #67 Unify diagnostic error sink across daily/embed/cluster
 - `a04e8a2` #68 reddit-intel cost brake — auto-pauses pipeline at $10/day
 - (this PR) #69 cluster threshold 0.78 → 0.62 (empirical tuning after first prod batches showed 77 themes / 77 posts, no grouping)
+- #124 (2026-05-05) Weekly digest signal-over-noise rebuild + public `/intel/themes/[slug]` deep-link page. Drops the 2-paragraph `leadNarrative` and the tweet-draft block from the email; moves the stats card above themes; theme titles become UTM-tagged links to a new public RSC at `apps/web/app/intel/themes/[slug]/page.tsx` (theme + up to 50 Reddit member permalinks + "Want this monitored for your brand?" trial CTA). First UTM convention in the codebase via `apps/web/lib/utm.ts`. `apps/web/lib/tweet-draft.ts` deleted (no other callers).
 
 Feature flags (all default OFF, flip in Vercel env):
 
@@ -36,6 +37,7 @@ Feature flags (all default OFF, flip in Vercel env):
 - `NEXT_PUBLIC_FF_REDDIT_INTEL_DASHBOARD` — gates the threats-page widget
 - `FF_REDDIT_INTEL_EMAIL` — gates the weekly intel digest send
 - `NEXT_PUBLIC_FF_REDDIT_INTEL_B2B_API` — gates `/api/v1/intel/*` (returns 503 when off)
+- `NEXT_PUBLIC_FF_REDDIT_INTEL_PUBLIC_PAGES` — gates the public `/intel/themes/[slug]` page (added #124). When OFF the route returns notFound() and email theme titles still link to a URL that 404s — flip on per-environment after preview confirms the page renders.
 
 Steady-state cost projection: **~A\$0.30/day = ~A\$9/month** Anthropic +
 Voyage, well below the A\$50 cost-daily-check alert. Cron runs once
