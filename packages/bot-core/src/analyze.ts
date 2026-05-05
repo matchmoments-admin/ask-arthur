@@ -1,60 +1,37 @@
-import { analyzeWithClaude, detectInjectionAttempt } from "@askarthur/scam-engine/claude";
-import { extractURLs, checkURLReputation } from "@askarthur/scam-engine/safebrowsing";
-import { storeVerifiedScam, incrementStats } from "@askarthur/scam-engine/pipeline";
-import { logger } from "@askarthur/utils/logger";
+import { runAnalysisCore } from "@askarthur/scam-engine/analyze-core";
 import type { AnalysisResult } from "@askarthur/types";
 
 /**
  * Run the full scam analysis pipeline for a bot message.
- * Same logic as /api/analyze but called directly (no HTTP hop).
- * Supports optional image analysis via base64-encoded images.
+ *
+ * Thin wrapper around runAnalysisCore with the bot-specific defaults:
+ *   - surface: "bot" — namespaces the analyze-cache (so the same text
+ *     pasted in the web app and via Telegram don't collide)
+ *   - backgroundMode: "fire-and-forget" — bots run outside Vercel's
+ *     waitUntil envelope, so we kick off storeVerifiedScam +
+ *     incrementStats inline with .catch() guards
+ *   - skipCacheRead/Write are NOT set: bots benefit from the same
+ *     cache hit rate as web — duplicate scam pastes are common in chat
+ *
+ * Behavioural change vs. the pre-Phase-5 implementation: the
+ * confidence-bumping (Math.max(0.9) on URL escalation, Math.max(0.6)
+ * on injection floor) is gone — runAnalysisCore preserves the AI's
+ * raw confidence after merging signals. Other surfaces never had the
+ * bump; bots are now consistent. Red-flag phrasing also moves to the
+ * canonical "URL flagged by X and Y: <url>" / "manipulation patterns"
+ * strings shared across all surfaces.
  */
 export async function analyzeForBot(
   text: string,
   region?: string,
   images?: string[],
 ): Promise<AnalysisResult> {
-  // 1. Injection pre-filter
-  const injection = detectInjectionAttempt(text);
-
-  // 2. Extract URLs
-  const urls = extractURLs(text);
-
-  // 3. Run Claude analysis + URL reputation in parallel
-  const [analysis, urlResults] = await Promise.all([
-    analyzeWithClaude(text, images, images?.length ? "image" : "text"),
-    urls.length > 0 ? checkURLReputation(urls) : Promise.resolve([]),
-  ]);
-
-  // 4. Merge verdicts — malicious URLs escalate to HIGH_RISK
-  let result = { ...analysis };
-  const maliciousURLs = urlResults.filter((u) => u.isMalicious);
-
-  if (maliciousURLs.length > 0 && result.verdict !== "HIGH_RISK") {
-    result.verdict = "HIGH_RISK";
-    result.confidence = Math.max(result.confidence, 0.9);
-    result.redFlags = [
-      ...result.redFlags,
-      ...maliciousURLs.map((u) => `Malicious URL detected: ${u.url} (flagged by ${u.sources.join(", ")})`),
-    ];
-  }
-
-  // Injection detected → floor to SUSPICIOUS minimum
-  if (injection.detected && result.verdict === "SAFE") {
-    result.verdict = "SUSPICIOUS";
-    result.confidence = Math.max(result.confidence, 0.6);
-  }
-
-  // 5. Background: store verified scams + increment stats
-  const regionStr = region ?? null;
-  if (result.verdict === "HIGH_RISK") {
-    storeVerifiedScam(result, regionStr).catch((err) =>
-      logger.error("Failed to store verified scam from bot", { error: String(err) })
-    );
-  }
-  incrementStats(result.verdict, regionStr).catch((err) =>
-    logger.error("Failed to increment stats from bot", { error: String(err) })
-  );
-
-  return result;
+  const out = await runAnalysisCore({
+    text,
+    surface: "bot",
+    region: region ?? null,
+    images,
+    backgroundMode: "fire-and-forget",
+  });
+  return out.result;
 }
