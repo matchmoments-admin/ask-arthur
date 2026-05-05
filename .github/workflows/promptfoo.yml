@@ -1,0 +1,70 @@
+name: Promptfoo regression eval
+
+# Round-2 audit (i) closure (skeleton). Runs the analyze-prompt
+# regression suite against real Haiku when:
+#   - PR touches files under evals/ (new fixture or config change)
+#   - PR touches packages/scam-engine/src/claude.ts (prompt change)
+#   - PR touches packages/types/src/analysis.ts (PROMPT_VERSION bump)
+#   - manually via workflow_dispatch
+#
+# Each run hits real Anthropic Haiku — typically $0.02-$0.05 per run
+# at 4 fixtures. The path-filter keeps the bill bounded.
+#
+# Job runs only on pull_request (not push) so it never gates main.
+# Failure surfaces in the PR check list; squash-merge will not
+# auto-skip it because the path-filter already governs invocation.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "evals/**"
+      - "packages/scam-engine/src/claude.ts"
+      - "packages/types/src/analysis.ts"
+  workflow_dispatch:
+
+concurrency:
+  group: promptfoo-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event.pull_request.draft == false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Run promptfoo eval
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY_EVAL }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "ANTHROPIC_API_KEY_EVAL secret not set — skipping eval"
+            echo "Set the secret in repo settings to enable Haiku regression evals"
+            exit 0
+          fi
+          pnpm dlx promptfoo@latest eval \
+            --config evals/promptfooconfig.yaml \
+            --output evals/output.json
+
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: promptfoo-output
+          path: evals/output.json
+          retention-days: 14

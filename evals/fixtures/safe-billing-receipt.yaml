@@ -1,0 +1,25 @@
+# Locks in: false-positive prevention. A real ATO/Optus billing receipt
+# should NOT be flagged as HIGH_RISK just because it mentions a
+# government brand and a payment. Watches for over-eager Haiku.
+- description: Legitimate Optus billing receipt — should be SAFE or UNCERTAIN
+  vars:
+    text: |
+      Optus Bill Receipt #INV-2026-04-3782
+      Account: [ACCOUNT]
+      Period: 1 Apr 2026 – 30 Apr 2026
+      Plan: Optus Family Plan ($89/mo)
+      Amount paid: $89.00
+      Payment method: Visa ending 4321
+      Thank you for your payment. View this bill in the My Optus app or
+      at optus.com.au/billing. Customer support: 133 937.
+    mode: text
+  assert:
+    - type: javascript
+      value: |
+        output.verdict === "SAFE" || output.verdict === "UNCERTAIN"
+    - type: javascript
+      value: |
+        // No false escalation: nothing in the redFlags list should claim
+        // the message is a scam outright.
+        Array.isArray(output.redFlags) &&
+        !output.redFlags.some(f => /scam|phishing|fraud/i.test(f))
