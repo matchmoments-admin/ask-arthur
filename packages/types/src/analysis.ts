@@ -8,7 +8,7 @@ import { z } from "zod";
 // aliases below each schema. Existing callers that `import type { X }`
 // are unaffected.
 
-export const PROMPT_VERSION = "2.0.0";
+export const PROMPT_VERSION = "2.1.0";
 
 // ── Primitives ───────────────────────────────────────────────────────────
 

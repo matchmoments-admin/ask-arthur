@@ -310,6 +310,15 @@ export const featureFlags = {
    *  surface (it's only useful for SUSPICIOUS / HIGH_RISK). Default OFF
    *  until preview smoke-test confirms latency budget and zero PII leak. */
   similarReports: process.env.NEXT_PUBLIC_FF_SIMILAR_REPORTS === "true",
+
+  /** Round-2 audit (f) — inject top-K recent reddit_intel_themes into the
+   *  Haiku system prompt at /api/analyze time. Adds one Voyage embedQuery
+   *  + one match_themes_by_centroid RPC per uncached request (~$0.000003
+   *  amortised). PROMPT_VERSION bumped to 2.1.0 so flipping this flag
+   *  invalidates the analyze-cache. Server-side only — gates the consumer
+   *  web flow specifically; extension/bot surfaces stay on the unprompted
+   *  classifier. */
+  ragThemes: process.env.FF_RAG_THEMES === "true",
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;
