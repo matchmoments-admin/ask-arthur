@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { waitUntil, ipAddress } from "@vercel/functions";
 import { checkRateLimit, checkImageUploadRateLimit } from "@askarthur/utils/rate-limit";
-import { analyzeWithClaude, detectInjectionAttempt, type Verdict } from "@askarthur/scam-engine/claude";
+import { analyzeWithClaude, detectInjectionAttempt } from "@askarthur/scam-engine/claude";
+import { mergeVerdict } from "@askarthur/core-analysis";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { resolveRequestId } from "@askarthur/utils/request-id";
 import { extractContactsFromText, normalizePhoneE164 } from "@askarthur/scam-engine/phone-normalize";
@@ -250,53 +251,22 @@ export async function POST(req: NextRequest) {
       contactEmails: aiResult.scammerContacts?.emailAddresses?.length ?? 0,
     });
 
-    // 6. Merge verdicts — URL threats escalate AI verdict
-    let finalVerdict: Verdict = aiResult.verdict;
+    // 6. Canonical signal merge — URL escalation, redirect-chain red flags,
+    // and injection floor all live in @askarthur/core-analysis/mergeVerdict.
+    // Replaces ~50 lines of previously-inlined logic that subtly diverged
+    // across the four analyze surfaces. See packages/core-analysis/src/
+    // verdict.ts for the contract + property tests.
+    const merged = mergeVerdict({
+      ai: aiResult,
+      urlResults,
+      redirectChains,
+      injection: injectionCheck,
+    });
+    aiResult.verdict = merged.verdict;
+    aiResult.redFlags = merged.redFlags;
+    aiResult.nextSteps = merged.nextSteps;
+    const finalVerdict = merged.verdict;
     const maliciousURLs = urlResults.filter((r) => r.isMalicious);
-
-    if (maliciousURLs.length > 0) {
-      // Escalate to HIGH_RISK if any URL is flagged
-      finalVerdict = "HIGH_RISK";
-      for (const mal of maliciousURLs) {
-        aiResult.redFlags.push(
-          `URL flagged by ${mal.sources.join(" and ")}: ${mal.url}`
-        );
-      }
-      if (!aiResult.nextSteps.includes("Do not click any links in this message.")) {
-        aiResult.nextSteps.unshift("Do not click any links in this message.");
-      }
-    }
-
-    aiResult.verdict = finalVerdict;
-
-    // 6b. Redirect-specific red flags
-    for (const chain of redirectChains) {
-      if (chain.isShortened) {
-        aiResult.redFlags.push(
-          `Shortened URL detected: ${chain.originalUrl} redirects to ${chain.finalUrl}`
-        );
-      }
-      if (chain.hasOpenRedirect) {
-        aiResult.redFlags.push(
-          `Open redirect detected in chain from ${chain.originalUrl}`
-        );
-      }
-      if (chain.truncated) {
-        aiResult.redFlags.push(
-          `Excessive redirect chain (${chain.hopCount}+ hops) from ${chain.originalUrl}`
-        );
-      }
-    }
-
-    // 6c. Injection floor — if injection detected, floor verdict at SUSPICIOUS minimum
-    if (injectionCheck.detected) {
-      if (finalVerdict === "SAFE") {
-        aiResult.verdict = "SUSPICIOUS";
-      }
-      aiResult.redFlags.push(
-        "This message contains manipulation patterns that attempt to influence the analysis"
-      );
-    }
 
     // 7. Background work via waitUntil (survives after response is sent)
     // When intelligenceCore is OFF, use the existing storeVerifiedScam path.
