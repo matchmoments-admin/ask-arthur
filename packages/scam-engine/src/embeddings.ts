@@ -104,6 +104,33 @@ const DOMAIN_DEFAULTS: Record<EmbeddingDomain, string> = {
   multimodal: "voyage-multimodal-3.5",
 };
 
+// One-shot env-routing health check. Logs a loud warning if any
+// EMBEDDING_MODEL_<DOMAIN> env var routes to a model whose call path
+// is not yet implemented. Without this check, a misconfigured deploy
+// can sit silently for hours until the first embed in that domain
+// throws — typically inside an Inngest cron, far from the source of
+// the misconfig. Idempotent across hot reloads via the module-level
+// `_envCheckDone` flag.
+let _envCheckDone = false;
+function checkEnvRoutingHealth(): void {
+  if (_envCheckDone) return;
+  _envCheckDone = true;
+  for (const [key, value] of Object.entries(process.env)) {
+    if (!key.startsWith("EMBEDDING_MODEL_")) continue;
+    if (!value) continue;
+    const spec = MODEL_REGISTRY[value];
+    if (spec && !spec.callPathReady) {
+      logger.warn(
+        `${key}="${value}" routes to a model whose call path is NOT yet ` +
+          `implemented (domain=${spec.domain}). Any embed() / embedQuery() ` +
+          `against this domain will throw at invocation. Unset the env var ` +
+          `or wait until the call path lands.`,
+      );
+    }
+  }
+}
+checkEnvRoutingHealth();
+
 export interface EmbedResult {
   vectors: number[][];
   provider: EmbeddingProvider;

@@ -1,6 +1,23 @@
 // Email breach exposure via Have I Been Pwned v3 API.
 // Checks if an email address appears in known data breaches.
-// Graceful degradation: missing API key → skip, errors → empty result.
+//
+// THIS IS THE SINGLE ENTRY POINT FOR HIBP IN THE CODEBASE. All callers
+// (apps/web/app/api/breach-check/route.ts, the entity-enrichment Inngest
+// step) use these exports. Do not add direct fetch() calls to
+// haveibeenpwned.com elsewhere — the route used to do that with no cache
+// and no timeout, and the divergence (5s timeout + 24h cache here vs.
+// nothing there) was a real reliability bug closed in W1.3.
+//
+// Two functions, two cache namespaces:
+//   - checkHIBP(email)         → boolean + names. Uses ?truncateResponse=true.
+//                                 Cheap; cached at askarthur:hibp:<sha256>.
+//   - checkHIBPDetailed(email) → full breach metadata. Uses
+//                                 ?truncateResponse=false. Larger payload
+//                                 cached at askarthur:hibp:detail:<sha256>.
+//
+// Both share: 5s AbortSignal.timeout, 24h cache TTL, graceful degradation
+// (missing API key → empty result, network/timeout/parse error → empty
+// result + logged.error). Callers always get a well-typed object back.
 
 import { Redis } from "@upstash/redis";
 import { logger } from "@askarthur/utils/logger";
