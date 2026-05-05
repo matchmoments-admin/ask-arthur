@@ -1,21 +1,20 @@
 // Reddit-intel weekly digest — editorial briefing template.
 //
 // Adapted from the AskArthurBriefing reference design (navy + white only,
-// Georgia serif headings + Arial sans labels, 640px max width). Replaces
-// the previous teal-accented intel template so the intel digest reads as
-// part of the same Ask Arthur newsletter family rather than a one-off
-// styling.
+// Georgia serif headings + Arial sans labels, 640px max width). Signal-
+// over-noise rebuild (2026-05-05): scannable stats lead, theme titles deep-
+// link to durable /intel/themes/[slug] pages so brand readers can drill
+// straight to the source Reddit posts.
 //
 // Slot mapping (intel data → briefing slots):
-//   leadNarrative           → intro paragraphs
 //   emergingThemes[0].title → headline (or fallback by post count)
-//   emergingThemes[1..]     → numbered list, "Emerging this week"
+//   emergingThemes[0].narrative (or fallback) → single dek line
+//   stats card → 3 columns: Posts · Active themes · Brands flagged
+//   emergingThemes[*]       → numbered list, "Emerging this week"
+//                              titles link to /intel/themes/<slug|id>
 //   topBrands               → sentence in "Brands impersonated"
 //   scamOfTheWeekQuote      → tip callout (white card, navy border)
 //   topCategories           → "By the numbers" sentence
-//   tweetDraft              → monospace card with char counter
-//   stats summary           → 3-column stats card (replaces hero image —
-//                              we don't have a generic intel illustration)
 
 import {
   Html,
@@ -32,8 +31,13 @@ import {
   Row,
   Column,
 } from "@react-email/components";
+import { withUtm } from "@/lib/utm";
 
 interface EmergingTheme {
+  /** UUID primary key — used as the deep-link fallback when slug is null. */
+  id: string;
+  /** URL-friendly slug; null on legacy rows. */
+  slug: string | null;
   title: string;
   narrative: string | null;
   memberCount: number;
@@ -61,12 +65,10 @@ export interface WeeklyIntelDigestProps {
   weekStart: string;
   weekEnd: string;
   totalPostsClassified: number;
-  leadNarrative: string;
   emergingThemes: EmergingTheme[];
   topBrands: BrandWatchEntry[];
   topCategories: CategoryEntry[];
   scamOfTheWeekQuote: { text: string; speakerRole: string } | null;
-  tweetDraft: string;
   modelVersion: string;
   promptVersion: string;
   regulatorAlerts?: RegulatorAlertEntry[];
@@ -80,7 +82,12 @@ const DIVIDER = "#E2E8F0";
 const SURFACE_TINT = "#F8FAFC";
 const SERIF = "Georgia, 'Times New Roman', serif";
 const SANS = "Arial, Helvetica, sans-serif";
-const MONO = "'SF Mono', 'Monaco', 'Roboto Mono', monospace";
+
+const EMAIL_UTM = {
+  source: "email",
+  campaign: "weekly-intel-digest",
+  medium: "email",
+};
 
 function humaniseDate(iso: string): string {
   // ISO date → "1 May" — short form for the briefing date band.
@@ -96,34 +103,49 @@ function humaniseCategory(label: string): string {
     .join(" ");
 }
 
-export default function WeeklyIntelDigest({
-  weekStart,
-  weekEnd,
-  totalPostsClassified,
-  leadNarrative,
-  emergingThemes = [],
-  topBrands = [],
-  topCategories = [],
-  scamOfTheWeekQuote,
-  tweetDraft,
-  modelVersion,
-  promptVersion,
-  regulatorAlerts,
-}: WeeklyIntelDigestProps) {
+function themeUrl(theme: EmergingTheme): string {
+  const key = theme.slug ?? theme.id;
+  return withUtm(`https://askarthur.au/intel/themes/${key}`, EMAIL_UTM);
+}
+
+function buildDek(props: WeeklyIntelDigestProps): string {
+  // Single tight line replacing the verbose lead-narrative paragraphs.
+  // Prefer the top theme's narrative (truncated) so the dek tells the
+  // reader what the headline scam actually is; fall back to a stats line.
+  const top = props.emergingThemes[0];
+  if (top?.narrative) {
+    const cleaned = top.narrative.replace(/\s+/g, " ").trim();
+    if (cleaned.length <= 120) return cleaned;
+    return cleaned.slice(0, 117).trimEnd() + "…";
+  }
+  const themes = props.emergingThemes.length;
+  return `${props.totalPostsClassified} Reddit reports analysed across ${themes} active scam pattern${themes === 1 ? "" : "s"}.`;
+}
+
+export default function WeeklyIntelDigest(props: WeeklyIntelDigestProps) {
+  const {
+    weekStart,
+    weekEnd,
+    totalPostsClassified,
+    emergingThemes = [],
+    topBrands = [],
+    topCategories = [],
+    scamOfTheWeekQuote,
+    modelVersion,
+    promptVersion,
+    regulatorAlerts,
+  } = props;
+
   const headline =
     emergingThemes[0]?.title ??
     `${totalPostsClassified} scam reports analysed this week`;
-  const previewLine =
-    emergingThemes[0]?.narrative ??
-    `${totalPostsClassified} scam reports analysed across ${emergingThemes.length} active themes`;
-  const intro = leadNarrative
-    .split(/\n{2,}/)
-    .filter((p) => p.trim().length > 0);
+  const dek = buildDek(props);
+  const ctaUrl = withUtm("https://askarthur.au/app/threats", EMAIL_UTM);
 
   return (
     <Html>
       <Head />
-      <Preview>{previewLine}</Preview>
+      <Preview>{dek}</Preview>
       <Body
         style={{
           backgroundColor: WHITE,
@@ -229,30 +251,24 @@ export default function WeeklyIntelDigest({
               {headline}
             </Heading>
 
-            {/* Intro paragraphs (lead narrative) */}
-            {intro.length > 0 && (
-              <div style={{ paddingTop: "18px" }}>
-                {intro.map((para, i) => (
-                  <Text
-                    key={i}
-                    style={{
-                      margin: i === 0 ? 0 : "14px 0 0 0",
-                      padding: 0,
-                      fontFamily: SERIF,
-                      fontSize: "16px",
-                      lineHeight: "26px",
-                      color: NAVY,
-                      fontWeight: 400,
-                    }}
-                  >
-                    {para}
-                  </Text>
-                ))}
-              </div>
-            )}
+            {/* Dek — one tight line, replaces verbose lead-narrative block */}
+            <Text
+              style={{
+                margin: "12px 0 0 0",
+                padding: 0,
+                fontFamily: SERIF,
+                fontSize: "16px",
+                lineHeight: "24px",
+                color: NAVY,
+                fontWeight: 400,
+                opacity: 0.85,
+              }}
+            >
+              {dek}
+            </Text>
 
-            {/* Stats card (replaces hero image) — three columns */}
-            <div style={{ paddingTop: "28px", paddingBottom: "28px" }}>
+            {/* Stats card (moved up — scannable signal at the top) */}
+            <div style={{ paddingTop: "24px", paddingBottom: "8px" }}>
               <Section
                 style={{
                   backgroundColor: SURFACE_TINT,
@@ -362,9 +378,9 @@ export default function WeeklyIntelDigest({
               </Section>
             </div>
 
-            {/* Emerging themes section */}
+            {/* Emerging themes section — titles link to per-theme pages */}
             {emergingThemes.length > 0 && (
-              <>
+              <div style={{ paddingTop: "24px" }}>
                 <Heading
                   as="h2"
                   style={{
@@ -382,7 +398,7 @@ export default function WeeklyIntelDigest({
                 <div style={{ paddingTop: "16px" }}>
                   {emergingThemes.map((theme, i) => (
                     <div
-                      key={i}
+                      key={theme.id}
                       style={{
                         marginTop: i === 0 ? 0 : "20px",
                         paddingBottom:
@@ -404,7 +420,17 @@ export default function WeeklyIntelDigest({
                           color: NAVY,
                         }}
                       >
-                        {i + 1}. {theme.title}
+                        {i + 1}.{" "}
+                        <Link
+                          href={themeUrl(theme)}
+                          style={{
+                            color: NAVY,
+                            textDecoration: "underline",
+                            textUnderlineOffset: "3px",
+                          }}
+                        >
+                          {theme.title} ↗
+                        </Link>
                       </Text>
                       {theme.narrative && (
                         <Text
@@ -447,7 +473,7 @@ export default function WeeklyIntelDigest({
                     </div>
                   ))}
                 </div>
-              </>
+              </div>
             )}
 
             {/* Brand watchlist sentence */}
@@ -644,63 +670,10 @@ export default function WeeklyIntelDigest({
               </div>
             )}
 
-            {/* Tweet draft — utility callout, monochrome */}
-            <div style={{ paddingTop: "32px" }}>
-              <Text
-                style={{
-                  margin: "0 0 8px 0",
-                  padding: 0,
-                  fontFamily: SANS,
-                  fontSize: "11px",
-                  fontWeight: 700,
-                  letterSpacing: "2px",
-                  textTransform: "uppercase" as const,
-                  color: NAVY,
-                  opacity: 0.75,
-                }}
-              >
-                Copy-paste tweet
-              </Text>
-              <Section
-                style={{
-                  backgroundColor: SURFACE_TINT,
-                  border: `1px solid ${DIVIDER}`,
-                  borderRadius: "8px",
-                  padding: "16px 18px",
-                }}
-              >
-                <Text
-                  style={{
-                    margin: 0,
-                    padding: 0,
-                    fontFamily: MONO,
-                    fontSize: "13px",
-                    lineHeight: "20px",
-                    color: NAVY,
-                    whiteSpace: "pre-wrap" as const,
-                  }}
-                >
-                  {tweetDraft}
-                </Text>
-              </Section>
-              <Text
-                style={{
-                  margin: "6px 0 0 0",
-                  padding: 0,
-                  fontFamily: SANS,
-                  fontSize: "11px",
-                  color: NAVY,
-                  opacity: 0.6,
-                }}
-              >
-                {tweetDraft.length}/280 characters
-              </Text>
-            </div>
-
             {/* Primary CTA */}
             <div style={{ paddingTop: "32px" }}>
               <Button
-                href="https://askarthur.au/app/threats"
+                href={ctaUrl}
                 style={{
                   backgroundColor: NAVY,
                   color: WHITE,

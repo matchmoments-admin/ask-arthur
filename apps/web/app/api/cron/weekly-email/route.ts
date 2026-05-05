@@ -5,7 +5,6 @@ import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { getWeeklyRedditIntel } from "@/lib/reddit-intel-weekly";
 import { getWeeklyRegulatorAlerts } from "@/lib/regulator-alerts-weekly";
-import { buildWeeklyTweetDraft } from "@/lib/tweet-draft";
 
 // When the redditIntelEmail flag is on we always send to brendan even if
 // the email_subscribers table is empty — the digest is the operator's
@@ -54,7 +53,6 @@ export async function GET(req: NextRequest) {
       const subscriberEmails = (subs ?? []).map((s) => s.email as string);
       const recipients = Array.from(new Set([OPERATOR_EMAIL, ...subscriberEmails]));
 
-      const tweetDraft = buildWeeklyTweetDraft(intel);
       const regulatorAlerts = await getWeeklyRegulatorAlerts();
 
       try {
@@ -62,12 +60,10 @@ export async function GET(req: NextRequest) {
           weekStart: intel.weekStart,
           weekEnd: intel.weekEnd,
           totalPostsClassified: intel.totalPostsClassified,
-          leadNarrative: intel.latestLeadNarrative,
           emergingThemes: intel.emergingThemes,
           topBrands: intel.topBrands,
           topCategories: intel.topCategories,
           scamOfTheWeekQuote: intel.scamOfTheWeekQuote,
-          tweetDraft,
           modelVersion: intel.modelVersion,
           promptVersion: intel.promptVersion,
           regulatorAlerts,

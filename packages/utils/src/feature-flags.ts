@@ -263,6 +263,15 @@ export const featureFlags = {
   redditIntelB2bApi:
     process.env.NEXT_PUBLIC_FF_REDDIT_INTEL_B2B_API === "true",
 
+  /** Reddit Intel — public /intel/themes/[slug] pages. Each page surfaces a
+   *  single narrative cluster + its Reddit member permalinks, used as the
+   *  email digest's deep-link target and a B2B trial-pitch surface. When OFF,
+   *  the route returns notFound() and the email falls back to plain-text
+   *  theme titles. Default OFF until a Vercel preview confirms the page
+   *  renders cleanly against real prod data. */
+  redditIntelPublicPages:
+    process.env.NEXT_PUBLIC_FF_REDDIT_INTEL_PUBLIC_PAGES === "true",
+
   /** B2B semantic search over scam_reports + verified_scams at
    *  /api/v1/scams/search. Returns 503 when off; validateApiKey is
    *  checked first regardless. Default OFF — turn on per-deployment once

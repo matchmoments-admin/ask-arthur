@@ -24,6 +24,11 @@ export interface WeeklyRedditIntel {
   topBrands: Array<{ brand: string; mentionCount: number }>;
   /** Up to 5 themes the most posts joined this week. */
   emergingThemes: Array<{
+    /** UUID primary key — used as the deep-link fallback when slug is null. */
+    id: string;
+    /** URL-friendly slug. May be null on legacy rows that pre-date the slug
+     *  backfill; callers should fall back to id when null. */
+    slug: string | null;
     title: string;
     narrative: string | null;
     memberCount: number;
@@ -98,7 +103,7 @@ export async function getWeeklyRedditIntel(): Promise<WeeklyRedditIntel | null> 
   const { data: themes } = await supabase
     .from("reddit_intel_themes")
     .select(
-      "title, narrative, member_count, representative_brands, last_seen_at",
+      "id, slug, title, narrative, member_count, representative_brands, last_seen_at",
     )
     .eq("is_active", true)
     .neq("title", "Pending naming")
@@ -107,6 +112,8 @@ export async function getWeeklyRedditIntel(): Promise<WeeklyRedditIntel | null> 
     .limit(5);
 
   const emergingThemes = (themes ?? []).map((t) => ({
+    id: t.id as string,
+    slug: (t.slug as string | null) ?? null,
     title: t.title as string,
     narrative: (t.narrative as string | null) ?? null,
     memberCount: (t.member_count as number) ?? 0,
