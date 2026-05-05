@@ -1,0 +1,34 @@
+# promptfoo regression suite — Ask Arthur analyze prompt
+#
+# Round-2 audit (i) closure (skeleton). Run with:
+#   pnpm dlx promptfoo eval --config evals/promptfooconfig.yaml
+#
+# Provider is a thin TS wrapper that calls analyzeWithClaude — this
+# keeps the eval surface aligned with the production prompt path.
+# When PROMPT_VERSION bumps or claude.ts SYSTEM_PROMPT changes, the
+# evals run and report any drift.
+
+description: Ask Arthur — analyze regression fixtures
+
+prompts:
+  - "{{text}}"
+
+providers:
+  - id: file://evals/runner.ts
+    label: claude-haiku-4.5
+
+# Each fixture file in fixtures/ is loaded as a test case. The runner
+# calls analyzeWithClaude with the input and the assertions verify the
+# returned JSON structure.
+tests: file://evals/fixtures/*.yaml
+
+defaultTest:
+  options:
+    # Each Haiku call costs ~$0.001-$0.005. 4 fixtures × 1 retry budget
+    # = up to $0.04 per full run. Hard cap at 10 attempts to prevent a
+    # runaway loop in case the assertions are misconfigured.
+    repeat: 1
+
+# Outputs go to evals/output.json by default. The HTML report renders
+# from that file via `pnpm dlx promptfoo view`.
+outputPath: evals/output.json

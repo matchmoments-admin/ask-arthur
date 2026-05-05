@@ -1,0 +1,26 @@
+# Locks in: ATO/MyGov impersonation pattern (highest-volume AU scam in
+# verdict_feedback last quarter). Should always escalate to HIGH_RISK
+# and surface the official ATO contact line.
+- description: Fake ATO tax refund SMS — should be HIGH_RISK
+  vars:
+    text: |
+      ATO: You have a tax refund of $1,247.50 pending. Click here to
+      claim within 24 hours or it will be returned to the Treasury:
+      http://ato-refund-au.com/claim?id=83F2A
+    mode: text
+  assert:
+    - type: javascript
+      value: |
+        output.verdict === "HIGH_RISK"
+    - type: contains-any
+      value:
+        - ATO
+        - tax refund
+        - my.gov.au
+        - 13 28 61
+    - type: javascript
+      value: |
+        // ATO is a top-3 AU brand — Haiku should name it as the
+        // impersonated brand on a confident match.
+        typeof output.impersonatedBrand === "string" &&
+        /ato|tax|mygov/i.test(output.impersonatedBrand)

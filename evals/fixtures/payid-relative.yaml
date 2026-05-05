@@ -1,0 +1,24 @@
+# Locks in: classic Marketplace PayID 'relative will collect' pattern.
+# Original audit (Round 2): canonical AU consumer-explainer scam.
+- description: PayID relative-collect scam — should be HIGH_RISK
+  vars:
+    text: |
+      Hi mate, very interested in your trailer. I'm at work right now so my
+      brother will come pick it up. I'll send you payment via PayID
+      straight away — what's your email for the PayID confirmation? My
+      bank limits are a bit weird so you might get an email about
+      upgrading your account, just follow the link to fix it.
+    mode: text
+  assert:
+    - type: javascript
+      value: |
+        output.verdict === "HIGH_RISK" || output.verdict === "SUSPICIOUS"
+    - type: contains-any
+      value:
+        - PayID
+        - marketplace
+        - relative
+        - upgrade
+    - type: javascript
+      value: |
+        Array.isArray(output.redFlags) && output.redFlags.length >= 2
