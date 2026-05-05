@@ -470,6 +470,9 @@ importers:
       '@anthropic-ai/sdk':
         specifier: ^0.74.0
         version: 0.74.0(zod@4.3.6)
+      '@askarthur/core-analysis':
+        specifier: workspace:*
+        version: link:../core-analysis
       '@askarthur/supabase':
         specifier: workspace:*
         version: link:../supabase
