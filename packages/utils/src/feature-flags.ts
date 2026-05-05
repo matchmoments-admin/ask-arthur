@@ -302,6 +302,14 @@ export const featureFlags = {
    *  Default OFF until the orgId tenant-scoping is confirmed safe and the
    *  /api/v1/exposure HTTP producer (separate PR) is in place. */
   vulnB2bExposure: process.env.FF_VULN_B2B_EXPOSURE === "true",
+
+  /** Round-2 audit (b) closure — render "Similar reports we've seen" under
+   *  the verdict on the consumer scan flow. The /api/analyze/similar route,
+   *  match_scam_reports_hybrid RPC (v95), and Voyage rerank-2.5-lite are
+   *  already live; this gates the UI consumer only. SAFE verdicts skip the
+   *  surface (it's only useful for SUSPICIOUS / HIGH_RISK). Default OFF
+   *  until preview smoke-test confirms latency budget and zero PII leak. */
+  similarReports: process.env.NEXT_PUBLIC_FF_SIMILAR_REPORTS === "true",
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;

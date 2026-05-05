@@ -9,6 +9,7 @@ import ResultCard from "./ResultCard";
 import ScreenshotDrawer from "./ScreenshotDrawer";
 import QrScanFlow from "./QrScanFlow";
 import InvalidSubmissionState from "./result/InvalidSubmissionState";
+import SimilarReports from "./result/SimilarReports";
 import { compressImage } from "@/lib/compressImage";
 import { tryDecodeQR } from "@/lib/qrDecode";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -598,6 +599,16 @@ export default function ScamChecker() {
             onCheckAnother={handleReset}
           />
       )}
+      {/* Similar prior reports — only meaningful for non-SAFE verdicts.
+          Decorative; hides itself silently on retrieval failure. */}
+      {result &&
+        status === "complete" &&
+        !charityResult &&
+        featureFlags.similarReports &&
+        result.verdict !== "SAFE" &&
+        text.trim().length > 0 && (
+          <SimilarReports text={text} />
+        )}
 
       {/* Media analysis result */}
       {showMediaResult && media.result && (
