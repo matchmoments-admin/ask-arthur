@@ -749,6 +749,124 @@ def cleanup_reddit_posts(conn) -> None:
         cursor.close()
 
 
+def bulk_upsert_narrative_feed_items(
+    conn,
+    items: list[dict],
+    feed_name: str,
+) -> dict:
+    """Direct INSERT ... ON CONFLICT for news-style narrative items.
+
+    Distinct from bulk_upsert_feed_items() which calls the upsert_feed_item
+    RPC — that RPC doesn't know about body_md/tags/published_at/evidence_r2_key
+    (added in v97). Rather than expand the RPC's signature (which would
+    require migration coordination with reddit_scams.py), this helper writes
+    the new columns directly via SQL.
+
+    Required keys per item:
+        source, external_id, title
+
+    Optional keys:
+        description, url, source_url, category, country_code,
+        impersonated_brand, body_md, tags, published_at, evidence_r2_key,
+        provenance_tier, source_created_at
+
+    Returns stats: {new, updated, skipped}.
+    """
+    stats = {"new": 0, "updated": 0, "skipped": 0}
+    if not items:
+        return stats
+
+    cursor = conn.cursor()
+    upsert_start = time.time()
+    rows: list[tuple] = []
+
+    for item in items:
+        source = (item.get("source") or "").strip()
+        external_id = (item.get("external_id") or "").strip()
+        title = (item.get("title") or "").strip()
+        if not source or not external_id or not title:
+            stats["skipped"] += 1
+            continue
+        rows.append((
+            source,
+            external_id,
+            title,
+            item.get("description"),
+            item.get("url"),
+            item.get("source_url"),
+            item.get("category"),
+            item.get("country_code"),
+            item.get("impersonated_brand"),
+            item.get("body_md"),
+            item.get("tags"),  # list[str] -> Postgres TEXT[]
+            item.get("published_at"),
+            item.get("evidence_r2_key"),
+            item.get("provenance_tier", "official"),  # narrative scrapers default to 'official'
+            item.get("source_created_at") or item.get("published_at"),
+        ))
+
+    if not rows:
+        cursor.close()
+        return stats
+
+    # ON CONFLICT key uses the partial unique index on (source, external_id)
+    # WHERE external_id IS NOT NULL. xmax = 0 in the RETURNING expression
+    # means "this row is freshly inserted" — anything else is an update.
+    try:
+        results = psycopg2.extras.execute_values(
+            cursor,
+            """
+            INSERT INTO public.feed_items
+              (source, external_id, title, description, url, source_url,
+               category, country_code, impersonated_brand, body_md, tags,
+               published_at, evidence_r2_key, provenance_tier, source_created_at,
+               published, created_at)
+            VALUES %s
+            ON CONFLICT (source, external_id) WHERE external_id IS NOT NULL
+            DO UPDATE SET
+              title = EXCLUDED.title,
+              description = EXCLUDED.description,
+              url = EXCLUDED.url,
+              source_url = EXCLUDED.source_url,
+              category = EXCLUDED.category,
+              country_code = EXCLUDED.country_code,
+              impersonated_brand = EXCLUDED.impersonated_brand,
+              body_md = EXCLUDED.body_md,
+              tags = EXCLUDED.tags,
+              published_at = EXCLUDED.published_at,
+              evidence_r2_key = EXCLUDED.evidence_r2_key,
+              source_created_at = EXCLUDED.source_created_at
+            RETURNING (xmax = 0) AS is_new
+            """,
+            [(*r, True) for r in rows],
+            template="(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())",
+            fetch=True,
+        )
+        for row in results:
+            if row[0]:
+                stats["new"] += 1
+            else:
+                stats["updated"] += 1
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.error(
+            f"bulk_upsert_narrative_feed_items failed: {e}",
+            extra={"metadata": {"feed": feed_name, "rows": len(rows)}},
+        )
+        stats["skipped"] = len(rows)
+    finally:
+        cursor.close()
+
+    total_ms = int((time.time() - upsert_start) * 1000)
+    logger.info(
+        f"narrative upsert: {stats['new']} new, {stats['updated']} updated, "
+        f"{stats['skipped']} skipped in {total_ms}ms",
+        extra={"metadata": {"feed": feed_name, "duration_ms": total_ms}},
+    )
+    return stats
+
+
 def log_ingestion(
     conn,
     feed_name: str,
