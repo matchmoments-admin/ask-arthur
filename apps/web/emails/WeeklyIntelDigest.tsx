@@ -7,15 +7,17 @@
 // styling.
 //
 // Slot mapping (intel data → briefing slots):
-//   leadNarrative           → intro paragraphs
 //   emergingThemes[0].title → headline (or fallback by post count)
+//   stats summary           → 3-column stats card, lifted above the lead so
+//                              brands see their name in the first scroll-zone
+//   topBrands               → "Brands impersonated" chip strip, sits with the
+//                              stats card (was buried below the lead before)
+//   leadNarrative           → first paragraph only — Sonnet's multi-paragraph
+//                              output buried the signal in the email
 //   emergingThemes[1..]     → numbered list, "Emerging this week"
-//   topBrands               → sentence in "Brands impersonated"
 //   scamOfTheWeekQuote      → tip callout (white card, navy border)
 //   topCategories           → "By the numbers" sentence
 //   tweetDraft              → monospace card with char counter
-//   stats summary           → 3-column stats card (replaces hero image —
-//                              we don't have a generic intel illustration)
 
 import {
   Html,
@@ -107,9 +109,13 @@ export default function WeeklyIntelDigest({
   const previewLine =
     emergingThemes[0]?.narrative ??
     `${totalPostsClassified} scam reports analysed across ${emergingThemes.length} active themes`;
-  const intro = leadNarrative
+  // Keep only the first paragraph of the lead narrative — Sonnet tends to
+  // produce 80–120 words across 2–3 paragraphs, which buries the signal in
+  // the email. The structured "Emerging this week" list carries the rest.
+  const introLead = leadNarrative
     .split(/\n{2,}/)
-    .filter((p) => p.trim().length > 0);
+    .map((p) => p.trim())
+    .find((p) => p.length > 0) ?? "";
 
   return (
     <Html>
@@ -220,30 +226,10 @@ export default function WeeklyIntelDigest({
               {headline}
             </Heading>
 
-            {/* Intro paragraphs (lead narrative) */}
-            {intro.length > 0 && (
-              <div style={{ paddingTop: "18px" }}>
-                {intro.map((para, i) => (
-                  <Text
-                    key={i}
-                    style={{
-                      margin: i === 0 ? 0 : "14px 0 0 0",
-                      padding: 0,
-                      fontFamily: SERIF,
-                      fontSize: "16px",
-                      lineHeight: "26px",
-                      color: NAVY,
-                      fontWeight: 400,
-                    }}
-                  >
-                    {para}
-                  </Text>
-                ))}
-              </div>
-            )}
-
-            {/* Stats card (replaces hero image) — three columns */}
-            <div style={{ paddingTop: "28px", paddingBottom: "28px" }}>
+            {/* Stats card (lifted above the intro so brands see their name
+                in five seconds — best-in-class threat-intel newsletters all
+                lead with scannable numbers, prose follows). */}
+            <div style={{ paddingTop: "20px", paddingBottom: "20px" }}>
               <Section
                 style={{
                   backgroundColor: SURFACE_TINT,
@@ -353,6 +339,62 @@ export default function WeeklyIntelDigest({
               </Section>
             </div>
 
+            {/* Brand chip strip — sits with the stats so brand names land in
+                the first scroll-zone, not buried below the prose. */}
+            {topBrands.length > 0 && (
+              <Text
+                style={{
+                  margin: "0 0 8px 0",
+                  padding: 0,
+                  fontFamily: SANS,
+                  fontSize: "11px",
+                  fontWeight: 600,
+                  letterSpacing: "2px",
+                  textTransform: "uppercase" as const,
+                  color: NAVY,
+                  opacity: 0.7,
+                }}
+              >
+                Brands impersonated
+              </Text>
+            )}
+            {topBrands.length > 0 && (
+              <Text
+                style={{
+                  margin: "0 0 24px 0",
+                  padding: 0,
+                  fontFamily: SERIF,
+                  fontSize: "15px",
+                  lineHeight: "24px",
+                  color: NAVY,
+                  fontWeight: 400,
+                }}
+              >
+                {topBrands
+                  .map((b) => `${b.brand} (×${b.mentionCount})`)
+                  .join(" · ")}
+              </Text>
+            )}
+
+            {/* Lead — single tight paragraph, not the full Sonnet-generated
+                multi-paragraph narrative. */}
+            {introLead.length > 0 && (
+              <Text
+                style={{
+                  margin: 0,
+                  padding: 0,
+                  fontFamily: SERIF,
+                  fontSize: "16px",
+                  lineHeight: "26px",
+                  color: NAVY,
+                  fontWeight: 400,
+                  paddingBottom: "28px",
+                }}
+              >
+                {introLead}
+              </Text>
+            )}
+
             {/* Emerging themes section */}
             {emergingThemes.length > 0 && (
               <>
@@ -439,41 +481,6 @@ export default function WeeklyIntelDigest({
                   ))}
                 </div>
               </>
-            )}
-
-            {/* Brand watchlist sentence */}
-            {topBrands.length > 0 && (
-              <div style={{ paddingTop: "32px" }}>
-                <Heading
-                  as="h2"
-                  style={{
-                    margin: 0,
-                    padding: 0,
-                    fontSize: "22px",
-                    lineHeight: "28px",
-                    fontFamily: SERIF,
-                    fontWeight: 600,
-                    color: NAVY,
-                  }}
-                >
-                  Brands impersonated
-                </Heading>
-                <Text
-                  style={{
-                    margin: "12px 0 0 0",
-                    padding: 0,
-                    fontFamily: SERIF,
-                    fontSize: "16px",
-                    lineHeight: "26px",
-                    color: NAVY,
-                    fontWeight: 400,
-                  }}
-                >
-                  {topBrands
-                    .map((b) => `${b.brand} (×${b.mentionCount})`)
-                    .join(" · ")}
-                </Text>
-              </div>
             )}
 
             {/* Scam of the week — tip callout style */}
