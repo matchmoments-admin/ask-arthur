@@ -467,17 +467,19 @@ def _extract_first_image(post: dict) -> str | None:
     return None
 
 
-def _get_oauth_token() -> str | None:
+def _get_oauth_token() -> tuple[str | None, float]:
     """Get Reddit OAuth bearer token using app-only (client_credentials) flow.
 
     Requires REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET env vars.
-    Returns None if credentials are not configured.
+    Returns (token, expires_at_epoch_seconds). On missing creds returns
+    (None, 0.0). Reddit defaults `expires_in` to 3600s; we fall back to
+    that if absent.
     """
     import os
     client_id = os.environ.get("REDDIT_CLIENT_ID")
     client_secret = os.environ.get("REDDIT_CLIENT_SECRET")
     if not client_id or not client_secret:
-        return None
+        return None, 0.0
     resp = requests.post(
         "https://www.reddit.com/api/v1/access_token",
         auth=(client_id, client_secret),
@@ -486,19 +488,69 @@ def _get_oauth_token() -> str | None:
         timeout=30,
     )
     resp.raise_for_status()
-    return resp.json().get("access_token")
+    body = resp.json()
+    token = body.get("access_token")
+    expires_in = body.get("expires_in", 3600)
+    expires_at = time.time() + float(expires_in)
+    return token, expires_at
 
 
-# Module-level state (reset per test via _reset_fetch_state)
+# Module-level state (reset per test via _reset_fetch_state).
+# `_oauth_token` semantics:
+#   None — never fetched yet
+#   ""   — fetch attempted and failed (don't keep retrying within a run)
+#   "..."— valid token; refresh when time.time() >= _oauth_token_expires_at - 60
 _oauth_token: str | None = None
+_oauth_token_expires_at: float = 0.0
+_OAUTH_REFRESH_LEEWAY_SECONDS = 60
 _working_endpoint: str | None = None  # Cache which endpoint succeeded
 
 
 def _reset_fetch_state() -> None:
     """Reset module-level fetch state. Used by tests."""
-    global _oauth_token, _working_endpoint
+    global _oauth_token, _oauth_token_expires_at, _working_endpoint
     _oauth_token = None
+    _oauth_token_expires_at = 0.0
     _working_endpoint = None
+
+
+def _ensure_oauth_token() -> str:
+    """Return a usable OAuth token, refreshing if expired or not yet fetched.
+
+    Returns "" when credentials are absent OR a previous fetch failed within
+    this run (don't hammer the auth endpoint). Empty-string sentinel is
+    distinct from `None` (never tried) so the caller can fall through to
+    unauth endpoints without re-attempting auth.
+    """
+    global _oauth_token, _oauth_token_expires_at
+
+    now = time.time()
+
+    # Token is fresh — reuse.
+    if _oauth_token and now < _oauth_token_expires_at - _OAUTH_REFRESH_LEEWAY_SECONDS:
+        return _oauth_token
+
+    # Empty-string sentinel: a prior fetch in this run failed; don't retry.
+    if _oauth_token == "":
+        return ""
+
+    # Either never fetched (None) or expired/near-expired — fetch fresh.
+    try:
+        token, expires_at = _get_oauth_token()
+    except Exception as e:
+        logger.warning(f"OAuth token fetch failed: {e}")
+        _oauth_token = ""
+        _oauth_token_expires_at = 0.0
+        return ""
+
+    if token:
+        _oauth_token = token
+        _oauth_token_expires_at = expires_at
+        return token
+
+    _oauth_token = ""
+    _oauth_token_expires_at = 0.0
+    return ""
 
 
 def _fetch_json_endpoint(
@@ -646,7 +698,7 @@ def _fetch_subreddit_posts(subreddit: str, limit: int) -> list[dict]:
     Priority: OAuth → old.reddit JSON → www.reddit JSON → RSS feed.
     Caches which endpoint works across subreddits within a scrape run.
     """
-    global _oauth_token, _working_endpoint
+    global _working_endpoint
 
     json_params = {"limit": limit, "raw_json": 1}
     public_headers = {"User-Agent": _USER_AGENT}
@@ -663,19 +715,13 @@ def _fetch_subreddit_posts(subreddit: str, limit: int) -> list[dict]:
         )
         _working_endpoint = None
 
-    # ── Tier 1: OAuth ──
-    if _oauth_token is None:
-        try:
-            _oauth_token = _get_oauth_token() or ""
-        except Exception as e:
-            logger.warning(f"OAuth token fetch failed: {e}")
-            _oauth_token = ""
-
-    if _oauth_token:
+    # ── Tier 1: OAuth (fetched/refreshed transparently) ──
+    token = _ensure_oauth_token()
+    if token:
         url = _REDDIT_OAUTH_BASE.format(subreddit=subreddit)
         oauth_headers = {
             "User-Agent": _USER_AGENT,
-            "Authorization": f"Bearer {_oauth_token}",
+            "Authorization": f"Bearer {token}",
         }
         result = _fetch_json_endpoint(url, json_params, oauth_headers)
         if result is not None:
