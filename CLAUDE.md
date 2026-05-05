@@ -219,6 +219,27 @@ sometimes lossy if a subsequent rebase has rewritten hashes.
    `mcp__supabase__apply_migration` on project `rquomhcgnodxzkhokwni`.
    Migrations should be idempotent (`CREATE TABLE IF NOT EXISTS`, `DROP POLICY IF
 EXISTS ... CREATE POLICY ...`, etc.) so re-running is safe.
+
+   **PL/pgSQL function gotchas — verified bites in prod (2026-05-06):**
+   - When a function has `RETURNS TABLE (col_name …)`, an unqualified
+     `col_name` inside the body resolves to the OUT-parameter variable,
+     NOT a table or CTE column. Add `#variable_conflict use_column`
+     immediately after `AS $$` to flip this default. Without it, an
+     unqualified `select id from cte` in the body raises
+     `ERROR 42702: column reference "id" is ambiguous` at function-call
+     time, never at CREATE FUNCTION time.
+   - `SET search_path = ''` hides extension operators like pgvector's
+     `<=>`. Use `SET search_path = public, pg_catalog` for SECURITY
+     INVOKER functions that depend on extension-provided operators;
+     reserve the empty form for SECURITY DEFINER functions where
+     unqualified-name exploitation is the actual threat model.
+   - Both bites surface as immediate exceptions on the first call,
+     regardless of input data — which is what
+     `packages/scam-engine/src/__tests__/rpcs.smoke.test.ts` is for.
+     Run it with `SUPABASE_INTEGRATION_TEST_URL` +
+     `SUPABASE_INTEGRATION_TEST_SERVICE_KEY` set against a preview
+     branch after applying any migration that touches a function body.
+
 6. **Check advisors** — `mcp__supabase__get_advisors` (type: security and performance).
    New ERRORs introduced by the migration must be fixed before merging the PR;
    pre-existing ERRORs can be documented in `ROADMAP.md` and deferred.

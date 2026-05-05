@@ -66,6 +66,7 @@
     "twilio": "^5.4.0"
   },
   "devDependencies": {
+    "@supabase/supabase-js": "^2.95.3",
     "@types/semver": "^7.5.8",
     "typescript": "^5",
     "vitest": "^4.0.18"
