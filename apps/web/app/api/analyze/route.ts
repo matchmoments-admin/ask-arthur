@@ -3,6 +3,10 @@ import { waitUntil, ipAddress } from "@vercel/functions";
 import { checkRateLimit, checkImageUploadRateLimit } from "@askarthur/utils/rate-limit";
 import { analyzeWithClaude, detectInjectionAttempt } from "@askarthur/scam-engine/claude";
 import { mergeVerdict } from "@askarthur/core-analysis";
+import {
+  getRelevantThemes,
+  renderThemesForPrompt,
+} from "@askarthur/scam-engine/retrieval/themes";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { resolveRequestId } from "@askarthur/utils/request-id";
 import { extractContactsFromText, normalizePhoneE164 } from "@askarthur/scam-engine/phone-normalize";
@@ -211,8 +215,29 @@ export async function POST(req: NextRequest) {
     // belongs in Promise.all — resolve it inline above the fan-out.
     const geo = geolocateFromHeaders(req.headers);
     const { region, countryCode } = geo;
+
+    // 5a. RAG themes — when FF_RAG_THEMES is on, fetch the top-K reddit_intel
+    //     themes whose centroid is closest to this submission and append
+    //     them to Haiku's system prompt as a second (uncached) block.
+    //     Themes must resolve BEFORE the Claude call so the prompt has
+    //     the context. URL reputation still runs in parallel with Claude
+    //     (the larger latency item). Net cost: ~150-250ms when the flag
+    //     is on, against the ~1.5-3s Claude call.
+    const themesPromptBlock =
+      featureFlags.ragThemes && text
+        ? await getRelevantThemes(text, { requestId }).then(
+            renderThemesForPrompt,
+          )
+        : "";
+
     const [aiResult, urlResults] = await Promise.all([
-      analyzeWithClaude(text, images.length > 0 ? images : undefined, mode, redirectChains.length > 0 ? redirectChains : undefined),
+      analyzeWithClaude(
+        text,
+        images.length > 0 ? images : undefined,
+        mode,
+        redirectChains.length > 0 ? redirectChains : undefined,
+        themesPromptBlock || undefined,
+      ),
       checkURLReputation(allUrls),
     ]);
 

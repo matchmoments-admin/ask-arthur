@@ -293,7 +293,16 @@ export async function analyzeWithClaude(
   text?: string,
   imagesBase64?: string[],
   mode?: AnalysisMode,
-  redirectChains?: RedirectChain[]
+  redirectChains?: RedirectChain[],
+  /**
+   * Optional RAG block to append after the static system prompt. Used by
+   * the FF_RAG_THEMES path to inject "recent community-reported scam
+   * patterns" into Haiku's context. Sent as a SECOND system block (not
+   * concatenated into SYSTEM_PROMPT) so the static prompt stays
+   * cache-eligible — different themes mean different second blocks but
+   * the larger first block still hits the prompt cache.
+   */
+  themesPromptBlock?: string,
 ): Promise<AnalysisResult> {
   // Fail-closed in production, mock in dev
   if (!process.env.ANTHROPIC_API_KEY) {
@@ -409,6 +418,11 @@ export async function analyzeWithClaude(
           text: SYSTEM_PROMPT,
           cache_control: { type: "ephemeral" as const },
         },
+        // RAG themes block — non-cached on purpose so its variability
+        // doesn't poison the prompt cache for the static block above.
+        ...(themesPromptBlock && themesPromptBlock.length > 0
+          ? [{ type: "text" as const, text: themesPromptBlock }]
+          : []),
       ],
       messages: [
         { role: "user", content },
