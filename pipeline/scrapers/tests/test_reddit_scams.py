@@ -19,6 +19,7 @@ from reddit_scams import (
     _extract_post_id_from_permalink,
     _fetch_subreddit_posts,
     _reset_fetch_state,
+    _ensure_oauth_token,
     _USER_AGENT,
 )
 
@@ -979,3 +980,83 @@ class TestFetchSubredditPosts:
         )
         posts = _fetch_subreddit_posts("Scams", 100)
         assert posts == []
+
+
+class TestEnsureOauthToken:
+    """OAuth token expiry — refresh near expiry, don't re-fetch when fresh."""
+
+    def setup_method(self):
+        _reset_fetch_state()
+
+    def test_token_cached_when_fresh(self, monkeypatch):
+        """Calling _ensure_oauth_token twice within a run uses one POST."""
+        monkeypatch.setenv("REDDIT_CLIENT_ID", "id")
+        monkeypatch.setenv("REDDIT_CLIENT_SECRET", "secret")
+        post_count = 0
+
+        def mock_post(*a, **kw):
+            nonlocal post_count
+            post_count += 1
+            return _make_json_response(
+                {"access_token": "tok-fresh", "expires_in": 3600}
+            )
+
+        monkeypatch.setattr(requests, "post", mock_post)
+        assert _ensure_oauth_token() == "tok-fresh"
+        assert _ensure_oauth_token() == "tok-fresh"
+        assert post_count == 1
+
+    def test_token_refreshed_when_near_expiry(self, monkeypatch):
+        """When the cached token is within 60s of expiry, refresh it."""
+        monkeypatch.setenv("REDDIT_CLIENT_ID", "id")
+        monkeypatch.setenv("REDDIT_CLIENT_SECRET", "secret")
+        tokens = iter(["tok-old", "tok-new"])
+        post_count = 0
+
+        def mock_post(*a, **kw):
+            nonlocal post_count
+            post_count += 1
+            # First call returns a token that expires in 30s (inside the
+            # 60s leeway window — should refresh on next call).
+            if post_count == 1:
+                return _make_json_response(
+                    {"access_token": next(tokens), "expires_in": 30}
+                )
+            return _make_json_response(
+                {"access_token": next(tokens), "expires_in": 3600}
+            )
+
+        monkeypatch.setattr(requests, "post", mock_post)
+        first = _ensure_oauth_token()
+        second = _ensure_oauth_token()
+        assert first == "tok-old"
+        assert second == "tok-new"
+        assert post_count == 2
+
+    def test_failure_caches_empty_string(self, monkeypatch):
+        """Auth fetch failure stamps "" — subsequent calls don't retry."""
+        monkeypatch.setenv("REDDIT_CLIENT_ID", "id")
+        monkeypatch.setenv("REDDIT_CLIENT_SECRET", "secret")
+        post_count = 0
+
+        def mock_post(*a, **kw):
+            nonlocal post_count
+            post_count += 1
+            raise requests.exceptions.ConnectionError("auth down")
+
+        monkeypatch.setattr(requests, "post", mock_post)
+        assert _ensure_oauth_token() == ""
+        assert _ensure_oauth_token() == ""
+        # Failure cached — no retry on second call.
+        assert post_count == 1
+
+    def test_no_credentials_returns_empty(self, monkeypatch):
+        """No client id/secret env vars → return "" without HTTP call."""
+        monkeypatch.delenv("REDDIT_CLIENT_ID", raising=False)
+        monkeypatch.delenv("REDDIT_CLIENT_SECRET", raising=False)
+
+        def mock_post(*a, **kw):
+            raise AssertionError("requests.post should not be called")
+
+        monkeypatch.setattr(requests, "post", mock_post)
+        assert _ensure_oauth_token() == ""
