@@ -65,6 +65,89 @@ produced this prioritized work queue. Full plan with verification matrix:
 
 ---
 
+## Audit Round 2 Remediation (2026-05-05) — deferred items
+
+The Round-2 codebase audit (2026-05-05) closed the bulk of items via PRs
+#125-#133. The list below is what's _intentionally not in the sprint_ —
+either because it requires a fresh signup (Google Play, Apple Developer)
+or because it's a multi-week build that didn't fit the side-bug pass.
+
+### Requires external signup (not unblocked yet)
+
+- **Real device attestation (Play Integrity + App Attest)** —
+  `apps/web/app/api/mobile/attest/route.ts` returns `501` in production
+  (W1.3 fail-loud guard, also covered by P0.1 above). Lifting that 501
+  needs **(a)** Google Play Console enrolment + Play Integrity API
+  credentials and **(b)** Apple Developer Program enrolment + App Attest
+  configuration. Both are paid annual signups. The route's flag stays
+  default-OFF and the 501 stays in the production hot path until both
+  exist. No code change unblocks this.
+
+### Significant scope (not signup-blocked, just deferred)
+
+- **Visual fingerprinting / `voyage-multimodal-3.5` call path (item h
+  from Round-2 audit)** — model is registered with `callPathReady: false`
+  and throws on invocation. Implementing it requires a new
+  `visual_fingerprints` table (migration), an Inngest screenshot-embed
+  consumer, and a clusterer for the multimodal vectors. ~2 weeks of work
+  and no consumer surface justifies the spend yet — submission volume
+  on screenshots is well below the threshold where dense visual
+  retrieval would beat the existing OCR+text path. Re-evaluate if image
+  submissions exceed 100/day for two consecutive weeks.
+
+- **Dual-embedding drift detection (item g from Round-2 audit)** —
+  `dual_consistency` column on `scam_reports` would track
+  `cosine(raw_text_embed, prefixed_text_embed)` per row to flag
+  population-level drift via Evidently or similar. The column is a
+  small migration; the alarm tooling is the load-bearing piece and
+  requires either Evidently in the stack or a custom rolling-quantile
+  job. Defer until volume + staffing justify a drift dashboard.
+
+- **Inngest fixture-extraction job (PR #133 follow-up)** — the
+  promptfoo skeleton in `evals/` ships with hand-curated fixtures.
+  The full audit-item-(i) closure needs an Inngest cron that reads
+  `verdict_feedback WHERE training_consent = true AND processed_at IS
+  NULL`, generates `evals/fixtures/auto/<id>.yaml` candidates, and
+  marks the row `processed_at = NOW()`. **Crucially**, auto-extracted
+  fixtures should NOT be promoted into the regression suite without
+  human review — a single mis-labelled feedback row in the gate
+  poisons every PR check after that. Requires a small `/admin/eval-fixtures`
+  triage UI: list pending fixtures, allow accept-into-curated /
+  reject. Cost-budget guard on the eval workflow (abort if cumulative
+  Anthropic spend > `EVAL_BUDGET_USD`, default $1) ships in the same
+  PR.
+
+### Cosmetic / nice-to-have
+
+- **`FeedbackDisagreementTile` on `/admin` dashboard** — the daily
+  Telegram digest from W1.1 (`/api/cron/feedback-digest`) covers
+  operator awareness on disagreement spikes. A dashboard tile would
+  be redundant for monitoring but useful for at-a-glance trend
+  inspection during incident review. Bundle with the next
+  `/admin` revamp; no standalone PR warranted.
+
+- **Cost-telemetry tagging for the new retrieval modules** — both
+  `getSimilarReports` (PR #126) and `getRelevantThemes` (PR #132) hit
+  Voyage but don't currently emit `cost_telemetry` rows. The
+  retrieval modules need a small refactor to thread token counts
+  back from the Voyage client into a `logCost({ feature: 'similar-reports' | 'rag-themes' })`
+  call. Comments in `packages/scam-engine/src/rerank.ts` already
+  flag this as a TODO. Single small PR; not on any critical path.
+
+- **Themes-on parallel eval coverage (PR #133 follow-up)** — when
+  `FF_RAG_THEMES` is on the prompt has different context, so the
+  current `evals/fixtures/*.yaml` set covers only the OFF path. Add a
+  parallel `evals/fixtures-with-themes/` set that locks behaviour
+  with the themes block. Trivial once promptfoo is wired.
+
+- **PR-comment summariser for promptfoo** — the workflow in PR #133
+  uploads `evals/output.json` as a build artifact. Wiring a job that
+  posts a pass/fail count + drift diff into the PR comment would
+  give reviewers a one-glance answer without downloading the
+  artifact. Standard `actions/github-script` pattern.
+
+---
+
 ## Result Screen V2 — follow-up sprints
 
 P0 (feedback widget, two-button footer, invalid-state, honest progress) is now
