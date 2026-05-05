@@ -166,3 +166,44 @@ describe("embed — domain routing", () => {
     ).rejects.toThrow(/Unknown modelId/);
   });
 });
+
+describe("embeddings — env-routing health check at module load", () => {
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.resetModules();
+    delete process.env.EMBEDDING_MODEL_GENERIC;
+    delete process.env.EMBEDDING_MODEL_FINANCE;
+    delete process.env.EMBEDDING_MODEL_MULTIMODAL;
+  });
+
+  afterEach(() => {
+    warnSpy?.mockRestore();
+  });
+
+  it("warns when EMBEDDING_MODEL_MULTIMODAL routes to a callPathReady=false model", async () => {
+    process.env.EMBEDDING_MODEL_MULTIMODAL = "voyage-multimodal-3.5";
+    const loggerModule = await import("@askarthur/utils/logger");
+    warnSpy = vi.spyOn(loggerModule.logger, "warn");
+    await import("../embeddings");
+    const calls = warnSpy.mock.calls.map((c) => String(c[0]));
+    expect(
+      calls.some(
+        (msg) =>
+          msg.includes("EMBEDDING_MODEL_MULTIMODAL") &&
+          msg.includes("call path is NOT yet implemented"),
+      ),
+    ).toBe(true);
+  });
+
+  it("stays silent when no env var routes to a non-ready model", async () => {
+    process.env.EMBEDDING_MODEL_GENERIC = "voyage-3.5-lite";
+    const loggerModule = await import("@askarthur/utils/logger");
+    warnSpy = vi.spyOn(loggerModule.logger, "warn");
+    await import("../embeddings");
+    const calls = warnSpy.mock.calls.map((c) => String(c[0]));
+    expect(
+      calls.some((msg) => msg.includes("call path is NOT yet implemented")),
+    ).toBe(false);
+  });
+});
