@@ -85,14 +85,19 @@ function metaLine(r: SimilarReport): string {
 }
 
 export default function SimilarReports({ text }: Props) {
-  const [state, setState] = useState<State>({ status: "loading" });
+  // Lazy initial state — the empty-text branch resolves at first render
+  // without a follow-up setState call (which would have triggered the
+  // react-hooks/cascading-renders lint rule). The parent guards against
+  // empty text but we keep the check defensively.
+  const [state, setState] = useState<State>(() =>
+    text.trim().length === 0
+      ? ({ status: "hidden" } as State)
+      : ({ status: "loading" } as State),
+  );
 
   useEffect(() => {
     const trimmed = text.trim();
-    if (trimmed.length === 0) {
-      setState({ status: "hidden" });
-      return;
-    }
+    if (trimmed.length === 0) return;
 
     let cancelled = false;
 
