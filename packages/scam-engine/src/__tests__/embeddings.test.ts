@@ -186,10 +186,10 @@ describe("embeddings — env-routing health check at module load", () => {
     const loggerModule = await import("@askarthur/utils/logger");
     warnSpy = vi.spyOn(loggerModule.logger, "warn");
     await import("../embeddings");
-    const calls = warnSpy.mock.calls.map((c) => String(c[0]));
+    const calls = warnSpy.mock.calls.map((c: unknown[]) => String(c[0]));
     expect(
       calls.some(
-        (msg) =>
+        (msg: string) =>
           msg.includes("EMBEDDING_MODEL_MULTIMODAL") &&
           msg.includes("call path is NOT yet implemented"),
       ),
@@ -201,9 +201,11 @@ describe("embeddings — env-routing health check at module load", () => {
     const loggerModule = await import("@askarthur/utils/logger");
     warnSpy = vi.spyOn(loggerModule.logger, "warn");
     await import("../embeddings");
-    const calls = warnSpy.mock.calls.map((c) => String(c[0]));
+    const calls = warnSpy.mock.calls.map((c: unknown[]) => String(c[0]));
     expect(
-      calls.some((msg) => msg.includes("call path is NOT yet implemented")),
+      calls.some((msg: string) =>
+        msg.includes("call path is NOT yet implemented"),
+      ),
     ).toBe(false);
   });
 });
