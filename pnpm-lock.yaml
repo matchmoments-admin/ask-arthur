@@ -154,6 +154,9 @@ importers:
       '@askarthur/charity-check':
         specifier: workspace:*
         version: link:../../packages/charity-check
+      '@askarthur/core-analysis':
+        specifier: workspace:*
+        version: link:../../packages/core-analysis
       '@askarthur/extension-audit':
         specifier: workspace:^
         version: link:../../packages/extension-audit

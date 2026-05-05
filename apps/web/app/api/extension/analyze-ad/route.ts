@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { Redis } from "@upstash/redis";
 import { waitUntil } from "@vercel/functions";
-import { analyzeWithClaude, type Verdict } from "@askarthur/scam-engine/claude";
+import { analyzeWithClaude } from "@askarthur/scam-engine/claude";
 import { extractURLs, checkURLReputation } from "@askarthur/scam-engine/safebrowsing";
 import { checkHiveAI } from "@askarthur/scam-engine/hive-ai";
+import { mergeVerdict, type DeepfakeSignal } from "@askarthur/core-analysis";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -183,41 +184,43 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 5. Merge verdicts
-    let verdict: Verdict = analysis?.verdict ?? "SAFE";
-    const redFlags: string[] = analysis?.redFlags ?? [];
-    let urlMalicious = false;
+    // 5. Build the deepfake signal for the canonical merge. Hive is a
+    // boolean detector — `detected: true` triggers HIGH_RISK escalation in
+    // mergeVerdict; `isAiGenerated: true` adds a red flag without escalating.
+    const deepfakeSignal: DeepfakeSignal | undefined = hive
+      ? {
+          detected: hive.isDeepfake,
+          provider: "hive",
+          isAiGenerated: hive.isAiGenerated,
+        }
+      : undefined;
 
-    // URL malicious → escalate to HIGH_RISK
-    const maliciousURLs = Array.isArray(urlChecks) ? urlChecks.filter((r) => r.isMalicious) : [];
-    if (maliciousURLs.length > 0) {
-      verdict = "HIGH_RISK";
-      urlMalicious = true;
-      for (const mal of maliciousURLs) {
-        redFlags.push(`URL flagged by ${mal.sources.join(" and ")}: ${mal.url}`);
-      }
-    }
-
-    // Hive deepfake → escalate to HIGH_RISK
-    let aiGeneratedImage = false;
-    let deepfakeDetected = false;
+    // Capture pre-merge facts the response needs to expose alongside the
+    // merged verdict (these aren't part of mergeVerdict's signal output).
+    const generatorSource: string | null = hive?.generatorSource ?? null;
+    const aiGeneratedImage = !!hive?.isAiGenerated;
+    const deepfakeDetected = !!hive?.isDeepfake;
     let impersonatedCelebrity: string | null = null;
-    let generatorSource: string | null = null;
 
-    if (hive) {
-      generatorSource = hive.generatorSource;
-
-      if (hive.isDeepfake) {
-        deepfakeDetected = true;
-        verdict = "HIGH_RISK";
-        redFlags.push("Deepfake image detected by AI analysis");
-      }
-
-      if (hive.isAiGenerated) {
-        aiGeneratedImage = true;
-        redFlags.push("Image appears to be AI-generated");
-      }
-    }
+    // 5b. Canonical merge — replaces the previously-inlined URL-escalation +
+    //     deepfake-escalation logic. Same source of truth as the consumer
+    //     and extension surfaces.
+    const urlChecksList = Array.isArray(urlChecks) ? urlChecks : [];
+    const safeFallbackAi = {
+      verdict: analysis?.verdict ?? ("SAFE" as const),
+      confidence: analysis?.confidence ?? 0.5,
+      summary: analysis?.summary ?? "Unable to analyze this ad.",
+      redFlags: analysis?.redFlags ?? [],
+      nextSteps: analysis?.nextSteps ?? [],
+    };
+    const merged = mergeVerdict({
+      ai: safeFallbackAi,
+      urlResults: urlChecksList,
+      deepfake: deepfakeSignal,
+    });
+    const verdict = merged.verdict;
+    const redFlags = merged.redFlags;
+    const urlMalicious = merged.signals.maliciousUrlCount > 0;
 
     // 6. Celebrity matching (if deepfake detected)
     if (deepfakeDetected && analysis?.impersonatedBrand) {
