@@ -1,11 +1,16 @@
-// POST /api/v1/intel/search — semantic search over Reddit Intel.
+// POST /api/v1/intel/search — semantic search over Reddit Intel + (optionally)
+// AU regulator narratives.
 //
 // Two-stage retrieval pipeline:
 //   1. embedQuery(query) → 1024-dim vector
 //   2. match_reddit_intel RPC → top-50 by cosine over reddit_post_intel
 //      (and optionally match_reddit_intel_themes for theme-level hits)
+//      When featureFlags.regulatorIntelSearch is on, ALSO call
+//      match_feed_items_narrative for Scamwatch/ACSC/ASIC alerts.
 //   3. rerank-2.5-lite → re-orders the top-50 to top-K by relevance
-//   4. respond with the reranked subset + cosine + relevance score
+//      (posts only — narratives are typically <20 results, rerank adds
+//      latency without lift at that volume)
+//   4. respond with the reranked subset + narrative subset + cosine scores
 //
 // Reranking is non-fatal: if the rerank call fails (Voyage outage, rate
 // limit) we fall back to the cosine-only ordering and tag fallback=true
@@ -14,9 +19,9 @@
 // Gated by featureFlags.redditIntelB2bApi (same flag as /api/v1/intel/
 // themes). Auth via API key + daily rate limit.
 //
-// Request body: { query: string, scope?: "posts" | "themes" | "both",
-// limit?: number, minSimilarity?: number }
-// Response: { posts, themes, usage, fallback }
+// Request body: { query: string, scope?: "posts" | "themes" | "both"
+//   | "narratives" | "all", limit?: number, minSimilarity?: number }
+// Response: { posts, themes, narratives, usage, fallback }
 
 import { NextRequest, NextResponse } from "next/server";
 import { validateApiKey } from "@/lib/apiAuth";
@@ -55,6 +60,26 @@ interface ThemeMatchRow {
   ioc_phone_count: number;
   similarity: number;
 }
+
+interface NarrativeMatchRow {
+  id: number;
+  source: string;
+  title: string;
+  description: string | null;
+  body_md: string | null;
+  url: string | null;
+  category: string | null;
+  impersonated_brand: string | null;
+  tags: string[] | null;
+  published_at: string | null;
+  similarity: number;
+}
+
+const NARRATIVE_SOURCE_LABEL: Record<string, string> = {
+  scamwatch_alert: "ACCC Scamwatch",
+  acsc: "ASD ACSC",
+  asic_investor: "ASIC",
+};
 
 const MAX_QUERY_LEN = 1000;
 const DEFAULT_LIMIT = 10;
@@ -106,8 +131,18 @@ export async function POST(req: NextRequest) {
   }
   const query = body.query.trim().slice(0, MAX_QUERY_LEN);
 
-  const scope =
-    body.scope === "themes" || body.scope === "both" ? body.scope : "posts";
+  const validScopes = ["posts", "themes", "both", "narratives", "all"] as const;
+  type Scope = (typeof validScopes)[number];
+  const scope: Scope =
+    typeof body.scope === "string" && validScopes.includes(body.scope as Scope)
+      ? (body.scope as Scope)
+      : "posts";
+
+  const wantPosts = scope === "posts" || scope === "both" || scope === "all";
+  const wantThemes = scope === "themes" || scope === "both" || scope === "all";
+  const wantNarratives =
+    (scope === "narratives" || scope === "all") &&
+    featureFlags.regulatorIntelSearch;
 
   const limit = Math.min(
     Math.max(typeof body.limit === "number" ? body.limit : DEFAULT_LIMIT, 1),
@@ -166,8 +201,9 @@ export async function POST(req: NextRequest) {
 
   let posts: PostMatchRow[] = [];
   let themes: ThemeMatchRow[] = [];
+  let narratives: NarrativeMatchRow[] = [];
 
-  if (scope === "posts" || scope === "both") {
+  if (wantPosts) {
     const { data, error } = await supabase.rpc("match_reddit_intel", {
       p_query_embedding: queryVecPg,
       p_match_count: ANN_TOP_N,
@@ -183,7 +219,7 @@ export async function POST(req: NextRequest) {
     posts = (data ?? []) as PostMatchRow[];
   }
 
-  if (scope === "themes" || scope === "both") {
+  if (wantThemes) {
     const { data, error } = await supabase.rpc("match_reddit_intel_themes", {
       p_query_embedding: queryVecPg,
       p_match_count: ANN_TOP_N,
@@ -197,6 +233,24 @@ export async function POST(req: NextRequest) {
       );
     }
     themes = (data ?? []) as ThemeMatchRow[];
+  }
+
+  if (wantNarratives) {
+    // Narrative volume is tiny (<1k/year), so we don't rerank — cosine ordering
+    // is good enough. Failure is non-fatal; if the RPC errors we just omit
+    // narratives from the response rather than 500'ing the whole search.
+    const { data, error } = await supabase.rpc("match_feed_items_narrative", {
+      p_query_embedding: queryVecPg,
+      p_match_count: limit,
+      p_min_similarity: minSimilarity,
+    });
+    if (error) {
+      logger.warn("match_feed_items_narrative RPC failed (non-fatal)", {
+        error: error.message,
+      });
+    } else {
+      narratives = (data ?? []) as NarrativeMatchRow[];
+    }
   }
 
   // ── Stage 3: rerank posts (themes are usually few enough to skip) ───
@@ -285,6 +339,20 @@ export async function POST(req: NextRequest) {
       iocUrlCount: t.ioc_url_count,
       iocPhoneCount: t.ioc_phone_count,
       similarity: t.similarity,
+    })),
+    narratives: narratives.map((n) => ({
+      id: n.id,
+      source: n.source,
+      sourceLabel: NARRATIVE_SOURCE_LABEL[n.source] ?? n.source,
+      title: n.title,
+      description: n.description,
+      bodyMd: n.body_md,
+      url: n.url,
+      category: n.category,
+      impersonatedBrand: n.impersonated_brand,
+      tags: n.tags ?? [],
+      publishedAt: n.published_at,
+      similarity: n.similarity,
     })),
     usage: {
       embedTokens,

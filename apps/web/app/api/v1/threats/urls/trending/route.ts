@@ -3,6 +3,12 @@ import { validateApiKey } from "@/lib/apiAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
+const REGULATOR_SOURCES: Record<string, string> = {
+  scamwatch_alert: "Scamwatch",
+  acsc: "ACSC",
+  asic_investor: "ASIC",
+};
+
 export async function GET(req: NextRequest) {
   // API key authentication
   const auth = await validateApiKey(req);
@@ -36,7 +42,7 @@ export async function GET(req: NextRequest) {
   try {
     const { data: urls, error } = await supabase
       .from("scam_urls")
-      .select("domain, normalized_url, report_count, unique_reporter_count, confidence_level, brand_impersonated, source_type, whois_registrar, whois_created_date, last_reported_at")
+      .select("domain, normalized_url, report_count, unique_reporter_count, confidence_level, brand_impersonated, source_type, whois_registrar, whois_created_date, last_reported_at, feed_sources")
       .eq("is_active", true)
       .gte("last_reported_at", since.toISOString())
       .order("report_count", { ascending: false });
@@ -58,6 +64,7 @@ export async function GET(req: NextRequest) {
         totalReports: number;
         brands: Set<string>;
         sourceTypes: Set<string>;
+        regulators: Set<string>;
         whoisRegistrar: string | null;
         domainAgeDays: number | null;
         latestReport: string;
@@ -67,6 +74,9 @@ export async function GET(req: NextRequest) {
     for (const url of urls || []) {
       const key = url.domain;
       const existing = grouped.get(key);
+      const urlRegulators = (url.feed_sources ?? [])
+        .map((s: string) => REGULATOR_SOURCES[s])
+        .filter((r: string | undefined): r is string => Boolean(r));
 
       const domainAgeDays = url.whois_created_date
         ? Math.floor((Date.now() - new Date(url.whois_created_date).getTime()) / (1000 * 60 * 60 * 24))
@@ -77,6 +87,7 @@ export async function GET(req: NextRequest) {
         existing.totalReports += url.report_count;
         if (url.brand_impersonated) existing.brands.add(url.brand_impersonated);
         if (url.source_type) existing.sourceTypes.add(url.source_type);
+        for (const r of urlRegulators) existing.regulators.add(r);
         if (url.last_reported_at > existing.latestReport) {
           existing.latestReport = url.last_reported_at;
         }
@@ -87,6 +98,7 @@ export async function GET(req: NextRequest) {
           totalReports: url.report_count,
           brands: new Set(url.brand_impersonated ? [url.brand_impersonated] : []),
           sourceTypes: new Set(url.source_type ? [url.source_type] : []),
+          regulators: new Set(urlRegulators),
           whoisRegistrar: url.whois_registrar,
           domainAgeDays,
           latestReport: url.last_reported_at,
@@ -100,6 +112,8 @@ export async function GET(req: NextRequest) {
       .slice(0, limit)
       .map((t) => ({
         domain: t.domain,
+        regulator_confirmed: t.regulators.size > 0,
+        regulators: Array.from(t.regulators),
         url_count: t.urlCount,
         total_reports: t.totalReports,
         brand_impersonated: Array.from(t.brands),

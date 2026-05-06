@@ -4,6 +4,30 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { normalizeURL, isURLFormat } from "@askarthur/scam-engine/url-normalize";
 import { logger } from "@askarthur/utils/logger";
 
+// Map of feed_sources values that mean "AU regulator confirmed" → friendly
+// label for the API response. Keep in lockstep with the v97 source allowlist
+// on feed_items + the entries that asic_investor_alerts.py writes to
+// scam_urls.feed_sources[].
+const REGULATOR_SOURCES: Record<string, string> = {
+  scamwatch_alert: "Scamwatch",
+  acsc: "ACSC",
+  asic_investor: "ASIC",
+};
+
+function deriveRegulators(feedSources: string[] | null | undefined): {
+  regulatorConfirmed: boolean;
+  regulators: string[];
+} {
+  const sources = feedSources ?? [];
+  const regulators = sources
+    .map((s) => REGULATOR_SOURCES[s])
+    .filter((label): label is string => Boolean(label));
+  return {
+    regulatorConfirmed: regulators.length > 0,
+    regulators: Array.from(new Set(regulators)),
+  };
+}
+
 export async function GET(req: NextRequest) {
   // API key authentication
   const auth = await validateApiKey(req);
@@ -63,10 +87,18 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    const { regulatorConfirmed, regulators } = deriveRegulators(
+      data.feed_sources as string[] | null,
+    );
+
     return NextResponse.json(
       {
         found: true,
         normalizedUrl: data.normalized_url,
+        // Authority-elevated fields surface near the top so they're hard to miss.
+        regulatorConfirmed,
+        regulators,
+        feedSources: (data.feed_sources as string[] | null) ?? [],
         domain: data.domain,
         subdomain: data.subdomain,
         tld: data.tld,

@@ -533,7 +533,11 @@ paths:
   /threats/urls/lookup:
     get:
       summary: Look up a URL
-      description: Check if a specific URL has been reported as a scam threat.
+      description: |
+        Check if a specific URL has been reported as a scam threat.
+
+        When `regulatorConfirmed: true`, the URL has been flagged by an
+        Australian regulator (Scamwatch / ACSC / ASIC). Treat as authoritative.
       operationId: lookupUrl
       tags: [Threats]
       parameters:
@@ -555,6 +559,20 @@ paths:
                     type: boolean
                   normalizedUrl:
                     type: string
+                  regulatorConfirmed:
+                    type: boolean
+                    description: true when at least one AU regulator (Scamwatch, ACSC, ASIC) flagged this URL.
+                  regulators:
+                    type: array
+                    items:
+                      type: string
+                      enum: [Scamwatch, ACSC, ASIC]
+                    description: Friendly labels of the regulators that flagged this URL.
+                  feedSources:
+                    type: array
+                    items:
+                      type: string
+                    description: Raw feed_sources array — useful for debugging which scrapers flagged the URL.
         "401":
           description: Invalid or missing API key
           content:

@@ -3,6 +3,12 @@ import { validateApiKey } from "@/lib/apiAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
+const REGULATOR_SOURCES: Record<string, string> = {
+  scamwatch_alert: "Scamwatch",
+  acsc: "ACSC",
+  asic_investor: "ASIC",
+};
+
 export async function GET(req: NextRequest) {
   // API key authentication
   const auth = await validateApiKey(req);
@@ -36,7 +42,7 @@ export async function GET(req: NextRequest) {
   try {
     const { data: urls, error } = await supabase
       .from("scam_urls")
-      .select("domain, tld, report_count, unique_reporter_count, confidence_score, confidence_level, brand_impersonated, whois_registrar, whois_registrant_country, whois_created_date, whois_is_private, ssl_valid, ssl_issuer, last_reported_at")
+      .select("domain, tld, report_count, unique_reporter_count, confidence_score, confidence_level, brand_impersonated, whois_registrar, whois_registrant_country, whois_created_date, whois_is_private, ssl_valid, ssl_issuer, last_reported_at, feed_sources")
       .eq("is_active", true)
       .gte("last_reported_at", since.toISOString());
 
@@ -65,6 +71,7 @@ export async function GET(req: NextRequest) {
         highestConfidenceScore: number;
         highestConfidenceLevel: string;
         brands: Set<string>;
+        regulators: Set<string>;
         registrar: string | null;
         registrantCountry: string | null;
         domainAgeDays: number | null;
@@ -76,6 +83,9 @@ export async function GET(req: NextRequest) {
 
     for (const url of urls || []) {
       const key = url.domain;
+      const urlRegulators = (url.feed_sources ?? [])
+        .map((s: string) => REGULATOR_SOURCES[s])
+        .filter((r: string | undefined): r is string => Boolean(r));
 
       // Track breakdowns (domain-level, counted once per domain)
       if (!domainMap.has(key)) {
@@ -100,6 +110,7 @@ export async function GET(req: NextRequest) {
         existing.totalReports += url.report_count;
         existing.totalUniqueReporters += url.unique_reporter_count;
         if (url.brand_impersonated) existing.brands.add(url.brand_impersonated);
+        for (const r of urlRegulators) existing.regulators.add(r);
         if (url.confidence_score > existing.highestConfidenceScore) {
           existing.highestConfidenceScore = url.confidence_score;
           existing.highestConfidenceLevel = url.confidence_level;
@@ -114,6 +125,7 @@ export async function GET(req: NextRequest) {
           highestConfidenceScore: url.confidence_score,
           highestConfidenceLevel: url.confidence_level,
           brands: new Set(url.brand_impersonated ? [url.brand_impersonated] : []),
+          regulators: new Set(urlRegulators),
           registrar: url.whois_registrar,
           registrantCountry: url.whois_registrant_country,
           domainAgeDays,
@@ -130,6 +142,8 @@ export async function GET(req: NextRequest) {
       .slice(0, limit)
       .map((d) => ({
         domain: d.domain,
+        regulator_confirmed: d.regulators.size > 0,
+        regulators: Array.from(d.regulators),
         tld: d.tld,
         url_count: d.urlCount,
         total_reports: d.totalReports,
