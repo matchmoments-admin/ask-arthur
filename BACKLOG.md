@@ -294,25 +294,34 @@ Infrastructure is in place (v38–v40). Future work:
 
 - [ ] **`cyber.gov.au` egress block from GH Actions IPs** — `ACSC` RSS
   endpoints time out reliably from GH runners (90s × 3 attempts) but
-  serve `<1s` from local at HTTP/1.1. Confirmed 2026-05-06.  
-  **Failed hypothesis**: Mozilla Safari UA fallback (PR #140) also timed
-  out 3× in a row — so it's NOT UA filtering. Block is at the network
-  layer (Cloudflare WAF or upstream firewall denying GH Actions IP
-  ranges).  
-  **Recommended path**: move ACSC fetch to a Vercel Inngest function.
-  Vercel egress IPs differ from GH Actions ranges and Vercel-cron
-  scrapers are an established pattern in the codebase (compare
-  `apps/web/app/api/cron/reddit-intel-trigger/route.ts`). ~80 LOC port:
-  port `acsc_alerts.py` to TypeScript inside an Inngest cron, parse
-  RSS via fast-xml-parser, write to feed_items via the same supabase
-  client. Estimated 1-2 hours.  
+  serve `<1s` from local at HTTP/1.1. Confirmed 2026-05-06; Mozilla UA
+  fallback (#140) also timed out so the block is at the network/IP
+  layer, not UA filtering.  
+  **Mitigation already shipped**: `pipeline/scrapers/common/backoff.py`
+  skips ACSC fetches once 5 consecutive failures are logged. The 3h
+  cron still fires but writes a `partial`-status heartbeat instead of
+  hammering the upstream. Resets automatically when one fetch succeeds.  
+  **Diagnostic tooling**: `pipeline/scrapers/probe_acsc.py` runs HEAD/GET
+  across multiple UAs (askarthur, mozilla, curl, googlebot, no-UA),
+  multiple endpoints (rss/alerts, rss/advisories, /, /robots.txt), and
+  cross-checks `requests` vs stdlib `urllib`. Plus DNS resolution + raw
+  TCP+TLS handshake probes. Trigger via
+  `gh workflow run scrape-feeds.yml -f feed=probe_acsc` to capture a
+  diagnostic table. **Run the probe BEFORE attempting the Inngest port
+  so we're not optimising for the wrong cause.**  
+  **Longer-term path**: port ACSC fetch to a Vercel Inngest function.
+  Vercel egress IPs differ from GH Actions ranges; Vercel-cron scrapers
+  are an established pattern (compare
+  `apps/web/app/api/cron/reddit-intel-trigger/route.ts`). ~80 LOC
+  TypeScript port using fast-xml-parser. Estimated 1-2 hours.  
   **Fallback**: if Vercel IPs also get blocked, scrape the HTML listing
   at `/about-us/view-all-content/alerts-and-advisories` (different
   Cloudflare cache rules) or accept the gap — Scamwatch + ASIC cover
   most AU regulator-narrative needs.  
-  Track via SQL: `SELECT COUNT(*) FILTER (WHERE status='success'),
-  COUNT(*) FILTER (WHERE status='error') FROM feed_ingestion_log
-  WHERE feed_name='acsc' AND created_at > now() - interval '7 days'`.
+  Health query: `SELECT status, COUNT(*) FROM feed_ingestion_log WHERE
+  feed_name='acsc' AND created_at > now() - interval '7 days' GROUP BY
+  status`. Healthy week is mostly `success`; an unhealthy backoff week
+  is `error` followed by `partial` (the heartbeats).
 
 - [ ] **FTC / FBI / UK / NCSC narrative scrapers** — not built; pattern
   matches `acsc_alerts.py`. Feed URLs from the original brief require
