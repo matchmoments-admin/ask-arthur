@@ -292,19 +292,27 @@ Infrastructure is in place (v38–v40). Future work:
 
 ### News Intel narrative feeds (shipped 2026-05-06, post-launch watch)
 
-- [ ] **`cyber.gov.au` RSS reliability from GH Actions IPs** — first-launch
-  observation: ACSC `/rss/{alerts,advisories}` times out reliably from GitHub
-  Actions runners with the AskArthur UA, even after 3× retry with 90s
-  timeout. Same endpoints serve `<1s` from local at HTTP/1.1.  
-  **Mitigation already shipped** (PR #140): `common/http_cache.py` swaps to
-  a Mozilla Safari UA on retry attempts 1+. Suspected Cloudflare WAF filter.  
-  **Watch**: if Mozilla UA also gets blocked, options are
-  (a) move ACSC fetch into a Vercel Inngest function (different egress IPs);
-  (b) scrape via the on-page HTML at `/about-us/view-all-content/alerts-and-advisories`
-  instead of RSS; (c) accept the gap (Scamwatch + ASIC cover most AU narrative).
-  Track via SQL: `SELECT MIN(created_at), MAX(created_at), COUNT(*)
-  FROM feed_ingestion_log WHERE feed_name='acsc' AND status='error'
-  AND created_at > now() - interval '7 days'` — alert if >50% of recent runs are errors.
+- [ ] **`cyber.gov.au` egress block from GH Actions IPs** — `ACSC` RSS
+  endpoints time out reliably from GH runners (90s × 3 attempts) but
+  serve `<1s` from local at HTTP/1.1. Confirmed 2026-05-06.  
+  **Failed hypothesis**: Mozilla Safari UA fallback (PR #140) also timed
+  out 3× in a row — so it's NOT UA filtering. Block is at the network
+  layer (Cloudflare WAF or upstream firewall denying GH Actions IP
+  ranges).  
+  **Recommended path**: move ACSC fetch to a Vercel Inngest function.
+  Vercel egress IPs differ from GH Actions ranges and Vercel-cron
+  scrapers are an established pattern in the codebase (compare
+  `apps/web/app/api/cron/reddit-intel-trigger/route.ts`). ~80 LOC port:
+  port `acsc_alerts.py` to TypeScript inside an Inngest cron, parse
+  RSS via fast-xml-parser, write to feed_items via the same supabase
+  client. Estimated 1-2 hours.  
+  **Fallback**: if Vercel IPs also get blocked, scrape the HTML listing
+  at `/about-us/view-all-content/alerts-and-advisories` (different
+  Cloudflare cache rules) or accept the gap — Scamwatch + ASIC cover
+  most AU regulator-narrative needs.  
+  Track via SQL: `SELECT COUNT(*) FILTER (WHERE status='success'),
+  COUNT(*) FILTER (WHERE status='error') FROM feed_ingestion_log
+  WHERE feed_name='acsc' AND created_at > now() - interval '7 days'`.
 
 - [ ] **FTC / FBI / UK / NCSC narrative scrapers** — not built; pattern
   matches `acsc_alerts.py`. Feed URLs from the original brief require
