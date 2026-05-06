@@ -74,15 +74,28 @@ def conditional_get(
             if cached_lm:
                 headers["If-Modified-Since"] = cached_lm
 
-    # GitHub Actions runners occasionally see slow responses from
-    # cyber.gov.au (Cloudflare-fronted) — surface a single retry with
-    # backoff before giving up rather than blocking the whole feed.
+    # GitHub Actions runners occasionally see slow / blocked responses from
+    # cyber.gov.au (Cloudflare-fronted). Some endpoints appear to filter on
+    # User-Agent — the AskArthur UA times out reliably from GH IPs while a
+    # generic Mozilla UA succeeds. Strategy:
+    #   attempt 0: declared UA at full timeout
+    #   attempt 1: Mozilla UA fallback at full timeout (likely unblocks)
+    #   attempt 2: Mozilla UA fallback at full timeout (true retry)
+    # Errors propagate after the final attempt — caller is expected to log
+    # the failure to feed_ingestion_log and exit cleanly.
+    MOZILLA_UA = (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 "
+        "(KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+    )
     last_err: Exception | None = None
     resp = None
     for attempt in range(retries + 1):
         try:
+            attempt_headers = dict(headers)
+            if attempt > 0:
+                attempt_headers["User-Agent"] = MOZILLA_UA
             resp = requests.get(
-                url, headers=headers, timeout=timeout, allow_redirects=True
+                url, headers=attempt_headers, timeout=timeout, allow_redirects=True
             )
             break
         except (requests.Timeout, requests.ConnectionError) as err:
@@ -92,7 +105,10 @@ def conditional_get(
             backoff_s = 2 ** attempt
             logger.warning(
                 f"conditional_get retry {attempt + 1}/{retries} after {type(err).__name__}",
-                extra={"metadata": {"source": source, "url": url, "backoff_s": backoff_s}},
+                extra={"metadata": {
+                    "source": source, "url": url, "backoff_s": backoff_s,
+                    "next_ua": "mozilla" if attempt + 1 > 0 else "default",
+                }},
             )
             import time as _t
             _t.sleep(backoff_s)

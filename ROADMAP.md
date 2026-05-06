@@ -78,6 +78,11 @@ Building a comprehensive threat database.
 | GitHub Actions scheduled scraping                 | ✅ Done |
 | Feed timestamp tracking                           | ✅ Done |
 | IP address and crypto wallet intelligence         | ✅ Done |
+| AU regulator narrative feeds (Scamwatch / ACSC / ASIC) | ✅ Done |
+| Tiered cron schedule (3h / 6h / 12h / daily)      | ✅ Done |
+| ETag / If-Modified-Since cache for RSS sources    | ✅ Done |
+| Voyage embedding for narrative `feed_items`       | ✅ Done |
+| Nightly retention housekeeping (archive + prune)  | ✅ Done |
 
 ### Inngest Background Processing ✅
 

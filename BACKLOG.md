@@ -290,6 +290,46 @@ Infrastructure is in place (v38–v40). Future work:
 
 - [ ] Fix broken scrapers (manual-only, low priority): ThreatFox (401 — API key expired), crt.sh (NoneType `.strip()` — null domain bug), PhishStats (95s timeout — upstream slow/down), CryptoScamDB (404 — GitHub source gone, likely dead)
 
+### News Intel narrative feeds (shipped 2026-05-06, post-launch watch)
+
+- [ ] **`cyber.gov.au` RSS reliability from GH Actions IPs** — first-launch
+  observation: ACSC `/rss/{alerts,advisories}` times out reliably from GitHub
+  Actions runners with the AskArthur UA, even after 3× retry with 90s
+  timeout. Same endpoints serve `<1s` from local at HTTP/1.1.  
+  **Mitigation already shipped** (PR #140): `common/http_cache.py` swaps to
+  a Mozilla Safari UA on retry attempts 1+. Suspected Cloudflare WAF filter.  
+  **Watch**: if Mozilla UA also gets blocked, options are
+  (a) move ACSC fetch into a Vercel Inngest function (different egress IPs);
+  (b) scrape via the on-page HTML at `/about-us/view-all-content/alerts-and-advisories`
+  instead of RSS; (c) accept the gap (Scamwatch + ASIC cover most AU narrative).
+  Track via SQL: `SELECT MIN(created_at), MAX(created_at), COUNT(*)
+  FROM feed_ingestion_log WHERE feed_name='acsc' AND status='error'
+  AND created_at > now() - interval '7 days'` — alert if >50% of recent runs are errors.
+
+- [ ] **FTC / FBI / UK / NCSC narrative scrapers** — not built; pattern
+  matches `acsc_alerts.py`. Feed URLs from the original brief require
+  re-validation (FTC's `consumer-alerts/feed` is 404 as of 2026-05-06).
+  Estimated ~150 LOC each + cron line. Defer until AU sources are
+  proven steady-state for 4+ weeks.
+
+- [ ] **Google Web Risk migration** — `safebrowsing.ts` currently uses
+  Safe Browsing v4 which is non-commercial-only per Google's ToS. Web Risk
+  is the commercial replacement: 100k Lookup calls/month free, then
+  $0.50/1k. Free tier alone covers our volume. **Trigger**: commercial
+  launch / monetisation event.
+
+- [ ] **OG image upload to R2** — narrative scrapers extract `og:image`
+  but currently don't upload to R2. Adding the upload path means adding
+  `evidence_r2_key` to the bulk_upsert and uploading via existing
+  `common/r2.py`. Defer until a renderer (email card, dashboard preview)
+  needs it.
+
+- [ ] **Re-run ACSC manually after 24h** — first-launch ACSC scrapes all
+  timed out from GH IPs. After Mozilla UA fallback ships in PR #140, the
+  3h cron should self-heal. Verify after 24h via
+  `SELECT * FROM feed_ingestion_log WHERE feed_name='acsc' ORDER BY created_at DESC LIMIT 10`
+  — at least one `success` with `records_new > 0` expected.
+
 ## Reddit Scam Intelligence — priority watch
 
 Plan: [docs/plans/reddit-intel.md](./docs/plans/reddit-intel.md). All 14 PRs (#55–#68) merged 2026-05-02; pipeline is live and producing data within cost budget. Active watch items:
