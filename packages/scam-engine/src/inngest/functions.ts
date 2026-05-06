@@ -50,6 +50,11 @@ import { feedbackTriageRefresh } from "./feedback-triage-refresh";
 // scam_reports + reddit_post_intel. Cron-driven 30-min poll.
 import { feedItemsEmbed } from "./feed-items-embed";
 
+// News Intel: nightly retention housekeeping — archive narratives >365d
+// to feed_items_archive, prune feed_ingestion_log >90d, prune
+// feed_http_cache >30d. 02:30 UTC.
+import { feedRetention } from "./feed-retention";
+
 export const inngestFunctions = [
   stalenessCheck,
   stalenessCheckIPs,
@@ -86,4 +91,6 @@ export const inngestFunctions = [
   feedbackTriageRefresh,
   // News Intel: regulator-narrative embedding
   feedItemsEmbed,
+  // News Intel: nightly retention housekeeping
+  feedRetention,
 ];
