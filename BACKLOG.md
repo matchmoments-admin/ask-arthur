@@ -314,19 +314,29 @@ Infrastructure is in place (v38–v40). Future work:
   `gh workflow run scrape-feeds.yml -f feed=probe_acsc` to capture a
   diagnostic table. **Run the probe BEFORE attempting the Inngest port
   so we're not optimising for the wrong cause.**  
-  **Longer-term path**: port ACSC fetch to a Vercel Inngest function.
-  Vercel egress IPs differ from GH Actions ranges; Vercel-cron scrapers
-  are an established pattern (compare
-  `apps/web/app/api/cron/reddit-intel-trigger/route.ts`). ~80 LOC
-  TypeScript port using fast-xml-parser. Estimated 1-2 hours.  
-  **Fallback**: if Vercel IPs also get blocked, scrape the HTML listing
-  at `/about-us/view-all-content/alerts-and-advisories` (different
-  Cloudflare cache rules) or accept the gap — Scamwatch + ASIC cover
-  most AU regulator-narrative needs.  
+  **Vercel ingest (in code, gated default OFF)**: PR #147 ships
+  `packages/scam-engine/src/inngest/acsc-ingest-vercel.ts` — a parallel
+  Inngest cron that fetches ACSC RSS from Vercel's runtime instead of
+  GH Actions. Gated by `FF_ACSC_INGEST_VERCEL` (server-side env). To
+  validate Vercel egress works:
+    1. Set `FF_ACSC_INGEST_VERCEL=true` in Vercel preview
+    2. In Inngest dashboard, manually invoke `acsc-ingest-vercel`
+    3. Query `SELECT status, records_new, error_message FROM
+       feed_ingestion_log WHERE feed_name='acsc' ORDER BY created_at
+       DESC LIMIT 3` — first row is the Vercel run
+    4. If `success` with `records_new > 0` → flip flag to true in prod,
+       open follow-up to remove the Python GH Actions step
+    5. If `error` (Vercel IPs also tarpitted) → flip flag off, accept
+       the gap (Scamwatch + ASIC cover most AU regulator-narrative
+       needs), open separate ticket to scrape the HTML listing instead
+       of RSS as Plan C.
+  **Fallback (Plan C)**: scrape `/about-us/view-all-content/alerts-and-advisories`
+  HTML listing — different Akamai cache/WAF rules than RSS endpoints,
+  may pass through. Only consider if Vercel egress also fails.  
   Health query: `SELECT status, COUNT(*) FROM feed_ingestion_log WHERE
   feed_name='acsc' AND created_at > now() - interval '7 days' GROUP BY
   status`. Healthy week is mostly `success`; an unhealthy backoff week
-  is `error` followed by `partial` (the heartbeats).
+  is `error` followed by `partial` (the Python backoff heartbeats).
 
 - [ ] **FTC / FBI / UK / NCSC narrative scrapers** — not built; pattern
   matches `acsc_alerts.py`. Feed URLs from the original brief require

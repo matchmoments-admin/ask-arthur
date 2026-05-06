@@ -60,6 +60,11 @@ import { feedRetention } from "./feed-retention";
 // 100 user reports, so it gets a dedicated push (not bundled like scam-alerts).
 import { regulatorAlertPush } from "./regulator-alert-push";
 
+// News Intel: ACSC ingest from Vercel egress (workaround for Akamai
+// tarpitting Azure / GH Actions IPs). Default OFF — flip the flag after
+// the first manual trigger confirms Vercel egress isn't also tarpitted.
+import { acscIngestVercel } from "./acsc-ingest-vercel";
+
 export const inngestFunctions = [
   stalenessCheck,
   stalenessCheckIPs,
@@ -100,4 +105,6 @@ export const inngestFunctions = [
   feedRetention,
   // News Intel: regulator-alert push fan-out
   regulatorAlertPush,
+  // News Intel: ACSC ingest from Vercel egress (Akamai-tarpit workaround)
+  acscIngestVercel,
 ];
