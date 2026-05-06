@@ -50,6 +50,13 @@ interface CategoryEntry {
   count: number;
 }
 
+export interface RegulatorAlertEntry {
+  sourceLabel: string;
+  title: string;
+  url: string | null;
+  publishedAt: string | null;
+}
+
 export interface WeeklyIntelDigestProps {
   weekStart: string;
   weekEnd: string;
@@ -62,6 +69,7 @@ export interface WeeklyIntelDigestProps {
   tweetDraft: string;
   modelVersion: string;
   promptVersion: string;
+  regulatorAlerts?: RegulatorAlertEntry[];
 }
 
 // ── Brand palette (matches AskArthurBriefing) ─────────────────────────────
@@ -100,6 +108,7 @@ export default function WeeklyIntelDigest({
   tweetDraft,
   modelVersion,
   promptVersion,
+  regulatorAlerts,
 }: WeeklyIntelDigestProps) {
   const headline =
     emergingThemes[0]?.title ??
@@ -566,6 +575,72 @@ export default function WeeklyIntelDigest({
                     .map((c) => `${humaniseCategory(c.label)} (${c.count})`)
                     .join(" · ")}
                 </Text>
+              </div>
+            )}
+
+            {/* Regulator alerts — first-party narratives this week.
+                Renders only when at least one alert was published in the
+                7-day window so the section vanishes cleanly on quiet weeks. */}
+            {regulatorAlerts && regulatorAlerts.length > 0 && (
+              <div style={{ paddingTop: "32px" }}>
+                <Text
+                  style={{
+                    margin: "0 0 12px 0",
+                    padding: 0,
+                    fontFamily: SANS,
+                    fontSize: "11px",
+                    fontWeight: 700,
+                    letterSpacing: "2px",
+                    textTransform: "uppercase" as const,
+                    color: NAVY,
+                    opacity: 0.75,
+                  }}
+                >
+                  Regulator alerts this week
+                </Text>
+                <ul
+                  style={{
+                    margin: 0,
+                    padding: "0 0 0 18px",
+                    fontFamily: SERIF,
+                    fontSize: "15px",
+                    lineHeight: "24px",
+                    color: NAVY,
+                  }}
+                >
+                  {regulatorAlerts.map((alert, i) => (
+                    <li key={`reg-${i}`} style={{ marginBottom: "6px" }}>
+                      {alert.url ? (
+                        <Link
+                          href={alert.url}
+                          style={{
+                            color: NAVY,
+                            textDecoration: "underline",
+                            fontWeight: 500,
+                          }}
+                        >
+                          {alert.title}
+                        </Link>
+                      ) : (
+                        <span style={{ fontWeight: 500 }}>{alert.title}</span>
+                      )}
+                      <span
+                        style={{
+                          fontFamily: SANS,
+                          fontSize: "12px",
+                          color: NAVY,
+                          opacity: 0.6,
+                          marginLeft: "8px",
+                        }}
+                      >
+                        — {alert.sourceLabel}
+                        {alert.publishedAt
+                          ? ` · ${humaniseDate(alert.publishedAt.slice(0, 10))}`
+                          : ""}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
 

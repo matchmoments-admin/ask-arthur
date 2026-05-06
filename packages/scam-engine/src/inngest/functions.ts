@@ -45,6 +45,11 @@ import { scamReportsBackfillEmbed } from "./scam-reports-backfill-embed";
 // every 5 min so /admin/feedback stays current.
 import { feedbackTriageRefresh } from "./feedback-triage-refresh";
 
+// News Intel: embed regulator narratives (Scamwatch/ACSC/ASIC) into
+// feed_items.embedding so hybrid retrieval can fold them in alongside
+// scam_reports + reddit_post_intel. Cron-driven 30-min poll.
+import { feedItemsEmbed } from "./feed-items-embed";
+
 export const inngestFunctions = [
   stalenessCheck,
   stalenessCheckIPs,
@@ -79,4 +84,6 @@ export const inngestFunctions = [
   scamReportsBackfillEmbed,
   // Feedback learning loop
   feedbackTriageRefresh,
+  // News Intel: regulator-narrative embedding
+  feedItemsEmbed,
 ];

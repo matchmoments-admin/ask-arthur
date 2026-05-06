@@ -4,6 +4,7 @@ import { sendWeeklyDigest, sendWeeklyIntelDigest } from "@/lib/resend";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { getWeeklyRedditIntel } from "@/lib/reddit-intel-weekly";
+import { getWeeklyRegulatorAlerts } from "@/lib/regulator-alerts-weekly";
 import { buildWeeklyTweetDraft } from "@/lib/tweet-draft";
 
 // When the redditIntelEmail flag is on we always send to brendan even if
@@ -54,6 +55,7 @@ export async function GET(req: NextRequest) {
       const recipients = Array.from(new Set([OPERATOR_EMAIL, ...subscriberEmails]));
 
       const tweetDraft = buildWeeklyTweetDraft(intel);
+      const regulatorAlerts = await getWeeklyRegulatorAlerts();
 
       try {
         await sendWeeklyIntelDigest(recipients, {
@@ -68,6 +70,7 @@ export async function GET(req: NextRequest) {
           tweetDraft,
           modelVersion: intel.modelVersion,
           promptVersion: intel.promptVersion,
+          regulatorAlerts,
         });
       } catch (err) {
         // Log the failure to cost_telemetry so it's queryable alongside
