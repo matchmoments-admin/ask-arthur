@@ -338,6 +338,14 @@ export const redditIntelDaily = inngest.createFunction(
           // it). cacheSystem stays on — wrapper still requests cache, just
           // without the prefill scaffolding.
           cacheSystem: true,
+          // Force strict JSON via Anthropic tool-use. Pre-fix baseline
+          // was ~10% of batches failing with "Unterminated string in
+          // JSON" or "Expected ',' or '}'" parse errors at ~$0.54
+          // wasted per failure (3 retries × ~$0.18). Tool-use makes the
+          // model emit a parsed JS object directly — no JSON.parse
+          // step, no malformed output class.
+          useToolUse: true,
+          toolName: "submit_classification",
         });
         return response;
       } catch (err) {

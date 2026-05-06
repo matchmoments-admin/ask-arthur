@@ -97,6 +97,18 @@ export interface CallClaudeJsonOptions<T> {
   userIsTrusted?: boolean;
   /** Correlation ID surfaced in logger metadata. Optional. */
   requestId?: string;
+  /** Use Anthropic tool-use API to FORCE strict JSON output. The schema is
+   *  serialised to JSON Schema via Zod 4's `z.toJSONSchema` and passed as a
+   *  tool with `tool_choice: { type: 'tool', name: ... }` so the model can
+   *  only respond by calling the tool. The input arrives pre-parsed as an
+   *  object — no JSON.parse step, eliminating the "Unterminated string"
+   *  class of failure that the Reddit-intel classifier was hitting ~10% of
+   *  the time. Default false to avoid disrupting existing callers. */
+  useToolUse?: boolean;
+  /** Tool name when `useToolUse` is true. Default 'submit_response'. Surfaces
+   *  in Anthropic's response metadata; choose something descriptive like
+   *  'classify_reddit_posts' for easier log triage. */
+  toolName?: string;
 }
 
 /**
@@ -123,6 +135,8 @@ export async function callClaudeJson<T>(
     cacheSystem = true,
     userIsTrusted = false,
     requestId,
+    useToolUse = false,
+    toolName = "submit_response",
   } = opts;
 
   if (!process.env.ANTHROPIC_API_KEY) {
@@ -167,20 +181,41 @@ export async function callClaudeJson<T>(
       ]
     : system;
 
+  // Build the request. Tool-use mode adds a single forced-tool definition
+  // so the model can only respond via the tool — Anthropic guarantees the
+  // tool input is a valid JSON object matching the schema, sidestepping
+  // the "Unterminated string in JSON" failure the legacy text-extract
+  // path hit ~10% of the time on long Reddit-intel batches.
+  const requestParams: Anthropic.Messages.MessageCreateParams = {
+    model: spec.id,
+    max_tokens: maxTokens,
+    system: systemBlock,
+    messages: [{ role: "user", content: userContent }],
+  };
+  if (useToolUse) {
+    // io: 'input' — we want the schema BEFORE Zod transforms run (so
+    // Anthropic generates raw input we then validate + transform).
+    const inputSchema = z.toJSONSchema(schema, { io: "input" }) as Record<
+      string,
+      unknown
+    >;
+    requestParams.tools = [
+      {
+        name: toolName,
+        description:
+          "Submit your structured response. ALL output must be returned by " +
+          "calling this tool — do not emit any text outside the tool call.",
+        input_schema: inputSchema as Anthropic.Messages.Tool["input_schema"],
+      },
+    ];
+    requestParams.tool_choice = { type: "tool", name: toolName };
+  }
+
   // No assistant prefill — Sonnet 4.6 (and likely future models) reject the
   // pattern with `400 invalid_request_error: This model does not support
-  // assistant message prefill`. We rely on the system prompt's "Return JSON
-  // only" instruction + extractJson() below, which tolerates markdown
-  // fences and leading prose if the model decides to add them.
-  const response = await client.messages.create(
-    {
-      model: spec.id,
-      max_tokens: maxTokens,
-      system: systemBlock,
-      messages: [{ role: "user", content: userContent }],
-    },
-    { timeout: timeoutMs },
-  );
+  // assistant message prefill`. On the legacy text path we rely on the
+  // system prompt's "Return JSON only" instruction + extractJson() below.
+  const response = await client.messages.create(requestParams, { timeout: timeoutMs });
 
   const usage: CallClaudeUsage = {
     inputTokens: response.usage?.input_tokens ?? 0,
@@ -196,28 +231,51 @@ export async function callClaudeJson<T>(
     usage.cacheWriteTokens * spec.cacheWriteUsdPerToken +
     usage.cacheReadTokens * spec.cacheReadUsdPerToken;
 
-  // Concatenate text blocks. Without prefill, models may emit markdown
-  // fences (```json ... ```) or leading prose before the JSON. extractJson
-  // finds the first `{` to its matching last `}` (or `[` to `]`) and
-  // tolerates both wrappers.
-  const rawText = response.content
-    .filter((b): b is Anthropic.Messages.TextBlock => b.type === "text")
-    .map((b) => b.text)
-    .join("");
-  const jsonText = extractJson(rawText);
-
+  // Tool-use response: the model called our forced tool, so the input is
+  // already a parsed JS object. Skip extractJson + JSON.parse entirely.
+  // If for any reason the response lacks a tool_use block (shouldn't happen
+  // when tool_choice forces it), fail loud rather than silently degrade —
+  // a missing tool_use here means the model malfunctioned and we want the
+  // visible error surface.
   let parsed: unknown;
-  try {
-    parsed = JSON.parse(jsonText);
-  } catch (err) {
-    logger.error("Claude returned non-JSON output", {
-      requestId,
-      modelId: spec.id,
-      preview: rawText.slice(0, 200),
-    });
-    throw new Error(
-      `Claude JSON parse failed (${spec.id}): ${(err as Error).message}`,
+  if (useToolUse) {
+    const toolUseBlock = response.content.find(
+      (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use",
     );
+    if (!toolUseBlock) {
+      logger.error("Tool-use mode requested but no tool_use block in response", {
+        requestId,
+        modelId: spec.id,
+        stopReason: response.stop_reason,
+        contentTypes: response.content.map((b) => b.type),
+      });
+      throw new Error(
+        `Claude tool-use response missing (${spec.id}): stop_reason=${response.stop_reason}`,
+      );
+    }
+    parsed = toolUseBlock.input;
+  } else {
+    // Legacy text-extract path. Concatenate text blocks. Without prefill,
+    // models may emit markdown fences (```json ... ```) or leading prose
+    // before the JSON. extractJson finds the first `{` to its matching
+    // last `}` (or `[` to `]`) and tolerates both wrappers.
+    const rawText = response.content
+      .filter((b): b is Anthropic.Messages.TextBlock => b.type === "text")
+      .map((b) => b.text)
+      .join("");
+    const jsonText = extractJson(rawText);
+    try {
+      parsed = JSON.parse(jsonText);
+    } catch (err) {
+      logger.error("Claude returned non-JSON output", {
+        requestId,
+        modelId: spec.id,
+        preview: rawText.slice(0, 200),
+      });
+      throw new Error(
+        `Claude JSON parse failed (${spec.id}): ${(err as Error).message}`,
+      );
+    }
   }
 
   const result = schema.safeParse(parsed);
@@ -226,7 +284,7 @@ export async function callClaudeJson<T>(
       requestId,
       modelId: spec.id,
       issues: result.error.issues.slice(0, 5),
-      preview: jsonText.slice(0, 200),
+      preview: JSON.stringify(parsed).slice(0, 200),
     });
     throw new Error(
       `Claude output schema mismatch (${spec.id}): ${result.error.issues
