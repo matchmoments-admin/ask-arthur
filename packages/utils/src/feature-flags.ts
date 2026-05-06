@@ -88,6 +88,13 @@ export const featureFlags = {
   /** Mobile: scam alert push notifications */
   pushAlerts: process.env.NEXT_PUBLIC_FF_PUSH_ALERTS === "true",
 
+  /** Mobile: regulator-alerts feed surfaced via /api/mobile/regulator-alerts.
+   *  Default OFF until the mobile app's RegulatorAlertsScreen ships in a
+   *  later Expo release — keeping the endpoint dark prevents an OTA-updated
+   *  client from hitting it before the UI is ready. */
+  mobileRegulatorAlerts:
+    process.env.NEXT_PUBLIC_FF_MOBILE_REGULATOR_ALERTS === "true",
+
   /** Mobile: device attestation (Play Integrity / App Attest) */
   deviceAttestation: process.env.NEXT_PUBLIC_FF_DEVICE_ATTEST === "true",
 
