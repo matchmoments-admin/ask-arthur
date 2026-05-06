@@ -22,6 +22,7 @@ on:
           - scamwatch_alerts
           - acsc_alerts
           - asic_investor_alerts
+          - probe_acsc
           - urlhaus
           - openphish
           - phishtank
@@ -75,6 +76,14 @@ jobs:
           github.event.inputs.feed == 'all' || github.event.inputs.feed == 'acsc_alerts'
           || (github.event_name == 'schedule' && (github.event.schedule == '0 */3 * * *' || github.event.schedule == '0 */6 * * *' || github.event.schedule == '0 */12 * * *' || github.event.schedule == '0 16 * * *'))
         run: python -m acsc_alerts
+
+      # One-shot diagnostic probe — workflow_dispatch only. Captures HTTP
+      # status, timing, and headers across multiple UA/method permutations
+      # so we can pinpoint exactly what cyber.gov.au is doing to GH-runner
+      # IPs. See pipeline/scrapers/probe_acsc.py for the matrix.
+      - name: Probe cyber.gov.au (diagnostic)
+        if: github.event.inputs.feed == 'probe_acsc'
+        run: python -m probe_acsc
 
       # ──────────────────────────────────────────────────────────────────
       # tier-6h — high-velocity IOC feeds + Reddit
