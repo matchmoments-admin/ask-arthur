@@ -801,7 +801,10 @@ def bulk_upsert_narrative_feed_items(
             item.get("tags"),  # list[str] -> Postgres TEXT[]
             item.get("published_at"),
             item.get("evidence_r2_key"),
-            item.get("provenance_tier", "official"),  # narrative scrapers default to 'official'
+            # provenance_tier_t enum: tier_1_regulator | tier_2_industry |
+            # tier_3_curated | tier_4_osint | tier_5_community. Regulator
+            # scrapers (Scamwatch/ACSC/ASIC) all map to tier_1_regulator.
+            item.get("provenance_tier", "tier_1_regulator"),
             item.get("source_created_at") or item.get("published_at"),
         ))
 

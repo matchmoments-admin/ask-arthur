@@ -83,7 +83,7 @@ def _parse_rss(xml_text: str, kind: str) -> list[dict]:
             "tags": tags + [kind],
             "published_at": pub_date,
             "source_created_at": pub_date,
-            "provenance_tier": "official",
+            "provenance_tier": "tier_1_regulator",
         })
     return items
 
@@ -167,7 +167,7 @@ def scrape() -> None:
             records_skipped=item_stats["skipped"],
             duration_ms=duration_ms,
             error_message=error_msg,
-            record_type="feed_item",
+            record_type="url",
         )
     logger.info(
         f"ACSC complete: items new={item_stats['new']} updated={item_stats['updated']}, "
