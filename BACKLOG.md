@@ -292,11 +292,16 @@ Infrastructure is in place (v38–v40). Future work:
 
 ### News Intel narrative feeds (shipped 2026-05-06, post-launch watch)
 
-- [ ] **`cyber.gov.au` egress block from GH Actions IPs** — `ACSC` RSS
-  endpoints time out reliably from GH runners (90s × 3 attempts) but
-  serve `<1s` from local at HTTP/1.1. Confirmed 2026-05-06; Mozilla UA
-  fallback (#140) also timed out so the block is at the network/IP
-  layer, not UA filtering.  
+- [ ] **Akamai tarpit on Azure (GH Actions) IPs targeting cyber.gov.au** —
+  Diagnostic probe (`probe_acsc.py`, run via PR #145, 2026-05-06) returned
+  41/41 ReadTimeout failures across 5 UAs × 4 endpoints × 2 methods + a
+  urllib parity check. All identical 15s read-timeout. DNS resolves
+  (Akamai 23.210.244.0/24 — NOT Cloudflare as initially assumed); TLS
+  handshake completes in 6ms. So this is **deliberate Akamai bot
+  protection silently dropping responses for Azure egress IPs** (GH
+  Actions runs on Azure 135.232.0.0/16). Even `googlebot` UA on
+  `/robots.txt` is tarpitted — proves it's IP-range based, not
+  UA/endpoint filtering.  
   **Mitigation already shipped**: `pipeline/scrapers/common/backoff.py`
   skips ACSC fetches once 5 consecutive failures are logged. The 3h
   cron still fires but writes a `partial`-status heartbeat instead of

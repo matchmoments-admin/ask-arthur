@@ -55,20 +55,26 @@ export default function TrustPage() {
     <div className="min-h-screen flex flex-col">
       <Nav />
 
-      {/* Hero */}
-      <section className="bg-deep-navy text-white py-16 px-5">
-        <div className="max-w-2xl mx-auto text-center">
-          <Shield size={44} className="mx-auto mb-4 opacity-70" strokeWidth={1.5} />
-          <h1 className="text-4xl font-extrabold mb-3">Trust & Security</h1>
-          <p className="text-white/70 text-base max-w-lg mx-auto">
-            How Ask Arthur protects your data and earns the trust of individuals,
-            businesses, and governments.
-          </p>
+      <main
+        id="main-content"
+        className="flex-1 w-full max-w-[640px] mx-auto px-5 pt-16 pb-16"
+      >
+        <div className="flex items-center gap-2 mb-4">
+          <Shield size={20} className="text-deep-navy" />
+          <span className="text-xs font-bold tracking-widest uppercase text-deep-navy">
+            Trust & Security
+          </span>
         </div>
-      </section>
+        <h1 className="text-deep-navy text-4xl md:text-5xl font-extrabold mb-4 leading-tight">
+          How we protect your data
+        </h1>
+        <p className="text-lg text-gov-slate mb-10 leading-relaxed">
+          Ask Arthur&apos;s security posture, compliance certifications,
+          infrastructure overview, and data-handling practices for individuals,
+          businesses, and governments.
+        </p>
 
-      <main id="main-content" className="flex-1">
-        <div className="max-w-2xl mx-auto px-5 py-12 space-y-12">
+        <div className="space-y-12">
 
           {/* Certifications */}
           <section>

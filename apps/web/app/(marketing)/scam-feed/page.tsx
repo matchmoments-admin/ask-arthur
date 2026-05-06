@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { Shield } from "lucide-react";
+import { Shield, ChevronDown } from "lucide-react";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import FeedList from "@/components/FeedList";
@@ -88,59 +88,66 @@ export default async function ScamFeedPage() {
           about the latest threats targeting Australians.
         </p>
 
+        {/* Collapsible "Regulator alerts this week" subheading. Native
+            <details> rather than React state so the page stays a Server
+            Component and the section works without JS. Closed by default
+            so the feed grid is the dominant element on the page. */}
         {pinned.length > 0 && (
-          <section
-            aria-labelledby="regulator-alerts-heading"
-            className="mb-10 rounded-xl border border-deep-navy/10 bg-deep-navy/5 p-5"
-          >
-            <div className="flex items-center gap-2 mb-3">
-              <Shield size={16} className="text-deep-navy" />
-              <h2
-                id="regulator-alerts-heading"
-                className="text-xs font-bold tracking-widest uppercase text-deep-navy"
-              >
+          <details className="group mb-10">
+            <summary className="flex items-center gap-2 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+              <Shield size={18} className="text-deep-navy flex-shrink-0" />
+              <h2 className="text-xl md:text-2xl font-bold text-deep-navy">
                 Regulator alerts this week
+                <span className="ml-2 text-base font-normal text-gov-slate">
+                  ({pinned.length})
+                </span>
               </h2>
-            </div>
-            <ul className="space-y-3">
-              {pinned.map((alert) => {
-                const sourceLabel =
-                  SOURCE_CONFIG[alert.source]?.label ?? alert.source;
-                const dateStr = alert.published_at
-                  ? relativeTime(alert.published_at)
-                  : relativeTime(alert.created_at);
-                const titleNode = (
-                  <span className="font-semibold text-deep-navy hover:underline">
-                    {alert.title}
-                  </span>
-                );
-                return (
-                  <li key={alert.id} className="text-sm leading-snug">
-                    {alert.url ? (
-                      <a
-                        href={alert.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        {titleNode}
-                      </a>
-                    ) : (
-                      titleNode
-                    )}
-                    <span className="ml-2 text-xs text-gov-slate">
-                      — {sourceLabel} · {dateStr}
+              <ChevronDown
+                size={20}
+                className="ml-auto text-deep-navy transition-transform duration-200 group-open:rotate-180"
+              />
+            </summary>
+            <div className="mt-4 rounded-xl border border-deep-navy/20 bg-white p-5">
+              <ul className="space-y-3">
+                {pinned.map((alert) => {
+                  const sourceLabel =
+                    SOURCE_CONFIG[alert.source]?.label ?? alert.source;
+                  const dateStr = alert.published_at
+                    ? relativeTime(alert.published_at)
+                    : relativeTime(alert.created_at);
+                  const titleNode = (
+                    <span className="font-semibold text-deep-navy hover:underline">
+                      {alert.title}
                     </span>
-                  </li>
-                );
-              })}
-            </ul>
-            <Link
-              href="/intel/regulator-alerts"
-              className="mt-4 inline-block text-xs font-medium text-deep-navy underline-offset-2 hover:underline"
-            >
-              View all regulator alerts →
-            </Link>
-          </section>
+                  );
+                  return (
+                    <li key={alert.id} className="text-sm leading-snug">
+                      {alert.url ? (
+                        <a
+                          href={alert.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {titleNode}
+                        </a>
+                      ) : (
+                        titleNode
+                      )}
+                      <span className="ml-2 text-xs text-gov-slate">
+                        — {sourceLabel} · {dateStr}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+              <Link
+                href="/intel/regulator-alerts"
+                className="mt-4 inline-block text-xs font-medium text-deep-navy underline-offset-2 hover:underline"
+              >
+                View all regulator alerts →
+              </Link>
+            </div>
+          </details>
         )}
 
         <FeedList initialItems={items} initialTotal={total} />
