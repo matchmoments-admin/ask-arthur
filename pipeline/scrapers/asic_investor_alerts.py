@@ -110,7 +110,7 @@ def _build_synthetic_summary(records: list[dict]) -> dict | None:
         "tags": ["asic", "investor-alert", "regulator-confirmed"],
         "published_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "source_created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "provenance_tier": "official",
+        "provenance_tier": "tier_1_regulator",
     }
 
 

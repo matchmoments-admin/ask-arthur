@@ -133,7 +133,7 @@ def _parse_article(article_url: str, html: str) -> dict | None:
         "published_at": pub_at,
         "source_created_at": pub_at,
         "evidence_r2_key": None,  # R2 image upload is a follow-up; URL goes to feed_items.r2_image_key separately if needed
-        "provenance_tier": "official",
+        "provenance_tier": "tier_1_regulator",
         # Out-of-band: pass image_url so the URL extractor sees it but it's not stored on feed_items.
         "_image_url": image_url,
     }
@@ -243,7 +243,10 @@ def scrape() -> None:
             records_skipped=item_stats["skipped"],
             duration_ms=duration_ms,
             error_message=error_msg,
-            record_type="feed_item",
+            # feed_ingestion_log.record_type allowed values:
+            # url|ip|crypto_wallet|entity|charity. Narrative scrapers also
+            # extract URLs into the urls table, so 'url' is the closest fit.
+            record_type="url",
         )
     logger.info(
         f"Scamwatch complete: items new={item_stats['new']} updated={item_stats['updated']}, "
