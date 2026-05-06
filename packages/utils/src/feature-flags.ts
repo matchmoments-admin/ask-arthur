@@ -319,6 +319,13 @@ export const featureFlags = {
    *  web flow specifically; extension/bot surfaces stay on the unprompted
    *  classifier. */
   ragThemes: process.env.FF_RAG_THEMES === "true",
+
+  /** News Intel — fold regulator narrative search results (Scamwatch / ACSC /
+   *  ASIC) into /api/v1/intel/search alongside reddit posts via the
+   *  match_feed_items_narrative RPC. Default OFF for staged rollout — flip
+   *  on once the corpus has had a few weeks to accrue and customers have
+   *  asked for it. Server-side only — gates the API merge logic. */
+  regulatorIntelSearch: process.env.FF_REGULATOR_INTEL_SEARCH === "true",
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;

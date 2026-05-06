@@ -55,6 +55,11 @@ import { feedItemsEmbed } from "./feed-items-embed";
 // feed_http_cache >30d. 02:30 UTC.
 import { feedRetention } from "./feed-retention";
 
+// News Intel: push notifications for newly-ingested regulator narratives.
+// Cron */30 min — single ASIC/Scamwatch alert is more authoritative than
+// 100 user reports, so it gets a dedicated push (not bundled like scam-alerts).
+import { regulatorAlertPush } from "./regulator-alert-push";
+
 export const inngestFunctions = [
   stalenessCheck,
   stalenessCheckIPs,
@@ -93,4 +98,6 @@ export const inngestFunctions = [
   feedItemsEmbed,
   // News Intel: nightly retention housekeeping
   feedRetention,
+  // News Intel: regulator-alert push fan-out
+  regulatorAlertPush,
 ];
