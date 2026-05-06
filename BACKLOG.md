@@ -368,6 +368,14 @@ Infrastructure is in place (v38–v40). Future work:
   ≥ 2026-05-13), check the Mon Telegram digest contains a
   `news-intel-embed` line. **No code change needed** — verification only.
 
+- [x] **Daily admin health digest (silence-on-perfect-day)** — shipped via
+  PR-H. `/api/cron/health-digest` runs at 22:00 UTC (08:00 AEST) daily,
+  queries cost_telemetry for `*-error` rows + feed_ingestion_log for
+  stale feeds, sends Telegram only when issues detected. Per-feed
+  staleness thresholds in route.ts; known-dormant scrapers excluded.
+  When the Vercel ACSC ingest (PR #147) confirms green, revert the
+  `acsc` threshold from 999h (silenced) to 12h.
+
 - [ ] **`/intel/regulator-alerts/[slug]` detail pages (P3)** — surface
   per-alert detail pages with full body_md rendered, breadcrumbs, and
   per-source schema.org markup for SEO. Requires a `slug` column on
