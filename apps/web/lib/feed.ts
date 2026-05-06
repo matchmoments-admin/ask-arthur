@@ -21,12 +21,17 @@ export const CATEGORY_CONFIG: Record<
 
 export const SOURCE_CONFIG: Record<
   string,
-  { label: string; icon: string }
+  { label: string; icon: string; isRegulator?: boolean }
 > = {
   reddit: { label: "Reddit", icon: "MessageCircle" },
   user_report: { label: "Reported", icon: "Flag" },
   verified_scam: { label: "Verified", icon: "ShieldCheck" },
   scamwatch: { label: "Scamwatch", icon: "Shield" },
+  // Regulator narrative sources — surfaced with a "Regulator" pill in
+  // FeedCard so they're visually distinct from user-generated content.
+  scamwatch_alert: { label: "ACCC Scamwatch", icon: "Shield", isRegulator: true },
+  acsc: { label: "ASD ACSC", icon: "Shield", isRegulator: true },
+  asic_investor: { label: "ASIC", icon: "Shield", isRegulator: true },
 };
 
 export const COUNTRY_OPTIONS = [

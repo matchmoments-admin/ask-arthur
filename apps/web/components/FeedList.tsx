@@ -15,6 +15,9 @@ type FeedListProps = {
 
 const SOURCE_FILTERS = [
   { value: "", label: "All" },
+  { value: "scamwatch_alert", label: "Scamwatch" },
+  { value: "acsc", label: "ACSC" },
+  { value: "asic_investor", label: "ASIC" },
   { value: "reddit", label: "Reddit" },
   { value: "user_report", label: "Reported" },
   { value: "verified_scam", label: "Verified" },

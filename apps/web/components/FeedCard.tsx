@@ -122,8 +122,12 @@ export default function FeedCard({ item }: { item: FeedItem }) {
           </p>
         )}
 
-        {/* Bottom row: badges */}
+        {/* Bottom row: badges. Regulator pill leads when present so the
+            authority signal isn't lost behind category/brand pills. */}
         <div className="flex items-center gap-2 flex-wrap">
+          {sourceConfig.isRegulator && (
+            <Pill label="Regulator" color="#1B2A4A" />
+          )}
           {categoryConfig && (
             <Pill label={categoryConfig.label} color={categoryConfig.color} />
           )}
