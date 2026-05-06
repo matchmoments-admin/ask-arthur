@@ -100,21 +100,19 @@ export default async function RegulatorAlertsPage() {
             </p>
           </div>
         ) : (
-          <ul className="space-y-6">
-            {alerts.map((alert) => {
-              const sourceLabel =
-                SOURCE_CONFIG[alert.source]?.label ?? alert.source;
-              const dateStr = alert.published_at
-                ? relativeTime(alert.published_at)
-                : relativeTime(alert.created_at);
-              const preview = bodyPreview(alert);
-              return (
-                <li
-                  key={alert.id}
-                  className="border-b border-border-light pb-6 last:border-b-0"
-                >
-                  <div className="flex items-center gap-2 text-xs text-gov-slate mb-2">
-                    <span className="inline-flex items-center gap-1 rounded-full bg-deep-navy/10 px-2 py-0.5 font-semibold text-deep-navy">
+        <ul className="space-y-5">
+          {alerts.map((alert) => {
+            const sourceLabel =
+              SOURCE_CONFIG[alert.source]?.label ?? alert.source;
+            const dateStr = alert.published_at
+              ? relativeTime(alert.published_at)
+              : relativeTime(alert.created_at);
+            const preview = bodyPreview(alert);
+            return (
+              <li key={alert.id}>
+                <article className="rounded-xl border border-deep-navy/20 bg-white p-5 transition-shadow hover:shadow-sm hover:border-deep-navy/40">
+                  <div className="flex items-center gap-2 text-xs text-gov-slate mb-3">
+                    <span className="inline-flex items-center gap-1 rounded-full border border-deep-navy/30 px-2 py-0.5 font-semibold text-deep-navy">
                       <Shield size={10} />
                       {sourceLabel}
                     </span>
@@ -147,7 +145,7 @@ export default async function RegulatorAlertsPage() {
                     )}
                   </h2>
                   {preview && (
-                    <p className="text-sm text-gov-slate leading-relaxed mb-2">
+                    <p className="text-sm text-gov-slate leading-relaxed mb-3">
                       {preview}
                     </p>
                   )}
@@ -161,9 +159,10 @@ export default async function RegulatorAlertsPage() {
                       Read at source →
                     </a>
                   )}
-                </li>
-              );
-            })}
+                </article>
+              </li>
+            );
+          })}
         </ul>
       )}
     </>

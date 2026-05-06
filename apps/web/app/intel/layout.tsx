@@ -9,7 +9,7 @@ export default function IntelLayout({
   return (
     <div className="min-h-screen flex flex-col">
       <Nav />
-      <main className="flex-1 w-full max-w-[760px] mx-auto px-5 pt-10 pb-16">
+      <main className="flex-1 w-full max-w-[640px] mx-auto px-5 pt-16 pb-16">
         {children}
       </main>
       <Footer />
