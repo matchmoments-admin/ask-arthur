@@ -12,8 +12,6 @@
 import type { Metadata } from "next";
 import { Shield } from "lucide-react";
 import { createServiceClient } from "@askarthur/supabase/server";
-import Nav from "@/components/Nav";
-import Footer from "@/components/Footer";
 import { SOURCE_CONFIG, relativeTime } from "@/lib/feed";
 
 export const revalidate = 1800; // 30 min ISR
@@ -72,27 +70,24 @@ function bodyPreview(row: RegulatorAlertRow, maxChars = 220): string | null {
 export default async function RegulatorAlertsPage() {
   const alerts = await getAlerts();
 
+  // Nav + Footer + container provided by /intel/layout.tsx — return only
+  // the page-specific content.
   return (
-    <div className="min-h-screen flex flex-col">
-      <Nav />
-      <main
-        id="main-content"
-        className="flex-1 w-full max-w-[640px] mx-auto px-5 pt-16 pb-16"
-      >
-        <div className="flex items-center gap-2 mb-4">
-          <Shield size={20} className="text-deep-navy" />
-          <span className="text-xs font-bold tracking-widest uppercase text-deep-navy">
-            Regulator alerts
-          </span>
-        </div>
-        <h1 className="text-deep-navy text-4xl md:text-5xl font-extrabold mb-4 leading-tight">
-          Australian regulator scam warnings
-        </h1>
-        <p className="text-lg text-gov-slate mb-10 leading-relaxed">
-          Authoritative alerts published by ACCC Scamwatch, ASD&apos;s
-          Australian Cyber Security Centre, and ASIC Moneysmart. Updated
-          continuously as regulators publish new warnings.
-        </p>
+    <>
+      <div className="flex items-center gap-2 mb-4">
+        <Shield size={20} className="text-deep-navy" />
+        <span className="text-xs font-bold tracking-widest uppercase text-deep-navy">
+          Regulator alerts
+        </span>
+      </div>
+      <h1 className="text-deep-navy text-4xl md:text-5xl font-extrabold mb-4 leading-tight">
+        Australian regulator scam warnings
+      </h1>
+      <p className="text-lg text-gov-slate mb-10 leading-relaxed">
+        Authoritative alerts published by ACCC Scamwatch, ASD&apos;s
+        Australian Cyber Security Centre, and ASIC Moneysmart. Updated
+        continuously as regulators publish new warnings.
+      </p>
 
         {alerts.length === 0 ? (
           <div className="text-center py-16">
@@ -169,10 +164,8 @@ export default async function RegulatorAlertsPage() {
                 </li>
               );
             })}
-          </ul>
-        )}
-      </main>
-      <Footer />
-    </div>
+        </ul>
+      )}
+    </>
   );
 }
