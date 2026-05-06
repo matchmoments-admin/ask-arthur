@@ -338,6 +338,30 @@ Infrastructure is in place (v38–v40). Future work:
   `SELECT * FROM feed_ingestion_log WHERE feed_name='acsc' ORDER BY created_at DESC LIMIT 10`
   — at least one `success` with `records_new > 0` expected.
 
+- [ ] **Daily Telegram cost digest — verify after 7d** — the existing weekly
+  WoW cost digest auto-includes any feature found in `cost_telemetry`.
+  After 7 days of `news-intel-embed` cost data has accrued (target date
+  ≥ 2026-05-13), check the Mon Telegram digest contains a
+  `news-intel-embed` line. **No code change needed** — verification only.
+
+- [ ] **`/intel/regulator-alerts/[slug]` detail pages (P3)** — surface
+  per-alert detail pages with full body_md rendered, breadcrumbs, and
+  per-source schema.org markup for SEO. Requires a `slug` column on
+  `feed_items` (currently the dedup key is a SHA-256 hash). Implementation
+  notes when picked up:
+  * Add `slug TEXT` column on `feed_items`, backfilled from a slugified
+    version of `title` + a 6-char hash suffix to avoid collisions.
+  * Update the three narrative scrapers to populate `slug` on insert.
+  * Build the `[slug]/page.tsx` route mirroring `/intel/regulator-alerts/page.tsx`.
+  Defer until `/intel/regulator-alerts` (the list page) shows clear SEO
+  signal — Plausible referrers from search engines pointing at it.
+
+- [ ] **Mobile `RegulatorAlertsScreen` UI** — `/api/mobile/regulator-alerts`
+  shipped in PR #144 (gated default OFF). The mobile app needs a screen
+  to render the response. Pickup signal: when @askarthur/mobile is next
+  bumped for an Expo release, add the screen and flip
+  `NEXT_PUBLIC_FF_MOBILE_REGULATOR_ALERTS=true` simultaneously.
+
 ## Reddit Scam Intelligence — priority watch
 
 Plan: [docs/plans/reddit-intel.md](./docs/plans/reddit-intel.md). All 14 PRs (#55–#68) merged 2026-05-02; pipeline is live and producing data within cost budget. Active watch items:
