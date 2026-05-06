@@ -43,7 +43,8 @@ def conditional_get(
     url: str,
     *,
     user_agent: str = "AskArthur-ThreatFeed/1.0 (+https://askarthur.au)",
-    timeout: int = 60,
+    timeout: int = 90,
+    retries: int = 2,
 ) -> ConditionalResponse:
     """GET ``url`` with cached ETag/Last-Modified headers, persisting the
     new values on a 200.
@@ -73,7 +74,30 @@ def conditional_get(
             if cached_lm:
                 headers["If-Modified-Since"] = cached_lm
 
-    resp = requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
+    # GitHub Actions runners occasionally see slow responses from
+    # cyber.gov.au (Cloudflare-fronted) — surface a single retry with
+    # backoff before giving up rather than blocking the whole feed.
+    last_err: Exception | None = None
+    resp = None
+    for attempt in range(retries + 1):
+        try:
+            resp = requests.get(
+                url, headers=headers, timeout=timeout, allow_redirects=True
+            )
+            break
+        except (requests.Timeout, requests.ConnectionError) as err:
+            last_err = err
+            if attempt >= retries:
+                raise
+            backoff_s = 2 ** attempt
+            logger.warning(
+                f"conditional_get retry {attempt + 1}/{retries} after {type(err).__name__}",
+                extra={"metadata": {"source": source, "url": url, "backoff_s": backoff_s}},
+            )
+            import time as _t
+            _t.sleep(backoff_s)
+    if resp is None:  # belt-and-suspenders: loop should have raised
+        raise last_err or RuntimeError("conditional_get: no response")
 
     if resp.status_code == 304:
         logger.info("304 Not Modified", extra={"metadata": {"source": source, "url": url}})
