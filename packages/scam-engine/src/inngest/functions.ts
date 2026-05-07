@@ -65,6 +65,14 @@ import { regulatorAlertPush } from "./regulator-alert-push";
 // the first manual trigger confirms Vercel egress isn't also tarpitted.
 import { acscIngestVercel } from "./acsc-ingest-vercel";
 
+// Phone Footprint: nightly anonymisation + monitor consent sweep. Wires
+// up RPCs that v75 created but no scheduler invoked. 03:15 UTC.
+import { phoneFootprintRetention } from "./phone-footprint-retention";
+
+// Reddit Intel: prune reddit_processed_posts dedup tracker (30-day
+// horizon matches scraper re-encounter window). 03:45 UTC.
+import { redditProcessedPostsRetention } from "./reddit-processed-posts-retention";
+
 export const inngestFunctions = [
   stalenessCheck,
   stalenessCheckIPs,
@@ -107,4 +115,8 @@ export const inngestFunctions = [
   regulatorAlertPush,
   // News Intel: ACSC ingest from Vercel egress (Akamai-tarpit workaround)
   acscIngestVercel,
+  // Phone Footprint: nightly anonymisation + monitor consent sweep
+  phoneFootprintRetention,
+  // Reddit Intel: nightly dedup-tracker prune (30d)
+  redditProcessedPostsRetention,
 ];
