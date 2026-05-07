@@ -485,13 +485,29 @@ that needs its own PR because the blast radius or scope is larger.
 
 ### Advisor cleanup — queued
 
-- [ ] **Drop 177 unused indexes** — `vulnerabilities` alone carries 11; `scam_reports` 9; `subscriptions` 6; `scam_entities` / `flagged_ads` 5 each. Own PR so a rare-query regression is easy to revert. Run `pg_stat_user_indexes` again after 30 days of prod traffic before finalising the drop list
-- [ ] **Resolve 21 empty partitioned shadow tables** — `cost_telemetry_partitioned*`, `scam_reports_partitioned*`, `feed_items_partitioned*` exist but have zero rows. Decision: either finish the `pg_partman` cutover (per `docs/partitioning-runbook.md`) or drop the shadows. Blocked on: confirming whether the v-series migration that created them intended a maintenance-window cutover that never ran
-- [ ] **Rewrite 16 `USING (true)` RLS policies** on `check_stats`, `email_subscribers`, `feed_ingestion_log`, `scam_crypto_wallets`, `scam_ips`, `scam_urls`, `verified_scams`. These are the consumer-facing public surfaces — each needs a policy that lets the intended reader through and blocks everything else. Behavioural risk: rate-limited feed UI + public stats can break if done wrong
-- [ ] **Consolidate multiple-permissive-policy duplication** on `api_keys` (20 findings), `org_members` (20), `org_invitations` (10), `user_profiles` (10). Pattern: collapse service-role + user-scope + org-scope policies to one permissive policy per role with `(select auth.uid())` wrapping — also resolves 55 `auth_rls_initplan` warnings in the same pass
-- [ ] **Move `pg_trgm` extension out of `public`** — `CREATE SCHEMA IF NOT EXISTS extensions; ALTER EXTENSION pg_trgm SET SCHEMA extensions`. Closes the remaining ~32 `function_search_path_mutable` findings (they're all `gtrgm_*` / `similarity*` / `word_similarity*` functions owned by the extension). Must update any SQL that references `public.similarity()` etc. explicitly
-- [ ] **Enable HIBP leaked-password protection** in Supabase Auth settings (dashboard toggle, no migration)
-- [ ] **Add explicit deny-all policies to `cost_telemetry` + its 12 monthly partitions** — clears the 23 `rls_enabled_no_policy` INFO findings. Cosmetic but keeps the advisor board clean
+> **2026-05-08 status update.** Live advisor count is now 335 unused indexes
+> (508 MB) — up from the April snapshot's 177. The growth is partly real
+> (more migrations) and partly partition shells (54 of the 335 sit in empty
+> `*_partitioned_y%` shadows that resolve when those shells are rebuilt or
+> dropped per the partitioning decision). Hot-table candidates after
+> excluding pkey + partition-shell indexes: **~230**. **Plus the ERROR-level
+> `feed_items_all` SECURITY DEFINER finding shipped fixed in v100 (PR #150)
+> alongside 11 missing FK indexes; performance unindexed_foreign_keys lint
+> count: 11 → 0.**
+
+- [ ] **Drop ~230 hot-table unused indexes** — `vulnerabilities` carries 11; `scam_reports` 9; `subscriptions` 6; `scam_entities` / `flagged_ads` 5 each. Own PR so a rare-query regression is easy to revert. **Snapshot `pg_stat_user_indexes.idx_scan` to `docs/ops/index-baseline-2026-05.md` first**, wait 30 days for traffic confirmation, then drop in logical groups
+- [ ] **`acnc_charities.idx_acnc_name_mission_embedding_hnsw` (481 MB) is NOT dormant** — `idx_scan=0` is a feature-flag false negative. The `match_charities_by_embedding` RPC at `packages/charity-check/src/providers/acnc.ts:376` will use this index the moment `NEXT_PUBLIC_FF_CHARITY_CHECK` flips ON. **Do NOT drop this one as part of the unused-index sweep.** Reconsider only after the flag has been on for 30 days AND the index still shows zero scans, OR migrate to `halfvec` to halve the cost (~240 MB) at ~1% recall loss. Investigated 2026-05-08 (would-be v101 PR aborted) — see plan §1.1 for context
+- [ ] **Resolve 21 empty partitioned shadow tables** — `cost_telemetry_partitioned*`, `scam_reports_partitioned*`, `feed_items_partitioned*` exist but have zero rows. **Critical**: live schema diff shows `feed_items_partitioned` (11 cols) and `scam_reports_partitioned` (17 cols) have **drifted** from live `feed_items` (26 cols) and `scam_reports` (25 cols) respectively — cutover would silently drop production columns. `cost_telemetry_partitioned` is shape-compatible but at 73 rows, partitioning is premature. Plan §3 sequencing: ENUM consolidation (§4.3) lands first, then both stale shells get rebuilt from current schema, then cutover one at a time
+- [ ] **Rewrite 16 `USING (true)` RLS policies** on `check_stats`, `email_subscribers`, `feed_ingestion_log`, `scam_crypto_wallets`, `scam_ips`, `scam_urls`, `verified_scams`. These are the consumer-facing public surfaces — each needs a policy that lets the intended reader through and blocks everything else. Behavioural risk: rate-limited feed UI + public stats can break if done wrong. **Must precede any `scam_url*` archival/lifecycle work** (plan §2.2 dependency)
+- [ ] **Consolidate multiple-permissive-policy duplication** — live count is now 210 lints across 25 tables: `api_keys` (20), `org_members` (20), `org_invitations` (10), `user_profiles` (10), 21 others. Pattern: collapse service-role + user-scope + org-scope policies to one permissive policy per role with `(select auth.uid())` wrapping — also resolves 60 `auth_rls_initplan` warnings in the same pass
+- [x] ✅ **`feed_items_all` SECURITY DEFINER view fixed** (v100 / PR #150) — the sole ERROR-level Supabase advisor finding. Was a v98 regression; v72 / v78 / v94b had cleared the rest. Closed 2026-05-08
+- [x] ✅ **11 missing FK indexes added** (v100 / PR #150) on `phone_footprint_*`, `telco_*`, `breaches`, `breach_sources_raw`. Performance advisor `unindexed_foreign_keys` count: 11 → 0. Closed 2026-05-08
+- [x] ✅ **Phone Footprint retention scheduled** (PR #151) — `anonymise_expired_footprints` + `sweep_inactive_monitors` now run nightly at 03:15 UTC via Inngest. Closes the documented-but-unenforced PII retention gap from v75. Closed 2026-05-08
+- [x] ✅ **`reddit_processed_posts` retention scheduled** (PR #151) — nightly 03:45 UTC `cleanup_old_reddit_posts(30)`. Closed 2026-05-08
+- [ ] **Move `pg_trgm` and `vector` extensions out of `public`** — `CREATE SCHEMA IF NOT EXISTS extensions; ALTER EXTENSION pg_trgm SET SCHEMA extensions; ALTER EXTENSION vector SET SCHEMA extensions`. Closes the remaining ~32 `function_search_path_mutable` findings (they're all `gtrgm_*` / `similarity*` / `<=>` functions owned by the extensions). Must update any SQL that references `public.similarity()` / `public.<=>` etc. explicitly
+- [ ] **Enable HIBP leaked-password protection** in Supabase Auth settings (dashboard toggle, no migration). 1 advisor WARN. Trivial to flip; user action required (dashboard-only)
+- [ ] **Add explicit deny-all policies to `cost_telemetry` + its 12 monthly partitions** — clears the 33 `rls_enabled_no_policy` INFO findings. Cosmetic but keeps the advisor board clean
+- [ ] **Lock down 48 SECURITY DEFINER functions executable by anon/authenticated** — per-function audit; service_role keeps EXECUTE, anon/authenticated REVOKE unless deliberately public (`check_breach_exposure`, `search_charities`, `create_scam_report`, etc.). 96 advisor WARNs (48 × 2 roles)
 
 ### Phase 1 commercial readiness (April 2026 roadmap)
 
