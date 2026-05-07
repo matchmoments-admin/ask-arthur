@@ -73,6 +73,10 @@ import { phoneFootprintRetention } from "./phone-footprint-retention";
 // horizon matches scraper re-encounter window). 03:45 UTC.
 import { redditProcessedPostsRetention } from "./reddit-processed-posts-retention";
 
+// Cost Telemetry: nightly rollup + 90d prune. Rollup table preserves
+// long-range aggregates; raw rows >90d deleted. 04:00 UTC.
+import { costTelemetryRetention } from "./cost-telemetry-retention";
+
 export const inngestFunctions = [
   stalenessCheck,
   stalenessCheckIPs,
@@ -119,4 +123,6 @@ export const inngestFunctions = [
   phoneFootprintRetention,
   // Reddit Intel: nightly dedup-tracker prune (30d)
   redditProcessedPostsRetention,
+  // Cost Telemetry: nightly rollup + 90d prune
+  costTelemetryRetention,
 ];
