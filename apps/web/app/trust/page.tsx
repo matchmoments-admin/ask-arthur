@@ -278,7 +278,10 @@ export default function TrustPage() {
             <a href="/terms" className="text-action-teal hover:underline font-medium">Terms of Service</a>
           </section>
 
-          <section className="pt-6 border-t border-border-light">
+          <section className="pt-8 border-t border-border-light">
+            <p className="text-xs uppercase tracking-widest text-gov-slate text-center mb-4">
+              What people are saying
+            </p>
             <Trustbox />
           </section>
         </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import Script from "next/script";
 
 interface TrustboxProps {
@@ -40,16 +40,22 @@ export default function Trustbox({
   const buid =
     businessUnitId ?? process.env.NEXT_PUBLIC_TRUSTPILOT_BUSINESS_UNIT_ID;
 
-  useEffect(() => {
-    // The bootstrap script auto-scans on initial page load only. SPA
-    // navigation re-mounts this component without re-firing the bootstrap
-    // — call loadFromElement to rehydrate.
+  // Trustpilot's bootstrap auto-scans on initial parse, but our useEffect
+  // can fire BEFORE the script has loaded — leaving the fallback <a> link
+  // visible. Drive both paths off Script's onLoad so we always call
+  // loadFromElement after window.Trustpilot exists, and re-attempt on the
+  // useEffect for SPA re-mounts where the script is already cached.
+  const hydrate = useCallback(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const tp = (typeof window !== "undefined" ? (window as any).Trustpilot : null);
     if (tp && ref.current) {
       tp.loadFromElement(ref.current, true);
     }
   }, []);
+
+  useEffect(() => {
+    hydrate();
+  }, [hydrate]);
 
   if (!tpl || !buid) return null;
 
@@ -58,6 +64,7 @@ export default function Trustbox({
       <Script
         src="//widget.trustpilot.com/bootstrap/v5/tp.widget.bootstrap.min.js"
         strategy="afterInteractive"
+        onLoad={hydrate}
       />
       <div
         ref={ref}
