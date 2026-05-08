@@ -39,16 +39,27 @@ Configured on project `rquomhcgnodxzkhokwni`. WAL archives every ~2 minutes. RPO
 
 PITR retention is currently 7 days. **Revisit when:** any single feature's deployment cycle exceeds a week (today: most features ship within 2-3 days).
 
-### Long-term cold (planned — not yet shipped)
+### Long-term cold (workflow shipped, gated on R2 setup)
 
-Daily logical dump via GitHub Actions cron, written to R2 with:
+Daily logical `pg_dump` via GitHub Actions cron (`.github/workflows/dr-pg-dump.yml`), written to R2 with:
 - Object Lock Compliance mode, 30-day retention (immutable; cannot delete via API)
 - Bucket versioning ON (object overwrite preserves prior versions)
 - Lifecycle: delete versions >90 days
 
-Naming: `safeverify-dr/<utc-date>/dump-<sha256>.sql.gz`. SHA256 in filename catches in-flight corruption.
+Naming: `safeverify-dr/<utc-date>/safeverify-<utc-timestamp>-<sha256-prefix>.dump`. SHA-256 stored in object metadata; HEAD-verify after upload catches in-flight corruption.
 
-**Status: NOT YET SHIPPED.** Tracked as Phase 9.2 of the data-model improvement plan. Today's only DR is Supabase PITR (7d) + their daily backups (varies). Implement before any B2B contract ships — SOC 2 will require it.
+Schedule: 17:00 UTC nightly (= 03:00 AEST, off-peak after the 02:30 retention pipeline finishes).
+
+**Status: Workflow shipped 2026-05-08 (Phase 9.2). Gated on `vars.ENABLE_DR_DUMP == 'true'` so a partially-configured deploy doesn't fail nightly.** One-time setup required before enabling:
+
+1. Create R2 bucket with Object Lock Compliance + versioning + 90-day lifecycle.
+2. Create R2 API token scoped to the bucket.
+3. Add GitHub secrets: `R2_ACCOUNT_ID`, `R2_DR_BUCKET`, `R2_DR_ACCESS_KEY_ID`, `R2_DR_SECRET_ACCESS_KEY`. (`SUPABASE_DB_URL` already exists for `scrape-feeds.yml`.)
+4. Set GitHub variable `ENABLE_DR_DUMP=true` to enable the cron.
+
+Header of the workflow file documents the setup steps inline.
+
+**Workflow excludes Supabase-managed schemas** (storage, auth, realtime, supabase_functions, net, pgsodium, vault) — those have separate vendor-managed DR. Only `public` schema (and other user-defined schemas) are dumped.
 
 ### Storage (R2)
 
