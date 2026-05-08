@@ -73,8 +73,11 @@ export async function createFeedbackPage(
     // The Notion SDK's typed properties union is wide; we build the payload
     // dynamically and let the runtime validate. Type-narrowing every property
     // pulls in the entire @notionhq/client surface for no real benefit here.
+    // Notion's default title-type column is named "Name". agent-fleet's
+    // tools.ts uses the same convention. Don't rename to "Title" in the UI;
+    // we write to "Name" here so a freshly created DB works without setup.
     const properties: Record<string, unknown> = {
-      Title: { title: [{ type: "text", text: { content: payload.title.slice(0, 200) } }] },
+      Name: { title: [{ type: "text", text: { content: payload.title.slice(0, 200) } }] },
       Type: selectProp(TYPE_LABEL[payload.type]),
       Priority: selectProp(priority),
       Description: rt(payload.description),
