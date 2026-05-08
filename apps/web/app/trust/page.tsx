@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Shield, Lock, Server, Eye, AlertTriangle, CheckCircle, Clock, Download, FileText, Table as TableIcon, History } from "lucide-react";
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
+import Trustbox from "@/components/trust/Trustbox";
 
 export const metadata: Metadata = {
   title: "Trust & Security",
@@ -275,6 +276,10 @@ export default function TrustPage() {
           <section className="flex flex-wrap gap-4 text-sm">
             <a href="/privacy" className="text-action-teal hover:underline font-medium">Privacy Policy</a>
             <a href="/terms" className="text-action-teal hover:underline font-medium">Terms of Service</a>
+          </section>
+
+          <section className="pt-6 border-t border-border-light">
+            <Trustbox />
           </section>
         </div>
       </main>
