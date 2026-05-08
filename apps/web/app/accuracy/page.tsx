@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { createServiceClient } from "@askarthur/supabase/server";
+import Nav from "@/components/Nav";
+import Footer from "@/components/Footer";
 
 export const metadata: Metadata = {
   title: "Accuracy | Ask Arthur",
@@ -81,8 +83,10 @@ export default async function AccuracyPage() {
   const stats = await loadStats();
 
   return (
-    <main className="max-w-[720px] mx-auto px-5 py-12">
-      <header>
+    <div className="min-h-screen flex flex-col">
+      <Nav />
+      <main className="max-w-[720px] mx-auto px-5 py-12 flex-1">
+        <header>
         <p className="text-xs font-bold uppercase tracking-widest text-gov-slate mb-2">
           Trust signal
         </p>
@@ -192,6 +196,8 @@ export default async function AccuracyPage() {
           for.
         </p>
       </section>
-    </main>
+      </main>
+      <Footer />
+    </div>
   );
 }
