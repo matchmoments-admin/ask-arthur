@@ -4,6 +4,7 @@ import Footer from "@/components/Footer";
 import Nav from "@/components/Nav";
 import ChartsSection from "@/components/charts/ChartsSection";
 import WorldScamMapWithHighlights from "@/components/charts/WorldScamMapWithHighlights";
+import Trustbox from "@/components/trust/Trustbox";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { parseStateFromRegion } from "@/lib/chart-tokens";
 
@@ -314,6 +315,13 @@ export default async function AboutPage() {
                 {name}
               </a>
             ))}
+          </div>
+
+          <div className="mt-10 pt-8 border-t border-border-light">
+            <p className="text-xs uppercase tracking-widest text-gov-slate text-center mb-3">
+              What people are saying
+            </p>
+            <Trustbox />
           </div>
         </section>
       </main>
