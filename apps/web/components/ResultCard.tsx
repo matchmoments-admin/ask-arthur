@@ -1,9 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { ArrowRight, CircleX, Eye, HandCoins, TriangleAlert } from "lucide-react";
 import ResultFeedback from "./result/ResultFeedback";
 import ResultActionButtons from "./result/ResultActionButtons";
+import OnwardReportPicker from "./result/OnwardReportPicker";
+import type { EvidenceContext } from "@/lib/onward/destinations";
 import type { ScammerContacts } from "@askarthur/types";
 
 type Verdict = "SAFE" | "SUSPICIOUS" | "HIGH_RISK";
@@ -106,6 +109,10 @@ export default function ResultCard({
   verdict,
   redFlags,
   scamType,
+  impersonatedBrand,
+  scammerContacts,
+  scammerUrls,
+  channel,
   onCheckAnother,
   contentHash,
   analysisId,
@@ -115,9 +122,15 @@ export default function ResultCard({
   const config = VERDICT_CONFIG[verdict];
   const title = resolveTitle(verdict, scamType);
   const Icon = config.icon;
-  const showReport = verdict !== "SAFE";
+  // Picker is only useful when we have a scam_reports row to attach the
+  // onward log entries to; otherwise the picker has nothing to forward.
+  const showReport = verdict !== "SAFE" && typeof scamReportId === "number";
+  const [showPicker, setShowPicker] = useState(false);
 
   async function handleReport() {
+    // Audit: write a 'user_reported' verdict_feedback row regardless of
+    // which destinations the user later picks. This preserves the existing
+    // analytics signal (how many users hit the report button).
     try {
       await fetch("/api/feedback", {
         method: "POST",
@@ -137,14 +150,25 @@ export default function ResultCard({
     } catch {
       // Best-effort — matches ResultFeedback's fire-and-forget pattern.
     }
-    if (typeof window !== "undefined") {
-      window.open(
-        "https://portal.scamwatch.gov.au/report-a-scam/",
-        "_blank",
-        "noopener,noreferrer",
-      );
-    }
+    setShowPicker(true);
   }
+
+  // Build the evidence context once and reuse for the picker + summary.
+  const evidence: EvidenceContext = {
+    reportRef: scamReportId
+      ? `ASK-${String(scamReportId).padStart(6, "0")}`
+      : "ASK-pending",
+    scamType: scamType ?? null,
+    impersonatedBrand: impersonatedBrand ?? null,
+    channel: channel ?? null,
+    scammerUrls: (scammerUrls ?? []).map((u) => u.url),
+    scammerPhones:
+      scammerContacts?.phoneNumbers.map((p) => p.value) ?? [],
+    scammerEmails:
+      scammerContacts?.emailAddresses.map((e) => e.value) ?? [],
+    redFlags,
+    receivedAt: new Date().toISOString(),
+  };
 
   const flagItems =
     redFlags.length > 0
@@ -250,6 +274,20 @@ export default function ResultCard({
         scamReportId={scamReportId}
         contentHash={contentHash}
       />
+
+      {/* Onward report picker — opens inline when user clicks "Report this scam".
+          The picker swaps to OnwardReportSummary after the user submits. */}
+      {showPicker && scamReportId && (
+        <OnwardReportPicker
+          scamReportId={scamReportId}
+          analysisId={analysisId}
+          scamType={scamType}
+          impersonatedBrand={impersonatedBrand}
+          channel={channel}
+          evidence={evidence}
+          onClose={() => setShowPicker(false)}
+        />
+      )}
 
       {/* Two-button footer */}
       {onCheckAnother && (

@@ -10,6 +10,14 @@ import {
   phoneFootprintVonageBackfillPager,
   phoneFootprintVonageBackfillMonitor,
 } from "./functions/phone-footprint-vonage-backfill";
+import { onwardBrandAbuse } from "./functions/onward-brand-abuse";
+import { onwardAcmaEmailSpam } from "./functions/onward-acma";
+import {
+  onwardScamwatch,
+  onwardReportCyber,
+  onwardIdcare,
+  onwardAskArthurFeed,
+} from "./functions/onward-skipped";
 
 // App-layer Inngest functions live here because they cross apps/web-only
 // primitives (R2 upload, Resend, local auth helpers) that shouldn't leak
@@ -22,6 +30,13 @@ const appFunctions = [
   phoneFootprintRefreshMonitor,
   phoneFootprintVonageBackfillPager,
   phoneFootprintVonageBackfillMonitor,
+  // Onward reporting (v119)
+  onwardBrandAbuse,
+  onwardAcmaEmailSpam,
+  onwardScamwatch,
+  onwardReportCyber,
+  onwardIdcare,
+  onwardAskArthurFeed,
 ];
 
 export const { GET, POST, PUT } = serve({

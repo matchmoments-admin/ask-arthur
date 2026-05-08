@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Trustbox from "./trust/Trustbox";
 
 export default function Footer() {
   return (
@@ -14,6 +15,9 @@ export default function Footer() {
           <Link href="/api-docs" className="text-xs font-bold uppercase tracking-widest text-gov-slate hover:text-action-teal transition-colors py-3">
             API
           </Link>
+          <Link href="/accuracy" className="text-xs font-bold uppercase tracking-widest text-gov-slate hover:text-action-teal transition-colors py-3">
+            Accuracy
+          </Link>
           <Link href="/trust" className="text-xs font-bold uppercase tracking-widest text-gov-slate hover:text-action-teal transition-colors py-3">
             Security
           </Link>
@@ -24,6 +28,9 @@ export default function Footer() {
             Terms
           </Link>
         </nav>
+        <div className="mb-4">
+          <Trustbox />
+        </div>
         <p className="text-xs text-gov-slate mb-4 leading-relaxed">
           If you&apos;ve been scammed, call{" "}
           <a href="tel:1300292371" className="font-bold text-deep-navy hover:text-action-teal transition-colors">
