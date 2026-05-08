@@ -22,6 +22,7 @@
     "dev:telegram": "pnpm --filter @askarthur/web telegram:dev",
     "pipeline-test": "cd pipeline/scrapers && python -m pytest tests/ -v",
     "trust:pdfs": "node scripts/generate-trust-pdfs.mjs",
+    "push-blog": "node scripts/push-blog.mjs",
     "prepare": "husky"
   },
   "lint-staged": {
