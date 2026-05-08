@@ -81,6 +81,11 @@ import { costTelemetryRetention } from "./cost-telemetry-retention";
 // sim/device-swap-events (forensic); 365d for the rest. 04:30 UTC.
 import { telcoEventsRetention } from "./telco-events-retention";
 
+// Archive shadows: nightly archival mover for 6 medium-volume tables
+// (flagged_ads, deepfake_detections, media_analyses, scan_results,
+// verdict_feedback, brand_impersonation_alerts). 05:00 UTC.
+import { archiveShadowsRetention } from "./archive-shadows-retention";
+
 export const inngestFunctions = [
   stalenessCheck,
   stalenessCheckIPs,
@@ -131,4 +136,6 @@ export const inngestFunctions = [
   costTelemetryRetention,
   // Telco events: nightly prune (730d sim/device-swap; 365d others)
   telcoEventsRetention,
+  // Archive shadows: nightly archival mover (6 medium-volume tables)
+  archiveShadowsRetention,
 ];
