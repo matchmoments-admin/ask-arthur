@@ -6,6 +6,11 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { logCost, PRICING } from "@/lib/cost-telemetry";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
+import {
+  createFeedbackPage,
+  type FeedbackPayload,
+  type FeedbackType,
+} from "@/lib/notion/feedback-tracker";
 
 // Where new-lead notifications are delivered. Kept a const so the
 // recipient is obvious in code review — don't silently redirect this to
@@ -123,23 +128,73 @@ export async function POST(req: NextRequest) {
       })();
     }
 
-    // Telegram ping to the admin ops chat. Prefix with /agent-fleet to
-    // match the CMS/publish command convention already in the codebase
-    // (see v74 migration comment) — keeps the ops chat filterable by
-    // subsystem.
+    // Determine if this submission is typed feedback (bug/improvement/feature)
+    // — those route to Notion + a structured Telegram alert. General enquiries
+    // use the existing /agent-fleet lead format.
+    const ax = (lead.assessment_data ?? {}) as Record<string, unknown>;
+    const feedbackType = (ax.feedback_type as FeedbackType | "general" | undefined) ?? "general";
+    const isTypedFeedback =
+      feedbackType === "bug" ||
+      feedbackType === "improvement" ||
+      feedbackType === "feature";
+
+    // Notion dual-write — only fires for typed feedback. Non-blocking.
+    let notionPageUrl: string | null = null;
+    if (isTypedFeedback) {
+      try {
+        const payload: FeedbackPayload = {
+          type: feedbackType,
+          title: String(ax.title ?? "").slice(0, 200),
+          description: String(ax.description ?? ""),
+          reporterEmail: lead.email,
+          reporterName: lead.name,
+          stepsToReproduce: typeof ax.steps === "string" ? ax.steps : null,
+          severity: ax.severity as FeedbackPayload["severity"],
+          currentBehavior: typeof ax.current === "string" ? ax.current : null,
+          desiredBehavior: typeof ax.desired === "string" ? ax.desired : null,
+          problem: typeof ax.problem === "string" ? ax.problem : null,
+          useCase: typeof ax.use_case === "string" ? ax.use_case : null,
+          url: typeof ax.url === "string" ? ax.url : null,
+          userAgent: typeof ax.user_agent === "string" ? ax.user_agent : null,
+          appVersion: typeof ax.app_version === "string" ? ax.app_version : null,
+          source: "web",
+        };
+        const page = await createFeedbackPage(payload);
+        notionPageUrl = page?.url ?? null;
+      } catch (err) {
+        logger.error("Notion feedback write failed", { error: String(err) });
+      }
+    }
+
+    // Telegram ping. Two formats:
+    //  - General lead: existing /agent-fleet lead style.
+    //  - Typed feedback: structured HTML alert with Notion deep-link.
     (async () => {
       try {
-        const hearAbout =
-          (lead.assessment_data as { hear_about?: string } | null)?.hear_about ?? null;
-        const lines = [
-          `/agent-fleet lead`,
-          `<b>New lead</b> — ${escapeHtml(lead.name)} (${escapeHtml(lead.email)})`,
-          `Company: ${escapeHtml(lead.company_name)}${lead.sector ? ` · ${escapeHtml(lead.sector)}` : ""}`,
-          lead.source ? `Source: ${escapeHtml(lead.source)}` : null,
-          hearAbout ? `Heard via: ${escapeHtml(hearAbout)}` : null,
-          challenge ? `\n<i>${escapeHtml(truncate(challenge, 400))}</i>` : null,
-        ].filter(Boolean);
-        await sendAdminTelegramMessage(lines.join("\n"));
+        if (isTypedFeedback) {
+          await sendAdminTelegramMessage(
+            buildFeedbackTelegram(
+              feedbackType,
+              ax,
+              lead.name,
+              lead.email,
+              lead.company_name,
+              notionPageUrl
+            )
+          );
+        } else {
+          const hearAbout =
+            (lead.assessment_data as { hear_about?: string } | null)?.hear_about ?? null;
+          const lines = [
+            `/agent-fleet lead`,
+            `<b>New lead</b> — ${escapeHtml(lead.name)} (${escapeHtml(lead.email)})`,
+            `Company: ${escapeHtml(lead.company_name)}${lead.sector ? ` · ${escapeHtml(lead.sector)}` : ""}`,
+            lead.source ? `Source: ${escapeHtml(lead.source)}` : null,
+            hearAbout ? `Heard via: ${escapeHtml(hearAbout)}` : null,
+            challenge ? `\n<i>${escapeHtml(truncate(challenge, 400))}</i>` : null,
+          ].filter(Boolean);
+          await sendAdminTelegramMessage(lines.join("\n"));
+        }
       } catch (err) {
         logger.error("Lead Telegram notification failed", { error: String(err) });
       }
@@ -198,4 +253,38 @@ function escapeHtml(s: string): string {
 
 function truncate(s: string, n: number): string {
   return s.length <= n ? s : s.slice(0, n - 1) + "…";
+}
+
+const FEEDBACK_EMOJI: Record<FeedbackType, string> = {
+  bug: "🐛",
+  improvement: "🛠",
+  feature: "✨",
+};
+
+function buildFeedbackTelegram(
+  type: FeedbackType,
+  ax: Record<string, unknown>,
+  reporter: string,
+  email: string,
+  company: string,
+  notionUrl: string | null
+): string {
+  const title = String(ax.title ?? "").slice(0, 200);
+  const description = String(ax.description ?? "");
+  const severity = ax.severity ? `[${String(ax.severity)}]` : "";
+  const url = typeof ax.url === "string" ? ax.url : "";
+
+  const lines = [
+    `/agent-fleet feedback`,
+    `${FEEDBACK_EMOJI[type]} <b>New ${type}${severity ? " " + escapeHtml(severity) : ""}</b>`,
+    `<b>${escapeHtml(title)}</b>`,
+    "",
+    escapeHtml(truncate(description, 600)),
+    "",
+    `👤 ${escapeHtml(reporter)} &lt;${escapeHtml(email)}&gt;`,
+    `🏢 ${escapeHtml(company)}`,
+  ];
+  if (url) lines.push(`🔗 <a href="${escapeHtml(url)}">Page</a>`);
+  if (notionUrl) lines.push(`\n📝 <a href="${escapeHtml(notionUrl)}">Open in Notion</a>`);
+  return lines.join("\n");
 }
