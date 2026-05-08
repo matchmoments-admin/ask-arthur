@@ -478,54 +478,77 @@ Related to Phase 13 in `ROADMAP.md`. Items that need action before (or as) we hi
 
 ## Database Hygiene & SPF Readiness
 
-Deferred items from the 2026-04-23 database audit (`mcp__supabase__get_advisors`
-against project `rquomhcgnodxzkhokwni`). P0 items shipped in migration v78
-(`fix/db-p0-security-hygiene`) — items below are the deliberately-deferred work
-that needs its own PR because the blast radius or scope is larger.
+Started as the deferred items from the 2026-04-23 advisor audit. Heavily
+rewritten 2026-05-08 after a 26-PR sweep (v100–v118 + 5 ops PRs) closed
+**412 of 664 advisor lints (62%)**. Full execution plan + deferred work:
+[`~/.claude/plans/prancy-strolling-dongarra.md`](~/.claude/plans/prancy-strolling-dongarra.md).
 
-### Advisor cleanup — queued
+### Advisor scoreboard
 
-> **2026-05-08 status update.** Live advisor count is now 335 unused indexes
-> (508 MB) — up from the April snapshot's 177. The growth is partly real
-> (more migrations) and partly partition shells (54 of the 335 sit in empty
-> `*_partitioned_y%` shadows that resolve when those shells are rebuilt or
-> dropped per the partitioning decision). Hot-table candidates after
-> excluding pkey + partition-shell indexes: **~230**. **Plus the ERROR-level
-> `feed_items_all` SECURITY DEFINER finding shipped fixed in v100 (PR #150)
-> alongside 11 missing FK indexes; performance unindexed_foreign_keys lint
-> count: 11 → 0.**
+> **As of 2026-05-08:** 0 ERROR · 1 security WARN (HIBP toggle, manual)
+> · 5 perf WARN (residual `multiple_permissive_policies`) · 245 INFO
+> (`unused_index`, awaiting 30-day baseline). Down from 664 lints / 1
+> ERROR / 116 security WARN / 270 perf WARN at session start.
 
-- [ ] **Drop ~230 hot-table unused indexes** — `vulnerabilities` carries 11; `scam_reports` 9; `subscriptions` 6; `scam_entities` / `flagged_ads` 5 each. Own PR so a rare-query regression is easy to revert. **Snapshot `pg_stat_user_indexes.idx_scan` to `docs/ops/index-baseline-2026-05.md` first**, wait 30 days for traffic confirmation, then drop in logical groups
-- [ ] **`acnc_charities.idx_acnc_name_mission_embedding_hnsw` (481 MB) is NOT dormant** — `idx_scan=0` is a feature-flag false negative. The `match_charities_by_embedding` RPC at `packages/charity-check/src/providers/acnc.ts:376` will use this index the moment `NEXT_PUBLIC_FF_CHARITY_CHECK` flips ON. **Do NOT drop this one as part of the unused-index sweep.** Reconsider only after the flag has been on for 30 days AND the index still shows zero scans, OR migrate to `halfvec` to halve the cost (~240 MB) at ~1% recall loss. Investigated 2026-05-08 (would-be v101 PR aborted) — see plan §1.1 for context
-- [ ] **Resolve 21 empty partitioned shadow tables** — `cost_telemetry_partitioned*`, `scam_reports_partitioned*`, `feed_items_partitioned*` exist but have zero rows. **Critical**: live schema diff shows `feed_items_partitioned` (11 cols) and `scam_reports_partitioned` (17 cols) have **drifted** from live `feed_items` (26 cols) and `scam_reports` (25 cols) respectively — cutover would silently drop production columns. `cost_telemetry_partitioned` is shape-compatible but at 73 rows, partitioning is premature. Plan §3 sequencing: ENUM consolidation (§4.3) lands first, then both stale shells get rebuilt from current schema, then cutover one at a time
-- [ ] **Rewrite 16 `USING (true)` RLS policies** on `check_stats`, `email_subscribers`, `feed_ingestion_log`, `scam_crypto_wallets`, `scam_ips`, `scam_urls`, `verified_scams`. These are the consumer-facing public surfaces — each needs a policy that lets the intended reader through and blocks everything else. Behavioural risk: rate-limited feed UI + public stats can break if done wrong. **Must precede any `scam_url*` archival/lifecycle work** (plan §2.2 dependency)
-- [ ] **Consolidate multiple-permissive-policy duplication** — live count is now 210 lints across 25 tables: `api_keys` (20), `org_members` (20), `org_invitations` (10), `user_profiles` (10), 21 others. Pattern: collapse service-role + user-scope + org-scope policies to one permissive policy per role with `(select auth.uid())` wrapping — also resolves 60 `auth_rls_initplan` warnings in the same pass
-- [x] ✅ **`feed_items_all` SECURITY DEFINER view fixed** (v100 / PR #150) — the sole ERROR-level Supabase advisor finding. Was a v98 regression; v72 / v78 / v94b had cleared the rest. Closed 2026-05-08
-- [x] ✅ **11 missing FK indexes added** (v100 / PR #150) on `phone_footprint_*`, `telco_*`, `breaches`, `breach_sources_raw`. Performance advisor `unindexed_foreign_keys` count: 11 → 0. Closed 2026-05-08
-- [x] ✅ **Phone Footprint retention scheduled** (PR #151) — `anonymise_expired_footprints` + `sweep_inactive_monitors` now run nightly at 03:15 UTC via Inngest. Closes the documented-but-unenforced PII retention gap from v75. Closed 2026-05-08
-- [x] ✅ **`reddit_processed_posts` retention scheduled** (PR #151) — nightly 03:45 UTC `cleanup_old_reddit_posts(30)`. Closed 2026-05-08
-- [ ] **Move `pg_trgm` and `vector` extensions out of `public`** — `CREATE SCHEMA IF NOT EXISTS extensions; ALTER EXTENSION pg_trgm SET SCHEMA extensions; ALTER EXTENSION vector SET SCHEMA extensions`. Closes the remaining ~32 `function_search_path_mutable` findings (they're all `gtrgm_*` / `similarity*` / `<=>` functions owned by the extensions). Must update any SQL that references `public.similarity()` / `public.<=>` etc. explicitly
-- [ ] **Enable HIBP leaked-password protection** in Supabase Auth settings (dashboard toggle, no migration). 1 advisor WARN. Trivial to flip; user action required (dashboard-only)
-- [ ] **Add explicit deny-all policies to `cost_telemetry` + its 12 monthly partitions** — clears the 33 `rls_enabled_no_policy` INFO findings. Cosmetic but keeps the advisor board clean
-- [ ] **Lock down 48 SECURITY DEFINER functions executable by anon/authenticated** — per-function audit; service_role keeps EXECUTE, anon/authenticated REVOKE unless deliberately public (`check_breach_exposure`, `search_charities`, `create_scam_report`, etc.). 96 advisor WARNs (48 × 2 roles)
+### Active queue — ready to execute, prioritised
 
-### Phase 1 commercial readiness (April 2026 roadmap)
+These items have clear scope and no blocking decisions; pick up in any
+order.
 
-- [ ] **Case management tables** — `cases`, `case_entities`, `case_transitions`, `case_evidence`, `case_notes`, `case_tasks`, `case_merges` with `new → triaged → investigating → confirmed → reported → resolved / false_positive / duplicate / merged` state machine. Bank-sellable baseline; no commercial fraud platform ships without it
-- [ ] **Append-only `audit_log` with hash chain** — `bigserial` id, `prev_hash` + `row_hash = sha256(prev_hash || payload)` per row; periodic `audit_anchor` external WORM publish. Required for SPF Respond, CPS 234 incident response, Australian Evidence Act 1995 admissibility. SOC 2 CC6/CC7 evidence
-- [ ] **`evidence` pointer table + S3 Object Lock Compliance-mode bucket** + per-access `evidence_custody` events. Chain-of-custody for anything that may end up in AFCA/court
-- [ ] **`spf_principle_events` table** — `principle enum(govern, prevent, detect, report, disrupt, respond)`, `event_kind`, polymorphic `source_table`/`source_id`, `occurred_at`. Drives the SPF scorecard widget (six traffic-light tiles) on `/app/compliance`. Projects existing events onto the six Treasury SPF §58BB principles
-- [ ] **Partition `api_usage_log` daily** via `pg_partman` + hourly/daily materialised rollups + 30-day raw retention. Current per-row writer will detonate at enterprise ingestion
-- [ ] **Webhook delivery ledger** — `webhook_endpoints`, `webhook_events`, `webhook_deliveries` with HMAC-SHA256 signing, exponential backoff ≤3 days, idempotency on `webhook_events.id`, dead-letter state with manual replay. Banks expect Stripe/Standard Webhooks-grade guarantees
-- [ ] **Tenant residency groundwork** — extend `organizations` with `primary_region`, `allowed_regions[]`, `kms_key_ref`, `data_classification`. Table stakes for enterprise contracts and BYOK
-- [ ] **Wire `logCost()` into every `/api/analyze` path** — `cost_telemetry` currently has 3 rows despite ongoing analyze traffic, so the writer is not invoked on most paths. Code change, not schema
-- [ ] **Enable the four Phase-1 production feature flags** (`NEXT_PUBLIC_FF_DATA_PIPELINE`, `_ENTITY_ENRICHMENT`, `_RISK_SCORING`, `_CLUSTER_BUILDER`) and run the pipelines end-to-end so `scam_clusters`, `scam_entities.risk_score`, and `vulnerability_detections` populate with real data. Today's demos fall flat because the tables are empty
-- [ ] **`reddit_processed_posts` retention** — not read by the web app; grows unbounded without a retention job. Pattern: nightly `cleanup_old_reddit_posts(60)` via `pg_cron`
+1. - [ ] **P1 — Drop ~230 hot-table unused indexes (Phase 1.1 Stage C)** — baseline snapshot landed in `docs/ops/index-baseline-2026-05.md` (PR #153) on 2026-05-08; **Stage C ships AFTER 2026-06-08** with apples-to-apples re-snapshot. Per-domain drop PRs (`vulnerabilities` carries 10; `scam_reports` 12; `breaches` 11; `subscriptions` 8). **Skip `idx_acnc_name_mission_embedding_hnsw` (481 MB)** — feature-flag false negative; documented in baseline doc.
+2. - [ ] **P1 — Enable HIBP leaked-password protection** in Supabase Auth dashboard. The only remaining security advisor WARN. User-action only (no migration).
+3. - [ ] **P2 — Phase 4.3 ENUM consolidation (5 PRs)** — replace free-text `scam_type`, `channel` with `scam_intent_label` + `scam_channel` ENUMs; consolidate `feed_items.category` and `reddit_post_intel.intent_label` onto the shared enum. Decisions resolved 2026-05-08: pipe-delim row → `advance_fee`; drop `delivery_method` column. Plan §Phase 4.3 has the full 5-PR sequence (4.3a value-norm → 4.3b drop column → 4.3c ENUM types → 4.3d type-migrate → 4.3e Zod hardening). **Effort: L (1-2 weeks).**
+4. - [ ] **P2 — Phase 8.1 cluster-builder SQL-isation (3 PRs)** — write tests first (none exist today), then recursive-CTE shadow mode for 14d, then flip. Hard prerequisite for Phase 3.4 partitioning. **Effort: L (3-4 weeks).** Plan §Phase 8.1.
+5. - [ ] **P2 — Wire `logCost()` into every `/api/analyze` path** — `cost_telemetry` was at 3 rows in April, 73 in May. Spot-check whether all paid AI calls now log; if any path bypasses, fix. Code change only. (v112 retention is shipped so cost is bounded; this is about completeness of attribution.)
+6. - [ ] **P2 — Run vulnerability enrichment pipeline end-to-end** — 2,139 rows in `vulnerabilities`; `vulnerability_detections` + `vulnerability_exposure_checks` still at 0. The `match-b2b-exposure` Inngest function isn't firing or has no sites to match against. Investigate + flip whatever flag is blocking.
+7. - [ ] **P3 — Phase 9.2 R2 setup + enable** — workflow shipped (PR #173) gated on `vars.ENABLE_DR_DUMP`. One-time setup (4 steps documented in `.github/workflows/dr-pg-dump.yml` header): R2 bucket with Object Lock + token + GH secrets + variable.
+8. - [ ] **P3 — First DR drill (Phase 9.3, scheduled 2026-07-01)** — quarterly drill per `docs/ops/dr-plan.md`. Deliverable: first drill log entry in that doc + an `apps/web/scripts/smoke.ts` post-restore validator.
+9. - [ ] **P3 — Reconcile feed cadence docs** — `ARCHITECTURE.md` claims 15-minute feed sync; production runs weekly via GitHub Actions cron. Either lift the cadence or correct the doc.
 
-### Non-schema advisor TODOs
+### Decision-gated / external-trigger queue
 
-- [ ] **Run vulnerability enrichment pipeline end-to-end** — 2,139 rows ingested into `vulnerabilities` but `vulnerability_detections` and `vulnerability_exposure_checks` still at 0. `/admin/vulnerabilities` shows CVE ingestion is working; the `match-b2b-exposure` Inngest function is either not firing or has no sites to match against
-- [ ] **Reconcile feed cadence docs** — `ARCHITECTURE.md` claims 15-minute feed sync; production runs weekly via GitHub Actions cron. Either lift the cadence or correct the doc
+10. - [ ] **Phase 5.1 audit log + Merkle anchoring** — Inngest event-sourced log + nightly Merkle anchor to R2 Object Lock bucket. **Trigger:** B2B contract or SPF Act compliance posture demands audit trail. Plan §Phase 5.
+11. - [ ] **Phase 5.2 cases + state machine** — `cases`, `case_entities`, `case_transitions`, `case_evidence`, `case_notes`, `case_tasks`, `case_merges`. Bank-sellable baseline. **Triggers after 5.1 stable for 30 days.**
+12. - [ ] **Phase 5.3 evidence + Object Lock Compliance bucket** — chain-of-custody for AFCA/court. **Triggers after 5.2 has at least one case in `confirmed` state.**
+13. - [ ] **Phase 5.4 `spf_principle_events`** — drives the SPF scorecard widget on `/app/compliance`. Projects existing events onto the six Treasury SPF §58BB principles. **Trigger:** SPF Act 1 July 2026 alignment.
+14. - [ ] **Phase 5.5 webhook delivery ledger** — `webhook_endpoints`, `webhook_events`, `webhook_deliveries` with HMAC-SHA256, ≤3-day exponential backoff, idempotency, dead-letter state. **Trigger:** B2B customer requesting webhook integration.
+15. - [ ] **Phase 7.x full B2C/B2B tenancy unification** — JWT-baked tenant claims + single `tenant_id` FK + B2C synthetic tenants. **Trigger:** B2B contract surfaces a requirement current dual-column pattern can't satisfy (BYOK, residency, SSO with org-scoped IdP). Phase 7.0 mutex CHECKs already shipped (v116) so the data-integrity gap is closed; full unification is high-risk + speculative-without-trigger.
+16. - [ ] **Phase 6 cold-tier R2 Parquet** — Postgres → Parquet on R2 incremental archival; manifest table; FDW for rare deep queries. **Trigger:** archive shadow tables (Phase 2.5, shipped) cross 365 days of accumulated data, OR Postgres storage cost becomes pressing. Defer until late 2026 unless triggered earlier.
+17. - [ ] **Phase 3 partitioning cutover** — rebuild stale shells (feed_items_partitioned 11→26 cols; scam_reports_partitioned 17→25 cols), cut over one table at a time, wire pg_partman, BRIN-index, autovacuum-tune. **Hard prerequisites: Phase 4.3 ENUM (so shells use final types) + Phase 8.1c cluster-builder ON for ≥7 days.** Plan §Phase 3.
+18. - [ ] **Partition `api_usage_log` daily** — current per-row UPSERT shape will detonate at enterprise ingestion. `pg_partman` + materialised rollups + 30d raw retention. **Trigger:** enterprise customer onboards OR `api_usage_log` crosses 5M rows.
+19. - [ ] **Tenant residency groundwork** — extend `organizations` with `primary_region`, `allowed_regions[]`, `kms_key_ref`, `data_classification`. Additive only. **Trigger:** enterprise contract negotiation surfaces residency or BYOK.
+20. - [ ] **Phase 8.2 HNSW memory residency audit** — `pg_buffercache` hit-ratio per vector index; raise `maintenance_work_mem`; rebuild with `REINDEX CONCURRENTLY`. **Trigger:** post-2026-06-08 (after Phase 1.1 Stage C drops resolve the unused-index noise).
+21. - [ ] **Phase 8.3 `halfvec` migration** — 50% memory savings at ~1% recall loss. **Trigger:** any vector index hits 1 GB OR query p95 exceeds 200ms.
+22. - [ ] **Phase 8.4 hybrid search RRF + BM25** — replace `ts_rank` on `/api/v1/intel/search` and `/api/v1/scams/search`. **Trigger:** intel-search becomes a customer-visible product surface.
+23. - [ ] **Enable the four Phase-1 production feature flags** (`NEXT_PUBLIC_FF_DATA_PIPELINE`, `_ENTITY_ENRICHMENT`, `_RISK_SCORING`, `_CLUSTER_BUILDER`) and run the pipelines end-to-end so `scam_clusters`, `scam_entities.risk_score`, and `vulnerability_detections` populate with real data.
+
+### Closed (shipped 2026-05-08)
+
+26 PRs (#150–#173) shipped this session. Highlights:
+
+- [x] ✅ **Sole ERROR-level finding closed** (v100 / #150) — `feed_items_all` `security_invoker=true` regression fixed
+- [x] ✅ **All 134 SECURITY DEFINER lockdown WARNs cleared** (v104 + v110 / #157 + #163) — every SECURITY DEFINER function now service_role-only by default. `set_user_admin` was anon-callable — material privilege-escalation surface, now closed
+- [x] ✅ **11 missing FK indexes** (v100 / #150) — `unindexed_foreign_keys` 11 → 0 (then 0 → 0 after v102's `cost_telemetry.user_id` follow-up index in v108)
+- [x] ✅ **2 genuinely-missing FKs added** (v102 / #155) — 5 of 7 audit findings were wrong (already-existing under unconventional names; columns that don't exist)
+- [x] ✅ **`pg_trgm` + `vector` moved out of `public`** (v103 / #156) — 9 RPCs updated atomically
+- [x] ✅ **60 `auth_rls_initplan` warnings cleared** (v105 / #158) — `auth.uid()` wrapped in `(SELECT auth.uid())` across 60 policies
+- [x] ✅ **13 USING(true) anon-write holes closed** (v106 / #159) — drop on `check_stats`, `email_subscribers`, `feed_ingestion_log`, `scam_*`, `verified_scams`. Real anon-INSERT/UPDATE/DELETE surface eliminated
+- [x] ✅ **multi-permissive 210 → 5** (v107 + v111 / #160 + #164) — 24 redundant service-role policies dropped + 17 user/org policies OR-merged
+- [x] ✅ **`upsert_site_and_store_audit` search_path pinned** (v101 / #154)
+- [x] ✅ **5 defensive CHECK constraints** (v101 / #154) — confidence_score ranges, daily_limit > 0, cost_telemetry units/cost ≥ 0, body_md size cap
+- [x] ✅ **Deny-all RESTRICTIVE on 33 RLS-enabled-no-policy tables** (v101 + v109 / #154 + #162)
+- [x] ✅ **Index baseline snapshot** (#153) — 30-day clock started for Phase 1.1 Stage C drop sweep
+- [x] ✅ **Phone Footprint retention** (#151) — `anonymise_expired_footprints` + `sweep_inactive_monitors` Inngest cron 03:15 UTC. Closes documented-but-unenforced PII gap
+- [x] ✅ **`reddit_processed_posts` retention** (#151) — `cleanup_old_reddit_posts(30)` Inngest cron 03:45 UTC
+- [x] ✅ **`cost_telemetry` retention + rollup** (v112 / #165) — 90d raw + `cost_telemetry_daily_rollup` table; nightly cron 04:00 UTC
+- [x] ✅ **Telco event-table retention** (v113 / #166) — 730d for sim/device-swap (forensic); 365d for the rest. 7 tables. Nightly cron 04:30 UTC
+- [x] ✅ **Phase 2.5 archive shadows** (v118 / #172) — 6 archive shadows for flagged_ads, deepfake_detections, media_analyses, scan_results, verdict_feedback, brand_impersonation_alerts. Nightly cron 05:00 UTC
+- [x] ✅ **`phone_reputation` dropped** (v115 / #169) — superseded by `phone_footprints` (v75); zero callers
+- [x] ✅ **Phase 7.0 mutex CHECKs** (v116 / #170) — `api_keys`, `phone_footprints`, `telco_api_usage`, `telco_webhook_subscriptions` now enforce single-owner invariant. `org_members` correctly excluded as M:N junction
+- [x] ✅ **Phase 4.6 tier-duplication documented** (v116 / #170) — COMMENT ON COLUMN on `api_keys.tier` + `subscriptions.plan` documents `sync_subscription_tier()` as the canonical sync. (Audit corrected v2 plan: `user_profiles.tier` doesn't exist; it's duplication, not triplication.)
+- [x] ✅ **Phase 4.4 JSONB schema versioning** (v117 / #171) — 11 `*_v` SMALLINT columns added across 10 tables
+- [x] ✅ **Daily pg_dump → R2 workflow shipped** (#173) — gated on `ENABLE_DR_DUMP`; 4-step setup documented
+- [x] ✅ **Operational docs:** `docs/ops/data-retention.md` (#167), `docs/ops/dr-plan.md` (#167), `docs/ops/index-baseline-2026-05.md` (#153)
 
 ## Breach Defence Suite — paused after PR 2 (2026-04-29)
 
