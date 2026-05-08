@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { ThumbsUp, ThumbsDown } from "lucide-react";
 import { createServiceClient } from "@askarthur/supabase/server";
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
@@ -85,7 +86,7 @@ export default async function AccuracyPage() {
   return (
     <div className="min-h-screen flex flex-col">
       <Nav />
-      <main className="max-w-[720px] mx-auto px-5 py-12 flex-1">
+      <main className="max-w-[640px] mx-auto px-5 py-12 flex-1">
         <header>
         <p className="text-xs font-bold uppercase tracking-widest text-gov-slate mb-2">
           Trust signal
@@ -95,9 +96,21 @@ export default async function AccuracyPage() {
         </h1>
         <p className="mt-3 text-base text-gov-slate leading-relaxed">
           We don&apos;t ask happy users for reviews. We let everyone — happy or
-          unhappy — vote 👍 or 👎 on every check, and we publish the totals here.
-          The numbers move when you submit feedback. They&apos;re sometimes
-          uncomfortable, and that&apos;s the point.
+          unhappy — vote{" "}
+          <ThumbsUp
+            size={16}
+            aria-hidden="true"
+            className="inline-block align-text-bottom mx-0.5 text-deep-navy"
+          />{" "}
+          or{" "}
+          <ThumbsDown
+            size={16}
+            aria-hidden="true"
+            className="inline-block align-text-bottom mx-0.5 text-alert-amber"
+          />{" "}
+          on every check, and we publish the totals here. The numbers move when
+          you submit feedback. They&apos;re sometimes uncomfortable, and
+          that&apos;s the point.
         </p>
       </header>
 
