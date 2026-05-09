@@ -261,13 +261,12 @@ class TestDelistmentSweep:
         conn.cursor.return_value = cursor
         return conn, cursor
 
-    def test_disables_statement_timeout_first(self):
-        """Supabase's pooler enforces a 2-min statement_timeout that the
-        sweep's UPDATE against 63K rows can blow on cohort-shape changes.
-        The first cursor.execute MUST disable the timeout so the sweep
-        doesn't crash with `canceling statement due to statement timeout`
-        and cascade an InFailedSqlTransaction into the surrounding
-        log_ingestion call."""
+    def test_caps_statement_timeout_first(self):
+        """The first cursor.execute MUST set a real statement_timeout cap
+        (currently 300s) before any UPDATE runs. The 2-min pooler default
+        is too tight for the chunked relist; an unbounded `= 0` is what
+        caused the 2026-05-09 20-hour hang. Lock the contract: the cap
+        must be set, must be a real value, and must NOT be `0`."""
         conn, cursor = self._make_conn_with_cursor()
         run_started_at = datetime(2026, 5, 4, 12, 0, tzinfo=timezone.utc)
 
@@ -275,7 +274,10 @@ class TestDelistmentSweep:
 
         first_sql = cursor.execute.call_args_list[0][0][0]
         assert "statement_timeout" in first_sql.lower()
-        assert "0" in first_sql
+        assert "'300s'" in first_sql
+        # Defence against a future revert to the unbounded form.
+        assert "= 0" not in first_sql.replace(" ", "")
+        assert "=0" not in first_sql.replace(" ", "")
 
     def test_relist_pass_runs_first(self):
         """Order matters: re-list before delist sweep, otherwise an ABN
@@ -343,13 +345,23 @@ class TestDelistmentSweep:
         the caller short-circuits BEFORE this function — but if for some
         reason an empty list reaches us, the sweep should still execute
         without error. That's defensive belt-and-braces; a real empty-rows
-        case is gated by `if rows and status != 'error':` in scrape()."""
+        case is gated by `if rows and status != 'error':` in scrape().
+
+        With the 2026-05-09 chunked relist refactor, an empty seen_abns
+        means the per-chunk loop never executes, so RELIST_SQL is never
+        run. The DELIST sweep + final count still fire. Total: 3 calls
+        (SET + DELIST_SWEEP + SELECT count) instead of the pre-refactor 4.
+        """
         conn, cursor = self._make_conn_with_cursor()
         run_delistment_sweep(
             conn, [], datetime(2026, 5, 4, tzinfo=timezone.utc),
         )
-        # SET statement_timeout + two UPDATEs + one SELECT
-        assert cursor.execute.call_count == 4
+        # SET statement_timeout + DELIST_SWEEP + SELECT count.
+        # No RELIST because there's nothing to relist.
+        assert cursor.execute.call_count == 3
+        # The DELIST sweep specifically must still run.
+        executed_sqls = [c[0][0] for c in cursor.execute.call_args_list]
+        assert any(sql is DELIST_SWEEP_SQL for sql in executed_sqls)
 
 
 class TestSqlConstants:

@@ -5,6 +5,25 @@ import { logger } from "@askarthur/utils/logger";
 // Global edge rate limiting — 60 requests/min per IP (sliding window via Upstash)
 // Coexists with per-route limits in lib/rateLimit.ts (defense-in-depth)
 
+// Race a promise against a timeout. Returns null on timeout. Used to keep a
+// degraded Supabase Auth from taking the whole site down via a hung
+// middleware invocation (incident 2026-05-09).
+async function withTimeout<T>(
+  p: Promise<T>,
+  ms: number,
+  label: string,
+): Promise<T | null> {
+  return await Promise.race([
+    p,
+    new Promise<null>((resolve) =>
+      setTimeout(() => {
+        logger.error(`${label} timed out after ${ms}ms`);
+        resolve(null);
+      }, ms),
+    ),
+  ]);
+}
+
 export async function middleware(req: NextRequest) {
   // Cron routes — defense-in-depth auth check before skipping rate limiting
   if (req.nextUrl.pathname.startsWith("/api/cron")) {
@@ -39,10 +58,16 @@ export async function middleware(req: NextRequest) {
   const { supabase, response } = createMiddlewareClient(req);
 
   if (authEnabled && supabase) {
-    // getUser() validates JWT server-side (not spoofable like getSession)
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    // getUser() validates JWT server-side (not spoofable like getSession).
+    // Wrapped in a 3s timeout so a degraded Supabase Auth can't hang the
+    // whole middleware invocation. On timeout we treat the request as
+    // anonymous — public pages stay up; protected paths redirect to login.
+    const result = await withTimeout(
+      supabase.auth.getUser(),
+      3000,
+      "middleware: supabase.auth.getUser",
+    );
+    const user = result?.data?.user ?? null;
 
     const pathname = req.nextUrl.pathname;
 

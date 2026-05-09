@@ -33,6 +33,15 @@ CKAN_BASE = "https://data.gov.au/data/api/3/action/datastore_search"
 PAGE_SIZE = 5000
 USER_AGENT = "AskArthur-CharityCheck/1.0 (+https://askarthur.au)"
 BATCH = 500
+# Tail UPDATEs (TOUCH_LAST_SEEN_SQL, RELIST_SQL, DELIST_SWEEP_SQL) used to
+# run as one statement against ~63K rows. Incident 2026-05-09: a single
+# tail UPDATE pinned a backend for 20 hours and cascaded the whole site
+# offline. Chunk them at 5K rows so any single statement stays well under
+# the 300s ceiling we now enforce below.
+TOUCH_CHUNK = 5000
+# Per-statement ceiling for ACNC admin UPDATEs. Generous (5min) for chunked
+# scans, but never `0` — `0` is what caused the 20h hang.
+STATEMENT_TIMEOUT = "300s"
 
 # CKAN columns are 8 boolean per-state flags; we flatten to a TEXT[] of state codes.
 STATE_COLS: list[tuple[str, str]] = [
@@ -341,12 +350,12 @@ def upsert_charities(conn, rows: list[dict], run_now) -> dict:
     """
     stats = {"new": 0, "updated": 0, "skipped": 0}
     cursor = conn.cursor()
-    # Same reasoning as run_delistment_sweep — TOUCH_LAST_SEEN_SQL at the
-    # tail of this function UPDATEs all 63K+ ABNs in one shot and blows
-    # Supabase's 2-min pooler timeout on any cohort where many rows are
-    # hashed-equal (which is most days, since the ACNC register only churns
-    # ~hundreds of rows per week).
-    cursor.execute("SET statement_timeout = 0")
+    # The pooler default of 2 min is too tight for the chunked tail UPDATEs
+    # below (each chunk scans up to TOUCH_CHUNK ABNs against a 63K-row table).
+    # Cap at 5 min — long enough for any single chunk, short enough that a
+    # stuck statement self-aborts before it can pin a backend (see incident
+    # 2026-05-09 — a previous `SET statement_timeout = 0` allowed a 20h hang).
+    cursor.execute(f"SET statement_timeout = '{STATEMENT_TIMEOUT}'")
     upsert_start = time.time()
     total = len(rows)
     total_batches = (total + BATCH - 1) // BATCH
@@ -418,12 +427,27 @@ def upsert_charities(conn, rows: list[dict], run_now) -> dict:
     # Touch last_seen_in_register for every ABN this run saw. The WHERE-gated
     # UPSERT skipped rows whose hash was unchanged, so without this update
     # those rows would drift past the delistment cutoff over time.
+    #
+    # Chunked at TOUCH_CHUNK to keep each UPDATE bounded — the all-in-one
+    # form caused the 2026-05-09 incident. try/except per chunk so a single
+    # chunk failure (e.g. lock contention) doesn't poison the whole run.
     seen_abns = [r["abn"] for r in rows]
     touch_start = time.time()
-    cursor.execute(TOUCH_LAST_SEEN_SQL, (run_now, seen_abns))
-    conn.commit()
+    total_touched = 0
+    for chunk_idx, i in enumerate(range(0, len(seen_abns), TOUCH_CHUNK)):
+        chunk = seen_abns[i : i + TOUCH_CHUNK]
+        try:
+            cursor.execute(TOUCH_LAST_SEEN_SQL, (run_now, chunk))
+            total_touched += cursor.rowcount
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            logger.error(
+                f"ACNC last-seen chunk {chunk_idx} ({len(chunk)} ABNs) failed: {e}",
+                extra={"metadata": {"feed": FEED_NAME, "chunk_idx": chunk_idx}},
+            )
     logger.info(
-        f"ACNC last-seen touched: {cursor.rowcount} rows in "
+        f"ACNC last-seen touched: {total_touched} rows in "
         f"{int((time.time() - touch_start) * 1000)}ms",
         extra={"metadata": {"feed": FEED_NAME}},
     )
@@ -450,19 +474,32 @@ def run_delistment_sweep(conn, seen_abns: list[str], run_started_at) -> dict:
     Returns {"relisted": n, "newly_delisted": m, "still_delisted": k} for
     the ingestion log.
 
-    Statement timeout: Supabase's pooler enforces a 2-min statement_timeout
-    by default, but the DELIST_SWEEP_SQL UPDATE against 63K+ rows with the
-    BRIN index on last_seen_in_register can run longer on the first pass of
-    a new shape of cohort. Disable timeouts for these two administrative
-    UPDATEs only — they're idempotent re-applyable.
+    Statement timeout: capped at STATEMENT_TIMEOUT (5 min) — generous for a
+    chunked RELIST against the seen-ABN list, and DELIST_SWEEP_SQL against a
+    BRIN-indexed last_seen_in_register predicate runs in seconds on a healthy
+    cluster. Never `0` — that's what allowed the 20h hang on 2026-05-09.
+
+    RELIST_SQL is chunked at TOUCH_CHUNK ABNs/iteration to bound any single
+    statement; DELIST_SWEEP_SQL is left as a single statement because its
+    WHERE clause uses an indexed range predicate, not a 63K-element ANY().
     """
     cursor = conn.cursor()
-    cursor.execute("SET statement_timeout = 0")
+    cursor.execute(f"SET statement_timeout = '{STATEMENT_TIMEOUT}'")
 
     relist_start = time.time()
-    cursor.execute(RELIST_SQL, (seen_abns,))
-    relisted = cursor.rowcount
-    conn.commit()
+    relisted = 0
+    for chunk_idx, i in enumerate(range(0, len(seen_abns), TOUCH_CHUNK)):
+        chunk = seen_abns[i : i + TOUCH_CHUNK]
+        try:
+            cursor.execute(RELIST_SQL, (chunk,))
+            relisted += cursor.rowcount
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            logger.error(
+                f"ACNC relist chunk {chunk_idx} ({len(chunk)} ABNs) failed: {e}",
+                extra={"metadata": {"feed": FEED_NAME, "chunk_idx": chunk_idx}},
+            )
 
     sweep_start = time.time()
     cursor.execute(DELIST_SWEEP_SQL, (run_started_at, run_started_at))
