@@ -12,6 +12,7 @@ import time
 
 import requests
 
+from common.backoff import enforce_backoff_or_skip
 from common.db import get_db, bulk_upsert_ips, log_ingestion
 from common.logging_config import get_logger
 
@@ -21,9 +22,12 @@ FEED_NAME = "abuseipdb"
 FEED_URL = "https://api.abuseipdb.com/api/v2/blacklist"
 # Minimum abuse confidence score (0-100) to include
 MIN_CONFIDENCE = 75
+BACKOFF_THRESHOLD = 3
 
 
 def scrape() -> None:
+    if enforce_backoff_or_skip(FEED_NAME, threshold=BACKOFF_THRESHOLD, record_type="ip"):
+        return
     start = time.time()
     ips: list[dict] = []
     error_msg = None

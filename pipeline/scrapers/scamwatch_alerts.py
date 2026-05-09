@@ -20,6 +20,7 @@ from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup
 
+from common.backoff import enforce_backoff_or_skip
 from common.db import (
     bulk_upsert_narrative_feed_items,
     bulk_upsert_urls,
@@ -33,6 +34,7 @@ from common.normalize import normalize_url
 logger = get_logger(__name__)
 
 FEED_NAME = "scamwatch_alert"
+BACKOFF_THRESHOLD = 3
 LISTING = "https://www.scamwatch.gov.au/about-us/news-and-alerts/browse-news-and-alerts"
 ORIGIN = "https://www.scamwatch.gov.au"
 USER_AGENT = "AskArthur-ThreatFeed/1.0 (+https://askarthur.au)"
@@ -176,6 +178,8 @@ def _extract_urls(article: dict) -> Iterable[dict]:
 
 
 def scrape() -> None:
+    if enforce_backoff_or_skip(FEED_NAME, threshold=BACKOFF_THRESHOLD, record_type="url"):
+        return
     start = time.time()
     error_msg: str | None = None
     status = "success"

@@ -22,7 +22,10 @@ import psycopg2
 import psycopg2.extras
 import requests
 
+from common.backoff import enforce_backoff_or_skip
 from common.db import get_db, log_ingestion
+
+BACKOFF_THRESHOLD = 3
 from common.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -536,6 +539,9 @@ def scrape() -> None:
     """
     if os.environ.get("FF_CHARITY_CHECK_INGEST", "").strip().lower() != "true":
         logger.info("FF_CHARITY_CHECK_INGEST not set to 'true' — skipping ACNC scrape")
+        return
+
+    if enforce_backoff_or_skip(FEED_NAME, threshold=BACKOFF_THRESHOLD, record_type="charity"):
         return
 
     from datetime import datetime, timezone

@@ -13,12 +13,14 @@ from urllib.parse import quote
 
 import requests
 
+from common.backoff import enforce_backoff_or_skip
 from common.db import get_db, bulk_upsert_urls, log_ingestion
 from common.logging_config import get_logger
 
 logger = get_logger(__name__)
 
 FEED_NAME = "crtsh"
+BACKOFF_THRESHOLD = 3
 
 # Australian brands to monitor in CT logs
 AU_BRAND_KEYWORDS = [
@@ -126,6 +128,8 @@ def is_legitimate_domain(domain: str) -> bool:
 
 
 def scrape() -> None:
+    if enforce_backoff_or_skip(FEED_NAME, threshold=BACKOFF_THRESHOLD, record_type="url"):
+        return
     start = time.time()
     urls: list[dict] = []
     seen_domains: set[str] = set()

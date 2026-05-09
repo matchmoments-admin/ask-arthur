@@ -17,6 +17,7 @@ import re
 import time
 from typing import Any
 
+from common.backoff import enforce_backoff_or_skip
 from common.db import (
     bulk_upsert_narrative_feed_items,
     bulk_upsert_urls,
@@ -32,6 +33,7 @@ logger = get_logger(__name__)
 FEED_NAME = "asic_investor"
 JSON_URL = "https://static.moneysmart.gov.au/_data/investor-alert-list.json"
 SOURCE_PAGE = "https://moneysmart.gov.au/check-and-report-scams/investor-alert-list"
+BACKOFF_THRESHOLD = 3
 
 # Liberal URL extractor — ASIC packs websites/aliases as plain strings or
 # multi-line text. We split on commas/newlines/whitespace then validate.
@@ -128,6 +130,8 @@ def _records_from_payload(payload: Any) -> list[dict]:
 
 
 def scrape() -> None:
+    if enforce_backoff_or_skip(FEED_NAME, threshold=BACKOFF_THRESHOLD, record_type="url"):
+        return
     start = time.time()
     error_msg: str | None = None
     status = "success"

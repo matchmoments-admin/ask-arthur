@@ -8,6 +8,7 @@ import time
 
 import requests
 
+from common.backoff import enforce_backoff_or_skip
 from common.db import get_db, bulk_upsert_urls, log_ingestion
 from common.logging_config import get_logger
 
@@ -15,9 +16,12 @@ logger = get_logger(__name__)
 
 FEED_NAME = "phishing_database"
 TEXT_URL = "https://raw.githubusercontent.com/mitchellkrogza/Phishing.Database/master/phishing-links-ACTIVE-NOW.txt"
+BACKOFF_THRESHOLD = 3
 
 
 def scrape() -> None:
+    if enforce_backoff_or_skip(FEED_NAME, threshold=BACKOFF_THRESHOLD, record_type="url"):
+        return
     start = time.time()
     urls: list[dict] = []
     error_msg = None

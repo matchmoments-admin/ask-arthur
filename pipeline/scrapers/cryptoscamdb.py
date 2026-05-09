@@ -9,6 +9,7 @@ import time
 
 import requests
 
+from common.backoff import enforce_backoff_or_skip
 from common.db import get_db, bulk_upsert_crypto_wallets, log_ingestion
 from common.logging_config import get_logger
 from common.validate import validate_eth_address, validate_btc_address
@@ -17,6 +18,7 @@ logger = get_logger(__name__)
 
 FEED_NAME = "cryptoscamdb"
 FEED_URL = "https://raw.githubusercontent.com/CryptoScamDB/blacklist/master/data/urls.json"
+BACKOFF_THRESHOLD = 3
 
 
 def _detect_chain(address: str) -> str:
@@ -29,6 +31,8 @@ def _detect_chain(address: str) -> str:
 
 
 def scrape() -> None:
+    if enforce_backoff_or_skip(FEED_NAME, threshold=BACKOFF_THRESHOLD, record_type="crypto_wallet"):
+        return
     start = time.time()
     wallets: list[dict] = []
     seen_addresses: set[str] = set()

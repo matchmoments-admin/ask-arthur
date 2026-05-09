@@ -18,7 +18,7 @@ import re
 import time
 import xml.etree.ElementTree as ET
 
-from common.backoff import should_backoff
+from common.backoff import enforce_backoff_or_skip
 from common.db import (
     bulk_upsert_narrative_feed_items,
     bulk_upsert_urls,
@@ -120,43 +120,18 @@ def _extract_urls_from_body(body: str | None, source_link: str) -> list[dict]:
     return urls
 
 
-BACKOFF_THRESHOLD = 5  # consecutive failures before we stop hammering
+BACKOFF_THRESHOLD = 3  # cyber.gov.au is the most-blocked upstream we have
 
 
 def scrape() -> None:
+    if enforce_backoff_or_skip(FEED_NAME, threshold=BACKOFF_THRESHOLD, record_type="url"):
+        return
     start = time.time()
     all_items: list[dict] = []
     all_urls: list[dict] = []
     error_msg: str | None = None
     status = "success"
     fetched = 0
-
-    # ── Backoff check — be a good citizen of cyber.gov.au ─────────────────
-    # If the last N runs have all errored, skip the fetch. The cron still
-    # logs a heartbeat row (status='partial') so it's queryable proof we're
-    # aware. Once one fetch succeeds, the consecutive-error counter resets
-    # and normal cadence resumes.
-    with get_db() as conn:
-        skip, error_count = should_backoff(conn, FEED_NAME, threshold=BACKOFF_THRESHOLD)
-        if skip:
-            duration_ms = int((time.time() - start) * 1000)
-            log_ingestion(
-                conn,
-                feed_name=FEED_NAME,
-                status="partial",
-                records_fetched=0,
-                duration_ms=duration_ms,
-                error_message=(
-                    f"backoff_active: {error_count} consecutive failures "
-                    f"(threshold={BACKOFF_THRESHOLD}); skipped to avoid hammering upstream"
-                ),
-                record_type="url",
-            )
-            logger.warning(
-                f"ACSC scrape skipped — {error_count} consecutive failures. "
-                f"Will retry on next successful probe or after manual recovery."
-            )
-            return
 
     try:
         for kind, url in FEEDS.items():
