@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAuthServerClient } from "@askarthur/supabase/server-auth";
 import { createServiceClient } from "@askarthur/supabase/server";
+import { getUser, AuthUnavailableError } from "@/lib/auth";
 import crypto from "crypto";
+
+function authUnavailable() {
+  return NextResponse.json(
+    { error: "Authentication temporarily unavailable" },
+    { status: 503, headers: { "Retry-After": "30" } },
+  );
+}
 
 async function hashKey(key: string): Promise<string> {
   const data = new TextEncoder().encode(key);
@@ -23,18 +31,16 @@ function generateRawKey(): string {
 }
 
 export async function POST(req: NextRequest) {
-  const supabase = await createAuthServerClient();
-  if (!supabase) {
-    return NextResponse.json(
-      { error: "Auth not configured" },
-      { status: 500 }
-    );
+  // Auth check runs through lib/auth getUser() so it inherits the 5s
+  // timeout + AuthUnavailableError contract (incident 2026-05-09: a bare
+  // supabase.auth.getUser() here would 504 if Supabase Auth is degraded).
+  let user;
+  try {
+    user = await getUser();
+  } catch (err) {
+    if (err instanceof AuthUnavailableError) return authUnavailable();
+    throw err;
   }
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -89,20 +95,25 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET() {
+  let user;
+  try {
+    user = await getUser();
+  } catch (err) {
+    if (err instanceof AuthUnavailableError) return authUnavailable();
+    throw err;
+  }
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // Separate auth-bound supabase client for the RLS-enforced query below.
+  // (lib/auth getUser() validates the JWT but doesn't return a query client.)
   const supabase = await createAuthServerClient();
   if (!supabase) {
     return NextResponse.json(
       { error: "Auth not configured" },
       { status: 500 }
     );
-  }
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   // RLS enforced — only returns user's own keys
