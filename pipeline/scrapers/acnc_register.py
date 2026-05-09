@@ -443,8 +443,15 @@ def run_delistment_sweep(conn, seen_abns: list[str], run_started_at) -> dict:
 
     Returns {"relisted": n, "newly_delisted": m, "still_delisted": k} for
     the ingestion log.
+
+    Statement timeout: Supabase's pooler enforces a 2-min statement_timeout
+    by default, but the DELIST_SWEEP_SQL UPDATE against 63K+ rows with the
+    BRIN index on last_seen_in_register can run longer on the first pass of
+    a new shape of cohort. Disable timeouts for these two administrative
+    UPDATEs only — they're idempotent re-applyable.
     """
     cursor = conn.cursor()
+    cursor.execute("SET statement_timeout = 0")
 
     relist_start = time.time()
     cursor.execute(RELIST_SQL, (seen_abns,))
@@ -551,6 +558,16 @@ def scrape() -> None:
                 error_msg = str(e)
                 status = "error"
                 logger.error(f"ACNC delistment sweep failed: {e}")
+                # The sweep raises with the connection's transaction in an
+                # aborted state ("InFailedSqlTransaction"). Without a rollback
+                # here the subsequent log_ingestion call cascades into a second
+                # exception that prevents the error row from ever being written
+                # — and the daily health digest then sees ACNC as stale even
+                # though the script ran. Roll back so log_ingestion succeeds.
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
 
         duration_ms = int((time.time() - start) * 1000)
         log_ingestion(

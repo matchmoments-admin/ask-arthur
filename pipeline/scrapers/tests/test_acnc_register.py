@@ -244,14 +244,15 @@ class TestDelistmentSweep:
         """Build a fake conn whose cursor returns the row counts and
         SELECT result we need to verify the sweep's behaviour."""
         cursor = MagicMock()
-        # Sequence: relist UPDATE → sweep UPDATE → SELECT count
-        # Using side_effect on a property so each .rowcount access in turn
-        # returns the next value.
-        rowcount_values = [relist_rowcount, sweep_rowcount]
+        # Sequence: SET statement_timeout → relist UPDATE → sweep UPDATE
+        # → SELECT count. The leading None covers the SET (rowcount unused).
+        rowcount_values = [None, relist_rowcount, sweep_rowcount]
 
         def execute_side_effect(sql, args=None):
             if rowcount_values:
-                cursor.rowcount = rowcount_values.pop(0)
+                value = rowcount_values.pop(0)
+                if value is not None:
+                    cursor.rowcount = value
 
         cursor.execute.side_effect = execute_side_effect
         cursor.fetchone.return_value = (still_delisted,)
@@ -259,6 +260,22 @@ class TestDelistmentSweep:
         conn = MagicMock()
         conn.cursor.return_value = cursor
         return conn, cursor
+
+    def test_disables_statement_timeout_first(self):
+        """Supabase's pooler enforces a 2-min statement_timeout that the
+        sweep's UPDATE against 63K rows can blow on cohort-shape changes.
+        The first cursor.execute MUST disable the timeout so the sweep
+        doesn't crash with `canceling statement due to statement timeout`
+        and cascade an InFailedSqlTransaction into the surrounding
+        log_ingestion call."""
+        conn, cursor = self._make_conn_with_cursor()
+        run_started_at = datetime(2026, 5, 4, 12, 0, tzinfo=timezone.utc)
+
+        run_delistment_sweep(conn, ["11000000001"], run_started_at)
+
+        first_sql = cursor.execute.call_args_list[0][0][0]
+        assert "statement_timeout" in first_sql.lower()
+        assert "0" in first_sql
 
     def test_relist_pass_runs_first(self):
         """Order matters: re-list before delist sweep, otherwise an ABN
@@ -268,12 +285,12 @@ class TestDelistmentSweep:
 
         run_delistment_sweep(conn, ["11000000001", "11000000002"], run_started_at)
 
-        # Two UPDATEs + one SELECT
-        assert cursor.execute.call_count == 3
-        first_sql = cursor.execute.call_args_list[0][0][0]
-        second_sql = cursor.execute.call_args_list[1][0][0]
-        assert first_sql is RELIST_SQL
-        assert second_sql is DELIST_SWEEP_SQL
+        # SET statement_timeout + two UPDATEs + one SELECT
+        assert cursor.execute.call_count == 4
+        relist_sql = cursor.execute.call_args_list[1][0][0]
+        sweep_sql = cursor.execute.call_args_list[2][0][0]
+        assert relist_sql is RELIST_SQL
+        assert sweep_sql is DELIST_SWEEP_SQL
 
     def test_relist_pass_uses_seen_abns(self):
         """The first UPDATE must scope to the ABNs we saw this run."""
@@ -283,8 +300,8 @@ class TestDelistmentSweep:
 
         run_delistment_sweep(conn, seen, run_started_at)
 
-        first_call_args = cursor.execute.call_args_list[0][0][1]
-        assert first_call_args == (seen,)
+        relist_call_args = cursor.execute.call_args_list[1][0][1]
+        assert relist_call_args == (seen,)
 
     def test_sweep_uses_run_started_at_as_cutoff(self):
         """The delistment cutoff is run_started_at, NOT NOW(). This is what
@@ -294,7 +311,7 @@ class TestDelistmentSweep:
 
         run_delistment_sweep(conn, ["11000000001"], run_started_at)
 
-        sweep_args = cursor.execute.call_args_list[1][0][1]
+        sweep_args = cursor.execute.call_args_list[2][0][1]
         # DELIST_SWEEP_SQL takes (delisted_at_default, last_seen_cutoff)
         assert sweep_args == (run_started_at, run_started_at)
 
@@ -331,7 +348,8 @@ class TestDelistmentSweep:
         run_delistment_sweep(
             conn, [], datetime(2026, 5, 4, tzinfo=timezone.utc),
         )
-        assert cursor.execute.call_count == 3
+        # SET statement_timeout + two UPDATEs + one SELECT
+        assert cursor.execute.call_count == 4
 
 
 class TestSqlConstants:
