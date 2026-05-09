@@ -12,6 +12,7 @@ To publish a draft, push it through the agent-fleet flow:
 pnpm push-blog <slug>                      # one file, default newsletter on
 pnpm push-blog <slug> --no-newsletter      # publish without sending the email
 pnpm push-blog <slug> --dry-run            # render HTML and print, no POST
+pnpm push-blog <slug> --with-illustration  # block + print illustrate command if no hero
 pnpm push-blog --backfill                  # interactive picker for orphans
 ```
 
@@ -38,15 +39,35 @@ What happens:
 
 Smart defaults:
 
-| Field      | Default                                                   |
-| ---------- | --------------------------------------------------------- |
-| `title`    | First `# H1` of the body                                  |
-| `slug`     | Filename with `.md` and any leading `YYYY-MM-DD-` removed |
-| `excerpt`  | First non-heading paragraph, trimmed to ~200 chars        |
-| `tags`     | `[]`                                                      |
-| `hero`     | None (Ghost shows no feature image)                       |
-| `hero_alt` | None                                                      |
-| `category` | None                                                      |
+| Field      | Default                                                                                                                        |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `title`    | First `# H1` of the body, else title-cased slug                                                                                |
+| `slug`     | Filename with `.md` and any leading `YYYY-MM-DD-` removed                                                                      |
+| `excerpt`  | First non-heading paragraph, trimmed to ~200 chars                                                                             |
+| `tags`     | `[]`                                                                                                                           |
+| `hero`     | First standalone image in the body (after optional H1), else newest `.webp` under `apps/web/public/illustrations/blog/<slug>/` |
+| `hero_alt` | The `![alt](...)` text from the auto-detected image, else the title                                                            |
+| `category` | None                                                                                                                           |
+
+### Hero detection
+
+The script auto-promotes a hero image to Ghost's `feature_image` (which
+drives the post's hero card on `/blog`, the OG image, and the safeverify
+mirror's `hero_image_url`). Detection precedence:
+
+1. **`hero` in frontmatter** — explicit override always wins.
+2. **First standalone image in the body** — must appear in the first 1-3
+   blocks (i.e. before any body paragraph). When detected, both the
+   leading H1 _and_ this image are stripped from the rendered HTML so they
+   don't render twice (Ghost shows post title and feature_image as
+   separate page elements already).
+3. **`apps/web/public/illustrations/blog/<slug>/*.webp`** — most-recent
+   `.webp` under that directory. This is the convention the Claude Code
+   `illustrate` pipeline writes to, so a fresh illustrate run becomes the
+   hero on the next push without a manual frontmatter edit.
+
+If none match, the post publishes with no hero card. Use
+`--with-illustration` to force a hero before pushing.
 
 To override, add YAML at the top of the file:
 
@@ -80,6 +101,33 @@ This makes `git diff` show which files have been queued, and prevents the
 after content edits via Ghost admin, or to start over), delete those three
 fields and run again — but consider editing in Ghost admin instead, since
 that's the source of truth post-publish.
+
+## `--with-illustration` — couple this with the illustrate pipeline
+
+The `claude "illustrate: ..."` Claude Code pipeline writes the winning
+image to `apps/web/public/illustrations/blog/<slug>/<name>.webp`. Adding
+`--with-illustration` to `pnpm push-blog` makes a missing hero a hard
+stop instead of a warning, and prints a copy-pasteable illustrate command
+seeded from the post's title + first paragraph. Typical loop:
+
+```bash
+$ pnpm push-blog spf-telco-readiness-1-july-2026 --with-illustration
+No hero image detected …
+
+Run this in another terminal …
+
+  claude "illustrate: SPF Telco Readiness 1 July 2026 — …" --telegram
+
+When the winner lands at apps/web/public/illustrations/blog/spf-telco-readiness-1-july-2026/<name>.webp,
+re-run pnpm push-blog spf-telco-readiness-1-july-2026 …
+```
+
+Refine the brief, run `claude` in another terminal, approve the variant in
+Telegram (the illustrate pipeline has its own keyboard, separate from the
+post-approval keyboard). Once the winner lands in the sibling dir, re-run
+`pnpm push-blog <slug>` (without `--with-illustration`) and the
+sibling-dir auto-detect picks it up as the hero. Two human approvals,
+zero manual frontmatter edits.
 
 ## Env required
 
