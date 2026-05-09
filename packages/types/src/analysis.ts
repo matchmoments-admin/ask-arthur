@@ -15,6 +15,19 @@ export const PROMPT_VERSION = "2.1.0";
 export const VerdictSchema = z.enum(["SAFE", "UNCERTAIN", "SUSPICIOUS", "HIGH_RISK"]);
 export type Verdict = z.infer<typeof VerdictSchema>;
 
+// User-facing labels for each verdict tier. The internal enum stays SAFE
+// because it's the API contract, but every surface should display this
+// string. SAFE is deliberately "Stay alert" rather than anything that
+// asserts the message is benign — Arthur is a heuristic system and
+// missing a scam happens. The instruction-led label keeps the lowest
+// tier defensible: we always told the user to stay alert.
+export const VERDICT_LABEL: Record<Verdict, string> = {
+  SAFE: "Stay alert",
+  UNCERTAIN: "Uncertain",
+  SUSPICIOUS: "Suspicious",
+  HIGH_RISK: "Looks like a scam",
+};
+
 export const AnalysisModeSchema = z.enum(["text", "image", "qrcode"]);
 export type AnalysisMode = z.infer<typeof AnalysisModeSchema>;
 

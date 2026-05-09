@@ -6,25 +6,25 @@ const VERDICT_CONFIG: Record<Verdict, { bg: string; textColor: string; title: st
   SAFE: {
     bg: "bg-safe",
     textColor: "text-safe",
-    title: "This Appears Safe",
+    title: "Stay alert",
     icon: ShieldCheck,
   },
   SUSPICIOUS: {
     bg: "bg-warn",
     textColor: "text-warn",
-    title: "Proceed with Caution",
+    title: "Suspicious",
     icon: TriangleAlert,
   },
   HIGH_RISK: {
     bg: "bg-danger",
     textColor: "text-danger",
-    title: "High Risk — Likely a Scam",
+    title: "Looks like a scam",
     icon: ShieldAlert,
   },
   UNCERTAIN: {
     bg: "bg-text-secondary",
     textColor: "text-text-secondary",
-    title: "Uncertain — Could Not Determine",
+    title: "Uncertain",
     icon: TriangleAlert,
   },
 };

@@ -1,4 +1,4 @@
-import type { AnalysisResult } from "@askarthur/types";
+import { VERDICT_LABEL, type AnalysisResult } from "@askarthur/types";
 
 const VERDICT_EMOJI: Record<string, string> = {
   SAFE: ":white_check_mark:",
@@ -44,7 +44,7 @@ export function toSlackBlocks(result: AnalysisResult): SlackResponse {
     type: "header",
     text: {
       type: "plain_text",
-      text: `${emoji} Verdict: ${result.verdict.replace("_", " ")} (${confidence}%)`,
+      text: `${emoji} Verdict: ${VERDICT_LABEL[result.verdict] ?? result.verdict} (${confidence}%)`,
       emoji: true,
     },
   });

@@ -1,4 +1,4 @@
-import type { AnalysisResult } from "@askarthur/types";
+import { VERDICT_LABEL, type AnalysisResult } from "@askarthur/types";
 
 const VERDICT_EMOJI: Record<string, string> = {
   SAFE: "\u2705",
@@ -21,7 +21,8 @@ export function toTelegramHTML(result: AnalysisResult): string {
   const confidence = Math.round(result.confidence * 100);
   const lines: string[] = [];
 
-  lines.push(`${emoji} <b>Verdict: ${result.verdict.replace("_", " ")}</b> (${confidence}% confidence)`);
+  const label = VERDICT_LABEL[result.verdict] ?? result.verdict;
+  lines.push(`${emoji} <b>Verdict: ${label}</b> (${confidence}% confidence)`);
   lines.push("");
   lines.push(escapeHTML(result.summary));
 

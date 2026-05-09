@@ -14,7 +14,7 @@ const makeResult = (overrides: Partial<AnalysisResult> = {}): AnalysisResult => 
 describe("toTelegramHTML", () => {
   it("formats a SAFE verdict", () => {
     const html = toTelegramHTML(makeResult());
-    expect(html).toContain("<b>Verdict: SAFE</b>");
+    expect(html).toContain("<b>Verdict: Stay alert</b>");
     expect(html).toContain("95% confidence");
     expect(html).toContain("This message appears to be legitimate.");
     expect(html).toContain("Ask Arthur");
@@ -29,7 +29,7 @@ describe("toTelegramHTML", () => {
         scamType: "phishing",
       })
     );
-    expect(html).toContain("<b>Verdict: HIGH RISK</b>");
+    expect(html).toContain("<b>Verdict: Looks like a scam</b>");
     expect(html).toContain("92% confidence");
     expect(html).toContain("<b>Red Flags:</b>");
     expect(html).toContain("Urgency language");

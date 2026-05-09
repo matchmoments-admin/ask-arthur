@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { ThumbsUp, ThumbsDown } from "lucide-react";
 import { createServiceClient } from "@askarthur/supabase/server";
+import { VERDICT_LABEL, type Verdict } from "@askarthur/types";
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
 
@@ -24,11 +25,6 @@ interface VerdictBreakdown {
 }
 
 const VERDICT_ORDER = ["HIGH_RISK", "SUSPICIOUS", "SAFE"] as const;
-const VERDICT_LABEL: Record<string, string> = {
-  HIGH_RISK: "Looks like a scam",
-  SUSPICIOUS: "Suspicious",
-  SAFE: "No clear flags",
-};
 
 async function loadStats(): Promise<{
   byVerdict: VerdictBreakdown[];
@@ -143,7 +139,7 @@ export default async function AccuracyPage() {
                 >
                   <header className="flex items-center justify-between gap-3 mb-2">
                     <h2 className="font-bold text-deep-navy text-sm">
-                      {VERDICT_LABEL[b.verdict] ?? b.verdict}
+                      {VERDICT_LABEL[b.verdict as Verdict] ?? b.verdict}
                     </h2>
                     <span className="text-xs text-gov-slate">
                       {b.total} ratings

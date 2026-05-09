@@ -3,20 +3,13 @@ import { CheckCircle, CircleAlert, HelpCircle, XCircle } from "lucide-react-nati
 import type { LucideIcon } from "lucide-react-native";
 import { VerdictColors } from "@/constants/colors";
 import { Fonts } from "@/constants/fonts";
-import type { Verdict } from "@askarthur/types";
+import { VERDICT_LABEL, type Verdict } from "@askarthur/types";
 
 const VERDICT_ICON: Record<Verdict, LucideIcon> = {
   SAFE: CheckCircle,
   UNCERTAIN: HelpCircle,
   SUSPICIOUS: CircleAlert,
   HIGH_RISK: XCircle,
-};
-
-const VERDICT_LABEL: Record<Verdict, string> = {
-  SAFE: "Safe",
-  UNCERTAIN: "Uncertain",
-  SUSPICIOUS: "Suspicious",
-  HIGH_RISK: "High Risk",
 };
 
 interface VerdictBadgeProps {
