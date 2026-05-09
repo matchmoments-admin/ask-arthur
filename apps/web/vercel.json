@@ -59,6 +59,10 @@
     {
       "path": "/api/cron/pg-stuck-query-watchdog",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/scraper-brake-alert",
+      "schedule": "*/15 * * * *"
     }
   ],
   "functions": {

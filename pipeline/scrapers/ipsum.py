@@ -12,6 +12,7 @@ import time
 
 import requests
 
+from common.backoff import enforce_backoff_or_skip
 from common.db import get_db, bulk_upsert_ips, log_ingestion
 from common.logging_config import get_logger
 
@@ -19,9 +20,12 @@ logger = get_logger(__name__)
 
 FEED_NAME = "ipsum"
 FEED_URL = "https://raw.githubusercontent.com/stamparm/ipsum/master/ipsum.txt"
+BACKOFF_THRESHOLD = 3
 
 
 def scrape() -> None:
+    if enforce_backoff_or_skip(FEED_NAME, threshold=BACKOFF_THRESHOLD, record_type="ip"):
+        return
     start = time.time()
     ips: list[dict] = []
     error_msg = None

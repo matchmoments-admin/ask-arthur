@@ -23,6 +23,7 @@ import psycopg2.extras
 import requests
 from bs4 import BeautifulSoup
 
+from common.backoff import enforce_backoff_or_skip
 from common.db import get_db, log_ingestion
 from common.logging_config import get_logger
 
@@ -30,6 +31,7 @@ logger = get_logger(__name__)
 
 FEED_NAME = "pfra_members"
 USER_AGENT = "AskArthur-CharityCheck/1.0 (+https://askarthur.au)"
+BACKOFF_THRESHOLD = 3
 
 SOURCES = [
     ("charity", "https://pfra.org.au/membership/charity-members/"),
@@ -158,6 +160,9 @@ def scrape() -> None:
     no-op."""
     if os.environ.get("FF_CHARITY_CHECK_INGEST", "").strip().lower() != "true":
         logger.info("FF_CHARITY_CHECK_INGEST not set to 'true' — skipping PFRA scrape")
+        return
+
+    if enforce_backoff_or_skip(FEED_NAME, threshold=BACKOFF_THRESHOLD, record_type="charity"):
         return
 
     start = time.time()

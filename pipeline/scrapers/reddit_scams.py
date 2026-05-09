@@ -20,6 +20,7 @@ from typing import NamedTuple
 
 import requests
 
+from common.backoff import enforce_backoff_or_skip
 from common.db import (
     get_db,
     bulk_upsert_urls,
@@ -33,6 +34,9 @@ from common.db import (
 )
 from common.r2 import upload_reddit_evidence
 from common.logging_config import get_logger
+
+FEED_NAME = "reddit"
+BACKOFF_THRESHOLD = 3
 from common.normalize import normalize_url
 from common.validate import (
     validate_eth_address,
@@ -785,6 +789,8 @@ def _try_endpoint(
 
 def scrape() -> None:
     """Scrape Reddit scam subreddits for IOCs."""
+    if enforce_backoff_or_skip(FEED_NAME, threshold=BACKOFF_THRESHOLD, record_type="url"):
+        return
     start = time.time()
     all_urls: list[dict] = []
     all_wallets: list[dict] = []

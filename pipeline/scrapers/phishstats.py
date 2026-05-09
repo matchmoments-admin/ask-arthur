@@ -8,6 +8,7 @@ import time
 
 import requests
 
+from common.backoff import enforce_backoff_or_skip
 from common.db import get_db, bulk_upsert_urls, log_ingestion
 from common.logging_config import get_logger
 
@@ -19,6 +20,7 @@ MIN_SCORE = 5
 PAGE_SIZE = 1000
 MAX_RETRIES = 3
 BASE_DELAY = 5  # seconds
+BACKOFF_THRESHOLD = 3
 
 
 def _fetch_with_retry() -> requests.Response:
@@ -58,6 +60,8 @@ def _fetch_with_retry() -> requests.Response:
 
 
 def scrape() -> None:
+    if enforce_backoff_or_skip(FEED_NAME, threshold=BACKOFF_THRESHOLD, record_type="url"):
+        return
     start = time.time()
     urls: list[dict] = []
     error_msg = None
