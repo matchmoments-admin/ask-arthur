@@ -14,7 +14,7 @@ const makeResult = (overrides: Partial<AnalysisResult> = {}): AnalysisResult => 
 describe("toWhatsAppMessage", () => {
   it("formats with WhatsApp bold markers", () => {
     const msg = toWhatsAppMessage(makeResult());
-    expect(msg).toContain("*Verdict: SUSPICIOUS*");
+    expect(msg).toContain("*Verdict: Suspicious*");
     expect(msg).toContain("75% confidence");
     expect(msg).toContain("*Red Flags:*");
     expect(msg).toContain("*What to do:*");

@@ -29,7 +29,7 @@ describe("toSlackBlocks", () => {
     const response = toSlackBlocks(makeResult());
     const blocks = response.attachments[0].blocks;
     const header = blocks.find((b) => b.type === "header");
-    expect(header?.text?.text).toContain("HIGH RISK");
+    expect(header?.text?.text).toContain("Looks like a scam");
     expect(header?.text?.text).toContain("88%");
   });
 

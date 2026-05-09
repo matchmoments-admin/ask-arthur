@@ -23,13 +23,17 @@ export default function VerdictDoughnut({
   }
 
   const data = [
-    { title: "Safe", value: safeCount, color: VERDICT_COLORS.safe },
+    { title: "Stay alert", value: safeCount, color: VERDICT_COLORS.safe },
     {
       title: "Suspicious",
       value: suspiciousCount,
       color: VERDICT_COLORS.suspicious,
     },
-    { title: "High Risk", value: highRiskCount, color: VERDICT_COLORS.danger },
+    {
+      title: "Looks like a scam",
+      value: highRiskCount,
+      color: VERDICT_COLORS.danger,
+    },
   ].filter((d) => d.value > 0);
 
   return (

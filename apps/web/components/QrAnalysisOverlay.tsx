@@ -21,7 +21,7 @@ const VERDICT_CONFIG: Record<string, { icon: LucideIcon; iconColor: string; icon
     icon: ShieldCheck,
     iconColor: "text-[#388E3C]",
     iconBg: "bg-safe-bg",
-    title: "This Appears Safe",
+    title: "Stay alert",
   },
   SUSPICIOUS: {
     icon: TriangleAlert,
