@@ -341,6 +341,12 @@ def upsert_charities(conn, rows: list[dict], run_now) -> dict:
     """
     stats = {"new": 0, "updated": 0, "skipped": 0}
     cursor = conn.cursor()
+    # Same reasoning as run_delistment_sweep — TOUCH_LAST_SEEN_SQL at the
+    # tail of this function UPDATEs all 63K+ ABNs in one shot and blows
+    # Supabase's 2-min pooler timeout on any cohort where many rows are
+    # hashed-equal (which is most days, since the ACNC register only churns
+    # ~hundreds of rows per week).
+    cursor.execute("SET statement_timeout = 0")
     upsert_start = time.time()
     total = len(rows)
     total_batches = (total + BATCH - 1) // BATCH
@@ -541,6 +547,15 @@ def scrape() -> None:
                 error_msg = str(e)
                 status = "error"
                 logger.error(f"ACNC upsert failed: {e}")
+                # Same defensive rollback as the delistment sweep: if the
+                # exception came from a tail-end UPDATE (TOUCH_LAST_SEEN_SQL
+                # is the most likely culprit on 63K rows), the connection's
+                # transaction is now poisoned and log_ingestion below will
+                # cascade-fail with InFailedSqlTransaction unless we clear it.
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
 
         # Delistment sweep — only when the upsert succeeded. If we sweep on
         # a partial-fetch (incomplete CKAN response) we'd flag thousands of
