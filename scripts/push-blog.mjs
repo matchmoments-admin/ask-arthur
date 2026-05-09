@@ -32,7 +32,158 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
-import { marked } from "marked";
+import { Marked } from "marked";
+import { markedHighlight } from "marked-highlight";
+import hljs from "highlight.js/lib/core";
+import javascript from "highlight.js/lib/languages/javascript";
+import python from "highlight.js/lib/languages/python";
+import bash from "highlight.js/lib/languages/bash";
+import json from "highlight.js/lib/languages/json";
+import plaintext from "highlight.js/lib/languages/plaintext";
+
+// ── Renderer (KEEP IN SYNC with apps/web/lib/blogRenderer.ts) ───────────────
+//
+// Why duplicated: scripts/ is plain ESM; apps/web/lib/blogRenderer.ts is
+// TypeScript and imports a JSX-co-located helper via Next.js's `@/` alias,
+// which doesn't resolve outside Next. Sharing via a workspace package is
+// the right long-term fix (filed as a follow-up); for now both copies must
+// produce byte-identical output for posts to render the same on the site.
+//
+// If you add a feature to blogRenderer.ts (new admonition type, new
+// shortcode, new code-fence behaviour), mirror it here. Until then,
+// founder-authored posts pushed via this script will render differently
+// than legacy markdown posts.
+
+hljs.registerLanguage("javascript", javascript);
+hljs.registerLanguage("python", python);
+hljs.registerLanguage("bash", bash);
+hljs.registerLanguage("json", json);
+hljs.registerLanguage("plaintext", plaintext);
+
+const CALLOUT_CONFIG = {
+  TIP: {
+    label: "Tip",
+    cls: "callout-tip",
+    icon: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg>',
+  },
+  WARNING: {
+    label: "Warning",
+    cls: "callout-warning",
+    icon: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/><path d="M12 15h.01"/><path d="M12 7v4"/></svg>',
+  },
+  DANGER: {
+    label: "Danger",
+    cls: "callout-danger",
+    icon: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 12v4"/><path d="M12 20h.01"/><path d="M8.128 16.949A7 7 0 1 1 15.71 8h1.79a1 1 0 0 1 0 9h-1.642"/></svg>',
+  },
+  NOTE: {
+    label: "Note",
+    cls: "callout-note",
+    icon: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>',
+  },
+  IMPORTANT: {
+    label: "Important",
+    cls: "callout-warning",
+    icon: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>',
+  },
+};
+
+function youtubeHtml(videoId) {
+  return `<div class="video-embed">
+    <iframe
+      src="https://www.youtube.com/embed/${videoId}"
+      title="Video"
+      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+      allowfullscreen
+    ></iframe>
+  </div>`;
+}
+
+function extractRawText(tokens) {
+  return tokens
+    .map((t) => {
+      if ("text" in t && typeof t.text === "string") return t.text;
+      if ("raw" in t && typeof t.raw === "string") return t.raw;
+      return "";
+    })
+    .join("");
+}
+
+function encodeBase64Utf8(input) {
+  const bytes = new TextEncoder().encode(input);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return typeof btoa === "function"
+    ? btoa(binary)
+    : Buffer.from(binary, "binary").toString("base64");
+}
+
+const marked = new Marked(
+  markedHighlight({
+    emptyLangClass: "hljs",
+    langPrefix: "hljs language-",
+    highlight(code, lang) {
+      if (lang === "mermaid") return code;
+      const language = hljs.getLanguage(lang) ? lang : "plaintext";
+      return hljs.highlight(code, { language }).value;
+    },
+  }),
+  {
+    renderer: {
+      code({ text, lang }) {
+        if (lang === "mermaid") {
+          const encoded = encodeBase64Utf8(text);
+          return `<div class="mermaid-diagram" data-mermaid-source="${encoded}"></div>\n`;
+        }
+        const language = hljs.getLanguage(lang || "") ? lang : "plaintext";
+        const highlighted = hljs.highlight(text, { language }).value;
+        return `<pre><code class="hljs language-${language}">${highlighted}</code></pre>\n`;
+      },
+
+      paragraph(token) {
+        const text = token.text;
+        const ytMatch = text.match(
+          /^https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]+)/,
+        );
+        if (ytMatch) return youtubeHtml(ytMatch[1]);
+        const customMatch = text.match(/^::youtube\[([\w-]+)\]$/);
+        if (customMatch) return youtubeHtml(customMatch[1]);
+        return `<p>${this.parser.parseInline(token.tokens)}</p>\n`;
+      },
+
+      image({ href, title, text }) {
+        const caption = title || "";
+        const alt = text || "";
+        if (caption) {
+          return `<figure>
+            <img src="${href}" alt="${alt}" loading="lazy" />
+            <figcaption>${caption}</figcaption>
+          </figure>`;
+        }
+        return `<img src="${href}" alt="${alt}" loading="lazy" />`;
+      },
+
+      blockquote({ tokens }) {
+        const inner = this.parser.parse(tokens);
+        const raw = extractRawText(tokens);
+        const calloutMatch = raw.match(/^\[!(\w+)\]\s*/);
+        if (calloutMatch) {
+          const type = calloutMatch[1].toUpperCase();
+          const config = CALLOUT_CONFIG[type];
+          if (config) {
+            const cleaned = inner.replace(/\[!\w+\]\s*/, "");
+            return `<div class="callout ${config.cls}"><div class="callout-title">${config.icon}<span>${config.label}</span></div><div class="callout-body">${cleaned}</div></div>\n`;
+          }
+        }
+        return `<blockquote>${inner}</blockquote>\n`;
+      },
+    },
+  },
+);
+
+async function renderMarkdown(content) {
+  return await marked.parse(content);
+}
 
 const AGENT_FLEET_URL =
   process.env.AGENT_FLEET_URL?.replace(/\/$/, "") ||
@@ -141,18 +292,25 @@ async function pushOne(slug) {
     );
   }
 
-  // marked is configured for raw markdown → HTML; we don't need the bespoke
-  // admonition/mermaid handling that apps/web/lib/blogRenderer.ts adds because
-  // the public site renders this post via the Ghost mirror, not the legacy
-  // markdown path. (Dual-rendered posts are not a thing.)
-  const renderedHtml = await marked.parse(bodyForRender);
+  // Use the same renderer as apps/web/lib/blogRenderer.ts so admonitions,
+  // mermaid sentinels, YouTube embeds, image figures, and hljs code colors
+  // are baked into the HTML before it ships to Ghost. The HTML lands in
+  // blog_posts.content_html, the safeverify post page renders it inside
+  // <div class="blog-content"> with <MermaidDiagram /> mounted — same
+  // markup, same CSS, byte-identical visuals to legacy markdown posts.
+  const renderedHtml = await renderMarkdown(bodyForRender);
   const html = rewriteRelativeUrls(renderedHtml);
 
   if (dryRun) {
     console.log("─── meta ───");
     console.log(JSON.stringify(meta, null, 2));
-    console.log("─── html (first 800 chars) ───");
-    console.log(html.slice(0, 800));
+    if (flags.has("--full-html")) {
+      console.log("─── html (full) ───");
+      console.log(html);
+    } else {
+      console.log("─── html (first 800 chars; pass --full-html to see all) ───");
+      console.log(html.slice(0, 800));
+    }
     console.log("─── (dry run, no POST) ───");
     return;
   }
@@ -164,11 +322,19 @@ async function pushOne(slug) {
     process.exit(2);
   }
 
+  // Ghost's primary_tag (the first tag) maps to safeverify's category_slug
+  // via the mirror webhook. If a `category` frontmatter is set, prepend it
+  // so it becomes the primary tag (and Ghost dedupes if it also appears in
+  // `tags`).
+  const tagsForGhost = meta.category
+    ? [meta.category, ...meta.tags.filter((t) => t !== meta.category)]
+    : meta.tags;
+
   const payload = {
     slug: meta.slug,
     title: meta.title,
     html,
-    tags: meta.tags,
+    tags: tagsForGhost,
     excerpt: meta.excerpt,
     hero_image_url: meta.hero ? toAbsoluteUrl(meta.hero) : undefined,
     hero_image_alt: meta.hero_alt,
