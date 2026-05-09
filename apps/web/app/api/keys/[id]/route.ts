@@ -1,22 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAuthServerClient } from "@askarthur/supabase/server-auth";
+import { getUser, AuthUnavailableError } from "@/lib/auth";
 
 export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const supabase = await createAuthServerClient();
-  if (!supabase) {
-    return NextResponse.json(
-      { error: "Auth not configured" },
-      { status: 500 }
-    );
+  // Auth check via lib/auth (5s timeout + AuthUnavailableError) — incident 2026-05-09.
+  let user;
+  try {
+    user = await getUser();
+  } catch (err) {
+    if (err instanceof AuthUnavailableError) {
+      return NextResponse.json(
+        { error: "Authentication temporarily unavailable" },
+        { status: 503, headers: { "Retry-After": "30" } },
+      );
+    }
+    throw err;
   }
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -25,6 +27,15 @@ export async function DELETE(
   const keyId = parseInt(id, 10);
   if (isNaN(keyId)) {
     return NextResponse.json({ error: "Invalid key ID" }, { status: 400 });
+  }
+
+  // Auth-bound client for the RLS-enforced UPDATE below.
+  const supabase = await createAuthServerClient();
+  if (!supabase) {
+    return NextResponse.json(
+      { error: "Auth not configured" },
+      { status: 500 }
+    );
   }
 
   // RLS enforced — user can only update their own keys

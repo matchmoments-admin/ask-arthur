@@ -29,13 +29,28 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Extract user_id from auth header if present (Security Fix #6: device binding)
+  // Extract user_id from auth header if present (Security Fix #6: device binding).
+  //
+  // Bearer-token auth.getUser() is wrapped in a 3s Promise.race so a
+  // degraded GoTrue can't hang the route. On timeout (or any other
+  // failure) we silently fall through to anonymous registration — same
+  // UX as if the caller never sent a Bearer token. Incident 2026-05-09:
+  // the prior bare-await would 504 on a hung GoTrue.
   let userId: string | null = null;
   const authHeader = req.headers.get("authorization");
   if (authHeader?.startsWith("Bearer ")) {
     try {
-      const { data: { user } } = await supabase.auth.getUser(authHeader.slice(7));
-      userId = user?.id ?? null;
+      const result = await Promise.race([
+        supabase.auth.getUser(authHeader.slice(7)),
+        new Promise<"timeout">((resolve) =>
+          setTimeout(() => resolve("timeout"), 3000),
+        ),
+      ]);
+      if (result === "timeout") {
+        logger.warn("mobile/push/register: auth.getUser timed out, falling through to anonymous");
+      } else {
+        userId = result.data.user?.id ?? null;
+      }
     } catch {
       // Anonymous registration — continue without user binding
     }

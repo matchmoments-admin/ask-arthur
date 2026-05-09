@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import crypto from "crypto";
-import { createAuthServerClient } from "@askarthur/supabase/server-auth";
 import { createServiceClient } from "@askarthur/supabase/server";
+import { getUser, AuthUnavailableError } from "@/lib/auth";
 
 const CreateOrgSchema = z.object({
   name: z.string().min(1).max(200),
@@ -44,18 +44,20 @@ function generateRawKey(): string {
 }
 
 export async function POST(req: NextRequest) {
-  const supabase = await createAuthServerClient();
-  if (!supabase) {
-    return NextResponse.json(
-      { error: "Auth not configured" },
-      { status: 500 }
-    );
+  // Auth check via lib/auth (5s timeout + AuthUnavailableError) — incident 2026-05-09.
+  // No RLS-bound query needed; subsequent ops use the service client.
+  let user;
+  try {
+    user = await getUser();
+  } catch (err) {
+    if (err instanceof AuthUnavailableError) {
+      return NextResponse.json(
+        { error: "Authentication temporarily unavailable" },
+        { status: 503, headers: { "Retry-After": "30" } },
+      );
+    }
+    throw err;
   }
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
