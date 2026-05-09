@@ -107,7 +107,7 @@ or because it's a multi-week build that didn't fit the side-bug pass.
   promptfoo skeleton in `evals/` ships with hand-curated fixtures.
   The full audit-item-(i) closure needs an Inngest cron that reads
   `verdict_feedback WHERE training_consent = true AND processed_at IS
-  NULL`, generates `evals/fixtures/auto/<id>.yaml` candidates, and
+NULL`, generates `evals/fixtures/auto/<id>.yaml` candidates, and
   marks the row `processed_at = NOW()`. **Crucially**, auto-extracted
   fixtures should NOT be promoted into the regression suite without
   human review — a single mis-labelled feedback row in the gate
@@ -293,106 +293,106 @@ Infrastructure is in place (v38–v40). Future work:
 ### News Intel narrative feeds (shipped 2026-05-06, post-launch watch)
 
 - [ ] **Akamai tarpit on Azure (GH Actions) IPs targeting cyber.gov.au** —
-  Diagnostic probe (`probe_acsc.py`, run via PR #145, 2026-05-06) returned
-  41/41 ReadTimeout failures across 5 UAs × 4 endpoints × 2 methods + a
-  urllib parity check. All identical 15s read-timeout. DNS resolves
-  (Akamai 23.210.244.0/24 — NOT Cloudflare as initially assumed); TLS
-  handshake completes in 6ms. So this is **deliberate Akamai bot
-  protection silently dropping responses for Azure egress IPs** (GH
-  Actions runs on Azure 135.232.0.0/16). Even `googlebot` UA on
-  `/robots.txt` is tarpitted — proves it's IP-range based, not
-  UA/endpoint filtering.  
-  **Mitigation already shipped**: `pipeline/scrapers/common/backoff.py`
-  skips ACSC fetches once 5 consecutive failures are logged. The 3h
-  cron still fires but writes a `partial`-status heartbeat instead of
-  hammering the upstream. Resets automatically when one fetch succeeds.  
-  **Diagnostic tooling**: `pipeline/scrapers/probe_acsc.py` runs HEAD/GET
-  across multiple UAs (askarthur, mozilla, curl, googlebot, no-UA),
-  multiple endpoints (rss/alerts, rss/advisories, /, /robots.txt), and
-  cross-checks `requests` vs stdlib `urllib`. Plus DNS resolution + raw
-  TCP+TLS handshake probes. Trigger via
-  `gh workflow run scrape-feeds.yml -f feed=probe_acsc` to capture a
-  diagnostic table. **Run the probe BEFORE attempting the Inngest port
-  so we're not optimising for the wrong cause.**  
-  **Vercel ingest (in code, gated default OFF)**: PR #147 ships
-  `packages/scam-engine/src/inngest/acsc-ingest-vercel.ts` — a parallel
-  Inngest cron that fetches ACSC RSS from Vercel's runtime instead of
-  GH Actions. Gated by `FF_ACSC_INGEST_VERCEL` (server-side env). To
-  validate Vercel egress works:
-    1. Set `FF_ACSC_INGEST_VERCEL=true` in Vercel preview
-    2. In Inngest dashboard, manually invoke `acsc-ingest-vercel`
-    3. Query `SELECT status, records_new, error_message FROM
-       feed_ingestion_log WHERE feed_name='acsc' ORDER BY created_at
-       DESC LIMIT 3` — first row is the Vercel run
-    4. If `success` with `records_new > 0` → flip flag to true in prod,
-       open follow-up to remove the Python GH Actions step
-    5. If `error` (Vercel IPs also tarpitted) → flip flag off, accept
-       the gap (Scamwatch + ASIC cover most AU regulator-narrative
-       needs), open separate ticket to scrape the HTML listing instead
-       of RSS as Plan C.
-  **Fallback (Plan C)**: scrape `/about-us/view-all-content/alerts-and-advisories`
-  HTML listing — different Akamai cache/WAF rules than RSS endpoints,
-  may pass through. Only consider if Vercel egress also fails.  
-  Health query: `SELECT status, COUNT(*) FROM feed_ingestion_log WHERE
-  feed_name='acsc' AND created_at > now() - interval '7 days' GROUP BY
-  status`. Healthy week is mostly `success`; an unhealthy backoff week
-  is `error` followed by `partial` (the Python backoff heartbeats).
+      Diagnostic probe (`probe_acsc.py`, run via PR #145, 2026-05-06) returned
+      41/41 ReadTimeout failures across 5 UAs × 4 endpoints × 2 methods + a
+      urllib parity check. All identical 15s read-timeout. DNS resolves
+      (Akamai 23.210.244.0/24 — NOT Cloudflare as initially assumed); TLS
+      handshake completes in 6ms. So this is **deliberate Akamai bot
+      protection silently dropping responses for Azure egress IPs** (GH
+      Actions runs on Azure 135.232.0.0/16). Even `googlebot` UA on
+      `/robots.txt` is tarpitted — proves it's IP-range based, not
+      UA/endpoint filtering.  
+      **Mitigation already shipped**: `pipeline/scrapers/common/backoff.py`
+      skips ACSC fetches once 5 consecutive failures are logged. The 3h
+      cron still fires but writes a `partial`-status heartbeat instead of
+      hammering the upstream. Resets automatically when one fetch succeeds.  
+      **Diagnostic tooling**: `pipeline/scrapers/probe_acsc.py` runs HEAD/GET
+      across multiple UAs (askarthur, mozilla, curl, googlebot, no-UA),
+      multiple endpoints (rss/alerts, rss/advisories, /, /robots.txt), and
+      cross-checks `requests` vs stdlib `urllib`. Plus DNS resolution + raw
+      TCP+TLS handshake probes. Trigger via
+      `gh workflow run scrape-feeds.yml -f feed=probe_acsc` to capture a
+      diagnostic table. **Run the probe BEFORE attempting the Inngest port
+      so we're not optimising for the wrong cause.**  
+      **Vercel ingest (in code, gated default OFF)**: PR #147 ships
+      `packages/scam-engine/src/inngest/acsc-ingest-vercel.ts` — a parallel
+      Inngest cron that fetches ACSC RSS from Vercel's runtime instead of
+      GH Actions. Gated by `FF_ACSC_INGEST_VERCEL` (server-side env). To
+      validate Vercel egress works:
+  1. Set `FF_ACSC_INGEST_VERCEL=true` in Vercel preview
+  2. In Inngest dashboard, manually invoke `acsc-ingest-vercel`
+  3. Query `SELECT status, records_new, error_message FROM
+feed_ingestion_log WHERE feed_name='acsc' ORDER BY created_at
+DESC LIMIT 3` — first row is the Vercel run
+  4. If `success` with `records_new > 0` → flip flag to true in prod,
+     open follow-up to remove the Python GH Actions step
+  5. If `error` (Vercel IPs also tarpitted) → flip flag off, accept
+     the gap (Scamwatch + ASIC cover most AU regulator-narrative
+     needs), open separate ticket to scrape the HTML listing instead
+     of RSS as Plan C.
+     **Fallback (Plan C)**: scrape `/about-us/view-all-content/alerts-and-advisories`
+     HTML listing — different Akamai cache/WAF rules than RSS endpoints,
+     may pass through. Only consider if Vercel egress also fails.  
+     Health query: `SELECT status, COUNT(*) FROM feed_ingestion_log WHERE
+feed_name='acsc' AND created_at > now() - interval '7 days' GROUP BY
+status`. Healthy week is mostly `success`; an unhealthy backoff week
+     is `error` followed by `partial` (the Python backoff heartbeats).
 
 - [ ] **FTC / FBI / UK / NCSC narrative scrapers** — not built; pattern
-  matches `acsc_alerts.py`. Feed URLs from the original brief require
-  re-validation (FTC's `consumer-alerts/feed` is 404 as of 2026-05-06).
-  Estimated ~150 LOC each + cron line. Defer until AU sources are
-  proven steady-state for 4+ weeks.
+      matches `acsc_alerts.py`. Feed URLs from the original brief require
+      re-validation (FTC's `consumer-alerts/feed` is 404 as of 2026-05-06).
+      Estimated ~150 LOC each + cron line. Defer until AU sources are
+      proven steady-state for 4+ weeks.
 
 - [ ] **Google Web Risk migration** — `safebrowsing.ts` currently uses
-  Safe Browsing v4 which is non-commercial-only per Google's ToS. Web Risk
-  is the commercial replacement: 100k Lookup calls/month free, then
-  $0.50/1k. Free tier alone covers our volume. **Trigger**: commercial
-  launch / monetisation event.
+      Safe Browsing v4 which is non-commercial-only per Google's ToS. Web Risk
+      is the commercial replacement: 100k Lookup calls/month free, then
+      $0.50/1k. Free tier alone covers our volume. **Trigger**: commercial
+      launch / monetisation event.
 
 - [ ] **OG image upload to R2** — narrative scrapers extract `og:image`
-  but currently don't upload to R2. Adding the upload path means adding
-  `evidence_r2_key` to the bulk_upsert and uploading via existing
-  `common/r2.py`. Defer until a renderer (email card, dashboard preview)
-  needs it.
+      but currently don't upload to R2. Adding the upload path means adding
+      `evidence_r2_key` to the bulk_upsert and uploading via existing
+      `common/r2.py`. Defer until a renderer (email card, dashboard preview)
+      needs it.
 
 - [ ] **Re-run ACSC manually after 24h** — first-launch ACSC scrapes all
-  timed out from GH IPs. After Mozilla UA fallback ships in PR #140, the
-  3h cron should self-heal. Verify after 24h via
-  `SELECT * FROM feed_ingestion_log WHERE feed_name='acsc' ORDER BY created_at DESC LIMIT 10`
-  — at least one `success` with `records_new > 0` expected.
+      timed out from GH IPs. After Mozilla UA fallback ships in PR #140, the
+      3h cron should self-heal. Verify after 24h via
+      `SELECT * FROM feed_ingestion_log WHERE feed_name='acsc' ORDER BY created_at DESC LIMIT 10`
+      — at least one `success` with `records_new > 0` expected.
 
 - [ ] **Daily Telegram cost digest — verify after 7d** — the existing weekly
-  WoW cost digest auto-includes any feature found in `cost_telemetry`.
-  After 7 days of `news-intel-embed` cost data has accrued (target date
-  ≥ 2026-05-13), check the Mon Telegram digest contains a
-  `news-intel-embed` line. **No code change needed** — verification only.
+      WoW cost digest auto-includes any feature found in `cost_telemetry`.
+      After 7 days of `news-intel-embed` cost data has accrued (target date
+      ≥ 2026-05-13), check the Mon Telegram digest contains a
+      `news-intel-embed` line. **No code change needed** — verification only.
 
 - [x] **Daily admin health digest (silence-on-perfect-day)** — shipped via
-  PR-H. `/api/cron/health-digest` runs at 22:00 UTC (08:00 AEST) daily,
-  queries cost_telemetry for `*-error` rows + feed_ingestion_log for
-  stale feeds, sends Telegram only when issues detected. Per-feed
-  staleness thresholds in route.ts; known-dormant scrapers excluded.
-  When the Vercel ACSC ingest (PR #147) confirms green, revert the
-  `acsc` threshold from 999h (silenced) to 12h.
+      PR-H. `/api/cron/health-digest` runs at 22:00 UTC (08:00 AEST) daily,
+      queries cost_telemetry for `*-error` rows + feed_ingestion_log for
+      stale feeds, sends Telegram only when issues detected. Per-feed
+      staleness thresholds in route.ts; known-dormant scrapers excluded.
+      When the Vercel ACSC ingest (PR #147) confirms green, revert the
+      `acsc` threshold from 999h (silenced) to 12h.
 
 - [ ] **`/intel/regulator-alerts/[slug]` detail pages (P3)** — surface
-  per-alert detail pages with full body_md rendered, breadcrumbs, and
-  per-source schema.org markup for SEO. Requires a `slug` column on
-  `feed_items` (currently the dedup key is a SHA-256 hash). Implementation
-  notes when picked up:
-  * Add `slug TEXT` column on `feed_items`, backfilled from a slugified
+      per-alert detail pages with full body_md rendered, breadcrumbs, and
+      per-source schema.org markup for SEO. Requires a `slug` column on
+      `feed_items` (currently the dedup key is a SHA-256 hash). Implementation
+      notes when picked up:
+  - Add `slug TEXT` column on `feed_items`, backfilled from a slugified
     version of `title` + a 6-char hash suffix to avoid collisions.
-  * Update the three narrative scrapers to populate `slug` on insert.
-  * Build the `[slug]/page.tsx` route mirroring `/intel/regulator-alerts/page.tsx`.
-  Defer until `/intel/regulator-alerts` (the list page) shows clear SEO
-  signal — Plausible referrers from search engines pointing at it.
+  - Update the three narrative scrapers to populate `slug` on insert.
+  - Build the `[slug]/page.tsx` route mirroring `/intel/regulator-alerts/page.tsx`.
+    Defer until `/intel/regulator-alerts` (the list page) shows clear SEO
+    signal — Plausible referrers from search engines pointing at it.
 
 - [ ] **Mobile `RegulatorAlertsScreen` UI** — `/api/mobile/regulator-alerts`
-  shipped in PR #144 (gated default OFF). The mobile app needs a screen
-  to render the response. Pickup signal: when @askarthur/mobile is next
-  bumped for an Expo release, add the screen and flip
-  `NEXT_PUBLIC_FF_MOBILE_REGULATOR_ALERTS=true` simultaneously.
+      shipped in PR #144 (gated default OFF). The mobile app needs a screen
+      to render the response. Pickup signal: when @askarthur/mobile is next
+      bumped for an Expo release, add the screen and flip
+      `NEXT_PUBLIC_FF_MOBILE_REGULATOR_ALERTS=true` simultaneously.
 
 ## Reddit Scam Intelligence — priority watch
 
@@ -580,6 +580,43 @@ order.
 ## Charity Legitimacy Check
 
 v0.1 + v0.2a code-complete + merged 2026-05-02 (#83 #85 #86 #87 #92). `acnc_charities` table populated (63,637 rows from data.gov.au CKAN, weekly source / daily scraper). Engine + page + routes live in main; consumer surface gated by `NEXT_PUBLIC_FF_CHARITY_CHECK` (default OFF). See [`docs/ops/charity-check-config.md`](./docs/ops/charity-check-config.md) for config + smoke-test checklist.
+
+### ⚠ v0.2 BLOCKER — split embeddings to a sibling table BEFORE consumer launch
+
+Incident 2026-05-09 (PR #187 + post-mortem): the 498 MB
+`idx_acnc_name_mission_embedding_hnsw` index on the same physical table
+as the daily-write `acnc_charities` was dropped to recover from a
+Disk-IO-budget depletion warning. The index was on the daily-write hot
+table because v0.1 ingested embeddings inline. **Do not recreate the
+HNSW on `acnc_charities` directly when you flip the consumer flag.**
+
+Architectural pattern to follow (matches what `verified_scams` /
+`scam_reports` already do — see migrations v87–v89):
+
+1. New migration: `acnc_charity_embeddings (abn pk, embedding vector(1024), model_version text, generated_at timestamptz)`. 1:1 with `acnc_charities`, FK on ABN cascade-delete.
+2. Move `name_mission_embedding` + `embedding_model_version` columns from
+   `acnc_charities` to the new sibling. Keep the columns NULL-droppable in
+   `acnc_charities` for one deploy cycle (read-the-old, write-the-new) to
+   avoid a flag-flip race.
+3. `CREATE INDEX CONCURRENTLY ... USING hnsw ... ON acnc_charity_embeddings`. Now the daily ACNC sweep's UPDATEs on `acnc_charities` never touch the HNSW index — IO drops by the same ~95% we just clawed back.
+4. Update `packages/charity-check/src/embeddings.ts` (or wherever the
+   semantic search joins) to JOIN the sibling on `abn`. Single index lookup
+   on the sibling stays fast.
+5. Update the embed backfill Inngest function to write to the sibling
+   (`acnc-charity-backfill-embed.ts`).
+6. **Re-run the advisor + the disk-IO query** (`extensions.pg_stat_statements` ordered by `shared_blks_read+shared_blks_written`) BEFORE flipping `NEXT_PUBLIC_FF_CHARITY_CHECK` ON — the Disk IO Budget warning was the canary.
+
+Why split BEFORE launch instead of "fix-it-later": the daily sweep is
+already running. The moment we recreate the HNSW on the same table,
+every nightly TOUCH_LAST_SEEN_SQL chunk dirties index pages again — the
+exact pattern that depleted the IO budget today. The split is the
+single one-time cost; deferring it just rebuys the same incident.
+
+Ship as PR v0.2-prelaunch BEFORE v0.2c/d/e. Until that PR ships,
+charity-check semantic search is unavailable (exact-name + trigram
+search still works via the existing 14 MB GIN index — that's how every
+public AU charity register search-bar works today, so users will not
+notice).
 
 ### v0.2 — consumer launch (4 PRs remaining)
 
