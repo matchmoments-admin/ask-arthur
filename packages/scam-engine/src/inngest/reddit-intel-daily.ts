@@ -177,14 +177,25 @@ const DailySummarySchema = z.object({
     .default({ totalPosts: 0, topCategories: {}, topBrands: {} }),
 });
 
-// Sonnet 4.6 occasionally returns top-level array/object fields as
-// JSON-encoded strings under tool-use mode (observed in cost_telemetry
-// WHERE feature='reddit-intel-error' from 2026-05-06 onward — every
-// classify call failed all 4 attempts on `perPost: expected array,
-// received string`). Pre-parse defensively rather than trusting the
-// wrapper: a no-op on the happy path, ~$0.50 saved per failed batch.
-const jsonStringPassthrough = (v: unknown) =>
-  typeof v === "string" ? JSON.parse(v) : v;
+// Defensive preprocess for the rare case where Sonnet stringifies an
+// array/object inside tool-use input. Root cause for the 2026-05-06 → 10
+// outage was fixed in anthropic.ts (io: "input" → "output" so the JSON
+// Schema sent to Anthropic is strict, not permissive). This preprocess
+// stays as belt-and-braces:
+//   - non-string  → passthrough (the expected happy path)
+//   - valid JSON  → parse and continue (covers any residual stringify)
+//   - malformed   → return the string unchanged so Zod surfaces a clean
+//                   "expected array, received string" instead of a raw
+//                   SyntaxError from the preprocess itself (which is what
+//                   produced the 2026-05-10 errors).
+const jsonStringPassthrough = (v: unknown) => {
+  if (typeof v !== "string") return v;
+  try {
+    return JSON.parse(v);
+  } catch {
+    return v;
+  }
+};
 
 const SonnetOutputSchema = z.object({
   perPost: z.preprocess(jsonStringPassthrough, z.array(PerPostSchema)),
