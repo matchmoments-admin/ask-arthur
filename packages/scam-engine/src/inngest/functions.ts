@@ -31,8 +31,8 @@ import { redditIntelDaily } from "./reddit-intel-daily";
 import { redditIntelEmbed } from "./reddit-intel-embed";
 import { redditIntelCluster } from "./reddit-intel-cluster";
 
-// ACNC charity register: backfill + delta-embed name_mission_embedding
-// (powers the semantic typosquat signal in packages/charity-check).
+// ACNC charity register: backfill + delta-embed sibling table acnc_charity_embeddings
+// (v121/v122). Powers the semantic typosquat signal in packages/charity-check.
 import { acncCharityBackfillEmbed } from "./acnc-charity-backfill-embed";
 
 // scam_reports + verified_scams embeddings (Phase C):
