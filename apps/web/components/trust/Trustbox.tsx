@@ -3,50 +3,68 @@
 import { useCallback, useEffect, useRef } from "react";
 import Script from "next/script";
 
-// Trustpilot's "Micro Combo" template — stars + score + review count in
-// a compact ~24px-tall horizontal strip. **Free-tier compatible** (verified
-// 2026-05-10 after the Mini template returned 400 "BusinessUnit does not
-// have access to that trustbox" — Mini is paid-tier only).
+// Trustpilot's "Review Collector" template — the only widget the Free
+// tier exposes. It renders as a CTA inviting visitors to leave a review
+// (NOT a passive rating display). Verified 2026-05-10 after every other
+// template ID returned `{"Error":["BusinessUnit does not have access to
+// that trustbox"]}` from the trustbox-data endpoint — Trustpilot gates
+// access per (BUID, template) pair via the dashboard's "Showcase →
+// Website widgets" publish step.
 //
-// Other Trustpilot Free-tier template IDs:
-//   Micro Star          5419b6ffb0d04a076446a9af  (just stars)
-//   Micro TrustScore    5419b732fbfb950b10de65e5  (just the score number)
-//   Micro Review Count  5419b637fa0340045cd0c936  ("X out of Y reviews")
+// Review Collector requires `data-token` — a per-account anti-CSRF token
+// generated when you publish the widget in the dashboard. Configure via
+// NEXT_PUBLIC_TRUSTPILOT_DATA_TOKEN. Without the token, the widget will
+// load but Trustpilot will refuse to record any reviews collected.
 //
-// NEXT_PUBLIC_TRUSTPILOT_TEMPLATE_ID still overrides if set on Vercel,
-// so an upgrade to a paid plan can swap in Mini/Carousel/etc. without code.
-const DEFAULT_TEMPLATE_ID = "5419b6a8b0d04a076446a9ad";
+// To swap to a passive rating display (Mini, Micro Combo, Micro Star,
+// etc.) you need a paid Trustpilot plan AND to publish that template in
+// the dashboard, which gives you a different template ID + token to
+// override these env vars with.
+const DEFAULT_TEMPLATE_ID = "56278e9abfbbba0bdcd568bc";
 
 interface TrustboxProps {
-  /** Trustpilot template id. Defaults to "Micro Combo" — Free-tier
-   *  compatible. Override per page if you've upgraded to a paid plan. */
+  /** Trustpilot template id. Defaults to "Review Collector" — the only
+   *  widget the Free tier exposes. Override if you have a paid plan. */
   templateId?: string;
   /** Trustpilot business unit id. */
   businessUnitId?: string;
+  /** Per-widget anti-CSRF token. Required for Review Collector; some
+   *  paid templates also require it. Trustpilot generates this when
+   *  you publish the widget in the dashboard. */
+  dataToken?: string;
   /** Width — Trustpilot accepts pct or px. */
   width?: string;
-  /** Height in px — must match the chosen template. Micro family = 24px. */
+  /** Height in px — must match the chosen template. Review Collector = 52px. */
   height?: string;
   /** Theme — light fits the footer, dark for contrast over hero. */
   theme?: "light" | "dark";
+  /** BCP-47 locale. Trustpilot generates the embed code with the locale
+   *  you picked when publishing the widget — match that here. */
+  locale?: string;
 }
 
 /**
- * Trustpilot TrustBox widget. Free-tier widget — surfaces whatever rating
- * users have organically left, *including* bad ones. Deliberately passive:
- * we do NOT solicit reviews via in-app CTAs (qualified-moment funneling
- * skews the signal — see /docs/plans/contact-feedback-and-onward-reporting.md
- * §5 reframe).
+ * Trustpilot TrustBox widget. The Free tier only exposes "Review
+ * Collector" — a CTA prompt that invites visitors to leave a review.
  *
- * No-ops if env vars are unset, so local dev and unconfigured previews don't
- * render an empty placeholder.
+ * Note: this is a behavioural shift from the original design intent
+ * ("deliberately passive — we do NOT solicit reviews via in-app CTAs",
+ * see /docs/plans/contact-feedback-and-onward-reporting.md §5). The
+ * passive-display widgets we wanted (Mini, Micro Combo, etc.) require
+ * a paid Trustpilot plan. If we re-evaluate that, this component can
+ * be swapped to any other template by changing the env vars.
+ *
+ * No-ops if BUID + template are missing — local dev and unconfigured
+ * previews render nothing instead of a broken placeholder.
  */
 export default function Trustbox({
   templateId,
   businessUnitId,
+  dataToken,
   width = "100%",
-  height = "24px",
+  height = "52px",
   theme = "light",
+  locale,
 }: TrustboxProps) {
   const ref = useRef<HTMLDivElement>(null);
   const tpl =
@@ -55,6 +73,8 @@ export default function Trustbox({
     DEFAULT_TEMPLATE_ID;
   const buid =
     businessUnitId ?? process.env.NEXT_PUBLIC_TRUSTPILOT_BUSINESS_UNIT_ID;
+  const token = dataToken ?? process.env.NEXT_PUBLIC_TRUSTPILOT_DATA_TOKEN;
+  const tpLocale = locale ?? process.env.NEXT_PUBLIC_TRUSTPILOT_LOCALE ?? "en-US";
 
   // Trustpilot's bootstrap auto-scans on initial parse, but our useEffect
   // can fire BEFORE the script has loaded — leaving the fallback <a> link
@@ -180,15 +200,16 @@ export default function Trustbox({
       <div
         ref={ref}
         className="trustpilot-widget"
-        data-locale="en-AU"
+        data-locale={tpLocale}
         data-template-id={tpl}
         data-businessunit-id={buid}
         data-style-height={height}
         data-style-width={width}
         data-theme={theme}
+        {...(token ? { "data-token": token } : {})}
       >
         <a
-          href="https://au.trustpilot.com/review/askarthur.au"
+          href="https://www.trustpilot.com/review/askarthur.au"
           target="_blank"
           rel="noopener noreferrer"
         >
