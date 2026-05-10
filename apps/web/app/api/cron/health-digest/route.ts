@@ -29,8 +29,10 @@ export const dynamic = "force-dynamic";
 const STALENESS_THRESHOLD_HOURS: Record<string, number> = {
   reddit: 36,
   scamwatch_alert: 12,
-  // ACSC currently dark from GH-Actions IPs (Akamai tarpit, BACKLOG.md).
-  // Once PR #147's Vercel ingest is verified green, revert to 12h.
+  // ACSC dormant: cyber.gov.au tarpits both GH Actions egress (Azure IPs)
+  // and Vercel egress (proven 2026-05-11 by 7d of 0-success ingest rows).
+  // Scamwatch + ASIC carry AU regulator narrative coverage. Threshold left
+  // at 999 so the daily digest stays silent without removing the entry.
   acsc: 999,
   asic_investor: 36,
   acnc_register: 36,

@@ -342,15 +342,6 @@ export const featureFlags = {
    *  on once the corpus has had a few weeks to accrue and customers have
    *  asked for it. Server-side only — gates the API merge logic. */
   regulatorIntelSearch: process.env.FF_REGULATOR_INTEL_SEARCH === "true",
-
-  /** News Intel — ACSC RSS ingest via Vercel egress instead of GH Actions.
-   *  Akamai tarpits Azure (GH Actions) IPs, proven by 41/41 ReadTimeout
-   *  failures across all UAs/methods/endpoints (see BACKLOG and
-   *  pipeline/scrapers/probe_acsc.py). Vercel's egress IPs differ and
-   *  may not be tarpitted. Flipping this flag on for the first time IS
-   *  the test — read the resulting feed_ingestion_log row to see
-   *  whether it works. Default OFF until that smoke-test confirms. */
-  acscIngestVercel: process.env.FF_ACSC_INGEST_VERCEL === "true",
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;
