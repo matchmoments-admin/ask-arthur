@@ -78,11 +78,14 @@ be true for the scraper to actually run on a scheduled or dispatched job.
 
 ### Migrations applied (production project `rquomhcgnodxzkhokwni`)
 
-| Version                            | Applied at         | Purpose                                                                   |
-| ---------------------------------- | ------------------ | ------------------------------------------------------------------------- |
-| `v83_acnc_charities`               | 2026-05-02 02:42 Z | Creates `acnc_charities` table + 4 indexes + RLS + `search_charities` RPC |
-| `v83_search_charities_search_path` | 2026-05-02 02:44 Z | Adds `SET search_path = public, pg_catalog` to the RPC (advisor WARN fix) |
-| `v84_feed_ingestion_log_charity`   | 2026-05-02 06:11 Z | Adds `'charity'` to `feed_ingestion_log.record_type` CHECK allowlist      |
+| Version                                | Applied at         | Purpose                                                                                                                                                                                                           |
+| -------------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `v83_acnc_charities`                   | 2026-05-02 02:42 Z | Creates `acnc_charities` table + 4 indexes + RLS + `search_charities` RPC                                                                                                                                         |
+| `v83_search_charities_search_path`     | 2026-05-02 02:44 Z | Adds `SET search_path = public, pg_catalog` to the RPC (advisor WARN fix)                                                                                                                                         |
+| `v84_feed_ingestion_log_charity`       | 2026-05-02 06:11 Z | Adds `'charity'` to `feed_ingestion_log.record_type` CHECK allowlist                                                                                                                                              |
+| `v87_acnc_charity_embeddings`          | 2026-05-03 19:18 Z | Adds `name_mission_embedding` + `embedding_model_version` columns and `match_charities_by_embedding` RPC. **HNSW from this migration was dropped 2026-05-09 during the incident** and is being moved to v121.     |
+| `v92_acnc_delistment_columns`          | 2026-05-04 09:52 Z | Adds `is_delisted` + `delisted_at` columns to `acnc_charities` so charities removed from the ACNC register are flagged but not deleted (preserves history).                                                       |
+| `v121_acnc_charity_embeddings_sibling` | 2026-05-11         | **Sibling-table migration.** Moves the embedding to `acnc_charity_embeddings` (PK = `charity_abn`, FK to `acnc_charities`, ON DELETE CASCADE). RPC body rewritten to JOIN sibling. Filters `is_delisted` results. |
 
 ### Tables and row counts (post-first-ingest, 2026-05-02)
 
@@ -95,6 +98,30 @@ be true for the scraper to actually run on a scheduled or dispatched job.
 ### RPCs
 
 - `search_charities(p_query TEXT, p_limit INT DEFAULT 8)` — autocomplete; returns `(abn, charity_legal_name, town_city, state, charity_website, similarity_score)`. Trigram + ILIKE-prefix ranking; ILIKE-prefix wins (sim=1.0). Hardened with `SET search_path = public, pg_catalog`. Granted to `anon, authenticated, service_role`.
+- `match_charities_by_embedding(p_query_embedding VECTOR(1024), p_match_count INT, p_min_similarity REAL)` — semantic NN over `acnc_charity_embeddings` (sibling, v121). JOINs back to `acnc_charities` for the human-readable columns + filters `is_delisted=true`. Granted to `anon, authenticated, service_role`.
+- `get_acnc_charities_missing_embedding(p_limit INT)` — backfill helper used by the `acnc-charity-backfill-embed` Inngest function. Returns live (non-delisted) charities whose row is absent from the sibling table. Granted to `service_role` only.
+
+### HNSW build (one-shot, pre-launch)
+
+The v121 migration creates the sibling table without the HNSW index — at 63k × 1024-dim vectors the build exceeds the migration runner's timeout (and the MCP-imposed timeout). Build it manually via the Supabase **SQL Editor** (the dashboard editor has a longer query budget than the MCP) **before** flipping `NEXT_PUBLIC_FF_CHARITY_CHECK` to `true`:
+
+```sql
+SET LOCAL maintenance_work_mem = '512MB';
+CREATE INDEX IF NOT EXISTS idx_acnc_charity_embeddings_hnsw
+  ON public.acnc_charity_embeddings
+  USING hnsw (embedding vector_cosine_ops);
+```
+
+Expected wall time on Pro-tier compute: ~10–15 min for 63k vectors. The `IF NOT EXISTS` guard is idempotent — a duplicate run is a no-op.
+
+Until the HNSW exists, `match_charities_by_embedding` falls back to a sequential scan over the sibling. Functional but ~5s/query — too slow for a consumer surface. The launch checklist in §6 makes the HNSW build a hard gate.
+
+When the index exists you can verify with:
+
+```sql
+SELECT pg_size_pretty(pg_relation_size('idx_acnc_charity_embeddings_hnsw'::regclass));
+-- ~250-300 MB at 63k rows × 1024-dim, m=16, ef_construction=64.
+```
 
 ---
 
@@ -133,7 +160,13 @@ Manual scrape: `gh workflow run scrape-feeds.yml -f feed=acnc_register` (also ac
 
 ## 6. Smoke-test checklist (post flag-flip)
 
-Run these on the preview deployment after setting `NEXT_PUBLIC_FF_CHARITY_CHECK=true`:
+**Pre-launch hard gates** (verify all before flipping `NEXT_PUBLIC_FF_CHARITY_CHECK=true`):
+
+- [ ] `idx_acnc_charity_embeddings_hnsw` exists (see "HNSW build (one-shot, pre-launch)" in §3). Without it, the typosquat semantic match runs at ~5s/query.
+- [ ] `acnc_charity_embeddings` row count ≈ `acnc_charities WHERE name_mission_embedding IS NOT NULL` row count (currently ~63k).
+- [ ] `mcp__supabase__get_advisors` (security + performance) shows no NEW errors introduced by v121.
+
+Then run these on the preview deployment after setting `NEXT_PUBLIC_FF_CHARITY_CHECK=true`:
 
 1. **SAFE happy path** — Visit `/charity-check?abn=11005357522`, expect SAFE verdict for "Australian Red Cross Society" with all four ticks lit, official donation URL CTA → `www.redcross.org.au`.
 2. **Autocomplete** — Type "Cancer Council" in the name field, expect a listbox of all five state-level Councils with town + state shown.
