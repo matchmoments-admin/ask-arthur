@@ -2,6 +2,14 @@
 
 Deferred features organized by platform. Items here are validated ideas that didn't make MVP but are worth building.
 
+> **📊 Funding-grade cost / caching / scale review (2026-05-10):**
+> [`docs/plans/api-costs-caching-and-scale.md`](./docs/plans/api-costs-caching-and-scale.md) —
+> full inventory of paid API providers, caching layers, telemetry coverage, and
+> a prioritised punch-list (P0–P2) of fixes with file/line citations. Reference
+> this when (a) preparing funder due-diligence materials, (b) picking up any of
+> the 12 enumerated remediation items, or (c) flipping a consumer feature flag
+> from default-OFF to ON.
+
 The "Audit Remediation Roadmap" below is the prioritized cross-cutting work
 queue derived from the 2026-04-28 per-feature flow audit; everything beneath
 it stays organized by platform/area.
