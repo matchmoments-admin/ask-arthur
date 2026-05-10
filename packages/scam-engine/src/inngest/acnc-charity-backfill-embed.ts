@@ -1,8 +1,12 @@
 // ACNC charity embeddings — backfill + delta job.
 //
-// Embeds acnc_charities.name_mission_embedding for any row where it's NULL
-// (initial 63k-row backfill, plus daily deltas as the ACNC scraper adds new
-// rows). Idempotent: only touches rows with embedding IS NULL.
+// Writes to `acnc_charity_embeddings` (1:1 sibling of acnc_charities,
+// added in migration v121 — see CLAUDE.md "Never Do" item #5 + 2026-05-09
+// incident: HNSW on a write-frequent parent burns Disk-IO budget every
+// daily scraper UPDATE). The parent column acnc_charities.name_mission_embedding
+// is being deprecated (will be dropped in a follow-up v122 migration after
+// this cutover is verified). DO NOT write to the parent column from this
+// function — every new embedding goes to the sibling.
 //
 // Two trigger paths:
 //   1. Cron: daily at 04:00 UTC. Handles deltas — the ACNC scraper runs
@@ -10,14 +14,18 @@
 //      ready to embed. Daily delta is typically <50 rows.
 //   2. Event: acnc.charity-embed.backfill.v1 — manual trigger for the
 //      initial 63k-row backfill. Operator fires this ~13 times (each run
-//      embeds up to 5000 rows = ~25 batches × 200) until count(NULL)
-//      reaches zero. Cost: ~$0.11 total at voyage-3.5 generic.
+//      embeds up to 5000 rows = ~25 batches × 200) until the sibling
+//      table is fully populated. Cost: ~$0.11 total at voyage-3.5 generic.
 //
 // Embedding text: charity_legal_name + other_names joined with " | ". We
 // deliberately exclude purposes/beneficiaries — they're similar across
 // genuinely-distinct charities ("support cancer patients" appears on every
 // cancer charity) and dilute the name-discrimination signal which is what
 // the typosquat detector uses.
+//
+// Discovery: the `get_acnc_charities_missing_embedding(p_limit)` SQL helper
+// (v121) returns live charities that don't yet have a sibling row. Avoids
+// loading the full table and filtering in JS.
 
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
@@ -82,7 +90,7 @@ async function logCost(args: {
 export const acncCharityBackfillEmbed = inngest.createFunction(
   {
     id: "acnc-charity-backfill-embed",
-    name: "ACNC: Backfill / delta-embed name_mission_embedding",
+    name: "ACNC: Backfill / delta-embed sibling table",
     retries: 2,
     // One at a time — multiple concurrent runs would race on the same
     // NULL rows. Inngest handles the lock.
@@ -117,12 +125,14 @@ export const acncCharityBackfillEmbed = inngest.createFunction(
         const supabase = createServiceClient();
         if (!supabase) throw new Error("Supabase service client unavailable");
 
-        const { data, error: loadErr } = await supabase
-          .from("acnc_charities")
-          .select("abn, charity_legal_name, other_names")
-          .is("name_mission_embedding", null)
-          .order("abn", { ascending: true })
-          .limit(BATCH_SIZE);
+        // v121: load via RPC that excludes charities already in the sibling
+        // embeddings table. Avoids the previous IS NULL filter on the
+        // parent column (which is being deprecated) and naturally excludes
+        // soft-deleted (is_delisted=true) charities.
+        const { data, error: loadErr } = await supabase.rpc(
+          "get_acnc_charities_missing_embedding",
+          { p_limit: BATCH_SIZE },
+        );
 
         if (loadErr) {
           throw new Error(`batch-${batchIdx} load failed: ${loadErr.message}`);
@@ -148,24 +158,29 @@ export const acncCharityBackfillEmbed = inngest.createFunction(
           );
         }
 
-        let written = 0;
-        for (let i = 0; i < rows.length; i++) {
-          const { error: writeErr } = await supabase
-            .from("acnc_charities")
-            .update({
-              name_mission_embedding: vectorToPgString(result.vectors[i]),
-              embedding_model_version: result.modelId,
-            })
-            .eq("abn", rows[i].abn);
-          if (writeErr) {
-            logger.warn("acnc-charity-backfill: row update failed", {
-              abn: rows[i].abn,
-              error: writeErr.message,
-            });
-            continue;
-          }
-          written++;
+        // Write to the sibling table via single bulk upsert. ON CONFLICT
+        // (charity_abn) DO UPDATE keeps re-embeds idempotent — e.g. if the
+        // function is retried after a partial write, we don't get
+        // duplicate-PK errors. The previous per-row UPDATE loop is now a
+        // single round-trip which is meaningfully faster at batch=200.
+        const upsertRows = rows.map((row, i) => ({
+          charity_abn: row.abn,
+          embedding: vectorToPgString(result.vectors[i]),
+          model: result.modelId,
+          embedded_at: new Date().toISOString(),
+        }));
+        const { error: writeErr, count } = await supabase
+          .from("acnc_charity_embeddings")
+          .upsert(upsertRows, {
+            onConflict: "charity_abn",
+            count: "exact",
+          });
+        if (writeErr) {
+          throw new Error(
+            `batch-${batchIdx} sibling upsert failed: ${writeErr.message}`,
+          );
         }
+        const written = count ?? rows.length;
 
         return {
           written,
