@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
+import { readNumberEnv, type NumberEnvResult } from "@/lib/env-coerce";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,11 +23,52 @@ export async function GET(req: Request) {
     return new Response("Unauthorized", { status: 401 });
   }
 
-  const thresholdUsd = parseFloat(process.env.DAILY_COST_THRESHOLD_USD ?? "2");
+  // Read all 5 numeric env-var caps up front via the safe coercer. Track
+  // any invalid values so we can write a single diagnostic row before any
+  // brake decision uses the (defaulted) value — otherwise a typo in
+  // REDDIT_INTEL_CAP_USD silently disables the brake.
+  const envReads: Record<string, NumberEnvResult> = {
+    DAILY_COST_THRESHOLD_USD: readNumberEnv("DAILY_COST_THRESHOLD_USD", 2),
+    VULN_AU_ENRICHMENT_CAP_USD: readNumberEnv("VULN_AU_ENRICHMENT_CAP_USD", 5),
+    REDDIT_INTEL_CAP_USD: readNumberEnv("REDDIT_INTEL_CAP_USD", 10),
+    PHONE_FOOTPRINT_CAP_USD: readNumberEnv("PHONE_FOOTPRINT_CAP_USD", 5),
+    CHARITY_CHECK_CAP_USD: readNumberEnv("CHARITY_CHECK_CAP_USD", 5),
+  };
+  const thresholdUsd = envReads.DAILY_COST_THRESHOLD_USD.value;
 
   const supabase = createServiceClient();
   if (!supabase) {
     return NextResponse.json({ error: "service_unavailable" }, { status: 503 });
+  }
+
+  // Surface invalid env values to cost_telemetry — health-digest aggregates
+  // feature LIKE '%error%' rows into its daily admin Telegram, so this lands
+  // visibly within 24h without needing a separate alerter. One row per bad
+  // env var per cron firing; at 4 firings/day × 5 env vars = max 20 rows/day
+  // even in the pathological all-bad-config case.
+  const invalidEnvs = Object.entries(envReads).filter(([, r]) => r.invalid);
+  if (invalidEnvs.length > 0) {
+    for (const [name, result] of invalidEnvs) {
+      logger.warn("cost-daily-check: invalid env value, falling back to default", {
+        env_var: name,
+        raw_value: result.rawValue,
+        fallback: result.value,
+      });
+    }
+    await supabase.from("cost_telemetry").insert(
+      invalidEnvs.map(([name, result]) => ({
+        feature: "cost-brake-config-error",
+        provider: "diagnostic",
+        operation: "parse_env",
+        units: 1,
+        estimated_cost_usd: 0,
+        metadata: {
+          env_var: name,
+          raw_value: result.rawValue,
+          fallback: result.value,
+        },
+      })),
+    );
   }
 
   const { data: today, error: todayError } = await supabase
@@ -96,16 +138,12 @@ export async function GET(req: Request) {
   // reddit-intel-classify + reddit-intel-embed + reddit-intel-name-themes
   // (excluding reddit-intel-error which is $0 diagnostic). If sum exceeds
   // REDDIT_INTEL_CAP_USD, brake the whole pipeline for 24h.
-  const vulnEnrichThresholdUsd = parseFloat(
-    process.env.VULN_AU_ENRICHMENT_CAP_USD ?? "5",
-  );
+  const vulnEnrichThresholdUsd = envReads.VULN_AU_ENRICHMENT_CAP_USD.value;
   const vulnEnrichCost = top.find(
     (t) => t.feature === "vuln_au_enrichment",
   )?.cost ?? 0;
 
-  const redditIntelThresholdUsd = parseFloat(
-    process.env.REDDIT_INTEL_CAP_USD ?? "10",
-  );
+  const redditIntelThresholdUsd = envReads.REDDIT_INTEL_CAP_USD.value;
   const redditIntelCost = top
     .filter(
       (t) =>
@@ -122,9 +160,7 @@ export async function GET(req: Request) {
   // feature='phone_footprint') for the brake calculation. Cap tighter than
   // the per-feature plan ($5/day) — at 1k DAU a runaway refresh loop could
   // rack up Vonage spend in minutes.
-  const phoneFootprintThresholdUsd = parseFloat(
-    process.env.PHONE_FOOTPRINT_CAP_USD ?? "5",
-  );
+  const phoneFootprintThresholdUsd = envReads.PHONE_FOOTPRINT_CAP_USD.value;
   const phoneFootprintTelemetryCost =
     top.find((t) => t.feature === "phone_footprint")?.cost ?? 0;
   const phoneFootprintCost = vonageCost + phoneFootprintTelemetryCost;
@@ -134,9 +170,7 @@ export async function GET(req: Request) {
   // of v0.2's image OCR (Claude Vision ~$0.002–$0.01/image) so the
   // threshold is wired before the spend appears. Default $5/day matches
   // the per-feature pattern used elsewhere.
-  const charityCheckThresholdUsd = parseFloat(
-    process.env.CHARITY_CHECK_CAP_USD ?? "5",
-  );
+  const charityCheckThresholdUsd = envReads.CHARITY_CHECK_CAP_USD.value;
   const charityCheckCost = top.find((t) => t.feature === "charity_check")?.cost ?? 0;
 
   let brakeSet = false;
