@@ -43,10 +43,13 @@ const securityHeaders = [
     key: "Permissions-Policy",
     value: "camera=(self), microphone=(), geolocation=(), payment=(self)",
   },
-  {
-    key: "Cross-Origin-Embedder-Policy",
-    value: "credentialless",
-  },
+  // Cross-Origin-Embedder-Policy was previously set to 'credentialless'.
+  // Removed 2026-05-10 because it blocked the Trustpilot widget iframe
+  // (chrome-error://chromewebdata/ inside the frame). We weren't using
+  // any of COEP's benefits — no SharedArrayBuffer, no Wasm threads, no
+  // high-precision timers. Removing it costs us nothing and unblocks
+  // third-party embeds. Re-add scoped to specific routes if a future
+  // feature ever needs cross-origin isolation.
   {
     key: "Cross-Origin-Opener-Policy",
     value: "same-origin",
@@ -64,7 +67,7 @@ const securityHeaders = [
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net",
       "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net",
       "img-src 'self' data: blob: https://*.r2.cloudflarestorage.com https://*.stripe.com https://blog.askarthur.au https://*.trustpilot.com https://*.trustpilot.net",
-      "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://plausible.io https://cdn.jsdelivr.net https://api.stripe.com",
+      "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://plausible.io https://cdn.jsdelivr.net https://api.stripe.com https://widget.trustpilot.com",
       "frame-src https://js.stripe.com https://hooks.stripe.com https://widget.trustpilot.com",
       "frame-ancestors 'none'",
       "form-action 'self'",
