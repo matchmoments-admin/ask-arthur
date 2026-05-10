@@ -3,22 +3,29 @@
 import { useCallback, useEffect, useRef } from "react";
 import Script from "next/script";
 
-// Trustpilot's "Mini" template — 5-star strip + score + review count, the
-// most recognisable layout and the one that renders a useful grey-stars
-// placeholder when a profile has zero reviews. NEXT_PUBLIC_TRUSTPILOT_TEMPLATE_ID
-// still overrides if set on Vercel.
-const DEFAULT_TEMPLATE_ID = "53aa8807dec7e10d38f59f32";
+// Trustpilot's "Micro Combo" template — stars + score + review count in
+// a compact ~24px-tall horizontal strip. **Free-tier compatible** (verified
+// 2026-05-10 after the Mini template returned 400 "BusinessUnit does not
+// have access to that trustbox" — Mini is paid-tier only).
+//
+// Other Trustpilot Free-tier template IDs:
+//   Micro Star          5419b6ffb0d04a076446a9af  (just stars)
+//   Micro TrustScore    5419b732fbfb950b10de65e5  (just the score number)
+//   Micro Review Count  5419b637fa0340045cd0c936  ("X out of Y reviews")
+//
+// NEXT_PUBLIC_TRUSTPILOT_TEMPLATE_ID still overrides if set on Vercel,
+// so an upgrade to a paid plan can swap in Mini/Carousel/etc. without code.
+const DEFAULT_TEMPLATE_ID = "5419b6a8b0d04a076446a9ad";
 
 interface TrustboxProps {
-  /** Trustpilot template id (provided by Trustpilot when claiming a profile).
-   *  Defaults to the "Mini" template (5 stars + score + review count).
-   *  Override per page if needed. */
+  /** Trustpilot template id. Defaults to "Micro Combo" — Free-tier
+   *  compatible. Override per page if you've upgraded to a paid plan. */
   templateId?: string;
   /** Trustpilot business unit id. */
   businessUnitId?: string;
   /** Width — Trustpilot accepts pct or px. */
   width?: string;
-  /** Height in px — must match the chosen template. Mini = 72px. */
+  /** Height in px — must match the chosen template. Micro family = 24px. */
   height?: string;
   /** Theme — light fits the footer, dark for contrast over hero. */
   theme?: "light" | "dark";
@@ -38,7 +45,7 @@ export default function Trustbox({
   templateId,
   businessUnitId,
   width = "100%",
-  height = "72px",
+  height = "24px",
   theme = "light",
 }: TrustboxProps) {
   const ref = useRef<HTMLDivElement>(null);
