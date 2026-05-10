@@ -167,13 +167,13 @@ export default function InvestorsPage() {
             <div className={styles.statSrc}>ACMA consumer survey</div>
           </div>
           <div className={styles.stat}>
-            <div className={styles.statNum}>8</div>
+            <div className={styles.statNum}>
+              1.9<span>K</span>
+            </div>
             <div className={styles.statLabel}>
-              Detection surfaces shipped to date
+              Threat-intel items ingested · and counting
             </div>
-            <div className={styles.statSrc}>
-              Web · Extension · iOS · Android · API
-            </div>
+            <div className={styles.statSrc}>16 daily feeds · Scamwatch · ACSC · ASIC · Reddit</div>
           </div>
         </section>
 
@@ -192,37 +192,47 @@ export default function InvestorsPage() {
               phone number. A Claude-orchestrated pipeline classifies the
               artefact, enriches it against fraud databases, runs targeted
               checks (URL reputation, header analysis, OCR, persona
-              consistency, breach exposure), and returns a structured verdict
-              in plain English.
+              consistency), and returns a structured verdict in plain English.
             </p>
             <ul className={styles.productList}>
               <li>
                 <span className={styles.k}>Scanner</span>
                 <span>
-                  <b>Free message, link &amp; image checker.</b> Multi-modal
-                  input. No sign-up. Messages discarded after analysis.
+                  <b>Free link, message &amp; image checker.</b> Originally built
+                  to catch domain-spoofing — the &ldquo;is this site really my
+                  bank?&rdquo; problem. Now multi-modal. No sign-up. Messages
+                  discarded after analysis.
+                </span>
+              </li>
+              <li>
+                <span className={styles.k}>Persona</span>
+                <span>
+                  <b>&ldquo;Is this person real?&rdquo;</b> Built off the back
+                  of{" "}
+                  <a
+                    href="https://youtu.be/EsCNkDrIGCw?t=904"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={styles.inlineLink}
+                  >
+                    Anthropic&apos;s hiring-due-diligence demo
+                  </a>{" "}
+                  — for vetting a candidate, a contractor, a date.
                 </span>
               </li>
               <li>
                 <span className={styles.k}>Companion</span>
                 <span>
-                  <b>Persona, phone footprint, charity check, breach defence.</b>{" "}
-                  Five purpose-built modules for the questions Australians
-                  Google in panic.
+                  <b>Phone footprint, charity check, weekly scam digest (beta).</b>{" "}
+                  Live web modules. The digest summarises what scrapers caught
+                  this week so subscribers stay one step ahead.
                 </span>
               </li>
               <li>
-                <span className={styles.k}>Surfaces</span>
+                <span className={styles.k}>Prototypes</span>
                 <span>
-                  <b>Web, browser extension, iOS, Android.</b> Same engine,
-                  shipped wherever the suspicious message arrives.
-                </span>
-              </li>
-              <li>
-                <span className={styles.k}>API</span>
-                <span>
-                  <b>Developer endpoint.</b> Same engine, embeddable in banking
-                  apps, telcos, and marketplace flows.
+                  <b>Browser extension, iOS, Android, public API.</b> Working
+                  prototypes today; finished and shipped with the round.
                 </span>
               </li>
             </ul>
@@ -277,17 +287,17 @@ export default function InvestorsPage() {
                 <span className={styles.tractionBig}>Solo</span>
                 <span className={styles.tractionDesc}>
                   <b>One technical founder, A$0 raised.</b> Live since February
-                  2026. The product you see at askarthur.au is what one person
-                  ships in a Sydney winter when they&apos;re very, very annoyed.
+                  2026. The website at askarthur.au is what one person ships
+                  in a Sydney winter when they&apos;re very, very annoyed.
                 </span>
               </li>
               <li>
                 <span className={styles.tractionBig}>16</span>
                 <span className={styles.tractionDesc}>
-                  <b>Active threat-intelligence feeds</b> ingesting daily —
-                  Scamwatch, ACSC, ASIC, Reddit narrative-extraction, AU
-                  regulator scrapes — into a unified Postgres + pgvector
-                  index.
+                  <b>Threat-intel scrapers running daily.</b> Scamwatch, ACSC,
+                  ASIC, Reddit narrative-extraction, AU regulator alerts — 1.9K
+                  items so far, indexed in Postgres + pgvector. This is the
+                  spine the product reads from.
                 </span>
               </li>
               <li>
@@ -300,42 +310,47 @@ export default function InvestorsPage() {
                 </span>
               </li>
               <li>
-                <span className={styles.tractionBig}>8</span>
+                <span className={styles.tractionBig}>5</span>
                 <span className={styles.tractionDesc}>
-                  <b>Detection surfaces shipped:</b> web scanner, persona
-                  check, phone footprint, charity check, breach defence,
-                  Chrome/Firefox extension, iOS, Android.
+                  <b>Web modules live in production:</b> scanner, persona
+                  check, phone footprint, charity check, weekly scam digest
+                  (beta). Browser extension, iOS, Android, and public API
+                  exist as prototypes — what funding finishes.
                 </span>
               </li>
               <li>
                 <span className={styles.tractionBig}>A$0</span>
                 <span className={styles.tractionDesc}>
-                  <b>Cost to the user, ever.</b> Revenue comes from the API and
-                  institutional partnerships, never from the public tool.
+                  <b>Cost to the user, ever.</b> Revenue plan is the API and
+                  institutional partnerships, never the public tool.
                 </span>
               </li>
             </ul>
           </div>
           <div className={styles.splitRight}>
+            <div className={styles.roadmapHead}>
+              Roadmap → what the cheque buys, by month
+            </div>
             <div className={styles.roadmap}>
               <div className={styles.phase}>
                 <div className={styles.phaseWhen}>M 0–3</div>
                 <div>
                   <h4>Voice &amp; phone-call checks</h4>
                   <p>
-                    Forward a voicemail or live-call snippet; Arthur returns
-                    voice-clone likelihood and known-bad-number signals.
+                    Not built yet. Forward a voicemail or live-call snippet;
+                    Arthur returns voice-clone likelihood and known-bad-number
+                    signals.
                   </p>
                 </div>
               </div>
               <div className={styles.phase}>
                 <div className={styles.phaseWhen}>M 3–6</div>
                 <div>
-                  <h4>Distribution &amp; native share-sheet</h4>
+                  <h4>Finish extension &amp; mobile</h4>
                   <p>
-                    Long-press any message → &ldquo;Ask Arthur.&rdquo; Browser
-                    extension store push, AU consumer-affairs partnerships, and
-                    polished mobile share-sheet.
+                    Take the Chrome/Firefox extension and the iOS/Android
+                    prototypes from working to shipped. Native share-sheet so
+                    the verdict comes back without leaving the messaging app.
                   </p>
                 </div>
               </div>
@@ -345,8 +360,8 @@ export default function InvestorsPage() {
                   <h4>First paid pilot</h4>
                   <p>
                     Embed Arthur in a transfer-confirmation or unknown-caller
-                    flow with an Australian bank or telco. Land one institutional
-                    partner; convert to revenue.
+                    flow with an Australian bank or telco. Land one
+                    institutional partner; convert to revenue.
                   </p>
                 </div>
               </div>
@@ -387,10 +402,13 @@ export default function InvestorsPage() {
               </div>
               <p className={styles.personBio}>
                 Sydney-based, technical. Built Ask Arthur solo since February
-                2026 — eight detection surfaces (scanner, persona check, phone
-                footprint, charity check, breach defence, browser extension,
-                iOS, Android) running on a Claude-orchestrated pipeline.
-                Looking for an investor who funds builders before traction.
+                2026 — five live web modules (scanner, persona check, phone
+                footprint, charity check, weekly scam digest in beta) running
+                on a Claude-orchestrated pipeline, plus 16 daily threat-intel
+                scrapers feeding a Postgres + pgvector spine. Browser
+                extension, iOS, Android, and public API are working
+                prototypes. Looking for an investor who funds builders before
+                traction.
               </p>
             </div>
             <div className={styles.person}>
@@ -412,7 +430,7 @@ export default function InvestorsPage() {
             <b>Ask Arthur Pty Ltd</b> · ABN 72 695 772 313 · Sydney NSW
             <br />
             <a href="https://askarthur.au">askarthur.au</a> ·{" "}
-            <a href="mailto:hello@askarthur.au">hello@askarthur.au</a> ·{" "}
+            <a href="mailto:brendan@askarthur.au">brendan@askarthur.au</a> ·{" "}
             <a href="https://askarthur.au/api-docs">/api-docs</a>
             <br />
             Independent cybersecurity advisory tool. Not affiliated with the

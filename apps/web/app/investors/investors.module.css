@@ -9,7 +9,7 @@
   --accent-deep: oklch(0.48 0.12 32);
   --good: oklch(0.52 0.1 150);
   --warn: oklch(0.58 0.14 60);
-  --danger: oklch(0.5 0.15 25);
+  --danger: #001f3f;
 
   --serif: var(--font-newsreader), "Source Serif Pro", Georgia, serif;
   --sans: var(--font-inter), "Helvetica Neue", Helvetica, Arial, sans-serif;
@@ -441,7 +441,7 @@
   height: 10px;
   border-radius: 50%;
   background: var(--danger);
-  box-shadow: 0 0 0 4px rgba(178, 60, 50, 0.18);
+  box-shadow: 0 0 0 4px rgba(0, 31, 63, 0.18);
 }
 .word {
   font-family: var(--serif);
@@ -533,10 +533,26 @@
   color: var(--ink);
 }
 
+.roadmapHead {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--accent-deep);
+  margin: 0 0 12px;
+}
 .roadmap {
   display: grid;
   gap: 14px;
   margin-top: 4px;
+}
+.inlineLink {
+  color: var(--accent-deep);
+  text-decoration: none;
+  border-bottom: 1px solid currentColor;
+}
+.inlineLink:hover {
+  color: var(--ink);
 }
 .phase {
   display: grid;
