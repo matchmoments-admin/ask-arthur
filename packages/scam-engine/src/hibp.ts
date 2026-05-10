@@ -18,8 +18,16 @@
 // Both share: 5s AbortSignal.timeout, 24h cache TTL, graceful degradation
 // (missing API key → empty result, network/timeout/parse error → empty
 // result + logged.error). Callers always get a well-typed object back.
+//
+// Cost telemetry: every cache-miss fetch (any outcome — 200, 404, timeout,
+// 5xx) writes one row to cost_telemetry with feature='breach-check' so the
+// daily summary surfaces HIBP call volume. HIBP is a flat-fee subscription
+// ($3.95/mo for Pwned 4), so unit_cost_usd is 0 — the value is the row
+// count itself, used to detect runaway quota burn (10 req/min cap) before
+// the rate-limit kicks in. Cache hits are NOT logged (no upstream call).
 
 import { Redis } from "@upstash/redis";
+import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
 const CACHE_TTL = 86_400; // 24 hours — breach data rarely changes
@@ -28,6 +36,41 @@ const CACHE_PREFIX = "askarthur:hibp";
 // only need names) don't pay for the larger payload's serialisation.
 const DETAIL_CACHE_PREFIX = "askarthur:hibp:detail";
 const HIBP_TIMEOUT_MS = 5000;
+
+/**
+ * Fire-and-forget cost row for a single HIBP upstream call. Never throws,
+ * never blocks — a cost-telemetry insert failure must never break a breach
+ * lookup. Returns a Promise the caller can `void` or hand to `waitUntil`.
+ *
+ * `outcome` distinguishes success / not-found / error so the daily admin
+ * health-digest can flag failure rates without manually parsing 4xx/5xx.
+ */
+async function logHibpCall(
+  mode: "check" | "detailed",
+  outcome: "found" | "not_found" | "error",
+  status?: number,
+): Promise<void> {
+  const supabase = createServiceClient();
+  if (!supabase) return;
+  const { error } = await supabase.from("cost_telemetry").insert({
+    feature: "breach-check",
+    provider: "hibp",
+    operation: mode === "detailed" ? "lookup_detailed" : "lookup",
+    units: 1,
+    // HIBP is flat-fee subscription, not per-call. Logged at $0 so the row
+    // contributes to call-volume tracking without inflating dollar totals.
+    // If/when HIBP moves to per-call billing, update PRICING in
+    // apps/web/lib/cost-telemetry.ts and reference here.
+    unit_cost_usd: 0,
+    estimated_cost_usd: 0,
+    metadata: { outcome, status: status ?? null },
+  });
+  if (error) {
+    logger.warn("HIBP cost telemetry insert failed (non-fatal)", {
+      error: error.message,
+    });
+  }
+}
 
 let _redis: Redis | null = null;
 function getRedis(): Redis | null {
@@ -135,6 +178,7 @@ export async function checkHIBP(email: string): Promise<HIBPResult> {
 
     // 404 = not found in any breaches
     if (res.status === 404) {
+      void logHibpCall("check", "not_found", 404);
       if (redis) {
         redis.set(`${CACHE_PREFIX}:${emailHash}`, EMPTY_RESULT, { ex: CACHE_TTL }).catch(() => {});
       }
@@ -142,6 +186,7 @@ export async function checkHIBP(email: string): Promise<HIBPResult> {
     }
 
     if (!res.ok) {
+      void logHibpCall("check", "error", res.status);
       logger.warn("HIBP check failed", { status: res.status });
       return EMPTY_RESULT;
     }
@@ -157,6 +202,8 @@ export async function checkHIBP(email: string): Promise<HIBPResult> {
       isBreached: breachNames.length > 0,
     };
 
+    void logHibpCall("check", "found", res.status);
+
     // Cache result (fire-and-forget)
     if (redis) {
       redis.set(`${CACHE_PREFIX}:${emailHash}`, result, { ex: CACHE_TTL }).catch(() => {});
@@ -164,6 +211,7 @@ export async function checkHIBP(email: string): Promise<HIBPResult> {
 
     return result;
   } catch (err) {
+    void logHibpCall("check", "error");
     logger.error("HIBP lookup error", { error: String(err) });
     return EMPTY_RESULT;
   }
@@ -196,18 +244,28 @@ export async function checkHIBPDetailed(email: string): Promise<HIBPDetailedResu
     }
   }
 
-  const res = await fetch(
-    `https://haveibeenpwned.com/api/v3/breachedaccount/${encodeURIComponent(email)}?truncateResponse=false`,
-    {
-      headers: {
-        "hibp-api-key": apiKey,
-        "user-agent": "AskArthur-SafeCheck/1.0",
+  let res: Response;
+  try {
+    res = await fetch(
+      `https://haveibeenpwned.com/api/v3/breachedaccount/${encodeURIComponent(email)}?truncateResponse=false`,
+      {
+        headers: {
+          "hibp-api-key": apiKey,
+          "user-agent": "AskArthur-SafeCheck/1.0",
+        },
+        signal: AbortSignal.timeout(HIBP_TIMEOUT_MS),
       },
-      signal: AbortSignal.timeout(HIBP_TIMEOUT_MS),
-    },
-  );
+    );
+  } catch (err) {
+    // Transport error before HIBP responded (timeout, DNS, network). Log
+    // the attempt — the rate-limit may still have decremented if HIBP
+    // received the request — then re-throw so the caller can return 502.
+    void logHibpCall("detailed", "error");
+    throw err;
+  }
 
   if (res.status === 404) {
+    void logHibpCall("detailed", "not_found", 404);
     if (redis) {
       redis.set(`${DETAIL_CACHE_PREFIX}:${emailHash}`, EMPTY_DETAIL, { ex: CACHE_TTL }).catch(() => {});
     }
@@ -215,6 +273,7 @@ export async function checkHIBPDetailed(email: string): Promise<HIBPDetailedResu
   }
 
   if (!res.ok) {
+    void logHibpCall("detailed", "error", res.status);
     throw new Error(`HIBP API returned ${res.status}`);
   }
 
@@ -224,6 +283,8 @@ export async function checkHIBPDetailed(email: string): Promise<HIBPDetailedResu
     breachCount: raw.length,
     breaches: raw.map(normaliseBreach),
   };
+
+  void logHibpCall("detailed", "found", res.status);
 
   if (redis) {
     redis.set(`${DETAIL_CACHE_PREFIX}:${emailHash}`, result, { ex: CACHE_TTL }).catch(() => {});
