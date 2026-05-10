@@ -26,7 +26,6 @@ on:
           - urlhaus
           - openphish
           - phishtank
-          - threatfox
           - phishstats
           - phishing_database
           - phishing_army
@@ -34,7 +33,6 @@ on:
           - ipsum
           - spamhaus
           - abuseipdb
-          - cryptoscamdb
           - crtsh
           - reddit
           - acnc_register
@@ -106,11 +104,12 @@ jobs:
           || (github.event_name == 'schedule' && (github.event.schedule == '0 */6 * * *' || github.event.schedule == '0 */12 * * *' || github.event.schedule == '0 16 * * *'))
         run: python -m phishtank
 
-      - name: ThreatFox
-        if: |
-          github.event.inputs.feed == 'all' || github.event.inputs.feed == 'threatfox'
-          || (github.event_name == 'schedule' && (github.event.schedule == '0 */6 * * *' || github.event.schedule == '0 */12 * * *' || github.event.schedule == '0 16 * * *'))
-        run: python -m threatfox
+      # ThreatFox — DISABLED 2026-05-11. abuse.ch API key returning 401
+      # Unauthorized since 2026-02-23 (80+ days of error rows). Coverage
+      # overlap with urlhaus/phishtank/openphish, so removing rather than
+      # rotating. To re-enable: rotate THREATFOX_AUTH_KEY at
+      # https://auth.abuse.ch, restore this step + the choice option above,
+      # and revert pipeline/scrapers/threatfox.py if any drift accumulated.
 
       # ──────────────────────────────────────────────────────────────────
       # tier-12h — bulk IOC mirrors (high overlap with tier-6h, slower)
@@ -168,11 +167,10 @@ jobs:
           ABUSEIPDB_API_KEY: ${{ secrets.ABUSEIPDB_API_KEY }}
         run: python -m abuseipdb
 
-      - name: CryptoScamDB
-        if: |
-          github.event.inputs.feed == 'all' || github.event.inputs.feed == 'cryptoscamdb'
-          || (github.event_name == 'schedule' && github.event.schedule == '0 16 * * *')
-        run: python -m cryptoscamdb
+      # CryptoScamDB — DISABLED 2026-05-11. Source repo returns 404 at
+      # raw.githubusercontent.com (project archived/moved). To re-enable:
+      # update SOURCE_URL in pipeline/scrapers/cryptoscamdb.py to a working
+      # mirror, then restore this step + the choice option above.
 
       - name: crt.sh
         if: |

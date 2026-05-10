@@ -14,7 +14,7 @@
     },
     {
       "path": "/api/cron/bot-queue-sweep",
-      "schedule": "*/10 * * * *"
+      "schedule": "0 */6 * * *"
     },
     {
       "path": "/api/cron/bot-queue-cleanup",
@@ -39,10 +39,6 @@
     {
       "path": "/api/cron/ensure-partitions",
       "schedule": "0 2 * * *"
-    },
-    {
-      "path": "/api/cron/reddit-intel-trigger",
-      "schedule": "0 8 * * *"
     },
     {
       "path": "/api/cron/reddit-intel-retention",

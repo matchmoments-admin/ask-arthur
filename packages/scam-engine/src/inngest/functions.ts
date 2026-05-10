@@ -60,11 +60,6 @@ import { feedRetention } from "./feed-retention";
 // 100 user reports, so it gets a dedicated push (not bundled like scam-alerts).
 import { regulatorAlertPush } from "./regulator-alert-push";
 
-// News Intel: ACSC ingest from Vercel egress (workaround for Akamai
-// tarpitting Azure / GH Actions IPs). Default OFF — flip the flag after
-// the first manual trigger confirms Vercel egress isn't also tarpitted.
-import { acscIngestVercel } from "./acsc-ingest-vercel";
-
 // Phone Footprint: nightly anonymisation + monitor consent sweep. Wires
 // up RPCs that v75 created but no scheduler invoked. 03:15 UTC.
 import { phoneFootprintRetention } from "./phone-footprint-retention";
@@ -126,8 +121,6 @@ export const inngestFunctions = [
   feedRetention,
   // News Intel: regulator-alert push fan-out
   regulatorAlertPush,
-  // News Intel: ACSC ingest from Vercel egress (Akamai-tarpit workaround)
-  acscIngestVercel,
   // Phone Footprint: nightly anonymisation + monitor consent sweep
   phoneFootprintRetention,
   // Reddit Intel: nightly dedup-tracker prune (30d)
