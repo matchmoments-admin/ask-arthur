@@ -54,38 +54,106 @@ export default function Trustbox({
   // visible. Drive both paths off Script's onLoad so we always call
   // loadFromElement after window.Trustpilot exists, and re-attempt on the
   // useEffect for SPA re-mounts where the script is already cached.
-  const hydrate = useCallback(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const tp = (typeof window !== "undefined" ? (window as any).Trustpilot : null);
-    if (!tp) {
-      console.warn("[Trustbox] window.Trustpilot not yet defined on hydrate");
-      return;
-    }
-    if (!ref.current) {
-      console.warn("[Trustbox] container ref missing on hydrate");
-      return;
-    }
-    tp.loadFromElement(ref.current, true);
-  }, []);
-
-  useEffect(() => {
-    hydrate();
-    // After 4s, if the bootstrap still hasn't replaced the fallback <a>
-    // with the rendered iframe, surface one console.error. The most common
-    // cause is an unclaimed Trustpilot business profile — the bootstrap
-    // silently no-ops when the BUID points to an unverified profile.
-    const timer = window.setTimeout(() => {
-      const node = ref.current;
-      if (!node) return;
-      const hasIframe = node.querySelector("iframe");
-      if (!hasIframe) {
+  //
+  // The hydrate path has historically failed silently in three different
+  // ways across deploys (script not loaded, profile unclaimed, BUID typo).
+  // The diagnostics here are deliberately verbose — when something breaks
+  // we want a single console.error tagged [Trustbox] with enough context to
+  // diagnose without a code change. Strip if/when the widget has been stable
+  // in prod for 30 days.
+  const hydrate = useCallback(
+    (trigger: "onLoad" | "useEffect") => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const tp = (typeof window !== "undefined" ? (window as any).Trustpilot : null);
+      if (!tp) {
+        console.warn(
+          `[Trustbox] hydrate(${trigger}): window.Trustpilot not yet defined — script may still be loading`,
+        );
+        return;
+      }
+      if (typeof tp.loadFromElement !== "function") {
         console.error(
-          "[Trustbox] widget did not hydrate after 4s — verify the Trustpilot business profile for this BUID is claimed and public",
+          `[Trustbox] hydrate(${trigger}): window.Trustpilot exists but loadFromElement is missing`,
+          { trustpilotKeys: Object.keys(tp) },
+        );
+        return;
+      }
+      if (!ref.current) {
+        console.warn(`[Trustbox] hydrate(${trigger}): container ref is null`);
+        return;
+      }
+      try {
+        tp.loadFromElement(ref.current, true);
+        console.info(
+          `[Trustbox] hydrate(${trigger}): loadFromElement called`,
+          {
+            templateId: tpl,
+            businessUnitId: buid,
+            container: ref.current.outerHTML.slice(0, 200),
+          },
+        );
+      } catch (err) {
+        console.error(
+          `[Trustbox] hydrate(${trigger}): loadFromElement threw`,
+          err,
         );
       }
+    },
+    [tpl, buid],
+  );
+
+  useEffect(() => {
+    hydrate("useEffect");
+    // After 4s, if the bootstrap still hasn't replaced the fallback <a>
+    // with the rendered iframe, surface one console.error with enough state
+    // to diagnose. Most common causes (in order):
+    //   1. Unclaimed Trustpilot business profile — bootstrap silently no-ops
+    //   2. CSP blocks the iframe injection (check Network/Console for refused frame-src)
+    //   3. BUID typo — Trustpilot returns no widget data for unknown BUIDs
+    //   4. Ad blocker stripped the bootstrap script
+    const timer = window.setTimeout(() => {
+      const node = ref.current;
+      if (!node) {
+        console.warn("[Trustbox] 4s probe: container ref is null");
+        return;
+      }
+      const iframe = node.querySelector("iframe");
+      if (iframe) {
+        console.info("[Trustbox] 4s probe: widget hydrated successfully");
+        return;
+      }
+      // Diagnostic dump — what ELSE is in the container? Did Trustpilot
+      // inject anything at all?
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const tp = (typeof window !== "undefined" ? (window as any).Trustpilot : null);
+      const stillHasFallbackLink = !!node.querySelector('a[href*="trustpilot.com"]');
+      console.error(
+        "[Trustbox] 4s probe: widget did NOT hydrate — diagnostic dump below",
+        {
+          templateId: tpl,
+          businessUnitId: buid,
+          windowTrustpilotPresent: !!tp,
+          loadFromElementPresent: !!(tp && typeof tp.loadFromElement === "function"),
+          containerInnerHTML: node.innerHTML.slice(0, 500),
+          containerChildCount: node.children.length,
+          stillHasFallbackLink,
+          containerDimensions: {
+            offsetWidth: node.offsetWidth,
+            offsetHeight: node.offsetHeight,
+            clientWidth: node.clientWidth,
+            clientHeight: node.clientHeight,
+          },
+          troubleshooting: [
+            "1. Confirm profile is claimed at https://business.trustpilot.com",
+            "2. Check Network tab for failed widget.trustpilot.com requests (CSP/adblocker)",
+            `3. Verify BUID at https://au.trustpilot.com/review/askarthur.au matches '${buid}'`,
+            "4. Check the Console for any 'Refused to frame' CSP errors",
+          ],
+        },
+      );
     }, 4000);
     return () => window.clearTimeout(timer);
-  }, [hydrate]);
+  }, [hydrate, tpl, buid]);
 
   if (!tpl || !buid) return null;
 
@@ -94,7 +162,13 @@ export default function Trustbox({
       <Script
         src="//widget.trustpilot.com/bootstrap/v5/tp.widget.bootstrap.min.js"
         strategy="afterInteractive"
-        onLoad={hydrate}
+        onLoad={() => hydrate("onLoad")}
+        onError={(err) => {
+          console.error(
+            "[Trustbox] bootstrap script failed to load — likely CSP block, ad-blocker, or network error",
+            err,
+          );
+        }}
       />
       <div
         ref={ref}
