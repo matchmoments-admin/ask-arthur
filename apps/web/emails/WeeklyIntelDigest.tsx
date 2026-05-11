@@ -148,7 +148,7 @@ export default function WeeklyIntelDigest(props: WeeklyIntelDigestProps) {
       <Preview>{dek}</Preview>
       <Body
         style={{
-          backgroundColor: WHITE,
+          backgroundColor: SURFACE_TINT,
           fontFamily: SERIF,
           margin: 0,
           padding: 0,
@@ -158,12 +158,18 @@ export default function WeeklyIntelDigest(props: WeeklyIntelDigestProps) {
           style={{
             maxWidth: "640px",
             margin: "0 auto",
-            padding: 0,
+            padding: "32px 20px",
             width: "100%",
           }}
         >
           {/* ================= HEADER ================= */}
-          <Section style={{ backgroundColor: NAVY, padding: "28px 36px" }}>
+          <Section
+            style={{
+              backgroundColor: NAVY,
+              padding: "28px 36px",
+              borderRadius: "12px 12px 0 0",
+            }}
+          >
             <Row>
               <Column
                 style={{
@@ -378,9 +384,45 @@ export default function WeeklyIntelDigest(props: WeeklyIntelDigestProps) {
               </Section>
             </div>
 
+            {/* Brand watchlist sentence — moved above the themes list so the
+                most scannable, brand-name-rich signal lands first. */}
+            {topBrands.length > 0 && (
+              <div style={{ paddingTop: "24px" }}>
+                <Heading
+                  as="h2"
+                  style={{
+                    margin: 0,
+                    padding: 0,
+                    fontSize: "22px",
+                    lineHeight: "28px",
+                    fontFamily: SERIF,
+                    fontWeight: 600,
+                    color: NAVY,
+                  }}
+                >
+                  Brands impersonated
+                </Heading>
+                <Text
+                  style={{
+                    margin: "12px 0 0 0",
+                    padding: 0,
+                    fontFamily: SERIF,
+                    fontSize: "16px",
+                    lineHeight: "26px",
+                    color: NAVY,
+                    fontWeight: 400,
+                  }}
+                >
+                  {topBrands
+                    .map((b) => `${b.brand} (×${b.mentionCount})`)
+                    .join(" · ")}
+                </Text>
+              </div>
+            )}
+
             {/* Emerging themes section — titles link to per-theme pages */}
             {emergingThemes.length > 0 && (
-              <div style={{ paddingTop: "24px" }}>
+              <div style={{ paddingTop: "32px" }}>
                 <Heading
                   as="h2"
                   style={{
