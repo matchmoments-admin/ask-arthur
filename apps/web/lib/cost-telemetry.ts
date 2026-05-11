@@ -143,15 +143,24 @@ export function logCost(ev: CostEvent): void {
 
 /**
  * Compute the Claude Haiku 4.5 cost for a given usage.
- * Does not account for cache reads (billed at 10% of input rate) yet —
- * that's a nice-to-have refinement, not launch-critical.
+ *
+ * Cache reads (when present) are billed at 10% of the standard input rate
+ * per Anthropic's prompt-caching pricing. Pass `cacheReadTokens` so the
+ * function subtracts that portion from full-rate input and adds it back at
+ * the discounted rate. Default 0 preserves callers that don't have the
+ * field in scope. At current scan volume (<1/day) cache_read is always 0
+ * and the math is identical; matters once sustained traffic crosses the
+ * 5-min ephemeral TTL and caching engages.
  */
 export function claudeHaikuCostUsd(
   inputTokens: number,
   outputTokens: number,
+  cacheReadTokens: number = 0,
 ): number {
+  const fullRateInputTokens = Math.max(0, inputTokens - cacheReadTokens);
   return (
-    inputTokens * PRICING.CLAUDE_HAIKU_4_5_INPUT_USD_PER_TOKEN +
+    fullRateInputTokens * PRICING.CLAUDE_HAIKU_4_5_INPUT_USD_PER_TOKEN +
+    cacheReadTokens * PRICING.CLAUDE_HAIKU_4_5_INPUT_USD_PER_TOKEN * 0.1 +
     outputTokens * PRICING.CLAUDE_HAIKU_4_5_OUTPUT_USD_PER_TOKEN
   );
 }

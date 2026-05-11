@@ -14,9 +14,15 @@ import {
 const CLAUDE_HAIKU_4_5_INPUT_USD_PER_TOKEN = 1 / 1_000_000;
 const CLAUDE_HAIKU_4_5_OUTPUT_USD_PER_TOKEN = 5 / 1_000_000;
 
-function claudeHaikuCostUsd(inputTokens: number, outputTokens: number): number {
+function claudeHaikuCostUsd(
+  inputTokens: number,
+  outputTokens: number,
+  cacheReadTokens: number = 0,
+): number {
+  const fullRateInputTokens = Math.max(0, inputTokens - cacheReadTokens);
   return (
-    inputTokens * CLAUDE_HAIKU_4_5_INPUT_USD_PER_TOKEN +
+    fullRateInputTokens * CLAUDE_HAIKU_4_5_INPUT_USD_PER_TOKEN +
+    cacheReadTokens * CLAUDE_HAIKU_4_5_INPUT_USD_PER_TOKEN * 0.1 +
     outputTokens * CLAUDE_HAIKU_4_5_OUTPUT_USD_PER_TOKEN
   );
 }
@@ -67,7 +73,8 @@ export const handleAnalyzeCompletedCost = inngest.createFunction(
       const totalTokens = data.usage!.inputTokens + data.usage!.outputTokens;
       const costUsd = claudeHaikuCostUsd(
         data.usage!.inputTokens,
-        data.usage!.outputTokens
+        data.usage!.outputTokens,
+        data.usage!.cacheReadInputTokens ?? 0,
       );
 
       const feature =
