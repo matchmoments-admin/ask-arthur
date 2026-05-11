@@ -138,6 +138,7 @@ export async function POST(req: NextRequest) {
         estimatedCostUsd: claudeHaikuCostUsd(
           analysis.usage.inputTokens,
           analysis.usage.outputTokens,
+          analysis.usage.cacheReadInputTokens ?? 0,
         ),
         metadata: {
           input_tokens: analysis.usage.inputTokens,
