@@ -70,19 +70,19 @@ Building a comprehensive threat database.
 
 ### Data Pipeline ✅
 
-| Feature                                           | Status  |
-| ------------------------------------------------- | ------- |
-| Python scraper framework with shared utilities    | ✅ Done |
-| 16 threat feed integrations (see ARCHITECTURE.md) | ✅ Done |
-| URL normalization (Python + TypeScript parity)    | ✅ Done |
-| GitHub Actions scheduled scraping                 | ✅ Done |
-| Feed timestamp tracking                           | ✅ Done |
-| IP address and crypto wallet intelligence         | ✅ Done |
+| Feature                                                | Status  |
+| ------------------------------------------------------ | ------- |
+| Python scraper framework with shared utilities         | ✅ Done |
+| 16 threat feed integrations (see ARCHITECTURE.md)      | ✅ Done |
+| URL normalization (Python + TypeScript parity)         | ✅ Done |
+| GitHub Actions scheduled scraping                      | ✅ Done |
+| Feed timestamp tracking                                | ✅ Done |
+| IP address and crypto wallet intelligence              | ✅ Done |
 | AU regulator narrative feeds (Scamwatch / ACSC / ASIC) | ✅ Done |
-| Tiered cron schedule (3h / 6h / 12h / daily)      | ✅ Done |
-| ETag / If-Modified-Since cache for RSS sources    | ✅ Done |
-| Voyage embedding for narrative `feed_items`       | ✅ Done |
-| Nightly retention housekeeping (archive + prune)  | ✅ Done |
+| Tiered cron schedule (3h / 6h / 12h / daily)           | ✅ Done |
+| ETag / If-Modified-Since cache for RSS sources         | ✅ Done |
+| Voyage embedding for narrative `feed_items`            | ✅ Done |
+| Nightly retention housekeeping (archive + prune)       | ✅ Done |
 
 ### Inngest Background Processing ✅
 
@@ -468,32 +468,39 @@ New data asset turning the 2026 vulnerability research (`docs/vulnerability-atla
 | Decision: Claude-vision text extraction vs local tesseract.js for image-injection scan                                        | Planned              |
 | Decision: `prompt_injection` category weight in mcp-audit (align with skill-scanner at 0.25, rebalance existing 6 categories) | Planned              |
 
-### Sprint 1 — MCP surface + VIDB foundation
+### Sprint 1 — MCP surface + VIDB foundation ✅
 
-| Feature                                                                                                                                  | Status  |
-| ---------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| Add `semver` to `@askarthur/mcp-audit` dependencies                                                                                      | Planned |
-| MCP CVE rulepack (`packages/mcp-audit/src/cve-rulepack.ts`, 12 CVEs, semver range matching)                                              | Planned |
-| MCP tool-description poisoning scanner (1a: README-scanning on npm package README)                                                       | Planned |
-| Image-embedded prompt injection scan (Claude-vision path — extract text in existing analyze call)                                        | Planned |
-| VIDB schema migration v63: `vulnerabilities`, `vulnerability_exposure_checks`, `vulnerability_detections`, `vulnerability_ingestion_log` | Planned |
-| `pipeline/scrapers/vulnerabilities/cisa_kev.py` — first scraper                                                                          | Planned |
+Shipped 2026-04-21 in PR #5 (`a4133bc`) + PR #6 (`1cbe30a`).
 
-### Sprint 2 — VIDB fill-in
+| Feature                                                                                                                                  | Status                                     |
+| ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| Add `semver` to `@askarthur/mcp-audit` dependencies                                                                                      | ✅ Done (2026-04-21, PR #5)                |
+| MCP CVE rulepack (`packages/mcp-audit/src/cve-rulepack.ts`, 12 CVEs, semver range matching)                                              | ✅ Done (2026-04-21, PR #5)                |
+| MCP tool-description poisoning scanner (1a: README-scanning on npm package README)                                                       | ✅ Done (2026-04-21, PR #5)                |
+| Image-embedded prompt injection scan (Claude-vision path — extract text in existing analyze call)                                        | ✅ Done (2026-04-21, PR #5)                |
+| VIDB schema migration v63: `vulnerabilities`, `vulnerability_exposure_checks`, `vulnerability_detections`, `vulnerability_ingestion_log` | ✅ Done (2026-04-21, PR #5, migration v63) |
+| Migration v64 — risk-tracking extension (patched-in versions, EPSS scores, lifecycle status, disposition)                                | ✅ Done (2026-04-21, PR #6, migration v64) |
+| `pipeline/scrapers/vulnerabilities/cisa_kev.py` — first scraper                                                                          | ✅ Done (2026-04-21, PR #5)                |
 
-| Feature                                                                                      | Status  |
-| -------------------------------------------------------------------------------------------- | ------- |
-| NVD, GHSA, OSV, enhanced CERT AU scrapers                                                    | Planned |
-| `common/vuln_db.py::bulk_upsert_vulnerabilities` helper                                      | Planned |
-| `.github/workflows/scrape-vulnerabilities.yml` (weekly, gated by `vars.ENABLE_VULN_SCRAPER`) | Planned |
-| Inngest AU-context enrichment (banks/gov affected, modeled after existing `ct-monitor.ts`)   | Planned |
-| Admin vulnerability dashboard stub at `/admin/vulnerabilities`                               | Planned |
+### Sprint 2 — VIDB fill-in ✅
+
+Shipped 2026-04-22 in PR #8 (`f9ebf2d`). Inngest cron cadence trimmed 2026-05-02 in PR #76 (`00db15d`).
+
+| Feature                                                                                      | Status                                                           |
+| -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| NVD, GHSA, OSV, enhanced CERT AU scrapers                                                    | ✅ Done (2026-04-22, PR #8)                                      |
+| `common/vuln_db.py::bulk_upsert_vulnerabilities` helper                                      | ✅ Done (2026-04-22, PR #8)                                      |
+| `.github/workflows/scrape-vulnerabilities.yml` (weekly, gated by `vars.ENABLE_VULN_SCRAPER`) | ✅ Done (2026-04-22, PR #8)                                      |
+| Inngest AU-context enrichment (`enrich-vulnerability.ts`, hourly; banks/gov affected)        | ✅ Done (2026-04-22, PR #8); cadence trimmed 2026-05-02 (PR #76) |
+| Admin vulnerability dashboard stub at `/admin/vulnerabilities`                               | ✅ Done (2026-04-22, PR #8)                                      |
 
 ### Sprint 3 — Extension hardening
 
+> **Note:** original row claimed "Migration v64: extension_version_history" — that's stale. v64 was actually used by Sprint 1's risk-tracking extension (per commit `1cbe30a`). When Sprint 3 ships, allocate a fresh migration number (next available at planning time).
+
 | Feature                                                                                                   | Status  |
 | --------------------------------------------------------------------------------------------------------- | ------- |
-| Migration v64: `extension_version_history` + `compare_extension_versions` RPC                             | Planned |
+| Migration (fresh number TBD): `extension_version_history` + `compare_extension_versions` RPC              | Planned |
 | Extension hollowing detector — `scanExtension()` accepts `previousVersion`, hashes worker/content scripts | Planned |
 | DOM-clickjacking detector (EXT-062, references VU#516608)                                                 | Planned |
 | Indirect injection scan on fetched URLs in `resolveRedirects`                                             | Planned |
@@ -514,6 +521,40 @@ New data asset turning the 2026 vulnerability research (`docs/vulnerability-atla
 | URL Security Report deep scan — **only 7 net-new checks** (SEC-001..SEC-004, SEC-006..SEC-008); others already in `packages/site-audit` | Planned |
 | MCP Config Safety Check (`/tools/mcp-config-check`, `packages/mcp-audit/src/config-audit.ts`)                                           | Planned |
 | Tool-poisoning scan on pasted config (deferred 1b — realistic data source for `packageData.tools` checks)                               | Planned |
+
+### Sprint 6 — Enrichment depth & scoring (scoped 2026-05-11)
+
+Plan-only as of 2026-05-11. Extends the Sprint 0–2 foundation with depth (AUSCERT + MSRC), refresh discipline (daily EPSS), composite scoring (Arthur Risk Score + SSVC), and rulepack rebase (mcp-audit reads from DB instead of hardcoded array). Does not require Sprints 3–5 to ship first; can land in parallel. Migration numbers will be allocated at PR-open time (next free was v123 at scoping; recheck before opening).
+
+| Workstream | Feature                                                                                                                                                                                                                                                          | Status  |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| WS-A       | AUSCERT bulletin scraper (`pipeline/scrapers/auscert_bulletins.py`) — dual-write to `feed_items` (new `auscert` source) + `vulnerabilities.au_context.auscert_bulletin_id`                                                                                       | Planned |
+| WS-B       | MSRC monthly CVRF scraper (`pipeline/scrapers/vulnerabilities/msrc.py`) — Patch Tuesday +24h cron, reuses v63 schema                                                                                                                                             | Planned |
+| WS-C       | Daily EPSS refresh Inngest function (FIRST.org bulk API, chunked ≤5K rows); adds `epss_updated_at` column                                                                                                                                                        | Planned |
+| WS-D       | Arthur Risk Score 0–100 + SSVC AU SOCI decision tree — TS not PL/pgSQL, folds into existing hourly enrich cron; adds `arthur_risk_score`, `arthur_risk_decision`, `arthur_risk_updated_at`; **requires ADR 0007**                                                | Planned |
+| WS-E       | VulnCheck Community SSVC weekly ingest (~244K CVE decisions); adds `ssvc_decision`, `ssvc_source`, `ssvc_updated_at`                                                                                                                                             | Planned |
+| WS-F       | OWASP-LLM Top 10 (2025) + MITRE ATLAS v5.4.0 taxonomy tables (`ai_vuln_categories`, `vuln_ai_classification`); refactor `mcp-audit/cve-rulepack.ts` to read DB join behind `NEXT_PUBLIC_FF_MCP_AUDIT_LIVE_FEED` (default OFF, hardcoded array stays as fallback) | Planned |
+| WS-G       | ASD Cyber Security Network Partner application — `docs/ops/asd-network-partner.md`; CTIS feed code blocked until approval lands (Sprint 7+)                                                                                                                      | Planned |
+
+Sprint 6 supporting docs (each owned by the corresponding workstream PR):
+
+- `docs/plans/vuln-intel.md` (WS-A) — full Sprint 6 plan, mirrors `docs/plans/reddit-intel.md` shape
+- `docs/ops/asd-network-partner.md` (WS-G)
+- `CONTEXT.md` — vulnerability-intel domain terms (Arthur Risk Score, SSVC, EPSS, KEV, PURL, CPE, Essential Eight, SOCI) added inline per the "no new synonyms" rule (WS-A or WS-D)
+- `packages/mcp-audit/README.md` — rulepack seed source + maintenance schedule + category-weight invariant (WS-F)
+- ADR `docs/adr/0007-arthur-risk-score-composite.md` (WS-D)
+
+### Out of scope (decided 2026-05-11 review)
+
+The May 2026 "Vulnerability Intelligence Platform Extension" spec also proposed the following — explicitly rejected because they constitute a B2B-SaaS pivot rather than an extension of the consumer scam-protection product, and because they would conflict with the paused Breach Defence Suite and other in-flight work. Documented in BACKLOG.md → "Vulnerability Intelligence — out-of-scope decisions" so future sessions don't re-propose:
+
+- SBOM ingest (CycloneDX 1.5–1.7, SPDX 2.3/3.0)
+- `customer_software_inventory` + `customer_exposures` per-customer tables
+- GitHub OAuth integration to scan customer repos
+- Sandboxed Claude Code auto-PR remediation runners
+- SOCI CIRMP report builder + Essential Eight ML1/ML2/ML3 evidence-pack export
+- Internal bounty-hunting agent (Anthropic HackerOne / Bugcrowd programs)
+- AUD $49/$149/$299/month B2B SMB pricing tiers
 
 ### Later (post-monetisation)
 

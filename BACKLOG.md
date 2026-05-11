@@ -302,11 +302,11 @@ Infrastructure is in place (v38–v40). Future work:
       Actions runs on Azure 135.232.0.0/16). Even `googlebot` UA on
       `/robots.txt` is tarpitted — proves it's IP-range based, not
       UA/endpoint filtering.  
-      **Mitigation already shipped**: `pipeline/scrapers/common/backoff.py`
+       **Mitigation already shipped**: `pipeline/scrapers/common/backoff.py`
       skips ACSC fetches once 5 consecutive failures are logged. The 3h
       cron still fires but writes a `partial`-status heartbeat instead of
       hammering the upstream. Resets automatically when one fetch succeeds.  
-      **Diagnostic tooling**: `pipeline/scrapers/probe_acsc.py` runs HEAD/GET
+       **Diagnostic tooling**: `pipeline/scrapers/probe_acsc.py` runs HEAD/GET
       across multiple UAs (askarthur, mozilla, curl, googlebot, no-UA),
       multiple endpoints (rss/alerts, rss/advisories, /, /robots.txt), and
       cross-checks `requests` vs stdlib `urllib`. Plus DNS resolution + raw
@@ -314,7 +314,7 @@ Infrastructure is in place (v38–v40). Future work:
       `gh workflow run scrape-feeds.yml -f feed=probe_acsc` to capture a
       diagnostic table. **Run the probe BEFORE attempting the Inngest port
       so we're not optimising for the wrong cause.**  
-      **Vercel ingest (in code, gated default OFF)**: PR #147 ships
+       **Vercel ingest (in code, gated default OFF)**: PR #147 ships
       `packages/scam-engine/src/inngest/acsc-ingest-vercel.ts` — a parallel
       Inngest cron that fetches ACSC RSS from Vercel's runtime instead of
       GH Actions. Gated by `FF_ACSC_INGEST_VERCEL` (server-side env). To
@@ -333,7 +333,7 @@ DESC LIMIT 3` — first row is the Vercel run
      **Fallback (Plan C)**: scrape `/about-us/view-all-content/alerts-and-advisories`
      HTML listing — different Akamai cache/WAF rules than RSS endpoints,
      may pass through. Only consider if Vercel egress also fails.  
-     Health query: `SELECT status, COUNT(*) FROM feed_ingestion_log WHERE
+      Health query: `SELECT status, COUNT(*) FROM feed_ingestion_log WHERE
 feed_name='acsc' AND created_at > now() - interval '7 days' GROUP BY
 status`. Healthy week is mostly `success`; an unhealthy backoff week
      is `error` followed by `partial` (the Python backoff heartbeats).
@@ -549,6 +549,29 @@ order.
 - [x] ✅ **Phase 4.4 JSONB schema versioning** (v117 / #171) — 11 `*_v` SMALLINT columns added across 10 tables
 - [x] ✅ **Daily pg_dump → R2 workflow shipped** (#173) — gated on `ENABLE_DR_DUMP`; 4-step setup documented
 - [x] ✅ **Operational docs:** `docs/ops/data-retention.md` (#167), `docs/ops/dr-plan.md` (#167), `docs/ops/index-baseline-2026-05.md` (#153)
+
+## Vulnerability Intelligence — out-of-scope decisions (2026-05-11)
+
+The May 2026 "Vulnerability Intelligence Platform Extension" spec proposed extending Phase 14 into a B2B-SaaS vulnerability management product competing with Tenable / Snyk / CyberCX. After investigation against the actual codebase state (Sprints 0–2 already shipped 2026-04-21/22; spec's "MSRC already integrated" claim was false), the following modules were **explicitly rejected** as a B2B pivot inconsistent with the consumer scam-protection brand and the in-flight workload. Don't re-propose without first reviewing this rationale.
+
+**Rejected scope:**
+
+- **SBOM ingest** (CycloneDX 1.5–1.7, SPDX 2.3/3.0) — would require `customer_software_inventory` + `customer_exposures` per-customer tables and a fundamentally B2B data model
+- **GitHub OAuth integration** to scan customer repos
+- **Sandboxed Claude Code auto-PR remediation runners** — Level 1/2/3 maturity rollout per the spec's Module 5
+- **SOCI CIRMP report builder** + Essential Eight ML1/ML2/ML3 evidence-pack OSCAL export
+- **Internal bounty-hunting agent** (Anthropic HackerOne / Bugcrowd programs) — brand-risk for a consumer-trust product; HackerOne IBB pause + curl-maintainer backlash make the safe-harbor pathway thin
+- **AUD $49/$149/$299/month B2B SMB pricing tiers** + MSP/MSSP channel + cyber-insurance partnerships
+
+**Why rejected:**
+
+1. **Brand conflict** — Ask Arthur sells consumer scam protection (extension, mobile, web, bots). The proposed scope was a Snyk/Tenable-class B2B product. The two go-to-markets are fundamentally different motions.
+2. **In-flight workload** — Breach Defence Suite already paused after PR 2; Phone Footprint v2 code-complete; Reddit Intel code-complete; Charity Check v0.2c–v0.2e still queued. Adding a 7-module B2B-SaaS layer would starve all of these.
+3. **Scope-vs-team** — single-dev + Claude Code reality cannot ship 7 modules + 4 phases + SOCI compliance product + bounty agent without abandoning the existing product surfaces.
+
+**Accepted-instead scope** — Sprint 6 (Enrichment depth & scoring), tracked in ROADMAP.md → Phase 14 → Sprint 6. Stays inside the consumer/scam-engine product; closes out enrichment depth (AUSCERT, MSRC, EPSS refresh, VulnCheck SSVC) and adds composite scoring (Arthur Risk Score + ADR 0007) + AI-vuln taxonomy seeding (OWASP-LLM + MITRE ATLAS) via the existing `packages/mcp-audit`.
+
+**If a future session re-proposes any of these:** check this section first, then reopen the decision explicitly with the user — don't auto-resume.
 
 ## Breach Defence Suite — paused after PR 2 (2026-04-29)
 

@@ -1,12 +1,15 @@
 # Phase 14 — Vulnerability Intelligence: Config Checklist
 
-What has to be set (and where) to take Phase 14 from "schema applied + first scraper shipped" to "weekly data flowing + admin visibility + eventual B2B feed". Group by who acts on it.
+**Status: Sprints 0–2 shipped to prod 2026-04-21/22** (PRs #5, #6, #8 — migrations v63 + v64 applied to Supabase project `rquomhcgnodxzkhokwni`). Inngest cron cadence trimmed 2026-05-02 (PR #76). What has to be set (and where) to take Phase 14 from "schema + scrapers running" to "Sprint 6 enrichment depth shipped" + eventual B2B feed (Sprint 4). Group by who acts on it.
 
-## Already done
+## Already done (Sprints 0–2)
 
-- ✅ **Supabase migration v63** — applied to prod (`rquomhcgnodxzkhokwni`). Creates `vulnerabilities`, `vulnerability_exposure_checks`, `vulnerability_detections`, `vulnerability_ingestion_log` + the `get_vulnerability_exposure_report` RPC + the `critical_vulnerabilities_au` view.
-- ✅ **mcp-audit integration** — new `MCP-SC-005` rulepack check covers 12 MCP-specific CVEs on both the target package and its deps. `MCP-TP-README-*` scans the package README for tool-description poisoning.
-- ✅ **First scraper** — `pipeline/scrapers/vulnerabilities/cisa_kev.py` and `.github/workflows/scrape-vulnerabilities.yml` (weekly Sunday 04:00 UTC).
+- ✅ **Migration v63 — VIDB schema** (PR #5, 2026-04-21). Creates `vulnerabilities`, `vulnerability_exposure_checks`, `vulnerability_detections`, `vulnerability_ingestion_log` + the `get_vulnerability_exposure_report` RPC + the `critical_vulnerabilities_au` view.
+- ✅ **Migration v64 — risk-tracking** (PR #6, 2026-04-21). Adds patched-in versions, EPSS scores, lifecycle status, disposition fields.
+- ✅ **mcp-audit integration** (PR #5) — new `MCP-SC-005` rulepack check covers 12 MCP-specific CVEs on both the target package and its deps. `MCP-TP-README-*` scans the package README for tool-description poisoning.
+- ✅ **Sprint 1 scraper** — `pipeline/scrapers/vulnerabilities/cisa_kev.py` and `.github/workflows/scrape-vulnerabilities.yml` (weekly Sunday 04:00 UTC).
+- ✅ **Sprint 2 scrapers** (PR #8, 2026-04-22) — `nvd_recent.py`, `osv_feed.py`, `github_advisory.py`, plus enhanced `cert_au.py::scrape_vulnerabilities()` extracting CVE IDs from ACSC advisories. `common/vuln_db.py::bulk_upsert_vulnerabilities` helper. Workflow gated by `vars.ENABLE_VULN_SCRAPER`.
+- ✅ **Inngest AU-context enrichment** (PR #8) — `packages/scam-engine/src/inngest/enrich-vulnerability.ts`, hourly cron, gated by `ffVulnAuEnrichment`, braked via `feature_brakes.vuln_au_enrichment`, full `cost_telemetry` instrumentation. Cadence trimmed 2026-05-02 (PR #76).
 - ✅ **Admin page** — `/admin/vulnerabilities` shows totals + recent scraper runs + top-50 critical list. Gated by existing admin cookie.
 
 ## Must set before first run
@@ -17,19 +20,37 @@ What has to be set (and where) to take Phase 14 from "schema applied + first scr
 - Value: `true`
 - Effect: allows `scrape-vulnerabilities.yml` to fire on its weekly cron. Manual `workflow_dispatch` runs regardless of this variable. Same gating convention as `ENABLE_SCRAPER` (for `scrape-feeds.yml`) and `ENABLE_DEEP_INVESTIGATION` (for `deep-investigation.yml`).
 
-No new secrets needed for Sprint 1. The existing `SUPABASE_DB_URL` secret (used by the URL scrapers) is already wired into the workflow.
+## Secrets needed for live Sprint 2 scrapers
 
-## Needed for Sprint 2 (deferred)
+The Sprint 2 scrapers ship code-complete; supply these secrets to activate full coverage. Without them, each scraper logs a clean skip and the workflow stays green.
 
-When the next batch of scrapers lands:
+| Scraper              | Secret / variable                                | Where to get it                                                                                      |
+| -------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `nvd_recent.py`      | `NVD_API_KEY`                                    | Register at https://nvd.nist.gov/developers/request-an-api-key — raises rate limit from 5→50 req/30s |
+| `github_advisory.py` | `GITHUB_TOKEN` with `read:security_events` scope | GitHub fine-grained PAT. Already have one for Reddit; may need scope expansion                       |
+| `osv_feed.py`        | none                                             | —                                                                                                    |
+| `cisa_kev.py`        | none                                             | —                                                                                                    |
 
-| Scraper | Secret / variable | Where to get it |
-|---|---|---|
-| `nvd_recent.py` | `NVD_API_KEY` | Register at https://nvd.nist.gov/developers/request-an-api-key — raises rate limit from 5→50 req/30s |
-| `github_advisory.py` | `GITHUB_TOKEN` with `read:security_events` scope | GitHub fine-grained PAT. Already have one for Reddit; may need scope expansion |
-| `msrc_api.py` | none (public) | — |
-| `chrome_releases.py`, `apple_security.py` | none (RSS) | — |
-| `vendor_psirt/*` | none (RSS) | — |
+## Needed for Sprint 6 (Enrichment depth & scoring — scoped 2026-05-11)
+
+Plan-only as of 2026-05-11. Allocate secrets/vars when each workstream PR opens. See ROADMAP.md → Phase 14 → Sprint 6 for the full workstream list.
+
+| Workstream              | Secret / variable                                                                                                                   | Where to get it                                                                                       |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| WS-A AUSCERT            | none (public bulletin index)                                                                                                        | —                                                                                                     |
+| WS-B MSRC               | none (public CVRF API)                                                                                                              | —                                                                                                     |
+| WS-C EPSS daily refresh | none (FIRST.org free)                                                                                                               | —                                                                                                     |
+| WS-E VulnCheck SSVC     | `VULNCHECK_API_KEY`                                                                                                                 | Free Community tier at https://vulncheck.com/account                                                  |
+| All workstreams         | per-feature cost-cap env vars (`AUSCERT_INGEST_CAP_USD`, `MSRC_INGEST_CAP_USD`, `EPSS_REFRESH_CAP_USD`, `VULNCHECK_INGEST_CAP_USD`) | Set to `1` or higher integer; non-numeric values silently disable brakes per the `parseFloat` footgun |
+
+## Sprint 3 — Extension hardening (deferred; vendor PSIRT feeds)
+
+When Sprint 3 ships extension-hollowing detection + DOM-clickjacking, may incorporate vendor PSIRT feeds:
+
+| Scraper                                   | Secret / variable | Where to get it |
+| ----------------------------------------- | ----------------- | --------------- |
+| `chrome_releases.py`, `apple_security.py` | none (RSS)        | —               |
+| `vendor_psirt/*`                          | none (RSS)        | —               |
 
 ## Needed for Sprint 4 (B2B API)
 
