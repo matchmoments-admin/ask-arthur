@@ -17,11 +17,6 @@
 //   topCategories           → "By the numbers" sentence
 
 import {
-  Html,
-  Head,
-  Preview,
-  Body,
-  Container,
   Section,
   Text,
   Link,
@@ -32,6 +27,8 @@ import {
   Column,
 } from "@react-email/components";
 import { withUtm } from "@/lib/utm";
+import EditorialBriefingLayout from "./_layout/EditorialBriefingLayout";
+import { DIVIDER, NAVY, SANS, SERIF, SURFACE_TINT, WHITE } from "./_layout/tokens";
 
 interface EmergingTheme {
   /** UUID primary key — used as the deep-link fallback when slug is null. */
@@ -73,15 +70,6 @@ export interface WeeklyIntelDigestProps {
   promptVersion: string;
   regulatorAlerts?: RegulatorAlertEntry[];
 }
-
-// ── Brand palette (matches AskArthurBriefing) ─────────────────────────────
-const NAVY = "#1B2A4A";
-const NAVY_SOFT = "#B8C1D1";
-const WHITE = "#FFFFFF";
-const DIVIDER = "#E2E8F0";
-const SURFACE_TINT = "#F8FAFC";
-const SERIF = "Georgia, 'Times New Roman', serif";
-const SANS = "Arial, Helvetica, sans-serif";
 
 const EMAIL_UTM = {
   source: "email",
@@ -143,88 +131,14 @@ export default function WeeklyIntelDigest(props: WeeklyIntelDigestProps) {
   const ctaUrl = withUtm("https://askarthur.au/app/threats", EMAIL_UTM);
 
   return (
-    <Html>
-      <Head />
-      <Preview>{dek}</Preview>
-      <Body
-        style={{
-          backgroundColor: SURFACE_TINT,
-          fontFamily: SERIF,
-          margin: 0,
-          padding: 0,
-        }}
-      >
-        <Container
-          style={{
-            maxWidth: "640px",
-            margin: "0 auto",
-            padding: "32px 20px",
-            width: "100%",
-          }}
-        >
-          {/* ================= HEADER ================= */}
-          <Section
-            style={{
-              backgroundColor: NAVY,
-              padding: "28px 36px",
-              borderRadius: "12px 12px 0 0",
-            }}
-          >
-            <Row>
-              <Column
-                style={{
-                  textAlign: "left" as const,
-                  verticalAlign: "middle",
-                }}
-              >
-                <Link
-                  href="https://askarthur.au"
-                  style={{ textDecoration: "none", color: WHITE }}
-                >
-                  <Text
-                    style={{
-                      margin: 0,
-                      color: WHITE,
-                      fontFamily: SERIF,
-                      fontSize: "22px",
-                      fontWeight: 700,
-                      letterSpacing: "0.5px",
-                      lineHeight: 1,
-                    }}
-                  >
-                    Ask Arthur
-                  </Text>
-                </Link>
-              </Column>
-              <Column
-                style={{
-                  textAlign: "right" as const,
-                  verticalAlign: "middle",
-                }}
-              >
-                <Text
-                  style={{
-                    margin: 0,
-                    color: WHITE,
-                    fontFamily: SANS,
-                    fontSize: "11px",
-                    fontWeight: 600,
-                    letterSpacing: "2px",
-                    textTransform: "uppercase" as const,
-                    opacity: 0.85,
-                  }}
-                >
-                  Weekly Intel
-                </Text>
-              </Column>
-            </Row>
-          </Section>
-
-          {/* ================= CONTENT ================= */}
-          <Section
-            style={{ backgroundColor: WHITE, padding: "32px 36px 36px" }}
-          >
-            {/* Issue meta */}
+    <EditorialBriefingLayout
+      preview={dek}
+      headerLabel="Weekly Intel"
+      unsubscribeUrl="https://askarthur.au/unsubscribe"
+      subscriptionReason="You're receiving this because you subscribed to Ask Arthur's weekly intel."
+      debugStripe={`${modelVersion} · ${promptVersion}`}
+    >
+      {/* Issue meta */}
             <Text
               style={{
                 margin: "0 0 12px 0",
@@ -750,93 +664,6 @@ export default function WeeklyIntelDigest(props: WeeklyIntelDigestProps) {
               <br />
               <strong>The Ask Arthur team</strong>
             </Text>
-          </Section>
-
-          {/* ================= FOOTER ================= */}
-          <Section style={{ backgroundColor: NAVY, padding: "32px 36px" }}>
-            <Text
-              style={{
-                margin: "0 0 6px 0",
-                padding: 0,
-                fontFamily: SERIF,
-                fontSize: "16px",
-                fontWeight: 700,
-                color: WHITE,
-                lineHeight: "20px",
-              }}
-            >
-              Ask Arthur
-            </Text>
-            <Text
-              style={{
-                margin: 0,
-                padding: 0,
-                fontFamily: SANS,
-                fontSize: "12px",
-                lineHeight: "18px",
-                color: NAVY_SOFT,
-              }}
-            >
-              Australia&apos;s free AI scam checker · askarthur.au
-            </Text>
-            <Text
-              style={{
-                margin: "20px 0 0 0",
-                padding: 0,
-                fontFamily: SANS,
-                fontSize: "12px",
-                lineHeight: "18px",
-                color: NAVY_SOFT,
-              }}
-            >
-              Ask Arthur · ABN 72 695 772 313 · Sydney, Australia
-            </Text>
-            <Text
-              style={{
-                margin: "8px 0 0 0",
-                padding: 0,
-                fontFamily: SANS,
-                fontSize: "12px",
-                lineHeight: "18px",
-                color: NAVY_SOFT,
-              }}
-            >
-              You&apos;re receiving this because you subscribed to Ask
-              Arthur&apos;s weekly intel.
-              <br />
-              <Link
-                href="https://askarthur.au/unsubscribe"
-                style={{ color: NAVY_SOFT, textDecoration: "underline" }}
-              >
-                Unsubscribe
-              </Link>
-              {" · "}
-              <Link
-                href="https://askarthur.au"
-                style={{ color: NAVY_SOFT, textDecoration: "underline" }}
-              >
-                askarthur.au
-              </Link>
-            </Text>
-            {/* Operator-only debug strip — pixel-tiny so it doesn't clutter
-                the consumer footer when subscribers exist. Useful for prompt
-                regression triage when something looks off. */}
-            <Text
-              style={{
-                margin: "16px 0 0 0",
-                padding: 0,
-                fontFamily: SANS,
-                fontSize: "10px",
-                lineHeight: "14px",
-                color: NAVY_SOFT,
-                opacity: 0.5,
-              }}
-            >
-              {modelVersion} · {promptVersion}
-            </Text>
-          </Section>
-        </Container>
-      </Body>
-    </Html>
+    </EditorialBriefingLayout>
   );
 }
