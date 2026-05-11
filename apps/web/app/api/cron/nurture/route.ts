@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@askarthur/supabase/server";
-import { render } from "@react-email/components";
 import SPFIntro from "@/emails/nurture/SPFIntro";
 import ReasonableSteps from "@/emails/nurture/ReasonableSteps";
 import CollectiveIntelligence from "@/emails/nurture/CollectiveIntelligence";
 import CaseStudy from "@/emails/nurture/CaseStudy";
 import TechnicalOverview from "@/emails/nurture/TechnicalOverview";
 import Deadline from "@/emails/nurture/Deadline";
+import { sendNurtureEmail } from "@/lib/resend";
+import { signUnsubscribeUrl } from "@/lib/unsubscribe";
 
 // Nurture email schedule: days after lead creation → email template
 const NURTURE_SCHEDULE = [
@@ -35,10 +36,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Service unavailable" }, { status: 503 });
   }
 
-  const resendKey = process.env.RESEND_API_KEY;
-  const fromEmail = process.env.RESEND_FROM_EMAIL ?? "Brendan Milton <brendan@askarthur.au>";
-
-  if (!resendKey) {
+  if (!process.env.RESEND_API_KEY) {
     return NextResponse.json({ error: "Email service not configured" }, { status: 503 });
   }
 
@@ -89,44 +87,32 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Render and send the email
-    const unsubscribeUrl = `https://askarthur.au/unsubscribe?email=${encodeURIComponent(lead.email)}`;
+    // Render + send via the centralised helper, which handles signed
+    // tokenised unsubscribe URLs, RFC 8058 one-click headers, and cost
+    // telemetry. The signed URL also threads into the template body so
+    // the in-email "Unsubscribe" link matches the header.
+    const unsubscribeUrl = signUnsubscribeUrl(
+      lead.email,
+      "https://askarthur.au/unsubscribe",
+    );
     const { Template } = schedule;
-    const html = await render(Template({ name: lead.name, unsubscribeUrl }));
+    const result = await sendNurtureEmail({
+      email: lead.email,
+      subject: schedule.subject,
+      template: Template({ name: lead.name, unsubscribeUrl }),
+      step: schedule.step,
+    });
 
-    try {
-      const res = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${resendKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          from: fromEmail,
-          to: [lead.email],
-          subject: schedule.subject,
-          html,
-          headers: {
-            "List-Unsubscribe": `<${unsubscribeUrl}>`,
-            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-          },
-        }),
-      });
-
-      if (res.ok) {
-        // Update nurture step
-        await supabase
-          .from("leads")
-          .update({
-            nurture_step: nextStep,
-            nurture_last_sent_at: now.toISOString(),
-          })
-          .eq("id", lead.id);
-
-        sent++;
-      }
-    } catch {
-      // Log but don't fail the whole batch
+    if (result.ok) {
+      await supabase
+        .from("leads")
+        .update({
+          nurture_step: nextStep,
+          nurture_last_sent_at: now.toISOString(),
+        })
+        .eq("id", lead.id);
+      sent++;
+    } else {
       skipped++;
     }
   }

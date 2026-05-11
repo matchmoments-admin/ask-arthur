@@ -46,6 +46,10 @@ _Avoid_: provider, signal, source, factor.
 Output of the `/charity-check` engine: a Verdict (canonical 4-level), a 0-100 composite score, the per-Pillar payloads (`acnc_registration`, `abr_dgr`, plus `donation_url` reserved for v0.2), a coverage map for UI hints, the official donation URL pulled from the ACNC register (so the verdict CTA never deep-links a fundraiser-supplied URL), and a plain-English explanation. Distinct from an Analysis Result — Analysis Results classify arbitrary user-submitted content; Charity Check Results verify a specific named-entity claim against authoritative registers.
 _Avoid_: charity result, charity score, charity verdict, "case".
 
+**Editorial Briefing layout**:
+The shared chrome for Ask Arthur outbound emails (Reddit Intel weekly digest + the 6-step SPF nurture series). Defined in `apps/web/emails/_layout/EditorialBriefingLayout.tsx`: navy header bar with the Ask Arthur wordmark + an uppercase right-aligned label pill, a white content card on a tinted page background with rounded corners, and a navy footer bar with brand block, ABN, signed-token unsubscribe link, and an optional operator-only debug stripe. Per-email content slots into briefing fields (eyebrow, H1, dek, optional stats card, sections, CTA, sign-off) so all Ask Arthur emails read as one publication.
+_Avoid_: "email template" (overloaded), "newsletter shell", "briefing chrome".
+
 ## Relationships
 
 - An **Analysis Result** produces exactly one **Verdict**.

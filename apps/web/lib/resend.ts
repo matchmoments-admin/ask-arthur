@@ -1,5 +1,6 @@
 import { Resend } from "resend";
 import { render } from "@react-email/components";
+import type { ReactElement } from "react";
 import Welcome from "@/emails/Welcome";
 import WeeklyDigest from "@/emails/WeeklyDigest";
 import WeeklyIntelDigest, {
@@ -165,5 +166,68 @@ export async function sendWeeklyIntelDigest(
         },
       });
     }
+  }
+}
+
+/**
+ * Sends a single nurture-series email to one lead. Centralises what the
+ * cron route used to do inline so every nurture step gets the same
+ * treatment as the weekly intel digest:
+ *  - tokenised, signed unsubscribe URL (rather than the previous
+ *    `?email=...` shape, which let any sender unsubscribe any address)
+ *  - RFC 2369 List-Unsubscribe + RFC 8058 one-click POST headers
+ *  - cost-telemetry log per send
+ *
+ * The nurture cron processes leads one at a time (small volume, per-lead
+ * step timing), so this helper is single-recipient by design.
+ */
+export async function sendNurtureEmail(args: {
+  email: string;
+  subject: string;
+  template: ReactElement;
+  /** Schedule step (1–6) — recorded in cost telemetry for funnel analysis. */
+  step: number;
+}): Promise<{ ok: boolean; error?: string }> {
+  const { email, subject, template, step } = args;
+  const resend = getResendClient();
+  const unsubscribeUrl = signUnsubscribeUrl(
+    email,
+    "https://askarthur.au/unsubscribe",
+  );
+  const oneClickUrl = signUnsubscribeUrl(
+    email,
+    "https://askarthur.au/api/unsubscribe-one-click",
+  );
+
+  const html = await render(template);
+
+  try {
+    const result = await resend.emails.send({
+      from: FROM,
+      to: email,
+      subject,
+      html,
+      headers: {
+        "List-Unsubscribe": `<${unsubscribeUrl}>, <${oneClickUrl}>`,
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+      },
+    });
+
+    if (result.error) {
+      return { ok: false, error: result.error.message };
+    }
+
+    logCost({
+      feature: "email",
+      provider: "resend",
+      operation: "nurture",
+      units: 1,
+      unitCostUsd: PRICING.RESEND_USD_PER_EMAIL,
+      metadata: { step },
+    });
+
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
