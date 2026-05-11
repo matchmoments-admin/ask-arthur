@@ -1,15 +1,16 @@
+// Nurture step 3 (Day 7) — collective intelligence pitch.
+//
+// Refactored 2026-05-11 onto EditorialBriefingLayout. Leads with the
+// 13% detection-rate stat from ASIC REP 761 in a single-tile callout.
+
 import {
-  Html,
-  Head,
-  Preview,
-  Body,
-  Container,
   Section,
   Text,
   Link,
-  Hr,
   Heading,
 } from "@react-email/components";
+import EditorialBriefingLayout from "../_layout/EditorialBriefingLayout";
+import { DIVIDER, NAVY, SANS, SERIF, SURFACE_TINT } from "../_layout/tokens";
 
 interface CollectiveIntelligenceProps {
   name?: string;
@@ -21,61 +22,181 @@ export default function CollectiveIntelligence({
   unsubscribeUrl = "https://askarthur.au/unsubscribe",
 }: CollectiveIntelligenceProps) {
   return (
-    <Html>
-      <Head>
-        <style>{`@import url('https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;600;700&display=swap');`}</style>
-      </Head>
-      <Preview>Why isolated scam prevention isn&apos;t enough</Preview>
-      <Body style={{ backgroundColor: "#F8FAFC", fontFamily: "'Public Sans', -apple-system, BlinkMacSystemFont, sans-serif" }}>
-        <Container style={{ maxWidth: "560px", margin: "0 auto", padding: "40px 20px" }}>
-          <Section style={{ backgroundColor: "#1B2A4A", borderRadius: "8px 8px 0 0", padding: "24px 28px" }}>
-            <Text style={{ color: "#FFFFFF", fontSize: "12px", fontWeight: 700, letterSpacing: "2px", textTransform: "uppercase" as const, margin: 0 }}>Ask Arthur</Text>
-          </Section>
+    <EditorialBriefingLayout
+      preview="Why isolated scam prevention isn't enough — ASIC REP 761 found Big Four banks detected only 13% of scam payments."
+      headerLabel="SPF Compliance"
+      unsubscribeUrl={unsubscribeUrl}
+      subscriptionReason="You're receiving this because you registered interest in Ask Arthur's SPF compliance briefings."
+    >
+      <Text
+        style={{
+          margin: "0 0 12px 0",
+          padding: 0,
+          fontFamily: SANS,
+          fontSize: "12px",
+          fontWeight: 600,
+          letterSpacing: "2px",
+          textTransform: "uppercase" as const,
+          color: NAVY,
+          opacity: 0.7,
+        }}
+      >
+        SPF Compliance · Brief 3 of 6
+      </Text>
 
-          <Section style={{ backgroundColor: "#FFFFFF", borderRadius: "0 0 8px 8px", padding: "28px", border: "1px solid #E2E8F0", borderTop: "none" }}>
-            <Heading as="h1" style={{ color: "#1B2A4A", fontSize: "22px", fontWeight: 700, margin: "0 0 16px 0" }}>
-              Why isolated scam prevention isn&apos;t enough
-            </Heading>
+      <Heading
+        as="h1"
+        style={{
+          margin: 0,
+          padding: 0,
+          fontSize: "34px",
+          lineHeight: "40px",
+          fontFamily: SERIF,
+          fontWeight: 500,
+          color: NAVY,
+        }}
+      >
+        Why isolated scam prevention isn&apos;t enough
+      </Heading>
 
-            {name && <Text style={{ color: "#334155", fontSize: "16px", lineHeight: "1.6" }}>Hi {name},</Text>}
+      <Text
+        style={{
+          margin: "12px 0 0 0",
+          padding: 0,
+          fontFamily: SERIF,
+          fontSize: "16px",
+          lineHeight: "24px",
+          color: NAVY,
+          opacity: 0.85,
+        }}
+      >
+        Scams don&apos;t respect organisational boundaries — a phishing URL
+        that hits one bank today will hit three more tomorrow.
+      </Text>
 
-            <Text style={{ color: "#334155", fontSize: "16px", lineHeight: "1.6" }}>
-              ASIC&apos;s REP 761 found the Big Four banks detected only <strong>13% of scam payments</strong>. Why so low? Because scams don&apos;t respect organisational boundaries &mdash; a phishing URL that hits one bank today will hit three more tomorrow.
-            </Text>
+      {/* Single-tile stat callout */}
+      <div style={{ paddingTop: "24px", paddingBottom: "8px" }}>
+        <Section
+          style={{
+            backgroundColor: SURFACE_TINT,
+            border: `1px solid ${DIVIDER}`,
+            borderRadius: "10px",
+            padding: "24px 20px",
+            textAlign: "center" as const,
+          }}
+        >
+          <Text
+            style={{
+              margin: 0,
+              padding: 0,
+              fontFamily: SERIF,
+              fontSize: "40px",
+              lineHeight: "44px",
+              fontWeight: 600,
+              color: NAVY,
+            }}
+          >
+            13%
+          </Text>
+          <Text
+            style={{
+              margin: "6px 0 0 0",
+              padding: 0,
+              fontFamily: SANS,
+              fontSize: "11px",
+              fontWeight: 600,
+              letterSpacing: "1.5px",
+              textTransform: "uppercase" as const,
+              color: NAVY,
+              opacity: 0.7,
+            }}
+          >
+            of scam payments detected by Big Four banks (ASIC REP 761)
+          </Text>
+        </Section>
+      </div>
 
-            <Text style={{ color: "#334155", fontSize: "16px", lineHeight: "1.6" }}>
-              Ask Arthur&apos;s Threat API turns this problem into an advantage. Every API call your organisation makes does two things simultaneously:
-            </Text>
+      {name && (
+        <Text
+          style={{
+            margin: "24px 0 0 0",
+            padding: 0,
+            fontFamily: SERIF,
+            fontSize: "16px",
+            lineHeight: "24px",
+            color: NAVY,
+          }}
+        >
+          Hi {name},
+        </Text>
+      )}
 
-            <Text style={{ color: "#334155", fontSize: "15px", lineHeight: "2", paddingLeft: "16px" }}>
-              1. <strong>Protects your customers</strong> with AI-powered scam detection<br />
-              2. <strong>Strengthens the network</strong> by contributing anonymised threat intelligence
-            </Text>
+      <Text
+        style={{
+          margin: "24px 0 0 0",
+          padding: 0,
+          fontFamily: SERIF,
+          fontSize: "16px",
+          lineHeight: "26px",
+          color: NAVY,
+        }}
+      >
+        Ask Arthur&apos;s Threat API turns this problem into an advantage.
+        Every API call your organisation makes does two things at once:
+        protects your customers with AI-powered scam detection, and
+        strengthens the network by contributing anonymised threat intelligence.
+      </Text>
 
-            <Text style={{ color: "#334155", fontSize: "16px", lineHeight: "1.6" }}>
-              The result: a scam URL flagged by one organisation is immediately available to protect customers across the entire network. This is precisely the kind of cross-ecosystem collaboration the SPF Act&apos;s Disrupt principle demands.
-            </Text>
+      <Text
+        style={{
+          margin: "16px 0 0 0",
+          padding: 0,
+          fontFamily: SERIF,
+          fontSize: "16px",
+          lineHeight: "26px",
+          color: NAVY,
+        }}
+      >
+        The result: a scam URL flagged by one organisation is immediately
+        available to protect customers across the entire network — precisely
+        the kind of cross-ecosystem collaboration the SPF Act&apos;s Disrupt
+        principle demands.
+      </Text>
 
-            <Text style={{ color: "#334155", fontSize: "16px", lineHeight: "1.6" }}>
-              Six API endpoints. Real-time detection. Automated compliance evidence. Every call documented in your audit trail.
-            </Text>
+      <div style={{ paddingTop: "24px" }}>
+        <Link
+          href="https://askarthur.au/api/v1/openapi.json"
+          style={{
+            backgroundColor: NAVY,
+            color: "#FFFFFF",
+            fontFamily: SANS,
+            fontSize: "15px",
+            fontWeight: 600,
+            lineHeight: "18px",
+            padding: "14px 26px",
+            borderRadius: "8px",
+            textDecoration: "none",
+            display: "inline-block",
+          }}
+        >
+          Explore the Threat API
+        </Link>
+      </div>
 
-            <Section style={{ textAlign: "center" as const, margin: "24px 0" }}>
-              <Link
-                href="https://askarthur.au/api/v1/openapi.json"
-                style={{ backgroundColor: "#0D9488", color: "#FFFFFF", padding: "12px 24px", borderRadius: "8px", textDecoration: "none", fontWeight: 600, fontSize: "14px" }}
-              >
-                Explore the Threat API
-              </Link>
-            </Section>
-
-            <Text style={{ color: "#64748B", fontSize: "14px", marginTop: "32px" }}>&mdash; Brendan Milton, Founder, Ask Arthur</Text>
-            <Hr style={{ borderColor: "#E2E8F0", margin: "24px 0" }} />
-            <Text style={{ color: "#94A3B8", fontSize: "12px", lineHeight: "1.5", margin: 0 }}>Ask Arthur | ABN 72 695 772 313 | Sydney, Australia</Text>
-            <Text style={{ color: "#94A3B8", fontSize: "12px", margin: "8px 0 0 0" }}><Link href={unsubscribeUrl} style={{ color: "#94A3B8" }}>Unsubscribe</Link></Text>
-          </Section>
-        </Container>
-      </Body>
-    </Html>
+      <Text
+        style={{
+          margin: "32px 0 0 0",
+          padding: 0,
+          fontFamily: SERIF,
+          fontSize: "15px",
+          lineHeight: "24px",
+          color: NAVY,
+        }}
+      >
+        — Brendan Milton
+        <br />
+        <strong>Founder, Ask Arthur</strong>
+      </Text>
+    </EditorialBriefingLayout>
   );
 }
