@@ -1,6 +1,6 @@
 # Ask Arthur Phone Footprint — Implementation Playbook v2
 
-> **Status:** historical narrative kept for legibility. The canonical spec will live at `docs/specs/phone-footprint-v2/` once backported (see PR 4 of the spec-driven-development rollout). Current system layout for Phone Footprint surfaces, tables, crons, and flags is in [docs/system-map/](../system-map/README.md).
+> **Status:** historical narrative kept for legibility. New work on this feature flows through GitHub Issues (the canonical artefact home — see `docs/agents/issue-tracker.md`). Run `/to-prd` to synthesise a PRD on a fresh issue, then `/to-issues` to break it into tracer-bullet child issues. Current system layout for Phone Footprint surfaces, tables, crons, and flags is in [docs/system-map/](../system-map/README.md).
 
 Status: **Locked in (2026-04-23).** Source of truth for Sprint 1–10. Codebase
 corrections from pre-implementation reconnaissance baked in — see §"Stack

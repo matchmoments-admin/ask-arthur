@@ -1,6 +1,6 @@
 # Contact Form Upgrade + Analysis-Result Onward Reporting
 
-> **Status:** historical narrative kept for legibility. Onward-reporting flow now lives at [docs/system-map/data-flows.md#6-onward-reporting-to-regulators](../system-map/data-flows.md#6-onward-reporting-to-regulators). If a follow-up to this plan ships, run it through `/spec-feature` (skill landing in PR 3 of the spec-driven-development rollout).
+> **Status:** historical narrative kept for legibility. Onward-reporting flow now lives at [docs/system-map/data-flows.md#6-onward-reporting-to-regulators](../system-map/data-flows.md#6-onward-reporting-to-regulators). For follow-up work, run `/to-prd` then `/to-issues` (artefact home is GitHub Issues — see `docs/agents/issue-tracker.md`).
 
 **Status:** in-progress (branch `feedback/contact-form-and-onward-reporting`).
 **Scope:** three workstreams — (A) /contact form augmentation with Notion+Telegram pipeline, (B) analysis-result onward reporting (brand-abuse email + destination picker), (C) passive trust signals (TrustBox footer + B2B review profiles + public accuracy page).

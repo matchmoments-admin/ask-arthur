@@ -14,13 +14,13 @@ The canonical "what's currently shipped and how does it talk to itself" map. **R
 
 A route, table, cron, or flag is documented in **exactly one** of these files — never two. The system map is the source of truth; older docs that overlap (`ARCHITECTURE.md`, `docs/plans/*.md`) defer to it via redirect or banner.
 
-| Existing doc                   | Role after this map                                                                                                                  |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `ARCHITECTURE.md`              | Retired stub. Redirects here.                                                                                                        |
-| `docs/plans/<feature>.md`      | Historical narrative for an in-flight build. Banner points to `docs/specs/<slug>/` (the spec workflow) once a feature is backported. |
-| `docs/ops/<feature>-config.md` | Operator runbook (env vars, flag flips, vendor setup, smoke tests). Different audience from system map; stays.                       |
-| `docs/adr/<n>-<topic>.md`      | Architectural law that specs respect. ADRs survive the system map and any spec.                                                      |
-| `CONTEXT.md`                   | Domain glossary. Defines vocabulary; this map describes deployed surface.                                                            |
+| Existing doc                   | Role after this map                                                                                                                                                               |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ARCHITECTURE.md`              | Retired stub. Redirects here.                                                                                                                                                     |
+| `docs/plans/<feature>.md`      | Historical narrative for an in-flight build. Banner points new work at GitHub Issues via `/to-prd` + `/to-issues` (canonical artefact home — see `docs/agents/issue-tracker.md`). |
+| `docs/ops/<feature>-config.md` | Operator runbook (env vars, flag flips, vendor setup, smoke tests). Different audience from system map; stays.                                                                    |
+| `docs/adr/<n>-<topic>.md`      | Architectural law that specs respect. ADRs survive the system map and any spec.                                                                                                   |
+| `CONTEXT.md`                   | Domain glossary. Defines vocabulary; this map describes deployed surface.                                                                                                         |
 
 ## System diagram
 
