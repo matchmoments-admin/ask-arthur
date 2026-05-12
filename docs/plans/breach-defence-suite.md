@@ -1,5 +1,7 @@
 # Breach Defence Suite — Implementation Plan
 
+> **Status:** historical narrative kept for legibility. The canonical spec will live at `docs/specs/breach-defence-suite/` once backported (see PR 4 of the spec-driven-development rollout). The OAIC NDB pause note in §1b is load-bearing — carry it forward into `design.md` when backporting. Current Breach Defence schema / flag inventory is in [docs/system-map/](../system-map/README.md).
+
 > **Source spec:** the implementation-ready Breach Defence Suite spec (F1–F11, §1–§12) attached at project kickoff. That document is the **detailed reference** for every PR. This plan is the **delta** between that spec and the codebase as it exists today, plus the sequenced build order. The spec itself is preserved in the PR description history of #46.
 
 ---

@@ -1,5 +1,7 @@
 # Reddit Scam Intelligence — Build Plan
 
+> **Status:** historical narrative kept for legibility. The canonical spec will live at `docs/specs/reddit-intel/` once backported (see PR 4 of the spec-driven-development rollout). Current Reddit Intel pipeline (cron timing, Inngest functions, flag inventory, B2B endpoints) is in [docs/system-map/](../system-map/README.md), with the end-to-end flow at [docs/system-map/data-flows.md#2-reddit-intel-pipeline](../system-map/data-flows.md#2-reddit-intel-pipeline).
+
 **Status:** **CODE COMPLETE 2026-05-02** — 14 PRs merged, Inngest functions
 registered + producing data in prod (Wave 1 verified: 40 intel rows + 6
 quotes + 1 daily summary on first successful classifier run). Awaiting:
