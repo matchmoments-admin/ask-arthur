@@ -1,5 +1,7 @@
 # Breach Defence Suite — Implementation Plan
 
+> **Status:** historical narrative kept for legibility. New work on this feature flows through GitHub Issues (the canonical artefact home — see `docs/agents/issue-tracker.md`). When the suite resumes, run `/to-prd` to synthesise a PRD on a fresh issue, then `/to-issues` to break it into tracer-bullet child issues. **The OAIC NDB pause note in §1b is load-bearing — carry it forward into the new PRD's "Out of Scope" or "Implementation Decisions" section.** Current Breach Defence schema / flag inventory is in [docs/system-map/](../system-map/README.md).
+
 > **Source spec:** the implementation-ready Breach Defence Suite spec (F1–F11, §1–§12) attached at project kickoff. That document is the **detailed reference** for every PR. This plan is the **delta** between that spec and the codebase as it exists today, plus the sequenced build order. The spec itself is preserved in the PR description history of #46.
 
 ---
