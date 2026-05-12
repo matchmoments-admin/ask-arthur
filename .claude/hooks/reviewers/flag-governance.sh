@@ -38,14 +38,34 @@ if [ -n "$bad_brake" ]; then
 fi
 
 # --- 3. Consumer flag without NEXT_PUBLIC_ prefix on client-visible name --
-# Heuristic: if the flag NAME ends in something clearly consumer-facing
-# (Public, Consumer, Dashboard, Email, Pages) we'd expect NEXT_PUBLIC_FF_*
-# env binding. This is a loose check.
-consumer_pattern="(public|consumer|dashboard|email|pages|widget|alert)"
-if grep -qiE "\"?[A-Za-z]*(${consumer_pattern}):" "$file" 2>/dev/null; then
-  # Are there any FF_* env reads WITHOUT NEXT_PUBLIC_ prefix that match?
-  if grep -qE "process\.env\.FF_[A-Z_]*(PUBLIC|CONSUMER|DASHBOARD|EMAIL|PAGES|WIDGET|ALERT)" "$file" 2>/dev/null; then
-    findings+=("**ADVISORY** — found server-only \`FF_*\` env var name that looks consumer-facing. Consumer flags should use \`NEXT_PUBLIC_FF_*\` so the client bundle can read them. Confirm whether this flag actually needs to be hidden from the client.")
+# Heuristic: a server-only FF_* flag with a consumer-sounding name (Public,
+# Consumer, Dashboard, Email, Pages, Widget, Alert) might actually need to be
+# NEXT_PUBLIC_FF_*. We flag it UNLESS a nearby comment (within 5 lines above
+# each match) explicitly says "server-only" / "server-side" — that's the
+# legitimate signal that the flag is intentionally server-bound.
+suspect_lines="$(grep -nE "process\.env\.FF_[A-Z_]*(PUBLIC|CONSUMER|DASHBOARD|EMAIL|PAGES|WIDGET|ALERT)" "$file" 2>/dev/null || true)"
+if [ -n "$suspect_lines" ]; then
+  # For each suspect line, check whether the 5 lines above contain a
+  # server-only marker. Collect names of flags that DON'T have one.
+  unmarked_flags=()
+  while IFS= read -r entry; do
+    [ -z "$entry" ] && continue
+    line_num="${entry%%:*}"
+    [ -z "$line_num" ] && continue
+    start=$(( line_num > 5 ? line_num - 5 : 1 ))
+    end=$(( line_num - 1 ))
+    [ "$end" -lt "$start" ] && continue
+    context="$(sed -n "${start},${end}p" "$file" 2>/dev/null || true)"
+    if ! printf '%s' "$context" | grep -qiE "server[ -]?(only|side)"; then
+      # Extract the flag identifier (the property name before the colon)
+      flag_name="$(printf '%s' "$entry" | sed -nE 's/^[0-9]+:[[:space:]]*([A-Za-z_][A-Za-z0-9_]*):.*$/\1/p')"
+      [ -n "$flag_name" ] && unmarked_flags+=("\`$flag_name\`")
+    fi
+  done <<< "$suspect_lines"
+
+  if [ ${#unmarked_flags[@]} -gt 0 ]; then
+    joined="$(IFS=', '; printf '%s' "${unmarked_flags[*]}")"
+    findings+=("**ADVISORY** — found server-only \`FF_*\` flag(s) with consumer-sounding names and no \`server-only\` / \`server-side\` marker in the nearby comment: ${joined}. Either (a) confirm intent + add \`Server-side only.\` to the doc comment, or (b) rename to \`NEXT_PUBLIC_FF_*\` so the client bundle can read it.")
   fi
 fi
 

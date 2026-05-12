@@ -284,8 +284,9 @@ export const featureFlags = {
    *  the function is dormant in prod (Meta Graph API call is still a stub)
    *  but the cron fires on schedule. Flag exists so the cost brake + kill
    *  switch are wired *before* the stub is replaced with a billed Meta call.
-   *  Default OFF: leave off until META_BRP_ACCESS_TOKEN is granted, the
-   *  Trusted Partner application clears, and the cost-daily-check brake on
+   *  Server-side only — the Inngest cron is the only consumer. Default OFF:
+   *  leave off until META_BRP_ACCESS_TOKEN is granted, the Trusted Partner
+   *  application clears, and the cost-daily-check brake on
    *  feature_brakes.meta_brp is in place. */
   metaBrpReporter: process.env.FF_META_BRP_REPORTER === "true",
 
@@ -315,7 +316,8 @@ export const featureFlags = {
    *  overlap, runs semver.satisfies on affected_versions, writes matching rows
    *  to vulnerability_detections, and emits b2b/exposure.matched.v1 for
    *  webhook fan-out. When OFF, the function returns {skipped:true} early.
-   *  Default OFF until the orgId tenant-scoping is confirmed safe and the
+   *  Server-side only — the Inngest function is the only consumer. Default
+   *  OFF until the orgId tenant-scoping is confirmed safe and the
    *  /api/v1/exposure HTTP producer (separate PR) is in place. */
   vulnB2bExposure: process.env.FF_VULN_B2B_EXPOSURE === "true",
 
