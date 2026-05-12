@@ -29,6 +29,20 @@ Master reference for AI assistants and contributors working on this codebase. St
 
 > **Database hygiene note.** See [docs/system-map/database.md#hygiene-backlog](./docs/system-map/database.md#hygiene-backlog) for the deferred items from the 2026-04-23 advisor audit (177 unused indexes, RLS rewrites, partitioned shadows, Phase 1 commercial tables). Migration v78 cleared the P0 advisor ERRORs; everything else is tracked in `BACKLOG.md → Database Hygiene & SPF Readiness`.
 
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues (`gh` CLI) — `matchmoments-admin/ask-arthur`. See [`docs/agents/issue-tracker.md`](./docs/agents/issue-tracker.md).
+
+### Triage labels
+
+Five canonical labels per Matt Pocock's framework, used as-is (no remap): `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See [`docs/agents/triage-labels.md`](./docs/agents/triage-labels.md).
+
+### Domain docs
+
+Single-context — `CONTEXT.md` + `docs/adr/` + `docs/system-map/` at repo root. See [`docs/agents/domain.md`](./docs/agents/domain.md).
+
 ## What Is This?
 
 Ask Arthur is an Australian scam detection platform. Users submit suspicious content (text, URLs, images) via web app, browser extension, mobile app, or chat bots. The platform uses Claude AI + threat intelligence feeds to return a verdict (SAFE / SUSPICIOUS / HIGH_RISK).
