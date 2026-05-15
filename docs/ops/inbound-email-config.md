@@ -51,20 +51,32 @@ No per-email Claude call. The Wave-3 weekly regulator clustering job (PR-C1, not
 
 Subscribe each upstream newsletter to its own tagged address:
 
-| Subscription          | Subscribe address                        | Source slug in `feed_items` |
-| --------------------- | ---------------------------------------- | --------------------------- |
-| Scamwatch GovDelivery | `scamwatch+ingest@askarthur-inbound.com` | `inbound_scamwatch`         |
-| ACSC Alert Service    | `acsc+ingest@askarthur-inbound.com`      | `inbound_acsc`              |
-| AUSTRAC               | `austrac+ingest@askarthur-inbound.com`   | `inbound_austrac`           |
-| OAIC newsletter       | `oaic+ingest@askarthur-inbound.com`      | `inbound_oaic`              |
-| AFP media-release     | `afp+ingest@askarthur-inbound.com`       | `inbound_afp`               |
-| ACMA                  | `acma+ingest@askarthur-inbound.com`      | `inbound_acma`              |
-| IDCARE Insights       | `idcare+ingest@askarthur-inbound.com`    | `inbound_idcare`            |
-| AusCERT digest        | `auscert+ingest@askarthur-inbound.com`   | `inbound_auscert`           |
-| FTC Consumer Alerts   | `ftc+ingest@askarthur-inbound.com`       | `inbound_ftc`               |
-| Risky Biz (backup)    | `riskybiz+ingest@askarthur-inbound.com`  | `inbound_riskybiz`          |
-| Krebs (backup)        | `krebs+ingest@askarthur-inbound.com`     | `inbound_krebs`             |
-| Anything else         | any tag not in the list above            | `inbound_generic`           |
+| Subscription                     | Subscribe URL                                                                                 | Subscribe address                           | Source slug            | Tier               |
+| -------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------- | ---------------------- | ------------------ |
+| Scamwatch (NASC)                 | https://www.scamwatch.gov.au/about-us/news-and-alerts/subscribe-to-scam-alert-emails          | `scamwatch+ingest@askarthur-inbound.com`    | `inbound_scamwatch`    | `tier_1_regulator` |
+| ACSC Alert Service               | https://www.cyber.gov.au/about-us/register                                                    | `acsc+ingest@askarthur-inbound.com`         | `inbound_acsc`         | `tier_1_regulator` |
+| ATO scam alerts (v129)           | https://www.ato.gov.au/online-services/scams-cyber-safety-and-identity-protection/scam-alerts | `ato+ingest@askarthur-inbound.com`          | `inbound_ato`          | `tier_1_regulator` |
+| OAIC Information Matters         | https://www.oaic.gov.au/engage-with-us/networks/information-matters-newsletter                | `oaic+ingest@askarthur-inbound.com`         | `inbound_oaic`         | `tier_1_regulator` |
+| FTC Consumer Alerts              | https://public.govdelivery.com/accounts/USFTCCONSUMER/subscriber/new                          | `ftc+ingest@askarthur-inbound.com`          | `inbound_ftc`          | `tier_1_regulator` |
+| IDCARE Insights                  | https://www.idcare.org/contact (request mailing list)                                         | `idcare+ingest@askarthur-inbound.com`       | `inbound_idcare`       | `tier_2_industry`  |
+| SANS NewsBites (v129)            | https://www.sans.org/newsletters/                                                             | `sans+ingest@askarthur-inbound.com`         | `inbound_sans`         | `tier_2_industry`  |
+| Risky Biz News                   | https://risky.biz/subscribe/                                                                  | `riskybiz+ingest@askarthur-inbound.com`     | `inbound_riskybiz`     | `tier_3_curated`   |
+| Krebs on Security                | https://krebsonsecurity.com/subscribe/                                                        | `krebs+ingest@askarthur-inbound.com`        | `inbound_krebs`        | `tier_3_curated`   |
+| TLDR Information Security (v129) | https://tldr.tech/infosec                                                                     | `tldr_infosec+ingest@askarthur-inbound.com` | `inbound_tldr_infosec` | `tier_3_curated`   |
+| The Hacker News (v129)           | https://thehackernews.com/ (footer email signup)                                              | `thn+ingest@askarthur-inbound.com`          | `inbound_thn`          | `tier_3_curated`   |
+| SecurityWeek Daily (v129)        | https://www.securityweek.com/newsletter/                                                      | `securityweek+ingest@askarthur-inbound.com` | `inbound_securityweek` | `tier_3_curated`   |
+| Anything else                    | any tag not in the list above                                                                 | (whatever the upstream form gives you)      | `inbound_generic`      | `tier_4_osint`     |
+
+**Sources without email subscription — handled by Phase B/D scrapers instead** (not via this pipeline):
+
+| Source                   | Why no email                                                | Path                               |
+| ------------------------ | ----------------------------------------------------------- | ---------------------------------- |
+| AUSTRAC media releases   | RSS-only (their email options "coming soon" as of May 2026) | Phase B PR-B3 — RSS scraper        |
+| AFP media releases       | No public email subscription                                | Phase B PR-B5 — RSS scraper        |
+| ACMA scam alerts         | Subscribe page removed in 2026 site redesign                | Phase B PR-B2 — HTML scraper       |
+| AusCERT public bulletins | Email digest is members-only (~A\$1k/yr)                    | Phase D PR-D2 — public-RSS scraper |
+| NASC Fusion Cell PDFs    | Buried in HTML; no newsletter                               | Phase B PR-B1 — HTML+PDF scraper   |
+| Services Australia scams | No newsletter                                               | Phase B PR-B6 — HTML scraper       |
 
 Allowlist enforced by migration v128 (`feed_items_source_check` constraint + `get_unembedded_narrative_feed_items()` RPC). Add a new tag → add a slug to both, in a new migration.
 
@@ -109,19 +121,26 @@ supabase secrets set --project-ref rquomhcgnodxzkhokwni \
 
 In the Cloudflare dashboard → `askarthur-inbound.com` → **Email** → **Email Routing** → **Routing rules** → **"Create address"** for each row. All rules use **Action: Send to a Worker → `askarthur-intel-inbound-email`**:
 
-| Custom address | Resulting source slug |
-| -------------- | --------------------- |
-| `acsc`         | `inbound_acsc`        |
-| `scamwatch`    | `inbound_scamwatch`   |
-| `austrac`      | `inbound_austrac`     |
-| `oaic`         | `inbound_oaic`        |
-| `afp`          | `inbound_afp`         |
-| `acma`         | `inbound_acma`        |
-| `idcare`       | `inbound_idcare`      |
-| `auscert`      | `inbound_auscert`     |
-| `ftc`          | `inbound_ftc`         |
-| `riskybiz`     | `inbound_riskybiz`    |
-| `krebs`        | `inbound_krebs`       |
+**Already created for the live zone (16 rules total). Recreate via the Cloudflare API if migrating zones — see the API automation script in the PR-A3 ship notes:**
+
+| Custom address | Resulting source slug  | Source                                                   |
+| -------------- | ---------------------- | -------------------------------------------------------- |
+| `scamwatch`    | `inbound_scamwatch`    | Scamwatch (NASC)                                         |
+| `acsc`         | `inbound_acsc`         | ACSC Alert Service                                       |
+| `oaic`         | `inbound_oaic`         | OAIC Information Matters                                 |
+| `idcare`       | `inbound_idcare`       | IDCARE Insights                                          |
+| `ftc`          | `inbound_ftc`          | FTC Consumer Alerts                                      |
+| `riskybiz`     | `inbound_riskybiz`     | Risky Biz News                                           |
+| `krebs`        | `inbound_krebs`        | Krebs on Security                                        |
+| `ato`          | `inbound_ato`          | ATO scam alerts (v129)                                   |
+| `sans`         | `inbound_sans`         | SANS NewsBites (v129)                                    |
+| `tldr_infosec` | `inbound_tldr_infosec` | TLDR Information Security (v129)                         |
+| `thn`          | `inbound_thn`          | The Hacker News (v129)                                   |
+| `securityweek` | `inbound_securityweek` | SecurityWeek Daily (v129)                                |
+| `austrac`      | `inbound_austrac`      | (kept — for when AUSTRAC's new email path opens)         |
+| `afp`          | `inbound_afp`          | (kept — in case AFP adds email later)                    |
+| `acma`         | `inbound_acma`         | (kept — in case ACMA restores subscribe page)            |
+| `auscert`      | `inbound_auscert`      | (kept — for paid AusCERT member digest if ever procured) |
 
 **Do not enable the catch-all.** Per-address rules give clean attribution; catch-all would route random scanner / typo traffic into `feed_items` as `inbound_generic`.
 

@@ -35,6 +35,7 @@ const InboundEmailPayload = z.object({
   // Pre-resolved source slug from the Worker. Must match the
   // feed_items_source_check allowlist (v128).
   source: z.enum([
+    // v128:
     "inbound_scamwatch",
     "inbound_acsc",
     "inbound_austrac",
@@ -47,6 +48,12 @@ const InboundEmailPayload = z.object({
     "inbound_riskybiz",
     "inbound_krebs",
     "inbound_generic",
+    // v129 (high-signal additions):
+    "inbound_ato",
+    "inbound_sans",
+    "inbound_tldr_infosec",
+    "inbound_thn",
+    "inbound_securityweek",
   ]),
   // Message-id hash from the Worker. Drives ON CONFLICT idempotency.
   external_id: z.string().min(8).max(128),
@@ -93,6 +100,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 //   tier_4_osint:     fallback for inbound_generic (unknown sender, unverified)
 function provenanceTierFor(source: string): string {
   switch (source) {
+    // Government regulators
     case "inbound_acsc":
     case "inbound_scamwatch":
     case "inbound_austrac":
@@ -100,12 +108,19 @@ function provenanceTierFor(source: string): string {
     case "inbound_afp":
     case "inbound_acma":
     case "inbound_ftc":
+    case "inbound_ato": // v129: AU Tax Office scam alerts — regulator
       return "tier_1_regulator";
+    // Industry / CERTs / victim support
     case "inbound_auscert":
     case "inbound_idcare":
+    case "inbound_sans": // v129: SANS NewsBites — expert-curated, industry standard
       return "tier_2_industry";
+    // Curated journalism / editorial
     case "inbound_riskybiz":
     case "inbound_krebs":
+    case "inbound_tldr_infosec": // v129
+    case "inbound_thn":          // v129
+    case "inbound_securityweek": // v129
       return "tier_3_curated";
     default:
       return "tier_4_osint";

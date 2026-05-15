@@ -34,6 +34,7 @@ interface Env {
 // ── Source-attribution table ────────────────────────────────────────────
 
 const KNOWN_TAGS = [
+  // Original v128 set (PR-A3):
   "scamwatch",
   "acsc",
   "austrac",
@@ -45,6 +46,12 @@ const KNOWN_TAGS = [
   "ftc",
   "riskybiz",
   "krebs",
+  // v129 additions (PR-A3 extension — replaces sources without email path):
+  "ato",
+  "sans",
+  "tldr_infosec",
+  "thn",
+  "securityweek",
 ] as const;
 type KnownTag = (typeof KNOWN_TAGS)[number];
 
