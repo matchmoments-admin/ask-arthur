@@ -61,5 +61,6 @@ A$0 per email. No Claude call in the per-email path. Voyage embedding is ~A$0.00
 - `docs/ops/inbound-email-config.md` — operator-facing setup + monitoring queries
 - `docs/plans/threat-intel-ingestion.md` — the plan this skill operationalises
 - `supabase/migration-v127-feed-sources.sql` — the feed_sources registry
-- `supabase/migration-v128-inbound-email-sources.sql` — original 12 inbound\_\* slugs
-- `supabase/migration-v129-inbound-email-extra-sources.sql` — 5 high-signal additions (ATO, SANS, TLDR, THN, SecurityWeek)
+- `supabase/migration-v128-inbound-email-sources.sql` — original 12 inbound\_\* slugs. NB: this migration shipped without the matching `feed_sources` INSERTs — v130 backfilled them. Step 3 above (`feed_sources` row paired with the slug, same migration) prevents the repeat.
+- `supabase/migration-v129-inbound-email-extra-sources.sql` — 5 high-signal additions (ATO, SANS, TLDR, THN, SecurityWeek). Reference shape: source_check + RPC + index + feed_sources INSERT all in one file.
+- `supabase/migration-v130-feed-sources-inbound-backfill.sql` — the v128 backfill itself.

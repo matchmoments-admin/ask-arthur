@@ -513,26 +513,36 @@ Each numbered PR is independently shippable, gated by its own flag (default off)
 
 ### Phase A — Foundation (≤1 sprint, 3 PRs)
 
-**PR-A1 — `feed_sources` config table (item #1, ~1 day)**
+**PR-A1 — `feed_sources` config table (item #1, ~1 day) — SHIPPED as #224**
 
-- Migration `supabase/migrations/v100-feed-sources.sql`: `CREATE TABLE feed_sources (...)` per §2 schema. Seed rows for all 26 existing scrapers + Wave 2 sources (initially `enabled=false` for new ones).
+- Migration `supabase/migration-v127-feed-sources.sql`: `CREATE TABLE feed_sources (...)` per §2 schema. Seed rows for all 26 existing scrapers + Wave 2 sources (initially `enabled=false` for new ones).
 - No code refactor yet — existing scrapers stay hardcoded. The table is read-only state for now; subsequent PRs will start querying it.
 - Files touched: 1 migration.
 
-**PR-A2 — `common/http_impersonate.py` opt-in helper (item #3, ~1 day)**
+**PR-A2 — `common/http_impersonate.py` opt-in helper (item #3, ~1 day) — SHIPPED as #225**
 
 - `pipeline/scrapers/requirements.txt`: add `curl_cffi==0.7.x` (pin minor).
 - `pipeline/scrapers/common/http_impersonate.py`: thin wrapper around `curl_cffi.requests` with default `impersonate="chrome120"`.
 - One smoke test in `pipeline/scrapers/tests/test_http_impersonate.py` against `https://cyber.gov.au/`.
 - No existing scraper changes — opt-in only.
 
-**PR-A3 — Inbound-email pipeline foundation (item #2, ~3 days)**
+**PR-A3 — Inbound-email pipeline foundation (item #2, ~3 days) — SHIPPED as #226 (+ #239/#240/#241 follow-ups)**
 
 - `apps/cloudflare-email-worker/` (new package, separate `wrangler.toml`): receives RFC822, strips GovDelivery wrapper redirects, POSTs to Supabase Edge Function.
 - `supabase/functions/intel-inbound-email/index.ts`: Zod-validates payload, attributes source by tag (`acsc+ingest@` → `source='inbound_acsc'`), inserts into `feed_items`.
-- Migration `v101-inbound-email-sources.sql`: add `inbound_<source>` slugs to `feed_items_source_check` + `get_unembedded_narrative_feed_items()` allowlist.
+- Migration `v128-inbound-email-sources.sql`: add `inbound_<source>` slugs to `feed_items_source_check` + `get_unembedded_narrative_feed_items()` allowlist.
+- v129 follow-on: 5 high-signal newsletter additions (ATO, SANS, TLDR, THN, SecurityWeek) on the same channel.
+- v130 follow-on (#240): backfill `feed_sources` rows for the 12 v128 inbound\_\* slugs that v128 missed.
 - `ENABLE_INTEL_INBOUND_EMAIL` env var; Worker returns `204` when off.
 - Operational docs: Cloudflare Email Routing setup, address-tagging conventions.
+
+**Phase A learnings baked into Phase B (see template below):**
+
+- Migration filenames live at `supabase/migration-vN-name.sql` (top level), not `supabase/migrations/vN-name.sql`. The plan's earlier hardcoded version numbers (v100/v101) drifted to v127/v128/v129/v130 in flight — use "next available version" instead.
+- Every new slug added to `feed_items_source_check` MUST be paired with a `feed_sources` INSERT in the same migration. v128 missed this; v130 backfilled it. The skill enforces this from now on.
+- Pre-deploy SQL smoke step is now mandatory — PR-A3 shipped two schema bugs found only post-deploy.
+- HTML-extraction is shared via `pipeline/scrapers/common/html_extract.py` (trafilatura wrapper, PR-A3e #241) so each new HTML scraper doesn't re-roll the regex that bit the Worker (#238 `htmlToText`).
+- Worker has a vitest test file as of #239 — any future change to `apps/cloudflare-email-worker/` adds a regression test there.
 
 ### Phase B — Wave 2 government sources (≤1 sprint, 6 PRs)
 
@@ -540,17 +550,25 @@ Each PR follows an identical template — copying `pipeline/scrapers/scamwatch_a
 
 **Template PR shape (apply to PRs B1–B6)**
 
-- Migration `vNNN-news-intel-add-<source>.sql`: add slug to `feed_items_source_check` + `get_unembedded_narrative_feed_items()` allowlist.
-- `pipeline/scrapers/<source>.py`: imports `bulk_upsert_narrative_feed_items`, `conditional_get`, `log_ingestion` from `common/`. Schema-mirror of `scamwatch_alerts.py`.
-- `.github/workflows/scrape-feeds.yml`: add scraper to the daily-16:00 tier (or weekly for low-volume sources).
-- `pipeline/scrapers/tests/test_<source>.py`: parsing + idempotency tests.
-- `ENABLE_<SOURCE>_INGEST` env var added to `turbo.json` `globalEnv` + `.env.example`.
-- `docs/system-map/background-workers.md`: append row to the scraper table.
+0. **Pre-deploy SQL smoke** _(new since Phase A — PR-A3 shipped two schema bugs found only post-deploy)_: paste the migration into `mcp__supabase__execute_sql` against a Supabase preview branch (or wrap in `BEGIN; ... ROLLBACK;` on prod) before `apply_migration`. Validates the constraint syntax, RPC function body, and partial-index WHERE clause in one shot.
+1. **Migration** `supabase/migration-vN-news-intel-add-<source>.sql` where `vN` is the **next available version** (`git ls-tree origin/main 'supabase/migration-v*' | tail -3` to find the highest current; as of 2026-05-16 the next is `v131`):
+   - Add slug to `feed_items_source_check` constraint.
+   - Add slug to `get_unembedded_narrative_feed_items()` RPC IN-list.
+   - Recreate `idx_feed_items_unembedded_narrative` with the slug in the WHERE clause (partial index must match).
+   - **Insert a row into `feed_sources`** for the slug with `enabled=false`, `category='narrative'`, jurisdiction, source URL, and notes. Required — v128 missed this and v130 had to backfill; the skill enforces it from now on.
+2. **Scraper** `pipeline/scrapers/<source>.py` — imports `bulk_upsert_narrative_feed_items`, `conditional_get`, `log_ingestion` from `common/`; schema-mirror of `scamwatch_alerts.py`.
+   - **For HTML sources**: use `from common.html_extract import extract_article_body` (PR-A3e #241) for body extraction. Don't hand-roll regex tag-stripping — same class of bug as #238 in the Worker.
+   - **For RSS sources**: feedparser gives clean text directly; no helper needed.
+3. **Workflow** `.github/workflows/scrape-feeds.yml`: add scraper to the daily-16:00 tier (or weekly for low-volume sources).
+4. **Tests** `pipeline/scrapers/tests/test_<source>.py`: parsing + idempotency. Mock external HTTP via `unittest.mock.patch`; add an opt-in live test gated on `ASKARTHUR_<SOURCE>_LIVE=1` (matches `test_http_impersonate.py` pattern).
+5. **Env var** `ENABLE_<SOURCE>_INGEST` added to `turbo.json` `globalEnv` + `.env.example`.
+6. **System map** `docs/system-map/background-workers.md`: append row to the scraper table.
 
-**PR-B1** — NASC news + Fusion Cell PDFs (item #4, ~1 day). Slug: `nasc`. Daily 16:00 UTC tier.
-**PR-B2** — ACMA scam alerts + quarterly Action PDF (item #5, ~1.5 days). Slugs: `acma_alerts`, `acma_quarterly`. Daily + weekly tiers.
-**PR-B3** — AUSTRAC media release RSS (item #6, ~0.5 day). Slug: `austrac`. Daily tier. **Simplest of the set — recommended vertical-slice candidate.**
-**PR-B4** — OAIC NDB releases (item #7, ~1 day). Slug: `oaic_ndb`. Weekly HEAD check.
+**PR-B1a** — NASC news HTML (item #4, ~1 day). Slug: `nasc`. Daily 16:00 UTC tier. Ships in Phase B.
+**PR-B1b** — NASC Fusion Cell PDF ingestion. **Deferred until PR-C3 ships** so the PDF rows have a consumer. Cross-reference: any PDF-row insert in PR-B1a / PR-B2 should be gated behind `ENABLE_REGULATOR_PDF_INGEST` to avoid stranded rows in `feed_items`.
+**PR-B2** — ACMA scam alerts + quarterly Action PDF (item #5, ~1.5 days). Slugs: `acma_alerts`, `acma_quarterly`. Daily + weekly tiers. Same PDF-row gating as PR-B1b.
+**PR-B3** — AUSTRAC media release RSS (item #6, ~0.5 day). Slug: `austrac`. Daily tier. **Simplest of the set — recommended vertical-slice candidate to validate the corrected Phase B template.**
+**PR-B4** — OAIC NDB releases (item #7, ~1 day). Slug: `oaic_ndb`. Weekly HEAD check. PDF; same gating note.
 **PR-B5** — AFP media releases (item #8, ~1 day). Slug: `afp`. Daily tier. Keyword pre-filter for scam/fraud/cyber.
 **PR-B6** — Services Australia scam alerts (item #9, ~1 day). Slug: `services_australia`. Weekly tier.
 
@@ -559,7 +577,7 @@ Each PR follows an identical template — copying `pipeline/scrapers/scamwatch_a
 **PR-C1 — Regulator-narrative theme clustering (item #10, ~2 days)**
 
 - Refactor `reddit-intel-daily` / `reddit-intel-cluster` in `packages/scam-engine/src/inngest/functions.ts` to accept `{ source_filter: string[] }` parameter.
-- Migration `vNNN-regulator-intel-themes.sql`: new table `regulator_intel_themes` mirroring `reddit_intel_themes` schema; new `feature_brakes.regulator_intel` row at A$5/day.
+- Migration `supabase/migration-vN-regulator-intel-themes.sql` (next available `vN`): new table `regulator_intel_themes` mirroring `reddit_intel_themes` schema; new `feature_brakes.regulator_intel` row at A$5/day.
 - New Inngest cron `regulator-intel-cluster` weekly Sunday 06:00 UTC; reads `feed_items` for last 7d × Phase B source slugs + existing ACSC/Scamwatch/ASIC.
 - **Batch API** integration: submit Sonnet 4.6 classifier as batch with 24h SLA.
 - **Prompt caching**: mark classifier system prompt + few-shot examples with `cache_control: {type: "ephemeral"}`.
@@ -572,7 +590,7 @@ Each PR follows an identical template — copying `pipeline/scrapers/scamwatch_a
 
 **PR-C3 — Quarterly / annual PDF ingester (item #12, ~1 day)**
 
-- Migration `vNNN-regulator-report-extracts.sql`: new table for Claude-extracted PDF structure.
+- Migration `supabase/migration-vN-regulator-report-extracts.sql` (next available `vN`): new table for Claude-extracted PDF structure.
 - Event-driven Inngest function `regulator-pdf-ingest` triggered when `feed_items.source IN ('acma_quarterly', 'oaic_ndb', 'accc_targeting_scams', ...)` inserts a row with `evidence_r2_key` set.
 - One-shot Sonnet call per PDF, JSON-schema validation.
 
@@ -614,6 +632,12 @@ Lifted from the standard `CLAUDE.md` ship workflow. Apply to every PR above.
 ## 9. Locked decisions (this session)
 
 - **Build scope:** Full Phase A (PR-A1 `feed_sources` table + PR-A2 `curl_cffi` helper + PR-A3 inbound-email pipeline). **All three PRs shipped 2026-05-15** (#224, #225, #226).
+- **Phase A tightening (2026-05-16)** — landed before Phase B opens, per plan `melodic-growing-biscuit`:
+  - **PR-A3c (#239)** — Worker bug fixes #237 (extractFirstUrl trailing punct) + #238 (htmlToText drops anchor hrefs). First vitest tests in the Worker package.
+  - **PR-A3d (#240)** — Migration v130 backfills `feed_sources` rows for the 12 v128 inbound\_\* slugs (v128 missed them; v129 only seeded its 5 additions).
+  - **News-intel-embed stall — non-finding.** The audit caught a transient mid-tick state, not a stall. The cron is healthy on its 30-min cadence. Monitoring queries (§11.4) now use a 1h threshold so future audits don't repeat the false-positive.
+  - **PR-A3e (#241)** — `pipeline/scrapers/common/html_extract.py` (trafilatura wrapper) so Phase B HTML scrapers inherit a single anchor-preserving body extractor. Same regression contract as Worker #238.
+  - **PR-A3f (this PR)** — Plan + skill doc updates per the learnings above.
 - **Inbound-email vendor:** Cloudflare Email Routing → Cloudflare Worker → Supabase Edge Function → direct insert into `feed_items`. Free tier across the stack.
 - **Inbound-email domain:** **`askarthur-inbound.com`** (registered through Cloudflare Registrar, A$16/year). Chosen over `intel.askarthur.au` to avoid touching production DNS and to keep inbound newsletter mail cleanly separated from Resend outbound traffic on `askarthur.au`.
 - **Deployed surface (PR-A3):**
@@ -751,12 +775,31 @@ GROUP BY source
 ORDER BY items_24h DESC;
 
 -- D. Backfill check — anything not embedded after >30 min?
+-- Embed cron runs every 30 min; rows landing mid-tick wait up to ~30 min
+-- before the next pass. Any inbound_* row with embedding IS NULL after
+-- 30 min indicates either (a) the cron has just missed this tick, or
+-- (b) a real backlog. For an alerting threshold use query E.
 SELECT source, count(*) AS stale_unembedded
 FROM public.feed_items
 WHERE source LIKE 'inbound_%'
   AND embedding IS NULL
   AND created_at < now() - interval '30 minutes'
 GROUP BY source;
+
+-- E. Embed-cron health — alert if narrative rows >1h old still unembedded.
+-- Covers the inbound channel AND every other narrative source (scamwatch,
+-- ACSC, ASIC, Phase B sources). Threshold of 1h gives the 30-min cron
+-- two ticks to clear a row before it's considered stuck. Replace the
+-- LIKE filter with a join to feed_sources if you want to scope to enabled
+-- sources only.
+SELECT fi.source, count(*) AS stale_unembedded, min(fi.created_at) AS oldest
+FROM public.feed_items fi
+WHERE fi.embedding IS NULL
+  AND fi.source IN (
+    SELECT slug FROM public.feed_sources WHERE category = 'narrative'
+  )
+  AND fi.created_at < now() - interval '1 hour'
+GROUP BY fi.source;
 ```
 
 ### 11.5 — Deferred (PR-A4, not shipping today)
