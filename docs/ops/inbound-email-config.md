@@ -182,12 +182,27 @@ GROUP BY source
 ORDER BY items_24h DESC;
 
 -- D. Backfill check — anything stuck unembedded after >30 min?
+-- The feed-items-embed cron runs every 30 min; rows landing mid-tick wait
+-- up to ~30 min before the next pass. For a true alert threshold, use E.
 SELECT source, count(*) AS stale_unembedded
 FROM public.feed_items
 WHERE source LIKE 'inbound_%'
   AND embedding IS NULL
   AND created_at < now() - interval '30 minutes'
 GROUP BY source;
+
+-- E. Embed-cron health (alert threshold) — narrative rows >1h old still
+-- unembedded indicate a real stall, not just "waiting for the next tick".
+-- Covers every narrative source (inbound + scamwatch_alert + acsc +
+-- asic_investor + Phase B sources). Wire into the daily health digest
+-- if it ever needs to page automatically.
+SELECT fi.source, count(*) AS stale_unembedded, min(fi.created_at) AS oldest
+FROM public.feed_items fi
+WHERE fi.embedding IS NULL
+  AND fi.source IN (
+    SELECT slug FROM public.feed_sources WHERE category = 'narrative'
+  )
+  AND fi.created_at < now() - interval '1 hour';
 ```
 
 ## Kill switch
