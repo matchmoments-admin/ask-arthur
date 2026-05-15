@@ -37,6 +37,10 @@ vi.mock("@/lib/auth", () => ({
   AuthUnavailableError: class extends Error {},
 }));
 
+vi.mock("@/lib/simSwapBeta", () => ({
+  hasRedeemedSimSwapInvite: vi.fn(() => Promise.resolve(true)),
+}));
+
 // Mutable so each test can swap in a different `get()` return. The
 // route caches the Redis instance at module scope (`_redis`), so the
 // constructor-time binding is captured ONCE for the whole test file.
@@ -68,11 +72,13 @@ import {
   callTelstraRetrieveDate,
 } from "@askarthur/scam-engine/phone-footprint";
 import { getUser } from "@/lib/auth";
+import { hasRedeemedSimSwapInvite } from "@/lib/simSwapBeta";
 import { createServiceClient } from "@askarthur/supabase/server";
 
 const mockedCall = vi.mocked(callTelstraSimSwap);
 const mockedDate = vi.mocked(callTelstraRetrieveDate);
 const mockedGetUser = vi.mocked(getUser);
+const mockedInvite = vi.mocked(hasRedeemedSimSwapInvite);
 const mockedSupa = vi.mocked(createServiceClient);
 
 function makeRequest(body: unknown): NextRequest {
@@ -109,6 +115,7 @@ describe("POST /api/sim-swap/check", () => {
       id: "user-1",
       email: "user@example.com",
     } as Awaited<ReturnType<typeof getUser>>);
+    mockedInvite.mockResolvedValue(true);
     redisInstance.get = async () => "1";
   });
 
@@ -116,6 +123,14 @@ describe("POST /api/sim-swap/check", () => {
     mockedGetUser.mockResolvedValue(null);
     const res = await POST(makeRequest({ msisdn: "+61412345678" }));
     expect(res.status).toBe(401);
+  });
+
+  it("403s with invite_required when user is signed in but not in the beta", async () => {
+    mockedInvite.mockResolvedValue(false);
+    const res = await POST(makeRequest({ msisdn: "+61412345678" }));
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error).toBe("invite_required");
   });
 
   it("400s on invalid msisdn", async () => {

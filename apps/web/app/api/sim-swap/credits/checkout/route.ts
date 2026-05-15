@@ -18,9 +18,11 @@ import "server-only";
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 import { stripe, getOrCreateStripeCustomer } from "@/lib/stripe";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { getUser, AuthUnavailableError } from "@/lib/auth";
+import { hasRedeemedSimSwapInvite } from "@/lib/simSwapBeta";
 import { getSimSwapSkuMeta, type SimSwapSku } from "@/lib/simSwapSkus";
 
 export const runtime = "nodejs";
@@ -37,6 +39,13 @@ function priceIdForSku(sku: SimSwapSku): string | null {
 }
 
 export async function POST(req: NextRequest) {
+  // Flag gate — must mirror the check endpoint. Without this, a curious
+  // user could buy credits before the feature is live (and we'd be
+  // sitting on un-redeemable balances).
+  if (!featureFlags.simSwapOnDemand) {
+    return NextResponse.json({ error: "feature_disabled" }, { status: 503 });
+  }
+
   let user;
   try {
     user = await getUser();
@@ -51,6 +60,14 @@ export async function POST(req: NextRequest) {
   }
   if (!user) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+  }
+
+  // Private-beta invite gate — must hold a redeemed invite to buy credits.
+  if (!(await hasRedeemedSimSwapInvite(user.id))) {
+    return NextResponse.json(
+      { error: "invite_required" },
+      { status: 403 },
+    );
   }
 
   let body: z.infer<typeof RequestBody>;
