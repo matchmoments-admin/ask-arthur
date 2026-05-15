@@ -85,6 +85,33 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+// Source → provenance_tier_t (enum on public.feed_items).
+//   tier_1_regulator: government regulators (ASD/ACSC, ACCC/Scamwatch, ACMA,
+//                     AUSTRAC, OAIC, AFP, FTC)
+//   tier_2_industry:  industry CERTs and victim-support services (AusCERT, IDCARE)
+//   tier_3_curated:   editorial / journalist commentary (Risky Biz, Krebs)
+//   tier_4_osint:     fallback for inbound_generic (unknown sender, unverified)
+function provenanceTierFor(source: string): string {
+  switch (source) {
+    case "inbound_acsc":
+    case "inbound_scamwatch":
+    case "inbound_austrac":
+    case "inbound_oaic":
+    case "inbound_afp":
+    case "inbound_acma":
+    case "inbound_ftc":
+      return "tier_1_regulator";
+    case "inbound_auscert":
+    case "inbound_idcare":
+      return "tier_2_industry";
+    case "inbound_riskybiz":
+    case "inbound_krebs":
+      return "tier_3_curated";
+    default:
+      return "tier_4_osint";
+  }
+}
+
 // ── Handler ─────────────────────────────────────────────────────────────
 
 Deno.serve(async (req: Request) => {
@@ -135,36 +162,38 @@ Deno.serve(async (req: Request) => {
     auth: { persistSession: false },
   });
 
+  // Plain insert. The unique index on (source, external_id) is partial
+  // (WHERE external_id IS NOT NULL), and PostgREST .upsert() with
+  // onConflict can't target a partial index reliably. Instead we INSERT
+  // and treat 23505 (unique_violation) as "duplicate, skip" — same
+  // idempotency semantics, just at the SQL-error layer.
   const { data, error } = await supabase
     .from("feed_items")
-    .upsert(
-      {
-        source: payload.source,
-        external_id: payload.external_id,
-        title: payload.subject,
-        description: null,
-        body_md: payload.body_md,
-        url: payload.url ?? null,
-        source_url: payload.url ?? null,
-        tags: payload.tags ?? null,
-        published_at: payload.received_at,
-        source_created_at: payload.received_at,
-        country_code: "AU", // most subscriptions are AU gov; specific sources can override later
-        provenance_tier: "verified", // gov subscriptions are first-party
-      },
-      { onConflict: "source,external_id", ignoreDuplicates: true },
-    )
+    .insert({
+      source: payload.source,
+      external_id: payload.external_id,
+      title: payload.subject,
+      description: null,
+      body_md: payload.body_md,
+      url: payload.url ?? null,
+      source_url: payload.url ?? null,
+      tags: payload.tags ?? null,
+      published_at: payload.received_at,
+      source_created_at: payload.received_at,
+      country_code: "AU", // most subscriptions are AU gov; specific sources can override later
+      provenance_tier: provenanceTierFor(payload.source),
+    })
     .select("id")
     .maybeSingle();
 
   if (error) {
+    // 23505 = unique_violation — same (source, external_id) already exists.
+    // Cloudflare retries / duplicate Message-IDs land here; idempotent skip.
+    if (error.code === "23505") {
+      return jsonResponse({ status: "duplicate", source: payload.source }, 200);
+    }
     return jsonResponse({ error: "db_write_failed", detail: error.message }, 500);
   }
 
-  if (!data) {
-    // ON CONFLICT short-circuit — duplicate, ignore.
-    return jsonResponse({ status: "duplicate", source: payload.source }, 200);
-  }
-
-  return jsonResponse({ status: "stored", id: data.id, source: payload.source }, 200);
+  return jsonResponse({ status: "stored", id: data?.id, source: payload.source }, 200);
 });
