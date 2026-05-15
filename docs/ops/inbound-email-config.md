@@ -100,6 +100,22 @@ echo "https://rquomhcgnodxzkhokwni.functions.supabase.co/intel-inbound-email" \
 pnpm wrangler deploy
 ```
 
+#### Redeploy after a code change
+
+The Cloudflare Worker is NOT redeployed automatically when the source merges to `main` — Cloudflare deploy is a separate step from the Vercel pipeline. After any change to `apps/cloudflare-email-worker/` that's merged to `main`:
+
+```bash
+cd /Users/<you>/Desktop/safeverify
+git checkout main && git pull --ff-only
+cd apps/cloudflare-email-worker
+pnpm typecheck                # confirm worker still compiles
+pnpm test                     # confirm vitest is green
+pnpm wrangler deploy
+# Note the Version ID returned — useful for rollback via `wrangler rollback <id>`.
+```
+
+`wrangler` reuses your `pnpm wrangler login` session, so you don't need a fresh API token for every redeploy. Cloudflare lists historical versions at https://dash.cloudflare.com/?to=/:account/workers/services/view/askarthur-intel-inbound-email — rollback is one click.
+
 ### 3. Deploy the Supabase Edge Function
 
 ```bash
