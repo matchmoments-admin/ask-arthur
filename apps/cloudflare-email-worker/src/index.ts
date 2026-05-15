@@ -69,10 +69,20 @@ function resolveSource(addresses: string[]): string {
 
 // ── Body extraction ─────────────────────────────────────────────────────
 
-function htmlToText(html: string): string {
+// Exported for unit tests in index.test.ts (#237 + #238 regression fixes).
+export function htmlToText(html: string): string {
   return html
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    // #238: preserve <a href> URLs as "label (url)" so newsletters whose
+    // confirm CTAs are button-only (TLDR, SANS, THN, SecurityWeek) don't
+    // lose the href when the generic tag-strip below runs. Anchor labels
+    // may wrap nested tags (<span>, <strong>); inner tags are stripped
+    // here so the label reads cleanly in the resulting text.
+    .replace(
+      /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi,
+      (_, url, label) => `${label.replace(/<[^>]+>/g, "")} (${url})`,
+    )
     .replace(/<\/?(p|br|div|tr|li|h[1-6])[^>]*>/gi, "\n")
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/g, " ")
@@ -141,9 +151,14 @@ async function resolveTrackingUrl(url: string): Promise<string> {
   }
 }
 
-function extractFirstUrl(text: string): string | undefined {
+// Exported for unit tests in index.test.ts.
+// #237: the character class [^\s<>"']+ doesn't exclude trailing prose
+// punctuation (`)`, `,`, `.`, `;`, `!`, `?`, `]`), so URLs wrapped in
+// Markdown parens or ending a sentence get over-captured. Strip those
+// after the match — none are valid as the *final* char of a URL anyway.
+export function extractFirstUrl(text: string): string | undefined {
   const m = text.match(/https?:\/\/[^\s<>"']+/);
-  return m?.[0];
+  return m?.[0].replace(/[)\].,;!?]+$/, "");
 }
 
 // ── Idempotency key ─────────────────────────────────────────────────────
