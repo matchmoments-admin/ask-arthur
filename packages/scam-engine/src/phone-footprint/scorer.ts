@@ -126,6 +126,7 @@ export function effectiveTier(args: {
 export function initialCoverage(): Coverage {
   return {
     vonage: "disabled",
+    telstra: "disabled",
     leakcheck: "disabled",
     ipqs: "disabled",
     twilio: "degraded",

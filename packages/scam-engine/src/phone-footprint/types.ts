@@ -37,6 +37,11 @@ export interface Coverage {
    *  approval is still in flight; 'degraded' on transient errors; 'disabled'
    *  when FF_VONAGE_ENABLED is false. */
   vonage: "live" | "pending" | "degraded" | "disabled";
+  /** 'live' once Telstra-direct CAMARA SIM Swap credentials are provisioned
+   *  and FF_TELSTRA_SIM_SWAP_ENABLED is on; 'pending' when the carrier-routing
+   *  rule chose Telstra but credentials are missing; 'degraded' on transient
+   *  errors; 'disabled' when the flag is off or the number isn't on Telstra. */
+  telstra: "live" | "pending" | "degraded" | "disabled";
   /** 'live' once DPA signed + API key set; 'disabled' otherwise. */
   leakcheck: "live" | "disabled" | "degraded";
   /** 'live' (primary reputation), 'fallback' (used because Vonage missed),

@@ -28,6 +28,7 @@ function footprintWithIdentity(detail: Record<string, unknown>): Footprint {
     },
     coverage: {
       vonage: "disabled",
+      telstra: "disabled",
       leakcheck: "disabled",
       ipqs: "disabled",
       twilio: "live",
