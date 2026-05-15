@@ -27,7 +27,7 @@
 // Runtime: Deno (Supabase Edge runtime). Imports use jsr: + npm: specifiers.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { z } from "jsr:@zod/zod@3";
+import { z } from "npm:zod@3.23.8";
 
 // ── Payload schema ──────────────────────────────────────────────────────
 
