@@ -6,6 +6,7 @@ import {
   resolvePhoneFootprintEntitlement,
   isPhoneFootprintPrice,
 } from "@/lib/phoneFootprintSkus";
+import { resolveSimSwapSku } from "@/lib/simSwapSkus";
 
 export const runtime = "nodejs";
 
@@ -128,11 +129,89 @@ async function handleCheckoutCompleted(
   session: Record<string, unknown>,
   supabase: SupabaseService
 ) {
+  const mode = session.mode as string | undefined;
+
+  // One-time payment (mode='payment'): currently the SIM Swap credit
+  // packs. Before this branch existed, mode='payment' sessions silently
+  // returned because `session.subscription` is null on them — every
+  // future one-time SKU has to opt in here.
+  if (mode === "payment") {
+    await handleOneTimePayment(session, supabase);
+    return;
+  }
+
   const subscriptionId = session.subscription as string | undefined;
   if (!subscriptionId) return;
 
   const subscription = await stripe.subscriptions.retrieve(subscriptionId);
   await upsertSubscription(subscription as unknown as Record<string, unknown>, supabase);
+}
+
+async function handleOneTimePayment(
+  session: Record<string, unknown>,
+  supabase: SupabaseService
+) {
+  const sessionId = session.id as string;
+  const metadata = (session.metadata as Record<string, string> | undefined) ?? {};
+  const userId = metadata.user_id;
+  if (!userId) {
+    logger.warn("Stripe one-time payment missing user_id metadata", {
+      sessionId,
+    });
+    return;
+  }
+
+  // Fetch the line items to discover which price was paid. Stripe doesn't
+  // include them on the session object by default.
+  const lineItems = await stripe.checkout.sessions.listLineItems(sessionId, {
+    limit: 5,
+  });
+  const priceId = lineItems.data[0]?.price?.id;
+  const quantity = lineItems.data[0]?.quantity ?? 1;
+
+  const sku = resolveSimSwapSku(priceId);
+  if (!sku) {
+    logger.warn("Stripe one-time payment: unrecognised price", {
+      sessionId,
+      priceId,
+    });
+    return;
+  }
+
+  // Idempotency: skip if we've already credited this payment_intent.
+  const paymentIntentId = session.payment_intent as string | undefined;
+  if (paymentIntentId) {
+    const { data: existing } = await supabase
+      .from("sim_swap_credit_ledger")
+      .select("id")
+      .eq("stripe_ref", paymentIntentId)
+      .limit(1)
+      .maybeSingle();
+    if (existing) {
+      logger.info("SIM Swap credit already granted for payment_intent", {
+        paymentIntentId,
+      });
+      return;
+    }
+  }
+
+  // grant_sim_swap_credits (v126) handles the insert-if-missing, lock,
+  // increment, and ledger write atomically inside one transaction.
+  const totalCredits = sku.credits * quantity;
+  const { error: incErr } = await supabase.rpc("grant_sim_swap_credits", {
+    p_user_id: userId,
+    p_bucket: sku.bucket,
+    p_credits: totalCredits,
+    p_reason: sku.ledgerReason,
+    p_stripe_ref: paymentIntentId ?? sessionId,
+  });
+  if (incErr) {
+    logger.error("grant_sim_swap_credits RPC failed", {
+      error: incErr,
+      sessionId,
+    });
+    throw incErr; // propagate so Stripe retries the webhook delivery
+  }
 }
 
 async function upsertSubscription(

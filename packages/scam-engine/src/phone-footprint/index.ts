@@ -39,6 +39,13 @@ export { renderFootprintPdf } from "./pdf/render";
 export { computeCarrierDrift } from "./providers/carrier-drift";
 
 export {
+  callTelstraSimSwap,
+  callTelstraRetrieveDate,
+  type TelstraSimSwapCheckResult,
+  type TelstraRetrieveDateResult,
+} from "./providers/telstra";
+
+export {
   hashMsisdn,
   hashIdentifierForPf,
   normalizePhoneE164,
