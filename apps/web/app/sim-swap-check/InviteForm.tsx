@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { KeyRound } from "lucide-react";
 
 export function InviteForm({ prefilledCode }: { prefilledCode: string }) {
   const [code, setCode] = useState(prefilledCode);
@@ -22,7 +23,6 @@ export function InviteForm({ prefilledCode }: { prefilledCode: string }) {
         setError(errorMessage(body.error, res.status));
         return;
       }
-      // Reload to re-render the page in the in-beta state.
       window.location.reload();
     } catch (err) {
       setError(`Network error: ${String(err)}`);
@@ -32,14 +32,25 @@ export function InviteForm({ prefilledCode }: { prefilledCode: string }) {
   }
 
   return (
-    <section className="rounded-lg border border-stone-200 bg-stone-50 p-6">
-      <h2 className="text-lg font-medium">You need an invite code</h2>
-      <p className="mt-2 text-sm text-stone-600">
-        SIM-swap check is in private beta. If you received an invite code by
-        email, enter it below to get access.
-      </p>
-      <form onSubmit={onSubmit} className="mt-4 flex flex-col gap-3">
-        <label className="text-sm font-medium" htmlFor="invite-code">
+    <section className="rounded-xl border border-border-light bg-white p-6 sm:p-8">
+      <div className="flex items-start gap-4">
+        <KeyRound size={22} className="text-deep-navy shrink-0 mt-1" />
+        <div className="flex-1">
+          <h2 className="font-semibold text-deep-navy">
+            You need an invite code
+          </h2>
+          <p className="text-sm text-gov-slate mt-1 leading-relaxed">
+            SIM-swap check is in private beta. If you received an invite code
+            by email, enter it below to get access.
+          </p>
+        </div>
+      </div>
+
+      <form onSubmit={onSubmit} className="mt-6 flex flex-col gap-3">
+        <label
+          className="text-sm font-medium text-deep-navy"
+          htmlFor="invite-code"
+        >
           Invite code
         </label>
         <input
@@ -49,18 +60,24 @@ export function InviteForm({ prefilledCode }: { prefilledCode: string }) {
           value={code}
           onChange={(e) => setCode(e.target.value)}
           autoComplete="one-time-code"
-          className="rounded-md border border-stone-300 px-3 py-2 text-base font-mono"
+          className="rounded-lg border border-border-light px-3 py-2.5 text-base font-mono focus:outline-none focus:ring-2 focus:ring-deep-navy"
           placeholder="e.g. arthur-sim-7K3F"
+          aria-invalid={error ? "true" : "false"}
+          aria-describedby={error ? "invite-error" : undefined}
         />
         {error ? (
-          <p role="alert" className="text-sm text-rose-700">
+          <p
+            id="invite-error"
+            role="alert"
+            className="text-sm text-[#B71C1C]"
+          >
             {error}
           </p>
         ) : null}
         <button
           type="submit"
           disabled={submitting || code.trim().length < 4}
-          className="rounded-md bg-stone-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          className="rounded-lg bg-deep-navy px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50 hover:bg-navy transition-colors"
         >
           {submitting ? "Redeeming…" : "Redeem invite"}
         </button>
