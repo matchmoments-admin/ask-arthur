@@ -1,0 +1,22 @@
+{
+  "name": "@askarthur/cloudflare-email-worker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cloudflare Email Routing Worker for intel.askarthur.au — parses inbound newsletter emails and forwards parsed payloads to the intel-inbound-email Supabase Edge Function.",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "postal-mime": "^2.2.7"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240909.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0",
+    "wrangler": "^3.78.0"
+  }
+}
