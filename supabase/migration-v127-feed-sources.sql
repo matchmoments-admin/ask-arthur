@@ -1,4 +1,4 @@
--- v100 — feed_sources config table.
+-- v127 — feed_sources config table.
 --
 -- Why: scraper inventory has grown to 26 active + several disabled/new
 -- entries. Slugs, URLs, and on/off state live in Python constants today,
