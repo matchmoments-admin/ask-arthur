@@ -46,6 +46,7 @@ import {
 } from "@askarthur/scam-engine/phone-footprint";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { getUser, AuthUnavailableError } from "@/lib/auth";
+import { hasRedeemedSimSwapInvite } from "@/lib/simSwapBeta";
 import { logCost } from "@/lib/cost-telemetry";
 
 export const runtime = "nodejs";
@@ -134,6 +135,14 @@ export async function POST(req: NextRequest) {
   }
   if (!user) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+  }
+
+  // --- (2b) Private-beta invite gate
+  if (!(await hasRedeemedSimSwapInvite(user.id))) {
+    return NextResponse.json(
+      { error: "invite_required" },
+      { status: 403 },
+    );
   }
 
   // --- (3) Validate body
