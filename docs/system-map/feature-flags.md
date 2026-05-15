@@ -152,6 +152,7 @@ When daily spend exceeds the cap, `cost-daily-check` upserts a `feature_brakes` 
 | `REDDIT_INTEL_CAP_USD`       | `10`    | `cost_telemetry WHERE feature='reddit-intel'`                               |
 | `PHONE_FOOTPRINT_CAP_USD`    | `5`     | Vonage `telco_api_usage` + `cost_telemetry WHERE feature='phone_footprint'` |
 | `CHARITY_CHECK_CAP_USD`      | `5`     | `cost_telemetry WHERE feature='charity-check'`                              |
+| `SIM_SWAP_CAP_USD`           | `20`    | Telstra `telco_api_usage` + `cost_telemetry WHERE feature='sim-swap'`       |
 
 **Use bare numbers** (`5`, `10`) — non-numeric values silently disable the brake because `parseFloat("$10")` is `NaN`.
 
@@ -220,8 +221,11 @@ When daily spend exceeds the cap, `cost-daily-check` upserts a `feature_brakes` 
 - `NEXT_PUBLIC_FF_MEDIA_ANALYSIS`, `NEXT_PUBLIC_FF_DEEPFAKE`, `NEXT_PUBLIC_FF_PHONE_INTEL`
 - `NEXT_PUBLIC_FF_CHARITY_CHECK`, `NEXT_PUBLIC_FF_PHONE_FOOTPRINT_CONSUMER`
 - `NEXT_PUBLIC_FF_REDDIT_INTEL_PUBLIC_PAGES`, `NEXT_PUBLIC_FF_REDDIT_INTEL_B2B_API`
+- `NEXT_PUBLIC_FF_SIM_SWAP_ON_DEMAND` — Gates web `/sim-swap-check` + mobile SOS tab; both also gate on per-user `sim_swap_beta_invites` row
 - (Full list lives in `packages/utils/src/feature-flags.ts`)
 - `FF_ANALYZE_INNGEST_WEB` — Server-only canary for the analyze Phase 2 pipeline
+- `FF_TELSTRA_SIM_SWAP_ENABLED` — Server-only; turns on the Telstra direct CAMARA SIM Swap provider in `packages/scam-engine/.../providers/telstra.ts`. Carrier routing in orchestrator: Telstra MSISDN → Telstra; else → Vonage → carrier-drift.
+- `FF_TELSTRA_NUMBER_VERIFY` — Server-only; allows mobile-data ownership proof via Telstra CAMARA Number Verification, bypassing Twilio Verify OTP at enrolment
 
 ### Inngest
 
@@ -235,6 +239,7 @@ When daily spend exceeds the cap, `cost-daily-check` upserts a `feature_brakes` 
 - `REALITY_DEFENDER_API_KEY`, `RESEMBLE_AI_API_TOKEN` — Deepfake / voice-clone detection
 - `ABN_LOOKUP_GUID` — ABR Web Services
 - `VONAGE_API_KEY`, `VONAGE_API_SECRET`, `VONAGE_APPLICATION_ID`, `VONAGE_PRIVATE_KEY` — Vonage NI v2 + CAMARA
+- `TELSTRA_CLIENT_ID`, `TELSTRA_CLIENT_SECRET`, `TELSTRA_API_BASE` — Telstra direct CAMARA SIM Swap + Number Verification (OAuth2 client-credentials)
 - `LEAKCHECK_API_KEY` — Phone-breach lookup
 
 ### Cost alerts & brakes

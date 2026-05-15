@@ -426,6 +426,27 @@ first, match the pattern in `apps/web/app/api/phone-footprint/[msisdn]/route.ts`
 - [ ] `GET /api/phone-footprint/<your-verified-phone>` returns `pillars.breach.available: true` + `coverage.leakcheck: "live"`.
 - [ ] Privacy policy updated with LeakCheck as an Overseas Recipient (APP 8).
 
+### Before `FF_TELSTRA_SIM_SWAP_ENABLED=true`
+
+Direct-to-Telstra CAMARA SIM Swap path for AU mobile numbers — slots in alongside the Vonage CAMARA provider behind the same `sim_swap` pillar shape.
+
+- [ ] Telstra trial contract / use-case approval signed off (Nathan @ Mobile APIs and PEX team).
+- [ ] Per-call pricing confirmed; `SIM_SWAP_CAP_USD` set to a sane daily ceiling (default `20`).
+- [ ] `TELSTRA_CLIENT_ID`, `TELSTRA_CLIENT_SECRET`, `TELSTRA_API_BASE` set in Vercel env (Production + Preview).
+- [ ] OAuth2 token fetch smoke test against `${TELSTRA_API_BASE}/v2/oauth/token` returns a bearer token.
+- [ ] Migration v123 applied (`sim_swap_credits`, `sim_swap_credit_ledger`, `sim_swap_beta_invites`, `consume_sim_swap_credit` RPC).
+- [ ] `POST /api/sim-swap/check` returns `swapped:false` for a clean Telstra number you own (after OTP).
+- [ ] `telco_api_usage` has rows for endpoint `camara/sim-swap` + `provider='telstra'`.
+- [ ] Privacy policy updated with the Telstra carrier-API clause (one-time explicit consent, tied to active service, revocable in `/account/numbers`).
+
+### Before `NEXT_PUBLIC_FF_SIM_SWAP_ON_DEMAND=true`
+
+- [ ] At least one verified beta tester redeemed a `sim_swap_beta_invites` row and exercised `/sim-swap-check` end-to-end on web.
+- [ ] Mobile screen submitted to TestFlight + Play Internal Testing.
+- [ ] Stripe products live: `STRIPE_PRICE_SIM_SWAP_CREDITS_5PACK` ($0.99), `STRIPE_PRICE_SIM_SWAP_RECOVERY_CHECK` ($4.99).
+- [ ] `consume_sim_swap_credit` RPC returns `SQLSTATE P0001 no_credits` once the free + paid buckets are drained; endpoint maps it to HTTP 402 with upsell payload.
+- [ ] `mcp__supabase__get_advisors` (security + performance) re-run — no new ERRORs.
+
 ### Before `NEXT_PUBLIC_FF_PHONE_FOOTPRINT_CONSUMER=true`
 
 - [ ] All three server-side flags live (or graceful-degrade validated).
@@ -520,15 +541,15 @@ research). Rather than wait, we ship internationally first.
 
 ### Per-country signal availability
 
-| Country                      | Pillar 1 (scam reports)     | Pillar 2 (breach) | Pillar 3 (reputation) | Pillar 4 (SIM swap)         | Pillar 5 (identity) | Notes                                                                                                                            |
-| ---------------------------- | --------------------------- | ----------------- | --------------------- | --------------------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| **GB** (UK)                  | ✅ low corpus               | ✅                | ✅ Vonage NI          | ✅ Vonage CAMARA            | ✅ Twilio           | **First international launch target.** UK GDPR ≈ AU APP — minimal compliance lift. SIM swap fraud high salience in news.         |
-| **US**                       | ✅ low corpus               | ✅                | ✅ Vonage NI          | ✅ Vonage CAMARA            | ✅ Twilio           | Sprint 8 — needs CCPA/CPRA disclosure review.                                                                                    |
-| **CA**                       | ✅ low corpus               | ✅                | ✅ Vonage NI          | ✅ Vonage CAMARA            | ✅ Twilio           | Sprint 8 — PIPEDA close to GDPR.                                                                                                 |
-| **DE/FR/IT/ES/NL**           | ✅ low corpus               | ✅                | ✅ Vonage NI          | ✅ Vonage CAMARA            | ✅ Twilio           | Sprint 10 — translated UI optional. GDPR standard.                                                                               |
-| **BR**                       | ✅ low corpus               | ✅                | ✅ Vonage NI          | ✅ Vonage CAMARA            | ✅ Twilio           | Sprint 10+ — LGPD + Portuguese translation.                                                                                      |
-| **AU**                       | ✅ **strong corpus (moat)** | ✅                | ✅ Vonage NI          | ⚠️ carrier-drift proxy only | ✅ Twilio           | Telstra direct + Optus/TPG via Aduna are the path. Pillar 4 currently runs the Twilio-deltas fallback for OTP-verified monitors. |
-| **JP/IN/ZA/everywhere else** | ⚠️ no corpus                | ✅                | ✅ Vonage NI          | ⚠️ carrier-drift proxy only | ✅ Twilio           | Lookup works; localised market entry deferred.                                                                                   |
+| Country                      | Pillar 1 (scam reports)     | Pillar 2 (breach) | Pillar 3 (reputation) | Pillar 4 (SIM swap)                                   | Pillar 5 (identity) | Notes                                                                                                                                                                                                                                                                                                                                        |
+| ---------------------------- | --------------------------- | ----------------- | --------------------- | ----------------------------------------------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **GB** (UK)                  | ✅ low corpus               | ✅                | ✅ Vonage NI          | ✅ Vonage CAMARA                                      | ✅ Twilio           | **First international launch target.** UK GDPR ≈ AU APP — minimal compliance lift. SIM swap fraud high salience in news.                                                                                                                                                                                                                     |
+| **US**                       | ✅ low corpus               | ✅                | ✅ Vonage NI          | ✅ Vonage CAMARA                                      | ✅ Twilio           | Sprint 8 — needs CCPA/CPRA disclosure review.                                                                                                                                                                                                                                                                                                |
+| **CA**                       | ✅ low corpus               | ✅                | ✅ Vonage NI          | ✅ Vonage CAMARA                                      | ✅ Twilio           | Sprint 8 — PIPEDA close to GDPR.                                                                                                                                                                                                                                                                                                             |
+| **DE/FR/IT/ES/NL**           | ✅ low corpus               | ✅                | ✅ Vonage NI          | ✅ Vonage CAMARA                                      | ✅ Twilio           | Sprint 10 — translated UI optional. GDPR standard.                                                                                                                                                                                                                                                                                           |
+| **BR**                       | ✅ low corpus               | ✅                | ✅ Vonage NI          | ✅ Vonage CAMARA                                      | ✅ Twilio           | Sprint 10+ — LGPD + Portuguese translation.                                                                                                                                                                                                                                                                                                  |
+| **AU**                       | ✅ **strong corpus (moat)** | ✅                | ✅ Vonage NI          | 🔒 Telstra direct (trial) / ⚠️ carrier-drift fallback | ✅ Twilio           | Telstra trial credentials in progress (May 2026, contact: Nathan @ Mobile APIs and PEX team). Provider wiring tracked in `packages/scam-engine/.../providers/telstra.ts` (PR series sim-swap/pr1+). Optus joining Aduna in coming weeks; TPG declined. Until flag flips, pillar 4 runs the Twilio-deltas fallback for OTP-verified monitors. |
+| **JP/IN/ZA/everywhere else** | ⚠️ no corpus                | ✅                | ✅ Vonage NI          | ⚠️ carrier-drift proxy only                           | ✅ Twilio           | Lookup works; localised market entry deferred.                                                                                                                                                                                                                                                                                               |
 
 ### What Sprint 6 shipped to enable this
 
