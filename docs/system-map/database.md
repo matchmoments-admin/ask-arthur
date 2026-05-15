@@ -55,8 +55,11 @@ Supabase Postgres (project `rquomhcgnodxzkhokwni`). 75+ tables across 12 domain 
 - `phone_footprint_refresh_queue` — Claim queue for Inngest refresh. `UNIQUE (monitor_id)`. v75.
 - `phone_footprint_otp_attempts` — Twilio Verify anti-abuse forensics. v75.
 - `sim_swap_monitors`, `sim_swap_events`, `device_swap_events` — SIM / device fraud monitoring (B2B).
+- `sim_swap_credits` — Per-user credit bucket for the on-demand consumer surface. `free_remaining` resets to 1 on the first call of each calendar month via the `consume_sim_swap_credit` RPC; `paid_remaining` and `recovery_remaining` are grant-driven. PK `user_id`. v123.
+- `sim_swap_credit_ledger` — Append-only audit of every credit consume / grant / refund. `reason` enum covers `monthly_reset`, `purchase_5pack`, `purchase_recovery`, `consume_check`, `refund_telstra_5xx`, `refund_telstra_degraded`, `admin_adjust`. Stripe `payment_intent` carried in `stripe_ref` for idempotency on the webhook side. v123 (+ v125 reason-CHECK expansion).
+- `sim_swap_beta_invites` — Single-use invite codes for the private beta. `redeemed_by` + `redeemed_at` null until claimed; UPDATE-WHERE-null is the race-safe redemption path. v123.
 - `phone_lookups` — Cached phone reputation lookups. v35, v19.
-- `telco_api_usage` — Vonage API usage per org / user. v76.
+- `telco_api_usage` — Vonage + Telstra API usage per org / user. v76 (Vonage), extended in v123/PR 2 to record `provider='telstra'`.
 - `telco_webhook_subscriptions` — Vonage webhook config. v76.
 
 ### Breach Defence
@@ -191,6 +194,9 @@ All have `BRIN(created_at)` for cheap range queries.
 - `sync_phone_footprint_entitlements(...)` — Stripe sync → quotas.
 - `anonymise_expired_footprints(...)` — Replace `msisdn_e164` with 'REDACTED' after snapshot expires.
 - `sweep_inactive_monitors(...)` — Soft-delete consent-lapsed monitors. Cron-called.
+- `consume_sim_swap_credit(p_user_id)` — Atomic decrement with lazy monthly reset; raises `P0001 'no_credits'` when both buckets empty. SECURITY DEFINER, service_role-only. v123.
+- `refund_sim_swap_credit(p_user_id, p_bucket, p_reason)` — Mirror of consume; returns a credit to its bucket on upstream failure with a ledger row. SECURITY DEFINER, service_role-only. v125.
+- `grant_sim_swap_credits(p_user_id, p_bucket, p_credits, p_reason, p_stripe_ref)` — Called from the Stripe webhook on `checkout.session.completed`; atomic insert-if-missing + lock + increment + ledger. SECURITY DEFINER, service_role-only. v126.
 
 ### Feedback & Triage
 

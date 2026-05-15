@@ -25,13 +25,14 @@ Every consumer page, authenticated page, admin page, and API route, grouped by d
 
 ### Consumer products
 
-| Route                  | Purpose                                                | Flag                     |
-| ---------------------- | ------------------------------------------------------ | ------------------------ |
-| `/charity-check`       | Free charity legitimacy lookup                         | `charityCheck`           |
-| `/phone-footprint`     | Phone-number digital footprint scanner (teaser + paid) | `phoneFootprintConsumer` |
-| `/persona-check`       | Person / entity reputation lookup                      | —                        |
-| `/extension`           | Chrome extension landing                               | —                        |
-| `/extension-turnstile` | Turnstile bridge iframe for extension registration     | —                        |
+| Route                  | Purpose                                                                      | Flag                     |
+| ---------------------- | ---------------------------------------------------------------------------- | ------------------------ |
+| `/charity-check`       | Free charity legitimacy lookup                                               | `charityCheck`           |
+| `/phone-footprint`     | Phone-number digital footprint scanner (teaser + paid)                       | `phoneFootprintConsumer` |
+| `/sim-swap-check`      | On-demand SIM-swap check (Telstra-direct CAMARA, private beta, invite-gated) | `simSwapOnDemand`        |
+| `/persona-check`       | Person / entity reputation lookup                                            | —                        |
+| `/extension`           | Chrome extension landing                                                     | —                        |
+| `/extension-turnstile` | Turnstile bridge iframe for extension registration                           | —                        |
 
 ### Vertical landing pages
 
@@ -152,16 +153,19 @@ Every consumer page, authenticated page, admin page, and API route, grouped by d
 
 ### Consumer lookup
 
-| Route                               | Method | Auth   | Purpose                                                 |
-| ----------------------------------- | ------ | ------ | ------------------------------------------------------- |
-| `/api/charity-check`                | POST   | open   | Charity legitimacy lookup                               |
-| `/api/charity-check/autocomplete`   | GET    | open   | Charity name autocomplete                               |
-| `/api/phone-footprint/[msisdn]`     | POST   | open   | Phone-number footprint (free teaser; paid via monitors) |
-| `/api/phone-footprint/[msisdn]/pdf` | GET    | open   | PDF report export (Inngest queued)                      |
-| `/api/scam-contacts/lookup`         | POST   | apikey | Lookup known scam contact                               |
-| `/api/scam-contacts/report`         | POST   | open   | Report a scam contact                                   |
-| `/api/scam-urls/lookup`             | POST   | apikey | Lookup scam URL with WHOIS / SSL                        |
-| `/api/scam-urls/report`             | POST   | open   | Report a scam URL                                       |
+| Route                               | Method | Auth   | Purpose                                                                                                                    |
+| ----------------------------------- | ------ | ------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `/api/charity-check`                | POST   | open   | Charity legitimacy lookup                                                                                                  |
+| `/api/charity-check/autocomplete`   | GET    | open   | Charity name autocomplete                                                                                                  |
+| `/api/phone-footprint/[msisdn]`     | POST   | open   | Phone-number footprint (free teaser; paid via monitors)                                                                    |
+| `/api/phone-footprint/[msisdn]/pdf` | GET    | open   | PDF report export (Inngest queued)                                                                                         |
+| `/api/sim-swap/check`               | POST   | auth   | On-demand SIM-swap check — Telstra CAMARA, OTP-gated, credit-debited; refunds on upstream failure. Flag: `simSwapOnDemand` |
+| `/api/sim-swap/credits/checkout`    | POST   | auth   | Stripe Checkout session for one-time SIM-swap credit packs (5-pack \$0.99 or recovery \$4.99). Flag: `simSwapOnDemand`     |
+| `/api/sim-swap/invites/redeem`      | POST   | auth   | Single-use beta invite redemption (idempotent + race-safe). Flag: `simSwapOnDemand`                                        |
+| `/api/scam-contacts/lookup`         | POST   | apikey | Lookup known scam contact                                                                                                  |
+| `/api/scam-contacts/report`         | POST   | open   | Report a scam contact                                                                                                      |
+| `/api/scam-urls/lookup`             | POST   | apikey | Lookup scam URL with WHOIS / SSL                                                                                           |
+| `/api/scam-urls/report`             | POST   | open   | Report a scam URL                                                                                                          |
 
 ### Extension integration (open, ECDSA-signed install requests)
 
