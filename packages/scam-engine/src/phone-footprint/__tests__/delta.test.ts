@@ -29,6 +29,7 @@ function buildFootprint(
     },
     coverage: {
       vonage: "live",
+      telstra: "disabled",
       leakcheck: "live",
       ipqs: "fallback",
       twilio: "live",

@@ -19,6 +19,7 @@ import { internalProvider } from "./providers/internal";
 import { twilioProvider } from "./providers/twilio";
 import { ipqsProvider } from "./providers/ipqs";
 import { vonageProvider } from "./providers/vonage";
+import { telstraProvider } from "./providers/telstra";
 import { leakcheckProvider } from "./providers/leakcheck";
 import { withTimeout, unavailablePillar, type ProviderContract } from "./provider-contract";
 
@@ -33,6 +34,7 @@ const FULL_TTL_MS = 7 * 24 * 3600 * 1000;
  *   twilio — identity (pillar 5)
  *   ipqs — reputation fallback (pillar 3b)
  *   vonage — reputation primary + sim_swap (pillars 3a + 4)
+ *   telstra — sim_swap (preferred AU path; wins over Vonage when both available)
  *   leakcheck — breach (pillar 2)
  */
 const PROVIDERS: ProviderContract[] = [
@@ -40,6 +42,7 @@ const PROVIDERS: ProviderContract[] = [
   twilioProvider,
   ipqsProvider,
   vonageProvider,
+  telstraProvider,
   leakcheckProvider,
 ];
 
@@ -79,9 +82,11 @@ export async function buildPhoneFootprint(
 
   // Track whether a given pillar has been filled already — providers may
   // emit the same pillar id (Vonage reputation + IPQS reputation both map
-  // to pillar 3). Primary source wins: Vonage first when available, then
-  // IPQS as fallback.
+  // to pillar 3; Telstra sim_swap + Vonage sim_swap both map to pillar 4).
+  // Primary source wins: Vonage first when available, then IPQS as
+  // fallback for reputation; Telstra first then Vonage for sim_swap.
   const primaryReputationFromVonage = { set: false };
+  const primarySimSwapFromTelstra = { set: false };
 
   settled.forEach((r, i) => {
     const provider = PROVIDERS[i]!;
@@ -122,8 +127,20 @@ export async function buildPhoneFootprint(
         continue;
       }
       if (pillar.id === "sim_swap") {
-        pillars.sim_swap = pillar;
-        if (provider.id === "vonage") {
+        // Telstra-direct wins over Vonage when available (operator-direct =
+        // higher confidence + lower latency). Vonage fills if Telstra
+        // returned unavailable. The carrier-drift fallback (below the
+        // forEach) only kicks in if BOTH Telstra and Vonage missed.
+        if (provider.id === "telstra" && pillar.available) {
+          pillars.sim_swap = pillar;
+          primarySimSwapFromTelstra.set = true;
+          coverage.telstra = "live";
+        } else if (provider.id === "telstra" && !pillar.available) {
+          coverage.telstra = telstraCoverageFromReason(pillar.reason);
+        } else if (provider.id === "vonage") {
+          if (!primarySimSwapFromTelstra.set) {
+            pillars.sim_swap = pillar;
+          }
           coverage.vonage = pillar.available
             ? "live"
             : vonageCoverageFromReason(pillar.reason);
@@ -274,6 +291,9 @@ function stampCoverageForDown(coverage: Coverage, providerId: string) {
     case "vonage":
       coverage.vonage = "degraded";
       break;
+    case "telstra":
+      coverage.telstra = "degraded";
+      break;
     case "leakcheck-phone":
       coverage.leakcheck = "degraded";
       break;
@@ -286,6 +306,26 @@ function vonageCoverageFromReason(reason: string | undefined): Coverage["vonage"
   if (reason.startsWith("camara_not_configured")) return "pending";
   if (reason.includes("403") || reason.includes("404") || reason.includes("422") || reason.includes("409")) {
     return "pending";
+  }
+  return "degraded";
+}
+
+function telstraCoverageFromReason(reason: string | undefined): Coverage["telstra"] {
+  if (!reason) return "degraded";
+  if (reason === "telstra_disabled" || reason === "telstra_not_configured") {
+    return reason === "telstra_disabled" ? "disabled" : "pending";
+  }
+  // 401/403/404/422/429 → not a Telstra subscriber (or quota tripped); the
+  // number simply isn't covered by this provider. From the UI's POV that's
+  // "disabled for this number" rather than "service degraded".
+  if (
+    reason.includes("401") ||
+    reason.includes("403") ||
+    reason.includes("404") ||
+    reason.includes("409") ||
+    reason.includes("422")
+  ) {
+    return "disabled";
   }
   return "degraded";
 }

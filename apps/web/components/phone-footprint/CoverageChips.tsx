@@ -25,6 +25,7 @@ const PROVIDER_LABELS: Record<keyof Coverage, string> = {
   twilio: "Twilio carrier + line type",
   ipqs: "IPQS reputation",
   vonage: "Vonage fraud score & SIM swap",
+  telstra: "Telstra SIM swap (AU-direct)",
   leakcheck: "LeakCheck phone-breach",
 };
 
