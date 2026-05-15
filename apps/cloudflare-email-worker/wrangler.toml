@@ -1,0 +1,27 @@
+# Cloudflare Worker: AskArthur intel-inbound-email router.
+#
+# Receives email via Cloudflare Email Routing, parses, POSTs to the
+# intel-inbound-email Supabase Edge Function.
+#
+# Operational setup (one-time):
+#   1. Enable Email Routing on the askarthur.au zone in Cloudflare dashboard.
+#   2. Create a "Catch-all" rule pointing at this Worker.
+#   3. Or create per-tag rules: acsc+ingest@..., scamwatch+ingest@..., etc.
+#   4. wrangler secret put INBOUND_EMAIL_WEBHOOK_SECRET
+#   5. wrangler secret put SUPABASE_EDGE_FUNCTION_URL
+#   6. wrangler deploy
+
+name = "askarthur-intel-inbound-email"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Email Routing binding — Cloudflare routes inbound messages to this Worker's
+# email() handler. No queue/KV needed for the MVP.
+[[send_email]]
+name = "QUARANTINE_FORWARDER"
+# Optional: forward parse failures to an operator inbox. Uncomment when set up.
+# destination_address = "ops@askarthur.au"
+
+[observability]
+enabled = true
