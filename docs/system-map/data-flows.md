@@ -1,6 +1,6 @@
 # Ask Arthur — Canonical Data Flows
 
-Six end-to-end flows that explain how the system talks to itself. Each flow lists the entry point, the work the request does inline, what gets handed off async, and which tables / RPCs / Inngest events are involved.
+Seven end-to-end flows that explain how the system talks to itself. Each flow lists the entry point, the work the request does inline, what gets handed off async, and which tables / RPCs / Inngest events are involved.
 
 For any route mentioned, see [web-surface.md](./web-surface.md). For any table or RPC, see [database.md](./database.md). For any cron or Inngest function, see [background-workers.md](./background-workers.md).
 
@@ -376,6 +376,54 @@ INSERT regulator_alert_pushes (report_id, destination, delivered_at)
 ```
 
 **Why event-driven, not cron:** these submissions are bursty and admin-approved. Cron polling would either lag or burn cost. Event-driven Inngest gives durable retry per destination with native idempotency on `report_id × destination`.
+
+---
+
+## 7. SIM Swap on-demand check — `/api/sim-swap/check`
+
+Private-beta consumer flow. User on `/sim-swap-check` runs a one-shot Telstra CAMARA lookup against their own (OTP-verified) number; result is a green or red card with recovery steps. Refunds on upstream failure so users aren't billed for Telstra outages.
+
+```
+POST /api/sim-swap/check
+  │
+  ├─ 1. Feature flag gate (simSwapOnDemand) — 503 feature_disabled if off
+  ├─ 2. Supabase session auth — 401 unauthenticated if missing
+  ├─ 2a. Private-beta invite gate (hasRedeemedSimSwapInvite) — 403 invite_required
+  ├─ 3. Zod body validation { msisdn, maxAge? (1..2400) }
+  ├─ 4. Ownership proof — Upstash key `pf:owner:{user_id}:{msisdn_hash}`
+  │      Set by /api/phone-footprint/verify/check (Twilio Verify OTP). 403 if absent.
+  ├─ 5. Cost brake — `feature_brakes.sim_swap` (paused_until > NOW()) → 503 Retry-After
+  ├─ 6. Rate limit — pf:user bucket (60/min/user, fail-CLOSED in prod)
+  ├─ 7. Credit consume — consume_sim_swap_credit RPC (v123)
+  │      ├─ Lazy monthly reset (free_remaining → 1 on first call of new month)
+  │      ├─ Free bucket first, then paid bucket
+  │      └─ Raises P0001 'no_credits' if both empty → 402 + upsell payload
+  │             (inline "Buy 5 checks — $0.99" CTA → /api/sim-swap/credits/checkout)
+  ├─ 8. Parallel Telstra calls (Promise.allSettled, 4s budget)
+  │      ├─ callTelstraSimSwap     — POST /sim-swap/v2/check { phoneNumber, maxAge }
+  │      └─ callTelstraRetrieveDate — POST /sim-swap/v2/retrieve-date { phoneNumber }
+  │      (Both share an in-process OAuth token with singleflight cache)
+  ├─ 9. Failure path — refund_sim_swap_credit RPC (v125)
+  │      ├─ Telstra 5xx / throw   → reason='refund_telstra_5xx',   503 telstra_unavailable
+  │      └─ Telstra 4xx 'degraded' → reason='refund_telstra_degraded', 422 carrier_not_covered
+  │         (Not a Telstra subscriber; future PR routes to Optus via Aduna)
+  ├─ 10. Cost telemetry — logCost feature='sim-swap', provider='telstra',
+  │      operation='on_demand_check', units=2, unitCostUsd=0.06 (~$0.12/check)
+  └─ 11. Response {
+            swapped, latestSimChange, monitoredPeriod, maxAgeHoursChecked,
+            recommendedAction: 'stop'|'proceed',
+            consumedBucket, creditsRemaining: { free, paid }
+          }
+```
+
+**Companion flows:**
+
+- **Stripe Checkout → credit grant.** `/api/sim-swap/credits/checkout` opens a one-time Stripe Checkout session (mode=payment) for `sim_swap_credits_5pack` ($0.99 → 5 paid credits) or `sim_swap_recovery_check` ($4.99 → 1 recovery credit). On `checkout.session.completed`, the Stripe webhook routes via `handleOneTimePayment` → `grant_sim_swap_credits` RPC (v126) which atomically inserts-if-missing, locks, increments, and writes a ledger row. Idempotent via `stripe_ref` (payment_intent) dedupe on the ledger.
+- **Invite redemption.** `/api/sim-swap/invites/redeem` is single-use + race-safe (`UPDATE ... WHERE redeemed_by IS NULL`). 200 idempotent if same user re-redeems their own code; 410 Gone if held by another user.
+
+**Why per-call refunds.** Telstra is a paid call (~$0.06 estimated per endpoint). Without refund, a 5xx burst would silently drain users' free + paid credits. The refund RPC writes a ledger row with `reason='refund_telstra_*'` so abuse vs systemic-outage can be told apart in the audit trail.
+
+**Carrier routing (orchestrator path, not direct-endpoint).** When the broader phone-footprint orchestrator runs (flow 3 above, refresh path), both `telstraProvider` and `vonageProvider` fire in parallel; Telstra wins the `sim_swap` pillar on confidence (0.98 vs 0.95) when both return `available: true`. See ADR 0007 (forthcoming) for the routing rationale. The on-demand `/api/sim-swap/check` endpoint bypasses the 6s orchestrator budget and calls Telstra directly via the exported `callTelstraSimSwap` + `callTelstraRetrieveDate` helpers.
 
 ---
 
