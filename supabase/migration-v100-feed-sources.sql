@@ -156,9 +156,10 @@ ON CONFLICT (slug) DO NOTHING;
 CREATE OR REPLACE FUNCTION public.feed_sources_set_updated_at()
 RETURNS TRIGGER
 LANGUAGE plpgsql
+SET search_path = ''
 AS $$
 BEGIN
-  NEW.updated_at = now();
+  NEW.updated_at = pg_catalog.now();
   RETURN NEW;
 END;
 $$;
