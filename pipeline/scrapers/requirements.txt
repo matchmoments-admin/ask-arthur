@@ -4,4 +4,5 @@ tldextract>=5.1,<6
 boto3>=1.34,<2
 beautifulsoup4>=4.12,<5
 curl_cffi>=0.7,<1
+trafilatura>=1.12,<2
 pytest>=8.0,<9
