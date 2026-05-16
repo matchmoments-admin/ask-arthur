@@ -35,6 +35,10 @@ async function getInitialFeed() {
     .from("feed_items")
     .select("*", { count: "exact" })
     .eq("published", true)
+    // r/scambait roleplay / image-only posts have no analyzable body and
+    // are noise on the consumer feed. Mirror the API filter so SSR and
+    // client-fetched pages stay consistent.
+    .not("source_url", "ilike", "%/r/scambait/%")
     .order("source_created_at", { ascending: false, nullsFirst: false })
     .range(0, 19);
 

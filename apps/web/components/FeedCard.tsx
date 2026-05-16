@@ -30,6 +30,7 @@ import {
   COUNTRY_FLAGS,
   getImageUrl,
   getCategoryIllustration,
+  humanizeSource,
   relativeTime,
 } from "@/lib/feed";
 import type { FeedItem } from "@/lib/feed";
@@ -44,7 +45,15 @@ const ICON_MAP: Record<string, React.ComponentType<{ size?: number; className?: 
 
 export default function FeedCard({ item }: { item: FeedItem }) {
   const categoryConfig = item.category ? CATEGORY_CONFIG[item.category] : null;
-  const sourceConfig = SOURCE_CONFIG[item.source] || SOURCE_CONFIG.reddit;
+  // Never fall back to SOURCE_CONFIG.reddit — that made every unregistered
+  // source (austrac, every inbound_*, future Phase B slugs) render as
+  // "Reddit" with a chat-bubble icon, visible on the public consumer feed
+  // until 2026-05-16. Humanise the raw slug instead so an unmapped source
+  // at least describes itself honestly.
+  const sourceConfig = SOURCE_CONFIG[item.source] ?? {
+    label: humanizeSource(item.source),
+    icon: "AlertTriangle",
+  };
   const imageUrl = getImageUrl(item);
 
   const SourceIcon = ICON_MAP[sourceConfig.icon] || MessageCircle;

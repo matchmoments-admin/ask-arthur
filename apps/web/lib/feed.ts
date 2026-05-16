@@ -32,7 +32,42 @@ export const SOURCE_CONFIG: Record<
   scamwatch_alert: { label: "ACCC Scamwatch", icon: "Shield", isRegulator: true },
   acsc: { label: "ASD ACSC", icon: "Shield", isRegulator: true },
   asic_investor: { label: "ASIC", icon: "Shield", isRegulator: true },
+  // Phase B narrative scrapers (austrac shipping in PR-B3 #247).
+  austrac: { label: "AUSTRAC", icon: "Shield", isRegulator: true },
+  // Inbound-email newsletter sources (Cloudflare Email Routing → Worker →
+  // intel-inbound-email Edge Function). These live behind the per-source
+  // auto_publish gate; until a row is promoted by the classifier (P3) or
+  // an operator, it stays published=false and never appears here. The
+  // labels render only when the gate flips a row to published=true.
+  inbound_scamwatch: { label: "ACCC Scamwatch", icon: "Shield", isRegulator: true },
+  inbound_acsc: { label: "ASD ACSC", icon: "Shield", isRegulator: true },
+  inbound_austrac: { label: "AUSTRAC", icon: "Shield", isRegulator: true },
+  inbound_oaic: { label: "OAIC", icon: "Shield", isRegulator: true },
+  inbound_afp: { label: "AFP", icon: "Shield", isRegulator: true },
+  inbound_acma: { label: "ACMA", icon: "Shield", isRegulator: true },
+  inbound_ato: { label: "ATO", icon: "Shield", isRegulator: true },
+  inbound_ftc: { label: "FTC", icon: "Shield", isRegulator: true },
+  inbound_idcare: { label: "IDCARE", icon: "Shield" },
+  inbound_auscert: { label: "AusCERT", icon: "Shield" },
+  inbound_krebs: { label: "Krebs on Security", icon: "Mail" },
+  inbound_sans: { label: "SANS NewsBites", icon: "Mail" },
+  inbound_tldr_infosec: { label: "TLDR Infosec", icon: "Mail" },
+  inbound_thn: { label: "The Hacker News", icon: "Mail" },
+  inbound_securityweek: { label: "SecurityWeek", icon: "Mail" },
+  inbound_riskybiz: { label: "Risky Business", icon: "Mail" },
+  inbound_generic: { label: "Newsletter", icon: "Mail" },
 };
+
+// Humanise an unregistered source slug for the fallback label so the UI
+// never silently impersonates one of the known sources (the old fallback
+// was SOURCE_CONFIG.reddit, which made every austrac / inbound_* row
+// render as "Reddit" before this source-config was added).
+export function humanizeSource(slug: string): string {
+  return slug
+    .replace(/^inbound_/, "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 export const COUNTRY_OPTIONS = [
   { value: "", label: "All Countries" },
