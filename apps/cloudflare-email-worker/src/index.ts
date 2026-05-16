@@ -161,6 +161,31 @@ export function extractFirstUrl(text: string): string | undefined {
   return m?.[0].replace(/[)\].,;!?]+$/, "");
 }
 
+// Exported for unit tests. 2026-05-17: THN (The Hacker News) inbound
+// newsletters arrived with a 561-char text/plain part that was nothing
+// but "This email is not formatted for viewing in a text email client.
+// Please read it with an HTML friendly email client..." boilerplate.
+// The real article content lived in text/html only. The previous body-
+// extraction logic (`parsed.text ?? htmlToText(parsed.html)`) saw a
+// non-empty text/plain and never reached the htmlToText fallback,
+// shipping the boilerplate as the feed_item body.
+//
+// Heuristic: if the text/plain part looks like an HTML-display-only
+// redirect notice, prefer the HTML body. Two signals must both hold:
+//   (a) text is short (< 2000 chars — real digests are 4k–40k+)
+//   (b) text matches a known "view in HTML email" pattern
+// Either alone is too loose: short text can be a legitimate one-paragraph
+// alert; the patterns alone could match a real article *quoting* a
+// scammer's "view in HTML" lure.
+export function isBoilerplatePlainText(text: string): boolean {
+  if (text.length > 2000) return false;
+  return (
+    /not formatted for viewing in a\s*text email client/i.test(text) ||
+    /please read.{0,40}(?:html.friendly|in.{0,20}html|as a web page)/i.test(text) ||
+    /view (?:this )?email .{0,40}(?:as a web page|in.{0,20}browser|in.{0,20}html)/i.test(text)
+  );
+}
+
 // ── Idempotency key ─────────────────────────────────────────────────────
 
 async function sha256Hex(input: string): Promise<string> {
@@ -213,10 +238,20 @@ export default {
     const from = parsed.from?.address ?? message.from;
     const receivedAt = (parsed.date ?? new Date().toISOString()).toString();
 
-    // Body: prefer text/plain, fall back to HTML→text. Cap at 50KB to
-    // satisfy the feed_items_body_md_size constraint.
-    let body = parsed.text ?? "";
-    if (!body && parsed.html) body = htmlToText(parsed.html);
+    // Body: prefer text/plain unless it's just an "open me in an HTML
+    // email client" boilerplate stub (THN does this). See
+    // isBoilerplatePlainText() for the heuristic. Cap at 50KB to satisfy
+    // the feed_items_body_md_size constraint.
+    const plainBody = parsed.text ?? "";
+    const htmlBody = parsed.html ?? "";
+    let body: string;
+    if (plainBody && !isBoilerplatePlainText(plainBody)) {
+      body = plainBody;
+    } else if (htmlBody) {
+      body = htmlToText(htmlBody);
+    } else {
+      body = plainBody; // last resort — accept boilerplate if no HTML available
+    }
     body = body.trim().slice(0, 50_000);
 
     // Resolve the first link if it's a tracking wrapper. We rewrite the

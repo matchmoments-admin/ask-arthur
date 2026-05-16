@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { extractFirstUrl, htmlToText } from "./index";
+import { extractFirstUrl, htmlToText, isBoilerplatePlainText } from "./index";
 
 describe("htmlToText (#238 regression)", () => {
   it("preserves anchor href on button-only confirm CTAs (TLDR / SANS / THN shape)", () => {
@@ -62,5 +62,56 @@ describe("extractFirstUrl (#237 regression)", () => {
 
   it("returns undefined when no URL is present", () => {
     expect(extractFirstUrl("no url here")).toBeUndefined();
+  });
+});
+
+describe("isBoilerplatePlainText (2026-05-17 THN regression)", () => {
+  // The exact text/plain body THN sent on 2026-05-16. 561 chars; pure
+  // boilerplate; the real article content was HTML-only.
+  const thnBoilerplate = `This email is not formatted for viewing in a
+text email client. Please read it with an HTML friendly
+email client like Outlook, Yahoo Mail, Gmail, etc.
+
+=====================================================================
+You are receiving this message because you subscribed to receive
+the newsletter: OpenClaw Vulnerabilities, Kazuar P2P Botnet, MS Exchange Server Exploit
+
+Copyright (c) 2014 NetLine Corporation. All rights reserved.
+750 University Avenue, Suite 200, Los Gatos, CA 95032
+=====================================================================`;
+
+  it("detects the prod THN boilerplate shape", () => {
+    expect(isBoilerplatePlainText(thnBoilerplate)).toBe(true);
+  });
+
+  it("detects 'view this email as a web page' variant (Marketo / Pardot)", () => {
+    const text =
+      "To view this email as a web page, go to the link below or copy and paste it into your browser's address window.\nhttps://example.com/view";
+    expect(isBoilerplatePlainText(text)).toBe(true);
+  });
+
+  it("detects 'view in browser' variant (HubSpot)", () => {
+    const text = "Having trouble viewing this email? View this email in your browser.";
+    expect(isBoilerplatePlainText(text)).toBe(true);
+  });
+
+  it("keeps real one-paragraph alerts that happen to be short", () => {
+    const text =
+      "URGENT: Critical Microsoft Exchange vulnerability CVE-2026-1234 actively exploited. " +
+      "Apply patches immediately. Indicators: malicious URL hxxps://evil.example, sender id 0x4a..";
+    expect(isBoilerplatePlainText(text)).toBe(false);
+  });
+
+  it("keeps long bodies even if they contain 'view in browser' (real digests)", () => {
+    // SecurityWeek's real 40KB digest has a "view in browser" link in its
+    // header but the body is real content. Length safety-check (>2KB)
+    // prevents false-positive on real long digests.
+    const text = "A".repeat(5000) + "\nview in browser";
+    expect(isBoilerplatePlainText(text)).toBe(false);
+  });
+
+  it("handles empty + whitespace-only input", () => {
+    expect(isBoilerplatePlainText("")).toBe(false);
+    expect(isBoilerplatePlainText("   \n\t  ")).toBe(false);
   });
 });
