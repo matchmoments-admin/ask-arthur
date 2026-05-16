@@ -546,21 +546,23 @@ Each numbered PR is independently shippable, gated by its own flag (default off)
 
 ### Phase B — Wave 2 government sources (≤1 sprint, 6 PRs)
 
-Each PR follows an identical template — copying `pipeline/scrapers/scamwatch_alerts.py` as the reference shape:
+Each PR follows an identical template — copying `pipeline/scrapers/scamwatch_alerts.py` (HTML) or `pipeline/scrapers/austrac.py` (RSS, PR-B3 #247) as the reference shape:
 
 **Template PR shape (apply to PRs B1–B6)**
 
 0. **Pre-deploy SQL smoke** _(new since Phase A — PR-A3 shipped two schema bugs found only post-deploy)_: paste the migration into `mcp__supabase__execute_sql` against a Supabase preview branch (or wrap in `BEGIN; ... ROLLBACK;` on prod) before `apply_migration`. Validates the constraint syntax, RPC function body, and partial-index WHERE clause in one shot.
-1. **Migration** `supabase/migration-vN-news-intel-add-<source>.sql` where `vN` is the **next available version** (`git ls-tree origin/main 'supabase/migration-v*' | tail -3` to find the highest current; as of 2026-05-16 the next is `v131`):
+   0a. **Pre-merge upstream URL verification** _(new since PR-B3 #247 — AUSTRAC originally shipped a Drupal-convention-guessed URL that 404'd; real feed lives at `/media-release/rss.xml`)_: `curl -I -L --max-time 8 "<feed_url>"` before pushing. Expect `200` + `content-type: application/rss+xml` (RSS) or `text/html` (HTML). If 404, find the real path by fetching the source's news listing page and grepping for `rss-link`, `feed.xml`, or `<link rel="alternate" type="application/rss+xml">`. Removes the "if 404 on prod smoke, one-line UPDATE fixes it" caveat that should never be needed.
+1. **Migration** `supabase/migration-vN-news-intel-add-<source>.sql` where `vN` is the **next available version** (`git ls-tree origin/main 'supabase/migration-v*' | tail -3` to find the highest current; as of 2026-05-16 after PR-B3 ships, the next is `v132`):
    - Add slug to `feed_items_source_check` constraint.
    - Add slug to `get_unembedded_narrative_feed_items()` RPC IN-list.
    - Recreate `idx_feed_items_unembedded_narrative` with the slug in the WHERE clause (partial index must match).
-   - **Insert a row into `feed_sources`** for the slug with `enabled=false`, `category='narrative'`, jurisdiction, source URL, and notes. Required — v128 missed this and v130 had to backfill; the skill enforces it from now on.
-2. **Scraper** `pipeline/scrapers/<source>.py` — imports `bulk_upsert_narrative_feed_items`, `conditional_get`, `log_ingestion` from `common/`; schema-mirror of `scamwatch_alerts.py`.
+   - **Insert a row into `feed_sources`** for the slug with `enabled=false`, `category='narrative'`, jurisdiction, source URL (pre-verified per step 0a), and notes. Required — v128 missed this and v130 had to backfill; the skill enforces it from now on.
+2. **Scraper** `pipeline/scrapers/<source>.py` — imports `bulk_upsert_narrative_feed_items`, `conditional_get`, `log_ingestion` from `common/`; schema-mirror of `scamwatch_alerts.py` (HTML) or `austrac.py` (RSS).
    - **For HTML sources**: use `from common.html_extract import extract_article_body` (PR-A3e #241) for body extraction. Don't hand-roll regex tag-stripping — same class of bug as #238 in the Worker.
    - **For RSS sources**: feedparser gives clean text directly; no helper needed.
-3. **Workflow** `.github/workflows/scrape-feeds.yml`: add scraper to the daily-16:00 tier (or weekly for low-volume sources).
-4. **Tests** `pipeline/scrapers/tests/test_<source>.py`: parsing + idempotency. Mock external HTTP via `unittest.mock.patch`; add an opt-in live test gated on `ASKARTHUR_<SOURCE>_LIVE=1` (matches `test_http_impersonate.py` pattern).
+   - **If the scraper has category-inference logic** (e.g. `_infer_category()` returning `"investment_fraud"` vs `"impersonation"`): **check specific patterns BEFORE generic ones**. An "investment scam" article matches generic `scam | fraud` first otherwise and gets mislabelled as impersonation. PR-B3 caught this with `test_pig_butchering_is_investment_fraud` — every Phase B scraper with category inference should follow the same ordering rule and add an equivalent test case.
+3. **Workflow** `.github/workflows/scrape-feeds.yml`: add scraper to the daily-16:00 tier (or weekly for low-volume sources). **Stagger by 5-10 min** off the existing 16:00 UTC scrapers (AUSTRAC, ACSC, Scamwatch) so the `feed_items` write window doesn't pile up during the 30-min `feed-items-embed` Inngest tick.
+4. **Tests** `pipeline/scrapers/tests/test_<source>.py`: parsing + idempotency. Mock external HTTP via `unittest.mock.patch`; add an opt-in live test gated on `ASKARTHUR_<SOURCE>_LIVE=1` (matches `test_http_impersonate.py` pattern). For scrapers with category inference, **a "specific-before-generic" regression case is mandatory** (see PR-B3 reference).
 5. **Env var** `ENABLE_<SOURCE>_INGEST` added to `turbo.json` `globalEnv` + `.env.example`.
 6. **System map** `docs/system-map/background-workers.md`: append row to the scraper table.
 
@@ -638,6 +640,10 @@ Lifted from the standard `CLAUDE.md` ship workflow. Apply to every PR above.
   - **News-intel-embed stall — non-finding.** The audit caught a transient mid-tick state, not a stall. The cron is healthy on its 30-min cadence. Monitoring queries (§11.4) now use a 1h threshold so future audits don't repeat the false-positive.
   - **PR-A3e (#241)** — `pipeline/scrapers/common/html_extract.py` (trafilatura wrapper) so Phase B HTML scrapers inherit a single anchor-preserving body extractor. Same regression contract as Worker #238.
   - **PR-A3f (this PR)** — Plan + skill doc updates per the learnings above.
+  - **PR-B3 (#247, 2026-05-16)** — First Phase B vertical slice (AUSTRAC RSS, v131 applied). Validates the corrected Phase B template end-to-end. Two new Phase B rules folded back into the template (see §7 Phase B steps 0a, 2, 3, 4):
+    - **Pre-merge `curl -I` the upstream feed URL** — originally shipped `/news-and-media/media-releases/rss` (Drupal `/rss/<section>` convention guess) which 404'd. Real feed is `/media-release/rss.xml`. Fixed pre-merge in commit `6e745e8`; prod `feed_sources.austrac` row synced via MCP UPDATE.
+    - **Category-inference ordering: specific before generic** — caught by `test_pig_butchering_is_investment_fraud` before merge. Investment-scam articles match generic `scam | fraud` first otherwise and mislabel as impersonation.
+    - **5-10 min stagger** off existing 16:00 UTC scrapers to avoid `feed_items` write contention during the embed Inngest tick.
 - **Inbound-email vendor:** Cloudflare Email Routing → Cloudflare Worker → Supabase Edge Function → direct insert into `feed_items`. Free tier across the stack.
 - **Inbound-email domain:** **`askarthur-inbound.com`** (registered through Cloudflare Registrar, A$16/year). Chosen over `intel.askarthur.au` to avoid touching production DNS and to keep inbound newsletter mail cleanly separated from Resend outbound traffic on `askarthur.au`.
 - **Deployed surface (PR-A3):**
