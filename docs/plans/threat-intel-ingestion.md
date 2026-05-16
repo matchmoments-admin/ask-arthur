@@ -645,6 +645,19 @@ Lifted from the standard `CLAUDE.md` ship workflow. Apply to every PR above.
   - Supabase Edge Function: `https://rquomhcgnodxzkhokwni.functions.supabase.co/intel-inbound-email` (deployed with `--no-verify-jwt`; auth via X-Webhook-Secret).
   - Kill switch `ENABLE_INTEL_INBOUND_EMAIL=true` in Supabase secrets.
 - **Cost ceiling:** A$0/mo recurring confirmed (no per-email Claude). Wave-3 clustering adds ~A$2/mo when it ships.
+- **Phase B vertical slice + side-find fixes (2026-05-16, second batch)** — same session as Phase A tightening:
+  - **PR #243** — `crtsh.py` None-handling regression fix (issue #227). Auto-closed #227. The original ops alert hypothesised a WAF change; the actual cause was `cert.get(k, "")` failing when the upstream emitted explicit JSON nulls. Two-line code change + regression test pinned the contract.
+  - **PR #244** — Reddit Intel `classifyWithRetry` helper (issue #228). Auto-closed #228. Adds bounded retry-with-feedback on Sonnet schema-mismatch, plus makes `dailySummary` optional with consumer guard. New `reddit-intel-classify-retry` cost-telemetry tag for retry-frequency monitoring.
+  - **PR #245** — `docs/system-map/background-workers.md` gains a "Cloudflare Workers" section for the inbound-email Worker. Ops doc gains a "Redeploy after a code change" subsection (Worker is NOT auto-redeployed when source merges to main — Vercel auto-deploys `apps/web`, Cloudflare deploys are manual).
+  - **PR #246** — `harden(auth)` of 5 protected API routes (`apps/web/app/api/family/*` + `apps/web/app/api/user/{delete-account,export-data}`). Adds `getSupabaseUserOrThrow` helper to `apps/web/lib/auth.ts` so each route doesn't inline Promise.race × 6. 503 + `Retry-After: 30` on degraded Auth (NOT 401 — that would log the user out on a transient outage).
+  - **PR #247 — PR-B3 AUSTRAC RSS** — first Phase B vertical slice. Validates the corrected Phase B template encoded in PR-A3f. Migration v131 applied; advisors clean. Future Phase B scrapers (B5 AFP, B1a NASC, B6 Services AU, B2 ACMA, B4 OAIC) copy this shape.
+  - **Issues #230 + #231 closed without code change.** Both alerts originated from the external "Daily Founder Briefing" Claude Code Routine that replaced legacy digests in f9c2fe1, not from repo code. Documented + closed with the find.
+  - **News-intel-embed cron healthy.** Confirmed via end-to-end DB check + cost-telemetry sweep during the session zoom-out. Embed timestamp 2026-05-16 01:01:43 UTC processing 5 backlog rows. Monitoring SQL threshold corrected to 1h.
+- **Phase B template confirmed via PR-B3 #247:**
+  - Migration shape: extend `feed_items_source_check` + extend `get_unembedded_narrative_feed_items()` RPC + recreate `idx_feed_items_unembedded_narrative` partial index + either INSERT or UPDATE `feed_sources` row (UPDATE if pre-seeded by v127, otherwise INSERT). All four in the same migration — no v128-style omissions.
+  - Scraper shape: copy `acsc_alerts.py` (RSS) or `scamwatch_alerts.py` (HTML). HTML scrapers use `from common.html_extract import extract_article_body` instead of hand-rolled bs4.
+  - Workflow shape: add to `workflow_dispatch` choice list + a step under the appropriate cron tier. No per-source `ENABLE_<SOURCE>_INGEST` gate by default — circuit breaker + `feed_sources.enabled` give the operator enough control.
+  - Category inference: specific patterns BEFORE generic `scam|fraud` (caught by PR-B3's `test_pig_butchering_is_investment_fraud` — `'investment scam'` matches generic `scam` first otherwise).
 
 ## 10. Outstanding questions (deferred — not blocking Phase A)
 
