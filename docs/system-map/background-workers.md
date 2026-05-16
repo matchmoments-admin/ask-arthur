@@ -249,6 +249,18 @@ Backed by `/api/cron/bot-queue-sweep` (every 6h) which picks up rows pending >2 
 
 ---
 
+## Cloudflare Workers
+
+External compute that doesn't fit Vercel cron or Inngest. Source lives under `apps/`.
+
+| Worker                          | Source                          | Trigger                  | Purpose                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------- | ------------------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `askarthur-intel-inbound-email` | `apps/cloudflare-email-worker/` | Cloudflare Email Routing | Receives inbound newsletter mail at `<tag>+ingest@askarthur-inbound.com`, parses MIME via postal-mime, attributes source by tag, resolves GovDelivery/Mailchimp redirects, POSTs to the `intel-inbound-email` Supabase Edge Function which inserts a `feed_items` row. Gated via Edge Function env `ENABLE_INTEL_INBOUND_EMAIL`. See [docs/ops/inbound-email-config.md](../ops/inbound-email-config.md). |
+
+Redeploy procedure when the Worker source changes: from `apps/cloudflare-email-worker/` run `pnpm typecheck && pnpm wrangler deploy`. The CLI needs a Cloudflare API token with `workers (write)` + `workers_scripts (write)` zone scope. Merging the source change to `main` does NOT auto-redeploy the Worker — Cloudflare deploy is a separate step. The `add-inbound-email-source` skill covers the end-to-end including this step.
+
+---
+
 ## Cost brakes and safety nets
 
 | Safety net                | Cron           | Checks                                    | Action                                                                                                                                                                                                                    |
