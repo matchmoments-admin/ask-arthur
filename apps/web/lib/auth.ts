@@ -1,5 +1,6 @@
 import "server-only";
 
+import type { SupabaseClient, User as SupabaseUser } from "@supabase/supabase-js";
 import { redirect } from "next/navigation";
 import { createAuthServerClient } from "@askarthur/supabase/server-auth";
 import { logger } from "@askarthur/utils/logger";
@@ -68,6 +69,44 @@ export async function getUser(): Promise<AuthUser | null> {
     orgRole: null,
     orgName: null,
   };
+}
+
+/**
+ * Like getUser() but takes a pre-built auth client. Use this in API
+ * routes that already need the client for OTHER calls (e.g. `signOut()`
+ * after a delete-account) and just want the timeout-wrapped getUser
+ * semantics. Returns the raw Supabase User shape (with created_at,
+ * email_confirmed_at, etc.) — preserve fields the AskArthur AuthUser
+ * type drops.
+ *
+ * Throws AuthUnavailableError on timeout — API-route callers should
+ * catch and return 503 + Retry-After so a transient Supabase Auth
+ * degradation doesn't log users out (401 would). Reference shape for
+ * the catch + 503 wrap is `apps/web/app/api/family/route.ts` after
+ * PR-AUTH-HARDEN.
+ *
+ * Uses the same AUTH_TIMEOUT_MS budget as getUser() so middleware,
+ * server components, and API routes all see the same degraded-Auth
+ * threshold.
+ */
+export async function getSupabaseUserOrThrow(
+  authClient: SupabaseClient,
+): Promise<SupabaseUser | null> {
+  const result = await Promise.race([
+    authClient.auth.getUser(),
+    new Promise<"timeout">((resolve) =>
+      setTimeout(() => resolve("timeout"), AUTH_TIMEOUT_MS),
+    ),
+  ]);
+
+  if (result === "timeout") {
+    logger.error(
+      `lib/auth.getSupabaseUserOrThrow: supabase.auth.getUser timed out after ${AUTH_TIMEOUT_MS}ms`,
+    );
+    throw new AuthUnavailableError();
+  }
+
+  return result.data.user ?? null;
 }
 
 /**
