@@ -168,6 +168,7 @@ Run on GitHub Actions, gated by `ENABLE_SCRAPER` (regular) / `ENABLE_VULN_SCRAPE
 | `scamwatch_alerts.py`     | scamwatch.gov.au HTML | 3h tier (`*/3`) | Narrative extraction                                                                     |
 | `acsc_alerts.py`          | cyber.gov.au RSS      | 3h tier         | UA-fallback for Cloudflare WAF (Mozilla UA on retry)                                     |
 | `asic_investor_alerts.py` | asic.gov.au JSON      | Daily 16:00 UTC | Investor alerts snapshot                                                                 |
+| `austrac.py`              | austrac.gov.au RSS    | Daily 16:00 UTC | Money-mule + payments-fraud typology reports. PR-B3 v131. First Phase B Wave 2 scraper.  |
 | `probe_acsc.py`           | cyber.gov.au probe    | Manual          | Diagnostic for WAF behaviour                                                             |
 | `reddit_scams.py`         | Reddit `r/Scams`      | Daily 06:00 UTC | Source for Reddit Intel pipeline                                                         |
 
