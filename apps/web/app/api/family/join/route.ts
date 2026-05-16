@@ -4,6 +4,8 @@ import { createAuthServerClient } from "@askarthur/supabase/server-auth";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 
+import { AuthUnavailableError, getSupabaseUserOrThrow } from "@/lib/auth";
+
 export async function POST(req: NextRequest) {
   if (!featureFlags.familyPlan) {
     return NextResponse.json({ error: "Not available" }, { status: 404 });
@@ -14,7 +16,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Auth not configured" }, { status: 503 });
   }
 
-  const { data: { user } } = await authClient.auth.getUser();
+  let user;
+  try {
+    user = await getSupabaseUserOrThrow(authClient);
+  } catch (err) {
+    if (err instanceof AuthUnavailableError) {
+      return NextResponse.json(
+        { error: "auth_unavailable", retryAfterSec: 30 },
+        { status: 503, headers: { "Retry-After": "30" } },
+      );
+    }
+    throw err;
+  }
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

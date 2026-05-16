@@ -4,6 +4,8 @@ import { createAuthServerClient } from "@askarthur/supabase/server-auth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
+import { AuthUnavailableError, getSupabaseUserOrThrow } from "@/lib/auth";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -26,10 +28,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "auth_unavailable" }, { status: 503 });
   }
 
-  const { data: userResp, error: userErr } = await auth.auth.getUser();
-  if (userErr || !userResp?.user) {
+  let supabaseUser;
+  try {
+    supabaseUser = await getSupabaseUserOrThrow(auth);
+  } catch (err) {
+    if (err instanceof AuthUnavailableError) {
+      return NextResponse.json(
+        { error: "auth_unavailable", retryAfterSec: 30 },
+        { status: 503, headers: { "Retry-After": "30" } },
+      );
+    }
+    throw err;
+  }
+  if (!supabaseUser) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  // Shadow the original `userResp` shape so the rest of the function reads the same.
+  const userResp = { user: supabaseUser };
 
   let body: unknown;
   try {
