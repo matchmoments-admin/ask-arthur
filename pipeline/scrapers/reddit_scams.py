@@ -62,8 +62,13 @@ _RETRYABLE_STATUSES = {429, 500, 502, 503, 504}  # 403 is NOT retried
 SUBREDDITS = [
     {"name": "Scams", "limit": 100},
     {"name": "phishing", "limit": 100},
-    {"name": "scambait", "limit": 100},
 ]
+# r/scambait was removed from ingestion on 2026-05-16. Reason: every
+# scambait post in production (30-day sample) was either an image-only
+# sequel with no analyzable body (e.g. "Elon... Part 2") or a roleplay
+# narrative without actionable AU consumer signal. r/Scams + r/phishing
+# provide ~5–10× the volume of genuine victim reports. Re-add the line
+# above if a use case for scambaiter modus-operandi reports emerges.
 
 # Flair-to-scam_type taxonomy mapping
 # Includes both live Reddit flairs (2025+) and legacy flairs for backward compat.
@@ -82,12 +87,6 @@ FLAIR_MAP: dict[str, str] = {
     "twitter": "phishing",
     "amazon": "phishing",
     "other": "phishing",
-    # ── Live r/scambait flairs ──
-    "completed bait": "other",
-    "bait in progress": "other",
-    "incomplete bait": "other",
-    "funny": "other",
-    "scambait question": "other",
     # ── Legacy flairs (backward compat) ──
     "phishing": "phishing",
     "smishing": "phishing",
