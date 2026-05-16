@@ -1,7 +1,7 @@
 """AUSTRAC media releases — RSS narrative scraper.
 
-Source:
-  https://www.austrac.gov.au/news-and-media/media-releases
+Source listing: https://www.austrac.gov.au/news-and-media/media-release
+RSS feed:      https://www.austrac.gov.au/media-release/rss.xml
 
 AUSTRAC publishes money-mule and payments-fraud typology reports under
 media releases. These are highest-signal for romance-scam and
@@ -42,7 +42,7 @@ from common.logging_config import get_logger
 logger = get_logger(__name__)
 
 FEED_NAME = "austrac"
-FEED_URL = "https://www.austrac.gov.au/news-and-media/media-releases/rss"
+FEED_URL = "https://www.austrac.gov.au/media-release/rss.xml"
 BACKOFF_THRESHOLD = 3
 
 URL_PATTERN = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)

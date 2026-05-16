@@ -89,14 +89,14 @@ CREATE INDEX idx_feed_items_unembedded_narrative
 
 UPDATE public.feed_sources
 SET enabled = true,
-    url = 'https://www.austrac.gov.au/news-and-media/media-releases/rss',
-    notes = 'PR-B3 v131. Money-mule + payments-fraud typology reports. RSS scraper in pipeline/scrapers/austrac.py — mirrors acsc_alerts.py template. First Phase B vertical slice validating the corrected template (skill add-inbound-email-source + plan threat-intel-ingestion.md §7).'
+    url = 'https://www.austrac.gov.au/media-release/rss.xml',
+    notes = 'PR-B3 v131. Money-mule + payments-fraud typology reports. RSS scraper in pipeline/scrapers/austrac.py — mirrors acsc_alerts.py template. First Phase B vertical slice validating the corrected template (skill add-inbound-email-source + plan threat-intel-ingestion.md §7). Verified URL 2026-05-16 via pre-merge curl: 200 application/rss+xml.'
 WHERE slug = 'austrac';
 
 -- ── 5. Verification (run after apply) ────────────────────────────────────
 --
 -- SELECT slug, enabled, url FROM public.feed_sources WHERE slug='austrac';
--- Expect: enabled=true, url ends in /rss.
+-- Expect: enabled=true, url='https://www.austrac.gov.au/media-release/rss.xml'.
 --
 -- SELECT 1 FROM public.feed_items WHERE source='austrac' LIMIT 1;
 -- Expect: 0 rows immediately after apply; populates on next scraper cron firing.
