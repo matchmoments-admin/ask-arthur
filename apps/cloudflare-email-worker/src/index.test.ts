@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { extractFirstUrl, htmlToText, isBoilerplatePlainText } from "./index";
+import {
+  extractFirstUrl,
+  htmlToText,
+  isBoilerplatePlainText,
+  isForwardCheckRecipient,
+} from "./index";
 
 describe("htmlToText (#238 regression)", () => {
   it("preserves anchor href on button-only confirm CTAs (TLDR / SANS / THN shape)", () => {
@@ -113,5 +118,45 @@ Copyright (c) 2014 NetLine Corporation. All rights reserved.
   it("handles empty + whitespace-only input", () => {
     expect(isBoilerplatePlainText("")).toBe(false);
     expect(isBoilerplatePlainText("   \n\t  ")).toBe(false);
+  });
+});
+
+describe("isForwardCheckRecipient (#252 forward-for-check)", () => {
+  it("matches bare check@ address", () => {
+    expect(isForwardCheckRecipient(["check@askarthur-inbound.com"])).toBe(true);
+  });
+
+  it("matches check+anything@ subaddress (plus-tag form)", () => {
+    expect(isForwardCheckRecipient(["check+user123@askarthur-inbound.com"])).toBe(true);
+  });
+
+  it("is case-insensitive on the tag", () => {
+    expect(isForwardCheckRecipient(["Check@askarthur-inbound.com"])).toBe(true);
+    expect(isForwardCheckRecipient(["CHECK+abc@askarthur-inbound.com"])).toBe(true);
+  });
+
+  it("returns false for known regulator tags (no overlap)", () => {
+    expect(isForwardCheckRecipient(["scamwatch+ingest@askarthur-inbound.com"])).toBe(false);
+    expect(isForwardCheckRecipient(["thn@askarthur-inbound.com"])).toBe(false);
+    expect(isForwardCheckRecipient(["acsc+ingest@askarthur-inbound.com"])).toBe(false);
+  });
+
+  it("returns false for unrelated addresses", () => {
+    expect(isForwardCheckRecipient(["hello@askarthur-inbound.com"])).toBe(false);
+    expect(isForwardCheckRecipient(["news@example.com"])).toBe(false);
+  });
+
+  it("returns false on empty array (no recipient)", () => {
+    expect(isForwardCheckRecipient([])).toBe(false);
+  });
+
+  it("matches when check@ is in a Cc / multi-recipient list", () => {
+    expect(
+      isForwardCheckRecipient([
+        "user@example.com",
+        "check@askarthur-inbound.com",
+        "cc@example.com",
+      ]),
+    ).toBe(true);
   });
 });

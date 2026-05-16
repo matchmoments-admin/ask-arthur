@@ -170,6 +170,100 @@ export async function sendWeeklyIntelDigest(
 }
 
 /**
+ * Sends the verdict reply for a user-forwarded "is this a scam?" email
+ * (#252). Plain HTML template (intentionally not a React-Email component —
+ * the surface is small and shouldn't carry the unsubscribe / digest
+ * footers used by marketing email). Subject is "Re: <original>" so most
+ * clients thread it under the forwarded message.
+ *
+ * Returns ok/error rather than throwing — the caller writes the outcome
+ * to `email_forward_checks.reply_sent_at` / `reply_error` either way.
+ */
+export async function sendForwardCheckReply(args: {
+  toEmail: string;
+  originalSubject: string;
+  verdict: "SAFE" | "UNCERTAIN" | "SUSPICIOUS" | "HIGH_RISK";
+  reasoning: string;
+  confidence?: number;
+}): Promise<{ ok: boolean; error?: string }> {
+  const { toEmail, originalSubject, verdict, reasoning, confidence } = args;
+  const resend = getResendClient();
+
+  const tone: Record<typeof verdict, { color: string; label: string; intro: string }> = {
+    SAFE: {
+      color: "#16a34a",
+      label: "Looks safe",
+      intro: "We found no signs of a scam in the message you forwarded.",
+    },
+    UNCERTAIN: {
+      color: "#ca8a04",
+      label: "Uncertain",
+      intro: "There are some elements worth checking before you act on this.",
+    },
+    SUSPICIOUS: {
+      color: "#ea580c",
+      label: "Suspicious",
+      intro: "This message has scam indicators. Treat it with caution.",
+    },
+    HIGH_RISK: {
+      color: "#dc2626",
+      label: "High risk — likely scam",
+      intro: "This is very likely a scam. Do not click links, reply, or send money.",
+    },
+  };
+  const pill = tone[verdict];
+  const confidenceLine =
+    typeof confidence === "number"
+      ? `<p style="color:#64748b;font-size:12px;margin:16px 0 0;">Confidence: ${Math.round(confidence * 100)}%</p>`
+      : "";
+
+  const subject = `Re: ${originalSubject.slice(0, 200)} — ${pill.label}`;
+  const html = `
+    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:560px;margin:0 auto;padding:32px 20px;color:#0f172a;">
+      <div style="display:inline-block;padding:6px 12px;border-radius:999px;background:${pill.color};color:#ffffff;font-size:12px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;">${pill.label}</div>
+      <h1 style="font-size:20px;margin:20px 0 8px;color:#0f172a;">Ask Arthur scam check</h1>
+      <p style="font-size:15px;line-height:1.6;margin:0 0 16px;">${pill.intro}</p>
+      <div style="border-left:3px solid ${pill.color};padding:12px 16px;background:#f8fafc;font-size:14px;line-height:1.6;color:#334155;">
+        ${reasoning.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br/>")}
+      </div>
+      ${confidenceLine}
+      <hr style="border:none;border-top:1px solid #e2e8f0;margin:32px 0 16px;"/>
+      <p style="color:#64748b;font-size:12px;line-height:1.5;margin:0;">
+        You sent this email to <strong>check@askarthur-inbound.com</strong>. We analysed the body
+        you forwarded with the same engine that runs <a href="https://askarthur.au" style="color:#0d9488;">askarthur.au</a>.
+        Verdicts are advisory — when in doubt, contact the sender through a channel you trust.
+      </p>
+      <p style="color:#94a3b8;font-size:11px;margin:8px 0 0;">
+        Ask Arthur · ABN 72 695 772 313 · Sydney, Australia
+      </p>
+    </div>
+  `;
+
+  try {
+    const result = await resend.emails.send({
+      from: FROM,
+      to: toEmail,
+      subject,
+      html,
+    });
+    if (result.error) {
+      return { ok: false, error: result.error.message };
+    }
+    logCost({
+      feature: "email-forward-check",
+      provider: "resend",
+      operation: "forward-check-reply",
+      units: 1,
+      unitCostUsd: PRICING.RESEND_USD_PER_EMAIL,
+      metadata: { verdict },
+    });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
  * Sends a single nurture-series email to one lead. Centralises what the
  * cron route used to do inline so every nurture step gets the same
  * treatment as the weekly intel digest:
