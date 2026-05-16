@@ -20,8 +20,28 @@ from reddit_scams import (
     _fetch_subreddit_posts,
     _reset_fetch_state,
     _ensure_oauth_token,
+    SUBREDDITS,
     _USER_AGENT,
 )
+
+
+class TestSubredditList:
+    """r/scambait was removed from ingestion on 2026-05-16 (see SUBREDDITS
+    comment in reddit_scams.py for context). Lock the decision so an
+    accidental re-add gets caught by CI.
+    """
+
+    def test_scambait_not_in_subreddit_list(self):
+        names = {s["name"].lower() for s in SUBREDDITS}
+        assert "scambait" not in names, (
+            "r/scambait was deliberately removed — see reddit_scams.py "
+            "SUBREDDITS comment before re-adding"
+        )
+
+    def test_core_subreddits_present(self):
+        names = {s["name"].lower() for s in SUBREDDITS}
+        assert "scams" in names
+        assert "phishing" in names
 
 
 class TestScrubUsernames:
@@ -194,17 +214,6 @@ class TestFlairMapping:
 
     def test_amazon_flair(self):
         assert _map_flair("Amazon") == "phishing"
-
-    # ── Live r/scambait flairs ──
-
-    def test_completed_bait(self):
-        assert _map_flair("Completed Bait") == "other"
-
-    def test_bait_in_progress(self):
-        assert _map_flair("Bait in Progress") == "other"
-
-    def test_scambait_question(self):
-        assert _map_flair("Scambait Question") == "other"
 
     # ── Legacy flairs (backward compat) ──
 
