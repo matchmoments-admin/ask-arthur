@@ -53,6 +53,15 @@ export async function GET(req: NextRequest) {
       query = query.textSearch("title", search, { type: "websearch" });
     }
 
+    // r/scambait carries roleplay / comedy content with no analyzable
+    // selftext on image-only posts (sequels like "Elon... Part 2", the
+    // "William David on a rig in Yemen" series). The rows stay in
+    // feed_items so the Reddit-Intel theme clustering can still use them
+    // for narrative-trend signals; they just don't surface on the public
+    // consumer feed. Filter at query time so the policy is reversible
+    // by deleting one line rather than re-ingesting.
+    query = query.not("source_url", "ilike", "%/r/scambait/%");
+
     const { data, error, count } = await query;
 
     if (error) {

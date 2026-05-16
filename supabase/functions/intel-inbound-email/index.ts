@@ -92,6 +92,37 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+// Source → ISO-3166-1 alpha-2 country for the flag chip on the public feed.
+// Returns null for global / multi-country sources so the chip just hides
+// instead of flying a wrong flag (the previous hardcode of "AU" tagged
+// Krebs/SANS/TLDR/THN/SecurityWeek as Australian).
+function countryCodeFor(source: string): string | null {
+  switch (source) {
+    case "inbound_scamwatch":
+    case "inbound_acsc":
+    case "inbound_austrac":
+    case "inbound_oaic":
+    case "inbound_afp":
+    case "inbound_acma":
+    case "inbound_idcare":
+    case "inbound_auscert":
+    case "inbound_ato":
+      return "AU";
+    case "inbound_ftc":
+      return "US";
+    // Global publishers — leave null so the UI suppresses the flag chip.
+    case "inbound_riskybiz":
+    case "inbound_krebs":
+    case "inbound_sans":
+    case "inbound_tldr_infosec":
+    case "inbound_thn":
+    case "inbound_securityweek":
+    case "inbound_generic":
+    default:
+      return null;
+  }
+}
+
 // Source → provenance_tier_t (enum on public.feed_items).
 //   tier_1_regulator: government regulators (ASD/ACSC, ACCC/Scamwatch, ACMA,
 //                     AUSTRAC, OAIC, AFP, FTC)
@@ -195,8 +226,15 @@ Deno.serve(async (req: Request) => {
       tags: payload.tags ?? null,
       published_at: payload.received_at,
       source_created_at: payload.received_at,
-      country_code: "AU", // most subscriptions are AU gov; specific sources can override later
+      country_code: countryCodeFor(payload.source),
       provenance_tier: provenanceTierFor(payload.source),
+      // Quarantine inbound emails by default. The newsletter classifier
+      // (P3 of the feed-quality recovery plan, 2026-05-16) promotes real
+      // newsletter content to published=true via the per-source
+      // auto_publish gate; subscription-confirmation / welcome emails
+      // stay false forever. Without this, every subscribe-confirm email
+      // surfaces on the public /scam-feed within seconds of arrival.
+      published: false,
     })
     .select("id")
     .maybeSingle();
