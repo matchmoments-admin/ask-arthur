@@ -279,4 +279,38 @@ A `feature_brakes.intel_inbound_email` row is **not** required at MVP because no
 - `pipeline/scrapers/scamwatch_alerts.py` — existing HTML scrape; the email path becomes the canonical Scamwatch source once subscribed (HTML scrape can be retired or kept as backfill).
 - `docs/system-map/background-workers.md` — full background-worker inventory.
 - `apps/cloudflare-email-worker/src/index.ts` — Worker source (TS).
+
+## Source health 2026-05-17
+
+First post-deploy audit of `feed_items WHERE source LIKE 'inbound_%'`. 17 source slugs are allowlisted via v128 + v129; only **3 have ever produced a row** (lifetime, not last-7-days):
+
+| Source                 | Lifetime rows | First seen           | Avg body chars | Likely status                                                                                 |
+| ---------------------- | ------------- | -------------------- | -------------- | --------------------------------------------------------------------------------------------- |
+| `inbound_securityweek` | 1             | 2026-05-16 14:01 UTC | 39,891         | Subscription active, daily — expect more rows arriving                                        |
+| `inbound_sans`         | 1             | 2026-05-16 18:11 UTC | 4,081          | Subscription active, Tue/Fri — 1 row in 2d is plausible                                       |
+| `inbound_thn`          | 1             | 2026-05-16 12:17 UTC | 561            | Pre-fix NetLine boilerplate — PR #255 deployed after this; next THN delivery is the real test |
+| `inbound_scamwatch`    | 0             | —                    | —              | Subscription likely never confirmed or routing not active                                     |
+| `inbound_acsc`         | 0             | —                    | —              | Same                                                                                          |
+| `inbound_oaic`         | 0             | —                    | —              | Same                                                                                          |
+| `inbound_idcare`       | 0             | —                    | —              | Same                                                                                          |
+| `inbound_ftc`          | 0             | —                    | —              | Same                                                                                          |
+| `inbound_riskybiz`     | 0             | —                    | —              | Weekly cadence — give 7d before assuming broken                                               |
+| `inbound_krebs`        | 0             | —                    | —              | Irregular cadence — give 7d                                                                   |
+| `inbound_tldr_infosec` | 0             | —                    | —              | Daily — should have produced ≥1 row in 2d if active                                           |
+| `inbound_ato`          | 0             | —                    | —              | Subscription likely never confirmed                                                           |
+| `inbound_austrac`      | 0             | —                    | —              | Reserved-but-inactive per address table                                                       |
+| `inbound_afp`          | 0             | —                    | —              | Reserved-but-inactive                                                                         |
+| `inbound_acma`         | 0             | —                    | —              | Reserved-but-inactive                                                                         |
+| `inbound_auscert`      | 0             | —                    | —              | Reserved-but-inactive                                                                         |
+| `inbound_generic`      | 0             | —                    | —              | Fallback — only fires when a non-allowlisted tag is hit                                       |
+
+### Next operator actions
+
+1. **For daily publishers with zero rows** (`tldr_infosec`, `ato`, `scamwatch`, `ftc`, `idcare`, `oaic`, `acsc`) — check the Gmail inbox `brendan@askarthur.au` (or wherever the confirm-subscription emails arrive) for unconfirmed welcome links. Click confirm; re-check after 24h.
+2. **For weekly / irregular publishers** (`riskybiz`, `krebs`) — wait until 2026-05-24 (one full week post-deploy) before assuming broken.
+3. **For reserved-but-inactive addresses** (`austrac`, `afp`, `acma`, `auscert`) — these were created in Cloudflare without subscribing the corresponding newsletter. Decide whether to subscribe (and when), or to remove the routing rules to reduce surface area.
+4. **For `inbound_thn`** — wait for the next THN daily digest (~24h post-deploy of PR #255) and verify the row's `length(body_md) > 2000`. If still 561, check `wrangler tail` for the `htmlToText` fallback path.
+
+This subsection is point-in-time. Future audits should re-run the lifetime query and update the table inline rather than appending new sections.
+
 - `supabase/functions/intel-inbound-email/index.ts` — Edge Function source (Deno TS).
