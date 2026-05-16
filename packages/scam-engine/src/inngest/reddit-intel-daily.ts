@@ -197,12 +197,104 @@ const jsonStringPassthrough = (v: unknown) => {
   }
 };
 
+// dailySummary is .optional() since 2026-05-16 (#228 fix). Sonnet 4.6
+// occasionally omits the field entirely — most often on low-volume
+// cohorts (≤5 posts) where there's not enough signal to summarise. The
+// per-post classifications are the load-bearing artefact; a missing
+// summary degrades the dashboard but doesn't justify aborting the
+// whole run and losing the per-post intel. Consumer at line ~479
+// upserts only when present.
 const SonnetOutputSchema = z.object({
   perPost: z.preprocess(jsonStringPassthrough, z.array(PerPostSchema)),
-  dailySummary: z.preprocess(jsonStringPassthrough, DailySummarySchema),
+  dailySummary: z.preprocess(jsonStringPassthrough, DailySummarySchema).optional(),
 });
 
 type SonnetOutput = z.infer<typeof SonnetOutputSchema>;
+
+// ── Retry-with-feedback (#228) ────────────────────────────────────────────
+//
+// Sonnet 4.6 occasionally returns the wrong shape for `perPost` (a string
+// instead of an array) or omits `dailySummary` entirely. Pre-fix the
+// classifier aborted on the first Zod validation failure, abandoning the
+// whole cohort. Most failures look like Sonnet "almost" followed the
+// schema — one nudge with the validation error injected as feedback
+// reliably produces a compliant retry.
+//
+// Bounded to one retry to avoid runaway cost on a genuinely broken
+// prompt. The retry path emits its own `reddit-intel-classify-retry`
+// cost_telemetry row so the daily health digest can track "how often
+// Sonnet needed re-prompting" as a leading indicator of prompt drift.
+//
+// Pattern matches the surface area of the existing error in anthropic.ts
+// line 290: "Claude output schema mismatch (${spec.id}): ..." and the
+// twin "Claude JSON parse failed (${spec.id}): ..." at line 276.
+
+type CallClaudeJsonArgs<TSchema extends z.ZodType<unknown>> = Parameters<
+  typeof callClaudeJson<z.infer<TSchema>>
+>[0];
+type CallClaudeJsonReturn<T> = Awaited<ReturnType<typeof callClaudeJson<T>>>;
+type ClassifyResult<T> = CallClaudeJsonReturn<T> & {
+  retried: boolean;
+  retryError?: string;
+  retryEstimatedCostUsd?: number;
+};
+
+function isSchemaRetryableError(err: unknown): err is Error {
+  if (!(err instanceof Error)) return false;
+  return (
+    err.message.startsWith("Claude output schema mismatch") ||
+    err.message.startsWith("Claude JSON parse failed")
+  );
+}
+
+function buildCorrectionUser(originalUser: string, errMsg: string): string {
+  return (
+    `${originalUser}\n\n---\n` +
+    `[Validation feedback from previous response]\n${errMsg}\n\n` +
+    `Re-emit a single JSON object matching the required shape exactly. ` +
+    `Do not include explanatory prose around the JSON. ` +
+    `Match every field name and shape as specified in the system prompt.`
+  );
+}
+
+/**
+ * Call callClaudeJson with one retry-with-feedback on schema/parse failure.
+ *
+ * The second-arg `callFn` lets unit tests inject a mock without touching
+ * the real Anthropic SDK. Default flows through to the production
+ * `callClaudeJson` from `../anthropic`.
+ */
+export async function classifyWithRetry<TSchema extends z.ZodType<unknown>>(
+  callArgs: CallClaudeJsonArgs<TSchema>,
+  callFn: (args: CallClaudeJsonArgs<TSchema>) => Promise<CallClaudeJsonReturn<z.infer<TSchema>>> = callClaudeJson,
+): Promise<ClassifyResult<z.infer<TSchema>>> {
+  try {
+    const first = await callFn(callArgs);
+    return { ...first, retried: false };
+  } catch (err) {
+    if (!isSchemaRetryableError(err)) throw err;
+    const errMsg = err.message;
+    logger.warn("classifyWithRetry: first call failed schema validation, retrying once", {
+      errorMessage: errMsg,
+    });
+    const correctedArgs: CallClaudeJsonArgs<TSchema> = {
+      ...callArgs,
+      user: buildCorrectionUser(callArgs.user, errMsg),
+    };
+    const second = await callFn(correctedArgs);
+    return {
+      ...second,
+      retried: true,
+      retryError: errMsg,
+      // Capture the wasted spend on the first call so cost telemetry
+      // can attribute it. We don't have the failed call's usage object
+      // (the wrapper threw before returning), so estimate the wasted
+      // cost as equal to a successful call's estimated cost — that's
+      // approximately right since both calls are similar token shapes.
+      retryEstimatedCostUsd: second.estimatedCostUsd,
+    };
+  }
+}
 
 // ── Cost telemetry ────────────────────────────────────────────────────────
 // Direct insert because logCost lives in apps/web/lib and packages/* must
@@ -341,7 +433,15 @@ export const redditIntelDaily = inngest.createFunction(
       };
 
       try {
-        const response = await callClaudeJson<SonnetOutput>({
+        // #228: retry-with-feedback on schema/parse failure. classifyWithRetry
+        // wraps callClaudeJson; the second call gets the Zod error injected
+        // into the user payload as correction feedback. If that fails too,
+        // logFunctionError + throw as before — three Inngest retries still
+        // get a shot, but each Inngest retry will itself do up to one
+        // retry-with-feedback. Total upper-bound: 6 Sonnet calls per cron
+        // firing (3 Inngest × 2 schema retries), well under the A$10/day
+        // brake.
+        const response = await classifyWithRetry<typeof SonnetOutputSchema>({
           model: "SONNET_4_6",
           system: SYSTEM_PROMPT,
           user: JSON.stringify(envelope),
@@ -475,29 +575,43 @@ export const redditIntelDaily = inngest.createFunction(
 
       // Daily summary upsert — overwrites same-day rows, allowing same-day
       // re-runs to refresh as more posts arrive in subsequent batches.
+      //
+      // #228: dailySummary is now .optional() — Sonnet 4.6 occasionally
+      // omits it (especially on low-volume cohorts). When missing we skip
+      // the summary upsert entirely rather than fabricating one. The
+      // dashboard will show a missing day; the per-post intel still wrote
+      // through to reddit_post_intel, which is the load-bearing artefact.
       const cohortDate = new Date(data.triggeredAt).toISOString().slice(0, 10);
       const summary = classification.result.dailySummary;
 
-      const { error: summaryErr } = await supabase
-        .from("reddit_intel_daily_summary")
-        .upsert(
-          {
-            cohort_date: cohortDate,
-            audience: "internal",
-            country_code: null,
-            lead_narrative: summary.leadNarrative,
-            emerging_threats: summary.emergingThreats,
-            brand_watchlist: summary.brandWatchlist,
-            stats: summary.stats,
-            posts_classified: validPerPost.length,
-            model_version: classification.modelId,
-            prompt_version: PROMPT_VERSION,
-          },
-          { onConflict: "cohort_date,audience,country_code" },
-        );
+      if (summary) {
+        const { error: summaryErr } = await supabase
+          .from("reddit_intel_daily_summary")
+          .upsert(
+            {
+              cohort_date: cohortDate,
+              audience: "internal",
+              country_code: null,
+              lead_narrative: summary.leadNarrative,
+              emerging_threats: summary.emergingThreats,
+              brand_watchlist: summary.brandWatchlist,
+              stats: summary.stats,
+              posts_classified: validPerPost.length,
+              model_version: classification.modelId,
+              prompt_version: PROMPT_VERSION,
+            },
+            { onConflict: "cohort_date,audience,country_code" },
+          );
 
-      if (summaryErr) {
-        throw new Error(`upsert daily_summary: ${summaryErr.message}`);
+        if (summaryErr) {
+          throw new Error(`upsert daily_summary: ${summaryErr.message}`);
+        }
+      } else {
+        logger.warn("reddit-intel-daily: dailySummary missing from Sonnet output — skipping summary upsert", {
+          cohortDate,
+          postCount: validPerPost.length,
+          retried: classification.retried,
+        });
       }
 
       return {
@@ -508,6 +622,34 @@ export const redditIntelDaily = inngest.createFunction(
     });
 
     // ── Step 5: cost telemetry + downstream event ────────────────────────
+    //
+    // #228: when classifyWithRetry actually retried, we paid for both
+    // calls. Log a marker row tagged `reddit-intel-classify-retry` so
+    // the daily health digest can track retry frequency as a leading
+    // indicator of prompt drift. The wasted-spend amount is approximate
+    // (we don't have the failed call's usage object) — see the helper
+    // for the rationale.
+    if (classification.retried) {
+      await step.run("log-cost-retry", async () => {
+        const supabase = createServiceClient();
+        if (!supabase) return;
+        await supabase.from("cost_telemetry").insert({
+          feature: "reddit-intel-classify-retry",
+          provider: "anthropic",
+          operation: "messages.create",
+          units: 0,
+          estimated_cost_usd: classification.retryEstimatedCostUsd ?? 0,
+          metadata: {
+            model: classification.modelId,
+            cohort_date: upsertResult.cohortDate,
+            post_count: posts.length,
+            prompt_version: PROMPT_VERSION,
+            retry_reason: classification.retryError,
+          },
+        });
+      });
+    }
+
     await step.run("log-cost", () =>
       logCost({
         estimatedCostUsd: classification.estimatedCostUsd,
