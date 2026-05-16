@@ -28,6 +28,11 @@ import PostalMime from "postal-mime";
 interface Env {
   INBOUND_EMAIL_WEBHOOK_SECRET: string;
   SUPABASE_EDGE_FUNCTION_URL: string; // e.g. https://<ref>.functions.supabase.co/intel-inbound-email
+  // /api/inbound-email-check (Vercel route). Receives user-forwarded
+  // "is this a scam?" emails. Different endpoint from the ingest path
+  // because it analyses + replies (Claude + Resend) rather than writing
+  // to feed_items. Optional; if unset, check@ tag emails are dropped.
+  EMAIL_FORWARD_CHECK_URL?: string;
   QUARANTINE_FORWARDER?: SendEmail; // optional; routes parse failures to ops@
 }
 
@@ -65,6 +70,22 @@ function resolveSource(addresses: string[]): string {
     }
   }
   return "inbound_generic";
+}
+
+// True if any recipient address is the user-forward check tag
+// (check@askarthur-inbound.com or check+anything@…). This is a separate
+// dispatch path from the regulator-ingest sources because the action
+// shape is different — we analyse the body with Claude and reply via
+// Resend instead of writing to feed_items.
+//
+// Exported for unit tests.
+export function isForwardCheckRecipient(addresses: string[]): boolean {
+  for (const addr of addresses) {
+    const local = addr.split("@")[0]?.toLowerCase() ?? "";
+    const tagCandidate = local.split("+")[0] ?? "";
+    if (tagCandidate === "check") return true;
+  }
+  return false;
 }
 
 // ── Body extraction ─────────────────────────────────────────────────────
@@ -232,7 +253,13 @@ export default {
       ...(parsed.to ?? []).map((a) => a.address ?? ""),
       ...(parsed.cc ?? []).map((a) => a.address ?? ""),
     ].filter(Boolean);
-    const source = resolveSource(toCandidates);
+
+    // Branch: is this a user-forwarded "is this a scam?" check, or a
+    // newsletter / regulator-alert ingest? The two share MIME parsing,
+    // body extraction, and tracking-URL resolution below — diverge only at
+    // the final dispatch step (Vercel route vs Supabase edge function).
+    const isForwardCheck = isForwardCheckRecipient(toCandidates);
+    const source = isForwardCheck ? "user_forward_check" : resolveSource(toCandidates);
 
     const subject = (parsed.subject ?? "(no subject)").trim().slice(0, 2000);
     const from = parsed.from?.address ?? message.from;
@@ -279,7 +306,23 @@ export default {
       tags: undefined as string[] | undefined,
     };
 
-    const resp = await fetch(env.SUPABASE_EDGE_FUNCTION_URL, {
+    // Dispatch: forward-check goes to the Vercel API route (which has
+    // Anthropic + Resend + cost telemetry in the same runtime as the rest
+    // of the analyze pipeline). Newsletter ingest goes to the Supabase
+    // edge function. If the forward-check URL isn't configured, drop the
+    // email silently — better than 500ing inbound mail.
+    let target: string | undefined;
+    if (isForwardCheck) {
+      target = env.EMAIL_FORWARD_CHECK_URL;
+      if (!target) {
+        console.warn("check@ email arrived but EMAIL_FORWARD_CHECK_URL is unset; dropping");
+        return;
+      }
+    } else {
+      target = env.SUPABASE_EDGE_FUNCTION_URL;
+    }
+
+    const resp = await fetch(target, {
       method: "POST",
       headers: {
         "content-type": "application/json",
