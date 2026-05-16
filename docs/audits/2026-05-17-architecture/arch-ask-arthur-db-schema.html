@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ask Arthur — Database Schema</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #f1f5f9;
+      font-family: 'JetBrains Mono', 'Courier New', monospace;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 24px;
+    }
+    header { text-align: center; margin-bottom: 32px; max-width: 1100px; }
+    header h1 { font-size: 26px; font-weight: 700; color: #0f172a; letter-spacing: -0.5px; }
+    header p { font-size: 13px; color: #64748b; margin-top: 8px; line-height: 1.5; }
+    .diagram-container {
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 16px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+      overflow: hidden;
+      max-width: 100%;
+    }
+    .diagram-container svg { display: block; max-width: 100%; }
+    .cards {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      margin-top: 32px;
+      max-width: 1340px;
+      width: 100%;
+    }
+    .card {
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 20px 24px;
+      flex: 1 1 280px;
+    }
+    .card h3 { font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; }
+    .card p { font-size: 12.5px; color: #334155; line-height: 1.65; }
+    footer { margin-top: 40px; font-size: 11px; color: #94a3b8; text-align: center; }
+    .download-bar { display: flex; gap: 10px; margin-top: 20px; }
+    .dl-btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 8px 16px; border-radius: 8px; border: 1px solid #e2e8f0;
+      background: #ffffff; color: #334155;
+      font-family: 'JetBrains Mono', 'Courier New', monospace;
+      font-size: 12px; font-weight: 600; cursor: pointer;
+    }
+    .dl-btn:hover { background: #f8fafc; border-color: #94a3b8; }
+    .dl-btn.png  { border-color: #0284c7; color: #0284c7; }
+    .dl-btn.webp { border-color: #059669; color: #059669; }
+    .dl-btn.copy { border-color: #7c3aed; color: #7c3aed; }
+    .dl-btn.copy.copied { background: #ede9fe; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Ask Arthur — Database Schema</h1>
+    <p>Supabase Postgres · 75+ tables · 71 RPCs · 9 triggers · 121 migrations (v2 → v122) · snapshot 2026-05-17</p>
+  </header>
+
+  <div class="diagram-container">
+    <svg viewBox="0 0 1340 1500" xmlns="http://www.w3.org/2000/svg" width="1340" height="1500">
+      <defs>
+        <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+          <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#e2e8f0" stroke-width="1" opacity="0.5"/>
+        </pattern>
+        <filter id="shadow" x="-5%" y="-5%" width="115%" height="130%">
+          <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#94a3b8" flood-opacity="0.18"/>
+        </filter>
+        <marker id="arrow-violet" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#7c3aed" opacity="0.7"/>
+        </marker>
+        <marker id="arrow-slate" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#64748b" opacity="0.7"/>
+        </marker>
+        <marker id="arrow-amber" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#f59e0b" opacity="0.85"/>
+        </marker>
+        <marker id="arrow-rose" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#e11d48" opacity="0.7"/>
+        </marker>
+      </defs>
+
+      <rect width="1340" height="1500" fill="#f8fafc"/>
+      <rect width="1340" height="1500" fill="url(#grid)"/>
+
+      <!-- Header strip -->
+      <text x="60" y="50" font-size="13" font-weight="700" fill="#3b0764" letter-spacing="1" font-family="JetBrains Mono, monospace">SUPABASE POSTGRES — rquomhcgnodxzkhokwni</text>
+      <text x="60" y="68" font-size="10" fill="#64748b" font-family="JetBrains Mono, monospace">Cells grouped by domain · arrows = FK / pipeline / dispatch relationships · ⚠ = hot (sibling-index rule) · ◑ = flag-gated · ⏸ = paused</text>
+
+      <!-- ============== FK ARROWS (z-order: bottom) ============== -->
+      <!-- (1) Identity → (2) Analysis Pipeline -->
+      <line x1="350" y1="170" x2="365" y2="170" stroke="#64748b" stroke-width="1.5" opacity="0.7" marker-end="url(#arrow-slate)"/>
+      <text x="343" y="160" font-size="8" fill="#64748b" font-family="JetBrains Mono, monospace" text-anchor="end">user_id</text>
+
+      <!-- (3) Feeds/Intel → (4) Reddit Intel (reddit_post_intel sources from feed_items) -->
+      <line x1="960" y1="190" x2="975" y2="190" stroke="#64748b" stroke-width="1.5" opacity="0.7" marker-end="url(#arrow-slate)"/>
+      <text x="953" y="180" font-size="8" fill="#64748b" font-family="JetBrains Mono, monospace" text-anchor="end">feed_items</text>
+
+      <!-- (1) Identity → (5) Phone Footprint -->
+      <line x1="205" y1="305" x2="205" y2="320" stroke="#64748b" stroke-width="1.5" opacity="0.7" marker-end="url(#arrow-slate)"/>
+      <text x="215" y="316" font-size="8" fill="#64748b" font-family="JetBrains Mono, monospace">user_id</text>
+
+      <!-- (2) Analysis Pipeline → (10) Telemetry (cost per call) -->
+      <line x1="510" y1="540" x2="510" y2="555" stroke="#f59e0b" stroke-width="1.5" opacity="0.7" stroke-dasharray="4,4" marker-end="url(#arrow-amber)"/>
+      <text x="520" y="551" font-size="8" fill="#b45309" font-family="JetBrains Mono, monospace">cost_telemetry</text>
+
+      <!-- (2) Analysis Pipeline → (11) Feedback -->
+      <line x1="690" y1="305" x2="690" y2="565" stroke="#f59e0b" stroke-width="1.5" opacity="0.6" stroke-dasharray="4,4" marker-end="url(#arrow-amber)"/>
+      <text x="700" y="540" font-size="8" fill="#b45309" font-family="JetBrains Mono, monospace">verdict_feedback</text>
+
+      <!-- (9) Bot Queue → (2) Analysis Pipeline -->
+      <line x1="170" y1="565" x2="350" y2="240" stroke="#f59e0b" stroke-width="1.5" opacity="0.6" stroke-dasharray="4,4" marker-end="url(#arrow-amber)"/>
+      <text x="200" y="430" font-size="8" fill="#b45309" font-family="JetBrains Mono, monospace">dispatch</text>
+
+      <!-- (14) Onward → (2) Analysis Pipeline -->
+      <line x1="510" y1="805" x2="510" y2="290" stroke="#7c3aed" stroke-width="1.5" opacity="0.4" stroke-dasharray="4,4" marker-end="url(#arrow-violet)"/>
+      <text x="520" y="800" font-size="8" fill="#7c3aed" font-family="JetBrains Mono, monospace">submitted reports</text>
+
+      <!-- (4) Reddit Intel internal: posts ↔ themes -->
+      <!-- Internal arrow shown inside cell -->
+
+      <!-- ============== ROW 1 — y=80-300 ============== -->
+      <!-- (1) IDENTITY / BILLING -->
+      <g>
+        <rect x="60" y="80" width="290" height="220" rx="10" ry="10" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5" filter="url(#shadow)"/>
+        <text x="76" y="104" font-size="11" font-weight="700" fill="#3b0764" font-family="JetBrains Mono, monospace" letter-spacing="0.5">IDENTITY / BILLING</text>
+        <text x="76" y="122" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• user_profiles ← auth.users (trg)</text>
+        <text x="76" y="136" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• api_keys (B2B, hashed, tier)</text>
+        <text x="76" y="150" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• subscriptions ← Stripe</text>
+        <text x="76" y="164" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• organizations · org_members</text>
+        <text x="76" y="178" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• org_invitations (hashed tokens)</text>
+        <text x="76" y="192" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• family_groups · family_members</text>
+        <text x="76" y="206" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">  + family_activity_log</text>
+        <text x="76" y="220" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• phone_footprint_entitlements</text>
+        <text x="76" y="238" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">indexes: BTree pk · partial unique</text>
+        <text x="76" y="252" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">trigger: on_auth_user_created</text>
+        <rect x="76" y="262" width="200" height="14" rx="3" fill="#fee2e2" stroke="#e11d48" stroke-width="1"/>
+        <text x="176" y="272" font-size="8" font-weight="700" fill="#881337" text-anchor="middle" font-family="JetBrains Mono, monospace">⛔ P1 · HIBP leaked-pwd toggle OFF</text>
+      </g>
+
+      <!-- (2) ANALYSIS PIPELINE ★ central -->
+      <g>
+        <rect x="365" y="80" width="290" height="220" rx="10" ry="10" fill="#ede9fe" stroke="#7c3aed" stroke-width="2" filter="url(#shadow)"/>
+        <text x="381" y="104" font-size="11" font-weight="700" fill="#3b0764" font-family="JetBrains Mono, monospace" letter-spacing="0.5">ANALYSIS PIPELINE ★</text>
+        <circle cx="640" cy="89" r="5" fill="#e11d48"/>
+        <text x="592" y="93" font-size="8" font-weight="700" fill="#e11d48" font-family="JetBrains Mono, monospace">⚠ HOT</text>
+
+        <text x="381" y="122" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• scam_reports [hot ⚠]</text>
+        <text x="395" y="135" font-size="8" fill="#3b0764" opacity="0.75" font-family="JetBrains Mono, monospace">HNSW partial (embedding NOT NULL)</text>
+        <text x="381" y="149" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• verified_scams (curated)</text>
+        <text x="395" y="162" font-size="8" fill="#3b0764" opacity="0.75" font-family="JetBrains Mono, monospace">HNSW · read-only corpus</text>
+        <text x="381" y="176" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• scam_entities [hot ⚠]</text>
+        <text x="395" y="189" font-size="8" fill="#3b0764" opacity="0.75" font-family="JetBrains Mono, monospace">UNIQUE(type, normalized_value)</text>
+        <text x="381" y="203" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• report_entity_links (M:M)</text>
+        <text x="381" y="216" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• scam_clusters · cluster_members</text>
+        <text x="381" y="230" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• scam_{urls,contacts,ips,wallets}</text>
+        <text x="381" y="252" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">RPC: create_scam_report (idempotent)</text>
+        <text x="381" y="266" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">trg: trg_entity_enrichment_pending</text>
+
+        <!-- Self-loop arrow for entities ↔ reports -->
+        <path d="M 540 220 Q 580 220 580 200" fill="none" stroke="#7c3aed" stroke-width="1.2" opacity="0.5" marker-end="url(#arrow-violet)"/>
+      </g>
+
+      <!-- (3) FEEDS / INTEL -->
+      <g>
+        <rect x="670" y="80" width="290" height="220" rx="10" ry="10" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5" filter="url(#shadow)"/>
+        <text x="686" y="104" font-size="11" font-weight="700" fill="#3b0764" font-family="JetBrains Mono, monospace" letter-spacing="0.5">FEEDS / INTEL</text>
+        <circle cx="950" cy="89" r="5" fill="#e11d48"/>
+        <text x="902" y="93" font-size="8" font-weight="700" fill="#e11d48" font-family="JetBrains Mono, monospace">⚠ HOT</text>
+
+        <text x="686" y="122" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• feed_items [hot ⚠]</text>
+        <text x="700" y="135" font-size="8" fill="#3b0764" opacity="0.75" font-family="JetBrains Mono, monospace">IVFFlat partial (narrative only, v97)</text>
+        <text x="700" y="148" font-size="8" fill="#3b0764" opacity="0.75" font-family="JetBrains Mono, monospace">archive shadow &gt;365d (v98)</text>
+        <text x="686" y="162" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• feed_ingestion_log (90d retention)</text>
+        <text x="686" y="176" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• feed_http_cache (ETag, 30d)</text>
+        <text x="686" y="190" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• feed_summaries (daily digest)</text>
+        <text x="686" y="208" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">writers: 23 Python scrapers +</text>
+        <text x="686" y="221" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">  intel-inbound-email Edge Fn</text>
+        <text x="686" y="243" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">RPCs: bulk_upsert_feed_*,</text>
+        <text x="686" y="256" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">  match_feed_items_hybrid (BM25+vec)</text>
+        <text x="686" y="270" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">embed: feed-items-embed (30m)</text>
+      </g>
+
+      <!-- (4) REDDIT INTEL -->
+      <g>
+        <rect x="975" y="80" width="290" height="220" rx="10" ry="10" fill="#fef3c7" stroke="#d97706" stroke-width="1.5" filter="url(#shadow)"/>
+        <text x="991" y="104" font-size="11" font-weight="700" fill="#78350f" font-family="JetBrains Mono, monospace" letter-spacing="0.5">REDDIT INTEL</text>
+        <rect x="1180" y="89" width="36" height="14" rx="3" fill="#fbbf24"/>
+        <text x="1198" y="99" font-size="8" font-weight="700" fill="#78350f" text-anchor="middle" font-family="JetBrains Mono, monospace">FLAG</text>
+
+        <text x="991" y="122" font-size="9" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">• reddit_post_intel</text>
+        <text x="1005" y="135" font-size="8" fill="#78350f" opacity="0.75" font-family="JetBrains Mono, monospace">Sonnet 4.6 classified · IVFFlat</text>
+        <text x="991" y="149" font-size="9" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">• reddit_intel_themes</text>
+        <text x="1005" y="162" font-size="8" fill="#78350f" opacity="0.75" font-family="JetBrains Mono, monospace">centroid IVFFlat · slug · wow_delta</text>
+        <text x="991" y="176" font-size="9" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">• reddit_post_intel_themes (M:M)</text>
+        <text x="991" y="190" font-size="9" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">• reddit_intel_quotes (≤140ch, scrub)</text>
+        <text x="991" y="204" font-size="9" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">• reddit_intel_daily_summary (JSONB)</text>
+        <text x="991" y="218" font-size="9" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">• reddit_processed_posts (dedup)</text>
+        <text x="991" y="240" font-size="9" font-weight="700" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">5 flags · brake $10/day</text>
+        <text x="991" y="254" font-size="9" font-weight="700" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">RPC: match_themes_by_centroid</text>
+        <text x="991" y="268" font-size="9" font-weight="700" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">embed: reddit-intel-embed (1024d)</text>
+
+        <!-- internal M:M arrow -->
+        <path d="M 1145 150 Q 1170 160 1145 175" fill="none" stroke="#7c3aed" stroke-width="1.2" opacity="0.5" marker-end="url(#arrow-violet)"/>
+      </g>
+
+      <!-- ============== ROW 2 — y=325-545 ============== -->
+      <!-- (5) PHONE FOOTPRINT -->
+      <g>
+        <rect x="60" y="325" width="290" height="220" rx="10" ry="10" fill="#fef3c7" stroke="#d97706" stroke-width="1.5" filter="url(#shadow)"/>
+        <text x="76" y="349" font-size="11" font-weight="700" fill="#78350f" font-family="JetBrains Mono, monospace" letter-spacing="0.5">PHONE FOOTPRINT</text>
+        <rect x="265" y="334" width="36" height="14" rx="3" fill="#fbbf24"/>
+        <text x="283" y="344" font-size="8" font-weight="700" fill="#78350f" text-anchor="middle" font-family="JetBrains Mono, monospace">FLAG</text>
+
+        <text x="76" y="368" font-size="9" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">• phone_footprints (BRIN expires_at)</text>
+        <text x="76" y="382" font-size="9" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">• phone_footprint_monitors</text>
+        <text x="90" y="395" font-size="8" fill="#78350f" opacity="0.75" font-family="JetBrains Mono, monospace">user_id · partial unique</text>
+        <text x="76" y="409" font-size="9" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">• phone_footprint_alerts (delta)</text>
+        <text x="76" y="423" font-size="9" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">• pf_refresh_queue (Inngest claim)</text>
+        <text x="76" y="437" font-size="9" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">• pf_otp_attempts (Twilio audit)</text>
+        <text x="76" y="451" font-size="9" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">• sim_swap_{monitors,events}</text>
+        <text x="76" y="465" font-size="9" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">• device_swap_events</text>
+        <text x="76" y="479" font-size="9" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">• telco_api_usage · webhook_subs</text>
+        <text x="76" y="501" font-size="9" font-weight="700" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">RPC: phone_footprint_internal,</text>
+        <text x="76" y="514" font-size="9" font-weight="700" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">  sync_phone_footprint_entitlements</text>
+        <text x="76" y="528" font-size="9" font-weight="700" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">brake $5/day · refresh-claimer 1h</text>
+      </g>
+
+      <!-- (6) CHARITY CHECK -->
+      <g>
+        <rect x="365" y="325" width="290" height="220" rx="10" ry="10" fill="#fef3c7" stroke="#d97706" stroke-width="1.5" filter="url(#shadow)"/>
+        <text x="381" y="349" font-size="11" font-weight="700" fill="#78350f" font-family="JetBrains Mono, monospace" letter-spacing="0.5">CHARITY CHECK</text>
+        <rect x="570" y="334" width="36" height="14" rx="3" fill="#fbbf24"/>
+        <text x="588" y="344" font-size="8" font-weight="700" fill="#78350f" text-anchor="middle" font-family="JetBrains Mono, monospace">FLAG</text>
+        <circle cx="640" cy="334" r="5" fill="#e11d48"/>
+        <text x="598" y="338" font-size="8" font-weight="700" fill="#e11d48" font-family="JetBrains Mono, monospace">⚠ HOT</text>
+
+        <text x="381" y="368" font-size="9" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">• acnc_charities [hot ⚠]  (63.6k)</text>
+        <text x="395" y="381" font-size="8" fill="#78350f" opacity="0.75" font-family="JetBrains Mono, monospace">trigram GIN(legal_name,other_names)</text>
+        <text x="395" y="394" font-size="8" fill="#78350f" opacity="0.75" font-family="JetBrains Mono, monospace">daily UPDATE chunked ≤5K (PR #187)</text>
+        <text x="381" y="412" font-size="9" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">  ↕ sibling 1:1</text>
+        <text x="381" y="426" font-size="9" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">• acnc_charity_embeddings</text>
+        <text x="395" y="439" font-size="8" fill="#78350f" opacity="0.75" font-family="JetBrains Mono, monospace">HNSW 1024d Voyage (v121, v122 drop)</text>
+        <text x="381" y="455" font-size="9" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">• pfra_members (B2B registry)</text>
+
+        <text x="381" y="479" font-size="9" font-weight="700" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">RPCs: search_charities (trigram)</text>
+        <text x="381" y="492" font-size="9" font-weight="700" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">  match_charities_by_embedding</text>
+        <text x="381" y="506" font-size="9" font-weight="700" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">embed: acnc-backfill-embed (nightly)</text>
+        <text x="381" y="520" font-size="9" font-weight="700" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">brake $5/day · ADR-0005 reference</text>
+
+        <!-- Sibling arrow -->
+        <path d="M 460 405 Q 450 412 460 422" fill="none" stroke="#7c3aed" stroke-width="1.3" opacity="0.65" stroke-dasharray="2,2"/>
+      </g>
+
+      <!-- (7) BREACH DEFENCE — PAUSED -->
+      <g opacity="0.7">
+        <rect x="670" y="325" width="290" height="220" rx="10" ry="10" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5" stroke-dasharray="5,4" filter="url(#shadow)"/>
+        <text x="686" y="349" font-size="11" font-weight="700" fill="#334155" font-family="JetBrains Mono, monospace" letter-spacing="0.5">BREACH DEFENCE</text>
+        <rect x="855" y="334" width="84" height="20" rx="3" fill="#64748b"/>
+        <text x="897" y="348" font-size="9" font-weight="700" fill="#ffffff" text-anchor="middle" font-family="JetBrains Mono, monospace">⏸ PAUSED</text>
+
+        <text x="686" y="372" font-size="9" fill="#334155" opacity="0.85" font-family="JetBrains Mono, monospace">• breaches (slug UNIQUE)</text>
+        <text x="700" y="385" font-size="8" fill="#334155" opacity="0.75" font-family="JetBrains Mono, monospace">data_classes ARRAY · trg updated_at</text>
+        <text x="686" y="399" font-size="9" fill="#334155" opacity="0.85" font-family="JetBrains Mono, monospace">• breach_victims_index</text>
+        <text x="700" y="412" font-size="8" fill="#334155" opacity="0.75" font-family="JetBrains Mono, monospace">SHA-256(email/phone/DL/medicare/passport)</text>
+        <text x="700" y="424" font-size="8" fill="#334155" opacity="0.75" font-family="JetBrains Mono, monospace">service-role only (no RLS user)</text>
+        <text x="686" y="438" font-size="9" fill="#334155" opacity="0.85" font-family="JetBrains Mono, monospace">• breach_sources_raw (audit)</text>
+
+        <text x="686" y="465" font-size="9" font-weight="700" fill="#334155" opacity="0.85" font-family="JetBrains Mono, monospace">Schema live · 0 rows ingested</text>
+        <text x="686" y="479" font-size="9" font-weight="700" fill="#334155" opacity="0.85" font-family="JetBrains Mono, monospace">Paused 2026-04-29 (PR 1+2 shipped)</text>
+        <text x="686" y="493" font-size="9" font-weight="700" fill="#334155" opacity="0.85" font-family="JetBrains Mono, monospace">17 PRs blocked · OAIC NDB finding</text>
+        <text x="686" y="507" font-size="9" font-weight="700" fill="#334155" opacity="0.85" font-family="JetBrains Mono, monospace">11 flags OFF (bd*)</text>
+        <text x="686" y="528" font-size="9" font-weight="700" fill="#334155" opacity="0.85" font-family="JetBrains Mono, monospace">RPC: check_breach_exposure</text>
+      </g>
+
+      <!-- (8) DEEPFAKE / MEDIA + BRAND -->
+      <g>
+        <rect x="975" y="325" width="290" height="220" rx="10" ry="10" fill="#fef3c7" stroke="#d97706" stroke-width="1.5" filter="url(#shadow)"/>
+        <text x="991" y="349" font-size="11" font-weight="700" fill="#78350f" font-family="JetBrains Mono, monospace" letter-spacing="0.5">DEEPFAKE / MEDIA + BRAND</text>
+
+        <text x="991" y="370" font-size="9" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">• deepfake_detections</text>
+        <text x="1005" y="383" font-size="8" fill="#78350f" opacity="0.75" font-family="JetBrains Mono, monospace">archive &gt;180d · trg increment_count</text>
+        <text x="991" y="397" font-size="9" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">• media_analyses (JSONB versioning)</text>
+        <text x="1005" y="410" font-size="8" fill="#78350f" opacity="0.75" font-family="JetBrains Mono, monospace">exif_data · phash_vector · archive 180d</text>
+        <text x="991" y="424" font-size="9" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">• flagged_ads (archive &gt;180d)</text>
+        <text x="1005" y="437" font-size="8" fill="#78350f" opacity="0.75" font-family="JetBrains Mono, monospace">trg auto_escalate (high risk)</text>
+        <text x="991" y="451" font-size="9" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">• brand_impersonation_alerts</text>
+        <text x="991" y="465" font-size="9" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">• known_brands (canonical registry)</text>
+
+        <text x="991" y="487" font-size="9" font-weight="700" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">deepfake wiring is ORPHAN</text>
+        <rect x="991" y="495" width="265" height="14" rx="3" fill="#fee2e2" stroke="#e11d48" stroke-width="1"/>
+        <text x="1123" y="505" font-size="8" font-weight="700" fill="#881337" text-anchor="middle" font-family="JetBrains Mono, monospace">⛔ P2 · Hive AI pricing contract pending</text>
+        <text x="991" y="525" font-size="9" font-weight="700" fill="#78350f" opacity="0.85" font-family="JetBrains Mono, monospace">flags: NEXT_PUBLIC_FF_DEEPFAKE, FACEBOOK_ADS</text>
+      </g>
+
+      <!-- ============== ROW 3 — y=570-790 ============== -->
+      <!-- (9) BOT QUEUE -->
+      <g>
+        <rect x="60" y="570" width="290" height="220" rx="10" ry="10" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5" filter="url(#shadow)"/>
+        <text x="76" y="594" font-size="11" font-weight="700" fill="#3b0764" font-family="JetBrains Mono, monospace" letter-spacing="0.5">BOT QUEUE</text>
+
+        <text x="76" y="615" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• bot_message_queue</text>
+        <text x="90" y="628" font-size="8" fill="#3b0764" opacity="0.75" font-family="JetBrains Mono, monospace">INSERT trigger → pg_net (unmetered)</text>
+        <text x="90" y="640" font-size="8" fill="#3b0764" opacity="0.75" font-family="JetBrains Mono, monospace">/api/bot-webhook (router)</text>
+        <text x="76" y="654" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• bot_subscriptions</text>
+        <text x="90" y="667" font-size="8" fill="#3b0764" opacity="0.75" font-family="JetBrains Mono, monospace">platform · channel · enrolled_at</text>
+
+        <text x="76" y="691" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">5 platforms: Telegram · WhatsApp ·</text>
+        <text x="76" y="704" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">  Slack · Messenger · Slack-shortcut</text>
+        <text x="76" y="724" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">Safety net: bot-queue-sweep (6h)</text>
+        <text x="76" y="738" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">  bot-queue-cleanup (daily 04:00)</text>
+        <text x="76" y="758" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">Rate limit: 5/h per user (Upstash)</text>
+        <text x="76" y="772" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">Verify: HMAC platform-specific</text>
+      </g>
+
+      <!-- (10) TELEMETRY / SAFETY -->
+      <g>
+        <rect x="365" y="570" width="290" height="220" rx="10" ry="10" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5" filter="url(#shadow)"/>
+        <text x="381" y="594" font-size="11" font-weight="700" fill="#3b0764" font-family="JetBrains Mono, monospace" letter-spacing="0.5">TELEMETRY / SAFETY</text>
+
+        <text x="381" y="615" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• cost_telemetry (BRIN created_at)</text>
+        <text x="395" y="628" font-size="8" fill="#3b0764" opacity="0.75" font-family="JetBrains Mono, monospace">feature · provider · operation · USD</text>
+        <text x="381" y="642" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• cost_telemetry_daily_rollup (MV)</text>
+        <text x="381" y="656" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• cost_telemetry_partitioned [shell]</text>
+        <text x="381" y="670" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• feature_brakes (per-feature caps)</text>
+
+        <text x="381" y="692" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">RPCs: refresh_cost_telemetry_*,</text>
+        <text x="381" y="705" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">  prune_cost_telemetry</text>
+        <text x="381" y="725" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">crons: cost-daily-check (6h),</text>
+        <text x="381" y="738" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">  cost-weekly-digest (Sun 22:00)</text>
+        <rect x="381" y="747" width="265" height="14" rx="3" fill="#fee2e2" stroke="#e11d48" stroke-width="1"/>
+        <text x="513" y="757" font-size="8" font-weight="700" fill="#881337" text-anchor="middle" font-family="JetBrains Mono, monospace">⛔ P3 · 2 Voyage retrievers miss logCost()</text>
+        <text x="381" y="778" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">pg-watchdog (*/5m) · brake-alert (*/15m)</text>
+      </g>
+
+      <!-- (11) FEEDBACK / TRIAGE -->
+      <g>
+        <rect x="670" y="570" width="290" height="220" rx="10" ry="10" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5" filter="url(#shadow)"/>
+        <text x="686" y="594" font-size="11" font-weight="700" fill="#3b0764" font-family="JetBrains Mono, monospace" letter-spacing="0.5">FEEDBACK / TRIAGE</text>
+        <circle cx="950" cy="579" r="5" fill="#e11d48"/>
+        <text x="902" y="583" font-size="8" font-weight="700" fill="#e11d48" font-family="JetBrains Mono, monospace">⚠ HOT</text>
+
+        <text x="686" y="615" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• verdict_feedback [hot ⚠]</text>
+        <text x="700" y="628" font-size="8" fill="#3b0764" opacity="0.75" font-family="JetBrains Mono, monospace">thumbs · reason code · scrub flag</text>
+        <text x="686" y="642" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• feedback_triage_queue (MV)</text>
+        <text x="700" y="655" font-size="8" fill="#3b0764" opacity="0.75" font-family="JetBrains Mono, monospace">triage_score = uncertainty × impact</text>
+        <text x="700" y="667" font-size="8" fill="#3b0764" opacity="0.75" font-family="JetBrains Mono, monospace">refresh: every 5 min (cron)</text>
+
+        <text x="686" y="691" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">RPC: refresh_feedback_triage_queue</text>
+        <text x="686" y="711" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">feedback-digest cron 09:00 daily</text>
+        <text x="686" y="725" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">→ admin review at /admin/feedback</text>
+        <text x="686" y="745" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">Active-learning loop:</text>
+        <text x="686" y="758" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">  high triage_score → re-prompt eval</text>
+        <text x="686" y="778" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">tag: feature='feedback-triage-refresh'</text>
+      </g>
+
+      <!-- (12) COMMERCE / CONTENT -->
+      <g>
+        <rect x="975" y="570" width="290" height="220" rx="10" ry="10" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5" filter="url(#shadow)"/>
+        <text x="991" y="594" font-size="11" font-weight="700" fill="#3b0764" font-family="JetBrains Mono, monospace" letter-spacing="0.5">COMMERCE / CONTENT</text>
+
+        <text x="991" y="615" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• leads (intake)</text>
+        <text x="991" y="629" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• stripe_event_log (event_id idemp.)</text>
+        <text x="991" y="643" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• blog_posts (TSVECTOR GIN)</text>
+        <text x="991" y="657" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• blog_categories</text>
+        <text x="991" y="671" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• email_subscribers (DENY_ALL RLS)</text>
+        <text x="991" y="685" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• extension_subscriptions/installs</text>
+        <text x="1005" y="698" font-size="8" fill="#3b0764" opacity="0.75" font-family="JetBrains Mono, monospace">per-install ECDSA key (v34, v61)</text>
+        <text x="991" y="712" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• device_push_tokens (v32)</text>
+        <text x="991" y="726" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• subscriber_match_checks</text>
+
+        <text x="991" y="752" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">trg: trg_leads_updated_at</text>
+        <text x="991" y="772" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">weekly-blog · weekly-email crons</text>
+      </g>
+
+      <!-- ============== ROW 4 — y=815-1035 ============== -->
+      <!-- (13) SCANS / SITES + FRAUD -->
+      <g>
+        <rect x="60" y="815" width="290" height="220" rx="10" ry="10" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5" filter="url(#shadow)"/>
+        <text x="76" y="839" font-size="11" font-weight="700" fill="#3b0764" font-family="JetBrains Mono, monospace" letter-spacing="0.5">SCANS / SITES + FRAUD</text>
+
+        <text x="76" y="860" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• scan_results (archive &gt;180d)</text>
+        <text x="76" y="874" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• sites (domain · badge_token)</text>
+        <text x="76" y="888" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• site_audits (JSONB GIN)</text>
+        <text x="76" y="902" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• fraud_manager_records (v58)</text>
+        <text x="76" y="916" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• investigation_records (v28)</text>
+        <text x="76" y="930" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• vulnerability_iocs (Phase 14)</text>
+        <text x="76" y="944" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• au_vuln_context (enrich-vulns-cron)</text>
+
+        <text x="76" y="970" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">RPC: get_threat_intel_export,</text>
+        <text x="76" y="983" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">  compute_entity_risk_score</text>
+        <text x="76" y="1003" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">/api/{site,extension,mcp}-audit</text>
+        <rect x="76" y="1011" width="265" height="14" rx="3" fill="#dbeafe" stroke="#0284c7" stroke-width="1"/>
+        <text x="208" y="1021" font-size="8" font-weight="700" fill="#0c4a6e" text-anchor="middle" font-family="JetBrains Mono, monospace">🔧 Vuln Intel Sprint 1 in flight</text>
+      </g>
+
+      <!-- (14) ONWARD / REGULATOR -->
+      <g>
+        <rect x="365" y="815" width="290" height="220" rx="10" ry="10" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5" filter="url(#shadow)"/>
+        <text x="381" y="839" font-size="11" font-weight="700" fill="#3b0764" font-family="JetBrains Mono, monospace" letter-spacing="0.5">ONWARD / REGULATOR</text>
+
+        <text x="381" y="860" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• onward_report_log</text>
+        <text x="381" y="874" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• regulator_alert_pushes (delivery)</text>
+        <text x="381" y="888" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">• provider_reports · _actions (v39)</text>
+
+        <text x="381" y="912" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">Destinations:</text>
+        <text x="395" y="926" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">  → Scamwatch (ACCC email)</text>
+        <text x="395" y="940" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">  → ACMA spam-text reporter</text>
+        <text x="395" y="954" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">  → ReportCyber (ACSC form)</text>
+        <text x="395" y="968" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">  → iDCARE referral</text>
+        <text x="395" y="982" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">  → AskArthur feed (internal)</text>
+
+        <text x="381" y="1006" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">Event: report.submitted.v1</text>
+        <text x="381" y="1020" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">Approval gate at /admin/onward-reports</text>
+      </g>
+
+      <!-- (15) RETENTION / ARCHIVE -->
+      <g>
+        <rect x="670" y="815" width="290" height="220" rx="10" ry="10" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5" filter="url(#shadow)"/>
+        <text x="686" y="839" font-size="11" font-weight="700" fill="#3b0764" font-family="JetBrains Mono, monospace" letter-spacing="0.5">RETENTION / ARCHIVE</text>
+
+        <text x="686" y="860" font-size="9" font-weight="700" fill="#3b0764" opacity="0.95" font-family="JetBrains Mono, monospace">11 archive shadows (BRIN created_at)</text>
+        <text x="686" y="874" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">scam_reports_archive (planned move)</text>
+        <text x="686" y="888" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">feed_items_archive (&gt;365d)</text>
+        <text x="686" y="902" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">scan_results_archive (&gt;180d)</text>
+        <text x="686" y="916" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">deepfake · media · flagged_ads (180d)</text>
+        <text x="686" y="930" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">verdict_feedback · brand_alerts · etc.</text>
+
+        <text x="686" y="952" font-size="9" font-weight="700" fill="#3b0764" opacity="0.95" font-family="JetBrains Mono, monospace">Partition shells (cutover pending):</text>
+        <text x="686" y="966" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">  cost_telemetry_partitioned (v71)</text>
+        <text x="686" y="980" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">  scam_reports_partitioned</text>
+        <text x="686" y="994" font-size="9" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">  feed_items_partitioned</text>
+
+        <text x="686" y="1018" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">RPC: archive_*_batch · prune_*</text>
+        <text x="686" y="1031" font-size="9" font-weight="700" fill="#3b0764" opacity="0.85" font-family="JetBrains Mono, monospace">cron: archive-shadows (05:00)</text>
+      </g>
+
+      <!-- (16) RPCs · TRIGGERS · HYGIENE -->
+      <g>
+        <rect x="975" y="815" width="290" height="220" rx="10" ry="10" fill="#ffe4e6" stroke="#e11d48" stroke-width="1.5" filter="url(#shadow)"/>
+        <text x="991" y="839" font-size="11" font-weight="700" fill="#881337" font-family="JetBrains Mono, monospace" letter-spacing="0.5">RPCs · TRIGGERS · HYGIENE</text>
+
+        <text x="991" y="860" font-size="9" font-weight="700" fill="#881337" opacity="0.95" font-family="JetBrains Mono, monospace">71 RPCs · ALL SECURITY DEFINER</text>
+        <text x="991" y="874" font-size="9" fill="#881337" opacity="0.85" font-family="JetBrains Mono, monospace">8 pipeline · 9 search/retrieval</text>
+        <text x="991" y="888" font-size="9" fill="#881337" opacity="0.85" font-family="JetBrains Mono, monospace">7 phone/breach · 4 cost/telem</text>
+        <text x="991" y="902" font-size="9" fill="#881337" opacity="0.85" font-family="JetBrains Mono, monospace">6 archive · 2 partitioning</text>
+        <text x="991" y="916" font-size="9" fill="#881337" opacity="0.85" font-family="JetBrains Mono, monospace">9 org/user · 3 cluster/entity</text>
+
+        <text x="991" y="940" font-size="9" font-weight="700" fill="#881337" opacity="0.95" font-family="JetBrains Mono, monospace">9 TRIGGERS</text>
+        <text x="991" y="954" font-size="9" fill="#881337" opacity="0.85" font-family="JetBrains Mono, monospace">on_auth_user_created · *_updated_at×4</text>
+        <text x="991" y="968" font-size="9" fill="#881337" opacity="0.85" font-family="JetBrains Mono, monospace">entity_enrichment_pending · family_owner</text>
+        <text x="991" y="982" font-size="9" fill="#881337" opacity="0.85" font-family="JetBrains Mono, monospace">deepfake_increment · flagged_ads_escalate</text>
+
+        <text x="991" y="1006" font-size="9" font-weight="700" fill="#881337" opacity="0.95" font-family="JetBrains Mono, monospace">HYGIENE BACKLOG</text>
+        <rect x="991" y="1014" width="265" height="14" rx="3" fill="#fee2e2" stroke="#e11d48" stroke-width="1"/>
+        <text x="1123" y="1024" font-size="8" font-weight="700" fill="#881337" text-anchor="middle" font-family="JetBrains Mono, monospace">⛔ P3 · 177 unused indexes · RLS rewrite</text>
+      </g>
+
+      <!-- ============== CRITICAL-RULE RIBBONS ============== -->
+      <g>
+        <rect x="60" y="1070" width="400" height="60" rx="8" ry="8" fill="#fef2f2" stroke="#e11d48" stroke-width="1.2"/>
+        <text x="76" y="1090" font-size="10" font-weight="700" fill="#881337" font-family="JetBrains Mono, monospace" letter-spacing="0.5">RULE · NEVER SET statement_timeout=0</text>
+        <text x="76" y="1107" font-size="9" fill="#881337" opacity="0.9" font-family="JetBrains Mono, monospace">chunk ≤5K rows · cap at '300s' · try/except</text>
+        <text x="76" y="1120" font-size="9" fill="#881337" opacity="0.9" font-family="JetBrains Mono, monospace">incident 2026-05-09: 20h hang · site down</text>
+      </g>
+
+      <g>
+        <rect x="475" y="1070" width="400" height="60" rx="8" ry="8" fill="#fef2f2" stroke="#e11d48" stroke-width="1.2"/>
+        <text x="491" y="1090" font-size="10" font-weight="700" fill="#881337" font-family="JetBrains Mono, monospace" letter-spacing="0.5">RULE · ADR-0005 SIBLING-INDEX PATTERN</text>
+        <text x="491" y="1107" font-size="9" fill="#881337" opacity="0.9" font-family="JetBrains Mono, monospace">large index (HNSW/GIN/BRIN) on hot table</text>
+        <text x="491" y="1120" font-size="9" fill="#881337" opacity="0.9" font-family="JetBrains Mono, monospace">→ 1:1 sibling (acnc_charity_embeddings)</text>
+      </g>
+
+      <g>
+        <rect x="890" y="1070" width="390" height="60" rx="8" ry="8" fill="#fef2f2" stroke="#e11d48" stroke-width="1.2"/>
+        <text x="906" y="1090" font-size="10" font-weight="700" fill="#881337" font-family="JetBrains Mono, monospace" letter-spacing="0.5">RULE · IDEMPOTENT MIGRATIONS</text>
+        <text x="906" y="1107" font-size="9" fill="#881337" opacity="0.9" font-family="JetBrains Mono, monospace">CREATE … IF NOT EXISTS · DROP POLICY IF</text>
+        <text x="906" y="1120" font-size="9" fill="#881337" opacity="0.9" font-family="JetBrains Mono, monospace">function bites: set_search_path · use_column</text>
+      </g>
+
+      <!-- ============== INDEX-TYPE PANEL ============== -->
+      <g>
+        <rect x="60" y="1160" width="600" height="180" rx="10" ry="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+        <text x="76" y="1182" font-size="11" font-weight="700" fill="#475569" font-family="JetBrains Mono, monospace" letter-spacing="0.5">INDEX TYPES IN USE</text>
+
+        <rect x="76" y="1198" width="14" height="10" rx="2" fill="#ddd6fe" stroke="#7c3aed" stroke-width="1"/>
+        <text x="96" y="1208" font-size="9" fill="#334155" font-family="JetBrains Mono, monospace">HNSW (dense ANN)</text>
+        <text x="96" y="1220" font-size="8" fill="#64748b" font-family="JetBrains Mono, monospace">scam_reports (partial) · verified_scams · acnc_charity_embeddings (sibling)</text>
+
+        <rect x="76" y="1238" width="14" height="10" rx="2" fill="#fed7aa" stroke="#ea580c" stroke-width="1"/>
+        <text x="96" y="1248" font-size="9" fill="#334155" font-family="JetBrains Mono, monospace">IVFFlat (dense ANN, lower recall)</text>
+        <text x="96" y="1260" font-size="8" fill="#64748b" font-family="JetBrains Mono, monospace">feed_items (partial, narrative only · lists=50) · reddit_post_intel · themes centroid</text>
+
+        <rect x="76" y="1278" width="14" height="10" rx="2" fill="#bae6fd" stroke="#0284c7" stroke-width="1"/>
+        <text x="96" y="1288" font-size="9" fill="#334155" font-family="JetBrains Mono, monospace">trigram GIN (substring search)</text>
+        <text x="96" y="1300" font-size="8" fill="#64748b" font-family="JetBrains Mono, monospace">acnc_charities (charity_legal_name, other_names)</text>
+
+        <rect x="76" y="1318" width="14" height="10" rx="2" fill="#fef3c7" stroke="#d97706" stroke-width="1"/>
+        <text x="96" y="1328" font-size="9" fill="#334155" font-family="JetBrains Mono, monospace">BRIN (cheap range scans on archive)</text>
+
+        <rect x="380" y="1318" width="14" height="10" rx="2" fill="#d1fae5" stroke="#059669" stroke-width="1"/>
+        <text x="400" y="1328" font-size="9" fill="#334155" font-family="JetBrains Mono, monospace">TSVECTOR GIN (full-text)</text>
+      </g>
+
+      <!-- ============== LEGEND ============== -->
+      <g transform="translate(680, 1160)">
+        <rect x="0" y="0" width="600" height="180" rx="10" ry="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+        <text x="16" y="22" font-size="11" font-weight="700" fill="#475569" font-family="JetBrains Mono, monospace" letter-spacing="0.5">LEGEND</text>
+
+        <rect x="16" y="38" width="14" height="10" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
+        <text x="36" y="48" font-size="9" fill="#334155" font-family="JetBrains Mono, monospace">database domain (shipped)</text>
+
+        <rect x="220" y="38" width="14" height="10" rx="2" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+        <text x="240" y="48" font-size="9" fill="#334155" font-family="JetBrains Mono, monospace">flag-gated domain</text>
+
+        <rect x="400" y="38" width="14" height="10" rx="2" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5" stroke-dasharray="3,2"/>
+        <text x="420" y="48" font-size="9" fill="#334155" font-family="JetBrains Mono, monospace">paused (Breach Defence)</text>
+
+        <circle cx="23" cy="68" r="5" fill="#e11d48"/>
+        <text x="36" y="72" font-size="9" fill="#334155" font-family="JetBrains Mono, monospace">⚠ hot table (sibling-index rule)</text>
+
+        <rect x="220" y="63" width="60" height="12" rx="3" fill="#e11d48"/>
+        <text x="250" y="72" font-size="8" font-weight="700" fill="#ffffff" text-anchor="middle" font-family="JetBrains Mono, monospace">⛔ P1/P2/P3</text>
+        <text x="290" y="72" font-size="9" fill="#334155" font-family="JetBrains Mono, monospace">open issue with severity</text>
+
+        <rect x="16" y="92" width="14" height="10" rx="2" fill="#ffe4e6" stroke="#e11d48" stroke-width="1.5"/>
+        <text x="36" y="102" font-size="9" fill="#334155" font-family="JetBrains Mono, monospace">RPCs / triggers / hygiene</text>
+
+        <rect x="220" y="92" width="14" height="10" rx="2" fill="#dbeafe" stroke="#0284c7" stroke-width="1.5"/>
+        <text x="240" y="102" font-size="9" fill="#334155" font-family="JetBrains Mono, monospace">🔧 WIP (Phase 14 Vuln Intel)</text>
+
+        <line x1="16" y1="124" x2="50" y2="124" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow-slate)"/>
+        <text x="58" y="128" font-size="9" fill="#334155" font-family="JetBrains Mono, monospace">FK (parent → child)</text>
+
+        <line x1="220" y1="124" x2="254" y2="124" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="4,4" marker-end="url(#arrow-amber)"/>
+        <text x="262" y="128" font-size="9" fill="#334155" font-family="JetBrains Mono, monospace">async / event-driven</text>
+
+        <line x1="400" y1="124" x2="434" y2="124" stroke="#7c3aed" stroke-width="1.5" opacity="0.5" stroke-dasharray="4,4" marker-end="url(#arrow-violet)"/>
+        <text x="442" y="128" font-size="9" fill="#334155" font-family="JetBrains Mono, monospace">pipeline promotion</text>
+
+        <text x="16" y="156" font-size="9" font-weight="700" fill="#64748b" font-family="JetBrains Mono, monospace">★ = central node (most FK arrows)</text>
+      </g>
+
+      <!-- ============== FOOTER STATS ============== -->
+      <text x="60" y="1380" font-size="10" font-weight="700" fill="#64748b" font-family="JetBrains Mono, monospace" letter-spacing="0.5">SNAPSHOT 2026-05-17</text>
+      <text x="60" y="1400" font-size="9" fill="#64748b" font-family="JetBrains Mono, monospace">14 domain areas · 75+ tables · 71 RPCs (all SECURITY DEFINER) · 9 triggers · 11 archive shadows · 3 partition shells · 121 migrations (v2 → v122)</text>
+      <text x="60" y="1420" font-size="9" fill="#64748b" font-family="JetBrains Mono, monospace">Hot tables (write-frequent, sibling-index required): scam_reports · verified_scams · scam_entities · acnc_charities · feed_items · feedback_triage_queue · verdict_feedback</text>
+      <text x="60" y="1440" font-size="9" fill="#64748b" font-family="JetBrains Mono, monospace">Sibling-pattern pairs: acnc_charities ↔ acnc_charity_embeddings (HNSW v121)</text>
+      <text x="60" y="1460" font-size="9" fill="#64748b" font-family="JetBrains Mono, monospace">Cost brakes (USD/day, feature_brakes table): DAILY=$2 · VULN_AU=$5 · REDDIT_INTEL=$10 · PHONE_FOOTPRINT=$5 · CHARITY_CHECK=$5</text>
+    </svg>
+  </div>
+
+  <div class="cards">
+    <div class="card">
+      <h3>Schema headline</h3>
+      <p>75+ tables across 14 domains · 71 RPCs (all SECURITY DEFINER) · 9 triggers · 11 archive shadows (BRIN on created_at) · 3 partition shells (cost_telemetry, scam_reports, feed_items) awaiting operator cutover · 121 migrations from v2 to v122.</p>
+    </div>
+    <div class="card">
+      <h3>Hot tables (sibling-index rule)</h3>
+      <p>Write-frequent tables that must never gain a large index on the parent. Today: <strong>acnc_charities</strong> (daily scraper UPDATE) → sibling <strong>acnc_charity_embeddings</strong> (HNSW v121); <strong>scam_reports</strong> (partial HNSW WHERE embedding IS NOT NULL, acceptable); <strong>feed_items</strong> (partial IVFFlat narrative-only). Per <strong>ADR-0005</strong>.</p>
+    </div>
+    <div class="card">
+      <h3>Open hygiene work</h3>
+      <p><strong>P1 HIBP toggle</strong> still OFF (sole security advisor WARN) · <strong>P3 RLS rewrite debt</strong> on ~10 tables (multi-permissive consolidation) · <strong>P3 177 unused indexes</strong> deferred from 2026-04-23 audit · <strong>P3 cost-telemetry gaps</strong> on <code>getSimilarReports</code> + <code>getRelevantThemes</code> Voyage retrievers · partition-cutover maintenance window TBD.</p>
+    </div>
+    <div class="card">
+      <h3>Critical incident reference</h3>
+      <p><strong>2026-05-09</strong> — single ACNC tail UPDATE with <code>SET statement_timeout = 0</code> hung for 20h, took the whole site down. Rules enacted: never set timeout to 0; chunk ≤5K rows; cap at <code>'300s'</code>; wrap <code>supabase.auth.getUser()</code> in <code>Promise.race</code>. Reference fix: PR #187 (chunked TOUCH_LAST_SEEN pattern in <code>pipeline/scrapers/acnc_register.py</code>).</p>
+    </div>
+  </div>
+
+  <div class="download-bar">
+    <button class="dl-btn png"  onclick="downloadDiagram('png')">↓ Download PNG</button>
+    <button class="dl-btn webp" onclick="downloadDiagram('webp')">↓ Download WebP</button>
+    <button class="dl-btn copy" onclick="copyDiagram(this)">⎘ Copy Image</button>
+  </div>
+
+  <footer>Generated 2026-05-17 · sources: docs/system-map/database.md + supabase/migrations/* + CLAUDE.md Critical Rules</footer>
+
+  <script>
+    function svgToBlob(mime, quality) {
+      return new Promise(resolve => {
+        const svg = document.querySelector('.diagram-container svg');
+        const vb  = svg.viewBox.baseVal;
+        const scale = 2;
+        const blob = new Blob([new XMLSerializer().serializeToString(svg)], { type: 'image/svg+xml;charset=utf-8' });
+        const url  = URL.createObjectURL(blob);
+        const img  = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width  = vb.width  * scale;
+          canvas.height = vb.height * scale;
+          const ctx = canvas.getContext('2d');
+          ctx.scale(scale, scale);
+          ctx.fillStyle = '#f8fafc';
+          ctx.fillRect(0, 0, vb.width, vb.height);
+          ctx.drawImage(img, 0, 0, vb.width, vb.height);
+          URL.revokeObjectURL(url);
+          canvas.toBlob(resolve, mime, quality);
+        };
+        img.src = url;
+      });
+    }
+
+    async function copyDiagram(btn) {
+      try {
+        const blob = await svgToBlob('image/png', 1.0);
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        btn.textContent = '✓ Copied!';
+        btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = '⎘ Copy Image'; btn.classList.remove('copied'); }, 2000);
+      } catch (e) {
+        btn.textContent = '✗ Failed';
+        setTimeout(() => { btn.textContent = '⎘ Copy Image'; }, 2000);
+      }
+    }
+
+    async function downloadDiagram(fmt) {
+      const mime = fmt === 'webp' ? 'image/webp' : 'image/png';
+      const blob = await svgToBlob(mime, 0.95);
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = document.title.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '.' + fmt;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    }
+  </script>
+</body>
+</html>
