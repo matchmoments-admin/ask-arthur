@@ -143,9 +143,18 @@ def scrape() -> None:
                 continue
 
             for cert in certs:
-                common_name = cert.get("common_name", "").strip().lower()
+                # crt.sh occasionally returns explicit JSON nulls for
+                # common_name and not_before. dict.get(k, default) only
+                # falls back to default when the key is *missing*, not
+                # when the value is None — so the previous
+                # `cert.get("common_name", "").strip()` raised
+                # `'NoneType' object has no attribute 'strip'` and tripped
+                # the circuit breaker on 2026-05-15 (#227). Wrap with
+                # `or ""` to handle both shapes.
+                common_name = (cert.get("common_name") or "").strip().lower()
                 if not common_name or common_name.startswith("*"):
-                    # Skip wildcards — too noisy
+                    # Skip wildcards — too noisy. Also skips the now-empty
+                    # null-common_name certs above.
                     continue
 
                 # Skip legitimate domains
@@ -157,7 +166,7 @@ def scrape() -> None:
                     continue
                 seen_domains.add(common_name)
 
-                not_before = cert.get("not_before", "").strip() or None
+                not_before = (cert.get("not_before") or "").strip() or None
                 cert_id = cert.get("id")
                 ref_url = f"https://crt.sh/?id={cert_id}" if cert_id else None
                 urls.append(
