@@ -47,7 +47,7 @@ Ask the user for both, use inline, and remind them to revoke once routing rule(s
 
 ## When NOT to use this skill
 
-- Source has an **RSS feed** → write a Python scraper in `pipeline/scrapers/` instead (Phase B PR pattern). RSS path is more reliable than email forwarding for sources that publish on a schedule.
+- Source has an **RSS feed** → write a Python scraper in `pipeline/scrapers/` instead (Phase B PR pattern in `docs/plans/threat-intel-ingestion.md` §7). RSS path is more reliable than email forwarding for sources that publish on a schedule. **Two rules locked in via PR-B3 (#247) — `curl -I` the upstream feed URL pre-merge** (AUSTRAC originally guessed a Drupal-convention path that 404'd; real feed is `/media-release/rss.xml`), and **for any scraper with `_infer_category()` logic, check specific patterns before generic** (an "investment scam" article matches generic `scam | fraud` first otherwise and mislabels as impersonation).
 - Source is **paid/members-only** with no public email → file an issue describing the value vs cost, don't try to subscribe.
 - Just adding a **routing rule** for an existing tag → only step 7, all other state already exists.
 
