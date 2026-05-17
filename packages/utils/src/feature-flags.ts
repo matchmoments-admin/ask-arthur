@@ -344,6 +344,35 @@ export const featureFlags = {
    *  on once the corpus has had a few weeks to accrue and customers have
    *  asked for it. Server-side only — gates the API merge logic. */
   regulatorIntelSearch: process.env.FF_REGULATOR_INTEL_SEARCH === "true",
+
+  // ===========================================================================
+  // Telstra SIM Swap — direct CAMARA API integration. Sits alongside the
+  // existing Vonage CAMARA provider in packages/scam-engine/.../providers/.
+  // Carrier routing in orchestrator.ts: Telstra MSISDN → Telstra provider;
+  // everything else → Vonage → carrier-drift fallback. Plan: PR #1 ships
+  // schema + flags; PR #2 ships the provider; PR #3 the endpoint + credits.
+  // ===========================================================================
+
+  /** Telstra direct CAMARA SIM Swap (`POST /sim-swap/v2/check` +
+   *  `/retrieve-date`). Server-side only — TELSTRA_CLIENT_SECRET is a server
+   *  secret. Default OFF until the trial portal login is provisioned AND
+   *  Nathan / TDEV sign off on the use case. When OFF, AU Telstra numbers
+   *  fall through to Vonage (mock-mode if Vonage too is unconfigured) →
+   *  carrier-drift fallback (Twilio Lookup deltas). */
+  telstraSimSwap: process.env.FF_TELSTRA_SIM_SWAP_ENABLED === "true",
+
+  /** Telstra CAMARA Number Verification — silent ownership proof on mobile
+   *  data (replaces Twilio Verify OTP at enrolment when the device is on a
+   *  Telstra cellular network). Server-side only. Default OFF until Nathan
+   *  confirms the API is bundled in the SIM Swap trial. When OFF, all
+   *  enrolments go through the existing Twilio Verify SMS flow. */
+  telstraNumberVerify: process.env.FF_TELSTRA_NUMBER_VERIFY === "true",
+
+  /** SIM Swap on-demand consumer surface — gates `/sim-swap-check` (web
+   *  private-beta page) and the mobile SOS tab. Both clients also check the
+   *  per-user `sim_swap_beta_invites` row, so this flag is a kill switch.
+   *  NEXT_PUBLIC_ so the UI can conditionally render entry points. */
+  simSwapOnDemand: process.env.NEXT_PUBLIC_FF_SIM_SWAP_ON_DEMAND === "true",
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;
