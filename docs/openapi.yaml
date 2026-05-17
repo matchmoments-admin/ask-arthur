@@ -205,6 +205,18 @@ components:
               type: object
               description: "Breakdown of risk scoring factors (added in v2.1.0)"
               additionalProperties: true
+            provenanceTier:
+              type: string
+              nullable: true
+              enum:
+                [
+                  tier_1_regulator,
+                  tier_2_industry,
+                  tier_3_curated,
+                  tier_4_osint,
+                  tier_5_community,
+                ]
+              description: "Source quality tier (added in v2.2.0). Null when not yet set."
         recentReports:
           type: array
           items:
@@ -226,7 +238,8 @@ components:
             properties:
               type:
                 type: string
-                enum: [phone, email, url, domain, ip, crypto_wallet, bank_account]
+                enum:
+                  [phone, email, url, domain, ip, crypto_wallet, bank_account]
               value:
                 type: string
 
@@ -271,6 +284,18 @@ components:
                 type: string
                 enum: [LOW, MEDIUM, HIGH, CRITICAL, UNKNOWN]
                 description: "Risk level derived from score (added in v2.1.0)"
+              provenanceTier:
+                type: string
+                nullable: true
+                enum:
+                  [
+                    tier_1_regulator,
+                    tier_2_industry,
+                    tier_3_curated,
+                    tier_4_osint,
+                    tier_5_community,
+                  ]
+                description: "Source quality tier (added in v2.2.0). Null when not yet set."
 
     EntityDetailResponse:
       type: object
@@ -317,6 +342,18 @@ components:
               type: object
               description: "Breakdown of risk scoring factors (added in v2.1.0)"
               additionalProperties: true
+            provenanceTier:
+              type: string
+              nullable: true
+              enum:
+                [
+                  tier_1_regulator,
+                  tier_2_industry,
+                  tier_3_curated,
+                  tier_4_osint,
+                  tier_5_community,
+                ]
+              description: "Source quality tier (added in v2.2.0). Null when not yet set."
         summary:
           type: object
           properties:

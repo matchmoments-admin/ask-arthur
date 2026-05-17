@@ -113,6 +113,7 @@ export async function GET(req: NextRequest) {
           riskScore: data.risk_score,
           riskLevel: data.risk_level,
           riskFactors: data.risk_factors,
+          provenanceTier: data.provenance_tier,
         },
         recentReports: reports,
       },
