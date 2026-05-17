@@ -332,9 +332,13 @@ Vercel cron: /api/cron/bot-queue-cleanup  (daily 04:00 UTC)
 
 ---
 
-## 5b. Inbound-email user scan — `scan@askarthur.au`
+## 5b. Inbound-email user scan — `scan@askarthur-inbound.com` (`scan@askarthur.au` route is currently dead — silent friends-only pilot)
 
-Email-forward analogue of the bot dispatch flow. Users forward suspicious emails to `scan@askarthur.au` (or directly to `scan+report@askarthur-inbound.com`); Arthur replies with a verdict via Resend.
+Email-forward analogue of the bot dispatch flow. Users forward suspicious emails and Arthur replies with a verdict via Resend.
+
+**Current state (2026-05-18):** the **direct path** (`scan@askarthur-inbound.com` → Cloudflare → Worker → /api/inbound-scan) is the only end-to-end working channel and is what we're piloting silently with friends. The **branded alias path** (`scan@askarthur.au` → M365 transport rule → Cloudflare) is configured at every layer but **M365 silently drops the outbound redirect** at the anti-spoofing layer because the redirected message carries the original sender's `From:` (typically `gmail.com`) over M365's IP space. See "M365 dead-leg" below for the three options to revive it.
+
+**Public-facing copy still references `scan@askarthur.au`** (apps/web/app/scan-channels/page.tsx) — left intact because that's the eventual address. During the friends-only pilot, share `scan@askarthur-inbound.com` privately.
 
 ```
 User forwards suspicious email
@@ -374,6 +378,32 @@ Cloudflare Worker (apps/cloudflare-email-worker)
 **Kill switches:** `ENABLE_USER_SCAN_INBOUND` (env on apps/web) toggles the endpoint. The Worker treats 204 as "drop quietly" so misroutes don't retry-storm.
 
 **Why not the existing `intel-inbound-email` Edge Function:** that function writes to `feed_items` (newsletter ingestion). Scan-report emails need a different downstream — analyze + reply. Routing in the Worker (not in the Edge Function) keeps the two flows independent so a regression in either doesn't bleed across.
+
+### M365 dead-leg — `scan@askarthur.au` chain (2026-05-17 investigation)
+
+The branded address routes through M365 (because `askarthur.au` MX points at `askarthur-au.mail.protection.outlook.com`). Every M365 gate we know of is now configured correctly, but the redirected outbound never reaches Cloudflare's MX. Detail captured here so we don't re-investigate from scratch when we come back to revive it.
+
+**Verified open gates (✅):**
+
+- DNS — `askarthur.au` SPF includes both `secureserver.net` and `spf.protection.outlook.com` with `-all`
+- Exchange Mail Flow Rule "Redirect scan@ to AskArthur inbound pipeline" — recipient match `scan@askarthur.au`, action `Redirect the message to scan+report@askarthur-inbound.com`, Enforce mode, priority 0, no exceptions, Stop-processing OFF
+- Anti-spam outbound policy (Default) — `Automatic forwarding rules: On — Forwarding is enabled`
+- Default Remote Domain (`*`) — `Allow automatic forwarding` checked
+- Exchange Connector — `Office 365 → Partner organization (askarthur-inbound.com)`, TLS required, `Any digital certificate, including self-signed` (correct for Cloudflare's `*.mx.cloudflare.net` cert), connector validation probe **passed end-to-end on 2026-05-17 10:25 UTC** (worker fired, cost_telemetry row landed)
+- Cloudflare — zone `askarthur-inbound.com`, MX at `route1/2/3.mx.cloudflare.net`, Email Routing rule for `scan@askarthur-inbound.com` → Worker `askarthur-intel-inbound-email`, `support_subaddress: true` (matches `scan+report@`)
+- Worker secrets — `INBOUND_EMAIL_WEBHOOK_SECRET`, `SCAN_REPORT_ENDPOINT_URL=https://askarthur.au/api/inbound-scan`, `SUPABASE_EDGE_FUNCTION_URL` (fallback)
+
+**What still drops (❌):** User-initiated forwards from Gmail → `scan@askarthur.au` go `Resolved` (rule fires) but **no outbound row to `scan+report@askarthur-inbound.com` appears in M365 message trace**. Direct sends to `scan@askarthur-inbound.com` work fine, ruling out Cloudflare / Worker / route.
+
+**Working hypothesis:** Microsoft Defender's anti-spoofing layer (separate from the configurable outbound anti-spam policy) is silently dropping the redirected outbound because the rule action preserves `From: <gmail.com>` while sending from M365 IPs. The configured Connector applies based on recipient domain but is consulted AFTER anti-spoofing screening for impersonation. The connector's validation probe succeeded because that probe has an intra-tenant `From:` (`O365ConnectorValidation@<tenant>.onmicrosoft.com`) that doesn't trip anti-spoofing.
+
+**Three options to revive `scan@askarthur.au` (cost ordered):**
+
+1. **Pivot the public-facing address to `scan@askarthur-inbound.com`** — $0, immediate, but loses brand alignment on the email address. Public copy + email footer update is ~30 lines of code. **This is the current default while piloting silently.**
+2. **Add a "Modify the From: header" action to the transport rule** before the Redirect — $0, requires rule edit + a relay alias like `scan-relay@askarthur.au`. Outbound becomes SPF/DMARC-aligned to `askarthur.au` and shouldn't trip anti-spoofing. Tradeoff: worker loses the original sender's email in `From:` (still preserved in body/headers but reply UX is slightly weirder).
+3. **Buy a real `scan@askarthur.au` mailbox** (M365 license ~$5–10/mo OR the free GoDaddy email slot) and use a per-mailbox **inbox rule** (not transport rule) to auto-forward to `scan+report@askarthur-inbound.com`. Inbox rules use a different outbound pathway that aligns `From:` to the mailbox owner. Cleanest fix; ongoing cost; one mailbox to manage. The earlier "aliases bypass inbox rules" gotcha doesn't apply because the new mailbox is canonical, not an alias.
+
+Tracking issue: see GitHub issues for the latest status.
 
 ---
 
