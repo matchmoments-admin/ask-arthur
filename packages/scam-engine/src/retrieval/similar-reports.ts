@@ -25,8 +25,8 @@
 // boundary can surface "this surface is temporarily unavailable" without
 // returning misleading empty results. Empty inputs return [] cleanly.
 
-import { embedQuery } from "../embeddings";
-import { rerank } from "../rerank";
+import { embedQuery, type EmbedResult } from "../embeddings";
+import { rerank, type RerankResult } from "../rerank";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
@@ -112,6 +112,7 @@ export async function getSimilarReports(
 
   // Stage 1: embed the query (asymmetric — query side of Voyage's prompt).
   const embedResult = await embedQuery([trimmed], { requestId });
+  void logEmbedCost(embedResult, requestId);
   const queryVec = embedResult.vectors[0];
   if (!queryVec) return [];
 
@@ -148,6 +149,7 @@ export async function getSimilarReports(
     withContent.map((c) => c.scrubbed_content),
     { topK: k, requestId },
   );
+  void logRerankCost(rerankResult, withContent.length, requestId);
 
   const out: SimilarReport[] = [];
   for (const r of rerankResult.results) {
@@ -176,4 +178,66 @@ export async function getSimilarReports(
   }
 
   return out;
+}
+
+// Fire-and-forget cost telemetry. Failing to write a cost row must never
+// break the user's verdict surface, so we swallow + warn-log on failure.
+// Cache-hit results legitimately come in with totalTokens=0 — those rows
+// are still written so the dashboard can see retrieval call volume even
+// when Voyage isn't billed.
+async function logEmbedCost(
+  result: EmbedResult,
+  requestId: string | undefined,
+): Promise<void> {
+  try {
+    const supabase = createServiceClient();
+    if (!supabase) return;
+    await supabase.from("cost_telemetry").insert({
+      feature: "similar-reports-retrieval",
+      provider: result.provider,
+      operation: "embeddings.create",
+      units: result.totalTokens,
+      estimated_cost_usd: result.estimatedCostUsd,
+      metadata: {
+        model: result.modelId,
+        domain: result.domain,
+        total_tokens: result.totalTokens,
+        request_id: requestId,
+      },
+    });
+  } catch (err) {
+    logger.warn("similar-reports: logEmbedCost failed", {
+      error: String(err),
+      requestId,
+    });
+  }
+}
+
+async function logRerankCost(
+  result: RerankResult,
+  docCount: number,
+  requestId: string | undefined,
+): Promise<void> {
+  try {
+    const supabase = createServiceClient();
+    if (!supabase) return;
+    await supabase.from("cost_telemetry").insert({
+      feature: "similar-reports-rerank",
+      provider: "voyage",
+      operation: "rerank",
+      units: result.totalTokens,
+      estimated_cost_usd: result.estimatedCostUsd,
+      metadata: {
+        model: result.modelId,
+        total_tokens: result.totalTokens,
+        doc_count: docCount,
+        request_id: requestId,
+      },
+    });
+  } catch (err) {
+    logger.warn("similar-reports: logRerankCost failed", {
+      error: String(err),
+      requestId,
+    });
+  }
 }

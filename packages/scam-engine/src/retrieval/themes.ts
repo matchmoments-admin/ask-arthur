@@ -18,7 +18,7 @@
 // Logged at warn level so an outage shows up in the dashboard without
 // taking the analyze flow down.
 
-import { embedQuery } from "../embeddings";
+import { embedQuery, type EmbedResult } from "../embeddings";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
@@ -89,6 +89,7 @@ export async function getRelevantThemes(
 
   try {
     const embedResult = await embedQuery([trimmed], { requestId });
+    void logEmbedCost(embedResult, requestId);
     const queryVec = embedResult.vectors[0];
     if (!queryVec) return [];
 
@@ -161,4 +162,37 @@ export function renderThemesForPrompt(themes: RelevantTheme[]): string {
     "If the user's message matches one of these patterns, name it in the summary using the title above.",
   );
   return lines.join("\n");
+}
+
+// Fire-and-forget cost telemetry. Themes is the decorative pre-analyze
+// pathway — failing to write a cost row must never block the analyze
+// flow, so we swallow + warn-log on failure. Cache hits emit a free row
+// (totalTokens=0) so retrieval call volume is visible in the dashboard
+// independent of Voyage billing.
+async function logEmbedCost(
+  result: EmbedResult,
+  requestId: string | undefined,
+): Promise<void> {
+  try {
+    const supabase = createServiceClient();
+    if (!supabase) return;
+    await supabase.from("cost_telemetry").insert({
+      feature: "themes-retrieval",
+      provider: result.provider,
+      operation: "embeddings.create",
+      units: result.totalTokens,
+      estimated_cost_usd: result.estimatedCostUsd,
+      metadata: {
+        model: result.modelId,
+        domain: result.domain,
+        total_tokens: result.totalTokens,
+        request_id: requestId,
+      },
+    });
+  } catch (err) {
+    logger.warn("themes: logEmbedCost failed", {
+      error: String(err),
+      requestId,
+    });
+  }
 }

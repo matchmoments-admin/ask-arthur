@@ -20,9 +20,16 @@ const mockEmbedQuery = vi.mocked(embedQuery);
 const mockRerank = vi.mocked(rerank);
 const mockCreateServiceClient = vi.mocked(createServiceClient);
 
-function makeSupabaseMock(rpcResult: { data: unknown[] | null; error: { message: string } | null }) {
+// from() handles fire-and-forget cost_telemetry writes. Default is a
+// no-op so existing tests don't have to think about telemetry; tests
+// asserting telemetry can replace the insert fn via `telemetryInsert`.
+function makeSupabaseMock(
+  rpcResult: { data: unknown[] | null; error: { message: string } | null },
+  telemetryInsert: ReturnType<typeof vi.fn> = vi.fn().mockResolvedValue({ error: null }),
+) {
   return {
     rpc: vi.fn().mockResolvedValue(rpcResult),
+    from: vi.fn().mockReturnValue({ insert: telemetryInsert }),
   } as unknown as ReturnType<typeof createServiceClient>;
 }
 
@@ -150,6 +157,37 @@ describe("getSimilarReports", () => {
       makeSupabaseMock({ data: null, error: { message: "connection lost" } }),
     );
     await expect(getSimilarReports("scam")).rejects.toThrow(/connection lost/);
+  });
+
+  it("emits cost_telemetry rows for embed + rerank with the right feature labels", async () => {
+    const telemetryInsert = vi.fn().mockResolvedValue({ error: null });
+    mockCreateServiceClient.mockReturnValue(
+      makeSupabaseMock(
+        { data: [sampleHybridRow], error: null },
+        telemetryInsert,
+      ),
+    );
+    mockRerank.mockResolvedValue({
+      results: [{ index: 0, relevanceScore: 0.85 }],
+      modelId: "rerank-2.5-lite",
+      totalTokens: 1234,
+      estimatedCostUsd: 0.0000247,
+    });
+
+    await getSimilarReports("tax refund email");
+    // Fire-and-forget telemetry inserts — flush the microtask queue so
+    // both `void logXxxCost(...)` promises resolve before we assert.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const features = telemetryInsert.mock.calls.map((c) => c[0]?.feature);
+    expect(features).toContain("similar-reports-retrieval");
+    expect(features).toContain("similar-reports-rerank");
+    const rerankRow = telemetryInsert.mock.calls.find(
+      (c) => c[0]?.feature === "similar-reports-rerank",
+    )?.[0];
+    expect(rerankRow?.operation).toBe("rerank");
+    expect(rerankRow?.units).toBe(1234);
+    expect(rerankRow?.estimated_cost_usd).toBeCloseTo(0.0000247);
   });
 
   it("rejects non-allowed verdict values defensively", async () => {
