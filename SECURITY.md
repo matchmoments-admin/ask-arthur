@@ -43,6 +43,7 @@ Threat model, mandatory defenses, and compliance status for Ask Arthur.
 | Financial data manipulation               | Low    | `record_financial_impact` RPC enforces non-negative loss, valid ISO 4217 currency; CHECK constraints on `estimated_loss >= 0`                                             |
 | Image proxy SSRF                          | Medium | Domain allowlist (3 domains), `redirect: "manual"` with re-validation, content-type check, 5MB limit, 10s timeout                                                         |
 | Feed data exposure                        | Low    | Only `published = TRUE` items visible via RLS; PII-scrubbed descriptions; no raw user content                                                                             |
+| Org-invite cross-tenant hijack            | High   | `/api/org/invite/accept` requires the signed-in user's email to match the invited email (case-insensitive, whitespace-trimmed); 403 on mismatch                           |
 
 ## Mandatory Defenses
 
@@ -98,6 +99,7 @@ All user text is sanitized before Claude analysis:
 - Max 5 active API keys per user (enforced in `generate_api_key_record` RPC)
 - Subscription ownership verified in Paddle webhook (prevents subscription theft via customData manipulation)
 - User profile role column is immutable via RLS WITH CHECK constraint
+- Org invitations bind acceptance to the invited email — token possession alone is insufficient. Even with a valid, unexpired token, `/api/org/invite/accept` returns 403 unless `auth.users.email` matches `org_invitations.email` (case-insensitive). Closes a previously latent cross-tenant hijack path where any authenticated user holding the invite link could join the wrong org.
 
 ### 4. Security Headers
 

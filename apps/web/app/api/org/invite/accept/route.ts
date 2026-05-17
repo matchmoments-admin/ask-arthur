@@ -52,6 +52,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "This invitation has expired" }, { status: 410 });
   }
 
+  // Bind the invitation to the email it was sent to. Without this, anyone holding
+  // the token could accept on behalf of any signed-in user, breaking tenant isolation.
+  const userEmail = user.email.toLowerCase().trim();
+  const invitedEmail = invitation.email?.toLowerCase().trim();
+  if (!userEmail || !invitedEmail || userEmail !== invitedEmail) {
+    return NextResponse.json(
+      {
+        error:
+          "This invitation was sent to a different email address. Please sign in with the invited email to accept.",
+      },
+      { status: 403 }
+    );
+  }
+
   // Check if user is already a member
   const { data: existingMember } = await supabase
     .from("org_members")
