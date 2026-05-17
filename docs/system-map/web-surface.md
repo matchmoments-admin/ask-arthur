@@ -10,18 +10,19 @@ Every consumer page, authenticated page, admin page, and API route, grouped by d
 
 ### Core landing + marketing
 
-| Route          | Purpose                                        | Notes |
-| -------------- | ---------------------------------------------- | ----- |
-| `/`            | Landing page with embedded scam checker widget | —     |
-| `/pricing`     | Pricing tiers and feature comparison           | —     |
-| `/about`       | Company / team background                      | —     |
-| `/contact`     | Contact form                                   | —     |
-| `/reviews`     | Customer testimonials                          | —     |
-| `/privacy`     | Privacy policy                                 | —     |
-| `/terms`       | Terms of service                               | —     |
-| `/investors`   | Investor relations                             | —     |
-| `/accuracy`    | Model accuracy / benchmarks                    | —     |
-| `/health/feed` | Public scam-trend feed snapshot                | —     |
+| Route            | Purpose                                                                                        | Notes |
+| ---------------- | ---------------------------------------------------------------------------------------------- | ----- |
+| `/`              | Landing page with embedded scam checker widget                                                 | —     |
+| `/pricing`       | Pricing tiers and feature comparison                                                           | —     |
+| `/about`         | Company / team background                                                                      | —     |
+| `/contact`       | Contact form                                                                                   | —     |
+| `/reviews`       | Customer testimonials                                                                          | —     |
+| `/privacy`       | Privacy policy                                                                                 | —     |
+| `/terms`         | Terms of service                                                                               | —     |
+| `/investors`     | Investor relations                                                                             | —     |
+| `/accuracy`      | Model accuracy / benchmarks                                                                    | —     |
+| `/health/feed`   | Public scam-trend feed snapshot                                                                | —     |
+| `/scan-channels` | Discovery page — every way to submit a scan (web, email, bots, extension, mobile). Shipped F1. | —     |
 
 ### Consumer products
 

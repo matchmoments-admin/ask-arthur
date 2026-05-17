@@ -332,6 +332,51 @@ Vercel cron: /api/cron/bot-queue-cleanup  (daily 04:00 UTC)
 
 ---
 
+## 5b. Inbound-email user scan — `scan@askarthur.au`
+
+Email-forward analogue of the bot dispatch flow. Users forward suspicious emails to `scan@askarthur.au` (or directly to `scan+report@askarthur-inbound.com`); Arthur replies with a verdict via Resend.
+
+```
+User forwards suspicious email
+  └─ scan@askarthur.au (forwarding alias)
+       │ (free GoDaddy/Cloudflare alias — no MX change on askarthur.au)
+       ▼
+  → scan+report@askarthur-inbound.com
+       │
+       ▼
+Cloudflare Email Routing (askarthur-inbound.com zone)
+  └─ Tag-based rule routes to the Email Worker
+       │
+       ▼
+Cloudflare Worker (apps/cloudflare-email-worker)
+  ├─ postal-mime parses MIME
+  ├─ resolveSource() → "inbound_scan_report"  (new in F1)
+  ├─ Dispatch branches on source:
+  │     ├─ scan_report   → SCAN_REPORT_ENDPOINT_URL  (apps/web /api/inbound-scan)
+  │     └─ everything else → SUPABASE_EDGE_FUNCTION_URL (intel-inbound-email)
+  └─ POSTs structured JSON + X-Webhook-Secret
+       │
+       ▼
+/api/inbound-scan  (apps/web/app/api/inbound-scan/route.ts)
+  ├─ ENABLE_USER_SCAN_INBOUND kill switch (default on; "false" → 204)
+  ├─ Verify x-webhook-secret (timing-safe)
+  ├─ Zod-validate payload (source = "inbound_scan_report")
+  ├─ Parse From: header → reply address + display name
+  ├─ Rate limit: checkInboundScanRateLimit(sender) — 20/h per normalised sender
+  ├─ analyzeForBot(subject + body_md, region="AU")
+  │   └─ Same scam-engine path as the four chat bots (surface="bot")
+  ├─ Resend email reply with verdict + redFlags + nextSteps
+  └─ logCost(feature="inbound_scan", provider="channel") — volume rollup
+```
+
+**Cost model:** A$0.001 Claude Haiku per scan (counted via analyzeForBot's own telemetry) + outbound Resend (in plan). The `inbound_scan` cost-telemetry rows have `estimatedCostUsd=0` so the dashboard can split per-channel volume without double-counting Claude.
+
+**Kill switches:** `ENABLE_USER_SCAN_INBOUND` (env on apps/web) toggles the endpoint. The Worker treats 204 as "drop quietly" so misroutes don't retry-storm.
+
+**Why not the existing `intel-inbound-email` Edge Function:** that function writes to `feed_items` (newsletter ingestion). Scan-report emails need a different downstream — analyze + reply. Routing in the Worker (not in the Edge Function) keeps the two flows independent so a regression in either doesn't bleed across.
+
+---
+
 ## 6. Onward reporting to regulators
 
 After a HIGH_RISK verdict (and after manual admin approval), a report can be escalated to AU regulators (Scamwatch / ACMA / iDcare / ReportCyber).

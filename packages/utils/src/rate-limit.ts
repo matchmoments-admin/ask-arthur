@@ -490,3 +490,71 @@ export async function checkCharityCheckRateLimit(
     return storeUnavailable(failMode, `checkCharityCheckRateLimit:${bucket}`);
   }
 }
+
+// ─── Inbound-scan rate limiter (F1) ─────────────────────────────────────
+//
+// Per-sender quota for `/api/inbound-scan` — users forwarding suspicious
+// emails to `scan+report@askarthur-inbound.com`. Identifier is the
+// normalised sender email (lowercased, local-part stripped of plus tags)
+// so the same person can't bypass by adding +123 suffixes.
+//
+// Limit is deliberately generous compared to web (`/api/analyze` is
+// 5/burst + 10/day) — forwarding is fire-and-forget; if someone gets a
+// scam wave they'll want to dump 10–20 in quick succession. But each one
+// is a paid Claude call + an outbound Resend, so we keep a hard ceiling.
+
+const _inboundScanLimiter = { current: null as Ratelimit | null };
+
+function getInboundScanLimiter(): Ratelimit {
+  if (_inboundScanLimiter.current) return _inboundScanLimiter.current;
+
+  const redis = new Redis({
+    url: process.env.UPSTASH_REDIS_REST_URL!,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+  });
+
+  const lim = new Ratelimit({
+    redis,
+    limiter: Ratelimit.slidingWindow(20, "1 h"),
+    prefix: "askarthur:inbound-scan",
+    analytics: true,
+  });
+  _inboundScanLimiter.current = lim;
+  return lim;
+}
+
+/**
+ * Check the inbound-scan rate-limit bucket for a sender email. 20/hour
+ * default. Fail-closed in production so a Redis outage doesn't let a
+ * single forwarder rack up unbounded Claude spend.
+ */
+export async function checkInboundScanRateLimit(
+  senderEmail: string,
+  failMode: FailMode = defaultFailMode(),
+): Promise<RateLimitResult> {
+  if (!process.env.UPSTASH_REDIS_REST_URL) {
+    return storeUnavailable(failMode, "checkInboundScanRateLimit");
+  }
+  // Strip +tag and lowercase so "alice+x@gmail.com" and "Alice@Gmail.com"
+  // share quota.
+  const normalised = senderEmail
+    .trim()
+    .toLowerCase()
+    .replace(/(\+[^@]*)(@)/, "$2");
+  try {
+    const res = await getInboundScanLimiter().limit(normalised);
+    if (!res.success) {
+      return {
+        allowed: false,
+        remaining: 0,
+        resetAt: new Date(res.reset),
+        message:
+          "You've forwarded a lot of emails recently. We'll resume scanning new ones in the next hour.",
+      };
+    }
+    return { allowed: true, remaining: res.remaining, resetAt: null };
+  } catch (err) {
+    logger.error("checkInboundScanRateLimit: store error", { error: String(err) });
+    return storeUnavailable(failMode, "checkInboundScanRateLimit");
+  }
+}
