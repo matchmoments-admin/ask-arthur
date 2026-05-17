@@ -157,11 +157,30 @@ function buildPlainText(opts: {
 // ── Handler ─────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
+  const startedAt = Date.now();
+
+  // Always log a "received" line BEFORE auth — this is what lets an
+  // operator confirm the worker is reaching the route at all when
+  // downstream auth/zod/analyzeForBot is silently failing. Without this,
+  // the only signal we had during the 2026-05-17 investigation was the
+  // absence of cost_telemetry rows, which conflates "worker didn't run"
+  // with "worker ran but the route rejected it".
+  const ip = req.headers.get("x-real-ip") ?? req.headers.get("x-forwarded-for") ?? "unknown";
+  const ua = req.headers.get("user-agent") ?? "unknown";
+  const contentLen = req.headers.get("content-length") ?? "0";
+  logger.info("inbound-scan: received", {
+    ip,
+    ua: ua.slice(0, 80),
+    content_length: contentLen,
+    has_secret: Boolean(req.headers.get("x-webhook-secret")),
+  });
+
   // Kill switch — defaults to true so this ships safely with the F1 PR;
   // setting ENABLE_USER_SCAN_INBOUND=false in env disables the endpoint
   // without redeploying the Worker.
   const enabled = process.env.ENABLE_USER_SCAN_INBOUND;
   if (enabled === "false") {
+    logger.info("inbound-scan: kill-switch active", { ip });
     return new NextResponse(null, { status: 204 });
   }
 
@@ -169,6 +188,12 @@ export async function POST(req: NextRequest) {
   const expected = process.env.INBOUND_EMAIL_WEBHOOK_SECRET;
   const provided = req.headers.get("x-webhook-secret") ?? "";
   if (!expected || !timingSafeEqual(provided, expected)) {
+    logger.warn("inbound-scan: unauthorized", {
+      ip,
+      ua: ua.slice(0, 80),
+      has_expected: Boolean(expected),
+      provided_len: provided.length,
+    });
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
@@ -288,6 +313,7 @@ export async function POST(req: NextRequest) {
     feedbackDownUrl: feedbackDown.url,
   });
 
+  let replySent = false;
   try {
     const resend = new Resend(resendKey);
     const sendResult = await resend.emails.send({
@@ -301,15 +327,28 @@ export async function POST(req: NextRequest) {
       tags: [{ name: "category", value: "inbound_scan_reply" }],
     });
     if (sendResult.error) {
+      // Resend's error shape is documented but the body sometimes
+      // carries extra context (e.g. domain unverified, IP suppressed).
+      // Capture everything we can so the operator doesn't have to log
+      // into Resend's dashboard to diagnose.
       logger.error("inbound-scan: Resend rejected", {
         error: sendResult.error.message,
-        sender: sender.email,
+        name: sendResult.error.name,
+        sender_domain: sender.email.split("@")[1] ?? "",
+        from: fromEmail,
+      });
+    } else {
+      replySent = true;
+      logger.info("inbound-scan: Resend accepted", {
+        message_id: sendResult.data?.id ?? "(no-id)",
+        sender_domain: sender.email.split("@")[1] ?? "",
       });
     }
   } catch (err) {
     logger.error("inbound-scan: Resend threw", {
       error: err instanceof Error ? err.message : String(err),
-      sender: sender.email,
+      sender_domain: sender.email.split("@")[1] ?? "",
+      from: fromEmail,
     });
     // Don't 500 — we already analysed, and the Worker has nothing useful
     // to retry. Operator sees the log line and can resend manually if
@@ -337,5 +376,13 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  return NextResponse.json({ ok: true, replySent: true, verdict });
+  logger.info("inbound-scan: outcome", {
+    verdict,
+    reply_sent: replySent,
+    sender_domain: sender.email.split("@")[1] ?? "",
+    external_id: payload.external_id,
+    duration_ms: Date.now() - startedAt,
+  });
+
+  return NextResponse.json({ ok: true, replySent, verdict });
 }

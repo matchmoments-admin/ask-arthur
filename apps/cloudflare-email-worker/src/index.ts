@@ -233,12 +233,29 @@ async function externalIdFor(
 
 export default {
   async email(message: ForwardableEmailMessage, env: Env, _ctx: ExecutionContext) {
+    // Always log a "received" line — this is the only thing visible in
+    // `wrangler tail` when an email arrives but downstream fails before
+    // any other log fires. Without it, a failure in postal-mime / fetch
+    // can leave the operator with zero signal that mail was even seen.
+    // (Investigated 2026-05-17 — scan@askarthur.au forwards were
+    // silently disappearing between Cloudflare MX and /api/inbound-scan
+    // because the only worker logs were on error paths.)
+    console.log("inbound-email: received", {
+      to: message.to,
+      from: message.from,
+      headers_message_id: message.headers.get("message-id") ?? "(none)",
+    });
+
     let parsed: Awaited<ReturnType<PostalMime["parse"]>>;
     try {
       const parser = new PostalMime();
       parsed = await parser.parse(message.raw as unknown as ReadableStream);
     } catch (err) {
-      console.error("postal-mime parse failed", err);
+      console.error("inbound-email: postal-mime parse failed", {
+        err: err instanceof Error ? err.message : String(err),
+        to: message.to,
+        from: message.from,
+      });
       // Don't 'setReject' — bouncing an inbound email could disrupt the
       // upstream subscription. Drop silently; subscription delivery
       // failures show in Cloudflare Email Routing logs.
@@ -300,30 +317,84 @@ export default {
       tags: undefined as string[] | undefined,
     };
 
-    // User-scan tag (scan) routes to a different endpoint that
-    // analyses the email + replies to the sender. Falls back to the intel
-    // Edge Function only if SCAN_REPORT_ENDPOINT_URL isn't configured —
-    // that's a "fail safe" choice: a misrouted user-scan ends up in
-    // feed_items with source=inbound_scan, which the v128
-    // feed_items_source_check constraint rejects (422). No data
-    // corruption; operator gets a quarantine notice.
-    const targetUrl =
-      isUserScanSource(source) && env.SCAN_REPORT_ENDPOINT_URL
-        ? env.SCAN_REPORT_ENDPOINT_URL
-        : env.SUPABASE_EDGE_FUNCTION_URL;
+    // Resolve the target URL for this source.
+    //
+    // The user-scan tag (`inbound_scan`) MUST go to the user-scan
+    // endpoint — falling back to the intel edge function is wrong
+    // because that path writes to feed_items, and the v128
+    // feed_items_source_check constraint rejects source=inbound_scan
+    // with 422. The previous code did fall back silently, which made
+    // mis-configuration invisible during the 2026-05-17 launch
+    // investigation: every user-forwarded scan was being POSTed to the
+    // wrong URL with no operator signal.
+    //
+    // Now: if the source is inbound_scan and the endpoint isn't
+    // configured, refuse to forward and quarantine. The next inbound
+    // will get the same treatment until the secret is set.
+    let targetUrl: string;
+    if (isUserScanSource(source)) {
+      if (!env.SCAN_REPORT_ENDPOINT_URL) {
+        console.error("inbound-email: SCAN_REPORT_ENDPOINT_URL missing for inbound_scan", {
+          source,
+          externalId,
+          to: payload.to,
+        });
+        if (env.QUARANTINE_FORWARDER) {
+          await env.QUARANTINE_FORWARDER.send(message).catch(() => {});
+        }
+        return;
+      }
+      targetUrl = env.SCAN_REPORT_ENDPOINT_URL;
+    } else {
+      targetUrl = env.SUPABASE_EDGE_FUNCTION_URL;
+    }
 
-    const resp = await fetch(targetUrl, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-webhook-secret": env.INBOUND_EMAIL_WEBHOOK_SECRET,
-      },
-      body: JSON.stringify(payload),
+    console.log("inbound-email: forwarding", {
+      source,
+      externalId,
+      target_host: (() => {
+        try {
+          return new URL(targetUrl).host;
+        } catch {
+          return "(invalid-url)";
+        }
+      })(),
+      from,
+      subject_len: subject.length,
+      body_len: body.length,
     });
+
+    let resp: Response;
+    try {
+      resp = await fetch(targetUrl, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-webhook-secret": env.INBOUND_EMAIL_WEBHOOK_SECRET,
+        },
+        body: JSON.stringify(payload),
+      });
+    } catch (err) {
+      // DNS / TLS / connection-reset failures land here. Previously
+      // these escaped the handler as an unhandled rejection — visible
+      // only to Cloudflare's internal log pipeline, not to `wrangler
+      // tail`. Catch + log so an operator running tail during a smoke
+      // test sees the failure mode.
+      console.error("inbound-email: fetch threw", {
+        err: err instanceof Error ? err.message : String(err),
+        source,
+        externalId,
+        target_url: targetUrl,
+      });
+      if (env.QUARANTINE_FORWARDER) {
+        await env.QUARANTINE_FORWARDER.send(message).catch(() => {});
+      }
+      return;
+    }
 
     if (!resp.ok && resp.status !== 204) {
       const text = await resp.text().catch(() => "");
-      console.error("inbound-email forward failed", {
+      console.error("inbound-email: forward failed", {
         status: resp.status,
         source,
         externalId,
@@ -336,6 +407,13 @@ export default {
       if (resp.status >= 500 && env.QUARANTINE_FORWARDER) {
         await env.QUARANTINE_FORWARDER.send(message).catch(() => {});
       }
+      return;
     }
+
+    console.log("inbound-email: forwarded", {
+      source,
+      externalId,
+      status: resp.status,
+    });
   },
 } satisfies ExportedHandler<Env>;
