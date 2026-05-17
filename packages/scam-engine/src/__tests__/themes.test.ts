@@ -20,9 +20,12 @@ const mockCreateServiceClient = vi.mocked(createServiceClient);
 
 function makeSupabaseMock(
   rpcResult: { data: unknown[] | null; error: { message: string } | null },
+  telemetryInsert: ReturnType<typeof vi.fn> = vi.fn().mockResolvedValue({ error: null }),
 ) {
   return {
     rpc: vi.fn().mockResolvedValue(rpcResult),
+    // from() handles fire-and-forget cost_telemetry writes. Default no-op.
+    from: vi.fn().mockReturnValue({ insert: telemetryInsert }),
   } as unknown as ReturnType<typeof createServiceClient>;
 }
 
@@ -121,6 +124,24 @@ describe("getRelevantThemes", () => {
     mockEmbedQuery.mockRejectedValueOnce(new Error("voyage down"));
     const result = await getRelevantThemes("text");
     expect(result).toEqual([]);
+  });
+
+  it("emits a themes-retrieval cost_telemetry row on each call", async () => {
+    const telemetryInsert = vi.fn().mockResolvedValue({ error: null });
+    mockCreateServiceClient.mockReturnValue(
+      makeSupabaseMock({ data: [sampleRow], error: null }, telemetryInsert),
+    );
+
+    await getRelevantThemes("payid scam");
+    // Fire-and-forget — flush microtasks before asserting.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(telemetryInsert).toHaveBeenCalledTimes(1);
+    const row = telemetryInsert.mock.calls[0]?.[0];
+    expect(row?.feature).toBe("themes-retrieval");
+    expect(row?.operation).toBe("embeddings.create");
+    expect(row?.units).toBe(50);
+    expect(row?.estimated_cost_usd).toBeCloseTo(0.000003);
   });
 });
 
