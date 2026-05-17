@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@askarthur/supabase/server";
-import { validateApiKey } from "@/lib/apiAuth";
+import { validateApiKey, rateLimitHeaders } from "@/lib/apiAuth";
 
 export async function GET(req: NextRequest) {
   const authResult = await validateApiKey(req, "threats.read");
@@ -28,13 +28,16 @@ export async function GET(req: NextRequest) {
     .single();
 
   if (error || !data) {
-    return NextResponse.json({ found: false, address: address.trim() });
+    return NextResponse.json(
+      { found: false, address: address.trim() },
+      { headers: rateLimitHeaders(authResult) }
+    );
   }
 
   return NextResponse.json({
     found: true,
     wallet: data,
   }, {
-    headers: { "Cache-Control": "public, s-maxage=300, stale-while-revalidate=60" },
+    headers: { "Cache-Control": "public, s-maxage=300, stale-while-revalidate=60", ...rateLimitHeaders(authResult) },
   });
 }

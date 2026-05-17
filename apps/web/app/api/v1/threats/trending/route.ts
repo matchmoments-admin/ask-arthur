@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { validateApiKey } from "@/lib/apiAuth";
+import { validateApiKey, rateLimitHeaders } from "@/lib/apiAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
       { error: "Daily API limit exceeded. Resets at midnight UTC." },
       {
         status: 429,
-        headers: { "Retry-After": "3600" },
+        headers: { "Retry-After": "3600", ...rateLimitHeaders(auth) },
       }
     );
   }
@@ -126,6 +126,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(response, {
     headers: {
       "Cache-Control": "public, s-maxage=300, stale-while-revalidate=60",
+      ...rateLimitHeaders(auth),
     },
   });
 }
