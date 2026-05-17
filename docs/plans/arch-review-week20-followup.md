@@ -264,15 +264,7 @@ The routine produced #285 on 2026-05-17 with no obvious flaws in _content_. The 
 
 3. **No delta detection.** Week 21's review of the same module will surface the same items unless the work has shipped. **Fix:** add a step: "Before drafting, `gh issue list --label architecture-review --state open` and explicitly diff against the previous week's findings. If an item recurs, prefix it with `(carried from week N)` rather than re-writing it fresh."
 
-4. **No module-rotation strategy declared.** Week 20 covered `apps/web/app`. Without a rotation plan, week 21 = same module = duplicates. **Fix:** declare a rotation in `docs/agents/weekly-arch-review.md`:
-   - Week N+0: `apps/web/app` (RSC pages, no `api/`)
-   - Week N+1: `apps/web/app/api` (route handlers)
-   - Week N+2: `packages/scam-engine`
-   - Week N+3: `packages/bot-core`
-   - Week N+4: `apps/extension` + `apps/mobile`
-   - Week N+5: `pipeline/scrapers`
-   - Week N+6: SQL migrations + RPCs since last sweep
-   - then loop
+4. **No module-rotation strategy declared in the repo.** Week 20 covered `apps/web/app`. The live routine prompt already has a 6-slot rotation (`scam-engine` → `apps/web/app/api` → `apps/web/app` → `breach-defence` → `pipeline/scrapers` → `bot-core + utils`, computed as `week_num % 6`), but it lived only in the claude.ai/code project settings. **Fix:** mirror the live rotation into `docs/agents/weekly-arch-review.md` (done in this PR) so prompt drift is reviewable. Future slot candidates to grow into when leverage warrants: `apps/extension` + `apps/mobile`; SQL migrations + RPCs; `packages/types` + `packages/supabase`.
 
 5. **`Sharpens: (none — pure hygiene)` is a smell.** Items 1 and 6 both have it. If the schema requires a domain-term mapping for every finding, hygiene items shouldn't share the schema — drop the field for them, or make it optional and only populate when meaningful. Otherwise reviewers learn to skim past it.
 

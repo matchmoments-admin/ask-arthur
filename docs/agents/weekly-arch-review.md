@@ -12,19 +12,20 @@
 
 ## Module rotation
 
-Weeks cycle through this list. The routine reads the most recent `architecture-review` issue to compute the next module; if none exists, it starts at week N+0.
+Weeks cycle through this list. The routine computes the slot deterministically from the ISO week number: `slot = (week_num % 6)`. Using ISO week (not "weeks since N") means the rotation is stable across restarts and missed runs.
 
-| Slot | Module under review                          |
-| ---- | -------------------------------------------- |
-| 0    | `apps/web/app` (RSC pages, excluding `api/`) |
-| 1    | `apps/web/app/api` (route handlers)          |
-| 2    | `packages/scam-engine`                       |
-| 3    | `packages/bot-core`                          |
-| 4    | `apps/extension` + `apps/mobile`             |
-| 5    | `pipeline/scrapers`                          |
-| 6    | SQL migrations + RPCs since the last sweep   |
+| Slot | Module under review                                          |
+| ---- | ------------------------------------------------------------ |
+| 0    | `packages/scam-engine`                                       |
+| 1    | `apps/web/app/api` (route handlers)                          |
+| 2    | `apps/web/app` (RSC pages — exclude `api/` subtree)          |
+| 3    | `packages/breach-defence`                                    |
+| 4    | `pipeline/scrapers`                                          |
+| 5    | `packages/bot-core` + `packages/utils` (both, as one review) |
 
-Skip a slot if the module hasn't changed since the previous sweep (declare the skip in the issue body so reviewers know it wasn't an omission).
+If the chosen path doesn't exist on the current `main`, abort and send a Telegram with the error. Skip a slot only if the module hasn't changed since the previous sweep, and declare the skip in the issue body so reviewers know it wasn't an omission.
+
+**Future slot candidates** _(not in rotation today; add when they earn the leverage)_: `apps/extension` + `apps/mobile`; SQL migrations + RPCs since the last sweep; `packages/types` + `packages/supabase`.
 
 ---
 
