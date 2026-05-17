@@ -66,7 +66,7 @@ Subscribe each upstream newsletter to its own tagged address:
 | The Hacker News (v129)           | https://thehackernews.com/ (footer email signup)                                              | `thn+ingest@askarthur-inbound.com`                                   | `inbound_thn`          | `tier_3_curated`                                                                         |
 | SecurityWeek Daily (v129)        | https://www.securityweek.com/newsletter/                                                      | `securityweek+ingest@askarthur-inbound.com`                          | `inbound_securityweek` | `tier_3_curated`                                                                         |
 | Anything else                    | any tag not in the list above                                                                 | (whatever the upstream form gives you)                               | `inbound_generic`      | `tier_4_osint`                                                                           |
-| **User-scan reports** (F1)       | n/a — public-facing alias                                                                     | `scan+report@askarthur-inbound.com`<br/>(alias: `scan@askarthur.au`) | `inbound_scan_report`  | **NOT a feed_items source** — routed to `/api/inbound-scan` instead. See data-flows §5b. |
+| **User-scan reports** (F1)       | n/a — public-facing alias                                                                     | `scan+report@askarthur-inbound.com`<br/>(alias: `scan@askarthur.au`) | `inbound_scan`         | **NOT a feed_items source** — routed to `/api/inbound-scan` instead. See data-flows §5b. |
 
 **Sources without email subscription — handled by Phase B/D scrapers instead** (not via this pipeline):
 
