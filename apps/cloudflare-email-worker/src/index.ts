@@ -28,6 +28,12 @@ import PostalMime from "postal-mime";
 interface Env {
   INBOUND_EMAIL_WEBHOOK_SECRET: string;
   SUPABASE_EDGE_FUNCTION_URL: string; // e.g. https://<ref>.functions.supabase.co/intel-inbound-email
+  /** Optional. URL of the user-scan endpoint (e.g.
+   *  https://askarthur.au/api/inbound-scan). When the recipient tag is
+   *  `scan_report`, the worker dispatches to this URL instead of the
+   *  intel newsletter Edge Function so user-forwarded scam reports are
+   *  analysed and replied to rather than written to feed_items. */
+  SCAN_REPORT_ENDPOINT_URL?: string;
   QUARANTINE_FORWARDER?: SendEmail; // optional; routes parse failures to ops@
 }
 
@@ -52,8 +58,18 @@ const KNOWN_TAGS = [
   "tldr_infosec",
   "thn",
   "securityweek",
+  // User-scan tag (F1 — scan@askarthur-inbound.com → /api/inbound-scan).
+  // Differs from the others: messages are NOT written to feed_items;
+  // they're forwarded to a different endpoint that analyses + replies.
+  "scan_report",
 ] as const;
 type KnownTag = (typeof KNOWN_TAGS)[number];
+
+/** True when this source should be routed to the user-scan endpoint
+ *  instead of the intel-inbound newsletter Edge Function. */
+function isUserScanSource(source: string): boolean {
+  return source === "inbound_scan_report";
+}
 
 function resolveSource(addresses: string[]): string {
   for (const addr of addresses) {
@@ -279,7 +295,19 @@ export default {
       tags: undefined as string[] | undefined,
     };
 
-    const resp = await fetch(env.SUPABASE_EDGE_FUNCTION_URL, {
+    // User-scan tag (scan_report) routes to a different endpoint that
+    // analyses the email + replies to the sender. Falls back to the intel
+    // Edge Function only if SCAN_REPORT_ENDPOINT_URL isn't configured —
+    // that's a "fail safe" choice: a misrouted user-scan ends up in
+    // feed_items with source=inbound_scan_report, which the v128
+    // feed_items_source_check constraint rejects (422). No data
+    // corruption; operator gets a quarantine notice.
+    const targetUrl =
+      isUserScanSource(source) && env.SCAN_REPORT_ENDPOINT_URL
+        ? env.SCAN_REPORT_ENDPOINT_URL
+        : env.SUPABASE_EDGE_FUNCTION_URL;
+
+    const resp = await fetch(targetUrl, {
       method: "POST",
       headers: {
         "content-type": "application/json",
