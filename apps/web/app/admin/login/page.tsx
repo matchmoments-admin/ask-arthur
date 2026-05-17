@@ -24,7 +24,7 @@ export default function AdminLoginPage() {
       });
 
       if (res.ok) {
-        router.push("/admin/blog");
+        router.push("/admin");
       } else {
         setError("Invalid credentials");
       }
