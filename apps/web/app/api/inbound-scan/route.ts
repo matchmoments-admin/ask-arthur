@@ -28,11 +28,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { Resend } from "resend";
+import { render } from "@react-email/components";
 
 import { analyzeForBot } from "@askarthur/bot-core/analyze";
 import { checkInboundScanRateLimit } from "@askarthur/utils/rate-limit";
 import { logger } from "@askarthur/utils/logger";
+import type { Verdict } from "@askarthur/types";
+
 import { logCost } from "@/lib/cost-telemetry";
+import { buildFeedbackUrl } from "@/lib/inbound-scan-feedback";
+import InboundScanResult from "@/emails/InboundScanResult";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -80,103 +85,73 @@ function parseFromHeader(from: string): { email: string; displayName?: string } 
 }
 
 // ── Reply rendering ─────────────────────────────────────────────────────
+//
+// HTML lives in apps/web/emails/InboundScanResult.tsx (React Email).
+// This module only owns the headline copy (used for the email subject)
+// and the plain-text fallback that goes alongside the rendered HTML in
+// the Resend send.
 
-const VERDICT_COLOUR: Record<string, string> = {
-  SAFE: "#16a34a",
-  CAUTION: "#d97706",
-  SUSPICIOUS: "#d97706",
-  HIGH_RISK: "#dc2626",
-  UNKNOWN: "#64748b",
-};
-
-const VERDICT_HEADLINE: Record<string, string> = {
-  SAFE: "Looks safe",
-  CAUTION: "Be cautious",
-  SUSPICIOUS: "Likely scam",
+const VERDICT_HEADLINE: Record<Verdict, string> = {
+  SAFE: "Looks safe — still verify",
+  UNCERTAIN: "We couldn't classify this",
+  SUSPICIOUS: "This looks suspicious",
   HIGH_RISK: "Very likely a scam — do not engage",
-  UNKNOWN: "Couldn't classify",
 };
 
-interface ReplyTemplate {
-  subject: string;
-  html: string;
-  text: string;
+function headlineFor(verdict: string): string {
+  return (VERDICT_HEADLINE as Record<string, string>)[verdict] ?? "Result";
 }
 
-function buildVerdictReply(
-  verdict: string,
-  confidence: number,
-  reasoning: string,
-  nextSteps: string[],
-  forwardedSubject: string,
-  displayName?: string,
-): ReplyTemplate {
-  const headline = VERDICT_HEADLINE[verdict] ?? "Result";
-  const colour = VERDICT_COLOUR[verdict] ?? "#0f172a";
-  const greeting = displayName ? `Hi ${displayName.split(" ")[0]},` : "Hi,";
-  const truncatedSubject =
-    forwardedSubject.length > 100
-      ? `${forwardedSubject.slice(0, 97)}…`
-      : forwardedSubject;
-
-  const steps = nextSteps.slice(0, 5);
-
-  const html = `
-    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; color: #0f172a;">
-      <p style="font-size: 16px; line-height: 1.5;">${greeting}</p>
-      <p style="font-size: 16px; line-height: 1.5;">Here's what Arthur found in the email you forwarded:</p>
-
-      <div style="margin: 24px 0; padding: 20px; border-radius: 12px; background: ${colour}11; border-left: 4px solid ${colour};">
-        <div style="font-size: 14px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">Verdict</div>
-        <div style="font-size: 24px; font-weight: 700; color: ${colour}; margin-top: 4px;">${headline}</div>
-        <div style="font-size: 13px; color: #64748b; margin-top: 4px;">Confidence: ${Math.round(confidence * 100)}%</div>
-      </div>
-
-      <p style="font-size: 15px; line-height: 1.6; color: #334155;">
-        <strong>Why:</strong> ${reasoning}
-      </p>
-
-      ${
-        steps.length > 0
-          ? `<p style="font-size: 15px; line-height: 1.6; color: #334155; margin-top: 16px;"><strong>What to do:</strong></p>
-             <ul style="font-size: 15px; line-height: 1.6; color: #334155; padding-left: 20px;">
-               ${steps.map((s) => `<li>${s}</li>`).join("")}
-             </ul>`
-          : ""
-      }
-
-      <p style="font-size: 13px; color: #94a3b8; margin-top: 32px; line-height: 1.5;">
-        We scanned the subject "<em>${truncatedSubject}</em>".<br />
-        Forward more suspicious emails to <a href="mailto:scan@askarthur.au" style="color: #0f766e;">scan@askarthur.au</a> any time, or paste them at <a href="https://askarthur.au" style="color: #0f766e;">askarthur.au</a>.
-      </p>
-
-      <p style="font-size: 12px; color: #cbd5e1; margin-top: 24px;">
-        Ask Arthur · Australia's AI scam-detection platform · askarthur.au
-      </p>
-    </div>
-  `;
-
-  const text = [
+function buildPlainText(opts: {
+  verdict: string;
+  confidence: number;
+  summary: string;
+  redFlags: string[];
+  nextSteps: string[];
+  forwardedSubject: string;
+  displayName?: string;
+  feedbackUpUrl: string;
+  feedbackDownUrl: string;
+}): string {
+  const headline = headlineFor(opts.verdict);
+  const greeting = opts.displayName
+    ? `Hi ${opts.displayName.split(" ")[0]},`
+    : "Hi,";
+  const lines = [
     greeting,
     "",
-    `Here's what Arthur found in the email you forwarded:`,
+    "Here's what Arthur found in the email you forwarded:",
     "",
     `Verdict: ${headline}`,
-    `Confidence: ${Math.round(confidence * 100)}%`,
+    `Confidence: ${Math.round(opts.confidence * 100)}%`,
     "",
-    `Why: ${reasoning}`,
+  ];
+  if (opts.summary) lines.push(`Why: ${opts.summary}`, "");
+  if (opts.redFlags.length > 0) {
+    lines.push("Red flags:");
+    for (const f of opts.redFlags.slice(0, 6)) lines.push(`  • ${f}`);
+    lines.push("");
+  }
+  if (opts.nextSteps.length > 0) {
+    lines.push("What to do:");
+    opts.nextSteps.slice(0, 5).forEach((s, i) => {
+      lines.push(`  ${i + 1}. ${s}`);
+    });
+    lines.push("");
+  }
+  lines.push(
+    "How did we do?",
+    `  Helpful: ${opts.feedbackUpUrl}`,
+    `  Not helpful: ${opts.feedbackDownUrl}`,
     "",
-    steps.length > 0 ? `What to do:\n${steps.map((s) => `  • ${s}`).join("\n")}\n` : "",
-    `Forward more suspicious emails to scan@askarthur.au any time, or paste them at askarthur.au.`,
+    "Help other Aussies find Arthur — leave a review:",
+    "  https://au.trustpilot.com/evaluate/askarthur.au",
     "",
-    "Ask Arthur · askarthur.au",
-  ].join("\n");
-
-  return {
-    subject: `Ask Arthur scan result: ${headline}`,
-    html,
-    text,
-  };
+    `We scanned the subject "${opts.forwardedSubject}". Forward more suspicious emails to scan@askarthur.au any time, or paste them at askarthur.au.`,
+    "",
+    "Ask Arthur · askarthur.au · Reply STOP to opt out.",
+  );
+  return lines.join("\n");
 }
 
 // ── Handler ─────────────────────────────────────────────────────────────
@@ -238,10 +213,11 @@ export async function POST(req: NextRequest) {
   // delivered") so it must be analysed alongside the body.
   const blob = [`Subject: ${payload.subject}`, "", payload.body_md].join("\n");
 
-  let verdict: string;
+  let verdict: Verdict;
   let confidence: number;
   let reasoning: string;
   let nextSteps: string[];
+  let redFlags: string[];
   try {
     const result = await analyzeForBot(blob, "AU");
     verdict = result.verdict;
@@ -251,6 +227,7 @@ export async function POST(req: NextRequest) {
       result.redFlags?.[0] ||
       "We couldn't extract a clear signal.";
     nextSteps = result.nextSteps ?? [];
+    redFlags = result.redFlags ?? [];
   } catch (err) {
     logger.error("inbound-scan: analyzeForBot failed", {
       error: err instanceof Error ? err.message : String(err),
@@ -272,23 +249,53 @@ export async function POST(req: NextRequest) {
   }
 
   const fromEmail = process.env.RESEND_FROM_EMAIL || "Ask Arthur <brendan@askarthur.au>";
-  const tpl = buildVerdictReply(
+  const baseUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://askarthur.au";
+  const feedbackUp = buildFeedbackUrl({
+    baseUrl,
+    externalId: payload.external_id,
+    verdict,
+    vote: "up",
+  });
+  const feedbackDown = buildFeedbackUrl({
+    baseUrl,
+    externalId: payload.external_id,
+    verdict,
+    vote: "down",
+  });
+  const headline = headlineFor(verdict);
+  const html = await render(
+    InboundScanResult({
+      verdict,
+      confidence,
+      summary: reasoning,
+      redFlags,
+      nextSteps,
+      forwardedSubject: payload.subject,
+      displayName: sender.displayName,
+      feedbackUpUrl: feedbackUp.url,
+      feedbackDownUrl: feedbackDown.url,
+    }),
+  );
+  const text = buildPlainText({
     verdict,
     confidence,
-    reasoning,
+    summary: reasoning,
+    redFlags,
     nextSteps,
-    payload.subject,
-    sender.displayName,
-  );
+    forwardedSubject: payload.subject,
+    displayName: sender.displayName,
+    feedbackUpUrl: feedbackUp.url,
+    feedbackDownUrl: feedbackDown.url,
+  });
 
   try {
     const resend = new Resend(resendKey);
     const sendResult = await resend.emails.send({
       from: fromEmail,
       to: sender.email,
-      subject: tpl.subject,
-      html: tpl.html,
-      text: tpl.text,
+      subject: `Ask Arthur scan result: ${headline}`,
+      html,
+      text,
       // Tag for Resend analytics so we can split scan-reply volume from
       // other transactional categories.
       tags: [{ name: "category", value: "inbound_scan_reply" }],
