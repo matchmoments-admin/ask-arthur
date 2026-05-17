@@ -350,9 +350,9 @@ Cloudflare Email Routing (askarthur-inbound.com zone)
        ▼
 Cloudflare Worker (apps/cloudflare-email-worker)
   ├─ postal-mime parses MIME
-  ├─ resolveSource() → "inbound_scan_report"  (new in F1)
+  ├─ resolveSource() → "inbound_scan"  (new in F1; "scan+report" splits to "scan")
   ├─ Dispatch branches on source:
-  │     ├─ scan_report   → SCAN_REPORT_ENDPOINT_URL  (apps/web /api/inbound-scan)
+  │     ├─ scan          → SCAN_REPORT_ENDPOINT_URL  (apps/web /api/inbound-scan)
   │     └─ everything else → SUPABASE_EDGE_FUNCTION_URL (intel-inbound-email)
   └─ POSTs structured JSON + X-Webhook-Secret
        │
@@ -360,7 +360,7 @@ Cloudflare Worker (apps/cloudflare-email-worker)
 /api/inbound-scan  (apps/web/app/api/inbound-scan/route.ts)
   ├─ ENABLE_USER_SCAN_INBOUND kill switch (default on; "false" → 204)
   ├─ Verify x-webhook-secret (timing-safe)
-  ├─ Zod-validate payload (source = "inbound_scan_report")
+  ├─ Zod-validate payload (source = "inbound_scan")
   ├─ Parse From: header → reply address + display name
   ├─ Rate limit: checkInboundScanRateLimit(sender) — 20/h per normalised sender
   ├─ analyzeForBot(subject + body_md, region="AU")

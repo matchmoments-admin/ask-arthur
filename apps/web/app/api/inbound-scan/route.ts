@@ -1,9 +1,11 @@
 // F1 — User-scan email-forward endpoint.
 //
 // Receives parsed-email payloads from the Cloudflare Email Routing Worker
-// (apps/cloudflare-email-worker) when the recipient tag is `scan_report`.
-// The worker resolves source = "inbound_scan_report" → routes here instead
-// of the intel-inbound-email Edge Function.
+// (apps/cloudflare-email-worker) when the recipient tag is `scan` (the
+// public-facing form is `scan+report@askarthur-inbound.com` via the
+// Cloudflare subaddressing split). The worker resolves
+// source = "inbound_scan" → routes here instead of the
+// intel-inbound-email Edge Function.
 //
 // Flow:
 //   1. Auth (shared-secret) + kill-switch + Zod
@@ -38,7 +40,7 @@ export const dynamic = "force-dynamic";
 // ── Payload schema (matches intel-inbound-email shape) ──────────────────
 
 const InboundScanPayload = z.object({
-  source: z.literal("inbound_scan_report"),
+  source: z.literal("inbound_scan"),
   external_id: z.string().min(8).max(128),
   subject: z.string().min(1).max(2000),
   body_md: z.string().min(1).max(50_000),
