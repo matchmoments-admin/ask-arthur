@@ -222,6 +222,8 @@ Expected features:
 - `scam-report-embed` (per-submission, scales with traffic)
 - `scam-reports-backfill-embed` (manual triggers only)
 - `intel-search` / `scams-search` (per B2B call, embed + rerank stages)
+- `similar-reports-retrieval` + `similar-reports-rerank` (per analyze, post-verdict surface — embed + rerank-2.5-lite; ~\$0.0002/call at today's pricing)
+- `themes-retrieval` (per analyze, decorative scam-pattern pre-pass embed; ~\$0.000003/call)
 
 **Alerts**: existing daily-cost-check Inngest cron emails when feature spend exceeds the configured cap. No Voyage-specific cap is currently set — add `VOYAGE_DAILY_CAP_USD` if/when monthly spend exceeds \$50.
 
