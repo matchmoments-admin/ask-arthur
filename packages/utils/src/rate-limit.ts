@@ -498,10 +498,13 @@ export async function checkCharityCheckRateLimit(
 // normalised sender email (lowercased, local-part stripped of plus tags)
 // so the same person can't bypass by adding +123 suffixes.
 //
-// Limit is deliberately generous compared to web (`/api/analyze` is
-// 5/burst + 10/day) — forwarding is fire-and-forget; if someone gets a
-// scam wave they'll want to dump 10–20 in quick succession. But each one
-// is a paid Claude call + an outbound Resend, so we keep a hard ceiling.
+// Hard cap: 3 forwards / 24h per sender. The product hypothesis is that
+// scam-forwards are sparse (a few per week, not per day) — anyone
+// flooding the channel is almost certainly testing or abusing. Each
+// forward costs ~A$0.001 Claude + an outbound Resend; capping at 3/day
+// keeps the per-sender daily ceiling under A$0.005 even at zero
+// optimisation. Heavy users get directed to the free web scanner via
+// the 4th-message rate-limit reply.
 
 const _inboundScanLimiter = { current: null as Ratelimit | null };
 
@@ -515,7 +518,7 @@ function getInboundScanLimiter(): Ratelimit {
 
   const lim = new Ratelimit({
     redis,
-    limiter: Ratelimit.slidingWindow(20, "1 h"),
+    limiter: Ratelimit.slidingWindow(3, "1 d"),
     prefix: "askarthur:inbound-scan",
     analytics: true,
   });
@@ -524,7 +527,7 @@ function getInboundScanLimiter(): Ratelimit {
 }
 
 /**
- * Check the inbound-scan rate-limit bucket for a sender email. 20/hour
+ * Check the inbound-scan rate-limit bucket for a sender email. 3/day
  * default. Fail-closed in production so a Redis outage doesn't let a
  * single forwarder rack up unbounded Claude spend.
  */
@@ -549,7 +552,7 @@ export async function checkInboundScanRateLimit(
         remaining: 0,
         resetAt: new Date(res.reset),
         message:
-          "You've forwarded a lot of emails recently. We'll resume scanning new ones in the next hour.",
+          "You've hit today's free-forward limit (3 per day). Paste suspicious messages at askarthur.au any time — no daily cap on the web scanner.",
       };
     }
     return { allowed: true, remaining: res.remaining, resetAt: null };
