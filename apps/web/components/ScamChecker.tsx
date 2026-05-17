@@ -45,12 +45,15 @@ export default function ScamChecker() {
   const [isDragging, setIsDragging] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [showQrScanner, setShowQrScanner] = useState(false);
-  const [inputMode, setInputMode] = useState<"text" | "image" | "qrcode" | "charity-image">("text");
+  const [inputMode, setInputMode] = useState<"text" | "image" | "qrcode" | "charity-image" | "charity-text">("text");
   const [qrDecodedUrl, setQrDecodedUrl] = useState<string | null>(null);
   const [qrError, setQrError] = useState<string | null>(null);
-  // Charity-check homepage flow (drawer → "Charity Upload Image"): the photo
-  // lives in the same `images` thumbnail strip; this flag tells the submit
-  // handler to route to /api/charity-check instead of /api/analyze.
+  // Charity-check homepage flow. Two entry points:
+  //   - "Charity Upload Image" → charity-image mode (image required)
+  //   - "Charity Check Name or ABN" → charity-text mode (name/ABN typed in
+  //     the existing textarea)
+  // Both flip `charityIntent` so the submit handler routes to
+  // /api/charity-check instead of /api/analyze.
   const [charityIntent, setCharityIntent] = useState(false);
   const [charityResult, setCharityResult] = useState<CharityCheckResult | null>(null);
   const [progressStep, setProgressStep] = useState<ProgressStep | undefined>(undefined);
@@ -92,6 +95,22 @@ export default function ScamChecker() {
       setErrorMsg("");
     };
     reader.readAsDataURL(compressed);
+  }, []);
+
+  const handleCharityTextSelected = useCallback(() => {
+    // Drawer's "Charity Check Name or ABN" entry — no image, just routes the
+    // main textarea through /api/charity-check on submit. Replaces the old
+    // deep-link to the standalone /charity-check?mode=name page so users stay
+    // on the homepage scanner.
+    setQrError(null);
+    setQrDecodedUrl(null);
+    setResult(null);
+    setCharityResult(null);
+    setImages([]);
+    setStatus("idle");
+    setInputMode("charity-text");
+    setCharityIntent(true);
+    setErrorMsg("");
   }, []);
 
   const processFiles = useCallback(async (files: File[], mode?: "image" | "qrcode") => {
@@ -205,12 +224,14 @@ export default function ScamChecker() {
     e.preventDefault();
     if (!text.trim() && images.length === 0) return;
 
-    // Charity-check branch: drawer's "Charity Upload Image" sets the intent
-    // flag. We POST to /api/charity-check (image required, name/abn pulled
-    // from the textarea via the same regex the analyze route uses for the
-    // CTA banner). All other Image #2 fields — donation URL / payment
-    // method / "are they in front of you" — are intentionally omitted.
-    if (charityIntent && images[0]) {
+    // Charity-check branch: drawer's "Charity Upload Image" or "Charity Check
+    // Name or ABN" sets the intent flag. We POST to /api/charity-check —
+    // image-mode sends `{image, ...extracted-prefill}`, text-mode sends
+    // `{abn, name}` parsed from the textarea. All other Image #2 fields —
+    // donation URL / payment method / "are they in front of you" — are
+    // intentionally omitted; they can re-appear later as conditional inputs
+    // rendered only when charityIntent is true.
+    if (charityIntent && (images[0] || text.trim())) {
       setStatus("analyzing");
       setCharityResult(null);
       setErrorMsg("");
@@ -218,11 +239,22 @@ export default function ScamChecker() {
 
       const trimmedText = text.trim();
       const intent = trimmedText ? detectCharityIntent(trimmedText) : null;
-      const body: Record<string, string | boolean> = {
-        image: images[0].base64,
-      };
-      if (intent?.extractedAbn) body.abn = intent.extractedAbn;
-      if (intent?.extractedName) body.name = intent.extractedName;
+      const body: Record<string, string | boolean> = {};
+      if (images[0]) body.image = images[0].base64;
+      if (intent?.extractedAbn) {
+        body.abn = intent.extractedAbn;
+      } else if (!images[0] && /^\d[\d\s-]*\d$/.test(trimmedText)) {
+        // No keyword/name match but the input is a digit-shaped string —
+        // treat it as a raw ABN; the route's Zod transform strips non-digits
+        // and validates length === 11.
+        body.abn = trimmedText;
+      }
+      if (intent?.extractedName) {
+        body.name = intent.extractedName;
+      } else if (!images[0] && !body.abn && trimmedText.length >= 2) {
+        // Plain typed name without charity keyword — pass it through as-is.
+        body.name = trimmedText.slice(0, 200);
+      }
 
       try {
         setProgressStep("lookup");
@@ -422,8 +454,8 @@ export default function ScamChecker() {
             </div>
           )}
 
-          {/* Charity-image notice */}
-          {inputMode === "charity-image" && (
+          {/* Charity-mode notice (image or text) */}
+          {(inputMode === "charity-image" || inputMode === "charity-text") && (
             <div className="flex items-center gap-2 px-4 pt-2 text-sm text-action-teal font-medium">
               <BadgeCheck size={16} />
               Charity check — we&rsquo;ll verify against the ACNC and ABR registers
@@ -437,7 +469,9 @@ export default function ScamChecker() {
             onFocus={() => setIsFocused(true)}
             onBlur={() => setIsFocused(false)}
             placeholder={
-              inputMode === "charity-image"
+              inputMode === "charity-text"
+                ? "Type the charity name or ABN"
+                : inputMode === "charity-image"
                 ? "Add anything else (charity name, ABN) — optional"
                 : "Paste the suspicious message, email, or URL here..."
             }
@@ -528,6 +562,9 @@ export default function ScamChecker() {
         }}
         onCharityImageSelected={
           featureFlags.charityCheck ? handleCharityImageSelected : undefined
+        }
+        onCharityTextSelected={
+          featureFlags.charityCheck ? handleCharityTextSelected : undefined
         }
       />
 
