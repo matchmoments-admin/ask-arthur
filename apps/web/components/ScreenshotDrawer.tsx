@@ -25,6 +25,11 @@ interface ScreenshotDrawerProps {
    *  charity-check intent set, instead of deep-linking to /charity-check.
    *  Single file only — the charity-check engine accepts one image. */
   onCharityImageSelected?: (file: File) => void;
+  /** Optional. When supplied, the "Charity Check Name or ABN" row becomes a
+   *  button that flips the homepage scanner into charity-text mode (so the
+   *  user types the name/ABN into the existing textarea) instead of
+   *  deep-linking to /charity-check?mode=name. */
+  onCharityTextSelected?: () => void;
 }
 
 export default function ScreenshotDrawer({
@@ -33,6 +38,7 @@ export default function ScreenshotDrawer({
   onFilesSelected,
   onScanQrCode,
   onCharityImageSelected,
+  onCharityTextSelected,
 }: ScreenshotDrawerProps) {
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -336,21 +342,42 @@ export default function ScreenshotDrawer({
                   className="hidden"
                 />
 
-                <Link
-                  href="/charity-check?mode=name"
-                  onClick={() => onOpenChange(false)}
-                  className="flex items-center gap-4 px-3 py-3 rounded-xl hover:bg-slate-50 transition-colors text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-deep-navy/20"
-                >
-                  <HeartHandshake className="text-action-teal" size={24} />
-                  <div>
-                    <div className="text-base font-semibold text-deep-navy">
-                      Charity Check Name or ABN
+                {onCharityTextSelected ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onCharityTextSelected();
+                      onOpenChange(false);
+                    }}
+                    className="flex items-center gap-4 px-3 py-3 rounded-xl hover:bg-slate-50 transition-colors text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-deep-navy/20"
+                  >
+                    <HeartHandshake className="text-action-teal" size={24} />
+                    <div>
+                      <div className="text-base font-semibold text-deep-navy">
+                        Charity Check Name or ABN
+                      </div>
+                      <div className="text-sm text-gov-slate">
+                        Look up an Australian charity
+                      </div>
                     </div>
-                    <div className="text-sm text-gov-slate">
-                      Look up an Australian charity
+                  </button>
+                ) : (
+                  <Link
+                    href="/charity-check?mode=name"
+                    onClick={() => onOpenChange(false)}
+                    className="flex items-center gap-4 px-3 py-3 rounded-xl hover:bg-slate-50 transition-colors text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-deep-navy/20"
+                  >
+                    <HeartHandshake className="text-action-teal" size={24} />
+                    <div>
+                      <div className="text-base font-semibold text-deep-navy">
+                        Charity Check Name or ABN
+                      </div>
+                      <div className="text-sm text-gov-slate">
+                        Look up an Australian charity
+                      </div>
                     </div>
-                  </div>
-                </Link>
+                  </Link>
+                )}
               </>
             )}
           </div>
