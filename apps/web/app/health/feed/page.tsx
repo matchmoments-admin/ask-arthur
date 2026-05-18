@@ -1,8 +1,8 @@
-import { createServiceClient } from "@askarthur/supabase/server";
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
 import { Globe, Puzzle, Plug, Zap } from "lucide-react";
 import type { Metadata } from "next";
+import { getPublicScanFeed } from "@/lib/scanner";
 
 export const dynamic = "force-dynamic";
 
@@ -39,20 +39,6 @@ const GRADE_PILL: Record<string, string> = {
   F: "bg-red-100 text-red-800",
 };
 
-async function getRecentScans() {
-  const supabase = createServiceClient();
-  if (!supabase) return [];
-
-  const { data } = await supabase
-    .from("scan_results")
-    .select("id, scan_type, target, target_display, overall_score, grade, share_token, scanned_at")
-    .eq("visibility", "public")
-    .order("scanned_at", { ascending: false })
-    .limit(50);
-
-  return data || [];
-}
-
 function relativeTime(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
   const mins = Math.floor(diff / 60000);
@@ -65,7 +51,7 @@ function relativeTime(dateStr: string): string {
 }
 
 export default async function ScanFeedPage() {
-  const scans = await getRecentScans();
+  const scans = await getPublicScanFeed();
 
   return (
     <div className="min-h-screen flex flex-col">

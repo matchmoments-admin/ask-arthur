@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import { createServiceClient } from "@askarthur/supabase/server";
 import WorldScamMapWithHighlights from "@/components/charts/WorldScamMapWithHighlights";
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
+import { getWorldStats } from "@/lib/dashboard/public-stats";
 
 export const revalidate = 3600;
 
@@ -18,23 +18,6 @@ export const metadata: Metadata = {
     url: "https://askarthur.au/scam-map",
   },
 };
-
-async function getWorldStats(): Promise<Record<string, number>> {
-  const supabase = createServiceClient();
-  if (!supabase) return {};
-
-  const { data, error } = await supabase.rpc("get_world_scam_stats", {
-    days_back: 30,
-  });
-
-  if (error || !data) return {};
-
-  const map: Record<string, number> = {};
-  for (const row of data as Array<{ country_code: string; scam_count: number }>) {
-    map[row.country_code] = row.scam_count;
-  }
-  return map;
-}
 
 export default async function ScamMapPage() {
   const countryData = await getWorldStats();

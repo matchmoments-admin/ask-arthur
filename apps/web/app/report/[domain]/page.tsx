@@ -1,6 +1,4 @@
-import { cache } from "react";
 import { notFound } from "next/navigation";
-import { createServiceClient } from "@askarthur/supabase/server";
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
 import SiteAuditReport, {
@@ -8,41 +6,11 @@ import SiteAuditReport, {
   type CheckResult,
 } from "@/components/SiteAuditReport";
 import type { Metadata } from "next";
+import { getLatestAuditByDomain } from "@/lib/report";
 
 interface PageProps {
   params: Promise<{ domain: string }>;
 }
-
-// Wrapped in React.cache so generateMetadata + the default export share
-// one site + audit DB round-trip per request instead of two.
-const getLatestAuditByDomain = cache(async (domain: string) => {
-  const supabase = createServiceClient();
-  if (!supabase) return null;
-
-  // Look up the site by domain
-  const { data: site, error: siteError } = await supabase
-    .from("sites")
-    .select("id, domain, normalized_url")
-    .eq("domain", domain)
-    .single();
-
-  if (siteError || !site) return null;
-
-  // Get the latest audit for this site
-  const { data: audit, error: auditError } = await supabase
-    .from("site_audits")
-    .select(
-      "id, overall_score, grade, test_results, category_scores, recommendations, duration_ms, scanned_at, share_token"
-    )
-    .eq("site_id", site.id)
-    .order("scanned_at", { ascending: false })
-    .limit(1)
-    .single();
-
-  if (auditError || !audit) return null;
-
-  return { site, audit };
-});
 
 export async function generateMetadata({
   params,

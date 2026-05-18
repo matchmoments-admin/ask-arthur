@@ -1,10 +1,10 @@
 import { Suspense } from "react";
 import { ShieldCheck, Puzzle, Plug, Zap, Globe } from "lucide-react";
-import { createServiceClient } from "@askarthur/supabase/server";
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
 import UniversalScanner from "@/components/UniversalScanner";
 import type { Metadata } from "next";
+import { getCombinedRecentScans, type RecentScan } from "@/lib/scanner";
 
 export const dynamic = "force-dynamic";
 
@@ -44,63 +44,6 @@ const GRADE_PILL: Record<string, string> = {
   F: "bg-[#FEF2F2] text-[#991B1B]",
 };
 
-interface RecentScan {
-  id: string;
-  scan_type: string;
-  target: string;
-  target_display: string | null;
-  grade: string;
-  overall_score: number;
-  share_token: string | null;
-  scanned_at: string;
-}
-
-async function getRecentScans(): Promise<RecentScan[]> {
-  const supabase = createServiceClient();
-  if (!supabase) return [];
-
-  const results: RecentScan[] = [];
-
-  // Pull from unified scan_results
-  const { data: scanData } = await supabase
-    .from("scan_results")
-    .select("id, scan_type, target, target_display, grade, overall_score, share_token, scanned_at")
-    .eq("visibility", "public")
-    .order("scanned_at", { ascending: false })
-    .limit(20);
-
-  if (scanData) {
-    results.push(...scanData.map((s) => ({ ...s, id: `sr-${s.id}` })));
-  }
-
-  // Pull from legacy site_audits (website scans)
-  const { data: siteData } = await supabase
-    .from("site_audits")
-    .select("id, overall_score, grade, scanned_at, share_token, site_id, sites!inner(domain)")
-    .order("scanned_at", { ascending: false })
-    .limit(20);
-
-  if (siteData) {
-    for (const s of siteData) {
-      const site = s.sites as unknown as { domain: string };
-      results.push({
-        id: `sa-${s.id}`,
-        scan_type: "website",
-        target: site.domain,
-        target_display: site.domain,
-        grade: s.grade,
-        overall_score: s.overall_score,
-        share_token: s.share_token,
-        scanned_at: s.scanned_at,
-      });
-    }
-  }
-
-  // Sort combined by date, take top 20
-  results.sort((a, b) => new Date(b.scanned_at).getTime() - new Date(a.scanned_at).getTime());
-  return results.slice(0, 20);
-}
-
 function relativeTime(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
   const mins = Math.floor(diff / 60000);
@@ -114,7 +57,7 @@ function relativeTime(dateStr: string): string {
 }
 
 export default async function ScannerPage() {
-  const recentScans = await getRecentScans();
+  const recentScans: RecentScan[] = await getCombinedRecentScans();
 
   return (
     <div className="min-h-screen flex flex-col">
