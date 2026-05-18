@@ -15,6 +15,7 @@ import type { Metadata } from "next";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
+import { gateOrNotFound } from "@/lib/featureGate";
 import { withUtm } from "@/lib/utm";
 
 const UUID_RE =
@@ -134,7 +135,7 @@ function formatDate(iso: string | null | undefined): string {
 }
 
 export default async function ThemePage({ params }: PageProps) {
-  if (!featureFlags.redditIntelPublicPages) notFound();
+  gateOrNotFound("redditIntelPublicPages");
 
   const { slug } = await params;
   const result = await loadTheme(slug);

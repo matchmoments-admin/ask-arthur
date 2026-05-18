@@ -1,9 +1,8 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
 import Link from "next/link";
 import { Shield, ChevronDown } from "lucide-react";
 import { createServiceClient } from "@askarthur/supabase/server";
-import { featureFlags } from "@askarthur/utils/feature-flags";
+import { gateOrNotFound } from "@/lib/featureGate";
 import FeedList from "@/components/FeedList";
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
@@ -72,7 +71,7 @@ async function getPinnedRegulatorAlerts(): Promise<PinnedAlert[]> {
 }
 
 export default async function ScamFeedPage() {
-  if (!featureFlags.scamFeed) notFound();
+  gateOrNotFound("scamFeed");
 
   const [{ items, total }, pinned] = await Promise.all([
     getInitialFeed(),

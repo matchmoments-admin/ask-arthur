@@ -6,8 +6,8 @@
 // its latest score + last-refresh + alert count. Add-monitor flow is a
 // client child that walks the OTP → create sequence.
 
-import { notFound, redirect } from "next/navigation";
-import { featureFlags } from "@askarthur/utils/feature-flags";
+import { redirect } from "next/navigation";
+import { gateOrNotFound } from "@/lib/featureGate";
 import { requireAuth } from "@/lib/auth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { MonitorsClient } from "./MonitorsClient";
@@ -35,7 +35,7 @@ interface FootprintMini {
 }
 
 export default async function MonitorsPage() {
-  if (!featureFlags.phoneFootprintConsumer) notFound();
+  gateOrNotFound("phoneFootprintConsumer");
   const user = await requireAuth();
 
   const supa = createServiceClient();

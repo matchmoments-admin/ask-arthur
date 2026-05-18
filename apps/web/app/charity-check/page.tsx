@@ -2,8 +2,7 @@ import { Suspense } from "react";
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
 import CharityChecker from "@/components/CharityChecker";
-import { featureFlags } from "@askarthur/utils/feature-flags";
-import { notFound } from "next/navigation";
+import { gateOrNotFound } from "@/lib/featureGate";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -13,11 +12,9 @@ export const metadata: Metadata = {
 };
 
 export default function CharityCheckPage() {
-  // Server-side gate. The page returns 404 when the flag is OFF so we can
-  // ship the route + components without exposing them in production.
-  if (!featureFlags.charityCheck) {
-    notFound();
-  }
+  // Server-side gate. Returns 404 when NEXT_PUBLIC_FF_CHARITY_CHECK is OFF
+  // so we can ship the route + components without exposing them in prod.
+  gateOrNotFound("charityCheck");
 
   return (
     <div className="min-h-screen flex flex-col">
