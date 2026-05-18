@@ -116,13 +116,14 @@ Gated by `FF_ANALYZE_INNGEST_WEB`. When false, the legacy `waitUntil` path runs 
 
 ### Housekeeping (nightly)
 
-| Function                           | Cron                     | Purpose                                           |
-| ---------------------------------- | ------------------------ | ------------------------------------------------- |
-| `cost-telemetry-retention`         | `0 4 * * *` (04:00 UTC)  | Daily rollup + 90d prune                          |
-| `phone-footprint-retention`        | `15 3 * * *` (03:15 UTC) | Anonymise old monitors + sweep consent expiry     |
-| `reddit-processed-posts-retention` | `45 3 * * *` (03:45 UTC) | Prune dedup table (30-day window)                 |
-| `telco-events-retention`           | `30 4 * * *` (04:30 UTC) | Prune telco events (730d SIM/device, 365d others) |
-| `archive-shadows-retention`        | `0 5 * * *` (05:00 UTC)  | Archive 6 medium-volume tables                    |
+| Function                           | Cron                     | Purpose                                                    |
+| ---------------------------------- | ------------------------ | ---------------------------------------------------------- |
+| `billing-ingest-nightly`           | `0 2 * * *` (02:00 UTC)  | Per-provider daily infra-spend → `infra_cost_daily` (v134) |
+| `cost-telemetry-retention`         | `0 4 * * *` (04:00 UTC)  | Daily rollup + 90d prune                                   |
+| `phone-footprint-retention`        | `15 3 * * *` (03:15 UTC) | Anonymise old monitors + sweep consent expiry              |
+| `reddit-processed-posts-retention` | `45 3 * * *` (03:45 UTC) | Prune dedup table (30-day window)                          |
+| `telco-events-retention`           | `30 4 * * *` (04:30 UTC) | Prune telco events (730d SIM/device, 365d others)          |
+| `archive-shadows-retention`        | `0 5 * * *` (05:00 UTC)  | Archive 6 medium-volume tables                             |
 
 ### Cluster & risk
 
@@ -295,6 +296,7 @@ every 12h pipeline-ct-monitor                (Inngest)
 
 02:00 ensure-partitions                       (Vercel)
 02:30 feed-retention                          (Inngest)
+02:00 billing-ingest-nightly                  (Inngest)
 03:00 vuln-retention                          (Vercel)
 03:00 pipeline-staleness-check[/ips/wallets]  (Inngest)
 03:15 phone-footprint-retention               (Inngest)
