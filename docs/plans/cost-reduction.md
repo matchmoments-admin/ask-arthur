@@ -77,10 +77,10 @@ Phases 0–2 are ~7 PRs, all small/medium. Phase 3 is 1 audit PR + ~6 migration 
 
 **Scope:** New Inngest function `billing-ingest-nightly` runs at 02:00 UTC daily, pulls usage from:
 
-- **Vercel** — `GET https://api.vercel.com/v1/usage` (needs `VERCEL_TOKEN` + `VERCEL_TEAM_ID` env vars)
+- **Vercel** — `GET https://api.vercel.com/v1/usage` (needs `VERCEL_TOKEN` + `VERCEL_TEAM_ID` env vars — setup steps in issue #299)
 - **GitHub Actions** — `GET https://api.github.com/repos/{owner}/{repo}/actions/billing/usage` (uses existing `GITHUB_TOKEN`)
 - **Anthropic** — already in `cost_telemetry`; just `SUM(cost_usd) WHERE created_at::date = $1`
-- **Supabase** — no public usage API; manual monthly paste-in field (or `—` placeholder for v1)
+- **Supabase** — **verified 2026-05-18: no public usage API** via Management token (`/v1/projects/<ref>/usage` and org-level usage all return 404). Instead derive cost from: (a) fixed Pro tier base via `INFRA_COST_SUPABASE_MONTHLY_BASE_USD=25` env var, (b) compute hours / storage GB / egress GB via direct SQL on `pg_stat_database` + `pg_database_size` + `pg_stat_replication`. One row per dimension stored as `provider='supabase-base|compute|storage|egress'`. Cleaner than a dashboard scraper.
 
 **Migration:** new table `infra_cost_daily (date, provider, usd_cents, raw_usage_jsonb)`.
 
@@ -153,12 +153,12 @@ CREATE TABLE function_invocation_daily (
 );
 ```
 
-- Inngest exposes per-function invocation counts via its REST API (`/v1/apps/{app_id}/functions/{fn_id}/runs`)
-- Vercel crons → inferred from function logs (`vercel logs` API)
+- **Inngest:** verified 2026-05-18 — no `/v1/runs`, `/v1/functions`, or `/v1/account` endpoints exist on the current plan tier (all return 404). Only `/v1/events` is exposed. **Derive counts** by paginating `GET /v1/events?name=inngest/function.finished&from=...&to=...` (returns events with `data.function_id` + `data.runtime_ms`), grouped per function. More code than expected; doable with existing `INNGEST_API_TOKEN`.
+- **Vercel crons:** count = (events per day from `vercel.json` schedule) — deterministic. Optionally cross-check with Vercel logs API for actual fires (catches missed runs).
 
 Sortable column on `/admin/costs/infra` showing "invocations/day" + "avg duration" per function. PR C2's cron right-sizing decisions key off this.
 
-**Validation:** Compare API-reported counts against `vercel.json` declared crons × days; tolerance ±5%.
+**Validation:** Compare derived Inngest counts against a known function (e.g. `pg-stuck-query-watchdog` should be ~288/day). Vercel: compare against `vercel.json` declared crons × days, tolerance ±5%.
 
 **Rollback:** Drop function + table + dashboard column.
 
@@ -371,10 +371,8 @@ Existing per-feature Anthropic digest body is preserved as a section, not replac
 
 ---
 
-## Open questions before Phase 0 starts
+## Setup questions — RESOLVED 2026-05-18
 
-1. **Are `VERCEL_TOKEN` + `VERCEL_TEAM_ID` already in Vercel env?** PR A1 needs them. If not, manual one-time setup.
-2. **Does Inngest's REST API expose per-function invocation counts on the current plan?** If not, infer from logs or skip until upgrade.
-3. **Supabase usage** — is the manual paste-in OK for v1, or does the human want a Playwright-style scraper of the Supabase dashboard? (Cost trade-off: scraper is fragile + brittle.)
-
-These don't block the plan being drafted, but answer them before opening PR A1.
+1. ✅ **Vercel tokens** — not currently in env. Setup steps captured in issue [#299](https://github.com/matchmoments-admin/ask-arthur/issues/299) (Create read-only token at vercel.com/account/tokens → fetch team ID via `/v2/teams` → add `VERCEL_TOKEN` + `VERCEL_TEAM_ID` to Vercel env across Prod/Preview/Dev + mirror to local `.env.local`).
+2. ✅ **Inngest counts** — verified: no per-function endpoint exists (`/v1/runs`, `/v1/functions`, `/v1/account` all 404). Only `/v1/events` works. **Derive counts** from `inngest/function.finished` events by pagination. PR A3 (#301) scope updated.
+3. ✅ **Supabase usage** — verified: no public usage endpoint via Management API. **Don't scrape the dashboard.** Use fixed Pro tier base (`INFRA_COST_SUPABASE_MONTHLY_BASE_USD=25`) + direct SQL probes for compute/storage/egress overage. Cleaner, no fragility. PR A1 (#299) scope updated.
