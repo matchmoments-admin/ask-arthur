@@ -72,6 +72,11 @@ import { redditProcessedPostsRetention } from "./reddit-processed-posts-retentio
 // long-range aggregates; raw rows >90d deleted. 04:00 UTC.
 import { costTelemetryRetention } from "./cost-telemetry-retention";
 
+// Billing ingest: nightly per-provider infra-spend rollup → infra_cost_daily
+// (v134). Pulls Vercel /v1/billing/charges + Anthropic sums from
+// cost_telemetry + Supabase Pro-base prorate. 02:00 UTC.
+import { billingIngestNightly } from "./billing-ingest-nightly";
+
 // Telco events: nightly prune across 7 append-only tables. 730d for
 // sim/device-swap-events (forensic); 365d for the rest. 04:30 UTC.
 import { telcoEventsRetention } from "./telco-events-retention";
@@ -127,6 +132,8 @@ export const inngestFunctions = [
   redditProcessedPostsRetention,
   // Cost Telemetry: nightly rollup + 90d prune
   costTelemetryRetention,
+  // Billing ingest: nightly per-provider infra-spend rollup (v134)
+  billingIngestNightly,
   // Telco events: nightly prune (730d sim/device-swap; 365d others)
   telcoEventsRetention,
   // Archive shadows: nightly archival mover (6 medium-volume tables)

@@ -149,6 +149,14 @@ async function getTiles(svc: ReturnType<typeof createServiceClient>): Promise<Ti
       secondary: "30d projection in dashboard",
     },
     {
+      href: "/admin/costs/infra",
+      title: "Infra cost rollup",
+      purpose: "Daily per-provider billing (Vercel + Anthropic + Supabase)",
+      metric: "30d total",
+      metricLabel: "Cloud spend",
+      secondary: "Rolled up by billing-ingest-nightly (02:00 UTC)",
+    },
+    {
       href: "/admin/feedback",
       title: "Feedback triage",
       purpose: "User disagreements ranked by uncertainty × harm",
