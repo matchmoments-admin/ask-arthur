@@ -45,32 +45,26 @@ export default async function FeedbackTriagePage({
   const counts = { false_positive: 0, false_negative: 0, user_reported: 0 };
 
   if (supabase) {
-    let query = supabase
-      .from("feedback_triage_queue")
-      .select("*")
-      .order("triage_score", { ascending: false })
-      .order("feedback_created_at", { ascending: false })
-      .limit(100);
+    // Single round-trip via v133 RPC (replaces 3 sequential queries).
+    // Server-side aggregation against the v94 MV; ~2.5 ms on prod.
+    const { data: summary } = await supabase.rpc(
+      "get_feedback_triage_summary",
+      { p_filter: filter, p_limit: 100 },
+    );
 
-    if (filter !== "top") {
-      query = query.eq("user_says", filter);
-    }
-
-    const { data } = await query;
-    rows = (data ?? []) as TriageRow[];
-
-    const { count } = await supabase
-      .from("feedback_triage_queue")
-      .select("*", { count: "exact", head: true });
-    totalCount = count ?? 0;
-
-    // Per-class counts (cheap — MV is at most a few thousand rows).
-    const { data: classRows } = await supabase
-      .from("feedback_triage_queue")
-      .select("user_says");
-    for (const r of classRows ?? []) {
-      const k = r.user_says as keyof typeof counts;
-      if (k in counts) counts[k] += 1;
+    if (summary && typeof summary === "object") {
+      const s = summary as {
+        rows?: TriageRow[];
+        total?: number;
+        counts?: Partial<typeof counts>;
+      };
+      rows = s.rows ?? [];
+      totalCount = s.total ?? 0;
+      if (s.counts) {
+        for (const k of ["false_positive", "false_negative", "user_reported"] as const) {
+          counts[k] = s.counts[k] ?? 0;
+        }
+      }
     }
   }
 
