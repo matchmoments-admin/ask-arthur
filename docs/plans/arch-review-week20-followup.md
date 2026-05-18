@@ -4,6 +4,7 @@
 **Routine:** Claude Code Routine "Weekly Architecture Review" (first run, 2026-05-17)
 **Goal:** Land the 6 deepening opportunities with zero regression to current behaviour.
 **Drafted:** 2026-05-18
+**Status (2026-05-18):** PRs 1, 2, 3 shipped to prod ([#303](https://github.com/matchmoments-admin/ask-arthur/pull/303), [#304](https://github.com/matchmoments-admin/ask-arthur/pull/304), [#305](https://github.com/matchmoments-admin/ask-arthur/pull/305)). Closed issues #289, #290, #291. Zero regression — 298+ tests still passing, prod homepage + `/scam-feed` both 200 after deploy. PRs 4–9 remain in queue.
 
 ---
 
@@ -20,7 +21,7 @@ The prior session produced a 6-PR plan (PRs #1–#6, with #5 + #6 split into sub
 
 ## PR queue (re-numbered for clarity)
 
-### PR 1 — `React.cache` hot-path loaders (bundles prior PR #1 + #2)
+### PR 1 — `React.cache` hot-path loaders (bundles prior PR #1 + #2) — ✅ SHIPPED ([#303](https://github.com/matchmoments-admin/ask-arthur/pull/303), 2026-05-18, closes #289)
 
 **Issue items addressed:** #285 item 1 (M, HIGH) + item 2 (S, HIGH)
 **Effort:** S (5 wrap sites, ~5 lines + 2 test files)
@@ -55,10 +56,11 @@ The prior session produced a 6-PR plan (PRs #1–#6, with #5 + #6 split into sub
 
 ---
 
-### PR 2 — `lib/featureGate.ts` helper (prior PR #3)
+### PR 2 — `lib/featureGate.ts` helper (prior PR #3) — ✅ SHIPPED ([#305](https://github.com/matchmoments-admin/ask-arthur/pull/305), 2026-05-18, closes #290)
 
 **Issue item:** #285 item 4 (S, MED)
 **Effort:** S (new ~30-line module + ~10 inline-call migrations + test file)
+**Actual:** 8 sites migrated (2 fewer than estimated). Inline-JSX gates explicitly skipped per plan. `gateOrNotFound("...")` is the audit-greppable surface this PR introduced.
 **Blast radius:** Charity Check page, Phone Footprint consumer page, Scam Feed page, Reddit Intel public pages, billing/signup/login redirects.
 
 **New module:** `apps/web/lib/featureGate.ts`
@@ -92,11 +94,12 @@ export function gateOrRedirect(
 
 ---
 
-### PR 3 — Move admin/health loaders into `lib/dashboard/admin-health.ts` (prior PR #5a)
+### PR 3 — Move admin/health loaders into `lib/dashboard/admin-health.ts` (prior PR #5a) — ✅ SHIPPED ([#304](https://github.com/matchmoments-admin/ask-arthur/pull/304), 2026-05-18, closes #291)
 
 **Issue item:** #285 item 3 (M, HIGH) — first slice of 3.
 **Effort:** S (mechanical extraction, ~5 functions, +1 test file)
 **Blast radius:** `apps/web/app/admin/health/page.tsx` only.
+**Actual:** 8 new tests added (vs the 1 file estimated). Null-client fallback coverage surfaced that this branch of every loader was previously untested — that's now regression-guarded.
 
 Move `getQueueCounts`, `getOldestPendingMinutes`, `getRecentFeedRuns`, `getArchiveStats`, `getStripeEventStats` from `admin/health/page.tsx:25-91` into `apps/web/lib/dashboard/admin-health.ts`. Page becomes a thin renderer.
 
@@ -218,18 +221,18 @@ Move `getInitialFeed`, `getPinnedRegulatorAlerts` into `apps/web/lib/feed.ts`. M
 ## Suggested execution order
 
 ```
-PR 1 (cache)                 → ship first, smallest, validates the pattern
-PR 2 (featureGate helper)    → ship in parallel, independent
-PR 3 (admin/health extract)  → ship in parallel, independent
-PR 4 (feedback RPC)          → ship after advisors green
-PR 5 (scam-feed extract)     → ship in parallel with PR 4
-PR 6 (remaining extracts)    → after PR 1 (preserves cache wraps)
+PR 1 (cache)                 → ✅ SHIPPED (#303, 2026-05-18)
+PR 2 (featureGate helper)    → ✅ SHIPPED (#305, 2026-05-18)
+PR 3 (admin/health extract)  → ✅ SHIPPED (#304, 2026-05-18)
+PR 4 (feedback RPC)          → next; ship after advisors green
+PR 5 (scam-feed extract)     → next; ship in parallel with PR 4
+PR 6 (remaining extracts)    → after PR 1 — cache wraps already in place; preserve them at new lib/ definition sites
 PR 7 (types pipeline)        → after PR 4 (captures new RPC shape)
 PR 8 (duplicate types)       → after PR 7
 PR 9a-d (area sweeps)        → after PR 8
 ```
 
-Total: 9 PRs (12 with PR 9's 4 sub-PRs). The first 5 are parallelisable across the queue.
+Total: 9 PRs (12 with PR 9's 4 sub-PRs). **3 shipped, 6 remaining.** PR 6 is now unblocked because PR 1 is in main.
 
 ---
 
