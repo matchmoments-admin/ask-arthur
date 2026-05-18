@@ -18,12 +18,17 @@
 //                        netAmount excluded — most rows zero out via the
 //                        free tier, but we want the gross figure for
 //                        when this user upgrades to a paid plan.
-//   - 'supabase-base'  — $INFRA_COST_SUPABASE_MONTHLY_BASE_USD / 30,
-//                        rounded to cents. Flat-rate proration; the
-//                        Mgmt API exposes no per-day usage endpoint
-//                        (verified 2026-05-18 via search_docs).
 //
-// Deferred (no public usage API):
+// Supabase: NOT ingested as a daily provider row. The Pro $25/mo
+// subscription is invariant (would write $0.83/day forever — pure noise)
+// and the variable per-day usage (compute add-ons, egress overage) isn't
+// exposed by the Mgmt API. The flat $25/mo is rendered as a static
+// "Fixed monthly subscriptions" card on /admin/costs/infra instead, so
+// the operator still sees it. Historical 'supabase-base' rows from PR
+// #309 remain in infra_cost_daily but are filtered out at the page
+// render layer.
+//
+// Deferred providers (no public usage API):
 //   - Supabase compute / storage / egress — per-dimension daily breakdown
 //     not exposed; only the dashboard surfaces it. Tracked in BACKLOG.
 //
@@ -189,23 +194,6 @@ async function pullGitHubActionsCents(date: string): Promise<{
   return { cents: toCents(totalUsd), raw: { itemCount, bySku } };
 }
 
-function supabaseBaseCents(): {
-  cents: number;
-  raw: { monthlyBaseUsd: number };
-} {
-  const monthly = Number(
-    process.env.INFRA_COST_SUPABASE_MONTHLY_BASE_USD ?? "25",
-  );
-  // Treat 1/30 of the monthly fee as the daily prorate. Approximation —
-  // calendar months vary 28-31 days — but the rounding error is <$0.05/mo
-  // and over a quarter the sum equals the actual billed quarterly base
-  // within rounding. Picking 30 because it's stable across months.
-  return {
-    cents: Math.round((monthly * 100) / 30),
-    raw: { monthlyBaseUsd: monthly },
-  };
-}
-
 export const billingIngestNightly = inngest.createFunction(
   {
     id: "billing-ingest-nightly",
@@ -272,31 +260,11 @@ export const billingIngestNightly = inngest.createFunction(
       return { cents, ...raw };
     });
 
-    const supabaseBase = await step.run("supabase-base", async () => {
-      const { cents, raw } = supabaseBaseCents();
-      const supabase = createServiceClient();
-      if (!supabase) throw new Error("supabase service client unavailable");
-      const { error } = await supabase.from("infra_cost_daily").upsert(
-        {
-          date: targetDate,
-          provider: "supabase-base",
-          usd_cents: cents,
-          raw_usage_jsonb: raw,
-          ingested_at: new Date().toISOString(),
-        },
-        { onConflict: "date,provider" },
-      );
-      if (error)
-        throw new Error(`upsert supabase-base row failed: ${error.message}`);
-      return { cents, ...raw };
-    });
-
     logger.info("billing-ingest-nightly: complete", {
       date: targetDate,
       vercelCents: vercel.cents,
       anthropicCents: anthropic.cents,
       githubActionsCents: githubActions.cents,
-      supabaseBaseCents: supabaseBase.cents,
     });
 
     return {
@@ -305,7 +273,6 @@ export const billingIngestNightly = inngest.createFunction(
         vercel: vercel.cents,
         anthropic: anthropic.cents,
         "github-actions": githubActions.cents,
-        "supabase-base": supabaseBase.cents,
       },
     };
   },
