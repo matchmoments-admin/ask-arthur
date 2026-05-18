@@ -76,6 +76,9 @@
     "app/api/extension/analyze/route.ts": {
       "maxDuration": 30
     },
+    "app/api/inbound-scan/route.ts": {
+      "maxDuration": 60
+    },
     "app/api/extension-audit/route.ts": {
       "maxDuration": 30
     },

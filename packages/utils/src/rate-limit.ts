@@ -75,6 +75,25 @@ export type RateLimitResult = {
   remaining: number;
   resetAt: Date | null;
   message?: string;
+  /**
+   * Why this result was returned.
+   *
+   * - "ok": below quota, request allowed.
+   * - "exceeded": user genuinely hit their quota. Caller should tell the
+   *   user (polite reply, friendly UI) — silent drops here destroy trust.
+   * - "store_unavailable": Upstash Redis was unreachable / threw. Caller
+   *   decides whether to fail open (cheap operations) or closed (paid
+   *   operations); either way this should page an operator, not silently
+   *   drop the request.
+   *
+   * Existed-only-as-`allowed` previously, which collapsed the two failure
+   * modes into one and made `route.ts` apologise to the user for an
+   * infrastructure blip as if they'd hit their quota. Incident
+   * 2026-05-18 (jacobovers@gmail.com): scan emails silently dropped
+   * because callers could not distinguish "user used 3 today" from
+   * "Anthropic returned 529".
+   */
+  reason?: "ok" | "exceeded" | "store_unavailable";
 };
 
 /**
@@ -106,9 +125,16 @@ function storeUnavailable(mode: FailMode, label: string): RateLimitResult {
       remaining: 0,
       resetAt: null,
       message: "Service temporarily unavailable.",
+      reason: "store_unavailable",
     };
   }
-  return { allowed: true, remaining: 99, resetAt: null };
+  logger.error(`${label}: store unavailable — failing OPEN`);
+  return {
+    allowed: true,
+    remaining: 99,
+    resetAt: null,
+    reason: "store_unavailable",
+  };
 }
 
 export async function checkRateLimit(
@@ -553,9 +579,15 @@ export async function checkInboundScanRateLimit(
         resetAt: new Date(res.reset),
         message:
           "You've hit today's free-forward limit (3 per day). Paste suspicious messages at askarthur.au any time — no daily cap on the web scanner.",
+        reason: "exceeded",
       };
     }
-    return { allowed: true, remaining: res.remaining, resetAt: null };
+    return {
+      allowed: true,
+      remaining: res.remaining,
+      resetAt: null,
+      reason: "ok",
+    };
   } catch (err) {
     logger.error("checkInboundScanRateLimit: store error", { error: String(err) });
     return storeUnavailable(failMode, "checkInboundScanRateLimit");
