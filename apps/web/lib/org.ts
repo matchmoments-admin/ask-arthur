@@ -1,5 +1,6 @@
 import "server-only";
 
+import { cache } from "react";
 import { redirect } from "next/navigation";
 import { createServiceClient } from "@askarthur/supabase/server";
 import type { OrgRole, OrgPermission } from "@askarthur/types";
@@ -38,8 +39,12 @@ export interface OrgMemberInfo {
 /**
  * Get the user's organization context, or null if they don't belong to one.
  * Uses the get_user_org RPC for a single efficient query.
+ *
+ * Wrapped in React.cache so requireOrg / requireOrgRole / requireOrgPermission
+ * share one RPC per request when invoked from a layout AND a child page.
+ * Cache is request-scoped; userId is the cache key.
  */
-export async function getOrg(userId: string): Promise<OrgContext | null> {
+export const getOrg = cache(async (userId: string): Promise<OrgContext | null> => {
   const supabase = createServiceClient();
   if (!supabase) return null;
 
@@ -62,7 +67,7 @@ export async function getOrg(userId: string): Promise<OrgContext | null> {
     orgStatus: row.org_status,
     memberRole: row.member_role as OrgRole,
   };
-}
+});
 
 /**
  * Require the user to belong to an organization.

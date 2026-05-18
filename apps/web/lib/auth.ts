@@ -1,5 +1,6 @@
 import "server-only";
 
+import { cache } from "react";
 import type { SupabaseClient, User as SupabaseUser } from "@supabase/supabase-js";
 import { redirect } from "next/navigation";
 import { createAuthServerClient } from "@askarthur/supabase/server-auth";
@@ -35,8 +36,14 @@ const AUTH_TIMEOUT_MS = 5000;
  *
  * Throws AuthUnavailableError if Supabase Auth doesn't respond within
  * AUTH_TIMEOUT_MS. Callers that want fail-open behaviour should catch.
+ *
+ * Wrapped in React.cache so a layout + child page that both call
+ * requireAuth() share one JWT validation per request, not two. The
+ * cache is request-scoped — no cross-request leak. Rejected promises
+ * (AuthUnavailableError, NEXT_REDIRECT) are cached and re-thrown
+ * identically to the un-cached path.
  */
-export async function getUser(): Promise<AuthUser | null> {
+export const getUser = cache(async (): Promise<AuthUser | null> => {
   const supabase = await createAuthServerClient();
   if (!supabase) return null;
 
@@ -69,7 +76,7 @@ export async function getUser(): Promise<AuthUser | null> {
     orgRole: null,
     orgName: null,
   };
-}
+});
 
 /**
  * Like getUser() but takes a pre-built auth client. Use this in API

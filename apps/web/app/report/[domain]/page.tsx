@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { notFound } from "next/navigation";
 import { createServiceClient } from "@askarthur/supabase/server";
 import Nav from "@/components/Nav";
@@ -12,7 +13,9 @@ interface PageProps {
   params: Promise<{ domain: string }>;
 }
 
-async function getLatestAuditByDomain(domain: string) {
+// Wrapped in React.cache so generateMetadata + the default export share
+// one site + audit DB round-trip per request instead of two.
+const getLatestAuditByDomain = cache(async (domain: string) => {
   const supabase = createServiceClient();
   if (!supabase) return null;
 
@@ -39,7 +42,7 @@ async function getLatestAuditByDomain(domain: string) {
   if (auditError || !audit) return null;
 
   return { site, audit };
-}
+});
 
 export async function generateMetadata({
   params,
