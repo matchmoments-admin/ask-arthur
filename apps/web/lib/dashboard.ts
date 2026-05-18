@@ -472,3 +472,33 @@ const SOURCE_LABELS: Record<string, string> = {
 export function getSourceLabel(key: string): string {
   return SOURCE_LABELS[key] || key;
 }
+
+export async function getCheckTimeSeries(days = 30) {
+  const supabase = createServiceClient();
+  if (!supabase) return [];
+  const since = new Date(Date.now() - days * 86400000)
+    .toISOString()
+    .split("T")[0];
+  const { data } = await supabase
+    .from("check_stats")
+    .select("date, total_checks, high_risk_count")
+    .gte("date", since)
+    .order("date", { ascending: true });
+
+  if (!data) return [];
+
+  const byDate = new Map<string, { total: number; high_risk: number }>();
+  for (const row of data) {
+    const existing = byDate.get(row.date) || { total: 0, high_risk: 0 };
+    byDate.set(row.date, {
+      total: existing.total + (row.total_checks || 0),
+      high_risk: existing.high_risk + (row.high_risk_count || 0),
+    });
+  }
+
+  return Array.from(byDate.entries()).map(([date, vals]) => ({
+    date,
+    total: vals.total,
+    high_risk: vals.high_risk,
+  }));
+}

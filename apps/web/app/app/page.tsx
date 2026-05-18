@@ -1,6 +1,7 @@
 import { requireAuth } from "@/lib/auth";
 import { getOrg } from "@/lib/org";
 import {
+  getCheckTimeSeries,
   getDashboardKPIs,
   getKpiTimeSeries,
   getScamTypeBreakdown,
@@ -9,7 +10,6 @@ import {
   getRecentActivity,
   getSpfPosture,
 } from "@/lib/dashboard";
-import { createServiceClient } from "@askarthur/supabase/server";
 import KPICards from "@/components/dashboard/KPICards";
 import DashboardHeader from "@/components/dashboard/DashboardHeader";
 import SafeTrend from "@/components/dashboard/SafeTrend";
@@ -18,34 +18,6 @@ import SafeTriage from "@/components/dashboard/SafeTriage";
 import SafeScamTypes from "@/components/dashboard/SafeScamTypes";
 import SafeLiveActivity from "@/components/dashboard/SafeLiveActivity";
 import SafeEntityTable from "@/components/dashboard/SafeEntityTable";
-
-async function getCheckTimeSeries(days = 30) {
-  const supabase = createServiceClient();
-  if (!supabase) return [];
-  const since = new Date(Date.now() - days * 86400000).toISOString().split("T")[0];
-  const { data } = await supabase
-    .from("check_stats")
-    .select("date, total_checks, high_risk_count")
-    .gte("date", since)
-    .order("date", { ascending: true });
-
-  if (!data) return [];
-
-  const byDate = new Map<string, { total: number; high_risk: number }>();
-  for (const row of data) {
-    const existing = byDate.get(row.date) || { total: 0, high_risk: 0 };
-    byDate.set(row.date, {
-      total: existing.total + (row.total_checks || 0),
-      high_risk: existing.high_risk + (row.high_risk_count || 0),
-    });
-  }
-
-  return Array.from(byDate.entries()).map(([date, vals]) => ({
-    date,
-    total: vals.total,
-    high_risk: vals.high_risk,
-  }));
-}
 
 export default async function DashboardPage() {
   const user = await requireAuth();

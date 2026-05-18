@@ -1,17 +1,14 @@
-import { cache } from "react";
 import { notFound } from "next/navigation";
-import { createServiceClient } from "@askarthur/supabase/server";
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
 import ScanResultReport from "@/components/ScanResultReport";
 import type { UnifiedScanResult } from "@askarthur/types/scanner";
 import type { Metadata } from "next";
+import { getScanByToken } from "@/lib/scan";
 
 interface PageProps {
   params: Promise<{ token: string }>;
 }
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const TYPE_LABELS: Record<string, string> = {
   extension: "Extension",
@@ -19,23 +16,6 @@ const TYPE_LABELS: Record<string, string> = {
   skill: "AI Skill",
   website: "Website",
 };
-
-// Wrapped in React.cache so generateMetadata + the default export share
-// one scan_results lookup per request instead of two.
-const getScanByToken = cache(async (token: string) => {
-  if (!UUID_RE.test(token)) return null;
-  const supabase = createServiceClient();
-  if (!supabase) return null;
-
-  const { data, error } = await supabase
-    .from("scan_results")
-    .select("*")
-    .eq("share_token", token)
-    .single();
-
-  if (error || !data) return null;
-  return data;
-});
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { token } = await params;
