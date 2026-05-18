@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getUser } from "@/lib/auth";
-import { featureFlags } from "@askarthur/utils/feature-flags";
+import { gateOrRedirect } from "@/lib/featureGate";
 import SignupForm from "./SignupForm";
 
 export const metadata = {
@@ -8,9 +8,7 @@ export const metadata = {
 };
 
 export default async function SignupPage() {
-  if (!featureFlags.auth) {
-    redirect("/");
-  }
+  gateOrRedirect("auth", "/");
 
   const user = await getUser();
   if (user) {

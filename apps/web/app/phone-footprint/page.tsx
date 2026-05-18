@@ -10,8 +10,7 @@
 // to surface the right copy after a lookup completes.
 
 import { headers } from "next/headers";
-import { notFound } from "next/navigation";
-import { featureFlags } from "@askarthur/utils/feature-flags";
+import { gateOrNotFound } from "@/lib/featureGate";
 import { LookupForm } from "./LookupForm";
 
 export const metadata = {
@@ -25,9 +24,7 @@ const CAMARA_COUNTRIES = new Set([
 ]);
 
 export default async function PhoneFootprintLanding() {
-  if (!featureFlags.phoneFootprintConsumer) {
-    notFound();
-  }
+  gateOrNotFound("phoneFootprintConsumer");
 
   const hdrs = await headers();
   const callerCountry = hdrs.get("x-vercel-ip-country")?.toUpperCase() ?? null;

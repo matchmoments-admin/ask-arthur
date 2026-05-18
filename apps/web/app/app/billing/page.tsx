@@ -1,7 +1,6 @@
 import { requireAuth } from "@/lib/auth";
 import { createAuthServerClient } from "@askarthur/supabase/server-auth";
-import { featureFlags } from "@askarthur/utils/feature-flags";
-import { redirect } from "next/navigation";
+import { gateOrRedirect } from "@/lib/featureGate";
 import BillingManager from "./BillingManager";
 
 export const metadata = {
@@ -11,9 +10,7 @@ export const metadata = {
 export default async function BillingPage() {
   const user = await requireAuth();
 
-  if (!featureFlags.billing) {
-    redirect("/app");
-  }
+  gateOrRedirect("billing", "/app");
 
   const supabase = await createAuthServerClient();
 

@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getUser } from "@/lib/auth";
-import { featureFlags } from "@askarthur/utils/feature-flags";
+import { gateOrRedirect } from "@/lib/featureGate";
 import LoginForm from "./LoginForm";
 
 export const metadata = {
@@ -12,9 +12,7 @@ export default async function LoginPage({
 }: {
   searchParams: Promise<{ next?: string }>;
 }) {
-  if (!featureFlags.auth) {
-    redirect("/");
-  }
+  gateOrRedirect("auth", "/");
 
   const user = await getUser();
   if (user) {
