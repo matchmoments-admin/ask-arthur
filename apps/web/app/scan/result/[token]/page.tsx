@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { notFound } from "next/navigation";
 import { createServiceClient } from "@askarthur/supabase/server";
 import Nav from "@/components/Nav";
@@ -19,7 +20,9 @@ const TYPE_LABELS: Record<string, string> = {
   website: "Website",
 };
 
-async function getScanByToken(token: string) {
+// Wrapped in React.cache so generateMetadata + the default export share
+// one scan_results lookup per request instead of two.
+const getScanByToken = cache(async (token: string) => {
   if (!UUID_RE.test(token)) return null;
   const supabase = createServiceClient();
   if (!supabase) return null;
@@ -32,7 +35,7 @@ async function getScanByToken(token: string) {
 
   if (error || !data) return null;
   return data;
-}
+});
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { token } = await params;

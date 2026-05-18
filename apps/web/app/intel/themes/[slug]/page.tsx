@@ -8,6 +8,7 @@
 // Accepts either UUID or slug — same precedent as the B2B API route at
 // apps/web/app/api/v1/intel/themes/[id]/route.ts:46.
 
+import { cache } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
@@ -50,9 +51,11 @@ interface MemberRow {
   } | null;
 }
 
-async function loadTheme(
+// Wrapped in React.cache so generateMetadata + the default export share
+// one DB round-trip per request instead of two. Cache is request-scoped.
+const loadTheme = cache(async (
   key: string,
-): Promise<{ theme: ThemeRow; members: MemberRow[] } | null> {
+): Promise<{ theme: ThemeRow; members: MemberRow[] } | null> => {
   const supabase = createServiceClient();
   if (!supabase) return null;
 
@@ -88,7 +91,7 @@ async function loadTheme(
     theme: theme as ThemeRow,
     members: (members ?? []) as unknown as MemberRow[],
   };
-}
+});
 
 export async function generateMetadata({
   params,
