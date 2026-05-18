@@ -6,9 +6,12 @@
 # the web bundle (apps/web/, packages/, tooling/, pnpm-lock.yaml,
 # turbo.json, root package.json, env files) triggers a build.
 #
-# Vercel runs this from the repository root regardless of the project's
-# Root Directory setting:
-#   https://vercel.com/docs/projects/git/monorepos#ignored-build-step
+# Vercel runs ignoreCommand from the project's Root Directory (apps/web/
+# in our case), NOT the repository root. The vercel.json reference uses
+# a path relative to Root Directory: "bash vercel-ignored-build-step.sh".
+# git commands inside the script still operate against the full repo
+# (git walks up to find .git) and return paths relative to the repo
+# root, so the regex matching against repo-root paths still works.
 #
 # To disable: remove the "ignoreCommand" line from apps/web/vercel.json.
 
