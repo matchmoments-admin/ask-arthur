@@ -33,7 +33,7 @@ import { render } from "@react-email/components";
 import { analyzeForBot } from "@askarthur/bot-core/analyze";
 import { checkInboundScanRateLimit } from "@askarthur/utils/rate-limit";
 import { logger } from "@askarthur/utils/logger";
-import type { Verdict } from "@askarthur/types";
+import type { AnalysisResult, Verdict } from "@askarthur/types";
 
 import { logCost } from "@/lib/cost-telemetry";
 import { buildFeedbackUrl } from "@/lib/inbound-scan-feedback";
@@ -100,6 +100,51 @@ const VERDICT_HEADLINE: Record<Verdict, string> = {
 
 function headlineFor(verdict: string): string {
   return (VERDICT_HEADLINE as Record<string, string>)[verdict] ?? "Result";
+}
+
+// ── Retry wrapper for analyzeForBot ─────────────────────────────────────
+//
+// Anthropic Claude returns 529 (overloaded_error) during peak hours — a
+// transient capacity error that always resolves within seconds. The SDK
+// defaults to retrying 5xx, but our per-call 15s timeout in claude.ts
+// caps the SDK's retry budget too tightly, so 529s leak out to callers
+// here. Without this wrapper a 529 turned into a silent dropped email
+// (incident 2026-05-18 — see jacobovers@gmail.com x2).
+//
+// We retry transient failures (5xx, 408, 429, "overloaded", connection
+// resets, fetch failures) with exponential backoff (1s, 3s). The total
+// worst-case wall time is ~4s of sleep + 3 × 15s per-attempt timeout =
+// ~50s, which is why /api/inbound-scan needs maxDuration: 60 in
+// vercel.json. Anything non-transient (validation errors, our own bugs)
+// throws on the first attempt — retrying would just delay the failure.
+async function analyzeWithRetries(
+  blob: string,
+  region: string,
+  maxAttempts = 3,
+): Promise<AnalysisResult> {
+  let lastErr: unknown = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await analyzeForBot(blob, region);
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      const isTransient =
+        /\b(408|429|5\d\d)\b|overloaded|rate.?limit|timeout|ECONNRESET|ETIMEDOUT|fetch failed|network/i.test(
+          msg,
+        );
+      if (!isTransient || attempt === maxAttempts) throw err;
+      const delayMs = 1000 * Math.pow(3, attempt - 1); // 1s, 3s
+      logger.warn("inbound-scan: analyzeForBot retrying", {
+        attempt,
+        of: maxAttempts,
+        delay_ms: delayMs,
+        error: msg.slice(0, 200),
+      });
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  throw lastErr; // unreachable — loop either returns or rethrows
 }
 
 function buildPlainText(opts: {
@@ -180,7 +225,9 @@ export async function POST(req: NextRequest) {
   // without redeploying the Worker.
   const enabled = process.env.ENABLE_USER_SCAN_INBOUND;
   if (enabled === "false") {
-    logger.info("inbound-scan: kill-switch active", { ip });
+    // logger.warn (not info) so the admin /costs dashboard surfaces this —
+    // a stuck kill-switch is a silent drop, and silent drops kill trust.
+    logger.warn("inbound-scan: kill-switch active — request dropped", { ip });
     return new NextResponse(null, { status: 204 });
   }
 
@@ -201,11 +248,20 @@ export async function POST(req: NextRequest) {
   try {
     raw = await req.json();
   } catch {
+    logger.warn("inbound-scan: invalid JSON body", { ip });
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
 
   const parsed = InboundScanPayload.safeParse(raw);
   if (!parsed.success) {
+    // Should never happen in steady state — the Worker constructs this
+    // payload. If it does, it's a Worker bug or a malicious POST, and
+    // an operator needs to see the diff between what arrived and the
+    // schema. Don't bury it at debug.
+    logger.warn("inbound-scan: payload validation failed", {
+      ip,
+      issues: parsed.error.issues.slice(0, 5),
+    });
     return NextResponse.json(
       { error: "validation_failed", issues: parsed.error.issues },
       { status: 422 },
@@ -220,17 +276,72 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "bad_sender" }, { status: 422 });
   }
 
-  // Per-sender rate limit. Fail-closed in prod.
-  const rate = await checkInboundScanRateLimit(sender.email);
-  if (!rate.allowed) {
-    // We could still send a "rate limited" reply, but for now treat as
-    // a quiet drop so a flood doesn't amplify into a flood of Resend
-    // outbound. The next forward an hour later will land normally.
-    logger.info("inbound-scan: rate limited", {
+  // Per-sender rate limit.
+  //
+  // Pass failMode: "open" — inbound-scan is cheap (A$0.001/email Claude
+  // Haiku + in-plan Resend send) and the cost of silently dropping a
+  // legitimate user's email during a Redis blip dwarfs the cost of a
+  // brief uncapped window. The fail-open path is loud (logger.error in
+  // storeUnavailable → admin /costs dashboard + Telegram digest) so an
+  // operator notices and a daily feature_brake is still the hard ceiling.
+  //
+  // Branch on `reason`:
+  //   - exceeded         → user genuinely hit 3/day. Send polite reply.
+  //                        Do NOT silent-drop — they're a real user.
+  //   - store_unavailable → Upstash blip. Already logged at error level
+  //                        by storeUnavailable(); process the email
+  //                        anyway. allowed will be true under fail-open.
+  //   - ok               → continue.
+  const rate = await checkInboundScanRateLimit(sender.email, "open");
+  if (rate.reason === "exceeded") {
+    // Polite reply — quota hit is a UX problem, not an attack.
+    const resendKey = process.env.RESEND_API_KEY;
+    if (resendKey) {
+      try {
+        const resend = new Resend(resendKey);
+        const fromEmail =
+          process.env.RESEND_FROM_EMAIL ||
+          "Ask Arthur <brendan@askarthur.au>";
+        await resend.emails.send({
+          from: fromEmail,
+          to: sender.email,
+          subject: "Ask Arthur — daily forward limit reached",
+          text: [
+            sender.displayName ? `Hi ${sender.displayName.split(" ")[0]},` : "Hi,",
+            "",
+            "You've hit today's free-forward limit (3 emails per day).",
+            "",
+            "Need to check something now? Paste it at https://askarthur.au — no daily cap on the web scanner.",
+            "",
+            "Your forward quota will reset in 24 hours.",
+            "",
+            "Ask Arthur · askarthur.au",
+          ].join("\n"),
+          tags: [{ name: "category", value: "inbound_scan_quota" }],
+        });
+      } catch (err) {
+        logger.error("inbound-scan: quota reply failed", {
+          error: err instanceof Error ? err.message : String(err),
+          sender: sender.email,
+        });
+      }
+    }
+    logger.info("inbound-scan: quota exceeded", {
       sender: sender.email,
       reset: rate.resetAt?.toISOString(),
     });
-    return new NextResponse(null, { status: 204 });
+    // 200 not 204 — the worker should see "we handled it" so it doesn't
+    // try to quarantine. The user got a reply explaining the limit.
+    return NextResponse.json({ ok: true, replySent: true, reason: "quota_exceeded" });
+  }
+  if (rate.reason === "store_unavailable") {
+    // Already logged at error level by storeUnavailable. Keep going —
+    // the email will still get scanned and the user will still get a
+    // reply. Cost ceiling is the feature_brakes daily cap, not the
+    // per-sender rate limit.
+    logger.error("inbound-scan: rate limit store unavailable — processing anyway", {
+      sender: sender.email,
+    });
   }
 
   // Combine subject + body into a single text blob for the scam engine.
@@ -244,7 +355,7 @@ export async function POST(req: NextRequest) {
   let nextSteps: string[];
   let redFlags: string[];
   try {
-    const result = await analyzeForBot(blob, "AU");
+    const result = await analyzeWithRetries(blob, "AU");
     verdict = result.verdict;
     confidence = result.confidence ?? 0;
     reasoning =
@@ -254,12 +365,84 @@ export async function POST(req: NextRequest) {
     nextSteps = result.nextSteps ?? [];
     redFlags = result.redFlags ?? [];
   } catch (err) {
-    logger.error("inbound-scan: analyzeForBot failed", {
-      error: err instanceof Error ? err.message : String(err),
+    // Retries are exhausted. Don't silently 500 — that loses the user's
+    // request forever. Send an honest "we're overloaded right now"
+    // apology reply so the user knows we received them and what to do
+    // next, then return 200 to the Worker so it doesn't quarantine.
+    const errMsg = err instanceof Error ? err.message : String(err);
+    logger.error("inbound-scan: analyzeForBot failed after retries", {
+      error: errMsg,
       sender: sender.email,
       external_id: payload.external_id,
     });
-    return NextResponse.json({ error: "analysis_failed" }, { status: 500 });
+    const resendKey = process.env.RESEND_API_KEY;
+    let apologySent = false;
+    if (resendKey) {
+      try {
+        const resend = new Resend(resendKey);
+        const fromEmail =
+          process.env.RESEND_FROM_EMAIL ||
+          "Ask Arthur <brendan@askarthur.au>";
+        const sendResult = await resend.emails.send({
+          from: fromEmail,
+          to: sender.email,
+          subject: "Ask Arthur — temporarily overloaded, please retry",
+          text: [
+            sender.displayName ? `Hi ${sender.displayName.split(" ")[0]},` : "Hi,",
+            "",
+            "We received the email you forwarded, but our scam-detection AI is temporarily overloaded and couldn't analyse it just now.",
+            "",
+            "Two ways to get a verdict right now:",
+            "  1. Forward the same email again in a few minutes — these blips usually clear in 1–2 minutes.",
+            "  2. Paste it directly at https://askarthur.au — same AI, different queue, often clearer when the email path is busy.",
+            "",
+            "Apologies for the inconvenience. We treat every forward as a real request — there's no risk you'll fall through the cracks.",
+            "",
+            "Ask Arthur · askarthur.au",
+          ].join("\n"),
+          tags: [{ name: "category", value: "inbound_scan_apology" }],
+        });
+        if (!sendResult.error) apologySent = true;
+        else {
+          logger.error("inbound-scan: apology reply Resend rejected", {
+            error: sendResult.error.message,
+            sender: sender.email,
+          });
+        }
+      } catch (apologyErr) {
+        logger.error("inbound-scan: apology reply threw", {
+          error:
+            apologyErr instanceof Error
+              ? apologyErr.message
+              : String(apologyErr),
+          sender: sender.email,
+        });
+      }
+    }
+    // Record the analysis failure in cost_telemetry so the admin /costs
+    // dashboard surfaces the spike — operators get an early signal
+    // before customers complain.
+    logCost({
+      feature: "inbound_scan",
+      provider: "channel",
+      operation: "email_forward_failed",
+      units: 1,
+      estimatedCostUsd: 0,
+      metadata: {
+        verdict: "ERROR",
+        sender_domain: sender.email.split("@")[1] ?? "",
+        external_id: payload.external_id,
+        apology_sent: apologySent,
+        error: errMsg.slice(0, 200),
+      },
+    });
+    // 200 so the Worker doesn't retry / quarantine. The user already
+    // received the apology and we have a telemetry breadcrumb.
+    return NextResponse.json({
+      ok: true,
+      replySent: apologySent,
+      reason: "analysis_failed_apology",
+    });
   }
 
   // Reply via Resend. Skip if the Resend env isn't configured — useful
