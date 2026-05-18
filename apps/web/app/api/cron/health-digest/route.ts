@@ -252,16 +252,35 @@ export async function GET(req: Request) {
   }
 
   const message = buildMessage(errors, stale, cost);
-  await sendAdminTelegramMessage(message);
 
-  logger.warn("health-digest: issues detected, admin notified", {
-    error_count: errors.reduce((s, e) => s + e.hits, 0),
-    stale_count: stale.length,
-    cost_usd: cost.cost_usd,
-  });
+  // Telegram send is gated by FF_LEGACY_DIGEST_TELEGRAM. The signal now rides
+  // in the consolidated 7am founder brief (Claude Code Routine "Daily Founder
+  // Briefing"). Flip to "true" to restore the legacy daily ping during an
+  // incident or while the new brief is being trusted.
+  const legacyTelegramEnabled =
+    process.env.FF_LEGACY_DIGEST_TELEGRAM === "true";
+
+  if (legacyTelegramEnabled) {
+    await sendAdminTelegramMessage(message);
+    logger.warn("health-digest: issues detected, admin notified", {
+      error_count: errors.reduce((s, e) => s + e.hits, 0),
+      stale_count: stale.length,
+      cost_usd: cost.cost_usd,
+    });
+  } else {
+    logger.warn(
+      "health-digest: issues detected; telegram muted (FF_LEGACY_DIGEST_TELEGRAM off), rolled into morning brief",
+      {
+        error_count: errors.reduce((s, e) => s + e.hits, 0),
+        stale_count: stale.length,
+        cost_usd: cost.cost_usd,
+      },
+    );
+  }
 
   return NextResponse.json({
-    alerted: true,
+    alerted: legacyTelegramEnabled,
+    muted: !legacyTelegramEnabled,
     errors,
     stale_feeds: stale,
     cost,

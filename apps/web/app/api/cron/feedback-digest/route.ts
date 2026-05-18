@@ -99,10 +99,25 @@ export async function GET(req: Request) {
 
   lines.push("", `Triage queue: https://askarthur.au/admin/feedback`);
 
-  await sendAdminTelegramMessage(lines.join("\n"));
+  // Telegram send is gated by FF_LEGACY_DIGEST_TELEGRAM. The signal now rides
+  // in the consolidated 7am founder brief (Claude Code Routine "Daily Founder
+  // Briefing"). Flip to "true" to restore the legacy daily ping during an
+  // incident or while the new brief is being trusted.
+  const legacyTelegramEnabled =
+    process.env.FF_LEGACY_DIGEST_TELEGRAM === "true";
+
+  if (legacyTelegramEnabled) {
+    await sendAdminTelegramMessage(lines.join("\n"));
+  } else {
+    logger.info(
+      "feedback-digest: telegram muted (FF_LEGACY_DIGEST_TELEGRAM off); rolled into morning brief",
+      { disagreements, fnOnSafeCount: fnOnSafe.length },
+    );
+  }
 
   return NextResponse.json({
-    alerted: true,
+    alerted: legacyTelegramEnabled,
+    muted: !legacyTelegramEnabled,
     total,
     correct,
     disagreements,
