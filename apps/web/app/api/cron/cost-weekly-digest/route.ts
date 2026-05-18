@@ -42,6 +42,27 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "query_failed" }, { status: 500 });
   }
 
+  // Inbound-scan apology-reply count over the last 7 days. Logged whenever
+  // analyzeForBot exhausts its in-route retry budget (Anthropic 529 sustained
+  // past ~50s — see apps/web/app/api/inbound-scan/route.ts). At friends-only
+  // pilot volume this should be 0 most weeks. A non-zero count is the
+  // documented signal to promote issue #315 (durable v2 — Inngest + brake +
+  // ops Telegram alerts) from ready-for-agent/p2 to grab-now.
+  const sevenDaysAgoTs = new Date(now - 7 * dayMs).toISOString();
+  const { count: inboundScanFailuresRaw, error: failuresErr } = await supabase
+    .from("cost_telemetry")
+    .select("*", { count: "exact", head: true })
+    .eq("feature", "inbound_scan")
+    .eq("operation", "email_forward_failed")
+    .gte("created_at", sevenDaysAgoTs);
+  if (failuresErr) {
+    // Non-fatal — digest still ships without the signal line.
+    logger.error("cost-weekly-digest: inbound-scan failures query failed", {
+      error: failuresErr.message,
+    });
+  }
+  const inboundScanFailures = inboundScanFailuresRaw ?? 0;
+
   const rows = (data ?? []).map((r) => ({
     day: r.day as string,
     feature: r.feature as string,
@@ -112,6 +133,15 @@ export async function GET(req: Request) {
     lines.push(``, `<i>No cost events logged this week.</i>`);
   }
 
+  if (inboundScanFailures > 0) {
+    lines.push(
+      ``,
+      `⚠️ <b>inbound-scan apology replies this week: ${inboundScanFailures}</b> — ` +
+        `Anthropic retry budget exhausted. Promote issue #315 if this is ` +
+        `non-zero two weeks running.`,
+    );
+  }
+
   lines.push(``, `Full breakdown: https://askarthur.au/admin/costs`);
 
   await sendAdminTelegramMessage(lines.join("\n"));
@@ -121,5 +151,6 @@ export async function GET(req: Request) {
     prevTotalUsd: prevTotal,
     thisEvents,
     topCount: top.length,
+    inboundScanFailures,
   });
 }
