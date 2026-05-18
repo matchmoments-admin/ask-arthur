@@ -99,6 +99,21 @@ export function toSlackBlocks(result: AnalysisResult): SlackResponse {
     });
   }
 
+  // Shop Guard Stage 0 — single-line summary in a section block. Block Kit
+  // surfaces don't render chips well; comma-joined tags match the other
+  // bot formatters.
+  if (result.shopSignal) {
+    const tags = result.shopSignal.commerceFlags;
+    const body =
+      tags.length === 0
+        ? "online shop detected"
+        : tags.slice(0, 5).join(", ");
+    blocks.push({
+      type: "section",
+      text: { type: "mrkdwn", text: `*Shop signals:* ${body}` },
+    });
+  }
+
   // Footer
   blocks.push({
     type: "context",

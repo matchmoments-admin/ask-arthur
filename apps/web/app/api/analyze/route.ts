@@ -16,6 +16,8 @@ import { geolocateFromHeaders } from "@askarthur/scam-engine/geolocate";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { ANALYZE_COMPLETED_EVENT } from "@askarthur/scam-engine/inngest/events";
 import { detectCharityIntent, type CharityIntent } from "@askarthur/scam-engine/charity-intent";
+import { detectCommerceSignal, buildShopSignal } from "@askarthur/scam-engine/shop-signal";
+import type { ShopSignal } from "@askarthur/types";
 import { WebAnalyzeInputSchema, type RedirectChain } from "@askarthur/types";
 import { storeVerifiedScam, incrementStats } from "@askarthur/scam-engine/pipeline";
 import { storeScamReport, buildEntities } from "@askarthur/scam-engine/report-store";
@@ -292,6 +294,19 @@ export async function POST(req: NextRequest) {
     aiResult.nextSteps = merged.nextSteps;
     const finalVerdict = merged.verdict;
     const maliciousURLs = urlResults.filter((r) => r.isMalicious);
+
+    // 6a. Shop Signal — Stage 0 of Shop Guard. Pure post-processor: when the
+    // submission looks commerce-shaped (URL with shopping TLD / cart path /
+    // Shopify-style platform hint OR text with commerce verbs), extract
+    // commerce-specific tags from the merged red-flag list and surface them
+    // as a structured signal the ResultCard + bot formatters render as
+    // chips. No paid API at Stage 0 — APIVoid + RDAP land in Stage 1 once
+    // the 30-day measurement window justifies them. Plan:
+    // docs/plans/shop-guard-v2.md.
+    let shopSignal: ShopSignal | undefined;
+    if (featureFlags.shopSignal && detectCommerceSignal(text, urls)) {
+      shopSignal = buildShopSignal(merged.redFlags);
+    }
 
     // 7. Background work via waitUntil (survives after response is sent)
     // When intelligenceCore is OFF, use the existing storeVerifiedScam path.
@@ -589,6 +604,7 @@ export async function POST(req: NextRequest) {
         ...(phoneRiskFlags && { phoneRiskFlags }),          // backward compat
         ...(isVoipCaller != null && { isVoipCaller }),       // backward compat
         ...(charityIntent && { charityIntent }),
+        ...(shopSignal && { shopSignal }),
       },
       {
         headers: {

@@ -633,6 +633,7 @@ export default function ScamChecker() {
             channel={result.channel}
             inputMode={result.inputMode || inputMode}
             charityIntent={result.charityIntent}
+            shopSignal={result.shopSignal}
             onCheckAnother={handleReset}
           />
       )}

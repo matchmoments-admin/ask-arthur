@@ -1,4 +1,4 @@
-import type { ScammerContacts, PhoneLookupResult } from "@askarthur/types";
+import type { ScammerContacts, PhoneLookupResult, ShopSignal } from "@askarthur/types";
 
 export type Verdict = "SAFE" | "SUSPICIOUS" | "HIGH_RISK";
 
@@ -31,4 +31,8 @@ export interface AnalysisResponse {
     extractedAbn?: string;
     extractedName?: string;
   };
+  /** Shop Guard Stage 0 — present when the input looked commerce-shaped.
+   *  Drives the commerce-flag chip row under the verdict in ResultCard.
+   *  Plan: docs/plans/shop-guard-v2.md. */
+  shopSignal?: ShopSignal;
 }

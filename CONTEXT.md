@@ -46,6 +46,10 @@ _Avoid_: provider, signal, source, factor.
 Output of the `/charity-check` engine: a Verdict (canonical 4-level), a 0-100 composite score, the per-Pillar payloads (`acnc_registration`, `abr_dgr`, plus `donation_url` reserved for v0.2), a coverage map for UI hints, the official donation URL pulled from the ACNC register (so the verdict CTA never deep-links a fundraiser-supplied URL), and a plain-English explanation. Distinct from an Analysis Result — Analysis Results classify arbitrary user-submitted content; Charity Check Results verify a specific named-entity claim against authoritative registers.
 _Avoid_: charity result, charity score, charity verdict, "case".
 
+**Shop Signal**:
+A small optional payload attached to an **Analysis Result** when the input looks commerce-shaped (URL with shopping TLD / cart-or-checkout path / Shopify-style platform hint, OR text with commerce verbs). Carries `{ isCommerce: true, commerceFlags: string[], generatedAt }` — `commerceFlags` is a deduplicated set of normalised tags (`payid-scam`, `relative-will-collect`, `fake-payment-confirmation`, etc.) extracted from the analyser's existing red-flag list. Stage 0 ships free-only and never writes back to `scam_reports`. Stage 1+ extends the payload with optional `domainAge`, `abnPresence`, `paidProviderVerdict` (APIVoid). See `docs/plans/shop-guard-v2.md`. Distinct from a **Pillar**-typed result — Shop Signal is a single field on Analysis Result, not its own multi-pillar engine.
+_Avoid_: shop result, shop verdict, "Shop Guard pillar" (it isn't one — Shop Guard is the user-facing capability name; the engineering Module is `shop-signal`).
+
 **Editorial Briefing layout**:
 The shared chrome for Ask Arthur outbound emails (Reddit Intel weekly digest + the 6-step SPF nurture series). Defined in `apps/web/emails/_layout/EditorialBriefingLayout.tsx`: navy header bar with the Ask Arthur wordmark + an uppercase right-aligned label pill, a white content card on a tinted page background with rounded corners, and a navy footer bar with brand block, ABN, signed-token unsubscribe link, and an optional operator-only debug stripe. Per-email content slots into briefing fields (eyebrow, H1, dek, optional stats card, sections, CTA, sign-off) so all Ask Arthur emails read as one publication.
 _Avoid_: "email template" (overloaded), "newsletter shell", "briefing chrome".
@@ -60,6 +64,7 @@ _Avoid_: "email template" (overloaded), "newsletter shell", "briefing chrome".
 - A **Unified Scan Result** is independent of the Scam Report graph — different domain, same platform.
 - A **Charity Check Result** is independent of the Scam Report graph — it carries a Verdict but doesn't itself become a Scam Report unless the user separately submits the underlying claim. Its pillars are not Scam Entities; they're external-register lookups.
 - A **Pillar** belongs to exactly one multi-pillar result type (Phone Footprint or Charity Check). The id namespace is per-feature; pillar ids are not globally unique.
+- A **Shop Signal** rides on an Analysis Result as an optional field — it is not its own result type and does not produce a separate Verdict. The Analysis Result's Verdict already incorporates whatever the analyser saw; Shop Signal exposes the commerce-shaped subset of that signal for surface-specific rendering.
 
 ## Example dialogue
 

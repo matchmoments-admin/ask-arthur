@@ -41,6 +41,16 @@ export function toWhatsAppMessage(result: AnalysisResult): string {
     lines.push(`*Type:* ${result.scamType}`);
   }
 
+  if (result.shopSignal) {
+    const tags = result.shopSignal.commerceFlags;
+    lines.push("");
+    if (tags.length === 0) {
+      lines.push("*Shop signals:* online shop detected");
+    } else {
+      lines.push(`*Shop signals:* ${tags.slice(0, 5).join(", ")}`);
+    }
+  }
+
   lines.push("");
   lines.push("_Powered by Ask Arthur \u2014 askarthur.au_");
 

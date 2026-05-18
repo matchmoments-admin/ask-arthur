@@ -2,12 +2,31 @@
 
 import { useState } from "react";
 import type { LucideIcon } from "lucide-react";
-import { ArrowRight, CircleX, Eye, HandCoins, TriangleAlert } from "lucide-react";
+import { ArrowRight, CircleX, Eye, HandCoins, ShoppingBag, TriangleAlert } from "lucide-react";
 import ResultFeedback from "./result/ResultFeedback";
 import ResultActionButtons from "./result/ResultActionButtons";
 import OnwardReportPicker from "./result/OnwardReportPicker";
 import type { EvidenceContext } from "@/lib/onward/destinations";
-import type { ScammerContacts } from "@askarthur/types";
+import type { ScammerContacts, ShopSignal } from "@askarthur/types";
+
+// Shop Signal commerce-flag tags → user-facing label. Stage 0 ships a
+// fixed mapping; if Stage 0.5 adds new tags, extend here. Unknown tags
+// fall through to their raw kebab-case form rather than being dropped —
+// surfacing the unknown is better than silently hiding it.
+const SHOP_FLAG_LABEL: Record<string, string> = {
+  "payid-scam": "PayID-shaped scam",
+  "fake-payment-confirmation": "Fake payment confirmation",
+  "overpayment-refund": "Overpayment refund scam",
+  "off-platform-move": "Moves you off-platform",
+  "relative-will-collect": "Buyer's relative collects",
+  "implausible-discount": "Discount too good to be true",
+  "domain-renewal-invoice": "Fake .com.au domain invoice",
+  "stock-photo-product": "Stock-photo product listing",
+  "fake-trust-badge": "Fake trust badge",
+  "fake-australia-post": "Fake Australia Post notice",
+  "urgent-purchase-pressure": "Urgent purchase pressure",
+  "fake-reviews": "Suspicious reviews",
+};
 
 type Verdict = "SAFE" | "SUSPICIOUS" | "HIGH_RISK";
 
@@ -42,6 +61,10 @@ interface ResultCardProps {
     extractedAbn?: string;
     extractedName?: string;
   };
+  /** Shop Guard Stage 0 — when the input looked commerce-shaped, surface
+   *  the deduplicated commerce-flag chip row beneath the verdict. Plan:
+   *  docs/plans/shop-guard-v2.md. */
+  shopSignal?: ShopSignal;
 }
 
 interface VerdictStyle {
@@ -118,6 +141,7 @@ export default function ResultCard({
   analysisId,
   scamReportId,
   charityIntent,
+  shopSignal,
 }: ResultCardProps) {
   const config = VERDICT_CONFIG[verdict];
   const title = resolveTitle(verdict, scamType);
@@ -234,6 +258,34 @@ export default function ResultCard({
           {title}
         </h2>
       </div>
+
+      {/* Shop Guard Stage 0 — commerce-flag chips. Renders when shopSignal is
+          present AND at least one tag was extracted. Empty-flag case (commerce
+          detected but no specific tag) renders a single "Online shop detected"
+          chip — surfacing the detection itself is part of the measurement
+          goal in the 30-day Stage 0 window. */}
+      {shopSignal && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <ShoppingBag size={16} className="text-gov-slate shrink-0" aria-hidden="true" />
+          <span className="text-xs font-semibold uppercase tracking-wide text-gov-slate">
+            Shop signals
+          </span>
+          {shopSignal.commerceFlags.length === 0 ? (
+            <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs text-gov-slate">
+              Online shop detected
+            </span>
+          ) : (
+            shopSignal.commerceFlags.map((tag) => (
+              <span
+                key={tag}
+                className="rounded-full border border-warn-border bg-warn-bg/40 px-2 py-0.5 text-xs text-warn-text"
+              >
+                {SHOP_FLAG_LABEL[tag] ?? tag}
+              </span>
+            ))
+          )}
+        </div>
+      )}
 
       {/* Red flag cards */}
       <ul className="mt-6 space-y-5">
