@@ -376,3 +376,17 @@ Existing per-feature Anthropic digest body is preserved as a section, not replac
 1. ✅ **Vercel tokens** — created + verified + in env (2026-05-18). Setup steps captured in issue [#299](https://github.com/matchmoments-admin/ask-arthur/issues/299). **Gotcha:** Vercel "personal accounts" are represented as auto-created teams in the new "northstar" account model, so `VERCEL_TEAM_ID` is required even when the token scope looks personal. Both `VERCEL_TOKEN` + `VERCEL_TEAM_ID` are now in Vercel env (Prod/Preview/Dev) and mirrored to `apps/web/.env.local`. `/v1/usage` endpoint reachable (returns 400 on date format only — PR A1 will discover the right shape at code time).
 2. ✅ **Inngest counts** — verified: no per-function endpoint exists (`/v1/runs`, `/v1/functions`, `/v1/account` all 404). Only `/v1/events` works. **Derive counts** from `inngest/function.finished` events by pagination. PR A3 (#301) scope updated.
 3. ✅ **Supabase usage** — verified: no public usage endpoint via Management API. **Don't scrape the dashboard.** Use fixed Pro tier base (`INFRA_COST_SUPABASE_MONTHLY_BASE_USD=25`) + direct SQL probes for compute/storage/egress overage. Cleaner, no fragility. PR A1 (#299) scope updated.
+
+---
+
+## PR D follow-up — Build Machine + ignoreCommand shipped (2026-05-18)
+
+PR #310 shipped:
+
+- `apps/web/vercel-ignored-build-step.sh` + `ignoreCommand` wire in `vercel.json` — skips Vercel builds for commits that touch only docs/, pipeline/scrapers/, supabase/_.sql, .github/workflows/, or _.md files.
+- Dropped `supabase-base` from the nightly Inngest ingest (invariant noise).
+- Page fix-up: Fixed-subs card + top-Vercel-services panel surfacing build-minute dominance.
+
+Manual change (operator, same day): **Build Machine: Turbo (30 vCPU, $0.126/min) → Elastic ($0.0035/CPU-min)**. This was the single biggest lever — Turbo was 9× the per-minute rate of Standard and offered marginal speed gains on serial Next.js builds.
+
+Expected combined savings: ~$80-95/mo. Real measurement in 7 days via `/admin/costs/infra`.
