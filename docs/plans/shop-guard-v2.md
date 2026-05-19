@@ -21,6 +21,94 @@
 
 ## 2. Module architecture — the Seam
 
+### Architecture at a glance
+
+```mermaid
+flowchart LR
+    %% Shop Signal architecture — anchor for all future PRs.
+    %% Solid lines + green = Stage 0 (shipped, commit dc978b4).
+    %% Dashed lines + amber = Stage 0.5 / Stage 1 (planned).
+    %% Dashed lines + orange = Stage 2 (gated on Stage 1 data).
+
+    subgraph IN ["Inputs (entry surfaces)"]
+        direction TB
+        I1["Web drawer<br/>ScamChecker.tsx"]
+        I2["Mobile share-target<br/>app/share-target/route.ts"]
+        I3["Telegram bot"]
+        I4["WhatsApp bot"]
+        I5["Slack bot"]
+        I6["Messenger bot"]
+        I7[["Browser extension<br/><i>Stage 2</i>"]]
+        I8[["B2B /api/v1/shop-check<br/><i>Stage 2</i>"]]
+    end
+
+    subgraph RT ["Routing (analyze spine)"]
+        direction TB
+        R1["/api/analyze route<br/>app/api/analyze/route.ts"]
+        R2["runAnalysisCore<br/>scam-engine/analyze-core.ts"]
+        R3["analyzeForBot<br/>bot-core/analyze.ts"]
+    end
+
+    subgraph MOD ["shop-signal Module — scam-engine/src/shop-signal.ts"]
+        direction TB
+        M1["detectCommerceSignal()<br/>URL TLD + path + platform<br/>OR text commerce verbs"]
+        M2["extractCommerceFlags()<br/>filter redFlags → tags"]
+        M3["buildShopSignal()<br/>{isCommerce, commerceFlags,<br/>generatedAt}"]
+        M1 --> M2 --> M3
+    end
+
+    subgraph S1 ["Stage 1+ enrichments (gated)"]
+        direction TB
+        E1[["APIVoid Adapter<br/>~A$0.003/call<br/>SHOP_GUARD_CAP_USD=15"]]
+        E2[["shop_checks table<br/>verdict TEXT + CHECK<br/>hot ⚠, 90d TTL"]]
+        E3[["Inngest fan-out<br/>shop.signal.evaluated.v1"]]
+        E1 -.-> E3 -.-> E2
+    end
+
+    subgraph OUT ["Output Adapters"]
+        direction TB
+        A1["Web ResultCard<br/>commerce-flag chips<br/>(+ accordion at Stage 1)"]
+        A2["Bot formatters ×4<br/>single-line summary"]
+        A3[["Extension popup<br/>activeTab only<br/><i>Stage 2</i>"]]
+        A4[["B2B JSON response<br/>+ onward_report_log<br/><i>Stage 2</i>"]]
+    end
+
+    I1 --> R1
+    I2 -. shared_text + .-> I1
+    I2 -.->|Stage 0.5: Referer +<br/>X-AskArthur-Inapp-Source| R1
+    I3 & I4 & I5 & I6 --> R3
+    I7 -. Stage 2 .-> R1
+    I8 -. Stage 2 .-> R2
+
+    R1 --> M1
+    R2 --> M1
+    R3 --> R2
+
+    M3 --> A1
+    M3 --> A2
+    M3 -. Stage 1 .-> E1
+    M3 -. Stage 2 .-> A3
+    M3 -. Stage 2 .-> A4
+    E2 -. hydrate accordion .-> A1
+    E2 -. Stage 2 .-> A3
+    E2 -. Stage 2 .-> A4
+
+    classDef stage0 fill:#d1fae5,stroke:#065f46,color:#064e3b
+    classDef stage1 fill:#fef3c7,stroke:#a16207,color:#78350f,stroke-dasharray:5 5
+    classDef stage2 fill:#fed7aa,stroke:#9a3412,color:#7c2d12,stroke-dasharray:5 5
+    class I1,I2,I3,I4,I5,I6,R1,R2,R3,M1,M2,M3,A1,A2 stage0
+    class E1,E2,E3 stage1
+    class I7,I8,A3,A4 stage2
+```
+
+**Contract this diagram encodes.** Future PRs MUST honour:
+
+1. **shop-signal lives in `packages/scam-engine/`**, not a sibling package. Anything that introduces `packages/shop-guard/` or moves the orchestrator out of `scam-engine` violates the diagram and needs an explicit ADR before proceeding.
+2. **Every Adapter consumes `AnalysisResult.shopSignal`** — chips, summary lines, popups, B2B JSON — none of them reach around the Module to call APIVoid or read `shop_checks` directly. The Module is the only place commerce-signal logic lives.
+3. **Two analyze entry points (web `/api/analyze` route + `runAnalysisCore`) call the Module directly**; bots reach the Module _through_ `runAnalysisCore` via `analyzeForBot`. Don't add a third entry-point shape (a new route or a parallel orchestrator) without first migrating one of the existing two.
+4. **APIVoid + `shop_checks` + Inngest are Stage 1**. Stage 0 must not write to the database, call a paid API, or emit an Inngest event. Stage 0.5 may only add the referrer-source field to the Module's input — no other shape change.
+5. **Extension popup is `activeTab` at Stage 2.** `<all_urls>` (= CWS sensitive re-review) is a separate PR gated on extension activation data, not bundled into Stage 2 PR 6.
+
 ### Where it lives
 
 ```
