@@ -17,7 +17,6 @@ import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { ANALYZE_COMPLETED_EVENT } from "@askarthur/scam-engine/inngest/events";
 import { detectCharityIntent, type CharityIntent } from "@askarthur/scam-engine/charity-intent";
 import { detectCommerceSignal, buildShopSignal } from "@askarthur/scam-engine/shop-signal";
-import type { ShopSignal } from "@askarthur/types";
 import { WebAnalyzeInputSchema, type RedirectChain } from "@askarthur/types";
 import { storeVerifiedScam, incrementStats } from "@askarthur/scam-engine/pipeline";
 import { storeScamReport, buildEntities } from "@askarthur/scam-engine/report-store";
@@ -310,9 +309,17 @@ export async function POST(req: NextRequest) {
     // doesn't yet delegate to runAnalysisCore (Phase 5 work), so any logic
     // change here must mirror there. Both branches read the same Module
     // (shop-signal.ts) — only the surrounding plumbing differs.
-    let shopSignal: ShopSignal | undefined;
-    if (featureFlags.shopSignal && detectCommerceSignal(text, urls)) {
-      shopSignal = buildShopSignal(merged.redFlags, referrerSource);
+    //
+    // Assignment shape mirrors analyze-core.ts:236 — mutate `aiResult` so
+    // the value threads through storeScamReport({ analysis: aiResult }) on
+    // the legacy waitUntil path AND the analyze.completed.v1 event payload
+    // on the durable Inngest path. The local-var pattern (pre-2026-05-20)
+    // dropped shopSignal from both persistence paths so the 30-day Stage-0
+    // measurement queries returned zero rows. `allUrls` matches the
+    // post-redirect URL list analyze-core uses (variable name there is
+    // `urlsToCheck`); using bare `urls` would miss bit.ly→.shop redirects.
+    if (featureFlags.shopSignal && detectCommerceSignal(text, allUrls)) {
+      aiResult.shopSignal = buildShopSignal(merged.redFlags, referrerSource);
     }
 
     // 7. Background work via waitUntil (survives after response is sent)
@@ -572,6 +579,7 @@ export async function POST(req: NextRequest) {
               urlResults: urlResults.length > 0 ? urlResults : undefined,
               usage: aiResult.usage,
               cacheHit: false, // route returned cache hit earlier; reaching here means we called Claude
+              shopSignal: aiResult.shopSignal,
               consumerFlags: {
                 intelligenceCore: featureFlags.intelligenceCore,
                 scamContactReporting: featureFlags.scamContactReporting,
@@ -611,7 +619,7 @@ export async function POST(req: NextRequest) {
         ...(phoneRiskFlags && { phoneRiskFlags }),          // backward compat
         ...(isVoipCaller != null && { isVoipCaller }),       // backward compat
         ...(charityIntent && { charityIntent }),
-        ...(shopSignal && { shopSignal }),
+        ...(aiResult.shopSignal && { shopSignal: aiResult.shopSignal }),
       },
       {
         headers: {
