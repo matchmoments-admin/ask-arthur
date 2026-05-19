@@ -101,6 +101,8 @@ flowchart LR
     class I7,I8,A3,A4 stage2
 ```
 
+> **Visual companion**: an editable Excalidraw version of the same diagram lives at [`assets/shop-signal-architecture.excalidraw`](./assets/shop-signal-architecture.excalidraw) (open in [excalidraw.com](https://excalidraw.com)) with a PNG preview at [`assets/shop-signal-architecture.png`](./assets/shop-signal-architecture.png). The Mermaid block above remains the source of truth — regenerate the PNG by re-running `build_shop_signal_diagram.py` (see commit message that introduced the assets) if the Mermaid changes.
+
 **Contract this diagram encodes.** Future PRs MUST honour:
 
 1. **shop-signal lives in `packages/scam-engine/`**, not a sibling package. Anything that introduces `packages/shop-guard/` or moves the orchestrator out of `scam-engine` violates the diagram and needs an explicit ADR before proceeding.
