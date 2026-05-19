@@ -284,7 +284,7 @@ arrow("ma-2",
 
 # -------- Column 4: Stage 1+ enrichments (3 boxes) --------
 stage1_boxes = [
-    ("s-apivoid", "APIVoid Adapter\n~A$0.003/call\nSHOP_GUARD_CAP_USD=15"),
+    ("s-apivoid", "APIVoid Adapter\n~A$0.003/call\nSHOP_SIGNAL_CAP_USD=15"),
     ("s-inngest", "Inngest fan-out\nshop.signal.evaluated.v1"),
     ("s-table",   "shop_checks table\nverdict TEXT + CHECK\nhot ⚠  ·  90d TTL"),
 ]

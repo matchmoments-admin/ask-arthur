@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import Image from "next/image";
+import { usePlausible } from "next-plausible";
 import { X, ScanLine, Paperclip, Mic, Lock, EyeOff, BadgeCheck } from "lucide-react";
 import AnalysisProgress, { type Step as ProgressStep } from "./AnalysisProgress";
 import ResultCard from "./ResultCard";
@@ -84,6 +85,14 @@ export default function ScamChecker() {
   // stage; the chip render comes in Stage 1 PR 4 alongside the accordion.
   const [referrerSource, setReferrerSource] = useState<ReferrerSource | undefined>(undefined);
   const searchParams = useSearchParams();
+
+  // Plausible custom-event hook. Wired in PR pre-launch-tidy to fire two
+  // events that compose into a sanity-check axis for the 30-day Stage-0
+  // Shop Signal measurement window (SQL is the source of truth — see
+  // docs/ops/shop-signal-measurement.md). usePlausible() returns a no-op
+  // function when next-plausible isn't initialised (CSP blocked, provider
+  // absent, DNT enabled), so calling it is safe in all environments.
+  const plausible = usePlausible();
 
   // Media analysis hook
   const media = useMediaAnalysis();
@@ -338,6 +347,18 @@ export default function ScamChecker() {
     setErrorMsg("");
     setProgressStep("upload");
 
+    // Plausible — Shop Signal measurement axis 1/2. Fires on every
+    // /api/analyze submit (NOT charity-check, which has its own funnel).
+    // Composes with the Q3 SQL in docs/ops/shop-signal-measurement.md as a
+    // sanity check on mobile-share share of total volume.
+    plausible("scam_check_submitted", {
+      props: {
+        has_text: !!text.trim(),
+        has_images: images.length > 0,
+        referrer_source: referrerSource ?? "direct",
+      },
+    });
+
     try {
       const fetchPromise = fetch("/api/analyze", {
         method: "POST",
@@ -375,6 +396,22 @@ export default function ScamChecker() {
       setProgressStep("done");
       setErrorAttempts(0);
       setErrorRef(null);
+      // Plausible — Shop Signal measurement axis 2/2. Fires only when the
+      // commerce-page detector matched. Composes with Q1 + Q2 SQL in
+      // docs/ops/shop-signal-measurement.md (commerce fraction + flag
+      // extraction rate). flag_count=0 is meaningful — counts the
+      // "commerce detected but no specific tag" case for the Stage-0.5-vs-1
+      // tripwire (<30% flag-extraction triggers re-evaluating the
+      // commerce-specific prompt addendum).
+      if (data.shopSignal) {
+        plausible("shop_signal_emitted", {
+          props: {
+            verdict: data.verdict,
+            flag_count: data.shopSignal.commerceFlags.length,
+            referrer_source: data.shopSignal.referrerSource ?? "direct",
+          },
+        });
+      }
       window.dispatchEvent(new Event("safeverify:check-complete"));
     } catch {
       setStatus("error");
