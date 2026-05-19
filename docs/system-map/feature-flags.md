@@ -12,23 +12,24 @@ All feature flags live in `packages/utils/src/feature-flags.ts`. Default is **OF
 
 ## Consumer features
 
-| Flag                   | Default | Purpose                                         |
-| ---------------------- | ------- | ----------------------------------------------- |
-| `mediaAnalysis`        | OFF     | Audio upload → Whisper transcription → analysis |
-| `deepfakeDetection`    | OFF     | Deepfake detection on audio/video               |
-| `phoneIntelligence`    | OFF     | Twilio Lookup v2 phone intelligence             |
-| `videoUpload`          | OFF     | Video upload support                            |
-| `scamContactReporting` | OFF     | Community scam-contact reporting + lookup       |
-| `scamUrlReporting`     | OFF     | Community scam-URL reporting + WHOIS / SSL      |
-| `dataPipeline`         | OFF     | Threat-feed ingestion + Inngest                 |
-| `newsletter`           | OFF     | Newsletter signup form on blog                  |
-| `redirectResolve`      | OFF     | Resolve URL redirect chains                     |
-| `emailScanning`        | OFF     | Chrome extension Gmail scanning                 |
-| `siteAudit`            | OFF     | Lightweight website security scanner            |
-| `emailSecurityChecks`  | **ON**  | SPF/DMARC/DKIM checks (zero cost)               |
-| `recoveryGuidance`     | OFF     | Recovery steps on high-risk verdicts            |
-| `charityCheck`         | OFF     | Consumer `/charity-check` page                  |
-| `charityCheckIngest`   | OFF     | Server: ACNC daily scraper ingest               |
+| Flag                   | Default | Purpose                                                                                                                                                                                                                                                                                                                           |
+| ---------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mediaAnalysis`        | OFF     | Audio upload → Whisper transcription → analysis                                                                                                                                                                                                                                                                                   |
+| `deepfakeDetection`    | OFF     | Deepfake detection on audio/video                                                                                                                                                                                                                                                                                                 |
+| `phoneIntelligence`    | OFF     | Twilio Lookup v2 phone intelligence                                                                                                                                                                                                                                                                                               |
+| `videoUpload`          | OFF     | Video upload support                                                                                                                                                                                                                                                                                                              |
+| `scamContactReporting` | OFF     | Community scam-contact reporting + lookup                                                                                                                                                                                                                                                                                         |
+| `scamUrlReporting`     | OFF     | Community scam-URL reporting + WHOIS / SSL                                                                                                                                                                                                                                                                                        |
+| `dataPipeline`         | OFF     | Threat-feed ingestion + Inngest                                                                                                                                                                                                                                                                                                   |
+| `newsletter`           | OFF     | Newsletter signup form on blog                                                                                                                                                                                                                                                                                                    |
+| `redirectResolve`      | OFF     | Resolve URL redirect chains                                                                                                                                                                                                                                                                                                       |
+| `emailScanning`        | OFF     | Chrome extension Gmail scanning                                                                                                                                                                                                                                                                                                   |
+| `siteAudit`            | OFF     | Lightweight website security scanner                                                                                                                                                                                                                                                                                              |
+| `emailSecurityChecks`  | **ON**  | SPF/DMARC/DKIM checks (zero cost)                                                                                                                                                                                                                                                                                                 |
+| `recoveryGuidance`     | OFF     | Recovery steps on high-risk verdicts                                                                                                                                                                                                                                                                                              |
+| `charityCheck`         | OFF     | Consumer `/charity-check` page                                                                                                                                                                                                                                                                                                    |
+| `charityCheckIngest`   | OFF     | Server: ACNC daily scraper ingest                                                                                                                                                                                                                                                                                                 |
+| `shopSignal`           | OFF     | Server: commerce-page post-processor on `/api/analyze` + `runAnalysisCore`. Stage 0/0.5 shipped 2026-05-19 (#324, #325). Attaches `shopSignal: { isCommerce, commerceFlags[], generatedAt, referrerSource? }` to the response; UI renders chips when present. No consumer-side flag — front end just renders if the field exists. |
 
 ## Intelligence core & enrichment
 
