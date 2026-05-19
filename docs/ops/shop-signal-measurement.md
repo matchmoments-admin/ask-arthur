@@ -1,7 +1,7 @@
 # Shop Signal — Stage 0 measurement queries
 
 > Measurement spec for the 30-day Stage 0 window that gates the Stage 1
-> paid-feed go/no-go (`SHOP_GUARD_CAP_USD=15` APIVoid Adapter,
+> paid-feed go/no-go (`SHOP_SIGNAL_CAP_USD=15` APIVoid Adapter,
 > `shop_checks` table, Inngest fan-out — issues #319 / #320 / #321).
 >
 > Plan: [`docs/plans/shop-guard-v2.md`](../plans/shop-guard-v2.md) §3.
@@ -168,36 +168,52 @@ order by hits desc;
 
 ## Plausible events
 
-The web app loads `next-plausible` (CSP allows `plausible.io` and the
-domain script attribute is already on `<html>` via the layout). Stage 0.5
-defines the event names but the calls themselves land in a small
-follow-up PR — wiring them now would also add a `usePlausible` hook to
-`ScamChecker.tsx` and require touching the result-render lifecycle, both
-of which felt like avoidable surface area for a "wire the referrer" PR.
+The web app loads `next-plausible` (CSP allows `plausible.io` in both
+`script-src` and `connect-src`; the domain attribute is on `<html>` via
+the root layout). Two custom events fire from `ScamChecker.tsx` as a
+sanity-check axis alongside the SQL queries above. SQL is the source of
+truth; Plausible is a faster spot-check.
+
+Live as of the Stage 0 pre-launch tidy PR (see plan §3 footnote). Code at
+`apps/web/components/ScamChecker.tsx` (search `usePlausible`).
 
 ```ts
-// On /api/analyze submit:
+// On /api/analyze submit (NOT charity-check):
 plausible("scam_check_submitted", {
   props: {
-    has_text: !!text.trim(),
-    has_images: images.length > 0,
-    referrer_source: referrerSource ?? "direct",
+    has_text: boolean,
+    has_images: boolean,
+    referrer_source: ReferrerSource | "direct",
   },
 });
 
-// When the response includes shopSignal (result-render lifecycle hook):
+// On successful response when shopSignal is present:
 plausible("shop_signal_emitted", {
   props: {
-    verdict: result.verdict,
-    flag_count: result.shopSignal.commerceFlags.length,
-    referrer_source: result.shopSignal.referrerSource ?? "direct",
+    verdict: "SAFE" | "SUSPICIOUS" | "HIGH_RISK",
+    flag_count: number, // 0 = commerce detected but no taxonomy tag matched
+    referrer_source: ReferrerSource | "direct",
   },
 });
 ```
 
-Plausible custom-event filtering is available on the existing dashboard
-at `plausible.io/askarthur.au`. Compose the same three gates from
-Plausible's "Goal Conversions" view as a sanity check against the SQL.
+### Plausible goal-conversion shape
+
+Configure goals in the Plausible dashboard at `plausible.io/askarthur.au`
+once the flag flip lands:
+
+1. **Goal: `scam_check_submitted`** — denominator for all
+   referrer-source breakdowns. The "Breakdown by referrer_source"
+   property view answers Q3 directly (mobile-share share of total
+   volume).
+2. **Goal: `shop_signal_emitted`** — funnel from Goal 1. The Plausible
+   conversion-rate row equals Q1 (commerce fraction). Breakdown by
+   `flag_count` (0 vs >0 buckets) answers Q2 (flag-extraction rate).
+
+If the Plausible numbers disagree with the SQL by more than a few
+percent, trust the SQL — Plausible drops events from clients with DNT,
+ad blockers, or sub-resource CSP issues. Plausible's job here is "smell
+test that the SQL is reading the world correctly," not "primary truth."
 
 ## Decision tree on day 31
 

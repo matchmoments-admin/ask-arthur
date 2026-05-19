@@ -34,10 +34,13 @@ POST /api/analyze
   │      ├─ Escalate → HIGH_RISK if any URL flagged
   │      ├─ Floor → SUSPICIOUS if injection detected
   │      └─ Tiered escalation on deepfake signals
-  ├─ 9a. Shop Signal post-processor (flag: shopSignal — default OFF)
+  ├─ 9a. Shop Signal post-processor (flag: shopSignal — default OFF, awaits 2026-05-20 flip)
   │      ├─ detectCommerceSignal(text, urls) → URL TLD / path / platform hint OR text commerce verbs
   │      ├─ buildShopSignal(merged.redFlags, referrerSource) → { isCommerce, commerceFlags[], generatedAt, referrerSource? }
-  │      └─ referrerSource ride-along from Web Share Target (instagram-inapp / tiktok-inapp / facebook-inapp / whatsapp-inapp)
+  │      ├─ referrerSource ride-along from Web Share Target (instagram-inapp / tiktok-inapp / facebook-inapp / whatsapp-inapp)
+  │      └─ Dual call-site: same block also at packages/scam-engine/src/analyze-core.ts:231 (bots / extension /
+  │         B2B reach the Module through runAnalysisCore, not via this route). Cross-ref comments added PR #328.
+  │         Lockstep edits required until Phase 5 buildAnalyze(variant, deps) factory consolidates.
   ├─ 10. Phone intelligence (HIGH_RISK/SUSPICIOUS only — inline this phase)
   │      └─ Twilio Lookup v2 (line type + CNAM, $0.018/lookup)
   ├─ 11. Background work

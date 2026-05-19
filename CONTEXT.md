@@ -9,6 +9,7 @@ This file is **opinionated and tight**. When two words exist for the same concep
 **Verdict**:
 One of `SAFE | UNCERTAIN | SUSPICIOUS | HIGH_RISK` — the safety classification we return for any submitted content.
 _Avoid_: result, classification, score, rating.
+_Storage quirk:_ `scam_reports.verdict` allows only the three legacy values (`SAFE`, `SUSPICIOUS`, `HIGH_RISK`) — the column predates `UNCERTAIN`. New tables (`charity_checks`, planned `shop_checks`) carry the full four. Cross-table linkage from a 4-value verdict back to a Scam Report only fires for the three legacy values; widening the column is a separate cross-table migration touching every read/write site of `scam_reports.verdict`, deliberately deferred.
 
 **Analysis Result**:
 Complete output from the Claude analyzer: a Verdict plus confidence, red flags, and optional Phone Lookup Result / Redirect Chain enrichment.

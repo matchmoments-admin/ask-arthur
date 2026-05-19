@@ -303,6 +303,13 @@ export async function POST(req: NextRequest) {
     // chips. No paid API at Stage 0 — APIVoid + RDAP land in Stage 1 once
     // the 30-day measurement window justifies them. Plan:
     // docs/plans/shop-guard-v2.md.
+    //
+    // DUAL CALL-SITE: same block also lives at
+    // packages/scam-engine/src/analyze-core.ts (search for
+    // `featureFlags.shopSignal && detectCommerceSignal`). The web route
+    // doesn't yet delegate to runAnalysisCore (Phase 5 work), so any logic
+    // change here must mirror there. Both branches read the same Module
+    // (shop-signal.ts) — only the surrounding plumbing differs.
     let shopSignal: ShopSignal | undefined;
     if (featureFlags.shopSignal && detectCommerceSignal(text, urls)) {
       shopSignal = buildShopSignal(merged.redFlags, referrerSource);
