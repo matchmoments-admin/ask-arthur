@@ -108,17 +108,17 @@ Sydney / Singapore regions; this is treated as US traffic by APIVoid.
 Plan §6 worst case: 1,000 commerce analyses/day × 60% paid-rate = 600
 APIVoid calls/day.
 
-| Scenario              | Calls/day | Tier    | USD/day | AUD/day | Margin vs. A$15 cap |
-| --------------------- | --------- | ------- | ------- | ------- | ------------------- |
-| Baseline (500 × 60%)  | 300       | Startup | $1.00   | A$1.50  | 10× headroom        |
-| Worst case (1k × 60%) | 600       | Startup | $2.00   | A$3.00  | 5× headroom         |
-| Worst case (1k × 60%) | 600       | Growth  | $1.24   | A$1.86  | 8× headroom         |
-| Cap exhaustion        | 5,000     | Startup | $16.67  | A$25.00 | breaches cap        |
-| Cap exhaustion        | 4,840     | Growth  | $10.02  | A$15.00 | exactly cap         |
+| Scenario              | Calls/day | Tier    | USD/day | AUD/day | Margin vs. $15 USD cap |
+| --------------------- | --------- | ------- | ------- | ------- | ---------------------- |
+| Baseline (500 × 60%)  | 300       | Startup | $1.00   | A$1.50  | 15× headroom           |
+| Worst case (1k × 60%) | 600       | Startup | $2.00   | A$3.00  | 7.5× headroom          |
+| Worst case (1k × 60%) | 600       | Growth  | $1.24   | A$1.86  | 12× headroom           |
+| Cap exhaustion        | 4,500     | Startup | $15.00  | A$22.50 | exactly cap            |
+| Cap exhaustion        | 7,246     | Growth  | $15.00  | A$22.50 | exactly cap            |
 
 `SHOP_SIGNAL_CAP_USD=15` corresponds to ~A$22.50/day worst-case spend
-(at A$1.50/USD FX). On Growth tier the cap engages at ~4,840 calls/day —
-roughly 8× the projected worst case — which is the "5× projected
+(at A$1.50/USD FX). On Growth tier the cap engages at ~7,246 calls/day —
+roughly 12× the projected worst case — which is the "5× projected
 Stage-2 worst case" target from plan §6 with comfortable margin for
 incident analysis. **Lower the cap to `10` if usage runs consistently
 below A$3/day for 14 days** — it cuts the blast radius of a runaway
@@ -162,11 +162,14 @@ extends that loop to include `shop_signal`:
 
 ```ts
 // Pseudocode for the cost-daily-check extension PR 2 will ship.
+// Tag enumeration matches §5 telemetry table (Reddit Intel pattern).
 const shopSignalThresholdUsd = envReads.SHOP_SIGNAL_CAP_USD.value;
 const shopSignalCost = top
   .filter(
     (t) =>
-      t.feature === "shop_signal" || t.feature === "shop-signal-apivoid-trust", // sub-tag for the APIVoid call specifically
+      t.feature === "shop_signal" ||
+      t.feature === "shop-signal-apivoid-error" ||
+      t.feature === "shop-signal-apivoid-overage",
   )
   .reduce((sum, t) => sum + t.cost, 0);
 
@@ -236,9 +239,13 @@ existing Reddit Intel sub-tag pattern):
 | `shop-signal-apivoid-error`   | `apivoid`  | `site-trustworthiness-error` | rare      | $0 diagnostic for HTTP errors / parse failures, used by the weekly digest to track API reliability.   |
 | `shop-signal-apivoid-overage` | `apivoid`  | `quota-overage`              | rare      | $0 diagnostic when APIVoid returns 402 / quota-exceeded. Triggers a Telegram heads-up; doesn't brake. |
 
-The brake-aggregator query (above) sums `feature='shop_signal' OR
-feature LIKE 'shop-signal-%'` — all three tags above feed into the
-daily cap calculation, but only the first carries non-zero cost.
+The brake-aggregator filter uses exact-match enumeration matching the
+Reddit Intel pattern in
+`apps/web/app/api/cron/cost-daily-check/route.ts:147-154`:
+`top.filter(t => t.feature === 'shop_signal' || t.feature === 'shop-signal-apivoid-error' || t.feature === 'shop-signal-apivoid-overage')`.
+All three tags feed into the daily cap calculation but only the first
+carries non-zero cost; including the diagnostic tags future-proofs
+against tag drift.
 
 ---
 
