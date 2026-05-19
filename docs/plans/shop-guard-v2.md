@@ -75,7 +75,7 @@ flowchart LR
 
     I1 --> R1
     I2 -. shared_text + .-> I1
-    I2 -.->|Stage 0.5: Referer +<br/>X-AskArthur-Inapp-Source| R1
+    I2 -.->|Stage 0.5: Referer +<br/>UA fingerprint (?shared_inapp= URL param)| R1
     I3 & I4 & I5 & I6 --> R3
     I7 -. Stage 2 .-> R1
     I8 -. Stage 2 .-> R2
@@ -158,13 +158,13 @@ export interface AnalysisResult {
 
 ### Adapters that consume it (no new code per Adapter at Stage 0)
 
-| Adapter              | Lives at                                       | Stage 0 behaviour                                                                                                         |
-| -------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| Web drawer           | `apps/web/components/...ResultCard.tsx`        | Reads `result.shopSignal?.commerceFlags` and renders inline chips if present. ~15 LOC.                                    |
-| Mobile share-target  | `apps/web/app/share-target/route.ts`           | Forwards `Referer` + `X-AskArthur-Inapp-Source` headers to `runAnalysisCore`. ~5 LOC.                                     |
-| Bot-core             | `packages/bot-core/src/analyze.ts` (no change) | Inherits `shopSignal` field automatically; per-platform formatters get one new "shop flags" line if present (~5 LOC × 4). |
-| `/api/v1/shop-check` | Stage 2                                        | Doesn't exist yet.                                                                                                        |
-| Extension            | Stage 2                                        | Doesn't exist yet.                                                                                                        |
+| Adapter              | Lives at                                       | Stage 0 behaviour                                                                                                                          |
+| -------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Web drawer           | `apps/web/components/...ResultCard.tsx`        | Reads `result.shopSignal?.commerceFlags` and renders inline chips if present. ~15 LOC.                                                     |
+| Mobile share-target  | `apps/web/app/share-target/route.ts`           | Forwards `Referer` + UA fingerprint to `detectInappReferrer()` which emits a `ReferrerSource` enum forwarded to `runAnalysisCore`. ~5 LOC. |
+| Bot-core             | `packages/bot-core/src/analyze.ts` (no change) | Inherits `shopSignal` field automatically; per-platform formatters get one new "shop flags" line if present (~5 LOC × 4).                  |
+| `/api/v1/shop-check` | Stage 2                                        | Doesn't exist yet.                                                                                                                         |
+| Extension            | Stage 2                                        | Doesn't exist yet.                                                                                                                         |
 
 ### Why this is a Module not a Pillar
 
@@ -198,7 +198,7 @@ The pillar-engine extraction discussion from ADR-0002 §"deferred" stays deferre
 
 1. **`packages/scam-engine/src/shop-signal.ts`** — exports:
    - `detectCommerceSignal(url, html?) → boolean` — TLD + path + known-platform-hint heuristic (Shopify generator meta, WooCommerce signature, `.shop`/`.store`/`.top` TLDs, `/cart` or `/checkout` path)
-   - `extractReferrerSource(headers) → ReferrerSource` — parses `Referer` + `X-AskArthur-Inapp-Source` + User-Agent fingerprint
+   - `detectInappReferrer(userAgent, referer)` returns `ReferrerSource | null` based on UA substring (load-bearing) + Referer (WhatsApp-iOS tiebreaker)
 2. **`packages/scam-engine/src/shop-signal-claude-prompt.ts`** — variant prompt that lists the AU-specific red flags Scamwatch publishes (no ABN, multiple PayIDs, "store closing", >70% off luxury, etc.). Returns `ShopSignal.commerceFlags`.
 3. **`packages/scam-engine/src/analyze-core.ts`** — branch: when `detectCommerceSignal()` is true AND `FF_SHOP_SIGNAL=true`, replace the default analyze prompt with the commerce variant; attach `shopSignal` to the result. ~10 LOC change.
 4. **`apps/web/app/share-target/route.ts`** — forward `Referer` + IG/TikTok/FB in-app User-Agent fingerprint as a new header into `runAnalysisCore`. ~5 LOC.

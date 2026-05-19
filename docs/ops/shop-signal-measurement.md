@@ -23,7 +23,9 @@ Stage 0.5 lands two read-side surfaces:
    from `runAnalysisCore` + `/api/analyze` through `storeScamReport` (see
    `packages/scam-engine/src/report-store.ts`). One row per analysis when
    `intelligenceCore` is on. The `analysis_result` GIN index
-   (`jsonb_path_ops`, v21) means the `?` operator is fast.
+   (`jsonb_path_ops`, v21) supports `@>` containment queries — we use that
+   operator shape in all queries below. The `?` key-exists operator would
+   fall back to a sequential scan.
 2. **Plausible custom events** (proposed names, not yet wired — see
    "Plausible events" below). Fired from
    `apps/web/components/ScamChecker.tsx` on submit + on result-with-shopSignal.
@@ -33,6 +35,17 @@ Stage 1 PR 3 (issue #320) replaces the JSONB read with a typed
 `source_surface`, `referrer_source`, `evaluated_at`. The queries below
 will continue to work against the JSONB shape after that lands; they're
 intentionally written to be source-of-truth-agnostic.
+
+### Known bias — cache-hit path
+
+When a text-only submission hits the analyze cache
+(`apps/web/app/api/analyze/route.ts:175-200`), the route short-circuits
+before `detectCommerceSignal` runs. Cached responses do not emit
+`shopSignal` and do not write to `scam_reports`. The 30-day measurement
+queries therefore undercount commerce traffic by the cache-hit fraction.
+Cache-hit rate is currently unmeasured; if Q1 sits near the 5% threshold
+at day-31, re-evaluate with a cache-bypass canary before declaring
+no-go.
 
 ## SQL — Supabase queries
 
@@ -74,8 +87,15 @@ flagged as (
   from public.scam_reports sr
   where sr.created_at >= '2026-05-19'::date
     and sr.created_at < '2026-06-18'::date
-    and sr.analysis_result ? 'shopSignal'
-    and (sr.analysis_result -> 'shopSignal' ->> 'isCommerce')::boolean = true
+    and sr.analysis_result @> '{"shopSignal":{"isCommerce":true}}'::jsonb
+    -- Aligned with denom: only count flagged rows that also have ≥1 url/domain entity link.
+    and exists (
+      select 1
+      from public.report_entity_links rel
+      join public.scam_entities se on se.id = rel.entity_id
+      where rel.report_id = sr.id
+        and se.entity_type in ('url', 'domain')
+    )
 )
 select
   (select count(*) from flagged)::numeric * 100
@@ -100,8 +120,7 @@ with commerce_rows as (
   from public.scam_reports sr
   where sr.created_at >= '2026-05-19'::date
     and sr.created_at < '2026-06-18'::date
-    and sr.analysis_result ? 'shopSignal'
-    and (sr.analysis_result -> 'shopSignal' ->> 'isCommerce')::boolean = true
+    and sr.analysis_result @> '{"shopSignal":{"isCommerce":true}}'::jsonb
 ),
 with_flags as (
   select id
@@ -131,8 +150,7 @@ with commerce_rows as (
   from public.scam_reports sr
   where sr.created_at >= '2026-05-19'::date
     and sr.created_at < '2026-06-18'::date
-    and sr.analysis_result ? 'shopSignal'
-    and (sr.analysis_result -> 'shopSignal' ->> 'isCommerce')::boolean = true
+    and sr.analysis_result @> '{"shopSignal":{"isCommerce":true}}'::jsonb
 )
 select
   ss ->> 'referrerSource' as referrer_source,
@@ -161,7 +179,7 @@ from public.scam_reports sr,
      ) as tag
 where sr.created_at >= '2026-05-19'::date
   and sr.created_at < '2026-06-18'::date
-  and sr.analysis_result ? 'shopSignal'
+  and sr.analysis_result @> '{"shopSignal":{"isCommerce":true}}'::jsonb
 group by tag
 order by hits desc;
 ```
