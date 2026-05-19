@@ -223,11 +223,15 @@ export async function runAnalysisCore(
   };
 
   // Shop Signal — Stage 0 of Shop Guard. Same shape as the parallel branch
-  // in apps/web/app/api/analyze/route.ts; bots + extension surfaces reach
-  // shop-signal through this Module rather than the web HTTP route, so the
-  // wiring lives here too (the route does NOT call runAnalysisCore yet —
-  // see docs/plans/shop-guard-v2.md §2 footnote). Plan:
-  // docs/plans/shop-guard-v2.md §3.
+  // in apps/web/app/api/analyze/route.ts (look for the matching
+  // `featureFlags.shopSignal && detectCommerceSignal(...)` block — keep the
+  // two in lockstep). Bots + extension surfaces reach shop-signal through
+  // this Module rather than the web HTTP route, so the wiring lives here
+  // too (the route does NOT call runAnalysisCore yet — see
+  // docs/plans/shop-guard-v2.md §2 footnote). The Phase 5
+  // `buildAnalyze(variant, deps)` factory will consolidate the duplication;
+  // until then any logic change here must mirror in route.ts and vice
+  // versa. Plan: docs/plans/shop-guard-v2.md §3.
   if (featureFlags.shopSignal && detectCommerceSignal(text, urlsToCheck)) {
     result.shopSignal = buildShopSignal(merged.redFlags, referrerSource);
   }
