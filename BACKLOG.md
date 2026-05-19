@@ -302,11 +302,11 @@ Infrastructure is in place (v38–v40). Future work:
       Actions runs on Azure 135.232.0.0/16). Even `googlebot` UA on
       `/robots.txt` is tarpitted — proves it's IP-range based, not
       UA/endpoint filtering.  
-      **Mitigation already shipped**: `pipeline/scrapers/common/backoff.py`
+       **Mitigation already shipped**: `pipeline/scrapers/common/backoff.py`
       skips ACSC fetches once 5 consecutive failures are logged. The 3h
       cron still fires but writes a `partial`-status heartbeat instead of
       hammering the upstream. Resets automatically when one fetch succeeds.  
-      **Diagnostic tooling**: `pipeline/scrapers/probe_acsc.py` runs HEAD/GET
+       **Diagnostic tooling**: `pipeline/scrapers/probe_acsc.py` runs HEAD/GET
       across multiple UAs (askarthur, mozilla, curl, googlebot, no-UA),
       multiple endpoints (rss/alerts, rss/advisories, /, /robots.txt), and
       cross-checks `requests` vs stdlib `urllib`. Plus DNS resolution + raw
@@ -314,7 +314,7 @@ Infrastructure is in place (v38–v40). Future work:
       `gh workflow run scrape-feeds.yml -f feed=probe_acsc` to capture a
       diagnostic table. **Run the probe BEFORE attempting the Inngest port
       so we're not optimising for the wrong cause.**  
-      **Vercel ingest (in code, gated default OFF)**: PR #147 ships
+       **Vercel ingest (in code, gated default OFF)**: PR #147 ships
       `packages/scam-engine/src/inngest/acsc-ingest-vercel.ts` — a parallel
       Inngest cron that fetches ACSC RSS from Vercel's runtime instead of
       GH Actions. Gated by `FF_ACSC_INGEST_VERCEL` (server-side env). To
@@ -333,7 +333,7 @@ DESC LIMIT 3` — first row is the Vercel run
      **Fallback (Plan C)**: scrape `/about-us/view-all-content/alerts-and-advisories`
      HTML listing — different Akamai cache/WAF rules than RSS endpoints,
      may pass through. Only consider if Vercel egress also fails.  
-     Health query: `SELECT status, COUNT(*) FROM feed_ingestion_log WHERE
+      Health query: `SELECT status, COUNT(*) FROM feed_ingestion_log WHERE
 feed_name='acsc' AND created_at > now() - interval '7 days' GROUP BY
 status`. Healthy week is mostly `success`; an unhealthy backoff week
      is `error` followed by `partial` (the Python backoff heartbeats).
@@ -455,6 +455,7 @@ Source-of-truth for everything below: `docs/research/voyage-ai-audit-2026-05-03.
 - [ ] **Refactor `EMBEDDING_PROVIDER` env to `EMBEDDING_MODEL_<DOMAIN>`** (`generic` / `finance` / `multimodal`) before adding the second consumer (S-effort) — today's two-provider switch dies the moment we want `voyage-finance-2` for crypto/investment posts and `voyage-3.5` for everything else. Get the abstraction right before cementing it across N consumers. See rec #10. Required before charity-check or multimodal embeddings ship.
 - [ ] **ADR — query-time embedding retention policy** — every embedded query is a derived form of submitted user content (plausibly PII-derivative under OAIC's view). Need a max-30-day window + default-purge on user account deletion documented before the consumer "similar reports" surface ships. See audit Q3.
 - [ ] **ADR — Postgres `<=>` ANN vs in-memory cosine** — required before `scam_reports.embedding` ships (>100k vectors → HNSW; <50k → IVFFlat). Decision shapes index strategy + RPC design + retry surface. Hard to reverse. See audit Q12.
+- [ ] **Include `shopSignal.commerceFlags` in `buildEmbedText()` for commerce-flagged scam reports** (S-effort) — `scam-report-embed.ts` currently composes the embed text from `scrubbed_content + scam_type + channel + impersonated_brand`. Near-duplicate commerce scams (e.g. two fake-AusPost PayID stories) embed to nearly identical vectors. Adding the 11-tag `COMMERCE_FLAG_TAXONOMY` set as a structured suffix would disambiguate them and lift the "similar reports" surface's precision for commerce-shaped traffic. **Surface-this-after** the 30-day Stage-0 Shop Signal measurement window closes (gates Stage 1 PRs #319/#320/#321 first; commerceFlags volume will be quantified at that point). Plan reference: [`docs/plans/shop-guard-v2.md`](./docs/plans/shop-guard-v2.md). Diagram: [`docs/plans/assets/shop-signal-current-state.excalidraw`](./docs/plans/assets/shop-signal-current-state.excalidraw) — flagged as the red "KNOWN GAP" callout.
 - [ ] **Backfill any pre-v86 vectors that lack `embedding_model_version`** — v86 migration's idempotent `UPDATE ... SET embedding_model_version='voyage-3' WHERE NULL AND embedding IS NOT NULL` covers existing rows at apply time; this entry exists so a future grep finds the policy if a stray null sneaks in. ADR-0003.
 
 ## Cost Observability & Infrastructure
