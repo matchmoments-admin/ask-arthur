@@ -174,6 +174,18 @@ The pillar-engine extraction discussion from ADR-0002 §"deferred" stays deferre
 
 ## 3. Stage 0 — one PR, ship now
 
+> **Status (2026-05-19): Stage 0 + Stage 0.5 both shipped.**
+>
+> - **Stage 0** — merged in PR [#324](https://github.com/matchmoments-admin/ask-arthur/pull/324), main commit `ac94ef9`. Detector + chip rendering + bot summary lines live behind `FF_SHOP_SIGNAL` (default OFF).
+> - **Stage 0.5** — merged in PR [#325](https://github.com/matchmoments-admin/ask-arthur/pull/325), main commit `da92c01`. In-app-browser referrer wiring end-to-end (`/share-target` → `ScamChecker` → `/api/analyze` → `runAnalysisCore` → `buildShopSignal`) + persistence onto `scam_reports.analysis_result` + measurement docs.
+> - **Measurement window**: starts the day `FF_SHOP_SIGNAL=true` is flipped in prod. Queries + decision tree in [`docs/ops/shop-signal-measurement.md`](../ops/shop-signal-measurement.md).
+>
+> **Implementation deltas from the planned scope below** (caught during build, captured here so the decision trail stays honest):
+>
+> - Point 1's `extractReferrerSource(headers)` became `detectInappReferrer(userAgent, referer)` in `apps/web/app/share-target/route.ts` — UA-substring detection is load-bearing, Referer is the WhatsApp-on-iOS tiebreaker.
+> - Point 2's `shop-signal-claude-prompt.ts` was **not shipped**. Stage 0 deliberately reused the existing system prompt (which already covers AU commerce-scam patterns) and post-processed Claude's red-flag list via the 11-tag `COMMERCE_FLAG_TAXONOMY` instead. The prompt fork is deferred — only revisit if Stage 0 measurement returns <30% on Q2 (`shop-signal-measurement.md`).
+> - Stage 0.5 also persists `shopSignal` onto `scam_reports.analysis_result` (in `storeScamReport`) so the Stage-0 measurement SQL can read against the existing v21 GIN(`jsonb_path_ops`) index without waiting for the Stage-1 `shop_checks` migration.
+
 **Branch:** `shop-signal/stage-0` off `main`.
 
 **Scope (~80 LOC + tests):**
@@ -378,16 +390,18 @@ vs. v1's 8 PRs all front-loaded before any user-visible value.
 ## 12. Tracking issues
 
 Created 2026-05-19 from this plan. Diagram in §2 is the canonical architecture
-reference each issue links back to. Status reflects label at creation; flip
-`needs-info` → `ready-for-agent` only when the gate noted in the issue clears.
+reference each issue links back to. Status reflects current label.
 
-| PR  | Issue                                                               | Stage | Label at open     | Gate                                                             |
-| --- | ------------------------------------------------------------------- | ----- | ----------------- | ---------------------------------------------------------------- |
-| —   | [#318](https://github.com/matchmoments-admin/ask-arthur/issues/318) | 0.5   | `ready-for-agent` | none — within 30-day Stage-0 measurement window                  |
-| 2   | [#319](https://github.com/matchmoments-admin/ask-arthur/issues/319) | 1     | `needs-info`      | Stage-0 measurement clears §3 bar (commerce %, flag %, mobile %) |
-| 3   | [#320](https://github.com/matchmoments-admin/ask-arthur/issues/320) | 1     | `needs-info`      | same as PR 2                                                     |
-| 4   | [#321](https://github.com/matchmoments-admin/ask-arthur/issues/321) | 1     | `needs-info`      | PR 2 + PR 3 land                                                 |
-| 5   | [#322](https://github.com/matchmoments-admin/ask-arthur/issues/322) | 2     | `needs-info`      | Stage-1 measurement gate in §4 PR 4 clears                       |
-| 6   | [#323](https://github.com/matchmoments-admin/ask-arthur/issues/323) | 2     | `needs-info`      | same as PR 5                                                     |
+| PR  | Issue / PR                                                                                                                              | Stage | Status                                            | Gate                                                             |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------- | ----- | ------------------------------------------------- | ---------------------------------------------------------------- |
+| 1   | [#324](https://github.com/matchmoments-admin/ask-arthur/pull/324)                                                                       | 0     | ✅ **shipped 2026-05-19** (main commit `ac94ef9`) | —                                                                |
+| —   | [#318](https://github.com/matchmoments-admin/ask-arthur/issues/318) → [#325](https://github.com/matchmoments-admin/ask-arthur/pull/325) | 0.5   | ✅ **shipped 2026-05-19** (main commit `da92c01`) | —                                                                |
+| 2   | [#319](https://github.com/matchmoments-admin/ask-arthur/issues/319)                                                                     | 1     | `needs-info`                                      | Stage-0 measurement clears §3 bar (commerce %, flag %, mobile %) |
+| 3   | [#320](https://github.com/matchmoments-admin/ask-arthur/issues/320)                                                                     | 1     | `needs-info`                                      | same as PR 2                                                     |
+| 4   | [#321](https://github.com/matchmoments-admin/ask-arthur/issues/321)                                                                     | 1     | `needs-info`                                      | PR 2 + PR 3 land                                                 |
+| 5   | [#322](https://github.com/matchmoments-admin/ask-arthur/issues/322)                                                                     | 2     | `needs-info`                                      | Stage-1 measurement gate in §4 PR 4 clears                       |
+| 6   | [#323](https://github.com/matchmoments-admin/ask-arthur/issues/323)                                                                     | 2     | `needs-info`                                      | same as PR 5                                                     |
 
-Default next-session entry point: **#318** (Stage 0.5, branch `shop-signal/stage-0.5` off `main`).
+**Measurement window**: 30 days from the day `FF_SHOP_SIGNAL=true` is flipped in prod. Queries + day-31 decision tree in [`docs/ops/shop-signal-measurement.md`](../ops/shop-signal-measurement.md).
+
+Next ready-for-agent work: gated. The 30-day Stage-0 window must clear before #319 / #320 are relabelled.
