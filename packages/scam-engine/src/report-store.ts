@@ -55,7 +55,7 @@ export async function storeScamReport(
     if (!supabase) return null;
 
     const scrubbedContent = params.text ? scrubPII(params.text) : null;
-    const scrubbedResult = {
+    const scrubbedResult: Record<string, unknown> = {
       summary: scrubPII(params.analysis.summary),
       redFlags: params.analysis.redFlags.map(scrubPII),
       nextSteps: params.analysis.nextSteps,
@@ -63,6 +63,15 @@ export async function storeScamReport(
       channel: params.analysis.channel,
       impersonatedBrand: params.analysis.impersonatedBrand,
     };
+    // Shop Signal — Stage 0.5 persists the commerce-page detector output
+    // onto scam_reports.analysis_result so the Stage-0 measurement queries
+    // in docs/ops/shop-signal-measurement.md can count commerce-flagged
+    // analyzes against the URL-bearing denominator. Payload is taxonomy
+    // tags + a single referrer enum — no scrubbing needed (no user
+    // content). Stage-1 PR 3 replaces this with a typed shop_checks row.
+    if (params.analysis.shopSignal) {
+      scrubbedResult.shopSignal = params.analysis.shopSignal;
+    }
 
     // 1. Create report row
     const { data: reportData, error: reportError } = await supabase.rpc(

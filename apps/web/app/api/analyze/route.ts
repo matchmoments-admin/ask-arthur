@@ -115,7 +115,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { text, image, images: rawImages, mode } = parsed.data;
+    const { text, image, images: rawImages, mode, referrerSource } = parsed.data;
     // Normalize: merge legacy single `image` into `images` array
     const images: string[] = rawImages && rawImages.length > 0
       ? rawImages
@@ -305,7 +305,7 @@ export async function POST(req: NextRequest) {
     // docs/plans/shop-guard-v2.md.
     let shopSignal: ShopSignal | undefined;
     if (featureFlags.shopSignal && detectCommerceSignal(text, urls)) {
-      shopSignal = buildShopSignal(merged.redFlags);
+      shopSignal = buildShopSignal(merged.redFlags, referrerSource);
     }
 
     // 7. Background work via waitUntil (survives after response is sent)

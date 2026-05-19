@@ -12,12 +12,18 @@
 // Sibling Module: charity-intent.ts (same shape — pure detector + payload).
 //
 // Out of scope at Stage 0:
-//   - referrerSource (deferred to Stage 0.5; share-target → home → form
-//     → route wiring exceeds the v2 plan's 5-LOC estimate and lands once
-//     the measurement window has signal to justify the touch)
 //   - APIVoid Site Trustworthiness call (Stage 1)
 //   - RDAP domain-age + ABR ABN Lookup adapters (Stage 1)
 //   - infrastructure-cluster join against scam_entities (Stage 1)
+//
+// Stage 0.5 added: optional referrerSource (the in-app-browser the user
+// arrived from — instagram-inapp / tiktok-inapp / facebook-inapp /
+// whatsapp-inapp) so the measurement window can count mobile-share share
+// of commerce-flagged volume. Detection lives in
+// apps/web/app/share-target/route.ts; this Module just carries the value
+// through onto the ShopSignal payload.
+
+import type { ReferrerSource } from "@askarthur/types";
 
 const COMMERCE_TLDS = new Set([
   "shop",
@@ -159,17 +165,29 @@ export function extractCommerceFlags(redFlags: readonly string[]): string[] {
  * verified `detectCommerceSignal()` is true; this function does NOT
  * re-check (it would be wasted work — the caller has the data).
  *
+ * `referrerSource` is the in-app-browser the user arrived from when
+ * they came in via the Web Share Target route; undefined when the
+ * request didn't originate from a share-sheet redirect or the source
+ * couldn't be identified. Stage 0.5 wires it through so the Stage-0
+ * measurement window can quantify the mobile-share share of
+ * commerce-flagged volume.
+ *
  * Returns the shape the consumer surfaces (web ResultCard, bot
  * formatters) read off `AnalysisResult.shopSignal`.
  */
-export function buildShopSignal(redFlags: readonly string[]): {
+export function buildShopSignal(
+  redFlags: readonly string[],
+  referrerSource?: ReferrerSource,
+): {
   isCommerce: true;
   commerceFlags: string[];
   generatedAt: string;
+  referrerSource?: ReferrerSource;
 } {
   return {
     isCommerce: true,
     commerceFlags: extractCommerceFlags(redFlags),
     generatedAt: new Date().toISOString(),
+    ...(referrerSource && { referrerSource }),
   };
 }

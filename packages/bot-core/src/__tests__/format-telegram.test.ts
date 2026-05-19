@@ -62,4 +62,27 @@ describe("toTelegramHTML", () => {
     const html = toTelegramHTML(makeResult({ scamType: "none" }));
     expect(html).not.toContain("<b>Type:</b>");
   });
+
+  it("does not crash on a shopSignal payload carrying referrerSource (Stage 0.5)", () => {
+    // Stage 0.5 adds an optional referrerSource field to ShopSignal so the
+    // Stage-0 measurement window can count mobile-share share of
+    // commerce-flagged volume. The formatter is not expected to render
+    // referrerSource at this stage (chip render lands in Stage 1 PR 4) —
+    // it just needs to keep emitting the existing shop-signals line
+    // without throwing on the enriched payload shape.
+    const html = toTelegramHTML(
+      makeResult({
+        verdict: "SUSPICIOUS",
+        redFlags: ["PayID payment requested", "Limited stock urgency"],
+        shopSignal: {
+          isCommerce: true,
+          commerceFlags: ["payid-scam", "urgent-purchase-pressure"],
+          generatedAt: "2026-05-19T09:00:00.000Z",
+          referrerSource: "instagram-inapp",
+        },
+      })
+    );
+    expect(html).toContain("Shop signals:");
+    expect(html).toContain("payid-scam");
+  });
 });

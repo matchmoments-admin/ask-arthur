@@ -96,6 +96,21 @@ export const UsageSchema = z.object({
 });
 export type Usage = z.infer<typeof UsageSchema>;
 
+// In-app-browser referrer carried from the Web Share Target redirect to
+// the analyze pipeline. The header detection happens in
+// apps/web/app/share-target/route.ts; the value rides through as a
+// `shared_inapp` query param and lands here once the form POSTs. Stage 0.5
+// of Shop Guard wires this up so the Stage-0 measurement window can
+// quantify what share of commerce-flagged volume arrives from social
+// in-app browsers (target: ≥20% per docs/plans/shop-guard-v2.md §3).
+export const ReferrerSourceSchema = z.enum([
+  "instagram-inapp",
+  "tiktok-inapp",
+  "facebook-inapp",
+  "whatsapp-inapp",
+]);
+export type ReferrerSource = z.infer<typeof ReferrerSourceSchema>;
+
 // Shop Signal — Stage 0 of Shop Guard. Attached to AnalysisResult when the
 // input looks commerce-shaped (a URL with a shopping TLD / Shopify or
 // WooCommerce hint / cart-or-checkout path). Carries a free-only signal at
@@ -104,14 +119,11 @@ export type Usage = z.infer<typeof UsageSchema>;
 // allows only the three legacy values) is accepted as documented in
 // docs/plans/shop-guard-v2.md §1 row 5; Shop Signal never writes back to
 // scam_reports, so the constraint never fires.
-//
-// referrerSource is omitted at Stage 0 — share-target → home → form → route
-// wiring is more than the 5-LOC the v2 plan estimated, and lands as Stage
-// 0.5 once the measurement window has signal to justify the touch.
 export const ShopSignalSchema = z.object({
   isCommerce: z.literal(true),
   commerceFlags: z.array(z.string()),
   generatedAt: z.string(),
+  referrerSource: ReferrerSourceSchema.optional(),
 });
 export type ShopSignal = z.infer<typeof ShopSignalSchema>;
 
@@ -158,6 +170,14 @@ export const WebAnalyzeInputSchema = z
       .max(MAX_IMAGES_PER_REQUEST)
       .optional(),
     mode: AnalysisModeSchema.optional(),
+    /**
+     * Source surface the request originated from when the user landed via
+     * the Web Share Target route. Populated by ScamChecker.tsx from the
+     * `shared_inapp` query param (which share-target/route.ts sets after
+     * sniffing the inbound Referer + User-Agent). Stage 0.5 of Shop Guard
+     * — drives the mobile-share-share measurement in the Stage-0 window.
+     */
+    referrerSource: ReferrerSourceSchema.optional(),
   })
   .refine(
     (data) => data.text || data.image || (data.images && data.images.length > 0),
