@@ -372,3 +372,20 @@ Total PR count to v1.0 with B2B + extension: **6**.
 Stretch CWS re-review PR: **7**.
 
 vs. v1's 8 PRs all front-loaded before any user-visible value.
+
+## 12. Tracking issues
+
+Created 2026-05-19 from this plan. Diagram in §2 is the canonical architecture
+reference each issue links back to. Status reflects label at creation; flip
+`needs-info` → `ready-for-agent` only when the gate noted in the issue clears.
+
+| PR  | Issue                                                               | Stage | Label at open     | Gate                                                             |
+| --- | ------------------------------------------------------------------- | ----- | ----------------- | ---------------------------------------------------------------- |
+| —   | [#318](https://github.com/matchmoments-admin/ask-arthur/issues/318) | 0.5   | `ready-for-agent` | none — within 30-day Stage-0 measurement window                  |
+| 2   | [#319](https://github.com/matchmoments-admin/ask-arthur/issues/319) | 1     | `needs-info`      | Stage-0 measurement clears §3 bar (commerce %, flag %, mobile %) |
+| 3   | [#320](https://github.com/matchmoments-admin/ask-arthur/issues/320) | 1     | `needs-info`      | same as PR 2                                                     |
+| 4   | [#321](https://github.com/matchmoments-admin/ask-arthur/issues/321) | 1     | `needs-info`      | PR 2 + PR 3 land                                                 |
+| 5   | [#322](https://github.com/matchmoments-admin/ask-arthur/issues/322) | 2     | `needs-info`      | Stage-1 measurement gate in §4 PR 4 clears                       |
+| 6   | [#323](https://github.com/matchmoments-admin/ask-arthur/issues/323) | 2     | `needs-info`      | same as PR 5                                                     |
+
+Default next-session entry point: **#318** (Stage 0.5, branch `shop-signal/stage-0.5` off `main`).
