@@ -21,7 +21,7 @@ Supabase Postgres (project `rquomhcgnodxzkhokwni`). 75+ tables across 12 domain 
 
 ### Analysis pipeline (write-hot)
 
-- `scam_reports` `[hot ⚠]` — Central node: every user analysis. **Embedding HNSW** (partial, `WHERE embedding IS NOT NULL`). v21 (intelligence core), v71 (partitioned shell), v89 (embedding).
+- `scam_reports` `[hot ⚠]` — Central node: every user analysis. **Embedding HNSW** (partial, `WHERE embedding IS NOT NULL`). v21 (intelligence core), v71 (partitioned shell), v89 (embedding). **`analysis_result` JSONB** also carries `shopSignal` (Stage 0.5, no migration — uses existing v21 GIN `jsonb_path_ops` index for `?` operator lookups; see `docs/ops/shop-signal-measurement.md`). Stage 1 PR 3 (#320) replaces the JSONB read with a typed `shop_checks` sibling table.
 - `verified_scams` — High-confidence authoritative scams. **Embedding HNSW** (read-only anchor corpus). v89.
 - `scam_entities` `[hot ⚠]` — Unified entity index (phone / email / url / domain / ip / crypto_wallet / bank_account). `UNIQUE (entity_type, normalized_value)`. v21.
 - `report_entity_links` — M-to-many: reports ↔ entities (extraction method, role). v21.

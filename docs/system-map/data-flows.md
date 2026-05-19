@@ -34,6 +34,10 @@ POST /api/analyze
   │      ├─ Escalate → HIGH_RISK if any URL flagged
   │      ├─ Floor → SUSPICIOUS if injection detected
   │      └─ Tiered escalation on deepfake signals
+  ├─ 9a. Shop Signal post-processor (flag: shopSignal — default OFF)
+  │      ├─ detectCommerceSignal(text, urls) → URL TLD / path / platform hint OR text commerce verbs
+  │      ├─ buildShopSignal(merged.redFlags, referrerSource) → { isCommerce, commerceFlags[], generatedAt, referrerSource? }
+  │      └─ referrerSource ride-along from Web Share Target (instagram-inapp / tiktok-inapp / facebook-inapp / whatsapp-inapp)
   ├─ 10. Phone intelligence (HIGH_RISK/SUSPICIOUS only — inline this phase)
   │      └─ Twilio Lookup v2 (line type + CNAM, $0.018/lookup)
   ├─ 11. Background work
@@ -105,6 +109,16 @@ Each layer is the safety net for the layer above:
     riskLevel: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"
     callerName: string | null
     callerNameType: "business" | "consumer" | null
+  }
+  shopSignal?: {            // Present when shopSignal flag is ON + input looks commerce-shaped
+    isCommerce: true
+    commerceFlags: string[] // Tags from the 11-entry COMMERCE_FLAG_TAXONOMY (payid-scam, off-platform-move, etc.)
+    generatedAt: string     // ISO timestamp
+    referrerSource?:        // Carried through from /share-target when user landed via Web Share Target
+      | "instagram-inapp"
+      | "tiktok-inapp"
+      | "facebook-inapp"
+      | "whatsapp-inapp"
   }
 }
 ```
