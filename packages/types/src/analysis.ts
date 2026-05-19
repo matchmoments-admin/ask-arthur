@@ -96,6 +96,25 @@ export const UsageSchema = z.object({
 });
 export type Usage = z.infer<typeof UsageSchema>;
 
+// Shop Signal — Stage 0 of Shop Guard. Attached to AnalysisResult when the
+// input looks commerce-shaped (a URL with a shopping TLD / Shopify or
+// WooCommerce hint / cart-or-checkout path). Carries a free-only signal at
+// Stage 0; Stage 1+ adds APIVoid + RDAP + ABR fields under new optional
+// keys. The four-value Verdict mismatch with scam_reports.verdict (which
+// allows only the three legacy values) is accepted as documented in
+// docs/plans/shop-guard-v2.md §1 row 5; Shop Signal never writes back to
+// scam_reports, so the constraint never fires.
+//
+// referrerSource is omitted at Stage 0 — share-target → home → form → route
+// wiring is more than the 5-LOC the v2 plan estimated, and lands as Stage
+// 0.5 once the measurement window has signal to justify the touch.
+export const ShopSignalSchema = z.object({
+  isCommerce: z.literal(true),
+  commerceFlags: z.array(z.string()),
+  generatedAt: z.string(),
+});
+export type ShopSignal = z.infer<typeof ShopSignalSchema>;
+
 // ── AnalysisResult — Claude's output plus pipeline-attached metadata ─────
 
 export const AnalysisResultSchema = z.object({
@@ -113,6 +132,7 @@ export const AnalysisResultSchema = z.object({
   // Token usage surfaced so callsites can emit cost telemetry.
   // Populated by analyzeWithClaude; absent on cached/mock paths.
   usage: UsageSchema.optional(),
+  shopSignal: ShopSignalSchema.optional(),
 });
 export type AnalysisResult = z.infer<typeof AnalysisResultSchema>;
 
@@ -192,5 +212,6 @@ export const AnalyzeOutputSchema = z.object({
   phoneRiskFlags: z.array(z.string()).optional(), // backward compat
   isVoipCaller: z.boolean().optional(), // backward compat
   cached: z.boolean().optional(),
+  shopSignal: ShopSignalSchema.optional(),
 });
 export type AnalyzeOutput = z.infer<typeof AnalyzeOutputSchema>;

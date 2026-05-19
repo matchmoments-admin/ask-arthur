@@ -41,7 +41,9 @@ import {
 } from "./analysis-cache";
 import { mergeVerdict } from "@askarthur/core-analysis";
 import { logger } from "@askarthur/utils/logger";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 import type { AnalysisResult, RedirectChain } from "@askarthur/types";
+import { detectCommerceSignal, buildShopSignal } from "./shop-signal";
 
 export type AnalyzeSurface = AnalyzeCacheSurface;
 
@@ -206,6 +208,16 @@ export async function runAnalysisCore(
     redFlags: merged.redFlags,
     nextSteps: merged.nextSteps,
   };
+
+  // Shop Signal — Stage 0 of Shop Guard. Same shape as the parallel branch
+  // in apps/web/app/api/analyze/route.ts; bots + extension surfaces reach
+  // shop-signal through this Module rather than the web HTTP route, so the
+  // wiring lives here too (the route does NOT call runAnalysisCore yet —
+  // see docs/plans/shop-guard-v2.md §2 footnote). Plan:
+  // docs/plans/shop-guard-v2.md §3.
+  if (featureFlags.shopSignal && detectCommerceSignal(text, urlsToCheck)) {
+    result.shopSignal = buildShopSignal(merged.redFlags);
+  }
 
   // 6. Background fan-out.
   const tasks: Promise<unknown>[] = [];

@@ -42,6 +42,16 @@ export function toMessengerMessage(result: AnalysisResult): string {
     lines.push(`\ud83d\udccc Type: ${result.scamType}`);
   }
 
+  if (result.shopSignal) {
+    const tags = result.shopSignal.commerceFlags;
+    lines.push("");
+    if (tags.length === 0) {
+      lines.push("\ud83d\udecd\ufe0f Shop signals: online shop detected");
+    } else {
+      lines.push(`\ud83d\udecd\ufe0f Shop signals: ${tags.slice(0, 5).join(", ")}`);
+    }
+  }
+
   lines.push("");
   lines.push("Powered by Ask Arthur \u2014 askarthur.au");
 

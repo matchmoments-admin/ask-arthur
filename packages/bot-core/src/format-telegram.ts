@@ -47,6 +47,20 @@ export function toTelegramHTML(result: AnalysisResult): string {
     lines.push(`<b>Type:</b> ${escapeHTML(result.scamType)}`);
   }
 
+  // Shop Guard Stage 0 \u2014 single-line summary when shopSignal is attached.
+  // Chat surfaces can't render chips so the four bot formatters all collapse
+  // to a tagged comma-separated summary; the web ResultCard renders the
+  // richer chip view.
+  if (result.shopSignal) {
+    const tags = result.shopSignal.commerceFlags;
+    lines.push("");
+    if (tags.length === 0) {
+      lines.push("<b>Shop signals:</b> online shop detected");
+    } else {
+      lines.push(`<b>Shop signals:</b> ${escapeHTML(tags.slice(0, 5).join(", "))}`);
+    }
+  }
+
   lines.push("");
   lines.push("<i>Powered by Ask Arthur \u2014 askarthur.au</i>");
 

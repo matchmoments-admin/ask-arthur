@@ -344,6 +344,16 @@ export const featureFlags = {
    *  on once the corpus has had a few weeks to accrue and customers have
    *  asked for it. Server-side only — gates the API merge logic. */
   regulatorIntelSearch: process.env.FF_REGULATOR_INTEL_SEARCH === "true",
+
+  /** Shop Guard Stage 0 — pure commerce-page detector + post-processor that
+   *  extracts commerce-specific tags from Claude's existing red-flag list
+   *  and attaches them as `AnalysisResult.shopSignal`. Server-side only:
+   *  the consumer surfaces (ResultCard chips, bot-formatter summary line)
+   *  render unconditionally when the field is present, so flipping this
+   *  flag end-to-end requires only the one server env. Default OFF until
+   *  preview smoke-test confirms the taxonomy hits ≥30% of commerce-shaped
+   *  fixtures. Plan: docs/plans/shop-guard-v2.md §3. */
+  shopSignal: process.env.FF_SHOP_SIGNAL === "true",
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;
