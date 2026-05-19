@@ -3,6 +3,7 @@ import {
   VerdictSchema,
   AnalysisModeSchema,
   ScammerContactsSchema,
+  ShopSignalSchema,
   UsageSchema,
 } from "@askarthur/types";
 
@@ -82,6 +83,13 @@ export const AnalyzeCompletedDataSchema = z.object({
   // Cost telemetry
   usage: UsageSchema.optional(),
   cacheHit: z.boolean(),
+
+  // Shop Signal — Stage 0 commerce-page detector payload. Threaded
+  // through so the durable report consumer can persist it onto
+  // scam_reports.analysis_result alongside the rest of the analysis
+  // fields. Absent when FF_SHOP_SIGNAL is off or the detector didn't
+  // match. Field shape mirrors AnalysisResult.shopSignal (same Schema).
+  shopSignal: ShopSignalSchema.optional(),
 
   // Flags that gate consumer behaviour — captured at emission time so
   // consumers don't race a flag flip mid-flight.
