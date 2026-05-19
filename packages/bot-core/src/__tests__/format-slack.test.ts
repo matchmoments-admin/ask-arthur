@@ -67,4 +67,22 @@ describe("toSlackBlocks", () => {
     const context = blocks.find((b) => b.type === "context");
     expect(context?.elements?.[0]?.text).toContain("Ask Arthur");
   });
+
+  it("does not crash on a shopSignal payload carrying referrerSource (Stage 0.5)", () => {
+    // Stage 0.5 carries the share-sheet origin through onto the
+    // ShopSignal payload. The Slack formatter must keep rendering its
+    // existing block shape without throwing on the enriched payload.
+    const response = toSlackBlocks(
+      makeResult({
+        shopSignal: {
+          isCommerce: true,
+          commerceFlags: ["fake-australia-post", "off-platform-move"],
+          generatedAt: "2026-05-19T09:00:00.000Z",
+          referrerSource: "tiktok-inapp",
+        },
+      })
+    );
+    expect(response.attachments).toHaveLength(1);
+    expect(response.attachments[0].blocks.length).toBeGreaterThan(0);
+  });
 });

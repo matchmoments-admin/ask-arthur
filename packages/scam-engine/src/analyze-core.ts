@@ -42,7 +42,11 @@ import {
 import { mergeVerdict } from "@askarthur/core-analysis";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
-import type { AnalysisResult, RedirectChain } from "@askarthur/types";
+import type {
+  AnalysisResult,
+  RedirectChain,
+  ReferrerSource,
+} from "@askarthur/types";
 import { detectCommerceSignal, buildShopSignal } from "./shop-signal";
 
 export type AnalyzeSurface = AnalyzeCacheSurface;
@@ -76,6 +80,14 @@ export interface AnalyzeCoreInput {
   backgroundMode?: "waitUntil" | "fire-and-forget" | "skip";
   /** Correlation ID for log traces. */
   requestId?: string;
+  /**
+   * In-app-browser the user arrived from when the request came through the
+   * Web Share Target redirect. Wired in Stage 0.5 of Shop Guard so the
+   * Stage-0 measurement window can count mobile-share share of
+   * commerce-flagged volume; surfaces as `shopSignal.referrerSource` on
+   * the response when shop-signal also fires.
+   */
+  referrerSource?: ReferrerSource;
 }
 
 export interface AnalyzeCoreOutput {
@@ -122,6 +134,7 @@ export async function runAnalysisCore(
     skipCacheWrite = false,
     backgroundMode = "waitUntil",
     requestId,
+    referrerSource,
   } = input;
 
   // 1. Cache read (unless caller opted out).
@@ -216,7 +229,7 @@ export async function runAnalysisCore(
   // see docs/plans/shop-guard-v2.md §2 footnote). Plan:
   // docs/plans/shop-guard-v2.md §3.
   if (featureFlags.shopSignal && detectCommerceSignal(text, urlsToCheck)) {
-    result.shopSignal = buildShopSignal(merged.redFlags);
+    result.shopSignal = buildShopSignal(merged.redFlags, referrerSource);
   }
 
   // 6. Background fan-out.

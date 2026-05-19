@@ -17,6 +17,24 @@ import { detectCharityIntent } from "@askarthur/scam-engine/charity-intent";
 import { useMediaAnalysis } from "@/lib/hooks/useMediaAnalysis";
 import type { AnalysisResponse } from "@/types/analysis";
 import type { CharityCheckResult } from "./CharityVerdict";
+import type { ReferrerSource } from "@askarthur/types";
+
+// Whitelist client-side so a hand-crafted `?shared_inapp=foo` can't reach
+// the server with a value that would fail Zod's enum guard on
+// WebAnalyzeInputSchema.referrerSource and 400 the whole request.
+const KNOWN_REFERRER_SOURCES: readonly ReferrerSource[] = [
+  "instagram-inapp",
+  "tiktok-inapp",
+  "facebook-inapp",
+  "whatsapp-inapp",
+] as const;
+
+function parseReferrerSource(raw: string | null): ReferrerSource | undefined {
+  if (!raw) return undefined;
+  return (KNOWN_REFERRER_SOURCES as readonly string[]).includes(raw)
+    ? (raw as ReferrerSource)
+    : undefined;
+}
 import {
   charityResultToResultCardProps,
 } from "@/lib/charityResultToResultCard";
@@ -59,6 +77,12 @@ export default function ScamChecker() {
   const [progressStep, setProgressStep] = useState<ProgressStep | undefined>(undefined);
   const [errorAttempts, setErrorAttempts] = useState(0);
   const [errorRef, setErrorRef] = useState<string | null>(null);
+  // `shared_inapp` rides over from the /share-target redirect when the
+  // user landed via the Web Share Target route from an in-app browser.
+  // Stage 0.5 of Shop Guard — we forward it to /api/analyze so shop-signal
+  // can stamp it onto the response payload. Not surfaced in the UI at this
+  // stage; the chip render comes in Stage 1 PR 4 alongside the accordion.
+  const [referrerSource, setReferrerSource] = useState<ReferrerSource | undefined>(undefined);
   const searchParams = useSearchParams();
 
   // Media analysis hook
@@ -68,8 +92,14 @@ export default function ScamChecker() {
   // Pre-fill textarea from Web Share Target (Android PWA)
   useEffect(() => {
     const sharedText = searchParams.get("shared_text");
+    const sharedInapp = parseReferrerSource(searchParams.get("shared_inapp"));
     if (sharedText) {
       setText(sharedText);
+    }
+    if (sharedInapp) {
+      setReferrerSource(sharedInapp);
+    }
+    if (sharedText || sharedInapp) {
       // Clean up the URL without triggering a navigation
       window.history.replaceState({}, "", "/");
     }
@@ -316,6 +346,7 @@ export default function ScamChecker() {
           text: text.trim() || undefined,
           images: images.length > 0 ? images.map((i) => i.base64) : undefined,
           mode: inputMode !== "text" ? inputMode : undefined,
+          ...(referrerSource && { referrerSource }),
         }),
       });
       // Request is in-flight — advance to "lookup" (visible for the bulk of
@@ -381,6 +412,11 @@ export default function ScamChecker() {
     setErrorRef(null);
     setCharityIntent(false);
     setCharityResult(null);
+    // Clear the share-sheet origin attribution on "Check Another" — the
+    // referrer only describes the inbound landing, not the next manual
+    // check, and carrying it forward would inflate the mobile-share
+    // measurement (docs/plans/shop-guard-v2.md §3 target).
+    setReferrerSource(undefined);
     media.reset();
   }
 
