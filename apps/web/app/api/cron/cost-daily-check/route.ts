@@ -23,7 +23,7 @@ export async function GET(req: Request) {
     return new Response("Unauthorized", { status: 401 });
   }
 
-  // Read all 6 numeric env-var caps up front via the safe coercer. Track
+  // Read all numeric env-var caps up front via the safe coercer. Track
   // any invalid values so we can write a single diagnostic row before any
   // brake decision uses the (defaulted) value — otherwise a typo in
   // REDDIT_INTEL_CAP_USD silently disables the brake.
@@ -34,6 +34,10 @@ export async function GET(req: Request) {
     PHONE_FOOTPRINT_CAP_USD: readNumberEnv("PHONE_FOOTPRINT_CAP_USD", 5),
     CHARITY_CHECK_CAP_USD: readNumberEnv("CHARITY_CHECK_CAP_USD", 5),
     SHOP_SIGNAL_CAP_USD: readNumberEnv("SHOP_SIGNAL_CAP_USD", 15),
+    INBOUND_EMAIL_SPIKE_THRESHOLD_24H: readNumberEnv(
+      "INBOUND_EMAIL_SPIKE_THRESHOLD_24H",
+      500,
+    ),
   };
   const thresholdUsd = envReads.DAILY_COST_THRESHOLD_USD.value;
 
@@ -50,11 +54,14 @@ export async function GET(req: Request) {
   const invalidEnvs = Object.entries(envReads).filter(([, r]) => r.invalid);
   if (invalidEnvs.length > 0) {
     for (const [name, result] of invalidEnvs) {
-      logger.warn("cost-daily-check: invalid env value, falling back to default", {
-        env_var: name,
-        raw_value: result.rawValue,
-        fallback: result.value,
-      });
+      logger.warn(
+        "cost-daily-check: invalid env value, falling back to default",
+        {
+          env_var: name,
+          raw_value: result.rawValue,
+          fallback: result.value,
+        },
+      );
     }
     await supabase.from("cost_telemetry").insert(
       invalidEnvs.map(([name, result]) => ({
@@ -78,12 +85,37 @@ export async function GET(req: Request) {
     .single();
 
   if (todayError) {
-    logger.error("cost-daily-check: query failed", { error: todayError.message });
+    logger.error("cost-daily-check: query failed", {
+      error: todayError.message,
+    });
     return NextResponse.json({ error: "query_failed" }, { status: 500 });
   }
 
   const costTelemetryUsd = Number(today?.total_cost_usd ?? 0);
   const eventCount = Number(today?.event_count ?? 0);
+
+  const inboundEmailSpikeThreshold = Math.max(
+    1,
+    Math.floor(envReads.INBOUND_EMAIL_SPIKE_THRESHOLD_24H.value),
+  );
+  const inboundEmailSinceIso = new Date(
+    Date.now() - 24 * 60 * 60 * 1000,
+  ).toISOString();
+  const { count: inboundEmailCountRaw, error: inboundEmailCountError } =
+    await supabase
+      .from("cost_telemetry")
+      .select("id", { count: "exact", head: true })
+      .eq("feature", "intel-inbound-email")
+      .gte("created_at", inboundEmailSinceIso);
+  if (inboundEmailCountError) {
+    logger.warn("cost-daily-check: inbound-email volume query failed", {
+      error: inboundEmailCountError.message,
+    });
+  }
+  const inboundEmailCount24h = inboundEmailCountRaw ?? 0;
+  const inboundEmailVolumeSpike =
+    !inboundEmailCountError &&
+    inboundEmailCount24h >= inboundEmailSpikeThreshold;
 
   // Vonage Phone Footprint spend lives in telco_api_usage, not cost_telemetry,
   // so query it independently and include it in the global threshold gate.
@@ -103,8 +135,37 @@ export async function GET(req: Request) {
   const totalCostUsd = costTelemetryUsd + vonageCost;
 
   if (totalCostUsd <= thresholdUsd) {
+    if (inboundEmailVolumeSpike) {
+      await sendAdminTelegramMessage(
+        [
+          `⚠️ <b>Ask Arthur inbound-email volume spike</b>`,
+          ``,
+          `Accepted inbound emails in last 24h: <b>${inboundEmailCount24h.toLocaleString()}</b>`,
+          `Threshold: ${inboundEmailSpikeThreshold.toLocaleString()}`,
+          ``,
+          `Cost impact is $0, but this can indicate a leaked +ingest tag or a newsletter burst.`,
+          `Quarantine: https://askarthur.au/admin/inbound-quarantine`,
+        ].join("\n"),
+      );
+      return NextResponse.json({
+        alerted: true,
+        belowThreshold: true,
+        inboundEmailVolumeSpike,
+        inboundEmailCount24h,
+        inboundEmailSpikeThreshold,
+        totalCostUsd,
+        costTelemetryUsd,
+        vonageCost,
+        thresholdUsd,
+        eventCount,
+      });
+    }
+
     return NextResponse.json({
       belowThreshold: true,
+      inboundEmailVolumeSpike,
+      inboundEmailCount24h,
+      inboundEmailSpikeThreshold,
       totalCostUsd,
       costTelemetryUsd,
       vonageCost,
@@ -140,9 +201,8 @@ export async function GET(req: Request) {
   // (excluding reddit-intel-error which is $0 diagnostic). If sum exceeds
   // REDDIT_INTEL_CAP_USD, brake the whole pipeline for 24h.
   const vulnEnrichThresholdUsd = envReads.VULN_AU_ENRICHMENT_CAP_USD.value;
-  const vulnEnrichCost = top.find(
-    (t) => t.feature === "vuln_au_enrichment",
-  )?.cost ?? 0;
+  const vulnEnrichCost =
+    top.find((t) => t.feature === "vuln_au_enrichment")?.cost ?? 0;
 
   const redditIntelThresholdUsd = envReads.REDDIT_INTEL_CAP_USD.value;
   const redditIntelCost = top
@@ -172,7 +232,8 @@ export async function GET(req: Request) {
   // threshold is wired before the spend appears. Default $5/day matches
   // the per-feature pattern used elsewhere.
   const charityCheckThresholdUsd = envReads.CHARITY_CHECK_CAP_USD.value;
-  const charityCheckCost = top.find((t) => t.feature === "charity_check")?.cost ?? 0;
+  const charityCheckCost =
+    top.find((t) => t.feature === "charity_check")?.cost ?? 0;
 
   // Shop Signal — APIVoid Site Trustworthiness paid feed. Same multi-tag
   // aggregation as Reddit Intel: the headline `shop_signal` tag carries the
@@ -196,21 +257,21 @@ export async function GET(req: Request) {
   let charityCheckBrakeSet = false;
   let shopSignalBrakeSet = false;
   if (vulnEnrichCost > vulnEnrichThresholdUsd) {
-    const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    const { error: brakeError } = await supabase
-      .from("feature_brakes")
-      .upsert(
-        {
-          feature: "vuln_au_enrichment",
-          paused_until: pausedUntil,
-          reason: `Daily spend $${vulnEnrichCost.toFixed(2)} exceeded $${vulnEnrichThresholdUsd} cap`,
-          set_by: "cost-daily-check",
-          set_cost_usd: vulnEnrichCost,
-          set_threshold_usd: vulnEnrichThresholdUsd,
-          set_at: new Date().toISOString(),
-        },
-        { onConflict: "feature" },
-      );
+    const pausedUntil = new Date(
+      Date.now() + 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const { error: brakeError } = await supabase.from("feature_brakes").upsert(
+      {
+        feature: "vuln_au_enrichment",
+        paused_until: pausedUntil,
+        reason: `Daily spend $${vulnEnrichCost.toFixed(2)} exceeded $${vulnEnrichThresholdUsd} cap`,
+        set_by: "cost-daily-check",
+        set_cost_usd: vulnEnrichCost,
+        set_threshold_usd: vulnEnrichThresholdUsd,
+        set_at: new Date().toISOString(),
+      },
+      { onConflict: "feature" },
+    );
     if (brakeError) {
       logger.error("failed to set vuln_au_enrichment brake", {
         error: brakeError.message,
@@ -229,20 +290,18 @@ export async function GET(req: Request) {
     const pausedUntil = new Date(
       Date.now() + 24 * 60 * 60 * 1000,
     ).toISOString();
-    const { error: brakeError } = await supabase
-      .from("feature_brakes")
-      .upsert(
-        {
-          feature: "reddit_intel",
-          paused_until: pausedUntil,
-          reason: `Daily spend $${redditIntelCost.toFixed(2)} exceeded $${redditIntelThresholdUsd} cap`,
-          set_by: "cost-daily-check",
-          set_cost_usd: redditIntelCost,
-          set_threshold_usd: redditIntelThresholdUsd,
-          set_at: new Date().toISOString(),
-        },
-        { onConflict: "feature" },
-      );
+    const { error: brakeError } = await supabase.from("feature_brakes").upsert(
+      {
+        feature: "reddit_intel",
+        paused_until: pausedUntil,
+        reason: `Daily spend $${redditIntelCost.toFixed(2)} exceeded $${redditIntelThresholdUsd} cap`,
+        set_by: "cost-daily-check",
+        set_cost_usd: redditIntelCost,
+        set_threshold_usd: redditIntelThresholdUsd,
+        set_at: new Date().toISOString(),
+      },
+      { onConflict: "feature" },
+    );
     if (brakeError) {
       logger.error("failed to set reddit_intel brake", {
         error: brakeError.message,
@@ -258,23 +317,25 @@ export async function GET(req: Request) {
   }
 
   if (charityCheckCost > charityCheckThresholdUsd) {
-    const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    const { error: brakeError } = await supabase
-      .from("feature_brakes")
-      .upsert(
-        {
-          feature: "charity_check",
-          paused_until: pausedUntil,
-          reason: `Daily spend $${charityCheckCost.toFixed(2)} exceeded $${charityCheckThresholdUsd} cap`,
-          set_by: "cost-daily-check",
-          set_cost_usd: charityCheckCost,
-          set_threshold_usd: charityCheckThresholdUsd,
-          set_at: new Date().toISOString(),
-        },
-        { onConflict: "feature" },
-      );
+    const pausedUntil = new Date(
+      Date.now() + 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const { error: brakeError } = await supabase.from("feature_brakes").upsert(
+      {
+        feature: "charity_check",
+        paused_until: pausedUntil,
+        reason: `Daily spend $${charityCheckCost.toFixed(2)} exceeded $${charityCheckThresholdUsd} cap`,
+        set_by: "cost-daily-check",
+        set_cost_usd: charityCheckCost,
+        set_threshold_usd: charityCheckThresholdUsd,
+        set_at: new Date().toISOString(),
+      },
+      { onConflict: "feature" },
+    );
     if (brakeError) {
-      logger.error("failed to set charity_check brake", { error: brakeError.message });
+      logger.error("failed to set charity_check brake", {
+        error: brakeError.message,
+      });
     } else {
       charityCheckBrakeSet = true;
       logger.warn("charity_check brake engaged", {
@@ -289,20 +350,18 @@ export async function GET(req: Request) {
     const pausedUntil = new Date(
       Date.now() + 24 * 60 * 60 * 1000,
     ).toISOString();
-    const { error: brakeError } = await supabase
-      .from("feature_brakes")
-      .upsert(
-        {
-          feature: "phone_footprint",
-          paused_until: pausedUntil,
-          reason: `Daily spend $${phoneFootprintCost.toFixed(2)} exceeded $${phoneFootprintThresholdUsd} cap (Vonage $${vonageCost.toFixed(2)} + telemetry $${phoneFootprintTelemetryCost.toFixed(2)})`,
-          set_by: "cost-daily-check",
-          set_cost_usd: phoneFootprintCost,
-          set_threshold_usd: phoneFootprintThresholdUsd,
-          set_at: new Date().toISOString(),
-        },
-        { onConflict: "feature" },
-      );
+    const { error: brakeError } = await supabase.from("feature_brakes").upsert(
+      {
+        feature: "phone_footprint",
+        paused_until: pausedUntil,
+        reason: `Daily spend $${phoneFootprintCost.toFixed(2)} exceeded $${phoneFootprintThresholdUsd} cap (Vonage $${vonageCost.toFixed(2)} + telemetry $${phoneFootprintTelemetryCost.toFixed(2)})`,
+        set_by: "cost-daily-check",
+        set_cost_usd: phoneFootprintCost,
+        set_threshold_usd: phoneFootprintThresholdUsd,
+        set_at: new Date().toISOString(),
+      },
+      { onConflict: "feature" },
+    );
     if (brakeError) {
       logger.error("failed to set phone_footprint brake", {
         error: brakeError.message,
@@ -319,21 +378,21 @@ export async function GET(req: Request) {
   }
 
   if (shopSignalCost > shopSignalThresholdUsd) {
-    const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    const { error: brakeError } = await supabase
-      .from("feature_brakes")
-      .upsert(
-        {
-          feature: "shop_signal",
-          paused_until: pausedUntil,
-          reason: `Daily spend $${shopSignalCost.toFixed(2)} exceeded $${shopSignalThresholdUsd} cap`,
-          set_by: "cost-daily-check",
-          set_cost_usd: shopSignalCost,
-          set_threshold_usd: shopSignalThresholdUsd,
-          set_at: new Date().toISOString(),
-        },
-        { onConflict: "feature" },
-      );
+    const pausedUntil = new Date(
+      Date.now() + 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const { error: brakeError } = await supabase.from("feature_brakes").upsert(
+      {
+        feature: "shop_signal",
+        paused_until: pausedUntil,
+        reason: `Daily spend $${shopSignalCost.toFixed(2)} exceeded $${shopSignalThresholdUsd} cap`,
+        set_by: "cost-daily-check",
+        set_cost_usd: shopSignalCost,
+        set_threshold_usd: shopSignalThresholdUsd,
+        set_at: new Date().toISOString(),
+      },
+      { onConflict: "feature" },
+    );
     if (brakeError) {
       logger.error("failed to set shop_signal brake", {
         error: brakeError.message,
@@ -396,6 +455,12 @@ export async function GET(req: Request) {
       `🛑 <b>shop_signal brake engaged</b> — paused for 24h (spend $${shopSignalCost.toFixed(2)} > $${shopSignalThresholdUsd} cap)`,
     );
   }
+  if (inboundEmailVolumeSpike) {
+    lines.push(
+      "",
+      `⚠️ <b>inbound-email volume spike</b> — ${inboundEmailCount24h.toLocaleString()}/24h >= ${inboundEmailSpikeThreshold.toLocaleString()} threshold`,
+    );
+  }
   lines.push("", `Full breakdown: https://askarthur.au/admin/costs`);
 
   await sendAdminTelegramMessage(lines.join("\n"));
@@ -416,5 +481,8 @@ export async function GET(req: Request) {
     charityCheckCost,
     shopSignalBrakeSet,
     shopSignalCost,
+    inboundEmailVolumeSpike,
+    inboundEmailCount24h,
+    inboundEmailSpikeThreshold,
   });
 }

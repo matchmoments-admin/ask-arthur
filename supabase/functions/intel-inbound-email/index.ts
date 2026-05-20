@@ -150,7 +150,7 @@ function provenanceTierFor(source: string): string {
     case "inbound_riskybiz":
     case "inbound_krebs":
     case "inbound_tldr_infosec": // v129
-    case "inbound_thn":          // v129
+    case "inbound_thn": // v129
     case "inbound_securityweek": // v129
       return "tier_3_curated";
     default:
@@ -245,8 +245,39 @@ Deno.serve(async (req: Request) => {
     if (error.code === "23505") {
       return jsonResponse({ status: "duplicate", source: payload.source }, 200);
     }
-    return jsonResponse({ error: "db_write_failed", detail: error.message }, 500);
+    return jsonResponse(
+      { error: "db_write_failed", detail: error.message },
+      500,
+    );
   }
 
-  return jsonResponse({ status: "stored", id: data?.id, source: payload.source }, 200);
+  const { error: telemetryError } = await supabase
+    .from("cost_telemetry")
+    .insert({
+      feature: "intel-inbound-email",
+      provider: "cloudflare",
+      operation: "email-receive",
+      units: 1,
+      unit_cost_usd: 0,
+      estimated_cost_usd: 0,
+      metadata: {
+        source: payload.source,
+        from: payload.from,
+        to: payload.to,
+        subject_len: payload.subject.length,
+        body_len: payload.body_md.length,
+        feed_item_id: data?.id ?? null,
+      },
+    });
+  if (telemetryError) {
+    console.warn("intel-inbound-email: cost_telemetry insert failed", {
+      source: payload.source,
+      detail: telemetryError.message,
+    });
+  }
+
+  return jsonResponse(
+    { status: "stored", id: data?.id, source: payload.source },
+    200,
+  );
 });

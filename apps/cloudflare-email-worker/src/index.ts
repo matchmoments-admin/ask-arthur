@@ -69,11 +69,72 @@ const KNOWN_TAGS = [
   "scan",
 ] as const;
 type KnownTag = (typeof KNOWN_TAGS)[number];
+type NewsletterTag = Exclude<KnownTag, "scan">;
+
+const TAG_SENDER_ALLOWLIST: Record<NewsletterTag, RegExp[]> = {
+  scamwatch: [
+    /(^|\.)scamwatch\.gov\.au$/,
+    /(^|\.)mailchimp\.com$/,
+    /(^|\.)list-manage\.com$/,
+    /(^|\.)mailchi\.mp$/,
+    /(^|\.)accc\.gov\.au$/,
+  ],
+  acsc: [/(^|\.)cyber\.gov\.au$/, /(^|\.)govdelivery\.com$/],
+  austrac: [/(^|\.)austrac\.gov\.au$/, /(^|\.)govdelivery\.com$/],
+  oaic: [/(^|\.)oaic\.gov\.au$/, /(^|\.)govdelivery\.com$/],
+  afp: [/(^|\.)afp\.gov\.au$/, /(^|\.)govdelivery\.com$/],
+  acma: [/(^|\.)acma\.gov\.au$/, /(^|\.)govdelivery\.com$/],
+  idcare: [/(^|\.)idcare\.org$/],
+  auscert: [/(^|\.)auscert\.org\.au$/],
+  ftc: [
+    /(^|\.)ftc\.gov$/,
+    /(^|\.)consumer\.ftc\.gov$/,
+    /(^|\.)govdelivery\.com$/,
+  ],
+  riskybiz: [/(^|\.)risky\.biz$/, /(^|\.)substack\.com$/],
+  krebs: [/(^|\.)krebsonsecurity\.com$/, /(^|\.)wordpress\.com$/],
+  ato: [/(^|\.)ato\.gov\.au$/, /(^|\.)govdelivery\.com$/],
+  sans: [/(^|\.)sans\.org$/],
+  tldr_infosec: [/(^|\.)tldr\.tech$/, /(^|\.)beehiiv\.com$/],
+  thn: [/(^|\.)thehackernews\.com$/, /(^|\.)netline\.com$/],
+  securityweek: [/(^|\.)securityweek\.com$/],
+};
 
 /** True when this source should be routed to the user-scan endpoint
  *  instead of the intel-inbound newsletter Edge Function. */
 function isUserScanSource(source: string): boolean {
   return source === "inbound_scan";
+}
+
+export function senderDomain(from: string): string | null {
+  const angleMatch = from.match(/<[^@\s<>]+@([^>\s]+)>/);
+  const rawDomain = angleMatch?.[1] ?? from.match(/@([^\s>]+)$/)?.[1];
+  if (!rawDomain) return null;
+  return rawDomain.replace(/[>"')\],;]+$/g, "").toLowerCase();
+}
+
+export function isAllowedSenderForSource(
+  source: string,
+  from: string,
+): boolean {
+  if (
+    !source.startsWith("inbound_") ||
+    source === "inbound_generic" ||
+    isUserScanSource(source)
+  ) {
+    return true;
+  }
+
+  const tag = source.slice("inbound_".length);
+  if (!(tag in TAG_SENDER_ALLOWLIST)) {
+    return false;
+  }
+
+  const domain = senderDomain(from);
+  if (!domain) return false;
+  return TAG_SENDER_ALLOWLIST[tag as NewsletterTag].some((pattern) =>
+    pattern.test(domain),
+  );
 }
 
 function resolveSource(addresses: string[]): string {
@@ -92,30 +153,32 @@ function resolveSource(addresses: string[]): string {
 
 // Exported for unit tests in index.test.ts (#237 + #238 regression fixes).
 export function htmlToText(html: string): string {
-  return html
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    // #238: preserve <a href> URLs as "label (url)" so newsletters whose
-    // confirm CTAs are button-only (TLDR, SANS, THN, SecurityWeek) don't
-    // lose the href when the generic tag-strip below runs. Anchor labels
-    // may wrap nested tags (<span>, <strong>); inner tags are stripped
-    // here so the label reads cleanly in the resulting text.
-    .replace(
-      /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi,
-      (_, url, label) => `${label.replace(/<[^>]+>/g, "")} (${url})`,
-    )
-    .replace(/<\/?(p|br|div|tr|li|h[1-6])[^>]*>/gi, "\n")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&#39;/g, "'")
-    .replace(/&quot;/g, '"')
-    .replace(/[ \t]+/g, " ")
-    .replace(/\n[ \t]+/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  return (
+    html
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      // #238: preserve <a href> URLs as "label (url)" so newsletters whose
+      // confirm CTAs are button-only (TLDR, SANS, THN, SecurityWeek) don't
+      // lose the href when the generic tag-strip below runs. Anchor labels
+      // may wrap nested tags (<span>, <strong>); inner tags are stripped
+      // here so the label reads cleanly in the resulting text.
+      .replace(
+        /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi,
+        (_, url, label) => `${label.replace(/<[^>]+>/g, "")} (${url})`,
+      )
+      .replace(/<\/?(p|br|div|tr|li|h[1-6])[^>]*>/gi, "\n")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&#39;/g, "'")
+      .replace(/&quot;/g, '"')
+      .replace(/[ \t]+/g, " ")
+      .replace(/\n[ \t]+/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim()
+  );
 }
 
 // ── GovDelivery / link-tracking redirect resolver ───────────────────────
@@ -130,10 +193,10 @@ export function htmlToText(html: string): string {
 // failures into the storage path).
 
 const TRACKING_HOSTS = [
-  "lnks.gd",         // GovDelivery
-  "click.email",     // generic Mailgun-style
+  "lnks.gd", // GovDelivery
+  "click.email", // generic Mailgun-style
   "trk.klclick.com", // Klaviyo
-  "go.email",        // generic
+  "go.email", // generic
   "url.us.m.mimecastprotect.com",
 ];
 
@@ -202,8 +265,12 @@ export function isBoilerplatePlainText(text: string): boolean {
   if (text.length > 2000) return false;
   return (
     /not formatted for viewing in a\s*text email client/i.test(text) ||
-    /please read.{0,40}(?:html.friendly|in.{0,20}html|as a web page)/i.test(text) ||
-    /view (?:this )?email .{0,40}(?:as a web page|in.{0,20}browser|in.{0,20}html)/i.test(text)
+    /please read.{0,40}(?:html.friendly|in.{0,20}html|as a web page)/i.test(
+      text,
+    ) ||
+    /view (?:this )?email .{0,40}(?:as a web page|in.{0,20}browser|in.{0,20}html)/i.test(
+      text,
+    )
   );
 }
 
@@ -232,7 +299,11 @@ async function externalIdFor(
 // ── Email handler ───────────────────────────────────────────────────────
 
 export default {
-  async email(message: ForwardableEmailMessage, env: Env, _ctx: ExecutionContext) {
+  async email(
+    message: ForwardableEmailMessage,
+    env: Env,
+    _ctx: ExecutionContext,
+  ) {
     // Always log a "received" line — this is the only thing visible in
     // `wrangler tail` when an email arrives but downstream fails before
     // any other log fires. Without it, a failure in postal-mime / fetch
@@ -276,6 +347,18 @@ export default {
     const from = parsed.from?.address ?? message.from;
     const receivedAt = (parsed.date ?? new Date().toISOString()).toString();
 
+    if (!isAllowedSenderForSource(source, from)) {
+      console.warn("inbound-email: sender-domain rejected", {
+        source,
+        from_domain: senderDomain(from) ?? "(unparseable)",
+        to: toCandidates[0] ?? message.to,
+      });
+      if (env.QUARANTINE_FORWARDER) {
+        await env.QUARANTINE_FORWARDER.send(message).catch(() => {});
+      }
+      return;
+    }
+
     // Body: prefer text/plain unless it's just an "open me in an HTML
     // email client" boilerplate stub (THN does this). See
     // isBoilerplatePlainText() for the heuristic. Cap at 50KB to satisfy
@@ -302,8 +385,14 @@ export default {
       if (resolved !== firstUrl) body = body.replace(firstUrl, resolved);
     }
 
-    const messageId = parsed.messageId ?? message.headers.get("message-id") ?? undefined;
-    const externalId = await externalIdFor(messageId, from, subject, receivedAt);
+    const messageId =
+      parsed.messageId ?? message.headers.get("message-id") ?? undefined;
+    const externalId = await externalIdFor(
+      messageId,
+      from,
+      subject,
+      receivedAt,
+    );
 
     const payload = {
       source,
@@ -334,11 +423,14 @@ export default {
     let targetUrl: string;
     if (isUserScanSource(source)) {
       if (!env.SCAN_REPORT_ENDPOINT_URL) {
-        console.error("inbound-email: SCAN_REPORT_ENDPOINT_URL missing for inbound_scan", {
-          source,
-          externalId,
-          to: payload.to,
-        });
+        console.error(
+          "inbound-email: SCAN_REPORT_ENDPOINT_URL missing for inbound_scan",
+          {
+            source,
+            externalId,
+            to: payload.to,
+          },
+        );
         if (env.QUARANTINE_FORWARDER) {
           await env.QUARANTINE_FORWARDER.send(message).catch(() => {});
         }

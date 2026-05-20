@@ -1,6 +1,6 @@
 # Inbound-email ingestion — operational setup
 
-**Last updated:** 2026-05-15 (PR-A3 shipped + deployed)
+**Last updated:** 2026-05-20 (PR-A4 sender allowlist + volume telemetry)
 
 The inbound-email pipeline turns any email subscription (GovDelivery, Substack, ad-hoc gov newsletter) into a row in `feed_items` that the existing `feed-items-embed` Inngest job picks up automatically. It is the foundation for the Wave-2/4 sources that have **no RSS** (Scamwatch, IDCARE Insights, FTC Consumer Alerts, AusCERT Week-in-Review, AUSTRAC subscription, OAIC newsletter, AFP media-release subscription).
 
@@ -17,7 +17,7 @@ The inbound-email pipeline turns any email subscription (GovDelivery, Substack, 
 
 Verified end-to-end via curl on deploy day: bad secret → 401, kill-switch OFF → 204, kill-switch ON + valid secret + bad payload → 422.
 
-**Operational follow-up: PR-A4 is deferred** — adds per-tag sender-domain allowlist in the Worker (e.g. `inbound_acsc` only accepts `cyber.gov.au` / `govdelivery.com` senders) plus `cost_telemetry` volume rows for spike alerts. Build trigger: first observed abuse or first volume-spike alert from real subscriptions.
+**PR-A4 guardrails are in code** — the Worker enforces the per-tag sender-domain allowlist (e.g. `inbound_acsc` only accepts `cyber.gov.au` / `govdelivery.com` senders) before forwarding, and the Edge Function writes `feature='intel-inbound-email'` zero-cost telemetry for accepted mail. `/api/cron/cost-daily-check` pages Telegram when accepted mail crosses `INBOUND_EMAIL_SPIKE_THRESHOLD_24H` (default `500`) over the last 24h.
 
 ## Architecture
 
@@ -39,6 +39,7 @@ Supabase Edge Function (supabase/functions/intel-inbound-email)
    │  • shared-secret auth (constant-time)
    │  • Zod validation
    │  • upsert into feed_items ON CONFLICT (source, external_id) DO NOTHING
+   │  • writes zero-cost cost_telemetry row for volume-spike detection
    ▼
 feed_items   ──── existing feed-items-embed Inngest, every 30 min ──▶ Voyage embed
              ──── existing regulator-alert-push Inngest, every 30 min ──▶ HIGH-confidence pushes
@@ -259,20 +260,21 @@ Briefly during the swap (~30s) the Edge Function may 401 the Worker's POSTs. Inb
 | Claude per email                           | **A$0** — Worker writes raw text directly to `feed_items`; Wave-3 clustering batches any Claude work |
 | **Total recurring**                        | **A$0/mo** (plus A$16/year for the domain)                                                           |
 
-A `feature_brakes.intel_inbound_email` row is **not** required at MVP because no Claude is in the per-email path. PR-A4 (deferred) would add it as defense-in-depth once we observe baseline volume.
+A `feature_brakes.intel_inbound_email` row is **not** required because no Claude is in the per-email path. Volume defense-in-depth is handled by zero-cost telemetry plus `INBOUND_EMAIL_SPIKE_THRESHOLD_24H` in `/api/cron/cost-daily-check`.
 
 ## Failure modes
 
-| Symptom                                                                                 | Cause                                                                                                     | Recovery                                                                                          |
-| --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Edge Function 401 from Worker                                                           | Worker secret diverged from Edge Function secret                                                          | Re-run secret rotation above; both sides must match                                               |
-| Edge Function 422                                                                       | Cloudflare changed wrapper-redirect host & we no longer resolve to a valid URL → Zod fails on `url` field | Add new host to `TRACKING_HOSTS` in `apps/cloudflare-email-worker/src/index.ts`                   |
-| Edge Function 204 with kill switch ON                                                   | `ENABLE_INTEL_INBOUND_EMAIL` flag drifted                                                                 | `supabase secrets list --project-ref rquomhcgnodxzkhokwni`; re-set to `true`                      |
-| Edge Function deploy fails with "Could not find version of '@zod/zod' that matches '3'" | JSR's @zod/zod is v4-only                                                                                 | Already fixed: import is `npm:zod@3.23.8`                                                         |
-| Edge Function returns "Missing authorization header"                                    | Forgot `--no-verify-jwt` flag on `supabase functions deploy`                                              | Re-deploy with `--no-verify-jwt`                                                                  |
-| Worker `postal-mime parse failed`                                                       | Malformed MIME from an upstream                                                                           | `QUARANTINE_FORWARDER` route forwards raw message to `ops@askarthur.au`; not yet wired up at MVP  |
-| `feed_items` constraint violation                                                       | A new `+ingest` tag was added without an `inbound_<tag>` slug in `feed_items_source_check`                | Ship a follow-up migration extending the allowlist (mirror v128)                                  |
-| Routing rule shows but no email arrives                                                 | Subaddressing is OFF, or the rule was created with the literal `+ingest` suffix instead of just the tag   | Settings → "Enable subaddressing" ON; recreate rule with custom address = tag only (no `+ingest`) |
+| Symptom                                                                                 | Cause                                                                                                     | Recovery                                                                                                                    |
+| --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Edge Function 401 from Worker                                                           | Worker secret diverged from Edge Function secret                                                          | Re-run secret rotation above; both sides must match                                                                         |
+| Edge Function 422                                                                       | Cloudflare changed wrapper-redirect host & we no longer resolve to a valid URL → Zod fails on `url` field | Add new host to `TRACKING_HOSTS` in `apps/cloudflare-email-worker/src/index.ts`                                             |
+| Edge Function 204 with kill switch ON                                                   | `ENABLE_INTEL_INBOUND_EMAIL` flag drifted                                                                 | `supabase secrets list --project-ref rquomhcgnodxzkhokwni`; re-set to `true`                                                |
+| Edge Function deploy fails with "Could not find version of '@zod/zod' that matches '3'" | JSR's @zod/zod is v4-only                                                                                 | Already fixed: import is `npm:zod@3.23.8`                                                                                   |
+| Edge Function returns "Missing authorization header"                                    | Forgot `--no-verify-jwt` flag on `supabase functions deploy`                                              | Re-deploy with `--no-verify-jwt`                                                                                            |
+| Worker `postal-mime parse failed`                                                       | Malformed MIME from an upstream                                                                           | `QUARANTINE_FORWARDER` route forwards raw message to `ops@askarthur.au`; not yet wired up at MVP                            |
+| Worker `sender-domain rejected`                                                         | Mail arrived on a known newsletter tag from a domain outside that tag's allowlist                         | Check the sender domain against the subscription provider; update `TAG_SENDER_ALLOWLIST` only after confirming real traffic |
+| `feed_items` constraint violation                                                       | A new `+ingest` tag was added without an `inbound_<tag>` slug in `feed_items_source_check`                | Ship a follow-up migration extending the allowlist (mirror v128)                                                            |
+| Routing rule shows but no email arrives                                                 | Subaddressing is OFF, or the rule was created with the literal `+ingest` suffix instead of just the tag   | Settings → "Enable subaddressing" ON; recreate rule with custom address = tag only (no `+ingest`)                           |
 
 ## Related
 

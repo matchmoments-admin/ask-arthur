@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { extractFirstUrl, htmlToText, isBoilerplatePlainText } from "./index";
+import {
+  extractFirstUrl,
+  htmlToText,
+  isAllowedSenderForSource,
+  isBoilerplatePlainText,
+  senderDomain,
+} from "./index";
 
 describe("htmlToText (#238 regression)", () => {
   it("preserves anchor href on button-only confirm CTAs (TLDR / SANS / THN shape)", () => {
-    const html =
-      `<table><tr><td><a href="https://tldr.tech/confirm/abc123">Confirm Signup</a></td></tr></table>`;
+    const html = `<table><tr><td><a href="https://tldr.tech/confirm/abc123">Confirm Signup</a></td></tr></table>`;
     const out = htmlToText(html);
     expect(out).toContain("https://tldr.tech/confirm/abc123");
     expect(out).toContain("Confirm Signup");
@@ -21,8 +26,7 @@ describe("htmlToText (#238 regression)", () => {
   });
 
   it("strips nested tags inside an anchor label", () => {
-    const html =
-      `<a href="https://example.com"><span>Click</span> <strong>here</strong></a>`;
+    const html = `<a href="https://example.com"><span>Click</span> <strong>here</strong></a>`;
     const out = htmlToText(html);
     expect(out).toContain("https://example.com");
     expect(out).toContain("Click");
@@ -38,8 +42,7 @@ describe("htmlToText (#238 regression)", () => {
 
 describe("extractFirstUrl (#237 regression)", () => {
   it("strips a trailing closing paren from Markdown-wrapped links", () => {
-    const text =
-      `Yes, subscribe me to this list. (https://accc.us10.list-manage.com/subscribe/confirm?u=abc&id=def&e=ghi)`;
+    const text = `Yes, subscribe me to this list. (https://accc.us10.list-manage.com/subscribe/confirm?u=abc&id=def&e=ghi)`;
     expect(extractFirstUrl(text)).toBe(
       "https://accc.us10.list-manage.com/subscribe/confirm?u=abc&id=def&e=ghi",
     );
@@ -55,9 +58,9 @@ describe("extractFirstUrl (#237 regression)", () => {
   });
 
   it("does not strip non-punctuation suffixes", () => {
-    expect(
-      extractFirstUrl("https://example.com/path?a=1&b=2 trailing"),
-    ).toBe("https://example.com/path?a=1&b=2");
+    expect(extractFirstUrl("https://example.com/path?a=1&b=2 trailing")).toBe(
+      "https://example.com/path?a=1&b=2",
+    );
   });
 
   it("returns undefined when no URL is present", () => {
@@ -91,7 +94,8 @@ Copyright (c) 2014 NetLine Corporation. All rights reserved.
   });
 
   it("detects 'view in browser' variant (HubSpot)", () => {
-    const text = "Having trouble viewing this email? View this email in your browser.";
+    const text =
+      "Having trouble viewing this email? View this email in your browser.";
     expect(isBoilerplatePlainText(text)).toBe(true);
   });
 
@@ -113,5 +117,45 @@ Copyright (c) 2014 NetLine Corporation. All rights reserved.
   it("handles empty + whitespace-only input", () => {
     expect(isBoilerplatePlainText("")).toBe(false);
     expect(isBoilerplatePlainText("   \n\t  ")).toBe(false);
+  });
+});
+
+describe("sender allowlist (PR-A4 abuse guard)", () => {
+  it("extracts domains from plain and display-name sender shapes", () => {
+    expect(senderDomain("alerts@cyber.gov.au")).toBe("cyber.gov.au");
+    expect(
+      senderDomain("ACSC Alert Service <alerts@updates.cyber.gov.au>"),
+    ).toBe("updates.cyber.gov.au");
+    expect(senderDomain("not an email")).toBeNull();
+  });
+
+  it("allows configured subdomains for the matching inbound source", () => {
+    expect(
+      isAllowedSenderForSource("inbound_acsc", "alerts@updates.cyber.gov.au"),
+    ).toBe(true);
+    expect(
+      isAllowedSenderForSource(
+        "inbound_scamwatch",
+        "bounce@us10.list-manage.com",
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects a known ingest tag when the sender domain does not match", () => {
+    expect(
+      isAllowedSenderForSource("inbound_acsc", "attacker@example.com"),
+    ).toBe(false);
+    expect(
+      isAllowedSenderForSource("inbound_krebs", "post@wordpress.com.au"),
+    ).toBe(false);
+  });
+
+  it("does not apply newsletter allowlists to generic or user-scan mail", () => {
+    expect(
+      isAllowedSenderForSource("inbound_generic", "unknown@example.com"),
+    ).toBe(true);
+    expect(isAllowedSenderForSource("inbound_scan", "victim@example.com")).toBe(
+      true,
+    );
   });
 });
