@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { waitUntil, ipAddress } from "@vercel/functions";
-import { checkRateLimit, checkImageUploadRateLimit } from "@askarthur/utils/rate-limit";
-import { analyzeWithClaude, detectInjectionAttempt } from "@askarthur/scam-engine/claude";
+import {
+  checkRateLimit,
+  checkImageUploadRateLimit,
+} from "@askarthur/utils/rate-limit";
+import {
+  analyzeWithClaude,
+  detectInjectionAttempt,
+} from "@askarthur/scam-engine/claude";
 import { mergeVerdict } from "@askarthur/core-analysis";
 import {
   getRelevantThemes,
@@ -9,19 +15,47 @@ import {
 } from "@askarthur/scam-engine/retrieval/themes";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { resolveRequestId } from "@askarthur/utils/request-id";
-import { extractContactsFromText, normalizePhoneE164 } from "@askarthur/scam-engine/phone-normalize";
-import { extractURLs, checkURLReputation } from "@askarthur/scam-engine/safebrowsing";
-import { resolveRedirects, extractFinalUrls } from "@askarthur/scam-engine/redirect-resolver";
+import {
+  extractContactsFromText,
+  normalizePhoneE164,
+} from "@askarthur/scam-engine/phone-normalize";
+import {
+  extractURLs,
+  checkURLReputation,
+} from "@askarthur/scam-engine/safebrowsing";
+import {
+  resolveRedirects,
+  extractFinalUrls,
+} from "@askarthur/scam-engine/redirect-resolver";
 import { geolocateFromHeaders } from "@askarthur/scam-engine/geolocate";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { ANALYZE_COMPLETED_EVENT } from "@askarthur/scam-engine/inngest/events";
-import { detectCharityIntent, type CharityIntent } from "@askarthur/scam-engine/charity-intent";
-import { detectCommerceSignal, buildShopSignal } from "@askarthur/scam-engine/shop-signal";
+import {
+  detectCharityIntent,
+  type CharityIntent,
+} from "@askarthur/scam-engine/charity-intent";
+import {
+  detectCommerceSignal,
+  buildShopSignal,
+} from "@askarthur/scam-engine/shop-signal";
+import {
+  settleShopSignalPersistence,
+  shopSignalSourceSurface,
+} from "@askarthur/scam-engine/shop-signal-persist";
 import { WebAnalyzeInputSchema, type RedirectChain } from "@askarthur/types";
-import { storeVerifiedScam, incrementStats } from "@askarthur/scam-engine/pipeline";
-import { storeScamReport, buildEntities } from "@askarthur/scam-engine/report-store";
+import {
+  storeVerifiedScam,
+  incrementStats,
+} from "@askarthur/scam-engine/pipeline";
+import {
+  storeScamReport,
+  buildEntities,
+} from "@askarthur/scam-engine/report-store";
 import { hashIdentifier } from "@askarthur/utils/hash";
-import { getCachedAnalysis, setCachedAnalysis } from "@askarthur/scam-engine/analysis-cache";
+import {
+  getCachedAnalysis,
+  setCachedAnalysis,
+} from "@askarthur/scam-engine/analysis-cache";
 import type { PhoneLookupResult } from "@askarthur/types";
 import { lookupPhoneNumber, extractPhoneNumbers } from "@/lib/twilioLookup";
 import { uploadScreenshot } from "@/lib/r2";
@@ -71,7 +105,7 @@ export async function POST(req: NextRequest) {
         logger.error("analyze.ip_extraction_failed");
         return NextResponse.json(
           { error: "bad_request", message: "Could not identify client." },
-          { status: 400 }
+          { status: 400 },
         );
       }
       // Dev: allow the request with a loopback identity
@@ -97,10 +131,12 @@ export async function POST(req: NextRequest) {
           headers: {
             "X-RateLimit-Remaining": "0",
             "Retry-After": rateCheck.resetAt
-              ? String(Math.ceil((rateCheck.resetAt.getTime() - Date.now()) / 1000))
+              ? String(
+                  Math.ceil((rateCheck.resetAt.getTime() - Date.now()) / 1000),
+                )
               : "3600",
           },
-        }
+        },
       );
     }
 
@@ -110,15 +146,20 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json(
         { error: "validation_error", message: parsed.error.issues[0]?.message },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
-    const { text, image, images: rawImages, mode, referrerSource } = parsed.data;
+    const {
+      text,
+      image,
+      images: rawImages,
+      mode,
+      referrerSource,
+    } = parsed.data;
     // Normalize: merge legacy single `image` into `images` array
-    const images: string[] = rawImages && rawImages.length > 0
-      ? rawImages
-      : image ? [image] : [];
+    const images: string[] =
+      rawImages && rawImages.length > 0 ? rawImages : image ? [image] : [];
 
     // Charity-intent detection (v0.2e). Pure regex; no I/O. When the input
     // looks charity-shaped (keyword OR ABN), attach a small payload to the
@@ -138,36 +179,51 @@ export async function POST(req: NextRequest) {
       const imgRl = await checkImageUploadRateLimit(clientIp);
       if (!imgRl.allowed) {
         return NextResponse.json(
-          { error: "rate_limited", message: imgRl.message, resetAt: imgRl.resetAt?.toISOString() },
+          {
+            error: "rate_limited",
+            message: imgRl.message,
+            resetAt: imgRl.resetAt?.toISOString(),
+          },
           {
             status: 429,
             headers: {
               "X-RateLimit-Remaining": "0",
               "Retry-After": imgRl.resetAt
-                ? String(Math.max(1, Math.ceil((imgRl.resetAt.getTime() - Date.now()) / 1000)))
+                ? String(
+                    Math.max(
+                      1,
+                      Math.ceil((imgRl.resetAt.getTime() - Date.now()) / 1000),
+                    ),
+                  )
                 : "3600",
             },
-          }
+          },
         );
       }
     }
 
     // 2b. Validate image magic bytes (prevent disguised file uploads)
     if (images.length > 0) {
-      const { validateImageMagicBytes } = await import("@askarthur/scam-engine/image-validate");
+      const { validateImageMagicBytes } =
+        await import("@askarthur/scam-engine/image-validate");
       for (const img of images) {
         const { valid } = validateImageMagicBytes(img);
         if (!valid) {
           return NextResponse.json(
-            { error: "validation_error", message: "Invalid image format. Supported: JPEG, PNG, GIF, WebP." },
-            { status: 400 }
+            {
+              error: "validation_error",
+              message: "Invalid image format. Supported: JPEG, PNG, GIF, WebP.",
+            },
+            { status: 400 },
           );
         }
       }
     }
 
     // 2c. Pre-filter for prompt injection attempts
-    const injectionCheck = text ? detectInjectionAttempt(text) : { detected: false, patterns: [] };
+    const injectionCheck = text
+      ? detectInjectionAttempt(text)
+      : { detected: false, patterns: [] };
 
     // 3. Check cache for text-only requests (skip for images — content-addressable hashing is complex)
     const isTextOnly = text && images.length === 0;
@@ -193,7 +249,7 @@ export async function POST(req: NextRequest) {
               "X-RateLimit-Remaining": String(rateCheck.remaining),
               "X-Request-Id": requestId,
             },
-          }
+          },
         );
       }
     }
@@ -321,21 +377,38 @@ export async function POST(req: NextRequest) {
     if (featureFlags.shopSignal && detectCommerceSignal(text, allUrls)) {
       aiResult.shopSignal = buildShopSignal(merged.redFlags, referrerSource);
     }
+    if (aiResult.shopSignal) {
+      waitUntil(
+        settleShopSignalPersistence({
+          requestId,
+          urls: allUrls,
+          verdict: aiResult.verdict,
+          shopSignal: aiResult.shopSignal,
+          sourceSurface: shopSignalSourceSurface("web", referrerSource),
+          referrerSource,
+        }),
+      );
+    }
 
     // 7. Background work via waitUntil (survives after response is sent)
     // When intelligenceCore is OFF, use the existing storeVerifiedScam path.
     // When ON, defer report storage until after entity extraction (step 8d).
     if (!featureFlags.intelligenceCore && finalVerdict === "HIGH_RISK") {
       waitUntil(
-        storeVerifiedScam(aiResult, region, images.length > 0 ? images : undefined, uploadScreenshot).catch((err) =>
-          logger.error("storeVerifiedScam failed", { error: String(err) })
-        )
+        storeVerifiedScam(
+          aiResult,
+          region,
+          images.length > 0 ? images : undefined,
+          uploadScreenshot,
+        ).catch((err) =>
+          logger.error("storeVerifiedScam failed", { error: String(err) }),
+        ),
       );
     }
     waitUntil(
       incrementStats(finalVerdict, region).catch((err) =>
-        logger.error("incrementStats failed", { error: String(err) })
-      )
+        logger.error("incrementStats failed", { error: String(err) }),
+      ),
     );
 
     // Cache text-only analysis results for future requests
@@ -346,7 +419,12 @@ export async function POST(req: NextRequest) {
     // 8. Extract scammer contacts when feature is on
     // Text path: extract from original (unscrubbed) text (preferred — has raw values)
     // Vision fallback: use contacts Claude extracted from screenshot (when text has none)
-    let scammerContacts: { phoneNumbers: Array<{ value: string; context: string }>; emailAddresses: Array<{ value: string; context: string }> } | undefined;
+    let scammerContacts:
+      | {
+          phoneNumbers: Array<{ value: string; context: string }>;
+          emailAddresses: Array<{ value: string; context: string }>;
+        }
+      | undefined;
     if (
       featureFlags.scamContactReporting &&
       (aiResult.verdict === "HIGH_RISK" || aiResult.verdict === "SUSPICIOUS")
@@ -354,7 +432,10 @@ export async function POST(req: NextRequest) {
       // Try text extraction first
       if (text) {
         const extracted = extractContactsFromText(text);
-        if (extracted.phoneNumbers.length > 0 || extracted.emailAddresses.length > 0) {
+        if (
+          extracted.phoneNumbers.length > 0 ||
+          extracted.emailAddresses.length > 0
+        ) {
           scammerContacts = extracted;
           logger.info("analyze.contacts_from_text", {
             phones: extracted.phoneNumbers.length,
@@ -380,7 +461,9 @@ export async function POST(req: NextRequest) {
             });
           }
         } catch (err) {
-          logger.warn("analyze.vision_contact_extract_failed", { error: String(err) });
+          logger.warn("analyze.vision_contact_extract_failed", {
+            error: String(err),
+          });
         }
       }
     }
@@ -389,8 +472,8 @@ export async function POST(req: NextRequest) {
     // Text path: extract phones from raw text
     // Vision fallback: normalize phones from Claude's scammerContacts
     let phoneIntelligence: PhoneLookupResult | undefined;
-    let phoneRiskFlags: string[] | undefined;   // backward compat
-    let isVoipCaller: boolean | undefined;       // backward compat
+    let phoneRiskFlags: string[] | undefined; // backward compat
+    let isVoipCaller: boolean | undefined; // backward compat
     if (
       featureFlags.phoneIntelligence &&
       (aiResult.verdict === "HIGH_RISK" || aiResult.verdict === "SUSPICIOUS")
@@ -403,7 +486,10 @@ export async function POST(req: NextRequest) {
         logger.info("analyze.phones_from_text", { count: phones.length });
       }
       // Fall through to vision if text extraction found nothing (or no text)
-      if (phones.length === 0 && aiResult.scammerContacts?.phoneNumbers?.length) {
+      if (
+        phones.length === 0 &&
+        aiResult.scammerContacts?.phoneNumbers?.length
+      ) {
         try {
           for (const p of aiResult.scammerContacts.phoneNumbers) {
             const normalized = extractPhoneNumbers(p.value);
@@ -411,17 +497,23 @@ export async function POST(req: NextRequest) {
           }
           logger.info("analyze.phones_from_vision", { count: phones.length });
         } catch (err) {
-          logger.warn("analyze.vision_phone_normalize_failed", { error: String(err) });
+          logger.warn("analyze.vision_phone_normalize_failed", {
+            error: String(err),
+          });
         }
       }
 
       // Only run Twilio on mobile numbers (04xx/05xx) — landlines and toll-free
       // return the same data as free libphonenumber. VoIP detection on mobiles
       // is the only signal Twilio adds that we can't get for free.
-      const lookupTarget = phones.find((p) => p.e164 && /^\+61[45]/.test(p.e164));
+      const lookupTarget = phones.find(
+        (p) => p.e164 && /^\+61[45]/.test(p.e164),
+      );
       if (lookupTarget?.e164) {
         try {
-          logger.info("analyze.twilio_lookup", { masked: maskE164(lookupTarget.e164) });
+          logger.info("analyze.twilio_lookup", {
+            masked: maskE164(lookupTarget.e164),
+          });
           const lookup = await lookupPhoneNumber(lookupTarget.e164);
           phoneIntelligence = lookup;
 
@@ -445,26 +537,31 @@ export async function POST(req: NextRequest) {
           // Inject key findings as red flags
           if (lookup.isVoip) {
             aiResult.redFlags.push(
-              `Phone ${lookup.nationalFormat || "detected"} uses VoIP — commonly used by scam operations`
+              `Phone ${lookup.nationalFormat || "detected"} uses VoIP — commonly used by scam operations`,
             );
           }
           if (lookup.countryCode && lookup.countryCode !== "AU") {
             aiResult.redFlags.push(
-              `Phone ${lookup.nationalFormat || "detected"} originates outside Australia (${lookup.countryCode})`
+              `Phone ${lookup.nationalFormat || "detected"} originates outside Australia (${lookup.countryCode})`,
             );
           }
 
           // Backward compat
-          phoneRiskFlags = lookup.riskFlags.length > 0 ? lookup.riskFlags : undefined;
+          phoneRiskFlags =
+            lookup.riskFlags.length > 0 ? lookup.riskFlags : undefined;
           isVoipCaller = lookup.isVoip || undefined;
         } catch (err) {
-          logger.error("Phone intelligence lookup failed", { error: String(err) });
+          logger.error("Phone intelligence lookup failed", {
+            error: String(err),
+          });
         }
       }
     }
 
     // 8c. Extract scammer URLs when URL reporting feature is on
-    let scammerUrls: Array<{ url: string; isMalicious: boolean; sources: string[] }> | undefined;
+    let scammerUrls:
+      | Array<{ url: string; isMalicious: boolean; sources: string[] }>
+      | undefined;
     if (
       featureFlags.scamUrlReporting &&
       (aiResult.verdict === "HIGH_RISK" || aiResult.verdict === "SUSPICIOUS") &&
@@ -505,48 +602,91 @@ export async function POST(req: NextRequest) {
         // Chain: store verified scam first to get ID, then store report with link
         waitUntil(
           (async () => {
-            const verifiedScamId = await storeVerifiedScam(aiResult, region, images.length > 0 ? images : undefined, uploadScreenshot);
+            const verifiedScamId = await storeVerifiedScam(
+              aiResult,
+              region,
+              images.length > 0 ? images : undefined,
+              uploadScreenshot,
+            );
             await storeScamReport({
-              reporterHash, source: "web", inputMode: mode || (images.length > 0 ? "image" : "text"),
-              analysis: aiResult, text, region, countryCode, verifiedScamId, entities: entitiesToLink,
+              reporterHash,
+              source: "web",
+              inputMode: mode || (images.length > 0 ? "image" : "text"),
+              analysis: aiResult,
+              text,
+              region,
+              countryCode,
+              verifiedScamId,
+              entities: entitiesToLink,
             });
-          })().catch(err => logger.error("Report pipeline failed", { error: String(err) }))
+          })().catch((err) =>
+            logger.error("Report pipeline failed", { error: String(err) }),
+          ),
         );
       } else {
         waitUntil(
           storeScamReport({
-            reporterHash, source: "web", inputMode: mode || (images.length > 0 ? "image" : "text"),
-            analysis: aiResult, text, region, countryCode, entities: entitiesToLink,
-          }).catch(err => logger.error("storeScamReport failed", { error: String(err) }))
+            reporterHash,
+            source: "web",
+            inputMode: mode || (images.length > 0 ? "image" : "text"),
+            analysis: aiResult,
+            text,
+            region,
+            countryCode,
+            entities: entitiesToLink,
+          }).catch((err) =>
+            logger.error("storeScamReport failed", { error: String(err) }),
+          ),
         );
       }
-    } else if (featureFlags.intelligenceCore && featureFlags.analyzeInngestWeb && finalVerdict === "HIGH_RISK") {
+    } else if (
+      featureFlags.intelligenceCore &&
+      featureFlags.analyzeInngestWeb &&
+      finalVerdict === "HIGH_RISK"
+    ) {
       // Inngest path: storeVerifiedScam still runs via waitUntil (Phase 2b
       // will move it). The report itself is emitted via the event below.
       waitUntil(
-        storeVerifiedScam(aiResult, region, images.length > 0 ? images : undefined, uploadScreenshot).catch(err =>
-          logger.error("storeVerifiedScam failed (inngest path)", { error: String(err) })
-        )
+        storeVerifiedScam(
+          aiResult,
+          region,
+          images.length > 0 ? images : undefined,
+          uploadScreenshot,
+        ).catch((err) =>
+          logger.error("storeVerifiedScam failed (inngest path)", {
+            error: String(err),
+          }),
+        ),
       );
     }
 
     // 8e. Brand impersonation alert — handled by `analyze-completed-brand`
     // when the Inngest flag is ON.
-    if (!featureFlags.analyzeInngestWeb && aiResult.impersonatedBrand && finalVerdict !== "SAFE") {
-      import("@askarthur/scam-engine/brand-alerts").then(({ createBrandAlert }) => {
-        waitUntil(
-          createBrandAlert({
-            brandName: aiResult.impersonatedBrand!,
-            scamType: aiResult.scamType,
-            channel: aiResult.channel,
-            confidence: aiResult.confidence,
-            scammerPhones: scammerContacts?.phoneNumbers?.map(p => p.value) || [],
-            scammerUrls: allUrls.slice(0, 10),
-            scammerEmails: scammerContacts?.emailAddresses?.map(e => e.value) || [],
-            summary: aiResult.summary,
-          }).catch(err => logger.error("Brand alert failed", { error: String(err) }))
-        );
-      });
+    if (
+      !featureFlags.analyzeInngestWeb &&
+      aiResult.impersonatedBrand &&
+      finalVerdict !== "SAFE"
+    ) {
+      import("@askarthur/scam-engine/brand-alerts").then(
+        ({ createBrandAlert }) => {
+          waitUntil(
+            createBrandAlert({
+              brandName: aiResult.impersonatedBrand!,
+              scamType: aiResult.scamType,
+              channel: aiResult.channel,
+              confidence: aiResult.confidence,
+              scammerPhones:
+                scammerContacts?.phoneNumbers?.map((p) => p.value) || [],
+              scammerUrls: allUrls.slice(0, 10),
+              scammerEmails:
+                scammerContacts?.emailAddresses?.map((e) => e.value) || [],
+              summary: aiResult.summary,
+            }).catch((err) =>
+              logger.error("Brand alert failed", { error: String(err) }),
+            ),
+          );
+        },
+      );
     }
 
     // 8f. Emit analyze.completed.v1 — triggers durable fan-out to the
@@ -569,8 +709,12 @@ export async function POST(req: NextRequest) {
               scamType: aiResult.scamType,
               channel: aiResult.channel,
               impersonatedBrand: aiResult.impersonatedBrand,
-              reporterHash: reporterHash || (await hashIdentifier(clientIp, ua)),
-              inputMode: (mode ?? (images.length > 0 ? "image" : "text")) as "text" | "image" | "qrcode",
+              reporterHash:
+                reporterHash || (await hashIdentifier(clientIp, ua)),
+              inputMode: (mode ?? (images.length > 0 ? "image" : "text")) as
+                | "text"
+                | "image"
+                | "qrcode",
               region,
               countryCode,
               text,
@@ -592,8 +736,8 @@ export async function POST(req: NextRequest) {
             logger.error("analyze.completed.v1 send failed", {
               error: String(err),
               requestId,
-            })
-          )
+            }),
+          ),
       );
     }
 
@@ -609,15 +753,17 @@ export async function POST(req: NextRequest) {
         maliciousURLs: maliciousURLs.length,
         countryCode,
         ...(aiResult.scamType && { scamType: aiResult.scamType }),
-        ...(aiResult.impersonatedBrand && { impersonatedBrand: aiResult.impersonatedBrand }),
+        ...(aiResult.impersonatedBrand && {
+          impersonatedBrand: aiResult.impersonatedBrand,
+        }),
         ...(aiResult.channel && { channel: aiResult.channel }),
         ...(scammerContacts && { scammerContacts }),
         ...(scammerUrls && { scammerUrls }),
         ...(scammerUrls && mode && { inputMode: mode }),
         ...(redirectChains.length > 0 && { redirects: redirectChains }),
         ...(phoneIntelligence && { phoneIntelligence }),
-        ...(phoneRiskFlags && { phoneRiskFlags }),          // backward compat
-        ...(isVoipCaller != null && { isVoipCaller }),       // backward compat
+        ...(phoneRiskFlags && { phoneRiskFlags }), // backward compat
+        ...(isVoipCaller != null && { isVoipCaller }), // backward compat
         ...(charityIntent && { charityIntent }),
         ...(aiResult.shopSignal && { shopSignal: aiResult.shopSignal }),
       },
@@ -626,16 +772,17 @@ export async function POST(req: NextRequest) {
           "X-RateLimit-Remaining": String(rateCheck.remaining),
           "X-Request-Id": requestId,
         },
-      }
+      },
     );
   } catch (err) {
     logger.error("Analysis error", { error: String(err) });
     return NextResponse.json(
       {
         error: "analysis_failed",
-        message: "Something went wrong analyzing your message. Please try again.",
+        message:
+          "Something went wrong analyzing your message. Please try again.",
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

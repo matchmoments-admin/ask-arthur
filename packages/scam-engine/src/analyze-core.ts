@@ -48,6 +48,10 @@ import type {
   ReferrerSource,
 } from "@askarthur/types";
 import { detectCommerceSignal, buildShopSignal } from "./shop-signal";
+import {
+  settleShopSignalPersistence,
+  shopSignalSourceSurface,
+} from "./shop-signal-persist";
 
 export type AnalyzeSurface = AnalyzeCacheSurface;
 
@@ -239,6 +243,18 @@ export async function runAnalysisCore(
   // 6. Background fan-out.
   const tasks: Promise<unknown>[] = [];
   if (backgroundMode !== "skip") {
+    if (result.shopSignal) {
+      tasks.push(
+        settleShopSignalPersistence({
+          requestId,
+          urls: urlsToCheck,
+          verdict: result.verdict,
+          shopSignal: result.shopSignal,
+          sourceSurface: shopSignalSourceSurface(surface, referrerSource),
+          referrerSource,
+        }),
+      );
+    }
     if (result.verdict === "HIGH_RISK") {
       tasks.push(
         storeVerifiedScam(result, region).catch((err) =>

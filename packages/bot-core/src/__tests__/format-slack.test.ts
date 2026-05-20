@@ -2,7 +2,9 @@ import { describe, it, expect } from "vitest";
 import { toSlackBlocks } from "../format-slack";
 import type { AnalysisResult } from "@askarthur/types";
 
-const makeResult = (overrides: Partial<AnalysisResult> = {}): AnalysisResult => ({
+const makeResult = (
+  overrides: Partial<AnalysisResult> = {},
+): AnalysisResult => ({
   verdict: "HIGH_RISK",
   confidence: 0.88,
   summary: "This is a phishing attempt.",
@@ -37,14 +39,18 @@ describe("toSlackBlocks", () => {
     const response = toSlackBlocks(makeResult());
     const blocks = response.attachments[0].blocks;
     const sections = blocks.filter((b) => b.type === "section");
-    const summaryBlock = sections.find((s) => s.text?.text === "This is a phishing attempt.");
+    const summaryBlock = sections.find(
+      (s) => s.text?.text === "This is a phishing attempt.",
+    );
     expect(summaryBlock).toBeDefined();
   });
 
   it("includes red flags", () => {
     const response = toSlackBlocks(makeResult());
     const blocks = response.attachments[0].blocks;
-    const flagBlock = blocks.find((b) => b.text?.text?.includes("*Red Flags:*"));
+    const flagBlock = blocks.find((b) =>
+      b.text?.text?.includes("*Red Flags:*"),
+    );
     expect(flagBlock).toBeDefined();
     expect(flagBlock?.text?.text).toContain("Fake URL");
   });
@@ -53,7 +59,9 @@ describe("toSlackBlocks", () => {
     const response = toSlackBlocks(makeResult());
     const blocks = response.attachments[0].blocks;
     const fieldsBlock = blocks.find((b) => b.fields);
-    expect(fieldsBlock?.fields?.some((f) => f.text.includes("phishing"))).toBe(true);
+    expect(fieldsBlock?.fields?.some((f) => f.text.includes("phishing"))).toBe(
+      true,
+    );
   });
 
   it("uses green color for SAFE verdict", () => {
@@ -68,10 +76,9 @@ describe("toSlackBlocks", () => {
     expect(context?.elements?.[0]?.text).toContain("Ask Arthur");
   });
 
-  it("does not crash on a shopSignal payload carrying referrerSource (Stage 0.5)", () => {
-    // Stage 0.5 carries the share-sheet origin through onto the
-    // ShopSignal payload. The Slack formatter must keep rendering its
-    // existing block shape without throwing on the enriched payload.
+  it("does not crash on an enriched shopSignal payload", () => {
+    // Stage 1 adds paidProviderVerdict after APIVoid enrichment. Slack keeps
+    // its existing block shape and ignores fields it does not render.
     const response = toSlackBlocks(
       makeResult({
         shopSignal: {
@@ -79,8 +86,16 @@ describe("toSlackBlocks", () => {
           commerceFlags: ["fake-australia-post", "off-platform-move"],
           generatedAt: "2026-05-19T09:00:00.000Z",
           referrerSource: "tiktok-inapp",
+          paidProviderVerdict: {
+            provider: "apivoid",
+            verdict: "suspicious",
+            trustScore: 58,
+            blacklistDetections: 0,
+            flags: ["email-spoofable"],
+            checkedAt: "2026-05-20T06:00:00.000Z",
+          },
         },
-      })
+      }),
     );
     expect(response.attachments).toHaveLength(1);
     expect(response.attachments[0].blocks.length).toBeGreaterThan(0);

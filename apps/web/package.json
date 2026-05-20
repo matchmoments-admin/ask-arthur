@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
+    "test:playwright": "playwright test",
     "typecheck": "tsc --noEmit",
     "telegram:dev": "tsx scripts/telegram-dev.ts"
   },
@@ -64,6 +65,7 @@
   },
   "devDependencies": {
     "@askarthur/eslint-config": "workspace:*",
+    "@playwright/test": "^1.51.1",
     "@tailwindcss/postcss": "^4",
     "@types/marked": "^5.0.2",
     "@types/node": "^20",

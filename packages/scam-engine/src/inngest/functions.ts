@@ -13,7 +13,10 @@ import { urlscanEnrichment } from "./urlscan-enrichment";
 import { scamAlertCron } from "./scam-alerts";
 import { syncVerifiedScamsToFeed, syncUserReportsToFeed } from "./feed-sync";
 import { metaBrpReport } from "./meta-brp-report";
-import { enrichVulnerability, enrichVulnerabilitiesCron } from "./enrich-vulnerability";
+import {
+  enrichVulnerability,
+  enrichVulnerabilitiesCron,
+} from "./enrich-vulnerability";
 import { matchB2bExposure } from "./match-b2b-exposure";
 
 // Phase 2: analyze.completed.v1 fan-out — durable replacements for the
@@ -22,6 +25,7 @@ import { handleAnalyzeCompletedReport } from "./analyze-report";
 import { handleAnalyzeCompletedBrand } from "./analyze-brand";
 import { handleAnalyzeCompletedCost } from "./analyze-cost";
 import { onAnalyzeFailed } from "./analyze-failure";
+import { shopSignalPaidProvider } from "./shop-signal-paid-provider";
 
 // Reddit Intel Wave 1: daily batched classifier triggered by cron poller.
 import { redditIntelDaily } from "./reddit-intel-daily";
@@ -107,6 +111,7 @@ export const inngestFunctions = [
   handleAnalyzeCompletedReport,
   handleAnalyzeCompletedBrand,
   handleAnalyzeCompletedCost,
+  shopSignalPaidProvider,
   onAnalyzeFailed,
   // Reddit Intel Wave 1
   redditIntelDaily,

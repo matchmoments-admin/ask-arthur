@@ -46,6 +46,7 @@
     "./abr-lookup": "./src/abr-lookup.ts",
     "./charity-intent": "./src/charity-intent.ts",
     "./shop-signal": "./src/shop-signal.ts",
+    "./shop-signal-persist": "./src/shop-signal-persist.ts",
     "./providers/apivoid": "./src/providers/apivoid.ts",
     "./vuln-detect": "./src/vuln-detect.ts",
     "./inngest/match-b2b-exposure": "./src/inngest/match-b2b-exposure.ts",

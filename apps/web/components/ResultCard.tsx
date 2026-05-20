@@ -2,12 +2,20 @@
 
 import { useState } from "react";
 import type { LucideIcon } from "lucide-react";
-import { ArrowRight, CircleX, Eye, HandCoins, ShoppingBag, TriangleAlert } from "lucide-react";
+import {
+  ArrowRight,
+  CircleX,
+  Eye,
+  HandCoins,
+  ShieldCheck,
+  ShoppingBag,
+  TriangleAlert,
+} from "lucide-react";
 import ResultFeedback from "./result/ResultFeedback";
 import ResultActionButtons from "./result/ResultActionButtons";
 import OnwardReportPicker from "./result/OnwardReportPicker";
 import type { EvidenceContext } from "@/lib/onward/destinations";
-import type { ScammerContacts, ShopSignal } from "@askarthur/types";
+import type { ScammerContacts, ShopSignal, Verdict } from "@askarthur/types";
 
 // Shop Signal commerce-flag tags → user-facing label. Stage 0 ships a
 // fixed mapping; if Stage 0.5 adds new tags, extend here. Unknown tags
@@ -28,7 +36,23 @@ const SHOP_FLAG_LABEL: Record<string, string> = {
   "fake-reviews": "Suspicious reviews",
 };
 
-type Verdict = "SAFE" | "SUSPICIOUS" | "HIGH_RISK";
+const PAID_PROVIDER_VERDICT_LABEL: Record<
+  NonNullable<ShopSignal["paidProviderVerdict"]>["verdict"],
+  string
+> = {
+  safe: "No paid-feed risk found",
+  suspicious: "Paid feed found warning signs",
+  risky: "Paid feed found high risk",
+};
+
+const PAID_PROVIDER_VERDICT_CLASS: Record<
+  NonNullable<ShopSignal["paidProviderVerdict"]>["verdict"],
+  string
+> = {
+  safe: "border-emerald-200 bg-emerald-50 text-emerald-800",
+  suspicious: "border-warn-border bg-warn-bg text-warn-heading",
+  risky: "border-danger-border bg-danger-bg text-danger-text",
+};
 
 interface ResultCardProps {
   verdict: Verdict;
@@ -87,6 +111,14 @@ const VERDICT_CONFIG: Record<Verdict, VerdictStyle> = {
     chipBorder: "border-warn-border/70",
     iconColor: "text-warn-text",
     flagBar: "bg-warn-text",
+  },
+  UNCERTAIN: {
+    baseTitle: "This is uncertain",
+    icon: TriangleAlert,
+    chipBg: "bg-warn-bg/60",
+    chipBorder: "border-warn-border/80",
+    iconColor: "text-warn-heading",
+    flagBar: "bg-warn-heading",
   },
   SUSPICIOUS: {
     baseTitle: "This looks suspicious",
@@ -150,6 +182,7 @@ export default function ResultCard({
   // onward log entries to; otherwise the picker has nothing to forward.
   const showReport = verdict !== "SAFE" && typeof scamReportId === "number";
   const [showPicker, setShowPicker] = useState(false);
+  const paidProviderVerdict = shopSignal?.paidProviderVerdict;
 
   async function handleReport() {
     // Audit: write a 'user_reported' verdict_feedback row regardless of
@@ -186,10 +219,8 @@ export default function ResultCard({
     impersonatedBrand: impersonatedBrand ?? null,
     channel: channel ?? null,
     scammerUrls: (scammerUrls ?? []).map((u) => u.url),
-    scammerPhones:
-      scammerContacts?.phoneNumbers.map((p) => p.value) ?? [],
-    scammerEmails:
-      scammerContacts?.emailAddresses.map((e) => e.value) ?? [],
+    scammerPhones: scammerContacts?.phoneNumbers.map((p) => p.value) ?? [],
+    scammerEmails: scammerContacts?.emailAddresses.map((e) => e.value) ?? [],
     redFlags,
     receivedAt: new Date().toISOString(),
   };
@@ -210,8 +241,10 @@ export default function ResultCard({
   const charityCheckHref = charityIntent
     ? (() => {
         const params = new URLSearchParams();
-        if (charityIntent.extractedAbn) params.set("abn", charityIntent.extractedAbn);
-        if (charityIntent.extractedName) params.set("name", charityIntent.extractedName);
+        if (charityIntent.extractedAbn)
+          params.set("abn", charityIntent.extractedAbn);
+        if (charityIntent.extractedName)
+          params.set("name", charityIntent.extractedName);
         const qs = params.toString();
         return qs ? `/charity-check?${qs}` : "/charity-check";
       })()
@@ -253,7 +286,11 @@ export default function ResultCard({
       <div
         className={`flex items-center gap-3 rounded-lg border-2 px-4 py-3 ${config.chipBg} ${config.chipBorder}`}
       >
-        <Icon className={`${config.iconColor} shrink-0`} size={28} aria-hidden="true" />
+        <Icon
+          className={`${config.iconColor} shrink-0`}
+          size={28}
+          aria-hidden="true"
+        />
         <h2 className="text-lg font-bold text-deep-navy leading-tight">
           {title}
         </h2>
@@ -266,7 +303,11 @@ export default function ResultCard({
           goal in the 30-day Stage 0 window. */}
       {shopSignal && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <ShoppingBag size={16} className="text-gov-slate shrink-0" aria-hidden="true" />
+          <ShoppingBag
+            size={16}
+            className="text-gov-slate shrink-0"
+            aria-hidden="true"
+          />
           <span className="text-xs font-semibold uppercase tracking-wide text-gov-slate">
             Shop signals
           </span>
@@ -285,6 +326,48 @@ export default function ResultCard({
             ))
           )}
         </div>
+      )}
+
+      {paidProviderVerdict && (
+        <details className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+            <span className="flex min-w-0 items-center gap-2">
+              <ShieldCheck
+                size={17}
+                className="shrink-0 text-gov-slate"
+                aria-hidden="true"
+              />
+              <span className="text-sm font-semibold text-deep-navy">
+                Paid shop check
+              </span>
+            </span>
+            <span
+              className={`shrink-0 rounded-full border px-2 py-0.5 text-xs font-semibold ${PAID_PROVIDER_VERDICT_CLASS[paidProviderVerdict.verdict]}`}
+            >
+              {PAID_PROVIDER_VERDICT_LABEL[paidProviderVerdict.verdict]}
+            </span>
+          </summary>
+          <div className="mt-3 grid gap-3 text-sm text-gov-slate sm:grid-cols-3">
+            <div>
+              <p className="font-semibold text-deep-navy">Trust score</p>
+              <p>{paidProviderVerdict.trustScore}/100</p>
+            </div>
+            <div>
+              <p className="font-semibold text-deep-navy">Blacklist hits</p>
+              <p>{paidProviderVerdict.blacklistDetections}</p>
+            </div>
+            <div>
+              <p className="font-semibold text-deep-navy">Checked</p>
+              <p>{paidProviderVerdict.checkedAt}</p>
+            </div>
+            {paidProviderVerdict.flags.length > 0 && (
+              <div className="sm:col-span-3">
+                <p className="font-semibold text-deep-navy">Provider flags</p>
+                <p>{paidProviderVerdict.flags.join(", ")}</p>
+              </div>
+            )}
+          </div>
+        </details>
       )}
 
       {/* Red flag cards */}
@@ -312,10 +395,10 @@ export default function ResultCard({
       {/* Remember disclaimer */}
       <div className="mt-6 border-y border-slate-200 py-4">
         <p className="text-sm text-gov-slate leading-relaxed">
-          <span className="font-bold text-deep-navy">Remember:</span>{" "}
-          Arthur is a free resource to be used alongside your own research and
-          best judgment. Always verify information through official channels
-          and use caution when clicking links.
+          <span className="font-bold text-deep-navy">Remember:</span> Arthur is
+          a free resource to be used alongside your own research and best
+          judgment. Always verify information through official channels and use
+          caution when clicking links.
         </p>
       </div>
 

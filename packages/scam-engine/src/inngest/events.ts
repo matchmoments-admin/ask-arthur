@@ -119,6 +119,38 @@ export function parseAnalyzeCompletedData(raw: unknown): AnalyzeCompletedData {
   return AnalyzeCompletedDataSchema.parse(raw);
 }
 
+// ── shop.signal.evaluated.v1 ───────────────────────────────────────────────
+//
+// Emitted after the cheap Shop Signal path writes its initial shop_checks row.
+// The event id is namespaced (`shop-signal:${requestId}`) because Inngest
+// dedups event ids globally within 24h; analyze.completed.v1 already uses the
+// bare requestId.
+
+export const ShopSignalEvaluatedDataSchema = z.object({
+  requestId: z.string().min(8).max(255),
+  host: z.string().min(1),
+  urls: z.array(z.string()).min(1),
+  shopCheckId: z.string().uuid(),
+  shopSignal: ShopSignalSchema,
+});
+export type ShopSignalEvaluatedData = z.infer<
+  typeof ShopSignalEvaluatedDataSchema
+>;
+
+export const SHOP_SIGNAL_EVALUATED_EVENT = "shop.signal.evaluated.v1" as const;
+
+export interface ShopSignalEvaluatedEvent {
+  name: typeof SHOP_SIGNAL_EVALUATED_EVENT;
+  id: string;
+  data: ShopSignalEvaluatedData;
+}
+
+export function parseShopSignalEvaluatedData(
+  raw: unknown,
+): ShopSignalEvaluatedData {
+  return ShopSignalEvaluatedDataSchema.parse(raw);
+}
+
 // ── scam-report.stored.v1 ────────────────────────────────────────────────
 //
 // Emitted by analyze-report.ts after storeScamReport succeeds. Carries the
@@ -251,8 +283,7 @@ export type RedditIntelEmbeddedData = z.infer<
   typeof RedditIntelEmbeddedDataSchema
 >;
 
-export const REDDIT_INTEL_EMBEDDED_EVENT =
-  "reddit.intel.embedded.v1" as const;
+export const REDDIT_INTEL_EMBEDDED_EVENT = "reddit.intel.embedded.v1" as const;
 
 export interface RedditIntelEmbeddedEvent {
   name: typeof REDDIT_INTEL_EMBEDDED_EVENT;

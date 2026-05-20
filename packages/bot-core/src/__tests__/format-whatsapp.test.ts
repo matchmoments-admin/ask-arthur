@@ -2,7 +2,9 @@ import { describe, it, expect } from "vitest";
 import { toWhatsAppMessage } from "../format-whatsapp";
 import type { AnalysisResult } from "@askarthur/types";
 
-const makeResult = (overrides: Partial<AnalysisResult> = {}): AnalysisResult => ({
+const makeResult = (
+  overrides: Partial<AnalysisResult> = {},
+): AnalysisResult => ({
   verdict: "SUSPICIOUS",
   confidence: 0.75,
   summary: "This message has some suspicious elements.",
@@ -30,10 +32,9 @@ describe("toWhatsAppMessage", () => {
     expect(msg).toContain("_Powered by Ask Arthur");
   });
 
-  it("does not crash on a shopSignal payload carrying referrerSource (Stage 0.5)", () => {
-    // Stage 0.5 wires in-app-browser referrer through onto the ShopSignal
-    // payload; the formatter must keep working without rendering the new
-    // field (chip render is Stage 1 PR 4).
+  it("does not crash on an enriched shopSignal payload", () => {
+    // Stage 1 wires paidProviderVerdict onto the ShopSignal payload after
+    // APIVoid enrichment; the formatter keeps rendering its existing line.
     const msg = toWhatsAppMessage(
       makeResult({
         verdict: "HIGH_RISK",
@@ -43,8 +44,16 @@ describe("toWhatsAppMessage", () => {
           commerceFlags: ["domain-renewal-invoice"],
           generatedAt: "2026-05-19T09:00:00.000Z",
           referrerSource: "instagram-inapp",
+          paidProviderVerdict: {
+            provider: "apivoid",
+            verdict: "risky",
+            trustScore: 22,
+            blacklistDetections: 2,
+            flags: ["domain-blacklisted"],
+            checkedAt: "2026-05-20T06:00:00.000Z",
+          },
         },
-      })
+      }),
     );
     expect(msg).toContain("Shop signals:");
     expect(msg).toContain("domain-renewal-invoice");

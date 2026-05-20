@@ -2,7 +2,9 @@ import { describe, it, expect } from "vitest";
 import { toTelegramHTML } from "../format-telegram";
 import type { AnalysisResult } from "@askarthur/types";
 
-const makeResult = (overrides: Partial<AnalysisResult> = {}): AnalysisResult => ({
+const makeResult = (
+  overrides: Partial<AnalysisResult> = {},
+): AnalysisResult => ({
   verdict: "SAFE",
   confidence: 0.95,
   summary: "This message appears to be legitimate.",
@@ -27,7 +29,7 @@ describe("toTelegramHTML", () => {
         confidence: 0.92,
         redFlags: ["Urgency language", "Requests personal info"],
         scamType: "phishing",
-      })
+      }),
     );
     expect(html).toContain("<b>Verdict: Looks like a scam</b>");
     expect(html).toContain("92% confidence");
@@ -38,7 +40,7 @@ describe("toTelegramHTML", () => {
 
   it("escapes HTML in user content", () => {
     const html = toTelegramHTML(
-      makeResult({ summary: 'Contains <script>alert("xss")</script>' })
+      makeResult({ summary: 'Contains <script>alert("xss")</script>' }),
     );
     expect(html).toContain("&lt;script&gt;");
     expect(html).not.toContain("<script>");
@@ -63,13 +65,10 @@ describe("toTelegramHTML", () => {
     expect(html).not.toContain("<b>Type:</b>");
   });
 
-  it("does not crash on a shopSignal payload carrying referrerSource (Stage 0.5)", () => {
-    // Stage 0.5 adds an optional referrerSource field to ShopSignal so the
-    // Stage-0 measurement window can count mobile-share share of
-    // commerce-flagged volume. The formatter is not expected to render
-    // referrerSource at this stage (chip render lands in Stage 1 PR 4) —
-    // it just needs to keep emitting the existing shop-signals line
-    // without throwing on the enriched payload shape.
+  it("does not crash on an enriched shopSignal payload", () => {
+    // Stage 1 adds paidProviderVerdict asynchronously. Bot formatters keep
+    // rendering the Stage-0 shop-signals line and must tolerate the enriched
+    // payload shape.
     const html = toTelegramHTML(
       makeResult({
         verdict: "SUSPICIOUS",
@@ -79,8 +78,16 @@ describe("toTelegramHTML", () => {
           commerceFlags: ["payid-scam", "urgent-purchase-pressure"],
           generatedAt: "2026-05-19T09:00:00.000Z",
           referrerSource: "instagram-inapp",
+          paidProviderVerdict: {
+            provider: "apivoid",
+            verdict: "suspicious",
+            trustScore: 44,
+            blacklistDetections: 0,
+            flags: ["no-valid-https"],
+            checkedAt: "2026-05-20T06:00:00.000Z",
+          },
         },
-      })
+      }),
     );
     expect(html).toContain("Shop signals:");
     expect(html).toContain("payid-scam");

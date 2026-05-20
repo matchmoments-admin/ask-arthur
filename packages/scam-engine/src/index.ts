@@ -1,5 +1,15 @@
-export { analyzeWithClaude, detectInjectionAttempt, escapeXml, validateResult } from "./claude";
-export { scrubPII, storeVerifiedScam, storePhoneLookups, incrementStats } from "./pipeline";
+export {
+  analyzeWithClaude,
+  detectInjectionAttempt,
+  escapeXml,
+  validateResult,
+} from "./claude";
+export {
+  scrubPII,
+  storeVerifiedScam,
+  storePhoneLookups,
+  incrementStats,
+} from "./pipeline";
 export { extractURLs, checkURLReputation } from "./safebrowsing";
 export { lookupWhois } from "./whois";
 export { checkSSL } from "./ssl";
@@ -15,6 +25,15 @@ export type { HiveAIResult } from "./hive-ai";
 export { generateDraftPosts } from "./social-post";
 export { storeScamReport, buildEntities } from "./report-store";
 export type { EntityToLink, StoreScamReportParams } from "./report-store";
+export {
+  persistShopSignalForPaidFeed,
+  settleShopSignalPersistence,
+  shopSignalSourceSurface,
+} from "./shop-signal-persist";
+export type {
+  PersistShopSignalInput,
+  ShopSignalSourceSurface,
+} from "./shop-signal-persist";
 export { recordDetection, recordDetections } from "./vuln-detect";
 export type {
   DetectionCandidate,

@@ -260,11 +260,12 @@ if (data?.paused_until && new Date(data.paused_until) > new Date()) {
 
 PR B (#319) wired the **consumer** side — `cost-daily-check` now
 aggregates these tags and engages the `shop_signal` brake. The rows
-themselves are **written by PR C (#321)**, which calls
-`getSiteTrustworthiness()` and `logCost()` from the Inngest fan-out
-(the adapter is pure provider I/O — it returns `units` /
-`estimatedCostUsd` but does not log; logging is the caller's job).
-Reference shape (matches the existing Reddit Intel sub-tag pattern):
+themselves are **written by PR C (#321)**, whose `scam-engine` Inngest
+fan-out calls `getSiteTrustworthiness()` and writes `cost_telemetry`
+directly via `createServiceClient()`. It deliberately does **not** import
+`apps/web/lib/cost-telemetry.ts`; app-level helpers are outside the
+package boundary. Reference shape (matches the existing Reddit Intel
+sub-tag pattern):
 
 | `feature` tag                 | `provider` | `operation`                  | Volume    | Notes                                                                                                 |
 | ----------------------------- | ---------- | ---------------------------- | --------- | ----------------------------------------------------------------------------------------------------- |
@@ -282,7 +283,27 @@ against tag drift.
 
 ---
 
-## 6. Cross-references
+## 6. Stage 2 measurement gate draft
+
+Do not relabel #322 / #323 `ready-for-agent` until the following are
+checked against real traffic after #321 ships:
+
+| Gate                          | Target                                              | Evidence to attach                                                                 |
+| ----------------------------- | --------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| AU adversarial detection      | ≥80% detection on Scamwatch online-shopping corpus  | Query export + sampled false-negative review notes                                 |
+| Small-retailer false positive | ≤2% FP on 200 real AU small-retailer traffic rows   | Reviewer initials, row ids/hashes, and final FP count                              |
+| Request-path latency          | p50 `/api/analyze` add ≤200ms for commerce requests | Before/after Vercel function timing; APIVoid must stay fully post-response/Inngest |
+| APIVoid spend                 | ≤A$3/day median                                     | `cost_telemetry` aggregate for `shop_signal` over the measurement window           |
+| DB health                     | No `pg-stuck-query-watchdog` pages in first 24h     | Watchdog digest or incident channel link                                           |
+
+Stage 1 is data plumbing plus measurement. The consumer accordion renders
+when enriched `shopSignal.paidProviderVerdict` is already present on the
+prop; this PR does not add a poll route or public read path for
+`shop_checks`.
+
+---
+
+## 7. Cross-references
 
 - **Plan**: [`docs/plans/shop-guard-v2.md`](../plans/shop-guard-v2.md)
 - **Measurement spec**: [`docs/ops/shop-signal-measurement.md`](./shop-signal-measurement.md)
