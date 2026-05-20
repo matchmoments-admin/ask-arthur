@@ -111,19 +111,40 @@ export const ReferrerSourceSchema = z.enum([
 ]);
 export type ReferrerSource = z.infer<typeof ReferrerSourceSchema>;
 
+// Shop Signal Stage 1 — compact verdict from the APIVoid Site
+// Trustworthiness paid feed. Produced by getSiteTrustworthiness() in
+// packages/scam-engine/src/providers/apivoid.ts and merged onto
+// ShopSignal by the Inngest fan-out (#321). Optional so Stage-0 payloads
+// (free-only, no paid call) validate unchanged. `verdict` here is the
+// APIVoid signal in isolation — the final fused commerce verdict is the
+// consumer's job, not this object's.
+export const PaidProviderVerdictSchema = z.object({
+  provider: z.literal("apivoid"),
+  verdict: z.enum(["safe", "suspicious", "risky"]),
+  /** APIVoid trust_score.result, 0-100 (higher = more trustworthy). */
+  trustScore: z.number(),
+  /** domain_blacklist.detections — count of blacklists flagging the host. */
+  blacklistDetections: z.number(),
+  /** Human-readable risk markers lifted from APIVoid's security_checks. */
+  flags: z.array(z.string()),
+  checkedAt: z.string(),
+});
+export type PaidProviderVerdict = z.infer<typeof PaidProviderVerdictSchema>;
+
 // Shop Signal — Stage 0 of Shop Guard. Attached to AnalysisResult when the
 // input looks commerce-shaped (a URL with a shopping TLD / Shopify or
 // WooCommerce hint / cart-or-checkout path). Carries a free-only signal at
-// Stage 0; Stage 1+ adds APIVoid + RDAP + ABR fields under new optional
-// keys. The four-value Verdict mismatch with scam_reports.verdict (which
-// allows only the three legacy values) is accepted as documented in
-// docs/plans/shop-guard-v2.md §1 row 5; Shop Signal never writes back to
-// scam_reports, so the constraint never fires.
+// Stage 0; Stage 1 adds `paidProviderVerdict` (APIVoid). The four-value
+// Verdict mismatch with scam_reports.verdict (which allows only the three
+// legacy values) is accepted as documented in docs/plans/shop-guard-v2.md
+// §1 row 5; Shop Signal never writes back to scam_reports, so the
+// constraint never fires.
 export const ShopSignalSchema = z.object({
   isCommerce: z.literal(true),
   commerceFlags: z.array(z.string()),
   generatedAt: z.string(),
   referrerSource: ReferrerSourceSchema.optional(),
+  paidProviderVerdict: PaidProviderVerdictSchema.optional(),
 });
 export type ShopSignal = z.infer<typeof ShopSignalSchema>;
 
