@@ -11,9 +11,9 @@
 // the wrong tier. New consumers should prefer this wrapper; existing
 // call-sites can migrate at their own pace.
 //
-// Pricing constants here MUST be kept in sync with apps/web/lib/cost-
-// telemetry.ts PRICING. They are inlined because the cost-telemetry module
-// lives in the web app and packages/* must not import upward.
+// Claude model IDs and pricing live together in the registry below. Wrapper
+// and cost-telemetry callers use getModel(key) so a model bump cannot silently
+// drift away from its rates.
 
 import Anthropic from "@anthropic-ai/sdk";
 import crypto from "node:crypto";
@@ -23,10 +23,15 @@ import { logger } from "@askarthur/utils/logger";
 
 import { sanitizeUnicode, escapeXml } from "./claude";
 
-export type ClaudeModelKey = "HAIKU_4_5" | "SONNET_4_6" | "OPUS_4_7";
+export const CLAUDE_MODEL_KEYS = [
+  "HAIKU_4_5",
+  "SONNET_4_6",
+  "OPUS_4_7",
+] as const;
 
-export interface ClaudeModelSpec {
-  id: string;
+export type ClaudeModelKey = (typeof CLAUDE_MODEL_KEYS)[number];
+
+export interface ClaudeModelPricing {
   /** USD per input token (uncached). */
   inputUsdPerToken: number;
   /** USD per output token. */
@@ -37,29 +42,55 @@ export interface ClaudeModelSpec {
   cacheReadUsdPerToken: number;
 }
 
-export const MODELS: Record<ClaudeModelKey, ClaudeModelSpec> = {
+export interface ClaudeModelEntry {
+  id: string;
+  pricing: ClaudeModelPricing;
+}
+
+export type ClaudeModelRegistry = Record<ClaudeModelKey, ClaudeModelEntry>;
+
+const CLAUDE_MODEL_REGISTRY = {
   HAIKU_4_5: {
     id: "claude-haiku-4-5-20251001",
-    inputUsdPerToken: 1 / 1_000_000,
-    outputUsdPerToken: 5 / 1_000_000,
-    cacheWriteUsdPerToken: 1.25 / 1_000_000,
-    cacheReadUsdPerToken: 0.1 / 1_000_000,
+    pricing: {
+      inputUsdPerToken: 1 / 1_000_000,
+      outputUsdPerToken: 5 / 1_000_000,
+      cacheWriteUsdPerToken: 1.25 / 1_000_000,
+      cacheReadUsdPerToken: 0.1 / 1_000_000,
+    },
   },
   SONNET_4_6: {
     id: "claude-sonnet-4-6",
-    inputUsdPerToken: 3 / 1_000_000,
-    outputUsdPerToken: 15 / 1_000_000,
-    cacheWriteUsdPerToken: 3.75 / 1_000_000,
-    cacheReadUsdPerToken: 0.3 / 1_000_000,
+    pricing: {
+      inputUsdPerToken: 3 / 1_000_000,
+      outputUsdPerToken: 15 / 1_000_000,
+      cacheWriteUsdPerToken: 3.75 / 1_000_000,
+      cacheReadUsdPerToken: 0.3 / 1_000_000,
+    },
   },
   OPUS_4_7: {
     id: "claude-opus-4-7",
-    inputUsdPerToken: 15 / 1_000_000,
-    outputUsdPerToken: 75 / 1_000_000,
-    cacheWriteUsdPerToken: 18.75 / 1_000_000,
-    cacheReadUsdPerToken: 1.5 / 1_000_000,
+    pricing: {
+      inputUsdPerToken: 15 / 1_000_000,
+      outputUsdPerToken: 75 / 1_000_000,
+      cacheWriteUsdPerToken: 18.75 / 1_000_000,
+      cacheReadUsdPerToken: 1.5 / 1_000_000,
+    },
   },
-};
+} satisfies ClaudeModelRegistry;
+
+export function getModel(key: ClaudeModelKey): ClaudeModelEntry {
+  const model = (
+    CLAUDE_MODEL_REGISTRY as Partial<Record<string, ClaudeModelEntry>>
+  )[key];
+  if (!model) {
+    throw new Error(
+      `Unknown Claude model key "${String(key)}" - add it to ` +
+        "CLAUDE_MODEL_REGISTRY with pricing before use.",
+    );
+  }
+  return model;
+}
 
 export interface CallClaudeUsage {
   inputTokens: number;
@@ -73,7 +104,7 @@ export interface CallClaudeResult<T> {
   usage: CallClaudeUsage;
   /** True if any tokens were served from cache. */
   cacheHit: boolean;
-  /** Computed against MODELS[*] rates; cents-of-a-cent precision. */
+  /** Computed against getModel(model).pricing; cents-of-a-cent precision. */
   estimatedCostUsd: number;
   modelId: string;
 }
@@ -148,7 +179,7 @@ export async function callClaudeJson<T>(
     throw new Error(`${msg} (dev/test) — set the env var or mock at the call site`);
   }
 
-  const spec = MODELS[model];
+  const spec = getModel(model);
   const client = new Anthropic();
 
   // Sandwich defence: nonce-tagged delimiter + explicit pre/post instruction.
@@ -226,10 +257,10 @@ export async function callClaudeJson<T>(
   const cacheHit = usage.cacheReadTokens > 0;
 
   const estimatedCostUsd =
-    usage.inputTokens * spec.inputUsdPerToken +
-    usage.outputTokens * spec.outputUsdPerToken +
-    usage.cacheWriteTokens * spec.cacheWriteUsdPerToken +
-    usage.cacheReadTokens * spec.cacheReadUsdPerToken;
+    usage.inputTokens * spec.pricing.inputUsdPerToken +
+    usage.outputTokens * spec.pricing.outputUsdPerToken +
+    usage.cacheWriteTokens * spec.pricing.cacheWriteUsdPerToken +
+    usage.cacheReadTokens * spec.pricing.cacheReadUsdPerToken;
 
   // Tool-use response: the model called our forced tool, so the input is
   // already a parsed JS object. Skip extractJson + JSON.parse entirely.

@@ -1,4 +1,5 @@
 import { waitUntil } from "@vercel/functions";
+import { getModel } from "@askarthur/scam-engine/anthropic";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
@@ -14,20 +15,10 @@ export interface CostEvent {
   requestId?: string | null;
 }
 
-// Pricing constants — single source of truth for per-unit costs.
-// Update here whenever upstream pricing changes.
+// Pricing constants for non-Claude providers. Claude pricing lives beside
+// model IDs in @askarthur/scam-engine/anthropic so model swaps cannot drift
+// from cost telemetry.
 export const PRICING = {
-  // Claude Haiku 4.5: $1/M input, $5/M output (April 2026 list price).
-  CLAUDE_HAIKU_4_5_INPUT_USD_PER_TOKEN: 1 / 1_000_000,
-  CLAUDE_HAIKU_4_5_OUTPUT_USD_PER_TOKEN: 5 / 1_000_000,
-
-  // Claude Sonnet 4.6: $3/M input, $15/M output (April 2026 list price).
-  // Cache writes billed at 1.25x input, cache reads at 0.1x input.
-  CLAUDE_SONNET_4_6_INPUT_USD_PER_TOKEN: 3 / 1_000_000,
-  CLAUDE_SONNET_4_6_OUTPUT_USD_PER_TOKEN: 15 / 1_000_000,
-  CLAUDE_SONNET_4_6_CACHE_WRITE_USD_PER_TOKEN: 3.75 / 1_000_000,
-  CLAUDE_SONNET_4_6_CACHE_READ_USD_PER_TOKEN: 0.3 / 1_000_000,
-
   // Voyage 3.5 embeddings: ~$0.06/M tokens (1024-dim, AU/global, Jan 2026 list).
   // Default generic-domain embedding model; OpenAI text-embedding-3-small is
   // the swap-in. Kept name VOYAGE_3_USD_PER_TOKEN for backward compat with
@@ -150,8 +141,9 @@ export function claudeHaikuCostUsd(
   inputTokens: number,
   outputTokens: number,
 ): number {
+  const { pricing } = getModel("HAIKU_4_5");
   return (
-    inputTokens * PRICING.CLAUDE_HAIKU_4_5_INPUT_USD_PER_TOKEN +
-    outputTokens * PRICING.CLAUDE_HAIKU_4_5_OUTPUT_USD_PER_TOKEN
+    inputTokens * pricing.inputUsdPerToken +
+    outputTokens * pricing.outputUsdPerToken
   );
 }

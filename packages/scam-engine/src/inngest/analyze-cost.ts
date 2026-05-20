@@ -5,19 +5,13 @@ import {
   ANALYZE_COMPLETED_EVENT,
   parseAnalyzeCompletedData,
 } from "./events";
-
-// Claude Haiku 4.5 token pricing (April 2026 list prices, $ per token).
-// Duplicated from apps/web/lib/cost-telemetry.ts `PRICING` to avoid a
-// cross-package dependency from scam-engine → apps/web. When pricing
-// changes, update both places (there's no shared pricing package yet —
-// if a third location appears, extract one).
-const CLAUDE_HAIKU_4_5_INPUT_USD_PER_TOKEN = 1 / 1_000_000;
-const CLAUDE_HAIKU_4_5_OUTPUT_USD_PER_TOKEN = 5 / 1_000_000;
+import { getModel } from "../anthropic";
 
 function claudeHaikuCostUsd(inputTokens: number, outputTokens: number): number {
+  const { pricing } = getModel("HAIKU_4_5");
   return (
-    inputTokens * CLAUDE_HAIKU_4_5_INPUT_USD_PER_TOKEN +
-    outputTokens * CLAUDE_HAIKU_4_5_OUTPUT_USD_PER_TOKEN
+    inputTokens * pricing.inputUsdPerToken +
+    outputTokens * pricing.outputUsdPerToken
   );
 }
 

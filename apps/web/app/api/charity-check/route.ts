@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { runCharityCheck, ocrLanyard } from "@askarthur/charity-check";
+import { getModel } from "@askarthur/scam-engine/anthropic";
 import { validateImageMagicBytes } from "@askarthur/scam-engine/image-validate";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { checkCharityCheckRateLimit } from "@askarthur/utils/rate-limit";
 import { resolveRequestId } from "@askarthur/utils/request-id";
 
-import { logCost, PRICING } from "@/lib/cost-telemetry";
+import { logCost } from "@/lib/cost-telemetry";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -149,7 +150,7 @@ export async function POST(req: NextRequest) {
         operation: "claude-haiku-4-5-ocr-lanyard",
         // ~600 input tokens (image + system + user prompt) + ~150 output
         units: 750,
-        unitCostUsd: PRICING.CLAUDE_HAIKU_4_5_INPUT_USD_PER_TOKEN,
+        unitCostUsd: getModel("HAIKU_4_5").pricing.inputUsdPerToken,
         requestId,
         metadata: {
           extracted: extracted.extracted,
