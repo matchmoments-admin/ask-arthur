@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { featureFlags } from "@askarthur/utils/feature-flags";
+import { checkShopSignalRateLimit } from "@askarthur/utils/rate-limit";
 import { createServiceClient } from "@askarthur/supabase/server";
 import {
   ShopCheckEnrichmentSchema,
@@ -14,7 +15,7 @@ import {
 } from "@askarthur/types";
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   if (!featureFlags.shopSignal) {
@@ -26,6 +27,33 @@ export async function GET(
     return NextResponse.json(
       { error: "validation_error", message: "Invalid id" },
       { status: 400 },
+    );
+  }
+
+  // Poll-rate guard — throttles a script hammering a known uuid. failMode
+  // "open": this is a cheap indexed PK read, so a Redis outage must fail
+  // toward letting the poll through, never toward breaking a live check.
+  const ip =
+    req.headers.get("x-real-ip") ??
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+    "unknown";
+  const limit = await checkShopSignalRateLimit("sc_poll", ip, "open");
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { error: "rate_limited", message: limit.message ?? "Too many requests." },
+      {
+        status: 429,
+        headers: limit.resetAt
+          ? {
+              "Retry-After": String(
+                Math.max(
+                  1,
+                  Math.ceil((limit.resetAt.getTime() - Date.now()) / 1000),
+                ),
+              ),
+            }
+          : undefined,
+      },
     );
   }
 

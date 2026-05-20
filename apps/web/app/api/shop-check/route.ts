@@ -113,6 +113,13 @@ export async function POST(req: NextRequest) {
 
   // Re-click guard — if a row already exists for this idempotency key,
   // return it unchanged so a re-click never resets a completed row's score.
+  //
+  // A concurrent first-POST race here is benign: both POSTs share the
+  // idempotency key, so upsert_shop_check's ON CONFLICT only ever resets a
+  // just-INSERTed placeholder (queued → queued), both emit the same Inngest
+  // event id (so enrichment still runs exactly once), and once a row reaches
+  // a completed state it is committed + SELECT-visible — so the dangerous
+  // complete → placeholder reset is caught by this guard and cannot occur.
   const existing = await supabase
     .from("shop_checks")
     .select("id")

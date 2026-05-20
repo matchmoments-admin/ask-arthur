@@ -518,15 +518,20 @@ export async function checkCharityCheckRateLimit(
 }
 
 // =============================================================================
-// Shop Signal — Deep Shop Check bucket
+// Shop Signal — Deep Shop Check buckets
 // =============================================================================
-// The Deep Shop Check (POST /api/shop-check) is a user-initiated enrichment
-// that spends APIVoid credits + a whoisjson.com free-tier call per run. Cap
-// it tightly per-IP — a real user rarely deep-checks more than a handful of
-// shops in a sitting. Fail-closed in production: a Redis blip must not open
-// unbounded paid-API spend.
+// sc_deep_check — POST /api/shop-check, the user-initiated enrichment that
+//   spends APIVoid credits + a whoisjson.com free-tier call per run. Capped
+//   tightly per-IP (a real user rarely deep-checks more than a handful of
+//   shops in a sitting) and fail-closed in production: a Redis blip must not
+//   open unbounded paid-API spend.
+// sc_poll — GET /api/shop-check/[id], the poll the tray issues every ~2s
+//   while enrichment runs. Generous cap, and the caller passes failMode
+//   "open" (see the GET route): the read is a single indexed PK lookup, so
+//   a Redis outage must fail toward letting the poll through rather than
+//   breaking a user's live check.
 
-type ShopSignalBucket = "sc_deep_check";
+type ShopSignalBucket = "sc_deep_check" | "sc_poll";
 
 const _ssLimiters = new Map<ShopSignalBucket, Ratelimit>();
 
@@ -547,6 +552,14 @@ function getSsLimiter(bucket: ShopSignalBucket): Ratelimit {
     sc_deep_check: {
       algo: slidingWindow(5, "10 m"),
       prefix: "askarthur:shop:deep-check",
+    },
+    // The tray polls every 2s for up to ~60s per check (≤30 GETs), and the
+    // sc_deep_check cap allows 5 checks / 10 min — a legit client tops out
+    // near 30 GETs/min. 120/min/IP gives ~4× headroom while still throttling
+    // a script hammering a known uuid.
+    sc_poll: {
+      algo: slidingWindow(120, "1 m"),
+      prefix: "askarthur:shop:poll",
     },
   };
 

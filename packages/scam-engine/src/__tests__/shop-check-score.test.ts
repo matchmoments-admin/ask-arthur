@@ -49,7 +49,19 @@ describe("computeCompositeScore", () => {
     ).toBe(18);
     expect(
       computeCompositeScore({ ...clean, domainAgeBand: "unknown" }).score,
-    ).toBe(0);
+    ).toBe(6);
+  });
+
+  it("keeps an unverifiable domain inside low-concern on its own", () => {
+    // unknown domain age (6) + no-abn (18) = 24 — calibrated to stay just
+    // under the 25-point some-concern threshold.
+    const result = computeCompositeScore({
+      ...clean,
+      domainAgeBand: "unknown",
+      abnStatus: "no-abn",
+    });
+    expect(result.score).toBe(24);
+    expect(result.band).toBe("low-concern");
   });
 
   it("weights ABN status", () => {

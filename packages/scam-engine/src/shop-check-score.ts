@@ -24,7 +24,12 @@ const DOMAIN_AGE_POINTS: Record<DomainAgeBand, number> = {
   fresh: 35, // < 30 days
   recent: 18, // 30–90 days
   established: 0, // ≥ 90 days
-  unknown: 0, // WHOIS unavailable — no signal, not a risk
+  // WHOIS unavailable. An unverifiable registration date is a mild
+  // corroborating concern — not a free pass for a fake shop hiding behind a
+  // WHOIS-restricted TLD (e.g. .au) or a privacy proxy. Capped at 6 so
+  // `unknown` + `no-abn` (18) = 24 stays inside the low-concern band (< 25):
+  // an unverifiable domain never tips an otherwise-clean shop on its own.
+  unknown: 6,
 };
 
 const ABN_POINTS: Record<AbnStatus, number> = {
