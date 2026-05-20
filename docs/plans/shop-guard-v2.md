@@ -321,9 +321,16 @@ Only if Stage-0 measurements clear the bar above. Three PRs.
 - The analyze pipeline and the Stage-0 detector are **untouched** — no
   `shop.signal.evaluated.v1`, no dual-call-site emit, no shared
   `shop-signal-persist.ts` helper (ADR 0007 not extended).
-- 38 unit tests; end-to-end smoke-tested locally (route → Inngest
-  enrichment → APIVoid → poll). Playwright + the Inngest unit test were
-  deferred — the function is exercised by the prod smoke test.
+- Unit tests cover `shop-check-score`, `abn-extract`, `fetch-shop-page`
+  (incl. redirect-chain SSRF), `whois-cached`, the `POST` / `GET`
+  `/api/shop-check` route handlers, and the `shop-signal-enrich` Inngest
+  function. End-to-end smoke-tested locally (route → Inngest enrichment →
+  APIVoid → poll); Playwright e2e deferred to the prod smoke test.
+- Pre-merge review hardening: `fetch-shop-page.ts` follows redirects
+  manually with a per-hop SSRF check; an unknown WHOIS domain age scores
+  a calibrated +6 rather than 0 (closes the privacy-proxy evasion gap
+  without tipping clean shops); the `GET` poll has a fail-open
+  rate-limit bucket.
 
 **Stage 1 measurement target before Stage 2:**
 
