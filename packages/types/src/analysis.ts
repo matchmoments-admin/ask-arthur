@@ -148,6 +148,84 @@ export const ShopSignalSchema = z.object({
 });
 export type ShopSignal = z.infer<typeof ShopSignalSchema>;
 
+// ── Deep Shop Check — Stage 1 user-initiated enrichment ──────────────────
+//
+// The Deep Shop Check is a SEPARATE request from analyze: the user clicks
+// "Run a deeper shop check" in the result card, which POSTs to
+// /api/shop-check and polls GET /api/shop-check/[id]. None of these types
+// go on AnalysisResult — the deep check never rides the analyze response.
+// See docs/adr/0008-shop-signal-deep-check-user-initiated.md.
+
+export const DomainAgeBandSchema = z.enum([
+  "fresh", // < 30 days — strongest fake-shop tell
+  "recent", // 30–90 days
+  "established", // ≥ 90 days
+  "unknown", // WHOIS unavailable / no created date
+]);
+export type DomainAgeBand = z.infer<typeof DomainAgeBandSchema>;
+
+export const AbnStatusSchema = z.enum([
+  "verified", // ABN displayed, on the ABR register, entity name matches
+  "name-mismatch", // ABN displayed + registered, but the holder name doesn't match
+  "unregistered", // ABN displayed but not found / inactive on the register
+  "no-abn", // .au shop, no ABN displayed at all
+  "not-applicable", // non-AU host — ABN display is not expected
+]);
+export type AbnStatus = z.infer<typeof AbnStatusSchema>;
+
+export const ShopCheckStatusSchema = z.enum([
+  "queued",
+  "processing",
+  "complete",
+  "error",
+]);
+export type ShopCheckStatus = z.infer<typeof ShopCheckStatusSchema>;
+
+// Overall concern band. Never "safe" — a heuristic shop check cannot
+// assert legitimacy, only the absence of detected concerns.
+export const ShopCheckBandSchema = z.enum([
+  "low-concern",
+  "some-concern",
+  "high-concern",
+]);
+export type ShopCheckBand = z.infer<typeof ShopCheckBandSchema>;
+
+export const ShopCheckDomainAgeSchema = z.object({
+  band: DomainAgeBandSchema,
+  ageDays: z.number().nullable(),
+  createdDate: z.string().nullable(),
+});
+export type ShopCheckDomainAge = z.infer<typeof ShopCheckDomainAgeSchema>;
+
+export const ShopCheckAbnSchema = z.object({
+  status: AbnStatusSchema,
+  abn: z.string().nullable(),
+  entityName: z.string().nullable(),
+});
+export type ShopCheckAbn = z.infer<typeof ShopCheckAbnSchema>;
+
+// The enrichment payload stored under `shop_checks.signal.deepCheck`.
+// `status` is always present; the result fields land only when the
+// Inngest enrichment completes.
+export const ShopCheckEnrichmentSchema = z.object({
+  status: ShopCheckStatusSchema,
+  domainAge: ShopCheckDomainAgeSchema.optional(),
+  abn: ShopCheckAbnSchema.optional(),
+  paidProviderVerdict: PaidProviderVerdictSchema.optional(),
+  compositeScore: z.number().min(0).max(100).optional(),
+  band: ShopCheckBandSchema.optional(),
+  errorMessage: z.string().optional(),
+  evaluatedAt: z.string().optional(),
+});
+export type ShopCheckEnrichment = z.infer<typeof ShopCheckEnrichmentSchema>;
+
+// The shape GET /api/shop-check/[id] returns to the client.
+export const ShopCheckResultSchema = ShopCheckEnrichmentSchema.extend({
+  id: z.string().uuid(),
+  url: z.string().optional(),
+});
+export type ShopCheckResult = z.infer<typeof ShopCheckResultSchema>;
+
 // ── AnalysisResult — Claude's output plus pipeline-attached metadata ─────
 
 export const AnalysisResultSchema = z.object({

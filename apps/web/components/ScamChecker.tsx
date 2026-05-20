@@ -47,6 +47,19 @@ function makeReferenceId(): string {
   return `ASK-${rand}`;
 }
 
+// Pull the commerce URL out of the submitted text for the Deep Shop Check
+// tray. Prefers a full http(s) URL; falls back to a bare host (single
+// token, has a dot, no whitespace) which the POST route normalises.
+function deriveCommerceUrl(raw: string): string | undefined {
+  const match = raw.match(/https?:\/\/[^\s<>"']+/i);
+  if (match) return match[0];
+  const t = raw.trim();
+  if (!/\s/.test(t) && /^[a-z0-9.-]+\.[a-z]{2,}(\/\S*)?$/i.test(t)) {
+    return `https://${t}`;
+  }
+  return undefined;
+}
+
 const MEDIA_STATUS_LABELS: Record<string, string> = {
   uploading: "Uploading audio...",
   transcribing: "Transcribing audio...",
@@ -707,6 +720,9 @@ export default function ScamChecker() {
             inputMode={result.inputMode || inputMode}
             charityIntent={result.charityIntent}
             shopSignal={result.shopSignal}
+            commerceUrl={
+              result.shopSignal ? deriveCommerceUrl(text) : undefined
+            }
             onCheckAnother={handleReset}
           />
       )}

@@ -4,6 +4,7 @@ import {
   AnalysisModeSchema,
   ScammerContactsSchema,
   ShopSignalSchema,
+  ReferrerSourceSchema,
   UsageSchema,
 } from "@askarthur/types";
 
@@ -385,4 +386,49 @@ export interface B2bExposureMatchedEvent {
   name: typeof B2B_EXPOSURE_MATCHED_EVENT;
   id: string;
   data: B2bExposureMatchedData;
+}
+
+// ── shop.check.requested.v1 ──────────────────────────────────────────────
+//
+// Emitted by POST /api/shop-check when a user clicks "Run a deeper shop
+// check" in the result card. Consumed by the shop-signal-enrich Inngest
+// function, which fetches the shop page, verifies a displayed ABN, looks up
+// domain age, calls APIVoid, scores the result, and writes it back onto the
+// shop_checks row addressed by shopCheckId.
+//
+// This is the user-initiated model from
+// docs/adr/0008-shop-signal-deep-check-user-initiated.md — it replaces the
+// auto-fire shop.signal.evaluated.v1 spec that issue #321 originally carried.
+//
+// Event id is `shop-check:${shopCheckId}` — the shopCheckId is a fresh uuid
+// per deep check so it never collides with analyze.completed.v1's bare
+// requestId in Inngest's 24h global id-dedup window.
+
+export const ShopCheckRequestedDataSchema = z.object({
+  // shop_checks.id — the row to enrich + the write-back address.
+  shopCheckId: z.string().uuid(),
+  // The shop URL the user asked to deep-check.
+  url: z.string().min(1).max(2048),
+  // Stage-0 commerce flags carried from the analyze result — one input to
+  // the composite score.
+  commerceFlags: z.array(z.string()),
+  // In-app-browser the user arrived from, when known.
+  referrerSource: ReferrerSourceSchema.optional(),
+});
+export type ShopCheckRequestedData = z.infer<
+  typeof ShopCheckRequestedDataSchema
+>;
+
+export const SHOP_CHECK_REQUESTED_EVENT = "shop.check.requested.v1" as const;
+
+export interface ShopCheckRequestedEvent {
+  name: typeof SHOP_CHECK_REQUESTED_EVENT;
+  id: string;
+  data: ShopCheckRequestedData;
+}
+
+export function parseShopCheckRequestedData(
+  raw: unknown,
+): ShopCheckRequestedData {
+  return ShopCheckRequestedDataSchema.parse(raw);
 }

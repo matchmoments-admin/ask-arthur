@@ -517,6 +517,88 @@ export async function checkCharityCheckRateLimit(
   }
 }
 
+// =============================================================================
+// Shop Signal — Deep Shop Check bucket
+// =============================================================================
+// The Deep Shop Check (POST /api/shop-check) is a user-initiated enrichment
+// that spends APIVoid credits + a whoisjson.com free-tier call per run. Cap
+// it tightly per-IP — a real user rarely deep-checks more than a handful of
+// shops in a sitting. Fail-closed in production: a Redis blip must not open
+// unbounded paid-API spend.
+
+type ShopSignalBucket = "sc_deep_check";
+
+const _ssLimiters = new Map<ShopSignalBucket, Ratelimit>();
+
+function getSsLimiter(bucket: ShopSignalBucket): Ratelimit {
+  const existing = _ssLimiters.get(bucket);
+  if (existing) return existing;
+
+  const redis = new Redis({
+    url: process.env.UPSTASH_REDIS_REST_URL!,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+  });
+
+  const slidingWindow = Ratelimit.slidingWindow.bind(Ratelimit);
+  const config: Record<
+    ShopSignalBucket,
+    { algo: ReturnType<typeof slidingWindow>; prefix: string }
+  > = {
+    sc_deep_check: {
+      algo: slidingWindow(5, "10 m"),
+      prefix: "askarthur:shop:deep-check",
+    },
+  };
+
+  const lim = new Ratelimit({
+    redis,
+    limiter: config[bucket].algo,
+    prefix: config[bucket].prefix,
+    analytics: true,
+  });
+  _ssLimiters.set(bucket, lim);
+  return lim;
+}
+
+/**
+ * Check a Shop Signal rate-limit bucket. Defaults to fail-closed in
+ * production — the Deep Shop Check spends real money (APIVoid credits +
+ * whoisjson.com free-tier draw), so a Redis outage allowing unbounded
+ * requests is worse than a rare false reject during a blip.
+ */
+export async function checkShopSignalRateLimit(
+  bucket: ShopSignalBucket,
+  identifier: string,
+  failMode: FailMode = defaultFailMode(),
+): Promise<RateLimitResult> {
+  if (!process.env.UPSTASH_REDIS_REST_URL) {
+    return storeUnavailable(failMode, `checkShopSignalRateLimit:${bucket}`);
+  }
+  try {
+    const res = await getSsLimiter(bucket).limit(identifier);
+    if (!res.success) {
+      return {
+        allowed: false,
+        remaining: 0,
+        resetAt: new Date(res.reset),
+        message: "Too many shop checks. Please try again later.",
+        reason: "exceeded",
+      };
+    }
+    return {
+      allowed: true,
+      remaining: res.remaining,
+      resetAt: null,
+      reason: "ok",
+    };
+  } catch (err) {
+    logger.error(`checkShopSignalRateLimit:${bucket}: store error`, {
+      error: String(err),
+    });
+    return storeUnavailable(failMode, `checkShopSignalRateLimit:${bucket}`);
+  }
+}
+
 // ─── Inbound-scan rate limiter (F1) ─────────────────────────────────────
 //
 // Per-sender quota for `/api/inbound-scan` — users forwarding suspicious
