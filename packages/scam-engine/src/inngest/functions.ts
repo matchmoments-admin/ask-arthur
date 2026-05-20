@@ -77,6 +77,10 @@ import { costTelemetryRetention } from "./cost-telemetry-retention";
 // cost_telemetry + Supabase Pro-base prorate. 02:00 UTC.
 import { billingIngestNightly } from "./billing-ingest-nightly";
 
+// Function invocation audit: nightly Inngest/Vercel-cron invocation counts
+// for /admin/costs/infra. 02:15 UTC, after billing-ingest-nightly.
+import { functionInvocationAudit } from "./function-invocation-audit";
+
 // Telco events: nightly prune across 7 append-only tables. 730d for
 // sim/device-swap-events (forensic); 365d for the rest. 04:30 UTC.
 import { telcoEventsRetention } from "./telco-events-retention";
@@ -134,6 +138,8 @@ export const inngestFunctions = [
   costTelemetryRetention,
   // Billing ingest: nightly per-provider infra-spend rollup (v134)
   billingIngestNightly,
+  // Function invocation audit: Inngest/Vercel-cron counts (v138)
+  functionInvocationAudit,
   // Telco events: nightly prune (730d sim/device-swap; 365d others)
   telcoEventsRetention,
   // Archive shadows: nightly archival mover (6 medium-volume tables)

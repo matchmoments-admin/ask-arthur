@@ -23,6 +23,15 @@ interface InfraRow {
   raw_usage_jsonb: Record<string, unknown> | null;
 }
 
+interface FunctionInvocationRow {
+  date: string;
+  function_name: string;
+  invocations: number;
+  avg_duration_ms: number | null;
+  source: "vercel-cron" | "inngest";
+  ingested_at: string;
+}
+
 const PROVIDER_LABELS: Record<string, string> = {
   vercel: "Vercel",
   anthropic: "Anthropic (Claude API)",
@@ -43,6 +52,12 @@ const FIXED_SUBSCRIPTIONS: { label: string; monthlyUsd: number; note?: string }[
 // Providers whose row should appear in the dashboard. `supabase-base`
 // historical rows stay in the DB but skip the UI.
 const ACTIVE_PROVIDERS = new Set(["vercel", "anthropic", "github-actions"]);
+const DO_NOT_CUT_FUNCTIONS = new Set(["pg-stuck-query-watchdog"]);
+
+const SOURCE_LABELS: Record<FunctionInvocationRow["source"], string> = {
+  "vercel-cron": "Vercel Cron",
+  inngest: "Inngest",
+};
 
 function thirtyDaysAgoIsoDate(): string {
   return new Date(Date.now() - 30 * 86400_000).toISOString().split("T")[0];
@@ -54,6 +69,12 @@ function formatUsd(cents: number): string {
 
 function formatUsdMonthly(usd: number): string {
   return `$${usd.toFixed(2)}/mo`;
+}
+
+function formatDuration(ms: number | null): string {
+  if (ms === null) return "—";
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
 }
 
 interface VercelServicesBreakdown {
@@ -96,6 +117,7 @@ export default async function InfraCostsPage() {
 
   const supabase = createServiceClient();
   let rows: InfraRow[] = [];
+  let functionRows: FunctionInvocationRow[] = [];
 
   if (supabase) {
     const since = thirtyDaysAgoIsoDate();
@@ -106,6 +128,16 @@ export default async function InfraCostsPage() {
       .order("date", { ascending: false })
       .order("provider", { ascending: true });
     rows = (data ?? []) as InfraRow[];
+
+    const { data: invocationData } = await supabase
+      .from("function_invocation_daily")
+      .select(
+        "date, function_name, invocations, avg_duration_ms, source, ingested_at",
+      )
+      .gte("date", since)
+      .order("date", { ascending: false })
+      .order("invocations", { ascending: false });
+    functionRows = (invocationData ?? []) as FunctionInvocationRow[];
   }
 
   // Filter out historical / inactive providers BEFORE aggregating.
@@ -150,6 +182,16 @@ export default async function InfraCostsPage() {
     (s, f) => s + f.monthlyUsd,
     0,
   );
+
+  const latestInvocationDate = functionRows
+    .map((r) => r.date)
+    .sort((a, b) => (a < b ? 1 : -1))
+    .at(0);
+  const latestFunctionRows = latestInvocationDate
+    ? functionRows
+        .filter((r) => r.date === latestInvocationDate)
+        .sort((a, b) => b.invocations - a.invocations)
+    : [];
 
   return (
     <div className="max-w-5xl mx-auto px-5 py-8">
@@ -297,6 +339,75 @@ export default async function InfraCostsPage() {
           </p>
         </section>
       )}
+
+      <section className="mb-8">
+        <h2 className="text-deep-navy text-sm font-semibold uppercase tracking-wider mb-3">
+          Function invocations
+        </h2>
+        {latestFunctionRows.length === 0 ? (
+          <p className="text-gov-slate text-sm py-8 text-center bg-slate-50 rounded-lg">
+            No invocation rows yet. The first audit lands at 02:15 UTC tomorrow.
+          </p>
+        ) : (
+          <div className="rounded-lg border border-slate-200 bg-white overflow-hidden">
+            <div className="border-b border-slate-100 bg-slate-50 px-3 py-2 text-xs text-gov-slate">
+              Latest audit date:{" "}
+              <span className="font-mono text-deep-navy">
+                {latestInvocationDate}
+              </span>
+              . Counts come from Inngest finished events plus deterministic
+              Vercel cron schedules.
+            </div>
+            <table className="w-full text-sm tabular-nums">
+              <thead className="bg-slate-50 text-gov-slate">
+                <tr>
+                  <th className="text-left px-3 py-2 font-semibold">
+                    Function
+                  </th>
+                  <th className="text-left px-3 py-2 font-semibold">Source</th>
+                  <th className="text-right px-3 py-2 font-semibold">
+                    Invocations/day
+                  </th>
+                  <th className="text-right px-3 py-2 font-semibold">
+                    Avg duration
+                  </th>
+                  <th className="text-left px-3 py-2 font-semibold">Flag</th>
+                </tr>
+              </thead>
+              <tbody>
+                {latestFunctionRows.map((row) => (
+                  <tr
+                    key={`${row.source}:${row.function_name}`}
+                    className="border-t border-slate-100"
+                  >
+                    <td className="px-3 py-2 text-deep-navy">
+                      {row.function_name}
+                    </td>
+                    <td className="px-3 py-2 text-gov-slate">
+                      {SOURCE_LABELS[row.source] ?? row.source}
+                    </td>
+                    <td className="px-3 py-2 text-right font-semibold text-deep-navy">
+                      {row.invocations.toLocaleString("en-US")}
+                    </td>
+                    <td className="px-3 py-2 text-right text-gov-slate">
+                      {formatDuration(row.avg_duration_ms)}
+                    </td>
+                    <td className="px-3 py-2">
+                      {DO_NOT_CUT_FUNCTIONS.has(row.function_name) ? (
+                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900">
+                          DO NOT cut
+                        </span>
+                      ) : (
+                        <span className="text-gov-slate">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       <section>
         <h2 className="text-deep-navy text-sm font-semibold uppercase tracking-wider mb-3">
