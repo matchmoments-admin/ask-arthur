@@ -129,6 +129,47 @@ describe("extractCommerceFlags", () => {
     expect(extractCommerceFlags(["PAYID FAKE EMAIL"])).toContain("payid-scam");
     expect(extractCommerceFlags(["payid fake email"])).toContain("payid-scam");
   });
+
+  // Regression: #333 — Claude's free-text phrasing varies, so the taxonomy
+  // must cover the semantic variants, not one canonical wording.
+  it("extracts relative-will-collect from varied collection phrasings (#333)", () => {
+    expect(
+      extractCommerceFlags(["My brother will collect the item — third-party pickup"]),
+    ).toContain("relative-will-collect");
+    expect(
+      extractCommerceFlags(["A courier will collect the goods once payment clears"]),
+    ).toContain("relative-will-collect");
+  });
+
+  it("extracts implausible-discount from discount-magnitude phrasings (#333)", () => {
+    expect(
+      extractCommerceFlags(["Extreme discount (80% off) on designer handbags"]),
+    ).toContain("implausible-discount");
+    expect(
+      extractCommerceFlags(["Prices sit well below market value for genuine goods"]),
+    ).toContain("implausible-discount");
+  });
+
+  it("extracts widened taxonomy phrasings", () => {
+    expect(
+      extractCommerceFlags(["All reviews are 5 stars and posted the same day"]),
+    ).toContain("fake-reviews");
+    expect(
+      extractCommerceFlags(["Reverse image search shows the product photos elsewhere"]),
+    ).toContain("stock-photo-product");
+    expect(
+      extractCommerceFlags(["Buyer wants to move to text message off Marketplace"]),
+    ).toContain("off-platform-move");
+    expect(
+      extractCommerceFlags(["Seller sent a doctored receipt as proof of payment"]),
+    ).toContain("fake-payment-confirmation");
+  });
+
+  it("does NOT tag urgent-purchase-pressure on generic non-commerce urgency", () => {
+    expect(
+      extractCommerceFlags(["Urgency tactics — 'act now or your account is suspended'"]),
+    ).not.toContain("urgent-purchase-pressure");
+  });
 });
 
 describe("buildShopSignal", () => {
