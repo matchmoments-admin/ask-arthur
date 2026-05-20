@@ -150,6 +150,18 @@ describe("extractCommerceFlags", () => {
     ).toContain("implausible-discount");
   });
 
+  // Regression: 2026-05-20 prod smoke test — Claude wrote "Unusually high
+  // discount (80% off designer goods)", which the first widening (#334)
+  // still missed. "% off" / "% discount" are the structural discount markers.
+  it("extracts implausible-discount from percentage and high-discount markers", () => {
+    expect(
+      extractCommerceFlags(["Unusually high discount (80% off designer goods)"]),
+    ).toContain("implausible-discount");
+    expect(
+      extractCommerceFlags(["Listing offers an 80% discount on genuine handbags"]),
+    ).toContain("implausible-discount");
+  });
+
   it("extracts widened taxonomy phrasings", () => {
     expect(
       extractCommerceFlags(["All reviews are 5 stars and posted the same day"]),
