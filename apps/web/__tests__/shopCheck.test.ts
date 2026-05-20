@@ -173,6 +173,41 @@ describe("POST /api/shop-check", () => {
     expect(inngest.send).not.toHaveBeenCalled();
   });
 
+  it("re-click on a stuck queued row re-emits the enrichment event", async () => {
+    // The prior POST created the row but its inngest.send threw, so the
+    // deepCheck never left "queued". A re-click must re-emit so "Try again"
+    // actually retries — without creating a second row.
+    const { client, rpc } = makeSupabase({
+      data: { id: "stuck-uuid", signal: { deepCheck: { status: "queued" } } },
+    });
+    useSupabase(client);
+
+    const res = await POST(postReq({ url: "https://designer-bags.shop/cart" }));
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).id).toBe("stuck-uuid");
+    expect(rpc).not.toHaveBeenCalled(); // no second row
+    expect(inngest.send).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(inngest.send).mock.calls[0][0]).toMatchObject({
+      name: "shop.check.requested.v1",
+      id: "shop-check:stuck-uuid",
+    });
+  });
+
+  it("re-click on a row past `queued` returns it without re-emitting", async () => {
+    const { client, rpc } = makeSupabase({
+      data: { id: "done-uuid", signal: { deepCheck: { status: "complete" } } },
+    });
+    useSupabase(client);
+
+    const res = await POST(postReq({ url: "https://designer-bags.shop/cart" }));
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).id).toBe("done-uuid");
+    expect(rpc).not.toHaveBeenCalled();
+    expect(inngest.send).not.toHaveBeenCalled();
+  });
+
   it("503s when the upsert RPC fails", async () => {
     const { client } = makeSupabase(
       { data: null },

@@ -19,13 +19,36 @@ import { normalizeURL } from "@askarthur/scam-engine/url-normalize";
 import { isPrivateURL } from "@askarthur/scam-engine/safebrowsing";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { SHOP_CHECK_REQUESTED_EVENT } from "@askarthur/scam-engine/inngest/events";
-import { ReferrerSourceSchema } from "@askarthur/types";
+import { ReferrerSourceSchema, type ReferrerSource } from "@askarthur/types";
 
 const BodySchema = z.object({
   url: z.string().min(1).max(2048),
   commerceFlags: z.array(z.string().max(64)).max(50).optional(),
   referrerSource: ReferrerSourceSchema.optional(),
 });
+
+/**
+ * Build the shop.check.requested.v1 event. The event id is keyed to the
+ * shop_checks row id, so re-emitting it for the same row is a safe no-op —
+ * Inngest dedups on the event id within its 24h window.
+ */
+function shopCheckRequestedEvent(
+  shopCheckId: string,
+  url: string,
+  commerceFlags: string[],
+  referrerSource?: ReferrerSource,
+) {
+  return {
+    name: SHOP_CHECK_REQUESTED_EVENT,
+    id: `shop-check:${shopCheckId}`,
+    data: {
+      shopCheckId,
+      url,
+      commerceFlags,
+      ...(referrerSource && { referrerSource }),
+    },
+  };
+}
 
 export async function POST(req: NextRequest) {
   if (!featureFlags.shopSignal) {
@@ -112,7 +135,8 @@ export async function POST(req: NextRequest) {
     `shop-check:${urlHashHex}:${dayBucket}`;
 
   // Re-click guard — if a row already exists for this idempotency key,
-  // return it unchanged so a re-click never resets a completed row's score.
+  // return it without creating a second row, so a re-click never resets a
+  // completed row's score.
   //
   // A concurrent first-POST race here is benign: both POSTs share the
   // idempotency key, so upsert_shop_check's ON CONFLICT only ever resets a
@@ -120,12 +144,38 @@ export async function POST(req: NextRequest) {
   // event id (so enrichment still runs exactly once), and once a row reaches
   // a completed state it is committed + SELECT-visible — so the dangerous
   // complete → placeholder reset is caught by this guard and cannot occur.
+  //
+  // Recovery case: if a prior POST created the row but its enrichment never
+  // started (deepCheck still "queued" — e.g. that POST's inngest.send threw),
+  // re-emit the event so a "Try again" click actually retries. Re-emitting is
+  // safe — the event id is keyed to the row id, so Inngest dedups a run that
+  // already happened or is mid-flight; a row past "queued" is left untouched.
   const existing = await supabase
     .from("shop_checks")
-    .select("id")
+    .select("id, signal")
     .eq("idempotency_key", idempotencyKey)
     .maybeSingle();
   if (existing.data?.id) {
+    const deepCheckStatus = (
+      existing.data.signal as { deepCheck?: { status?: string } } | null
+    )?.deepCheck?.status;
+    if (deepCheckStatus === "queued") {
+      try {
+        await inngest.send(
+          shopCheckRequestedEvent(
+            existing.data.id,
+            norm.normalized,
+            parsed.data.commerceFlags ?? [],
+            parsed.data.referrerSource,
+          ),
+        );
+      } catch (err) {
+        logger.error("shop-check: re-emit for a stuck queued row failed", {
+          shopCheckId: existing.data.id,
+          error: String(err),
+        });
+      }
+    }
     return NextResponse.json(
       { id: existing.data.id },
       { headers: { "Cache-Control": "no-store" } },
@@ -169,18 +219,14 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    await inngest.send({
-      name: SHOP_CHECK_REQUESTED_EVENT,
-      id: `shop-check:${shopCheckId}`,
-      data: {
+    await inngest.send(
+      shopCheckRequestedEvent(
         shopCheckId,
-        url: norm.normalized,
+        norm.normalized,
         commerceFlags,
-        ...(parsed.data.referrerSource && {
-          referrerSource: parsed.data.referrerSource,
-        }),
-      },
-    });
+        parsed.data.referrerSource,
+      ),
+    );
   } catch (err) {
     // The row exists in "queued" — the client poll will surface a stuck
     // state rather than a hard failure. Log loudly.
