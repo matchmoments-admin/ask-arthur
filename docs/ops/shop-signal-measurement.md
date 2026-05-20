@@ -72,8 +72,8 @@ where created_at >= now() - interval '7 days';
 with denom as (
   select sr.id
   from public.scam_reports sr
-  where sr.created_at >= '2026-05-19'::date           -- TODO: window start
-    and sr.created_at < '2026-06-18'::date            -- TODO: window end
+  where sr.created_at >= '2026-05-20'::date           -- window start (FF_SHOP_SIGNAL flipped 2026-05-20)
+    and sr.created_at < '2026-06-19'::date            -- window end (day-31 review 2026-06-19)
     and exists (
       select 1
       from public.report_entity_links rel
@@ -85,8 +85,8 @@ with denom as (
 flagged as (
   select sr.id
   from public.scam_reports sr
-  where sr.created_at >= '2026-05-19'::date
-    and sr.created_at < '2026-06-18'::date
+  where sr.created_at >= '2026-05-20'::date
+    and sr.created_at < '2026-06-19'::date
     and sr.analysis_result @> '{"shopSignal":{"isCommerce":true}}'::jsonb
     -- Aligned with denom: only count flagged rows that also have ≥1 url/domain entity link.
     and exists (
@@ -110,7 +110,7 @@ select
 
 ```sql
 -- Of the analyses where shop-signal fired, what % returned ≥1
--- commerce-specific tag in commerceFlags[]? The 11-tag taxonomy is in
+-- commerce-specific tag in commerceFlags[]? The 12-tag taxonomy is in
 -- packages/scam-engine/src/shop-signal.ts (COMMERCE_FLAG_TAXONOMY).
 -- A miss here means commerce was detected but no specific red-flag
 -- matched — useful as the Stage 0.5-vs-1 tripwire: <30% justifies the
@@ -118,8 +118,8 @@ select
 with commerce_rows as (
   select sr.id, sr.analysis_result -> 'shopSignal' as ss
   from public.scam_reports sr
-  where sr.created_at >= '2026-05-19'::date
-    and sr.created_at < '2026-06-18'::date
+  where sr.created_at >= '2026-05-20'::date
+    and sr.created_at < '2026-06-19'::date
     and sr.analysis_result @> '{"shopSignal":{"isCommerce":true}}'::jsonb
 ),
 with_flags as (
@@ -136,6 +136,15 @@ select
 
 **Pass:** `flag_extraction_pct >= 30`.
 
+> **Taxonomy note (2026-05-20).** `COMMERCE_FLAG_TAXONOMY` was widened on
+> day 1 of the window (issue #333) to cover free-text phrasing variants —
+> the original substring list missed e.g. "my brother will collect the
+> item" and "extreme discount (80% off)". A low Q2 reading is therefore
+> attributable to genuinely thin extraction, **not** substring
+> brittleness; the day-31 prompt-addendum escalation (decision-tree row 3)
+> is valid as written. Only matches were _added_ — the widened taxonomy is
+> a strict superset, so it never lowers Q2 relative to the original.
+
 ### Q3 — Mobile-share share of commerce-flagged volume (target: ≥20%)
 
 ```sql
@@ -148,8 +157,8 @@ select
 with commerce_rows as (
   select sr.id, sr.analysis_result -> 'shopSignal' as ss
   from public.scam_reports sr
-  where sr.created_at >= '2026-05-19'::date
-    and sr.created_at < '2026-06-18'::date
+  where sr.created_at >= '2026-05-20'::date
+    and sr.created_at < '2026-06-19'::date
     and sr.analysis_result @> '{"shopSignal":{"isCommerce":true}}'::jsonb
 )
 select
@@ -177,8 +186,8 @@ from public.scam_reports sr,
      jsonb_array_elements_text(
        sr.analysis_result -> 'shopSignal' -> 'commerceFlags'
      ) as tag
-where sr.created_at >= '2026-05-19'::date
-  and sr.created_at < '2026-06-18'::date
+where sr.created_at >= '2026-05-20'::date
+  and sr.created_at < '2026-06-19'::date
   and sr.analysis_result @> '{"shopSignal":{"isCommerce":true}}'::jsonb
 group by tag
 order by hits desc;
