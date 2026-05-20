@@ -19,6 +19,7 @@ A route, table, cron, or flag is documented in **exactly one** of these files â€
 | `ARCHITECTURE.md`              | Retired stub. Redirects here.                                                                                                                                                     |
 | `docs/plans/<feature>.md`      | Historical narrative for an in-flight build. Banner points new work at GitHub Issues via `/to-prd` + `/to-issues` (canonical artefact home â€” see `docs/agents/issue-tracker.md`). |
 | `docs/ops/<feature>-config.md` | Operator runbook (env vars, flag flips, vendor setup, smoke tests). Different audience from system map; stays.                                                                    |
+| `docs/compliance/`             | Compliance evidence, PIAs, policy commitments, retention tables, and decision logs. Uses the six-section convention in `docs/compliance/README.md`.                               |
 | `docs/adr/<n>-<topic>.md`      | Architectural law that specs respect. ADRs survive the system map and any spec.                                                                                                   |
 | `CONTEXT.md`                   | Domain glossary. Defines vocabulary; this map describes deployed surface.                                                                                                         |
 
