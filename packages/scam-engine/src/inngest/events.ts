@@ -119,6 +119,38 @@ export function parseAnalyzeCompletedData(raw: unknown): AnalyzeCompletedData {
   return AnalyzeCompletedDataSchema.parse(raw);
 }
 
+// ── shop.signal.evaluated.v1 ────────────────────────────────────────────
+//
+// Emitted after the free Shop Signal detector attaches a shopSignal payload
+// and the request path has scheduled its background work. The consumer calls
+// the paid APIVoid feed only when FF_SHOP_SIGNAL_PAID_FEED is ON, then writes
+// paidProviderVerdict back to shop_checks.signal through the v135 RPC.
+
+export const ShopSignalEvaluatedDataSchema = z.object({
+  requestId: z.string().min(1).max(255),
+  host: z.string().min(1),
+  urls: z.array(z.string()).min(1),
+  shopCheckId: z.string().uuid(),
+  shopSignal: ShopSignalSchema,
+});
+export type ShopSignalEvaluatedData = z.infer<
+  typeof ShopSignalEvaluatedDataSchema
+>;
+
+export const SHOP_SIGNAL_EVALUATED_EVENT = "shop.signal.evaluated.v1" as const;
+
+export interface ShopSignalEvaluatedEvent {
+  name: typeof SHOP_SIGNAL_EVALUATED_EVENT;
+  id: string;
+  data: ShopSignalEvaluatedData;
+}
+
+export function parseShopSignalEvaluatedData(
+  raw: unknown,
+): ShopSignalEvaluatedData {
+  return ShopSignalEvaluatedDataSchema.parse(raw);
+}
+
 // ── scam-report.stored.v1 ────────────────────────────────────────────────
 //
 // Emitted by analyze-report.ts after storeScamReport succeeds. Carries the

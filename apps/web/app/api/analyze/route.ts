@@ -17,6 +17,10 @@ import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { ANALYZE_COMPLETED_EVENT } from "@askarthur/scam-engine/inngest/events";
 import { detectCharityIntent, type CharityIntent } from "@askarthur/scam-engine/charity-intent";
 import { detectCommerceSignal, buildShopSignal } from "@askarthur/scam-engine/shop-signal";
+import {
+  persistAndEmitShopSignalEvaluation,
+  sourceSurfaceForAnalyzeSurface,
+} from "@askarthur/scam-engine/shop-checks";
 import { WebAnalyzeInputSchema, type RedirectChain } from "@askarthur/types";
 import { storeVerifiedScam, incrementStats } from "@askarthur/scam-engine/pipeline";
 import { storeScamReport, buildEntities } from "@askarthur/scam-engine/report-store";
@@ -320,6 +324,26 @@ export async function POST(req: NextRequest) {
     // `urlsToCheck`); using bare `urls` would miss bit.ly→.shop redirects.
     if (featureFlags.shopSignal && detectCommerceSignal(text, allUrls)) {
       aiResult.shopSignal = buildShopSignal(merged.redFlags, referrerSource);
+      waitUntil(
+        Promise.allSettled([
+          persistAndEmitShopSignalEvaluation({
+            requestId,
+            urls: allUrls,
+            verdict: aiResult.verdict,
+            confidence: aiResult.confidence,
+            shopSignal: aiResult.shopSignal,
+            sourceSurface: sourceSurfaceForAnalyzeSurface("web", Boolean(referrerSource)),
+          }),
+        ]).then((results) => {
+          const failed = results.find((r) => r.status === "rejected");
+          if (failed?.status === "rejected") {
+            logger.error("shop-signal fan-out failed", {
+              error: String(failed.reason),
+              requestId,
+            });
+          }
+        })
+      );
     }
 
     // 7. Background work via waitUntil (survives after response is sent)

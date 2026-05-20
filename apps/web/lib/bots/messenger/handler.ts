@@ -62,7 +62,7 @@ async function processMessage(
   }
 
   try {
-    const result = await analyzeForBot(text);
+    const result = await analyzeForBot(text, undefined, undefined, "bot-messenger");
     const formatted = toMessengerMessage(result);
 
     // Messenger has a 2000 char limit per message

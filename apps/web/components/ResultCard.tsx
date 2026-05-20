@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { LucideIcon } from "lucide-react";
-import { ArrowRight, CircleX, Eye, HandCoins, ShoppingBag, TriangleAlert } from "lucide-react";
+import { ArrowRight, ChevronDown, CircleX, Eye, HandCoins, ShoppingBag, TriangleAlert } from "lucide-react";
 import ResultFeedback from "./result/ResultFeedback";
 import ResultActionButtons from "./result/ResultActionButtons";
 import OnwardReportPicker from "./result/OnwardReportPicker";
@@ -26,6 +26,18 @@ const SHOP_FLAG_LABEL: Record<string, string> = {
   "fake-australia-post": "Fake Australia Post notice",
   "urgent-purchase-pressure": "Urgent purchase pressure",
   "fake-reviews": "Suspicious reviews",
+};
+
+const PAID_PROVIDER_VERDICT_LABEL: Record<"safe" | "suspicious" | "risky", string> = {
+  safe: "Low third-party risk",
+  suspicious: "Third-party caution",
+  risky: "Third-party high risk",
+};
+
+const PAID_PROVIDER_VERDICT_TONE: Record<"safe" | "suspicious" | "risky", string> = {
+  safe: "border-emerald-200 bg-emerald-50 text-emerald-800",
+  suspicious: "border-warn-border bg-warn-bg/40 text-warn-heading",
+  risky: "border-danger-border bg-danger-bg text-danger-text",
 };
 
 type Verdict = "SAFE" | "SUSPICIOUS" | "HIGH_RISK";
@@ -146,6 +158,9 @@ export default function ResultCard({
   const config = VERDICT_CONFIG[verdict];
   const title = resolveTitle(verdict, scamType);
   const Icon = config.icon;
+  const paidProviderVerdict = shopSignal?.paidProviderVerdict;
+  const [shopSignalOpen, setShopSignalOpen] = useState(false);
+  const shopSignalDetailId = useId();
   // Picker is only useful when we have a scam_reports row to attach the
   // onward log entries to; otherwise the picker has nothing to forward.
   const showReport = verdict !== "SAFE" && typeof scamReportId === "number";
@@ -283,6 +298,78 @@ export default function ResultCard({
                 {SHOP_FLAG_LABEL[tag] ?? tag}
               </span>
             ))
+          )}
+        </div>
+      )}
+
+      {paidProviderVerdict && (
+        <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50">
+          <button
+            type="button"
+            aria-expanded={shopSignalOpen}
+            aria-controls={shopSignalDetailId}
+            onClick={() => setShopSignalOpen((open) => !open)}
+            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+          >
+            <span>
+              <span className="block text-xs font-semibold uppercase tracking-wide text-gov-slate">
+                Shop trust check
+              </span>
+              <span className="mt-1 block text-sm font-bold text-deep-navy">
+                {PAID_PROVIDER_VERDICT_LABEL[paidProviderVerdict.verdict]}
+              </span>
+            </span>
+            <span className="flex items-center gap-2">
+              <span
+                className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${PAID_PROVIDER_VERDICT_TONE[paidProviderVerdict.verdict]}`}
+              >
+                {paidProviderVerdict.trustScore}/100
+              </span>
+              <ChevronDown
+                size={18}
+                className={`text-gov-slate transition-transform ${shopSignalOpen ? "rotate-180" : ""}`}
+                aria-hidden="true"
+              />
+            </span>
+          </button>
+          {shopSignalOpen && (
+            <div
+              id={shopSignalDetailId}
+              className="border-t border-slate-200 px-4 pb-4 pt-3 text-sm text-gov-slate"
+            >
+              <p>
+                APIVoid checked the shop host for trust and blacklist signals. This is a
+                supporting signal only, not a site audit grade.
+              </p>
+              <dl className="mt-3 grid grid-cols-2 gap-3">
+                <div>
+                  <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Blacklists
+                  </dt>
+                  <dd className="font-bold text-deep-navy">
+                    {paidProviderVerdict.blacklistDetections}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Provider
+                  </dt>
+                  <dd className="font-bold text-deep-navy">APIVoid</dd>
+                </div>
+              </dl>
+              {paidProviderVerdict.flags.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {paidProviderVerdict.flags.map((flag) => (
+                    <span
+                      key={flag}
+                      className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs"
+                    >
+                      {flag}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
         </div>
       )}

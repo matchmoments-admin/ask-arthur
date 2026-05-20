@@ -68,7 +68,7 @@ describe("toSlackBlocks", () => {
     expect(context?.elements?.[0]?.text).toContain("Ask Arthur");
   });
 
-  it("does not crash on a shopSignal payload carrying referrerSource (Stage 0.5)", () => {
+  it("does not crash on an enriched shopSignal payload carrying paidProviderVerdict", () => {
     // Stage 0.5 carries the share-sheet origin through onto the
     // ShopSignal payload. The Slack formatter must keep rendering its
     // existing block shape without throwing on the enriched payload.
@@ -79,6 +79,14 @@ describe("toSlackBlocks", () => {
           commerceFlags: ["fake-australia-post", "off-platform-move"],
           generatedAt: "2026-05-19T09:00:00.000Z",
           referrerSource: "tiktok-inapp",
+          paidProviderVerdict: {
+            provider: "apivoid",
+            verdict: "safe",
+            trustScore: 91,
+            blacklistDetections: 0,
+            flags: [],
+            checkedAt: "2026-05-20T09:00:00.000Z",
+          },
         },
       })
     );

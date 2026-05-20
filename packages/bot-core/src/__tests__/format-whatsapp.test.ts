@@ -30,10 +30,10 @@ describe("toWhatsAppMessage", () => {
     expect(msg).toContain("_Powered by Ask Arthur");
   });
 
-  it("does not crash on a shopSignal payload carrying referrerSource (Stage 0.5)", () => {
+  it("does not crash on an enriched shopSignal payload carrying paidProviderVerdict", () => {
     // Stage 0.5 wires in-app-browser referrer through onto the ShopSignal
     // payload; the formatter must keep working without rendering the new
-    // field (chip render is Stage 1 PR 4).
+    // fields.
     const msg = toWhatsAppMessage(
       makeResult({
         verdict: "HIGH_RISK",
@@ -43,6 +43,14 @@ describe("toWhatsAppMessage", () => {
           commerceFlags: ["domain-renewal-invoice"],
           generatedAt: "2026-05-19T09:00:00.000Z",
           referrerSource: "instagram-inapp",
+          paidProviderVerdict: {
+            provider: "apivoid",
+            verdict: "risky",
+            trustScore: 18,
+            blacklistDetections: 2,
+            flags: ["domain-blacklisted"],
+            checkedAt: "2026-05-20T09:00:00.000Z",
+          },
         },
       })
     );

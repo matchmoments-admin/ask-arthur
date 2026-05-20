@@ -25,6 +25,7 @@ export async function analyzeForBot(
   text: string,
   region?: string,
   images?: string[],
+  shopCheckSourceSurface?: "bot-telegram" | "bot-whatsapp" | "bot-slack" | "bot-messenger",
 ): Promise<AnalysisResult> {
   const out = await runAnalysisCore({
     text,
@@ -32,6 +33,7 @@ export async function analyzeForBot(
     region: region ?? null,
     images,
     backgroundMode: "fire-and-forget",
+    shopCheckSourceSurface,
   });
   return out.result;
 }

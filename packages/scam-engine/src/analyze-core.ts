@@ -48,6 +48,11 @@ import type {
   ReferrerSource,
 } from "@askarthur/types";
 import { detectCommerceSignal, buildShopSignal } from "./shop-signal";
+import {
+  persistAndEmitShopSignalEvaluation,
+  sourceSurfaceForAnalyzeSurface,
+  type ShopCheckSourceSurface,
+} from "./shop-checks";
 
 export type AnalyzeSurface = AnalyzeCacheSurface;
 
@@ -88,6 +93,8 @@ export interface AnalyzeCoreInput {
    * the response when shop-signal also fires.
    */
   referrerSource?: ReferrerSource;
+  /** Optional precise channel for shop_checks.source_surface. */
+  shopCheckSourceSurface?: ShopCheckSourceSurface;
 }
 
 export interface AnalyzeCoreOutput {
@@ -135,6 +142,7 @@ export async function runAnalysisCore(
     backgroundMode = "waitUntil",
     requestId,
     referrerSource,
+    shopCheckSourceSurface,
   } = input;
 
   // 1. Cache read (unless caller opted out).
@@ -259,6 +267,31 @@ export async function runAnalysisCore(
         }),
       ),
     );
+    if (result.shopSignal) {
+      tasks.push(
+        Promise.allSettled([
+          persistAndEmitShopSignalEvaluation({
+            requestId,
+            urls: urlsToCheck,
+            verdict: result.verdict,
+            confidence: result.confidence,
+            shopSignal: result.shopSignal,
+            sourceSurface:
+              shopCheckSourceSurface ??
+              sourceSurfaceForAnalyzeSurface(surface, Boolean(referrerSource)),
+          }),
+        ]).then((results) => {
+          const failed = results.find((r) => r.status === "rejected");
+          if (failed?.status === "rejected") {
+            logger.error("shop-signal fan-out failed", {
+              error: String(failed.reason),
+              surface,
+              requestId,
+            });
+          }
+        }),
+      );
+    }
     if (!skipCacheWrite) {
       tasks.push(setCachedAnalysis({ text, surface }, result));
     }

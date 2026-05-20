@@ -154,7 +154,12 @@ async function processImageMessage(
       return;
     }
 
-    const result = await analyzeForBot(caption ?? "Analyse this image for scam indicators", undefined, [base64]);
+    const result = await analyzeForBot(
+      caption ?? "Analyse this image for scam indicators",
+      undefined,
+      [base64],
+      "bot-whatsapp",
+    );
     const formatted = toWhatsAppMessage(result);
 
     const buttons: Array<{ id: string; title: string }> = [];
@@ -180,7 +185,7 @@ async function processAnalysis(from: string, text: string): Promise<void> {
   }
 
   try {
-    const result = await analyzeForBot(text);
+    const result = await analyzeForBot(text, undefined, undefined, "bot-whatsapp");
     const formatted = toWhatsAppMessage(result);
 
     // Send the analysis result with follow-up buttons
