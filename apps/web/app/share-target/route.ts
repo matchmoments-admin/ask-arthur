@@ -16,6 +16,17 @@ import type { ReferrerSource } from "@askarthur/types";
  * response payload so the Stage-0 measurement window can quantify what
  * share of commerce-flagged volume arrives from a social share-sheet.
  */
+/**
+ * Cap raw share-target input length BEFORE it lands in a 303 redirect URL.
+ * Downstream `/api/analyze` Zod schema enforces a 10K-char cap; without an
+ * earlier cap here, a giant share-target POST occupies the redirect chain
+ * (browser → reflected 303 with multi-KB query string → next request →
+ * Zod rejection). 5000 chars is comfortably above any legitimate paste
+ * (a long phishing email body is ~2-3K), below the practical URL-length
+ * concern (~8K on most stacks), and well under the downstream 10K Zod cap.
+ */
+const SHARE_TARGET_MAX_CHARS = 5000;
+
 export async function POST(request: NextRequest) {
   const formData = await request.formData();
 
@@ -23,9 +34,10 @@ export async function POST(request: NextRequest) {
   const url = formData.get("url")?.toString() ?? "";
   const title = formData.get("title")?.toString() ?? "";
 
-  // Combine non-empty parts into a single shared string
+  // Combine non-empty parts into a single shared string, then cap length
+  // before constructing the redirect URL (soft-DoS guard — see comment above).
   const parts = [title, text, url].filter(Boolean);
-  const sharedText = parts.join("\n");
+  const sharedText = parts.join("\n").slice(0, SHARE_TARGET_MAX_CHARS);
 
   const referrerSource = detectInappReferrer(
     request.headers.get("user-agent"),
