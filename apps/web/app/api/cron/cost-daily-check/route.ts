@@ -23,7 +23,7 @@ export async function GET(req: Request) {
     return new Response("Unauthorized", { status: 401 });
   }
 
-  // Read all 5 numeric env-var caps up front via the safe coercer. Track
+  // Read all 6 numeric env-var caps up front via the safe coercer. Track
   // any invalid values so we can write a single diagnostic row before any
   // brake decision uses the (defaulted) value — otherwise a typo in
   // REDDIT_INTEL_CAP_USD silently disables the brake.
@@ -33,6 +33,7 @@ export async function GET(req: Request) {
     REDDIT_INTEL_CAP_USD: readNumberEnv("REDDIT_INTEL_CAP_USD", 10),
     PHONE_FOOTPRINT_CAP_USD: readNumberEnv("PHONE_FOOTPRINT_CAP_USD", 5),
     CHARITY_CHECK_CAP_USD: readNumberEnv("CHARITY_CHECK_CAP_USD", 5),
+    SHOP_SIGNAL_CAP_USD: readNumberEnv("SHOP_SIGNAL_CAP_USD", 15),
   };
   const thresholdUsd = envReads.DAILY_COST_THRESHOLD_USD.value;
 
@@ -44,7 +45,7 @@ export async function GET(req: Request) {
   // Surface invalid env values to cost_telemetry — health-digest aggregates
   // feature LIKE '%error%' rows into its daily admin Telegram, so this lands
   // visibly within 24h without needing a separate alerter. One row per bad
-  // env var per cron firing; at 4 firings/day × 5 env vars = max 20 rows/day
+  // env var per cron firing; at 4 firings/day × 6 env vars = max 24 rows/day
   // even in the pathological all-bad-config case.
   const invalidEnvs = Object.entries(envReads).filter(([, r]) => r.invalid);
   if (invalidEnvs.length > 0) {
@@ -173,10 +174,27 @@ export async function GET(req: Request) {
   const charityCheckThresholdUsd = envReads.CHARITY_CHECK_CAP_USD.value;
   const charityCheckCost = top.find((t) => t.feature === "charity_check")?.cost ?? 0;
 
+  // Shop Signal — APIVoid Site Trustworthiness paid feed. Same multi-tag
+  // aggregation as Reddit Intel: the headline `shop_signal` tag carries the
+  // per-call cost; the `-error` / `-overage` tags are $0 diagnostics, summed
+  // in for tag-drift resilience. Cap defaults to $15/day (~A$22.50) — see
+  // docs/ops/shop-signal-config.md §3. Engaging this brake pauses only the
+  // paid feed; the free Stage-0 detector keeps running.
+  const shopSignalThresholdUsd = envReads.SHOP_SIGNAL_CAP_USD.value;
+  const shopSignalCost = top
+    .filter(
+      (t) =>
+        t.feature === "shop_signal" ||
+        t.feature === "shop-signal-apivoid-error" ||
+        t.feature === "shop-signal-apivoid-overage",
+    )
+    .reduce((sum, t) => sum + t.cost, 0);
+
   let brakeSet = false;
   let redditBrakeSet = false;
   let phoneFootprintBrakeSet = false;
   let charityCheckBrakeSet = false;
+  let shopSignalBrakeSet = false;
   if (vulnEnrichCost > vulnEnrichThresholdUsd) {
     const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     const { error: brakeError } = await supabase
@@ -300,6 +318,36 @@ export async function GET(req: Request) {
     }
   }
 
+  if (shopSignalCost > shopSignalThresholdUsd) {
+    const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const { error: brakeError } = await supabase
+      .from("feature_brakes")
+      .upsert(
+        {
+          feature: "shop_signal",
+          paused_until: pausedUntil,
+          reason: `Daily spend $${shopSignalCost.toFixed(2)} exceeded $${shopSignalThresholdUsd} cap`,
+          set_by: "cost-daily-check",
+          set_cost_usd: shopSignalCost,
+          set_threshold_usd: shopSignalThresholdUsd,
+          set_at: new Date().toISOString(),
+        },
+        { onConflict: "feature" },
+      );
+    if (brakeError) {
+      logger.error("failed to set shop_signal brake", {
+        error: brakeError.message,
+      });
+    } else {
+      shopSignalBrakeSet = true;
+      logger.warn("shop_signal brake engaged", {
+        costUsd: shopSignalCost,
+        thresholdUsd: shopSignalThresholdUsd,
+        pausedUntil,
+      });
+    }
+  }
+
   // Truncate to top 3 for the Telegram message (UX — keep it scannable).
   const topForTelegram = top.slice(0, 3);
 
@@ -342,6 +390,12 @@ export async function GET(req: Request) {
       `🛑 <b>charity_check brake engaged</b> — paused for 24h (spend $${charityCheckCost.toFixed(2)} > $${charityCheckThresholdUsd} cap)`,
     );
   }
+  if (shopSignalBrakeSet) {
+    lines.push(
+      "",
+      `🛑 <b>shop_signal brake engaged</b> — paused for 24h (spend $${shopSignalCost.toFixed(2)} > $${shopSignalThresholdUsd} cap)`,
+    );
+  }
   lines.push("", `Full breakdown: https://askarthur.au/admin/costs`);
 
   await sendAdminTelegramMessage(lines.join("\n"));
@@ -358,5 +412,9 @@ export async function GET(req: Request) {
     redditIntelCost,
     phoneFootprintBrakeSet,
     phoneFootprintCost,
+    charityCheckBrakeSet,
+    charityCheckCost,
+    shopSignalBrakeSet,
+    shopSignalCost,
   });
 }

@@ -354,6 +354,13 @@ export const featureFlags = {
    *  preview smoke-test confirms the taxonomy hits ≥30% of commerce-shaped
    *  fixtures. Plan: docs/plans/shop-guard-v2.md §3. */
   shopSignal: process.env.FF_SHOP_SIGNAL === "true",
+
+  /** Shop Guard Stage 1 — enables the APIVoid Site Trustworthiness paid
+   *  feed. Independent of `shopSignal` so the free Stage-0 detector keeps
+   *  running if the paid feed is in trouble. Server-side only. Default OFF
+   *  until the APIVoid trial-key preview smoke test passes; flip ON to
+   *  start consuming the trial. Plan: docs/plans/shop-guard-v2.md §4 PR 2. */
+  shopSignalPaidFeed: process.env.FF_SHOP_SIGNAL_PAID_FEED === "true",
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;

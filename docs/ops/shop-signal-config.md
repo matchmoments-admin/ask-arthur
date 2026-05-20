@@ -8,12 +8,14 @@ or the daily cap needs raising — it goes here.
 Referenced from [CLAUDE.md](../../CLAUDE.md) Quick Reference and from
 `docs/plans/shop-guard-v2.md` §4. Keep updated each PR.
 
-> **Status (2026-05-19)** — Created in the Stage 0 pre-launch tidy PR
-> after Stage 0 (#324) and Stage 0.5 (#325) shipped. Stage 0 is
-> free-only; **no env vars or paid keys are required for the Stage-0
-> flag flip** that starts the 30-day measurement window. Stage 1 (PR 2,
-> issue #319) will lift the SQL block in §4 below into a real migration
-> and provision the APIVoid key.
+> **Status (2026-05-20)** — Stage 0/0.5 (#324/#325) live; `FF_SHOP_SIGNAL`
+> flipped ON 2026-05-20. Stage 1 PR A (#320, `shop_checks` schema) and
+> PR B (#319, APIVoid adapter + cost brake) shipped. The APIVoid adapter,
+> `FF_SHOP_SIGNAL_PAID_FEED` flag, and `cost-daily-check` brake wiring are
+> in code; the trial key is in Vercel env. The paid feed is not yet
+> _called_ — that is PR C (#321, Inngest fan-out). Flip
+> `FF_SHOP_SIGNAL_PAID_FEED` ON only after #321 ships and the preview
+> smoke test passes.
 
 **Status legend**
 
@@ -34,7 +36,7 @@ clears.
 
 | Flag (env var)                      | Type            | Default | Status | Gates                                                                                                                                                                                                                                                                                                              | Flip when                                                                                                                                                              |
 | ----------------------------------- | --------------- | ------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `FF_SHOP_SIGNAL`                    | server          | `false` | ❌     | Master switch. When `false`, the analyze pipeline's commerce-signal branch short-circuits before `detectCommerceSignal()` runs and `AnalysisResult.shopSignal` is absent on every response. When `true`, the pure detector + Claude red-flag post-processor run on every URL-bearing / commerce-text-shaped input. | After this PR merges. Starts the 30-day Stage-0 measurement window. **Step D of the pre-launch tidy plan.**                                                            |
+| `FF_SHOP_SIGNAL`                    | server          | `false` | ✅     | Master switch. When `false`, the analyze pipeline's commerce-signal branch short-circuits before `detectCommerceSignal()` runs and `AnalysisResult.shopSignal` is absent on every response. When `true`, the pure detector + Claude red-flag post-processor run on every URL-bearing / commerce-text-shaped input. | After this PR merges. Starts the 30-day Stage-0 measurement window. **Step D of the pre-launch tidy plan.**                                                            |
 | `FF_SHOP_SIGNAL_PAID_FEED`          | server          | `false` | ❌     | APIVoid Site Trustworthiness Adapter (Stage 1 PR 2). Independent of `FF_SHOP_SIGNAL` so the cheap-path can run alone if the paid feed is in trouble.                                                                                                                                                               | After the 30-day Stage-0 measurement window clears all three gates in `docs/ops/shop-signal-measurement.md` AND PR 2 ships an APIVoid trial-key smoke test on preview. |
 | `NEXT_PUBLIC_FF_SHOP_GUARD_B2B_API` | consumer        | `false` | ❌     | `/api/v1/shop-check` route (Stage 2 PR 5). When off, the route returns 503.                                                                                                                                                                                                                                        | Stage-1 measurement target clears (≥80% detection on AU adversarial corpus, ≤2% FP on real traffic).                                                                   |
 | `WXT_SHOP_GUARD`                    | extension build | `false` | ❌     | Extension popup + `SHOW_SHOP_SIGNAL_VERDICT` handler in `url-guard.content.ts` (Stage 2 PR 6). Build-time flag — bundling decision, not runtime.                                                                                                                                                                   | Same gate as `NEXT_PUBLIC_FF_SHOP_GUARD_B2B_API`. Extension `<all_urls>` host permission stays gated on activation data (PR 7, separate).                              |
@@ -57,10 +59,10 @@ to validate the value-prop threshold before any paid spend.
 
 | Var                            | Stage       | Status | Where set                                       | Notes                                                                                                                                                                                                        |
 | ------------------------------ | ----------- | ------ | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `FF_SHOP_SIGNAL`               | Stage 0     | ❌     | Vercel → Production + Preview                   | `true` to enable. Default OFF.                                                                                                                                                                               |
-| `FF_SHOP_SIGNAL_PAID_FEED`     | Stage 1     | ❌     | Vercel → Production + Preview                   | `true` to enable APIVoid calls.                                                                                                                                                                              |
-| `APIVOID_API_KEY`              | Stage 1     | ❌     | Vercel → server-only (no `NEXT_PUBLIC_` prefix) | Provision from `apivoid.com/account` after subscription. Rotates via Vercel re-set; no Supabase secrets table involvement.                                                                                   |
-| `SHOP_SIGNAL_CAP_USD`          | Stage 1     | ❌     | Vercel → Production + Preview                   | Daily cap. **Use bare number** (`15`, not `$15` or `AUD 15` — `parseFloat("$15") === NaN` silently disables the brake). Default `15`. See §3 for cap derivation.                                             |
+| `FF_SHOP_SIGNAL`               | Stage 0     | ✅     | Vercel → Production + Preview                   | Flipped ON 2026-05-20 — Stage-0 measurement window open.                                                                                                                                                     |
+| `FF_SHOP_SIGNAL_PAID_FEED`     | Stage 1     | ❌     | Vercel → Production + Preview                   | Flag shipped in code by #319 (default OFF). `true` to enable APIVoid calls — flip after the preview smoke test passes.                                                                                       |
+| `APIVOID_API_KEY`              | Stage 1     | ✅     | Vercel → server-only (no `NEXT_PUBLIC_` prefix) | 30-day trial key added to Vercel + `.env.local` 2026-05-20. Rotates via Vercel re-set; no Supabase secrets table involvement.                                                                                |
+| `SHOP_SIGNAL_CAP_USD`          | Stage 1     | ⏳     | Vercel → Production + Preview                   | Optional — `cost-daily-check` defaults to `15` if unset. **Use bare number** (`15`, not `$15` — `parseFloat("$15") === NaN` silently disables the brake). See §3 for cap derivation.                         |
 | `NEXT_PUBLIC_PLAUSIBLE_DOMAIN` | already set | ✅     | Vercel → Production (`askarthur.au`)            | Used by `<PlausibleProvider>` in `apps/web/app/layout.tsx`. No change required for Shop Signal; the two new custom events (`scam_check_submitted`, `shop_signal_emitted`) inherit this domain automatically. |
 
 **Vercel pre-flip checklist** (before flipping `FF_SHOP_SIGNAL=true`):
@@ -103,6 +105,32 @@ captured here so PR 2 can lift it directly without re-research.
 Vercel-hosted Function calling APIVoid will egress from Vercel's
 Sydney / Singapore regions; this is treated as US traffic by APIVoid.
 
+### Verified API contract (2026-05-20, Stage 1 PR B / #319)
+
+Confirmed with a live trial-key call against the real endpoint:
+
+- **Endpoint:** `POST https://api.apivoid.com/v2/site-trust`, headers
+  `Content-Type: application/json` + `X-API-Key`, body `{"host": "<hostname>"}`.
+- **Measured latency:** ~1.5–4s per call (google.com 1.5s, github.com 3.9s,
+  cloudflare.com 2.9s). The adapter's timeout is **10s** — generous, as it
+  only runs in a background Inngest function (#321), never the request path.
+- **Response shape** (differs from the issue's original description —
+  `apivoid.ts` was written to the verified shape):
+  - `trust_score.result` — top-level, 0-100 integer.
+  - `domain_blacklist.detections` — top-level integer (absent → treated as 0).
+  - The boolean checks live under **`security_checks`**, not top-level:
+    `is_domain_blacklisted`, `is_suspicious_domain`, `is_suspended_site`,
+    `is_sinkholed_domain`, `is_most_abused_tld`, `is_ssl_expired`,
+    `is_valid_https`, `is_email_spoofable` — these are the fields the
+    adapter consumes for `flags[]` + verdict.
+  - There is **no** `is_high_discounts` / `is_fake_socials` field, and the
+    `site-trust` endpoint does **not** return `domain_age_in_days` — both
+    were dropped from the adapter. e-commerce platform detection is a
+    separate `ecommerce_platform` sub-object (not consumed at Stage 1).
+- **Verdict mapping** (`getSiteTrustworthiness`): `risky` if blacklisted or
+  `trustScore < 30`; `suspicious` if `trustScore < 70` or the domain is
+  suspicious / suspended / sinkholed; else `safe`.
+
 ### Stage 1 daily-cap derivation
 
 Plan §6 worst case: 1,000 commerce analyses/day × 60% paid-rate = 600
@@ -136,21 +164,22 @@ loop in half.
 > tax — every consumer of `feature_brakes` already speaks
 > underscore-canonical.
 
-### Draft migration (Stage 1 PR 2 lifts this verbatim)
+### No seed row — the brake row is created on demand
 
-Not applied yet — this is the SQL block PR 2 will copy into a numbered
-migration file (likely `v135_*.sql`, verify against `supabase/`
-numbering at apply time).
+> **Correction (Stage 1 PR 2, #319).** An earlier draft of this section
+> proposed seeding a `feature_brakes.shop_signal` row with
+> `paused_until = NULL`. That SQL is invalid: `feature_brakes.paused_until`
+> is `TIMESTAMPTZ NOT NULL` (migration v65). It is also unnecessary —
+> `feature_brakes` is **empty in production**; no feature (`phone_footprint`,
+> `reddit_intel`, `charity_check`, …) pre-seeds a row. The row is created
+> on demand by the `cost-daily-check` `.upsert(..., { onConflict: 'feature' })`
+> the first time the brake engages, and every consumer reads it with
+> `.maybeSingle()`, which treats "no row" as "not braked".
 
-```sql
--- Inserts (or updates) the shop_signal cost-brake row. Idempotent so
--- it's safe to re-run if the migration replays. Default state is "no
--- brake engaged" (paused_until=null); cost-daily-check writes
--- paused_until in the future when daily spend exceeds the cap.
-INSERT INTO public.feature_brakes (feature, paused_until, reason)
-VALUES ('shop_signal', NULL, 'Initial seed; engaged by cost-daily-check when daily APIVoid spend exceeds SHOP_SIGNAL_CAP_USD.')
-ON CONFLICT (feature) DO NOTHING;
-```
+So Stage 1 PR 2 ships **no brake seed**. Migration `v136` instead carries
+two CHECK-constraint guards the v135 `shop_checks` schema left off
+(`composite_score` 0-100 range, `referrer_source` enum) — see
+`supabase/migration-v136-shop-checks-constraints.sql`.
 
 ### How the brake engages
 
@@ -229,9 +258,13 @@ if (data?.paused_until && new Date(data.paused_until) > new Date()) {
 
 ## 5. Cost telemetry tags (Stage 1+)
 
-PR 2 will start writing `cost_telemetry` rows tagged for the
-`cost-daily-check` aggregator above. Reference shape (matches the
-existing Reddit Intel sub-tag pattern):
+PR B (#319) wired the **consumer** side — `cost-daily-check` now
+aggregates these tags and engages the `shop_signal` brake. The rows
+themselves are **written by PR C (#321)**, which calls
+`getSiteTrustworthiness()` and `logCost()` from the Inngest fan-out
+(the adapter is pure provider I/O — it returns `units` /
+`estimatedCostUsd` but does not log; logging is the caller's job).
+Reference shape (matches the existing Reddit Intel sub-tag pattern):
 
 | `feature` tag                 | `provider` | `operation`                  | Volume    | Notes                                                                                                 |
 | ----------------------------- | ---------- | ---------------------------- | --------- | ----------------------------------------------------------------------------------------------------- |
@@ -239,9 +272,9 @@ existing Reddit Intel sub-tag pattern):
 | `shop-signal-apivoid-error`   | `apivoid`  | `site-trustworthiness-error` | rare      | $0 diagnostic for HTTP errors / parse failures, used by the weekly digest to track API reliability.   |
 | `shop-signal-apivoid-overage` | `apivoid`  | `quota-overage`              | rare      | $0 diagnostic when APIVoid returns 402 / quota-exceeded. Triggers a Telegram heads-up; doesn't brake. |
 
-The brake-aggregator filter uses exact-match enumeration matching the
-Reddit Intel pattern in
-`apps/web/app/api/cron/cost-daily-check/route.ts:147-154`:
+The brake-aggregator filter (live since PR B) uses exact-match
+enumeration matching the Reddit Intel pattern in
+`apps/web/app/api/cron/cost-daily-check/route.ts`:
 `top.filter(t => t.feature === 'shop_signal' || t.feature === 'shop-signal-apivoid-error' || t.feature === 'shop-signal-apivoid-overage')`.
 All three tags feed into the daily cap calculation but only the first
 carries non-zero cost; including the diagnostic tags future-proofs
