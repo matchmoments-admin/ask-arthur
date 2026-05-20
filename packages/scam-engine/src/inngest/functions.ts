@@ -86,6 +86,10 @@ import { telcoEventsRetention } from "./telco-events-retention";
 // verdict_feedback, brand_impersonation_alerts). 05:00 UTC.
 import { archiveShadowsRetention } from "./archive-shadows-retention";
 
+// Shop Signal: Deep Shop Check enrichment — consumes shop.check.requested.v1
+// (user-initiated), runs ABN + WHOIS + APIVoid, writes back to shop_checks.
+import { shopSignalEnrich } from "./shop-signal-enrich";
+
 export const inngestFunctions = [
   stalenessCheck,
   stalenessCheckIPs,
@@ -138,4 +142,6 @@ export const inngestFunctions = [
   telcoEventsRetention,
   // Archive shadows: nightly archival mover (6 medium-volume tables)
   archiveShadowsRetention,
+  // Shop Signal: Deep Shop Check enrichment (user-initiated)
+  shopSignalEnrich,
 ];

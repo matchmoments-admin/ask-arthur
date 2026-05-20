@@ -6,6 +6,7 @@ import { ArrowRight, CircleX, Eye, HandCoins, ShoppingBag, TriangleAlert } from 
 import ResultFeedback from "./result/ResultFeedback";
 import ResultActionButtons from "./result/ResultActionButtons";
 import OnwardReportPicker from "./result/OnwardReportPicker";
+import DeepShopCheckTray from "./result/DeepShopCheckTray";
 import type { EvidenceContext } from "@/lib/onward/destinations";
 import type { ScammerContacts, ShopSignal } from "@askarthur/types";
 
@@ -65,6 +66,10 @@ interface ResultCardProps {
    *  the deduplicated commerce-flag chip row beneath the verdict. Plan:
    *  docs/plans/shop-guard-v2.md. */
   shopSignal?: ShopSignal;
+  /** The commerce URL from the submission. When present alongside
+   *  shopSignal, the Deep Shop Check tray (Stage 1) renders below the
+   *  chip row. */
+  commerceUrl?: string;
 }
 
 interface VerdictStyle {
@@ -142,6 +147,7 @@ export default function ResultCard({
   scamReportId,
   charityIntent,
   shopSignal,
+  commerceUrl,
 }: ResultCardProps) {
   const config = VERDICT_CONFIG[verdict];
   const title = resolveTitle(verdict, scamType);
@@ -285,6 +291,12 @@ export default function ResultCard({
             ))
           )}
         </div>
+      )}
+
+      {/* Deep Shop Check tray (Stage 1) — user-initiated ABN + domain-age +
+          reputation enrichment. Renders only with a commerce URL to check. */}
+      {shopSignal && commerceUrl && (
+        <DeepShopCheckTray commerceUrl={commerceUrl} shopSignal={shopSignal} />
       )}
 
       {/* Red flag cards */}

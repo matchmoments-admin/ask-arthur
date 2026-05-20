@@ -8,11 +8,15 @@
 >
 > Status (2026-05-20): **Stage 0 + 0.5 shipped** 2026-05-19 (#324/#325);
 > `FF_SHOP_SIGNAL` flipped ON 2026-05-20, 30-day measurement window open.
-> **Stage 1 in progress** — being built and shipped live on a 30-day
-> APIVoid free trial (#319/#320/#321). The §3 measurement bar is no
-> longer a build go/no-go gate; it now informs the day-31 APIVoid
-> paid-tier renew decision — see `docs/ops/shop-signal-measurement.md`.
-> Owner: brendan.
+> **Stage 1 built** — #320 (v135 `shop_checks`) + #319 (v136 APIVoid
+> adapter) merged; the **Deep Shop Check** (reworked #321) is PR #339
+> (migration v137 applied). Stage 1 shipped as a **user-initiated**
+> enrichment, NOT the auto-fire model the §4 PR-4 spec below originally
+> described — see
+> [`docs/adr/0008-shop-signal-deep-check-user-initiated.md`](../adr/0008-shop-signal-deep-check-user-initiated.md).
+> The §3 measurement bar is no longer a build go/no-go gate; it now
+> informs the day-31 APIVoid paid-tier renew decision — see
+> `docs/ops/shop-signal-measurement.md`. Owner: brendan.
 
 ## 1. Locked decisions (changes vs. v1)
 
@@ -286,14 +290,47 @@ Only if Stage-0 measurements clear the bar above. Three PRs.
 - Cron `/api/cron/shop-checks-retention` @ `45 3 * * *`
 - `docs/system-map/database.md` updated with `shop_checks [hot ⚠]` row
 
-### PR 4 — `shop-signal/inngest-and-result-card` (~300 LOC)
+### PR 4 — Deep Shop Check (shipped as PR #339 — supersedes the auto-fire spec)
 
-- Inngest function `shop-signal-paid-provider` consumes `shop.signal.evaluated.v1` event, writes `paidProviderVerdict` back via partial UPDATE through `update_shop_check_signal(...)` RPC (idempotent on `id`)
-- `runAnalysisCore` emits the event after the cheap-path response. Event id = requestId for 24h dedup. Independent of `FF_ANALYZE_INNGEST_WEB`
-- `Promise.allSettled` at the route level so shop-signal failure doesn't crater analyze
-- Web ResultCard accordion: per-signal expandable list, "Why this verdict" expander, `/audit` grade exclusion
-- One Playwright test per Verdict tier (SAFE / UNCERTAIN / SUSPICIOUS / HIGH_RISK)
-- One bot-formatter test per platform asserting no crash on `shopSignal` payload
+> **Superseded.** The original auto-fire PR-4 spec (emit
+> `shop.signal.evaluated.v1` synchronously from the analyze dual
+> call-site, running APIVoid on every commerce analyze) was **not
+> built**. A zoom-out review against the original research found Stage 1
+> had shipped APIVoid (research priority #6, "tertiary") while leaving
+> ABN (#1, the AU differentiator) and domain age (#3) unbuilt. PR #339
+> ships the **user-initiated Deep Shop Check** instead — full rationale
+> in [`docs/adr/0008-shop-signal-deep-check-user-initiated.md`](../adr/0008-shop-signal-deep-check-user-initiated.md).
+
+**What shipped (PR #339, branch `shop-signal/deep-check`):**
+
+- A "Run a deeper shop check" CTA (`DeepShopCheckTray`) below the
+  Stage-0 chip row — the deep check runs **only on an explicit click**,
+  not on every analyze (bounds APIVoid + WHOIS-free-tier spend).
+- `POST /api/shop-check` creates a `shop_checks` row + emits
+  `shop.check.requested.v1` (event id `shop-check:${shopCheckId}`).
+- Inngest `shop-signal-enrich` runs **all three signals** — ABN
+  verification (`abn-extract.ts`: modulus-89 checksum + `lookupABN` +
+  entity-name match), cache-first WHOIS domain age (`whois-cached.ts`),
+  APIVoid (`getSiteTrustworthiness`, gated by `FF_SHOP_SIGNAL_PAID_FEED`)
+  — computes a transparent composite score (`shop-check-score.ts`),
+  writes back via `update_shop_check_signal`.
+- `GET /api/shop-check/[id]` poll → the tray renders the breakdown.
+- Migration v137: `upsert_shop_check` takes a hex `TEXT` `url_hash`
+  (decoded internally); `update_shop_check_signal` extended with
+  optional `composite_score` + `verdict`.
+- The analyze pipeline and the Stage-0 detector are **untouched** — no
+  `shop.signal.evaluated.v1`, no dual-call-site emit, no shared
+  `shop-signal-persist.ts` helper (ADR 0007 not extended).
+- Unit tests cover `shop-check-score`, `abn-extract`, `fetch-shop-page`
+  (incl. redirect-chain SSRF), `whois-cached`, the `POST` / `GET`
+  `/api/shop-check` route handlers, and the `shop-signal-enrich` Inngest
+  function. End-to-end smoke-tested locally (route → Inngest enrichment →
+  APIVoid → poll); Playwright e2e deferred to the prod smoke test.
+- Pre-merge review hardening: `fetch-shop-page.ts` follows redirects
+  manually with a per-hop SSRF check; an unknown WHOIS domain age scores
+  a calibrated +6 rather than 0 (closes the privacy-proxy evasion gap
+  without tipping clean shops); the `GET` poll has a fail-open
+  rate-limit bucket.
 
 **Stage 1 measurement target before Stage 2:**
 
