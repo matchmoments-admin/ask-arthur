@@ -6,7 +6,13 @@
 > decision trail; do not edit them. Six structural decisions changed
 > between v1 and v2 — see §1.
 >
-> Status: planning (no code shipped). Owner: brendan.
+> Status (2026-05-20): **Stage 0 + 0.5 shipped** 2026-05-19 (#324/#325);
+> `FF_SHOP_SIGNAL` flipped ON 2026-05-20, 30-day measurement window open.
+> **Stage 1 in progress** — being built and shipped live on a 30-day
+> APIVoid free trial (#319/#320/#321). The §3 measurement bar is no
+> longer a build go/no-go gate; it now informs the day-31 APIVoid
+> paid-tier renew decision — see `docs/ops/shop-signal-measurement.md`.
+> Owner: brendan.
 
 ## 1. Locked decisions (changes vs. v1)
 

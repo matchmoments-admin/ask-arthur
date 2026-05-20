@@ -1,8 +1,11 @@
 # Shop Signal — Stage 0 measurement queries
 
-> Measurement spec for the 30-day Stage 0 window that gates the Stage 1
-> paid-feed go/no-go (`SHOP_SIGNAL_CAP_USD=15` APIVoid Adapter,
-> `shop_checks` table, Inngest fan-out — issues #319 / #320 / #321).
+> Measurement spec for the 30-day Stage 0 window. **Reframed 2026-05-20:**
+> Stage 1 (APIVoid Adapter, `shop_checks` table, Inngest fan-out — issues
+> #319 / #320 / #321) is being built and shipped **live on a 30-day
+> APIVoid free trial**, so this window no longer gates a build go/no-go —
+> it informs the day-31 **APIVoid paid-tier renew decision**
+> (`SHOP_SIGNAL_CAP_USD=15`). See "Decision tree on day 31" below.
 >
 > Plan: [`docs/plans/shop-guard-v2.md`](../plans/shop-guard-v2.md) §3.
 > Target shape: ≥5% URL-bearing analyzes are commerce-flagged, ≥30% of
@@ -11,9 +14,10 @@
 
 ## Window
 
-- **Start**: the day `FF_SHOP_SIGNAL=true` is flipped in production after
-  the Stage 0 PR (#324) lands on `main` and rolls out to all users.
-- **End**: 30 days later. Decision review on the 31st day.
+- **Start**: 2026-05-20 — `FF_SHOP_SIGNAL=true` flipped in production.
+- **End**: ~2026-06-19 (30 days). Decision review on the 31st day — see
+  "Decision tree on day 31" below. The APIVoid free trial runs roughly
+  the same 30 days, so day-31 is also the trial-renew decision point.
 
 ## Data sources
 
@@ -242,14 +246,38 @@ percent, trust the SQL — Plausible drops events from clients with DNT,
 ad blockers, or sub-resource CSP issues. Plausible's job here is "smell
 test that the SQL is reading the world correctly," not "primary truth."
 
-## Decision tree on day 31
+## Decision tree on day 31 — APIVoid renew decision
 
-| Q1  | Q2   | Q3   | Action                                                                                                                                                       |
-| --- | ---- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| ≥5% | ≥30% | ≥20% | Proceed to Stage 1. Flip issues #319 / #320 / #321 to `ready-for-agent`.                                                                                     |
-| <5% | —    | —    | Demand is too low. Write Stage-0-was-the-ceiling retro. Close #319-#323.                                                                                     |
-| ≥5% | <30% | —    | Demand exists; taxonomy too thin. Re-evaluate the commerce-specific prompt addendum (deferred per Stage 0 footnote) BEFORE Stage 1 APIVoid spend.            |
-| ≥5% | ≥30% | <20% | Mobile-share isn't the dominant entry. De-prioritise the share-sheet UX work but proceed to Stage 1 — the URL-bearing organic-search path is still in scope. |
+**Reframed 2026-05-20.** Stage 1 (APIVoid enrichment) is being built and
+shipped **live on a 30-day APIVoid free trial** running roughly
+co-terminous with this window. Day-31 is therefore no longer a "build
+Stage 1?" gate — that decision is made. It is now the **"renew APIVoid on
+a paid tier, or let the trial lapse and revert to Stage-0-only?"**
+decision, answered with 30 days of _real Stage 1 production data_ plus the
+Q1/Q2/Q3 metrics above.
+
+Inputs:
+
+- **Q1** (commerce volume) — enough commerce traffic to justify any paid
+  feed at all?
+- **Stage 1 live metrics** (`shop_checks` + `cost_telemetry WHERE
+feature='shop_signal'`):
+  - APIVoid daily spend vs the A$15 `SHOP_SIGNAL_CAP_USD` cap.
+  - Does `paidProviderVerdict` change the verdict / add signal over the
+    Stage-0 free path?
+  - Detection rate on the AU adversarial corpus (the #321 Stage-2 gate).
+- **Q2 / Q3** — taxonomy + mobile-share, descriptive.
+
+| Q1 commerce vol | APIVoid adds signal?               | Spend within cap? | Day-31 action                                                                                                                         |
+| --------------- | ---------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| ≥5%             | yes                                | yes               | **Renew** — buy APIVoid credits, keep Stage 1 live, proceed to Stage 2 (#322 / #323).                                                 |
+| <5%             | —                                  | —                 | Demand too low. Let the trial lapse, revert Stage 1 to flag-OFF, Stage-0-only. Close #322 / #323. Write the retro.                    |
+| ≥5%             | no (verdicts unchanged vs Stage 0) | —                 | APIVoid not load-bearing. Let the trial lapse, Stage-0-only; keep #319–#321 code dormant behind `FF_SHOP_SIGNAL_PAID_FEED`.           |
+| ≥5%             | yes                                | no (cap blown)    | Renew, but re-derive `SHOP_SIGNAL_CAP_USD` / APIVoid tier first — the brake will have been auto-engaging; investigate before Stage 2. |
+
+Q2 (flag extraction) is tracked separately in #333 — if it reads <30%
+with the twice-widened taxonomy, that routes to the Option-2 prompt
+addendum independently of this renew decision.
 
 ## Related
 
