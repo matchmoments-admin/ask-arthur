@@ -48,6 +48,7 @@
     "./shop-signal": "./src/shop-signal.ts",
     "./providers/apivoid": "./src/providers/apivoid.ts",
     "./vuln-detect": "./src/vuln-detect.ts",
+    "./reddit-intel-cluster-health": "./src/reddit-intel-cluster-health.ts",
     "./inngest/match-b2b-exposure": "./src/inngest/match-b2b-exposure.ts",
     "./retrieval/similar-reports": "./src/retrieval/similar-reports.ts",
     "./analyze-core": "./src/analyze-core.ts",

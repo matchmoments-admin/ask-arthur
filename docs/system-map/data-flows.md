@@ -165,11 +165,14 @@ Inngest: reddit-intel-embed
                        ▼
 Inngest: reddit-intel-cluster  (also nightly fallback)
   └─ For each unclustered post:
-     ├─ match_themes_by_centroid(post.embedding, limit=5)
-     ├─ if cosine ≥ 0.78 with existing theme → assign theme_id
+     ├─ load active reddit_intel_themes centroids and compare cosine in JS
+     ├─ if cosine ≥ 0.62 with existing theme → assign theme_id
      └─ else → create new reddit_intel_themes row (slug, member_count=1, centroid=embedding)
   └─ INSERT reddit_post_intel_themes (M-to-many, is_primary, similarity)
   └─ UPDATE reddit_intel_themes (member_count, last_seen, signal_strength, wow_delta_pct)
+  └─ Pre-flag-flip gate:
+     pnpm --filter @askarthur/web tsx scripts/verify-reddit-intel-cluster-health.ts
+     → read-only cluster health verdict (HEALTHY / NEEDS_RETUNING / DEGENERATE)
                        │
                        ▼ daily summary
 INSERT reddit_intel_daily_summary
