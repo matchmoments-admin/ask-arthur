@@ -12,8 +12,7 @@ import {
   Landmark,
   Truck,
 } from "lucide-react";
-
-type Verdict = "SAFE" | "SUSPICIOUS" | "HIGH_RISK";
+import type { Verdict } from "@askarthur/types";
 
 export interface RecoverySection {
   title: string;

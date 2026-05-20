@@ -7,15 +7,11 @@
 // the richer CharityVerdict component — this adapter is only for the
 // homepage path.
 //
-// Verdict mapping: ResultCard speaks the 3-level scale (SAFE | SUSPICIOUS |
-// HIGH_RISK) while CharityCheckResult speaks the canonical 4-level scale
-// (adds UNCERTAIN). UNCERTAIN folds to SUSPICIOUS — same amber treatment,
-// "this looks suspicious" is the closest copy match for "we couldn't fully
-// verify."
+// Verdict mapping: ResultCard speaks the canonical 4-level scale, so the
+// homepage charity path preserves UNCERTAIN instead of folding it away.
 
 import type { CharityCheckResult } from "@/components/CharityVerdict";
-
-type Verdict = "SAFE" | "SUSPICIOUS" | "HIGH_RISK";
+import type { Verdict } from "@askarthur/types";
 
 interface ResultCardCharityProps {
   verdict: Verdict;
@@ -26,16 +22,7 @@ interface ResultCardCharityProps {
 }
 
 function mapVerdict(v: CharityCheckResult["verdict"]): Verdict {
-  switch (v) {
-    case "SAFE":
-      return "SAFE";
-    case "HIGH_RISK":
-      return "HIGH_RISK";
-    case "SUSPICIOUS":
-    case "UNCERTAIN":
-    default:
-      return "SUSPICIOUS";
-  }
+  return v;
 }
 
 function buildRedFlags(result: CharityCheckResult): string[] {

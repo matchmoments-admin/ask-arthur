@@ -7,7 +7,7 @@ import ResultFeedback from "./result/ResultFeedback";
 import ResultActionButtons from "./result/ResultActionButtons";
 import OnwardReportPicker from "./result/OnwardReportPicker";
 import type { EvidenceContext } from "@/lib/onward/destinations";
-import type { ScammerContacts, ShopSignal } from "@askarthur/types";
+import type { ScammerContacts, ShopSignal, Verdict } from "@askarthur/types";
 
 // Shop Signal commerce-flag tags → user-facing label. Stage 0 ships a
 // fixed mapping; if Stage 0.5 adds new tags, extend here. Unknown tags
@@ -27,8 +27,6 @@ const SHOP_FLAG_LABEL: Record<string, string> = {
   "urgent-purchase-pressure": "Urgent purchase pressure",
   "fake-reviews": "Suspicious reviews",
 };
-
-type Verdict = "SAFE" | "SUSPICIOUS" | "HIGH_RISK";
 
 interface ResultCardProps {
   verdict: Verdict;
@@ -87,6 +85,14 @@ const VERDICT_CONFIG: Record<Verdict, VerdictStyle> = {
     chipBorder: "border-warn-border/70",
     iconColor: "text-warn-text",
     flagBar: "bg-warn-text",
+  },
+  UNCERTAIN: {
+    baseTitle: "We couldn't classify this — verify before you act",
+    icon: TriangleAlert,
+    chipBg: "bg-slate-50",
+    chipBorder: "border-slate-300",
+    iconColor: "text-gov-slate",
+    flagBar: "bg-gov-slate",
   },
   SUSPICIOUS: {
     baseTitle: "This looks suspicious",

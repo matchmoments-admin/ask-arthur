@@ -724,7 +724,7 @@ export default function ScamChecker() {
       {/* Media analysis result */}
       {showMediaResult && media.result && (
         <ResultCard
-          verdict={media.result.verdict as "SAFE" | "SUSPICIOUS" | "HIGH_RISK"}
+          verdict={media.result.verdict}
           confidence={media.result.confidence}
           summary={media.result.summary}
           redFlags={media.result.redFlags}

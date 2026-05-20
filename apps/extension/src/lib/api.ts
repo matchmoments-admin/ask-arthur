@@ -3,6 +3,7 @@ import type {
   ExtensionURLCheckResponse,
   ExtensionAnalyzeRequest,
   ExtensionAnalyzeResponse,
+  Verdict,
 } from "@askarthur/types";
 import { getInstallId } from "./storage";
 import { signRequest } from "./sign";
@@ -115,7 +116,7 @@ export async function reportScamEmail(report: {
   senderEmail: string;
   subject: string;
   urls: string[];
-  verdict: string;
+  verdict: Verdict;
   confidence: number;
 }): Promise<{ data: { success: boolean }; remaining: number | null }> {
   return request<{ success: boolean }>("/report-email", {
@@ -165,10 +166,10 @@ export async function fetchThreatDBUpdate(
 export async function checkAdCommunityFlags(
   adTextHash: string,
   landingUrl: string | null
-): Promise<{ flagCount: number; verdict: string | null }> {
+): Promise<{ flagCount: number; verdict: Verdict | null }> {
   const params = new URLSearchParams({ hash: adTextHash });
   if (landingUrl) params.set("url", landingUrl);
-  const { data } = await request<{ flagCount: number; verdict: string | null }>(
+  const { data } = await request<{ flagCount: number; verdict: Verdict | null }>(
     `/check-ad?${params.toString()}`
   );
   return data;
@@ -186,7 +187,7 @@ export async function flagAd(
 }
 
 export interface AdAnalysisResult {
-  verdict: "SAFE" | "SUSPICIOUS" | "HIGH_RISK";
+  verdict: Verdict;
   confidence: number;
   summary: string;
   redFlags: string[];

@@ -1,4 +1,5 @@
 import { EXT_COLORS } from "./extension-colors";
+import type { Verdict } from "@askarthur/types";
 
 export interface AdContent {
   advertiserName: string;
@@ -9,7 +10,7 @@ export interface AdContent {
 }
 
 export interface AdAnalysisResult {
-  verdict: "SAFE" | "SUSPICIOUS" | "HIGH_RISK";
+  verdict: Verdict;
   confidence: number;
   summary: string;
   redFlags: string[];

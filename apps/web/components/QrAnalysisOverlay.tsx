@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { ShieldCheck, TriangleAlert, ShieldAlert, CheckCircle, Clock, Circle, CircleAlert, ExternalLink, BadgeCheck } from "lucide-react";
 import { Drawer } from "vaul";
-import type { AnalysisResponse } from "@/types/analysis";
+import type { AnalysisResponse, Verdict } from "@/types/analysis";
 import { getOfficialBrand } from "@/lib/officialBrands";
 
 interface QrAnalysisOverlayProps {
@@ -16,7 +16,7 @@ interface QrAnalysisOverlayProps {
   onScanAnother: () => void;
 }
 
-const VERDICT_CONFIG: Record<string, { icon: LucideIcon; iconColor: string; iconBg: string; title: string }> = {
+const VERDICT_CONFIG: Record<Verdict, { icon: LucideIcon; iconColor: string; iconBg: string; title: string }> = {
   SAFE: {
     icon: ShieldCheck,
     iconColor: "text-[#388E3C]",
@@ -28,6 +28,12 @@ const VERDICT_CONFIG: Record<string, { icon: LucideIcon; iconColor: string; icon
     iconColor: "text-[#F57C00]",
     iconBg: "bg-warn-bg",
     title: "Proceed with Caution",
+  },
+  UNCERTAIN: {
+    icon: Clock,
+    iconColor: "text-slate-600",
+    iconBg: "bg-slate-100",
+    title: "Uncertain — verify first",
   },
   HIGH_RISK: {
     icon: ShieldAlert,
@@ -235,6 +241,7 @@ function VerdictContent({
   onScanAnother: () => void;
 }) {
   const config = VERDICT_CONFIG[result.verdict];
+  const isCautionVerdict = result.verdict === "SUSPICIOUS" || result.verdict === "UNCERTAIN";
   const officialBrand = result.impersonatedBrand
     ? getOfficialBrand(result.impersonatedBrand)
     : null;
@@ -320,8 +327,8 @@ function VerdictContent({
         </div>
       )}
 
-      {/* SUSPICIOUS verdict actions */}
-      {result.verdict === "SUSPICIOUS" && (
+      {/* SUSPICIOUS/UNCERTAIN verdict actions */}
+      {isCautionVerdict && (
         <div className="animate-verdict-content flex flex-col gap-3 w-full mt-2">
           <button
             type="button"

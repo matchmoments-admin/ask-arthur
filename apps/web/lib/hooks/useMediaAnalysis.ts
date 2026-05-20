@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
+import type { Verdict } from "@askarthur/types";
 
 export type MediaStatus =
   | "idle"
@@ -12,7 +13,7 @@ export type MediaStatus =
 
 export interface MediaResult {
   jobId: string;
-  verdict: string;
+  verdict: Verdict;
   confidence: number;
   summary: string;
   redFlags: string[];
@@ -32,7 +33,7 @@ interface UploadResponse {
 interface AnalyzeResponse {
   jobId: string;
   status: string;
-  verdict?: string;
+  verdict?: Verdict;
   confidence?: number;
   summary?: string;
   redFlags?: string[];
