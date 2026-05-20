@@ -9,13 +9,15 @@ Referenced from [CLAUDE.md](../../CLAUDE.md) Quick Reference and from
 `docs/plans/shop-guard-v2.md` §4. Keep updated each PR.
 
 > **Status (2026-05-20)** — Stage 0/0.5 (#324/#325) live; `FF_SHOP_SIGNAL`
-> flipped ON 2026-05-20. Stage 1 PR A (#320, `shop_checks` schema) and
-> PR B (#319, APIVoid adapter + cost brake) shipped. The APIVoid adapter,
-> `FF_SHOP_SIGNAL_PAID_FEED` flag, and `cost-daily-check` brake wiring are
-> in code; the trial key is in Vercel env. The paid feed is not yet
-> _called_ — that is PR C (#321, Inngest fan-out). Flip
-> `FF_SHOP_SIGNAL_PAID_FEED` ON only after #321 ships and the preview
-> smoke test passes.
+> ON. Stage 1 PR A (#320, `shop_checks` schema) + PR B (#319, APIVoid
+> adapter + cost brake) merged. The **Deep Shop Check** (reworked #321)
+> is **PR #339** — a user-initiated enrichment that calls APIVoid (plus
+> ABN verification + WHOIS domain age) from the `shop-signal-enrich`
+> Inngest function on an explicit "Run a deeper shop check" click.
+> Migration v137 applied. Once #339 merges, flip
+> `FF_SHOP_SIGNAL_PAID_FEED` ON so the deep check's APIVoid leg runs —
+> it works on the ABN + domain-age signals alone while the flag is OFF.
+> See [`docs/adr/0008-shop-signal-deep-check-user-initiated.md`](../adr/0008-shop-signal-deep-check-user-initiated.md).
 
 **Status legend**
 
@@ -34,12 +36,12 @@ All Shop Signal flags default **OFF** in production. They gate
 orthogonal subsystems so each one can be flipped after its own gate
 clears.
 
-| Flag (env var)                      | Type            | Default | Status | Gates                                                                                                                                                                                                                                                                                                              | Flip when                                                                                                                                                              |
-| ----------------------------------- | --------------- | ------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `FF_SHOP_SIGNAL`                    | server          | `false` | ✅     | Master switch. When `false`, the analyze pipeline's commerce-signal branch short-circuits before `detectCommerceSignal()` runs and `AnalysisResult.shopSignal` is absent on every response. When `true`, the pure detector + Claude red-flag post-processor run on every URL-bearing / commerce-text-shaped input. | After this PR merges. Starts the 30-day Stage-0 measurement window. **Step D of the pre-launch tidy plan.**                                                            |
-| `FF_SHOP_SIGNAL_PAID_FEED`          | server          | `false` | ❌     | APIVoid Site Trustworthiness Adapter (Stage 1 PR 2). Independent of `FF_SHOP_SIGNAL` so the cheap-path can run alone if the paid feed is in trouble.                                                                                                                                                               | After the 30-day Stage-0 measurement window clears all three gates in `docs/ops/shop-signal-measurement.md` AND PR 2 ships an APIVoid trial-key smoke test on preview. |
-| `NEXT_PUBLIC_FF_SHOP_GUARD_B2B_API` | consumer        | `false` | ❌     | `/api/v1/shop-check` route (Stage 2 PR 5). When off, the route returns 503.                                                                                                                                                                                                                                        | Stage-1 measurement target clears (≥80% detection on AU adversarial corpus, ≤2% FP on real traffic).                                                                   |
-| `WXT_SHOP_GUARD`                    | extension build | `false` | ❌     | Extension popup + `SHOW_SHOP_SIGNAL_VERDICT` handler in `url-guard.content.ts` (Stage 2 PR 6). Build-time flag — bundling decision, not runtime.                                                                                                                                                                   | Same gate as `NEXT_PUBLIC_FF_SHOP_GUARD_B2B_API`. Extension `<all_urls>` host permission stays gated on activation data (PR 7, separate).                              |
+| Flag (env var)                      | Type            | Default | Status | Gates                                                                                                                                                                                                                                                                                                              | Flip when                                                                                                                                 |
+| ----------------------------------- | --------------- | ------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `FF_SHOP_SIGNAL`                    | server          | `false` | ✅     | Master switch. When `false`, the analyze pipeline's commerce-signal branch short-circuits before `detectCommerceSignal()` runs and `AnalysisResult.shopSignal` is absent on every response. When `true`, the pure detector + Claude red-flag post-processor run on every URL-bearing / commerce-text-shaped input. | After this PR merges. Starts the 30-day Stage-0 measurement window. **Step D of the pre-launch tidy plan.**                               |
+| `FF_SHOP_SIGNAL_PAID_FEED`          | server          | `false` | ⏳     | The APIVoid leg of the Deep Shop Check (#339). When OFF, `shop-signal-enrich` skips APIVoid and the deep check completes on ABN + domain-age alone. Independent of `FF_SHOP_SIGNAL`.                                                                                                                               | After PR #339 merges — flip ON so the deep check's APIVoid call runs (trial key already in Vercel env).                                   |
+| `NEXT_PUBLIC_FF_SHOP_GUARD_B2B_API` | consumer        | `false` | ❌     | `/api/v1/shop-check` route (Stage 2 PR 5). When off, the route returns 503.                                                                                                                                                                                                                                        | Stage-1 measurement target clears (≥80% detection on AU adversarial corpus, ≤2% FP on real traffic).                                      |
+| `WXT_SHOP_GUARD`                    | extension build | `false` | ❌     | Extension popup + `SHOW_SHOP_SIGNAL_VERDICT` handler in `url-guard.content.ts` (Stage 2 PR 6). Build-time flag — bundling decision, not runtime.                                                                                                                                                                   | Same gate as `NEXT_PUBLIC_FF_SHOP_GUARD_B2B_API`. Extension `<all_urls>` host permission stays gated on activation data (PR 7, separate). |
 
 **Rollout order (recommended):**
 
@@ -260,17 +262,22 @@ if (data?.paused_until && new Date(data.paused_until) > new Date()) {
 
 PR B (#319) wired the **consumer** side — `cost-daily-check` now
 aggregates these tags and engages the `shop_signal` brake. The rows
-themselves are **written by PR C (#321)**, which calls
-`getSiteTrustworthiness()` and `logCost()` from the Inngest fan-out
-(the adapter is pure provider I/O — it returns `units` /
-`estimatedCostUsd` but does not log; logging is the caller's job).
-Reference shape (matches the existing Reddit Intel sub-tag pattern):
+themselves are **written by the `shop-signal-enrich` Inngest function
+(PR #339)**, which calls `getSiteTrustworthiness()` and inserts
+`cost_telemetry` rows **directly** via `createServiceClient()` — a
+`scam-engine` package cannot import the app's `logCost()`, so the
+adapter returns `units` / `estimatedCostUsd` and the Inngest function
+does the insert (the `analyze-cost.ts` pattern). Shipped shape:
 
-| `feature` tag                 | `provider` | `operation`                  | Volume    | Notes                                                                                                 |
-| ----------------------------- | ---------- | ---------------------------- | --------- | ----------------------------------------------------------------------------------------------------- |
-| `shop_signal`                 | `apivoid`  | `site-trustworthiness`       | ~per-call | Primary headline tag — what the brake aggregator reads.                                               |
-| `shop-signal-apivoid-error`   | `apivoid`  | `site-trustworthiness-error` | rare      | $0 diagnostic for HTTP errors / parse failures, used by the weekly digest to track API reliability.   |
-| `shop-signal-apivoid-overage` | `apivoid`  | `quota-overage`              | rare      | $0 diagnostic when APIVoid returns 402 / quota-exceeded. Triggers a Telegram heads-up; doesn't brake. |
+| `feature` tag               | `provider` | `operation`  | Volume    | Notes                                                                                              |
+| --------------------------- | ---------- | ------------ | --------- | -------------------------------------------------------------------------------------------------- |
+| `shop_signal`               | `apivoid`  | `site-trust` | ~per-call | Primary headline tag — what the brake aggregator reads. One row per successful APIVoid call.       |
+| `shop-signal-apivoid-error` | `apivoid`  | `site-trust` | rare      | $0 diagnostic row when APIVoid was attempted but returned `null` (missing key, brake, HTTP error). |
+
+(The `cost-daily-check` brake aggregator also enumerates a
+`shop-signal-apivoid-overage` tag for forward-compat; the deep check
+does not currently emit it — a 402/quota error falls into the
+`shop-signal-apivoid-error` row.)
 
 The brake-aggregator filter (live since PR B) uses exact-match
 enumeration matching the Reddit Intel pattern in
@@ -289,4 +296,5 @@ against tag drift.
 - **Architecture diagram**: [`docs/plans/assets/shop-signal-architecture.excalidraw`](../plans/assets/shop-signal-architecture.excalidraw) (Mermaid block in plan §2 is canonical)
 - **CONTEXT.md entries**: `Verdict`, `Shop Signal`, `Analysis Result`
 - **Sibling ops docs** (pattern reference): [`docs/ops/phone-footprint-config.md`](./phone-footprint-config.md), [`docs/ops/charity-check-config.md`](./charity-check-config.md)
-- **Issues**: [#319](https://github.com/matchmoments-admin/ask-arthur/issues/319) (Stage 1 / PR 2), [#320](https://github.com/matchmoments-admin/ask-arthur/issues/320) (Stage 1 / PR 3 — `shop_checks` migration), [#321](https://github.com/matchmoments-admin/ask-arthur/issues/321) (Stage 1 / PR 4 — Inngest + accordion)
+- **Issues**: [#319](https://github.com/matchmoments-admin/ask-arthur/issues/319) (Stage 1 / PR 2), [#320](https://github.com/matchmoments-admin/ask-arthur/issues/320) (Stage 1 / PR 3 — `shop_checks` migration), [#321](https://github.com/matchmoments-admin/ask-arthur/issues/321) (Stage 1 / PR 4 — reworked as the user-initiated Deep Shop Check, shipped in PR #339)
+- **ADR**: [`docs/adr/0008-shop-signal-deep-check-user-initiated.md`](../adr/0008-shop-signal-deep-check-user-initiated.md)
