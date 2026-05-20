@@ -1,4 +1,5 @@
-// Per-day infra-spend rollup view — reads from infra_cost_daily (v134).
+// Per-day infra-spend rollup view — reads from infra_cost_daily (v134)
+// and scraper_telemetry (v139).
 //
 // Complements /admin/costs (per-call AI telemetry) with the cloud-provider
 // daily billing rolled up by the billing-ingest-nightly Inngest function.
@@ -23,6 +24,15 @@ interface InfraRow {
   raw_usage_jsonb: Record<string, unknown> | null;
 }
 
+interface ScraperTelemetryRow {
+  date: string;
+  source: string;
+  rows_added: number;
+  runtime_seconds: number;
+  runs: number;
+  ingested_at: string;
+}
+
 const PROVIDER_LABELS: Record<string, string> = {
   vercel: "Vercel",
   anthropic: "Anthropic (Claude API)",
@@ -44,6 +54,10 @@ const FIXED_SUBSCRIPTIONS: { label: string; monthlyUsd: number; note?: string }[
 // historical rows stay in the DB but skip the UI.
 const ACTIVE_PROVIDERS = new Set(["vercel", "anthropic", "github-actions"]);
 
+const GITHUB_ACTIONS_LINUX_USD_PER_MIN = Number(
+  process.env.INFRA_COST_GITHUB_ACTIONS_LINUX_USD_PER_MIN ?? "0.008",
+);
+
 function thirtyDaysAgoIsoDate(): string {
   return new Date(Date.now() - 30 * 86400_000).toISOString().split("T")[0];
 }
@@ -54,6 +68,61 @@ function formatUsd(cents: number): string {
 
 function formatUsdMonthly(usd: number): string {
   return `$${usd.toFixed(2)}/mo`;
+}
+
+function formatUsdAmount(usd: number): string {
+  if (!Number.isFinite(usd) || usd <= 0) return "$0.00";
+  if (usd < 0.01) return `$${usd.toFixed(4)}`;
+  return `$${usd.toFixed(2)}`;
+}
+
+function formatSeconds(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  if (minutes < 60) return remainder === 0 ? `${minutes}m` : `${minutes}m ${remainder}s`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes === 0 ? `${hours}h` : `${hours}h ${remainingMinutes}m`;
+}
+
+function rowsPerRun(row: ScraperTelemetryRow): number {
+  return row.runs === 0 ? 0 : row.rows_added / row.runs;
+}
+
+function formatRowsPerRun(row: ScraperTelemetryRow): string {
+  const value = rowsPerRun(row);
+  if (value === 0) return "0";
+  if (value < 10) return value.toFixed(1);
+  return Math.round(value).toLocaleString("en-US");
+}
+
+function githubActionsCostUsd(runtimeSeconds: number): number {
+  return (runtimeSeconds / 60) * GITHUB_ACTIONS_LINUX_USD_PER_MIN;
+}
+
+function formatCostPerRow(row: ScraperTelemetryRow): string {
+  if (row.rows_added === 0) return "—";
+  return formatUsdAmount(githubActionsCostUsd(row.runtime_seconds) / row.rows_added);
+}
+
+function scraperTrend(row: ScraperTelemetryRow, rows: ScraperTelemetryRow[]): string {
+  const priorRows = rows
+    .filter((r) => r.source === row.source && r.date < row.date)
+    .sort((a, b) => (a.date < b.date ? 1 : -1))
+    .slice(0, 7);
+  if (priorRows.length === 0) return "new";
+
+  const avg =
+    priorRows.reduce((sum, prior) => sum + rowsPerRun(prior), 0) /
+    priorRows.length;
+  const current = rowsPerRun(row);
+  if (avg === 0) return current > 0 ? "↑ from 0" : "→ flat";
+
+  const deltaPct = ((current - avg) / avg) * 100;
+  if (deltaPct > 10) return `↑ ${Math.round(deltaPct)}%`;
+  if (deltaPct < -10) return `↓ ${Math.abs(Math.round(deltaPct))}%`;
+  return "→ flat";
 }
 
 interface VercelServicesBreakdown {
@@ -96,6 +165,7 @@ export default async function InfraCostsPage() {
 
   const supabase = createServiceClient();
   let rows: InfraRow[] = [];
+  let scraperRows: ScraperTelemetryRow[] = [];
 
   if (supabase) {
     const since = thirtyDaysAgoIsoDate();
@@ -106,6 +176,14 @@ export default async function InfraCostsPage() {
       .order("date", { ascending: false })
       .order("provider", { ascending: true });
     rows = (data ?? []) as InfraRow[];
+
+    const { data: scraperData } = await supabase
+      .from("scraper_telemetry")
+      .select("date, source, rows_added, runtime_seconds, runs, ingested_at")
+      .gte("date", since)
+      .order("date", { ascending: false })
+      .order("source", { ascending: true });
+    scraperRows = (scraperData ?? []) as ScraperTelemetryRow[];
   }
 
   // Filter out historical / inactive providers BEFORE aggregating.
@@ -144,6 +222,19 @@ export default async function InfraCostsPage() {
     (s, r) => s + r.cents,
     0,
   );
+
+  const latestScraperDate = scraperRows
+    .map((r) => r.date)
+    .sort()
+    .at(-1);
+  const latestScraperRows = latestScraperDate
+    ? scraperRows
+        .filter((row) => row.date === latestScraperDate)
+        .sort(
+          (a, b) =>
+            rowsPerRun(a) - rowsPerRun(b) || a.source.localeCompare(b.source),
+        )
+    : [];
 
   // Variable + fixed combined view at the top.
   const fixedMonthlyTotalUsd = FIXED_SUBSCRIPTIONS.reduce(
@@ -297,6 +388,98 @@ export default async function InfraCostsPage() {
           </p>
         </section>
       )}
+
+      <section className="mb-8">
+        <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <h2 className="text-deep-navy text-sm font-semibold uppercase tracking-wider">
+            Scraper efficiency
+          </h2>
+          {latestScraperDate && (
+            <span className="font-mono text-xs text-gov-slate">
+              {latestScraperDate}
+            </span>
+          )}
+        </div>
+        {latestScraperRows.length === 0 ? (
+          <p className="text-gov-slate text-sm py-8 text-center bg-slate-50 rounded-lg">
+            No scraper telemetry rows yet. The first audit lands at 02:10 UTC
+            tomorrow.
+          </p>
+        ) : (
+          <>
+            <div className="overflow-x-auto rounded-lg border border-slate-200">
+              <table className="w-full text-sm tabular-nums">
+                <thead className="bg-slate-50 text-gov-slate">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-semibold">Source</th>
+                    <th className="text-right px-3 py-2 font-semibold">Runs</th>
+                    <th className="text-right px-3 py-2 font-semibold">
+                      Runtime
+                    </th>
+                    <th className="text-right px-3 py-2 font-semibold">
+                      Rows added
+                    </th>
+                    <th className="text-right px-3 py-2 font-semibold">
+                      Rows/run
+                    </th>
+                    <th className="text-right px-3 py-2 font-semibold">
+                      Est. GA cost
+                    </th>
+                    <th className="text-right px-3 py-2 font-semibold">
+                      $/row
+                    </th>
+                    <th className="text-right px-3 py-2 font-semibold">Trend</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {latestScraperRows.map((row) => {
+                    const zeroRows = row.rows_added === 0;
+                    return (
+                      <tr key={row.source} className="border-t border-slate-100">
+                        <td className="px-3 py-2 font-mono text-xs text-deep-navy">
+                          {row.source}
+                          {zeroRows && (
+                            <span className="ml-2 rounded bg-amber-50 px-1.5 py-0.5 font-sans text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+                              candidate
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-right text-gov-slate">
+                          {row.runs.toLocaleString("en-US")}
+                        </td>
+                        <td className="px-3 py-2 text-right text-gov-slate">
+                          {formatSeconds(row.runtime_seconds)}
+                        </td>
+                        <td className="px-3 py-2 text-right text-gov-slate">
+                          {row.rows_added.toLocaleString("en-US")}
+                        </td>
+                        <td className="px-3 py-2 text-right font-semibold text-deep-navy">
+                          {formatRowsPerRun(row)}
+                        </td>
+                        <td className="px-3 py-2 text-right text-gov-slate">
+                          {formatUsdAmount(
+                            githubActionsCostUsd(row.runtime_seconds),
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-right text-gov-slate">
+                          {formatCostPerRow(row)}
+                        </td>
+                        <td className="px-3 py-2 text-right text-gov-slate">
+                          {scraperTrend(row, scraperRows)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-2 text-xs text-gov-slate leading-relaxed">
+              Sorted by rows/run ascending. Zero-row sources should be reviewed
+              before the next scraper spend cleanup.
+            </p>
+          </>
+        )}
+      </section>
 
       <section>
         <h2 className="text-deep-navy text-sm font-semibold uppercase tracking-wider mb-3">

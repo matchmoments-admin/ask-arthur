@@ -35,7 +35,7 @@ Defined in `apps/web/vercel.json`. All routes verify the Vercel cron signature.
 
 ---
 
-## Inngest functions (35)
+## Inngest functions (36)
 
 Defined in `packages/scam-engine/src/inngest/functions.ts`. All have idempotency keys based on `event.data.requestId` (24h dedup); cron functions use Inngest's native cron dedup.
 
@@ -119,6 +119,7 @@ Gated by `FF_ANALYZE_INNGEST_WEB`. When false, the legacy `waitUntil` path runs 
 | Function                           | Cron                     | Purpose                                                    |
 | ---------------------------------- | ------------------------ | ---------------------------------------------------------- |
 | `billing-ingest-nightly`           | `0 2 * * *` (02:00 UTC)  | Per-provider daily infra-spend → `infra_cost_daily` (v134) |
+| `scraper-cost-audit`               | `10 2 * * *` (02:10 UTC) | Per-scraper rows/runtime → `scraper_telemetry` (v139)      |
 | `cost-telemetry-retention`         | `0 4 * * *` (04:00 UTC)  | Daily rollup + 90d prune                                   |
 | `phone-footprint-retention`        | `15 3 * * *` (03:15 UTC) | Anonymise old monitors + sweep consent expiry              |
 | `reddit-processed-posts-retention` | `45 3 * * *` (03:45 UTC) | Prune dedup table (30-day window)                          |
@@ -295,8 +296,9 @@ every 6h bot-queue-sweep, cost-daily-check    (Vercel)
 every 12h pipeline-ct-monitor                (Inngest)
 
 02:00 ensure-partitions                       (Vercel)
-02:30 feed-retention                          (Inngest)
 02:00 billing-ingest-nightly                  (Inngest)
+02:10 scraper-cost-audit                      (Inngest)
+02:30 feed-retention                          (Inngest)
 03:00 vuln-retention                          (Vercel)
 03:00 pipeline-staleness-check[/ips/wallets]  (Inngest)
 03:15 phone-footprint-retention               (Inngest)

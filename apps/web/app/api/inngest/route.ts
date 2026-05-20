@@ -1,4 +1,5 @@
 import { serve } from "inngest/next";
+import type { NextRequest } from "next/server";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { inngestFunctions } from "@askarthur/scam-engine/inngest/functions";
 import { phoneFootprintPdfRender } from "./functions/phone-footprint-pdf";
@@ -39,7 +40,18 @@ const appFunctions = [
   onwardAskArthurFeed,
 ];
 
-export const { GET, POST, PUT } = serve({
+const handlers = serve({
   client: inngest,
   functions: [...inngestFunctions, ...appFunctions],
 });
+
+// Localise the duplicated NextRequest type boundary from inngest/next. Runtime
+// handlers are unchanged; this only keeps Next's route export checker green.
+type RouteHandler = (
+  request: NextRequest,
+  context: { params: Promise<Record<string, never>> },
+) => void | Response | Promise<void | Response>;
+
+export const GET = handlers.GET as unknown as RouteHandler;
+export const POST = handlers.POST as unknown as RouteHandler;
+export const PUT = handlers.PUT as unknown as RouteHandler;
