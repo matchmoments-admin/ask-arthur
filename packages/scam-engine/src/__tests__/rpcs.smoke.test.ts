@@ -95,6 +95,19 @@ describe.skipIf(!hasEnv)("SQL RPC smoke tests", () => {
     expect(error).toBeNull();
     expect(Array.isArray(data)).toBe(true);
   });
+
+  // shop_checks retention RPC (v135). Non-destructive: batch size 0 means
+  // LIMIT 0, so the DELETE touches no rows regardless of data. Exercises
+  // the function body (search_path, SET LOCAL, GET DIAGNOSTICS) so a
+  // broken PL/pgSQL definition fails here on the first call.
+  it("cleanup_expired_shop_checks executes without error (non-destructive)", async () => {
+    const supabase = getClient();
+    const { data, error } = await supabase.rpc("cleanup_expired_shop_checks", {
+      p_batch_size: 0,
+    });
+    expect(error).toBeNull();
+    expect(typeof data).toBe("number");
+  });
 });
 
 describe.skipIf(hasEnv)("SQL RPC smoke tests — env not configured", () => {

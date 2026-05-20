@@ -21,7 +21,7 @@ Supabase Postgres (project `rquomhcgnodxzkhokwni`). 75+ tables across 12 domain 
 
 ### Analysis pipeline (write-hot)
 
-- `scam_reports` `[hot ⚠]` — Central node: every user analysis. **Embedding HNSW** (partial, `WHERE embedding IS NOT NULL`). v21 (intelligence core), v71 (partitioned shell), v89 (embedding). **`analysis_result` JSONB** also carries `shopSignal` (Stage 0.5, no migration — uses existing v21 GIN `jsonb_path_ops` index for `?` operator lookups; see `docs/ops/shop-signal-measurement.md`). Stage 1 PR 3 (#320) replaces the JSONB read with a typed `shop_checks` sibling table.
+- `scam_reports` `[hot ⚠]` — Central node: every user analysis. **Embedding HNSW** (partial, `WHERE embedding IS NOT NULL`). v21 (intelligence core), v71 (partitioned shell), v89 (embedding). **`analysis_result` JSONB** also carries `shopSignal` (Stage 0.5, no migration — uses existing v21 GIN `jsonb_path_ops` index for `?` operator lookups; see `docs/ops/shop-signal-measurement.md`). Stage 1 #320 adds a typed `shop_checks` sibling table; the JSONB shim stays through the 30-day measurement window (shim removal deferred to post-day-31).
 - `verified_scams` — High-confidence authoritative scams. **Embedding HNSW** (read-only anchor corpus). v89.
 - `scam_entities` `[hot ⚠]` — Unified entity index (phone / email / url / domain / ip / crypto_wallet / bank_account). `UNIQUE (entity_type, normalized_value)`. v21.
 - `report_entity_links` — M-to-many: reports ↔ entities (extraction method, role). v21.
@@ -114,6 +114,7 @@ Supabase Postgres (project `rquomhcgnodxzkhokwni`). 75+ tables across 12 domain 
 ### Commerce & Content
 
 - `leads` — Customer lead intake. v56.
+- `shop_checks` `[hot ⚠]` — Shop Signal Stage 1 persistence: one row per commerce-flagged analyze. `signal` JSONB carries the ShopSignal payload + APIVoid `paidProviderVerdict`. 90-day TTL (BRIN on `ttl_expires_at`), swept by `cleanup_expired_shop_checks` via `/api/cron/shop-checks-retention` (`45 3 * * *`). Service-role RLS. RPCs: `upsert_shop_check`, `update_shop_check_signal` (both `SECURITY INVOKER`, service-role grant). v135 (#320).
 - `stripe_event_log` — Webhook events. Idempotent on `event_id`. v57.
 - `extension_subscriptions`, `extension_installs` — Extension license + per-install identity (ECDSA public key). v34–v61.
 - `blog_posts` — CMS posts. `search_vector` TSVECTOR GIN. v2.
@@ -208,6 +209,7 @@ All have `BRIN(created_at)` for cheap range queries.
 - `archive_secondary_tables_batch(batch_size, days)` — Bulk move across 6 tables. v118.
 - `archive_old_urls(archive_days)`, `mark_stale_urls(stale_days)`, `mark_stale_ips(stale_days)`, `mark_stale_crypto_wallets(stale_days)` — URL / IP / wallet staleness.
 - `cleanup_old_reddit_posts(days)` — Delete `reddit_processed_posts` >N days.
+- `cleanup_expired_shop_checks(batch_size)` — Delete one batch of TTL-expired `shop_checks` rows (`ttl_expires_at < now()`). Looped by the retention cron. v135.
 
 ### Partitioning
 
