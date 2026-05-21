@@ -1,10 +1,20 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-import { runShopSignalEnrich } from "../shop-signal-enrich";
+import {
+  runShopSignalEnrich,
+  handleEnrichFailure,
+} from "../shop-signal-enrich";
 import { fetchShopPage } from "../../fetch-shop-page";
 import { verifyShopAbn } from "../../abn-extract";
 import { getDomainCreatedDate } from "../../whois-cached";
+import { getSiteTrustworthiness } from "../../providers/apivoid";
 import { createServiceClient } from "@askarthur/supabase/server";
+
+// featureFlags is a mutable mock object so a test can flip the paid feed
+// on; beforeEach resets it to OFF.
+const { featureFlagsMock } = vi.hoisted(() => ({
+  featureFlagsMock: { shopSignalPaidFeed: false },
+}));
 
 // The enrichment adapters all do network I/O — mock them. The pure helpers
 // (computeCompositeScore, domainAgeBand, extractDomain) run for real so the
@@ -21,9 +31,8 @@ vi.mock("../../providers/apivoid", () => ({
 vi.mock("@askarthur/supabase/server", () => ({
   createServiceClient: vi.fn(),
 }));
-// Paid feed OFF — the deep check must complete on ABN + domain-age alone.
 vi.mock("@askarthur/utils/feature-flags", () => ({
-  featureFlags: { shopSignalPaidFeed: false },
+  featureFlags: featureFlagsMock,
 }));
 
 const SHOP_CHECK_ID = "11111111-1111-4111-8111-111111111111";
@@ -55,6 +64,7 @@ function completePatch(rpc: ReturnType<typeof vi.fn>) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  featureFlagsMock.shopSignalPaidFeed = false;
 });
 
 describe("runShopSignalEnrich", () => {
@@ -179,5 +189,120 @@ describe("runShopSignalEnrich", () => {
         commerceFlags: [],
       }),
     ).rejects.toThrow(/update_shop_check_signal failed/);
+  });
+
+  it("writes no apivoid-error telemetry row when the paid call is brake-skipped", async () => {
+    // A brake skip is the system working correctly — it must not look like
+    // an APIVoid failure in the health digest (GitHub #349, F-B).
+    featureFlagsMock.shopSignalPaidFeed = true;
+    vi.mocked(fetchShopPage).mockResolvedValue({
+      html: "<html>shop</html>",
+      finalUrl: "https://shop.example.com/",
+      status: 200,
+      error: null,
+    });
+    vi.mocked(verifyShopAbn).mockResolvedValue({
+      status: "not-applicable",
+      abn: null,
+      entityName: null,
+    });
+    vi.mocked(getDomainCreatedDate).mockResolvedValue({
+      createdDate: "2015-01-01",
+      source: "cache",
+    });
+    vi.mocked(getSiteTrustworthiness).mockResolvedValue({
+      ok: false,
+      reason: "brake",
+    });
+    const { client, insert } = fakeSupabase();
+    vi.mocked(createServiceClient).mockReturnValue(
+      client as unknown as ReturnType<typeof createServiceClient>,
+    );
+
+    await runShopSignalEnrich(step, {
+      shopCheckId: SHOP_CHECK_ID,
+      url: "https://shop.example.com/cart",
+      commerceFlags: [],
+    });
+
+    expect(insert).not.toHaveBeenCalled();
+  });
+
+  it("writes an apivoid-error telemetry row when the paid call genuinely fails", async () => {
+    featureFlagsMock.shopSignalPaidFeed = true;
+    vi.mocked(fetchShopPage).mockResolvedValue({
+      html: "<html>shop</html>",
+      finalUrl: "https://shop.example.com/",
+      status: 200,
+      error: null,
+    });
+    vi.mocked(verifyShopAbn).mockResolvedValue({
+      status: "not-applicable",
+      abn: null,
+      entityName: null,
+    });
+    vi.mocked(getDomainCreatedDate).mockResolvedValue({
+      createdDate: "2015-01-01",
+      source: "cache",
+    });
+    vi.mocked(getSiteTrustworthiness).mockResolvedValue({
+      ok: false,
+      reason: "http-error",
+    });
+    const { client, insert } = fakeSupabase();
+    vi.mocked(createServiceClient).mockReturnValue(
+      client as unknown as ReturnType<typeof createServiceClient>,
+    );
+
+    await runShopSignalEnrich(step, {
+      shopCheckId: SHOP_CHECK_ID,
+      url: "https://shop.example.com/cart",
+      commerceFlags: [],
+    });
+
+    expect(insert).toHaveBeenCalledWith(
+      expect.objectContaining({ feature: "shop-signal-apivoid-error" }),
+    );
+  });
+});
+
+describe("handleEnrichFailure", () => {
+  it("marks the row terminally `error` so a retry-exhausted check stops polling", async () => {
+    const { client, rpc } = fakeSupabase();
+    vi.mocked(createServiceClient).mockReturnValue(
+      client as unknown as ReturnType<typeof createServiceClient>,
+    );
+
+    await handleEnrichFailure({
+      data: {
+        event: {
+          data: {
+            shopCheckId: SHOP_CHECK_ID,
+            url: "https://shop.example.com/",
+            commerceFlags: [],
+          },
+        },
+      },
+    });
+
+    const errorWrite = rpc.mock.calls.find(
+      (c) =>
+        c[0] === "update_shop_check_signal" &&
+        (c[1] as { p_patch?: { deepCheck?: { status?: string } } }).p_patch
+          ?.deepCheck?.status === "error",
+    );
+    expect(errorWrite).toBeDefined();
+  });
+
+  it("no-ops on a malformed failure event rather than throwing", async () => {
+    const { client, rpc } = fakeSupabase();
+    vi.mocked(createServiceClient).mockReturnValue(
+      client as unknown as ReturnType<typeof createServiceClient>,
+    );
+
+    await expect(
+      handleEnrichFailure({ data: { event: { data: { not: "valid" } } } }),
+    ).resolves.toBeUndefined();
+    expect(rpc).not.toHaveBeenCalled();
   });
 });

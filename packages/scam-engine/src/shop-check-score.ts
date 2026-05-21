@@ -36,6 +36,12 @@ const ABN_POINTS: Record<AbnStatus, number> = {
   unregistered: 30, // ABN shown but not on the ABR register
   "no-abn": 18, // .au shop, no ABN displayed at all
   "name-mismatch": 12, // registered, but the holder name doesn't match
+  // The ABN could not be checked — the page was unreadable, or the ABR
+  // lookup itself failed (a service error, NOT a "this ABN isn't
+  // registered" answer). A mild corroborating concern like `unknown`
+  // domain age — never an accusation. unverified (6) + unknown domain (6)
+  // = 12 stays well inside low-concern (< 25).
+  unverified: 6,
   verified: 0,
   "not-applicable": 0, // non-AU host — absence of an ABN is expected
 };

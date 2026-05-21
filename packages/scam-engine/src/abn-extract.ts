@@ -151,18 +151,32 @@ function brandCandidates(html: string, url: string): string[] {
  * Verify whether a shop page displays a legitimate ABN. Returns the status,
  * the ABN found (if any), and the registered entity name (if looked up).
  *
- * - non-AU host       → "not-applicable" (ABN display isn't expected)
- * - no valid ABN      → "no-abn"
- * - ABN not on ABR / inactive → "unregistered"
+ * - non-AU host                → "not-applicable" (ABN display isn't expected)
+ * - page could not be read     → "unverified" (pass `pageError`)
+ * - no valid ABN on the page   → "no-abn"
+ * - register lookup failed     → "unverified" (service error / bad GUID)
+ * - ABN not on ABR / inactive  → "unregistered"
  * - ABN active, brand doesn't match holder → "name-mismatch"
  * - ABN active, brand matches holder       → "verified"
+ *
+ * `pageError` carries `fetchShopPage`'s failure reason: when the page was
+ * unreadable we never saw it, so we must not assert `no-abn`.
  */
 export async function verifyShopAbn(
   html: string,
   url: string,
+  pageError?: string | null,
 ): Promise<ShopAbnResult> {
   if (!isAuHost(url)) {
     return { status: "not-applicable", abn: null, entityName: null };
+  }
+
+  // The shop page could not be read (timeout, Cloudflare/Akamai 403,
+  // network error). We never actually saw the page, so we cannot claim it
+  // displays no ABN — report `unverified` rather than a false `no-abn`.
+  // See GitHub #349 (MINOR-2).
+  if (pageError) {
+    return { status: "unverified", abn: null, entityName: null };
   }
 
   const candidate = extractAbnCandidates(html).find(isValidAbnChecksum);
@@ -170,24 +184,37 @@ export async function verifyShopAbn(
     return { status: "no-abn", abn: null, entityName: null };
   }
 
-  const record = await lookupABN(candidate);
-  if (!record) {
-    return { status: "unregistered", abn: candidate, entityName: null };
+  const lookup = await lookupABN(candidate);
+  if ("ok" in lookup) {
+    // The register lookup returned no record. `not-found` is a real
+    // signal — the displayed ABN is genuinely unregistered. `lookup-failed`
+    // (ABR service error, bad GUID, an <exception> body) is NOT: reporting
+    // it as `unregistered` would false-accuse a legitimate shop during an
+    // ABR outage. See GitHub #349 (F-A).
+    return lookup.reason === "not-found"
+      ? { status: "unregistered", abn: candidate, entityName: null }
+      : { status: "unverified", abn: candidate, entityName: null };
   }
-  if (record.status.toLowerCase() !== "active") {
+
+  if (lookup.status.toLowerCase() !== "active") {
     return {
       status: "unregistered",
       abn: candidate,
-      entityName: record.entityName,
+      entityName: lookup.entityName,
     };
   }
 
+  // Match the shop brand against the registered legal name AND any
+  // registered business / trading names — a shop trading under a
+  // registered business name that differs from its legal entity name
+  // (routine for sole traders) is still legitimate.
+  const matchTargets = [lookup.entityName, ...lookup.businessNames];
   const matched = brandCandidates(html, url).some((c) =>
-    nameMatches(record.entityName, c),
+    matchTargets.some((target) => nameMatches(target, c)),
   );
   return {
     status: matched ? "verified" : "name-mismatch",
     abn: candidate,
-    entityName: record.entityName,
+    entityName: lookup.entityName,
   };
 }

@@ -89,6 +89,8 @@ function abnLabel(abn: ShopCheckResult["abn"]): string {
       return "An ABN is displayed but it isn't on the ABR register";
     case "no-abn":
       return "No ABN displayed — required for a legitimate Australian store";
+    case "unverified":
+      return "We couldn't verify the ABN — the register or the page was unavailable. Try the check again shortly";
     case "not-applicable":
       return "ABN check not applicable — this isn't an Australian (.au) store";
   }

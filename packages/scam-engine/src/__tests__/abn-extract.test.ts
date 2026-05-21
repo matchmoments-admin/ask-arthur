@@ -6,7 +6,7 @@ import {
   isAuHost,
   verifyShopAbn,
 } from "../abn-extract";
-import { lookupABN } from "../abr-lookup";
+import { lookupABN, type ABNLookupResult } from "../abr-lookup";
 
 vi.mock("../abr-lookup", () => ({ lookupABN: vi.fn() }));
 const mockedLookupABN = vi.mocked(lookupABN);
@@ -14,6 +14,26 @@ const mockedLookupABN = vi.mocked(lookupABN);
 // Real, checksum-valid ABNs.
 const ATO_ABN = "51824753556"; // Australian Taxation Office
 const AUSPOST_ABN = "28864970579"; // Australia Post
+
+/** A successful ABR record with sensible defaults; override per test. */
+function abrRecord(overrides: Partial<ABNLookupResult> = {}): ABNLookupResult {
+  return {
+    abn: ATO_ABN,
+    entityName: "Widget Store Pty Ltd",
+    entityType: "Australian Private Company",
+    status: "Active",
+    state: "NSW",
+    postcode: "2000",
+    businessNames: [],
+    isAcncRegistered: false,
+    dgrEndorsed: false,
+    dgrItemNumber: null,
+    dgrEffectiveFrom: null,
+    dgrEffectiveTo: null,
+    taxConcessionCharity: false,
+    ...overrides,
+  };
+}
 
 describe("isValidAbnChecksum", () => {
   it("accepts checksum-valid ABNs", () => {
@@ -89,6 +109,14 @@ describe("verifyShopAbn", () => {
     expect(mockedLookupABN).not.toHaveBeenCalled();
   });
 
+  it("returns unverified when the page could not be read — never a false no-abn", async () => {
+    // pageError set → fetchShopPage failed; we never saw the page, so we
+    // cannot assert it displays no ABN (GitHub #349, MINOR-2).
+    const result = await verifyShopAbn("", "https://widgets.com.au", "timeout");
+    expect(result.status).toBe("unverified");
+    expect(mockedLookupABN).not.toHaveBeenCalled();
+  });
+
   it("returns no-abn when an AU shop displays no valid ABN", async () => {
     const result = await verifyShopAbn(
       "<footer>Contact us</footer>",
@@ -98,8 +126,8 @@ describe("verifyShopAbn", () => {
     expect(mockedLookupABN).not.toHaveBeenCalled();
   });
 
-  it("returns unregistered when the ABN is not on the register", async () => {
-    mockedLookupABN.mockResolvedValue(null);
+  it("returns unregistered when the register reports the ABN as not-found", async () => {
+    mockedLookupABN.mockResolvedValue({ ok: false, reason: "not-found" });
     const result = await verifyShopAbn(
       `<footer>ABN ${ATO_ABN}</footer>`,
       "https://widgets.com.au",
@@ -108,21 +136,22 @@ describe("verifyShopAbn", () => {
     expect(result.abn).toBe(ATO_ABN);
   });
 
+  it("returns unverified — not unregistered — when the register lookup fails", async () => {
+    // A transient ABR outage / bad GUID / <exception> body must never be
+    // reported as "ABN unregistered" (GitHub #349, F-A).
+    mockedLookupABN.mockResolvedValue({ ok: false, reason: "lookup-failed" });
+    const result = await verifyShopAbn(
+      `<footer>ABN ${ATO_ABN}</footer>`,
+      "https://widgets.com.au",
+    );
+    expect(result.status).toBe("unverified");
+    expect(result.abn).toBe(ATO_ABN);
+  });
+
   it("returns unregistered when the ABN record is not Active", async () => {
-    mockedLookupABN.mockResolvedValue({
-      abn: ATO_ABN,
-      entityName: "Defunct Co Pty Ltd",
-      entityType: "Company",
-      status: "Cancelled",
-      state: "NSW",
-      postcode: "2000",
-      isAcncRegistered: false,
-      dgrEndorsed: false,
-      dgrItemNumber: null,
-      dgrEffectiveFrom: null,
-      dgrEffectiveTo: null,
-      taxConcessionCharity: false,
-    });
+    mockedLookupABN.mockResolvedValue(
+      abrRecord({ entityName: "Defunct Co Pty Ltd", status: "Cancelled" }),
+    );
     const result = await verifyShopAbn(
       `<footer>ABN ${ATO_ABN}</footer>`,
       "https://widgets.com.au",
@@ -131,20 +160,9 @@ describe("verifyShopAbn", () => {
   });
 
   it("returns verified when the registered name matches the shop brand", async () => {
-    mockedLookupABN.mockResolvedValue({
-      abn: ATO_ABN,
-      entityName: "Widget Store Pty Ltd",
-      entityType: "Company",
-      status: "Active",
-      state: "NSW",
-      postcode: "2000",
-      isAcncRegistered: false,
-      dgrEndorsed: false,
-      dgrItemNumber: null,
-      dgrEffectiveFrom: null,
-      dgrEffectiveTo: null,
-      taxConcessionCharity: false,
-    });
+    mockedLookupABN.mockResolvedValue(
+      abrRecord({ entityName: "Widget Store Pty Ltd" }),
+    );
     const result = await verifyShopAbn(
       `<title>Widget Store</title><footer>ABN ${ATO_ABN}</footer>`,
       "https://widgetstore.com.au",
@@ -153,21 +171,32 @@ describe("verifyShopAbn", () => {
     expect(result.entityName).toBe("Widget Store Pty Ltd");
   });
 
-  it("returns name-mismatch when the registered holder is unrelated", async () => {
-    mockedLookupABN.mockResolvedValue({
-      abn: ATO_ABN,
-      entityName: "John Citizen",
-      entityType: "Individual/Sole Trader",
-      status: "Active",
-      state: "VIC",
-      postcode: "3000",
-      isAcncRegistered: false,
-      dgrEndorsed: false,
-      dgrItemNumber: null,
-      dgrEffectiveFrom: null,
-      dgrEffectiveTo: null,
-      taxConcessionCharity: false,
-    });
+  it("returns verified when a registered business name matches even though the legal name does not", async () => {
+    // A sole trader's legal name is a person; the shop trades under a
+    // registered business name. Matching against businessNames keeps the
+    // legitimate shop `verified` instead of a false `name-mismatch`.
+    mockedLookupABN.mockResolvedValue(
+      abrRecord({
+        entityName: "John Citizen",
+        entityType: "Individual/Sole Trader",
+        businessNames: ["Mega Luxury Outlet"],
+      }),
+    );
+    const result = await verifyShopAbn(
+      `<title>Mega Luxury Outlet</title><footer>ABN ${ATO_ABN}</footer>`,
+      "https://megaluxuryoutlet.com.au",
+    );
+    expect(result.status).toBe("verified");
+  });
+
+  it("returns name-mismatch when neither the legal nor any business name matches", async () => {
+    mockedLookupABN.mockResolvedValue(
+      abrRecord({
+        entityName: "John Citizen",
+        entityType: "Individual/Sole Trader",
+        businessNames: ["Citizen Lawnmowing"],
+      }),
+    );
     const result = await verifyShopAbn(
       `<title>Mega Luxury Outlet</title><footer>ABN ${ATO_ABN}</footer>`,
       "https://megaluxuryoutlet.com.au",

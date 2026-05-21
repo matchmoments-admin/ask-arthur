@@ -74,9 +74,26 @@ describe("computeCompositeScore", () => {
     expect(
       computeCompositeScore({ ...clean, abnStatus: "name-mismatch" }).score,
     ).toBe(12);
+    // `unverified` (the check couldn't run) is a mild corroborating
+    // concern, never an accusation — scored like `unknown` domain age.
+    expect(
+      computeCompositeScore({ ...clean, abnStatus: "unverified" }).score,
+    ).toBe(6);
     expect(
       computeCompositeScore({ ...clean, abnStatus: "not-applicable" }).score,
     ).toBe(0);
+  });
+
+  it("keeps an unverifiable ABN + unknown domain inside low-concern", () => {
+    // unverified ABN (6) + unknown domain (6) = 12 — an enrichment that
+    // could not run never tips an otherwise-clean shop.
+    const result = computeCompositeScore({
+      ...clean,
+      domainAgeBand: "unknown",
+      abnStatus: "unverified",
+    });
+    expect(result.score).toBe(12);
+    expect(result.band).toBe("low-concern");
   });
 
   it("weights the APIVoid verdict, treating null as no signal", () => {

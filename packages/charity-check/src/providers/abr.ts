@@ -19,7 +19,11 @@
 // scorer change.
 
 import { logger } from "@askarthur/utils/logger";
-import { lookupABN, type ABNLookupResult } from "@askarthur/scam-engine/abr-lookup";
+import {
+  lookupABN,
+  type ABNLookupResult,
+  type AbnLookupFailure,
+} from "@askarthur/scam-engine/abr-lookup";
 
 import { unavailablePillar, type CharityProviderContract } from "../provider-contract";
 import type { CharityCheckInput, CharityPillarResult } from "../types";
@@ -38,7 +42,7 @@ export const abrProvider: CharityProviderContract = {
       return unavailablePillar("abr_dgr", "no_abn_provided");
     }
 
-    let result: ABNLookupResult | null = null;
+    let result: ABNLookupResult | AbnLookupFailure;
     try {
       result = await lookupABN(input.abn);
     } catch (err) {
@@ -46,12 +50,11 @@ export const abrProvider: CharityProviderContract = {
       return unavailablePillar("abr_dgr", "exception");
     }
 
-    if (!result) {
-      // lookupABN returns null on cache miss + ABR fetch error AND on
-      // a successful response that has no entity name (a benign "ABN
-      // not found"). The two cases are visually similar but the cause
-      // differs; v0.1 collapses them as "unavailable" because the
-      // distinction doesn't change the verdict.
+    if ("ok" in result) {
+      // lookupABN now returns a discriminated failure — `not-found` (the
+      // ABN is genuinely not on the register) vs `lookup-failed` (a
+      // transient ABR/service error). The charity verdict doesn't yet act
+      // on the distinction, so v0.1 still collapses both to "unavailable".
       return unavailablePillar("abr_dgr", "abr_unavailable_or_unknown");
     }
 

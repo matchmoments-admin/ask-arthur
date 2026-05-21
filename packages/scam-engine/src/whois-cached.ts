@@ -83,7 +83,12 @@ export async function getDomainCreatedDate(
   if (supabase) {
     // Best-effort write-back onto rows that already exist for this domain.
     // Never INSERT — a domain with no scam_urls row was never reported.
-    supabase
+    // Awaited, not fire-and-forget: getDomainCreatedDate runs inside an
+    // Inngest step, and an un-awaited promise is orphaned when the step's
+    // serverless invocation is frozen between steps — losing the cache
+    // write and re-drawing the near-exhausted whoisjson.com free tier on
+    // the next lookup for this domain.
+    const { error } = await supabase
       .from("scam_urls")
       .update({
         whois_created_date: whois.createdDate,
@@ -91,15 +96,13 @@ export async function getDomainCreatedDate(
         whois_is_private: whois.isPrivate,
         whois_lookup_at: new Date().toISOString(),
       })
-      .eq("domain", domain)
-      .then(({ error }) => {
-        if (error) {
-          logger.warn("getDomainCreatedDate: cache write-back failed", {
-            domain,
-            error: error.message,
-          });
-        }
+      .eq("domain", domain);
+    if (error) {
+      logger.warn("getDomainCreatedDate: cache write-back failed", {
+        domain,
+        error: error.message,
       });
+    }
   }
 
   return { createdDate: whois.createdDate, source: "live" };

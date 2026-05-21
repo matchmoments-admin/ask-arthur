@@ -10,8 +10,10 @@
 //
 // Graceful degradation is the contract: every failure mode — missing key,
 // brake engaged, unparseable host, HTTP error, timeout, malformed JSON —
-// returns `null`. The free Stage-0 commerce detector must keep working
-// regardless of what the paid feed does.
+// returns an `ApivoidSkip` (`{ ok: false, reason }`), never throws. The
+// reason lets the caller tell a by-design `brake` skip from a genuine
+// error so it only logs error telemetry for the latter (GitHub #349, F-B).
+// The free Stage-0 commerce detector keeps working regardless.
 //
 // NOT called synchronously in /api/analyze. #321 wires it into a
 // post-response Inngest fan-out. This module is the adapter + brake check
@@ -49,6 +51,18 @@ export interface ApivoidSiteTrust {
   units: number;
   /** Notional USD for the call — the caller passes this to logCost. */
   estimatedCostUsd: number;
+}
+
+/**
+ * A call that was skipped or failed. `brake` is a by-design skip — the
+ * cost brake is engaged, or the brake state is unverifiable (no Supabase
+ * client / brake lookup error), so declining the paid call is the safe
+ * default. The caller logs NO error telemetry for `brake`. Every other
+ * reason is a genuine error worth a diagnostic row. See GitHub #349 (F-B).
+ */
+export interface ApivoidSkip {
+  ok: false;
+  reason: "no-key" | "brake" | "bad-host" | "http-error" | "timeout";
 }
 
 /** Best-effort hostname extraction. Accepts a full URL or a bare host. */
@@ -156,28 +170,29 @@ function mapResponse(body: unknown): PaidProviderVerdict {
 
 /**
  * Call APIVoid Site Trustworthiness for a URL or host. Returns the mapped
- * verdict plus cost metadata for the caller to log, or `null` on any
- * failure (missing key, brake engaged, bad host, HTTP error, timeout,
- * malformed JSON). Never throws.
+ * verdict plus cost metadata for the caller to log, or an `ApivoidSkip`
+ * (`{ ok: false, reason }`) on any failure — missing key, brake engaged,
+ * bad host, HTTP error, timeout, malformed JSON. Never throws. Callers
+ * discriminate on `"ok" in result`.
  */
 export async function getSiteTrustworthiness(
   input: string,
-): Promise<ApivoidSiteTrust | null> {
+): Promise<ApivoidSiteTrust | ApivoidSkip> {
   const apiKey = process.env.APIVOID_API_KEY;
   if (!apiKey) {
     logger.warn("apivoid: APIVOID_API_KEY not set — skipping paid call");
-    return null;
+    return { ok: false, reason: "no-key" };
   }
 
   const host = extractHost(input);
   if (!host) {
     logger.warn("apivoid: could not extract host from input — skipping", { input });
-    return null;
+    return { ok: false, reason: "bad-host" };
   }
 
   if (await isBrakeEngaged()) {
     logger.warn("apivoid: shop_signal brake engaged — skipping paid call", { host });
-    return null;
+    return { ok: false, reason: "brake" };
   }
 
   const startedAt = Date.now();
@@ -194,7 +209,7 @@ export async function getSiteTrustworthiness(
 
     if (!res.ok) {
       logger.warn("apivoid: site-trust HTTP error", { status: res.status, host });
-      return null;
+      return { ok: false, reason: "http-error" };
     }
 
     const body = await res.json();
@@ -218,6 +233,10 @@ export async function getSiteTrustworthiness(
       host,
       elapsedMs: Date.now() - startedAt,
     });
-    return null;
+    const reason =
+      err instanceof DOMException && err.name === "TimeoutError"
+        ? "timeout"
+        : "http-error";
+    return { ok: false, reason };
   }
 }

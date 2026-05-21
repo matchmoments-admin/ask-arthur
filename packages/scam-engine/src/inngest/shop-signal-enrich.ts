@@ -107,7 +107,10 @@ export async function runShopSignalEnrich(
   // HTML never crosses a step boundary as persisted state.
   const abn = await step.run("verify-abn", async () => {
     const page = await fetchShopPage(url);
-    return verifyShopAbn(page.html ?? "", page.finalUrl ?? url);
+    // Pass page.error through: when the page was unreadable, verifyShopAbn
+    // returns `unverified` rather than a false `no-abn` (GitHub #349,
+    // MINOR-2) — we never saw the page, so we can't assert it has no ABN.
+    return verifyShopAbn(page.html ?? "", page.finalUrl ?? url, page.error);
   });
 
   const domainAge = await step.run("domain-age", async () => {
@@ -126,10 +129,20 @@ export async function runShopSignalEnrich(
 
   const apivoid = await step.run("apivoid", async () => {
     if (!featureFlags.shopSignalPaidFeed) {
-      return { attempted: false, result: null };
+      return { attempted: false as const, result: null, skipReason: null };
     }
-    const result = await getSiteTrustworthiness(url);
-    return { attempted: true, result };
+    const outcome = await getSiteTrustworthiness(url);
+    if ("ok" in outcome) {
+      // ApivoidSkip — the paid call was skipped or failed. skipReason
+      // lets the log-cost step tell a by-design `brake` skip from a
+      // genuine error.
+      return {
+        attempted: true as const,
+        result: null,
+        skipReason: outcome.reason,
+      };
+    }
+    return { attempted: true as const, result: outcome, skipReason: null };
   });
 
   // Cost telemetry — best-effort. feature='shop_signal' so cost-daily-check
@@ -154,10 +167,13 @@ export async function runShopSignalEnrich(
             trust_score: apivoid.result.paidProviderVerdict.trustScore,
           },
         });
-      } else if (apivoid.attempted) {
-        // APIVoid was called but returned null (key missing, brake
-        // engaged, HTTP error). $0 diagnostic row — cost-daily-check
-        // and the health digest both watch this tag.
+      } else if (apivoid.attempted && apivoid.skipReason !== "brake") {
+        // APIVoid was attempted and genuinely failed (missing key, bad
+        // host, HTTP error, timeout). $0 diagnostic row — cost-daily-check
+        // and the health digest both watch this tag. A by-design `brake`
+        // skip is deliberately excluded: it is the system working
+        // correctly and must not look like an APIVoid error in the
+        // digest (GitHub #349, F-B).
         await supabase.from("cost_telemetry").insert({
           feature: "shop-signal-apivoid-error",
           provider: "apivoid",
@@ -166,7 +182,7 @@ export async function runShopSignalEnrich(
           unit_cost_usd: 0,
           estimated_cost_usd: 0,
           request_id: shopCheckId,
-          metadata: { source: "deep-check" },
+          metadata: { source: "deep-check", reason: apivoid.skipReason },
         });
       }
     } catch (err) {
@@ -213,12 +229,55 @@ export async function runShopSignalEnrich(
   return { shopCheckId, score, band };
 }
 
+/**
+ * The onFailure body, factored out of the Inngest config so it is
+ * unit-testable without constructing the function (the same reasoning that
+ * extracted runShopSignalEnrich). After the enrichment exhausts its
+ * retries — e.g. a permanently failing write-back — this marks the row
+ * terminally `error`. Without it a write-back-exhausted row sits at
+ * `processing` forever and the client poll never resolves (GitHub #349,
+ * MINOR-3).
+ *
+ * `rawFailureEvent` is Inngest's `inngest/function.failed` event; it wraps
+ * the original shop.check.requested.v1 at `.data.event`.
+ */
+export async function handleEnrichFailure(
+  rawFailureEvent: unknown,
+): Promise<void> {
+  const original = (
+    rawFailureEvent as { data?: { event?: { data?: unknown } } }
+  )?.data?.event?.data;
+  let shopCheckId: string;
+  try {
+    shopCheckId = parseShopCheckRequestedData(original).shopCheckId;
+  } catch {
+    logger.error(
+      "shop-signal-enrich onFailure: could not parse the original event",
+    );
+    return;
+  }
+  try {
+    await writeDeepCheck(shopCheckId, {
+      status: "error",
+      errorMessage: "Deep shop check failed — please try again later.",
+    });
+  } catch (err) {
+    logger.error("shop-signal-enrich onFailure: error write-back failed", {
+      shopCheckId,
+      error: String(err),
+    });
+  }
+}
+
 export const shopSignalEnrich = inngest.createFunction(
   {
     id: "shop-signal-enrich",
     name: "Shop Signal: Deep Shop Check enrichment",
     idempotency: "event.data.shopCheckId",
     retries: 2,
+    // When all retries are exhausted, mark the row terminally `error` so
+    // the client poll stops and the tray shows an honest failure state.
+    onFailure: ({ event }) => handleEnrichFailure(event),
   },
   { event: SHOP_CHECK_REQUESTED_EVENT },
   // Inngest's `step` is structurally a superset of EnrichStep; the cast is
