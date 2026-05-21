@@ -267,8 +267,8 @@ describe("runShopSignalEnrich", () => {
 });
 
 describe("handleEnrichFailure", () => {
-  it("marks the row terminally `error` so a retry-exhausted check stops polling", async () => {
-    const { client, rpc } = fakeSupabase();
+  it("marks the row terminally `error` and emits a digest-visible telemetry row", async () => {
+    const { client, rpc, insert } = fakeSupabase();
     vi.mocked(createServiceClient).mockReturnValue(
       client as unknown as ReturnType<typeof createServiceClient>,
     );
@@ -292,6 +292,11 @@ describe("handleEnrichFailure", () => {
           ?.deepCheck?.status === "error",
     );
     expect(errorWrite).toBeDefined();
+    // A retry-exhausted run must land an `%error%`-tagged telemetry row so
+    // the daily health digest surfaces it (GitHub #349, F4).
+    expect(insert).toHaveBeenCalledWith(
+      expect.objectContaining({ feature: "shop-signal-enrich-error" }),
+    );
   });
 
   it("no-ops on a malformed failure event rather than throwing", async () => {

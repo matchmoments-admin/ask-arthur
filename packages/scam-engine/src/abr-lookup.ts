@@ -79,6 +79,10 @@ const CACHE_TTL = 60 * 60 * 24; // 24 hours
 // satisfy reads expecting the new shape. Increment on schema additions.
 // v3: added `businessNames`.
 const CACHE_VERSION = 3;
+// ABR business records are a few KB. A response far larger than this is
+// malformed / redirected / MITM'd — refuse it rather than buffer and
+// regex-scan an unbounded document in a background worker (GitHub #349).
+const MAX_ABR_BYTES = 1024 * 1024;
 
 let _redis: Redis | null = null;
 
@@ -272,6 +276,17 @@ export async function lookupABN(
 
     if (!response.ok) {
       logger.error("ABR API returned non-OK status", { status: response.status });
+      return { ok: false, reason: "lookup-failed" };
+    }
+
+    // Defensive size guard — refuse a response whose declared body is far
+    // larger than any real ABR record before buffering + regex-scanning it.
+    const declaredLength = Number(response.headers.get("content-length"));
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_ABR_BYTES) {
+      logger.warn("ABR response exceeds the size cap — skipping", {
+        abn,
+        declaredLength,
+      });
       return { ok: false, reason: "lookup-failed" };
     }
 

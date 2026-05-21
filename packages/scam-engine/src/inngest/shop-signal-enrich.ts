@@ -238,6 +238,13 @@ export async function runShopSignalEnrich(
  * `processing` forever and the client poll never resolves (GitHub #349,
  * MINOR-3).
  *
+ * Best-effort: when the DB is itself the reason the retries were
+ * exhausted, this handler's own write-back can fail too — that failure is
+ * logged, not guaranteed away. It also emits a $0 `shop-signal-enrich-error`
+ * cost_telemetry row so a spike in retry-exhausted deep checks surfaces in
+ * the daily health digest (which Telegrams every `feature LIKE '%error%'`
+ * row) instead of being visible only in the logs.
+ *
  * `rawFailureEvent` is Inngest's `inngest/function.failed` event; it wraps
  * the original shop.check.requested.v1 at `.data.event`.
  */
@@ -263,6 +270,31 @@ export async function handleEnrichFailure(
     });
   } catch (err) {
     logger.error("shop-signal-enrich onFailure: error write-back failed", {
+      shopCheckId,
+      error: String(err),
+    });
+  }
+
+  // Diagnostic $0 telemetry — a retry-exhausted deep check otherwise only
+  // touches shop_checks.signal + the logs, so it is invisible to the daily
+  // health digest. The `-error` suffix makes the digest's
+  // `feature LIKE '%error%'` filter pick it up.
+  try {
+    const supabase = createServiceClient();
+    if (supabase) {
+      await supabase.from("cost_telemetry").insert({
+        feature: "shop-signal-enrich-error",
+        provider: "inngest",
+        operation: "shop-signal-enrich",
+        units: 0,
+        unit_cost_usd: 0,
+        estimated_cost_usd: 0,
+        request_id: shopCheckId,
+        metadata: { source: "deep-check", stage: "onFailure" },
+      });
+    }
+  } catch (err) {
+    logger.warn("shop-signal-enrich onFailure: telemetry insert failed", {
       shopCheckId,
       error: String(err),
     });
