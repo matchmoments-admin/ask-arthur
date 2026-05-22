@@ -16,6 +16,7 @@
 // the ABN often lives on /about or /terms, not the homepage (GitHub #349).
 
 import { parse as parseTld } from "tldts";
+import { logger } from "@askarthur/utils/logger";
 import { lookupABN } from "./abr-lookup";
 import { fetchShopPage, type ShopPageFetch } from "./fetch-shop-page";
 import type { AbnStatus } from "@askarthur/types";
@@ -295,7 +296,17 @@ export async function verifyShopAbnDeep(
       candidateUrl,
       Math.min(remaining, PER_CANDIDATE_MS),
     );
-    if (page.error) continue; // unreadable candidate — skip, don't mask
+    if (page.error) {
+      // An unreadable candidate tells us nothing — skip it, don't let it
+      // mask the homepage `no-abn`. Logged so a systemic candidate-fetch
+      // failure (e.g. a CDN starts 403-ing the bot UA on /about pages)
+      // surfaces in the logs instead of silently regressing ABN coverage.
+      logger.warn("verifyShopAbnDeep: candidate page unreadable", {
+        candidateUrl,
+        error: page.error,
+      });
+      continue;
+    }
 
     const result = await verifyShopAbn(
       page.html ?? "",
