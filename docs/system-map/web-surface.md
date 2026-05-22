@@ -153,16 +153,18 @@ Every consumer page, authenticated page, admin page, and API route, grouped by d
 
 ### Consumer lookup
 
-| Route                               | Method | Auth   | Purpose                                                 |
-| ----------------------------------- | ------ | ------ | ------------------------------------------------------- |
-| `/api/charity-check`                | POST   | open   | Charity legitimacy lookup                               |
-| `/api/charity-check/autocomplete`   | GET    | open   | Charity name autocomplete                               |
-| `/api/phone-footprint/[msisdn]`     | POST   | open   | Phone-number footprint (free teaser; paid via monitors) |
-| `/api/phone-footprint/[msisdn]/pdf` | GET    | open   | PDF report export (Inngest queued)                      |
-| `/api/scam-contacts/lookup`         | POST   | apikey | Lookup known scam contact                               |
-| `/api/scam-contacts/report`         | POST   | open   | Report a scam contact                                   |
-| `/api/scam-urls/lookup`             | POST   | apikey | Lookup scam URL with WHOIS / SSL                        |
-| `/api/scam-urls/report`             | POST   | open   | Report a scam URL                                       |
+| Route                               | Method | Auth   | Purpose                                                                          |
+| ----------------------------------- | ------ | ------ | -------------------------------------------------------------------------------- |
+| `/api/charity-check`                | POST   | open   | Charity legitimacy lookup                                                        |
+| `/api/charity-check/autocomplete`   | GET    | open   | Charity name autocomplete                                                        |
+| `/api/phone-footprint/[msisdn]`     | POST   | open   | Phone-number footprint (free teaser; paid via monitors)                          |
+| `/api/phone-footprint/[msisdn]/pdf` | GET    | open   | PDF report export (Inngest queued)                                               |
+| `/api/scam-contacts/lookup`         | POST   | apikey | Lookup known scam contact                                                        |
+| `/api/scam-contacts/report`         | POST   | open   | Report a scam contact                                                            |
+| `/api/scam-urls/lookup`             | POST   | apikey | Lookup scam URL with WHOIS / SSL                                                 |
+| `/api/scam-urls/report`             | POST   | open   | Report a scam URL                                                                |
+| `/api/shop-check`                   | POST   | open   | Deep Shop Check — queue ABN + domain-age + APIVoid enrichment for a commerce URL |
+| `/api/shop-check/[id]`              | GET    | open   | Poll a Deep Shop Check result by id                                              |
 
 ### Extension integration (open, ECDSA-signed install requests)
 

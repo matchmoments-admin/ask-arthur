@@ -92,6 +92,10 @@ export async function POST(req: NextRequest) {
         summary: out.result.summary,
         redFlags: out.result.redFlags,
         nextSteps: out.result.nextSteps,
+        // Shop Signal — runAnalysisCore stamps this when the input looked
+        // commerce-shaped. The extension popup (#323) reads it to render
+        // the verdict + commerce-flag chips; omitted for non-commerce input.
+        ...(out.result.shopSignal ? { shopSignal: out.result.shopSignal } : {}),
         ...(out.cached ? { cached: true } : {}),
       },
       { headers: { "X-RateLimit-Remaining": String(auth.remaining) } },

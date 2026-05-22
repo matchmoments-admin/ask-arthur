@@ -5,6 +5,11 @@ import { getContextMenuText, setContextMenuText } from "@/lib/storage";
 import { ResultDisplay } from "@/components/ResultDisplay";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { ErrorState } from "@/components/ErrorState";
+import { ShopSignalCard } from "@/components/ShopSignalCard";
+
+// Build-time flag injected by wxt.config.ts. When false the ShopSignalCard
+// (and its chrome.scripting usage) is dead-code-eliminated from the bundle.
+declare const __SHOP_GUARD_ENABLED__: boolean;
 
 type CheckMode = "url" | "message";
 
@@ -116,6 +121,9 @@ export function CheckTab() {
 
   return (
     <div className="p-4 space-y-3">
+      {/* Shop Signal — auto-checks the active tab on popup open (#323) */}
+      {__SHOP_GUARD_ENABLED__ && <ShopSignalCard />}
+
       {/* Pill toggle */}
       <div className="flex bg-surface rounded-[20px] p-0.5 border border-border">
         <button

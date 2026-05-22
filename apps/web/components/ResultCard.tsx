@@ -8,28 +8,8 @@ import ResultActionButtons from "./result/ResultActionButtons";
 import OnwardReportPicker from "./result/OnwardReportPicker";
 import DeepShopCheckTray from "./result/DeepShopCheckTray";
 import type { EvidenceContext } from "@/lib/onward/destinations";
-import type { ScammerContacts, ShopSignal } from "@askarthur/types";
-
-// Shop Signal commerce-flag tags → user-facing label. Stage 0 ships a
-// fixed mapping; if Stage 0.5 adds new tags, extend here. Unknown tags
-// fall through to their raw kebab-case form rather than being dropped —
-// surfacing the unknown is better than silently hiding it.
-const SHOP_FLAG_LABEL: Record<string, string> = {
-  "payid-scam": "PayID-shaped scam",
-  "fake-payment-confirmation": "Fake payment confirmation",
-  "overpayment-refund": "Overpayment refund scam",
-  "off-platform-move": "Moves you off-platform",
-  "relative-will-collect": "Buyer's relative collects",
-  "implausible-discount": "Discount too good to be true",
-  "domain-renewal-invoice": "Fake .com.au domain invoice",
-  "stock-photo-product": "Stock-photo product listing",
-  "fake-trust-badge": "Fake trust badge",
-  "fake-australia-post": "Fake Australia Post notice",
-  "urgent-purchase-pressure": "Urgent purchase pressure",
-  "fake-reviews": "Suspicious reviews",
-};
-
-type Verdict = "SAFE" | "SUSPICIOUS" | "HIGH_RISK";
+import type { ScammerContacts, ShopSignal, Verdict } from "@askarthur/types";
+import { COMMERCE_FLAG_LABELS } from "@askarthur/types";
 
 interface ResultCardProps {
   verdict: Verdict;
@@ -108,6 +88,16 @@ const VERDICT_CONFIG: Record<Verdict, VerdictStyle> = {
     chipBorder: "border-danger-border",
     iconColor: "text-danger-text",
     flagBar: "bg-danger-text",
+  },
+  // Canonical Verdict is 4-value; UNCERTAIN renders a neutral, non-alarming
+  // chip that still nudges the user to verify (we never assert "safe").
+  UNCERTAIN: {
+    baseTitle: "We couldn't reach a clear verdict — verify before you act",
+    icon: Eye,
+    chipBg: "bg-slate-50",
+    chipBorder: "border-slate-200",
+    iconColor: "text-gov-slate",
+    flagBar: "bg-gov-slate",
   },
 };
 
@@ -286,7 +276,7 @@ export default function ResultCard({
                 key={tag}
                 className="rounded-full border border-warn-border bg-warn-bg/40 px-2 py-0.5 text-xs text-warn-text"
               >
-                {SHOP_FLAG_LABEL[tag] ?? tag}
+                {COMMERCE_FLAG_LABELS[tag] ?? tag}
               </span>
             ))
           )}
