@@ -72,7 +72,7 @@
   ],
   "functions": {
     "app/api/analyze/route.ts": {
-      "maxDuration": 30
+      "maxDuration": 60
     },
     "app/api/media/analyze/route.ts": {
       "maxDuration": 60

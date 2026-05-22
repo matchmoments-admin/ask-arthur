@@ -10,9 +10,11 @@ interface Props {
 }
 
 /**
- * Info-blue panel for unreadable / blocked / unscrapeable submissions.
- * Uses "we" not "you", provides two alternate paths, and escalates to IDCARE
- * after the third attempt.
+ * Info-blue panel for a failed analysis attempt. This is the generic handler
+ * for ANY /api/analyze failure (a transient AI overload, a network blip, a
+ * 500) — it must not assume a URL/site was ever involved, since text- and
+ * image-only submissions fail through here too. Uses "we" not "you", offers
+ * a retry path, and escalates to IDCARE after the third attempt.
  */
 export default function InvalidSubmissionState({
   referenceId,
@@ -39,34 +41,35 @@ export default function InvalidSubmissionState({
             id="invalid-submission-heading"
             className="text-lg font-bold text-deep-navy"
           >
-            We couldn&apos;t see that site directly
+            We couldn&apos;t finish that check
           </h2>
           <p className="mt-2 text-gov-slate leading-relaxed">
-            Some sites block automated checks — scam sites often do this on
-            purpose, so it can be a warning sign in itself. Try one of these
-            instead:
+            Something went wrong at our end — our checker is sometimes briefly
+            busy. Nothing you sent was stored. Here&apos;s what to try:
           </p>
           <ul className="mt-3 list-disc space-y-1 pl-5 text-gov-slate leading-relaxed">
-            <li>Take a screenshot of what you&apos;re worried about and upload it.</li>
-            <li>Paste the text of the message into the box above.</li>
+            <li>Try again — most checks go through on a second attempt.</li>
+            <li>
+              Still stuck? Paste the message as text instead of a screenshot.
+            </li>
           </ul>
           <div className="mt-4 flex flex-col-reverse gap-3 sm:flex-row">
-            {onRetry && (
-              <button
-                type="button"
-                onClick={onRetry}
-                className="inline-flex min-h-[48px] items-center justify-center rounded-full border-2 border-gov-slate bg-white px-5 py-2 text-sm font-bold uppercase tracking-widest text-deep-navy hover:bg-slate-50"
-              >
-                Try again
-              </button>
-            )}
             {onUploadScreenshot && (
               <button
                 type="button"
                 onClick={onUploadScreenshot}
-                className="inline-flex min-h-[48px] items-center justify-center rounded-full bg-deep-navy px-5 py-2 text-sm font-bold uppercase tracking-widest text-white hover:bg-navy"
+                className="inline-flex min-h-[48px] items-center justify-center rounded-full border-2 border-gov-slate bg-white px-5 py-2 text-sm font-bold uppercase tracking-widest text-deep-navy hover:bg-slate-50"
               >
                 Upload a screenshot
+              </button>
+            )}
+            {onRetry && (
+              <button
+                type="button"
+                onClick={onRetry}
+                className="inline-flex min-h-[48px] items-center justify-center rounded-full bg-deep-navy px-5 py-2 text-sm font-bold uppercase tracking-widest text-white hover:bg-navy"
+              >
+                Try again
               </button>
             )}
           </div>

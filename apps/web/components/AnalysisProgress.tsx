@@ -56,6 +56,11 @@ interface Props {
 }
 
 export default function AnalysisProgress({ status, currentStep }: Props) {
+  // On a finished error / throttle the result panel (or rate-limit banner) is
+  // the feedback — a stale all-checked step list, especially the legacy
+  // "Verifying URLs against databases…" line, wrongly implies a site/URL
+  // check ran when the submission was text- or image-only.
+  if (status === "error" || status === "rate_limited") return null;
   if (currentStep) {
     return <V2Progress currentStep={currentStep} />;
   }
