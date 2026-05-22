@@ -403,11 +403,15 @@ export async function analyzeWithClaude(
   // Use assistant prefill to force JSON output
   const multiImage = imagesBase64 && imagesBase64.length > 1;
   const hasImages = imagesBase64 && imagesBase64.length > 0;
-  // Per-request timeout. Vision calls tail longer (p95 ~3-8s, 529/overloaded
-  // tail absorbed up to ~25s); text-only is bounded tighter. Without this,
-  // the SDK default of 10 minutes means a hung Anthropic request can pin a
-  // Vercel function for its entire maxDuration budget.
-  const timeoutMs = hasImages ? 30_000 : 15_000;
+  // Per-request timeout + retry budget. Vision calls tail longer (p95
+  // ~3-8s, 529/overloaded tail absorbed up to ~25s); text is bounded
+  // tighter. The SDK retries 529s/timeouts — left at the default
+  // (maxRetries: 2) a vision retry chain overruns the route's 60s
+  // maxDuration, so Vercel kills the function mid-call and the user sees a
+  // generic 500. maxRetries: 1 + a 25s vision timeout keeps the worst case
+  // (25s + backoff + 25s ≈ 52s) inside the 60s budget while still
+  // recovering from a single transient overload.
+  const timeoutMs = hasImages ? 25_000 : 15_000;
   const response = await client.messages.create(
     {
       model: "claude-haiku-4-5-20251001",
@@ -429,7 +433,7 @@ export async function analyzeWithClaude(
         { role: "assistant", content: [{ type: "text", text: "{" }] },
       ],
     },
-    { timeout: timeoutMs }
+    { timeout: timeoutMs, maxRetries: 1 }
   );
 
   const responseText =
