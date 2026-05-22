@@ -8,16 +8,17 @@ or the daily cap needs raising — it goes here.
 Referenced from [CLAUDE.md](../../CLAUDE.md) Quick Reference and from
 `docs/plans/shop-guard-v2.md` §4. Keep updated each PR.
 
-> **Status (2026-05-20)** — Stage 0/0.5 (#324/#325) live; `FF_SHOP_SIGNAL`
+> **Status (2026-05-22)** — Stage 0/0.5 (#324/#325) live; `FF_SHOP_SIGNAL`
 > ON. Stage 1 PR A (#320, `shop_checks` schema) + PR B (#319, APIVoid
-> adapter + cost brake) merged. The **Deep Shop Check** (reworked #321)
-> is **PR #339** — a user-initiated enrichment that calls APIVoid (plus
-> ABN verification + WHOIS domain age) from the `shop-signal-enrich`
-> Inngest function on an explicit "Run a deeper shop check" click.
-> Migration v137 applied. Once #339 merges, flip
-> `FF_SHOP_SIGNAL_PAID_FEED` ON so the deep check's APIVoid leg runs —
-> it works on the ABN + domain-age signals alone while the flag is OFF.
-> See [`docs/adr/0008-shop-signal-deep-check-user-initiated.md`](../adr/0008-shop-signal-deep-check-user-initiated.md).
+> adapter + cost brake) + the **Deep Shop Check** (reworked #321, **PR
+> #339**) all merged and prod-verified. The Deep Shop Check is a
+> user-initiated enrichment that calls APIVoid + ABN verification + WHOIS
+> domain age from the `shop-signal-enrich` Inngest function on an explicit
+> "Run a deeper shop check" click. Migration v137 applied;
+> `FF_SHOP_SIGNAL_PAID_FEED` is **ON in prod** so the APIVoid leg runs (the
+> deep check still completes on ABN + domain-age alone when it is OFF).
+> Day-31 (~2026-06-19) is the APIVoid paid-tier renew decision. Open
+> follow-ups: **#349**. See [`docs/adr/0008-shop-signal-deep-check-user-initiated.md`](../adr/0008-shop-signal-deep-check-user-initiated.md).
 
 **Status legend**
 
@@ -39,7 +40,7 @@ clears.
 | Flag (env var)                      | Type            | Default | Status | Gates                                                                                                                                                                                                                                                                                                              | Flip when                                                                                                                                 |
 | ----------------------------------- | --------------- | ------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `FF_SHOP_SIGNAL`                    | server          | `false` | ✅     | Master switch. When `false`, the analyze pipeline's commerce-signal branch short-circuits before `detectCommerceSignal()` runs and `AnalysisResult.shopSignal` is absent on every response. When `true`, the pure detector + Claude red-flag post-processor run on every URL-bearing / commerce-text-shaped input. | After this PR merges. Starts the 30-day Stage-0 measurement window. **Step D of the pre-launch tidy plan.**                               |
-| `FF_SHOP_SIGNAL_PAID_FEED`          | server          | `false` | ⏳     | The APIVoid leg of the Deep Shop Check (#339). When OFF, `shop-signal-enrich` skips APIVoid and the deep check completes on ABN + domain-age alone. Independent of `FF_SHOP_SIGNAL`.                                                                                                                               | After PR #339 merges — flip ON so the deep check's APIVoid call runs (trial key already in Vercel env).                                   |
+| `FF_SHOP_SIGNAL_PAID_FEED`          | server          | `false` | ✅     | The APIVoid leg of the Deep Shop Check (#339). When OFF, `shop-signal-enrich` skips APIVoid and the deep check completes on ABN + domain-age alone. Independent of `FF_SHOP_SIGNAL`.                                                                                                                               | Done — ON in prod since 2026-05-20 (trial key in Vercel env). Day-31 (~2026-06-19) is the paid-tier renew decision.                       |
 | `NEXT_PUBLIC_FF_SHOP_GUARD_B2B_API` | consumer        | `false` | ❌     | `/api/v1/shop-check` route (Stage 2 PR 5). When off, the route returns 503.                                                                                                                                                                                                                                        | Stage-1 measurement target clears (≥80% detection on AU adversarial corpus, ≤2% FP on real traffic).                                      |
 | `WXT_SHOP_GUARD`                    | extension build | `false` | ❌     | Extension popup + `SHOW_SHOP_SIGNAL_VERDICT` handler in `url-guard.content.ts` (Stage 2 PR 6). Build-time flag — bundling decision, not runtime.                                                                                                                                                                   | Same gate as `NEXT_PUBLIC_FF_SHOP_GUARD_B2B_API`. Extension `<all_urls>` host permission stays gated on activation data (PR 7, separate). |
 
@@ -62,7 +63,7 @@ to validate the value-prop threshold before any paid spend.
 | Var                            | Stage       | Status | Where set                                       | Notes                                                                                                                                                                                                        |
 | ------------------------------ | ----------- | ------ | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `FF_SHOP_SIGNAL`               | Stage 0     | ✅     | Vercel → Production + Preview                   | Flipped ON 2026-05-20 — Stage-0 measurement window open.                                                                                                                                                     |
-| `FF_SHOP_SIGNAL_PAID_FEED`     | Stage 1     | ⏳     | Vercel → Production + Preview                   | Flag shipped in code by #319 (default OFF). `true` to enable APIVoid calls — flip after the preview smoke test passes.                                                                                       |
+| `FF_SHOP_SIGNAL_PAID_FEED`     | Stage 1     | ✅     | Vercel → Production + Preview                   | ON in prod since 2026-05-20. Enables the deep check's APIVoid leg; the deep check still completes on ABN + domain-age when OFF.                                                                              |
 | `APIVOID_API_KEY`              | Stage 1     | ✅     | Vercel → server-only (no `NEXT_PUBLIC_` prefix) | 30-day trial key added to Vercel + `.env.local` 2026-05-20. Rotates via Vercel re-set; no Supabase secrets table involvement.                                                                                |
 | `SHOP_SIGNAL_CAP_USD`          | Stage 1     | ⏳     | Vercel → Production + Preview                   | Optional — `cost-daily-check` defaults to `15` if unset. **Use bare number** (`15`, not `$15` — `parseFloat("$15") === NaN` silently disables the brake). See §3 for cap derivation.                         |
 | `NEXT_PUBLIC_PLAUSIBLE_DOMAIN` | already set | ✅     | Vercel → Production (`askarthur.au`)            | Used by `<PlausibleProvider>` in `apps/web/app/layout.tsx`. No change required for Shop Signal; the two new custom events (`scam_check_submitted`, `shop_signal_emitted`) inherit this domain automatically. |
@@ -290,7 +291,47 @@ against tag drift.
 
 ---
 
-## 6. Cross-references
+## 6. Integration firing map
+
+Every external call the **Deep Shop Check** makes, when it fires, and what
+guards it. The deep check is the only Shop Signal surface that calls a
+paid feed or any external API — Stage 0/0.5 (the analyze-time commerce
+detector) is pure and makes no network calls.
+
+### Diagram
+
+![Shop Signal Deep Check — integration firing map](../plans/assets/shop-signal-integration-firing-map.png)
+
+Editable source: [`shop-signal-integration-firing-map.excalidraw`](../plans/assets/shop-signal-integration-firing-map.excalidraw)
+— open at [excalidraw.com](https://excalidraw.com) (drag-and-drop) or in the
+VS Code / Obsidian Excalidraw plugin. Regenerate from
+[`build_shop_signal_firing_map.py`](../plans/assets/build_shop_signal_firing_map.py)
+(edit the script, not the `.excalidraw`).
+
+### When each integration fires
+
+| Integration                            | Fires when                                                                                                                                | What it does                                                                                                                                            | Endpoint / key                                                                      | Cost                                                                                                | Cache                                                                    | Degrades to                                                       | Accuracy status                                                                                                                                                                                                   |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Shop page fetch** (`fetchShopPage`)  | Every deep check — first action of the `verify-abn` step.                                                                                 | GETs the shop homepage so the HTML can be scanned for a displayed ABN. Manual redirects (≤5 hops, per-hop SSRF guard), 6s total budget, 512KB body cap. | The shop URL itself. No key.                                                        | $0                                                                                                  | None                                                                     | `{ html: null, error }` → empty HTML downstream.                  | **MINOR-2 — resolved (#351).** An unfetchable page now returns `unverified` (+6), not a false `no-abn`.                                                                                                           |
+| **ABR register** (`lookupABN`)         | Only when the host is `.au` **and** a checksum-valid 11-digit ABN was extracted from the fetched HTML.                                    | Verifies the ABN against the national register, returns the registered entity name for the brand-match.                                                 | `abr.business.gov.au/.../SearchByABNv202001`, 10s timeout, needs `ABN_LOOKUP_GUID`. | $0 (free gov API)                                                                                   | Redis 24h (`askarthur:abn:v3:<abn>`, successful lookups only)            | `{ ok: false, reason }`.                                          | **F-A — resolved (#351).** `lookupABN` returns a discriminated `not-found` / `lookup-failed`; only genuine `not-found` scores `unregistered` (+30), a lookup failure scores the soft `unverified` (+6). ADR 0009. |
+| **WHOIS** (`lookupWhois`)              | Every deep check, in the `domain-age` step — **but only on a `scam_urls` cache miss or >180-day-stale lookup**.                           | Resolves the domain's registration date → `fresh` / `recent` / `established` / `unknown` band.                                                          | `whoisjson.com/api/v1/whois`, 5s timeout, needs `WHOIS_API_KEY`.                    | $0 — free tier **~1,000/mo, near-exhausted** (hence cache-first).                                   | `scam_urls.whois_created_date` (DB), read-first; UPDATE-only write-back. | `createdDate: null` → `unknown` band (+6).                        | **F-G — resolved (#351)** — the write-back is now awaited. **Open:** structurally `unknown` for **all `.au` domains** (auDA WHOIS-restricts the TLD) — documented, PR B / #349.                                   |
+| **APIVoid** (`getSiteTrustworthiness`) | Every deep check, in the `apivoid` step — **only when `FF_SHOP_SIGNAL_PAID_FEED` is ON and `feature_brakes.shop_signal` is not engaged**. | Sends host-only; maps `trust_score` + `domain_blacklist` + `security_checks` → `safe` / `suspicious` / `risky`.                                         | `api.apivoid.com/v2/site-trust`, 10s timeout, needs `APIVOID_API_KEY`.              | **10 credits ≈ $0.0033/call** (notional — logged even on the free trial so the brake is exercised). | None                                                                     | `ApivoidSkip` → APIVoid signal skipped, score built on 2 signals. | **F-B — resolved (#351).** A brake skip writes no `cost_telemetry` row; a genuine failure carries `metadata.reason`.                                                                                              |
+
+DB writes around the integrations: `upsert_shop_check` (once per POST), `update_shop_check_signal` (twice per enrich run — `mark-processing`, then the final `write-back` that also sets the `composite_score` + `verdict` columns), and a `cost_telemetry` insert (once per run, whenever APIVoid was attempted). All three are small indexed RPC/insert calls — structurally incapable of a long-running query.
+
+### Guard cheat-sheet
+
+- **Whole feature** — `FF_SHOP_SIGNAL` must be ON, else `POST`/`GET /api/shop-check` 404.
+- **ABR call** — gated on `isAuHost(url)` **and** a checksum-valid ABN existing in the first 512KB of homepage HTML. Major AU retailers often fail the second gate (ABN lives on a Terms/About page) — see the empirical Bunnings result in [shop-signal-status memory] and #349.
+- **WHOIS call** — gated on a `scam_urls` cache miss. The cache is populated by the scam-URL reporting flow, so a never-reported domain always misses on the first deep check.
+- **APIVoid call** — gated on `FF_SHOP_SIGNAL_PAID_FEED` **and** the `shop_signal` cost brake **and** `APIVOID_API_KEY` being present.
+- **Cost** — only APIVoid spends. Per-IP rate limit (5 deep checks / 10 min, fail-closed) + the `SHOP_SIGNAL_CAP_USD` daily brake bound the spend. At ~$0.0033/call the cap (default 15) engages around 4,500 calls/day.
+
+The signal-accuracy follow-ups (F-A / F-B / F-G / MINOR-2) were closed in **PR #351**; the remaining `.au` domain-age coverage gap is tracked on **[#349](https://github.com/matchmoments-admin/ask-arthur/issues/349)**.
+
+---
+
+## 7. Cross-references
 
 - **Plan**: [`docs/plans/shop-guard-v2.md`](../plans/shop-guard-v2.md)
 - **Measurement spec**: [`docs/ops/shop-signal-measurement.md`](./shop-signal-measurement.md)
