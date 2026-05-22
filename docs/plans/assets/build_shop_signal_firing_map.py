@@ -162,8 +162,8 @@ cards = [
             ("FIRES WHEN",
              "Every deep check — the first\naction inside the verify-abn step."),
             ("WHAT IT DOES",
-             "HTTP GET of the shop homepage so\nthe HTML can be scanned for an "
-             "ABN.\nManual redirects · 6s · 512KB cap."),
+             "GET the homepage; if an .au shop\nshows no ABN, also GET /about ·\n"
+             "/terms · … (PR B). 6s · 512KB cap."),
             ("COST", "$0 — no API key, no cache."),
         ],
         "issue": ("MINOR-2  ·  resolved in #351",
@@ -202,10 +202,10 @@ cards = [
             ("COST",
              "$0 — free tier ~1,000/mo,\nnear-exhausted (so: cache-first)."),
         ],
-        "issue": ("F-G resolved (#351) · .au gap open",
+        "issue": ("F-G resolved (#351) · .au age = B1a",
                   "F-G fixed — write-back is awaited.\n"
-                  'Domain age stays "unknown" for .au\n'
-                  "(auDA) — documented, PR B / #349.", "warn"),
+                  '.au domain age is conceded\n'
+                  '"unknown" (auDA, no free source).', "warn"),
     },
     {
         "title": "4 · APIVoid",
@@ -255,9 +255,8 @@ for j, c in enumerate(cards):
 
 # ── Footnote ─────────────────────────────────────────────────────────────
 text("foot", 60, 900,
-     "Signal-accuracy follow-ups — F-A · F-B · F-G · MINOR-2 — all resolved "
-     "in PR #351. Open: the .au domain-age coverage gap (PR B), tracked on "
-     "GitHub #349.\n"
+     "F-A · F-B · F-G · MINOR-2 resolved in PR #351. PR B adds multi-page "
+     "ABN fetch; .au domain age is conceded (B1a). GitHub #349.\n"
      "Full firing table, guard cheat-sheet and cost derivation: "
      "docs/ops/shop-signal-config.md §6.", 12, MUTED)
 

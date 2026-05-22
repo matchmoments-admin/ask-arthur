@@ -24,9 +24,9 @@
 import { logger } from "@askarthur/utils/logger";
 import { isPrivateURL } from "./safebrowsing";
 
-// Total budget across the whole redirect chain (not per-hop) — keeps the
-// shop-signal-enrich duration estimate ("page fetch ~6s") honest no matter
-// how many hops a shop's CDN inserts.
+// Default total budget across the whole redirect chain (not per-hop) — a
+// caller may pass a smaller `budgetMs`. Keeps the shop-signal-enrich
+// duration estimate honest no matter how many hops a shop's CDN inserts.
 const TIMEOUT_MS = 6_000;
 // Follow at most this many redirects before giving up.
 const MAX_REDIRECTS = 5;
@@ -54,13 +54,21 @@ export interface ShopPageFetch {
  * SSRF-checking every hop. Returns { html: null, error } on a blocked URL,
  * HTTP error, timeout, size cap, redirect-limit, or any network failure —
  * never throws.
+ *
+ * `budgetMs` caps total wall-clock time across the whole redirect chain;
+ * it defaults to TIMEOUT_MS. `verifyShopAbnDeep` passes a shrinking slice
+ * of a shared deadline so a fixed set of candidate-page fetches stays
+ * inside one overall budget.
  */
-export async function fetchShopPage(url: string): Promise<ShopPageFetch> {
+export async function fetchShopPage(
+  url: string,
+  budgetMs: number = TIMEOUT_MS,
+): Promise<ShopPageFetch> {
   if (isPrivateURL(url)) {
     return { html: null, finalUrl: null, status: null, error: "blocked-private-url" };
   }
 
-  const deadline = Date.now() + TIMEOUT_MS;
+  const deadline = Date.now() + budgetMs;
   let currentUrl = url;
 
   try {

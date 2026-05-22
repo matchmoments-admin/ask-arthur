@@ -8,10 +8,16 @@
 // → modulus-89 checksum (drops 11-digit phone numbers / order IDs) → verify
 // the first valid candidate against the ABR register via lookupABN → match
 // the registered entity name against the shop's brand (domain label + page
-// title). Only I/O is the lookupABN delegate.
+// title).
+//
+// `verifyShopAbn` is pure apart from the `lookupABN` delegate.
+// `verifyShopAbnDeep` adds page I/O: it fetches the homepage and, for an
+// .au shop with no homepage ABN, a small fixed set of candidate pages —
+// the ABN often lives on /about or /terms, not the homepage (GitHub #349).
 
 import { parse as parseTld } from "tldts";
 import { lookupABN } from "./abr-lookup";
+import { fetchShopPage, type ShopPageFetch } from "./fetch-shop-page";
 import type { AbnStatus } from "@askarthur/types";
 
 // Official ABN checksum weights (modulus 89).
@@ -217,4 +223,89 @@ export async function verifyShopAbn(
     abn: candidate,
     entityName: lookup.entityName,
   };
+}
+
+// Candidate pages to try when an .au homepage shows no ABN. AU retailers
+// routinely put the ABN in an About / Terms / Contact footer rather than
+// the homepage (the Bunnings deep check proved it — GitHub #349). Ordered
+// most- to least-likely; the first page that displays a checksum-valid ABN
+// wins.
+const ABN_CANDIDATE_PATHS = ["/about", "/about-us", "/contact", "/terms"];
+// Total wall-clock budget shared across ALL candidate-page fetches, so a
+// deep check's page I/O stays bounded however many candidates run. Worst
+// case ≈ the homepage fetch (fetchShopPage's own default ~6s) + this.
+const CANDIDATE_BUDGET_MS = 10_000;
+// Per-candidate cap — one slow candidate must not eat the whole shared
+// budget and starve the pages after it.
+const PER_CANDIDATE_MS = 4_000;
+
+/**
+ * Deep ABN verification across a shop's homepage AND — for an .au shop
+ * that shows no ABN on the homepage — a small fixed set of candidate
+ * pages (`/about`, `/terms`, …).
+ *
+ * AU retailers routinely display their ABN in an About / Terms / Contact
+ * footer, not on the homepage, so a homepage-only check reports a false
+ * `no-abn` for legitimate shops (GitHub #349). This fetches the homepage
+ * first; only a `no-abn` homepage result — which implies an .au host with
+ * a readable homepage and no checksum-valid ABN — spends the candidate
+ * budget. Any other homepage result (`verified`, `unregistered`,
+ * `unverified`, `name-mismatch`, `not-applicable`) is already conclusive
+ * and returned unchanged.
+ *
+ * Candidate fetches share one wall-clock deadline; a candidate that won't
+ * load is skipped (it tells us nothing) rather than allowed to mask the
+ * homepage's `no-abn`. The first candidate that displays a checksum-valid
+ * ABN wins.
+ *
+ * `fetchPage` is injected for testing; production uses `fetchShopPage`.
+ * Never throws — every failure mode degrades to a `ShopAbnResult`.
+ */
+export async function verifyShopAbnDeep(
+  url: string,
+  fetchPage: (
+    u: string,
+    budgetMs?: number,
+  ) => Promise<ShopPageFetch> = fetchShopPage,
+): Promise<ShopAbnResult> {
+  const home = await fetchPage(url);
+  const homeResult = await verifyShopAbn(
+    home.html ?? "",
+    home.finalUrl ?? url,
+    home.error,
+  );
+  if (homeResult.status !== "no-abn") return homeResult;
+
+  // `no-abn` ⇒ .au host, readable homepage, no ABN on it. Walk the
+  // candidate pages under a single shared deadline.
+  const base = home.finalUrl ?? url;
+  const deadline = Date.now() + CANDIDATE_BUDGET_MS;
+  for (const path of ABN_CANDIDATE_PATHS) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+
+    let candidateUrl: string;
+    try {
+      candidateUrl = new URL(path, base).href;
+    } catch {
+      continue; // a malformed base can't yield candidate URLs
+    }
+
+    const page = await fetchPage(
+      candidateUrl,
+      Math.min(remaining, PER_CANDIDATE_MS),
+    );
+    if (page.error) continue; // unreadable candidate — skip, don't mask
+
+    const result = await verifyShopAbn(
+      page.html ?? "",
+      page.finalUrl ?? candidateUrl,
+    );
+    // `abn !== null` ⇒ the page displayed a checksum-valid ABN — that is
+    // the answer (verified / name-mismatch / unregistered / unverified).
+    // A `no-abn` or off-domain-redirect `not-applicable` keeps scanning.
+    if (result.abn !== null) return result;
+  }
+
+  return homeResult; // no ABN on the homepage or any candidate page
 }

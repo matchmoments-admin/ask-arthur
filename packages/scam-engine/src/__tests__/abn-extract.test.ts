@@ -5,8 +5,10 @@ import {
   isValidAbnChecksum,
   isAuHost,
   verifyShopAbn,
+  verifyShopAbnDeep,
 } from "../abn-extract";
 import { lookupABN, type ABNLookupResult } from "../abr-lookup";
+import type { ShopPageFetch } from "../fetch-shop-page";
 
 vi.mock("../abr-lookup", () => ({ lookupABN: vi.fn() }));
 const mockedLookupABN = vi.mocked(lookupABN);
@@ -202,5 +204,100 @@ describe("verifyShopAbn", () => {
       "https://megaluxuryoutlet.com.au",
     );
     expect(result.status).toBe("name-mismatch");
+  });
+});
+
+/** A successful ShopPageFetch for the verifyShopAbnDeep tests. */
+function okPage(html: string, finalUrl: string): ShopPageFetch {
+  return { html, finalUrl, status: 200, error: null };
+}
+
+/** A failed ShopPageFetch — fetchShopPage never throws, it returns this. */
+function failedPage(error: string): ShopPageFetch {
+  return { html: null, finalUrl: null, status: null, error };
+}
+
+describe("verifyShopAbnDeep", () => {
+  beforeEach(() => {
+    mockedLookupABN.mockReset();
+  });
+
+  it("returns the homepage result without fetching candidate pages when the homepage shows an ABN", async () => {
+    mockedLookupABN.mockResolvedValue(
+      abrRecord({ entityName: "Widget Store Pty Ltd" }),
+    );
+    const fetchPage = vi.fn(async () =>
+      okPage(
+        `<title>Widget Store</title><footer>ABN ${ATO_ABN}</footer>`,
+        "https://widgetstore.com.au/",
+      ),
+    );
+    const result = await verifyShopAbnDeep(
+      "https://widgetstore.com.au/",
+      fetchPage,
+    );
+    expect(result.status).toBe("verified");
+    expect(fetchPage).toHaveBeenCalledTimes(1);
+  });
+
+  it("walks candidate pages and finds an ABN that is not on the homepage", async () => {
+    // The dominant real-world case (#349): a legitimate AU retailer keeps
+    // its ABN on an /about page, not the homepage.
+    mockedLookupABN.mockResolvedValue({ ok: false, reason: "not-found" });
+    const fetchPage = vi.fn(async (u: string) =>
+      u.endsWith("/about")
+        ? okPage(`<footer>ABN ${ATO_ABN}</footer>`, u)
+        : okPage("<footer>no abn here</footer>", u),
+    );
+    const result = await verifyShopAbnDeep("https://widgets.com.au/", fetchPage);
+    expect(result.abn).toBe(ATO_ABN);
+    expect(result.status).toBe("unregistered"); // lookupABN mocked not-found
+    expect(fetchPage).toHaveBeenCalledTimes(2); // homepage + /about
+    // The candidate fetch receives a numeric slice of the shared budget.
+    expect(fetchPage).toHaveBeenNthCalledWith(
+      2,
+      "https://widgets.com.au/about",
+      expect.any(Number),
+    );
+  });
+
+  it("returns no-abn when neither the homepage nor any candidate page shows an ABN", async () => {
+    const fetchPage = vi.fn(async (u: string) =>
+      okPage("<footer>contact us</footer>", u),
+    );
+    const result = await verifyShopAbnDeep("https://widgets.com.au/", fetchPage);
+    expect(result.status).toBe("no-abn");
+    expect(fetchPage).toHaveBeenCalledTimes(5); // homepage + 4 candidate pages
+    expect(mockedLookupABN).not.toHaveBeenCalled();
+  });
+
+  it("never fetches candidate pages for a non-AU host", async () => {
+    const fetchPage = vi.fn(async (u: string) =>
+      okPage(`<footer>ABN ${ATO_ABN}</footer>`, u),
+    );
+    const result = await verifyShopAbnDeep("https://shop.com/", fetchPage);
+    expect(result.status).toBe("not-applicable");
+    expect(fetchPage).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns unverified — not no-abn — when the homepage itself could not be read", async () => {
+    const fetchPage = vi.fn(async () => failedPage("timeout"));
+    const result = await verifyShopAbnDeep("https://widgets.com.au/", fetchPage);
+    expect(result.status).toBe("unverified");
+    expect(fetchPage).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips a candidate page that will not load and keeps scanning", async () => {
+    mockedLookupABN.mockResolvedValue({ ok: false, reason: "not-found" });
+    const fetchPage = vi.fn(async (u: string) => {
+      if (u.endsWith("/about")) return failedPage("http-403");
+      if (u.endsWith("/about-us"))
+        return okPage(`<footer>ABN ${ATO_ABN}</footer>`, u);
+      return okPage("<footer>no abn</footer>", u);
+    });
+    const result = await verifyShopAbnDeep("https://widgets.com.au/", fetchPage);
+    expect(result.abn).toBe(ATO_ABN);
+    // homepage + /about (failed, skipped) + /about-us (hit)
+    expect(fetchPage).toHaveBeenCalledTimes(3);
   });
 });
