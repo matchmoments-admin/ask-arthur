@@ -367,9 +367,9 @@ export const featureFlags = {
    *  must stay OFF until prerequisites are met: `scrubPII` is text-only, so
    *  a stored screenshot is unredacted raw user content (faces, bank-app
    *  screens, IDs). Enabling requires OCR-based PII redaction OR a consent
-   *  path, plus legal review, the R2 `screenshots/` lifecycle rule, and a
-   *  privacy-policy update. Server-side only. See
-   *  docs/adr/0010-screenshot-retention-gated.md. */
+   *  path, plus legal review, the R2 `screenshots/` lifecycle rule, a
+   *  privacy-policy update, and upload-failure observability. Server-side
+   *  only. See docs/adr/0010-screenshot-retention-gated.md. */
   screenshotRetention: process.env.FF_SCREENSHOT_RETENTION === "true",
 } as const;
 

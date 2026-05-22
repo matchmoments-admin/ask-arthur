@@ -70,6 +70,14 @@ to a check of R2 screenshot storage. Findings:
 4. **Privacy copy update** — the homepage line plus privacy-policy
    sections 1, 2 and 6 — to disclose retention, its scope (HIGH_RISK image
    checks only), and the retention window.
+5. **Upload-failure observability** — a metric/alert on the
+   screenshot→R2 upload-failure rate, plus a periodic
+   `verified_scams.screenshot_key`-null-rate check. The R2
+   misconfiguration that prompted this ADR went undetected for the
+   feature's entire life precisely because `storeVerifiedScam` swallows
+   the upload error as non-blocking. The flag must not flip ON while that
+   failure mode is still silent — otherwise a future config drift,
+   credential rotation, or bucket deletion recurs invisibly.
 
 ## Reversal trigger
 
