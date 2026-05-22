@@ -4,8 +4,7 @@ import {
   runShopSignalEnrich,
   handleEnrichFailure,
 } from "../shop-signal-enrich";
-import { fetchShopPage } from "../../fetch-shop-page";
-import { verifyShopAbn } from "../../abn-extract";
+import { verifyShopAbnDeep } from "../../abn-extract";
 import { getDomainCreatedDate } from "../../whois-cached";
 import { getSiteTrustworthiness } from "../../providers/apivoid";
 import { createServiceClient } from "@askarthur/supabase/server";
@@ -19,8 +18,7 @@ const { featureFlagsMock } = vi.hoisted(() => ({
 // The enrichment adapters all do network I/O — mock them. The pure helpers
 // (computeCompositeScore, domainAgeBand, extractDomain) run for real so the
 // test exercises the genuine scoring path.
-vi.mock("../../fetch-shop-page", () => ({ fetchShopPage: vi.fn() }));
-vi.mock("../../abn-extract", () => ({ verifyShopAbn: vi.fn() }));
+vi.mock("../../abn-extract", () => ({ verifyShopAbnDeep: vi.fn() }));
 vi.mock("../../whois-cached", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../whois-cached")>()),
   getDomainCreatedDate: vi.fn(),
@@ -69,13 +67,7 @@ beforeEach(() => {
 
 describe("runShopSignalEnrich", () => {
   it("completes with a real composite score when all free signals resolve", async () => {
-    vi.mocked(fetchShopPage).mockResolvedValue({
-      html: "<html>ABN 12 345 678 901</html>",
-      finalUrl: "https://shop.example.com/",
-      status: 200,
-      error: null,
-    });
-    vi.mocked(verifyShopAbn).mockResolvedValue({
+    vi.mocked(verifyShopAbnDeep).mockResolvedValue({
       status: "verified",
       abn: "12345678901",
       entityName: "Example Shop Pty Ltd",
@@ -115,16 +107,9 @@ describe("runShopSignalEnrich", () => {
   });
 
   it("still completes when every enrichment signal degrades", async () => {
-    // Page fetch blocked, ABN unknowable, WHOIS down — every adapter
-    // returns its graceful-degradation value. The run must still reach a
-    // `complete` write-back, never throw.
-    vi.mocked(fetchShopPage).mockResolvedValue({
-      html: null,
-      finalUrl: null,
-      status: null,
-      error: "timeout",
-    });
-    vi.mocked(verifyShopAbn).mockResolvedValue({
+    // ABN absent, WHOIS down — every adapter returns a graceful-degradation
+    // value. The run must still reach a `complete` write-back, never throw.
+    vi.mocked(verifyShopAbnDeep).mockResolvedValue({
       status: "no-abn",
       abn: null,
       entityName: null,
@@ -157,13 +142,7 @@ describe("runShopSignalEnrich", () => {
   });
 
   it("propagates a write-back RPC failure so Inngest retries", async () => {
-    vi.mocked(fetchShopPage).mockResolvedValue({
-      html: null,
-      finalUrl: null,
-      status: null,
-      error: "network-error",
-    });
-    vi.mocked(verifyShopAbn).mockResolvedValue({
+    vi.mocked(verifyShopAbnDeep).mockResolvedValue({
       status: "not-applicable",
       abn: null,
       entityName: null,
@@ -195,13 +174,7 @@ describe("runShopSignalEnrich", () => {
     // A brake skip is the system working correctly — it must not look like
     // an APIVoid failure in the health digest (GitHub #349, F-B).
     featureFlagsMock.shopSignalPaidFeed = true;
-    vi.mocked(fetchShopPage).mockResolvedValue({
-      html: "<html>shop</html>",
-      finalUrl: "https://shop.example.com/",
-      status: 200,
-      error: null,
-    });
-    vi.mocked(verifyShopAbn).mockResolvedValue({
+    vi.mocked(verifyShopAbnDeep).mockResolvedValue({
       status: "not-applicable",
       abn: null,
       entityName: null,
@@ -230,13 +203,7 @@ describe("runShopSignalEnrich", () => {
 
   it("writes an apivoid-error telemetry row when the paid call genuinely fails", async () => {
     featureFlagsMock.shopSignalPaidFeed = true;
-    vi.mocked(fetchShopPage).mockResolvedValue({
-      html: "<html>shop</html>",
-      finalUrl: "https://shop.example.com/",
-      status: 200,
-      error: null,
-    });
-    vi.mocked(verifyShopAbn).mockResolvedValue({
+    vi.mocked(verifyShopAbnDeep).mockResolvedValue({
       status: "not-applicable",
       abn: null,
       entityName: null,

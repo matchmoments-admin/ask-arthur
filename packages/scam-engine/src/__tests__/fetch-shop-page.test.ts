@@ -178,4 +178,17 @@ describe("fetchShopPage", () => {
     expect(res.error).toBe("redirect-no-location");
     expect(res.html).toBeNull();
   });
+
+  it("honours a custom budgetMs — a spent budget times out before fetching", async () => {
+    // budgetMs threads straight into the redirect-chain deadline; a zero
+    // budget is already exhausted at the first loop check, so no fetch is
+    // issued. verifyShopAbnDeep relies on this to bound a shared
+    // multi-page fetch budget.
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const res = await fetchShopPage("https://shop.example.com/", 0);
+    expect(res.error).toBe("timeout");
+    expect(res.html).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
 });

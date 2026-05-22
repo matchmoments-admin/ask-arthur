@@ -10,6 +10,18 @@
 // This module reads that cache first and only calls lookupWhois on a miss,
 // then writes the result back onto any existing scam_urls rows (UPDATE only —
 // never INSERT a partial row for a domain that was never reported).
+//
+// `.au` coverage limitation (decision B1a, GitHub #349). auDA — the .au
+// registry — withholds domain creation dates from every free source:
+// whoisjson.com returns no created date for a .au domain, and the
+// IANA-pointed RDAP endpoint (rdap.cctld.au) carries only `last changed`
+// with no `registration` event (a `redacted` block confirms the omission
+// is deliberate). So for EVERY .au shop this lookup yields
+// createdDate: null → domainAgeBand "unknown" → +6 in the composite
+// score. That is accepted and calibrated-safe: .au domain age is conceded
+// as structurally unavailable from free sources, and the deep check's AU
+// verdict leans on the ABN (verifyShopAbnDeep) + APIVoid signals instead.
+// A paid WHOIS feed is the only way to recover it and is out of scope.
 
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";

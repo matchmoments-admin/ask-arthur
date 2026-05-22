@@ -274,6 +274,7 @@ Cross-platform features to help users and site owners assess website security �
 - [ ] White-label widget (embed on any site)
 - [ ] Webhook notifications for new threats
 - [ ] SOC integration (SIEM connectors)
+- [ ] **Shop Signal "Ask Arthur Verified" merchant badge (Shopify)** — a trust seal a _legitimate_ merchant embeds on their store, distinct from the consumer Shop Signal (which protects _shoppers_ from fake shops). Parked at the 2026-05-22 distribution review: it is a separate product and a separate B2B motion, not Shop Signal as built — the consumer feature ships to the web app + Chrome extension (#323) first. Revisit only if merchant-side demand surfaces; the real scope is a Shopify App Store listing + a verification/issuance flow, not a small add-on.
 
 ## Government Reporting
 
@@ -675,3 +676,4 @@ A multi-PR restyle moved every published blog post onto the charity-check / SIM-
 - [ ] **`scams-prevention-framework-compliance-guide` (17,578 chars) — structural pass + callout reduction.** Currently 10 H2, 1 HR, 9 callouts (too many — B2B band caps at 0–3). Needs HRs added between every H2, callouts pruned to 3 keeping the strongest DANGER / WARNING / TIP, and `hero_image_alt` confirmed populated. Body voice unchanged.
 - [x] All other blog posts (15 of 18) restyled and live in prod via PRs #104–#107, plus SPF telco-readiness restyle as a partial Batch 5 (this PR).
 - [x] Charity-check stale `reading_time_minutes` corrected from 16 → 7 (the column was set before the post was rewritten in #99; live display was already recomputed correctly at request time).
+- [ ] **Consumer explainer: "Don't wait for your bank to block it — check the shop first."** Ride the Westpac ad-campaign category awareness ("your account was blocked after shopping on a scam site") — position Shop Signal / the Deep Shop Check as the _prevention_ step before the bank's reactive block. Use the `blog` skill; structural gold standard is the SIM-swap consumer explainer. Cheap, high-leverage, and independent of the Shop Signal code work. Surfaced by the 2026-05-22 distribution review.

@@ -6,10 +6,12 @@
 // composite score, and writes the result back onto the shop_checks row the
 // client is polling via GET /api/shop-check/[id].
 //
-// Expected duration: ~5–35s (page fetch ~6s + WHOIS 5s + ABR 10s + APIVoid
-// 10s, mostly sequential). Well under the 5-min Inngest budget and the
-// 10-min pg-stuck-query-watchdog horizon — the only DB work is three small
-// RPC calls.
+// Expected duration: ~5–50s (page fetch ~6s — up to ~16s when the ABN is
+// not on the homepage and verifyShopAbnDeep walks /about-/terms-style
+// candidate pages — + WHOIS 5s + ABR 10s + APIVoid 10s, mostly
+// sequential). Well under the 5-min Inngest budget and the 10-min
+// pg-stuck-query-watchdog horizon — the only DB work is three small RPC
+// calls.
 //
 // Every enrichment adapter degrades gracefully (null/empty, never throws),
 // so a "failed" run is almost always a successful `complete` with partial
@@ -37,8 +39,7 @@ import {
   SHOP_CHECK_REQUESTED_EVENT,
   parseShopCheckRequestedData,
 } from "./events";
-import { fetchShopPage } from "../fetch-shop-page";
-import { verifyShopAbn } from "../abn-extract";
+import { verifyShopAbnDeep } from "../abn-extract";
 import {
   getDomainCreatedDate,
   domainAgeDays,
@@ -103,15 +104,13 @@ export async function runShopSignalEnrich(
     }
   });
 
-  // ABN — fetch the page and extract/verify in ONE step so the (capped)
-  // HTML never crosses a step boundary as persisted state.
-  const abn = await step.run("verify-abn", async () => {
-    const page = await fetchShopPage(url);
-    // Pass page.error through: when the page was unreadable, verifyShopAbn
-    // returns `unverified` rather than a false `no-abn` (GitHub #349,
-    // MINOR-2) — we never saw the page, so we can't assert it has no ABN.
-    return verifyShopAbn(page.html ?? "", page.finalUrl ?? url, page.error);
-  });
+  // ABN — verifyShopAbnDeep fetches the homepage and, for an .au shop with
+  // no homepage ABN, a small fixed set of candidate pages (/about, /terms,
+  // …) under a shared budget. The ABN often lives off the homepage, so a
+  // homepage-only check false-reports `no-abn` for legitimate AU shops
+  // (GitHub #349). Fetch + extract/verify happen inside this ONE step, so
+  // the (capped) HTML never crosses a step boundary as persisted state.
+  const abn = await step.run("verify-abn", () => verifyShopAbnDeep(url));
 
   const domainAge = await step.run("domain-age", async () => {
     const domain = extractDomain(url);
