@@ -30,7 +30,7 @@ Stage 0.5 lands two read-side surfaces:
    (`jsonb_path_ops`, v21) supports `@>` containment queries — we use that
    operator shape in all queries below. The `?` key-exists operator would
    fall back to a sequential scan.
-2. **Plausible custom events** (proposed names, not yet wired — see
+2. **Plausible custom events** (live since the Stage 0 pre-launch tidy — see
    "Plausible events" below). Fired from
    `apps/web/components/ScamChecker.tsx` on submit + on result-with-shopSignal.
 

@@ -4,6 +4,12 @@ const urlGuardEnabled = process.env.WXT_URL_GUARD === "true";
 const extensionSecurityEnabled = process.env.WXT_EXTENSION_SECURITY !== "false";
 const facebookAdsEnabled = process.env.WXT_FACEBOOK_ADS === "true";
 const siteAuditEnabled = process.env.WXT_SITE_AUDIT === "true";
+// Shop Signal popup (#323). Adds only the `scripting` permission — the
+// commerce detector is injected one-shot via chrome.scripting on the
+// user's popup click, under `activeTab`. Deliberately NO `<all_urls>`
+// host permission and NO content-script entrypoint, so this does not
+// trigger the Chrome Web Store sensitive-permission re-review.
+const shopGuardEnabled = process.env.WXT_SHOP_GUARD === "true";
 const turnstileBridgeUrl =
   process.env.WXT_TURNSTILE_BRIDGE_URL ??
   "https://askarthur.au/extension-turnstile";
@@ -43,6 +49,7 @@ export default defineConfig({
       "offscreen",
       ...(urlGuardEnabled ? ["webNavigation" as const] : []),
       ...(extensionSecurityEnabled ? ["alarms" as const] : []),
+      ...(shopGuardEnabled ? ["scripting" as const] : []),
     ],
     optional_permissions: [
       ...(extensionSecurityEnabled ? ["management" as const] : []),
@@ -75,6 +82,7 @@ export default defineConfig({
       __URL_GUARD_ENABLED__: urlGuardEnabled,
       __EXTENSION_SECURITY_ENABLED__: extensionSecurityEnabled,
       __FACEBOOK_ADS_ENABLED__: facebookAdsEnabled,
+      __SHOP_GUARD_ENABLED__: shopGuardEnabled,
     },
   }),
 });

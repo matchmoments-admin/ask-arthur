@@ -11,7 +11,8 @@ export type MessageType =
   | "DEEP_SCAN_EXTENSIONS"
   | "ANALYZE_AD"
   | "FLAG_AD"
-  | "ANALYZE_MARKETPLACE";
+  | "ANALYZE_MARKETPLACE"
+  | "ANALYZE_SHOP";
 
 export interface CheckURLMessage {
   type: "CHECK_URL";
@@ -83,6 +84,14 @@ export interface AnalyzeMarketplaceMessage {
   chatText?: string;
 }
 
+// Shop Signal popup (#323) — the popup sends the active tab's URL as the
+// analyze `text`; the backend's commerce detector extracts it and stamps
+// a ShopSignal onto the AnalysisResult.
+export interface AnalyzeShopMessage {
+  type: "ANALYZE_SHOP";
+  url: string;
+}
+
 export type ExtensionMessage =
   | CheckURLMessage
   | CheckTextMessage
@@ -93,7 +102,8 @@ export type ExtensionMessage =
   | DeepScanExtensionsMessage
   | AnalyzeAdMessage
   | FlagAdMessage
-  | AnalyzeMarketplaceMessage;
+  | AnalyzeMarketplaceMessage
+  | AnalyzeShopMessage;
 
 export interface MessageResponse<T = unknown> {
   success: boolean;

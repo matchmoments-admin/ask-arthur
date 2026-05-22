@@ -10,7 +10,7 @@ Everything that runs without a user request: Vercel crons, Inngest functions, Py
 
 ---
 
-## Vercel crons (16)
+## Vercel crons (17)
 
 Defined in `apps/web/vercel.json`. All routes verify the Vercel cron signature.
 
@@ -25,6 +25,7 @@ Defined in `apps/web/vercel.json`. All routes verify the Vercel cron signature.
 | `/api/cron/cost-weekly-digest`      | `0 22 * * 0` (Sun 22:00 UTC)   | WoW cost report to Telegram                |
 | `/api/cron/vuln-retention`          | `0 3 * * *` (daily 03:00 UTC)  | Prune `vulnerability_detections` >180d     |
 | `/api/cron/scam-reports-retention`  | `30 3 * * *` (daily 03:30 UTC) | Archive `scam_reports` + prune shadows     |
+| `/api/cron/shop-checks-retention`   | `45 3 * * *` (daily 03:45 UTC) | Prune TTL-expired `shop_checks` (chunked)  |
 | `/api/cron/ensure-partitions`       | `0 2 * * *` (daily 02:00 UTC)  | Create next-month partitions               |
 | `/api/cron/reddit-intel-trigger`    | `0 8 * * *` (daily 08:00 UTC)  | Poll `feed_items` for Reddit batches       |
 | `/api/cron/reddit-intel-retention`  | `30 4 * * *` (daily 04:30 UTC) | Prune `reddit_processed_posts` dedup table |
@@ -35,7 +36,7 @@ Defined in `apps/web/vercel.json`. All routes verify the Vercel cron signature.
 
 ---
 
-## Inngest functions (35)
+## Inngest functions (36)
 
 Defined in `packages/scam-engine/src/inngest/functions.ts`. All have idempotency keys based on `event.data.requestId` (24h dedup); cron functions use Inngest's native cron dedup.
 
@@ -143,6 +144,12 @@ Gated by `FF_ANALYZE_INNGEST_WEB`. When false, the legacy `waitUntil` path runs 
 | Function          | Cron                     | Purpose                                               |
 | ----------------- | ------------------------ | ----------------------------------------------------- |
 | `meta-brp-report` | `0 */6 * * *` (every 6h) | Meta Brand Rights Protection deepfake reporter (stub) |
+
+### Shop Signal
+
+| Function             | Trigger                   | Purpose                                                                                                                                                                 |
+| -------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `shop-signal-enrich` | `shop.check.requested.v1` | Deep Shop Check enrichment — ABN + domain-age + APIVoid; writes `shop_checks.signal.deepCheck`. Cost-brake gated; `$0` `shop-signal-enrich-error` telemetry on failure. |
 
 ### Onward reporting (event-driven, no cron)
 

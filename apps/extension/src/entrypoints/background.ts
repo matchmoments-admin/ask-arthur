@@ -201,6 +201,16 @@ async function handleMessage(
       const { data, remaining } = await analyzeText(message.text);
       return { success: true, data: { ...data, remaining } };
     }
+    case "ANALYZE_SHOP": {
+      // The popup sends the active tab's URL as the analyze `text`; the
+      // backend commerce detector extracts it and stamps a ShopSignal onto
+      // the result. Same endpoint as CHECK_TEXT — tagged for telemetry.
+      const { data, remaining } = await analyzeText(
+        message.url,
+        "extension-shop-signal",
+      );
+      return { success: true, data: { ...data, remaining } };
+    }
     case "GET_STATUS": {
       const installId = await getInstallId();
       return { success: true, data: { installId, ready: !!installId } };

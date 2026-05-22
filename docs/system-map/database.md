@@ -114,7 +114,7 @@ Supabase Postgres (project `rquomhcgnodxzkhokwni`). 75+ tables across 12 domain 
 ### Commerce & Content
 
 - `leads` — Customer lead intake. v56.
-- `shop_checks` `[hot ⚠]` — Shop Signal Stage 1 persistence: one row per commerce-flagged analyze. `signal` JSONB carries the ShopSignal payload + APIVoid `paidProviderVerdict`. 90-day TTL (BRIN on `ttl_expires_at`), swept by `cleanup_expired_shop_checks` via `/api/cron/shop-checks-retention` (`45 3 * * *`). Service-role RLS. RPCs: `upsert_shop_check`, `update_shop_check_signal` (both `SECURITY INVOKER`, service-role grant). v135 (#320).
+- `shop_checks` — Shop Signal Stage 1 persistence: one row per user-initiated Deep Shop Check (the "Run a deeper shop check" click — NOT per analyze; #321's auto-fire model was superseded, see ADR 0008). Low write volume, rate-limited 5/IP/10 min — not a hot table. `signal` JSONB carries the ShopSignal payload + APIVoid `paidProviderVerdict`. 90-day TTL (BRIN on `ttl_expires_at`), swept by `cleanup_expired_shop_checks` via `/api/cron/shop-checks-retention` (`45 3 * * *`). Service-role RLS. RPCs: `upsert_shop_check`, `update_shop_check_signal` (both `SECURITY INVOKER`, service-role grant). v135–v137 (#320).
 - `stripe_event_log` — Webhook events. Idempotent on `event_id`. v57.
 - `extension_subscriptions`, `extension_installs` — Extension license + per-install identity (ECDSA public key). v34–v61.
 - `blog_posts` — CMS posts. `search_vector` TSVECTOR GIN. v2.
