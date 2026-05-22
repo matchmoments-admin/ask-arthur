@@ -27,6 +27,8 @@ DANGER = "#b71c1c"
 DANGER_BG = "#fef2f2"
 BORDER = "#e2e8f0"
 WHITE = "#ffffff"
+OK = "#1b7f3b"
+OK_BG = "#e8f7ed"
 
 elements = []
 _seed = [4000]
@@ -109,7 +111,8 @@ text("title", 60, 28,
      "Shop Signal — Deep Shop Check: integration firing map", 28, PRIMARY)
 text("subtitle", 60, 72,
      "Every external call the enrichment makes, in firing order — when it "
-     "fires, what it does, what it costs, and known issues.", 14, MUTED)
+     "fires, what it does, what it costs, and signal-accuracy status.", 14,
+     MUTED)
 
 # ── Lifecycle ribbon (linear flow) ───────────────────────────────────────
 RIB_Y, RIB_H, RIB_W, RIB_STEP = 120, 68, 200, 236
@@ -163,10 +166,10 @@ cards = [
              "ABN.\nManual redirects · 6s · 512KB cap."),
             ("COST", "$0 — no API key, no cache."),
         ],
-        "issue": ("MINOR-2  (UX)",
-                  "An unfetchable page makes\n"
-                  'verifyShopAbn("") assert "no-abn" —\n'
-                  "a claim the system can't support.", "warn"),
+        "issue": ("MINOR-2  ·  resolved in #351",
+                  "An unfetchable page now returns\n"
+                  '"unverified" (+6), never a false\n'
+                  '"no-abn" — pageError is threaded in.', "ok"),
     },
     {
         "title": "2 · ABR register",
@@ -180,10 +183,10 @@ cards = [
              "name\nfor the brand-name match."),
             ("COST", "$0 — free .gov API.\nRedis-cached 24h per ABN."),
         ],
-        "issue": ("F-A  (correctness, MEDIUM)",
-                  "A lookup FAILURE returns null,\n"
-                  'scored as "unregistered" (+30) —\n'
-                  "false-flags a legitimate AU shop.", "danger"),
+        "issue": ("F-A  ·  resolved in #351",
+                  "lookupABN returns a discriminated\n"
+                  "result; a lookup failure scores soft\n"
+                  '"unverified" (+6), not "unregistered".', "ok"),
     },
     {
         "title": "3 · WHOIS",
@@ -199,10 +202,10 @@ cards = [
             ("COST",
              "$0 — free tier ~1,000/mo,\nnear-exhausted (so: cache-first)."),
         ],
-        "issue": ("F-G  +  .au coverage gap",
-                  'Always "unknown" for .au domains\n'
-                  "(auDA restricts WHOIS). F-G: the\n"
-                  "write-back is fire-and-forget.", "warn"),
+        "issue": ("F-G resolved (#351) · .au gap open",
+                  "F-G fixed — write-back is awaited.\n"
+                  'Domain age stays "unknown" for .au\n'
+                  "(auDA) — documented, PR B / #349.", "warn"),
     },
     {
         "title": "4 · APIVoid",
@@ -218,10 +221,10 @@ cards = [
             ("COST",
              "~$0.0033 / call (10 credits).\nLogged even on the free trial."),
         ],
-        "issue": ("F-B  (telemetry, LOW)",
-                  "A brake-engaged skip is logged\n"
-                  'as "apivoid-error" — looks like\n'
-                  "a failure in the health digest.", "warn"),
+        "issue": ("F-B  ·  resolved in #351",
+                  "A brake skip writes no error row;\n"
+                  "a genuine failure carries its reason\n"
+                  "in cost_telemetry.metadata.", "ok"),
     },
 ]
 
@@ -243,8 +246,8 @@ for j, c in enumerate(cards):
     # ISSUE zone — tinted card region.
     zt = body_top + 3 * ZONE_H
     ilabel, ibody, sev = c["issue"]
-    tint_bg = DANGER_BG if sev == "danger" else WARN_BG
-    tint_stroke = DANGER if sev == "danger" else WARN
+    tint_bg = {"danger": DANGER_BG, "warn": WARN_BG, "ok": OK_BG}[sev]
+    tint_stroke = {"danger": DANGER, "warn": WARN, "ok": OK}[sev]
     rect(f"itint{j}", x + 12, zt - 8, CARD_W - 24, 96, tint_stroke, tint_bg,
          sw=2)
     text(f"il{j}", x + 22, zt, ilabel, 11, tint_stroke)
@@ -252,8 +255,9 @@ for j, c in enumerate(cards):
 
 # ── Footnote ─────────────────────────────────────────────────────────────
 text("foot", 60, 900,
-     "Known issues — F-A (correctness) · F-B / F-G (low) · MINOR-2 (UX). "
-     "Tracked on GitHub issue #349.\n"
+     "Signal-accuracy follow-ups — F-A · F-B · F-G · MINOR-2 — all resolved "
+     "in PR #351. Open: the .au domain-age coverage gap (PR B), tracked on "
+     "GitHub #349.\n"
      "Full firing table, guard cheat-sheet and cost derivation: "
      "docs/ops/shop-signal-config.md §6.", 12, MUTED)
 
