@@ -2,7 +2,11 @@ import imageCompression from "browser-image-compression";
 
 const MAX_SIZE_KB = 500;
 const MAX_SIZE_BYTES = MAX_SIZE_KB * 1024;
-const MAX_DIMENSION = 1920;
+// Anthropic's vision API downscales any image whose long edge exceeds
+// ~1568px before analysis. Capping here at 1568 hands Claude the image at
+// its native working size — it skips a redundant server-side resize and
+// trims input-token cost, with no loss of analysable detail.
+const MAX_DIMENSION = 1568;
 
 export async function compressImage(file: File): Promise<File> {
   // Skip non-image files

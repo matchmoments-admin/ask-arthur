@@ -49,7 +49,7 @@ describe("compressImage", () => {
     expect(result).toBe(compressed);
     expect(mockCompress).toHaveBeenCalledWith(original, {
       maxSizeMB: 500 / 1024,
-      maxWidthOrHeight: 1920,
+      maxWidthOrHeight: 1568,
       useWebWorker: true,
       fileType: "image/webp",
       exifOrientation: undefined,

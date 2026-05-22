@@ -29,7 +29,11 @@ function getR2Client(): S3Client | null {
 }
 
 function getBucket(): string {
-  return process.env.R2_BUCKET_NAME || "askarthur-screenshots";
+  // Fallback must be the real bucket name. A stale fallback
+  // ("askarthur-screenshots") silently routed every upload to a
+  // non-existent bucket — PutObject threw NoSuchBucket, the caller
+  // swallowed it as non-blocking, and no screenshot was ever persisted.
+  return process.env.R2_BUCKET_NAME || "ask-arthur-r2";
 }
 
 /**

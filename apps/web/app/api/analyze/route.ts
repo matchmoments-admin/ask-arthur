@@ -322,12 +322,21 @@ export async function POST(req: NextRequest) {
       aiResult.shopSignal = buildShopSignal(merged.redFlags, referrerSource);
     }
 
+    // Screenshot retention gate. `scrubPII` is text-only — a stored
+    // screenshot is unredacted raw user content. When FF_SCREENSHOT_RETENTION
+    // is OFF (the default) storeVerifiedScam receives no uploader, so
+    // screenshots are discarded after analysis and the "images are
+    // discarded" privacy promise stays true. See docs/adr/0010.
+    const screenshotUploader = featureFlags.screenshotRetention
+      ? uploadScreenshot
+      : undefined;
+
     // 7. Background work via waitUntil (survives after response is sent)
     // When intelligenceCore is OFF, use the existing storeVerifiedScam path.
     // When ON, defer report storage until after entity extraction (step 8d).
     if (!featureFlags.intelligenceCore && finalVerdict === "HIGH_RISK") {
       waitUntil(
-        storeVerifiedScam(aiResult, region, images.length > 0 ? images : undefined, uploadScreenshot).catch((err) =>
+        storeVerifiedScam(aiResult, region, images.length > 0 ? images : undefined, screenshotUploader).catch((err) =>
           logger.error("storeVerifiedScam failed", { error: String(err) })
         )
       );
@@ -505,7 +514,7 @@ export async function POST(req: NextRequest) {
         // Chain: store verified scam first to get ID, then store report with link
         waitUntil(
           (async () => {
-            const verifiedScamId = await storeVerifiedScam(aiResult, region, images.length > 0 ? images : undefined, uploadScreenshot);
+            const verifiedScamId = await storeVerifiedScam(aiResult, region, images.length > 0 ? images : undefined, screenshotUploader);
             await storeScamReport({
               reporterHash, source: "web", inputMode: mode || (images.length > 0 ? "image" : "text"),
               analysis: aiResult, text, region, countryCode, verifiedScamId, entities: entitiesToLink,
@@ -524,7 +533,7 @@ export async function POST(req: NextRequest) {
       // Inngest path: storeVerifiedScam still runs via waitUntil (Phase 2b
       // will move it). The report itself is emitted via the event below.
       waitUntil(
-        storeVerifiedScam(aiResult, region, images.length > 0 ? images : undefined, uploadScreenshot).catch(err =>
+        storeVerifiedScam(aiResult, region, images.length > 0 ? images : undefined, screenshotUploader).catch(err =>
           logger.error("storeVerifiedScam failed (inngest path)", { error: String(err) })
         )
       );
