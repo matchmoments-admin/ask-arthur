@@ -269,10 +269,11 @@ themselves are **written by the `shop-signal-enrich` Inngest function
 adapter returns `units` / `estimatedCostUsd` and the Inngest function
 does the insert (the `analyze-cost.ts` pattern). Shipped shape:
 
-| `feature` tag               | `provider` | `operation`  | Volume    | Notes                                                                                              |
-| --------------------------- | ---------- | ------------ | --------- | -------------------------------------------------------------------------------------------------- |
-| `shop_signal`               | `apivoid`  | `site-trust` | ~per-call | Primary headline tag — what the brake aggregator reads. One row per successful APIVoid call.       |
-| `shop-signal-apivoid-error` | `apivoid`  | `site-trust` | rare      | $0 diagnostic row when APIVoid was attempted but returned `null` (missing key, brake, HTTP error). |
+| `feature` tag               | `provider` | `operation`          | Volume    | Notes                                                                                                                                                                                                                                                                                                                                         |
+| --------------------------- | ---------- | -------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `shop_signal`               | `apivoid`  | `site-trust`         | ~per-call | Primary headline tag — what the brake aggregator reads. One row per successful APIVoid call.                                                                                                                                                                                                                                                  |
+| `shop-signal-apivoid-error` | `apivoid`  | `site-trust`         | rare      | $0 diagnostic row when an attempted APIVoid call genuinely failed (missing key, bad host, HTTP error, timeout). The `metadata.reason` field carries the failure reason. A by-design **brake** skip writes **no** row — it is the system working correctly, so it must not look like an APIVoid error in the health digest (GitHub #349, F-B). |
+| `shop-signal-enrich-error`  | `inngest`  | `shop-signal-enrich` | rare      | $0 diagnostic row written by the `shop-signal-enrich` Inngest `onFailure` handler when the enrichment exhausts its retries. Surfaces a retry-exhausted Deep Shop Check in the daily health digest (the `feature LIKE '%error%'` filter) instead of only the logs (GitHub #349, F4).                                                           |
 
 (The `cost-daily-check` brake aggregator also enumerates a
 `shop-signal-apivoid-overage` tag for forward-compat; the deep check

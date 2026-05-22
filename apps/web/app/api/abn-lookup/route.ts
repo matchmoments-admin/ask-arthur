@@ -60,11 +60,17 @@ export async function GET(req: NextRequest) {
 
     const result = await lookupABN(parsed.data);
 
-    if (!result) {
-      return NextResponse.json(
-        { error: "ABN not found or lookup unavailable" },
-        { status: 404 }
-      );
+    if ("ok" in result) {
+      // result is AbnLookupFailure. `not-found` is a clean miss (404);
+      // `lookup-failed` is a transient ABR/service error (503) — kept
+      // distinct so a caller can tell "this ABN doesn't exist" from
+      // "try again later".
+      return result.reason === "not-found"
+        ? NextResponse.json({ error: "ABN not found" }, { status: 404 })
+        : NextResponse.json(
+            { error: "ABN lookup is temporarily unavailable" },
+            { status: 503 },
+          );
     }
 
     return NextResponse.json(result);

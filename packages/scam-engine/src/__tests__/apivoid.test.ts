@@ -20,7 +20,21 @@ vi.mock("@askarthur/supabase/server", () => ({
 }));
 vi.mock("@askarthur/utils/logger", () => ({ logger: loggerMock }));
 
-import { getSiteTrustworthiness } from "../providers/apivoid";
+import {
+  getSiteTrustworthiness,
+  type ApivoidSiteTrust,
+  type ApivoidSkip,
+} from "../providers/apivoid";
+
+// getSiteTrustworthiness returns a discriminated `ApivoidSiteTrust |
+// ApivoidSkip`. asTrust narrows to the success member for the verdict
+// tests, failing loudly if the call unexpectedly skipped.
+function asTrust(out: ApivoidSiteTrust | ApivoidSkip): ApivoidSiteTrust {
+  if ("ok" in out) {
+    throw new Error(`expected a site-trust result, got skip: ${out.reason}`);
+  }
+  return out;
+}
 
 // A Supabase client mock that resolves the feature_brakes lookup chain:
 // from("feature_brakes").select("paused_until").eq(...).maybeSingle()
@@ -91,16 +105,17 @@ afterEach(() => {
 describe("getSiteTrustworthiness — verdict mapping", () => {
   it("maps a high trust score with no risk markers to safe", async () => {
     fetchSpy.mockResolvedValue(okResponse(apivoidBody()));
-    const out = await getSiteTrustworthiness("https://legit-shop.com.au/cart");
-    expect(out).not.toBeNull();
-    expect(out!.paidProviderVerdict.provider).toBe("apivoid");
-    expect(out!.paidProviderVerdict.verdict).toBe("safe");
-    expect(out!.paidProviderVerdict.trustScore).toBe(90);
-    expect(out!.paidProviderVerdict.flags).toEqual([]);
-    expect(out!.units).toBe(10);
-    expect(out!.estimatedCostUsd).toBeCloseTo(0.0033);
-    expect(new Date(out!.paidProviderVerdict.checkedAt).toISOString()).toBe(
-      out!.paidProviderVerdict.checkedAt,
+    const out = asTrust(
+      await getSiteTrustworthiness("https://legit-shop.com.au/cart"),
+    );
+    expect(out.paidProviderVerdict.provider).toBe("apivoid");
+    expect(out.paidProviderVerdict.verdict).toBe("safe");
+    expect(out.paidProviderVerdict.trustScore).toBe(90);
+    expect(out.paidProviderVerdict.flags).toEqual([]);
+    expect(out.units).toBe(10);
+    expect(out.estimatedCostUsd).toBeCloseTo(0.0033);
+    expect(new Date(out.paidProviderVerdict.checkedAt).toISOString()).toBe(
+      out.paidProviderVerdict.checkedAt,
     );
   });
 
@@ -108,47 +123,47 @@ describe("getSiteTrustworthiness — verdict mapping", () => {
     fetchSpy.mockResolvedValue(
       okResponse(apivoidBody({ trust: 95, checks: { is_domain_blacklisted: true } })),
     );
-    const out = await getSiteTrustworthiness("https://x.shop");
-    expect(out!.paidProviderVerdict.verdict).toBe("risky");
-    expect(out!.paidProviderVerdict.flags).toContain("domain-blacklisted");
+    const out = asTrust(await getSiteTrustworthiness("https://x.shop"));
+    expect(out.paidProviderVerdict.verdict).toBe("risky");
+    expect(out.paidProviderVerdict.flags).toContain("domain-blacklisted");
   });
 
   it("maps blacklist detections > 0 to risky", async () => {
     fetchSpy.mockResolvedValue(okResponse(apivoidBody({ blacklistDetections: 3 })));
-    const out = await getSiteTrustworthiness("https://x.shop");
-    expect(out!.paidProviderVerdict.verdict).toBe("risky");
-    expect(out!.paidProviderVerdict.blacklistDetections).toBe(3);
-    expect(out!.paidProviderVerdict.flags).toContain("domain-blacklisted");
+    const out = asTrust(await getSiteTrustworthiness("https://x.shop"));
+    expect(out.paidProviderVerdict.verdict).toBe("risky");
+    expect(out.paidProviderVerdict.blacklistDetections).toBe(3);
+    expect(out.paidProviderVerdict.flags).toContain("domain-blacklisted");
   });
 
   it("maps a low trust score to risky", async () => {
     fetchSpy.mockResolvedValue(okResponse(apivoidBody({ trust: 20 })));
-    const out = await getSiteTrustworthiness("https://x.shop");
-    expect(out!.paidProviderVerdict.verdict).toBe("risky");
+    const out = asTrust(await getSiteTrustworthiness("https://x.shop"));
+    expect(out.paidProviderVerdict.verdict).toBe("risky");
   });
 
   it("maps a mid trust score to suspicious", async () => {
     fetchSpy.mockResolvedValue(okResponse(apivoidBody({ trust: 50 })));
-    const out = await getSiteTrustworthiness("https://x.shop");
-    expect(out!.paidProviderVerdict.verdict).toBe("suspicious");
+    const out = asTrust(await getSiteTrustworthiness("https://x.shop"));
+    expect(out.paidProviderVerdict.verdict).toBe("suspicious");
   });
 
   it("maps a suspended site to suspicious even with a good score", async () => {
     fetchSpy.mockResolvedValue(
       okResponse(apivoidBody({ trust: 85, checks: { is_suspended_site: true } })),
     );
-    const out = await getSiteTrustworthiness("https://x.shop");
-    expect(out!.paidProviderVerdict.verdict).toBe("suspicious");
-    expect(out!.paidProviderVerdict.flags).toContain("suspended-site");
+    const out = asTrust(await getSiteTrustworthiness("https://x.shop"));
+    expect(out.paidProviderVerdict.verdict).toBe("suspicious");
+    expect(out.paidProviderVerdict.flags).toContain("suspended-site");
   });
 
   it("maps a sinkholed domain to suspicious", async () => {
     fetchSpy.mockResolvedValue(
       okResponse(apivoidBody({ trust: 80, checks: { is_sinkholed_domain: true } })),
     );
-    const out = await getSiteTrustworthiness("https://x.shop");
-    expect(out!.paidProviderVerdict.verdict).toBe("suspicious");
-    expect(out!.paidProviderVerdict.flags).toContain("sinkholed-domain");
+    const out = asTrust(await getSiteTrustworthiness("https://x.shop"));
+    expect(out.paidProviderVerdict.verdict).toBe("suspicious");
+    expect(out.paidProviderVerdict.flags).toContain("sinkholed-domain");
   });
 
   it("collects all risk-marker flags from security_checks", async () => {
@@ -166,8 +181,8 @@ describe("getSiteTrustworthiness — verdict mapping", () => {
         }),
       ),
     );
-    const out = await getSiteTrustworthiness("https://x.shop");
-    expect(out!.paidProviderVerdict.flags).toEqual(
+    const out = asTrust(await getSiteTrustworthiness("https://x.shop"));
+    expect(out.paidProviderVerdict.flags).toEqual(
       expect.arrayContaining([
         "suspicious-domain",
         "high-risk-tld",
@@ -180,10 +195,10 @@ describe("getSiteTrustworthiness — verdict mapping", () => {
 
   it("degrades a missing trust score to a safe-side default (no throw)", async () => {
     fetchSpy.mockResolvedValue(okResponse({}));
-    const out = await getSiteTrustworthiness("https://x.shop");
-    expect(out!.paidProviderVerdict.trustScore).toBe(50);
-    expect(out!.paidProviderVerdict.verdict).toBe("suspicious");
-    expect(out!.paidProviderVerdict.flags).toEqual([]);
+    const out = asTrust(await getSiteTrustworthiness("https://x.shop"));
+    expect(out.paidProviderVerdict.trustScore).toBe(50);
+    expect(out.paidProviderVerdict.verdict).toBe("suspicious");
+    expect(out.paidProviderVerdict.flags).toEqual([]);
   });
 });
 
@@ -208,27 +223,27 @@ describe("getSiteTrustworthiness — request shape", () => {
   });
 });
 
-describe("getSiteTrustworthiness — graceful degradation returns null", () => {
-  it("returns null and skips the call when the API key is missing", async () => {
+describe("getSiteTrustworthiness — graceful degradation returns a discriminated skip", () => {
+  it("returns no-key and skips the call when the API key is missing", async () => {
     delete process.env.APIVOID_API_KEY;
     const out = await getSiteTrustworthiness("https://x.shop");
-    expect(out).toBeNull();
+    expect(out).toEqual({ ok: false, reason: "no-key" });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("returns null and skips the call when the host cannot be parsed", async () => {
+  it("returns bad-host and skips the call when the host cannot be parsed", async () => {
     const out = await getSiteTrustworthiness("not a url");
-    expect(out).toBeNull();
+    expect(out).toEqual({ ok: false, reason: "bad-host" });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("returns null and skips the call when the cost brake is engaged", async () => {
+  it("returns brake and skips the call when the cost brake is engaged", async () => {
     maybeSingleMock.mockResolvedValue({
       data: { paused_until: new Date(Date.now() + 3_600_000).toISOString() },
       error: null,
     });
     const out = await getSiteTrustworthiness("https://x.shop");
-    expect(out).toBeNull();
+    expect(out).toEqual({ ok: false, reason: "brake" });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -239,37 +254,43 @@ describe("getSiteTrustworthiness — graceful degradation returns null", () => {
     });
     fetchSpy.mockResolvedValue(okResponse(apivoidBody()));
     const out = await getSiteTrustworthiness("https://x.shop");
-    expect(out).not.toBeNull();
+    expect("ok" in out).toBe(false);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("returns null and skips the call when there is no Supabase client", async () => {
+  it("returns brake when there is no Supabase client (brake unverifiable)", async () => {
     createServiceClientMock.mockReturnValue(null);
     const out = await getSiteTrustworthiness("https://x.shop");
-    expect(out).toBeNull();
+    expect(out).toEqual({ ok: false, reason: "brake" });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("returns null and skips the call when the brake lookup errors", async () => {
+  it("returns brake when the brake lookup errors", async () => {
     maybeSingleMock.mockResolvedValue({ data: null, error: { message: "db down" } });
     const out = await getSiteTrustworthiness("https://x.shop");
-    expect(out).toBeNull();
+    expect(out).toEqual({ ok: false, reason: "brake" });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("returns null on an HTTP error response", async () => {
+  it("returns http-error on an HTTP error response", async () => {
     fetchSpy.mockResolvedValue({ ok: false, status: 500 } as unknown as Response);
     const out = await getSiteTrustworthiness("https://x.shop");
-    expect(out).toBeNull();
+    expect(out).toEqual({ ok: false, reason: "http-error" });
   });
 
-  it("returns null when fetch throws (timeout / network error)", async () => {
+  it("returns timeout when fetch aborts on the timeout signal", async () => {
     fetchSpy.mockRejectedValue(new DOMException("timed out", "TimeoutError"));
     const out = await getSiteTrustworthiness("https://x.shop");
-    expect(out).toBeNull();
+    expect(out).toEqual({ ok: false, reason: "timeout" });
   });
 
-  it("returns null when the response body is not valid JSON", async () => {
+  it("returns http-error when fetch throws a non-timeout network error", async () => {
+    fetchSpy.mockRejectedValue(new TypeError("network error"));
+    const out = await getSiteTrustworthiness("https://x.shop");
+    expect(out).toEqual({ ok: false, reason: "http-error" });
+  });
+
+  it("returns http-error when the response body is not valid JSON", async () => {
     fetchSpy.mockResolvedValue({
       ok: true,
       status: 200,
@@ -278,6 +299,6 @@ describe("getSiteTrustworthiness — graceful degradation returns null", () => {
       },
     } as unknown as Response);
     const out = await getSiteTrustworthiness("https://x.shop");
-    expect(out).toBeNull();
+    expect(out).toEqual({ ok: false, reason: "http-error" });
   });
 });

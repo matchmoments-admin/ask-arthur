@@ -169,6 +169,7 @@ export const AbnStatusSchema = z.enum([
   "name-mismatch", // ABN displayed + registered, but the holder name doesn't match
   "unregistered", // ABN displayed but not found / inactive on the register
   "no-abn", // .au shop, no ABN displayed at all
+  "unverified", // ABN couldn't be checked — page unreadable or the register lookup failed
   "not-applicable", // non-AU host — ABN display is not expected
 ]);
 export type AbnStatus = z.infer<typeof AbnStatusSchema>;
