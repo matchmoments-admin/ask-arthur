@@ -405,13 +405,20 @@ export async function analyzeWithClaude(
   const hasImages = imagesBase64 && imagesBase64.length > 0;
   // Per-request timeout + retry budget. Vision calls tail longer (p95
   // ~3-8s, 529/overloaded tail absorbed up to ~25s); text is bounded
-  // tighter. The SDK retries 529s/timeouts — left at the default
-  // (maxRetries: 2) a vision retry chain overruns the route's 60s
-  // maxDuration, so Vercel kills the function mid-call and the user sees a
-  // generic 500. maxRetries: 1 + a 25s vision timeout keeps the worst case
-  // (25s + backoff + 25s ≈ 52s) inside the 60s budget while still
-  // recovering from a single transient overload.
+  // tighter. The SDK retries 529s/timeouts, and this is a synchronous call
+  // behind the route's hard 60s maxDuration — the whole retry budget must
+  // stay well inside that wall or Vercel kills the function mid-call (the
+  // original P1).
+  //   vision: 25s timeout, maxRetries 0 — a deterministic ~25s ceiling, so
+  //     a mid-call function-kill is structurally impossible. Recovery is
+  //     the user's honest "Try again" button + the durable Inngest path;
+  //     an in-process retry doubles the worst case to ~52s (87% of the
+  //     budget before route overhead) and, during a real 529 outage,
+  //     usually just fails a second time 2s later.
+  //   text: 15s timeout, maxRetries 1 — 15 + backoff + 15 ≈ 32s, genuine
+  //     headroom inside 60s, so one cheap auto-retry is kept.
   const timeoutMs = hasImages ? 25_000 : 15_000;
+  const maxRetries = hasImages ? 0 : 1;
   const response = await client.messages.create(
     {
       model: "claude-haiku-4-5-20251001",
@@ -433,7 +440,7 @@ export async function analyzeWithClaude(
         { role: "assistant", content: [{ type: "text", text: "{" }] },
       ],
     },
-    { timeout: timeoutMs, maxRetries: 1 }
+    { timeout: timeoutMs, maxRetries }
   );
 
   const responseText =

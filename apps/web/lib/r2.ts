@@ -28,12 +28,28 @@ function getR2Client(): S3Client | null {
   return _r2Client;
 }
 
+// The real R2 bucket. Used only as a last-resort fallback — a missing
+// R2_BUCKET_NAME in production is a misconfiguration, not a default to
+// route silently. A stale fallback ("askarthur-screenshots") once routed
+// every upload to a non-existent bucket: PutObject threw NoSuchBucket, the
+// caller swallowed it as non-blocking, and no screenshot was ever
+// persisted — undetected for the feature's whole life.
+const FALLBACK_BUCKET = "ask-arthur-r2";
+
 function getBucket(): string {
-  // Fallback must be the real bucket name. A stale fallback
-  // ("askarthur-screenshots") silently routed every upload to a
-  // non-existent bucket — PutObject threw NoSuchBucket, the caller
-  // swallowed it as non-blocking, and no screenshot was ever persisted.
-  return process.env.R2_BUCKET_NAME || "ask-arthur-r2";
+  const bucket = process.env.R2_BUCKET_NAME;
+  if (!bucket) {
+    // Surface the misconfiguration loudly (mirrors getR2Client's missing-
+    // credentials handling) while still returning the real bucket, so prod
+    // degrades gracefully instead of NoSuchBucket-ing every upload.
+    if (process.env.NODE_ENV === "production") {
+      logger.error("R2_BUCKET_NAME not set — using fallback bucket", {
+        fallback: FALLBACK_BUCKET,
+      });
+    }
+    return FALLBACK_BUCKET;
+  }
+  return bucket;
 }
 
 /**

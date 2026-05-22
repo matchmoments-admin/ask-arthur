@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 
 // ── Mocks ──
@@ -367,5 +367,98 @@ describe("/api/analyze redirect integration", () => {
 
     const data = await res.json();
     expect(data.redirects).toBeUndefined();
+  });
+});
+
+// ── Screenshot retention gate (ADR 0010) ──
+//
+// FF_SCREENSHOT_RETENTION decides whether storeVerifiedScam is handed an R2
+// uploader. The gate is privacy-critical: scrubPII is text-only, so a stored
+// screenshot is unredacted raw user content. These tests pin the gate in
+// both positions so a refactor cannot silently re-enable retention — the
+// route passing `uploadScreenshot` unconditionally would violate CLAUDE.md's
+// "Never Do: store raw user content or PII" with no other test failing.
+
+describe("/api/analyze screenshot retention gate", () => {
+  // PNG magic bytes — validateImageMagicBytes rejects arbitrary payloads.
+  const PNG_IMAGE = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    Buffer.from("payload"),
+  ]).toString("base64");
+
+  let restoreFlags: (() => void) | null = null;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(checkRateLimit).mockResolvedValue({
+      allowed: true,
+      remaining: 9,
+      resetAt: null,
+    });
+  });
+
+  afterEach(() => {
+    restoreFlags?.();
+    restoreFlags = null;
+  });
+
+  async function setFlags(overrides: Record<string, boolean>) {
+    const mod = await import("@askarthur/utils/feature-flags");
+    const flags = mod.featureFlags as unknown as Record<string, unknown>;
+    const originals: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(overrides)) {
+      originals[key] = flags[key];
+      Object.defineProperty(flags, key, {
+        value,
+        writable: true,
+        configurable: true,
+      });
+    }
+    restoreFlags = () => {
+      for (const [key, value] of Object.entries(originals)) {
+        Object.defineProperty(flags, key, {
+          value,
+          writable: true,
+          configurable: true,
+        });
+      }
+    };
+  }
+
+  async function highRiskImageRequest() {
+    const { analyzeWithClaude } = await import("@askarthur/scam-engine/claude");
+    vi.mocked(analyzeWithClaude).mockResolvedValue({
+      verdict: "HIGH_RISK",
+      confidence: 0.95,
+      summary: "Test scam",
+      redFlags: ["Flag 1"],
+      nextSteps: ["Step 1"],
+      scamType: "phishing",
+    });
+    return POST(makeRequest({ image: PNG_IMAGE }));
+  }
+
+  it("passes NO uploader to storeVerifiedScam when FF_SCREENSHOT_RETENTION is OFF", async () => {
+    await setFlags({ screenshotRetention: false, intelligenceCore: false });
+    const { storeVerifiedScam } = await import("@askarthur/scam-engine/pipeline");
+
+    const res = await highRiskImageRequest();
+    expect(res.status).toBe(200);
+    expect(storeVerifiedScam).toHaveBeenCalled();
+    // 4th arg is the screenshot uploader — undefined means screenshots are
+    // discarded after analysis and the "images are discarded" promise holds.
+    expect(vi.mocked(storeVerifiedScam).mock.calls[0][3]).toBeUndefined();
+  });
+
+  it("passes an uploader to storeVerifiedScam when FF_SCREENSHOT_RETENTION is ON", async () => {
+    await setFlags({ screenshotRetention: true, intelligenceCore: false });
+    const { storeVerifiedScam } = await import("@askarthur/scam-engine/pipeline");
+
+    const res = await highRiskImageRequest();
+    expect(res.status).toBe(200);
+    expect(storeVerifiedScam).toHaveBeenCalled();
+    expect(typeof vi.mocked(storeVerifiedScam).mock.calls[0][3]).toBe(
+      "function"
+    );
   });
 });
