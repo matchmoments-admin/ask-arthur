@@ -361,6 +361,16 @@ export const featureFlags = {
    *  until the APIVoid trial-key preview smoke test passes; flip ON to
    *  start consuming the trial. Plan: docs/plans/shop-guard-v2.md §4 PR 2. */
   shopSignalPaidFeed: process.env.FF_SHOP_SIGNAL_PAID_FEED === "true",
+
+  /** Screenshot retention — when ON, `storeVerifiedScam` uploads the raw
+   *  screenshot of a HIGH_RISK image submission to R2. Default OFF, and it
+   *  must stay OFF until prerequisites are met: `scrubPII` is text-only, so
+   *  a stored screenshot is unredacted raw user content (faces, bank-app
+   *  screens, IDs). Enabling requires OCR-based PII redaction OR a consent
+   *  path, plus legal review, the R2 `screenshots/` lifecycle rule, and a
+   *  privacy-policy update. Server-side only. See
+   *  docs/adr/0010-screenshot-retention-gated.md. */
+  screenshotRetention: process.env.FF_SCREENSHOT_RETENTION === "true",
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;
