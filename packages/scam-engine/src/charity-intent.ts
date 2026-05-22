@@ -6,11 +6,19 @@
 // we could extract — instead of routing the input through the generic
 // scam-analysis pipeline alone.
 //
-// This module is pure (no I/O, no external calls); it returns a small
-// payload the route attaches to the response and the result component
-// renders as a deep-link CTA. The /charity-check engine still does the
-// real verification — this is just the discoverability bridge per the
-// strategy memo §1 "hybrid placement" recommendation.
+// This is a discoverability NUDGE, not a check. The /charity-check drawer
+// is the explicit, deterministic entry point and does the real verification
+// (ACNC + ABR registers). Because that drawer backstops every miss, this
+// detector is tuned for precision over recall: a missed nudge just yields a
+// normal verdict, but a FALSE nudge misroutes the user into the wrong tool.
+// It therefore fires only on an explicit charity keyword — a bare 11-digit
+// number is not a charity signal (an ABN identifies any Australian
+// business, charities included).
+//
+// The route attaches the returned payload to the response; the result
+// component renders it as a deep-link CTA into /charity-check, pre-filled.
+
+import { isValidAbnChecksum } from "./abn-extract";
 
 const CHARITY_KEYWORDS = [
   "charity",
@@ -41,15 +49,27 @@ const NAME_PATTERNS: RegExp[] = [
   /\b([A-Z][A-Za-z'.-]+(?:\s+[A-Z][A-Za-z'.-]+){1,5})\s+(?:Charity|Appeal|Foundation|Fund|Society|Trust|Council)\b/,
 ];
 
-/** Find the first 11-digit ABN-shaped substring in `text`. Returns the
- *  digits-only form, or undefined if no candidate matched. We scan
- *  digit/space/dash runs and validate digit count rather than relying on
- *  a single complex regex — easier to keep correct for "11005357522",
- *  "11 005 357 522", and "11-005-357-522" all at once. */
+/** Find the first checksum-valid ABN in `text`.
+ *
+ *  Two guards stop ad-tracking junk being read as an ABN — the bug that
+ *  fired a false charity nudge on a commerce URL whose `gad_campaignid`
+ *  query param happened to be 11 digits long:
+ *    1. URLs are stripped first — query strings (gad_campaignid, gclid,
+ *       gbraid …) are full of long digit runs that are not ABNs.
+ *    2. Every 11-digit candidate must pass the official modulus-89 ABN
+ *       checksum, which rejects phone numbers, order IDs and campaign IDs
+ *       that merely happen to be 11 digits long.
+ *
+ *  Scans digit/space/dash runs so "11005357522", "11 005 357 522" and
+ *  "11-005-357-522" all collapse to the same digits-only form. */
 function extractAbn(text: string): string | undefined {
-  for (const m of text.matchAll(/[\d][\d\s-]{8,18}[\d]/g)) {
+  const withoutUrls = text.replace(
+    /(?:https?:\/\/)?[^\s/?#]+\.[^\s/?#]+(?:[/?#]\S*)?/gi,
+    " ",
+  );
+  for (const m of withoutUrls.matchAll(/[\d][\d\s-]{8,18}[\d]/g)) {
     const digits = m[0].replace(/\D/g, "");
-    if (digits.length === 11) return digits;
+    if (digits.length === 11 && isValidAbnChecksum(digits)) return digits;
   }
   return undefined;
 }
@@ -80,10 +100,13 @@ export function detectCharityIntent(text: string | null | undefined): CharityInt
   const lower = trimmed.toLowerCase();
   const hasKeyword = CHARITY_KEYWORDS.some((k) => lower.includes(k));
 
-  const extractedAbn = extractAbn(trimmed);
+  // Precision gate — fire only on an explicit charity keyword. A bare
+  // ABN-shaped number is not charity intent (an ABN identifies any
+  // Australian business, charities included); the /charity-check drawer
+  // is the explicit path for a number-only check.
+  if (!hasKeyword) return null;
 
-  // No charity-shaped signals → don't fire the CTA.
-  if (!hasKeyword && !extractedAbn) return null;
+  const extractedAbn = extractAbn(trimmed);
 
   let extractedName: string | undefined;
   for (const re of NAME_PATTERNS) {
