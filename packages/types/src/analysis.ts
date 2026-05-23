@@ -148,6 +148,28 @@ export const ShopSignalSchema = z.object({
 });
 export type ShopSignal = z.infer<typeof ShopSignalSchema>;
 
+// Commerce-flag tag → user-facing label. The tags themselves are produced
+// by extractCommerceFlags() in packages/scam-engine/src/shop-signal.ts
+// (COMMERCE_FLAG_TAXONOMY). This map is the shared label source so the web
+// ResultCard and the extension popup render identical chip text. Unknown
+// tags fall through to their raw kebab-case form in the renderer rather
+// than being dropped — surfacing the unknown is better than silently
+// hiding it.
+export const COMMERCE_FLAG_LABELS: Record<string, string> = {
+  "payid-scam": "PayID-shaped scam",
+  "fake-payment-confirmation": "Fake payment confirmation",
+  "overpayment-refund": "Overpayment refund scam",
+  "off-platform-move": "Moves you off-platform",
+  "relative-will-collect": "Buyer's relative collects",
+  "implausible-discount": "Discount too good to be true",
+  "domain-renewal-invoice": "Fake .com.au domain invoice",
+  "stock-photo-product": "Stock-photo product listing",
+  "fake-trust-badge": "Fake trust badge",
+  "fake-australia-post": "Fake Australia Post notice",
+  "urgent-purchase-pressure": "Urgent purchase pressure",
+  "fake-reviews": "Suspicious reviews",
+};
+
 // ── Deep Shop Check — Stage 1 user-initiated enrichment ──────────────────
 //
 // The Deep Shop Check is a SEPARATE request from analyze: the user clicks

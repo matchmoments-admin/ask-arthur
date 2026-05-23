@@ -1,6 +1,6 @@
 import { setInstallId, getInstallId, setContextMenuText } from "@/lib/storage";
 import { ensureRegistered } from "@/lib/register";
-import { checkURL, analyzeText, analyzeExtensionsCRX, fetchThreatDBUpdate, checkAdCommunityFlags, flagAd, analyzeAd, ExtensionApiError } from "@/lib/api";
+import { checkURL, analyzeText, analyzeShop, analyzeExtensionsCRX, fetchThreatDBUpdate, checkAdCommunityFlags, flagAd, analyzeAd, ExtensionApiError } from "@/lib/api";
 import { getCachedScanReport, setCachedScanReport } from "@/lib/extension-scan-cache";
 import { scanInstalledExtensions, buildSecurityReport } from "@/lib/extension-scanner";
 import { setupThreatDBRefresh, getThreatDB } from "@/lib/threat-db";
@@ -199,6 +199,10 @@ async function handleMessage(
     }
     case "CHECK_TEXT": {
       const { data, remaining } = await analyzeText(message.text);
+      return { success: true, data: { ...data, remaining } };
+    }
+    case "ANALYZE_SHOP": {
+      const { data, remaining } = await analyzeShop(message.url);
       return { success: true, data: { ...data, remaining } };
     }
     case "GET_STATUS": {

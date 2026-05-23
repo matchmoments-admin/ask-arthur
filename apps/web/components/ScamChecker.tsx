@@ -97,6 +97,12 @@ export default function ScamChecker() {
   // can stamp it onto the response payload. Not surfaced in the UI at this
   // stage; the chip render comes in Stage 1 PR 4 alongside the accordion.
   const [referrerSource, setReferrerSource] = useState<ReferrerSource | undefined>(undefined);
+  // Set on landing with ?deepShopUrl=<encoded-url> (the extension popup's
+  // "Run a deeper shop check" CTA opens this URL). Drives the auto-submit
+  // useEffect below — pre-fills text + fires /api/analyze without an extra
+  // user click. Stays a ref (not state) so flipping it doesn't trigger a
+  // re-render; the auto-submit effect reads it once.
+  const pendingDeepShopAutoSubmit = useRef(false);
   const searchParams = useSearchParams();
 
   // Plausible custom-event hook. Wired in PR pre-launch-tidy to fire two
@@ -111,21 +117,44 @@ export default function ScamChecker() {
   const media = useMediaAnalysis();
   const audioInputRef = useRef<HTMLInputElement>(null);
 
-  // Pre-fill textarea from Web Share Target (Android PWA)
+  // Pre-fill textarea from Web Share Target (Android PWA) OR from the
+  // extension popup's deep-shop-check CTA.
   useEffect(() => {
     const sharedText = searchParams.get("shared_text");
     const sharedInapp = parseReferrerSource(searchParams.get("shared_inapp"));
+    const deepShopUrl = searchParams.get("deepShopUrl");
     if (sharedText) {
       setText(sharedText);
     }
     if (sharedInapp) {
       setReferrerSource(sharedInapp);
     }
-    if (sharedText || sharedInapp) {
+    if (deepShopUrl) {
+      // Extension deep-link — pre-fill and auto-submit so the user lands
+      // directly on the verdict + Deep Shop Check tray, no extra click.
+      setText(deepShopUrl);
+      pendingDeepShopAutoSubmit.current = true;
+    }
+    if (sharedText || sharedInapp || deepShopUrl) {
       // Clean up the URL without triggering a navigation
       window.history.replaceState({}, "", "/");
     }
   }, [searchParams]);
+
+  // Auto-submit the form when the user arrived via the extension's
+  // deep-shop-check CTA. handleSubmit() is hoisted (async function
+  // declaration below), so the reference is stable here. The effect runs
+  // after the text state from the search-params effect above has been
+  // committed.
+  useEffect(() => {
+    if (!pendingDeepShopAutoSubmit.current) return;
+    if (status !== "idle" || text.length === 0) return;
+    pendingDeepShopAutoSubmit.current = false;
+    void handleSubmit({ preventDefault: () => {} } as React.FormEvent);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- handleSubmit
+    // is a hoisted function declaration and changes on every render; we
+    // intentionally only want this effect to react to text + status.
+  }, [text, status]);
 
   const handleCharityImageSelected = useCallback(async (file: File) => {
     // Reset other modes — charity-image is a hard mode-switch (single image,

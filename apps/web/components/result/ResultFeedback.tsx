@@ -2,9 +2,9 @@
 
 import { useState, useTransition } from "react";
 import { ThumbsUp, ThumbsDown } from "lucide-react";
+import type { Verdict } from "@askarthur/types";
 
 type Vote = "up" | "down" | null;
-type Verdict = "SAFE" | "SUSPICIOUS" | "HIGH_RISK" | "UNCERTAIN";
 
 const DOWN_REASONS: Array<{ code: string; label: string }> = [
   { code: "not_a_scam", label: "This isn't actually a scam" },

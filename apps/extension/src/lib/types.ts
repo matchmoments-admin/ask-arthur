@@ -11,7 +11,8 @@ export type MessageType =
   | "DEEP_SCAN_EXTENSIONS"
   | "ANALYZE_AD"
   | "FLAG_AD"
-  | "ANALYZE_MARKETPLACE";
+  | "ANALYZE_MARKETPLACE"
+  | "ANALYZE_SHOP";
 
 export interface CheckURLMessage {
   type: "CHECK_URL";
@@ -83,6 +84,13 @@ export interface AnalyzeMarketplaceMessage {
   chatText?: string;
 }
 
+// Shop Guard Stage 2 / PR 6 — popup detects an active-tab commerce page via
+// chrome.scripting.executeScript and asks the background to analyze the URL.
+export interface AnalyzeShopMessage {
+  type: "ANALYZE_SHOP";
+  url: string;
+}
+
 export type ExtensionMessage =
   | CheckURLMessage
   | CheckTextMessage
@@ -93,7 +101,8 @@ export type ExtensionMessage =
   | DeepScanExtensionsMessage
   | AnalyzeAdMessage
   | FlagAdMessage
-  | AnalyzeMarketplaceMessage;
+  | AnalyzeMarketplaceMessage
+  | AnalyzeShopMessage;
 
 export interface MessageResponse<T = unknown> {
   success: boolean;
