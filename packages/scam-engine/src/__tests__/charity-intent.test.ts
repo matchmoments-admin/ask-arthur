@@ -25,14 +25,23 @@ describe("detectCharityIntent", () => {
       ).toBeNull();
     });
 
-    it("text with random 11-digit string that isn't charity-shaped — still detects (ABN alone)", () => {
-      // This is intentional: even without charity keywords, an 11-digit
-      // ABN-shaped number is enough to offer the CTA. The dedicated
-      // /charity-check page will reject false positives on its own
-      // (the engine looks up the ABN; not-found = SUSPICIOUS, no harm).
-      const r = detectCharityIntent("My phone is 11 005 357 522 wait no thats wrong");
-      expect(r).not.toBeNull();
-      expect(r?.extractedAbn).toBe("11005357522");
+    it("does NOT detect a bare ABN-shaped number with no charity keyword", () => {
+      // An ABN identifies any Australian business, charities included — a
+      // bare number is not charity intent. The /charity-check drawer is the
+      // explicit entry point for a number-only check.
+      expect(
+        detectCharityIntent("My phone is 11 005 357 522 wait no thats wrong"),
+      ).toBeNull();
+    });
+
+    it("does NOT detect on a commerce URL whose ad params contain an 11-digit id", () => {
+      // Regression — a THE ICONIC link: the Google Ads gad_campaignid
+      // (23717187782, 11 digits) was scraped as an "ABN" and fired a false
+      // "This looks like a charity request" nudge. No charity keyword, the
+      // number fails the ABN checksum, and it lives inside a URL.
+      const url =
+        "theiconic.com.au/the-iconic?utm_source=google&gad_campaignid=23717187782&gclid=Cj0KCQjw";
+      expect(detectCharityIntent(url)).toBeNull();
     });
   });
 
@@ -63,6 +72,22 @@ describe("detectCharityIntent", () => {
       const r = detectCharityIntent("Donate to charity number 123456789012");
       expect(r?.detected).toBe(true);
       expect(r?.extractedAbn).toBeUndefined();
+    });
+
+    it("rejects an 11-digit number that fails the ABN checksum", () => {
+      // 23717187782 is 11 digits but not a valid ABN (modulus-89 fails).
+      const r = detectCharityIntent("Donate to charity number 23717187782");
+      expect(r?.detected).toBe(true); // the charity keyword fired the nudge
+      expect(r?.extractedAbn).toBeUndefined(); // the bogus number is dropped
+    });
+
+    it("does not extract a checksum-valid ABN embedded inside a URL", () => {
+      // A number inside a URL is ambiguous — not a deliberately typed ABN.
+      const r = detectCharityIntent(
+        "Donate here: https://example.org.au/ref/11005357522",
+      );
+      expect(r?.detected).toBe(true); // "Donate" fired the nudge
+      expect(r?.extractedAbn).toBeUndefined(); // URL-embedded digits ignored
     });
   });
 

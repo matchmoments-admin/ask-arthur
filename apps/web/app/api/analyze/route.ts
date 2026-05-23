@@ -120,9 +120,9 @@ export async function POST(req: NextRequest) {
       ? rawImages
       : image ? [image] : [];
 
-    // Charity-intent detection (v0.2e). Pure regex; no I/O. When the input
-    // looks charity-shaped (keyword OR ABN), attach a small payload to the
-    // response so the result component can render a "Run a full charity
+    // Charity-intent detection (v0.2e). Pure regex; no I/O. A discoverability
+    // nudge — when the input carries an explicit charity keyword, attach a
+    // small payload so the result component can render a "Run a full charity
     // check →" CTA deep-linking to /charity-check pre-filled. Doesn't
     // change the verdict path — runs alongside the normal scam analysis.
     // Gated on featureFlags.charityCheck so the CTA only appears when the
