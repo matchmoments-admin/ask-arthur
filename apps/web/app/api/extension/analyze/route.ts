@@ -92,6 +92,11 @@ export async function POST(req: NextRequest) {
         summary: out.result.summary,
         redFlags: out.result.redFlags,
         nextSteps: out.result.nextSteps,
+        // Shop Signal — Stage 0 detector runs inside runAnalysisCore; surfacing
+        // it here lets the extension popup render commerce-flag chips and offer
+        // the deep-link to the Deep Shop Check. Optional: absent for non-commerce
+        // input, so the extension's existing ResultDisplay path is unaffected.
+        ...(out.result.shopSignal ? { shopSignal: out.result.shopSignal } : {}),
         ...(out.cached ? { cached: true } : {}),
       },
       { headers: { "X-RateLimit-Remaining": String(auth.remaining) } },

@@ -5,8 +5,16 @@ import { getContextMenuText, setContextMenuText } from "@/lib/storage";
 import { ResultDisplay } from "@/components/ResultDisplay";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { ErrorState } from "@/components/ErrorState";
+import { ShopSignalCard } from "@/components/ShopSignalCard";
+import { detectCommerce } from "@/lib/commerce-detector";
+
+// Build-time define from wxt.config.ts. False on non-Shop-Guard builds, in
+// which case the active-tab detector + auto-fire ANALYZE_SHOP path skip
+// entirely — the popup stays manual-input-only.
+declare const __SHOP_GUARD_ENABLED__: boolean;
 
 type CheckMode = "url" | "message";
+type ShopState = "idle" | "detecting" | "analyzing" | "ready" | "not-shop" | "error";
 
 export function CheckTab() {
   const [mode, setMode] = useState<CheckMode>("url");
@@ -21,12 +29,65 @@ export function CheckTab() {
   const [remaining, setRemaining] = useState<number | null>(null);
   const [shareLabel, setShareLabel] = useState("Share result");
 
-  // On mount: get current tab URL + check for context menu text
+  // Shop Guard Stage 2 / PR 6 — popup-mount commerce detector + analyze.
+  // shopState: idle = guard disabled / not yet checked; detecting = running
+  // the DOM detector; analyzing = backend ANALYZE_SHOP in flight; ready =
+  // verdict received; not-shop = page failed the two-of-three rule (we
+  // stay silent, the user still gets the manual check below); error =
+  // detector or analyze errored, also stay silent.
+  const [shopState, setShopState] = useState<ShopState>("idle");
+  const [shopResult, setShopResult] = useState<AnalysisResult | null>(null);
+  const [shopUrl, setShopUrl] = useState<string>("");
+
+  // On mount: get current tab URL + check for context menu text + (if enabled)
+  // run the commerce detector against the active tab via one-shot
+  // chrome.scripting.executeScript. The detector function is serialised
+  // across the isolated world, so it must not close over module-scope
+  // identifiers — see commerce-detector.ts.
   useEffect(() => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      const url = tabs[0]?.url;
+      const tab = tabs[0];
+      const url = tab?.url;
+      const tabId = tab?.id;
       if (url && (url.startsWith("http://") || url.startsWith("https://"))) {
         setUrlInput(url);
+
+        if (__SHOP_GUARD_ENABLED__ && tabId !== undefined && chrome.scripting) {
+          setShopState("detecting");
+          setShopUrl(url);
+          chrome.scripting
+            .executeScript({ target: { tabId }, func: detectCommerce })
+            .then(async (results) => {
+              const verdict = results[0]?.result;
+              if (!verdict || !verdict.isShop) {
+                setShopState("not-shop");
+                return;
+              }
+              setShopState("analyzing");
+              try {
+                const response: MessageResponse = await chrome.runtime.sendMessage({
+                  type: "ANALYZE_SHOP",
+                  url,
+                });
+                if (response.success && response.data) {
+                  const data = response.data as AnalysisResult & { remaining?: number };
+                  if (data.remaining !== undefined) setRemaining(data.remaining);
+                  setShopResult(data);
+                  setShopState("ready");
+                } else {
+                  setShopState("error");
+                }
+              } catch {
+                setShopState("error");
+              }
+            })
+            .catch(() => {
+              // Pages where scripting injection is blocked (chrome://, the
+              // Chrome Web Store, etc.) silently fall through to the
+              // manual-check UX.
+              setShopState("not-shop");
+            });
+        }
       }
     });
 
@@ -116,6 +177,24 @@ export function CheckTab() {
 
   return (
     <div className="p-4 space-y-3">
+      {/* Shop Guard Stage 2 — auto-fire result on commerce-shaped active tabs.
+          Renders above the manual check so users see the "this page is a shop,
+          here's what we found" verdict first; the manual URL/Message check
+          below still works for arbitrary inputs. */}
+      {__SHOP_GUARD_ENABLED__ && shopState === "analyzing" && (
+        <div className="flex items-center gap-2 rounded-[10px] border border-border bg-surface px-3 py-2.5">
+          <div className="h-3 w-3 rounded-full bg-primary animate-pulse shrink-0" />
+          <p className="text-[11px] text-text-secondary">
+            Checking this shop page…
+          </p>
+        </div>
+      )}
+      {__SHOP_GUARD_ENABLED__ && shopState === "ready" && shopResult && (
+        <div className="animate-fade-in">
+          <ShopSignalCard result={shopResult} url={shopUrl} />
+        </div>
+      )}
+
       {/* Pill toggle */}
       <div className="flex bg-surface rounded-[20px] p-0.5 border border-border">
         <button

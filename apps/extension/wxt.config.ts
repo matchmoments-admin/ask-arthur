@@ -4,6 +4,12 @@ const urlGuardEnabled = process.env.WXT_URL_GUARD === "true";
 const extensionSecurityEnabled = process.env.WXT_EXTENSION_SECURITY !== "false";
 const facebookAdsEnabled = process.env.WXT_FACEBOOK_ADS === "true";
 const siteAuditEnabled = process.env.WXT_SITE_AUDIT === "true";
+// Shop Guard Stage 2 / PR 6 — popup-side commerce-page detector + Shop
+// Signal card. Uses `activeTab` + `scripting` (one-shot inject on popup
+// open) instead of `<all_urls>` so this build stays out of the Chrome Web
+// Store sensitive-permission re-review path. Plan:
+// docs/plans/shop-guard-v2.md §5.
+const shopGuardEnabled = process.env.WXT_SHOP_GUARD === "true";
 const turnstileBridgeUrl =
   process.env.WXT_TURNSTILE_BRIDGE_URL ??
   "https://askarthur.au/extension-turnstile";
@@ -43,6 +49,7 @@ export default defineConfig({
       "offscreen",
       ...(urlGuardEnabled ? ["webNavigation" as const] : []),
       ...(extensionSecurityEnabled ? ["alarms" as const] : []),
+      ...(shopGuardEnabled ? ["scripting" as const] : []),
     ],
     optional_permissions: [
       ...(extensionSecurityEnabled ? ["management" as const] : []),
@@ -75,6 +82,7 @@ export default defineConfig({
       __URL_GUARD_ENABLED__: urlGuardEnabled,
       __EXTENSION_SECURITY_ENABLED__: extensionSecurityEnabled,
       __FACEBOOK_ADS_ENABLED__: facebookAdsEnabled,
+      __SHOP_GUARD_ENABLED__: shopGuardEnabled,
     },
   }),
 });

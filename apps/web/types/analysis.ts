@@ -1,6 +1,6 @@
-import type { ScammerContacts, PhoneLookupResult, ShopSignal } from "@askarthur/types";
+import type { ScammerContacts, PhoneLookupResult, ShopSignal, Verdict } from "@askarthur/types";
 
-export type Verdict = "SAFE" | "SUSPICIOUS" | "HIGH_RISK";
+export type { Verdict };
 
 export interface ScammerUrl {
   url: string;

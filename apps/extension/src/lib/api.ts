@@ -111,6 +111,22 @@ export async function analyzeText(
   });
 }
 
+// Shop Guard Stage 2 / PR 6 — analyze a commerce page URL surfaced by the
+// popup's on-mount DOM detector. Reuses the same /analyze endpoint (Shop
+// Signal lives inside runAnalysisCore); the X-Scan-Source header keeps the
+// surface attributable in cost telemetry. The response carries shopSignal
+// + verdict + redFlags so the popup's ShopSignalCard can render without a
+// second call.
+export async function analyzeShop(
+  url: string,
+): Promise<{ data: AnalysisResult; remaining: number | null }> {
+  return request<AnalysisResult>("/analyze", {
+    method: "POST",
+    body: JSON.stringify({ text: url }),
+    headers: { "X-Scan-Source": "extension-shop" },
+  });
+}
+
 export async function reportScamEmail(report: {
   senderEmail: string;
   subject: string;
