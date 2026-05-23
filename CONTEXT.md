@@ -63,6 +63,26 @@ _Avoid_: "share source", "inapp browser tag", "UA tag".
 The shared chrome for Ask Arthur outbound emails (Reddit Intel weekly digest + the 6-step SPF nurture series). Defined in `apps/web/emails/_layout/EditorialBriefingLayout.tsx`: navy header bar with the Ask Arthur wordmark + an uppercase right-aligned label pill, a white content card on a tinted page background with rounded corners, and a navy footer bar with brand block, ABN, signed-token unsubscribe link, and an optional operator-only debug stripe. Per-email content slots into briefing fields (eyebrow, H1, dek, optional stats card, sections, CTA, sign-off) so all Ask Arthur emails read as one publication.
 _Avoid_: "email template" (overloaded), "newsletter shell", "briefing chrome".
 
+**Verified Shop**:
+A merchant store that installed `apps/shopfront-shopify` and passed the continuous-verification pipeline (ADR-0011 badge state machine). Stored in `shopfront_shops` + `shopfront_verifications`. The unit of record for the merchant-side of clone-detection — Clone Signals are computed _for_ a Verified Shop. The Verified Directory at `askarthur.au/verified/{shop-handle}` publishes the per-shop provenance page (ADR-0014). Contrast with the cold-outreach target (a Clone Alert with `target_shop_id IS NULL`): an AU store that the matcher landed on but isn't an installed Verified Shop yet.
+_Avoid_: "installed shop" (overloaded — Shopify's own term), bare "merchant" (overloaded — refers to any Shopify-side or matcher-detected entity).
+
+**Brand Match** (Clone Signal — deterministic-string):
+A candidate domain _appears to be_ a permutation / typo / confusable / punycode rendering of a Verified Shop's brand. One of three Clone Signal types alongside **Visual Match** and **Semantic Match**. Phase A scans against the existing scam corpus (`scam_reports.url` + `reddit_post_intel.url` + brand-mention scrape output); Phase B adds the Calidog certstream firehose; Phase C adds the whoisds NRD daily zip. Signal name is invariant across phases; only the candidate-domain population changes.
+_Avoid_: "TLD watchlist match" (misleading — implies new-registration awareness that only Phases B+C deliver), "permutation hit".
+
+**Visual Match** (Clone Signal — deterministic-visual):
+A candidate page's rendered assets collide with a Verified Shop's — same logo (pHash on logo / hero images), same Shopify theme fingerprint, or same rendered-HTML structure (TLSH; Phase C optional). Live at Phase A onward.
+_Avoid_: "logo hit", "pHash collision".
+
+**Semantic Match** (Clone Signal — embedding):
+A candidate page's content reads like a Verified Shop's homepage — quantified by Voyage `voyage-3` page-content embedding cosine similarity above threshold. **Primary verdict for the "logo-swap, copy-preserved" attack class** per ADR-0015 — only fires for candidates whose deterministic verdict (Brand Match + Visual Match) scored below ship-threshold, NOT a uniform confidence-booster across the board. Phase C only. Per CLAUDE.md Critical Rules + ADR-0005, the embedding column lives on the `shopfront_clone_alerts_embeddings` sibling table with HNSW on the read-only side; the parent `shopfront_clone_alerts` row stays lean and write-frequent (the `acnc_charity_embeddings` precedent).
+_Avoid_: "embedding match" (overloaded — embeddings are also used for Reddit Intel narrative clustering and the Verified Directory semantic-search bar), "cosine hit".
+
+**Clone Alert**:
+The composite unit of record in `shopfront_clone_alerts`. One row per (Verified Shop, candidate domain) pair where at least one Clone Signal fired above threshold. Carries a severity score combining the firing signals, a JSONB array of per-signal evidence, and a `source` discriminator (Phase A: `corpus`; Phase B: `certstream_calidog`, `lexical_pattern`; Phase C: `nrd`, `hetzner_certstream`). A Clone Alert with `target_shop_id IS NULL` represents a hit on an AU shop that isn't a Verified Shop yet — the inbound queue for the cold-outreach pipeline (#385). Distinct from the existing `brand_impersonation_alerts` table (AU govt / bank / telco surface via crt.sh, per ADR-0016 — kept separate; cross-overlap modelled via a discriminator column rather than a third parallel table).
+_Avoid_: "clone hit", "clone finding" (the rejected parallel-table name from the Proactive Monitor draft), bare "match" (reserve for the signal types).
+
 ## Relationships
 
 - An **Analysis Result** produces exactly one **Verdict**.
@@ -74,6 +94,10 @@ _Avoid_: "email template" (overloaded), "newsletter shell", "briefing chrome".
 - A **Charity Check Result** is independent of the Scam Report graph — it carries a Verdict but doesn't itself become a Scam Report unless the user separately submits the underlying claim. Its pillars are not Scam Entities; they're external-register lookups.
 - A **Pillar** belongs to exactly one multi-pillar result type (Phone Footprint or Charity Check). The id namespace is per-feature; pillar ids are not globally unique.
 - A **Shop Signal** rides on an Analysis Result as an optional field — it is not its own result type and does not produce a separate Verdict. The Analysis Result's Verdict already incorporates whatever the analyser saw; Shop Signal exposes the commerce-shaped subset of that signal for surface-specific rendering.
+- A **Brand Match**, **Visual Match**, or **Semantic Match** is a Clone Signal — one of three inputs that feed a Clone Alert.
+- A **Clone Alert** is a composite — one alert may carry multiple Clone Signals (the JSONB evidence array records which signals fired, at what score, and from which population).
+- A **Clone Alert** belongs to exactly one **Verified Shop** via `target_shop_id`, OR has `target_shop_id IS NULL` when the matcher landed on an AU shop that isn't a Verified Shop yet (the Phase B+ lexical-pattern surface — feeds #385 cold-outreach).
+- A **Verified Shop** has continuous-verification state in `shopfront_verifications` (ADR-0011) and a public provenance page at `askarthur.au/verified/{shop-handle}` (ADR-0014).
 
 ## Example dialogue
 
@@ -86,5 +110,5 @@ _Avoid_: "email template" (overloaded), "newsletter shell", "briefing chrome".
 ## Flagged ambiguities
 
 - **"case"** is used informally to mean both **Scam Report** (the user-submitted item) and a Breach Defence case (a separate Phase-1 commercial concept tracked in `BACKLOG.md → Database Hygiene & SPF Readiness`). Keep distinct: prefer **Scam Report** for the consumer-flow item; reserve "case" for Breach Defence work, and define it precisely if/when that surface ships.
-- **"alert"** is overloaded: brand alerts (sent to monitored businesses), cost-telemetry alerts (Telegram digests), and oncall alerts (none yet) are different concepts. Resolve before adding the term to this glossary.
+- **"alert"** is still overloaded across the platform: brand alerts (the existing `brand_impersonation_alerts` table — AU govt/bank/telco surface), cost-telemetry alerts (Telegram digests), and oncall alerts (none yet) all live alongside the now-defined **Clone Alert** (clone-detection composite, in `shopfront_clone_alerts`). When the bare word "alert" appears in code or docs, prefer one of the specific terms.
 - **"campaign"** is overloaded: marketing campaigns (the `docs/campaigns/` folder) and scam campaigns (a near-synonym for **Scam Cluster** with an impersonated-brand axis). Prefer **Scam Cluster** for the scam-side meaning.
