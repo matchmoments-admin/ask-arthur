@@ -6,9 +6,13 @@
     ".": "./src/index.ts",
     "./analysis": "./src/analysis.ts",
     "./billing": "./src/billing.ts",
+    "./db": "./src/db.generated.ts",
     "./extension-security": "./src/extension-security.ts",
     "./intelligence": "./src/intelligence.ts",
     "./scanner": "./src/scanner.ts"
+  },
+  "scripts": {
+    "gen:db": "supabase gen types typescript --project-id rquomhcgnodxzkhokwni --schema public > src/db.generated.ts"
   },
   "dependencies": {
     "zod": "^4.3.6"

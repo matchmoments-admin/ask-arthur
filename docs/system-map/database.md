@@ -352,3 +352,25 @@ Both bites surface as immediate exceptions on the first call. Smoke test against
 SUPABASE_INTEGRATION_TEST_URL=… SUPABASE_INTEGRATION_TEST_SERVICE_KEY=… \
   pnpm --filter @askarthur/scam-engine test rpcs.smoke
 ```
+
+---
+
+## Generated TypeScript types
+
+The `public` schema is mirrored into TypeScript at `packages/types/src/db.generated.ts` and re-exported as `Database`, `Tables<>`, `TablesInsert<>`, `TablesUpdate<>`, `Enums<>` from `@askarthur/types`. Consumers can write `Tables<'feedback_triage_queue'>` instead of hand-maintaining a row interface that drifts the moment a column is added.
+
+**Regeneration command** (requires `SUPABASE_ACCESS_TOKEN` in environment):
+
+```bash
+pnpm --filter @askarthur/types gen:db
+```
+
+**When to regenerate** — after any migration that:
+
+- adds or renames a column on a `public` table or materialized view,
+- changes an enum's value list,
+- changes the argument list or return shape of a `public` RPC.
+
+The generated file is committed (NOT git-ignored) so CI typechecks have access to it without needing the Supabase CLI or an access token. The trade-off: every regen produces a sizeable diff that must land in the same PR as the migration that prompted it.
+
+**Pilot file** — `apps/web/app/admin/feedback/page.tsx` uses `Tables<'feedback_triage_queue'>` as the base for its `TriageRow` shape and narrows nullability + enum strings at the page boundary with a runtime type guard. Use this pattern (boundary narrowing, no `as` casts) when the MV/view row's nullability is wider than the consumer expects.

@@ -69,3 +69,6 @@ apps/extension/dist/
 
 # Salesforce DX cache (stray — not a Salesforce project; auto-created by IDE/CLI)
 .sfdx/
+
+# Supabase CLI ephemeral state (created by `supabase gen types`, etc.)
+**/supabase/.temp/
