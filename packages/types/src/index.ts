@@ -7,3 +7,5 @@ export * from "./news-intel";
 export * from "./organization";
 export * from "./scanner";
 export * from "./site-audit";
+
+export type { Database, Json, Tables, TablesInsert, TablesUpdate, Enums } from "./db.generated";

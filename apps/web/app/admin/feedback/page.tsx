@@ -1,31 +1,37 @@
 import { requireAdmin } from "@/lib/adminAuth";
+import type { Tables } from "@askarthur/types";
 import { createServiceClient } from "@askarthur/supabase/server";
 import TriageTable from "./TriageTable";
 
 export const dynamic = "force-dynamic";
 
-export interface TriageRow {
+type TriageRowRaw = Tables<"feedback_triage_queue">;
+
+const VERDICT_VALUES = ["SAFE", "UNCERTAIN", "SUSPICIOUS", "HIGH_RISK"] as const;
+const USER_SAYS_VALUES = ["false_positive", "false_negative", "user_reported"] as const;
+
+export type TriageRow = TriageRowRaw & {
   feedback_id: number;
   feedback_created_at: string;
-  verdict_given: "SAFE" | "UNCERTAIN" | "SUSPICIOUS" | "HIGH_RISK";
-  user_says: "false_positive" | "false_negative" | "user_reported";
-  reason_codes: string[] | null;
-  training_consent: boolean | null;
-  comment: string | null;
-  locale: string | null;
-  user_agent_family: string | null;
-  submitted_content_hash: string | null;
-  report_id: number | null;
-  analysis_id: string | null;
-  scrubbed_content: string | null;
-  verdict_confidence: number | null;
-  scam_type: string | null;
-  impersonated_brand: string | null;
-  report_source: string | null;
-  report_created_at: string | null;
+  verdict_given: (typeof VERDICT_VALUES)[number];
+  user_says: (typeof USER_SAYS_VALUES)[number];
   uncertainty: number;
   impact_weight: number;
   triage_score: number;
+};
+
+function isTriageRow(r: TriageRowRaw): r is TriageRow {
+  return (
+    r.feedback_id != null &&
+    r.feedback_created_at != null &&
+    r.uncertainty != null &&
+    r.impact_weight != null &&
+    r.triage_score != null &&
+    r.verdict_given != null &&
+    (VERDICT_VALUES as readonly string[]).includes(r.verdict_given) &&
+    r.user_says != null &&
+    (USER_SAYS_VALUES as readonly string[]).includes(r.user_says)
+  );
 }
 
 type FilterMode = "top" | "false_positive" | "false_negative" | "user_reported";
@@ -54,11 +60,11 @@ export default async function FeedbackTriagePage({
 
     if (summary && typeof summary === "object") {
       const s = summary as {
-        rows?: TriageRow[];
+        rows?: TriageRowRaw[];
         total?: number;
         counts?: Partial<typeof counts>;
       };
-      rows = s.rows ?? [];
+      rows = (s.rows ?? []).filter(isTriageRow);
       totalCount = s.total ?? 0;
       if (s.counts) {
         for (const k of ["false_positive", "false_negative", "user_reported"] as const) {
