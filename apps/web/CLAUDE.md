@@ -64,6 +64,12 @@ Only fall back to `pnpm turbo build` (no filter) when verifying cross-package im
 - **Cron routes live at `app/api/cron/*`** — wired to Vercel's `vercel.json`. Hold them under 5 min on a healthy DB or the `pg-stuck-query-watchdog` will page. Chunk hot-table work at ≤5K rows/iteration.
 - **Stripe customer-mapping is `user_profiles.stripe_customer_id` (v57)** — populated server-side by `getOrCreateStripeCustomer()` in `lib/stripe.ts`. The webhook handler cross-checks ownership against this. Don't trust `metadata.user_id` from Stripe events without verifying.
 
+## Recommended local tooling
+
+- **TypeScript LSP** — `/plugin install typescript-lsp@anthropics-claude-code` enables real type diagnostics and cross-package go-to-definition for the Claude Code session. High leverage in a 14-package monorepo with strict TS; per-developer choice (not committed config). Requires `typescript-language-server` available — installed via `pnpm install` at the workspace root.
+
+> The Zod 4 / Next 16 / React 19 drift hazards live in [`.claude/skills/grill-with-docs/STACK-PINS.md`](../../.claude/skills/grill-with-docs/STACK-PINS.md). Read that first if a session involves any of those libraries.
+
 ## Common pitfalls
 
 - `next/link` to a route that doesn't exist returns 404 at runtime, not build time — verify the path matches `app/<route>/page.tsx` or `app/(group)/<route>/page.tsx`.

@@ -71,6 +71,23 @@ if [ "$rel_path" = "packages/utils/src/feature-flags.ts" ]; then
   applicable+=("flag-governance")
 fi
 
+# cost-telemetry-instrumentation-reviewer:
+#   - apps/web/app/api/** (any .ts file under the API tree; * matches '/')
+case "$rel_path" in
+  apps/web/app/api/*.ts)
+    applicable+=("cost-telemetry-instrumentation")
+    ;;
+esac
+
+# rls-and-tenant-isolation-reviewer:
+#   - apps/web/** + packages/** (.ts / .tsx)
+#   - reviewer self-skips allowed worker-tier paths (scam-engine, inngest fns, supabase pkg)
+case "$rel_path" in
+  apps/web/*.ts|apps/web/*.tsx|packages/*.ts|packages/*.tsx)
+    applicable+=("rls-and-tenant-isolation")
+    ;;
+esac
+
 # No reviewers applicable — silent exit.
 [ ${#applicable[@]} -eq 0 ] && exit 0
 
