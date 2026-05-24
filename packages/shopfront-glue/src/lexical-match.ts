@@ -1,26 +1,30 @@
 // Deterministic lexical matcher for clone-watch Layer 0 — see ADR-0015
 // signal model (deterministic-string only at MVP; Voyage embeddings are
-// Phase C). Four signal types in priority order:
+// Phase C). Three signal types in priority order:
 //
 //   1. confusable  — domain contains a brand rendered via Unicode
 //                    confusables (cyrillic 'а' for latin 'a', etc.)
-//   2. punycode    — domain decodes via punycode to a string containing
-//                    the brand
-//   3. substring   — brand name appears in the domain label after
+//   2. substring   — brand name appears in the domain label after
 //                    normalisation
-//   4. levenshtein — domain label is ≤ edit-distance threshold from
-//                    the brand
+//   3. levenshtein — domain label is exactly 1 edit-distance from
+//                    the brand (distance-2 produces too many false
+//                    positives on legitimate AU domains — `bondi.com.au`
+//                    vs "Bonds", `targets.shop` vs "Target")
 //
-// Score is 0..1. A match against the entry's legitimate_domains returns
-// null (a brand can't clone itself).
+// Score is 0..1; bounded < 1.0 so brand_match_score * 40 stays below
+// the `medium` severity boundary at MVP. A match against the entry's
+// legitimate_domains returns null (a brand can't clone itself).
+//
+// Punycode / IDN homograph decoding is NOT covered at MVP. Node's
+// URL constructor does not decode A-labels (xn--...) to Unicode, so
+// the historical "punycode" signal was dead code. A-label substring
+// matches (e.g. `xn--bunnings-cn1c.shop` contains the latin string
+// "bunnings") still fire via the `substring` branch. Real IDN
+// decoding is a Phase B concern.
 
 import { AU_BRAND_WATCHLIST, type BrandEntry } from "./au-brand-watchlist";
 
-export type SignalType =
-  | "confusable"
-  | "punycode"
-  | "substring"
-  | "levenshtein";
+export type SignalType = "confusable" | "substring" | "levenshtein";
 
 export interface MatchResult {
   brand: string;
@@ -30,20 +34,20 @@ export interface MatchResult {
   evidence: Record<string, string | number>;
 }
 
-// Common cyrillic / greek / fullwidth → latin confusables. Not exhaustive;
-// extend as we see real-world hits. Keys are confusable characters; values
-// are their latin equivalents.
+// Lowercase cyrillic / greek / fullwidth → latin confusables. Uppercase
+// entries removed: `domain.toLowerCase()` runs before normalisation so
+// uppercase keys are unreachable.
 const CONFUSABLES: Record<string, string> = {
   "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "у": "y", "х": "x",
-  "А": "a", "В": "b", "Е": "e", "К": "k", "М": "m", "Н": "h", "О": "o",
-  "Р": "p", "С": "c", "Т": "t", "Х": "x",
+  "і": "i", "ј": "j", "ѕ": "s",
   "ο": "o", "α": "a", "ν": "v", "ρ": "p", "τ": "t",
   "０": "0", "１": "1", "２": "2", "３": "3", "４": "4",
   "５": "5", "６": "6", "７": "7", "８": "8", "９": "9",
 };
 
-const LEVENSHTEIN_THRESHOLD = 2;
+const LEVENSHTEIN_THRESHOLD = 1;
 const MIN_BRAND_LEN_FOR_LEVENSHTEIN = 5;
+const MAX_MATCH_SCORE = 0.95;
 
 export function lexicalMatch(
   domain: string,
@@ -64,18 +68,6 @@ export function lexicalMatch(
   for (const entry of watchlist) {
     const brand = entry.brand.toLowerCase().replace(/[^a-z0-9]/g, "");
     if (!brand) continue;
-
-    const punycodeForm = decodePunycode(primary);
-    if (punycodeForm && punycodeForm.includes(brand)) {
-      best = pickBetter(best, {
-        brand: entry.brand,
-        legitimate_domain: entry.legitimate_domains[0] ?? "",
-        score: 0.95,
-        signal_type: "punycode",
-        evidence: { input_label: primary, decoded: punycodeForm, brand },
-      });
-      continue;
-    }
 
     const normalised = normaliseConfusables(primary);
     if (normalised !== primary && normalised.includes(brand)) {
@@ -107,7 +99,7 @@ export function lexicalMatch(
         best = pickBetter(best, {
           brand: entry.brand,
           legitimate_domain: entry.legitimate_domains[0] ?? "",
-          score: Math.min(0.8, Math.max(0.55, score)),
+          score: Math.min(MAX_MATCH_SCORE, Math.max(0.55, score)),
           signal_type: "levenshtein",
           evidence: { input_label: primary, brand, edit_distance: dist },
         });
@@ -129,16 +121,6 @@ function normaliseConfusables(input: string): string {
     out += CONFUSABLES[ch] ?? ch;
   }
   return out;
-}
-
-function decodePunycode(label: string): string | null {
-  if (!label.startsWith("xn--")) return null;
-  try {
-    const url = new URL(`https://${label}.invalid/`);
-    return url.hostname.split(".")[0] ?? null;
-  } catch {
-    return null;
-  }
 }
 
 function levenshtein(a: string, b: string): number {

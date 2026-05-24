@@ -1,15 +1,19 @@
 // AU brand watchlist for Layer 0 clone-watch (NRD daily ingest).
 //
-// Cross-surface dedupe in S0E.2 routes bank/telco/post hits that overlap
-// ct-monitor.ts coverage to brand_impersonation_alerts instead of duplicating
-// here — see ADR-0016 "different product surface" and shopfront-nrd-daily-ingest
-// step 4. The signal is preserved; the storage discriminator is enforced
-// at the seam, not by trimming the watchlist.
+// Banks/telcos/post are retained alongside the consumer-extension
+// ct-monitor.ts coverage. The cross-surface dedupe step was dropped
+// from MVP scope (see canonicalise.ts header for context — the
+// brand_impersonation_alerts table has no candidate_url column). For
+// the ~6-12 bank/telco/post brands on this list, accept that Layer 0
+// and ct-monitor.ts may report the same suspect domain on two
+// surfaces during the 7-day MVP evidence window. If duplicate noise
+// becomes material, a follow-up migration adds candidate_url to
+// brand_impersonation_alerts and reintroduces dedupe.
 //
 // legitimate_domains is the matcher's exclusion list — exact-string hits
-// against these never produce an alert. Each brand SHOULD include the
-// .com.au + .com.au.{state} + bare .com forms it actually operates on,
-// so a domain like `bunnings.com.au` isn't reported as a clone of itself.
+// against these never produce an alert. Each brand SHOULD include every
+// real domain it operates on so a domain like `davidjones.com.au` isn't
+// reported as a clone of itself.
 
 export interface BrandEntry {
   brand: string;
@@ -27,7 +31,7 @@ export const AU_BRAND_WATCHLIST: BrandEntry[] = [
   { brand: "Target", legitimate_domains: ["target.com.au"] },
   { brand: "Big W", legitimate_domains: ["bigw.com.au"] },
   { brand: "Myer", legitimate_domains: ["myer.com.au"] },
-  { brand: "David Jones", legitimate_domains: ["davidjones.com"] },
+  { brand: "David Jones", legitimate_domains: ["davidjones.com.au", "davidjones.com"] },
 
   // Retail — electronics + hardware + homewares
   { brand: "JB Hi-Fi", legitimate_domains: ["jbhifi.com.au"] },

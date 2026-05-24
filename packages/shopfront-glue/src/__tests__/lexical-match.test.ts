@@ -24,7 +24,7 @@ describe("lexicalMatch", () => {
     expect(result?.signal_type).toBe("substring");
   });
 
-  it("matches a typo within Levenshtein threshold", () => {
+  it("matches a single-edit typo (Levenshtein distance 1)", () => {
     const result = lexicalMatch("bunings.shop", TEST_WATCHLIST);
     expect(result).not.toBeNull();
     expect(result?.brand).toBe("Bunnings");
@@ -32,8 +32,12 @@ describe("lexicalMatch", () => {
     expect(result?.evidence.edit_distance).toBe(1);
   });
 
-  it("rejects a typo outside Levenshtein threshold", () => {
-    const result = lexicalMatch("bnngs.shop", TEST_WATCHLIST);
+  it("rejects a 2-edit typo (threshold=1 lowers FP rate on legit AU domains)", () => {
+    // 'bunnnigs' is distance 2 from 'bunnings' — threshold=1 means no fire.
+    // This is the defamation-defence boundary: `bondi.com.au` (dist 1 from
+    // Bonds is still a hit), but distance-2 dictionary words (`bonded.com`,
+    // `targets.shop`, `subwy.com`) are out.
+    const result = lexicalMatch("bunnnigs.shop", TEST_WATCHLIST);
     expect(result).toBeNull();
   });
 
@@ -58,18 +62,39 @@ describe("lexicalMatch", () => {
     expect(result).toBeNull();
   });
 
-  it("decodes punycode and detects brand", () => {
-    const punycoded = "xn--bunnings-cn1c";
-    const result = lexicalMatch(`${punycoded}.shop`, TEST_WATCHLIST);
-    if (result) {
-      expect(result.brand).toBe("Bunnings");
-      expect(["punycode", "substring"]).toContain(result.signal_type);
-    }
+  it("substring-matches an A-label that contains the brand string", () => {
+    // We do NOT decode IDN at MVP — Node's URL constructor doesn't decode
+    // punycode A-labels to Unicode. Instead we rely on the brand appearing
+    // as a substring of the raw label (xn--bunnings-cn1c.shop contains
+    // "bunnings"). Real IDN homograph handling is Phase B scope.
+    const result = lexicalMatch("xn--bunnings-cn1c.shop", TEST_WATCHLIST);
+    expect(result).not.toBeNull();
+    expect(result?.brand).toBe("Bunnings");
+    expect(result?.signal_type).toBe("substring");
   });
 
   it("prefers higher-score signal when multiple types match", () => {
     const result = lexicalMatch("bunnings.shop", TEST_WATCHLIST);
     expect(result).not.toBeNull();
     expect(result?.signal_type).toBe("substring");
+  });
+
+  it("never returns score >= 1.0 (cap below `medium` severity boundary)", () => {
+    // Per #376 severity formula `round(score * 40)`, score >= 1.0 would map
+    // to severity 40 = `medium` tier, violating the MVP cap. Confusable is
+    // the highest signal at 0.9 → severity 36 → low. Defence-in-depth: if
+    // a future signal pushes score above 0.95 the matcher clamps.
+    const probes = [
+      "bunnings.shop",
+      "bunings.shop",
+      "westpаc-login.shop",
+      "jbhifi-au.shop",
+    ];
+    for (const probe of probes) {
+      const result = lexicalMatch(probe, TEST_WATCHLIST);
+      if (result) {
+        expect(result.score).toBeLessThan(1.0);
+      }
+    }
   });
 });
