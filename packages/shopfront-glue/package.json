@@ -1,0 +1,23 @@
+{
+  "name": "@askarthur/shopfront-glue",
+  "version": "0.0.0",
+  "private": true,
+  "exports": {
+    ".": "./src/index.ts",
+    "./au-brand-watchlist": "./src/au-brand-watchlist.ts",
+    "./canonicalise": "./src/canonicalise.ts",
+    "./lexical-match": "./src/lexical-match.ts"
+  },
+  "dependencies": {
+    "@askarthur/types": "workspace:*",
+    "@askarthur/utils": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5",
+    "vitest": "^4.0.18"
+  },
+  "scripts": {
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit"
+  }
+}

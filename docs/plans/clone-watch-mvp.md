@@ -102,11 +102,11 @@ To be appended to `docs/adr/0016-clone-detection-source-layering.md` after the "
 
 ## 3-PR sequence
 
-| PR  | Title                                                                                                 | Files                                                                                                                                                     | Wall-clock | Issue |
-| --- | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | ----- |
-| 1   | feat(shopfront-glue): clone-watch MVP foundation — v140 schema + AU brand watchlist + lexical matcher | new `packages/shopfront-glue/` package; `supabase/migrations/migration-v140-shopfront-init.sql`; `au-brand-watchlist.ts`; `lexical-match.ts` + unit tests | ~1.5 days  | S0E.1 |
-| 2   | feat(shopfront-glue): NRD daily Inngest ingest + Telegram digest                                      | `packages/scam-engine/src/inngest/shopfront-nrd-daily-ingest.ts`; env var `WHOISDS_NRD_ZIP_URL`; feature flag `FF_SHOPFRONT_CLONE_WATCH` default OFF      | ~1.5 days  | S0E.2 |
-| 3   | feat(web): public /clone-watch page + ADR-0016 amendment commit                                       | `apps/web/app/clone-watch/page.tsx`; optional `/clone-watch/[brand]/page.tsx`; sitemap + robots; `docs/adr/0016-...md` addendum; #376 body amendment      | ~1 day     | S0E.3 |
+| PR  | Title                                                                                                 | Files                                                                                                                                                | Wall-clock | Issue |
+| --- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | ----- |
+| 1   | feat(shopfront-glue): clone-watch MVP foundation — v140 schema + AU brand watchlist + lexical matcher | new `packages/shopfront-glue/` package; `supabase/migration-v140-shopfront-init.sql`; `au-brand-watchlist.ts`; `lexical-match.ts` + unit tests       | ~1.5 days  | S0E.1 |
+| 2   | feat(shopfront-glue): NRD daily Inngest ingest + Telegram digest                                      | `packages/scam-engine/src/inngest/shopfront-nrd-daily-ingest.ts`; env var `WHOISDS_NRD_ZIP_URL`; feature flag `FF_SHOPFRONT_CLONE_WATCH` default OFF | ~1.5 days  | S0E.2 |
+| 3   | feat(web): public /clone-watch page + ADR-0016 amendment commit                                       | `apps/web/app/clone-watch/page.tsx`; optional `/clone-watch/[brand]/page.tsx`; sitemap + robots; `docs/adr/0016-...md` addendum; #376 body amendment | ~1 day     | S0E.3 |
 
 **Total wall-clock:** ~4 days of focused work for a working engine + public URL.
 
@@ -114,7 +114,7 @@ To be appended to `docs/adr/0016-clone-detection-source-layering.md` after the "
 
 **Goal:** schema + matcher in place. No execution yet.
 
-**Migration v140 (`supabase/migrations/migration-v140-shopfront-init.sql`):**
+**Migration v140 (`supabase/migration-v140-shopfront-init.sql`):**
 
 - `shopfront_shops` (per #376 schema reference; stays empty until #373)
 - `shopfront_clone_alerts` (per #376 locked schema, ALL columns + CHECK + indexes)
