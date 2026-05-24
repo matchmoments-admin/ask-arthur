@@ -12,6 +12,8 @@
 -- Phase B (#383) reuse the same RPC — same write target, same dedupe
 -- semantics.
 
+-- Signature changes require DROP FUNCTION first (Postgres restriction);
+-- the REVOKE/GRANT statements below must be re-applied after any DROP.
 CREATE OR REPLACE FUNCTION public.upsert_clone_alerts_batch(p_rows JSONB)
 RETURNS INTEGER
 LANGUAGE plpgsql
@@ -21,6 +23,10 @@ AS $$
 DECLARE
   inserted_count INTEGER := 0;
 BEGIN
+  -- Per CLAUDE.md "long-running write loop" rule: cap at a real value so
+  -- a 5K-row chunk under load can't silently truncate mid-batch.
+  SET LOCAL statement_timeout = '300s';
+
   WITH upsert AS (
     INSERT INTO public.shopfront_clone_alerts (
       target_shop_id,
@@ -41,7 +47,14 @@ BEGIN
       r->>'url_hash',
       COALESCE(r->'signals', '[]'::jsonb),
       (r->>'severity')::SMALLINT,
-      r->>'severity_tier',
+      -- Defensive: callers MUST supply a valid tier, but coerce unexpected
+      -- values to 'low' so a single bad row can't violate the CHECK and
+      -- abort the whole chunk's transaction.
+      CASE
+        WHEN r->>'severity_tier' IN ('low', 'medium', 'high', 'critical')
+          THEN r->>'severity_tier'
+        ELSE 'low'
+      END,
       r->>'source'
     FROM jsonb_array_elements(p_rows) AS r
     ON CONFLICT (

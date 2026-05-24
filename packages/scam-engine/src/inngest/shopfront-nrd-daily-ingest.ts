@@ -28,9 +28,12 @@ import {
 import { ssrfSafeDispatcher } from "../ssrf-dispatcher";
 
 const ZIP_DOWNLOAD_TIMEOUT_MS = 60_000;
-const MAX_ZIP_BYTES = 200 * 1024 * 1024; // 200 MB
+const MAX_ZIP_BYTES = 50 * 1024 * 1024; // 50 MB compressed — 10x the legit
+                                        // whoisds payload (~5-15 MB)
+const MAX_UNCOMPRESSED_BYTES = 500 * 1024 * 1024; // 500 MB — zip-bomb guard
 const UPSERT_CHUNK_SIZE = 5_000;
 const TELEGRAM_DIGEST_TOP_N = 5;
+const FAILED_CHUNK_THROW_RATIO = 0.1; // throw if >10% of chunks failed
 
 interface MatchHit {
   candidate_domain: string;
@@ -49,6 +52,10 @@ export const shopfrontNrdDailyIngest = inngest.createFunction(
     name: "Shopfront Clone-Watch: Daily NRD Ingest",
     // Per CLAUDE.md "<5 min" rule. Add 1m safety margin.
     timeouts: { finish: "6m" },
+    // Singleton — prevent overlap on slow run or manual invoke during cron
+    // window. Matches the shape used by other singleton crons in this
+    // codebase (cluster-builder, enrichment, urlscan-enrichment, etc).
+    concurrency: { limit: 1 },
   },
   { cron: "30 8 * * *" },
   async ({ step }) => {
@@ -58,8 +65,8 @@ export const shopfrontNrdDailyIngest = inngest.createFunction(
 
     const nrdUrl = process.env.WHOISDS_NRD_ZIP_URL;
     if (!nrdUrl) {
+      // Benign skip — don't pollute cost_telemetry's error stream.
       logger.warn("shopfront-nrd: WHOISDS_NRD_ZIP_URL unset — skipping run");
-      await logErrorTelemetry("nrd_url_missing", { url_set: false });
       return { skipped: true, reason: "WHOISDS_NRD_ZIP_URL unset" };
     }
 
@@ -83,6 +90,8 @@ export const shopfrontNrdDailyIngest = inngest.createFunction(
         domains_scanned: domains.length,
         hits_found: hits.length,
         rows_inserted: upsertResult.inserted,
+        failed_chunks: upsertResult.failed_chunks,
+        total_chunks: upsertResult.total_chunks,
       });
     });
 
@@ -91,6 +100,7 @@ export const shopfrontNrdDailyIngest = inngest.createFunction(
         domains_scanned: domains.length,
         hits,
         inserted: upsertResult.inserted,
+        failed_chunks: upsertResult.failed_chunks,
       });
     });
 
@@ -98,12 +108,14 @@ export const shopfrontNrdDailyIngest = inngest.createFunction(
       domains: domains.length,
       hits: hits.length,
       inserted: upsertResult.inserted,
+      failed_chunks: upsertResult.failed_chunks,
     });
 
     return {
       domains_scanned: domains.length,
       hits_found: hits.length,
       rows_inserted: upsertResult.inserted,
+      failed_chunks: upsertResult.failed_chunks,
     };
   },
 );
@@ -138,8 +150,18 @@ async function parseNrdZip(zipBuffer: Uint8Array): Promise<string[]> {
     throw new Error("NRD zip contained no .txt entries");
   }
   const out: string[] = [];
+  let uncompressedBytesSeen = 0;
   for (const entry of entries) {
     const text = await entry.async("string");
+    // Zip-bomb defence: a malicious zip can compress 1000:1. Cap the
+    // aggregate decompressed bytes across all entries to keep memory
+    // bounded even if the compressed payload was within MAX_ZIP_BYTES.
+    uncompressedBytesSeen += text.length;
+    if (uncompressedBytesSeen > MAX_UNCOMPRESSED_BYTES) {
+      throw new Error(
+        `NRD zip decompressed-size cap exceeded (${uncompressedBytesSeen} > ${MAX_UNCOMPRESSED_BYTES})`,
+      );
+    }
     for (const raw of text.split(/\r?\n/)) {
       const line = raw.trim().toLowerCase();
       if (!line || line.startsWith("#")) continue;
@@ -176,6 +198,8 @@ async function matchDomains(domains: string[]): Promise<MatchHit[]> {
 
 export interface UpsertChunkResult {
   inserted: number;
+  failed_chunks: number;
+  total_chunks: number;
 }
 
 export function buildUpsertRow(hit: MatchHit) {
@@ -205,22 +229,28 @@ export function buildUpsertRow(hit: MatchHit) {
 }
 
 async function upsertHitsInChunks(hits: MatchHit[]): Promise<UpsertChunkResult> {
-  if (hits.length === 0) return { inserted: 0 };
+  if (hits.length === 0) {
+    return { inserted: 0, failed_chunks: 0, total_chunks: 0 };
+  }
 
   const supabase = createServiceClient();
   if (!supabase) {
     logger.warn("shopfront-nrd: Supabase client unavailable — skipping upsert");
-    return { inserted: 0 };
+    return { inserted: 0, failed_chunks: 0, total_chunks: 0 };
   }
 
   let inserted = 0;
+  let failed_chunks = 0;
+  let total_chunks = 0;
   for (let i = 0; i < hits.length; i += UPSERT_CHUNK_SIZE) {
+    total_chunks++;
     const chunk = hits.slice(i, i + UPSERT_CHUNK_SIZE);
     const rows = chunk.map(buildUpsertRow);
     const { data, error } = await supabase.rpc("upsert_clone_alerts_batch", {
       p_rows: rows,
     });
     if (error) {
+      failed_chunks++;
       logger.error("shopfront-nrd: upsert chunk failed", {
         chunk_start: i,
         chunk_size: chunk.length,
@@ -236,7 +266,21 @@ async function upsertHitsInChunks(hits: MatchHit[]): Promise<UpsertChunkResult> 
     inserted += typeof data === "number" ? data : 0;
   }
 
-  return { inserted };
+  // If a large fraction of chunks failed, fail the Inngest step so the run
+  // surfaces as red on the dashboard rather than reporting "0 new rows" on
+  // what's actually a broken pipeline.
+  if (
+    total_chunks > 0 &&
+    failed_chunks / total_chunks > FAILED_CHUNK_THROW_RATIO
+  ) {
+    throw new Error(
+      `shopfront-nrd: ${failed_chunks}/${total_chunks} chunks failed (>${
+        FAILED_CHUNK_THROW_RATIO * 100
+      }%)`,
+    );
+  }
+
+  return { inserted, failed_chunks, total_chunks };
 }
 
 // ── Cost telemetry + error log ───────────────────────────────────────────
@@ -245,6 +289,8 @@ async function logCostTelemetry(args: {
   domains_scanned: number;
   hits_found: number;
   rows_inserted: number;
+  failed_chunks: number;
+  total_chunks: number;
 }): Promise<void> {
   const supabase = createServiceClient();
   if (!supabase) return;
@@ -258,6 +304,8 @@ async function logCostTelemetry(args: {
       domains_scanned: args.domains_scanned,
       hits_found: args.hits_found,
       rows_inserted: args.rows_inserted,
+      failed_chunks: args.failed_chunks,
+      total_chunks: args.total_chunks,
     },
   });
 }
@@ -283,6 +331,7 @@ async function sendTelegramDigest(args: {
   domains_scanned: number;
   hits: MatchHit[];
   inserted: number;
+  failed_chunks: number;
 }): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_ADMIN_CHAT_ID;
@@ -306,6 +355,11 @@ async function sendTelegramDigest(args: {
   lines.push(
     `Scanned <b>${args.domains_scanned.toLocaleString()}</b> domains · <b>${args.hits.length}</b> hits · <b>${args.inserted}</b> new rows.`,
   );
+  if (args.failed_chunks > 0) {
+    lines.push(
+      `⚠️ <b>${args.failed_chunks}</b> chunk(s) failed — see cost_telemetry WHERE feature='shopfront_clone_watch_error'`,
+    );
+  }
   if (topBrands.length > 0) {
     lines.push("");
     lines.push("<b>Top brands:</b>");
