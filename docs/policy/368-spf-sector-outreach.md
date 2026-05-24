@@ -2,6 +2,15 @@
 
 **Status:** ready to send. Action: brendan picks 5–10 contacts, customises per-org, sends in batches of 2–3 per week.
 
+**Evidence freshness (2026-05-24):** Layer 0 of clone-detection is now LIVE in prod. The `/clone-watch` page surfaces newly-registered-domain (NRD) candidate clones against an AU-brand watchlist. v2 matcher (PR #408) shipped 2026-05-24; Day 1 ledger after deploy: **5 alerts across 4 brands, ~20% FP rate** (within the <30% acceptance gate). Live hits:
+
+- **Westpac** — `westpachomesb.info` (TP-class; plausible homepage clone)
+- **Target** — `target-ads.pro` (TP-class; clean ads-suffix impersonation pattern) + `targetspheresolutions.shop` (marginal — Phase A DNS check needed)
+- **Kmart** — `qkmart.com` (TP-class; single-char-prefix typosquat caught via Levenshtein)
+- **Coles** — `autoecolesoultbycfconduite.fr` (FP; French driving school; known v3 follow-up #409)
+
+**Use the live `/clone-watch` page as evidence in every conversation** — outreach now references shipped behaviour and a real Day-1 evidence cohort, not a roadmap promise.
+
 **Goal:** validate willingness-to-pay A$1,500–2,500/mo (≈ A$18K–30K/yr) for the Ask Arthur Network — Threat Feed License product (ADR-0012, plan §2 Layer 4). Without ~$15-20K MRR from this tier (10–15 enterprise customers), the free Shopfront tier + ops + takedown triage bleed money. This is **the funding-engine validation gate** — its outcome determines whether Shopfront Stage 1 ships and whether Phase C clone-detection (#384) is worth building.
 
 ---
@@ -14,7 +23,7 @@ Prioritised by SPF-designated sector. Each org gets a customised email — commo
 
 - **Commonwealth Bank** — fraud-ops team (LinkedIn intro via mutual; or `fraud-team@cba.com.au` as the public ingress). Reference CBA's NameCheck product as proof they're investing here.
 - **NAB** — try via Innovation Hub / scam-intelligence team. NAB's "Acquaintance Scam" reports may be a hook.
-- **Westpac** — fraud-ops. Public scam-awareness campaign suggests appetite.
+- **Westpac** — fraud-ops. Public scam-awareness campaign suggests appetite. **Live evidence for Westpac specifically:** `westpachomesb.info` is currently in `/clone-watch` (TP-class signal, plausible homepage-clone domain). Open with this in the email.
 
 ### Telcos (2) — looking to detect scam-SMS sender IDs
 
@@ -41,13 +50,17 @@ Prioritised by SPF-designated sector. Each org gets a customised email — commo
 
 ## What we're selling (the SKU)
 
-API access to the Ask Arthur threat-feed corpus:
+API access to the Ask Arthur threat-feed corpus (figures as of 2026-05-24):
 
-- Scam corpus (currently ~56 user-submitted reports + 2,643 feed_items + 18 brand_impersonation_alerts — grows daily as the consumer extension / mobile app uptake)
-- Reddit Intel narrative classifier (840 rows; 13 brief narrative categories) — surfaces emergent scam techniques
+- Scam corpus (56 user-submitted reports + 2,699 feed_items + 18 brand_impersonation_alerts — grows daily as the consumer extension / mobile app uptake)
+- Reddit Intel narrative classifier (~840 rows; 13 brief narrative categories) — surfaces emergent scam techniques
 - RaaS Telegram cross-reference — phone numbers / URLs scraped from active scammer channels
 - ABN / ACNC verification engine (63,637 ACNC charities indexed)
-- Phase C clone-detection feeds (gated on this WTP signal) — proactive clone-domain inventory, banks ingest into fraud-rule engines
+- **Clone-detection feeds, staged build (ADR-0015/0016):**
+  - **Layer 0 (LIVE 2026-05-24)** — deterministic NRD lexical sweep, ~50 AU brands, daily; current footprint: 17 alerts in 24h including 1 plausible Westpac clone. View at `/clone-watch`.
+  - **Phase A (next)** — DNS + content active-scanner against Layer 0 candidates; resolves the FP/FN trade-off.
+  - **Phase B** — Certificate Transparency firehose; catches clones at issuance.
+  - **Phase C** — Voyage embeddings + optional Hetzner compute for visual + semantic matching; **explicitly gated on this WTP validation landing positive.**
 
 Delivery: API access + SLA + named support + custom integrations + (where Phase C clones a partner's domain corpus) co-investigation.
 
@@ -67,7 +80,7 @@ Subject: **Ask Arthur Network — AU threat-feed for [bank fraud-ops / telco tru
 >
 > - **AU scam corpus** (consumer-reported scams, URL/phone/email indicators, narrative classification)
 > - **Reddit Intel** narrative classifier (emergent scam techniques surfaced before they hit mainstream channels)
-> - **Phase C clone-detection feeds** (Q4 2026) — proactive inventory of newly-stood-up clone domains targeting AU consumers
+> - **Clone-detection feeds** — Layer 0 (live today at [askarthur.au/clone-watch](https://askarthur.au/clone-watch); 17 candidate-clones in the last 24h across the AU-brand watchlist), Phase A/B/C planned per ADR-0015/0016 (DNS-active scanner → Certificate-Transparency firehose → semantic-match via Voyage embeddings). Phase C explicitly gated on this WTP conversation landing positive.
 > - **ABN / ACNC verification adapter** (the registered-business + registered-charity validators we've built)
 >
 > Delivery: API + SLA + named support + custom integrations.
