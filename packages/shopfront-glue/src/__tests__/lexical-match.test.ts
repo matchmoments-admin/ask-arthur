@@ -121,6 +121,112 @@ describe("lexicalMatch", () => {
     expect(result?.signal_type).toBe("substring");
   });
 
+  // v2 scam-context-token gate (issue #405). Second prod run after #403
+  // surfaced ~70% FP rate from common-English-word embeddings ("Greece"
+  // contains "reece", "carpentry" contains "target"). Substring hits now
+  // require either (a) primary label IS the brand exactly, or (b) a
+  // scam-context token (bank/login/shop/pay/au/etc.) appears in the
+  // domain with the brand stripped.
+
+  it("v2: bare-brand-on-wrong-TLD always fires (no context token required)", () => {
+    // `westpac.com` — primary IS the brand, .com is not the legitimate TLD.
+    // Classic impersonation; must hit regardless of context tokens.
+    const result = lexicalMatch("westpac.com", TEST_WATCHLIST);
+    expect(result).not.toBeNull();
+    expect(result?.brand).toBe("Westpac");
+    expect(result?.signal_type).toBe("substring");
+  });
+
+  it("v2: does NOT fire on 'Greece' for brand 'Reece' (common-word embedding)", () => {
+    const list: BrandEntry[] = [{ brand: "Reece", legitimate_domains: ["reece.com.au"] }];
+    expect(lexicalMatch("bigclash-greece.co", list)).toBeNull();
+    expect(lexicalMatch("greeceexcursion.com", list)).toBeNull();
+    expect(lexicalMatch("spindjinn-greece.net", list)).toBeNull();
+  });
+
+  it("v2: does NOT fire on common-word embeddings of brand 'Target' (no scam-context)", () => {
+    const list: BrandEntry[] = [{ brand: "Target", legitimate_domains: ["target.com.au"] }];
+    // 'targettcarpentryltd.co.uk' — carpenter surname-style FP
+    expect(lexicalMatch("targettcarpentryltd.co.uk", list)).toBeNull();
+    // 'legacypnttargetpro.co' — random "pro" suffix, no scam-context token
+    expect(lexicalMatch("legacypnttargetpro.co", list)).toBeNull();
+  });
+
+  it("v2: does NOT fire on surname-embedded 'colescreekllc.org' for brand 'Coles'", () => {
+    const list: BrandEntry[] = [{ brand: "Coles", legitimate_domains: ["coles.com.au"] }];
+    expect(lexicalMatch("colescreekllc.org", list)).toBeNull();
+  });
+
+  it("v2: does NOT fire on 'pricelineevsunbury.com' (brand-substring with no context)", () => {
+    const list: BrandEntry[] = [{ brand: "Priceline", legitimate_domains: ["priceline.com.au"] }];
+    expect(lexicalMatch("pricelineevsunbury.com", list)).toBeNull();
+  });
+
+  it("v2: DOES fire on 'westpachomesb.info' (TP — residue contains 'home')", () => {
+    const list: BrandEntry[] = [{ brand: "Westpac", legitimate_domains: ["westpac.com.au"] }];
+    const result = lexicalMatch("westpachomesb.info", list);
+    expect(result).not.toBeNull();
+    expect(result?.brand).toBe("Westpac");
+    expect(result?.signal_type).toBe("substring");
+  });
+
+  it("v2: 1-char-prefix typosquats stay caught via Levenshtein fallback", () => {
+    // 'qkmart.com' — substring gate kills the brand-substring path (no
+    // context token in `q .com`), but Levenshtein (dist=1, minlen=5 met)
+    // still fires. This is the safety net for single-edit typosquats
+    // (`qkmart`, `kmartz`, `2kmart`) which lack context tokens. Brands
+    // shorter than 5 chars (KFC, ANZ, NAB, IGA, Aldi) skip Levenshtein
+    // by design, so `kfc-net.net` IS a known FN — see next test.
+    const list: BrandEntry[] = [{ brand: "Kmart", legitimate_domains: ["kmart.com.au"] }];
+    const result = lexicalMatch("qkmart.com", list);
+    expect(result).not.toBeNull();
+    expect(result?.signal_type).toBe("levenshtein");
+  });
+
+  it("v2: known FN — 'kfc-net.net' is gated out (short brand, no Levenshtein safety net)", () => {
+    // Short brands (<5 chars) skip Levenshtein to avoid `kfd`/`kfe`-style
+    // dictionary collisions, so brand-substring is their only path. Gated
+    // by context-token requirement here; Phase A scanner (#376) picks up
+    // domains like `kfc-net.net` via DNS/content inspection.
+    const list: BrandEntry[] = [{ brand: "KFC", legitimate_domains: ["kfc.com.au"] }];
+    expect(lexicalMatch("kfc-net.net", list)).toBeNull();
+  });
+
+  it("v2: .com.au TLD alone does NOT satisfy the 'au' context token", () => {
+    // `targetscarpenter.com.au` — brand substring + `.com.au` suffix.
+    // The 2-char ccTLD drop prevents the universal `.au` from leaking.
+    const list: BrandEntry[] = [{ brand: "Target", legitimate_domains: ["target.com.au"] }];
+    expect(lexicalMatch("targetscarpenter.com.au", list)).toBeNull();
+  });
+
+  it("v2: 'au' as a primary-label segment IS legitimate context", () => {
+    // Use .com TLD (not .shop) to isolate the `au` token as the only
+    // possible gate trigger; `.shop` would also satisfy the gate and
+    // mask whether the `au`-as-segment path actually fires.
+    const list: BrandEntry[] = [{ brand: "Westpac", legitimate_domains: ["westpac.com.au"] }];
+    const result = lexicalMatch("westpac-au.com", list);
+    expect(result).not.toBeNull();
+    expect(result?.signal_type).toBe("substring");
+  });
+
+  it("v2: confusable signal is NOT gated by context-token requirement", () => {
+    // Cyrillic 'а' in westpac with no other context tokens. Confusable hits
+    // are intentional homograph attacks — always high-confidence.
+    const list: BrandEntry[] = [{ brand: "Westpac", legitimate_domains: ["westpac.com.au"] }];
+    const result = lexicalMatch("westpаc.net", list);
+    expect(result).not.toBeNull();
+    expect(result?.signal_type).toBe("confusable");
+  });
+
+  it("v2: Levenshtein signal is NOT gated by context-token requirement", () => {
+    // bunings (1-edit from bunnings) on a .net TLD with no context tokens.
+    // Single-edit typos are scoped tightly already (threshold=1, minlen=5).
+    const list: BrandEntry[] = [{ brand: "Bunnings", legitimate_domains: ["bunnings.com.au"] }];
+    const result = lexicalMatch("bunings.net", list);
+    expect(result).not.toBeNull();
+    expect(result?.signal_type).toBe("levenshtein");
+  });
+
   it("never returns score >= 1.0 (cap below `medium` severity boundary)", () => {
     // Per #376 severity formula `round(score * 40)`, score >= 1.0 would map
     // to severity 40 = `medium` tier, violating the MVP cap. Confusable is
