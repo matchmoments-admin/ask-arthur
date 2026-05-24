@@ -6,9 +6,15 @@
 // (target_shop_id IS NULL branch, source = 'nrd'), and sends a
 // Telegram summary to the admin chat.
 //
+// URL is computed from yesterday's UTC date — whoisds publishes
+// each day's NRD list as a free zip at a deterministic
+// base64-of-"YYYY-MM-DD.zip" URL. No auth, no env-var maintenance,
+// no monthly rotation. WHOISDS_NRD_ZIP_URL still works as an
+// optional override for testing or emergency source-switching.
+//
 // See docs/plans/clone-watch-mvp.md §4 PR 2 for the full contract.
 //
-// Expected duration: 30s-3min for ~100K-1M domains/day. Hard-capped
+// Expected duration: 30s-3min for ~70K domains/day. Hard-capped
 // to <5 min per CLAUDE.md Inngest rule. statement_timeout='300s' per
 // CLAUDE.md long-running write loop rule.
 
@@ -63,12 +69,10 @@ export const shopfrontNrdDailyIngest = inngest.createFunction(
       return { skipped: true, reason: "FF_SHOPFRONT_CLONE_WATCH disabled" };
     }
 
-    const nrdUrl = process.env.WHOISDS_NRD_ZIP_URL;
-    if (!nrdUrl) {
-      // Benign skip — don't pollute cost_telemetry's error stream.
-      logger.warn("shopfront-nrd: WHOISDS_NRD_ZIP_URL unset — skipping run");
-      return { skipped: true, reason: "WHOISDS_NRD_ZIP_URL unset" };
-    }
+    // Compute yesterday's NRD URL from UTC date. Override possible via
+    // WHOISDS_NRD_ZIP_URL for tests, emergency source-switching, or
+    // back-fills against a specific historical date.
+    const nrdUrl = process.env.WHOISDS_NRD_ZIP_URL ?? computeNrdUrl(yesterdayUtc());
 
     // Download + parse in a single step: Inngest serialises step return
     // values to JSON, so a Uint8Array can't cross step boundaries.
@@ -119,6 +123,35 @@ export const shopfrontNrdDailyIngest = inngest.createFunction(
     };
   },
 );
+
+// ── URL computation ──────────────────────────────────────────────────────
+
+/**
+ * The whoisds free-tier daily NRD list lives at a deterministic URL
+ * derived from base64(YYYY-MM-DD.zip). No auth required (the page's
+ * terms state "free of charge … without a license and without any
+ * payment"). The cron runs at 08:30 UTC and fetches *yesterday's*
+ * list — whoisds publishes each day's NRD overnight UTC.
+ */
+export function computeNrdUrl(date: Date): string {
+  const iso = formatUtcDate(date); // "YYYY-MM-DD"
+  const filename = `${iso}.zip`;
+  const b64 = Buffer.from(filename, "utf8").toString("base64");
+  return `https://www.whoisds.com/whois-database/newly-registered-domains/${b64}/nrd`;
+}
+
+export function yesterdayUtc(now: Date = new Date()): Date {
+  const d = new Date(now);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d;
+}
+
+function formatUtcDate(date: Date): string {
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(date.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
 
 // ── Downloads ─────────────────────────────────────────────────────────────
 

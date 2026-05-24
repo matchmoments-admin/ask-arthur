@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildUpsertRow } from "../shopfront-nrd-daily-ingest";
+import {
+  buildUpsertRow,
+  computeNrdUrl,
+  yesterdayUtc,
+} from "../shopfront-nrd-daily-ingest";
 
 const baseHit = {
   candidate_domain: "bunings-au-deals.shop",
@@ -51,5 +55,47 @@ describe("buildUpsertRow", () => {
       brand: "bunnings",
     });
     expect(typeof sig?.fired_at).toBe("string");
+  });
+});
+
+describe("computeNrdUrl", () => {
+  it("encodes 2026-05-23 to the live URL the operator pasted from whoisds", () => {
+    const url = computeNrdUrl(new Date(Date.UTC(2026, 4, 23)));
+    expect(url).toBe(
+      "https://www.whoisds.com/whois-database/newly-registered-domains/MjAyNi0wNS0yMy56aXA=/nrd",
+    );
+  });
+
+  it("uses UTC date components even when the host TZ is non-UTC", () => {
+    // Date(Date.UTC(...)) bypasses local-TZ pitfalls; formatUtcDate
+    // also uses getUTC* methods. Sanity-check the boundary case.
+    const url = computeNrdUrl(new Date(Date.UTC(2026, 0, 1)));
+    expect(url).toContain(
+      Buffer.from("2026-01-01.zip", "utf8").toString("base64"),
+    );
+  });
+
+  it("zero-pads month and day", () => {
+    const url = computeNrdUrl(new Date(Date.UTC(2026, 0, 5)));
+    expect(url).toContain(
+      Buffer.from("2026-01-05.zip", "utf8").toString("base64"),
+    );
+  });
+});
+
+describe("yesterdayUtc", () => {
+  it("returns the day before the given Date in UTC", () => {
+    const today = new Date(Date.UTC(2026, 4, 24));
+    const y = yesterdayUtc(today);
+    expect(y.getUTCFullYear()).toBe(2026);
+    expect(y.getUTCMonth()).toBe(4);
+    expect(y.getUTCDate()).toBe(23);
+  });
+
+  it("rolls the month boundary backwards correctly", () => {
+    const may1 = new Date(Date.UTC(2026, 4, 1));
+    const apr30 = yesterdayUtc(may1);
+    expect(apr30.getUTCMonth()).toBe(3); // April
+    expect(apr30.getUTCDate()).toBe(30);
   });
 });
