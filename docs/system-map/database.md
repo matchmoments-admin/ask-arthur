@@ -121,6 +121,13 @@ Supabase Postgres (project `rquomhcgnodxzkhokwni`). 75+ tables across 12 domain 
 - `blog_categories` — Category taxonomy. v18.
 - `email_subscribers` — Newsletter signup. DENY_ALL RLS (v109).
 
+### Clone-watch / Shopfront
+
+- `shopfront_shops` — Installed Shopify merchant index. Minimal scaffold at MVP (id, shop_domain, shopify_shop_id, installed_at). Empty at Layer 0; #373 extends with pgsodium-encrypted token columns. Service-role RLS. v140.
+- `shopfront_clone_alerts` — Single write target for ALL clone detections across Layer 0 / Phase A / Phase B / Phase C (ADR-0016 Decision #1). Layer 0 writes `target_shop_id IS NULL`, `source = 'nrd'`. CHECK enforces XOR on `target_shop_id` / `inferred_target_domain`. `signals` JSONB array per ADR-0015. UNIQUE expression index on `(COALESCE(target_shop_id::text, inferred_target_domain), url_hash)`. Service-role RLS. v140.
+- `shopfront_takedown_attempts` — DMCA / registrar / Cloudflare / Shopify-abuse log per alert. Unused at Layer 0; populated by Shield Pro tier (#377). Service-role RLS. v140.
+- RPCs: `upsert_clone_alerts_batch(p_rows JSONB) → INTEGER` — batch INSERT ... ON CONFLICT DO UPDATE for the expression index. SECURITY DEFINER, `search_path = public, pg_catalog`, `SET LOCAL statement_timeout = '300s'`. service-role grant only. v141.
+
 ### Misc / Internal
 
 - `device_push_tokens` — Push token registration per user / org. v32.
@@ -157,7 +164,7 @@ All have `BRIN(created_at)` for cheap range queries.
 
 ---
 
-## RPCs (71 total — all `SECURITY DEFINER`)
+## RPCs (72 total — all `SECURITY DEFINER`)
 
 ### Analysis pipeline
 

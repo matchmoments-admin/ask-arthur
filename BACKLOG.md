@@ -523,6 +523,9 @@ order.
 21. - [ ] **Phase 8.3 `halfvec` migration** — 50% memory savings at ~1% recall loss. **Trigger:** any vector index hits 1 GB OR query p95 exceeds 200ms.
 22. - [ ] **Phase 8.4 hybrid search RRF + BM25** — replace `ts_rank` on `/api/v1/intel/search` and `/api/v1/scams/search`. **Trigger:** intel-search becomes a customer-visible product surface.
 23. - [ ] **Enable the four Phase-1 production feature flags** (`NEXT_PUBLIC_FF_DATA_PIPELINE`, `_ENTITY_ENRICHMENT`, `_RISK_SCORING`, `_CLUSTER_BUILDER`) and run the pipelines end-to-end so `scam_clusters`, `scam_entities.risk_score`, and `vulnerability_detections` populate with real data.
+24. - [ ] **Clone-watch — add FK index on `shopfront_takedown_attempts.initiated_by_user_id`** (auth.users(id)). Advisor INFO from v140 apply (2026-05-24). Column is NULL at MVP — only Shield Pro merchant-self-serve takedowns populate it (#377). Add the index when Shield Pro ships.
+25. - [ ] **Clone-watch — flip `/clone-watch` page to indexable after #371 v1 copy returns**. Currently `noindex,nofollow` for the first 7 days. Removal: drop `robots` from `apps/web/app/clone-watch/page.tsx` metadata + add `/clone-watch` to `apps/web/app/sitemap.ts` static entries. Requires lawyer-vetted v1 copy from #371 disclaimer pack.
+26. - [ ] **Clone-watch — re-evaluate cross-surface dedupe vs `brand_impersonation_alerts`** during the 7-day evidence window. If bank/telco/post brands produce material duplicate noise across Layer 0 and ct-monitor.ts surfaces, add a `candidate_url` column to `brand_impersonation_alerts` (v142+) and reintroduce the dedupe step that was dropped from S0E.2 after the phantom-column finding.
 
 ### Closed (shipped 2026-05-08)
 
