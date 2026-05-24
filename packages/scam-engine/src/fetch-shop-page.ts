@@ -17,12 +17,20 @@
 //     internal host is the classic SSRF bypass that redirect: "follow"
 //     would silently issue mid-chain. Mirrors redirect-resolver.ts's
 //     per-hop check.
+//   - Resolution-time SSRF guard via `ssrfSafeDispatcher`. isPrivateURL is
+//     purely syntactic and lets a hostname through that A-records to a
+//     private IP (e.g. `rebind.example.com → 127.0.0.1`), AND it cannot
+//     defend against DNS rebinding where the host resolves to a public IP
+//     at check-time and a private IP at fetch-time. The dispatcher hooks
+//     undici's per-connection lookup and rejects the resolved IP if it is
+//     private — closing both windows. Issue #353.
 //   - Finite total timeout across the whole redirect chain.
 //   - Bounded redirect count.
 //   - Response-body size cap — never read an unbounded body into memory.
 
 import { logger } from "@askarthur/utils/logger";
 import { isPrivateURL } from "./safebrowsing";
+import { ssrfSafeDispatcher } from "./ssrf-dispatcher";
 
 // Default total budget across the whole redirect chain (not per-hop) — a
 // caller may pass a smaller `budgetMs`. Keeps the shop-signal-enrich
@@ -83,6 +91,9 @@ export async function fetchShopPage(
         redirect: "manual",
         headers: { "User-Agent": BROWSER_UA, Accept: "text/html,*/*" },
         signal: AbortSignal.timeout(remaining),
+        // `dispatcher` is undici-specific (Node 22's fetch is undici);
+        // not in lib.dom RequestInit. The cast is intentional.
+        ...({ dispatcher: ssrfSafeDispatcher } as Record<string, unknown>),
       });
 
       // ── Redirect hop ──────────────────────────────────────────────────
