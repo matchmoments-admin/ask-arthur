@@ -223,13 +223,112 @@ export default function PrivacyPage() {
             </p>
           </section>
 
-          {/* TODO(legal-review): section 5 copy was drafted against OAIC's
+          {/* TODO(legal-review): the merchant-data commitments in section 5 are
+              published before the Shopfront app ships (#366 PCD-L2 application
+              requires the live policy URL). Replace placeholders with audited
+              copy once the disclaimer-pack engagement (#371) returns. */}
+          <section>
+            <h2 className="text-deep-navy text-lg font-bold mb-3">
+              5. Ask Arthur Shield — Shopify Merchant App
+            </h2>
+            <p className="text-gov-slate text-base leading-relaxed mb-3">
+              Ask Arthur Shield is a forthcoming Shopify app for Australian
+              merchants that adds fraud-prevention and chargeback-defence
+              services to their checkout. This section describes the buyer
+              data handling commitments that apply when a merchant installs
+              the app. The app is currently in development and is not yet
+              available on the Shopify App Store.
+            </p>
+
+            <p className="text-gov-slate text-base leading-relaxed mb-2 font-semibold">
+              What we process:
+            </p>
+            <p className="text-gov-slate text-base leading-relaxed mb-3">
+              When an Australian merchant installs Ask Arthur Shield, we
+              process buyer email, phone, billing address, shipping address,
+              and order metadata (line items, browser IP, user-agent).
+            </p>
+
+            <p className="text-gov-slate text-base leading-relaxed mb-2 font-semibold">
+              Why:
+            </p>
+            <p className="text-gov-slate text-base leading-relaxed mb-3">
+              To compute a SAFE / UNCERTAIN / SUSPICIOUS / HIGH_RISK trust
+              verdict for each order, and to generate Card Issuer Evidence
+              3.0–compliant evidence packs when the merchant receives a
+              chargeback.
+            </p>
+
+            <p className="text-gov-slate text-base leading-relaxed mb-2 font-semibold">
+              Where:
+            </p>
+            <p className="text-gov-slate text-base leading-relaxed mb-3">
+              Stored in Australia (Supabase Sydney region, separate from our
+              main analysis pipeline), encrypted at rest with pgsodium,
+              accessed by service-role only. Encryption keys live in Supabase
+              Vault; access is service-role only and is logged for audit.
+            </p>
+
+            <p className="text-gov-slate text-base leading-relaxed mb-2 font-semibold">
+              How long:
+            </p>
+            <p className="text-gov-slate text-base leading-relaxed mb-3">
+              120 days from order date (matching the standard chargeback
+              window). After 120 days, all personally-identifying buyer data
+              is purged automatically.
+            </p>
+
+            <p className="text-gov-slate text-base leading-relaxed mb-2 font-semibold">
+              Who we share with:
+            </p>
+            <p className="text-gov-slate text-base leading-relaxed mb-3">
+              Nobody. The data is processed solely for the installing
+              merchant&apos;s fraud-prevention surface. We do not sell, market
+              against, or otherwise commercialise customer PII. Aggregate
+              signal counters (not identifiable) may be retained for corpus
+              enrichment.
+            </p>
+
+            <p className="text-gov-slate text-base leading-relaxed mb-2 font-semibold">
+              Your rights:
+            </p>
+            <p className="text-gov-slate text-base leading-relaxed mb-3">
+              Under the Australian Privacy Act 1988 and the Australian Privacy
+              Principles, you may request access to or deletion of personal
+              information we hold about you. Contact{" "}
+              <a
+                href="mailto:brendan@askarthur.au"
+                className="text-action-teal hover:underline"
+              >
+                brendan@askarthur.au
+              </a>
+              .
+            </p>
+
+            <p className="text-gov-slate text-base leading-relaxed mb-2 font-semibold">
+              Our data processor relationship with Shopify merchants:
+            </p>
+            <p className="text-gov-slate text-base leading-relaxed">
+              When the Shopify app processes buyer PII, the merchant is the
+              data controller and Ask Arthur is the data processor. Our data
+              processing agreement (DPA) with merchants is available at{" "}
+              <a
+                href="/trust/dpa"
+                className="text-action-teal hover:underline"
+              >
+                /trust/dpa
+              </a>
+              .
+            </p>
+          </section>
+
+          {/* TODO(legal-review): section 6 copy was drafted against OAIC's
               October 2024 AI guidance. Run past Australian privacy counsel
               (Clayton Utz / MinterEllison) before enabling the training_consent
               pipeline in P2. */}
           <section>
             <h2 className="text-deep-navy text-lg font-bold mb-3">
-              5. How We Use Your Feedback
+              6. How We Use Your Feedback
             </h2>
             <p className="text-gov-slate text-base leading-relaxed mb-3">
               When you rate a check with thumbs-up or thumbs-down, we store:
@@ -266,7 +365,7 @@ export default function PrivacyPage() {
 
           <section>
             <h2 className="text-deep-navy text-lg font-bold mb-3">
-              6. Data Retention
+              7. Data Retention
             </h2>
             <ul className="list-disc list-inside text-gov-slate text-base leading-relaxed space-y-2">
               <li>
@@ -286,7 +385,7 @@ export default function PrivacyPage() {
 
           <section>
             <h2 className="text-deep-navy text-lg font-bold mb-3">
-              7. Cookies &amp; Tracking
+              8. Cookies &amp; Tracking
             </h2>
             <p className="text-gov-slate text-base leading-relaxed">
               Ask Arthur does not use cookies. We use Plausible Analytics, which
@@ -298,7 +397,7 @@ export default function PrivacyPage() {
 
           <section>
             <h2 className="text-deep-navy text-lg font-bold mb-3">
-              8. Your Rights
+              9. Your Rights
             </h2>
             <p className="text-gov-slate text-base leading-relaxed mb-3">
               You have the right to access, correct, and request deletion of
@@ -375,7 +474,7 @@ export default function PrivacyPage() {
 
           <section>
             <h2 className="text-deep-navy text-lg font-bold mb-3">
-              9. Contact
+              10. Contact
             </h2>
             <p className="text-gov-slate text-base leading-relaxed">
               For privacy inquiries, contact us at{" "}
@@ -390,7 +489,7 @@ export default function PrivacyPage() {
 
           <section>
             <p className="text-sm text-slate-400">
-              Last updated: April 2026
+              Last updated: May 2026
             </p>
           </section>
         </div>
