@@ -1,7 +1,17 @@
 import { analyzeForBot } from "@askarthur/bot-core/analyze";
 import { toSlackBlocks } from "@askarthur/bot-core/format-slack";
 import { checkBotRateLimit } from "@askarthur/bot-core/rate-limit";
+import { assertSafeURL } from "@askarthur/scam-engine/ssrf-guard";
 import { logger } from "@askarthur/utils/logger";
+
+// Slack's slash-command webhook hands us a `response_url` we POST the
+// verdict back to. The token only authorises Slack as the producer of
+// the payload, not the URL — so without a hostname check the route is a
+// confused-deputy SSRF: a forged `response_url` could point at internal
+// infra and our server would oblige. Slack always uses hooks.slack.com
+// for response_urls (separate from incoming webhooks at
+// hooks.slack.com/services/...), so the allowlist is a single host.
+const SLACK_RESPONSE_HOST = "hooks.slack.com";
 
 interface SlackSlashPayload {
   command: string;
@@ -68,6 +78,33 @@ export async function handleSlashCommand(payload: SlackSlashPayload): Promise<vo
 }
 
 async function postToResponseUrl(url: string, body: unknown): Promise<void> {
+  // Two-layer SSRF defence:
+  //   1. Hostname allowlist — Slack response_urls are always hooks.slack.com.
+  //   2. assertSafeURL — belt-and-braces against numeric IP / metadata host
+  //      attempts that happen to spoof the hostname check (e.g. a `hooks.slack.com`
+  //      DNS entry pointing at 169.254.169.254).
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    logger.warn("Slack response_url rejected — unparseable", { url });
+    return;
+  }
+  if (parsed.hostname.toLowerCase() !== SLACK_RESPONSE_HOST) {
+    logger.warn("Slack response_url rejected — unexpected hostname", {
+      hostname: parsed.hostname,
+    });
+    return;
+  }
+  try {
+    assertSafeURL(url);
+  } catch (err) {
+    logger.warn("Slack response_url rejected by assertSafeURL", {
+      error: String(err),
+    });
+    return;
+  }
+
   try {
     const response = await fetch(url, {
       method: "POST",

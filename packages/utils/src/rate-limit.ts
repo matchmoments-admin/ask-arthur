@@ -612,6 +612,70 @@ export async function checkShopSignalRateLimit(
   }
 }
 
+// =============================================================================
+// Org invite accept — per-user accept-attempt cap
+// =============================================================================
+// Caps attempts to POST /api/org/invite/accept per authenticated user. Pairs
+// with the email-binding check on that route so a logged-in attacker can't
+// brute-force token guesses or hammer the route looking for tokens that hash
+// to a target email. 10 attempts / hour is generous enough for a legitimate
+// invitee who fat-fingers a token a few times, tight enough to make
+// enumeration impractical.
+
+const _orgInviteAcceptLimiter = { current: null as Ratelimit | null };
+
+function getOrgInviteAcceptLimiter(): Ratelimit {
+  if (_orgInviteAcceptLimiter.current) return _orgInviteAcceptLimiter.current;
+  const redis = new Redis({
+    url: process.env.UPSTASH_REDIS_REST_URL!,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+  });
+  const lim = new Ratelimit({
+    redis,
+    limiter: Ratelimit.slidingWindow(10, "1 h"),
+    prefix: "askarthur:org-invite-accept",
+    analytics: true,
+  });
+  _orgInviteAcceptLimiter.current = lim;
+  return lim;
+}
+
+/**
+ * Check the org-invite-accept rate-limit bucket for an authenticated user.
+ * 10 attempts / hour, fail-closed in production.
+ */
+export async function checkOrgInviteAcceptRateLimit(
+  userId: string,
+  failMode: FailMode = defaultFailMode(),
+): Promise<RateLimitResult> {
+  if (!process.env.UPSTASH_REDIS_REST_URL) {
+    return storeUnavailable(failMode, "checkOrgInviteAcceptRateLimit");
+  }
+  try {
+    const res = await getOrgInviteAcceptLimiter().limit(userId);
+    if (!res.success) {
+      return {
+        allowed: false,
+        remaining: 0,
+        resetAt: new Date(res.reset),
+        message: "Too many invite-accept attempts. Try again later.",
+        reason: "exceeded",
+      };
+    }
+    return {
+      allowed: true,
+      remaining: res.remaining,
+      resetAt: null,
+      reason: "ok",
+    };
+  } catch (err) {
+    logger.error("checkOrgInviteAcceptRateLimit: store error", {
+      error: String(err),
+    });
+    return storeUnavailable(failMode, "checkOrgInviteAcceptRateLimit");
+  }
+}
+
 // ─── Inbound-scan rate limiter (F1) ─────────────────────────────────────
 //
 // Per-sender quota for `/api/inbound-scan` — users forwarding suspicious

@@ -135,6 +135,49 @@ async function handleCheckoutCompleted(
   await upsertSubscription(subscription as unknown as Record<string, unknown>, supabase);
 }
 
+// Resolve the Supabase user_id that owns a given Stripe customer. Reads the
+// user_profiles.stripe_customer_id UNIQUE column populated by
+// getOrCreateStripeCustomer() during checkout (apps/web/lib/stripe.ts). Returns
+// null if the mapping doesn't exist — caller must treat that as an ownership
+// failure, not a soft-skip, otherwise the gate is bypassed for any subscription
+// whose checkout flow didn't write the mapping.
+async function getUserIdFromStripeCustomer(
+  supabase: SupabaseService,
+  stripeCustomerId: string,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("user_profiles")
+    .select("id")
+    .eq("stripe_customer_id", stripeCustomerId)
+    .maybeSingle();
+  if (error) {
+    logger.error("getUserIdFromStripeCustomer query failed", {
+      error,
+      stripeCustomerId,
+    });
+    return null;
+  }
+  return (data?.id as string | undefined) ?? null;
+}
+
+// Resolve the user_id that owns a given api_key. Used as the second half of
+// the ownership cross-check below.
+async function getUserIdFromApiKey(
+  supabase: SupabaseService,
+  apiKeyId: number,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("api_keys")
+    .select("user_id")
+    .eq("id", apiKeyId)
+    .maybeSingle();
+  if (error) {
+    logger.error("getUserIdFromApiKey query failed", { error, apiKeyId });
+    return null;
+  }
+  return (data?.user_id as string | undefined) ?? null;
+}
+
 async function upsertSubscription(
   sub: Record<string, unknown>,
   supabase: SupabaseService
@@ -163,6 +206,32 @@ async function upsertSubscription(
     logger.warn("Stripe subscription missing api_key_id in metadata", {
       subscriptionId: sub.id,
     });
+    return;
+  }
+
+  // Ownership cross-check: the metadata can technically be set on a Stripe
+  // subscription by anyone who can call the Stripe Dashboard / API with the
+  // account credentials. Without this gate, a forged or tampered metadata
+  // value pointing at someone else's api_key_id would escalate that key's
+  // tier when this webhook fires. We pin metadata.api_key_id to the actual
+  // Stripe customer's owning user (via user_profiles.stripe_customer_id,
+  // which is server-set during checkout in lib/stripe.ts).
+  const customerId = sub.customer as string;
+  const [keyOwnerId, customerOwnerId] = await Promise.all([
+    getUserIdFromApiKey(supabase, apiKeyId),
+    getUserIdFromStripeCustomer(supabase, customerId),
+  ]);
+  if (!keyOwnerId || !customerOwnerId || keyOwnerId !== customerOwnerId) {
+    logger.error("Stripe webhook ownership mismatch — refusing tier sync", {
+      subscriptionId: sub.id,
+      apiKeyId,
+      customerId,
+      keyOwnerId,
+      customerOwnerId,
+    });
+    // 200 (not 500) — Stripe is doing its job; the problem is metadata vs
+    // ownership, which retries won't fix. Logged + observable in
+    // cost-telemetry-style alerting, but doesn't trigger Stripe retry loops.
     return;
   }
 
@@ -244,6 +313,29 @@ async function upsertPhoneFootprintSubscription(
       },
     );
     return;
+  }
+
+  // Consumer-SKU ownership gate: metadata.user_id must match the Stripe
+  // customer's owning user. Without this, a tampered metadata could grant
+  // a paid entitlement to another user's account. Fleet/org SKUs would
+  // require an org_id → owning-user mapping that doesn't exist yet; tracked
+  // as backlog "Phone Footprint org ownership gate". For now, fleet path
+  // remains as-is (still gated by the metadata being set server-side during
+  // Stripe checkout in apps/web/app/api/stripe/checkout/route.ts).
+  if (!entitlement.isFleet && userId) {
+    const customerOwnerId = await getUserIdFromStripeCustomer(
+      supabase,
+      sub.customer as string,
+    );
+    if (!customerOwnerId || customerOwnerId !== userId) {
+      logger.error("Phone Footprint ownership mismatch — refusing entitlement", {
+        subscriptionId: sub.id,
+        sku: entitlement.sku,
+        metadataUserId: userId,
+        customerOwnerId,
+      });
+      return;
+    }
   }
 
   const status = sub.status as string;
@@ -337,6 +429,25 @@ async function handleSubscriptionDeleted(
     : null;
 
   if (apiKeyId && !Number.isNaN(apiKeyId)) {
+    // Same ownership gate as upsertSubscription: refuse to downgrade an
+    // api_key whose owner doesn't match the Stripe customer behind this
+    // deletion event. Without this, a tampered metadata could force a
+    // free-tier downgrade on someone else's key.
+    const customerId = sub.customer as string;
+    const [keyOwnerId, customerOwnerId] = await Promise.all([
+      getUserIdFromApiKey(supabase, apiKeyId),
+      getUserIdFromStripeCustomer(supabase, customerId),
+    ]);
+    if (!keyOwnerId || !customerOwnerId || keyOwnerId !== customerOwnerId) {
+      logger.error("Stripe deletion ownership mismatch — refusing tier sync", {
+        subscriptionId: sub.id,
+        apiKeyId,
+        customerId,
+        keyOwnerId,
+        customerOwnerId,
+      });
+      return;
+    }
     await syncTier(supabase, apiKeyId, "free", "canceled");
   }
 }
