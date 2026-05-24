@@ -62,6 +62,48 @@ describe("lexicalMatch", () => {
     expect(result).toBeNull();
   });
 
+  // Word-boundary substring defence for short brands. First prod run
+  // surfaced 137+ FPs each on ANZ/NAB/IGA because plain substring
+  // matches anywhere — `franzese.com`, `lanzhoudhl.com`, `bigbassbonanza.com`
+  // would all "contain anz". For brands < 5 chars, require the brand
+  // as a standalone segment of the primary label.
+  it("does NOT substring-match short brand 'ANZ' in 'franzese.com'", () => {
+    const shortList: BrandEntry[] = [
+      { brand: "ANZ", legitimate_domains: ["anz.com.au"] },
+    ];
+    expect(lexicalMatch("franzese.com", shortList)).toBeNull();
+    expect(lexicalMatch("lanzhoudhl.com", shortList)).toBeNull();
+    expect(lexicalMatch("nathanz.art", shortList)).toBeNull();
+    expect(lexicalMatch("bigbassbonanzacasino.uk", shortList)).toBeNull();
+  });
+
+  it("DOES substring-match short brand 'ANZ' in 'anz-bank.shop' (word-boundary)", () => {
+    const shortList: BrandEntry[] = [
+      { brand: "ANZ", legitimate_domains: ["anz.com.au"] },
+    ];
+    const result = lexicalMatch("anz-bank.shop", shortList);
+    expect(result).not.toBeNull();
+    expect(result?.signal_type).toBe("substring");
+  });
+
+  it("DOES substring-match short brand 'IGA' in 'iga_online.com'", () => {
+    const shortList: BrandEntry[] = [
+      { brand: "IGA", legitimate_domains: ["iga.com.au"] },
+    ];
+    const result = lexicalMatch("iga_online.com", shortList);
+    expect(result).not.toBeNull();
+    expect(result?.signal_type).toBe("substring");
+  });
+
+  it("preserves loose substring behaviour for long brand 'Bunnings'", () => {
+    const list: BrandEntry[] = [
+      { brand: "Bunnings", legitimate_domains: ["bunnings.com.au"] },
+    ];
+    const result = lexicalMatch("buybunningsdirect.shop", list);
+    expect(result).not.toBeNull();
+    expect(result?.signal_type).toBe("substring");
+  });
+
   it("substring-matches an A-label that contains the brand string", () => {
     // We do NOT decode IDN at MVP — Node's URL constructor doesn't decode
     // punycode A-labels to Unicode. Instead we rely on the brand appearing
