@@ -254,6 +254,21 @@ This plan ships as PR 4 (planning artefacts: this doc + ADR-0016 addendum + GH i
 
 Build PRs S0E.1 → S0E.2 → S0E.3 ship in a separate session via the handoff at `/tmp/handoff-clone-watch-mvp-*.md`. First move for that session: PR 1 (S0E.1) — schema + foundation. Pre-PR-1 wall-clock task: Brendan signs up at whoisds.com to obtain `WHOISDS_NRD_ZIP_URL` (5-min task). PR 1 can ship without the URL since it has no live execution.
 
+## Matcher evolution log
+
+The Layer 0 lexical matcher (`packages/shopfront-glue/src/lexical-match.ts`) has shipped three iterations as production evidence has accumulated. Each iteration is recorded with its acceptance-gate result. The signal-gating rationale (substring gated, confusable + Levenshtein ungated, token list selection, two-char-ccTLD drop) is captured in [ADR-0017](../adr/0017-clone-detection-substring-gating.md).
+
+- **v1 (S0E.1, PR #397)** — substring + Levenshtein with brand-stripping. First prod run produced 432 hits with ~95% FPs from short-brand substring noise (137× ANZ matching `franzese.com`, 137× IGA matching `lanzhoudhl.com`, 85× NAB from `bigbassbonanzacasino.uk` etc).
+- **v1.5 (PR #403)** — added `MIN_BRAND_LEN_FOR_LOOSE_SUBSTRING=5` word-boundary check for short brands (ANZ/NAB/IGA/KFC/BWS). Brands ≥5 chars kept substring-anywhere; brands <5 chars required standalone-segment match. First-fix run reduced to 17 hits with ~70% FPs — mostly common-English-word collisions on long brands (3× Reece matching _Greece_, 7× Target mostly real businesses).
+- **v2 (PR #408)** — scam-context-token gate on substring hits (Option A from #405). Substring matches now require the brand-stripped residue to contain at least one of 14 scam-context tokens (`bank`, `login`, `support`, `ads`, `online`, `secure`, `verify`, `pay`, `home`, `shop`, `store`, `account`, `au`); confusable + Levenshtein paths stay ungated. Two-char-ccTLD drop heuristic prevents `.com.au` from universally satisfying the `au` token. Bare-brand-on-wrong-TLD exception (e.g. `westpac.com` IS the brand) fires without context. Post-deploy run (2026-05-24 10:32 UTC): 5 hits, 20% FP rate (within the <30% acceptance gate, ≥3 daily-hits floor). Known FN: short brands lose Levenshtein safety net when no scam-context token is present (e.g. `kfc-net.net` no longer fires). Known FP class surfaced live: `auto-*` prefix leaks via mid-word `au` substring (FP `autoecolesoultbycfconduite.fr` for Coles) → tracked as v3 follow-up in [#409](https://github.com/matchmoments-admin/ask-arthur/issues/409).
+
+### Acceptance gate (locked at v2)
+
+Two coupled gates that any future matcher iteration must clear:
+
+1. **FP rate <30%** on the daily NRD run (eyeball-verified for the first 7 days post-flip, then periodic spot-checks via the verification SQL in `docs/ops/clone-watch-config.md`).
+2. **Daily hit count ≥3** — "the floor". Distinguishes a working matcher from a silenced one; a v3+ iteration that drives the FP rate to 0% by emitting zero hits is a regression, not an improvement.
+
 ## What kills this MVP / triggers a re-plan
 
 - whoisds.com paywalls the NRD zip → swap to a different free source (alternatives: ICANN CZDS per-TLD subscriptions, registry-specific public lists). If no free source remains, the engine still works on internal corpus alone (#376 Phase A path) — but the public-evidence flywheel weakens.

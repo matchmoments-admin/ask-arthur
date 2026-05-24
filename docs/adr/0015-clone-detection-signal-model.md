@@ -150,10 +150,22 @@ attack class within the first 90 days of design-partner cohort
 operation, Phase C is pulled forward and the Phase B gating is
 relaxed.
 
+## Amendment 2026-05-24 (post-PR #408) — Layer 0 substring signal is gated
+
+At Layer 0 (Pre-Stage-1 MVP per ADR-0016 amendment), the deterministic-string signal type **substring** is no longer fired on raw substring match alone. After v1.5's first prod runs produced ~70% FPs on common-English-word brand collisions (`bigclash-greece.co` for Reece, `targetsec.com.br` for Target), PR #408 introduced a token-gate on the substring path:
+
+- **Substring** at Layer 0 fires only when EITHER (a) the primary label IS the brand (bare-brand-on-wrong-TLD exception, e.g. `westpac.com`), OR (b) the brand-stripped residue contains at least one scam-context token (`bank`, `login`, `support`, `ads`, `online`, `secure`, `verify`, `pay`, `home`, `shop`, `store`, `account`, `au`).
+- **Confusable** and **Levenshtein** branches remain ungated. Different threat shapes — Unicode confusables are intentional character trickery (intent in the character choice), Levenshtein with `minLen=5` already has a tight candidate space, neither needs the additional gate.
+
+This amendment touches the per-signal precision tuning, not the signal taxonomy itself — the three signal-type names (Brand Match / Visual Match / Semantic Match) are unchanged. Detailed rationale, token-list selection, the two-char-ccTLD drop heuristic, the known FN trade-off (short brands without Levenshtein fallback like `kfc-net.net`), and the known FP class surfaced post-deploy (`au` mid-word leak — tracked in #409) live in [ADR-0017](./0017-clone-detection-substring-gating.md).
+
+The same gating applies if/when Phase A's installed-merchant corpus run uses the same substring matcher (the `packages/shopfront-glue/` matcher is shared across Layer 0 and Phase A per ADR-0016). Phase B and Phase C signal-gating decisions are out of scope for this amendment.
+
 ## Related
 
 - `docs/plans/shopify-shopfront.md` §2 Layer 1 (Phase A) + §5 Stage 2 (Phase B/C)
 - ADR-0016 — clone-detection source layering (corpus vs CT firehose vs NRD)
+- ADR-0017 — Layer 0 substring-hit gating (the v2 matcher rationale)
 - ADR-0003 — embedding model versioning convention
 - ADR-0004 — multi-domain embedding model selection
 - ADR-0005 — pgvector HNSW vs IVFFlat policy

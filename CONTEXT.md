@@ -71,6 +71,10 @@ _Avoid_: "installed shop" (overloaded — Shopify's own term), bare "merchant" (
 A candidate domain _appears to be_ a permutation / typo / confusable / punycode rendering of a Verified Shop's brand. One of three Clone Signal types alongside **Visual Match** and **Semantic Match**. Phase A scans against the existing scam corpus (`scam_reports.url` + `reddit_post_intel.url` + brand-mention scrape output); Phase B adds the Calidog certstream firehose; Phase C adds the whoisds NRD daily zip. Signal name is invariant across phases; only the candidate-domain population changes.
 _Avoid_: "TLD watchlist match" (misleading — implies new-registration awareness that only Phases B+C deliver), "permutation hit".
 
+**Scam-context token** (Brand Match sub-concept):
+A short keyword (`bank`, `login`, `shop`, `pay`, `au`, etc.) whose presence in a candidate domain's brand-stripped residue is required for a Layer 0 **substring** Brand Match to fire. Gates only the substring signal type; **confusable** and **Levenshtein** signals are ungated (different threat shapes). List lives in `SCAM_CONTEXT_TOKENS` in `packages/shopfront-glue/src/lexical-match.ts`. Two-character ccTLDs (`.com.au`, `.co.uk`) are dropped from the residue before checking so `au` / `uk` don't leak universally from the TLD. The bare-brand-on-wrong-TLD exception (e.g. `westpac.com`) fires without context. Per ADR-0017.
+_Avoid_: "context word" (overloaded), "scam keyword" (clashes with the analyser's red-flag vocabulary).
+
 **Visual Match** (Clone Signal — deterministic-visual):
 A candidate page's rendered assets collide with a Verified Shop's — same logo (pHash on logo / hero images), same Shopify theme fingerprint, or same rendered-HTML structure (TLSH; Phase C optional). Live at Phase A onward.
 _Avoid_: "logo hit", "pHash collision".
