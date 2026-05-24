@@ -102,11 +102,11 @@ To be appended to `docs/adr/0016-clone-detection-source-layering.md` after the "
 
 ## 3-PR sequence
 
-| PR  | Title                                                                                                 | Files                                                                                                                                                     | Wall-clock | Issue |
-| --- | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | ----- |
-| 1   | feat(shopfront-glue): clone-watch MVP foundation — v140 schema + AU brand watchlist + lexical matcher | new `packages/shopfront-glue/` package; `supabase/migrations/migration-v140-shopfront-init.sql`; `au-brand-watchlist.ts`; `lexical-match.ts` + unit tests | ~1.5 days  | S0E.1 |
-| 2   | feat(shopfront-glue): NRD daily Inngest ingest + Telegram digest                                      | `packages/scam-engine/src/inngest/shopfront-nrd-daily-ingest.ts`; env var `WHOISDS_NRD_ZIP_URL`; feature flag `FF_SHOPFRONT_CLONE_WATCH` default OFF      | ~1.5 days  | S0E.2 |
-| 3   | feat(web): public /clone-watch page + ADR-0016 amendment commit                                       | `apps/web/app/clone-watch/page.tsx`; optional `/clone-watch/[brand]/page.tsx`; sitemap + robots; `docs/adr/0016-...md` addendum; #376 body amendment      | ~1 day     | S0E.3 |
+| PR  | Title                                                                                                 | Files                                                                                                                                                | Wall-clock | Issue |
+| --- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | ----- |
+| 1   | feat(shopfront-glue): clone-watch MVP foundation — v140 schema + AU brand watchlist + lexical matcher | new `packages/shopfront-glue/` package; `supabase/migration-v140-shopfront-init.sql`; `au-brand-watchlist.ts`; `lexical-match.ts` + unit tests       | ~1.5 days  | S0E.1 |
+| 2   | feat(shopfront-glue): NRD daily Inngest ingest + Telegram digest                                      | `packages/scam-engine/src/inngest/shopfront-nrd-daily-ingest.ts`; env var `WHOISDS_NRD_ZIP_URL`; feature flag `FF_SHOPFRONT_CLONE_WATCH` default OFF | ~1.5 days  | S0E.2 |
+| 3   | feat(web): public /clone-watch page + ADR-0016 amendment commit                                       | `apps/web/app/clone-watch/page.tsx`; optional `/clone-watch/[brand]/page.tsx`; sitemap + robots; `docs/adr/0016-...md` addendum; #376 body amendment | ~1 day     | S0E.3 |
 
 **Total wall-clock:** ~4 days of focused work for a working engine + public URL.
 
@@ -114,7 +114,7 @@ To be appended to `docs/adr/0016-clone-detection-source-layering.md` after the "
 
 **Goal:** schema + matcher in place. No execution yet.
 
-**Migration v140 (`supabase/migrations/migration-v140-shopfront-init.sql`):**
+**Migration v140 (`supabase/migration-v140-shopfront-init.sql`):**
 
 - `shopfront_shops` (per #376 schema reference; stays empty until #373)
 - `shopfront_clone_alerts` (per #376 locked schema, ALL columns + CHECK + indexes)
@@ -128,7 +128,7 @@ To be appended to `docs/adr/0016-clone-detection-source-layering.md` after the "
 - Standard pnpm workspace package shape (`package.json`, `tsconfig.json`, `src/index.ts`)
 - `src/au-brand-watchlist.ts`: exported `AU_BRAND_WATCHLIST` array of AU retail + banks/telcos/post. Deduped list (~50 entries): Bunnings, Woolworths, Coles, Westpac, NAB, ANZ, CBA, Telstra, Optus, Vodafone, Australia Post, Myer, David Jones, JB Hi-Fi, Harvey Norman, Officeworks, Kmart, Target, Big W, Aldi, IGA, Dan Murphy's, BWS, Liquorland, Chemist Warehouse, Priceline, Mitre 10, Reece, Toll, StarTrack, Sendle, Domino's, McDonald's, KFC, Hungry Jack's, Subway, 7-Eleven, Toyworld, Smiggle, Cotton On, Bonds, Country Road, Witchery, Sportsgirl, Glue Store, Universal Store, City Beach, Surfstitch. Each entry: `{ brand: string, legitimate_domains: string[] }`. NOTE: severity_floor dropped from MVP — Brand Match alone caps at score 40 per #376 formula → tier always = `low`. Tiering becomes meaningful when Visual Match (Phase A) and Semantic Match (Phase C) add weight.
 - `src/lexical-match.ts`: `lexicalMatch(domain: string, watchlist: BrandEntry[]): MatchResult | null` — runs Levenshtein edit-distance + Unicode confusables + punycode normalisation + brand-substring detection. Returns `{ brand, score, signal_type: 'levenshtein' | 'confusable' | 'punycode' | 'substring', evidence }` on hit. Excludes legitimate_domains.
-- URL canonicalisation contract (used by S0E.2 + every consumer of the matcher): `candidate_url = 'https://' + domain.toLowerCase() + '/'` (always https, always trailing slash, always lowercased). `url_hash = sha256(candidate_url)` (hex, lowercase). Locked here so cross-surface dedupe against `brand_impersonation_alerts.candidate_url` works deterministically.
+- URL canonicalisation contract (used by S0E.2 + every consumer of the matcher): `candidate_url = 'https://' + domain.toLowerCase() + '/'` (always https, always trailing slash, always lowercased). `url_hash = sha256(candidate_url)` (hex, lowercase). Lives in `packages/shopfront-glue/canonicalise.ts`. All clone-watch writers (Layer 0 NRD, Phase A corpus, Phase B firehose) MUST go through this so `uniq_clone_alerts_target_url` dedupes same-domain hits across runs.
 - Unit tests via vitest: `__tests__/lexical-match.test.ts` covering edge cases (legitimate domain rejection, punycode normalisation, confusable detection, edit-distance boundary). Plus a `canonicaliseCandidateUrl` test asserting the locked form.
 
 **Verification (pre-merge gate):**
@@ -151,10 +151,12 @@ To be appended to `docs/adr/0016-clone-detection-source-layering.md` after the "
   1. `step.run("download-nrd-zip")` — fetches `WHOISDS_NRD_ZIP_URL` via `ssrfSafeDispatcher` (per #387). 60s timeout. Returns Buffer.
   2. `step.run("parse-nrd-list")` — unzips, parses domain list. Returns `string[]`.
   3. `step.run("lexical-match-domains")` — runs each domain through `lexicalMatch()` against `AU_BRAND_WATCHLIST`. Returns hits.
-  4. `step.run("cross-surface-dedupe")` — for each hit, `SELECT 1 FROM brand_impersonation_alerts WHERE candidate_url = $1 LIMIT 1`. If hit, skip the insert (ct-monitor.ts already owns this domain on the consumer-extension surface — see ADR-0016 "different product surface" rule). Drops the banks/telcos overlap without losing the watchlist signal.
-  5. `step.run("insert-clone-alerts")` — chunked insert into `shopfront_clone_alerts` (chunks of ≤5K). `target_shop_id = NULL`, `inferred_target_domain = <brand_legitimate_domain>`, `candidate_url = canonicaliseCandidateUrl(domain)`, `url_hash = sha256(candidate_url)`, `source = 'nrd'`, `severity = brand_match_score * 40` (capped 0-100, brand_match_score is the matcher's 0-1 confidence), `severity_tier = 'low'` for MVP (since Visual + Semantic terms are 0).
-  6. `step.run("log-cost-telemetry")` — `logCost({ feature: 'shopfront_clone_watch', provider: 'whoisds', cost_usd: 0, qty: <domain_count> })`.
-  7. `step.run("send-telegram-digest")` — internal-only digest: "Today's clone-watch: N hits across M brands. Top 5: [...]"
+  4. `step.run("insert-clone-alerts")` — chunked insert into `shopfront_clone_alerts` (chunks of ≤5K) via UPSERT on the existing `uniq_clone_alerts_target_url` index (which dedupes same-domain hits across runs). `target_shop_id = NULL`, `inferred_target_domain = <brand_legitimate_domain>`, `candidate_url = canonicaliseCandidateUrl(domain)`, `url_hash = sha256(candidate_url)`, `source = 'nrd'`, `severity = Math.floor(brand_match_score * 40)` (matcher caps `brand_match_score < 1.0`, so severity ≤ 39 → `severity_tier = 'low'` always at MVP, since Visual + Semantic terms are 0). The matcher already returns `score ≤ 0.95`; `Math.floor` is defence-in-depth.
+  5. `step.run("log-cost-telemetry")` — `logCost({ feature: 'shopfront_clone_watch', provider: 'whoisds', cost_usd: 0, qty: <domain_count> })`.
+  6. `step.run("send-telegram-digest")` — internal-only digest: "Today's clone-watch: N hits across M brands. Top 5: [...]"
+
+  **No cross-surface dedupe against `brand_impersonation_alerts` at MVP** — that table has no `candidate_url` column (it stores `scammer_urls TEXT[]`). For the ~6-12 bank/telco/post brands on the watchlist, accept that Layer 0 and ct-monitor.ts may report the same suspect domain on two surfaces during the 7-day evidence window. If duplicate noise becomes material, a follow-up migration adds `candidate_url` to `brand_impersonation_alerts` and reintroduces a dedupe step then.
+
 - Error handling: each step has try/catch; failures log to `cost_telemetry WHERE feature='shopfront_clone_watch_error'` and Telegram-page.
 - `statement_timeout='300s'` set at session start (Supabase client option `db.headers['x-statement-timeout'] = '300s'` or per-call SET LOCAL).
 - Hard cap on Inngest run duration: <5 min (per CLAUDE.md "<5 min" rule).
@@ -178,7 +180,7 @@ To be appended to `docs/adr/0016-clone-detection-source-layering.md` after the "
 **Verification (pre-merge gate — Inngest won't fire on preview, so this is unit-only):**
 
 - `pnpm turbo build` clean
-- Vitest covers cross-surface-dedupe branch (mocked `brand_impersonation_alerts` hit → skip insert; miss → insert)
+- Vitest covers UPSERT idempotency (same domain twice → one row, last_seen_at updated)
 - Vitest covers canonical-URL form (lowercased domain, https://, trailing slash)
 - **`/local-ultrareview`** pass — security agent reviews SSRF dispatcher wiring + zip-bomb defence; ops/cost agent reviews 5-min cap + statement_timeout + chunked inserts
 

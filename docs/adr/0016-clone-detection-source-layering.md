@@ -265,5 +265,5 @@ is unaffected.
 - Issue #376 — Phase A scanner (corpus-only)
 - `packages/scam-engine/src/inngest/ct-monitor.ts` — the EXISTING CT monitor (AU govt / bank / telco, every 12h via crt.sh) that this ADR explicitly does NOT replace
 - `brand_impersonation_alerts` table — the existing 9-row table the existing CT monitor writes to
-- `supabase/migrations/migration-v140-shopfront-init.sql` — the migration that creates `shopfront_clone_alerts` (planned, not yet applied; ships in S0E.1)
+- `supabase/migration-v140-shopfront-init.sql` — the migration that creates `shopfront_clone_alerts` (planned, not yet applied; ships in S0E.1)
 - CLAUDE.md → "Always do" → deletion test for new wrapper modules
