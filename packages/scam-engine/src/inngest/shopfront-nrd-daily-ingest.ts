@@ -63,7 +63,17 @@ export const shopfrontNrdDailyIngest = inngest.createFunction(
     // codebase (cluster-builder, enrichment, urlscan-enrichment, etc).
     concurrency: { limit: 1 },
   },
-  { cron: "30 8 * * *" },
+  // Two triggers:
+  //   - cron: the daily 08:30 UTC sweep
+  //   - event: lets ops re-run the ingest ad-hoc (smoke tests, back-fills,
+  //     post-incident replays) without leaning on the Inngest dashboard
+  //     "Invoke" button. Send via the events API with the production
+  //     INNGEST_EVENT_KEY. Event payload is ignored — the fn always
+  //     fetches yesterday's NRD list unless WHOISDS_NRD_ZIP_URL overrides.
+  [
+    { cron: "30 8 * * *" },
+    { event: "shopfront/nrd.manual-trigger.v1" },
+  ],
   async ({ step }) => {
     if (!featureFlags.shopfrontCloneWatch) {
       return { skipped: true, reason: "FF_SHOPFRONT_CLONE_WATCH disabled" };
