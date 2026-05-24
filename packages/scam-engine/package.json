@@ -56,16 +56,19 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",
     "@askarthur/core-analysis": "workspace:*",
+    "@askarthur/shopfront-glue": "workspace:*",
     "@askarthur/supabase": "workspace:*",
     "@askarthur/types": "workspace:*",
     "@askarthur/utils": "workspace:*",
     "@react-pdf/renderer": "^4.0.0",
     "@upstash/redis": "^1.36.2",
     "inngest": "^3.54.2",
+    "jszip": "^3.10.1",
     "libphonenumber-js": "^1.11.0",
     "semver": "^7.6.0",
     "tldts": "^7.0.23",
-    "twilio": "^5.4.0"
+    "twilio": "^5.4.0",
+    "undici": "^6.21.1"
   },
   "devDependencies": {
     "@supabase/supabase-js": "^2.95.3",
