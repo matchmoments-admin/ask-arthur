@@ -182,9 +182,82 @@ public endpoint at any point post-Phase-B, Phase B work re-targets
 Hetzner immediately and a new ADR captures the operational ownership
 of the self-hosted stream.
 
+## Amendment 2026-05-24 — NRD pulled forward to Pre-Stage-1 MVP (Layer 0)
+
+A pre-Stage-1 MVP layer ("Layer 0 — clone-watch") is added that runs
+the whoisds NRD daily zip against a static AU brand watchlist
+(~50 retail merchants). Layer 0 sits BEFORE Phase A's
+installed-merchant scope and feeds the public `askarthur.au/clone-watch`
+page. The full Layer 0 plan lives at
+`docs/plans/clone-watch-mvp.md`.
+
+**Justification.** The locked plan put Shield app surfaces (badge,
+Directory, scanner gated to installed merchants) BEFORE the engine,
+on the assumption merchants would install on the strength of the
+Stage 0 outreach narrative. User-driven reality check 2026-05-24:
+the Shield is a wrapper around evidence the engine produces, and
+the outreach in #367 / #370 is vaporware without an operating
+engine. Layer 0 costs A$0/mo marginal (whoisds free tier +
+deterministic lexical matching + 1 daily Inngest fn within
+free-tier headroom) and gives every Stage 0 outreach a live URL
+to land on.
+
+**What moves.** Only the whoisds NRD daily zip ingest moves from
+Phase C to Layer 0.
+
+**What stays in Phase C unchanged.** Voyage embeddings (the
+"primary verdict for the logo-swap, copy-preserved attack class"
+per ADR-0015), Hetzner certstream-server (conditional on Calidog
+spike failure OR enterprise SLA), cross-merchant federated
+clustering. All still gated on Layer 4 WTP signal from #368 +
+privacy counsel opinion from #369.
+
+**What stays in Phase B unchanged.** Calidog public certstream
+WSS firehose, the 48h stability spike gate, the
+`shopfront_shop_permutations` precomputed table for installed
+merchants. Phase B is still gated on ≥10 paying Shield Pro
+merchants.
+
+**Where Layer 0 writes.** Same `shopfront_clone_alerts` table
+(Decision #1 of the build chain unchanged) with `target_shop_id IS
+NULL` + `inferred_target_domain` populated + `source = 'nrd'`. The
+schema's existing CHECK constraint and `idx_clone_alerts_unverified`
+partial index already support this branch — no schema change beyond
+shipping v140 itself.
+
+**Where Layer 0 code lives.** `packages/shopfront-glue/` — same as
+Phase A. Deletion test still fails for `packages/domain-monitor/`
+at Layer 0 scope. The Layer 0 lexical matcher is the foundation
+that Phase A and Phase B both reuse; the deletion test for
+`shopfront-glue/` passes from Layer 0 onward.
+
+**Where the public page lives.** `apps/web/app/clone-watch/` (Next.js
+App Router server component). Read-only, factual-signal-only,
+indexable. v0 copy follows the principles in
+`docs/policy/draft-disclaimer-pack-v0.md`; v1 copy replaces it when
+#371 lawyer-vetted pack returns.
+
+**Source-layering table after this amendment:**
+
+| Phase       | Sources                                                                                             | Storage                                                                  | Package                                           |
+| ----------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------- |
+| **0 (MVP)** | whoisds NRD daily zip × static AU brand watchlist (~50 brands)                                      | `shopfront_clone_alerts` (target_shop_id IS NULL, source = 'nrd')        | `packages/shopfront-glue/`                        |
+| A (#376)    | Brand-keyword corpus over `scam_reports` + `reddit_post_intel` + `feed_items` × installed merchants | `shopfront_clone_alerts` (target_shop_id IS NOT NULL, source = 'corpus') | `packages/shopfront-glue/`                        |
+| B           | Calidog public certstream WSS + lexical-pattern matcher (precomputed permutations)                  | SAME `shopfront_clone_alerts` (NOT a parallel table)                     | `packages/shopfront-glue/` (extended)             |
+| C           | Voyage embeddings + Hetzner (conditional) + cross-merchant federation                               | `shopfront_clone_alerts` + sibling `shopfront_clone_alerts_embeddings`   | `packages/domain-monitor/` (deletion test passes) |
+
+**Reversal trigger for Layer 0.** If whoisds.com paywalls or
+disables free NRD access, swap to an alternative free source
+(ICANN CZDS per-TLD subscriptions, registry-specific public
+lists). If no free source remains, Layer 0 degrades to "engine
+only on internal corpus" (the existing #376 Phase A path) — the
+public-evidence flywheel weakens but the merchant-installed path
+is unaffected.
+
 ## Related
 
 - `docs/plans/shopify-shopfront.md` §2 Layer 1 + §5 Stage 2 (a/b)
+- `docs/plans/clone-watch-mvp.md` — Layer 0 / MVP plan (NEW 2026-05-24)
 - ADR-0015 — clone-detection signal model (deterministic-first, embeddings primary at Phase C)
 - ADR-0011 — continuous re-verification (the badge state machine clone-detection feeds)
 - ADR-0012 — Threat Feed License enterprise SKU (the funding engine that gates Phase C)
@@ -192,5 +265,5 @@ of the self-hosted stream.
 - Issue #376 — Phase A scanner (corpus-only)
 - `packages/scam-engine/src/inngest/ct-monitor.ts` — the EXISTING CT monitor (AU govt / bank / telco, every 12h via crt.sh) that this ADR explicitly does NOT replace
 - `brand_impersonation_alerts` table — the existing 9-row table the existing CT monitor writes to
-- `supabase/migrations/v140_shopfront_init.sql` — the migration that creates `shopfront_clone_alerts` (planned, not yet applied)
+- `supabase/migrations/migration-v140-shopfront-init.sql` — the migration that creates `shopfront_clone_alerts` (planned, not yet applied; ships in S0E.1)
 - CLAUDE.md → "Always do" → deletion test for new wrapper modules
