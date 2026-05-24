@@ -8,6 +8,19 @@ it stays organized by platform/area.
 
 ---
 
+## Investor Readiness — Sprint Shipped + Deferred (2026-05-25)
+
+The 2026-05-25 audit (investor-readiness review) drove a one-day sprint that shipped four P0 security fixes + DB hygiene (PR #413, merged 2026-05-24) and a Claude Code harness pass (PR #414). Three followups and the SOC 2 path were explicitly deferred:
+
+- **[#415](https://github.com/matchmoments-admin/ask-arthur/issues/415) — Deferred: SOC 2 Type I + Vanta/Sprinto kickoff.** Year 1 cost A$30–60K (platform A$5–15K + audit A$15–25K + pentest A$10–20K). Park until a named bank prospect requires it OR ARR justifies the burn. Full plan: `docs/pitch/certification-roadmap.md`.
+- **[#416](https://github.com/matchmoments-admin/ask-arthur/issues/416) — Followup: Real device attestation.** `/api/mobile/attest` returns hard 501 today. Wire real Google Play Integrity + Apple App Attest verifiers when any mobile surface needs them. Currently nothing consumes a device token.
+- **[#417](https://github.com/matchmoments-admin/ask-arthur/issues/417) — Followup: Phone Footprint fleet/org SKU ownership gate.** Consumer-SKU gate shipped; fleet path still trusts metadata `org_id`. Needed before any paying fleet customer signs up. Two design options (mapping table vs admin-membership check) listed in the issue.
+- **[#418](https://github.com/matchmoments-admin/ask-arthur/issues/418) — Followup: Unit tests for the four hardened routes.** No tests existed pre-#413; retrofitting is `ready-for-agent`.
+
+What shipped is locked in: `mcp__supabase__get_advisors security` returns 0 lints; prod home + `/api/analyze` + `/charity-check` + `/clone-watch` smoke tests green post-deploy (2026-05-24).
+
+---
+
 ## Audit Remediation Roadmap (2026-04-28 flow audit)
 
 The 2026-04-28 per-feature flow audit (~100 findings across 41 features)
