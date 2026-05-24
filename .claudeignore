@@ -1,0 +1,54 @@
+# Build artefacts — Claude should never index or grep through these.
+node_modules/
+**/node_modules/
+
+# Next.js
+.next/
+**/.next/
+
+# Expo / React Native
+.expo/
+**/.expo/
+
+# Generic build outputs
+dist/
+**/dist/
+build/
+**/build/
+
+# Turborepo
+.turbo/
+**/.turbo/
+
+# Caches
+.cache/
+**/.cache/
+*.log
+
+# OS / IDE
+.DS_Store
+.vscode/
+.idea/
+
+# Vercel
+.vercel/
+**/.vercel/
+
+# Stale worktrees — these are inert copies of past branches.
+.claude/worktrees/
+
+# Coverage / test outputs
+coverage/
+**/coverage/
+
+# Python
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+**/.pytest_cache/
+.venv/
+venv/
+
+# Lockfiles — readable when needed via Read, but excluded from greps.
+pnpm-lock.yaml

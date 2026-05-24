@@ -10,6 +10,28 @@ The canonical "what's currently shipped and how does it talk to itself" map. **R
 | [feature-flags.md](./feature-flags.md)           | Every flag from `packages/utils/src/feature-flags.ts` (~80) + env-var groups.                                                  |
 | [data-flows.md](./data-flows.md)                 | The 6 canonical flows: analyze pipeline, Reddit Intel, Phone Footprint refresh, Charity Check, Bot dispatch, Onward reporting. |
 
+## Package surface map
+
+The deployed surface above is **what runs in production**. The table below is **what code consumes what code** — useful when navigating a 14-package workspace looking for "where does X live" without grepping the entire monorepo. Each package's own `src/index.ts` is the authoritative export list; this table is a pointer.
+
+| Package                      | Key exports                                                                                  | Consumers                                                     |
+| ---------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `@askarthur/types`           | Zod schemas, `AnalysisResult`, `TIER_LIMITS`, `UnifiedScanResult`                            | every app + every other package                               |
+| `@askarthur/supabase`        | `createServiceClient`, `createAuthServerClient`, `createMiddlewareClient`, browser client    | apps/web, apps/extension, apps/mobile                         |
+| `@askarthur/utils`           | `logger`, `checkRateLimit` (+ per-feature buckets), `hashIdentifier`, `featureFlags`         | every app + every other package                               |
+| `@askarthur/core-analysis`   | `mergeVerdict`, `runAnalysisCore` — the single canonical verdict-merge surface               | apps/web (`/api/analyze`, `/api/extension/analyze`), bot-core |
+| `@askarthur/scam-engine`     | `analyzeWithClaude`, `storeVerifiedScam`, `scrubPII`, `assertSafeURL`, all Inngest functions | apps/web                                                      |
+| `@askarthur/bot-core`        | `analyzeForBot`, `toTelegramMessage`/`toSlackBlocks`/etc., webhook verifiers                 | apps/web bot routes                                           |
+| `@askarthur/breach-defence`  | AU Breach Index, DNS-drift, typosquat, recovery playbooks                                    | apps/web breach surfaces                                      |
+| `@askarthur/shopfront-glue`  | Clone-watch matcher (Phase A deterministic)                                                  | apps/web `/api/cron/clone-watch-*`                            |
+| `@askarthur/charity-check`   | ACNC search + verdict logic                                                                  | apps/web `/charity-check`, `/api/charity-check`               |
+| `@askarthur/extension-audit` | `scanExtension` — Chrome extension static analysis                                           | apps/web `/api/extension-audit`                               |
+| `@askarthur/mcp-audit`       | `scanMcpServer`, `scanSkill` — MCP/skill security scanner                                    | apps/web `/api/mcp-audit`                                     |
+| `@askarthur/site-audit`      | Website audit pipeline (Lighthouse-style)                                                    | apps/web `/api/site-audit`                                    |
+| `@askarthur/eslint-config`   | Shared ESLint config                                                                         | every app + package                                           |
+
+Subdirectory `CLAUDE.md` files (where present) describe scoped commands and gotchas for that package. Currently: `apps/web/CLAUDE.md`, `packages/scam-engine/CLAUDE.md`, `pipeline/scrapers/CLAUDE.md`.
+
 ## The single home-per-fact rule
 
 A route, table, cron, or flag is documented in **exactly one** of these files — never two. The system map is the source of truth; older docs that overlap (`ARCHITECTURE.md`, `docs/plans/*.md`) defer to it via redirect or banner.
