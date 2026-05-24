@@ -39,7 +39,7 @@ Subject: **Disclaimer-pack engagement for Ask Arthur Shield (scam-detection / me
 >
 > I'm Brendan Milton, founder of [Ask Arthur](https://askarthur.au) — an Australian scam-detection platform with consumer extension, mobile app, and a forthcoming Shopify merchant app ("Ask Arthur Shield"). We need an AU law firm to scope a disclaimer-pack engagement covering five outbound consumer-facing surfaces that make factual claims about third-party merchants and suspected scam operators.
 >
-> The full SOW is at: [docs/policy/371-disclaimer-pack-sow.md in our repo — share access on request]. In brief, the pack covers:
+> The full SOW is at: [docs/policy/371-disclaimer-pack-sow.md in our repo — share access on request]. **We have also prepared a v0 pre-counsel draft of the pack at [docs/policy/draft-disclaimer-pack-v0.md] as a redline target — the intent is to compress your review wall-clock from "draft from brief" to "redline our draft"** (we estimate ~2 weeks of saving for the same fee envelope). In brief, the pack covers:
 >
 > 1. The "Verified by Ask Arthur" merchant badge (point-in-time, not a warranty)
 > 2. Clone-detection alert copy sent to merchants (factual signals, not legal characterisations)
