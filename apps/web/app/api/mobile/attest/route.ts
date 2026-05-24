@@ -1,83 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import { logger } from "@askarthur/utils/logger";
-import { featureFlags } from "@askarthur/utils/feature-flags";
 
+// Hard 501 across all environments until real Google Play Integrity / Apple
+// App Attest verification is wired up. The previous shape issued a deviceToken
+// to any non-prod caller (verification was a TODO), which meant any downstream
+// endpoint that trusts the token could be bypassed in dev/preview by anyone
+// who could reach the route. A feature-flag gate doesn't help: flipping the
+// flag would re-open the bypass. Track the real implementation as
+// "Device attestation hardening" in BACKLOG.md.
 export async function POST(req: NextRequest) {
-  if (!featureFlags.deviceAttestation) {
-    return NextResponse.json(
-      { error: "Device attestation is not enabled" },
-      { status: 404 }
-    );
-  }
-
-  let body: { token: string; platform: string };
+  // Drain the body so clients get a 501 rather than a hung connection on
+  // platforms where the runtime won't send a response until the request is
+  // fully read.
   try {
-    body = await req.json();
+    await req.text();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    /* ignore — we're refusing regardless */
   }
 
-  const { token, platform } = body;
-  if (!token || !platform) {
-    return NextResponse.json(
-      { error: "Missing token or platform" },
-      { status: 400 }
-    );
-  }
+  logger.warn("Device attestation route called but verification is not implemented");
 
-  if (platform !== "android" && platform !== "ios") {
-    return NextResponse.json(
-      { error: "Unsupported platform" },
-      { status: 400 }
-    );
-  }
-
-  // Defense-in-depth: the FF gate above currently keeps this route inert in
-  // production, but the verification logic below is a TODO that accepts any
-  // token. If `featureFlags.deviceAttestation` is ever flipped on in prod
-  // before Google Play Integrity / Apple App Attest verification is wired
-  // up, this route would silently issue device tokens to anyone. Refuse
-  // explicitly so an FF flip fails loudly instead of bypassing auth.
-  if (process.env.NODE_ENV === "production") {
-    logger.error(
-      "device attestation route hit in production but verification is not implemented",
-      { platform, tokenLength: token.length },
-    );
-    return NextResponse.json(
-      { error: "Device attestation is not yet implemented in production" },
-      { status: 501 }
-    );
-  }
-
-  try {
-    if (platform === "android") {
-      // TODO: Verify Play Integrity token with Google's server-side API
-      // Requires: google.apis.playintegrity.v1
-      // For now, accept and log — full verification added when Google Cloud project is configured
-      logger.info("Android attestation token received", {
-        tokenLength: token.length,
-      });
-    } else {
-      // TODO: Verify App Attest attestation with Apple's server
-      // Requires: POST to https://data.appattest.apple.com/v1/attestKey
-      // For now, accept and log
-      logger.info("iOS attestation token received", {
-        tokenLength: token.length,
-      });
-    }
-
-    // Return a short-lived JWT (placeholder — wire up JWT signing when secrets are configured)
-    const deviceToken = `dat_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
-
-    return NextResponse.json({
-      deviceToken,
-      expiresIn: 3600,
-    });
-  } catch (err) {
-    logger.error("Device attestation verification failed", { error: err });
-    return NextResponse.json(
-      { error: "Attestation verification failed" },
-      { status: 500 }
-    );
-  }
+  return NextResponse.json(
+    { error: "device_attestation_not_implemented" },
+    { status: 501 },
+  );
 }

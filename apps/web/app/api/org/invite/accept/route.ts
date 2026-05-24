@@ -1,16 +1,47 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createServiceClient } from "@askarthur/supabase/server";
+import { checkOrgInviteAcceptRateLimit } from "@askarthur/utils/rate-limit";
 import { getUser } from "@/lib/auth";
+import { AuthUnavailableError } from "@/lib/auth";
+import { logger } from "@askarthur/utils/logger";
 
 const AcceptSchema = z.object({
   token: z.string().min(1),
 });
 
 export async function POST(req: NextRequest) {
-  const user = await getUser();
+  let user;
+  try {
+    user = await getUser();
+  } catch (err) {
+    if (err instanceof AuthUnavailableError) {
+      return NextResponse.json(
+        { error: "Authentication service temporarily unavailable" },
+        { status: 503, headers: { "Retry-After": "30" } },
+      );
+    }
+    throw err;
+  }
   if (!user) {
     return NextResponse.json({ error: "Please sign in to accept this invitation" }, { status: 401 });
+  }
+
+  // Rate limit BEFORE the DB lookup so an attacker can't probe tokens
+  // unboundedly. Identifier is user.id, not IP, so accounts can't bypass by
+  // rotating IPs. 10/hr (see checkOrgInviteAcceptRateLimit) is well above
+  // legit retry rates.
+  const rl = await checkOrgInviteAcceptRateLimit(user.id);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: rl.message ?? "Too many attempts. Try again later." },
+      {
+        status: 429,
+        headers: rl.resetAt
+          ? { "Retry-After": Math.max(1, Math.ceil((rl.resetAt.getTime() - Date.now()) / 1000)).toString() }
+          : undefined,
+      },
+    );
   }
 
   const body = await req.json();
@@ -42,6 +73,27 @@ export async function POST(req: NextRequest) {
 
   if (lookupError || !invitation) {
     return NextResponse.json({ error: "Invalid or expired invitation" }, { status: 404 });
+  }
+
+  // Email-binding: the invitation token is only valid for the email the
+  // org admin entered. Without this, anyone who guesses or steals a token
+  // (CSRF on the invite email, shoulder-surf, a phished forward) can join
+  // the org as the invited role. Compare case-insensitively because Supabase
+  // stores emails verbatim from the admin entry, which is often title-cased,
+  // while user.email is whatever the signup flow recorded. Do NOT echo the
+  // expected email back in the response — that would let a logged-in
+  // attacker probe membership by token.
+  const invitedEmail = (invitation.email ?? "").trim().toLowerCase();
+  const userEmail = (user.email ?? "").trim().toLowerCase();
+  if (!invitedEmail || !userEmail || invitedEmail !== userEmail) {
+    logger.warn("org invite email mismatch", {
+      userId: user.id,
+      invitationId: invitation.id,
+    });
+    return NextResponse.json(
+      { error: "This invitation was sent to a different email address" },
+      { status: 403 },
+    );
   }
 
   if (invitation.accepted_at) {
