@@ -16,9 +16,10 @@ import { createServiceClient } from "@askarthur/supabase/server";
 export const revalidate = 3600; // 1 hour ISR
 
 export const metadata: Metadata = {
-  title: "Clone-watch — AU brand-domain registrations under review | Ask Arthur",
+  title:
+    "Clone-watch — newly-registered AU brand-pattern domains | Ask Arthur",
   description:
-    "Newly-registered domains that match patterns of Australian retail brands. Factual signals from a daily public-registry sweep. No legal claim of bad faith.",
+    "A daily list of newly-registered domains matching the lexical pattern of Australian retail brand names. Public-registry observations only.",
   // v0 page — noindex for the first 7 days while v0 copy is unvetted by
   // counsel. Flip via a follow-up PR after #371 lawyer pack returns.
   robots: { index: false, follow: false },
@@ -77,7 +78,10 @@ function signalLabel(sig: SignalEntry | null): string {
     case "levenshtein":
       return "1-char typo";
     default:
-      return String(sig.signal_type);
+      // Whitelist: anything outside the curated vocabulary falls back to
+      // the generic label so attacker-influenced JSONB can't surface raw
+      // enum tokens inside the styled pill.
+      return "match";
   }
 }
 
@@ -102,14 +106,15 @@ export default async function CloneWatchPage() {
         </span>
       </div>
       <h1 className="text-deep-navy text-4xl md:text-5xl font-extrabold mb-4 leading-tight">
-        AU brand-domain registrations under review
+        Newly-registered AU brand-pattern domains
       </h1>
 
       <p className="text-lg text-gov-slate mb-6 leading-relaxed">
-        Each entry below is a domain registered in the last 7 days that
-        matches a pattern of an Australian retail brand on our watchlist.
-        These are factual signals from a public-registry sweep, not legal
-        claims that the registrant is acting in bad faith.
+        Each entry below is a domain registered in the last 7 days whose
+        characters match the lexical pattern of an Australian brand on
+        our reference list. These are factual observations from a
+        public-registry sweep — not characterisations of the registrant
+        or their intent.
       </p>
 
       <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 mb-10 text-sm leading-relaxed text-amber-900">
@@ -123,15 +128,15 @@ export default async function CloneWatchPage() {
             <p>
               A daily lexical match against newly-registered domains. We
               do <strong>not</strong> claim any listed domain is operated
-              by a scammer, infringes any trademark, or is hosting
-              fraudulent content. We claim only that the domain string
-              resembles an Australian brand by a deterministic
+              by a scammer or is hosting fraudulent content. We claim
+              only that the domain string is characteristically similar
+              to an Australian brand name by a deterministic
               measurement.
             </p>
             <p className="mt-3 font-semibold">If your brand appears here</p>
             <p>
               You can verify your shop on Ask Arthur or request removal
-              from the watchlist by emailing{" "}
+              from the reference list by emailing{" "}
               <a
                 href="mailto:hello@askarthur.au"
                 className="underline font-medium"
@@ -193,8 +198,9 @@ export default async function CloneWatchPage() {
         <p className="mb-2">
           <strong className="text-deep-navy">Data source:</strong>{" "}
           Newly-registered domain (NRD) lists from whoisds.com (free
-          public tier), filtered against a watchlist of approximately
-          50 Australian retail, bank, telco, and logistics brands.
+          public tier), filtered against a reference list of
+          approximately 50 Australian retail, bank, telco, and
+          logistics brand names.
         </p>
         <p className="mb-2">
           <strong className="text-deep-navy">What we have not done:</strong>{" "}
