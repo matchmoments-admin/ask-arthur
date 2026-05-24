@@ -20,9 +20,14 @@ import { logger } from "@askarthur/utils/logger";
 import { lookupABN } from "./abr-lookup";
 import { fetchShopPage, type ShopPageFetch } from "./fetch-shop-page";
 import type { AbnStatus } from "@askarthur/types";
+import { isValidAbnChecksum } from "./abn-checksum";
 
-// Official ABN checksum weights (modulus 89).
-const ABN_WEIGHTS = [10, 1, 3, 5, 7, 9, 11, 13, 15, 17, 19];
+// Re-exported from the pure `abn-checksum` module — callers of
+// `abn-extract` (server-only, pulls in `fetchShopPage` → `node:dns`)
+// keep working unchanged, while `charity-intent.ts` (reachable from
+// `ScamChecker.tsx`'s client bundle) imports from `./abn-checksum`
+// directly and avoids the server-only chain.
+export { isValidAbnChecksum };
 
 // Company-form words + articles stripped before name matching — a shop's
 // registered name routinely differs from its trading name only by these.
@@ -47,20 +52,6 @@ export function isAuHost(url: string): boolean {
   } catch {
     return false;
   }
-}
-
-/**
- * Validate an 11-digit ABN string with the official modulus-89 algorithm.
- * Subtract 1 from the first digit, apply the weight vector, sum, mod 89.
- */
-export function isValidAbnChecksum(digits: string): boolean {
-  if (!/^\d{11}$/.test(digits)) return false;
-  let sum = 0;
-  for (let i = 0; i < 11; i++) {
-    const d = Number(digits[i]) - (i === 0 ? 1 : 0);
-    sum += d * ABN_WEIGHTS[i];
-  }
-  return sum % 89 === 0;
 }
 
 function stripToText(html: string): string {

@@ -18,7 +18,10 @@
 // The route attaches the returned payload to the response; the result
 // component renders it as a deep-link CTA into /charity-check, pre-filled.
 
-import { isValidAbnChecksum } from "./abn-extract";
+// Import from `./abn-checksum` (pure) rather than `./abn-extract` — the
+// latter pulls in `fetchShopPage` → `ssrf-dispatcher` → `node:dns`, and
+// this module is reachable from `ScamChecker.tsx` (a client component).
+import { isValidAbnChecksum } from "./abn-checksum";
 
 const CHARITY_KEYWORDS = [
   "charity",
