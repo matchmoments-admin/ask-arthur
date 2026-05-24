@@ -59,6 +59,33 @@ const MAX_MATCH_SCORE = 0.95;
 // primary label (split by - or _).
 const MIN_BRAND_LEN_FOR_LOOSE_SUBSTRING = 5;
 
+// Scam-context-token gate on substring hits (v2 matcher, issue #405).
+// Second prod run after the #403 word-boundary fix surfaced ~70% FP rate
+// from common English words containing a brand substring: "Greece" →
+// reece (3/17), "carpentry" → target (multiple), "auto-école" → coles,
+// "surname Coles" → coles. Pattern: brand embedded mid-word in a segment
+// that's otherwise unrelated to commerce/auth.
+//
+// Gate: a substring hit only fires if either
+//   (a) the primary label IS the brand exactly — bare brand on a
+//       non-legitimate TLD is impersonation by definition (westpac.com,
+//       cba.net, kfc.shop)
+//   (b) at least one scam-context token appears in the domain with the
+//       brand stripped and 2-char ccTLDs dropped (so `.com.au` doesn't
+//       leak the `au` token universally)
+//
+// Known FN trade-off: `kfc-net.net` (KFC) and similar short-brand
+// substring hits with no context token — short brands (<5 chars) skip
+// Levenshtein entirely (see MIN_BRAND_LEN_FOR_LEVENSHTEIN), so substring
+// is their only path. Phase A scanner (#376) picks these up via DNS/
+// content inspection. Long-brand 1-char-edit typosquats (`qkmart.com`,
+// `kmartz.com`) keep firing via the Levenshtein branch, which remains
+// ungated — single-edit typos are already scoped tightly enough.
+const SCAM_CONTEXT_TOKENS = [
+  "bank", "login", "support", "ads", "online", "secure", "verify",
+  "pay", "home", "shop", "store", "account", "au",
+];
+
 export function lexicalMatch(
   domain: string,
   watchlist: BrandEntry[] = AU_BRAND_WATCHLIST,
@@ -95,7 +122,7 @@ export function lexicalMatch(
       brand.length >= MIN_BRAND_LEN_FOR_LOOSE_SUBSTRING
         ? primary.includes(brand)
         : primary.split(/[-_]/).includes(brand);
-    if (substringHit) {
+    if (substringHit && hasScamContext(lower, primary, brand)) {
       best = pickBetter(best, {
         brand: entry.brand,
         legitimate_domain: entry.legitimate_domains[0] ?? "",
@@ -127,6 +154,23 @@ export function lexicalMatch(
 function pickBetter(a: MatchResult | null, b: MatchResult): MatchResult {
   if (!a) return b;
   return b.score > a.score ? b : a;
+}
+
+function hasScamContext(domain: string, primary: string, brand: string): boolean {
+  // Exception (a): bare brand on a non-legitimate TLD always fires.
+  // Caller has already filtered legitimate-domain exact matches upstream.
+  if (primary === brand) return true;
+
+  // Drop a 2-char final label (ccTLDs like .au, .uk, .fr) so the universal
+  // `.com.au` suffix doesn't satisfy the `au` token for every Australian
+  // domain. gTLDs (.shop, .info, .org, .net) are kept — `.shop` is itself
+  // a scam-storefront signal.
+  const labels = domain.split(".");
+  const lastLabel = labels.at(-1) ?? "";
+  const stem = lastLabel.length <= 2 ? labels.slice(0, -1).join(".") : domain;
+
+  const residue = stem.replace(brand, " ");
+  return SCAM_CONTEXT_TOKENS.some((token) => residue.includes(token));
 }
 
 function normaliseConfusables(input: string): string {
