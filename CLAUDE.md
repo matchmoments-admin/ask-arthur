@@ -106,6 +106,10 @@ pnpm --filter @askarthur/web test
 cd pipeline/scrapers && python -m pytest tests/ -v
 ```
 
+**For most agent work, prefer scoped commands (`pnpm --filter <pkg> ...`) over the global `pnpm turbo ...` form.** Turbo runs every package in the workspace, which burns context on irrelevant output and slows the agent loop significantly in a 14-package monorepo. Only use the global form when verifying cross-package impact — e.g. you changed an export in `packages/types` and want every consumer rebuilt.
+
+When working inside `apps/<x>/` or `packages/<x>/`, read that subdirectory's `CLAUDE.md` first if one exists. Subdirectory files cover scoped commands, local conventions, and gotchas that this root file deliberately omits to stay lean. Current subdirectory guides: `apps/web/`, `packages/scam-engine/`, `pipeline/scrapers/`.
+
 ## Import Patterns
 
 All cross-package imports use `@askarthur/*` (no hyphen):
