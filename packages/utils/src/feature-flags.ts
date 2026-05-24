@@ -362,6 +362,13 @@ export const featureFlags = {
    *  start consuming the trial. Plan: docs/plans/shop-guard-v2.md §4 PR 2. */
   shopSignalPaidFeed: process.env.FF_SHOP_SIGNAL_PAID_FEED === "true",
 
+  /** Shopfront clone-watch Layer 0 — daily NRD lexical sweep against the
+   *  static AU brand watchlist. Server-side only (the Inngest function is
+   *  the only consumer). Default OFF until WHOISDS_NRD_ZIP_URL is set in
+   *  Vercel + the post-merge prod smoke verifies the first run produces
+   *  rows + Telegram digest. Plan: docs/plans/clone-watch-mvp.md §4 PR 2. */
+  shopfrontCloneWatch: process.env.FF_SHOPFRONT_CLONE_WATCH === "true",
+
   /** Screenshot retention — when ON, `storeVerifiedScam` uploads the raw
    *  screenshot of a HIGH_RISK image submission to R2. Default OFF, and it
    *  must stay OFF until prerequisites are met: `scrubPII` is text-only, so

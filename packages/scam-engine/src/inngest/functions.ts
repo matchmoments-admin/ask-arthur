@@ -90,6 +90,12 @@ import { archiveShadowsRetention } from "./archive-shadows-retention";
 // (user-initiated), runs ABN + WHOIS + APIVoid, writes back to shop_checks.
 import { shopSignalEnrich } from "./shop-signal-enrich";
 
+// Shopfront Clone-Watch: Layer 0 daily NRD sweep against the static
+// AU brand watchlist (S0E.2). Writes hits into shopfront_clone_alerts
+// with target_shop_id IS NULL, source = 'nrd'. Gated by
+// FF_SHOPFRONT_CLONE_WATCH (default OFF).
+import { shopfrontNrdDailyIngest } from "./shopfront-nrd-daily-ingest";
+
 export const inngestFunctions = [
   stalenessCheck,
   stalenessCheckIPs,
@@ -144,4 +150,6 @@ export const inngestFunctions = [
   archiveShadowsRetention,
   // Shop Signal: Deep Shop Check enrichment (user-initiated)
   shopSignalEnrich,
+  // Shopfront Clone-Watch: Layer 0 daily NRD sweep (S0E.2)
+  shopfrontNrdDailyIngest,
 ];
