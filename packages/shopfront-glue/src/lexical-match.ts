@@ -49,6 +49,16 @@ const LEVENSHTEIN_THRESHOLD = 1;
 const MIN_BRAND_LEN_FOR_LEVENSHTEIN = 5;
 const MAX_MATCH_SCORE = 0.95;
 
+// Substring threshold: brands ≥ this length match anywhere in the
+// primary label. Shorter brands (3-char "ANZ" / "NAB" / "IGA",
+// 4-char "Aldi" / "Toll") need a stricter check — `anz` as a raw
+// substring matches `franzese.com`, `lanzhoudhl.com`, `nathanz.art`,
+// and hundreds of other non-clone domains. First prod run produced
+// 137+85 hits each on ANZ + NAB before this gate. For short brands
+// we require the brand to appear as a standalone segment of the
+// primary label (split by - or _).
+const MIN_BRAND_LEN_FOR_LOOSE_SUBSTRING = 5;
+
 export function lexicalMatch(
   domain: string,
   watchlist: BrandEntry[] = AU_BRAND_WATCHLIST,
@@ -81,7 +91,11 @@ export function lexicalMatch(
       continue;
     }
 
-    if (primary.includes(brand)) {
+    const substringHit =
+      brand.length >= MIN_BRAND_LEN_FOR_LOOSE_SUBSTRING
+        ? primary.includes(brand)
+        : primary.split(/[-_]/).includes(brand);
+    if (substringHit) {
       best = pickBetter(best, {
         brand: entry.brand,
         legitimate_domain: entry.legitimate_domains[0] ?? "",
