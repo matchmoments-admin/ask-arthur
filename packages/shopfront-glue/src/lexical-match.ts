@@ -81,6 +81,12 @@ const MIN_BRAND_LEN_FOR_LOOSE_SUBSTRING = 5;
 // content inspection. Long-brand 1-char-edit typosquats (`qkmart.com`,
 // `kmartz.com`) keep firing via the Levenshtein branch, which remains
 // ungated — single-edit typos are already scoped tightly enough.
+//
+// Token-as-TLD note: `shop`, `online`, `store`, `bank`, `support` are
+// all both context tokens AND legitimate gTLDs. The 2-char-ccTLD drop
+// keeps these (≥4 chars), so any brand-substring hit on `.shop` /
+// `.online` / `.store` / `.bank` / `.support` auto-passes the gate.
+// Intentional — `.shop` is itself a scam-storefront signal.
 const SCAM_CONTEXT_TOKENS = [
   "bank", "login", "support", "ads", "online", "secure", "verify",
   "pay", "home", "shop", "store", "account", "au",
@@ -169,7 +175,11 @@ function hasScamContext(domain: string, primary: string, brand: string): boolean
   const lastLabel = labels.at(-1) ?? "";
   const stem = lastLabel.length <= 2 ? labels.slice(0, -1).join(".") : domain;
 
-  const residue = stem.replace(brand, " ");
+  // replaceAll (not replace) so a brand appearing twice in the domain
+  // doesn't leak its own letters into the residue and accidentally
+  // satisfy a token. Latent foot-gun if a future watchlist brand equals
+  // a context token (e.g. a "Shop"/"Pay"/"Home"-named brand).
+  const residue = stem.replaceAll(brand, " ");
   return SCAM_CONTEXT_TOKENS.some((token) => residue.includes(token));
 }
 

@@ -144,9 +144,11 @@ describe("lexicalMatch", () => {
     expect(lexicalMatch("spindjinn-greece.net", list)).toBeNull();
   });
 
-  it("v2: does NOT fire on 'carpentry/carpenter' embeddings for brand 'Target'", () => {
+  it("v2: does NOT fire on common-word embeddings of brand 'Target' (no scam-context)", () => {
     const list: BrandEntry[] = [{ brand: "Target", legitimate_domains: ["target.com.au"] }];
+    // 'targettcarpentryltd.co.uk' — carpenter surname-style FP
     expect(lexicalMatch("targettcarpentryltd.co.uk", list)).toBeNull();
+    // 'legacypnttargetpro.co' — random "pro" suffix, no scam-context token
     expect(lexicalMatch("legacypnttargetpro.co", list)).toBeNull();
   });
 
@@ -198,8 +200,11 @@ describe("lexicalMatch", () => {
   });
 
   it("v2: 'au' as a primary-label segment IS legitimate context", () => {
+    // Use .com TLD (not .shop) to isolate the `au` token as the only
+    // possible gate trigger; `.shop` would also satisfy the gate and
+    // mask whether the `au`-as-segment path actually fires.
     const list: BrandEntry[] = [{ brand: "Westpac", legitimate_domains: ["westpac.com.au"] }];
-    const result = lexicalMatch("westpac-au.shop", list);
+    const result = lexicalMatch("westpac-au.com", list);
     expect(result).not.toBeNull();
     expect(result?.signal_type).toBe("substring");
   });
