@@ -96,7 +96,7 @@ To be appended to `docs/adr/0016-clone-detection-source-layering.md` after the "
 
 **Operational notes:**
 
-- whoisds.com free tier requires manual signup at https://www.whoisds.com (Brendan one-time, captures the daily-download URL with embedded token). Capture the URL in Vercel env as `WHOISDS_NRD_ZIP_URL`. URL rotates monthly per whoisds policy.
+- whoisds.com free-tier NRD lists are publicly downloadable at deterministic date-based URLs (the page header reads "without a license and without any payment"). The Inngest fn computes yesterday's URL on each tick via `computeNrdUrl(yesterdayUtc())` in `packages/scam-engine/src/inngest/shopfront-nrd-daily-ingest.ts`. No signup, no env var, no rotation. `WHOISDS_NRD_ZIP_URL` remains an optional override for tests or emergency source-switching.
 - NRD zip is ~50-200MB (~100K-1M domains/day). Download + parse in chunks; chunked DB writes ≤5K/iteration per CLAUDE.md hot-table rules.
 - `statement_timeout='300s'` cap per CLAUDE.md "long-running write loop" rule.
 
@@ -148,7 +148,7 @@ To be appended to `docs/adr/0016-clone-detection-source-layering.md` after the "
 - Cron: `30 8 * * *` (daily 08:30 UTC — well-spaced from existing 08:00 UTC reddit-intel-trigger)
 - Feature flag gate: `FF_SHOPFRONT_CLONE_WATCH` (default OFF; flip ON after first successful prod run)
 - Steps:
-  1. `step.run("download-nrd-zip")` — fetches `WHOISDS_NRD_ZIP_URL` via `ssrfSafeDispatcher` (per #387). 60s timeout. Returns Buffer.
+  1. `step.run("download-and-parse-nrd")` — computes yesterday's NRD URL via `computeNrdUrl(yesterdayUtc())` (or honours `WHOISDS_NRD_ZIP_URL` override for tests), fetches via `ssrfSafeDispatcher` (per #387). 60s timeout. URL pattern is `https://www.whoisds.com/whois-database/newly-registered-domains/${base64("YYYY-MM-DD.zip")}/nrd`.
   2. `step.run("parse-nrd-list")` — unzips, parses domain list. Returns `string[]`.
   3. `step.run("lexical-match-domains")` — runs each domain through `lexicalMatch()` against `AU_BRAND_WATCHLIST`. Returns hits.
   4. `step.run("insert-clone-alerts")` — chunked insert into `shopfront_clone_alerts` (chunks of ≤5K) via UPSERT on the existing `uniq_clone_alerts_target_url` index (which dedupes same-domain hits across runs). `target_shop_id = NULL`, `inferred_target_domain = <brand_legitimate_domain>`, `candidate_url = canonicaliseCandidateUrl(domain)`, `url_hash = sha256(candidate_url)`, `source = 'nrd'`, `severity = Math.floor(brand_match_score * 40)` (matcher caps `brand_match_score < 1.0`, so severity ≤ 39 → `severity_tier = 'low'` always at MVP, since Visual + Semantic terms are 0). The matcher already returns `score ≤ 0.95`; `Math.floor` is defence-in-depth.
@@ -163,7 +163,7 @@ To be appended to `docs/adr/0016-clone-detection-source-layering.md` after the "
 
 **Post-merge prod smoke checklist (required — Inngest fns don't fire on Vercel previews):**
 
-1. Set `WHOISDS_NRD_ZIP_URL` env var in Vercel prod + preview.
+1. No env var to set — the Inngest fn computes yesterday's URL automatically. (`WHOISDS_NRD_ZIP_URL` is an optional override; leave it unset unless you need to back-fill a specific historical date or swap source.)
 2. Flip `FF_SHOPFRONT_CLONE_WATCH=true` in Vercel prod env.
 3. Trigger run manually via Inngest dashboard (`shopfront-nrd-daily-ingest` → "Invoke").
 4. Wait for run completion (≤5 min). Verify status `success` in Inngest dashboard.
