@@ -22,6 +22,7 @@ import JSZip from "jszip";
 import { fetch as undiciFetch } from "undici";
 
 import { inngest } from "./client";
+import { CLONE_WATCH_SCAN_REQUESTED_EVENT } from "./events";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -107,6 +108,38 @@ export const shopfrontNrdDailyIngest = inngest.createFunction(
         failed_chunks: upsertResult.failed_chunks,
         total_chunks: upsertResult.total_chunks,
       });
+    });
+
+    // Phase A.3 — fan out urlscan jobs for any pending-initial-scan rows
+    // (newly inserted today + any unscanned backlog within 14 days).
+    // Gated independently of the master clone-watch flag so we can canary
+    // urlscan without flipping outreach.
+    await step.run("fan-out-urlscan", async () => {
+      if (!featureFlags.shopfrontCloneUrlscan) return { fanned_out: 0 };
+      const sb = createServiceClient();
+      if (!sb) return { fanned_out: 0 };
+      const { data } = await sb.rpc("list_clone_alerts_pending_urlscan", {
+        p_limit: 20,
+      });
+      const rows =
+        (data as Array<{
+          id: number;
+          candidate_url: string;
+          candidate_domain: string;
+        }> | null) ?? [];
+      if (rows.length === 0) return { fanned_out: 0 };
+      const events = rows.map((r) => ({
+        name: CLONE_WATCH_SCAN_REQUESTED_EVENT,
+        id: `clone-watch-urlscan-initial:${r.id}`,
+        data: {
+          alertId: r.id,
+          candidateUrl: r.candidate_url,
+          candidateDomain: r.candidate_domain,
+          reason: "initial" as const,
+        },
+      }));
+      await inngest.send(events);
+      return { fanned_out: rows.length };
     });
 
     await step.run("send-telegram-digest", async () => {
