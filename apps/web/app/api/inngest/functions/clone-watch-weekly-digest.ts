@@ -72,6 +72,19 @@ export const cloneWatchWeeklyDigest = inngest.createFunction(
       };
     });
 
+    const takedown = await step.run("fetch-takedown-stats", async () => {
+      const { data } = await sb.rpc("clone_watch_takedown_stats", { p_days: 7 });
+      if (!Array.isArray(data) || data.length === 0) {
+        return EMPTY_TAKEDOWN_STATS;
+      }
+      const r = data[0] as Record<string, number>;
+      return {
+        takedowns_total: Number(r.takedowns_total ?? 0),
+        median_minutes: Number(r.median_minutes ?? 0),
+        p90_minutes: Number(r.p90_minutes ?? 0),
+      };
+    });
+
     const brandBreakdown = await step.run("fetch-brand-breakdown", async () => {
       const since = new Date(Date.now() - 7 * 86400000).toISOString();
       const { data: rows } = await sb
@@ -114,6 +127,7 @@ export const cloneWatchWeeklyDigest = inngest.createFunction(
       period,
       metrics,
       brandBreakdown,
+      takedown,
     });
 
     const telegramMessage = buildTelegramMessage({
@@ -123,6 +137,7 @@ export const cloneWatchWeeklyDigest = inngest.createFunction(
       fpRate,
       brandBreakdown,
       linkedinDraft,
+      takedown,
     });
 
     await step.run("send-telegram", async () => {
@@ -155,7 +170,7 @@ export const cloneWatchWeeklyDigest = inngest.createFunction(
   },
 );
 
-interface WeeklyMetrics {
+export interface WeeklyMetrics {
   candidates_total: number;
   triaged_tp: number;
   triaged_fp: number;
@@ -177,13 +192,32 @@ const EMPTY_METRICS: WeeklyMetrics = {
   notifications_sent: 0,
 };
 
-function buildTelegramMessage({
+export interface TakedownStats {
+  takedowns_total: number;
+  median_minutes: number;
+  p90_minutes: number;
+}
+
+const EMPTY_TAKEDOWN_STATS: TakedownStats = {
+  takedowns_total: 0,
+  median_minutes: 0,
+  p90_minutes: 0,
+};
+
+function formatMinutes(m: number): string {
+  if (!m || m < 1) return "—";
+  if (m < 60) return `${m} min`;
+  return `${(m / 60).toFixed(1)}h`;
+}
+
+export function buildTelegramMessage({
   period,
   metrics,
   tpRate,
   fpRate,
   brandBreakdown,
   linkedinDraft,
+  takedown,
 }: {
   period: string;
   metrics: WeeklyMetrics;
@@ -191,10 +225,16 @@ function buildTelegramMessage({
   fpRate: number;
   brandBreakdown: Array<{ brand: string; count: number }>;
   linkedinDraft: string;
+  takedown?: TakedownStats;
 }): string {
   const brandLines = brandBreakdown.length
     ? brandBreakdown.map((b) => `· ${escapeHtml(b.brand)} — ${b.count}`).join("\n")
     : "<i>(no confirmed TPs this week)</i>";
+
+  const takedownLine =
+    takedown && takedown.takedowns_total > 0
+      ? `Netcraft takedowns: <b>${takedown.takedowns_total}</b> · median <b>${formatMinutes(takedown.median_minutes)}</b> · P90 ${formatMinutes(takedown.p90_minutes)}`
+      : `Netcraft takedowns: 0 (polling cron warming up)`;
 
   return [
     `🛡️ <b>Clone-watch weekly · ${escapeHtml(period)}</b>`,
@@ -206,6 +246,7 @@ function buildTelegramMessage({
     `Pending: ${metrics.pending}`,
     `Brands touched: <b>${metrics.brands_touched}</b>`,
     `Netcraft submits: ${metrics.submissions_netcraft}`,
+    takedownLine,
     `Brand notifications: ${metrics.notifications_sent}`,
     ``,
     `<b>Top brands (confirmed TP):</b>`,
@@ -219,19 +260,26 @@ function buildTelegramMessage({
   ].join("\n");
 }
 
-function buildLinkedInDraft({
+export function buildLinkedInDraft({
   period,
   metrics,
   brandBreakdown,
+  takedown,
 }: {
   period: string;
   metrics: WeeklyMetrics;
   brandBreakdown: Array<{ brand: string; count: number }>;
+  takedown?: TakedownStats;
 }): string {
   const brandLine = brandBreakdown
     .slice(0, 5)
     .map((b) => brandDisplayName(b.brand))
     .join(", ");
+
+  const takedownLine =
+    takedown && takedown.takedowns_total > 0
+      ? `${takedown.takedowns_total} domains browser-blocked via Netcraft — median time-to-takedown ${formatMinutes(takedown.median_minutes)}.`
+      : null;
 
   return [
     `🛡️ Ask Arthur clone-watch — week of ${period}`,
@@ -239,6 +287,7 @@ function buildLinkedInDraft({
     `${metrics.candidates_total} candidate clone domains surfaced across ${metrics.brands_touched} Australian brands.`,
     `${metrics.triaged_tp} confirmed as likely clones after human review.`,
     `${metrics.submissions_netcraft} submitted to community blocklists for browser-block coverage.`,
+    ...(takedownLine ? [takedownLine] : []),
     `${metrics.notifications_sent} brand security teams notified.`,
     ``,
     brandLine
@@ -253,7 +302,7 @@ function buildLinkedInDraft({
   ].join("\n");
 }
 
-function brandDisplayName(legitimateDomain: string): string {
+export function brandDisplayName(legitimateDomain: string): string {
   // Strip the TLD for readability in social copy: "kmart.com.au" → "Kmart"
   const root = legitimateDomain.split(".")[0] ?? legitimateDomain;
   return root.charAt(0).toUpperCase() + root.slice(1);

@@ -12,6 +12,7 @@
 import type { Metadata } from "next";
 import { AlertTriangle, ShieldQuestion } from "lucide-react";
 import { createServiceClient } from "@askarthur/supabase/server";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 
 export const revalidate = 3600; // 1 hour ISR
 
@@ -61,6 +62,40 @@ async function getAlerts(): Promise<CloneAlertRow[]> {
   return (data ?? []) as CloneAlertRow[];
 }
 
+interface PublicImpactSnapshot {
+  window_days: number;
+  candidates_total: number;
+  tp_confirmed_total: number;
+  netcraft_submits_total: number;
+  brand_notifications_total: number;
+  brands_protected: number;
+}
+
+interface PublicTakedownStats {
+  window_days: number;
+  takedowns_total: number;
+  median_minutes: number;
+}
+
+async function getPublicImpact(): Promise<{
+  impact: PublicImpactSnapshot;
+  takedown: PublicTakedownStats | null;
+} | null> {
+  const supabase = createServiceClient();
+  if (!supabase) return null;
+  const [impactRes, takedownRes] = await Promise.all([
+    supabase.rpc("clone_watch_public_impact", { p_days: 30 }),
+    supabase.rpc("clone_watch_takedown_stats", { p_days: 30 }),
+  ]);
+  if (!Array.isArray(impactRes.data) || impactRes.data.length === 0) return null;
+  const impact = impactRes.data[0] as PublicImpactSnapshot;
+  const takedown =
+    Array.isArray(takedownRes.data) && takedownRes.data[0]
+      ? (takedownRes.data[0] as PublicTakedownStats)
+      : null;
+  return { impact, takedown };
+}
+
 function firstSignal(signals: unknown): SignalEntry | null {
   if (!Array.isArray(signals) || signals.length === 0) return null;
   const first = signals[0];
@@ -94,8 +129,87 @@ function relativeTime(iso: string): string {
   return `${days}d ago`;
 }
 
+function PublicImpactBlock({
+  impact,
+  takedown,
+}: {
+  impact: PublicImpactSnapshot;
+  takedown: PublicTakedownStats | null;
+}) {
+  // Aggregate-only — never names a specific candidate domain. Renders only
+  // when FF_SHOPFRONT_CLONE_OUTREACH=true AND there's at least one
+  // candidate in the window. Quiet weeks render no block (intentional —
+  // an "0 candidates" block reads as broken, not as quiet).
+  const fmtMinutes = (m: number) =>
+    m < 60 ? `${m} min` : `${(m / 60).toFixed(1)}h`;
+  const tiles: Array<{ label: string; value: string }> = [
+    {
+      label: "Candidates surfaced",
+      value: impact.candidates_total.toLocaleString(),
+    },
+    { label: "Brands protected", value: impact.brands_protected.toLocaleString() },
+    {
+      label: "Reported to Netcraft",
+      value: impact.netcraft_submits_total.toLocaleString(),
+    },
+    // Show median-time-to-takedown when Netcraft has confirmed at least one;
+    // otherwise show brand-notification count (it's the next-most-impressive
+    // metric while takedown polling is still warming up).
+    takedown && takedown.takedowns_total > 0
+      ? {
+          label: "Median time-to-takedown",
+          value: fmtMinutes(takedown.median_minutes),
+        }
+      : {
+          label: "Brand teams notified",
+          value: impact.brand_notifications_total.toLocaleString(),
+        },
+  ];
+  return (
+    <section
+      aria-labelledby="impact-heading"
+      className="rounded-xl border border-deep-navy/15 bg-deep-navy/[0.04] p-5 mb-8"
+    >
+      <h2
+        id="impact-heading"
+        className="text-xs font-bold uppercase tracking-widest text-deep-navy mb-3"
+      >
+        Last {impact.window_days} days · clone-watch impact
+      </h2>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {tiles.map((t) => (
+          <div key={t.label}>
+            <p
+              className="text-2xl md:text-3xl font-extrabold text-deep-navy"
+              style={{ fontVariantNumeric: "tabular-nums" }}
+            >
+              {t.value}
+            </p>
+            <p className="text-[11px] text-gov-slate mt-0.5 leading-snug">
+              {t.label}
+            </p>
+          </div>
+        ))}
+      </div>
+      <p className="text-[11px] text-gov-slate mt-4 leading-relaxed">
+        Numbers are aggregate-only. We never publish which specific domains
+        we&apos;ve reported. Reports go to community blocklist aggregators
+        (so suspect domains get browser-blocked globally) and to the
+        affected brand&apos;s security team.
+      </p>
+    </section>
+  );
+}
+
 export default async function CloneWatchPage() {
-  const alerts = await getAlerts();
+  const [alerts, impactBundle] = await Promise.all([
+    getAlerts(),
+    featureFlags.shopfrontCloneOutreach
+      ? getPublicImpact()
+      : Promise.resolve(null),
+  ]);
+  const impact = impactBundle?.impact ?? null;
+  const takedown = impactBundle?.takedown ?? null;
 
   return (
     <>
@@ -116,6 +230,10 @@ export default async function CloneWatchPage() {
         public-registry sweep — not characterisations of the registrant
         or their intent.
       </p>
+
+      {impact && impact.candidates_total > 0 && (
+        <PublicImpactBlock impact={impact} takedown={takedown} />
+      )}
 
       <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 mb-10 text-sm leading-relaxed text-amber-900">
         <div className="flex items-start gap-2">
