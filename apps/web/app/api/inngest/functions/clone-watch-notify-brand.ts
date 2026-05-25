@@ -37,19 +37,52 @@ const FROM_EMAIL =
   process.env.RESEND_FROM_EMAIL ?? "Ask Arthur <brendan@askarthur.au>";
 const REPLY_TO_EMAIL = "brendan@askarthur.au";
 
+export type DirectoryChannel =
+  | "bugcrowd_vdp"
+  | "security_txt"
+  | "fraud_inbox"
+  | "contact_form"
+  | "manual_review"
+  | "none";
+
 interface DirectoryRow {
   brand: string;
   legitimate_domain: string;
-  channel_type:
-    | "bugcrowd_vdp"
-    | "security_txt"
-    | "fraud_inbox"
-    | "contact_form"
-    | "manual_review"
-    | "none";
+  channel_type: DirectoryChannel;
   recipient: string | null;
   evidence_format: string;
   notes: string | null;
+}
+
+export type NotificationAction =
+  | { kind: "skip"; reason: string }
+  | { kind: "manual_action"; channel: DirectoryChannel }
+  | { kind: "email"; channel: "security_txt" | "fraud_inbox" };
+
+/**
+ * Pure routing function — given a directory row, return the action to take.
+ * Extracted from the Inngest handler so we can unit-test channel branching
+ * without mocking Supabase / Resend / Inngest step machinery.
+ */
+export function decideNotificationAction(
+  row: DirectoryRow | null,
+): NotificationAction {
+  if (!row) return { kind: "skip", reason: "no_directory_row" };
+  if (row.channel_type === "none") return { kind: "skip", reason: "channel_none" };
+  if (
+    row.channel_type === "bugcrowd_vdp" ||
+    row.channel_type === "contact_form" ||
+    row.channel_type === "manual_review"
+  ) {
+    return { kind: "manual_action", channel: row.channel_type };
+  }
+  if (row.channel_type === "security_txt" || row.channel_type === "fraud_inbox") {
+    if (!row.recipient) {
+      return { kind: "skip", reason: "directory_recipient_null" };
+    }
+    return { kind: "email", channel: row.channel_type };
+  }
+  return { kind: "skip", reason: "unknown_channel_type" };
 }
 
 export const cloneWatchNotifyBrand = inngest.createFunction(
@@ -176,6 +209,32 @@ export const cloneWatchNotifyBrand = inngest.createFunction(
       if (!directoryRow.recipient) {
         return { skipped: true, reason: "directory_recipient_null" };
       }
+
+      // Suppression check (Phase C) — if the recipient has previously
+      // replied STOP, never send again. The check is cheap (indexed
+      // partial WHERE classified_as='stop') and runs before Resend so
+      // we never bill an email that'd hit a suppressed inbox.
+      const suppressed = await step.run("check-suppression", async () => {
+        const { data } = await sb.rpc(
+          "clone_alert_recipient_is_suppressed",
+          { p_email: directoryRow.recipient },
+        );
+        return Boolean(data);
+      });
+      if (suppressed) {
+        logger.info("clone-watch notify: suppressed recipient", {
+          alertId: data.alertId,
+          recipient: directoryRow.recipient,
+        });
+        await persistNotification(sb, data.alertId, {
+          channel_type: directoryRow.channel_type,
+          recipient: directoryRow.recipient,
+          status: "skipped",
+          sent_at: null,
+        });
+        return { skipped: true, reason: "recipient_stop_suppressed" };
+      }
+
       const apiKey = process.env.RESEND_API_KEY;
       if (!apiKey) {
         logger.warn("clone-watch notify: RESEND_API_KEY not set");

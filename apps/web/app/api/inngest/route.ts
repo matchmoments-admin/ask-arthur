@@ -25,6 +25,9 @@ import {
 import { cloneWatchSubmitNetcraft } from "./functions/clone-watch-submit-netcraft";
 import { cloneWatchNotifyBrand } from "./functions/clone-watch-notify-brand";
 import { cloneWatchWeeklyDigest } from "./functions/clone-watch-weekly-digest";
+// Phase B — poll Netcraft for takedown status every 30 min. Powers the
+// median time-to-takedown metric in the dashboard + weekly digest.
+import { cloneWatchPollNetcraft } from "./functions/clone-watch-poll-netcraft";
 
 // App-layer Inngest functions live here because they cross apps/web-only
 // primitives (R2 upload, Resend, local auth helpers) that shouldn't leak
@@ -48,6 +51,8 @@ const appFunctions = [
   cloneWatchSubmitNetcraft,
   cloneWatchNotifyBrand,
   cloneWatchWeeklyDigest,
+  // Clone-watch measurement closure Phase B (v145)
+  cloneWatchPollNetcraft,
 ];
 
 export const { GET, POST, PUT } = serve({

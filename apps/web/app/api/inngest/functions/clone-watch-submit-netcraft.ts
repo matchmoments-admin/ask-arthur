@@ -175,7 +175,7 @@ export const cloneWatchSubmitNetcraft = inngest.createFunction(
   },
 );
 
-function buildSubmissionReason(data: {
+export function buildSubmissionReason(data: {
   brand: string;
   candidateDomain: string;
   signalType: string;
@@ -188,3 +188,6 @@ function buildSubmissionReason(data: {
     `Surfaced under askarthur.au's Australian brand watchlist.`,
   ].join(" ");
 }
+
+// Re-exported for the route layer / tests / future logging consumers.
+export const NETCRAFT_REPORT_ENDPOINT_URL = NETCRAFT_REPORT_ENDPOINT;

@@ -445,3 +445,44 @@ If approved as scoped:
 5. Open issue `[Shopfront S0E.x] Layer 5 AskArthur LinkedIn case-study posts (weekly)` (anytime after Phase 2)
 6. Sign up for Netcraft Report API key + apply for APWG eCX membership + request Google Web Risk sales call (parallel, no engineering required)
 7. Hand-curate the 50-row `brand_contact_directory` (one afternoon; can run in parallel with Phase 1 build)
+
+---
+
+## 15. Measurement-closure follow-up (post-PR-#424 ship)
+
+**Status.** PR #424 merged 2026-05-26. Layers 1-5 live behind feature flags; `FF_SHOPFRONT_CLONE_OUTREACH=true` set in Vercel prod. Three measurement gaps identified post-merge that turn "queryable in SQL" into "visible everywhere it matters":
+
+### Phase A — Measurement closure (this follow-up PR)
+
+1. **Per-brand historical table in `/admin/clone-watch`** — new RPC `clone_watch_brand_breakdown(p_days)` returning per-brand totals; render as sortable table below the pending list. Columns: brand, total candidates, TP count, FP rate, Netcraft submits, brand notifications, last hit.
+2. **Public impact stats on `/clone-watch` consumer page** — gated 30-day aggregate section: "N candidates surfaced, M confirmed clones, K browser-blocks via Netcraft". Never names a specific candidate domain. Renders only when `FF_SHOPFRONT_CLONE_OUTREACH=true`.
+3. **Tests for the 3 new Inngest functions** — vitest mocks of Resend, Supabase, Inngest. Covers flag-off short-circuit, dedup, channel routing for each.
+4. **System-map docs sync** — add the 3 new Inngest fns to `docs/system-map/background-workers.md`; add the 4 new flags to `docs/system-map/feature-flags.md`.
+
+**Dropped from Phase A after audit:** server-side Plausible events (no helper exists; `cost_telemetry` already provides per-feature event counts + metadata that surface in `/admin/costs`). Pre-inserting a `feature_brakes` row is also unnecessary — the table is pause-state, not pre-config caps; the existing `cost-daily-check` cron handles it via `DAILY_COST_THRESHOLD_USD` + per-feature env caps like `SHOPFRONT_CLONE_OUTREACH_CAP_USD`.
+
+### Phase B — Time-to-takedown tracking (next PR)
+
+1. New Inngest cron `shopfront-clone-poll-netcraft-status` running every 30 min.
+2. Queries `shopfront_clone_alerts WHERE submitted_to.netcraft.uuid IS NOT NULL AND submitted_to.netcraft.takedown_at IS NULL`.
+3. Hits Netcraft v3 status endpoint for each, updates `submitted_to.netcraft.{state, takedown_at}`.
+4. Powers a "median time-to-takedown" KPI in the admin dashboard + weekly digest + LinkedIn post.
+
+**Blocked by:** real `NETCRAFT_REPORT_API_KEY` in Vercel prod. Phase A ships before this.
+
+### Phase C — Brand-reply inbound tracking (next PR after B)
+
+1. `clone-watch-replies@askarthur-inbound.com` alias via Cloudflare Email Routing (existing pattern — `docs/ops/inbound-email-config.md`).
+2. Cloudflare Worker → Supabase Edge Function → new `clone_alert_brand_replies` table.
+3. Reply classifier (small heuristic): STOP / acknowledgement / takedown-confirmation / FP-correction.
+4. Surface in admin dashboard alongside the original send. Auto-suppression on STOP.
+
+**Blocked by:** Phase A ships first. No external deps beyond the existing inbound-email Cloudflare/Supabase plumbing.
+
+### Phase D — Public-facing trust building (future, post-Phase-C)
+
+1. `/clone-watch` public page (currently `noindex`) gets the lawyer-vetted v1 copy (#371 in BACKLOG), flip to `index,follow`.
+2. SEO-friendly per-brand sub-pages `/clone-watch/<brand>` summarising the brand's clone history (anonymised).
+3. Weekly Telegram digest → LinkedIn post → re-published on the blog as a "30-day clone-watch report" cadence.
+
+**Gating:** lawyer pack #371 ship.
