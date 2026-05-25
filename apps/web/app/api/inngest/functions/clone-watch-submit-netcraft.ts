@@ -116,31 +116,19 @@ export const cloneWatchSubmitNetcraft = inngest.createFunction(
     await step.run("persist-submission", async () => {
       const sb = createServiceClient();
       if (!sb) return;
-      const now = new Date().toISOString();
-      const submittedFragment = {
-        netcraft: {
+      // Atomic JSONB merge via v147 RPC — prevents lost-update races with
+      // clone-watch-notify-brand (which can run concurrently on the same
+      // alert from the shared shopfront/clone.triaged.v1 event).
+      await sb.rpc("merge_clone_alert_submission", {
+        p_alert_id: data.alertId,
+        p_key: "netcraft",
+        p_value: {
           uuid: submission.netcraftUuid,
           state: submission.state,
-          submitted_at: now,
+          submitted_at: new Date().toISOString(),
         },
-      };
-      // jsonb_set via supabase-js: read-modify-write to merge with whatever
-      // else is in submitted_to. The risk of a lost-update race is bounded
-      // here — only this function and clone-watch-notify-brand touch the
-      // field, and Inngest's per-function idempotency key prevents
-      // concurrent runs for the same alertId.
-      const { data: row } = await sb
-        .from("shopfront_clone_alerts")
-        .select("submitted_to")
-        .eq("id", data.alertId)
-        .maybeSingle();
-      const existing =
-        (row?.submitted_to as Record<string, unknown> | null) ?? {};
-      const merged = { ...existing, ...submittedFragment };
-      await sb
-        .from("shopfront_clone_alerts")
-        .update({ submitted_to: merged, triage_status: "tp_actioned" })
-        .eq("id", data.alertId);
+        p_set_triage_status: "tp_actioned",
+      });
     });
 
     await step.run("log-cost", async () => {

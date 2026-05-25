@@ -31,8 +31,10 @@ export const cloneWatchWeeklyDigest = inngest.createFunction(
     concurrency: { limit: 1 },
   },
   // Two triggers: cron + manual-trigger event for ad-hoc rerun.
+  // Sun 10:00 UTC — deconflicted from the daily feedback-digest cron
+  // (0 9 * * *, every morning including Sundays). Closes ultrareview M3.
   [
-    { cron: "0 9 * * 0" },
+    { cron: "0 10 * * 0" },
     { event: "shopfront/clone.weekly-digest.manual-trigger.v1" },
   ],
   async ({ step }) => {
@@ -73,7 +75,18 @@ export const cloneWatchWeeklyDigest = inngest.createFunction(
     });
 
     const takedown = await step.run("fetch-takedown-stats", async () => {
-      const { data } = await sb.rpc("clone_watch_takedown_stats", { p_days: 7 });
+      const { data, error } = await sb.rpc("clone_watch_takedown_stats", {
+        p_days: 7,
+      });
+      // Don't fail the digest on takedown-stats failure — it's a nice-to-have
+      // KPI, not the primary signal. Log so we don't silently lose it.
+      // Closes ultrareview I2.
+      if (error) {
+        logger.error("clone-watch weekly digest: takedown stats failed", {
+          error: error.message,
+        });
+        return EMPTY_TAKEDOWN_STATS;
+      }
       if (!Array.isArray(data) || data.length === 0) {
         return EMPTY_TAKEDOWN_STATS;
       }

@@ -153,7 +153,10 @@ export const cloneWatchNotifyBrand = inngest.createFunction(
       return { skipped: true, reason: "channel_none" };
     }
 
-    // Dedup — never re-notify the same (alert × channel) pairing.
+    // Dedup — never re-notify the same alert if we've already SENT (or
+    // a STOP-suppressed) email. Manual-action rows live under a separate
+    // key (`brand_notification_queued`) so re-triaging them DOES re-page
+    // the admin instead of silently no-op'ing — fixes ultrareview H3.
     const alreadyNotified = await step.run("check-dedup", async () => {
       const { data: row } = await sb
         .from("shopfront_clone_alerts")
@@ -188,11 +191,14 @@ export const cloneWatchNotifyBrand = inngest.createFunction(
         await sendAdminTelegramMessage(lines.join("\n"));
       });
 
-      await persistNotification(sb, data.alertId, {
+      // Manual-action rows go under a DIFFERENT key
+      // (brand_notification_queued) so the dedup check above doesn't
+      // short-circuit on re-triage. The admin acting via Telegram is the
+      // real send completion; until then, the row remains re-triageable.
+      await persistManualQueue(sb, data.alertId, {
         channel_type: directoryRow.channel_type,
         recipient: directoryRow.recipient,
-        status: "pending_manual_action",
-        sent_at: null,
+        queued_at: new Date().toISOString(),
       });
       return {
         ok: true,
@@ -337,7 +343,7 @@ export const cloneWatchNotifyBrand = inngest.createFunction(
 interface NotificationFragment {
   channel_type: string;
   recipient: string | null;
-  status: "sent" | "pending_manual_action" | "skipped";
+  status: "sent" | "skipped";
   sent_at: string | null;
   provider_message_id?: string | null;
 }
@@ -348,21 +354,34 @@ async function persistNotification(
   fragment: NotificationFragment,
 ): Promise<void> {
   if (!sb) return;
-  const { data: row } = await sb
-    .from("shopfront_clone_alerts")
-    .select("submitted_to")
-    .eq("id", alertId)
-    .maybeSingle();
-  const existing =
-    (row?.submitted_to as Record<string, unknown> | null) ?? {};
-  const merged = {
-    ...existing,
-    brand_notification: { ...fragment, ts: new Date().toISOString() },
-  };
-  await sb
-    .from("shopfront_clone_alerts")
-    .update({ submitted_to: merged })
-    .eq("id", alertId);
+  // Atomic JSONB merge via v147 RPC — prevents lost-update races with
+  // submit-netcraft (which can run concurrently on the same alert).
+  await sb.rpc("merge_clone_alert_submission", {
+    p_alert_id: alertId,
+    p_key: "brand_notification",
+    p_value: { ...fragment, ts: new Date().toISOString() },
+    p_set_triage_status: null,
+  });
+}
+
+interface ManualQueueFragment {
+  channel_type: string;
+  recipient: string | null;
+  queued_at: string;
+}
+
+async function persistManualQueue(
+  sb: ReturnType<typeof createServiceClient>,
+  alertId: number,
+  fragment: ManualQueueFragment,
+): Promise<void> {
+  if (!sb) return;
+  await sb.rpc("merge_clone_alert_submission", {
+    p_alert_id: alertId,
+    p_key: "brand_notification_queued",
+    p_value: fragment,
+    p_set_triage_status: null,
+  });
 }
 
 function escapeHtml(s: string): string {

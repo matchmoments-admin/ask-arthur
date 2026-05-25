@@ -3,6 +3,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { logCost } from "@/lib/cost-telemetry";
+import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 
 /**
  * Phase B — Netcraft takedown-status polling.
@@ -41,8 +42,15 @@ const TERMINAL_STATES = new Set([
   "not_phishing", // alternative label seen in some Netcraft responses
 ]);
 
-const POLL_BATCH_LIMIT = 50;
+// Batch size is bounded by the 5-min Inngest soft-target and the 10-min
+// pg-stuck-query-watchdog hard cap. 25 rows × 12s per-fetch timeout = 5
+// min worst case — safely under the watchdog edge. Originally 50, halved
+// after ultrareview H1.
+const POLL_BATCH_LIMIT = 25;
 const PER_REQUEST_TIMEOUT_MS = 12_000;
+// If more than this share of fetches in a single run fail, page admin —
+// likely Netcraft outage or API-key drift. Closes ultrareview M4.
+const OUTAGE_PAGE_ERROR_RATIO = 0.5;
 
 interface PendingPollRow {
   id: number;
@@ -110,6 +118,10 @@ export const cloneWatchPollNetcraft = inngest.createFunction(
       else still_pending++;
 
       await step.run(`persist-${row.id}`, async () => {
+        // Load existing netcraft fragment to preserve `submitted_at` + first
+        // takedown_at. Atomic-merge writes the new fragment as ONE key
+        // (avoids the cross-fn race that submit-netcraft + notify-brand
+        // had pre-v147).
         const { data: alertRow } = await sb
           .from("shopfront_clone_alerts")
           .select("submitted_to")
@@ -117,27 +129,45 @@ export const cloneWatchPollNetcraft = inngest.createFunction(
           .maybeSingle();
         const existing =
           (alertRow?.submitted_to as Record<string, unknown> | null) ?? {};
-        const existingNetcraft = (existing.netcraft as Record<string, unknown>) ?? {};
-        const merged = {
-          ...existing,
-          netcraft: {
-            ...existingNetcraft,
-            state: outcome.state,
-            last_checked_at: new Date().toISOString(),
-            // Only set takedown_at on the first transition — never overwrite.
-            ...(outcome.kind === "takedown" && !existingNetcraft.takedown_at
-              ? { takedown_at: new Date().toISOString() }
-              : {}),
-            // Stash the raw response for debugging once. Keep small.
-            ...(outcome.kind === "takedown"
-              ? { takedown_state_observed: outcome.state }
-              : {}),
-          },
+        const existingNetcraft =
+          (existing.netcraft as Record<string, unknown>) ?? {};
+        const fragment: Record<string, unknown> = {
+          ...existingNetcraft,
+          // Stored lowercased so re-poll lookups + TERMINAL_STATES.has(...)
+          // compare consistently. Closes ultrareview H5.
+          state: outcome.state.toLowerCase(),
+          last_checked_at: new Date().toISOString(),
         };
-        await sb
-          .from("shopfront_clone_alerts")
-          .update({ submitted_to: merged })
-          .eq("id", row.id);
+        if (outcome.kind === "takedown" && !existingNetcraft.takedown_at) {
+          fragment.takedown_at = new Date().toISOString();
+          fragment.takedown_state_observed = outcome.state;
+        }
+        await sb.rpc("merge_clone_alert_submission", {
+          p_alert_id: row.id,
+          p_key: "netcraft",
+          p_value: fragment,
+          p_set_triage_status: null,
+        });
+      });
+    }
+
+    // Outage-paging — if a large share of fetches failed, page admin so
+    // they can check Netcraft status / API-key drift. Closes M4.
+    if (
+      pending.length >= 5 &&
+      errors / pending.length >= OUTAGE_PAGE_ERROR_RATIO
+    ) {
+      await step.run("page-on-outage", async () => {
+        await sendAdminTelegramMessage(
+          [
+            `⚠️ <b>Clone-watch — Netcraft poll degraded</b>`,
+            `Errors: <b>${errors}/${pending.length}</b> (${Math.round(
+              (errors / pending.length) * 100,
+            )}%)`,
+            `Possible cause: Netcraft outage, API-key rotation, or rate-limit.`,
+            `Inngest dashboard: shopfront-clone-poll-netcraft`,
+          ].join("\n"),
+        );
       });
     }
 
@@ -203,6 +233,14 @@ async function pollOne(
       (typeof json.state === "string" && json.state) ||
       (typeof json.status === "string" && json.status) ||
       "unknown";
+    // M2 observability — log raw state on every poll so we can spot
+    // Netcraft state-machine drift (e.g. they add a new terminal label
+    // we don't recognise). Cheap log line; no PII.
+    logger.info("clone-watch netcraft poll: observed state", {
+      alertId: row.id,
+      state,
+      isTerminal: TERMINAL_STATES.has(state.toLowerCase()),
+    });
     return TERMINAL_STATES.has(state.toLowerCase())
       ? { kind: "takedown", state }
       : { kind: "pending", state };
