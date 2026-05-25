@@ -123,18 +123,19 @@ Every consumer page, authenticated page, admin page, and API route, grouped by d
 
 ### Admin (`/admin/*` — HMAC token + admin role)
 
-| Route                    | Purpose                           |
-| ------------------------ | --------------------------------- |
-| `/admin/dashboard`       | Admin home                        |
-| `/admin/feedback`        | Feedback triage queue review      |
-| `/admin/costs`           | Cost-telemetry dashboard          |
-| `/admin/brand-alerts`    | Brand-impersonation alert review  |
-| `/admin/onward-reports`  | Pre-approve regulator submissions |
-| `/admin/vulnerabilities` | Vuln-intel review                 |
-| `/admin/reports`         | Scam-report inspection            |
-| `/admin/users`           | User management                   |
-| `/admin/leads`           | B2B sales pipeline                |
-| `/admin/stripe`          | Manual invoicing                  |
+| Route                    | Purpose                                                                                                                   |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `/admin/dashboard`       | Admin home                                                                                                                |
+| `/admin/feedback`        | Feedback triage queue review                                                                                              |
+| `/admin/costs`           | Cost-telemetry dashboard                                                                                                  |
+| `/admin/brand-alerts`    | Brand-impersonation alert review                                                                                          |
+| `/admin/clone-watch`     | Clone-watch triage queue (FP/TP/Investigate) + per-brand history + Netcraft takedown stats + urlscan classification chips |
+| `/admin/onward-reports`  | Pre-approve regulator submissions                                                                                         |
+| `/admin/vulnerabilities` | Vuln-intel review                                                                                                         |
+| `/admin/reports`         | Scam-report inspection                                                                                                    |
+| `/admin/users`           | User management                                                                                                           |
+| `/admin/leads`           | B2B sales pipeline                                                                                                        |
+| `/admin/stripe`          | Manual invoicing                                                                                                          |
 
 ---
 
@@ -314,13 +315,15 @@ Every consumer page, authenticated page, admin page, and API route, grouped by d
 
 ### Admin (admin)
 
-| Route                               | Method | Purpose                           |
-| ----------------------------------- | ------ | --------------------------------- |
-| `/api/admin/login`                  | GET    | HMAC token generation (legacy)    |
-| `/api/admin/brand-alerts/publish`   | POST   | Publish brand-impersonation alert |
-| `/api/admin/brand-alerts/skip`      | POST   | Mark alert reviewed / skipped     |
-| `/api/admin/onward-reports/approve` | POST   | Pre-approve regulator report      |
-| `/api/admin/stripe/invoice`         | POST   | Manual invoice creation           |
+| Route                               | Method | Purpose                                                                                        |
+| ----------------------------------- | ------ | ---------------------------------------------------------------------------------------------- |
+| `/api/admin/login`                  | GET    | HMAC token generation (legacy)                                                                 |
+| `/api/admin/brand-alerts/publish`   | POST   | Publish brand-impersonation alert                                                              |
+| `/api/admin/brand-alerts/skip`      | POST   | Mark alert reviewed / skipped                                                                  |
+| `/api/admin/clone-watch/triage`     | POST   | FP / TP / Investigate transition + emit `shopfront/clone.triaged.v1` event on tp_confirmed     |
+| `/api/admin/clone-watch/scan`       | POST   | Manual urlscan trigger for a specific alert (rate-limited 20/hour to preserve free-tier quota) |
+| `/api/admin/onward-reports/approve` | POST   | Pre-approve regulator report                                                                   |
+| `/api/admin/stripe/invoice`         | POST   | Manual invoice creation                                                                        |
 
 ### Cron routes (Vercel signature)
 

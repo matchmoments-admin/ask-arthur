@@ -452,7 +452,7 @@ If approved as scoped:
 
 **Status.** PR #424 merged 2026-05-26. Layers 1-5 live behind feature flags; `FF_SHOPFRONT_CLONE_OUTREACH=true` set in Vercel prod. Three measurement gaps identified post-merge that turn "queryable in SQL" into "visible everywhere it matters":
 
-### Phase A — Measurement closure (this follow-up PR)
+### Phase A — Measurement closure ✅ SHIPPED (PR #425)
 
 1. **Per-brand historical table in `/admin/clone-watch`** — new RPC `clone_watch_brand_breakdown(p_days)` returning per-brand totals; render as sortable table below the pending list. Columns: brand, total candidates, TP count, FP rate, Netcraft submits, brand notifications, last hit.
 2. **Public impact stats on `/clone-watch` consumer page** — gated 30-day aggregate section: "N candidates surfaced, M confirmed clones, K browser-blocks via Netcraft". Never names a specific candidate domain. Renders only when `FF_SHOPFRONT_CLONE_OUTREACH=true`.
@@ -461,7 +461,17 @@ If approved as scoped:
 
 **Dropped from Phase A after audit:** server-side Plausible events (no helper exists; `cost_telemetry` already provides per-feature event counts + metadata that surface in `/admin/costs`). Pre-inserting a `feature_brakes` row is also unnecessary — the table is pause-state, not pre-config caps; the existing `cost-daily-check` cron handles it via `DAILY_COST_THRESHOLD_USD` + per-feature env caps like `SHOPFRONT_CLONE_OUTREACH_CAP_USD`.
 
-### Phase B — Time-to-takedown tracking (next PR)
+### Phase A.3 — urlscan.io auto-scan + classify ✅ SHIPPED (PR #432 + #433)
+
+Shipped after Phase A as an independent layer:
+
+1. **Auto-scan** every new NRD candidate via urlscan.io within ~90s of ingest. `shopfront-clone-urlscan` Inngest fn submits + sleeps 60s + 30s retry + retrieves + auto-classifies + persists via atomic RPC.
+2. **Daily re-scan cron** (Sun 11:00 UTC) for stale rows within a 60-day seasoning window (bumped from 30 days in v149 per ultrareview F22 follow-up).
+3. **Auto-classification**: `parked_for_sale` (Afternic/Sedo/etc — suffix match) / `unresolved` (NXDOMAIN) / `likely_phishing` (urlscan `verdicts.malicious`) / `neutral`. Conservative triage transitions: parked + unresolved → `needs_investigation`; `likely_phishing` STAYS on pending queue (operator confirms manually so the event-emit + downstream fan-out fires correctly).
+4. **Admin dashboard**: classification chip + screenshot thumbnail per row + "Scan now" / "Re-scan" button. Soft rate-limit 20 scans/hour.
+5. **Cost**: A\$0 (urlscan free tier 100/day; actual use ~60/day with full re-scan cron). Folded into the existing `SHOPFRONT_CLONE_OUTREACH_CAP_USD` brake aggregate.
+
+### Phase B — Time-to-takedown tracking ✅ SHIPPED (PR #425)
 
 1. New Inngest cron `shopfront-clone-poll-netcraft-status` running every 30 min.
 2. Queries `shopfront_clone_alerts WHERE submitted_to.netcraft.uuid IS NOT NULL AND submitted_to.netcraft.takedown_at IS NULL`.
