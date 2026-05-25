@@ -114,32 +114,47 @@ export const shopfrontNrdDailyIngest = inngest.createFunction(
     // (newly inserted today + any unscanned backlog within 14 days).
     // Gated independently of the master clone-watch flag so we can canary
     // urlscan without flipping outreach.
+    //
+    // Wrapped in try/catch so a urlscan fan-out failure (e.g. revoked
+    // INNGEST_EVENT_KEY) does NOT poison the rest of the daily ingest
+    // (the Telegram digest, cost telemetry, etc still need to fire).
+    // Fixes ultrareview F9.
     await step.run("fan-out-urlscan", async () => {
       if (!featureFlags.shopfrontCloneUrlscan) return { fanned_out: 0 };
-      const sb = createServiceClient();
-      if (!sb) return { fanned_out: 0 };
-      const { data } = await sb.rpc("list_clone_alerts_pending_urlscan", {
-        p_limit: 20,
-      });
-      const rows =
-        (data as Array<{
-          id: number;
-          candidate_url: string;
-          candidate_domain: string;
-        }> | null) ?? [];
-      if (rows.length === 0) return { fanned_out: 0 };
-      const events = rows.map((r) => ({
-        name: CLONE_WATCH_SCAN_REQUESTED_EVENT,
-        id: `clone-watch-urlscan-initial:${r.id}`,
-        data: {
-          alertId: r.id,
-          candidateUrl: r.candidate_url,
-          candidateDomain: r.candidate_domain,
-          reason: "initial" as const,
-        },
-      }));
-      await inngest.send(events);
-      return { fanned_out: rows.length };
+      try {
+        const sb = createServiceClient();
+        if (!sb) return { fanned_out: 0, reason: "no_supabase_client" };
+        const { data } = await sb.rpc("list_clone_alerts_pending_urlscan", {
+          p_limit: 20,
+        });
+        const rows =
+          (data as Array<{
+            id: number;
+            candidate_url: string;
+            candidate_domain: string;
+          }> | null) ?? [];
+        if (rows.length === 0) return { fanned_out: 0 };
+        const events = rows.map((r) => ({
+          name: CLONE_WATCH_SCAN_REQUESTED_EVENT,
+          id: `clone-watch-urlscan-initial:${r.id}`,
+          data: {
+            alertId: r.id,
+            candidateUrl: r.candidate_url,
+            candidateDomain: r.candidate_domain,
+            reason: "initial" as const,
+          },
+        }));
+        await inngest.send(events);
+        return { fanned_out: rows.length };
+      } catch (err) {
+        logger.error("shopfront-nrd: urlscan fan-out failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        // Best-effort — let the daily ingest continue so the Telegram
+        // digest + cost telemetry still fire. Tomorrow's run picks up
+        // these rows again via list_clone_alerts_pending_urlscan.
+        return { fanned_out: 0, errored: true };
+      }
     });
 
     await step.run("send-telegram-digest", async () => {

@@ -320,6 +320,39 @@ describe("clone-watch-urlscan — classifyScan", () => {
     ).toBe("parked_for_sale");
   });
 
+  it("does NOT classify subdomain-attack hosts as parked (suffix match)", () => {
+    // Pre-F8 fix this matched `afternic.com` via substring → parked.
+    // Post-F8 fix uses suffix match (host === p || host.endsWith('.' + p))
+    // so attacker-controlled `evilafternic.com.attacker.com` falls through.
+    expect(
+      classifyScan({
+        ...baseResult,
+        effectiveUrl: "https://evilafternic.com.attacker.com/login",
+      }),
+    ).toBe("neutral");
+    expect(
+      classifyScan({
+        ...baseResult,
+        effectiveUrl: "https://fakesedo.com.evil.com/",
+      }),
+    ).toBe("neutral");
+  });
+
+  it("DOES classify legitimate subdomains of marketplace hosts as parked (suffix match)", () => {
+    expect(
+      classifyScan({
+        ...baseResult,
+        effectiveUrl: "https://parking.afternic.com/forsale/x.com",
+      }),
+    ).toBe("parked_for_sale");
+    expect(
+      classifyScan({
+        ...baseResult,
+        effectiveUrl: "https://www.dan.com/buy-domain/x.com",
+      }),
+    ).toBe("parked_for_sale");
+  });
+
   it("classifies urlscan-flagged malicious as likely_phishing", () => {
     expect(
       classifyScan({ ...baseResult, malicious: true }),
@@ -353,8 +386,12 @@ describe("clone-watch-urlscan — classifyScan", () => {
 });
 
 describe("clone-watch-urlscan — suggestTriageTransition", () => {
-  it("escalates likely_phishing → tp_confirmed", () => {
-    expect(suggestTriageTransition("likely_phishing")).toBe("tp_confirmed");
+  it("returns null for likely_phishing — operator manually confirms (F5)", () => {
+    // Pre-F5: this returned 'tp_confirmed', which dropped the row off the
+    // pending queue + skipped event-emit → row became invisible + inert.
+    // Post-F5: returns null so the chip surfaces on the dashboard +
+    // operator confirms TP manually, which emits the event correctly.
+    expect(suggestTriageTransition("likely_phishing")).toBeNull();
   });
 
   it("downgrades parked_for_sale → needs_investigation", () => {

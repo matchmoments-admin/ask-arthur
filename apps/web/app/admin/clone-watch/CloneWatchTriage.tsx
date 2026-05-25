@@ -82,9 +82,14 @@ export default function CloneWatchTriage({
   const [pending, setPending] = useState(initialPending);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // Separate info channel — success / "scan queued" / acknowledgement
+  // messages. setError() is reserved for actual errors so the styling
+  // matches the message intent (red vs blue). Fixes ultrareview F10.
+  const [info, setInfo] = useState<string | null>(null);
 
   const handleTriage = (alertId: number, status: TriageStatus) => {
     setError(null);
+    setInfo(null);
     const previous = pending;
     setPending((rows) => rows.filter((r) => r.id !== alertId));
 
@@ -108,6 +113,7 @@ export default function CloneWatchTriage({
 
   const handleScan = (alertId: number) => {
     setError(null);
+    setInfo(null);
     startTransition(async () => {
       try {
         const res = await fetch("/api/admin/clone-watch/scan", {
@@ -121,8 +127,8 @@ export default function CloneWatchTriage({
         }
         // No optimistic update — scan completes async (~90s). The row's
         // urlscan_classification + screenshot will land on the next page
-        // load. A small inline confirmation is enough for now.
-        setError(
+        // load.
+        setInfo(
           `Scan queued for alert ${alertId} — refresh in ~90s to see the result`,
         );
       } catch (err) {
@@ -144,6 +150,11 @@ export default function CloneWatchTriage({
       {error && (
         <div className="mb-4 px-4 py-2 bg-rose-50 border border-rose-200 text-rose-700 text-sm rounded-lg">
           {error}
+        </div>
+      )}
+      {info && (
+        <div className="mb-4 px-4 py-2 bg-sky-50 border border-sky-200 text-sky-700 text-sm rounded-lg">
+          {info}
         </div>
       )}
       <div className="bg-white border border-border-light rounded-xl shadow-sm overflow-hidden">
@@ -202,15 +213,21 @@ function PendingRow({
     <div className="px-5 py-4">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex gap-3">
-          {row.urlscan_screenshot_url && (
+          {isHttpsUrlscanUrl(row.urlscan_screenshot_url) && (
             // Thumbnail of the rendered page so the operator can eyeball
             // whether it looks like a phishing page without opening the
-            // candidate URL directly. urlscan-hosted CDN — safe to embed.
+            // candidate URL directly. urlscan-hosted CDN.
+            // Defense-in-depth (ultrareview F19): we validate the URL is
+            // an https://urlscan.io path before rendering, even though
+            // CSP would block anything else.
+            // referrerPolicy="no-referrer" prevents leaking the admin
+            // dashboard URL to the CDN (ultrareview F3).
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              src={row.urlscan_screenshot_url}
+              src={row.urlscan_screenshot_url!}
               alt={`Sandbox screenshot of ${row.candidate_domain}`}
               loading="lazy"
+              referrerPolicy="no-referrer"
               className="w-32 h-20 object-cover object-top border border-slate-200 rounded shadow-sm shrink-0"
             />
           )}
@@ -324,6 +341,16 @@ function PendingRow({
       </div>
     </div>
   );
+}
+
+function isHttpsUrlscanUrl(value: string | null | undefined): boolean {
+  if (!value) return false;
+  try {
+    const u = new URL(value);
+    return u.protocol === "https:" && u.hostname.endsWith("urlscan.io");
+  } catch {
+    return false;
+  }
 }
 
 function TriageButton({
