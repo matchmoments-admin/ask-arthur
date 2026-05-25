@@ -432,3 +432,41 @@ export function parseShopCheckRequestedData(
 ): ShopCheckRequestedData {
   return ShopCheckRequestedDataSchema.parse(raw);
 }
+
+// ── shopfront/clone.triaged.v1 ──────────────────────────────────────────
+//
+// Emitted by POST /api/admin/clone-watch/triage when an admin marks a
+// shopfront_clone_alerts row as tp_confirmed. Fan-out to two consumers:
+//   1. clone-watch-submit-netcraft  — Layer 2 community blocklist submission
+//   2. clone-watch-notify-brand     — Layer 3+4 brand-direct notification
+//
+// Event id is `clone-watch-triage:${alertId}` — the same alert id can be
+// re-triaged (e.g. FP → TP after evidence review). Re-emit produces a
+// re-run; consumers dedup against shopfront_clone_alerts.submitted_to to
+// avoid double-submission.
+
+export const CloneWatchTriagedDataSchema = z.object({
+  alertId: z.number().int().positive(),
+  brand: z.string().min(1).max(255),
+  candidateDomain: z.string().min(1).max(255),
+  candidateUrl: z.string().min(1).max(2048),
+  severityTier: z.string().min(1).max(32),
+  signalType: z.string().min(1).max(64),
+  score: z.number(),
+  triagedAt: z.string().datetime(),
+});
+export type CloneWatchTriagedData = z.infer<typeof CloneWatchTriagedDataSchema>;
+
+export const CLONE_WATCH_TRIAGED_EVENT = "shopfront/clone.triaged.v1" as const;
+
+export interface CloneWatchTriagedEvent {
+  name: typeof CLONE_WATCH_TRIAGED_EVENT;
+  id: string;
+  data: CloneWatchTriagedData;
+}
+
+export function parseCloneWatchTriagedData(
+  raw: unknown,
+): CloneWatchTriagedData {
+  return CloneWatchTriagedDataSchema.parse(raw);
+}
