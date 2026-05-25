@@ -470,3 +470,37 @@ export function parseCloneWatchTriagedData(
 ): CloneWatchTriagedData {
   return CloneWatchTriagedDataSchema.parse(raw);
 }
+
+// ── shopfront/clone.scan-requested.v1 ───────────────────────────────────
+//
+// Emitted by the daily NRD ingest for each NEW row upserted, OR manually
+// for a rescan. The clone-watch-urlscan Inngest consumer submits the URL
+// to urlscan.io, waits ~60s, retrieves the result, auto-classifies, and
+// persists. See docs/plans/clone-watch-outreach.md §15 Phase A.3.
+
+export const CloneWatchScanRequestedDataSchema = z.object({
+  alertId: z.number().int().positive(),
+  candidateUrl: z.string().min(1).max(2048),
+  candidateDomain: z.string().min(1).max(255),
+  // 'initial' = first scan after NRD ingest; 'rescan' = re-scan from the
+  // daily cron checking for state transitions (parked → activated).
+  reason: z.enum(["initial", "rescan"]),
+});
+export type CloneWatchScanRequestedData = z.infer<
+  typeof CloneWatchScanRequestedDataSchema
+>;
+
+export const CLONE_WATCH_SCAN_REQUESTED_EVENT =
+  "shopfront/clone.scan-requested.v1" as const;
+
+export interface CloneWatchScanRequestedEvent {
+  name: typeof CLONE_WATCH_SCAN_REQUESTED_EVENT;
+  id: string;
+  data: CloneWatchScanRequestedData;
+}
+
+export function parseCloneWatchScanRequestedData(
+  raw: unknown,
+): CloneWatchScanRequestedData {
+  return CloneWatchScanRequestedDataSchema.parse(raw);
+}

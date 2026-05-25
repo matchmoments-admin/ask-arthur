@@ -1,7 +1,15 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { CheckCircle2, XCircle, Search, ExternalLink, Copy } from "lucide-react";
+import {
+  CheckCircle2,
+  XCircle,
+  Search,
+  ExternalLink,
+  Copy,
+  Camera,
+  RefreshCw,
+} from "lucide-react";
 
 export interface PendingAlert {
   id: number;
@@ -17,7 +25,38 @@ export interface PendingAlert {
   severity_tier: string;
   triage_status: string;
   first_seen_at: string;
+  // From v148 — urlscan auto-scan evidence. Nullable while flag is OFF
+  // or scan hasn't fired yet.
+  urlscan_classification?:
+    | "parked_for_sale"
+    | "unresolved"
+    | "likely_phishing"
+    | "neutral"
+    | null;
+  urlscan_scanned_at?: string | null;
+  urlscan_screenshot_url?: string | null;
+  urlscan_effective_url?: string | null;
 }
+
+const URLSCAN_LABEL: Record<
+  NonNullable<PendingAlert["urlscan_classification"]>,
+  string
+> = {
+  parked_for_sale: "parked",
+  unresolved: "unresolved",
+  likely_phishing: "likely phishing",
+  neutral: "resolves",
+};
+
+const URLSCAN_STYLE: Record<
+  NonNullable<PendingAlert["urlscan_classification"]>,
+  string
+> = {
+  parked_for_sale: "bg-amber-50 text-amber-700 border-amber-200",
+  unresolved: "bg-slate-50 text-slate-600 border-slate-200",
+  likely_phishing: "bg-rose-100 text-rose-800 border-rose-300 font-semibold",
+  neutral: "bg-sky-50 text-sky-700 border-sky-200",
+};
 
 type TriageStatus = "tp_confirmed" | "fp" | "needs_investigation";
 
@@ -67,6 +106,31 @@ export default function CloneWatchTriage({
     });
   };
 
+  const handleScan = (alertId: number) => {
+    setError(null);
+    startTransition(async () => {
+      try {
+        const res = await fetch("/api/admin/clone-watch/scan", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ alertId }),
+        });
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          throw new Error(j.error ?? `scan request failed (${res.status})`);
+        }
+        // No optimistic update — scan completes async (~90s). The row's
+        // urlscan_classification + screenshot will land on the next page
+        // load. A small inline confirmation is enough for now.
+        setError(
+          `Scan queued for alert ${alertId} — refresh in ~90s to see the result`,
+        );
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "scan request failed");
+      }
+    });
+  };
+
   if (pending.length === 0) {
     return (
       <div className="text-center py-16 text-slate-400 text-sm bg-white border border-border-light rounded-xl">
@@ -99,6 +163,7 @@ export default function CloneWatchTriage({
               row={row}
               disabled={isPending}
               onTriage={handleTriage}
+              onScan={handleScan}
             />
           ))}
         </div>
@@ -111,10 +176,12 @@ function PendingRow({
   row,
   disabled,
   onTriage,
+  onScan,
 }: {
   row: PendingAlert;
   disabled: boolean;
   onTriage: (id: number, status: TriageStatus) => void;
+  onScan: (id: number) => void;
 }) {
   const signal = row.signals?.[0];
   const signalType = signal?.signal_type ?? signal?.type ?? "unknown";
@@ -129,28 +196,62 @@ function PendingRow({
     : "";
 
   const sandboxUrl = `https://urlscan.io/search/#domain%3A${encodeURIComponent(row.candidate_domain)}`;
+  const hasUrlscan = Boolean(row.urlscan_classification);
 
   return (
     <div className="px-5 py-4">
       <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-sm font-semibold text-deep-navy">
-              {row.candidate_domain}
-            </span>
-            <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">
-              {signalType}
-            </span>
-            <span className="text-[10px] text-slate-400">score {score}</span>
+        <div className="min-w-0 flex gap-3">
+          {row.urlscan_screenshot_url && (
+            // Thumbnail of the rendered page so the operator can eyeball
+            // whether it looks like a phishing page without opening the
+            // candidate URL directly. urlscan-hosted CDN — safe to embed.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={row.urlscan_screenshot_url}
+              alt={`Sandbox screenshot of ${row.candidate_domain}`}
+              loading="lazy"
+              className="w-32 h-20 object-cover object-top border border-slate-200 rounded shadow-sm shrink-0"
+            />
+          )}
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 mb-1 flex-wrap">
+              <span className="text-sm font-semibold text-deep-navy">
+                {row.candidate_domain}
+              </span>
+              <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">
+                {signalType}
+              </span>
+              <span className="text-[10px] text-slate-400">score {score}</span>
+              {row.urlscan_classification && (
+                <span
+                  className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${URLSCAN_STYLE[row.urlscan_classification]}`}
+                  title={
+                    row.urlscan_effective_url
+                      ? `urlscan effective URL: ${row.urlscan_effective_url}`
+                      : undefined
+                  }
+                >
+                  {URLSCAN_LABEL[row.urlscan_classification]}
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-slate-500">
+              <span className="text-slate-400">matches</span>{" "}
+              <span className="font-medium">{row.inferred_target_domain}</span>
+              {evidence && <span className="text-slate-400"> · {evidence}</span>}
+            </p>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              first seen {new Date(row.first_seen_at).toLocaleString("en-AU")}
+              {row.urlscan_scanned_at && (
+                <>
+                  {" · "}
+                  urlscan{" "}
+                  {new Date(row.urlscan_scanned_at).toLocaleString("en-AU")}
+                </>
+              )}
+            </p>
           </div>
-          <p className="text-xs text-slate-500">
-            <span className="text-slate-400">matches</span>{" "}
-            <span className="font-medium">{row.inferred_target_domain}</span>
-            {evidence && <span className="text-slate-400"> · {evidence}</span>}
-          </p>
-          <p className="text-[11px] text-slate-400 mt-0.5">
-            first seen {new Date(row.first_seen_at).toLocaleString("en-AU")}
-          </p>
         </div>
         <div className="flex flex-col items-end gap-2 shrink-0">
           <div className="flex items-center gap-1.5">
@@ -170,11 +271,34 @@ function PendingRow({
               target="_blank"
               rel="noopener noreferrer"
               className="text-[11px] flex items-center gap-1 px-2 py-1 border border-slate-200 rounded hover:bg-slate-50 text-slate-600"
-              title="urlscan.io sandbox lookup (safe to open)"
+              title="urlscan.io public search (safe to open)"
             >
               <ExternalLink size={11} />
               urlscan
             </a>
+            <button
+              type="button"
+              onClick={() => onScan(row.id)}
+              disabled={disabled}
+              className="text-[11px] flex items-center gap-1 px-2 py-1 border border-slate-200 rounded hover:bg-slate-50 text-slate-600 disabled:opacity-40"
+              title={
+                hasUrlscan
+                  ? "Re-scan via urlscan.io (overwrites the previous result in ~90s)"
+                  : "Scan via urlscan.io (result lands in ~90s)"
+              }
+            >
+              {hasUrlscan ? (
+                <>
+                  <RefreshCw size={11} />
+                  Re-scan
+                </>
+              ) : (
+                <>
+                  <Camera size={11} />
+                  Scan now
+                </>
+              )}
+            </button>
           </div>
           <div className="flex items-center gap-1.5">
             <TriageButton

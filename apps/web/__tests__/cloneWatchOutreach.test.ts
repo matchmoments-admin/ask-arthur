@@ -10,6 +10,12 @@ import {
   brandDisplayName,
   type WeeklyMetrics,
 } from "@/app/api/inngest/functions/clone-watch-weekly-digest";
+import {
+  classifyScan,
+  suggestTriageTransition,
+  PARKED_HOST_PATTERNS,
+} from "@/app/api/inngest/functions/clone-watch-urlscan";
+import type { URLScanResult } from "@askarthur/scam-engine/urlscan";
 
 // Covers the pure helpers that route channels, build outbound copy, and
 // shape the Netcraft submission. The Inngest step machinery itself
@@ -262,5 +268,114 @@ describe("clone-watch-weekly-digest — pure formatters", () => {
       expect(message).not.toContain("<script>alert(1)</script>");
       expect(message).toContain("&lt;script&gt;");
     });
+  });
+});
+
+describe("clone-watch-urlscan — classifyScan", () => {
+  const baseResult: URLScanResult = {
+    scanId: "abc",
+    screenshotUrl: "https://urlscan.io/screenshots/abc.png",
+    effectiveUrl: "https://example.com/",
+    malicious: false,
+    score: 0,
+    categories: [],
+    technologies: [],
+    serverInfo: { ip: "1.2.3.4", country: "AU", asn: "AS123" },
+    domainAge: null,
+  };
+
+  it("classifies a null result as unresolved", () => {
+    expect(classifyScan(null)).toBe("unresolved");
+  });
+
+  it("classifies an empty effectiveUrl as unresolved", () => {
+    expect(classifyScan({ ...baseResult, effectiveUrl: "" })).toBe("unresolved");
+  });
+
+  it("classifies Afternic-hosted effective URL as parked_for_sale", () => {
+    expect(
+      classifyScan({
+        ...baseResult,
+        effectiveUrl:
+          "https://www.afternic.com/forsale/qkmart.com?utm_medium=parkedpag",
+      }),
+    ).toBe("parked_for_sale");
+  });
+
+  it("classifies Sedo-hosted effective URL as parked_for_sale", () => {
+    expect(
+      classifyScan({
+        ...baseResult,
+        effectiveUrl: "https://sedo.com/search/details/?domain=example.com",
+      }),
+    ).toBe("parked_for_sale");
+  });
+
+  it("classifies sedoparking subdomains as parked_for_sale", () => {
+    expect(
+      classifyScan({
+        ...baseResult,
+        effectiveUrl: "https://ns1.sedoparking.com/showcase",
+      }),
+    ).toBe("parked_for_sale");
+  });
+
+  it("classifies urlscan-flagged malicious as likely_phishing", () => {
+    expect(
+      classifyScan({ ...baseResult, malicious: true }),
+    ).toBe("likely_phishing");
+  });
+
+  it("classifies a benign resolving page as neutral", () => {
+    expect(
+      classifyScan({
+        ...baseResult,
+        effectiveUrl: "https://westpachomesb.info/",
+      }),
+    ).toBe("neutral");
+  });
+
+  it("does not treat brand-like hostnames as parked unless on a marketplace", () => {
+    expect(
+      classifyScan({
+        ...baseResult,
+        effectiveUrl: "https://qkmart.com/login",
+      }),
+    ).toBe("neutral");
+  });
+
+  it("handles malformed effective URLs gracefully", () => {
+    // Invalid URL → safeHostOf returns null → not parked, not malicious → neutral
+    expect(
+      classifyScan({ ...baseResult, effectiveUrl: "not a url" }),
+    ).toBe("neutral");
+  });
+});
+
+describe("clone-watch-urlscan — suggestTriageTransition", () => {
+  it("escalates likely_phishing → tp_confirmed", () => {
+    expect(suggestTriageTransition("likely_phishing")).toBe("tp_confirmed");
+  });
+
+  it("downgrades parked_for_sale → needs_investigation", () => {
+    expect(suggestTriageTransition("parked_for_sale")).toBe(
+      "needs_investigation",
+    );
+  });
+
+  it("downgrades unresolved → needs_investigation", () => {
+    expect(suggestTriageTransition("unresolved")).toBe("needs_investigation");
+  });
+
+  it("returns null for neutral (leave alone for human review)", () => {
+    expect(suggestTriageTransition("neutral")).toBeNull();
+  });
+});
+
+describe("clone-watch-urlscan — PARKED_HOST_PATTERNS", () => {
+  it("includes the major domain marketplace operators", () => {
+    expect(PARKED_HOST_PATTERNS).toContain("afternic.com");
+    expect(PARKED_HOST_PATTERNS).toContain("sedo.com");
+    expect(PARKED_HOST_PATTERNS).toContain("dan.com");
   });
 });

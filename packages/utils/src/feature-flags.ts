@@ -398,6 +398,16 @@ export const featureFlags = {
   shopfrontCloneWeeklyDigest:
     process.env.FF_SHOPFRONT_CLONE_WEEKLY_DIGEST === "true",
 
+  /** Phase A.3 — urlscan.io auto-scan + auto-classification for new
+   *  clone-watch candidates. Free tier (100/day) is plenty for our
+   *  ~5-10 daily candidates plus a re-scan cron. Server-side only.
+   *  Gates the two Inngest functions (clone-watch-urlscan + clone-watch-
+   *  urlscan-rescan). Independent of the master shopfrontCloneOutreach
+   *  flag so we can canary urlscan before turning on the outreach
+   *  consumers. Plan: docs/plans/clone-watch-outreach.md §15 Phase A.3. */
+  shopfrontCloneUrlscan:
+    process.env.FF_SHOPFRONT_CLONE_URLSCAN === "true",
+
   /** Screenshot retention — when ON, `storeVerifiedScam` uploads the raw
    *  screenshot of a HIGH_RISK image submission to R2. Default OFF, and it
    *  must stay OFF until prerequisites are met: `scrubPII` is text-only, so
