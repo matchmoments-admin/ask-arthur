@@ -123,10 +123,26 @@ Supabase Postgres (project `rquomhcgnodxzkhokwni`). 75+ tables across 12 domain 
 
 ### Clone-watch / Shopfront
 
-- `shopfront_shops` — Installed Shopify merchant index. Minimal scaffold at MVP (id, shop_domain, shopify_shop_id, installed_at). Empty at Layer 0; #373 extends with pgsodium-encrypted token columns. Service-role RLS. v140.
-- `shopfront_clone_alerts` — Single write target for ALL clone detections across Layer 0 / Phase A / Phase B / Phase C (ADR-0016 Decision #1). Layer 0 writes `target_shop_id IS NULL`, `source = 'nrd'`. CHECK enforces XOR on `target_shop_id` / `inferred_target_domain`. `signals` JSONB array per ADR-0015. UNIQUE expression index on `(COALESCE(target_shop_id::text, inferred_target_domain), url_hash)`. Service-role RLS. v140.
+- `shopfront_shops` — Installed Shopify merchant index. Minimal scaffold at MVP. Service-role RLS. v140.
+- `shopfront_clone_alerts` — Single write target for ALL clone detections (ADR-0016 Decision #1). Layer 0 writes `target_shop_id IS NULL`, `source = 'nrd'`. CHECK enforces XOR on `target_shop_id` / `inferred_target_domain`. `signals` JSONB array per ADR-0015. UNIQUE expression index on `(COALESCE(target_shop_id::text, inferred_target_domain), url_hash)`. Service-role RLS. v140. **Extended in v143** with triage columns: `triage_status` (CHECK in `'pending'|'tp_confirmed'|'fp'|'needs_investigation'|'tp_actioned'`), `triage_by uuid`, `triage_at timestamptz`, `triage_notes text`, `submitted_to jsonb DEFAULT '{}'::jsonb`. **Extended in v148** with urlscan columns: `urlscan_evidence jsonb`, `urlscan_classification` (CHECK in `'parked_for_sale'|'unresolved'|'likely_phishing'|'neutral'`), `urlscan_scanned_at timestamptz`, `urlscan_uuid text`. Partial indexes: `idx_clone_alerts_triage_pending`, `idx_clone_alerts_urlscan_rescan`.
 - `shopfront_takedown_attempts` — DMCA / registrar / Cloudflare / Shopify-abuse log per alert. Unused at Layer 0; populated by Shield Pro tier (#377). Service-role RLS. v140.
-- RPCs: `upsert_clone_alerts_batch(p_rows JSONB) → INTEGER` — batch INSERT ... ON CONFLICT DO UPDATE for the expression index. SECURITY DEFINER, `search_path = public, pg_catalog`, `SET LOCAL statement_timeout = '300s'`. service-role grant only. v141.
+- `brand_contact_directory` — Per-brand outreach channel mapping for Layer 3/4 (`channel_type` enum: bugcrowd_vdp / security_txt / fraud_inbox / contact_form / manual_review / none; `recipient` email or URL; `evidence_format`). Service-role RLS only. Seeded with 4 verified (Kmart/Target/AusPost/CBA) + 44 manual_review brands. v143 + v143b seed.
+- `clone_alert_brand_replies` — Inbound brand-reply tracking (Phase C foundation). Receives parsed reply messages from the planned Cloudflare Worker → Edge Function inbound handler (issue #430). CHECK `from_email = lower(from_email)` enforces lowercase for suppression lookup. Service-role RLS only. v146.
+- **Clone-watch RPCs (12, all SECURITY DEFINER + locked search_path)**:
+  - `upsert_clone_alerts_batch(JSONB) → INTEGER` — batch INSERT ON CONFLICT for daily NRD ingest. v141.
+  - `list_clone_alerts_pending_triage(p_limit INT) → TABLE` — admin dashboard pending queue + urlscan classification + screenshot URL. v143 / v148.
+  - `set_clone_alert_triage(p_alert_id BIGINT, p_status TEXT, p_admin_id UUID, p_notes TEXT)` — triage state transition. v143.
+  - `clone_watch_weekly_metrics(p_days INT) → TABLE` — KPIs for admin tile + weekly digest. v143.
+  - `clone_watch_brand_breakdown(p_days INT) → TABLE` — per-brand history for admin table. v144. Anon REVOKED.
+  - `clone_watch_public_impact(p_days INT) → TABLE` — aggregate counts for `/clone-watch` public page. **Anon GRANT** (output is aggregate-only). v144 + revised in v147 (brands_protected semantic fix).
+  - `clone_watch_takedown_stats(p_days INT) → TABLE` — median + P90 time-to-takedown. **Anon GRANT**. v145.
+  - `list_clone_alerts_pending_netcraft_poll(p_limit INT) → TABLE` — selector for Netcraft polling cron. v145.
+  - `list_clone_alerts_pending_urlscan(p_limit INT) → TABLE` — selector for urlscan initial-scan fan-out. v148.
+  - `list_clone_alerts_for_urlscan_rescan(p_limit, p_stale_after_hours) → TABLE` — selector for daily urlscan re-scan cron. v148 + revised in v149 (30→60 day window).
+  - `persist_clone_alert_urlscan(p_alert_id, p_urlscan_uuid, p_evidence, p_classification, p_set_triage_status) → TABLE` — atomic persist + never-demote triage transition. v148.
+  - `merge_clone_alert_submission(p_alert_id, p_key, p_value, p_set_triage_status) → TABLE` — atomic JSONB merge for `submitted_to` to prevent cross-fn races between submit-netcraft / poll-netcraft / notify-brand. v147.
+  - `ingest_clone_alert_brand_reply(...)` — called by the future inbound-email handler. v146.
+  - `clone_alert_recipient_is_suppressed(p_email TEXT) → BOOLEAN` — STOP-suppression check called by notify-brand. v146.
 
 ### Misc / Internal
 

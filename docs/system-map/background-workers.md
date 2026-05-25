@@ -155,6 +155,20 @@ Gated by `FF_ANALYZE_INNGEST_WEB`. When false, the legacy `waitUntil` path runs 
 | `report-onward-ask-arthur-feed` | manual                              | Internal feed archive                                  |
 | `onward-brand-abuse`            | `report.submitted.v1` (brand abuse) | Queue brand report submission                          |
 
+### Shopfront clone-watch (Layer 0 + outreach + measurement)
+
+Layer 0 daily NRD ingest live since 2026-05-24. Outreach pipeline + measurement closure landed across PRs #424 / #425 / #431 / #432 / #433. All gated by `FF_SHOPFRONT_CLONE_*` flags (see `feature-flags.md`).
+
+| Function                          | Trigger                                               | Purpose                                                                                                                                                                                    |
+| --------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `shopfront-nrd-daily-ingest`      | cron `30 8 * * *` + `shopfront/nrd.manual-trigger.v1` | Layer 0 — downloads whoisds NRD zip, lexical-matches against ~50 AU brand watchlist, UPSERTs into `shopfront_clone_alerts`, sends Telegram digest. Then fans out urlscan-requested events. |
+| `shopfront-clone-submit-netcraft` | event `shopfront/clone.triaged.v1`                    | Layer 2 — submits TP-confirmed candidates to Netcraft v3 Report API. Skips if `FF_SHOPFRONT_CLONE_SUBMIT_NETCRAFT` OFF or `NETCRAFT_REPORT_API_KEY` unset.                                 |
+| `shopfront-clone-notify-brand`    | event `shopfront/clone.triaged.v1`                    | Layers 3+4 — looks up `brand_contact_directory`, routes by channel_type (security_txt / fraud_inbox → Resend; bugcrowd_vdp / contact_form / manual_review → Telegram-page admin).          |
+| `shopfront-clone-poll-netcraft`   | cron `*/30 * * * *` + manual-trigger event            | Polls Netcraft for takedown status, updates `submitted_to.netcraft.{state,takedown_at}`. Powers median time-to-takedown KPI.                                                               |
+| `shopfront-clone-weekly-digest`   | cron `0 10 * * 0` (Sun)                               | Layer 5 — aggregates the week, Telegram-pages admin with KPI summary + LinkedIn-post draft (anonymised).                                                                                   |
+| `shopfront-clone-urlscan`         | event `shopfront/clone.scan-requested.v1`             | Phase A.3 — submits candidate URL to urlscan.io, waits 60s + 30s retry, retrieves, auto-classifies (parked / unresolved / likely_phishing / neutral), persists.                            |
+| `shopfront-clone-urlscan-rescan`  | cron `0 11 * * *` + manual-trigger event              | Phase A.3 — fans out scan-requested events for stale rows (>24h since last scan, within 60-day window). Catches the parked → activated transition.                                         |
+
 ---
 
 ## Python scrapers (23 in `pipeline/scrapers/`)

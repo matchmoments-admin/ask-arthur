@@ -119,6 +119,19 @@ Paused after PR 2 over OAIC NDB data-availability finding. All flags OFF, schema
 | `leakcheckEnabled`       | OFF     | LeakCheck phone-breach lookup                    |
 | `twilioVerifyEnabled`    | OFF     | Twilio Verify OTP for phone-ownership proof      |
 
+## Shopfront clone-watch
+
+Layer 0 = daily NRD lexical sweep (live since 2026-05-24). Layers 1–5 = outreach pipeline + measurement closure; landed across PRs #424 / #425 / #431 / #432 / #433. All server-side flags.
+
+| Flag                                                                  | Default | Purpose                                                                                                                                          |
+| --------------------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `shopfrontCloneWatch` (`FF_SHOPFRONT_CLONE_WATCH`)                    | **ON**  | Layer 0 daily NRD ingest cron. ON in prod since 2026-05-24.                                                                                      |
+| `shopfrontCloneOutreach` (`FF_SHOPFRONT_CLONE_OUTREACH`)              | **ON**  | Master flag for Layers 1–5 (triage dashboard + outreach). ON in prod since 2026-05-26. When OFF, `/admin/clone-watch` 404s + all consumers skip. |
+| `shopfrontCloneSubmitNetcraft` (`FF_SHOPFRONT_CLONE_SUBMIT_NETCRAFT`) | OFF     | Layer 2 Netcraft community-blocklist submission. Independent gate so Netcraft path can ship after the brand-notify path stabilises.              |
+| `shopfrontCloneNotifyBrand` (`FF_SHOPFRONT_CLONE_NOTIFY_BRAND`)       | OFF     | Layers 3+4 brand notification (formal channels + courtesy email). Flip after the `brand_contact_directory` rows are verified per brand.          |
+| `shopfrontCloneWeeklyDigest` (`FF_SHOPFRONT_CLONE_WEEKLY_DIGEST`)     | OFF     | Layer 5 weekly digest cron (Sun 10:00 UTC) → Telegram + LinkedIn-post draft. Flip after first triage week.                                       |
+| `shopfrontCloneUrlscan` (`FF_SHOPFRONT_CLONE_URLSCAN`)                | OFF     | Phase A.3 urlscan.io auto-scan + daily re-scan cron. Independent of master `shopfrontCloneOutreach` so we can canary urlscan separately.         |
+
 ## Vulnerability & B2B
 
 | Flag                     | Default | Purpose                                               |
@@ -147,14 +160,15 @@ Paused after PR 2 over OAIC NDB data-availability finding. All flags OFF, schema
 
 When daily spend exceeds the cap, `cost-daily-check` upserts a `feature_brakes` row and the function early-returns until `paused_until` expires (24h).
 
-| Env var                      | Default | Source data                                                                                                                                                                                                                                         |
-| ---------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DAILY_COST_THRESHOLD_USD`   | `2`     | `cost_telemetry` total → admin alert                                                                                                                                                                                                                |
-| `VULN_AU_ENRICHMENT_CAP_USD` | `5`     | `cost_telemetry WHERE feature='vuln-au-enrichment'`                                                                                                                                                                                                 |
-| `REDDIT_INTEL_CAP_USD`       | `10`    | `cost_telemetry WHERE feature='reddit-intel'`                                                                                                                                                                                                       |
-| `PHONE_FOOTPRINT_CAP_USD`    | `5`     | Vonage `telco_api_usage` + `cost_telemetry WHERE feature='phone_footprint'`                                                                                                                                                                         |
-| `CHARITY_CHECK_CAP_USD`      | `5`     | `cost_telemetry WHERE feature='charity-check'`                                                                                                                                                                                                      |
-| `SHOP_SIGNAL_CAP_USD`        | `15`    | `cost_telemetry WHERE feature IN ('shop_signal', 'shop-signal-apivoid-error', 'shop-signal-apivoid-overage')` — wired by `cost-daily-check` (Stage 1 #319). See [`docs/ops/shop-signal-config.md`](../ops/shop-signal-config.md) §3 for derivation. |
+| Env var                            | Default | Source data                                                                                                                                                                                                                                                                                                                                                              |
+| ---------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `DAILY_COST_THRESHOLD_USD`         | `2`     | `cost_telemetry` total → admin alert                                                                                                                                                                                                                                                                                                                                     |
+| `VULN_AU_ENRICHMENT_CAP_USD`       | `5`     | `cost_telemetry WHERE feature='vuln-au-enrichment'`                                                                                                                                                                                                                                                                                                                      |
+| `REDDIT_INTEL_CAP_USD`             | `10`    | `cost_telemetry WHERE feature='reddit-intel'`                                                                                                                                                                                                                                                                                                                            |
+| `PHONE_FOOTPRINT_CAP_USD`          | `5`     | Vonage `telco_api_usage` + `cost_telemetry WHERE feature='phone_footprint'`                                                                                                                                                                                                                                                                                              |
+| `CHARITY_CHECK_CAP_USD`            | `5`     | `cost_telemetry WHERE feature='charity-check'`                                                                                                                                                                                                                                                                                                                           |
+| `SHOP_SIGNAL_CAP_USD`              | `15`    | `cost_telemetry WHERE feature IN ('shop_signal', 'shop-signal-apivoid-error', 'shop-signal-apivoid-overage')` — wired by `cost-daily-check` (Stage 1 #319). See [`docs/ops/shop-signal-config.md`](../ops/shop-signal-config.md) §3 for derivation.                                                                                                                      |
+| `SHOPFRONT_CLONE_OUTREACH_CAP_USD` | `5`     | `cost_telemetry WHERE feature IN ('shopfront_clone_submit_netcraft', 'shopfront_clone_notify_brand', 'shopfront_clone_weekly_digest', 'shopfront_clone_poll_netcraft', 'shopfront_clone_urlscan', 'shopfront_clone_urlscan_rescan')` — aggregate brake across all 6 Layer 1–5 + Phase A.3 sub-features. Engages a single `feature='shopfront_clone_outreach'` brake row. |
 
 **Use bare numbers** (`5`, `10`) — non-numeric values silently disable the brake because `parseFloat("$10")` is `NaN`.
 
@@ -176,6 +190,13 @@ When daily spend exceeds the cap, `cost-daily-check` upserts a `feature_brakes` 
 - `ANTHROPIC_API_KEY`
 - `OPENAI_API_KEY` — Whisper transcription
 - `VOYAGE_API_KEY` — Voyage 3 embeddings (per-env split — production / preview / dev)
+
+### Clone-watch outreach (server-only)
+
+- `NETCRAFT_REPORT_API_KEY` — Netcraft v3 Report API; powers Layer 2 community-blocklist submission + the takedown-polling cron. Apply via `report@netcraft.com`. When unset, the submit + poll fns skip-with-reason.
+- `NETCRAFT_REPORTER_EMAIL` — identity included in Netcraft submissions. Defaults to `brendan@askarthur.au`.
+- `URLSCAN_API_KEY` — urlscan.io free-tier API key. Powers Phase A.3 auto-scan + daily re-scan cron (~60/day usage, 100/day cap).
+- `WHOISDS_NRD_ZIP_URL` — optional override for the Layer 0 daily NRD source. Leave unset; computed deterministically from yesterday's UTC date.
 
 ### Redis / Cache
 
