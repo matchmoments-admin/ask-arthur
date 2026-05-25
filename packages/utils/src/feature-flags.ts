@@ -369,6 +369,35 @@ export const featureFlags = {
    *  rows + Telegram digest. Plan: docs/plans/clone-watch-mvp.md §4 PR 2. */
   shopfrontCloneWatch: process.env.FF_SHOPFRONT_CLONE_WATCH === "true",
 
+  /** Shopfront clone-watch outreach — master flag for Layers 1-5
+   *  (admin triage dashboard, community submission, brand notification,
+   *  weekly digest). Server-side only. When OFF, /admin/clone-watch
+   *  returns notFound() and all downstream Inngest functions short-circuit.
+   *  Default OFF. Plan: docs/plans/clone-watch-outreach.md. */
+  shopfrontCloneOutreach:
+    process.env.FF_SHOPFRONT_CLONE_OUTREACH === "true",
+
+  /** Layer 2 — Netcraft community submission. Server-side only. Gates the
+   *  shopfront-clone-submit-netcraft Inngest fn. Independent of the
+   *  master shopfrontCloneOutreach flag so the brand-notification path can
+   *  ship before Netcraft API access is provisioned. Default OFF until
+   *  NETCRAFT_REPORT_API_KEY is set in Vercel. */
+  shopfrontCloneSubmitNetcraft:
+    process.env.FF_SHOPFRONT_CLONE_SUBMIT_NETCRAFT === "true",
+
+  /** Layer 3+4 — brand-direct notification. Server-side only. Gates the
+   *  shopfront-clone-notify-brand Inngest fn. Default OFF until
+   *  brand_contact_directory is seeded for the full watchlist and the
+   *  manual-approval gate has been calibrated. */
+  shopfrontCloneNotifyBrand:
+    process.env.FF_SHOPFRONT_CLONE_NOTIFY_BRAND === "true",
+
+  /** Layer 5 — weekly digest Inngest cron + LinkedIn-post draft via
+   *  Telegram. Server-side only. Default OFF until first triage week
+   *  produces enough signal to publish. */
+  shopfrontCloneWeeklyDigest:
+    process.env.FF_SHOPFRONT_CLONE_WEEKLY_DIGEST === "true",
+
   /** Screenshot retention — when ON, `storeVerifiedScam` uploads the raw
    *  screenshot of a HIGH_RISK image submission to R2. Default OFF, and it
    *  must stay OFF until prerequisites are met: `scrubPII` is text-only, so

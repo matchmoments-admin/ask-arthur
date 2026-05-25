@@ -93,6 +93,8 @@ async function getTiles(svc: ReturnType<typeof createServiceClient>): Promise<Ti
     onwardRes,
     blogDraftsRes,
     queuePendingRes,
+    cloneWatchPendingRes,
+    cloneWatchTpRes,
   ] = await Promise.all([
     svc
       .from("feed_items")
@@ -133,6 +135,19 @@ async function getTiles(svc: ReturnType<typeof createServiceClient>): Promise<Ti
       .from("bot_message_queue")
       .select("id", { count: "exact", head: true })
       .eq("status", "pending"),
+    // Clone-watch outreach (v143): how many NRD candidates still awaiting triage
+    svc
+      .from("shopfront_clone_alerts")
+      .select("id", { count: "exact", head: true })
+      .eq("source", "nrd")
+      .eq("triage_status", "pending"),
+    // Clone-watch outreach (v143): how many confirmed TP / actioned in last 7d
+    svc
+      .from("shopfront_clone_alerts")
+      .select("id", { count: "exact", head: true })
+      .eq("source", "nrd")
+      .in("triage_status", ["tp_confirmed", "tp_actioned"])
+      .gte("first_seen_at", since7d),
   ]);
 
   const inboundActiveCount = new Set(
@@ -186,6 +201,15 @@ async function getTiles(svc: ReturnType<typeof createServiceClient>): Promise<Ti
       purpose: "Brand impersonation hits surfaced for review",
       metric: String(brandAlertsRes.count ?? 0),
       metricLabel: "New 24h",
+    },
+    {
+      href: "/admin/clone-watch",
+      title: "Clone-watch triage",
+      purpose: "Daily NRD candidates awaiting FP / TP / Investigate verdict",
+      metric: String(cloneWatchPendingRes.count ?? 0),
+      metricLabel: "Awaiting triage",
+      warn: (cloneWatchPendingRes.count ?? 0) > 20,
+      secondary: `${cloneWatchTpRes.count ?? 0} TP confirmed in last 7d`,
     },
     {
       href: "/admin/vulnerabilities",

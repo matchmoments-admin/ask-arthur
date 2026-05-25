@@ -411,8 +411,13 @@ async function sendTelegramDigest(args: {
     }
   }
   lines.push("");
+  if (args.hits.length > 0) {
+    lines.push(
+      `<b>➜ Triage queue:</b> <a href="https://askarthur.au/admin/clone-watch">askarthur.au/admin/clone-watch</a>`,
+    );
+  }
   lines.push(
-    `<i>askarthur.au/clone-watch (gated noindex; flip after #371 v1 copy)</i>`,
+    `<i>Public: askarthur.au/clone-watch (gated noindex; flip after #371 v1 copy)</i>`,
   );
 
   try {

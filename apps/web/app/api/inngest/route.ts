@@ -18,6 +18,13 @@ import {
   onwardIdcare,
   onwardAskArthurFeed,
 } from "./functions/onward-skipped";
+// Clone-watch outreach — Layer 2 (Netcraft submission), Layer 3+4 (brand
+// notification), Layer 5 (weekly digest). Triggered by shopfront/clone.
+// triaged.v1 emitted from /api/admin/clone-watch/triage. Plan:
+// docs/plans/clone-watch-outreach.md.
+import { cloneWatchSubmitNetcraft } from "./functions/clone-watch-submit-netcraft";
+import { cloneWatchNotifyBrand } from "./functions/clone-watch-notify-brand";
+import { cloneWatchWeeklyDigest } from "./functions/clone-watch-weekly-digest";
 
 // App-layer Inngest functions live here because they cross apps/web-only
 // primitives (R2 upload, Resend, local auth helpers) that shouldn't leak
@@ -37,6 +44,10 @@ const appFunctions = [
   onwardReportCyber,
   onwardIdcare,
   onwardAskArthurFeed,
+  // Clone-watch outreach (v143)
+  cloneWatchSubmitNetcraft,
+  cloneWatchNotifyBrand,
+  cloneWatchWeeklyDigest,
 ];
 
 export const { GET, POST, PUT } = serve({
