@@ -11,6 +11,14 @@ const BodySchema = z.object({
   alertId: z.number().int().positive(),
 });
 
+// Soft rate-limit on operator-triggered manual scans — protects the urlscan
+// free-tier daily quota (100/day) from accidental button-mashing.
+// Counts cost_telemetry rows for the admin-triggered operation in the last
+// hour; rejects if > MAX. Per-feature (not per-user) so it caps the whole
+// operator team rather than allowing N admins × N scans.
+// Closes ultrareview F20.
+const MAX_ADMIN_SCANS_PER_HOUR = 20;
+
 export const dynamic = "force-dynamic";
 
 /**
@@ -50,6 +58,27 @@ export async function POST(req: Request) {
     return NextResponse.json(
       { error: "supabase_unavailable" },
       { status: 503 },
+    );
+  }
+
+  // Soft rate-limit on admin-triggered scans (ultrareview F20)
+  const oneHourAgo = new Date(Date.now() - 3600 * 1000).toISOString();
+  const { count: recentScanCount } = await sb
+    .from("cost_telemetry")
+    .select("id", { head: true, count: "exact" })
+    .eq("feature", "shopfront_clone_urlscan")
+    .gte("created_at", oneHourAgo);
+  if ((recentScanCount ?? 0) >= MAX_ADMIN_SCANS_PER_HOUR) {
+    logger.warn("admin scan: rate-limited", {
+      recentScanCount,
+      max: MAX_ADMIN_SCANS_PER_HOUR,
+    });
+    return NextResponse.json(
+      {
+        error: "rate_limited",
+        details: `Soft cap of ${MAX_ADMIN_SCANS_PER_HOUR} clone-watch scans per hour reached. Wait for the next cycle to preserve urlscan's daily quota.`,
+      },
+      { status: 429 },
     );
   }
 

@@ -194,10 +194,11 @@ export async function GET(req: Request) {
     )
     .reduce((sum, t) => sum + t.cost, 0);
 
-  // Clone-watch outreach — aggregate across the 4 sub-features (Netcraft
-  // submit + poll, brand notify, weekly digest). Engaging this brake
-  // pauses ALL clone-watch outreach activity for 24h; the upstream Layer 0
-  // NRD ingest (shopfront_clone_watch) keeps running.
+  // Clone-watch outreach — aggregate across the 6 sub-features (Netcraft
+  // submit + poll, brand notify, weekly digest, urlscan + urlscan rescan).
+  // Engaging this brake pauses ALL clone-watch outreach activity for 24h;
+  // the upstream Layer 0 NRD ingest (shopfront_clone_watch) keeps running.
+  // urlscan + urlscan_rescan added per ultrareview F6 (PR #432).
   const shopfrontCloneOutreachThresholdUsd =
     envReads.SHOPFRONT_CLONE_OUTREACH_CAP_USD.value;
   const shopfrontCloneOutreachCost = top
@@ -206,7 +207,9 @@ export async function GET(req: Request) {
         t.feature === "shopfront_clone_submit_netcraft" ||
         t.feature === "shopfront_clone_notify_brand" ||
         t.feature === "shopfront_clone_weekly_digest" ||
-        t.feature === "shopfront_clone_poll_netcraft",
+        t.feature === "shopfront_clone_poll_netcraft" ||
+        t.feature === "shopfront_clone_urlscan" ||
+        t.feature === "shopfront_clone_urlscan_rescan",
     )
     .reduce((sum, t) => sum + t.cost, 0);
 

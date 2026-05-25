@@ -19,21 +19,32 @@ import { logCost } from "@/lib/cost-telemetry";
  *
  * Wait time: 60s between submit + retrieve. urlscan's typical scan latency
  * is 20-40s; 60s gives headroom. If the retrieve 404s (scan still in
- * progress), we wait another 30s and try once more, then give up — the
- * daily re-scan cron will pick it up tomorrow.
+ * progress), we wait another 30s and try once more. If still null after
+ * the retry, skip persistence — the daily re-scan cron will pick it up
+ * tomorrow. We do NOT auto-classify-as-unresolved on retry exhaustion
+ * (ultrareview F4) because that would be gameable by deliberately
+ * slow-rendering attackers.
  *
  * Classification heuristics (conservative — auto-triage only on
- * unambiguous evidence; ambiguous cases stay 'pending' for human review):
+ * unambiguous + low-impact evidence; high-impact transitions stay manual):
  *   - effectiveUrl matches Afternic / Sedo / Dan.com / ... → parked_for_sale
  *     → auto-triage to needs_investigation (squat, re-watch periodically)
  *   - effectiveUrl empty                                    → unresolved
  *     → auto-triage to needs_investigation (worth re-scanning)
  *   - urlscan verdicts.malicious === true                   → likely_phishing
- *     → auto-triage to tp_confirmed (emits shopfront/clone.triaged.v1 via DB
- *       NOT — we explicitly do NOT re-emit because the operator should
- *       still confirm before brand-notify fires)
+ *     → NO auto-triage (ultrareview F5) — the chip is shown in the admin
+ *       dashboard prominently (rose-red) so the operator confirms TP
+ *       themselves, which emits shopfront/clone.triaged.v1 and fans out to
+ *       Netcraft submit + brand notify. Auto-flipping triage_status would
+ *       hide the row from the pending queue AND skip the event emit, so
+ *       the row becomes invisible and inert.
  *   - else                                                  → neutral
  *     → leave triage state alone
+ *
+ * **Inngest function ID `shopfront-clone-urlscan` is load-bearing** —
+ * renaming it orphans in-flight runs (60-90s `step.sleep` between submit
+ * and retrieve makes orphan windows real). Same for the rescan fn.
+ * Coordinate any rename via a feature flag transition.
  *
  * See docs/plans/clone-watch-outreach.md §15 Phase A.3.
  */
@@ -64,7 +75,11 @@ export const cloneWatchUrlscan = inngest.createFunction(
     // One scan at a time — urlscan free tier is rate-limited; concurrency
     // overlap could trigger throttling.
     concurrency: { limit: 3 },
-    idempotency: "event.data.alertId",
+    // Idempotency on event.id (not event.data.alertId) so rescans of the
+    // same alert next day actually run (initial-scan event id is stable
+    // per alert; rescan emits with a unique timestamped id, so they DO
+    // differ at event.id level). Fixes ultrareview F1.
+    idempotency: "event.id",
     // Hard cap matches sleep budget + buffer
     timeouts: { finish: "5m" },
   },
@@ -103,6 +118,24 @@ export const cloneWatchUrlscan = inngest.createFunction(
       result = await step.run("retrieve-urlscan-retry", async () => {
         return retrieveURLScan(submission.uuid);
       });
+    }
+
+    // Both retrievals failed → don't auto-classify as 'unresolved' (which
+    // would be triage-promoted to needs_investigation). An attacker can
+    // deliberately slow-render to game the auto-classifier. Skip
+    // persistence; the daily rescan cron retries tomorrow.
+    // Fixes ultrareview F4.
+    if (!result) {
+      logger.warn("clone-watch urlscan: both retrievals returned null", {
+        alertId: data.alertId,
+        urlscanUuid: submission.uuid,
+      });
+      return {
+        skipped: true,
+        reason: "scan_timeout_both_retrievals_null",
+        alertId: data.alertId,
+        urlscanUuid: submission.uuid,
+      };
     }
 
     const classification = classifyScan(result);
@@ -173,9 +206,12 @@ export function classifyScan(
     return "unresolved";
   }
 
-  // Parked-on-marketplace detection — match the effective URL's host
+  // Parked-on-marketplace detection — match the effective URL's host.
+  // Use suffix match (not substring) so an attacker-controlled host like
+  // `evilafternic.com.attacker.com` does NOT match `afternic.com`.
+  // Fixes ultrareview F8.
   const host = safeHostOf(result.effectiveUrl);
-  if (host && PARKED_HOST_PATTERNS.some((p) => host.includes(p))) {
+  if (host && PARKED_HOST_PATTERNS.some((p) => host === p || host.endsWith("." + p))) {
     return "parked_for_sale";
   }
 
@@ -192,18 +228,31 @@ export function classifyScan(
  * Map a classification to a triage_status transition suggestion.
  * Returns null when no transition is appropriate (leave the row alone).
  *
+ * `likely_phishing` deliberately returns NULL (ultrareview F5):
+ * - Auto-flipping to `tp_confirmed` would drop the row off the pending
+ *   queue (it's filtered to pending-only) so the operator never sees the
+ *   rose-red chip.
+ * - It also wouldn't emit `shopfront/clone.triaged.v1`, so the downstream
+ *   Netcraft-submit + brand-notify consumers never fire.
+ * - Net effect: row becomes invisible + inert. Bad.
+ * Instead, the chip surfaces in the dashboard; operator manually confirms
+ * TP, which DOES emit the event and fans out correctly.
+ *
+ * `parked_for_sale` + `unresolved` → `needs_investigation` is safe because
+ * those rows aren't actionable signals — moving them off the pending queue
+ * is desirable. The chip + screenshot stay queryable from the admin page.
+ *
  * The DB RPC (persist_clone_alert_urlscan) refuses to demote already-
  * triaged rows, so this can be safely conservative here.
  */
 export function suggestTriageTransition(
   classification: UrlscanClassification,
-): "tp_confirmed" | "needs_investigation" | null {
+): "needs_investigation" | null {
   switch (classification) {
     case "parked_for_sale":
     case "unresolved":
       return "needs_investigation";
     case "likely_phishing":
-      return "tp_confirmed";
     case "neutral":
       return null;
   }

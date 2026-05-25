@@ -45,8 +45,11 @@ export const cloneWatchUrlscanRescan = inngest.createFunction(
     concurrency: { limit: 1 },
     timeouts: { finish: "5m" },
   },
+  // 11:00 UTC daily — deconflicted from `feedback-digest` cron (0 9 * * *,
+  // every day including Sun), per the PR #431 ops-deconfliction policy.
+  // Fixes ultrareview F7.
   [
-    { cron: "0 9 * * *" },
+    { cron: "0 11 * * *" },
     { event: "shopfront/clone.urlscan-rescan.manual-trigger.v1" },
   ],
   async ({ step }) => {
