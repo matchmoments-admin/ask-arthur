@@ -34,6 +34,10 @@ export async function GET(req: Request) {
     PHONE_FOOTPRINT_CAP_USD: readNumberEnv("PHONE_FOOTPRINT_CAP_USD", 5),
     CHARITY_CHECK_CAP_USD: readNumberEnv("CHARITY_CHECK_CAP_USD", 5),
     SHOP_SIGNAL_CAP_USD: readNumberEnv("SHOP_SIGNAL_CAP_USD", 15),
+    SHOPFRONT_CLONE_OUTREACH_CAP_USD: readNumberEnv(
+      "SHOPFRONT_CLONE_OUTREACH_CAP_USD",
+      5,
+    ),
   };
   const thresholdUsd = envReads.DAILY_COST_THRESHOLD_USD.value;
 
@@ -190,11 +194,28 @@ export async function GET(req: Request) {
     )
     .reduce((sum, t) => sum + t.cost, 0);
 
+  // Clone-watch outreach — aggregate across the 4 sub-features (Netcraft
+  // submit + poll, brand notify, weekly digest). Engaging this brake
+  // pauses ALL clone-watch outreach activity for 24h; the upstream Layer 0
+  // NRD ingest (shopfront_clone_watch) keeps running.
+  const shopfrontCloneOutreachThresholdUsd =
+    envReads.SHOPFRONT_CLONE_OUTREACH_CAP_USD.value;
+  const shopfrontCloneOutreachCost = top
+    .filter(
+      (t) =>
+        t.feature === "shopfront_clone_submit_netcraft" ||
+        t.feature === "shopfront_clone_notify_brand" ||
+        t.feature === "shopfront_clone_weekly_digest" ||
+        t.feature === "shopfront_clone_poll_netcraft",
+    )
+    .reduce((sum, t) => sum + t.cost, 0);
+
   let brakeSet = false;
   let redditBrakeSet = false;
   let phoneFootprintBrakeSet = false;
   let charityCheckBrakeSet = false;
   let shopSignalBrakeSet = false;
+  let shopfrontCloneOutreachBrakeSet = false;
   if (vulnEnrichCost > vulnEnrichThresholdUsd) {
     const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     const { error: brakeError } = await supabase
@@ -348,6 +369,38 @@ export async function GET(req: Request) {
     }
   }
 
+  if (shopfrontCloneOutreachCost > shopfrontCloneOutreachThresholdUsd) {
+    const pausedUntil = new Date(
+      Date.now() + 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const { error: brakeError } = await supabase
+      .from("feature_brakes")
+      .upsert(
+        {
+          feature: "shopfront_clone_outreach",
+          paused_until: pausedUntil,
+          reason: `Daily spend $${shopfrontCloneOutreachCost.toFixed(2)} exceeded $${shopfrontCloneOutreachThresholdUsd} cap`,
+          set_by: "cost-daily-check",
+          set_cost_usd: shopfrontCloneOutreachCost,
+          set_threshold_usd: shopfrontCloneOutreachThresholdUsd,
+          set_at: new Date().toISOString(),
+        },
+        { onConflict: "feature" },
+      );
+    if (brakeError) {
+      logger.error("failed to set shopfront_clone_outreach brake", {
+        error: brakeError.message,
+      });
+    } else {
+      shopfrontCloneOutreachBrakeSet = true;
+      logger.warn("shopfront_clone_outreach brake engaged", {
+        costUsd: shopfrontCloneOutreachCost,
+        thresholdUsd: shopfrontCloneOutreachThresholdUsd,
+        pausedUntil,
+      });
+    }
+  }
+
   // Truncate to top 3 for the Telegram message (UX — keep it scannable).
   const topForTelegram = top.slice(0, 3);
 
@@ -396,6 +449,12 @@ export async function GET(req: Request) {
       `🛑 <b>shop_signal brake engaged</b> — paused for 24h (spend $${shopSignalCost.toFixed(2)} > $${shopSignalThresholdUsd} cap)`,
     );
   }
+  if (shopfrontCloneOutreachBrakeSet) {
+    lines.push(
+      "",
+      `🛑 <b>shopfront_clone_outreach brake engaged</b> — paused for 24h (spend $${shopfrontCloneOutreachCost.toFixed(2)} > $${shopfrontCloneOutreachThresholdUsd} cap)`,
+    );
+  }
   lines.push("", `Full breakdown: https://askarthur.au/admin/costs`);
 
   await sendAdminTelegramMessage(lines.join("\n"));
@@ -416,5 +475,7 @@ export async function GET(req: Request) {
     charityCheckCost,
     shopSignalBrakeSet,
     shopSignalCost,
+    shopfrontCloneOutreachBrakeSet,
+    shopfrontCloneOutreachCost,
   });
 }
