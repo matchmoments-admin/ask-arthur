@@ -127,7 +127,21 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
       // drops the remaining N-1 groups. Mirrors the urlscan-fan-out guard
       // in shopfront-nrd-daily-ingest.ts.
       try {
-        const batchId = crypto.randomUUID();
+        // Mint the batchId INSIDE a step.run so it's memoised across
+        // Inngest replays. crypto.randomUUID() is non-deterministic —
+        // if it ran in the plain function body, every replay would
+        // generate a new UUID, every downstream step key
+        // (`render-batch-${batchId}`, `assign-batch-${batchId}`, ...)
+        // would change, Inngest's SHA-1-hashed step cache would never
+        // hit, and the same steps would re-execute on every replay
+        // until the 10-minute function timeout. The mint step's key is
+        // stable because the group key is derived from the memoised
+        // load-unbatched result.
+        const groupKey = `${group.brand}::${group.recipient}`;
+        const batchId = await step.run(
+          `mint-batch-id:${groupKey}`,
+          async () => crypto.randomUUID(),
+        );
         const candidates: CloneWatchCandidate[] = group.rows.map((r) => ({
           candidateDomain: r.candidate_domain,
           candidateUrl: r.candidate_url,
