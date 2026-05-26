@@ -1,3 +1,5 @@
+import { readFileSync } from "fs";
+import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   buildSubmissionReason,
@@ -829,10 +831,8 @@ describe("clone-watch-notify-brand-prepare — idempotency contract (migration v
   // machinery the codebase doesn't have today); this snapshot test is the
   // pragmatic substitute — catches the regression if a future migration
   // edits these RPCs to drop either filter.
-  const fs = require("fs") as typeof import("fs");
-  const path = require("path") as typeof import("path");
-  const migration = fs.readFileSync(
-    path.join(
+  const migration = readFileSync(
+    join(
       __dirname,
       "..",
       "..",
