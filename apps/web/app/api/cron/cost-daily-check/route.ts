@@ -38,6 +38,10 @@ export async function GET(req: Request) {
       "SHOPFRONT_CLONE_OUTREACH_CAP_USD",
       5,
     ),
+    SHOPFRONT_CLONE_WATCH_CAP_USD: readNumberEnv(
+      "SHOPFRONT_CLONE_WATCH_CAP_USD",
+      1,
+    ),
   };
   const thresholdUsd = envReads.DAILY_COST_THRESHOLD_USD.value;
 
@@ -213,12 +217,25 @@ export async function GET(req: Request) {
     )
     .reduce((sum, t) => sum + t.cost, 0);
 
+  // Clone-watch Layer 0 (NRD lexical sweep) — separate aggregate from
+  // shopfront_clone_outreach because the cost drivers are different
+  // (Inngest run-minutes + whoisds free tier today; Phase A adds DNS +
+  // screenshot per Layer-0 candidate). A breach on outreach should not
+  // pause the morning intel sweep, and vice-versa. Pre-staged at A$1/day
+  // per #412 Sprint 1; raise when Phase A spend lands.
+  const shopfrontCloneWatchThresholdUsd =
+    envReads.SHOPFRONT_CLONE_WATCH_CAP_USD.value;
+  const shopfrontCloneWatchCost = top
+    .filter((t) => t.feature === "shopfront_clone_watch")
+    .reduce((sum, t) => sum + t.cost, 0);
+
   let brakeSet = false;
   let redditBrakeSet = false;
   let phoneFootprintBrakeSet = false;
   let charityCheckBrakeSet = false;
   let shopSignalBrakeSet = false;
   let shopfrontCloneOutreachBrakeSet = false;
+  let shopfrontCloneWatchBrakeSet = false;
   if (vulnEnrichCost > vulnEnrichThresholdUsd) {
     const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     const { error: brakeError } = await supabase
@@ -404,6 +421,38 @@ export async function GET(req: Request) {
     }
   }
 
+  if (shopfrontCloneWatchCost > shopfrontCloneWatchThresholdUsd) {
+    const pausedUntil = new Date(
+      Date.now() + 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const { error: brakeError } = await supabase
+      .from("feature_brakes")
+      .upsert(
+        {
+          feature: "shopfront_clone_watch",
+          paused_until: pausedUntil,
+          reason: `Daily spend $${shopfrontCloneWatchCost.toFixed(2)} exceeded $${shopfrontCloneWatchThresholdUsd} cap`,
+          set_by: "cost-daily-check",
+          set_cost_usd: shopfrontCloneWatchCost,
+          set_threshold_usd: shopfrontCloneWatchThresholdUsd,
+          set_at: new Date().toISOString(),
+        },
+        { onConflict: "feature" },
+      );
+    if (brakeError) {
+      logger.error("failed to set shopfront_clone_watch brake", {
+        error: brakeError.message,
+      });
+    } else {
+      shopfrontCloneWatchBrakeSet = true;
+      logger.warn("shopfront_clone_watch brake engaged", {
+        costUsd: shopfrontCloneWatchCost,
+        thresholdUsd: shopfrontCloneWatchThresholdUsd,
+        pausedUntil,
+      });
+    }
+  }
+
   // Truncate to top 3 for the Telegram message (UX — keep it scannable).
   const topForTelegram = top.slice(0, 3);
 
@@ -458,6 +507,12 @@ export async function GET(req: Request) {
       `🛑 <b>shopfront_clone_outreach brake engaged</b> — paused for 24h (spend $${shopfrontCloneOutreachCost.toFixed(2)} > $${shopfrontCloneOutreachThresholdUsd} cap)`,
     );
   }
+  if (shopfrontCloneWatchBrakeSet) {
+    lines.push(
+      "",
+      `🛑 <b>shopfront_clone_watch brake engaged</b> — paused for 24h (spend $${shopfrontCloneWatchCost.toFixed(2)} > $${shopfrontCloneWatchThresholdUsd} cap)`,
+    );
+  }
   lines.push("", `Full breakdown: https://askarthur.au/admin/costs`);
 
   await sendAdminTelegramMessage(lines.join("\n"));
@@ -480,5 +535,7 @@ export async function GET(req: Request) {
     shopSignalCost,
     shopfrontCloneOutreachBrakeSet,
     shopfrontCloneOutreachCost,
+    shopfrontCloneWatchBrakeSet,
+    shopfrontCloneWatchCost,
   });
 }
