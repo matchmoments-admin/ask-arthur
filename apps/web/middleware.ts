@@ -25,6 +25,19 @@ async function withTimeout<T>(
 }
 
 export async function middleware(req: NextRequest) {
+  // Inngest webhook — authenticated by Inngest's signing key inside the
+  // route handler (`serve()` from `inngest/next` validates X-Inngest-
+  // Signature using `INNGEST_SIGNING_KEY`). The middleware's Supabase
+  // auth path is incompatible: Inngest doesn't send user cookies, so
+  // `supabase.auth.getUser()` runs with no JWT and stalls for 3s when
+  // Supabase Auth is degraded, causing Inngest to mark the webhook
+  // delivery as failed (smoke-test 2026-05-26 — none of the new
+  // clone-watch outreach fns processed events until this skip landed).
+  // Same shape as the cron skip below.
+  if (req.nextUrl.pathname.startsWith("/api/inngest")) {
+    return NextResponse.next();
+  }
+
   // Cron routes — defense-in-depth auth check before skipping rate limiting
   if (req.nextUrl.pathname.startsWith("/api/cron")) {
     const cronSecret = req.headers.get("x-cron-secret")
