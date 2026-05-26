@@ -392,6 +392,10 @@ Cloudflare Worker (apps/cloudflare-email-worker)
 
 **Why not the existing `intel-inbound-email` Edge Function:** that function writes to `feed_items` (newsletter ingestion). Scan-report emails need a different downstream — analyze + reply. Routing in the Worker (not in the Edge Function) keeps the two flows independent so a regression in either doesn't bleed across.
 
+**M365 routing gotcha (verified in prod 2026-05-17):** the alias `scan@askarthur.au` is a GoDaddy/Microsoft 365 alias resolving to `brendan@askarthur.au`. **Inbox rules don't fire on aliased mail** because M365 rewrites `To:` to the canonical mailbox before inbox-rule evaluation. Use an **Exchange transport rule** (Mail flow → Rules → Redirect messages, matching "The recipient address includes scan@askarthur.au") — those run server-side before alias resolution. Also: M365's default outbound spam policy silently blocks external redirects with `5.7.520 Access denied`; flip "Automatic forwarding: On" in the Anti-spam outbound policy at security.microsoft.com.
+
+**Email-reply template:** inline HTML in `apps/web/app/api/inbound-scan/route.ts` (template strings) as of PR #278. Upgrade to a React Email template with thumbs feedback + Trustpilot CTA tracked in issue #281.
+
 ---
 
 ## 6. Onward reporting to regulators
