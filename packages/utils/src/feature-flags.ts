@@ -420,6 +420,16 @@ export const featureFlags = {
    *  manual-approval gate has been calibrated. */
   shopfrontCloneNotifyBrand: readBoolEnv("FF_SHOPFRONT_CLONE_NOTIFY_BRAND"),
 
+  /** PR-B2 — auto-approve brand notifications instead of requiring an
+   *  admin click in Telegram. Default OFF: every batch shows up as a
+   *  Telegram preview with an HMAC-signed approve URL; the admin clicks
+   *  it to trigger the actual Resend send. Flip this ON once the
+   *  template has been validated through several real batches and the
+   *  brand-team response shape is well-understood. */
+  shopfrontCloneNotifyBrandAutoSend: readBoolEnv(
+    "FF_SHOPFRONT_CLONE_NOTIFY_BRAND_AUTO_SEND",
+  ),
+
   /** Layer 5 — weekly digest Inngest cron + LinkedIn-post draft via
    *  Telegram. Server-side only. Default OFF until first triage week
    *  produces enough signal to publish. */

@@ -6,10 +6,7 @@ import {
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
-import { Resend } from "resend";
-import { render } from "@react-email/components";
-import CloneWatchBrandAlert from "@/emails/CloneWatchBrandAlert";
-import { logCost, PRICING } from "@/lib/cost-telemetry";
+import { logCost } from "@/lib/cost-telemetry";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 
 /**
@@ -255,48 +252,16 @@ export const cloneWatchNotifyBrand = inngest.createFunction(
         return { skipped: true, reason: "directory_recipient_null" };
       }
 
-      // Severity gate (PR-B Phase 1 calibration): low-severity alerts
-      // enqueue into clone_alert_notification_queue + surface in the
-      // weekly digest only, instead of emailing the brand security inbox
-      // each time. Stops the noise floor from training brand teams to
-      // treat AskArthur mail as low-signal. high/critical/medium still
-      // send immediately.
-      const severity = (data.severityTier as SeverityTier) ?? "medium";
-      if (severity === "low") {
-        await step.run("enqueue-low-severity-digest", async () => {
-          await sb.rpc("enqueue_clone_alert_notification", {
-            p_alert_id: data.alertId,
-            p_brand: directoryRow.brand,
-            p_candidate_domain: data.candidateDomain,
-            p_candidate_url: data.candidateUrl,
-            p_recipient: directoryRow.recipient!,
-            p_channel_type: directoryRow.channel_type,
-            p_severity_tier: "low",
-            p_scheduled_for: nextWeeklyDigestSchedule().toISOString(),
-          });
-        });
-        await persistNotification(sb, data.alertId, {
-          channel_type: directoryRow.channel_type,
-          recipient: directoryRow.recipient,
-          status: "skipped",
-          sent_at: null,
-        });
-        logger.info("clone-watch notify: low-severity enqueued for digest", {
-          alertId: data.alertId,
-          brand: directoryRow.brand,
-        });
-        return {
-          ok: true,
-          channel: directoryRow.channel_type,
-          enqueued: true,
-          severity,
-        };
-      }
-
-      // Suppression check (Phase C) — if the recipient has previously
-      // replied STOP, never send again. The check is cheap (indexed
-      // partial WHERE classified_as='stop') and runs before Resend so
-      // we never bill an email that'd hit a suppressed inbox.
+      // PR-B2 — never send immediately. Always enqueue into
+      // clone_alert_notification_queue and let the daily batch-builder
+      // cron group + Telegram-preview to the admin for approval.
+      // One email per brand per day, not N. The admin clicks an HMAC
+      // approve URL to authorise the actual send (FF_SHOPFRONT_CLONE_-
+      // NOTIFY_BRAND_AUTO_SEND lifts that gate once the template is
+      // validated).
+      //
+      // Suppression check still runs first so STOP-replied recipients
+      // never even hit the queue.
       const suppressed = await step.run("check-suppression", async () => {
         const { data } = await sb.rpc(
           "clone_alert_recipient_is_suppressed",
@@ -318,98 +283,64 @@ export const cloneWatchNotifyBrand = inngest.createFunction(
         return { skipped: true, reason: "recipient_stop_suppressed" };
       }
 
-      const apiKey = process.env.RESEND_API_KEY;
-      if (!apiKey) {
-        logger.warn("clone-watch notify: RESEND_API_KEY not set");
-        return { skipped: true, reason: "resend_api_key_missing" };
-      }
+      const severity = (data.severityTier as SeverityTier) ?? "medium";
+      // Schedule low-severity for next weekly digest, everything else
+      // for the next daily-batch cron.
+      const scheduledFor =
+        severity === "low"
+          ? nextWeeklyDigestSchedule()
+          : new Date(); // batch builder picks up immediately (scheduled_for <= now())
 
-      // Pull Netcraft ref if Layer 2 already submitted — included in body
-      // so the brand sees we've already done the community-blocklist step.
-      const netcraftUuid = await step.run("read-netcraft-ref", async () => {
-        const { data: row } = await sb
-          .from("shopfront_clone_alerts")
-          .select("submitted_to")
-          .eq("id", data.alertId)
-          .maybeSingle();
-        const submitted_to =
-          (row?.submitted_to as Record<string, unknown> | null) ?? {};
-        const netcraft = submitted_to.netcraft as
-          | { uuid?: string | null }
-          | undefined;
-        return netcraft?.uuid ?? null;
-      });
-
-      const html = await step.run("render-email", () =>
-        render(
-          CloneWatchBrandAlert({
-            brandName: directoryRow.brand,
-            legitimateDomain: directoryRow.legitimate_domain,
-            candidateDomain: data.candidateDomain,
-            candidateUrl: data.candidateUrl,
-            signalType: data.signalType,
-            score: data.score,
-            firstSeenAt: data.triagedAt,
-            evidenceSummary: `Surfaced via daily NRD lexical sweep — match score ${data.score.toFixed(2)}, signal ${data.signalType}.`,
-            netcraftSubmissionId: netcraftUuid ?? undefined,
-          }),
-        ),
-      );
-
-      const sendResult = await step.run("send-email", async () => {
-        const resend = new Resend(apiKey);
-        const result = await resend.emails.send({
-          from: FROM_EMAIL,
-          to: [directoryRow.recipient!],
-          replyTo: REPLY_TO_EMAIL,
-          subject: `Possible clone of ${directoryRow.brand} — ${data.candidateDomain}`,
-          html,
+      await step.run("enqueue-for-batch", async () => {
+        await sb.rpc("enqueue_clone_alert_notification", {
+          p_alert_id: data.alertId,
+          p_brand: directoryRow.brand,
+          p_candidate_domain: data.candidateDomain,
+          p_candidate_url: data.candidateUrl,
+          p_recipient: directoryRow.recipient!,
+          p_channel_type: directoryRow.channel_type,
+          p_severity_tier: severity,
+          p_scheduled_for: scheduledFor.toISOString(),
         });
-        if (result.error) {
-          throw new Error(
-            `Resend rejected: ${result.error.message ?? String(result.error)}`,
-          );
-        }
-        return result.data;
       });
 
       await persistNotification(sb, data.alertId, {
         channel_type: directoryRow.channel_type,
         recipient: directoryRow.recipient,
-        status: "sent",
-        sent_at: new Date().toISOString(),
-        provider_message_id: sendResult?.id ?? null,
+        status: "skipped", // not yet 'sent' — batch builder will update
+        sent_at: null,
       });
 
       await step.run("log-cost", async () => {
         logCost({
           feature: "shopfront_clone_notify_brand",
-          provider: "resend",
-          operation: directoryRow.channel_type,
-          units: 1,
-          unitCostUsd: PRICING.RESEND_USD_PER_EMAIL,
+          provider: "queue",
+          operation: "enqueue",
+          units: 0,
+          unitCostUsd: 0,
           metadata: {
             alert_id: data.alertId,
             brand: directoryRow.brand,
             channel_type: directoryRow.channel_type,
-            candidate_domain: data.candidateDomain,
-            netcraft_uuid: netcraftUuid,
+            severity_tier: severity,
+            scheduled_for: scheduledFor.toISOString(),
           },
         });
       });
 
-      logger.info("clone-watch notify: email sent", {
+      logger.info("clone-watch notify: enqueued for batch", {
         alertId: data.alertId,
         brand: directoryRow.brand,
         channel: directoryRow.channel_type,
-        providerMessageId: sendResult?.id,
+        severity,
+        scheduled_for: scheduledFor.toISOString(),
       });
 
       return {
         ok: true,
         channel: directoryRow.channel_type,
-        sent: true,
-        providerMessageId: sendResult?.id,
+        enqueued: true,
+        severity,
       };
     }
 

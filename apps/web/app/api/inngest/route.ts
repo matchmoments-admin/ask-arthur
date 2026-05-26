@@ -33,6 +33,8 @@ import { cloneWatchPollNetcraft } from "./functions/clone-watch-poll-netcraft";
 // Plan: docs/plans/clone-watch-outreach.md §15 Phase A.3.
 import { cloneWatchUrlscan } from "./functions/clone-watch-urlscan";
 import { cloneWatchUrlscanRescan } from "./functions/clone-watch-urlscan-rescan";
+// PR-B2 — daily batch builder + Telegram approval flow (v151)
+import { cloneWatchNotifyBrandPrepare } from "./functions/clone-watch-notify-brand-prepare";
 
 // App-layer Inngest functions live here because they cross apps/web-only
 // primitives (R2 upload, Resend, local auth helpers) that shouldn't leak
@@ -61,6 +63,8 @@ const appFunctions = [
   // Clone-watch measurement closure Phase A.3 (v148)
   cloneWatchUrlscan,
   cloneWatchUrlscanRescan,
+  // Clone-watch approval-gated daily-batch builder (v151)
+  cloneWatchNotifyBrandPrepare,
 ];
 
 export const { GET, POST, PUT } = serve({
