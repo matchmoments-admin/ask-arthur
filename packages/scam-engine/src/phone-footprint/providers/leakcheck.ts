@@ -11,6 +11,7 @@
 
 import { Redis } from "@upstash/redis";
 import { logger } from "@askarthur/utils/logger";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 import type { ProviderContract } from "../provider-contract";
 import { unavailablePillar } from "../provider-contract";
 import type { PillarResult } from "../types";
@@ -89,7 +90,7 @@ export const leakcheckProvider: ProviderContract = {
   timeoutMs: 3000,
 
   async run(msisdn): Promise<PillarResult> {
-    if (process.env.FF_LEAKCHECK_ENABLED !== "true") {
+    if (!featureFlags.leakcheckEnabled) {
       return unavailablePillar("breach", "leakcheck_disabled");
     }
     const apiKey = process.env.LEAKCHECK_API_KEY;
