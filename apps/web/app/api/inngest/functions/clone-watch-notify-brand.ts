@@ -54,18 +54,40 @@ interface DirectoryRow {
   notes: string | null;
 }
 
+export type SeverityTier = "low" | "medium" | "high" | "critical";
+
 export type NotificationAction =
   | { kind: "skip"; reason: string }
   | { kind: "manual_action"; channel: DirectoryChannel }
-  | { kind: "email"; channel: "security_txt" | "fraud_inbox" };
+  | { kind: "email"; channel: "security_txt" | "fraud_inbox" }
+  | {
+      kind: "enqueue_digest";
+      channel: "security_txt" | "fraud_inbox";
+      severity: "low";
+    };
 
 /**
- * Pure routing function — given a directory row, return the action to take.
- * Extracted from the Inngest handler so we can unit-test channel branching
- * without mocking Supabase / Resend / Inngest step machinery.
+ * Pure routing function — given a directory row + severity tier, return
+ * the action to take. Extracted from the Inngest handler so we can
+ * unit-test channel + severity branching without mocking Supabase /
+ * Resend / Inngest step machinery.
+ *
+ * Severity gate (PR-B Phase 1 calibration):
+ *   - critical / high → email immediately (existing behaviour)
+ *   - medium          → email immediately (preserves no-regression default
+ *                       while the daily-batch consumer is unbuilt; future
+ *                       follow-up flips this to enqueue + daily cron)
+ *   - low             → enqueue into clone_alert_notification_queue;
+ *                       surfaces in the weekly digest only. Stops the
+ *                       low-severity noise floor from spamming brand
+ *                       security inboxes.
+ *
+ * `severity` is optional so callers that haven't been updated still get
+ * the legacy behaviour (treated as 'medium' = send immediately).
  */
 export function decideNotificationAction(
   row: DirectoryRow | null,
+  severity: SeverityTier = "medium",
 ): NotificationAction {
   if (!row) return { kind: "skip", reason: "no_directory_row" };
   if (row.channel_type === "none") return { kind: "skip", reason: "channel_none" };
@@ -80,9 +102,26 @@ export function decideNotificationAction(
     if (!row.recipient) {
       return { kind: "skip", reason: "directory_recipient_null" };
     }
+    if (severity === "low") {
+      return { kind: "enqueue_digest", channel: row.channel_type, severity };
+    }
     return { kind: "email", channel: row.channel_type };
   }
   return { kind: "skip", reason: "unknown_channel_type" };
+}
+
+/**
+ * Compute the next Sunday 09:00 UTC for the weekly-digest queue. Pure so
+ * we can unit-test it with a fixed `now`.
+ */
+export function nextWeeklyDigestSchedule(now: Date = new Date()): Date {
+  const d = new Date(now);
+  // 0 = Sunday in JS getUTCDay()
+  const dow = d.getUTCDay();
+  const daysUntilSunday = dow === 0 ? 7 : 7 - dow;
+  d.setUTCDate(d.getUTCDate() + daysUntilSunday);
+  d.setUTCHours(9, 0, 0, 0);
+  return d;
 }
 
 export const cloneWatchNotifyBrand = inngest.createFunction(
@@ -214,6 +253,44 @@ export const cloneWatchNotifyBrand = inngest.createFunction(
     ) {
       if (!directoryRow.recipient) {
         return { skipped: true, reason: "directory_recipient_null" };
+      }
+
+      // Severity gate (PR-B Phase 1 calibration): low-severity alerts
+      // enqueue into clone_alert_notification_queue + surface in the
+      // weekly digest only, instead of emailing the brand security inbox
+      // each time. Stops the noise floor from training brand teams to
+      // treat AskArthur mail as low-signal. high/critical/medium still
+      // send immediately.
+      const severity = (data.severityTier as SeverityTier) ?? "medium";
+      if (severity === "low") {
+        await step.run("enqueue-low-severity-digest", async () => {
+          await sb.rpc("enqueue_clone_alert_notification", {
+            p_alert_id: data.alertId,
+            p_brand: directoryRow.brand,
+            p_candidate_domain: data.candidateDomain,
+            p_candidate_url: data.candidateUrl,
+            p_recipient: directoryRow.recipient!,
+            p_channel_type: directoryRow.channel_type,
+            p_severity_tier: "low",
+            p_scheduled_for: nextWeeklyDigestSchedule().toISOString(),
+          });
+        });
+        await persistNotification(sb, data.alertId, {
+          channel_type: directoryRow.channel_type,
+          recipient: directoryRow.recipient,
+          status: "skipped",
+          sent_at: null,
+        });
+        logger.info("clone-watch notify: low-severity enqueued for digest", {
+          alertId: data.alertId,
+          brand: directoryRow.brand,
+        });
+        return {
+          ok: true,
+          channel: directoryRow.channel_type,
+          enqueued: true,
+          severity,
+        };
       }
 
       // Suppression check (Phase C) — if the recipient has previously

@@ -118,6 +118,29 @@ export const cloneWatchWeeklyDigest = inngest.createFunction(
         .slice(0, 8);
     });
 
+    // PR-B Phase 1: surface low-severity queue rows in the admin digest
+    // so the operator can see what notify-brand has been suppressing.
+    // (The actual brand-consolidated weekly digest send is a follow-up;
+    // for now these rows accumulate in 'pending' status and the admin
+    // sees per-brand counts here.)
+    const lowSeverityDigest = await step.run("fetch-low-severity-queue", async () => {
+      const { data: rows } = await sb.rpc(
+        "list_clone_alerts_pending_notification_batch",
+        { p_severity: "low", p_limit: 500 },
+      );
+      const counts = new Map<string, number>();
+      for (const row of (rows ?? []) as Array<{ brand: string }>) {
+        counts.set(row.brand, (counts.get(row.brand) ?? 0) + 1);
+      }
+      return {
+        total: rows?.length ?? 0,
+        byBrand: Array.from(counts.entries())
+          .map(([brand, count]) => ({ brand, count }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 5),
+      };
+    });
+
     const weekEnd = new Date();
     const weekStart = new Date(Date.now() - 7 * 86400000);
     const formatDate = (d: Date) =>
@@ -151,6 +174,7 @@ export const cloneWatchWeeklyDigest = inngest.createFunction(
       brandBreakdown,
       linkedinDraft,
       takedown,
+      lowSeverityDigest,
     });
 
     await step.run("send-telegram", async () => {
@@ -223,6 +247,11 @@ function formatMinutes(m: number): string {
   return `${(m / 60).toFixed(1)}h`;
 }
 
+export interface LowSeverityDigest {
+  total: number;
+  byBrand: Array<{ brand: string; count: number }>;
+}
+
 export function buildTelegramMessage({
   period,
   metrics,
@@ -231,6 +260,7 @@ export function buildTelegramMessage({
   brandBreakdown,
   linkedinDraft,
   takedown,
+  lowSeverityDigest,
 }: {
   period: string;
   metrics: WeeklyMetrics;
@@ -239,6 +269,7 @@ export function buildTelegramMessage({
   brandBreakdown: Array<{ brand: string; count: number }>;
   linkedinDraft: string;
   takedown?: TakedownStats;
+  lowSeverityDigest?: LowSeverityDigest;
 }): string {
   const brandLines = brandBreakdown.length
     ? brandBreakdown.map((b) => `· ${escapeHtml(b.brand)} — ${b.count}`).join("\n")
@@ -248,6 +279,18 @@ export function buildTelegramMessage({
     takedown && takedown.takedowns_total > 0
       ? `Netcraft takedowns: <b>${takedown.takedowns_total}</b> · median <b>${formatMinutes(takedown.median_minutes)}</b> · P90 ${formatMinutes(takedown.p90_minutes)}`
       : `Netcraft takedowns: 0 (polling cron warming up)`;
+
+  const lowSeverityLines =
+    lowSeverityDigest && lowSeverityDigest.total > 0
+      ? [
+          ``,
+          `<b>Low-severity queue (suppressed from per-hit email):</b>`,
+          `<i>${lowSeverityDigest.total} candidates across ${lowSeverityDigest.byBrand.length} brand(s)</i>`,
+          ...lowSeverityDigest.byBrand.map(
+            (b) => `· ${escapeHtml(b.brand)} — ${b.count}`,
+          ),
+        ]
+      : [];
 
   return [
     `🛡️ <b>Clone-watch weekly · ${escapeHtml(period)}</b>`,
@@ -264,6 +307,7 @@ export function buildTelegramMessage({
     ``,
     `<b>Top brands (confirmed TP):</b>`,
     brandLines,
+    ...lowSeverityLines,
     ``,
     `<b>Triage queue:</b> <a href="https://askarthur.au/admin/clone-watch">askarthur.au/admin/clone-watch</a>`,
     ``,
