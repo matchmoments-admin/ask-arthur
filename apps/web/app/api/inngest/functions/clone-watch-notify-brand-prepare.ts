@@ -64,7 +64,15 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
     id: "shopfront-clone-notify-brand-prepare",
     name: "Clone-Watch: Daily batch builder + Telegram approval preview",
     retries: 2,
-    concurrency: { limit: 1 },
+    // singleton (key defaults to fn id) replaces the legacy `concurrency:
+    // { limit: 1 }` shape — same "no overlapping runs" guarantee, but the
+    // slot releases cleanly on cancel/timeout/error. The legacy form left a
+    // phantom slot held by an early cancelled smoke-test run, which masked
+    // every subsequent manual trigger as `function_version: 0 / no step
+    // progress`. `mode: "skip"` is correct because this cron is idempotent
+    // — the next 09:30 UTC sweep picks up any rows the skipped run would
+    // have processed.
+    singleton: { mode: "skip" },
     timeouts: { finish: "10m" },
   },
   [
@@ -72,6 +80,13 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
     { event: "shopfront/clone.notify-brand-prepare.manual-trigger.v1" },
   ],
   async ({ step }) => {
+    // Entry breadcrumb — cheap Vercel-log line that proves dispatch reached
+    // the route. Splits "Inngest never called Vercel" from "Vercel ran but
+    // crashed silently" in any future hang investigation.
+    logger.info("clone-watch prepare: invoked", {
+      autoSend: featureFlags.shopfrontCloneNotifyBrandAutoSend,
+    });
+
     if (!featureFlags.shopfrontCloneOutreach) {
       return { skipped: true, reason: "FF_SHOPFRONT_CLONE_OUTREACH disabled" };
     }
@@ -105,88 +120,113 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
 
     let batchesPrepared = 0;
     let autoSent = 0;
+    let groupsFailed = 0;
 
     for (const group of groups) {
-      const batchId = crypto.randomUUID();
-      const candidates: CloneWatchCandidate[] = group.rows.map((r) => ({
-        candidateDomain: r.candidate_domain,
-        candidateUrl: r.candidate_url,
-        signalType: "lexical",
-        score: 0,
-        firstSeenAt: r.enqueued_at,
-        evidenceSummary: `Surfaced via daily NRD lexical sweep (severity ${r.severity_tier}).`,
-      }));
+      // Per-group try/catch — one bad render/RPC/Telegram call no longer
+      // drops the remaining N-1 groups. Mirrors the urlscan-fan-out guard
+      // in shopfront-nrd-daily-ingest.ts.
+      try {
+        const batchId = crypto.randomUUID();
+        const candidates: CloneWatchCandidate[] = group.rows.map((r) => ({
+          candidateDomain: r.candidate_domain,
+          candidateUrl: r.candidate_url,
+          signalType: "lexical",
+          score: 0,
+          firstSeenAt: r.enqueued_at,
+          evidenceSummary: `Surfaced via daily NRD lexical sweep (severity ${r.severity_tier}).`,
+        }));
 
-      const legitimateDomain = group.brand;
-      const subject = buildBatchSubject(group);
-      const html = await step.run(`render-batch-${batchId}`, async () => {
-        return render(
-          CloneWatchBrandAlert({
-            brandName: legitimateDomain,
-            legitimateDomain,
-            candidates,
-            reportRef: `CW-batch-${batchId}`,
-          }),
-        );
-      });
-
-      const approveUrl = buildBatchApprovalUrl(
-        "approve",
-        batchId,
-        group.brand,
-        group.recipient,
-      );
-      const rejectUrl = buildBatchApprovalUrl(
-        "reject",
-        batchId,
-        group.brand,
-        group.recipient,
-      );
-
-      await step.run(`assign-batch-${batchId}`, async () => {
-        await sb.rpc("assign_clone_alert_batch", {
-          p_queue_ids: group.rows.map((r) => r.id),
-          p_batch_id: batchId,
-          p_email_subject: subject,
-          p_email_body_html: html,
-          p_approval_url: approveUrl,
-          p_auto_approved: autoSend,
+        const legitimateDomain = group.brand;
+        const subject = buildBatchSubject(group);
+        const html = await step.run(`render-batch-${batchId}`, async () => {
+          return render(
+            CloneWatchBrandAlert({
+              brandName: legitimateDomain,
+              legitimateDomain,
+              candidates,
+              reportRef: `CW-batch-${batchId}`,
+            }),
+          );
         });
-      });
 
-      if (autoSend) {
-        // Auto-approve path: send via Resend immediately, mark sent.
-        const apiKey = process.env.RESEND_API_KEY;
-        if (!apiKey) {
-          logger.warn("clone-watch prepare: RESEND_API_KEY missing in auto-send mode");
-        } else {
-          const sendResult = await step.run(
-            `auto-send-${batchId}`,
-            async () => {
-              const resend = new Resend(apiKey);
-              const result = await resend.emails.send({
-                from: FROM_EMAIL,
-                to: [group.recipient],
-                replyTo: REPLY_TO_EMAIL,
-                subject,
-                html,
+        // URL build runs INSIDE the assign-batch step so a missing
+        // CLONE_WATCH_APPROVAL_SECRET / ADMIN_SECRET surfaces as a step-
+        // level retry/failure with a clear log — not an opaque function
+        // crash before any step ran. Returns both URLs so the Telegram
+        // step downstream uses the same values.
+        const { approveUrl, rejectUrl } = await step.run(
+          `assign-batch-${batchId}`,
+          async () => {
+            const approveUrl = buildBatchApprovalUrl(
+              "approve",
+              batchId,
+              group.brand,
+              group.recipient,
+            );
+            const rejectUrl = buildBatchApprovalUrl(
+              "reject",
+              batchId,
+              group.brand,
+              group.recipient,
+            );
+            const { error } = await sb.rpc("assign_clone_alert_batch", {
+              p_queue_ids: group.rows.map((r) => r.id),
+              p_batch_id: batchId,
+              p_email_subject: subject,
+              p_email_body_html: html,
+              p_approval_url: approveUrl,
+              p_auto_approved: autoSend,
+            });
+            if (error) {
+              throw new Error(`assign_clone_alert_batch: ${error.message}`);
+            }
+            return { approveUrl, rejectUrl };
+          },
+        );
+
+        if (autoSend) {
+          // Auto-approve path: send via Resend immediately, mark sent.
+          const apiKey = process.env.RESEND_API_KEY;
+          if (!apiKey) {
+            logger.warn(
+              "clone-watch prepare: RESEND_API_KEY missing in auto-send mode",
+            );
+          } else {
+            const sendResult = await step.run(
+              `auto-send-${batchId}`,
+              async () => {
+                const resend = new Resend(apiKey);
+                const result = await resend.emails.send({
+                  from: FROM_EMAIL,
+                  to: [group.recipient],
+                  replyTo: REPLY_TO_EMAIL,
+                  subject,
+                  html,
+                });
+                if (result.error) {
+                  throw new Error(
+                    `Resend rejected: ${result.error.message ?? String(result.error)}`,
+                  );
+                }
+                return result.data;
+              },
+            );
+            await step.run(`mark-sent-${batchId}`, async () => {
+              const { error } = await sb.rpc("transition_clone_alert_batch", {
+                p_batch_id: batchId,
+                p_new_status: "sent",
+                p_provider_message_id: sendResult?.id ?? null,
               });
-              if (result.error) {
+              if (error) {
                 throw new Error(
-                  `Resend rejected: ${result.error.message ?? String(result.error)}`,
+                  `transition_clone_alert_batch: ${error.message}`,
                 );
               }
-              return result.data;
-            },
-          );
-          await step.run(`mark-sent-${batchId}`, async () => {
-            await sb.rpc("transition_clone_alert_batch", {
-              p_batch_id: batchId,
-              p_new_status: "sent",
-              p_provider_message_id: sendResult?.id ?? null,
             });
-          });
-          await step.run(`log-cost-${batchId}`, async () => {
+            // logCost is fire-and-forget via waitUntil — wrapping it in
+            // step.run adds no durability and risks the waitUntil being
+            // killed at the step boundary.
             logCost({
               feature: "shopfront_clone_notify_brand",
               provider: "resend",
@@ -201,25 +241,23 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
                 provider_message_id: sendResult?.id ?? null,
               },
             });
+            autoSent++;
+          }
+        } else {
+          // Telegram approval-preview path.
+          await step.run(`telegram-preview-${batchId}`, async () => {
+            await sendAdminTelegramMessage(
+              buildTelegramApprovalMessage({
+                brand: group.brand,
+                recipient: group.recipient,
+                candidateCount: candidates.length,
+                candidateDomains: candidates.map((c) => c.candidateDomain),
+                subject,
+                approveUrl,
+                rejectUrl,
+              }),
+            );
           });
-          autoSent++;
-        }
-      } else {
-        // Telegram approval-preview path.
-        await step.run(`telegram-preview-${batchId}`, async () => {
-          await sendAdminTelegramMessage(
-            buildTelegramApprovalMessage({
-              brand: group.brand,
-              recipient: group.recipient,
-              candidateCount: candidates.length,
-              candidateDomains: candidates.map((c) => c.candidateDomain),
-              subject,
-              approveUrl,
-              rejectUrl,
-            }),
-          );
-        });
-        await step.run(`log-cost-prep-${batchId}`, async () => {
           logCost({
             feature: "shopfront_clone_notify_brand_prepare",
             provider: "telegram",
@@ -232,14 +270,23 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
               candidate_count: candidates.length,
             },
           });
+        }
+        batchesPrepared++;
+      } catch (err) {
+        groupsFailed++;
+        logger.error("clone-watch prepare: group failed", {
+          brand: group.brand,
+          recipient: group.recipient,
+          error: err instanceof Error ? err.message : String(err),
         });
+        continue;
       }
-      batchesPrepared++;
     }
 
     logger.info("clone-watch notify-brand prepare: done", {
       batches: batchesPrepared,
       auto_sent: autoSent,
+      groups_failed: groupsFailed,
       mode: autoSend ? "auto_send" : "manual_approval",
     });
 
@@ -247,6 +294,7 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
       ok: true,
       batches_prepared: batchesPrepared,
       auto_sent: autoSent,
+      groups_failed: groupsFailed,
       mode: autoSend ? "auto_send" : "manual_approval",
     };
   },
