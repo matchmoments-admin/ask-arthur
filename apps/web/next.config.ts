@@ -1,3 +1,4 @@
+import { withAxiom } from "next-axiom";
 import type { NextConfig } from "next";
 
 // CSP shared by the Turnstile bridge page. Extensions must be allowed to
@@ -165,4 +166,9 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+// `withAxiom` wraps the config so future Web Vitals / client-side log
+// hooks pick up the dataset automatically. Server-side Logger usage in
+// middleware, route handlers, and Inngest functions does not depend on
+// this wrap — they instantiate Logger directly via `@askarthur/utils/axiom-logger`.
+// The wrap is a no-op while `FF_AXIOM_ENABLED=false`.
+export default withAxiom(nextConfig);

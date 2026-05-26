@@ -5,6 +5,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./logger": "./src/logger.ts",
+    "./axiom-logger": "./src/axiom-logger.ts",
     "./hash": "./src/hash.ts",
     "./feature-flags": "./src/feature-flags.ts",
     "./rate-limit": "./src/rate-limit.ts",
@@ -13,6 +14,7 @@
   "dependencies": {
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.36.2",
+    "next-axiom": "1.10.0",
     "ulid": "^3.0.0"
   }
 }
