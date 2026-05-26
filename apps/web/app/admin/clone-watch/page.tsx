@@ -2,7 +2,10 @@ import { notFound } from "next/navigation";
 import { requireAdmin } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
-import CloneWatchTriage, { type PendingAlert } from "./CloneWatchTriage";
+import CloneWatchTriage, {
+  type PendingAlert,
+  type PendingBatch,
+} from "./CloneWatchTriage";
 
 export const dynamic = "force-dynamic";
 
@@ -15,17 +18,26 @@ export default async function CloneWatchAdminPage() {
 
   const supabase = createServiceClient();
   let pending: PendingAlert[] = [];
+  let pendingBatches: PendingBatch[] = [];
   let weekly: WeeklySnapshot = EMPTY_WEEKLY;
   let brandBreakdown: BrandBreakdownRow[] = [];
   let takedown: TakedownStats = EMPTY_TAKEDOWN;
 
   if (supabase) {
-    const [pendingRes, weeklyRes, brandRes, takedownRes] = await Promise.all([
-      supabase.rpc("list_clone_alerts_pending_triage", { p_limit: 200 }),
-      supabase.rpc("clone_watch_weekly_metrics", { p_days: 7 }),
-      supabase.rpc("clone_watch_brand_breakdown", { p_days: 30 }),
-      supabase.rpc("clone_watch_takedown_stats", { p_days: 30 }),
-    ]);
+    const [pendingRes, weeklyRes, brandRes, takedownRes, pendingBatchesRes] =
+      await Promise.all([
+        supabase.rpc("list_clone_alerts_pending_triage", { p_limit: 200 }),
+        supabase.rpc("clone_watch_weekly_metrics", { p_days: 7 }),
+        supabase.rpc("clone_watch_brand_breakdown", { p_days: 30 }),
+        supabase.rpc("clone_watch_takedown_stats", { p_days: 30 }),
+        supabase
+          .from("clone_alert_notification_queue")
+          .select(
+            "batch_id, brand, recipient, candidate_domain, email_subject, prepared_at",
+          )
+          .eq("approval_status", "pending")
+          .order("prepared_at", { ascending: true }),
+      ]);
     if (Array.isArray(pendingRes.data)) {
       pending = pendingRes.data as PendingAlert[];
     }
@@ -37,6 +49,11 @@ export default async function CloneWatchAdminPage() {
     }
     if (Array.isArray(takedownRes.data) && takedownRes.data[0]) {
       takedown = takedownRes.data[0] as TakedownStats;
+    }
+    if (Array.isArray(pendingBatchesRes.data)) {
+      pendingBatches = groupPendingBatches(
+        pendingBatchesRes.data as PendingBatchRow[],
+      );
     }
   }
 
@@ -61,7 +78,10 @@ export default async function CloneWatchAdminPage() {
 
       <TakedownStatsRow stats={takedown} />
 
-      <CloneWatchTriage initialPending={pending} />
+      <CloneWatchTriage
+        initialPending={pending}
+        initialPendingBatches={pendingBatches}
+      />
 
       <BrandBreakdownTable rows={brandBreakdown} computedAt={computedAt} />
     </div>
@@ -77,6 +97,37 @@ interface WeeklySnapshot {
   brands_touched: number;
   submissions_netcraft: number;
   notifications_sent: number;
+}
+
+interface PendingBatchRow {
+  batch_id: string;
+  brand: string;
+  recipient: string;
+  candidate_domain: string;
+  email_subject: string | null;
+  prepared_at: string | null;
+}
+
+function groupPendingBatches(rows: PendingBatchRow[]): PendingBatch[] {
+  const map = new Map<string, PendingBatch>();
+  for (const row of rows) {
+    const existing = map.get(row.batch_id);
+    if (existing) {
+      existing.candidateDomains.push(row.candidate_domain);
+      existing.candidateCount++;
+    } else {
+      map.set(row.batch_id, {
+        batchId: row.batch_id,
+        brand: row.brand,
+        recipient: row.recipient,
+        subject: row.email_subject ?? "",
+        candidateCount: 1,
+        candidateDomains: [row.candidate_domain],
+        preparedAt: row.prepared_at ?? new Date().toISOString(),
+      });
+    }
+  }
+  return Array.from(map.values());
 }
 
 const EMPTY_WEEKLY: WeeklySnapshot = {

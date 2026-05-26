@@ -9,6 +9,8 @@ import {
   Copy,
   Camera,
   RefreshCw,
+  Send,
+  Mail,
 } from "lucide-react";
 
 export interface PendingAlert {
@@ -36,6 +38,16 @@ export interface PendingAlert {
   urlscan_scanned_at?: string | null;
   urlscan_screenshot_url?: string | null;
   urlscan_effective_url?: string | null;
+}
+
+export interface PendingBatch {
+  batchId: string;
+  brand: string;
+  recipient: string;
+  subject: string;
+  candidateCount: number;
+  candidateDomains: string[];
+  preparedAt: string;
 }
 
 const URLSCAN_LABEL: Record<
@@ -76,16 +88,58 @@ const STATUS_STYLE: Record<TriageStatus, string> = {
 
 export default function CloneWatchTriage({
   initialPending,
+  initialPendingBatches,
 }: {
   initialPending: PendingAlert[];
+  initialPendingBatches: PendingBatch[];
 }) {
   const [pending, setPending] = useState(initialPending);
+  const [pendingBatches, setPendingBatches] = useState(initialPendingBatches);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   // Separate info channel — success / "scan queued" / acknowledgement
   // messages. setError() is reserved for actual errors so the styling
   // matches the message intent (red vs blue). Fixes ultrareview F10.
   const [info, setInfo] = useState<string | null>(null);
+
+  const handleBatchAction = (
+    batchId: string,
+    action: "send" | "reject",
+  ) => {
+    setError(null);
+    setInfo(null);
+    const previous = pendingBatches;
+    const batch = pendingBatches.find((b) => b.batchId === batchId);
+    setPendingBatches((rows) => rows.filter((r) => r.batchId !== batchId));
+
+    startTransition(async () => {
+      try {
+        const res = await fetch(
+          `/api/admin/clone-watch/batches/${encodeURIComponent(batchId)}/${action}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          throw new Error(
+            j.error ?? `${action} failed (${res.status})`,
+          );
+        }
+        if (action === "send" && batch) {
+          setInfo(
+            `Sent email to ${batch.recipient} (${batch.candidateCount} candidate${batch.candidateCount === 1 ? "" : "s"})`,
+          );
+        } else if (action === "reject" && batch) {
+          setInfo(`Batch for ${batch.brand} rejected. No email sent.`);
+        }
+      } catch (err) {
+        setPendingBatches(previous);
+        setError(err instanceof Error ? err.message : `${action} failed`);
+      }
+    });
+  };
 
   const handleTriage = (alertId: number, status: TriageStatus) => {
     setError(null);
@@ -137,13 +191,7 @@ export default function CloneWatchTriage({
     });
   };
 
-  if (pending.length === 0) {
-    return (
-      <div className="text-center py-16 text-slate-400 text-sm bg-white border border-border-light rounded-xl">
-        Nothing awaiting triage. The next NRD ingest runs at 08:30 UTC.
-      </div>
-    );
-  }
+  const empty = pending.length === 0 && pendingBatches.length === 0;
 
   return (
     <>
@@ -157,30 +205,139 @@ export default function CloneWatchTriage({
           {info}
         </div>
       )}
-      <div className="bg-white border border-border-light rounded-xl shadow-sm overflow-hidden">
-        <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-2">
-          <Search size={14} className="text-slate-400" />
-          <h2 className="text-sm font-semibold text-deep-navy">
-            Pending — {pending.length}
-          </h2>
-          <span className="ml-auto text-[11px] text-slate-400">
-            Newest first
-          </span>
+
+      <div id="approvals" />
+      {pendingBatches.length > 0 && (
+        <div className="mb-6 bg-white border border-border-light rounded-xl shadow-sm overflow-hidden">
+          <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-2">
+            <Mail size={14} className="text-slate-400" />
+            <h2 className="text-sm font-semibold text-deep-navy">
+              Pending brand-notification approvals — {pendingBatches.length}
+            </h2>
+            <span className="ml-auto text-[11px] text-slate-400">
+              Oldest first
+            </span>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {pendingBatches.map((batch) => (
+              <PendingBatchRow
+                key={batch.batchId}
+                batch={batch}
+                disabled={isPending}
+                onAction={handleBatchAction}
+              />
+            ))}
+          </div>
         </div>
-        <div className="divide-y divide-slate-100">
-          {pending.map((row) => (
-            <PendingRow
-              key={row.id}
-              row={row}
-              disabled={isPending}
-              onTriage={handleTriage}
-              onScan={handleScan}
-            />
-          ))}
+      )}
+
+      {empty && (
+        <div className="text-center py-16 text-slate-400 text-sm bg-white border border-border-light rounded-xl">
+          Nothing awaiting triage or approval. The next NRD ingest runs at
+          08:30 UTC; the next brand-notification prepare runs at 09:30 UTC.
         </div>
-      </div>
+      )}
+
+      {pending.length > 0 && (
+        <div className="bg-white border border-border-light rounded-xl shadow-sm overflow-hidden">
+          <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-2">
+            <Search size={14} className="text-slate-400" />
+            <h2 className="text-sm font-semibold text-deep-navy">
+              Pending triage — {pending.length}
+            </h2>
+            <span className="ml-auto text-[11px] text-slate-400">
+              Newest first
+            </span>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {pending.map((row) => (
+              <PendingRow
+                key={row.id}
+                row={row}
+                disabled={isPending}
+                onTriage={handleTriage}
+                onScan={handleScan}
+              />
+            ))}
+          </div>
+        </div>
+      )}
     </>
   );
+}
+
+function PendingBatchRow({
+  batch,
+  disabled,
+  onAction,
+}: {
+  batch: PendingBatch;
+  disabled: boolean;
+  onAction: (batchId: string, action: "send" | "reject") => void;
+}) {
+  const preparedAge = formatAge(batch.preparedAt);
+  return (
+    <div className="px-5 py-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
+            <span className="text-sm font-semibold text-deep-navy">
+              {batch.brand}
+            </span>
+            <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">
+              {batch.candidateCount} candidate
+              {batch.candidateCount === 1 ? "" : "s"}
+            </span>
+            <span className="text-[10px] text-slate-400">{preparedAge}</span>
+          </div>
+          <p className="text-xs text-slate-600 mb-1">
+            <span className="text-slate-400">to</span>{" "}
+            <code className="text-[12px] bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded">
+              {batch.recipient}
+            </code>
+          </p>
+          <p className="text-xs text-slate-700 mb-2">
+            <span className="text-slate-400">subject</span> {batch.subject}
+          </p>
+          <p className="text-[11px] text-slate-500 break-all">
+            {batch.candidateDomains.slice(0, 8).join(" · ")}
+            {batch.candidateDomains.length > 8 && (
+              <> &middot; …+{batch.candidateDomains.length - 8} more</>
+            )}
+          </p>
+        </div>
+        <div className="flex flex-col gap-1.5 shrink-0">
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => onAction(batch.batchId, "send")}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border bg-teal-50 text-teal-700 border-teal-200 hover:bg-teal-100 text-xs font-semibold disabled:opacity-50"
+          >
+            <Send size={12} />
+            Send
+          </button>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => onAction(batch.batchId, "reject")}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 text-xs font-semibold disabled:opacity-50"
+          >
+            <XCircle size={12} />
+            Reject
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function formatAge(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(ms / 60000);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
 }
 
 function PendingRow({

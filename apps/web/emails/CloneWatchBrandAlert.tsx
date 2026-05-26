@@ -1,21 +1,15 @@
 import {
-  Heading,
+  Html,
+  Head,
+  Preview,
+  Body,
+  Container,
+  Section,
   Text,
   Link,
-  Section,
   Hr,
-  Row,
-  Column,
+  Heading,
 } from "@react-email/components";
-import EditorialBriefingLayout from "./_layout/EditorialBriefingLayout";
-import {
-  DIVIDER,
-  NAVY,
-  SANS,
-  SERIF,
-  TEXT_MUTED,
-  WHITE,
-} from "./_layout/tokens";
 
 export interface CloneWatchCandidate {
   candidateDomain: string;
@@ -44,8 +38,7 @@ export interface CloneWatchBrandAlertProps {
   evidenceSummary?: string;
   netcraftSubmissionId?: string;
   /** Optional ack URL — when present, renders a teal-pill CTA so the brand
-   *  team can confirm receipt and tell us what they're doing. Helps populate
-   *  the weekly impact digest. */
+   *  team can confirm receipt and tell us what they're doing. */
   ackRequestUrl?: string;
   /** Optional Ask Arthur ref for support correlation (defaults to the
    *  candidate domain — every email is identifiable by domain anyway). */
@@ -55,13 +48,12 @@ export interface CloneWatchBrandAlertProps {
 /**
  * Factual-signal alert to a brand's security / fraud / abuse team.
  *
- * Uses the shared EditorialBriefingLayout so the chrome (navy header,
- * white card, navy footer with ABN + unsubscribe) matches every other
- * outbound Ask Arthur email (WeeklyDigest, WeeklyIntelDigest, nurture
- * sequence).
+ * Visual style matches WeeklyDigest.tsx (Public Sans, navy header card,
+ * teal CTAs, 560px container) so all outbound Ask Arthur emails share the
+ * same chrome. Earlier revisions used the EditorialBriefingLayout which
+ * read as too SPF/editorial for a one-shot brand notification.
  *
- * Tone: factual signal language. Never characterise the operator. Same
- * defensive posture Netcraft / Bolster use without lawyer-vetted copy.
+ * Tone: factual signal language. Never characterise the operator.
  *
  * Used by Layer 3 (formal channels: Bugcrowd VDP, security.txt) and
  * Layer 4 (courtesy fraud-inbox sends) — same body, channel-type routes.
@@ -69,12 +61,8 @@ export interface CloneWatchBrandAlertProps {
 export default function CloneWatchBrandAlert(
   props: CloneWatchBrandAlertProps,
 ) {
-  const {
-    brandName,
-    legitimateDomain,
-    ackRequestUrl,
-    reportRef,
-  } = props;
+  const { brandName, legitimateDomain, ackRequestUrl, reportRef } = props;
+
   // Normalise to candidates[] regardless of which prop shape the caller used.
   const candidates: CloneWatchCandidate[] =
     props.candidates && props.candidates.length > 0
@@ -92,290 +80,339 @@ export default function CloneWatchBrandAlert(
         ];
   const isBatch = candidates.length > 1;
   const primary = candidates[0];
-  const signalLabel = describeSignal(primary.signalType);
   const ref =
-    reportRef ?? (isBatch ? `CW-batch-${brandName}` : `CW-${primary.candidateDomain}`);
+    reportRef ??
+    (isBatch ? `CW-batch-${brandName}` : `CW-${primary.candidateDomain}`);
   const stopMailto = `mailto:brendan@askarthur.au?subject=${encodeURIComponent(
     `STOP clone-watch notifications — ${brandName}`,
   )}&body=${encodeURIComponent(
     `Please stop sending clone-watch notifications for ${brandName} (${legitimateDomain}). Ref: ${ref}.`,
   )}`;
 
+  const previewText = isBatch
+    ? `${candidates.length} possible clones matching ${brandName}`
+    : `Possible clone domain matching ${brandName} — ${primary.candidateDomain}`;
+
   return (
-    <EditorialBriefingLayout
-      preview={
-        isBatch
-          ? `${candidates.length} possible clones matching ${brandName}`
-          : `Possible clone domain matching ${brandName} — ${primary.candidateDomain}`
-      }
-      headerLabel="Clone-watch alert"
-      unsubscribeUrl={stopMailto}
-      subscriptionReason={`You're receiving this because Ask Arthur's daily lexical sweep of newly-registered domains matched the candidate below against your brand ${brandName}. Reply STOP or use the link below to suppress future notifications about this brand.`}
-    >
-      <Heading
-        as="h1"
+    <Html>
+      <Head>
+        <style>{`@import url('https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;600;700&display=swap');`}</style>
+      </Head>
+      <Preview>{previewText}</Preview>
+      <Body
         style={{
-          margin: "0 0 12px 0",
-          fontFamily: SERIF,
-          fontSize: "26px",
-          lineHeight: "32px",
-          fontWeight: 700,
-          color: NAVY,
+          backgroundColor: "#F8FAFC",
+          fontFamily:
+            "'Public Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
         }}
       >
-        Possible clone domain matching {brandName}
-      </Heading>
-
-      <Text
-        style={{
-          margin: "0 0 20px 0",
-          fontFamily: SANS,
-          fontSize: "14px",
-          lineHeight: "22px",
-          color: "#334155",
-        }}
-      >
-        Hello {brandName} security team — Ask Arthur (askarthur.au) runs a
-        daily lexical sweep of newly-registered domains against a watchlist
-        of Australian brands. {isBatch ? (
-          <>
-            <strong>{candidates.length} domains</strong> surfaced overnight as
-            possible clones of <strong>{legitimateDomain}</strong>. They may
-            be worth your fraud / takedown team&apos;s attention.
-          </>
-        ) : (
-          <>
-            The domain below surfaced as a {signalLabel} of{" "}
-            <strong>{legitimateDomain}</strong> and may be worth your fraud /
-            takedown team&apos;s attention.
-          </>
-        )}
-      </Text>
-
-      {candidates.map((c) => (
-        <SignalBlock
-          key={c.candidateDomain}
-          candidateDomain={c.candidateDomain}
-          candidateUrl={c.candidateUrl}
-          legitimateDomain={legitimateDomain}
-          signalType={c.signalType}
-          score={c.score}
-          firstSeenAt={c.firstSeenAt}
-          evidenceSummary={c.evidenceSummary}
-          netcraftSubmissionId={c.netcraftSubmissionId}
-        />
-      ))}
-
-      <Hr style={{ borderColor: DIVIDER, margin: "24px 0" }} />
-
-      <SectionHeading>What we&apos;ve done</SectionHeading>
-      <Text style={bodyTextStyle}>
-        {primary.netcraftSubmissionId ? (
-          <>
-            Submitted to Netcraft for community blocklist + browser-block
-            coverage. {isBatch ? "First Netcraft submission ref" : "Netcraft submission ref"}:{" "}
-            <code style={codeInlineStyle}>{primary.netcraftSubmissionId}</code>.
-          </>
-        ) : (
-          <>
-            We have not yet submitted to community blocklists — sharing the
-            signal with you first.
-          </>
-        )}
-      </Text>
-
-      <SectionHeading>What you might do</SectionHeading>
-      <Text style={bodyTextStyle}>
-        If this matches your fraud-monitoring criteria, common next steps
-        are filing an abuse report with the registrar, requesting
-        browser-vendor blocking, or escalating to your trademark counsel.
-        Reply to this email if you&apos;d like the underlying evidence pack
-        in a different format.
-      </Text>
-
-      {ackRequestUrl && (
-        <Section style={{ marginTop: "24px" }}>
-          <Link
-            href={ackRequestUrl}
-            style={{
-              display: "inline-block",
-              backgroundColor: "#0D9488",
-              color: WHITE,
-              fontSize: "14px",
-              fontWeight: 600,
-              padding: "10px 20px",
-              borderRadius: "6px",
-              textDecoration: "none",
-              fontFamily: SANS,
-            }}
-          >
-            Acknowledge receipt
-          </Link>
-          <Text
-            style={{
-              ...bodyTextStyle,
-              fontSize: "12px",
-              color: TEXT_MUTED,
-              marginTop: "8px",
-            }}
-          >
-            Helps us populate the weekly impact digest. Optional.
-          </Text>
-        </Section>
-      )}
-
-      <Hr style={{ borderColor: DIVIDER, margin: "24px 0" }} />
-
-      <Text
-        style={{
-          margin: 0,
-          fontFamily: SANS,
-          fontSize: "12px",
-          lineHeight: "18px",
-          color: TEXT_MUTED,
-        }}
-      >
-        This is a factual signal report, not a determination that the
-        domain is malicious. Ask Arthur does not file takedowns on behalf
-        of brands; we surface candidates and submit to community blocklist
-        aggregators. Reply <strong>FALSE POSITIVE</strong> with the
-        candidate domain to help us improve the matcher. Ref:{" "}
-        <code style={codeInlineStyle}>{ref}</code>
-      </Text>
-    </EditorialBriefingLayout>
-  );
-}
-
-function SignalBlock({
-  candidateDomain,
-  candidateUrl,
-  legitimateDomain,
-  signalType,
-  score,
-  firstSeenAt,
-  evidenceSummary,
-  netcraftSubmissionId,
-}: {
-  candidateDomain: string;
-  candidateUrl: string;
-  legitimateDomain: string;
-  signalType: string;
-  score: number;
-  firstSeenAt: string;
-  evidenceSummary: string;
-  netcraftSubmissionId?: string;
-}) {
-  return (
-    <Section
-      style={{
-        backgroundColor: "#F8FAFC",
-        border: `1px solid ${DIVIDER}`,
-        borderRadius: "8px",
-        padding: "16px 20px",
-      }}
-    >
-      <SignalRow label="Candidate domain" value={candidateDomain} mono />
-      <SignalRow label="Candidate URL" value={candidateUrl} mono />
-      <SignalRow label="Matched brand" value={legitimateDomain} mono />
-      <SignalRow label="Signal type" value={signalType} />
-      <SignalRow label="Match score" value={score.toFixed(2)} />
-      <SignalRow
-        label="First seen"
-        value={new Date(firstSeenAt).toISOString()}
-      />
-      {evidenceSummary && (
-        <SignalRow label="Evidence" value={evidenceSummary} />
-      )}
-      {netcraftSubmissionId && (
-        <SignalRow label="Netcraft ref" value={netcraftSubmissionId} mono />
-      )}
-    </Section>
-  );
-}
-
-function SignalRow({
-  label,
-  value,
-  mono,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
-  return (
-    <Row style={{ marginBottom: "6px" }}>
-      <Column
-        style={{
-          width: "120px",
-          verticalAlign: "top",
-          paddingRight: "8px",
-        }}
-      >
-        <Text
+        <Container
           style={{
-            margin: 0,
-            fontFamily: SANS,
-            fontSize: "11px",
-            textTransform: "uppercase" as const,
-            letterSpacing: "0.05em",
-            color: TEXT_MUTED,
-            lineHeight: "18px",
+            maxWidth: "560px",
+            margin: "0 auto",
+            padding: "40px 20px",
           }}
         >
-          {label}
-        </Text>
-      </Column>
-      <Column style={{ verticalAlign: "top" }}>
-        <Text
-          style={{
-            margin: 0,
-            fontFamily: mono
-              ? "'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace"
-              : SANS,
-            fontSize: "13px",
-            lineHeight: "18px",
-            color: "#0F172A",
-            wordBreak: "break-all",
-          }}
-        >
-          {value}
-        </Text>
-      </Column>
-    </Row>
+          {/* Header */}
+          <Section
+            style={{
+              backgroundColor: "#1B2A4A",
+              borderRadius: "8px 8px 0 0",
+              padding: "24px 28px",
+            }}
+          >
+            <Text
+              style={{
+                color: "#FFFFFF",
+                fontSize: "12px",
+                fontWeight: 700,
+                letterSpacing: "2px",
+                textTransform: "uppercase" as const,
+                margin: 0,
+              }}
+            >
+              Ask Arthur
+            </Text>
+            <Heading
+              as="h1"
+              style={{
+                color: "#FFFFFF",
+                fontSize: "22px",
+                fontWeight: 700,
+                margin: "8px 0 0 0",
+              }}
+            >
+              Clone-watch alert
+            </Heading>
+          </Section>
+
+          {/* Body */}
+          <Section
+            style={{
+              backgroundColor: "#FFFFFF",
+              borderRadius: "0 0 8px 8px",
+              padding: "28px",
+              border: "1px solid #E2E8F0",
+              borderTop: "none",
+            }}
+          >
+            <Text
+              style={{
+                color: "#334155",
+                fontSize: "16px",
+                lineHeight: "1.6",
+                margin: "0 0 16px 0",
+              }}
+            >
+              Hello <strong>{brandName}</strong> team — Ask Arthur runs a
+              daily lexical sweep of newly-registered domains against a
+              watchlist of Australian brands.{" "}
+              {isBatch ? (
+                <>
+                  <strong>{candidates.length} domains</strong> surfaced
+                  overnight as possible clones of{" "}
+                  <strong>{legitimateDomain}</strong> and may be worth your
+                  fraud / takedown team&apos;s attention.
+                </>
+              ) : (
+                <>
+                  The domain below surfaced as a possible clone of{" "}
+                  <strong>{legitimateDomain}</strong> and may be worth your
+                  fraud / takedown team&apos;s attention.
+                </>
+              )}
+            </Text>
+
+            <Hr style={{ borderColor: "#E2E8F0", margin: "20px 0" }} />
+
+            {/* Candidates — numbered list, WeeklyDigest style */}
+            {candidates.map((c, i) => (
+              <Section key={c.candidateDomain} style={{ marginBottom: "20px" }}>
+                <Text
+                  style={{
+                    color: "#1B2A4A",
+                    fontSize: "15px",
+                    fontWeight: 600,
+                    margin: "0 0 6px 0",
+                  }}
+                >
+                  {i + 1}. {c.candidateDomain}
+                </Text>
+                <Text
+                  style={{
+                    color: "#475569",
+                    fontSize: "14px",
+                    lineHeight: "1.5",
+                    margin: "0 0 6px 0",
+                  }}
+                >
+                  <strong>URL:</strong>{" "}
+                  <code style={codeInline}>{c.candidateUrl}</code>
+                </Text>
+                <Text
+                  style={{
+                    color: "#475569",
+                    fontSize: "14px",
+                    lineHeight: "1.5",
+                    margin: "0 0 6px 0",
+                  }}
+                >
+                  <strong>Signal:</strong> {describeSignal(c.signalType)}
+                  {c.score > 0 && (
+                    <>
+                      {" "}
+                      &middot; match score{" "}
+                      <code style={codeInline}>{c.score.toFixed(2)}</code>
+                    </>
+                  )}{" "}
+                  &middot; first seen{" "}
+                  <code style={codeInline}>
+                    {new Date(c.firstSeenAt).toISOString().slice(0, 10)}
+                  </code>
+                </Text>
+                {c.evidenceSummary && (
+                  <Text
+                    style={{
+                      color: "#64748B",
+                      fontSize: "13px",
+                      lineHeight: "1.5",
+                      margin: "0 0 6px 0",
+                      fontStyle: "italic",
+                    }}
+                  >
+                    {c.evidenceSummary}
+                  </Text>
+                )}
+                {c.netcraftSubmissionId && (
+                  <Text
+                    style={{
+                      color: "#475569",
+                      fontSize: "13px",
+                      lineHeight: "1.5",
+                      margin: "0 0 6px 0",
+                    }}
+                  >
+                    <strong>Netcraft ref:</strong>{" "}
+                    <code style={codeInline}>{c.netcraftSubmissionId}</code>
+                  </Text>
+                )}
+              </Section>
+            ))}
+
+            <Hr style={{ borderColor: "#E2E8F0", margin: "20px 0" }} />
+
+            <Heading
+              as="h3"
+              style={{
+                color: "#1B2A4A",
+                fontSize: "15px",
+                fontWeight: 700,
+                margin: "0 0 8px 0",
+              }}
+            >
+              What we&apos;ve done
+            </Heading>
+            <Text
+              style={{
+                color: "#334155",
+                fontSize: "14px",
+                lineHeight: "1.6",
+                margin: "0 0 16px 0",
+              }}
+            >
+              {primary.netcraftSubmissionId ? (
+                <>
+                  Submitted to Netcraft for community blocklist +
+                  browser-block coverage.{" "}
+                  {isBatch
+                    ? "First Netcraft submission ref"
+                    : "Netcraft submission ref"}
+                  :{" "}
+                  <code style={codeInline}>{primary.netcraftSubmissionId}</code>
+                  .
+                </>
+              ) : (
+                <>
+                  We have not yet submitted to community blocklists — sharing
+                  the signal with you first.
+                </>
+              )}
+            </Text>
+
+            <Heading
+              as="h3"
+              style={{
+                color: "#1B2A4A",
+                fontSize: "15px",
+                fontWeight: 700,
+                margin: "0 0 8px 0",
+              }}
+            >
+              What you might do
+            </Heading>
+            <Text
+              style={{
+                color: "#334155",
+                fontSize: "14px",
+                lineHeight: "1.6",
+                margin: "0 0 16px 0",
+              }}
+            >
+              If this matches your fraud-monitoring criteria, common next
+              steps are filing an abuse report with the registrar,
+              requesting browser-vendor blocking, or escalating to your
+              trademark counsel. Reply to this email if you&apos;d like the
+              underlying evidence pack in a different format.
+            </Text>
+
+            {ackRequestUrl && (
+              <>
+                <Hr style={{ borderColor: "#E2E8F0", margin: "20px 0" }} />
+                <Link
+                  href={ackRequestUrl}
+                  style={{
+                    display: "inline-block",
+                    backgroundColor: "#0D9488",
+                    color: "#FFFFFF",
+                    fontSize: "14px",
+                    fontWeight: 600,
+                    padding: "10px 20px",
+                    borderRadius: "6px",
+                    textDecoration: "none",
+                  }}
+                >
+                  Acknowledge receipt
+                </Link>
+                <Text
+                  style={{
+                    color: "#94A3B8",
+                    fontSize: "12px",
+                    margin: "8px 0 0 0",
+                  }}
+                >
+                  Optional — helps us populate the weekly impact digest.
+                </Text>
+              </>
+            )}
+
+            <Hr style={{ borderColor: "#E2E8F0", margin: "24px 0" }} />
+
+            <Text
+              style={{
+                color: "#64748B",
+                fontSize: "12px",
+                lineHeight: "1.5",
+                margin: 0,
+              }}
+            >
+              This is a factual signal report, not a determination that the
+              domain is malicious. Ask Arthur does not file takedowns on
+              behalf of brands; we surface candidates and submit to
+              community blocklist aggregators. Reply{" "}
+              <strong>FALSE POSITIVE</strong> with the candidate domain to
+              help us improve the matcher. Ref:{" "}
+              <code style={codeInline}>{ref}</code>
+            </Text>
+
+            <Text
+              style={{
+                color: "#94A3B8",
+                fontSize: "12px",
+                margin: "16px 0 0 0",
+              }}
+            >
+              You&apos;re receiving this because Ask Arthur&apos;s daily
+              lexical sweep matched the candidate above against your brand{" "}
+              {brandName}.{" "}
+              <Link href={stopMailto} style={{ color: "#94A3B8" }}>
+                Stop notifications for this brand
+              </Link>
+            </Text>
+            <Text
+              style={{
+                color: "#94A3B8",
+                fontSize: "12px",
+                lineHeight: "1.5",
+                margin: "8px 0 0 0",
+              }}
+            >
+              Ask Arthur | ABN 72 695 772 313 | Sydney, Australia
+            </Text>
+          </Section>
+        </Container>
+      </Body>
+    </Html>
   );
 }
 
-function SectionHeading({ children }: { children: React.ReactNode }) {
-  return (
-    <Heading
-      as="h3"
-      style={{
-        margin: "0 0 8px 0",
-        fontFamily: SERIF,
-        fontSize: "16px",
-        lineHeight: "22px",
-        fontWeight: 700,
-        color: NAVY,
-      }}
-    >
-      {children}
-    </Heading>
-  );
-}
-
-const bodyTextStyle = {
-  margin: "0 0 16px 0",
-  fontFamily: SANS,
-  fontSize: "14px",
-  lineHeight: "22px",
-  color: "#334155",
-} as const;
-
-const codeInlineStyle = {
+const codeInline = {
   fontFamily:
     "'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace",
   fontSize: "12px",
   color: "#0F172A",
+  backgroundColor: "#F1F5F9",
+  padding: "1px 4px",
+  borderRadius: "3px",
 } as const;
 
 function describeSignal(signalType: string): string {

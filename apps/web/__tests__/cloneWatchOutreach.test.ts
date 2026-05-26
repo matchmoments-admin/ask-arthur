@@ -1,6 +1,6 @@
 import { readFileSync } from "fs";
 import { join } from "path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   buildSubmissionReason,
   NETCRAFT_REPORT_ENDPOINT_URL,
@@ -25,12 +25,8 @@ import {
 import {
   groupByBrandRecipient,
   buildBatchSubject,
-  buildTelegramApprovalMessage,
+  buildTelegramSummaryMessage,
 } from "@/app/api/inngest/functions/clone-watch-notify-brand-prepare";
-import {
-  signBatchApproveToken,
-  verifyBatchApproveToken,
-} from "@/lib/clone-watch-approve";
 import type { URLScanResult } from "@askarthur/scam-engine/urlscan";
 
 // Covers the pure helpers that route channels, build outbound copy, and
@@ -664,154 +660,35 @@ describe("clone-watch-notify-brand-prepare — pure helpers", () => {
     });
   });
 
-  describe("buildTelegramApprovalMessage", () => {
-    it("includes both approve + reject URLs + truncated domain list", () => {
-      const msg = buildTelegramApprovalMessage({
-        brand: "kmart.com.au",
-        recipient: "x@y.com",
-        candidateCount: 12,
-        candidateDomains: Array.from({ length: 12 }, (_, i) => `c${i}.com`),
-        subject: "12 possible clones of kmart.com.au",
-        approveUrl: "https://askarthur.au/api/admin/clone-watch/approve-batch/abc?sig=xyz",
-        rejectUrl: "https://askarthur.au/api/admin/clone-watch/reject-batch/abc?sig=xyz",
+  describe("buildTelegramSummaryMessage", () => {
+    it("renders single-batch wording with the dashboard URL", () => {
+      const msg = buildTelegramSummaryMessage({
+        batchesPrepared: 1,
+        dashboardUrl: "https://askarthur.au/admin/clone-watch#approvals",
       });
-      expect(msg).toContain("kmart.com.au");
-      expect(msg).toContain("Approve + send");
-      expect(msg).toContain("Reject");
-      expect(msg).toContain("approve-batch/abc");
-      expect(msg).toContain("reject-batch/abc");
-      // List capped at 10 + summary
-      expect(msg).toContain("…and 2 more");
+      expect(msg).toContain("1</b> batch awaiting your approval");
+      expect(msg).toContain(
+        "https://askarthur.au/admin/clone-watch#approvals",
+      );
+      // Defensive — no HMAC URLs, no per-candidate domain list
+      expect(msg).not.toContain("approve-batch");
+      expect(msg).not.toContain("reject-batch");
     });
 
-    it("HTML-escapes brand + subject (defence vs unicode lookalikes in brand names)", () => {
-      const msg = buildTelegramApprovalMessage({
-        brand: "<script>alert(1)</script>",
-        recipient: "x@y.com",
-        candidateCount: 1,
-        candidateDomains: ["c0.com"],
-        subject: "<b>html-in-subject</b>",
-        approveUrl: "https://x",
-        rejectUrl: "https://x",
+    it("uses plural noun when more than one batch", () => {
+      const msg = buildTelegramSummaryMessage({
+        batchesPrepared: 7,
+        dashboardUrl: "https://askarthur.au/admin/clone-watch#approvals",
       });
-      expect(msg).not.toContain("<script>");
-      expect(msg).toContain("&lt;script&gt;");
-      expect(msg).toContain("&lt;b&gt;");
+      expect(msg).toContain("7</b> batches awaiting your approval");
     });
   });
 });
 
-describe("clone-watch-approve — HMAC", () => {
-  beforeEach(() => {
-    process.env.CLONE_WATCH_APPROVAL_SECRET = "test-secret-do-not-leak";
-  });
-
-  afterEach(() => {
-    delete process.env.CLONE_WATCH_APPROVAL_SECRET;
-  });
-
-  it("round-trips: sign → verify true", () => {
-    const sig = signBatchApproveToken(
-      "approve",
-      "batch-1",
-      "kmart.com.au",
-      "x@y.com",
-    );
-    expect(
-      verifyBatchApproveToken(
-        "approve",
-        "batch-1",
-        "kmart.com.au",
-        "x@y.com",
-        sig,
-      ),
-    ).toBe(true);
-  });
-
-  it("verify fails when action differs (approve sig used for reject)", () => {
-    const sig = signBatchApproveToken(
-      "approve",
-      "batch-1",
-      "kmart.com.au",
-      "x@y.com",
-    );
-    expect(
-      verifyBatchApproveToken(
-        "reject",
-        "batch-1",
-        "kmart.com.au",
-        "x@y.com",
-        sig,
-      ),
-    ).toBe(false);
-  });
-
-  it("verify fails when batchId differs", () => {
-    const sig = signBatchApproveToken(
-      "approve",
-      "batch-1",
-      "kmart.com.au",
-      "x@y.com",
-    );
-    expect(
-      verifyBatchApproveToken(
-        "approve",
-        "batch-2",
-        "kmart.com.au",
-        "x@y.com",
-        sig,
-      ),
-    ).toBe(false);
-  });
-
-  it("verify fails when recipient differs (no URL-substitution attack)", () => {
-    const sig = signBatchApproveToken(
-      "approve",
-      "batch-1",
-      "kmart.com.au",
-      "x@y.com",
-    );
-    expect(
-      verifyBatchApproveToken(
-        "approve",
-        "batch-1",
-        "kmart.com.au",
-        "attacker@evil.com",
-        sig,
-      ),
-    ).toBe(false);
-  });
-
-  it("verify is case-insensitive on brand + recipient (matches signing)", () => {
-    const sig = signBatchApproveToken(
-      "approve",
-      "batch-1",
-      "Kmart.com.au",
-      "X@Y.COM",
-    );
-    expect(
-      verifyBatchApproveToken(
-        "approve",
-        "batch-1",
-        "kmart.com.au",
-        "x@y.com",
-        sig,
-      ),
-    ).toBe(true);
-  });
-
-  it("verify gracefully rejects malformed token (non-hex / wrong length)", () => {
-    expect(
-      verifyBatchApproveToken(
-        "approve",
-        "batch-1",
-        "kmart.com.au",
-        "x@y.com",
-        "not-a-hex-string",
-      ),
-    ).toBe(false);
-  });
-});
+// HMAC URL approve/reject routes were removed (replaced by admin-dashboard
+// flow). Their tests deleted in the same PR. The dashboard POST routes
+// rely on `requireAdmin()` for auth + Zod for body shape — exercised by
+// the live e2e flow rather than unit tests here.
 
 describe("clone-watch-notify-brand-prepare — idempotency contract (migration v151)", () => {
   // The idempotency guarantee of the daily prepare cron lives entirely at
