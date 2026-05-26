@@ -810,3 +810,61 @@ describe("clone-watch-approve — HMAC", () => {
     ).toBe(false);
   });
 });
+
+describe("clone-watch-notify-brand-prepare — idempotency contract (migration v151)", () => {
+  // The idempotency guarantee of the daily prepare cron lives entirely at
+  // the SQL layer, not in TypeScript. Two contracts to lock:
+  //
+  //   1. list_clone_alerts_unbatched_for_prepare MUST filter on
+  //      approval_status = 'unbatched' so already-batched rows
+  //      (state = 'pending' / 'sent' / 'auto_approved' / 'rejected') are
+  //      invisible to subsequent runs.
+  //   2. assign_clone_alert_batch MUST transition rows OUT of 'unbatched'
+  //      (to 'pending' or 'auto_approved') AND require WHERE
+  //      approval_status = 'unbatched' as a defense-in-depth gate.
+  //
+  // Together these mean a re-run of the prepare cron on the same day
+  // returns zero new batches. The handler-level Inngest behavioural test
+  // is tracked as deferred issue #428 (would require mock-supabase + step
+  // machinery the codebase doesn't have today); this snapshot test is the
+  // pragmatic substitute — catches the regression if a future migration
+  // edits these RPCs to drop either filter.
+  const fs = require("fs") as typeof import("fs");
+  const path = require("path") as typeof import("path");
+  const migration = fs.readFileSync(
+    path.join(
+      __dirname,
+      "..",
+      "..",
+      "..",
+      "supabase",
+      "migration-v151-clone-watch-notification-approval.sql",
+    ),
+    "utf8",
+  );
+
+  it("list_clone_alerts_unbatched_for_prepare filters on approval_status = 'unbatched'", () => {
+    // Extract the function body — between the AS $$ that follows the
+    // function name and the next $$.
+    const fnMatch = migration.match(
+      /CREATE OR REPLACE FUNCTION public\.list_clone_alerts_unbatched_for_prepare[\s\S]*?AS \$\$([\s\S]*?)\$\$/,
+    );
+    expect(fnMatch).not.toBeNull();
+    const body = fnMatch![1];
+    expect(body).toMatch(/approval_status\s*=\s*'unbatched'/);
+  });
+
+  it("assign_clone_alert_batch transitions out of 'unbatched' AND gates on 'unbatched'", () => {
+    const fnMatch = migration.match(
+      /CREATE OR REPLACE FUNCTION public\.assign_clone_alert_batch[\s\S]*?AS \$\$([\s\S]*?)\$\$/,
+    );
+    expect(fnMatch).not.toBeNull();
+    const body = fnMatch![1];
+    // Transitions TO 'pending' (default) and 'auto_approved' (skip approval).
+    expect(body).toMatch(/'pending'/);
+    expect(body).toMatch(/'auto_approved'/);
+    // Defense-in-depth WHERE clause: even if the caller passes ids that are
+    // already-batched, the UPDATE is a no-op for non-'unbatched' rows.
+    expect(body).toMatch(/WHERE\s+id\s*=\s*ANY\(p_queue_ids\)[\s\S]*?approval_status\s*=\s*'unbatched'/);
+  });
+});
