@@ -9,26 +9,30 @@ import CloneWatchBrandAlert, {
   type CloneWatchCandidate,
 } from "@/emails/CloneWatchBrandAlert";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
-import { buildBatchApprovalUrl } from "@/lib/clone-watch-approve";
 import { logCost, PRICING } from "@/lib/cost-telemetry";
 
 /**
- * PR-B2 — Daily batch builder for clone-watch brand notifications.
+ * Daily batch builder for clone-watch brand notifications.
  *
  * 1. Pulls all queue rows in 'unbatched' state where scheduled_for <= now()
  * 2. Groups by (brand, recipient) — each group becomes ONE consolidated
  *    email instead of N separate emails (user feedback 2026-05-26)
  * 3. For each group:
- *      - assigns a fresh batch_id (uuid)
+ *      - mints a fresh batch_id (uuid, inside step.run so it survives
+ *        Inngest replays — see PR #456)
  *      - renders the email body via React Email
- *      - stores rendered subject + html on the queue rows so the approve
- *        endpoint sends EXACTLY what was previewed (no template drift)
+ *      - stores rendered subject + html on the queue rows so the dashboard
+ *        sends EXACTLY what was previewed (no template drift)
  *      - transitions rows to 'pending' approval state
- *      - sends a Telegram preview to admin with the full body + an
- *        HMAC-signed approve URL + reject URL
- * 4. When FF_SHOPFRONT_CLONE_NOTIFY_BRAND_AUTO_SEND is ON, the prepare
- *    cron skips the Telegram step and sends directly (marks rows
- *    'auto_approved' → 'sent'). Default OFF until template is validated.
+ * 4. After the loop, fires ONE summary Telegram pointing the admin at the
+ *    dashboard (replaces the old per-batch HMAC-URL preview, which was
+ *    auto-clicked by Telegram's link-preview crawler — incident
+ *    2026-05-26). Per-batch Send/Reject buttons live in
+ *    /admin/clone-watch#approvals.
+ * 5. When FF_SHOPFRONT_CLONE_NOTIFY_BRAND_AUTO_SEND is ON, the loop skips
+ *    the dashboard step and sends via Resend immediately (marks rows
+ *    'auto_approved' → 'sent'). Default OFF until the matcher's false-
+ *    positive rate is calibrated.
  *
  * Cron: 09:30 UTC daily (after the 08:30 UTC NRD ingest settles).
  * Gated by FF_SHOPFRONT_CLONE_OUTREACH + FF_SHOPFRONT_CLONE_NOTIFY_BRAND.
@@ -58,20 +62,16 @@ interface BrandGroup {
 const FROM_EMAIL =
   process.env.RESEND_FROM_EMAIL ?? "Ask Arthur <brendan@askarthur.au>";
 const REPLY_TO_EMAIL = "brendan@askarthur.au";
+const DASHBOARD_URL = "https://askarthur.au/admin/clone-watch#approvals";
 
 export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
   {
     id: "shopfront-clone-notify-brand-prepare",
-    name: "Clone-Watch: Daily batch builder + Telegram approval preview",
+    name: "Clone-Watch: Daily batch builder + dashboard summary",
     retries: 2,
     // singleton (key defaults to fn id) replaces the legacy `concurrency:
     // { limit: 1 }` shape — same "no overlapping runs" guarantee, but the
-    // slot releases cleanly on cancel/timeout/error. The legacy form left a
-    // phantom slot held by an early cancelled smoke-test run, which masked
-    // every subsequent manual trigger as `function_version: 0 / no step
-    // progress`. `mode: "skip"` is correct because this cron is idempotent
-    // — the next 09:30 UTC sweep picks up any rows the skipped run would
-    // have processed.
+    // slot releases cleanly on cancel/timeout/error. See PR #455.
     singleton: { mode: "skip" },
     timeouts: { finish: "10m" },
   },
@@ -80,9 +80,6 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
     { event: "shopfront/clone.notify-brand-prepare.manual-trigger.v1" },
   ],
   async ({ step }) => {
-    // Entry breadcrumb — cheap Vercel-log line that proves dispatch reached
-    // the route. Splits "Inngest never called Vercel" from "Vercel ran but
-    // crashed silently" in any future hang investigation.
     logger.info("clone-watch prepare: invoked", {
       autoSend: featureFlags.shopfrontCloneNotifyBrandAutoSend,
     });
@@ -123,20 +120,7 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
     let groupsFailed = 0;
 
     for (const group of groups) {
-      // Per-group try/catch — one bad render/RPC/Telegram call no longer
-      // drops the remaining N-1 groups. Mirrors the urlscan-fan-out guard
-      // in shopfront-nrd-daily-ingest.ts.
       try {
-        // Mint the batchId INSIDE a step.run so it's memoised across
-        // Inngest replays. crypto.randomUUID() is non-deterministic —
-        // if it ran in the plain function body, every replay would
-        // generate a new UUID, every downstream step key
-        // (`render-batch-${batchId}`, `assign-batch-${batchId}`, ...)
-        // would change, Inngest's SHA-1-hashed step cache would never
-        // hit, and the same steps would re-execute on every replay
-        // until the 10-minute function timeout. The mint step's key is
-        // stable because the group key is derived from the memoised
-        // load-unbatched result.
         const groupKey = `${group.brand}::${group.recipient}`;
         const batchId = await step.run(
           `mint-batch-id:${groupKey}`,
@@ -164,40 +148,22 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
           );
         });
 
-        // URL build runs INSIDE the assign-batch step so a missing
-        // CLONE_WATCH_APPROVAL_SECRET / ADMIN_SECRET surfaces as a step-
-        // level retry/failure with a clear log — not an opaque function
-        // crash before any step ran. Returns both URLs so the Telegram
-        // step downstream uses the same values.
-        const { approveUrl, rejectUrl } = await step.run(
-          `assign-batch-${batchId}`,
-          async () => {
-            const approveUrl = buildBatchApprovalUrl(
-              "approve",
-              batchId,
-              group.brand,
-              group.recipient,
-            );
-            const rejectUrl = buildBatchApprovalUrl(
-              "reject",
-              batchId,
-              group.brand,
-              group.recipient,
-            );
-            const { error } = await sb.rpc("assign_clone_alert_batch", {
-              p_queue_ids: group.rows.map((r) => r.id),
-              p_batch_id: batchId,
-              p_email_subject: subject,
-              p_email_body_html: html,
-              p_approval_url: approveUrl,
-              p_auto_approved: autoSend,
-            });
-            if (error) {
-              throw new Error(`assign_clone_alert_batch: ${error.message}`);
-            }
-            return { approveUrl, rejectUrl };
-          },
-        );
+        await step.run(`assign-batch-${batchId}`, async () => {
+          // approval_url is no longer a load-bearing URL — kept as an
+          // empty string for schema compatibility. The dashboard
+          // (/admin/clone-watch#approvals) is the only approval surface.
+          const { error } = await sb.rpc("assign_clone_alert_batch", {
+            p_queue_ids: group.rows.map((r) => r.id),
+            p_batch_id: batchId,
+            p_email_subject: subject,
+            p_email_body_html: html,
+            p_approval_url: "",
+            p_auto_approved: autoSend,
+          });
+          if (error) {
+            throw new Error(`assign_clone_alert_batch: ${error.message}`);
+          }
+        });
 
         if (autoSend) {
           // Auto-approve path: send via Resend immediately, mark sent.
@@ -238,9 +204,6 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
                 );
               }
             });
-            // logCost is fire-and-forget via waitUntil — wrapping it in
-            // step.run adds no durability and risks the waitUntil being
-            // killed at the step boundary.
             logCost({
               feature: "shopfront_clone_notify_brand",
               provider: "resend",
@@ -257,34 +220,11 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
             });
             autoSent++;
           }
-        } else {
-          // Telegram approval-preview path.
-          await step.run(`telegram-preview-${batchId}`, async () => {
-            await sendAdminTelegramMessage(
-              buildTelegramApprovalMessage({
-                brand: group.brand,
-                recipient: group.recipient,
-                candidateCount: candidates.length,
-                candidateDomains: candidates.map((c) => c.candidateDomain),
-                subject,
-                approveUrl,
-                rejectUrl,
-              }),
-            );
-          });
-          logCost({
-            feature: "shopfront_clone_notify_brand_prepare",
-            provider: "telegram",
-            operation: "approval_preview",
-            units: 0,
-            unitCostUsd: 0,
-            metadata: {
-              batch_id: batchId,
-              brand: group.brand,
-              candidate_count: candidates.length,
-            },
-          });
         }
+        // Manual-approval path: no per-batch Telegram. Just the row
+        // transitions to 'pending' via the assign step above. The
+        // summary Telegram fires once at the end of the loop pointing
+        // admins at the dashboard.
         batchesPrepared++;
       } catch (err) {
         groupsFailed++;
@@ -295,6 +235,33 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
         });
         continue;
       }
+    }
+
+    // Fire ONE summary Telegram to the admin chat if we created any new
+    // manual-approval batches. Auto-sent batches don't need this surface —
+    // the email is already on its way to the recipient.
+    const pendingNew = batchesPrepared - autoSent;
+    if (pendingNew > 0) {
+      await step.run("notify-admin-summary", async () => {
+        await sendAdminTelegramMessage(
+          buildTelegramSummaryMessage({
+            batchesPrepared: pendingNew,
+            dashboardUrl: DASHBOARD_URL,
+          }),
+        );
+      });
+      logCost({
+        feature: "shopfront_clone_notify_brand_prepare",
+        provider: "telegram",
+        operation: "summary_notification",
+        units: 0,
+        unitCostUsd: 0,
+        metadata: {
+          batches_prepared: batchesPrepared,
+          pending_for_approval: pendingNew,
+          auto_sent: autoSent,
+        },
+      });
     }
 
     logger.info("clone-watch notify-brand prepare: done", {
@@ -342,38 +309,22 @@ export function buildBatchSubject(group: BrandGroup): string {
   return `${group.rows.length} possible clones of ${group.brand} — ${new Date().toISOString().slice(0, 10)}`;
 }
 
-export function buildTelegramApprovalMessage(args: {
-  brand: string;
-  recipient: string;
-  candidateCount: number;
-  candidateDomains: string[];
-  subject: string;
-  approveUrl: string;
-  rejectUrl: string;
+/**
+ * Summary Telegram posted ONCE per prepare run. Replaces the old per-batch
+ * HMAC-URL preview that was auto-clicked by Telegram's link-preview
+ * crawler. The dashboard URL is the only link — clicking it from Telegram
+ * is safe because the dashboard requires admin auth.
+ */
+export function buildTelegramSummaryMessage(args: {
+  batchesPrepared: number;
+  dashboardUrl: string;
 }): string {
-  const escape = (s: string) =>
-    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const domainList = args.candidateDomains
-    .slice(0, 10)
-    .map((d) => `· <code>${escape(d)}</code>`)
-    .join("\n");
-  const extra =
-    args.candidateDomains.length > 10
-      ? `\n…and ${args.candidateDomains.length - 10} more`
-      : "";
+  const noun = args.batchesPrepared === 1 ? "batch" : "batches";
   return [
-    `🛡️ <b>Clone-watch — batch ready for approval</b>`,
+    `🛡️ <b>Clone-watch — prepare summary</b>`,
     ``,
-    `Brand: <b>${escape(args.brand)}</b>`,
-    `Recipient: <code>${escape(args.recipient)}</code>`,
-    `Subject: ${escape(args.subject)}`,
-    `Candidates: <b>${args.candidateCount}</b>`,
+    `<b>${args.batchesPrepared}</b> ${noun} awaiting your approval.`,
     ``,
-    domainList + extra,
-    ``,
-    `✅ <a href="${args.approveUrl}">Approve + send</a>`,
-    `❌ <a href="${args.rejectUrl}">Reject</a>`,
-    ``,
-    `<i>Approve URL is HMAC-signed and locked to this batch_id + brand + recipient. Single use.</i>`,
+    `Review and send at <a href="${args.dashboardUrl}">${args.dashboardUrl}</a>`,
   ].join("\n");
 }
