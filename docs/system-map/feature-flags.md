@@ -280,6 +280,7 @@ When daily spend exceeds the cap, `cost-daily-check` upserts a `feature_brakes` 
 - `ENABLE_CHARITY_CHECK_INGEST` — GH Actions gate for ACNC / PFRA scrapers
 - `ENABLE_DEEP_INVESTIGATION` — GH Actions gate for weekly deep-investigation pipeline
 - `GHSA_PAT` — GitHub Advisories token
+- `FF_LEGACY_DIGEST_TELEGRAM` — When `true`, the `/api/cron/feedback-digest` (09:00 UTC) and `/api/cron/health-digest` (22:00 UTC) cron routes resume sending their daily Telegram pings. Default OFF — the signal has been folded into the consolidated 7am AEST "Daily Founder Briefing" Claude Code Routine. Rollback lever: flip to `true` on Vercel if the founder brief regresses. The cron routes still execute their queries and return JSON either way; only the Telegram send is gated. Planned removal: delete both routes ~2 weeks after the new brief is trusted.
 
 ---
 
