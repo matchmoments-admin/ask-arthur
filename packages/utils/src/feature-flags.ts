@@ -2,6 +2,35 @@
 // NEXT_PUBLIC_ prefix makes these available on both server and client.
 // Default: all OFF. Enable incrementally as each capability is verified.
 
+/**
+ * Read a boolean env var safely at RUNTIME.
+ *
+ * Why this exists — two real, observed failure modes:
+ *
+ * 1. Trailing whitespace in the Vercel-stored value. On 2026-05-26 the
+ *    `FF_SHOPFRONT_CLONE_OUTREACH` and `FF_SHOPFRONT_CLONE_URLSCAN` vars
+ *    were stored as `"true\n"` (5 chars) instead of `"true"`. The strict
+ *    `=== "true"` comparison silently failed and the gated Inngest fns
+ *    returned `{skipped: true, reason: "FF_X disabled"}` in prod for days.
+ *
+ * 2. Build-time inlining of `process.env.X`. Next.js/Webpack/Turbopack's
+ *    DefinePlugin statically replaces `process.env.X` literals at build
+ *    time. For Vercel env vars not visible to the build (e.g. encrypted
+ *    secrets), this inlines as `undefined === "true"` → `false` baked
+ *    into the artifact. Using `process.env[name]` (bracket + variable)
+ *    defeats the static replacement because Webpack can't constant-fold
+ *    a dynamic property access — the read happens at runtime where the
+ *    encrypted value is available.
+ *
+ * NEXT_PUBLIC_* flags MUST keep using the literal `process.env.NEXT_PUBLIC_X`
+ * pattern: the client bundle has no `process.env`, so it relies on
+ * build-time inlining to receive a value at all. Apply this helper only
+ * to server-side flags.
+ */
+function readBoolEnv(name: string): boolean {
+  return (process.env[name] ?? "").trim() === "true";
+}
+
 export const featureFlags = {
   /** Phase 1: Audio upload → Whisper transcription → scam analysis */
   mediaAnalysis: process.env.NEXT_PUBLIC_FF_MEDIA_ANALYSIS === "true",
@@ -130,7 +159,7 @@ export const featureFlags = {
    *  alerts, and cost telemetry. When OFF, falls back to the legacy
    *  waitUntil block. Server-side only (no NEXT_PUBLIC_ prefix) — this
    *  controls backend routing, not client UI. */
-  analyzeInngestWeb: process.env.FF_ANALYZE_INNGEST_WEB === "true",
+  analyzeInngestWeb: readBoolEnv("FF_ANALYZE_INNGEST_WEB"),
 
   /** Phone Footprint — consumer product (free teaser + paid self-lookup).
    *  Client-side NEXT_PUBLIC_ so the UI can conditionally render entry
@@ -144,13 +173,13 @@ export const featureFlags = {
    *  + VONAGE_API_SECRET are set and the provider has been dry-tested.
    *  When OFF, pillar 3 falls back to IPQS and pillar 4 reports
    *  `available: false` so the scorer redistributes weight. */
-  vonageEnabled: process.env.FF_VONAGE_ENABLED === "true",
+  vonageEnabled: readBoolEnv("FF_VONAGE_ENABLED"),
 
   /** Phone Footprint — LeakCheck phone-breach lookup. Server-side only.
    *  Default OFF until LeakCheck DPA is signed with APP-equivalent clauses
    *  (APP 8 — overseas disclosure). When OFF, pillar 2 (breach) either
    *  falls back to HIBP email-only coverage or reports `available: false`. */
-  leakcheckEnabled: process.env.FF_LEAKCHECK_ENABLED === "true",
+  leakcheckEnabled: readBoolEnv("FF_LEAKCHECK_ENABLED"),
 
   /** Phone Footprint — Twilio Verify OTP for phone ownership proof.
    *  Server-side only. Default OFF until TWILIO_VERIFY_SERVICE_SID is
@@ -158,7 +187,7 @@ export const featureFlags = {
    *  endpoints have been tested end-to-end. This is the APP 3.5/3.6
    *  compliance spine — the paid-tier lookup route falls back to
    *  teaser-only output when OFF. */
-  twilioVerifyEnabled: process.env.FF_TWILIO_VERIFY_ENABLED === "true",
+  twilioVerifyEnabled: readBoolEnv("FF_TWILIO_VERIFY_ENABLED"),
 
   // ===========================================================================
   // Breach Defence Suite — gates each feature in the F1–F11 build. Default OFF
@@ -242,7 +271,7 @@ export const featureFlags = {
    *  reddit_intel_daily_summary / reddit_intel_quotes. Server-side only —
    *  this controls backend processing, not UI. Costs ~A$5-15/month at current
    *  ~270 posts/week volume; daily cost-telemetry alert set at A$50. */
-  redditIntelIngest: process.env.FF_REDDIT_INTEL_INGEST === "true",
+  redditIntelIngest: readBoolEnv("FF_REDDIT_INTEL_INGEST"),
 
   /** Reddit Intel Wave 2 — dashboard widgets (RedditIntelPanel, theme cards,
    *  brand watchlist, theme-velocity drill-down). Independent of the ingest
@@ -256,7 +285,7 @@ export const featureFlags = {
    *  reddit_intel_daily_summary. When OFF, weekly-email cron falls back to
    *  the legacy verified_scams template. Server-side only — the cron route
    *  is the only consumer. */
-  redditIntelEmail: process.env.FF_REDDIT_INTEL_EMAIL === "true",
+  redditIntelEmail: readBoolEnv("FF_REDDIT_INTEL_EMAIL"),
 
   /** Reddit Intel Wave 3 — public B2B API at /api/v1/intel/* (themes, digest,
    *  quotes). Returns 503 when off; validateApiKey is checked first regardless. */
@@ -288,7 +317,7 @@ export const featureFlags = {
    *  leave off until META_BRP_ACCESS_TOKEN is granted, the Trusted Partner
    *  application clears, and the cost-daily-check brake on
    *  feature_brakes.meta_brp is in place. */
-  metaBrpReporter: process.env.FF_META_BRP_REPORTER === "true",
+  metaBrpReporter: readBoolEnv("FF_META_BRP_REPORTER"),
 
   /** Charity Legitimacy Check — consumer page (/charity-check) + main-checker
    *  deep-link CTA. Public flag so the UI can conditionally render entry
@@ -301,14 +330,14 @@ export const featureFlags = {
    *  upserts. When OFF (or unset), the scraper logs a no-op and exits.
    *  Wired in the GitHub Actions step env *and* checked at the top of
    *  scrape() so an accidental local run is also a no-op. */
-  charityCheckIngest: process.env.FF_CHARITY_CHECK_INGEST === "true",
+  charityCheckIngest: readBoolEnv("FF_CHARITY_CHECK_INGEST"),
 
   /** Phase 14 Sprint 1 closure — write public.vulnerability_detections rows
    *  from scanner runs. Currently mcp-audit only; extension-audit + skill-audit
    *  pending CVE rulepack mappings. Server-side only — controls fire-and-forget
    *  DB writes after a scan completes; never blocks the user response. Default
    *  OFF until the helper has been smoke-tested in preview. */
-  vulnDetectionRecording: process.env.FF_VULN_DETECTION_RECORDING === "true",
+  vulnDetectionRecording: readBoolEnv("FF_VULN_DETECTION_RECORDING"),
 
   /** Phase 14 Sprint 4 — B2B exposure matcher. The match-b2b-exposure Inngest
    *  function is triggered by b2b/exposure.requested.v1 events carrying a
@@ -319,7 +348,7 @@ export const featureFlags = {
    *  Server-side only — the Inngest function is the only consumer. Default
    *  OFF until the orgId tenant-scoping is confirmed safe and the
    *  /api/v1/exposure HTTP producer (separate PR) is in place. */
-  vulnB2bExposure: process.env.FF_VULN_B2B_EXPOSURE === "true",
+  vulnB2bExposure: readBoolEnv("FF_VULN_B2B_EXPOSURE"),
 
   /** Round-2 audit (b) closure — render "Similar reports we've seen" under
    *  the verdict on the consumer scan flow. The /api/analyze/similar route,
@@ -336,14 +365,14 @@ export const featureFlags = {
    *  invalidates the analyze-cache. Server-side only — gates the consumer
    *  web flow specifically; extension/bot surfaces stay on the unprompted
    *  classifier. */
-  ragThemes: process.env.FF_RAG_THEMES === "true",
+  ragThemes: readBoolEnv("FF_RAG_THEMES"),
 
   /** News Intel — fold regulator narrative search results (Scamwatch / ACSC /
    *  ASIC) into /api/v1/intel/search alongside reddit posts via the
    *  match_feed_items_narrative RPC. Default OFF for staged rollout — flip
    *  on once the corpus has had a few weeks to accrue and customers have
    *  asked for it. Server-side only — gates the API merge logic. */
-  regulatorIntelSearch: process.env.FF_REGULATOR_INTEL_SEARCH === "true",
+  regulatorIntelSearch: readBoolEnv("FF_REGULATOR_INTEL_SEARCH"),
 
   /** Shop Guard Stage 0 — pure commerce-page detector + post-processor that
    *  extracts commerce-specific tags from Claude's existing red-flag list
@@ -353,50 +382,48 @@ export const featureFlags = {
    *  flag end-to-end requires only the one server env. Default OFF until
    *  preview smoke-test confirms the taxonomy hits ≥30% of commerce-shaped
    *  fixtures. Plan: docs/plans/shop-guard-v2.md §3. */
-  shopSignal: process.env.FF_SHOP_SIGNAL === "true",
+  shopSignal: readBoolEnv("FF_SHOP_SIGNAL"),
 
   /** Shop Guard Stage 1 — enables the APIVoid Site Trustworthiness paid
    *  feed. Independent of `shopSignal` so the free Stage-0 detector keeps
    *  running if the paid feed is in trouble. Server-side only. Default OFF
    *  until the APIVoid trial-key preview smoke test passes; flip ON to
    *  start consuming the trial. Plan: docs/plans/shop-guard-v2.md §4 PR 2. */
-  shopSignalPaidFeed: process.env.FF_SHOP_SIGNAL_PAID_FEED === "true",
+  shopSignalPaidFeed: readBoolEnv("FF_SHOP_SIGNAL_PAID_FEED"),
 
   /** Shopfront clone-watch Layer 0 — daily NRD lexical sweep against the
    *  static AU brand watchlist. Server-side only (the Inngest function is
    *  the only consumer). Default OFF until WHOISDS_NRD_ZIP_URL is set in
    *  Vercel + the post-merge prod smoke verifies the first run produces
    *  rows + Telegram digest. Plan: docs/plans/clone-watch-mvp.md §4 PR 2. */
-  shopfrontCloneWatch: process.env.FF_SHOPFRONT_CLONE_WATCH === "true",
+  shopfrontCloneWatch: readBoolEnv("FF_SHOPFRONT_CLONE_WATCH"),
 
   /** Shopfront clone-watch outreach — master flag for Layers 1-5
    *  (admin triage dashboard, community submission, brand notification,
    *  weekly digest). Server-side only. When OFF, /admin/clone-watch
    *  returns notFound() and all downstream Inngest functions short-circuit.
    *  Default OFF. Plan: docs/plans/clone-watch-outreach.md. */
-  shopfrontCloneOutreach:
-    process.env.FF_SHOPFRONT_CLONE_OUTREACH === "true",
+  shopfrontCloneOutreach: readBoolEnv("FF_SHOPFRONT_CLONE_OUTREACH"),
 
   /** Layer 2 — Netcraft community submission. Server-side only. Gates the
    *  shopfront-clone-submit-netcraft Inngest fn. Independent of the
    *  master shopfrontCloneOutreach flag so the brand-notification path can
    *  ship before Netcraft API access is provisioned. Default OFF until
    *  NETCRAFT_REPORT_API_KEY is set in Vercel. */
-  shopfrontCloneSubmitNetcraft:
-    process.env.FF_SHOPFRONT_CLONE_SUBMIT_NETCRAFT === "true",
+  shopfrontCloneSubmitNetcraft: readBoolEnv(
+    "FF_SHOPFRONT_CLONE_SUBMIT_NETCRAFT",
+  ),
 
   /** Layer 3+4 — brand-direct notification. Server-side only. Gates the
    *  shopfront-clone-notify-brand Inngest fn. Default OFF until
    *  brand_contact_directory is seeded for the full watchlist and the
    *  manual-approval gate has been calibrated. */
-  shopfrontCloneNotifyBrand:
-    process.env.FF_SHOPFRONT_CLONE_NOTIFY_BRAND === "true",
+  shopfrontCloneNotifyBrand: readBoolEnv("FF_SHOPFRONT_CLONE_NOTIFY_BRAND"),
 
   /** Layer 5 — weekly digest Inngest cron + LinkedIn-post draft via
    *  Telegram. Server-side only. Default OFF until first triage week
    *  produces enough signal to publish. */
-  shopfrontCloneWeeklyDigest:
-    process.env.FF_SHOPFRONT_CLONE_WEEKLY_DIGEST === "true",
+  shopfrontCloneWeeklyDigest: readBoolEnv("FF_SHOPFRONT_CLONE_WEEKLY_DIGEST"),
 
   /** Phase A.3 — urlscan.io auto-scan + auto-classification for new
    *  clone-watch candidates. Free tier (100/day) is plenty for our
@@ -404,12 +431,8 @@ export const featureFlags = {
    *  Gates the two Inngest functions (clone-watch-urlscan + clone-watch-
    *  urlscan-rescan). Independent of the master shopfrontCloneOutreach
    *  flag so we can canary urlscan before turning on the outreach
-   *  consumers. Plan: docs/plans/clone-watch-outreach.md §15 Phase A.3.
-   *  Cache-bust marker 2026-05-26 — Turbo restored a stale utils artifact
-   *  that inlined `false` from before the env var existed; this comment
-   *  edit invalidates the cache so the env-var read happens at runtime. */
-  shopfrontCloneUrlscan:
-    process.env.FF_SHOPFRONT_CLONE_URLSCAN === "true",
+   *  consumers. Plan: docs/plans/clone-watch-outreach.md §15 Phase A.3. */
+  shopfrontCloneUrlscan: readBoolEnv("FF_SHOPFRONT_CLONE_URLSCAN"),
 
   /** Screenshot retention — when ON, `storeVerifiedScam` uploads the raw
    *  screenshot of a HIGH_RISK image submission to R2. Default OFF, and it
@@ -419,7 +442,7 @@ export const featureFlags = {
    *  path, plus legal review, the R2 `screenshots/` lifecycle rule, a
    *  privacy-policy update, and upload-failure observability. Server-side
    *  only. See docs/adr/0010-screenshot-retention-gated.md. */
-  screenshotRetention: process.env.FF_SCREENSHOT_RETENTION === "true",
+  screenshotRetention: readBoolEnv("FF_SCREENSHOT_RETENTION"),
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;
