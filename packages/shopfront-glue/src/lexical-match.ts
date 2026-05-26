@@ -92,6 +92,21 @@ const SCAM_CONTEXT_TOKENS = [
   "pay", "home", "shop", "store", "account", "au",
 ];
 
+// v3 matcher (#409). `au` is the only token <3 chars in the list. As a raw
+// substring it leaks on any domain whose primary label starts with the
+// letters "au" — `autoecolesoultbycfconduite.fr` (French driving school,
+// Coles FP), `auction-*`, `audio-*`, `australia-*` (without .au). Day-1
+// prod evidence (2026-05-24) caught the auto-école case. Other tokens in
+// the list are ≥3 chars and naturally word-boundary-safe (`pay` matches
+// `paypal-secure.shop` correctly, `bank` matches `cba-bank.info`).
+//
+// Treat segment-bounded tokens as primary-label-segment matches only:
+// the token must appear between `-` / `_` / `.` separators in the
+// brand-stripped residue. Preserves the `westpac-au.com` TP signal
+// (segment "au" between `-` and `.`); kills the `autoeoultbycf...` FP
+// class (no segment break before "au").
+const SEGMENT_BOUNDED_TOKENS = new Set(["au"]);
+
 export function lexicalMatch(
   domain: string,
   watchlist: BrandEntry[] = AU_BRAND_WATCHLIST,
@@ -180,7 +195,12 @@ function hasScamContext(domain: string, primary: string, brand: string): boolean
   // satisfy a token. Latent foot-gun if a future watchlist brand equals
   // a context token (e.g. a "Shop"/"Pay"/"Home"-named brand).
   const residue = stem.replaceAll(brand, " ");
-  return SCAM_CONTEXT_TOKENS.some((token) => residue.includes(token));
+  const residueSegments = residue.split(/[-_.]/).filter(Boolean);
+  return SCAM_CONTEXT_TOKENS.some((token) =>
+    SEGMENT_BOUNDED_TOKENS.has(token)
+      ? residueSegments.includes(token)
+      : residue.includes(token),
+  );
 }
 
 function normaliseConfusables(input: string): string {

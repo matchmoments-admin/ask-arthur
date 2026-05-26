@@ -209,6 +209,34 @@ describe("lexicalMatch", () => {
     expect(result?.signal_type).toBe("substring");
   });
 
+  it("v3: does NOT fire on 'autoecolesoultbycfconduite.fr' for brand 'Coles' (#409 FP kill)", () => {
+    // Day-1 prod evidence (2026-05-24). `autoecolesoultbycfconduite` is a
+    // French driving school. Brand "coles" matches as a substring (embedded
+    // in "auto-écoles"). Pre-v3 the residue `auto eoultbycfconduite.fr` had
+    // `.fr` ccTLD dropped → `autoeoultbycfconduite` → `.includes("au")` =
+    // true → FP. v3 requires `au` to be a residue segment, not embedded.
+    const list: BrandEntry[] = [{ brand: "Coles", legitimate_domains: ["coles.com.au"] }];
+    expect(lexicalMatch("autoecolesoultbycfconduite.fr", list)).toBeNull();
+  });
+
+  it("v3: does NOT fire on 'auctionkmartco.com' for brand 'Kmart' (segment-position guard)", () => {
+    // Brand "kmart" substring hit. Pre-v3, residue `auctionco` → mid-word
+    // `au` leak. v3 guards by requiring `au` to be its own residue segment.
+    const list: BrandEntry[] = [{ brand: "Kmart", legitimate_domains: ["kmart.com.au"] }];
+    expect(lexicalMatch("auctionkmartco.com", list)).toBeNull();
+  });
+
+  it("v3: DOES fire on 'kmart-au-secure.shop' (segment-bounded 'au' as middle segment)", () => {
+    // Defense: the segment-bounded check must work when `au` sits between
+    // two other segments, not just leading/trailing. Residue after Kmart
+    // strip: ` -au-secure.shop` → segments ["", "au", "secure", "shop"]
+    // → `au` is present. TP preserved.
+    const list: BrandEntry[] = [{ brand: "Kmart", legitimate_domains: ["kmart.com.au"] }];
+    const result = lexicalMatch("kmart-au-secure.shop", list);
+    expect(result).not.toBeNull();
+    expect(result?.signal_type).toBe("substring");
+  });
+
   it("v2: confusable signal is NOT gated by context-token requirement", () => {
     // Cyrillic 'а' in westpac with no other context tokens. Confusable hits
     // are intentional homograph attacks — always high-confidence.
