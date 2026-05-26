@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   buildSubmissionReason,
   NETCRAFT_REPORT_ENDPOINT_URL,
@@ -20,6 +20,15 @@ import {
   serialiseSubmitFailure,
   serialiseRetrievalTimeout,
 } from "@/app/api/inngest/functions/clone-watch-urlscan";
+import {
+  groupByBrandRecipient,
+  buildBatchSubject,
+  buildTelegramApprovalMessage,
+} from "@/app/api/inngest/functions/clone-watch-notify-brand-prepare";
+import {
+  signBatchApproveToken,
+  verifyBatchApproveToken,
+} from "@/lib/clone-watch-approve";
 import type { URLScanResult } from "@askarthur/scam-engine/urlscan";
 
 // Covers the pure helpers that route channels, build outbound copy, and
@@ -574,5 +583,230 @@ describe("clone-watch-urlscan — failure-evidence serialisers (#441)", () => {
       expect(ev.retrieval_timeout).toBe(true);
       expect(typeof ev.scanned_at).toBe("string");
     });
+  });
+});
+
+// PR-B2 — approval-gated daily-batch flow.
+describe("clone-watch-notify-brand-prepare — pure helpers", () => {
+  describe("groupByBrandRecipient", () => {
+    const baseRow = (over: Partial<{ id: number; brand: string; recipient: string; candidate_domain: string }>) => ({
+      id: over.id ?? 1,
+      alert_id: 100 + (over.id ?? 1),
+      brand: over.brand ?? "kmart.com.au",
+      candidate_domain: over.candidate_domain ?? "qkmart.com",
+      candidate_url: "https://" + (over.candidate_domain ?? "qkmart.com"),
+      recipient: over.recipient ?? "vulnerabilitydisclosure@bigw.com.au",
+      channel_type: "fraud_inbox",
+      severity_tier: "medium",
+      enqueued_at: "2026-05-26T03:00:00.000Z",
+    });
+
+    it("groups 5 Kmart hits into ONE batch per recipient (user feedback)", () => {
+      const rows = [1, 2, 3, 4, 5].map((i) =>
+        baseRow({ id: i, candidate_domain: `kmart-clone-${i}.com` }),
+      );
+      const groups = groupByBrandRecipient(rows);
+      expect(groups).toHaveLength(1);
+      expect(groups[0].rows).toHaveLength(5);
+      expect(groups[0].brand).toBe("kmart.com.au");
+    });
+
+    it("splits across brands", () => {
+      const rows = [
+        baseRow({ id: 1, brand: "kmart.com.au", recipient: "kmart@x.com" }),
+        baseRow({ id: 2, brand: "westpac.com.au", recipient: "westpac@x.com" }),
+        baseRow({ id: 3, brand: "kmart.com.au", recipient: "kmart@x.com" }),
+      ];
+      const groups = groupByBrandRecipient(rows);
+      expect(groups).toHaveLength(2);
+      const kmart = groups.find((g) => g.brand === "kmart.com.au");
+      expect(kmart?.rows).toHaveLength(2);
+    });
+
+    it("splits across recipients for the same brand", () => {
+      const rows = [
+        baseRow({ id: 1, recipient: "a@x.com" }),
+        baseRow({ id: 2, recipient: "b@x.com" }),
+      ];
+      const groups = groupByBrandRecipient(rows);
+      expect(groups).toHaveLength(2);
+    });
+  });
+
+  describe("buildBatchSubject", () => {
+    const group = (count: number) => ({
+      brand: "kmart.com.au",
+      recipient: "x@y.com",
+      channel_type: "fraud_inbox",
+      rows: Array.from({ length: count }, (_, i) => ({
+        id: i,
+        alert_id: i,
+        brand: "kmart.com.au",
+        candidate_domain: `clone-${i}.com`,
+        candidate_url: "https://x",
+        recipient: "x@y.com",
+        channel_type: "fraud_inbox",
+        severity_tier: "medium",
+        enqueued_at: "2026-05-26T03:00:00.000Z",
+      })),
+    });
+
+    it("uses the single-domain shape when count === 1", () => {
+      const s = buildBatchSubject(group(1));
+      expect(s).toBe("Possible clone of kmart.com.au — clone-0.com");
+    });
+
+    it("uses the consolidated shape when count > 1", () => {
+      const s = buildBatchSubject(group(5));
+      expect(s).toContain("5 possible clones of kmart.com.au");
+    });
+  });
+
+  describe("buildTelegramApprovalMessage", () => {
+    it("includes both approve + reject URLs + truncated domain list", () => {
+      const msg = buildTelegramApprovalMessage({
+        brand: "kmart.com.au",
+        recipient: "x@y.com",
+        candidateCount: 12,
+        candidateDomains: Array.from({ length: 12 }, (_, i) => `c${i}.com`),
+        subject: "12 possible clones of kmart.com.au",
+        approveUrl: "https://askarthur.au/api/admin/clone-watch/approve-batch/abc?sig=xyz",
+        rejectUrl: "https://askarthur.au/api/admin/clone-watch/reject-batch/abc?sig=xyz",
+      });
+      expect(msg).toContain("kmart.com.au");
+      expect(msg).toContain("Approve + send");
+      expect(msg).toContain("Reject");
+      expect(msg).toContain("approve-batch/abc");
+      expect(msg).toContain("reject-batch/abc");
+      // List capped at 10 + summary
+      expect(msg).toContain("…and 2 more");
+    });
+
+    it("HTML-escapes brand + subject (defence vs unicode lookalikes in brand names)", () => {
+      const msg = buildTelegramApprovalMessage({
+        brand: "<script>alert(1)</script>",
+        recipient: "x@y.com",
+        candidateCount: 1,
+        candidateDomains: ["c0.com"],
+        subject: "<b>html-in-subject</b>",
+        approveUrl: "https://x",
+        rejectUrl: "https://x",
+      });
+      expect(msg).not.toContain("<script>");
+      expect(msg).toContain("&lt;script&gt;");
+      expect(msg).toContain("&lt;b&gt;");
+    });
+  });
+});
+
+describe("clone-watch-approve — HMAC", () => {
+  beforeEach(() => {
+    process.env.CLONE_WATCH_APPROVAL_SECRET = "test-secret-do-not-leak";
+  });
+
+  afterEach(() => {
+    delete process.env.CLONE_WATCH_APPROVAL_SECRET;
+  });
+
+  it("round-trips: sign → verify true", () => {
+    const sig = signBatchApproveToken(
+      "approve",
+      "batch-1",
+      "kmart.com.au",
+      "x@y.com",
+    );
+    expect(
+      verifyBatchApproveToken(
+        "approve",
+        "batch-1",
+        "kmart.com.au",
+        "x@y.com",
+        sig,
+      ),
+    ).toBe(true);
+  });
+
+  it("verify fails when action differs (approve sig used for reject)", () => {
+    const sig = signBatchApproveToken(
+      "approve",
+      "batch-1",
+      "kmart.com.au",
+      "x@y.com",
+    );
+    expect(
+      verifyBatchApproveToken(
+        "reject",
+        "batch-1",
+        "kmart.com.au",
+        "x@y.com",
+        sig,
+      ),
+    ).toBe(false);
+  });
+
+  it("verify fails when batchId differs", () => {
+    const sig = signBatchApproveToken(
+      "approve",
+      "batch-1",
+      "kmart.com.au",
+      "x@y.com",
+    );
+    expect(
+      verifyBatchApproveToken(
+        "approve",
+        "batch-2",
+        "kmart.com.au",
+        "x@y.com",
+        sig,
+      ),
+    ).toBe(false);
+  });
+
+  it("verify fails when recipient differs (no URL-substitution attack)", () => {
+    const sig = signBatchApproveToken(
+      "approve",
+      "batch-1",
+      "kmart.com.au",
+      "x@y.com",
+    );
+    expect(
+      verifyBatchApproveToken(
+        "approve",
+        "batch-1",
+        "kmart.com.au",
+        "attacker@evil.com",
+        sig,
+      ),
+    ).toBe(false);
+  });
+
+  it("verify is case-insensitive on brand + recipient (matches signing)", () => {
+    const sig = signBatchApproveToken(
+      "approve",
+      "batch-1",
+      "Kmart.com.au",
+      "X@Y.COM",
+    );
+    expect(
+      verifyBatchApproveToken(
+        "approve",
+        "batch-1",
+        "kmart.com.au",
+        "x@y.com",
+        sig,
+      ),
+    ).toBe(true);
+  });
+
+  it("verify gracefully rejects malformed token (non-hex / wrong length)", () => {
+    expect(
+      verifyBatchApproveToken(
+        "approve",
+        "batch-1",
+        "kmart.com.au",
+        "x@y.com",
+        "not-a-hex-string",
+      ),
+    ).toBe(false);
   });
 });

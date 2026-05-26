@@ -17,15 +17,31 @@ import {
   WHITE,
 } from "./_layout/tokens";
 
+export interface CloneWatchCandidate {
+  candidateDomain: string;
+  candidateUrl: string;
+  signalType: string;
+  score: number;
+  firstSeenAt: string;
+  evidenceSummary: string;
+  netcraftSubmissionId?: string;
+}
+
 export interface CloneWatchBrandAlertProps {
   brandName: string;
   legitimateDomain: string;
-  candidateDomain: string;
-  candidateUrl: string;
-  signalType: string; // 'substring' | 'levenshtein' | 'confusable'
-  score: number;
-  firstSeenAt: string; // ISO
-  evidenceSummary: string;
+  /** Either a single candidate (legacy single-hit path — kept for back-compat
+   *  with any non-batched call sites) OR an array of N candidates that ship
+   *  as ONE consolidated email (PR-B2 batched-daily flow). When `candidates`
+   *  is provided it takes precedence; otherwise the singular fields below
+   *  synthesise a one-element array. */
+  candidates?: CloneWatchCandidate[];
+  candidateDomain?: string;
+  candidateUrl?: string;
+  signalType?: string;
+  score?: number;
+  firstSeenAt?: string;
+  evidenceSummary?: string;
   netcraftSubmissionId?: string;
   /** Optional ack URL — when present, renders a teal-pill CTA so the brand
    *  team can confirm receipt and tell us what they're doing. Helps populate
@@ -50,21 +66,35 @@ export interface CloneWatchBrandAlertProps {
  * Used by Layer 3 (formal channels: Bugcrowd VDP, security.txt) and
  * Layer 4 (courtesy fraud-inbox sends) — same body, channel-type routes.
  */
-export default function CloneWatchBrandAlert({
-  brandName,
-  legitimateDomain,
-  candidateDomain,
-  candidateUrl,
-  signalType,
-  score,
-  firstSeenAt,
-  evidenceSummary,
-  netcraftSubmissionId,
-  ackRequestUrl,
-  reportRef,
-}: CloneWatchBrandAlertProps) {
-  const signalLabel = describeSignal(signalType);
-  const ref = reportRef ?? `CW-${candidateDomain}`;
+export default function CloneWatchBrandAlert(
+  props: CloneWatchBrandAlertProps,
+) {
+  const {
+    brandName,
+    legitimateDomain,
+    ackRequestUrl,
+    reportRef,
+  } = props;
+  // Normalise to candidates[] regardless of which prop shape the caller used.
+  const candidates: CloneWatchCandidate[] =
+    props.candidates && props.candidates.length > 0
+      ? props.candidates
+      : [
+          {
+            candidateDomain: props.candidateDomain ?? "",
+            candidateUrl: props.candidateUrl ?? "",
+            signalType: props.signalType ?? "lexical",
+            score: props.score ?? 0,
+            firstSeenAt: props.firstSeenAt ?? new Date().toISOString(),
+            evidenceSummary: props.evidenceSummary ?? "",
+            netcraftSubmissionId: props.netcraftSubmissionId,
+          },
+        ];
+  const isBatch = candidates.length > 1;
+  const primary = candidates[0];
+  const signalLabel = describeSignal(primary.signalType);
+  const ref =
+    reportRef ?? (isBatch ? `CW-batch-${brandName}` : `CW-${primary.candidateDomain}`);
   const stopMailto = `mailto:brendan@askarthur.au?subject=${encodeURIComponent(
     `STOP clone-watch notifications — ${brandName}`,
   )}&body=${encodeURIComponent(
@@ -73,7 +103,11 @@ export default function CloneWatchBrandAlert({
 
   return (
     <EditorialBriefingLayout
-      preview={`Possible clone domain matching ${brandName} — ${candidateDomain}`}
+      preview={
+        isBatch
+          ? `${candidates.length} possible clones matching ${brandName}`
+          : `Possible clone domain matching ${brandName} — ${primary.candidateDomain}`
+      }
       headerLabel="Clone-watch alert"
       unsubscribeUrl={stopMailto}
       subscriptionReason={`You're receiving this because Ask Arthur's daily lexical sweep of newly-registered domains matched the candidate below against your brand ${brandName}. Reply STOP or use the link below to suppress future notifications about this brand.`}
@@ -103,38 +137,49 @@ export default function CloneWatchBrandAlert({
       >
         Hello {brandName} security team — Ask Arthur (askarthur.au) runs a
         daily lexical sweep of newly-registered domains against a watchlist
-        of Australian brands. The domain below surfaced as a {signalLabel} of{" "}
-        <strong>{legitimateDomain}</strong> and may be worth your fraud /
-        takedown team&apos;s attention.
+        of Australian brands. {isBatch ? (
+          <>
+            <strong>{candidates.length} domains</strong> surfaced overnight as
+            possible clones of <strong>{legitimateDomain}</strong>. They may
+            be worth your fraud / takedown team&apos;s attention.
+          </>
+        ) : (
+          <>
+            The domain below surfaced as a {signalLabel} of{" "}
+            <strong>{legitimateDomain}</strong> and may be worth your fraud /
+            takedown team&apos;s attention.
+          </>
+        )}
       </Text>
 
-      <SignalBlock
-        candidateDomain={candidateDomain}
-        candidateUrl={candidateUrl}
-        legitimateDomain={legitimateDomain}
-        signalType={signalType}
-        score={score}
-        firstSeenAt={firstSeenAt}
-        evidenceSummary={evidenceSummary}
-        netcraftSubmissionId={netcraftSubmissionId}
-      />
+      {candidates.map((c) => (
+        <SignalBlock
+          key={c.candidateDomain}
+          candidateDomain={c.candidateDomain}
+          candidateUrl={c.candidateUrl}
+          legitimateDomain={legitimateDomain}
+          signalType={c.signalType}
+          score={c.score}
+          firstSeenAt={c.firstSeenAt}
+          evidenceSummary={c.evidenceSummary}
+          netcraftSubmissionId={c.netcraftSubmissionId}
+        />
+      ))}
 
       <Hr style={{ borderColor: DIVIDER, margin: "24px 0" }} />
 
       <SectionHeading>What we&apos;ve done</SectionHeading>
-      <Text
-        style={bodyTextStyle}
-      >
-        {netcraftSubmissionId ? (
+      <Text style={bodyTextStyle}>
+        {primary.netcraftSubmissionId ? (
           <>
             Submitted to Netcraft for community blocklist + browser-block
-            coverage. Netcraft submission ref:{" "}
-            <code style={codeInlineStyle}>{netcraftSubmissionId}</code>.
+            coverage. {isBatch ? "First Netcraft submission ref" : "Netcraft submission ref"}:{" "}
+            <code style={codeInlineStyle}>{primary.netcraftSubmissionId}</code>.
           </>
         ) : (
           <>
-            We have not yet submitted this to community blocklists —
-            sharing the signal with you first.
+            We have not yet submitted to community blocklists — sharing the
+            signal with you first.
           </>
         )}
       </Text>
