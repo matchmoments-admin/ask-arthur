@@ -404,7 +404,10 @@ export const featureFlags = {
    *  Gates the two Inngest functions (clone-watch-urlscan + clone-watch-
    *  urlscan-rescan). Independent of the master shopfrontCloneOutreach
    *  flag so we can canary urlscan before turning on the outreach
-   *  consumers. Plan: docs/plans/clone-watch-outreach.md §15 Phase A.3. */
+   *  consumers. Plan: docs/plans/clone-watch-outreach.md §15 Phase A.3.
+   *  Cache-bust marker 2026-05-26 — Turbo restored a stale utils artifact
+   *  that inlined `false` from before the env var existed; this comment
+   *  edit invalidates the cache so the env-var read happens at runtime. */
   shopfrontCloneUrlscan:
     process.env.FF_SHOPFRONT_CLONE_URLSCAN === "true",
 
