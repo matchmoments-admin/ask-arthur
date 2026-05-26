@@ -1,0 +1,24 @@
+{
+  "_README": "Copy this file to .mcp.json (gitignored) and fill in the env vars from your shell. The supabase server runs in --read-only mode; writes go via the Supabase MCP HTTP endpoint when explicitly authorised, or through the Supabase dashboard, never through this local stdio server. To grant write access on a personal dev branch, override the supabase entry in a sibling `.mcp.json.local` file (also gitignored).",
+  "mcpServers": {
+    "figma": {
+      "type": "http",
+      "url": "https://mcp.figma.com/mcp"
+    },
+    "supabase": {
+      "command": "/usr/local/bin/mcp-server-supabase",
+      "args": ["--read-only", "--project-ref=rquomhcgnodxzkhokwni"],
+      "env": {
+        "SUPABASE_ACCESS_TOKEN": "${SUPABASE_ACCESS_TOKEN}"
+      }
+    },
+    "gemini": {
+      "command": "/usr/local/bin/gemini-mcp",
+      "args": ["--quiet"],
+      "env": {
+        "GEMINI_API_KEY": "${GEMINI_API_KEY}",
+        "GEMINI_OUTPUT_DIR": "/absolute/path/to/your/checkout/apps/web/public/illustrations"
+      }
+    }
+  }
+}

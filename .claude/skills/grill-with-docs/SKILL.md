@@ -15,6 +15,10 @@ If a question can be answered by exploring the codebase, explore the codebase in
 
 <supporting-info>
 
+## Stack pins (read first when libraries are involved)
+
+If the session touches React, Next.js, Zod, Expo, WXT, Supabase JS, or Inngest, read [`STACK-PINS.md`](./STACK-PINS.md) before engaging. The installed versions in this repo drift from common training-data defaults; the pins file documents the specific hazards (e.g. `cookies()` is async in Next 16, `z.string().url()` is removed in Zod 4). Update STACK-PINS.md inline if you discover the installed version has bumped.
+
 ## Domain awareness
 
 During codebase exploration, also look for existing documentation:
