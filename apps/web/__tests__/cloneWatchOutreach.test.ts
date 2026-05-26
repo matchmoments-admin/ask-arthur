@@ -3,7 +3,10 @@ import {
   buildSubmissionReason,
   NETCRAFT_REPORT_ENDPOINT_URL,
 } from "@/app/api/inngest/functions/clone-watch-submit-netcraft";
-import { decideNotificationAction } from "@/app/api/inngest/functions/clone-watch-notify-brand";
+import {
+  decideNotificationAction,
+  nextWeeklyDigestSchedule,
+} from "@/app/api/inngest/functions/clone-watch-notify-brand";
 import {
   buildLinkedInDraft,
   buildTelegramMessage,
@@ -149,6 +152,100 @@ describe("clone-watch-notify-brand — decideNotificationAction", () => {
       kind: "skip",
       reason: "directory_recipient_null",
     });
+  });
+
+  // PR-B Phase 1 calibration: severity-gated routing for email channels.
+  describe("severity gate", () => {
+    const securityRow = {
+      ...baseRow,
+      channel_type: "security_txt" as const,
+      recipient: "security@example.com",
+    };
+
+    it("routes critical severity to immediate email", () => {
+      const action = decideNotificationAction(securityRow, "critical");
+      expect(action).toEqual({ kind: "email", channel: "security_txt" });
+    });
+
+    it("routes high severity to immediate email", () => {
+      const action = decideNotificationAction(securityRow, "high");
+      expect(action).toEqual({ kind: "email", channel: "security_txt" });
+    });
+
+    it("routes medium severity to immediate email (no-regression default)", () => {
+      const action = decideNotificationAction(securityRow, "medium");
+      expect(action).toEqual({ kind: "email", channel: "security_txt" });
+    });
+
+    it("routes low severity to weekly-digest enqueue", () => {
+      const action = decideNotificationAction(securityRow, "low");
+      expect(action).toEqual({
+        kind: "enqueue_digest",
+        channel: "security_txt",
+        severity: "low",
+      });
+    });
+
+    it("defaults to medium (immediate email) when severity is omitted", () => {
+      const action = decideNotificationAction(securityRow);
+      expect(action).toEqual({ kind: "email", channel: "security_txt" });
+    });
+
+    it("low severity on fraud_inbox enqueues too", () => {
+      const action = decideNotificationAction(
+        { ...securityRow, channel_type: "fraud_inbox" },
+        "low",
+      );
+      expect(action).toEqual({
+        kind: "enqueue_digest",
+        channel: "fraud_inbox",
+        severity: "low",
+      });
+    });
+
+    it("low severity does NOT bypass manual_action routing for VDPs", () => {
+      // bugcrowd_vdp / contact_form / manual_review always go to manual_action
+      // regardless of severity — the channel constraint dominates.
+      const action = decideNotificationAction(
+        { ...baseRow, channel_type: "bugcrowd_vdp" },
+        "low",
+      );
+      expect(action).toEqual({ kind: "manual_action", channel: "bugcrowd_vdp" });
+    });
+
+    it("low severity does NOT bypass null-recipient skip", () => {
+      const action = decideNotificationAction(
+        { ...securityRow, recipient: null },
+        "low",
+      );
+      expect(action).toEqual({
+        kind: "skip",
+        reason: "directory_recipient_null",
+      });
+    });
+  });
+});
+
+describe("clone-watch-notify-brand — nextWeeklyDigestSchedule", () => {
+  it("returns Sunday 09:00 UTC when 'now' is a weekday", () => {
+    // Tuesday 26 May 2026 at 03:14 UTC → next Sunday is 31 May
+    const now = new Date(Date.UTC(2026, 4, 26, 3, 14, 0));
+    const next = nextWeeklyDigestSchedule(now);
+    expect(next.toISOString()).toBe("2026-05-31T09:00:00.000Z");
+  });
+
+  it("skips to the FOLLOWING Sunday when 'now' is already Sunday", () => {
+    // Sunday 24 May 2026 at 10:00 UTC (after 09:00 cron) → next Sunday is 31 May
+    const now = new Date(Date.UTC(2026, 4, 24, 10, 0, 0));
+    const next = nextWeeklyDigestSchedule(now);
+    expect(next.toISOString()).toBe("2026-05-31T09:00:00.000Z");
+  });
+
+  it("rolls to Sunday from Saturday", () => {
+    // Saturday 23 May 2026 at 22:00 UTC → next Sunday is 24 May at 09:00
+    const now = new Date(Date.UTC(2026, 4, 23, 22, 0, 0));
+    const next = nextWeeklyDigestSchedule(now);
+    expect(next.toISOString()).toBe("2026-05-24T09:00:00.000Z");
   });
 });
 

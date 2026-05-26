@@ -86,4 +86,145 @@ export const AU_BRAND_WATCHLIST: BrandEntry[] = [
   { brand: "Telstra", legitimate_domains: ["telstra.com.au"] },
   { brand: "Optus", legitimate_domains: ["optus.com.au"] },
   { brand: "Vodafone", legitimate_domains: ["vodafone.com.au"] },
+
+  // ── PR-B (Phase 1) expansion: +47 brands across high-impersonation
+  // sectors that the original list missed. See
+  // docs/research/clone-watch-brand-contacts.md for provenance + the
+  // per-brand security/abuse contacts seeded into
+  // brand_contact_directory by migration v150.
+
+  // Government services — ACSC's recurring top-impersonation list.
+  { brand: "myGov", legitimate_domains: ["my.gov.au"] },
+  { brand: "Australian Taxation Office", legitimate_domains: ["ato.gov.au"] },
+  {
+    brand: "Services Australia",
+    legitimate_domains: [
+      "servicesaustralia.gov.au",
+      "centrelink.gov.au",
+      "medicareaustralia.gov.au",
+    ],
+  },
+  { brand: "Service NSW", legitimate_domains: ["service.nsw.gov.au"] },
+  { brand: "Service Victoria", legitimate_domains: ["service.vic.gov.au"] },
+  { brand: "Service WA", legitimate_domains: ["wa.gov.au"] },
+  {
+    brand: "Department of Home Affairs",
+    legitimate_domains: ["homeaffairs.gov.au", "immi.homeaffairs.gov.au"],
+  },
+  {
+    brand: "NDIS",
+    legitimate_domains: ["ndis.gov.au", "ndiscommission.gov.au"],
+  },
+  { brand: "Australian Electoral Commission", legitimate_domains: ["aec.gov.au"] },
+  { brand: "Reserve Bank of Australia", legitimate_domains: ["rba.gov.au"] },
+
+  // Energy retailers — recurring refund/disconnect-threat phishing template.
+  { brand: "AGL", legitimate_domains: ["agl.com.au"] },
+  { brand: "Origin Energy", legitimate_domains: ["originenergy.com.au"] },
+  { brand: "EnergyAustralia", legitimate_domains: ["energyaustralia.com.au"] },
+  { brand: "Red Energy", legitimate_domains: ["redenergy.com.au"] },
+  { brand: "Alinta Energy", legitimate_domains: ["alintaenergy.com.au"] },
+  { brand: "Powershop", legitimate_domains: ["powershop.com.au"] },
+  { brand: "Simply Energy", legitimate_domains: ["simplyenergy.com.au"] },
+
+  // Airlines + travel — voucher/refund + rewards-points phishing.
+  { brand: "Qantas", legitimate_domains: ["qantas.com.au", "qantas.com"] },
+  { brand: "Virgin Australia", legitimate_domains: ["virginaustralia.com"] },
+  { brand: "Jetstar", legitimate_domains: ["jetstar.com"] },
+  { brand: "Webjet", legitimate_domains: ["webjet.com.au"] },
+  {
+    brand: "Flight Centre",
+    legitimate_domains: ["flightcentre.com.au", "flightcentre.com"],
+  },
+  { brand: "Booking.com", legitimate_domains: ["booking.com"] },
+  { brand: "Wotif", legitimate_domains: ["wotif.com"] },
+
+  // Health insurers — premium-refund / claim-update phishing.
+  { brand: "Bupa", legitimate_domains: ["bupa.com.au"] },
+  { brand: "Medibank", legitimate_domains: ["medibank.com.au"] },
+  { brand: "HCF", legitimate_domains: ["hcf.com.au"] },
+  { brand: "NIB", legitimate_domains: ["nib.com.au"] },
+  { brand: "AHM", legitimate_domains: ["ahm.com.au"] },
+  { brand: "HBF", legitimate_domains: ["hbf.com.au"] },
+
+  // Crypto exchanges — account-takeover + transfer-recovery scams.
+  {
+    brand: "Binance Australia",
+    legitimate_domains: ["binance.com", "binance.com.au"],
+  },
+  { brand: "CoinSpot", legitimate_domains: ["coinspot.com.au"] },
+  { brand: "Independent Reserve", legitimate_domains: ["independentreserve.com"] },
+  { brand: "Swyftx", legitimate_domains: ["swyftx.com"] },
+  { brand: "BTC Markets", legitimate_domains: ["btcmarkets.net"] },
+  { brand: "Digital Surge", legitimate_domains: ["digitalsurge.com.au"] },
+
+  // Investment platforms — refund/withdrawal phishing.
+  {
+    brand: "CommSec",
+    legitimate_domains: ["commsec.com.au"],
+  },
+  { brand: "Stake", legitimate_domains: ["hellostake.com"] },
+  { brand: "SelfWealth", legitimate_domains: ["selfwealth.com.au"] },
+  { brand: "Superhero", legitimate_domains: ["superhero.com.au"] },
+  { brand: "Pearler", legitimate_domains: ["pearler.com"] },
+
+  // Tolls / public-transport cards — SMS-bill + top-up phishing. Linkt is
+  // top-3 most-impersonated AU brand 2024 per Scamwatch.
+  { brand: "Linkt (Transurban)", legitimate_domains: ["linkt.com.au"] },
+  { brand: "EastLink", legitimate_domains: ["eastlink.com.au"] },
+  {
+    brand: "Opal (Transport for NSW)",
+    legitimate_domains: ["transportnsw.info", "opal.com.au"],
+  },
+  {
+    brand: "myki (Public Transport Victoria)",
+    legitimate_domains: ["ptv.vic.gov.au", "mymyki.com.au"],
+  },
+  { brand: "Translink (Queensland)", legitimate_domains: ["translink.com.au"] },
+
+  // Real estate / classifieds — rental-bond + private-seller-escrow fraud.
+  {
+    brand: "realestate.com.au",
+    legitimate_domains: [
+      "realestate.com.au",
+      "property.com.au",
+      "realcommercial.com.au",
+    ],
+  },
+  {
+    brand: "Domain",
+    legitimate_domains: ["domain.com.au", "allhomes.com.au"],
+  },
+  {
+    brand: "Carsales",
+    legitimate_domains: [
+      "carsales.com.au",
+      "redbook.com.au",
+      "bikesales.com.au",
+    ],
+  },
+  { brand: "Gumtree", legitimate_domains: ["gumtree.com.au"] },
+
+  // Streaming — subscription-renewal phishing (global top-5 globally).
+  {
+    brand: "Foxtel / Kayo",
+    legitimate_domains: [
+      "foxtel.com.au",
+      "kayosports.com.au",
+      "binge.com.au",
+      "hubbl.com.au",
+    ],
+  },
+  { brand: "Netflix (AU)", legitimate_domains: ["netflix.com"] },
+  { brand: "Spotify (AU)", legitimate_domains: ["spotify.com"] },
+  { brand: "Stan", legitimate_domains: ["stan.com.au"] },
+  {
+    brand: "Disney+ (AU)",
+    legitimate_domains: ["disneyplus.com", "disney.com.au"],
+  },
+
+  // E-commerce — marketplace + order-confirm phishing.
+  { brand: "eBay Australia", legitimate_domains: ["ebay.com.au"] },
+  { brand: "Kogan", legitimate_domains: ["kogan.com"] },
+  { brand: "MyDeal", legitimate_domains: ["mydeal.com.au"] },
 ];
