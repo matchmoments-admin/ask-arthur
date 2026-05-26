@@ -26,6 +26,32 @@ export interface URLScanSubmission {
   apiUrl: string;
 }
 
+/**
+ * Detailed submit result for callers that need to record why a submission
+ * failed (e.g. clone-watch's persist-on-failure path, so the row gets
+ * `urlscan_scanned_at = now()` and is picked up by tomorrow's rescan cron
+ * instead of being stuck forever — see issue #441).
+ *
+ * Tagged union so callers do `if (r.ok) {...}` and TypeScript narrows.
+ */
+export type URLScanSubmitDetailed =
+  | { ok: true; uuid: string; apiUrl: string }
+  | {
+      ok: false;
+      /** Coarse-grained reason for telemetry + dashboard grouping */
+      error:
+        | "no_api_key"
+        | "http_error"
+        | "network_error"
+        | "timeout"
+        | "rate_limited"
+        | "rejected";
+      /** HTTP status when error came from a response (http_error / rate_limited / rejected) */
+      status?: number;
+      /** Best-effort human-readable detail — may include API error body */
+      message?: string;
+    };
+
 const EMPTY_RESULT: URLScanResult = {
   scanId: "",
   screenshotUrl: null,
@@ -41,16 +67,36 @@ const EMPTY_RESULT: URLScanResult = {
 /**
  * Submit a URL for scanning. Returns a scan UUID for later retrieval.
  * Free tier: 100 scans/day (public), 5,000/day (paid).
+ *
+ * Existing legacy surface — returns `null` on any failure. New code
+ * should prefer `submitURLScanWithDetails` so it can record the failure
+ * reason (issue #441 — clone-watch row stuck-state).
  */
-export async function submitURLScan(url: string): Promise<URLScanSubmission | null> {
+export async function submitURLScan(
+  url: string,
+): Promise<URLScanSubmission | null> {
+  const result = await submitURLScanWithDetails(url);
+  return result.ok ? { uuid: result.uuid, apiUrl: result.apiUrl } : null;
+}
+
+/**
+ * Submit a URL for scanning, returning a discriminated result that
+ * distinguishes success from each failure mode. Callers that need to
+ * persist or surface the failure reason (e.g. clone-watch's
+ * persist-on-failure path) should prefer this over `submitURLScan`.
+ */
+export async function submitURLScanWithDetails(
+  url: string,
+): Promise<URLScanSubmitDetailed> {
   const apiKey = process.env.URLSCAN_API_KEY;
   if (!apiKey) {
     logger.warn("URLSCAN_API_KEY not set, skipping URLScan submission");
-    return null;
+    return { ok: false, error: "no_api_key" };
   }
 
+  let res: Response;
   try {
-    const res = await fetch("https://urlscan.io/api/v1/scan/", {
+    res = await fetch("https://urlscan.io/api/v1/scan/", {
       method: "POST",
       headers: {
         "API-Key": apiKey,
@@ -62,21 +108,45 @@ export async function submitURLScan(url: string): Promise<URLScanSubmission | nu
       }),
       signal: AbortSignal.timeout(10_000),
     });
-
-    if (!res.ok) {
-      logger.warn("URLScan submission failed", { status: res.status, url });
-      return null;
-    }
-
-    const data = await res.json();
-    return {
-      uuid: data.uuid,
-      apiUrl: data.api,
-    };
   } catch (err) {
-    logger.error("URLScan submission error", { error: String(err), url });
-    return null;
+    const message = String(err);
+    const isTimeout =
+      message.includes("AbortError") || message.includes("TimeoutError");
+    logger.error("URLScan submission error", { error: message, url });
+    return {
+      ok: false,
+      error: isTimeout ? "timeout" : "network_error",
+      message,
+    };
   }
+
+  if (!res.ok) {
+    // urlscan's API documents 429 for rate limit and 400 for outright
+    // refusal (e.g. internal IP, malformed URL, blocked domain). Treat
+    // them as distinct so the dashboard can group them.
+    let bodyText: string | undefined;
+    try {
+      bodyText = (await res.text()).slice(0, 500);
+    } catch {
+      // best-effort body capture — ignore parse failures
+    }
+    const reason =
+      res.status === 429
+        ? "rate_limited"
+        : res.status === 400
+          ? "rejected"
+          : "http_error";
+    logger.warn("URLScan submission failed", {
+      status: res.status,
+      reason,
+      url,
+      body: bodyText,
+    });
+    return { ok: false, error: reason, status: res.status, message: bodyText };
+  }
+
+  const data = (await res.json()) as { uuid: string; api: string };
+  return { ok: true, uuid: data.uuid, apiUrl: data.api };
 }
 
 /**

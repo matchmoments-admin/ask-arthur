@@ -4,9 +4,10 @@ import {
   parseCloneWatchScanRequestedData,
 } from "@askarthur/scam-engine/inngest/events";
 import {
-  submitURLScan,
+  submitURLScanWithDetails,
   retrieveURLScan,
   type URLScanResult,
+  type URLScanSubmitDetailed,
 } from "@askarthur/scam-engine/urlscan";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -100,10 +101,55 @@ export const cloneWatchUrlscan = inngest.createFunction(
 
     // Submit the scan
     const submission = await step.run("submit-urlscan", async () => {
-      return submitURLScan(data.candidateUrl);
+      return submitURLScanWithDetails(data.candidateUrl);
     });
-    if (!submission) {
-      return { skipped: true, reason: "submit_failed" };
+
+    // Submit failed — persist a stub row so:
+    //   (1) `urlscan_scanned_at = now()` lets tomorrow's rescan cron pick
+    //       it up (the cron filters on scanned_at IS NOT NULL — without
+    //       this stub the row would be stuck forever, issue #441).
+    //   (2) `urlscan_evidence` records the failure reason for the admin
+    //       dashboard so a human can see WHY urlscan refused (rate limit,
+    //       internal IP, blocked domain — alert 468 surfaced this gap).
+    // We deliberately do NOT auto-classify on submit_failed — same
+    // ultrareview-F4 reasoning as the retrieval-timeout branch.
+    if (!submission.ok) {
+      await step.run("persist-submit-failure", async () => {
+        await sb.rpc("persist_clone_alert_urlscan", {
+          p_alert_id: data.alertId,
+          p_urlscan_uuid: null,
+          p_urlscan_evidence: serialiseSubmitFailure(submission),
+          p_classification: null,
+          p_set_triage_status: null,
+        });
+      });
+      await step.run("log-cost", async () => {
+        logCost({
+          feature: "shopfront_clone_urlscan",
+          provider: "urlscan",
+          operation: "submit_failed",
+          units: 0,
+          unitCostUsd: 0,
+          metadata: {
+            alert_id: data.alertId,
+            candidate_domain: data.candidateDomain,
+            error: submission.error,
+            status: submission.status,
+          },
+        });
+      });
+      logger.warn("clone-watch urlscan: submit failed, persisted stub", {
+        alertId: data.alertId,
+        error: submission.error,
+        status: submission.status,
+      });
+      return {
+        skipped: true,
+        reason: "submit_failed",
+        error: submission.error,
+        status: submission.status,
+        alertId: data.alertId,
+      };
     }
 
     // urlscan needs ~30-60s to render the page + analyse
@@ -120,15 +166,40 @@ export const cloneWatchUrlscan = inngest.createFunction(
       });
     }
 
-    // Both retrievals failed → don't auto-classify as 'unresolved' (which
-    // would be triage-promoted to needs_investigation). An attacker can
-    // deliberately slow-render to game the auto-classifier. Skip
-    // persistence; the daily rescan cron retries tomorrow.
-    // Fixes ultrareview F4.
+    // Both retrievals failed → persist a stub so the rescan cron picks
+    // it up tomorrow (cron filters on `urlscan_scanned_at IS NOT NULL`
+    // — without this persist the row stays NULL forever and is never
+    // rescannable, which was the original issue #441 stuck-state bug).
+    // We deliberately do NOT auto-classify as 'unresolved' (which would
+    // trigger triage promotion to needs_investigation) — an attacker
+    // could game that by deliberately slow-rendering. Ultrareview F4.
     if (!result) {
       logger.warn("clone-watch urlscan: both retrievals returned null", {
         alertId: data.alertId,
         urlscanUuid: submission.uuid,
+      });
+      await step.run("persist-retrieval-timeout", async () => {
+        await sb.rpc("persist_clone_alert_urlscan", {
+          p_alert_id: data.alertId,
+          p_urlscan_uuid: submission.uuid,
+          p_urlscan_evidence: serialiseRetrievalTimeout(submission.uuid),
+          p_classification: null,
+          p_set_triage_status: null,
+        });
+      });
+      await step.run("log-cost", async () => {
+        logCost({
+          feature: "shopfront_clone_urlscan",
+          provider: "urlscan",
+          operation: "retrieval_timeout",
+          units: 1,
+          unitCostUsd: 0,
+          metadata: {
+            alert_id: data.alertId,
+            candidate_domain: data.candidateDomain,
+            urlscan_uuid: submission.uuid,
+          },
+        });
       });
       return {
         skipped: true,
@@ -288,6 +359,39 @@ function serialiseEvidence(
     categories: result.categories.slice(0, 10),
     technologies: result.technologies.slice(0, 15),
     server: result.serverInfo,
+  };
+}
+
+/**
+ * Evidence shape persisted when urlscan REFUSES the submission (rate
+ * limit, 400 rejection, network error). The row gets `urlscan_scanned_at`
+ * set so the daily rescan cron picks it back up — without that
+ * timestamp the row is stuck forever (issue #441 root cause).
+ */
+export function serialiseSubmitFailure(
+  submission: Extract<URLScanSubmitDetailed, { ok: false }>,
+): Record<string, unknown> {
+  return {
+    submit_failed: true,
+    error: submission.error,
+    status: submission.status ?? null,
+    message: submission.message ?? null,
+    attempted_at: new Date().toISOString(),
+  };
+}
+
+/**
+ * Evidence shape persisted when submit succeeded but both retrieval
+ * attempts returned null (scan still in progress past our 90s budget).
+ * Records the uuid so a future operator can manually re-fetch from
+ * urlscan if they care.
+ */
+export function serialiseRetrievalTimeout(uuid: string): Record<string, unknown> {
+  return {
+    uuid,
+    retrieved: false,
+    retrieval_timeout: true,
+    scanned_at: new Date().toISOString(),
   };
 }
 
