@@ -14,6 +14,8 @@ import {
   classifyScan,
   suggestTriageTransition,
   PARKED_HOST_PATTERNS,
+  serialiseSubmitFailure,
+  serialiseRetrievalTimeout,
 } from "@/app/api/inngest/functions/clone-watch-urlscan";
 import type { URLScanResult } from "@askarthur/scam-engine/urlscan";
 
@@ -414,5 +416,66 @@ describe("clone-watch-urlscan — PARKED_HOST_PATTERNS", () => {
     expect(PARKED_HOST_PATTERNS).toContain("afternic.com");
     expect(PARKED_HOST_PATTERNS).toContain("sedo.com");
     expect(PARKED_HOST_PATTERNS).toContain("dan.com");
+  });
+});
+
+// Issue #441 regression coverage — the persist-on-failure paths write a
+// non-null urlscan_scanned_at so tomorrow's rescan cron picks the row
+// back up. Without these stubs the row was stuck forever.
+describe("clone-watch-urlscan — failure-evidence serialisers (#441)", () => {
+  describe("serialiseSubmitFailure", () => {
+    it("records the urlscan error reason + http status for rate limits", () => {
+      const ev = serialiseSubmitFailure({
+        ok: false,
+        error: "rate_limited",
+        status: 429,
+        message: "Too Many Requests",
+      });
+      expect(ev.submit_failed).toBe(true);
+      expect(ev.error).toBe("rate_limited");
+      expect(ev.status).toBe(429);
+      expect(ev.message).toBe("Too Many Requests");
+      expect(typeof ev.attempted_at).toBe("string");
+    });
+
+    it("records 'rejected' with the 400-body for blocklisted candidates", () => {
+      // alert 468 (westpachomesb.info) shape — urlscan refuses some
+      // candidates with a 400 + descriptive body.
+      const ev = serialiseSubmitFailure({
+        ok: false,
+        error: "rejected",
+        status: 400,
+        message: "Submission failed: scanning this URL is not allowed",
+      });
+      expect(ev.error).toBe("rejected");
+      expect(ev.status).toBe(400);
+      expect((ev.message as string)).toContain("not allowed");
+    });
+
+    it("handles network errors with no status code", () => {
+      const ev = serialiseSubmitFailure({
+        ok: false,
+        error: "network_error",
+        message: "Error: getaddrinfo ENOTFOUND",
+      });
+      expect(ev.status).toBeNull();
+      expect(ev.error).toBe("network_error");
+    });
+
+    it("handles no-api-key without a message", () => {
+      const ev = serialiseSubmitFailure({ ok: false, error: "no_api_key" });
+      expect(ev.status).toBeNull();
+      expect(ev.message).toBeNull();
+    });
+  });
+
+  describe("serialiseRetrievalTimeout", () => {
+    it("records the uuid so a future operator can manually re-fetch", () => {
+      const ev = serialiseRetrievalTimeout("019e6233-a2ba-7308-ba79-b2bbe38aefc0");
+      expect(ev.uuid).toBe("019e6233-a2ba-7308-ba79-b2bbe38aefc0");
+      expect(ev.retrieved).toBe(false);
+      expect(ev.retrieval_timeout).toBe(true);
+      expect(typeof ev.scanned_at).toBe("string");
+    });
   });
 });
