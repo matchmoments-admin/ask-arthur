@@ -272,6 +272,13 @@ When daily spend exceeds the cap, `cost-daily-check` upserts a `feature_brakes` 
 - `CHARITY_CHECK_CAP_USD` (default `5`)
 - `SHOP_SIGNAL_CAP_USD` (default `15`)
 
+### Observability (Axiom)
+
+- `NEXT_PUBLIC_AXIOM_DATASET` — Axiom dataset name (e.g. `ask-arthur`). `NEXT_PUBLIC_` prefix is forward-compat for browser Web Vitals; current usage is server-only.
+- `NEXT_PUBLIC_AXIOM_TOKEN` — Axiom ingest-scoped API token. Browser-readable is safe because the token has `ingest`-only scope (cannot read, delete, or modify data). Falls back to `AXIOM_TOKEN` if set server-only.
+- `FF_AXIOM_ENABLED` — Master kill switch for all Axiom ingest from the server. Default **OFF**. When `false` or unset, `getLogger()` returns a no-op object — zero outbound requests, zero ingest cost. Server-side flag (uses bracket notation in `axiom-logger.ts`).
+- `AXIOM_SAMPLE_PCT` — INFO/DEBUG sampling percentage (0–100). Optional. Default: `10` in production, `100` otherwise. WARN and ERROR are never sampled. Sampling is **per-request** (FNV-1a hash of `requestId`), so a request's logs are kept or dropped together — traces stay coherent.
+
 ### Operational
 
 - `PG_WATCHDOG_AUTO_TERMINATE` — When `true`, `pg-stuck-query-watchdog` cron auto-terminates non-VACUUM backends running ≥60 min
