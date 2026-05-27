@@ -21,6 +21,16 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
   await requireAdmin();
 
+  // Feature-flag gate runs BEFORE the rate-limit (local-ultrareview F2):
+  // when the flag is OFF (canary rollback, accidental flip-off), the
+  // route 503s without burning an Upstash request per probe.
+  if (!featureFlags.shopfrontCloneOutreach) {
+    return NextResponse.json(
+      { error: "clone_outreach_disabled" },
+      { status: 503 },
+    );
+  }
+
   // Per-admin rate limit (PR-G, #496). 200 triages per 5 min sliding
   // window. Sized for legitimate bulk-FP bursts (PR-F can fire ~50 in a
   // single brand-group action; 200 is 4x headroom). Bounds a compromised-
@@ -47,13 +57,6 @@ export async function POST(req: Request) {
         },
       );
     }
-  }
-
-  if (!featureFlags.shopfrontCloneOutreach) {
-    return NextResponse.json(
-      { error: "clone_outreach_disabled" },
-      { status: 503 },
-    );
   }
 
   let parsed;

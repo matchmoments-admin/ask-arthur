@@ -184,19 +184,45 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
     // Call Haiku with tool-use forced JSON output (matches the pattern
     // proven on Reddit Intel). Cache the system prompt (default) so
     // repeat calls within the cache TTL hit at ~10x lower cost.
+    //
+    // Error path (local-ultrareview F5): emit a $0 `_error` cost-telemetry
+    // row BEFORE re-throwing so Inngest's retry+failure surface in the
+    // health-digest aggregator (matches `reddit-intel-error` pattern).
+    // Without this row, a degraded Anthropic endpoint produces invisible
+    // failures — the only signal is the absence of clone_watch_classifications
+    // rows, which the operator wouldn't notice for hours.
     const callResult = await step.run("classify-haiku", async () => {
-      return callClaudeJson({
-        model: "HAIKU_4_5",
-        system: SYSTEM_PROMPT,
-        user: userMessage,
-        userIsTrusted: true, // structured envelope, not raw user text
-        schema: ClassificationOutputSchema,
-        maxTokens: 256,
-        cacheSystem: true,
-        useToolUse: true,
-        toolName: "submit_classification",
-        requestId: `clone-watch-preclassify:${data.alertId}`,
-      });
+      try {
+        return await callClaudeJson({
+          model: "HAIKU_4_5",
+          system: SYSTEM_PROMPT,
+          user: userMessage,
+          userIsTrusted: true, // structured envelope, not raw user text
+          schema: ClassificationOutputSchema,
+          maxTokens: 256,
+          cacheSystem: true,
+          useToolUse: true,
+          toolName: "submit_classification",
+          requestId: `clone-watch-preclassify:${data.alertId}`,
+        });
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        logCost({
+          feature: "shopfront_clone_preclassify_error",
+          provider: "anthropic",
+          operation: "classify_error",
+          units: 0,
+          unitCostUsd: 0,
+          metadata: {
+            alert_id: data.alertId,
+            brand: data.brand,
+            error_message: errorMessage.slice(0, 500),
+            model_id: "claude-haiku-4-5-20251001",
+            prompt_version: PROMPT_VERSION,
+          },
+        });
+        throw err; // Re-throw so Inngest applies retries:2 + finally fails the run
+      }
     });
 
     const classification = callResult.result;
