@@ -17,25 +17,40 @@ import { logCost, PRICING } from "@/lib/cost-telemetry";
  * 1. Pulls all queue rows in 'unbatched' state where scheduled_for <= now()
  * 2. Groups by (brand, recipient) — each group becomes ONE consolidated
  *    email instead of N separate emails (user feedback 2026-05-26)
- * 3. For each group:
+ * 3. Filters out brands we already notified inside the cooldown window
+ *    (default 24h, via brand_contact_directory.last_notified_at). Skipped
+ *    rows stay in 'unbatched' for the next day's run.
+ * 4. Caps each batch at MAX_CANDIDATES_PER_BATCH (50). If a single
+ *    (brand, recipient) group exceeds the cap, the oldest 50 ship today
+ *    and the remainder roll over to tomorrow.
+ * 5. For each batch:
  *      - mints a fresh batch_id (uuid, inside step.run so it survives
  *        Inngest replays — see PR #456)
  *      - renders the email body via React Email
  *      - stores rendered subject + html on the queue rows so the dashboard
  *        sends EXACTLY what was previewed (no template drift)
  *      - transitions rows to 'pending' approval state
- * 4. After the loop, fires ONE summary Telegram pointing the admin at the
+ * 6. After the loop, fires ONE summary Telegram pointing the admin at the
  *    dashboard (replaces the old per-batch HMAC-URL preview, which was
  *    auto-clicked by Telegram's link-preview crawler — incident
  *    2026-05-26). Per-batch Send/Reject buttons live in
  *    /admin/clone-watch#approvals.
- * 5. When FF_SHOPFRONT_CLONE_NOTIFY_BRAND_AUTO_SEND is ON, the loop skips
+ * 7. When FF_SHOPFRONT_CLONE_NOTIFY_BRAND_AUTO_SEND is ON, the loop skips
  *    the dashboard step and sends via Resend immediately (marks rows
  *    'auto_approved' → 'sent'). Default OFF until the matcher's false-
  *    positive rate is calibrated.
  *
  * Cron: 09:30 UTC daily (after the 08:30 UTC NRD ingest settles).
  * Gated by FF_SHOPFRONT_CLONE_OUTREACH + FF_SHOPFRONT_CLONE_NOTIFY_BRAND.
+ *
+ * Hardening pass v152 (2026-05-27):
+ *   • Pre-check feature_brakes.shopfront_clone_outreach
+ *   • Per-brand 24h cooldown (no daily fatigue for watchlisted brands)
+ *   • Max 50 candidates per batch (no 400-row mega-emails)
+ *   • RESEND_FROM_EMAIL: fail closed if env unset (was defaulting to a
+ *     personal-looking sender)
+ *   • Telegram summary surfaces groupsFailed + groupsSkipped counts
+ *   • Recipient hashed in log lines
  *
  * See docs/plans/clone-watch-outreach.md.
  */
@@ -59,10 +74,11 @@ interface BrandGroup {
   rows: UnbatchedRow[];
 }
 
-const FROM_EMAIL =
-  process.env.RESEND_FROM_EMAIL ?? "Ask Arthur <brendan@askarthur.au>";
+const FROM_EMAIL = process.env.RESEND_FROM_EMAIL;
 const REPLY_TO_EMAIL = "brendan@askarthur.au";
 const DASHBOARD_URL = "https://askarthur.au/admin/clone-watch#approvals";
+const BRAND_COOLDOWN_HOURS = 24;
+const MAX_CANDIDATES_PER_BATCH = 50;
 
 export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
   {
@@ -97,6 +113,42 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
     const sb = createServiceClient();
     if (!sb) return { skipped: true, reason: "supabase_unavailable" };
 
+    // Cost brake — if the daily-spend brake is engaged, skip the whole run.
+    const brakeEngaged = await step.run("check-brake", async () => {
+      const { data, error } = await sb
+        .from("feature_brakes")
+        .select("paused_until")
+        .eq("feature", "shopfront_clone_outreach")
+        .maybeSingle();
+      if (error) {
+        logger.warn("clone-watch prepare: brake lookup failed", {
+          error: error.message,
+        });
+        return true; // conservative
+      }
+      return Boolean(
+        data?.paused_until && new Date(data.paused_until).getTime() > Date.now(),
+      );
+    });
+    if (brakeEngaged) {
+      await step.run("notify-brake-engaged", async () => {
+        await sendAdminTelegramMessage(
+          [
+            "🛑 <b>Clone-watch prepare skipped</b>",
+            "",
+            "<code>feature_brakes.shopfront_clone_outreach</code> is engaged.",
+            "No batches prepared. Resume when the brake clears.",
+          ].join("\n"),
+        );
+      });
+      return { skipped: true, reason: "cost_brake_engaged" };
+    }
+
+    if (!FROM_EMAIL) {
+      logger.error("clone-watch prepare: RESEND_FROM_EMAIL unset");
+      return { skipped: true, reason: "resend_from_email_unset" };
+    }
+
     const rows = await step.run("load-unbatched", async () => {
       const { data, error } = await sb.rpc(
         "list_clone_alerts_unbatched_for_prepare",
@@ -112,14 +164,64 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
       return { ok: true, batches_prepared: 0, reason: "no_unbatched_rows" };
     }
 
-    const groups = groupByBrandRecipient(rows);
+    const allGroups = groupByBrandRecipient(rows);
+
+    // Per-brand cooldown filter. Skipped brands roll over to next run.
+    const cooldownBrands = await step.run(
+      "check-brand-cooldown",
+      async () => {
+        const legitimateDomains = allGroups.map((g) => g.brand);
+        const { data, error } = await sb.rpc(
+          "list_recently_notified_brands",
+          {
+            p_legitimate_domains: legitimateDomains,
+            p_cooldown_hours: BRAND_COOLDOWN_HOURS,
+          },
+        );
+        if (error) {
+          logger.warn("clone-watch prepare: cooldown lookup failed", {
+            error: error.message,
+          });
+          return [];
+        }
+        return ((data as Array<{ legitimate_domain: string }> | null) ?? []).map(
+          (r) => r.legitimate_domain,
+        );
+      },
+    );
+    const cooldownSet = new Set(cooldownBrands);
+    const groups = allGroups.filter((g) => !cooldownSet.has(g.brand));
+    const groupsSkippedCooldown = allGroups.length - groups.length;
+
+    if (groups.length === 0) {
+      logger.info("clone-watch prepare: all brands within cooldown", {
+        skipped: groupsSkippedCooldown,
+      });
+      return {
+        ok: true,
+        batches_prepared: 0,
+        groups_skipped_cooldown: groupsSkippedCooldown,
+        reason: "all_brands_within_cooldown",
+      };
+    }
+
+    // Cap candidates per batch. Oldest 50 ship today; remainder stays
+    // unbatched for tomorrow.
+    const cappedGroups = groups.map((g) => ({
+      ...g,
+      rows: g.rows
+        .slice()
+        .sort((a, b) => a.enqueued_at.localeCompare(b.enqueued_at))
+        .slice(0, MAX_CANDIDATES_PER_BATCH),
+    }));
+
     const autoSend = featureFlags.shopfrontCloneNotifyBrandAutoSend;
 
     let batchesPrepared = 0;
     let autoSent = 0;
     let groupsFailed = 0;
 
-    for (const group of groups) {
+    for (const group of cappedGroups) {
       try {
         const groupKey = `${group.brand}::${group.recipient}`;
         const batchId = await step.run(
@@ -177,13 +279,16 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
               `auto-send-${batchId}`,
               async () => {
                 const resend = new Resend(apiKey);
-                const result = await resend.emails.send({
-                  from: FROM_EMAIL,
-                  to: [group.recipient],
-                  replyTo: REPLY_TO_EMAIL,
-                  subject,
-                  html,
-                });
+                const result = await resend.emails.send(
+                  {
+                    from: FROM_EMAIL,
+                    to: [group.recipient],
+                    replyTo: REPLY_TO_EMAIL,
+                    subject,
+                    html,
+                  },
+                  { idempotencyKey: `clone-watch-send:${batchId}` },
+                );
                 if (result.error) {
                   throw new Error(
                     `Resend rejected: ${result.error.message ?? String(result.error)}`,
@@ -197,10 +302,26 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
                 p_batch_id: batchId,
                 p_new_status: "sent",
                 p_provider_message_id: sendResult?.id ?? null,
+                p_admin_id: null,
               });
               if (error) {
                 throw new Error(
                   `transition_clone_alert_batch: ${error.message}`,
+                );
+              }
+            });
+            await step.run(`record-sent-${batchId}`, async () => {
+              const { error } = await sb.rpc(
+                "record_brand_notification_sent",
+                {
+                  p_batch_id: batchId,
+                  p_provider_message_id: sendResult?.id ?? null,
+                },
+              );
+              if (error) {
+                logger.warn(
+                  "clone-watch prepare: record_brand_notification_sent failed",
+                  { batchId, error: error.message },
                 );
               }
             });
@@ -213,7 +334,6 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
               metadata: {
                 batch_id: batchId,
                 brand: group.brand,
-                recipient: group.recipient,
                 candidate_count: candidates.length,
                 provider_message_id: sendResult?.id ?? null,
               },
@@ -230,7 +350,6 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
         groupsFailed++;
         logger.error("clone-watch prepare: group failed", {
           brand: group.brand,
-          recipient: group.recipient,
           error: err instanceof Error ? err.message : String(err),
         });
         continue;
@@ -238,14 +357,16 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
     }
 
     // Fire ONE summary Telegram to the admin chat if we created any new
-    // manual-approval batches. Auto-sent batches don't need this surface —
-    // the email is already on its way to the recipient.
+    // manual-approval batches OR anything failed/was skipped (so silent
+    // failures don't hide).
     const pendingNew = batchesPrepared - autoSent;
-    if (pendingNew > 0) {
+    if (pendingNew > 0 || groupsFailed > 0 || groupsSkippedCooldown > 0) {
       await step.run("notify-admin-summary", async () => {
         await sendAdminTelegramMessage(
           buildTelegramSummaryMessage({
             batchesPrepared: pendingNew,
+            groupsFailed,
+            groupsSkippedCooldown,
             dashboardUrl: DASHBOARD_URL,
           }),
         );
@@ -260,6 +381,8 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
           batches_prepared: batchesPrepared,
           pending_for_approval: pendingNew,
           auto_sent: autoSent,
+          groups_failed: groupsFailed,
+          groups_skipped_cooldown: groupsSkippedCooldown,
         },
       });
     }
@@ -268,6 +391,7 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
       batches: batchesPrepared,
       auto_sent: autoSent,
       groups_failed: groupsFailed,
+      groups_skipped_cooldown: groupsSkippedCooldown,
       mode: autoSend ? "auto_send" : "manual_approval",
     });
 
@@ -276,6 +400,7 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
       batches_prepared: batchesPrepared,
       auto_sent: autoSent,
       groups_failed: groupsFailed,
+      groups_skipped_cooldown: groupsSkippedCooldown,
       mode: autoSend ? "auto_send" : "manual_approval",
     };
   },
@@ -310,21 +435,41 @@ export function buildBatchSubject(group: BrandGroup): string {
 }
 
 /**
- * Summary Telegram posted ONCE per prepare run. Replaces the old per-batch
- * HMAC-URL preview that was auto-clicked by Telegram's link-preview
- * crawler. The dashboard URL is the only link — clicking it from Telegram
- * is safe because the dashboard requires admin auth.
+ * Summary Telegram posted ONCE per prepare run. The dashboard URL is the
+ * only link — clicking it from Telegram is safe because the dashboard
+ * requires admin auth.
+ *
+ * Surfaces three counters so silent failures + cooldown-skips don't hide:
+ *   • batchesPrepared    — awaiting Send in the dashboard
+ *   • groupsFailed       — rendered/assigned threw; will retry tomorrow
+ *   • groupsSkipped      — within 24h cooldown; roll over to tomorrow
  */
 export function buildTelegramSummaryMessage(args: {
   batchesPrepared: number;
+  groupsFailed: number;
+  groupsSkippedCooldown: number;
   dashboardUrl: string;
 }): string {
-  const noun = args.batchesPrepared === 1 ? "batch" : "batches";
-  return [
-    `🛡️ <b>Clone-watch — prepare summary</b>`,
-    ``,
-    `<b>${args.batchesPrepared}</b> ${noun} awaiting your approval.`,
+  const lines = [`🛡️ <b>Clone-watch — prepare summary</b>`, ``];
+  if (args.batchesPrepared > 0) {
+    const noun = args.batchesPrepared === 1 ? "batch" : "batches";
+    lines.push(
+      `<b>${args.batchesPrepared}</b> ${noun} awaiting your approval.`,
+    );
+  } else {
+    lines.push(`No new batches awaiting approval.`);
+  }
+  if (args.groupsSkippedCooldown > 0) {
+    lines.push(
+      `${args.groupsSkippedCooldown} brand${args.groupsSkippedCooldown === 1 ? "" : "s"} skipped (24h cooldown — roll over to next run).`,
+    );
+  }
+  if (args.groupsFailed > 0) {
+    lines.push(`⚠️ ${args.groupsFailed} group${args.groupsFailed === 1 ? "" : "s"} failed during render/assign (check logs).`);
+  }
+  lines.push(
     ``,
     `Review and send at <a href="${args.dashboardUrl}">${args.dashboardUrl}</a>`,
-  ].join("\n");
+  );
+  return lines.join("\n");
 }

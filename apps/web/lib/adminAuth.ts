@@ -99,4 +99,22 @@ export async function requireAdmin(): Promise<void> {
   }
 }
 
+/**
+ * Resolve the acting admin's user id when one is available (Supabase Auth
+ * path). Returns null under the HMAC-cookie fallback — no user id exists.
+ *
+ * MUST be called AFTER requireAdmin() — this helper does not enforce admin
+ * access, it only retrieves the user id for audit-trail writes.
+ */
+export async function getAdminUserId(): Promise<string | null> {
+  if (!featureFlags.auth) return null;
+  try {
+    const { getUser } = await import("@/lib/auth");
+    const user = await getUser();
+    return user?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export { COOKIE_NAME, MAX_AGE };
