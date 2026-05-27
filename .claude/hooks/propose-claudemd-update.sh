@@ -4,10 +4,11 @@
 # session contains a `fix(...)` / `correct` follow-up commit, proposes that a
 # rule might belong in the nearest subdirectory CLAUDE.md.
 #
-# Does NOT write to disk. Emits a hookSpecificOutput.additionalContext JSON
-# block that becomes a system reminder in the next turn (or the next session)
-# so the human / model can decide whether to promote the proposal into a real
-# rule.
+# Does NOT write to disk. Emits the proposal via the top-level `systemMessage`
+# field (the only schema-valid surface for Stop hooks; `hookSpecificOutput` is
+# reserved for PreToolUse / UserPromptSubmit / PostToolUse / PostToolBatch).
+# The runtime renders systemMessage in the chat so the human / model can
+# decide whether to promote the proposal into a real rule.
 #
 # **Critical:** checks the `stop_hook_active` JSON field first and exits 0
 # immediately if true (prevents infinite Stop loops, per the official Claude
@@ -73,7 +74,8 @@ else
   proposal="Consider creating \`${candidate_claudemd}\` modelled on the existing sub-CLAUDE.md pattern (5 sections: owns / doesn't own / public API / gotchas / where things live). The session touched \`${top_dir}\` repeatedly and shipped a fix commit (\`${trigger_commit:0:7}\`) — local guidance could prevent a repeat."
 fi
 
-# Emit the advisory as hookSpecificOutput.additionalContext. The runtime wraps
-# this in a system reminder visible at the start of the next turn / session.
-printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":"'"$(printf '%s' "$proposal" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read())[1:-1])')"'"}}'
+# Emit the advisory as top-level `systemMessage` (the only valid Stop-hook
+# field for surfacing text — `hookSpecificOutput.additionalContext` is for
+# UserPromptSubmit / PostToolUse / PostToolBatch, NOT Stop).
+printf '%s\n' "$proposal" | python3 -c 'import json,sys; print(json.dumps({"systemMessage": sys.stdin.read().rstrip("\n")}))'
 exit 0

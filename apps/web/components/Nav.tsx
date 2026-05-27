@@ -9,6 +9,9 @@ export default async function Nav() {
     links.push({ href: "/health", label: "Scanner" });
   }
   links.push({ href: "/persona-check", label: "Persona Check" });
+  if (featureFlags.charityCheck) {
+    links.push({ href: "/charity-check", label: "Charity Check" });
+  }
   if (featureFlags.scamFeed) {
     links.push({ href: "/scam-feed", label: "Feed" });
   }
