@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { Mail, Search, Send, XCircle } from "lucide-react";
 import TriageRow, {
   type PendingAlertView,
@@ -12,6 +12,14 @@ import type { TriageStatus } from "@/components/admin/triage/types";
 // Re-export the alert shape under its prior name for the server-side
 // `page.tsx` callers. The new TriageRow consumes the same shape.
 export type PendingAlert = PendingAlertView;
+
+// sessionStorage key for bulk-selection persistence. Scoped to the
+// browser tab (not localStorage) — we want selection to survive
+// page refresh + navigation around the admin chrome, but not bleed
+// into a future session a week later. Stale IDs (rows another admin
+// triaged in the meantime) are filtered against the current pending
+// list on hydration.
+const SELECTION_STORAGE_KEY = "admin:clone-watch:selection";
 
 export interface PendingBatch {
   batchId: string;
@@ -41,6 +49,51 @@ export default function CloneWatchTriage({
   // Bulk-selection: a Set of pending alert ids the admin has ticked.
   // Empty by default; cleared after any bulk action.
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
+
+  // Hydrate selection from sessionStorage on mount. Filtered against the
+  // current pending list so stale IDs (rows another admin or a previous
+  // session triaged) don't reappear. Runs once on mount — re-running on
+  // `pending` change would cause selection drift when rows are added
+  // mid-session.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.sessionStorage.getItem(SELECTION_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return;
+      const pendingIds = new Set(initialPending.map((r) => r.id));
+      const hydrated = parsed.filter(
+        (id): id is number => typeof id === "number" && pendingIds.has(id),
+      );
+      if (hydrated.length > 0) {
+        setSelectedIds(new Set(hydrated));
+      }
+    } catch {
+      // Corrupt storage value — ignore. Worst case: admin re-selects.
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only hydration
+  }, []);
+
+  // Persist selection on every change. Cleared when the set is empty so
+  // a stale entry doesn't survive a tab restore.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (selectedIds.size === 0) {
+        window.sessionStorage.removeItem(SELECTION_STORAGE_KEY);
+      } else {
+        window.sessionStorage.setItem(
+          SELECTION_STORAGE_KEY,
+          JSON.stringify(Array.from(selectedIds)),
+        );
+      }
+    } catch {
+      // sessionStorage can throw in Safari private mode + quota-exceeded.
+      // Silent — selection just doesn't persist; the in-memory state
+      // continues to work.
+    }
+  }, [selectedIds]);
 
   // Group pending rows by inferred_target_domain, preserving the parent
   // order. Any group of ≥2 gets a BrandGroupHeader with "Select all N"
