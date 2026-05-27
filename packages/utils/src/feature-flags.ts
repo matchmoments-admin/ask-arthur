@@ -422,6 +422,16 @@ export const featureFlags = {
    *  consumers. Plan: docs/plans/clone-watch-outreach.md §15 Phase A.3. */
   shopfrontCloneUrlscan: readBoolEnv("FF_SHOPFRONT_CLONE_URLSCAN"),
 
+  /** PR-D2 (#498) — Haiku 4.5 pre-classifier for clone-watch candidates.
+   *  Server-side only. Gates the clone-watch-haiku-preclassify Inngest fn.
+   *  When ON, every new NRD candidate gets a Haiku classification stored
+   *  in clone_watch_classifications (sibling table). Pending-queue order
+   *  is then pre-ranked by confidence. Default OFF — canary independently
+   *  of the master shopfrontCloneOutreach flag.
+   *  Cost: ~$0.01–0.02/call × ~7 hits/day = ~$0.07/day. Capped by
+   *  SHOPFRONT_CLONE_PRECLASSIFY_CAP_USD (default 2). */
+  shopfrontClonePreclassify: readBoolEnv("FF_SHOPFRONT_CLONE_PRECLASSIFY"),
+
   /** Screenshot retention — when ON, `storeVerifiedScam` uploads the raw
    *  screenshot of a HIGH_RISK image submission to R2. Default OFF, and it
    *  must stay OFF until prerequisites are met: `scrubPII` is text-only, so

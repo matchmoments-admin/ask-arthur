@@ -35,6 +35,10 @@ import { cloneWatchUrlscan } from "./functions/clone-watch-urlscan";
 import { cloneWatchUrlscanRescan } from "./functions/clone-watch-urlscan-rescan";
 // PR-B2 — daily batch builder + Telegram approval flow (v151)
 import { cloneWatchNotifyBrandPrepare } from "./functions/clone-watch-notify-brand-prepare";
+// PR-D2 (#498) — Haiku 4.5 pre-classifier. Pre-ranks pending queue by
+// confidence DESC. Writes to clone_watch_classifications sibling table
+// (v157). Pre-rank only at this stage; auto-FP follows in PR-D5 (#501).
+import { cloneWatchHaikuPreclassify } from "./functions/clone-watch-haiku-preclassify";
 
 // App-layer Inngest functions live here because they cross apps/web-only
 // primitives (R2 upload, Resend, local auth helpers) that shouldn't leak
@@ -65,6 +69,8 @@ const appFunctions = [
   cloneWatchUrlscanRescan,
   // Clone-watch approval-gated daily-batch builder (v151)
   cloneWatchNotifyBrandPrepare,
+  // Clone-watch Haiku pre-classifier (PR-D2, #498, v157)
+  cloneWatchHaikuPreclassify,
 ];
 
 export const { GET, POST, PUT } = serve({

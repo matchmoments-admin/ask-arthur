@@ -504,3 +504,33 @@ export function parseCloneWatchScanRequestedData(
 ): CloneWatchScanRequestedData {
   return CloneWatchScanRequestedDataSchema.parse(raw);
 }
+
+// PR-D2 (#498) — Haiku pre-classifier event. Emitted alongside the
+// scan-requested event from shopfront-nrd-daily-ingest for each new
+// alert row. Consumer (clone-watch-haiku-preclassify) calls Haiku 4.5
+// and writes the result to clone_watch_classifications (sibling table).
+const CloneWatchPreclassifyRequestedDataSchema = z.object({
+  alertId: z.number().int().positive(),
+  brand: z.string(),                    // inferred_target_domain
+  candidateDomain: z.string(),
+  candidateUrl: z.string(),
+});
+
+export type CloneWatchPreclassifyRequestedData = z.infer<
+  typeof CloneWatchPreclassifyRequestedDataSchema
+>;
+
+export const CLONE_WATCH_PRECLASSIFY_REQUESTED_EVENT =
+  "shopfront/clone.preclassify-requested.v1" as const;
+
+export interface CloneWatchPreclassifyRequestedEvent {
+  name: typeof CLONE_WATCH_PRECLASSIFY_REQUESTED_EVENT;
+  id: string;
+  data: CloneWatchPreclassifyRequestedData;
+}
+
+export function parseCloneWatchPreclassifyRequestedData(
+  raw: unknown,
+): CloneWatchPreclassifyRequestedData {
+  return CloneWatchPreclassifyRequestedDataSchema.parse(raw);
+}
