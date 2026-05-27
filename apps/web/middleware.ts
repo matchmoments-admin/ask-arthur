@@ -219,4 +219,18 @@ export const config = {
     // Match all routes except static files, images, favicon
     "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
+  // Node.js runtime — required because PR #461 added verifyAdminToken
+  // (which uses node:crypto's createHmac + timingSafeEqual) to the
+  // /admin/* path of this middleware. In Edge Runtime, the polyfilled
+  // crypto silently returns mismatched digests for valid HMACs, so every
+  // HMAC-only admin login got 307'd back to /admin/login despite a
+  // mathematically-valid cookie. Caught 2026-05-27 during the live e2e
+  // test (server returned 307 even when curl'd with a hand-verified
+  // valid cookie + matching prod ADMIN_SECRET).
+  //
+  // Next.js 16 supports Node.js middleware natively (no experimental
+  // flag). Per Vercel's platform guidance, Node.js middleware is the
+  // recommended runtime — it runs on Fluid Compute with the same cold-
+  // start characteristics as Edge for routine requests.
+  runtime: "nodejs",
 };
