@@ -95,4 +95,21 @@ describe("middleware request-id propagation", () => {
     const res = await middleware(req);
     expect(res.headers.get("X-Request-Id")).toBeTruthy();
   });
+
+  it("prefers Idempotency-Key over a client-supplied x-request-id (dedup intent wins)", async () => {
+    // Hypothetical edge case: a misbehaving client sends BOTH headers
+    // with different values. The Idempotency-Key carries explicit
+    // dedup intent and must win — otherwise a client could bypass
+    // their own idempotency contract by also sending x-request-id.
+    const res = await callMiddleware({
+      "Idempotency-Key": "idem-key-aaaaaa",
+      "x-request-id": "xreqid-bbbbbb",
+    });
+    expect(res.headers.get("X-Request-Id")).toBe("idem-key-aaaaaa");
+  });
+
+  it("falls through to a client-supplied x-request-id when no Idempotency-Key is sent", async () => {
+    const res = await callMiddleware({ "x-request-id": "client-trace-12345" });
+    expect(res.headers.get("X-Request-Id")).toBe("client-trace-12345");
+  });
 });

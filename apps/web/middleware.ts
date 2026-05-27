@@ -272,7 +272,9 @@ export async function middleware(req: NextRequest) {
         durationMs: Date.now() - start,
         rateRemaining,
       });
-      void log.flush();
+      // Fire-and-forget — neutralise rejection so a flaky Axiom can't
+      // surface as an unhandled-rejection runtime warning.
+      log.flush().catch(() => {});
     } catch {
       // Never let logging break a request.
     }
