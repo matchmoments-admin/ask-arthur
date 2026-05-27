@@ -71,21 +71,21 @@ export default function BulkActionBar({
           <BulkButton
             tone="tp"
             icon={CheckCircle2}
-            label="Confirm"
+            label="Confirm clone"
             onClick={onConfirmAll}
             disabled={disabled}
           />
           <BulkButton
             tone="inv"
             icon={Search}
-            label="Investigate"
+            label="Park"
             onClick={onInvestigateAll}
             disabled={disabled}
           />
           <BulkButton
             tone="fp"
             icon={XCircle}
-            label="Dismiss"
+            label="Not a clone"
             onClick={onDismissAll}
             disabled={disabled}
           />

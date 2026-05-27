@@ -266,7 +266,7 @@ export default function CloneWatchTriage({
         };
         if (status === "tp_confirmed" && body.eventEmitted === false) {
           setError(
-            `Triage saved but downstream fan-out failed (no Netcraft / brand-notify). Re-triage by setting to Investigate then back to TP.`,
+            `Triage saved but downstream fan-out failed (no Netcraft / brand-notify). Re-triage by setting to Park then back to Confirm clone.`,
           );
         }
       } catch (err) {

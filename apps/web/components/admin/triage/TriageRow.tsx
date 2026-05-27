@@ -308,7 +308,7 @@ export default function TriageRow({
           kind="tp"
           onClick={() => handleVerdict("tp")}
           disabled={disabled}
-          fullLabel="TP — confirm"
+          fullLabel="Confirm clone"
         />
         <VerdictButton
           kind="inv"
@@ -319,7 +319,7 @@ export default function TriageRow({
           kind="fp"
           onClick={() => handleVerdict("fp")}
           disabled={disabled}
-          fullLabel="FP — drop"
+          fullLabel="Not a clone"
         />
       </div>
     </article>
