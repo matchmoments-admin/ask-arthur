@@ -126,23 +126,47 @@ Supabase Postgres (project `rquomhcgnodxzkhokwni`). 75+ tables across 12 domain 
 - `shopfront_shops` — Installed Shopify merchant index. Minimal scaffold at MVP. Service-role RLS. v140.
 - `shopfront_clone_alerts` — Single write target for ALL clone detections (ADR-0016 Decision #1). Layer 0 writes `target_shop_id IS NULL`, `source = 'nrd'`. CHECK enforces XOR on `target_shop_id` / `inferred_target_domain`. `signals` JSONB array per ADR-0015. UNIQUE expression index on `(COALESCE(target_shop_id::text, inferred_target_domain), url_hash)`. Service-role RLS. v140. **Extended in v143** with triage columns: `triage_status` (CHECK in `'pending'|'tp_confirmed'|'fp'|'needs_investigation'|'tp_actioned'`), `triage_by uuid`, `triage_at timestamptz`, `triage_notes text`, `submitted_to jsonb DEFAULT '{}'::jsonb`. **Extended in v148** with urlscan columns: `urlscan_evidence jsonb`, `urlscan_classification` (CHECK in `'parked_for_sale'|'unresolved'|'likely_phishing'|'neutral'`), `urlscan_scanned_at timestamptz`, `urlscan_uuid text`. Partial indexes: `idx_clone_alerts_triage_pending`, `idx_clone_alerts_urlscan_rescan`.
 - `shopfront_takedown_attempts` — DMCA / registrar / Cloudflare / Shopify-abuse log per alert. Unused at Layer 0; populated by Shield Pro tier (#377). Service-role RLS. v140.
-- `brand_contact_directory` — Per-brand outreach channel mapping for Layer 3/4 (`channel_type` enum: bugcrowd_vdp / security_txt / fraud_inbox / contact_form / manual_review / none; `recipient` email or URL; `evidence_format`). Service-role RLS only. Seeded with 4 verified (Kmart/Target/AusPost/CBA) + 44 manual_review brands. v143 + v143b seed.
+- `brand_contact_directory` — Per-brand outreach channel mapping for Layer 3/4. `brand text PRIMARY KEY`; `channel_type text CHECK IN ('bugcrowd_vdp','security_txt','fraud_inbox','contact_form','manual_review','none')`; `legitimate_domain`; `recipient` email or URL; `evidence_format`; `last_notified_at timestamptz` (24h cooldown signal); `notes`. Service-role RLS only. v143 + v143b seed; expanded in v150 (74 → 106 brands); re-routed big-four banks bugcrowd_vdp → fraud_inbox in v155 (real phishing inboxes for NAB/Westpac/ANZ/CBA); silenced 13 no-inbox brands → `none` in v156. **Current distribution (2026-05-28):** manual_review 42, fraud_inbox 41, none 13, contact_form 9, security_txt 1, bugcrowd_vdp 0.
+- `clone_alert_notification_queue` — Daily batch queue for Layer 3/4 emails. `id bigserial PK`, `alert_id bigint`, `brand text` (FK → `brand_contact_directory.brand` since v154), `candidate_domain`, `candidate_url`, `recipient`, `channel_type`, `severity_tier`, `scheduled_for timestamptz`, `enqueued_at`, `processed_at`, `batch_id uuid`, `approval_status text` (`unbatched` / `pending` / `approved` / `auto_approved` / `sent` / `rejected` / `expired`), `email_subject`, `email_body_html`, `prepared_at`, `approved_at`, `approval_url`, `provider_message_id`, `approved_by_admin_id uuid`, `rejected_by_admin_id uuid`. UPSERT key `(alert_id, channel_type)`. Service-role RLS only. v151.
 - `clone_alert_brand_replies` — Inbound brand-reply tracking (Phase C foundation). Receives parsed reply messages from the planned Cloudflare Worker → Edge Function inbound handler (issue #430). CHECK `from_email = lower(from_email)` enforces lowercase for suppression lookup. Service-role RLS only. v146.
-- **Clone-watch RPCs (12, all SECURITY DEFINER + locked search_path)**:
+- **Clone-watch RPCs (24, all SECURITY DEFINER + locked search_path, all `REVOKE EXECUTE FROM PUBLIC, anon, authenticated` unless noted):**
+
+  _Ingest + triage:_
   - `upsert_clone_alerts_batch(JSONB) → INTEGER` — batch INSERT ON CONFLICT for daily NRD ingest. v141.
   - `list_clone_alerts_pending_triage(p_limit INT) → TABLE` — admin dashboard pending queue + urlscan classification + screenshot URL. v143 / v148.
   - `set_clone_alert_triage(p_alert_id BIGINT, p_status TEXT, p_admin_id UUID, p_notes TEXT)` — triage state transition. v143.
+  - `merge_clone_alert_submission(p_alert_id, p_key, p_value, p_set_triage_status) → TABLE` — atomic JSONB merge for `submitted_to` to prevent cross-fn races between submit-netcraft / poll-netcraft / notify-brand / triage-route-inline. v147.
+
+  _KPI / public surface:_
   - `clone_watch_weekly_metrics(p_days INT) → TABLE` — KPIs for admin tile + weekly digest. v143.
-  - `clone_watch_brand_breakdown(p_days INT) → TABLE` — per-brand history for admin table. v144. Anon REVOKED.
+  - `clone_watch_brand_breakdown(p_days INT) → TABLE` — per-brand history for admin table. v144.
   - `clone_watch_public_impact(p_days INT) → TABLE` — aggregate counts for `/clone-watch` public page. **Anon GRANT** (output is aggregate-only). v144 + revised in v147 (brands_protected semantic fix).
   - `clone_watch_takedown_stats(p_days INT) → TABLE` — median + P90 time-to-takedown. **Anon GRANT**. v145.
-  - `list_clone_alerts_pending_netcraft_poll(p_limit INT) → TABLE` — selector for Netcraft polling cron. v145.
+
+  _URLscan:_
   - `list_clone_alerts_pending_urlscan(p_limit INT) → TABLE` — selector for urlscan initial-scan fan-out. v148.
-  - `list_clone_alerts_for_urlscan_rescan(p_limit, p_stale_after_hours) → TABLE` — selector for daily urlscan re-scan cron. v148 + revised in v149 (30→60 day window).
+  - `list_clone_alerts_for_urlscan_rescan(p_limit, p_stale_after_hours) → TABLE` — selector for daily urlscan re-scan cron. v148 + v149 (30→60 day window).
   - `persist_clone_alert_urlscan(p_alert_id, p_urlscan_uuid, p_evidence, p_classification, p_set_triage_status) → TABLE` — atomic persist + never-demote triage transition. v148.
-  - `merge_clone_alert_submission(p_alert_id, p_key, p_value, p_set_triage_status) → TABLE` — atomic JSONB merge for `submitted_to` to prevent cross-fn races between submit-netcraft / poll-netcraft / notify-brand. v147.
+
+  _Netcraft polling:_
+  - `list_clone_alerts_pending_netcraft_poll(p_limit INT) → TABLE` — selector for Netcraft polling cron. v145.
+
+  _Notification queue (batch-approval flow — v151+):_
+  - `enqueue_clone_alert_notification(p_alert_id, p_brand, p_candidate_domain, p_candidate_url, p_recipient, p_channel_type, p_severity_tier, p_scheduled_for)` — UPSERT into queue keyed on `(alert_id, channel_type)`. Called by both notify-brand Inngest fn and (since PR #488) the triage route inline. v151.
+  - `list_clone_alerts_unbatched_for_prepare(p_limit INT) → TABLE` — selector for the daily 09:30 UTC prepare cron. v151.
+  - `list_recently_notified_brands(p_legitimate_domains TEXT[], p_cooldown_hours INT) → TABLE` — 24h cooldown filter for the prepare cron. v152.
+  - `assign_clone_alert_batch(p_queue_ids BIGINT[], p_batch_id UUID, p_email_subject, p_email_body_html, p_approval_url, p_auto_approved BOOL)` — freezes rendered subject + html on the queue rows, transitions to `pending` (or `auto_approved`). v151.
+  - `load_clone_alert_batch(p_batch_id UUID) → TABLE` — admin dashboard send-route loader; returns all queue rows for a batch with frozen subject/html. v151.
+  - `transition_clone_alert_batch(p_batch_id, p_new_status, p_provider_message_id, p_admin_id) → TABLE(updated_count, observed_status, observed_brand, observed_recipient)` — terminal-state transition with structured race-loser detection. v152.
+  - `record_brand_notification_sent(p_batch_id UUID, p_provider_message_id TEXT) → INTEGER` — stamps `brand_contact_directory.last_notified_at` + `submitted_to.brand_notification` for every alert in the batch. **v153 fix**: lookup by `brand` (was `legitimate_domain`, which failed for brands whose name differs from their domain like "Domain").
+  - `list_clone_alerts_pending_notification_batch(p_limit INT) → TABLE` — dashboard "approvals" tab selector. v151.
+  - `mark_clone_alert_notifications_processed(p_alert_ids BIGINT[])` — terminal write for queue rows whose send completed. v151.
+  - `purge_old_clone_alert_queue_rows(p_days INT)` — retention sweep, called by `/api/cron/clone-watch-retention`. v151.
+  - `purge_old_fp_clone_alerts(p_days INT)` — retention sweep for false-positive alerts. v151.
+
+  _Inbound brand replies:_
   - `ingest_clone_alert_brand_reply(...)` — called by the future inbound-email handler. v146.
-  - `clone_alert_recipient_is_suppressed(p_email TEXT) → BOOLEAN` — STOP-suppression check called by notify-brand. v146.
+  - `clone_alert_recipient_is_suppressed(p_email TEXT) → BOOLEAN` — STOP-suppression check called by notify-brand + the triage route inline + the dashboard send route. v146.
 
 ### Misc / Internal
 
@@ -180,7 +204,7 @@ All have `BRIN(created_at)` for cheap range queries.
 
 ---
 
-## RPCs (72 total — all `SECURITY DEFINER`)
+## RPCs (90 total — all `SECURITY DEFINER`)
 
 ### Analysis pipeline
 
@@ -309,26 +333,29 @@ Audit waves:
 
 ---
 
-## Migration timeline (v2 → v122)
+## Migration timeline (v2 → v156)
 
 Approximate domain bundling:
 
-| Range     | Theme                                                                                             |
-| --------- | ------------------------------------------------------------------------------------------------- |
-| v2–v9     | Core bootstrap (users, verified_scams, blog_posts, api_keys, scan_results)                        |
-| v10–v13   | Pipeline core (bot_message_queue, feed_items, feed_ingestion_log, scam_urls)                      |
-| v14–v20   | Entity + audit (scam_ips, scam_crypto_wallets, sites, site_audits)                                |
-| v21–v23   | Intelligence core (scam_reports, scam_entities, report_entity_links, clusters)                    |
-| v24–v30   | Scoring + billing (api_tiers, subscriptions, api_keys evolution)                                  |
-| v31–v35   | Auth + reputation (auth.users trigger, push_tokens, phone_reputation)                             |
-| v36–v48   | Feed expansion (reddit_feed, threat_intel_exports, feed_summaries, brand_alerts)                  |
-| v49–v60   | Deepfake + org (flagged_ads, deepfake_detections, organizations, leads, fraud_manager)            |
-| v61–v68   | Telemetry + archive (cost_telemetry, feature_brakes, verdict_feedback, archival shadows)          |
-| v69–v77   | Phone Footprint ships + RLS tightening                                                            |
-| v78–v90   | Breach Defence + Embeddings (breaches, breach_victims_index, HNSW on scam_reports/verified_scams) |
-| v91–v99   | Reddit Intel + News Intel narratives + retention                                                  |
-| v100–v107 | DB hygiene + RLS standardisation (FK indexes, DENY_ALL, multi-permissive consolidation)           |
-| v108–v122 | Refinement + sibling tables (cost_telemetry_daily_rollup, acnc_charity_embeddings)                |
+| Range     | Theme                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| v2–v9     | Core bootstrap (users, verified_scams, blog_posts, api_keys, scan_results)                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| v10–v13   | Pipeline core (bot_message_queue, feed_items, feed_ingestion_log, scam_urls)                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| v14–v20   | Entity + audit (scam_ips, scam_crypto_wallets, sites, site_audits)                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| v21–v23   | Intelligence core (scam_reports, scam_entities, report_entity_links, clusters)                                                                                                                                                                                                                                                                                                                                                                                                                |
+| v24–v30   | Scoring + billing (api_tiers, subscriptions, api_keys evolution)                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| v31–v35   | Auth + reputation (auth.users trigger, push_tokens, phone_reputation)                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| v36–v48   | Feed expansion (reddit_feed, threat_intel_exports, feed_summaries, brand_alerts)                                                                                                                                                                                                                                                                                                                                                                                                              |
+| v49–v60   | Deepfake + org (flagged_ads, deepfake_detections, organizations, leads, fraud_manager)                                                                                                                                                                                                                                                                                                                                                                                                        |
+| v61–v68   | Telemetry + archive (cost_telemetry, feature_brakes, verdict_feedback, archival shadows)                                                                                                                                                                                                                                                                                                                                                                                                      |
+| v69–v77   | Phone Footprint ships + RLS tightening                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| v78–v90   | Breach Defence + Embeddings (breaches, breach_victims_index, HNSW on scam_reports/verified_scams)                                                                                                                                                                                                                                                                                                                                                                                             |
+| v91–v99   | Reddit Intel + News Intel narratives + retention                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| v100–v107 | DB hygiene + RLS standardisation (FK indexes, DENY_ALL, multi-permissive consolidation)                                                                                                                                                                                                                                                                                                                                                                                                       |
+| v108–v122 | Refinement + sibling tables (cost_telemetry_daily_rollup, acnc_charity_embeddings)                                                                                                                                                                                                                                                                                                                                                                                                            |
+| v123–v139 | SIM-swap + admin-auth + Phase B threat-intel scrapers + analyze observability                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| v140–v149 | Clone-watch core: shopfront_clone_alerts (v140) → ingest RPC (v141) → triage columns + directory seed (v143/v143b) → KPI RPCs (v144/v145) → inbound replies (v146) → atomic JSONB merge (v147) → urlscan evidence (v148) → 60-day rescan window (v149)                                                                                                                                                                                                                                        |
+| v150–v156 | Clone-watch outreach hardening: directory expansion to 106 brands (v150); notification queue + batch-approval RPCs (v151); cost-brake-aware send + cooldown + race-loser detection (v152); `record_brand_notification_sent` lookup-by-brand fix (v153); FK `clone_alert_notification_queue.brand → brand_contact_directory.brand` + 5 orphan cleanup (v154); big-four banks bugcrowd_vdp → fraud_inbox with real phishing inboxes (v155); silence 13 no-inbox brands → `none` channel (v156). |
 
 ---
 

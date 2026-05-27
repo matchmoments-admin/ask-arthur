@@ -496,3 +496,23 @@ Shipped after Phase A as an independent layer:
 3. Weekly Telegram digest → LinkedIn post → re-published on the blog as a "30-day clone-watch report" cadence.
 
 **Gating:** lawyer pack #371 ship.
+
+### Phase E — Batch-approval + bank-channel hardening ✅ SHIPPED (PRs #468–#489)
+
+Driven by the first live e2e test on 2026-05-27 (NAB clone alert 487). Surfaced four classes of issue that the original Phases 3/4 design didn't account for; each fix shipped as a focused PR or migration. **Status: all code-complete, all flags ON, `FF_SHOPFRONT_CLONE_NOTIFY_BRAND` ON in prod, first live NAB send at 09:24 UTC.**
+
+1. **Admin-auth recovery** (PRs #460–#467 + #473). Pre-existing HMAC-token middleware fell through to Edge runtime, which can't verify the HMAC. Moved middleware to Node.js runtime; trimmed `ADMIN_SECRET` / `UNSUBSCRIBE_SECRET` / `INBOUND_SCAN_FEEDBACK_SECRET` via `readStringEnv` helper.
+2. **Batch-approval flow** (PRs #468 / #469 / #475 / #476). Replaced the original "send immediately on triage" with a queue + daily prepare cron + dashboard click. Migrations v150–v154 added `clone_alert_notification_queue`, batch RPCs, FK to `brand_contact_directory.brand`. Send-route + record RPC look up the directory by `brand` PK (not `legitimate_domain` — was failing for brands like "Domain" whose name differs from its domain).
+3. **Bank-channel routing** (PRs #482 + #486). NAB / Westpac / ANZ Bugcrowd VDPs explicitly reject phishing/clone reports (VDPs are scoped to software vulnerabilities). v155 re-routed the big-four to `fraud_inbox` with their real phishing inboxes; v156 silenced 13 brands with no acceptable inbox to `channel_type='none'`. Current directory: 42 manual_review, 41 fraud_inbox, 13 none, 9 contact_form, 1 security_txt, 0 bugcrowd_vdp.
+4. **Silent-drop defence** (PR #487 + #488). A 2026-05-27 08:38 UTC Inngest cloud blip silently dropped the triaged event — `triage_at` was set in the DB but no batch appeared in approvals, looking exactly like "the click didn't work". Three defences: inline directory-lookup + `enqueue_clone_alert_notification` in the triage route (queue row exists by the time the dashboard returns); `inngest.send` with bounded retry (3 attempts, exponential 200/400/800ms backoff); on retry exhaustion, `sendAdminTelegramMessage` + `eventEmitted:false` in response so the dashboard surfaces a warning toast.
+5. **Evidence in email** (PR #489). The prepare cron now fetches `urlscan_evidence` per alert in one batched query and the React Email template embeds the urlscan.io result link + screenshot thumbnail when retrieval succeeded. Template gracefully omits the evidence block when scan failed/timed out.
+6. **Post-#489 hardening** (PR-A 2026-05-28). `RESEND_FROM_EMAIL` now read via `readStringEnv` at call-site (defeats trailing-whitespace + DefinePlugin static-inlining) in both the prepare cron auto-send path and the dashboard send route. Triage-route inline-enqueue path stamps `submitted_to.brand_notification` + logs cost telemetry for parity with the Inngest consumer. Dead `FROM_EMAIL` / `REPLY_TO_EMAIL` constants removed from `notify-brand.ts` (function no longer calls Resend).
+
+**Open follow-ups** (filed during Phase E, not blocking):
+
+- **#477** — `CRON_SECRET` raw `process.env.X` reads across 20+ files (mechanical trim PR).
+- **#478** — Pre-filled Bugcrowd helper for the 9 remaining `manual_review` / `contact_form` brands.
+- **#479** — Parallel takedown channels (Google Safe Browsing, PhishTank, APWG).
+- **#480** — Time-to-takedown tracking by channel (Netcraft vs brand-direct).
+- **#481** — Per-brand `auto_send` flag for trusted `fraud_inbox` brands (CBA, RBA, Aus Post).
+- **#485** — Playwright form-POST automation for Scamwatch (replace PR #484's manual CSV upload).

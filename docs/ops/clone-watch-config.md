@@ -247,56 +247,73 @@ v3, v4, etc.
 
 ## 8. Outreach + measurement ops (Layers 1–5 + Phase A.3)
 
-Shipped across PRs #424 / #425 / #431 / #432 / #433. The pipeline turns Layer 0 daily NRD hits into community-blocklist submissions + brand-team notifications + auto-classified screenshots.
+Shipped across PRs #424 / #425 / #431 / #432 / #433; hardened across #468 / #469 / #475 / #476 / #482–#489 (admin-auth + bank-channel routing + inline-enqueue + URLscan-embedded evidence). The pipeline turns Layer 0 daily NRD hits into community-blocklist submissions + brand-team notifications + auto-classified screenshots, with a daily batch-builder + admin-click approval before any email leaves the platform.
 
 ### Operator dashboard
 
-[`/admin/clone-watch`](https://askarthur.au/admin/clone-watch) shows:
+[`/admin/clone-watch`](https://askarthur.au/admin/clone-watch) shows three views:
 
-- Pending-triage queue with FP / TP / Investigate buttons
-- Per-row urlscan classification chip (parked / unresolved / likely phishing / resolves) + screenshot thumbnail + "Scan now" / "Re-scan" button
-- Weekly KPI tiles + per-brand history table (30 days) + Netcraft takedown stats (median / P90)
+1. **Triage queue** — pending alerts with FP / TP / Investigate buttons, per-row urlscan classification chip (parked / unresolved / likely phishing / resolves) + screenshot thumbnail + "Scan now" / "Re-scan". Bulk-select supports per-brand actions; selection persists across reloads via sessionStorage (PR #474).
+2. **#approvals tab** — batches in `pending` state with frozen subject + html preview + Send / Reject. One row per (brand, recipient, batch_id).
+3. **Per-brand history + Netcraft takedown stats** — 30-day window, median / P90 time-to-takedown.
 
 ### Daily op cadence
 
-- **08:30 UTC** — Layer 0 NRD ingest runs (`shopfront-nrd-daily-ingest`), inserts hits, fans out urlscan-requested events for new rows (when `FF_SHOPFRONT_CLONE_URLSCAN=true`).
-- **~08:32 UTC** — urlscan auto-scans complete (~90s/row × concurrency 3). Most rows arrive in the dashboard with a classification already attached.
-- **5-min triage pass** — operator visits `/admin/clone-watch`, eyeballs screenshots, marks FP/TP/Investigate. Auto-classified `parked_for_sale` + `unresolved` rows have already been moved to `needs_investigation` and dropped off the pending queue.
-- **On TP** — emits `shopfront/clone.triaged.v1`. When `FF_SHOPFRONT_CLONE_SUBMIT_NETCRAFT=true` + `NETCRAFT_REPORT_API_KEY` is set, `shopfront-clone-submit-netcraft` fires (~30 sec). When `FF_SHOPFRONT_CLONE_NOTIFY_BRAND=true`, `shopfront-clone-notify-brand` looks up `brand_contact_directory` and emails / Telegram-pages.
-- **11:00 UTC** — urlscan re-scan cron (`shopfront-clone-urlscan-rescan`) catches up to 50 stale rows (re-scans cover 60-day seasoning window).
+- **08:30 UTC** — `shopfront-nrd-daily-ingest` runs (Layer 0), inserts hits into `shopfront_clone_alerts`, fans out scan-requested events.
+- **~08:32 UTC** — urlscan auto-scans complete (~90s/row × concurrency 3). Most rows arrive in the dashboard with a classification + screenshot already attached.
+- **5-min triage pass** — operator opens `/admin/clone-watch`, eyeballs screenshots, marks FP / TP / Investigate. Auto-classified `parked_for_sale` + `unresolved` rows have already been moved to `needs_investigation` and dropped off the pending queue.
+  - **On TP**: triage route inline-enqueues into `clone_alert_notification_queue` for `fraud_inbox` / `security_txt` brands (PR #488), stamps `submitted_to.brand_notification = {status:'skipped'}` for dashboard parity (PR-A 2026-05-28), then emits `shopfront/clone.triaged.v1` with bounded retry. On retry exhaustion the admin is Telegram-paged and the dashboard surfaces `eventEmitted:false` as a yellow toast (PR #487).
+  - When `FF_SHOPFRONT_CLONE_SUBMIT_NETCRAFT=true` + `NETCRAFT_REPORT_API_KEY` set, `shopfront-clone-submit-netcraft` fires (~30 sec) as part of the fan-out.
+- **09:30 UTC** — `shopfront-clone-notify-brand-prepare` runs (daily batch builder). Groups queue rows by (brand, recipient), filters via 24h cooldown, caps each group at 50 candidates, fetches `urlscan_evidence` per alert (link + screenshot), renders React Email, freezes subject + html on the queue, transitions to `pending`. Posts ONE summary Telegram pointing the admin at `/admin/clone-watch#approvals`. When `FF_SHOPFRONT_CLONE_NOTIFY_BRAND_AUTO_SEND=true`, dispatches via Resend on the same tick instead of waiting for admin click.
+- **Admin clicks Send** at `/admin/clone-watch#approvals` → `POST /api/admin/clone-watch/batches/[batchId]/send`. Pre-checks (FF + brake + RESEND_FROM_EMAIL), cross-validates recipient against `brand_contact_directory.brand` PK, re-checks STOP suppression, Resend send with `idempotencyKey: clone-watch-send:{batchId}`, transitions batch, records send (stamps `last_notified_at` + `submitted_to.brand_notification.status='sent'`).
+- **11:00 UTC** — urlscan re-scan cron (`shopfront-clone-urlscan-rescan`) catches up to 50 stale rows (60-day window). Catches the parked → activated transition.
 - **Every 30 min** — Netcraft takedown polling cron updates `submitted_to.netcraft.{state, takedown_at}`.
 
 ### Outreach env vars
 
-| Var                                | Purpose                                                                                                                 | Where set                                 |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| `NETCRAFT_REPORT_API_KEY`          | Auth header for Netcraft v3 Report API. Apply via `report@netcraft.com`. Submit + poll fns skip-with-reason when unset. | Vercel → Production (pending application) |
-| `NETCRAFT_REPORTER_EMAIL`          | Identity included in submissions. Defaults to `brendan@askarthur.au`.                                                   | Vercel → Production (optional)            |
-| `URLSCAN_API_KEY`                  | urlscan.io free-tier API key. Powers the auto-scan + re-scan crons.                                                     | Vercel → Production (set 87d ago)         |
-| `SHOPFRONT_CLONE_OUTREACH_CAP_USD` | Aggregate cost-brake across all 6 sub-features (submit / notify / digest / poll / urlscan + rescan). Defaults to `5`.   | Vercel → Production (optional)            |
+| Var                                | Purpose                                                                                                                                                                                                                                                                                                                                                     | Where set                                 |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| `NETCRAFT_REPORT_API_KEY`          | Auth header for Netcraft v3 Report API. Apply via `report@netcraft.com`. Submit + poll fns skip-with-reason when unset.                                                                                                                                                                                                                                     | Vercel → Production (pending application) |
+| `NETCRAFT_REPORTER_EMAIL`          | Identity included in submissions. Defaults to `brendan@askarthur.au`.                                                                                                                                                                                                                                                                                       | Vercel → Production (optional)            |
+| `URLSCAN_API_KEY`                  | urlscan.io free-tier API key. Powers the auto-scan + re-scan crons.                                                                                                                                                                                                                                                                                         | Vercel → Production (set 87d ago)         |
+| `RESEND_FROM_EMAIL`                | Sender for Layers 3+4 brand-notification emails. **Required** — both the prepare cron's auto-send path and the dashboard send route fail closed (`resend_from_email_unset`) when missing. Read via `readStringEnv` to defeat trailing-whitespace + DefinePlugin static-inlining (PR-A 2026-05-28). Recommended shape `"Ask Arthur <brendan@askarthur.au>"`. | Vercel → Production                       |
+| `SHOPFRONT_CLONE_OUTREACH_CAP_USD` | Aggregate cost-brake across all sub-features (submit / notify / digest / poll / urlscan + rescan). Defaults to `5`.                                                                                                                                                                                                                                         | Vercel → Production (optional)            |
 
 ### `brand_contact_directory` curation
 
-The notify-brand fn routes by `channel_type`:
+The notify-brand router (Inngest fn) + the triage-route inline-enqueue path both route by `channel_type`:
 
-- `bugcrowd_vdp` → Telegram-pages admin to open the VDP form. Used for Kmart Group (Kmart + Target Australia).
-- `security_txt` → Resend plain-text email to RFC 9116 `Contact:` address. Used for AusPost + CBA.
-- `fraud_inbox` → Resend plain-text email to curated fraud / abuse address.
-- `contact_form` / `manual_review` → Telegram-pages admin to look up the contact manually.
-- `none` → skip silently.
+- `fraud_inbox` → Resend email to curated fraud/abuse address (e.g. `phishing@nab.com.au`, `hoaxes@cba.com.au`). The big-four banks all live here after v155 — Bugcrowd VDP scopes explicitly reject phishing/clone reports.
+- `security_txt` → Resend email to RFC 9116 `Contact:` address. Used for AusPost only after v155.
+- `bugcrowd_vdp` → Telegram-pages admin to open the VDP form. **0 brands currently** (v155 + v156 moved everything off this channel — VDPs are out-of-scope for clone reports).
+- `contact_form` → Telegram-pages admin to fill the web form manually.
+- `manual_review` → Telegram-pages admin to look up + add the contact to the directory.
+- `none` → skip silently. Used for brands with no acceptable inbox (e.g. Telstra, Optus, Service NSW per v156 — re-route on case-by-case via the dedicated [issue #480 / #481 follow-ups](https://github.com/matchmoments-admin/ask-arthur/issues/480) when an inbox is confirmed).
 
-Seeded with 4 verified + 44 `manual_review` brands. To verify a manual_review row:
+**Current distribution (2026-05-28):**
+
+| channel_type    | count | example brands                             |
+| --------------- | ----- | ------------------------------------------ |
+| `manual_review` | 42    | Bunnings, ALDI, etc. (verify-as-you-go)    |
+| `fraud_inbox`   | 41    | NAB, Westpac, ANZ, CBA, ubank, ...         |
+| `none`          | 13    | Telstra, Optus, Service NSW (PR #486 v156) |
+| `contact_form`  | 9     | brands with no email, web form only        |
+| `security_txt`  | 1     | AusPost                                    |
+| `bugcrowd_vdp`  | 0     | (none — see v155 + v156 rationale)         |
+
+To verify a `manual_review` row:
 
 ```sql
 UPDATE public.brand_contact_directory
 SET channel_type = 'fraud_inbox',
     recipient = 'abuse@bunnings.com.au',
     evidence_format = 'plain_email',
-    notes = 'Verified via Bunnings security.txt — 2026-05-26'
+    notes = 'Verified via Bunnings security.txt — 2026-05-28',
+    updated_at = now()
 WHERE brand = 'Bunnings';
 ```
 
-Then flip `FF_SHOPFRONT_CLONE_NOTIFY_BRAND=true` to start sending.
+`FF_SHOPFRONT_CLONE_NOTIFY_BRAND` is **already ON in prod** (since 2026-05-27, first live NAB send at 09:24 UTC) — verifying a `manual_review` row to `fraud_inbox` immediately makes that brand reachable.
 
 ### urlscan rate-limit & budget
 
@@ -343,6 +360,8 @@ Sun 10:00 UTC — `shopfront-clone-weekly-digest` Telegram-pages admin with KPI 
 - `packages/scam-engine/src/inngest/shopfront-nrd-daily-ingest.ts` — the Inngest function (cron `30 8 * * *` + `shopfront/nrd.manual-trigger.v1` event handler)
 - `apps/web/app/clone-watch/page.tsx` — the public surface (now includes Phase A.3 aggregate impact block when `FF_SHOPFRONT_CLONE_OUTREACH=true`)
 - `apps/web/app/admin/clone-watch/page.tsx` — the operator dashboard
-- `apps/web/app/api/inngest/functions/clone-watch-*.ts` — the 4 outreach + 2 urlscan Inngest functions
+- `apps/web/app/api/inngest/functions/clone-watch-*.ts` — 7 Inngest functions: `submit-netcraft`, `notify-brand`, `notify-brand-prepare` (daily 09:30 UTC batch builder), `poll-netcraft`, `weekly-digest`, `urlscan`, `urlscan-rescan`
+- `apps/web/app/api/admin/clone-watch/batches/[batchId]/send/route.ts` + `.../reject/route.ts` — admin-approval endpoints powering `/admin/clone-watch#approvals`
+- `apps/web/app/api/admin/clone-watch/scamwatch-export/route.ts` — CSV export for Scamwatch manual upload (PR #484; auto-submit tracked in [#485](https://github.com/matchmoments-admin/ask-arthur/issues/485))
 - Open issues: [#409](https://github.com/matchmoments-admin/ask-arthur/issues/409) v3 matcher word-boundary fix · [#426](https://github.com/matchmoments-admin/ask-arthur/issues/426) Netcraft observability · [#427](https://github.com/matchmoments-admin/ask-arthur/issues/427) TOAST sibling-table · [#428](https://github.com/matchmoments-admin/ask-arthur/issues/428) handler tests · [#429](https://github.com/matchmoments-admin/ask-arthur/issues/429) stale-queue dashboard · [#430](https://github.com/matchmoments-admin/ask-arthur/issues/430) Phase C inbound handler · [#434](https://github.com/matchmoments-admin/ask-arthur/issues/434) urlscan evidence audit trail
 - BACKLOG.md #25 (flip `/clone-watch` to indexable after #371 v1 copy) + #26 (re-evaluate cross-surface dedupe with `brand_impersonation_alerts`)
