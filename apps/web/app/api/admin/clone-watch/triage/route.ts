@@ -83,6 +83,92 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "triage_failed" }, { status: 500 });
   }
 
+  // Inline enqueue for the brand-notification path. Replaces the
+  // `clone-watch-notify-brand` Inngest function's enqueue step in the
+  // critical path while keeping that function as a redundant safety net.
+  //
+  // Why inline: the 2026-05-27 08:38 NAB silent-drop was at the Inngest
+  // fan-out, not the email send itself. Inlining the directory lookup +
+  // enqueue means the queue row is guaranteed to exist by the time the
+  // dashboard returns — the admin sees the batch in approvals at the next
+  // prepare-cron run regardless of Inngest health.
+  //
+  // The Inngest event still fires below for two reasons:
+  //   1. Netcraft submission needs the async/retry path (genuinely
+  //      benefits from Inngest)
+  //   2. notify-brand consumer still runs and handles manual-channel
+  //      branches (bugcrowd_vdp, manual_review). For email channels it
+  //      no-ops via the UPSERT in enqueue_clone_alert_notification
+  //      (ON CONFLICT (alert_id, channel_type)).
+  //
+  // The inline path only handles the common case: email channels with a
+  // recipient. Anything else (no directory row, manual_action channels,
+  // null recipient, suppressed recipient) falls through to the Inngest
+  // consumer which has the full branch coverage.
+  let enqueuedInline = false;
+  if (
+    parsed.status === "tp_confirmed" &&
+    featureFlags.shopfrontCloneNotifyBrand
+  ) {
+    try {
+      const { data: directoryRow } = await supabase
+        .from("brand_contact_directory")
+        .select("brand, channel_type, recipient")
+        .eq("legitimate_domain", alert.inferred_target_domain)
+        .maybeSingle();
+
+      if (
+        directoryRow &&
+        (directoryRow.channel_type === "fraud_inbox" ||
+          directoryRow.channel_type === "security_txt") &&
+        directoryRow.recipient
+      ) {
+        // Suppression check — STOP-replied recipients never even hit the
+        // queue. Same logic as notify-brand's check-suppression step.
+        const { data: suppressed } = await supabase.rpc(
+          "clone_alert_recipient_is_suppressed",
+          { p_email: directoryRow.recipient },
+        );
+        if (!suppressed) {
+          const { error: enqueueErr } = await supabase.rpc(
+            "enqueue_clone_alert_notification",
+            {
+              p_alert_id: alert.id,
+              p_brand: directoryRow.brand,
+              p_candidate_domain: alert.candidate_domain,
+              p_candidate_url: alert.candidate_url,
+              p_recipient: directoryRow.recipient,
+              p_channel_type: directoryRow.channel_type,
+              p_severity_tier: alert.severity_tier ?? "medium",
+              p_scheduled_for: new Date().toISOString(),
+            },
+          );
+          if (enqueueErr) {
+            // Don't fail the triage — Inngest fan-out is still going to
+            // fire (notify-brand will retry the enqueue). The UPSERT on
+            // (alert_id, channel_type) makes the Inngest re-try idempotent.
+            logger.warn(
+              "clone-watch triage: inline enqueue rpc failed (Inngest will retry)",
+              { alertId: alert.id, error: enqueueErr.message },
+            );
+          } else {
+            enqueuedInline = true;
+          }
+        }
+      }
+    } catch (err) {
+      // Any failure here is non-fatal. Inngest notify-brand consumer
+      // still fires below and will redo the work.
+      logger.warn(
+        "clone-watch triage: inline enqueue threw (Inngest will retry)",
+        {
+          alertId: alert.id,
+          error: err instanceof Error ? err.message : String(err),
+        },
+      );
+    }
+  }
+
   // Fan-out: emit event ONLY for tp_confirmed. The downstream consumers
   // (Netcraft submit, brand notify) check their own feature flags + API key
   // presence and gracefully no-op when unavailable.
@@ -166,6 +252,7 @@ export async function POST(req: Request) {
     ok: true,
     alert: data,
     eventEmitted,
+    enqueuedInline,
   });
 }
 
