@@ -28,7 +28,12 @@ export async function POST(req: NextRequest) {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "strict",
-      path: "/admin",
+      // Path "/" not "/admin" — admin API routes live under /api/admin/*
+      // (NOT /admin/*), so a cookie scoped to /admin is never sent on
+      // dashboard button clicks. Symptom: every triage/send/reject POST
+      // 307s to /admin/login because requireAdmin() doesn't see the
+      // cookie. Caught 2026-05-27 during the PR #459 live e2e test.
+      path: "/",
       maxAge: MAX_AGE,
     });
 
