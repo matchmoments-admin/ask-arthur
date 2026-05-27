@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
+import { readStringEnv } from "@askarthur/utils/env";
 import { createAdminToken, COOKIE_NAME, MAX_AGE } from "@/lib/adminAuth";
 
 export async function POST(req: NextRequest) {
   try {
     const { secret } = await req.json();
 
-    const adminSecret = process.env.ADMIN_SECRET;
+    // Trimmed read — see packages/utils/src/env.ts. Without this, a
+    // Vercel-stored `ADMIN_SECRET` with a trailing newline silently 401s
+    // every login attempt with no diagnosable signal.
+    const adminSecret = readStringEnv("ADMIN_SECRET");
     if (!adminSecret || typeof secret !== "string") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

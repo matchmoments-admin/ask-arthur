@@ -1,35 +1,13 @@
 // Feature flags — env-var-based, toggleable via Vercel dashboard.
 // NEXT_PUBLIC_ prefix makes these available on both server and client.
 // Default: all OFF. Enable incrementally as each capability is verified.
-
-/**
- * Read a boolean env var safely at RUNTIME.
- *
- * Why this exists — two real, observed failure modes:
- *
- * 1. Trailing whitespace in the Vercel-stored value. On 2026-05-26 the
- *    `FF_SHOPFRONT_CLONE_OUTREACH` and `FF_SHOPFRONT_CLONE_URLSCAN` vars
- *    were stored as `"true\n"` (5 chars) instead of `"true"`. The strict
- *    `=== "true"` comparison silently failed and the gated Inngest fns
- *    returned `{skipped: true, reason: "FF_X disabled"}` in prod for days.
- *
- * 2. Build-time inlining of `process.env.X`. Next.js/Webpack/Turbopack's
- *    DefinePlugin statically replaces `process.env.X` literals at build
- *    time. For Vercel env vars not visible to the build (e.g. encrypted
- *    secrets), this inlines as `undefined === "true"` → `false` baked
- *    into the artifact. Using `process.env[name]` (bracket + variable)
- *    defeats the static replacement because Webpack can't constant-fold
- *    a dynamic property access — the read happens at runtime where the
- *    encrypted value is available.
- *
- * NEXT_PUBLIC_* flags MUST keep using the literal `process.env.NEXT_PUBLIC_X`
- * pattern: the client bundle has no `process.env`, so it relies on
- * build-time inlining to receive a value at all. Apply this helper only
- * to server-side flags.
- */
-function readBoolEnv(name: string): boolean {
-  return (process.env[name] ?? "").trim() === "true";
-}
+//
+// Server-side flags use `readBoolEnv` (from ./env) to defeat trailing-
+// whitespace + build-time-inlining failure modes. NEXT_PUBLIC_* keeps
+// the literal `process.env.NEXT_PUBLIC_X === "true"` pattern because the
+// client bundle has no `process.env` and relies on build-time inlining.
+// See packages/utils/src/env.ts for the full rationale.
+import { readBoolEnv } from "./env";
 
 export const featureFlags = {
   /** Phase 1: Audio upload → Whisper transcription → scam analysis */

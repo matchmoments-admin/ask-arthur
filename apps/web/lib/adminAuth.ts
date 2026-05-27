@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { readStringEnv } from "@askarthur/utils/env";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 
@@ -8,7 +9,11 @@ const COOKIE_NAME = "__aa_admin";
 const MAX_AGE = 60 * 60 * 24; // 24 hours
 
 function getSecret(): string {
-  const secret = process.env.ADMIN_SECRET;
+  // readStringEnv trims trailing whitespace + uses bracket notation so
+  // Vercel-stored secrets with stray newlines don't silently fail HMAC
+  // verification (a stored value of `"<secret>\n"` would otherwise produce
+  // a different HMAC than the same `<secret>` typed into the login form).
+  const secret = readStringEnv("ADMIN_SECRET");
   if (!secret) throw new Error("ADMIN_SECRET not configured");
   return secret;
 }

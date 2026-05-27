@@ -7,6 +7,7 @@
     "./logger": "./src/logger.ts",
     "./axiom-logger": "./src/axiom-logger.ts",
     "./hash": "./src/hash.ts",
+    "./env": "./src/env.ts",
     "./feature-flags": "./src/feature-flags.ts",
     "./rate-limit": "./src/rate-limit.ts",
     "./request-id": "./src/request-id.ts"
