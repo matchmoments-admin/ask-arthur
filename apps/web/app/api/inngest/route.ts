@@ -35,6 +35,9 @@ import { cloneWatchUrlscan } from "./functions/clone-watch-urlscan";
 import { cloneWatchUrlscanRescan } from "./functions/clone-watch-urlscan-rescan";
 // PR-B2 — daily batch builder + Telegram approval flow (v151)
 import { cloneWatchNotifyBrandPrepare } from "./functions/clone-watch-notify-brand-prepare";
+// PR-D1 (#497) — weekly FP-cluster digest. Surfaces repeat FP patterns
+// to the operator as proposed matcher exceptions. Operator-feedback loop.
+import { cloneWatchFpClusterDigest } from "./functions/clone-watch-fp-cluster-digest";
 
 // App-layer Inngest functions live here because they cross apps/web-only
 // primitives (R2 upload, Resend, local auth helpers) that shouldn't leak
@@ -65,6 +68,8 @@ const appFunctions = [
   cloneWatchUrlscanRescan,
   // Clone-watch approval-gated daily-batch builder (v151)
   cloneWatchNotifyBrandPrepare,
+  // Clone-watch FP-cluster digest (PR-D1, #497)
+  cloneWatchFpClusterDigest,
 ];
 
 export const { GET, POST, PUT } = serve({
