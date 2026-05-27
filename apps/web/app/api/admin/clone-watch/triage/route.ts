@@ -7,6 +7,7 @@ import { logger } from "@askarthur/utils/logger";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { CLONE_WATCH_TRIAGED_EVENT } from "@askarthur/scam-engine/inngest/events";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
+import { logCost } from "@/lib/cost-telemetry";
 
 const TriageBodySchema = z.object({
   alertId: z.number().int().positive(),
@@ -153,6 +154,55 @@ export async function POST(req: Request) {
             );
           } else {
             enqueuedInline = true;
+
+            // Parity with the Inngest notify-brand consumer: stamp
+            // `submitted_to.brand_notification = {status:'skipped'}` so
+            // the dashboard's per-alert state reflects "queued for batch"
+            // without waiting for the Inngest fan-out to catch up. Also
+            // short-circuits the Inngest `check-dedup` step on the
+            // redundant-safety-net path (alreadyNotified becomes true).
+            const { error: stampErr } = await supabase.rpc(
+              "merge_clone_alert_submission",
+              {
+                p_alert_id: alert.id,
+                p_key: "brand_notification",
+                p_value: {
+                  channel_type: directoryRow.channel_type,
+                  recipient: directoryRow.recipient,
+                  status: "skipped",
+                  sent_at: null,
+                  ts: new Date().toISOString(),
+                },
+                p_set_triage_status: null,
+              },
+            );
+            if (stampErr) {
+              // Non-fatal — Inngest notify-brand will re-stamp on its
+              // next run via the same RPC. Log for observability.
+              logger.warn(
+                "clone-watch triage: inline submitted_to stamp failed",
+                { alertId: alert.id, error: stampErr.message },
+              );
+            }
+
+            // Parity with the Inngest consumer's log-cost step so
+            // telemetry doesn't under-count enqueues when Inngest is the
+            // redundant path. units:0/unitCostUsd:0 matches notify-brand.
+            logCost({
+              feature: "shopfront_clone_notify_brand",
+              provider: "queue",
+              operation: "enqueue_inline",
+              units: 0,
+              unitCostUsd: 0,
+              metadata: {
+                alert_id: alert.id,
+                brand: directoryRow.brand,
+                channel_type: directoryRow.channel_type,
+                severity_tier: alert.severity_tier ?? "medium",
+                scheduled_for: new Date().toISOString(),
+                source: "triage_route_inline",
+              },
+            });
           }
         }
       }

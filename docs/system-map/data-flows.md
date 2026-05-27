@@ -445,6 +445,130 @@ INSERT regulator_alert_pushes (report_id, destination, delivered_at)
 
 ---
 
+## 7. Clone-watch — NRD ingest → triage → brand notification
+
+Layer 0 Newly Registered Domain (NRD) sweep against ~50 AU brands, admin triage, then a batched email to the impacted brand's fraud/abuse inbox. Three architectural ideas to remember when reading the flow:
+
+- **Single write target** (`shopfront_clone_alerts`) per ADR-0016, regardless of source.
+- **Inline-enqueue at the click** (PR #488) so the queue row exists by the time the dashboard returns — Inngest fan-out is the redundant safety net, not the load-bearing path.
+- **Batch-approval before send** — never autosend unless `FF_SHOPFRONT_CLONE_NOTIFY_BRAND_AUTO_SEND` is explicitly flipped. The 09:30 UTC `notify-brand-prepare` cron groups by `(brand, recipient)`, applies a 24h cooldown, freezes the rendered email on the queue, and the admin clicks Send.
+
+```
+08:30 UTC daily cron
+  └─ shopfront-nrd-daily-ingest (Inngest)
+     ├─ Download whoisds NRD zip → ~80K new domains
+     ├─ Lexical match against au-brand-watchlist.ts (~50 brands, scam-context-token gated)
+     ├─ upsert_clone_alerts_batch(JSONB)
+     │    → INSERT INTO shopfront_clone_alerts ON CONFLICT (composite key)
+     │    → source='nrd', target_shop_id=NULL, inferred_target_domain=brand.legitimate_domain
+     ├─ Telegram digest: "5 candidates today across 3 brands"
+     └─ Fan out shopfront/clone.scan-requested.v1 per new row
+                       │
+                       ▼
+~08:32 UTC — shopfront-clone-urlscan (Inngest, concurrency 3)
+  ├─ submitURLScanWithDetails(candidate_url)
+  ├─ step.sleep 60s + (retry 30s if needed)
+  ├─ retrieveURLScan(uuid) → effective_url, screenshot_url, malicious, score
+  ├─ classifyScan: parked_for_sale | unresolved | likely_phishing | neutral
+  └─ persist_clone_alert_urlscan(alert_id, uuid, evidence, classification, suggested_triage)
+       parked_for_sale + unresolved → auto-flip triage_status to 'needs_investigation'
+       likely_phishing → NO auto-flip (operator confirms TP manually so the event fires)
+                       │
+                       ▼
+Admin visits /admin/clone-watch — eyeballs screenshot chips, clicks FP / TP / Investigate
+  └─ POST /api/admin/clone-watch/triage (HMAC auth, FF_SHOPFRONT_CLONE_OUTREACH gate)
+     ├─ Load alert (id, inferred_target_domain, candidate_domain, candidate_url, severity_tier, signals)
+     ├─ set_clone_alert_triage RPC (transition triage_status, stamp triage_at / triage_by)
+     │
+     │   ── On tp_confirmed + FF_SHOPFRONT_CLONE_NOTIFY_BRAND ON:    INLINE-ENQUEUE PATH ──
+     ├─ SELECT brand, channel_type, recipient FROM brand_contact_directory
+     │    WHERE legitimate_domain = alert.inferred_target_domain
+     ├─ if channel_type IN (fraud_inbox, security_txt) AND recipient AND NOT suppressed:
+     │    ├─ enqueue_clone_alert_notification(...) — UPSERT into clone_alert_notification_queue
+     │    │    keyed on (alert_id, channel_type); scheduled_for = now() regardless of severity
+     │    ├─ merge_clone_alert_submission(p_key='brand_notification',
+     │    │      p_value={status:'skipped', recipient, channel_type, sent_at:null, ts}) — PR-A 2026-05-28
+     │    └─ logCost(feature='shopfront_clone_notify_brand', operation='enqueue_inline')   — PR-A 2026-05-28
+     │
+     │   ── On tp_confirmed (any case): emit shopfront/clone.triaged.v1 ──
+     ├─ inngest.send with retry (3 attempts, 200/400/800ms backoff, ~1.4s cap)
+     │    └─ On exhaustion: sendAdminTelegramMessage("event drop") + return eventEmitted:false
+     │       (Dashboard surfaces a yellow warning toast — alert was triaged, downstream didn't fire)
+     └─ Return { ok, alert, eventEmitted, enqueuedInline }
+                       │
+                       ▼
+Inngest fan-out from shopfront/clone.triaged.v1 (idempotency key event.data.alertId):
+  ├─ shopfront-clone-submit-netcraft (if FF_SHOPFRONT_CLONE_SUBMIT_NETCRAFT)
+  │    └─ POST Netcraft v3 Report API → submitted_to.netcraft.submission_id
+  │
+  └─ shopfront-clone-notify-brand (REDUNDANT SAFETY NET for the email path; load-bearing for manual)
+     ├─ load brand_contact_directory (eq legitimate_domain)
+     ├─ check-dedup: read submitted_to.brand_notification (the PR-A stamp short-circuits here)
+     │    → if already stamped, return {skipped:'already_notified'} ← happy path
+     ├─ if channel_type IN (security_txt, fraud_inbox) AND NOT already_notified:
+     │    └─ re-run enqueue (UPSERT is idempotent — no double row), then merge submitted_to
+     └─ if channel_type IN (bugcrowd_vdp, contact_form, manual_review):
+        └─ Telegram-page admin via brand_notification_queued key (separate from brand_notification
+           so re-triage doesn't silently no-op)
+                       │
+                       ▼ (rows sit in queue with approval_status='unbatched')
+09:30 UTC daily — shopfront-clone-notify-brand-prepare (Inngest singleton, 10m finish-timeout)
+  ├─ Pre-checks: FF_SHOPFRONT_CLONE_OUTREACH + FF_SHOPFRONT_CLONE_NOTIFY_BRAND + feature_brakes
+  │    + readStringEnv('RESEND_FROM_EMAIL')   (PR-A 2026-05-28 — defeats trailing-whitespace/inlining)
+  ├─ list_clone_alerts_unbatched_for_prepare(p_limit=500)
+  ├─ Group by (brand, recipient) into BrandGroup[]
+  ├─ list_recently_notified_brands(legitimate_domains, p_cooldown_hours=24) — filter out fatigued brands
+  ├─ Cap each group at MAX_CANDIDATES_PER_BATCH=50 (oldest 50 ship, remainder rolls over)
+  ├─ Per group:
+  │    ├─ step.run mint-batch-id (uuid — keyed on group so replay-safe)
+  │    ├─ step.run fetch-urlscan-evidence (batched query keyed on alert_ids)
+  │    │    → Returns Record<string, {resultUrl, screenshotUrl?}>     ← NOT a Map — step.run
+  │    │                                                                JSON-serialises returns
+  │    ├─ Render React Email (CloneWatchBrandAlert) with urlscan link/screenshot embedded (PR #489)
+  │    ├─ assign_clone_alert_batch(queue_ids[], batch_id, subject, html, '', p_auto_approved)
+  │    │    → freezes subject + html on queue rows; transitions to 'pending' (or 'auto_approved')
+  │    │
+  │    └─ if FF_SHOPFRONT_CLONE_NOTIFY_BRAND_AUTO_SEND:
+  │         ├─ Resend.emails.send with idempotencyKey: clone-watch-send:{batchId}
+  │         ├─ transition_clone_alert_batch(batchId, 'sent', provider_message_id, NULL)
+  │         └─ record_brand_notification_sent(batchId, provider_message_id)
+  │              → stamps brand_contact_directory.last_notified_at + submitted_to.brand_notification
+  │
+  └─ ONE summary Telegram (no per-batch link — Telegram crawlers auto-click incident 2026-05-26)
+       "🛡️ N batches awaiting approval at /admin/clone-watch#approvals"
+                       │
+                       ▼ (manual-approval path: rows in 'pending')
+Admin clicks Send at /admin/clone-watch#approvals
+  └─ POST /api/admin/clone-watch/batches/[batchId]/send
+     ├─ Pre-checks: requireAdmin, FF gates, feature_brakes, readStringEnv('RESEND_FROM_EMAIL')
+     ├─ load_clone_alert_batch(batchId) — returns rows with frozen subject + html
+     ├─ Idempotent state guards (sent → 200 alreadySent / rejected → 409 / expired → 410)
+     ├─ Cross-validate first.recipient against brand_contact_directory.brand=first.brand
+     │    (PK lookup safe; v153 fix — was legitimate_domain which failed for brand≠domain cases)
+     ├─ Re-check clone_alert_recipient_is_suppressed (STOP between enqueue and send)
+     ├─ Resend.emails.send with idempotencyKey: clone-watch-send:{batchId}
+     ├─ transition_clone_alert_batch(batchId, 'sent', provider_message_id, admin_id)
+     │    → structured outcome (updated_count, observed_status, ...) detects race-loser
+     └─ record_brand_notification_sent(batchId, provider_message_id)
+          → brand_contact_directory.last_notified_at = now()
+          → submitted_to.brand_notification.{status:'sent', sent_at, provider_message_id, batch_id}
+                       │
+                       ▼ (Phase C, planned — issue #430)
+Brand replies to brendan@askarthur.au
+  └─ Cloudflare Worker (askarthur-inbound.com) → Supabase Edge Function intel-inbound-email
+     └─ ingest_clone_alert_brand_reply(from_email, classified_as, raw_message_id, ...)
+        → STOP-class replies stamp clone_alert_brand_replies; subsequent enqueues skip via
+          clone_alert_recipient_is_suppressed()
+```
+
+**Why inline-enqueue + Inngest both:** the 2026-05-27 NAB silent-drop hit a brief Inngest cloud blip — the event was emitted but never delivered, so `notify-brand` never ran and the admin saw no batch in approvals. Inlining the enqueue means the queue row exists at the moment the triage RPC returns, regardless of Inngest health. Keeping the Inngest path defends the manual-channel branches (`bugcrowd_vdp` / `contact_form` / `manual_review`) and re-runs the email-channel enqueue idempotently (UPSERT on `(alert_id, channel_type)`).
+
+**Why batched, not immediate-send:** at ~5 hits/day across 5–10 brands the per-hit email noise destroys the deliverability score. One email per (brand, recipient, day) with all candidates listed gets read; ten emails per brand per day gets filtered to junk.
+
+**Why HMAC retry + Telegram alert + `eventEmitted:false`:** the failure mode of the silent-drop was indistinguishable from "click didn't work" — `triage_at` was set in the DB but the admin saw nothing happen. The three layers of defence ensure that either (a) Inngest gets the event eventually (retry), (b) the admin is paged when retries exhaust (Telegram), or (c) the dashboard surfaces the partial-success as a warning toast (`eventEmitted:false`).
+
+---
+
 ## Cross-flow patterns
 
 A few invariants that hold across all six flows:
