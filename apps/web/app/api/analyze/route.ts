@@ -26,6 +26,7 @@ import type { PhoneLookupResult } from "@askarthur/types";
 import { lookupPhoneNumber, extractPhoneNumbers } from "@/lib/twilioLookup";
 import { uploadScreenshot } from "@/lib/r2";
 import { logger, maskE164 } from "@askarthur/utils/logger";
+import { getLogger } from "@askarthur/utils/axiom-logger";
 import { logCost, claudeHaikuCostUsd } from "@/lib/cost-telemetry";
 
 /**
@@ -50,6 +51,9 @@ function extractClientIp(req: NextRequest): string | null {
 }
 
 export async function POST(req: NextRequest) {
+  // Captured at function entry so durationMs is consistent across the
+  // success-path emit, the cache-hit emit, and the catch-block emit.
+  const start = Date.now();
   try {
     // 0. Reject oversized payloads (defense against oversized base64)
     const contentLength = parseInt(req.headers.get("content-length") || "0");
@@ -176,6 +180,13 @@ export async function POST(req: NextRequest) {
       if (cached) {
         const geo = geolocateFromHeaders(req.headers);
         waitUntil(incrementStats(cached.verdict, geo.region));
+        emitAnalyzeComplete({
+          requestId,
+          verdict: cached.verdict,
+          cached: true,
+          submissionType: "text",
+          start,
+        });
         return NextResponse.json(
           {
             verdict: cached.verdict,
@@ -607,6 +618,17 @@ export async function POST(req: NextRequest) {
     }
 
     // 9. Return result
+    emitAnalyzeComplete({
+      requestId,
+      verdict: aiResult.verdict,
+      cached: false,
+      submissionType:
+        mode ?? (images.length > 0 ? "image" : text ? "text" : "unknown"),
+      start,
+      usage: aiResult.usage,
+      hasImages: images.length > 0,
+      flagPath: featureFlags.analyzeInngestWeb ? "inngest-web" : "wait-until-legacy",
+    });
     return NextResponse.json(
       {
         verdict: aiResult.verdict,
@@ -639,6 +661,25 @@ export async function POST(req: NextRequest) {
     );
   } catch (err) {
     logger.error("Analysis error", { error: String(err) });
+    // Cross-system Axiom error log. Resolve requestId fresh from
+    // headers — middleware always populates `x-request-id` before this
+    // route runs, so this matches whatever the success-path emit
+    // would have used. Wrapped in try/catch so logging cannot mask the
+    // underlying error or break the 500 response.
+    try {
+      const axiomLog = getLogger({
+        source: "api/analyze",
+        requestId: resolveRequestId(req.headers),
+      });
+      axiomLog.error("analyze.error", {
+        error: err instanceof Error ? err.message : String(err),
+        errorType: err instanceof Error ? err.name : "Unknown",
+        durationMs: Date.now() - start,
+      });
+      axiomLog.flush().catch(() => {});
+    } catch {
+      // Never let logging surface a new error.
+    }
     return NextResponse.json(
       {
         error: "analysis_failed",
@@ -646,5 +687,52 @@ export async function POST(req: NextRequest) {
       },
       { status: 500 }
     );
+  }
+}
+
+// Boundary-only Axiom emit. Single `analyze.complete` event per
+// request carrying verdict, latency, submission shape, and Claude
+// token counts. Intentionally NOT a generic logger — its job is to
+// keep the success-path log shape in one place so dashboards and
+// monitors are stable across the cache-hit path and the main flow.
+//
+// Why not log per-step: each /api/analyze hits Claude, URL reputation,
+// possibly redirect-resolver, possibly retrieval-augmented theme
+// lookup. Per-step logging would inflate ingest 5× without making
+// dashboards more useful — the per-step durations are already
+// summarised in the cost_telemetry table.
+function emitAnalyzeComplete(args: {
+  requestId: string;
+  verdict: string;
+  cached: boolean;
+  submissionType: string;
+  start: number;
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadInputTokens?: number;
+  };
+  hasImages?: boolean;
+  flagPath?: "inngest-web" | "wait-until-legacy";
+}): void {
+  try {
+    const axiomLog = getLogger({
+      source: "api/analyze",
+      requestId: args.requestId,
+    });
+    axiomLog.info("analyze.complete", {
+      verdict: args.verdict,
+      cached: args.cached,
+      submissionType: args.submissionType,
+      durationMs: Date.now() - args.start,
+      hasImages: args.hasImages ?? false,
+      flagPath: args.flagPath ?? "n/a",
+      claudeInputTokens: args.usage?.inputTokens,
+      claudeOutputTokens: args.usage?.outputTokens,
+      claudeCacheReadTokens: args.usage?.cacheReadInputTokens,
+    });
+    axiomLog.flush().catch(() => {});
+  } catch {
+    // Never let logging break the success path.
   }
 }
