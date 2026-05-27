@@ -5,10 +5,7 @@ import {
   buildSubmissionReason,
   NETCRAFT_REPORT_ENDPOINT_URL,
 } from "@/app/api/inngest/functions/clone-watch-submit-netcraft";
-import {
-  decideNotificationAction,
-  nextWeeklyDigestSchedule,
-} from "@/app/api/inngest/functions/clone-watch-notify-brand";
+import { decideNotificationAction } from "@/app/api/inngest/functions/clone-watch-notify-brand";
 import {
   buildLinkedInDraft,
   buildTelegramMessage,
@@ -184,13 +181,14 @@ describe("clone-watch-notify-brand — decideNotificationAction", () => {
       expect(action).toEqual({ kind: "email", channel: "security_txt" });
     });
 
-    it("routes low severity to weekly-digest enqueue", () => {
+    it("routes low severity to immediate email (admin TP-confirm = no noise floor)", () => {
+      // Pre-2026-05-27 this returned { kind: 'enqueue_digest', severity:'low' }
+      // and the handler scheduled for next-Sunday digest. That gate was
+      // removed because this consumer only fires post-admin-TP-confirm —
+      // there is no auto-noise to throttle against. See PR
+      // fix/clone-watch-scheduled-for-now.
       const action = decideNotificationAction(securityRow, "low");
-      expect(action).toEqual({
-        kind: "enqueue_digest",
-        channel: "security_txt",
-        severity: "low",
-      });
+      expect(action).toEqual({ kind: "email", channel: "security_txt" });
     });
 
     it("defaults to medium (immediate email) when severity is omitted", () => {
@@ -198,16 +196,12 @@ describe("clone-watch-notify-brand — decideNotificationAction", () => {
       expect(action).toEqual({ kind: "email", channel: "security_txt" });
     });
 
-    it("low severity on fraud_inbox enqueues too", () => {
+    it("low severity on fraud_inbox also routes to immediate email", () => {
       const action = decideNotificationAction(
         { ...securityRow, channel_type: "fraud_inbox" },
         "low",
       );
-      expect(action).toEqual({
-        kind: "enqueue_digest",
-        channel: "fraud_inbox",
-        severity: "low",
-      });
+      expect(action).toEqual({ kind: "email", channel: "fraud_inbox" });
     });
 
     it("low severity does NOT bypass manual_action routing for VDPs", () => {
@@ -230,29 +224,6 @@ describe("clone-watch-notify-brand — decideNotificationAction", () => {
         reason: "directory_recipient_null",
       });
     });
-  });
-});
-
-describe("clone-watch-notify-brand — nextWeeklyDigestSchedule", () => {
-  it("returns Sunday 09:00 UTC when 'now' is a weekday", () => {
-    // Tuesday 26 May 2026 at 03:14 UTC → next Sunday is 31 May
-    const now = new Date(Date.UTC(2026, 4, 26, 3, 14, 0));
-    const next = nextWeeklyDigestSchedule(now);
-    expect(next.toISOString()).toBe("2026-05-31T09:00:00.000Z");
-  });
-
-  it("skips to the FOLLOWING Sunday when 'now' is already Sunday", () => {
-    // Sunday 24 May 2026 at 10:00 UTC (after 09:00 cron) → next Sunday is 31 May
-    const now = new Date(Date.UTC(2026, 4, 24, 10, 0, 0));
-    const next = nextWeeklyDigestSchedule(now);
-    expect(next.toISOString()).toBe("2026-05-31T09:00:00.000Z");
-  });
-
-  it("rolls to Sunday from Saturday", () => {
-    // Saturday 23 May 2026 at 22:00 UTC → next Sunday is 24 May at 09:00
-    const now = new Date(Date.UTC(2026, 4, 23, 22, 0, 0));
-    const next = nextWeeklyDigestSchedule(now);
-    expect(next.toISOString()).toBe("2026-05-24T09:00:00.000Z");
   });
 });
 

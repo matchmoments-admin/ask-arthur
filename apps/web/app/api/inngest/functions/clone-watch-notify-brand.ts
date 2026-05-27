@@ -56,35 +56,26 @@ export type SeverityTier = "low" | "medium" | "high" | "critical";
 export type NotificationAction =
   | { kind: "skip"; reason: string }
   | { kind: "manual_action"; channel: DirectoryChannel }
-  | { kind: "email"; channel: "security_txt" | "fraud_inbox" }
-  | {
-      kind: "enqueue_digest";
-      channel: "security_txt" | "fraud_inbox";
-      severity: "low";
-    };
+  | { kind: "email"; channel: "security_txt" | "fraud_inbox" };
 
 /**
- * Pure routing function — given a directory row + severity tier, return
- * the action to take. Extracted from the Inngest handler so we can
- * unit-test channel + severity branching without mocking Supabase /
- * Resend / Inngest step machinery.
+ * Pure routing function — given a directory row, return the action to take.
+ * Extracted from the Inngest handler so we can unit-test channel branching
+ * without mocking Supabase / Resend / Inngest step machinery.
  *
- * Severity gate (PR-B Phase 1 calibration):
- *   - critical / high → email immediately (existing behaviour)
- *   - medium          → email immediately (preserves no-regression default
- *                       while the daily-batch consumer is unbuilt; future
- *                       follow-up flips this to enqueue + daily cron)
- *   - low             → enqueue into clone_alert_notification_queue;
- *                       surfaces in the weekly digest only. Stops the
- *                       low-severity noise floor from spamming brand
- *                       security inboxes.
- *
- * `severity` is optional so callers that haven't been updated still get
- * the legacy behaviour (treated as 'medium' = send immediately).
+ * Severity used to gate weekly-digest behaviour for `low` rows. That gate
+ * was removed 2026-05-27 because `notify-brand` only fires on
+ * `clone.triaged.v1` (admin TP-confirmed). An admin confirming the row
+ * means the candidate is a real clone — there is no "noise floor" to
+ * batch-protect against. Holding admin-confirmed low-severity rows for
+ * the next-Sunday digest was a real UX bug (queue row 8 stuck until
+ * 2026-05-31 during the 2026-05-27 e2e test). Severity stays in the
+ * function signature so the type contract is unchanged; the parameter is
+ * now informational (used for cooldown logging downstream, not routing).
  */
 export function decideNotificationAction(
   row: DirectoryRow | null,
-  severity: SeverityTier = "medium",
+  _severity: SeverityTier = "medium",
 ): NotificationAction {
   if (!row) return { kind: "skip", reason: "no_directory_row" };
   if (row.channel_type === "none") return { kind: "skip", reason: "channel_none" };
@@ -99,26 +90,9 @@ export function decideNotificationAction(
     if (!row.recipient) {
       return { kind: "skip", reason: "directory_recipient_null" };
     }
-    if (severity === "low") {
-      return { kind: "enqueue_digest", channel: row.channel_type, severity };
-    }
     return { kind: "email", channel: row.channel_type };
   }
   return { kind: "skip", reason: "unknown_channel_type" };
-}
-
-/**
- * Compute the next Sunday 09:00 UTC for the weekly-digest queue. Pure so
- * we can unit-test it with a fixed `now`.
- */
-export function nextWeeklyDigestSchedule(now: Date = new Date()): Date {
-  const d = new Date(now);
-  // 0 = Sunday in JS getUTCDay()
-  const dow = d.getUTCDay();
-  const daysUntilSunday = dow === 0 ? 7 : 7 - dow;
-  d.setUTCDate(d.getUTCDate() + daysUntilSunday);
-  d.setUTCHours(9, 0, 0, 0);
-  return d;
 }
 
 export const cloneWatchNotifyBrand = inngest.createFunction(
@@ -284,12 +258,14 @@ export const cloneWatchNotifyBrand = inngest.createFunction(
       }
 
       const severity = (data.severityTier as SeverityTier) ?? "medium";
-      // Schedule low-severity for next weekly digest, everything else
-      // for the next daily-batch cron.
-      const scheduledFor =
-        severity === "low"
-          ? nextWeeklyDigestSchedule()
-          : new Date(); // batch builder picks up immediately (scheduled_for <= now())
+      // All severities: schedule for now(). The daily-batch builder picks
+      // up `scheduled_for <= now()` and groups by (brand, recipient), so
+      // multiple low-severity alerts for the same brand still consolidate
+      // into one email at the next 09:30 UTC cron tick. The previous
+      // "low → next Sunday weekly digest" branch was removed 2026-05-27 —
+      // this handler only fires post-admin-TP-confirm, so the noise-floor
+      // concern doesn't apply (admin already filtered the noise).
+      const scheduledFor = new Date();
 
       await step.run("enqueue-for-batch", async () => {
         await sb.rpc("enqueue_clone_alert_notification", {
