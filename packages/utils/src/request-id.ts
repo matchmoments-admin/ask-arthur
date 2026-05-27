@@ -30,15 +30,26 @@ export function isValidIdempotencyKey(value: string | null | undefined): value i
 }
 
 /**
- * Resolve the canonical request id for an incoming request:
- * - If the caller sent a well-formed `Idempotency-Key` header, use it.
- * - Otherwise generate a fresh ULID.
+ * Resolve the canonical request id for an incoming request.
+ *
+ * Priority:
+ *   1. `x-request-id` — set by `apps/web/middleware.ts` before the route
+ *      handler runs. Middleware already evaluated the Idempotency-Key
+ *      precedence, so by the time we reach a route this header is the
+ *      single source of truth and route + middleware logs share an id.
+ *   2. `Idempotency-Key` — defensive fallback for the rare case where
+ *      middleware was bypassed (e.g. direct invocation in a test).
+ *   3. Server-generated ULID.
  *
  * The returned string is the authoritative id used for: logging
  * correlation, the response `X-Request-Id` header, the Inngest event id,
  * and the scam_reports.idempotency_key column.
  */
 export function resolveRequestId(headers: Headers): string {
+  const propagated = headers.get("x-request-id");
+  if (isValidIdempotencyKey(propagated)) {
+    return propagated;
+  }
   const supplied = headers.get("idempotency-key") ?? headers.get("x-idempotency-key");
   if (isValidIdempotencyKey(supplied)) {
     return supplied;
