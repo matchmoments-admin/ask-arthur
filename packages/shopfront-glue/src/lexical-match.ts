@@ -15,12 +15,27 @@
 // the `medium` severity boundary at MVP. A match against the entry's
 // legitimate_domains returns null (a brand can't clone itself).
 //
-// Punycode / IDN homograph decoding is NOT covered at MVP. Node's
-// URL constructor does not decode A-labels (xn--...) to Unicode, so
-// the historical "punycode" signal was dead code. A-label substring
-// matches (e.g. `xn--bunnings-cn1c.shop` contains the latin string
-// "bunnings") still fire via the `substring` branch. Real IDN
-// decoding is a Phase B concern.
+// Punycode / IDN homograph decoding (PR-E, #494). Domain registered as
+// `xn--…` (an A-label) is decoded to its Unicode form before lexical
+// matching. Catches clones like:
+//   xn--auspst-9ya.com  → ausp̃st.com  → confusable-normalises to auspost
+// A-label substring hits still fire on the raw form when the latin
+// chars happen to align (e.g. xn--bunnings-cn1c.shop literally contains
+// "bunnings") — that path is preserved as a fallback.
+//
+// Cyrillic / Greek / Latin-extended confusables on the bare ASCII form
+// were already handled via CONFUSABLES below; this PR adds the IDN
+// decode step in front of that. Wider confusables coverage tracked in
+// BACKLOG.md #29.
+
+// Node 24 ships `node:punycode` as deprecated-but-present. We use it
+// here because the matcher is server-only (Inngest + cron) and adding a
+// userland dep for one function is heavier than the deprecation
+// warning. If Node ever removes it, swap to the `punycode/` package
+// (zero behaviour change).
+//
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+import punycode from "node:punycode";
 
 import { AU_BRAND_WATCHLIST, type BrandEntry } from "./au-brand-watchlist";
 
@@ -121,55 +136,97 @@ export function lexicalMatch(
   const labels = lower.split(".");
   const primary = labels[0] ?? lower;
 
+  // IDN decode (PR-E, #494). When the primary label is an A-label
+  // (xn--…), decode to Unicode before confusable / substring / Levenshtein
+  // checks. `decodeIdnLabel` returns the original input if not an A-label,
+  // OR if punycode.toUnicode throws on a malformed value — never throws
+  // upward. The DECODED form is what we match against.
+  const matchPrimary = decodeIdnLabel(primary);
+  const wasIdnDecoded = matchPrimary !== primary;
+
   let best: MatchResult | null = null;
 
   for (const entry of watchlist) {
     const brand = entry.brand.toLowerCase().replace(/[^a-z0-9]/g, "");
     if (!brand) continue;
 
-    const normalised = normaliseConfusables(primary);
-    if (normalised !== primary && normalised.includes(brand)) {
+    const normalised = normaliseConfusables(matchPrimary);
+    if (normalised !== matchPrimary && normalised.includes(brand)) {
       best = pickBetter(best, {
         brand: entry.brand,
         legitimate_domain: entry.legitimate_domains[0] ?? "",
         score: 0.9,
         signal_type: "confusable",
-        evidence: { input_label: primary, normalised, brand },
+        evidence: wasIdnDecoded
+          ? { input_label: primary, idn_decoded: matchPrimary, normalised, brand }
+          : { input_label: primary, normalised, brand },
       });
       continue;
     }
 
     const substringHit =
       brand.length >= MIN_BRAND_LEN_FOR_LOOSE_SUBSTRING
-        ? primary.includes(brand)
-        : primary.split(/[-_]/).includes(brand);
-    if (substringHit && hasScamContext(lower, primary, brand)) {
+        ? matchPrimary.includes(brand)
+        : matchPrimary.split(/[-_]/).includes(brand);
+    if (substringHit && hasScamContext(lower, matchPrimary, brand)) {
       best = pickBetter(best, {
         brand: entry.brand,
         legitimate_domain: entry.legitimate_domains[0] ?? "",
         score: 0.85,
         signal_type: "substring",
-        evidence: { input_label: primary, brand },
+        evidence: wasIdnDecoded
+          ? { input_label: primary, idn_decoded: matchPrimary, brand }
+          : { input_label: primary, brand },
       });
       continue;
     }
 
     if (brand.length >= MIN_BRAND_LEN_FOR_LEVENSHTEIN) {
-      const dist = levenshtein(primary, brand);
+      const dist = levenshtein(matchPrimary, brand);
       if (dist > 0 && dist <= LEVENSHTEIN_THRESHOLD) {
-        const score = 1 - dist / Math.max(primary.length, brand.length);
+        const score = 1 - dist / Math.max(matchPrimary.length, brand.length);
         best = pickBetter(best, {
           brand: entry.brand,
           legitimate_domain: entry.legitimate_domains[0] ?? "",
           score: Math.min(MAX_MATCH_SCORE, Math.max(0.55, score)),
           signal_type: "levenshtein",
-          evidence: { input_label: primary, brand, edit_distance: dist },
+          evidence: wasIdnDecoded
+            ? {
+                input_label: primary,
+                idn_decoded: matchPrimary,
+                brand,
+                edit_distance: dist,
+              }
+            : { input_label: primary, brand, edit_distance: dist },
         });
       }
     }
   }
 
   return best;
+}
+
+/**
+ * Decode a single domain label from punycode (A-label) to Unicode (U-label)
+ * when the label starts with the IDNA `xn--` prefix. Returns the original
+ * input on any non-A-label OR on malformed punycode (punycode.toUnicode
+ * can throw on certain inputs — we treat those as opaque ASCII).
+ *
+ * Examples:
+ *   `xn--auspst-9ya`  → "ausp̃st"     (small letter p with tilde)
+ *   `xn--bunnings-cn1c` → "bunnings象" (latin "bunnings" + a CJK ideograph)
+ *   `auspost`          → "auspost"    (no transform)
+ *   `xn---broken-broken` → "xn---broken-broken" (malformed, returned as-is)
+ *
+ * Exported for unit-testing.
+ */
+export function decodeIdnLabel(label: string): string {
+  if (!label.startsWith("xn--")) return label;
+  try {
+    return punycode.toUnicode(label);
+  } catch {
+    return label;
+  }
 }
 
 function pickBetter(a: MatchResult | null, b: MatchResult): MatchResult {
