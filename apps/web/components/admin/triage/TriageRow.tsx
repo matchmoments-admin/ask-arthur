@@ -29,6 +29,25 @@ export interface PendingAlertView {
   urlscan_scanned_at?: string | null;
   urlscan_screenshot_url?: string | null;
   urlscan_effective_url?: string | null;
+  // PR-D2 (#498) — Haiku classifier signal. NULL when classifier hasn't
+  // run (FF_SHOPFRONT_CLONE_PRECLASSIFY OFF, or fan-out raced, or row
+  // pre-dates the feature). Chip rendering gated on `is_clone != null`.
+  auto_classification_is_clone?: boolean | null;
+  auto_classification_confidence?: number | null;
+  auto_classification_clone_tactic?:
+    | "typosquat"
+    | "homograph"
+    | "brandjack"
+    | "lookalike_tld"
+    | "subdomain_abuse"
+    | "compound_word"
+    | "unrelated"
+    | "parked"
+    | "other"
+    | null;
+  auto_classification_attack_intent?: string | null;
+  auto_classification_reason?: string | null;
+  likely_tp?: boolean | null;
 }
 
 const URLSCAN_TONE: Record<
@@ -196,6 +215,41 @@ export default function TriageRow({
             }
           >
             {urlscanTone.label}
+          </span>
+        )}
+        {row.auto_classification_is_clone != null && (
+          <span
+            className="uppercase"
+            title={
+              row.auto_classification_reason
+                ? `Haiku: ${row.auto_classification_reason}`
+                : undefined
+            }
+            style={{
+              padding: "2px 8px",
+              borderRadius: 6,
+              fontSize: 10.5,
+              letterSpacing: "0.06em",
+              fontWeight: 600,
+              color: row.likely_tp
+                ? "var(--color-tp-fg)"
+                : "var(--color-muted)",
+              background: row.likely_tp
+                ? "var(--color-tp-bg)"
+                : "var(--color-surface-2)",
+              border: `1px solid ${
+                row.likely_tp ? "var(--color-tp-ring)" : "var(--color-line-soft)"
+              }`,
+            }}
+          >
+            AI: {row.auto_classification_is_clone ? "clone" : "not clone"}
+            {typeof row.auto_classification_confidence === "number" && (
+              <> · {Math.round(row.auto_classification_confidence * 100)}%</>
+            )}
+            {row.auto_classification_clone_tactic &&
+            row.auto_classification_is_clone ? (
+              <> · {row.auto_classification_clone_tactic}</>
+            ) : null}
           </span>
         )}
       </div>

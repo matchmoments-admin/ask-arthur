@@ -38,6 +38,10 @@ import { cloneWatchNotifyBrandPrepare } from "./functions/clone-watch-notify-bra
 // PR-D1 (#497) — weekly FP-cluster digest. Surfaces repeat FP patterns
 // to the operator as proposed matcher exceptions. Operator-feedback loop.
 import { cloneWatchFpClusterDigest } from "./functions/clone-watch-fp-cluster-digest";
+// PR-D2 (#498) — Haiku 4.5 pre-classifier. Pre-ranks pending queue by
+// confidence DESC. Writes to clone_watch_classifications sibling table
+// (v157). Pre-rank only at this stage; auto-FP follows in PR-D5 (#501).
+import { cloneWatchHaikuPreclassify } from "./functions/clone-watch-haiku-preclassify";
 
 // App-layer Inngest functions live here because they cross apps/web-only
 // primitives (R2 upload, Resend, local auth helpers) that shouldn't leak
@@ -70,6 +74,8 @@ const appFunctions = [
   cloneWatchNotifyBrandPrepare,
   // Clone-watch FP-cluster digest (PR-D1, #497)
   cloneWatchFpClusterDigest,
+  // Clone-watch Haiku pre-classifier (PR-D2, #498, v157)
+  cloneWatchHaikuPreclassify,
 ];
 
 export const { GET, POST, PUT } = serve({

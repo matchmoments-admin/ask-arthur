@@ -22,7 +22,10 @@ import JSZip from "jszip";
 import { fetch as undiciFetch } from "undici";
 
 import { inngest } from "./client";
-import { CLONE_WATCH_SCAN_REQUESTED_EVENT } from "./events";
+import {
+  CLONE_WATCH_SCAN_REQUESTED_EVENT,
+  CLONE_WATCH_PRECLASSIFY_REQUESTED_EVENT,
+} from "./events";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -153,6 +156,74 @@ export const shopfrontNrdDailyIngest = inngest.createFunction(
         // Best-effort — let the daily ingest continue so the Telegram
         // digest + cost telemetry still fire. Tomorrow's run picks up
         // these rows again via list_clone_alerts_pending_urlscan.
+        return { fanned_out: 0, errored: true };
+      }
+    });
+
+    // PR-D2 (#498) — fan out Haiku preclassify-requested events for all
+    // newly-ingested NRD candidates. Independent flag + try/catch for
+    // the same poison-resistance reason as the urlscan fan-out above.
+    // Selector: any pending alert from this run's hits that has no row
+    // in clone_watch_classifications yet — keyed on alert_id so the
+    // function is idempotent across re-runs.
+    await step.run("fan-out-haiku-preclassify", async () => {
+      if (!featureFlags.shopfrontClonePreclassify) {
+        return { fanned_out: 0 };
+      }
+      try {
+        const sb = createServiceClient();
+        if (!sb) return { fanned_out: 0, reason: "no_supabase_client" };
+
+        // Use the urlscan-pending selector — it already returns only
+        // NRD-source alerts that need a follow-up call. The classifier
+        // and urlscan run in parallel by design (independent signals).
+        // The classifier's own idempotency key (event.data.alertId)
+        // prevents double-classification if Inngest delivers twice.
+        const { data } = await sb.rpc("list_clone_alerts_pending_urlscan", {
+          p_limit: 20,
+        });
+        const rows =
+          (data as Array<{
+            id: number;
+            candidate_url: string;
+            candidate_domain: string;
+          }> | null) ?? [];
+        if (rows.length === 0) return { fanned_out: 0 };
+
+        // We need brand (inferred_target_domain) for the classifier
+        // input. Hydrate it via a single follow-up query on the same
+        // ids. The fan-out is small (≤20 rows) so the extra trip is
+        // negligible vs adding the column to the existing selector
+        // (which is shared with urlscan — broader blast).
+        const alertIds = rows.map((r) => r.id);
+        const { data: brands } = await sb
+          .from("shopfront_clone_alerts")
+          .select("id, inferred_target_domain")
+          .in("id", alertIds);
+        const brandById = new Map<number, string>();
+        for (const b of (brands as Array<{ id: number; inferred_target_domain: string | null }> | null) ?? []) {
+          if (b.inferred_target_domain) brandById.set(b.id, b.inferred_target_domain);
+        }
+
+        const events = rows
+          .filter((r) => brandById.has(r.id))
+          .map((r) => ({
+            name: CLONE_WATCH_PRECLASSIFY_REQUESTED_EVENT,
+            id: `clone-watch-preclassify:${r.id}`,
+            data: {
+              alertId: r.id,
+              brand: brandById.get(r.id)!,
+              candidateDomain: r.candidate_domain,
+              candidateUrl: r.candidate_url,
+            },
+          }));
+        if (events.length === 0) return { fanned_out: 0 };
+        await inngest.send(events);
+        return { fanned_out: events.length };
+      } catch (err) {
+        logger.error("shopfront-nrd: haiku-preclassify fan-out failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
         return { fanned_out: 0, errored: true };
       }
     });
