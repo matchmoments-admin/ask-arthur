@@ -1,15 +1,14 @@
-import Link from "next/link";
 import { requireAdmin } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
+import StatTopCard, { type StatTone } from "@/components/admin/overview/StatTopCard";
+import OverviewTile from "@/components/admin/overview/OverviewTile";
 
 export const dynamic = "force-dynamic";
 
-// Admin overview / landing page. Until this page existed, /admin produced a
-// 404 and operators had to know the sub-page URLs (or sign-in always landed
-// on /admin/blog). The dashboard surfaces today's cost spend, the open
-// feedback queue, any paused cost brakes, and a tile per sub-page with one
-// freshness metric — enough to decide where to drill down without burning a
-// second click on a half-loaded data view.
+// Admin overview / landing page. Surfaces today's cost spend, the open
+// feedback queue, any paused cost brakes, and a tile per sub-page with
+// one freshness metric — enough to decide where to drill down without
+// burning a second click on a half-loaded data view.
 
 interface Summary {
   todayCostUsd: number;
@@ -101,9 +100,6 @@ async function getTiles(svc: ReturnType<typeof createServiceClient>): Promise<Ti
       .select("id", { count: "exact", head: true })
       .eq("published", false)
       .like("source", "inbound_%"),
-    // "Active" = produced ≥1 row in last 7d. Distinct source count via a
-    // grouped select; pgrest doesn't expose distinct directly so we pull a
-    // small set and count client-side.
     svc
       .from("feed_items")
       .select("source")
@@ -135,13 +131,11 @@ async function getTiles(svc: ReturnType<typeof createServiceClient>): Promise<Ti
       .from("bot_message_queue")
       .select("id", { count: "exact", head: true })
       .eq("status", "pending"),
-    // Clone-watch outreach (v143): how many NRD candidates still awaiting triage
     svc
       .from("shopfront_clone_alerts")
       .select("id", { count: "exact", head: true })
       .eq("source", "nrd")
       .eq("triage_status", "pending"),
-    // Clone-watch outreach (v143): how many confirmed TP / actioned in last 7d
     svc
       .from("shopfront_clone_alerts")
       .select("id", { count: "exact", head: true })
@@ -249,93 +243,70 @@ export default async function AdminIndexPage() {
   const [summary, tiles] = await Promise.all([getSummary(svc), getTiles(svc)]);
 
   const todayOverBudget = summary.todayCostUsd >= summary.costThresholdUsd;
+  const spendTone: StatTone = todayOverBudget ? "attention" : "neutral";
+  const feedbackTone: StatTone =
+    summary.feedbackOpen > 100 ? "attention" : summary.feedbackOpen > 0 ? "attention" : "neutral";
+  const brakesTone: StatTone =
+    summary.brakesPaused > 0 ? "danger" : "ok";
 
   return (
-    <main className="mx-auto max-w-6xl px-5 py-8">
-      <header className="mb-6">
-        <h1 className="text-deep-navy text-2xl font-extrabold tracking-tight">Overview</h1>
-        <p className="text-gov-slate mt-1 text-sm">
-          Single starting point for operational work. Drill into any tile for the full view.
+    <div className="mx-auto max-w-6xl px-4 py-6 lg:px-6 lg:py-8">
+      <header className="px-1 pb-4">
+        <h1
+          className="serif"
+          style={{ fontSize: 26, color: "var(--color-ink)", letterSpacing: "-0.015em" }}
+        >
+          Overview
+        </h1>
+        <p
+          className="mt-1"
+          style={{
+            fontSize: 13.5,
+            color: "var(--color-muted)",
+            lineHeight: 1.45,
+          }}
+        >
+          Single starting point for operational work. Tap any tile for the full view.
         </p>
       </header>
 
-      <section className="mb-8 grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <BannerCard
-          label="Today's spend (USD)"
+      <section className="mb-3.5 grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <StatTopCard
+          label="Today's spend"
           value={`$${summary.todayCostUsd.toFixed(4)}`}
-          warn={todayOverBudget}
-          hint={`${summary.todayCostEventCount} events · threshold $${summary.costThresholdUsd}`}
+          sub={`${summary.todayCostEventCount} events · threshold $${summary.costThresholdUsd}`}
+          tone={spendTone}
         />
-        <BannerCard
+        <StatTopCard
           label="Feedback queue"
           value={summary.feedbackOpen.toLocaleString()}
-          warn={summary.feedbackOpen > 100}
-          hint="user disagreements awaiting triage"
+          sub={summary.feedbackOpen === 0 ? "no items awaiting triage" : "awaiting triage"}
+          tone={feedbackTone}
         />
-        <BannerCard
-          label="Paused cost brakes"
+        <StatTopCard
+          label="Paused brakes"
           value={summary.brakesPaused.toLocaleString()}
-          warn={summary.brakesPaused > 0}
-          danger={summary.brakesPaused > 0}
-          hint={summary.brakesPaused === 0 ? "all features running" : "at least one feature paused"}
+          sub={summary.brakesPaused === 0 ? "all features running" : "at least one feature paused"}
+          tone={brakesTone}
         />
       </section>
 
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <section className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
         {tiles.map((tile) => (
-          <Tile key={tile.href} {...tile} />
+          <OverviewTile
+            key={tile.href}
+            href={tile.href}
+            title={tile.title}
+            sub={tile.purpose}
+            primary={tile.metric}
+            primaryLabel={tile.metricLabel}
+            foot={tile.secondary}
+            warn={tile.warn}
+          />
         ))}
       </section>
-    </main>
-  );
-}
 
-function BannerCard({
-  label,
-  value,
-  warn,
-  danger,
-  hint,
-}: {
-  label: string;
-  value: string;
-  warn?: boolean;
-  danger?: boolean;
-  hint?: string;
-}) {
-  const border = danger
-    ? "border-red-300 bg-red-50"
-    : warn
-      ? "border-amber-300 bg-amber-50"
-      : "border-slate-200 bg-white";
-  const valueColor = danger ? "text-red-700" : warn ? "text-amber-700" : "text-slate-900";
-  return (
-    <div className={`rounded-md border px-4 py-3 ${border}`}>
-      <div className="text-xs uppercase tracking-wide text-slate-500">{label}</div>
-      <div className={`mt-1 text-2xl font-semibold ${valueColor}`}>{value}</div>
-      {hint ? <div className="mt-1 text-xs text-slate-500">{hint}</div> : null}
+      <div style={{ height: 32 }} />
     </div>
-  );
-}
-
-function Tile({ href, title, purpose, metric, metricLabel, warn, secondary }: TileMetric) {
-  const border = warn ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-white";
-  const metricColor = warn ? "text-amber-700" : "text-slate-900";
-  return (
-    <Link
-      href={href}
-      className={`group block rounded-md border px-4 py-4 transition-shadow hover:shadow-sm ${border}`}
-    >
-      <div className="flex items-baseline justify-between gap-3">
-        <h2 className="text-deep-navy text-base font-semibold group-hover:underline">{title}</h2>
-        <span className="text-action-teal text-xs">→</span>
-      </div>
-      <p className="text-gov-slate mt-1 text-xs leading-snug">{purpose}</p>
-      <div className="mt-3">
-        <div className={`text-xl font-semibold ${metricColor}`}>{metric}</div>
-        <div className="text-xs uppercase tracking-wide text-slate-500">{metricLabel}</div>
-        {secondary ? <div className="mt-1 text-xs text-slate-500">{secondary}</div> : null}
-      </div>
-    </Link>
   );
 }

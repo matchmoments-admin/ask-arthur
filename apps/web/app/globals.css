@@ -43,7 +43,61 @@
   --color-danger-text: #d32f2f;
   --color-danger-heading: #b71c1c;
 
+  /* Admin design tokens (mobile-first admin uplift, 2026-05-27).
+     Scoped names — admin components reference these directly; consumer
+     surfaces continue to use the deep-navy / action-teal / safe / warn /
+     danger sets above. */
+  --color-ink: #0b1f3a;
+  --color-ink-2: #1b3257;
+  --color-muted: #6b7280;
+  --color-muted-2: #94a3b8;
+  --color-line: #e6e8ee;
+  --color-line-soft: #eef0f4;
+  --color-surface: #ffffff;
+  --color-surface-2: #fafafc;
+  --color-admin-bg: #f5f5f8;
+  --color-teal: #1e8c86;
+  --color-teal-soft: #e6f4f2;
+  --color-tp-bg: #fdebeb;
+  --color-tp-fg: #b23a3a;
+  --color-tp-ring: #f5c9c9;
+  --color-inv-bg: #fcf3cb;
+  --color-inv-fg: #8a6a14;
+  --color-inv-ring: #f3de92;
+  --color-fp-bg: #f1f3f7;
+  --color-fp-fg: #475569;
+  --color-fp-ring: #dde2ea;
+  --shadow-card:
+    0 1px 0 rgba(11, 31, 58, 0.04), 0 1px 3px rgba(11, 31, 58, 0.06);
+
   --font-sans: var(--font-public-sans), sans-serif;
+  --font-geist: var(--font-geist-sans), -apple-system, system-ui, sans-serif;
+  --font-geist-mono: var(--font-geist-mono-var), ui-monospace, monospace;
+  --font-serif-display: var(--font-source-serif), Georgia, serif;
+}
+
+/* Admin chrome utilities (used by the admin subtree only — these classes
+   are inert outside /admin/* because the font CSS variables are only
+   declared in apps/web/app/admin/layout.tsx). */
+.font-geist {
+  font-family: var(--font-geist);
+}
+
+.serif {
+  font-family: var(--font-serif-display);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.mono {
+  font-family: var(--font-geist-mono);
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.hide-scrollbar {
+  scrollbar-width: none;
 }
 
 body {
