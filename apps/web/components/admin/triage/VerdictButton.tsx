@@ -11,26 +11,31 @@ interface VerdictMeta {
   icon: typeof CheckCircle2;
 }
 
+// Labels rephrased 2026-05-28 (PR-C): "TP/FP/Investigate" is infosec-triage
+// jargon that's hostile to anyone not steeped in intrusion-detection terms.
+// The DB enum values (tp_confirmed / fp / needs_investigation) are unchanged
+// so RPC contracts + downstream consumers keep working — this is a UI-only
+// rename.
 const KIND_META: Record<VerdictKind, VerdictMeta> = {
   tp: {
     bg: "var(--color-tp-bg)",
     fg: "var(--color-tp-fg)",
     ring: "var(--color-tp-ring)",
-    label: "Confirm",
+    label: "Confirm clone",
     icon: CheckCircle2,
   },
   inv: {
     bg: "var(--color-inv-bg)",
     fg: "var(--color-inv-fg)",
     ring: "var(--color-inv-ring)",
-    label: "Investigate",
+    label: "Park",
     icon: Search,
   },
   fp: {
     bg: "var(--color-fp-bg)",
     fg: "var(--color-fp-fg)",
     ring: "var(--color-fp-ring)",
-    label: "Dismiss",
+    label: "Not a clone",
     icon: XCircle,
   },
 };
