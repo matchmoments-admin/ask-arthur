@@ -234,6 +234,10 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
         // succeeded) a screenshot thumbnail. Single batched query keyed on
         // alert_id; null/empty results are tolerated — the template
         // gracefully omits the evidence block when nothing's there.
+        //
+        // Returns a plain object (not a Map) because step.run JSON-
+        // serialises the return value for replay-safety; Maps don't
+        // survive that round-trip.
         const alertIds = group.rows.map((r) => r.alert_id);
         const evidenceByAlertId = await step.run(
           `fetch-urlscan-evidence-${batchId}`,
@@ -241,7 +245,8 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
         );
 
         const candidates: CloneWatchCandidate[] = group.rows.map((r) => {
-          const evidence = evidenceByAlertId.get(r.alert_id);
+          // Numeric keys become strings in JSON; JS accessor handles either.
+          const evidence = evidenceByAlertId[String(r.alert_id)];
           return {
             candidateDomain: r.candidate_domain,
             candidateUrl: r.candidate_url,
@@ -461,16 +466,20 @@ export function urlscanEvidenceFromJsonb(
 }
 
 /**
- * Batch-fetch urlscan_evidence for a list of alert ids. Returns a Map
- * keyed on alert_id so callers can lookup per-row. Null/failure-shape
- * rows are simply omitted from the map; the template gracefully handles
- * the missing case.
+ * Batch-fetch urlscan_evidence for a list of alert ids. Returns a plain
+ * object keyed by alert-id-as-string. We use Record<string, ...> rather
+ * than Map<number, ...> because step.run JSON-serialises the return
+ * value — Maps don't survive that round-trip but plain objects do.
+ * Numeric keys become strings in JSON; JS accessor handles either.
+ *
+ * Null/failure-shape rows are simply omitted from the result; the
+ * template gracefully handles the missing case.
  */
 export async function fetchUrlscanEvidence(
   sb: NonNullable<ReturnType<typeof createServiceClient>>,
   alertIds: number[],
-): Promise<Map<number, UrlscanEvidenceForEmail>> {
-  const result = new Map<number, UrlscanEvidenceForEmail>();
+): Promise<Record<string, UrlscanEvidenceForEmail>> {
+  const result: Record<string, UrlscanEvidenceForEmail> = {};
   if (alertIds.length === 0) return result;
   const { data, error } = await sb
     .from("shopfront_clone_alerts")
@@ -484,10 +493,9 @@ export async function fetchUrlscanEvidence(
     return result;
   }
   for (const row of data ?? []) {
-    const ev = urlscanEvidenceFromJsonb(
-      (row as { id: number; urlscan_evidence: unknown }).urlscan_evidence,
-    );
-    if (ev) result.set((row as { id: number }).id, ev);
+    const r = row as { id: number; urlscan_evidence: unknown };
+    const ev = urlscanEvidenceFromJsonb(r.urlscan_evidence);
+    if (ev) result[String(r.id)] = ev;
   }
   return result;
 }
