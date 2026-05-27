@@ -263,6 +263,7 @@ describe("clone-watch-weekly-digest — pure formatters", () => {
         period: "20 May – 26 May",
         metrics: baseMetrics,
         brandBreakdown: baseBrands,
+        reportedBrands: [],
       });
       expect(draft).toContain("Kmart");
       expect(draft).toContain("Westpac");
@@ -279,6 +280,7 @@ describe("clone-watch-weekly-digest — pure formatters", () => {
         period: "20 May – 26 May",
         metrics: { ...baseMetrics, triaged_tp: 0 },
         brandBreakdown: [],
+        reportedBrands: [],
       });
       expect(draft).toContain("Quiet week");
     });
@@ -288,9 +290,33 @@ describe("clone-watch-weekly-digest — pure formatters", () => {
         period: "20 May – 26 May",
         metrics: baseMetrics,
         brandBreakdown: baseBrands,
+        reportedBrands: [],
       });
       expect(draft).toContain("brendan@askarthur.au");
       expect(draft).toContain("#scamprotection");
+    });
+
+    it("names brands we reported to directly when reportedBrands is non-empty", () => {
+      const draft = buildLinkedInDraft({
+        period: "20 May – 26 May",
+        metrics: baseMetrics,
+        brandBreakdown: baseBrands,
+        reportedBrands: ["nab.com.au", "westpac.com.au", "auspost.com.au"],
+      });
+      expect(draft).toContain("Reported directly to security teams at:");
+      expect(draft).toContain("Nab");
+      expect(draft).toContain("Westpac");
+      expect(draft).toContain("Auspost");
+    });
+
+    it("omits the 'reported to' line when no direct-email channels fired", () => {
+      const draft = buildLinkedInDraft({
+        period: "20 May – 26 May",
+        metrics: baseMetrics,
+        brandBreakdown: baseBrands,
+        reportedBrands: [],
+      });
+      expect(draft).not.toContain("Reported directly to security teams at:");
     });
   });
 
@@ -303,6 +329,7 @@ describe("clone-watch-weekly-digest — pure formatters", () => {
         tpRate: 30,
         fpRate: 53,
         brandBreakdown: baseBrands,
+        reportedBrands: [],
         linkedinDraft,
       });
       expect(message).toContain("LinkedIn-post draft");
@@ -316,6 +343,7 @@ describe("clone-watch-weekly-digest — pure formatters", () => {
         tpRate: 30,
         fpRate: 53,
         brandBreakdown: baseBrands,
+        reportedBrands: [],
         linkedinDraft: "x",
       });
       expect(message).toContain("askarthur.au/admin/clone-watch");
@@ -328,6 +356,7 @@ describe("clone-watch-weekly-digest — pure formatters", () => {
         tpRate: 0,
         fpRate: 53,
         brandBreakdown: [],
+        reportedBrands: [],
         linkedinDraft: "x",
       });
       expect(message).toContain("no confirmed TPs this week");
@@ -340,10 +369,26 @@ describe("clone-watch-weekly-digest — pure formatters", () => {
         tpRate: 30,
         fpRate: 53,
         brandBreakdown: [{ brand: "<script>alert(1)</script>", count: 1 }],
+        reportedBrands: [],
         linkedinDraft: "x",
       });
       expect(message).not.toContain("<script>alert(1)</script>");
       expect(message).toContain("&lt;script&gt;");
+    });
+
+    it("shows the 'Reported directly to' line when reportedBrands non-empty", () => {
+      const message = buildTelegramMessage({
+        period: "20 May – 26 May",
+        metrics: baseMetrics,
+        tpRate: 30,
+        fpRate: 53,
+        brandBreakdown: baseBrands,
+        reportedBrands: ["nab.com.au", "westpac.com.au"],
+        linkedinDraft: "x",
+      });
+      expect(message).toContain("Reported directly to");
+      expect(message).toContain("Nab");
+      expect(message).toContain("Westpac");
     });
   });
 });
