@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createMiddlewareClient } from "@askarthur/supabase/middleware";
 import { logger } from "@askarthur/utils/logger";
+import { getLogger } from "@askarthur/utils/axiom-logger";
+import { resolveRequestId } from "@askarthur/utils/request-id";
 import { verifyAdminToken, COOKIE_NAME as ADMIN_COOKIE } from "@/lib/adminAuth";
 
 // Global edge rate limiting — 60 requests/min per IP (sliding window via Upstash)
@@ -26,6 +28,19 @@ async function withTimeout<T>(
 }
 
 export async function middleware(req: NextRequest) {
+  const start = Date.now();
+
+  // Compute a canonical request id once per request and propagate it as
+  // (a) the `x-request-id` request header so downstream route handlers
+  // share it, and (b) the `X-Request-Id` response header so clients can
+  // correlate. `resolveRequestId` already evaluates Idempotency-Key
+  // precedence; we feed it the inbound headers so the priority order
+  // stays in one place. `requestHeaders` is what supabase's middleware
+  // helper will use when building the response.
+  const requestId = resolveRequestId(req.headers);
+  const requestHeaders = new Headers(req.headers);
+  requestHeaders.set("x-request-id", requestId);
+
   // Inngest webhook — authenticated by Inngest's signing key inside the
   // route handler (`serve()` from `inngest/next` validates X-Inngest-
   // Signature using `INNGEST_SIGNING_KEY`). The middleware's Supabase
@@ -36,7 +51,9 @@ export async function middleware(req: NextRequest) {
   // clone-watch outreach fns processed events until this skip landed).
   // Same shape as the cron skip below.
   if (req.nextUrl.pathname.startsWith("/api/inngest")) {
-    return NextResponse.next();
+    const skipResponse = NextResponse.next({ request: { headers: requestHeaders } });
+    skipResponse.headers.set("X-Request-Id", requestId);
+    return skipResponse;
   }
 
   // Cron routes — defense-in-depth auth check before skipping rate limiting
@@ -46,7 +63,10 @@ export async function middleware(req: NextRequest) {
     const expected = process.env.CRON_SECRET;
 
     if (!expected || !cronSecret || cronSecret.length !== expected.length) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json(
+        { error: "Unauthorized" },
+        { status: 401, headers: { "X-Request-Id": requestId } },
+      );
     }
 
     // Timing-safe comparison
@@ -58,10 +78,15 @@ export async function middleware(req: NextRequest) {
       mismatch |= a[i] ^ b[i];
     }
     if (mismatch !== 0) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json(
+        { error: "Unauthorized" },
+        { status: 401, headers: { "X-Request-Id": requestId } },
+      );
     }
 
-    return NextResponse.next();
+    const cronResponse = NextResponse.next({ request: { headers: requestHeaders } });
+    cronResponse.headers.set("X-Request-Id", requestId);
+    return cronResponse;
   }
 
   // ---------------------------------------------------------------------------
@@ -69,7 +94,9 @@ export async function middleware(req: NextRequest) {
   //    Required by @supabase/ssr to keep auth cookies fresh.
   // ---------------------------------------------------------------------------
   const authEnabled = process.env.NEXT_PUBLIC_FF_AUTH === "true";
-  const { supabase, response } = createMiddlewareClient(req);
+  const { supabase, response } = createMiddlewareClient(req, requestHeaders);
+  let authState: "auth_disabled" | "anonymous" | "user" | "admin" =
+    authEnabled ? "anonymous" : "auth_disabled";
 
   if (authEnabled && supabase) {
     // getUser() validates JWT server-side (not spoofable like getSession).
@@ -82,6 +109,9 @@ export async function middleware(req: NextRequest) {
       "middleware: supabase.auth.getUser",
     );
     const user = result?.data?.user ?? null;
+    if (user) {
+      authState = user.app_metadata?.role === "admin" ? "admin" : "user";
+    }
 
     const pathname = req.nextUrl.pathname;
 
@@ -93,7 +123,9 @@ export async function middleware(req: NextRequest) {
         const loginUrl = req.nextUrl.clone();
         loginUrl.pathname = "/login";
         loginUrl.searchParams.set("next", pathname);
-        return NextResponse.redirect(loginUrl);
+        const redirectResponse = NextResponse.redirect(loginUrl);
+        redirectResponse.headers.set("X-Request-Id", requestId);
+        return redirectResponse;
       }
     }
 
@@ -113,9 +145,12 @@ export async function middleware(req: NextRequest) {
         if (!adminCookie || !verifyAdminToken(adminCookie)) {
           const loginUrl = req.nextUrl.clone();
           loginUrl.pathname = "/admin/login";
-          return NextResponse.redirect(loginUrl);
+          const redirectResponse = NextResponse.redirect(loginUrl);
+          redirectResponse.headers.set("X-Request-Id", requestId);
+          return redirectResponse;
         }
         // HMAC-authenticated — fall through.
+        authState = "admin";
       } else if (user.app_metadata?.role !== "admin") {
         // Non-admin user — fall through to existing HMAC admin auth
         // (dual-mode during transition, don't block here)
@@ -129,6 +164,8 @@ export async function middleware(req: NextRequest) {
   const isApiRoute = req.nextUrl.pathname.startsWith("/api/");
   const isMutatingRequest = req.method !== "GET" && req.method !== "HEAD";
   if (!isApiRoute && !isMutatingRequest) {
+    response.headers.set("X-Request-Id", requestId);
+    logRequest(response, 0);
     return response;
   }
 
@@ -141,9 +178,11 @@ export async function middleware(req: NextRequest) {
       logger.error("Upstash not configured in production — blocking request");
       return NextResponse.json(
         { error: "Service temporarily unavailable" },
-        { status: 503 }
+        { status: 503, headers: { "X-Request-Id": requestId } }
       );
     }
+    response.headers.set("X-Request-Id", requestId);
+    logRequest(response, 0);
     return response;
   }
 
@@ -181,6 +220,8 @@ export async function middleware(req: NextRequest) {
     if (!redisResponse.ok) {
       // Fail-open on Redis errors to avoid blocking legitimate traffic
       logger.error("Middleware Upstash error", { status: redisResponse.status });
+      response.headers.set("X-Request-Id", requestId);
+      logRequest(response, undefined);
       return response;
     }
 
@@ -196,21 +237,47 @@ export async function middleware(req: NextRequest) {
             "Retry-After": "60",
             "X-RateLimit-Limit": String(maxRequests),
             "X-RateLimit-Remaining": "0",
+            "X-Request-Id": requestId,
           },
         }
       );
     }
 
+    const remaining = Math.max(0, maxRequests - requestCount);
     response.headers.set("X-RateLimit-Limit", String(maxRequests));
-    response.headers.set(
-      "X-RateLimit-Remaining",
-      String(Math.max(0, maxRequests - requestCount))
-    );
+    response.headers.set("X-RateLimit-Remaining", String(remaining));
+    response.headers.set("X-Request-Id", requestId);
+    logRequest(response, remaining);
     return response;
   } catch (err) {
     // Fail-open on unexpected errors
     logger.error("Middleware rate limit error", { error: String(err) });
+    response.headers.set("X-Request-Id", requestId);
+    logRequest(response, undefined);
     return response;
+  }
+
+  // Emit one sampled Axiom INFO per request. Fire-and-forget: do NOT
+  // await flush. Middleware sits in the hot path of every page request,
+  // and a network round-trip to api.axiom.co per request would tax page
+  // load. The wrapper is a no-op until FF_AXIOM_ENABLED=true.
+  function logRequest(res: NextResponse, rateRemaining: number | undefined): void {
+    try {
+      const log = getLogger({ source: "middleware", requestId });
+      log.info("request", {
+        method: req.method,
+        path: req.nextUrl.pathname,
+        status: res.status,
+        authState,
+        durationMs: Date.now() - start,
+        rateRemaining,
+      });
+      // Fire-and-forget — neutralise rejection so a flaky Axiom can't
+      // surface as an unhandled-rejection runtime warning.
+      log.flush().catch(() => {});
+    } catch {
+      // Never let logging break a request.
+    }
   }
 }
 

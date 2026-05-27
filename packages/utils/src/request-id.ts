@@ -30,18 +30,35 @@ export function isValidIdempotencyKey(value: string | null | undefined): value i
 }
 
 /**
- * Resolve the canonical request id for an incoming request:
- * - If the caller sent a well-formed `Idempotency-Key` header, use it.
- * - Otherwise generate a fresh ULID.
+ * Resolve the canonical request id for an incoming request.
+ *
+ * Priority:
+ *   1. `Idempotency-Key` (or `x-idempotency-key`) — Stripe-style
+ *      client intent. Carries dedup semantics and must always win
+ *      when present, including over a client-supplied `x-request-id`.
+ *   2. `x-request-id` — used in two cases:
+ *        a) Middleware sets this after running the resolver itself,
+ *           so route handlers reading it see the canonical id even
+ *           when no Idempotency-Key was sent.
+ *        b) A client (rarely) sends only `x-request-id` to set their
+ *           correlation token without invoking the idempotency contract.
+ *   3. Server-generated ULID — last resort.
  *
  * The returned string is the authoritative id used for: logging
  * correlation, the response `X-Request-Id` header, the Inngest event id,
- * and the scam_reports.idempotency_key column.
+ * and the scam_reports.idempotency_key column. With this priority
+ * order, middleware and route handlers always return the same value
+ * because middleware ran the same resolver and copied the result into
+ * `x-request-id` before the route handler saw the request.
  */
 export function resolveRequestId(headers: Headers): string {
   const supplied = headers.get("idempotency-key") ?? headers.get("x-idempotency-key");
   if (isValidIdempotencyKey(supplied)) {
     return supplied;
+  }
+  const propagated = headers.get("x-request-id");
+  if (isValidIdempotencyKey(propagated)) {
+    return propagated;
   }
   return ulid();
 }
