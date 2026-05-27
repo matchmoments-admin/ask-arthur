@@ -156,10 +156,23 @@ export default function CloneWatchTriage({
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ alertId, status }),
-          }).then((res) => ({ alertId, ok: res.ok, status: res.status })),
+          }).then(async (res) => {
+            const body = res.ok
+              ? ((await res.json().catch(() => ({}))) as {
+                  eventEmitted?: boolean;
+                })
+              : null;
+            return {
+              alertId,
+              ok: res.ok,
+              status: res.status,
+              eventEmitted: body?.eventEmitted ?? true,
+            };
+          }),
         ),
       );
       const failed: number[] = [];
+      let eventDrops = 0;
       for (const r of results) {
         if (r.status === "rejected" || !r.value.ok) {
           failed.push(
@@ -167,10 +180,20 @@ export default function CloneWatchTriage({
               ? r.value.alertId
               : 0, // network throw — we lose the id but the count is still right below
           );
+        } else if (status === "tp_confirmed" && r.value.eventEmitted === false) {
+          eventDrops++;
         }
       }
       if (failed.length === 0) {
-        setInfo(`Bulk action applied to ${ids.length} alert${ids.length === 1 ? "" : "s"}`);
+        if (eventDrops > 0) {
+          setError(
+            `Triage saved for ${ids.length}, but ${eventDrops} downstream fan-out${eventDrops === 1 ? "" : "s"} dropped (no Netcraft / brand-notify). Re-triage those rows to retry.`,
+          );
+        } else {
+          setInfo(
+            `Bulk action applied to ${ids.length} alert${ids.length === 1 ? "" : "s"}`,
+          );
+        }
       } else {
         // Restore the failed rows from the snapshot
         const failedSet = new Set(failed);
@@ -233,6 +256,18 @@ export default function CloneWatchTriage({
         if (!res.ok) {
           const j = await res.json().catch(() => ({}));
           throw new Error(j.error ?? `triage failed (${res.status})`);
+        }
+        // Triage succeeded but if the downstream Inngest event failed
+        // (rare — defended by server-side 3-attempt retry), the alert
+        // is marked tp_confirmed but no Netcraft / brand-notify fires.
+        // Surface so the operator can re-triage manually.
+        const body = (await res.json().catch(() => ({}))) as {
+          eventEmitted?: boolean;
+        };
+        if (status === "tp_confirmed" && body.eventEmitted === false) {
+          setError(
+            `Triage saved but downstream fan-out failed (no Netcraft / brand-notify). Re-triage by setting to Investigate then back to TP.`,
+          );
         }
       } catch (err) {
         setPending(previous);
