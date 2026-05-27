@@ -198,11 +198,17 @@ export async function GET(req: Request) {
     )
     .reduce((sum, t) => sum + t.cost, 0);
 
-  // Clone-watch outreach — aggregate across the 6 sub-features (Netcraft
-  // submit + poll, brand notify, weekly digest, urlscan + urlscan rescan).
+  // Clone-watch outreach — aggregate across 8 sub-features:
+  //   Netcraft submit + poll, brand notify, weekly digest,
+  //   urlscan + urlscan rescan,
+  //   Haiku pre-classifier (PR-D2, #498) + its `_error` diagnostic row.
+  //
   // Engaging this brake pauses ALL clone-watch outreach activity for 24h;
   // the upstream Layer 0 NRD ingest (shopfront_clone_watch) keeps running.
   // urlscan + urlscan_rescan added per ultrareview F6 (PR #432).
+  // preclassify + preclassify_error added per local-ultrareview F1 + F5
+  // (PR-H, 2026-05-28) — wires the Haiku spend (real $) + the error
+  // diagnostic ($0, surfaces in health-digest) into the shared brake.
   const shopfrontCloneOutreachThresholdUsd =
     envReads.SHOPFRONT_CLONE_OUTREACH_CAP_USD.value;
   const shopfrontCloneOutreachCost = top
@@ -213,7 +219,9 @@ export async function GET(req: Request) {
         t.feature === "shopfront_clone_weekly_digest" ||
         t.feature === "shopfront_clone_poll_netcraft" ||
         t.feature === "shopfront_clone_urlscan" ||
-        t.feature === "shopfront_clone_urlscan_rescan",
+        t.feature === "shopfront_clone_urlscan_rescan" ||
+        t.feature === "shopfront_clone_preclassify" ||
+        t.feature === "shopfront_clone_preclassify_error",
     )
     .reduce((sum, t) => sum + t.cost, 0);
 

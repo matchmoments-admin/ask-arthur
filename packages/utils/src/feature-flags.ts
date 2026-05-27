@@ -428,8 +428,10 @@ export const featureFlags = {
    *  in clone_watch_classifications (sibling table). Pending-queue order
    *  is then pre-ranked by confidence. Default OFF — canary independently
    *  of the master shopfrontCloneOutreach flag.
-   *  Cost: ~$0.01–0.02/call × ~7 hits/day = ~$0.07/day. Capped by
-   *  SHOPFRONT_CLONE_PRECLASSIFY_CAP_USD (default 2). */
+   *  Cost: ~$0.01–0.02/call × ~7 hits/day = ~$0.07/day. Spend is rolled
+   *  into the shared `SHOPFRONT_CLONE_OUTREACH_CAP_USD` aggregate brake
+   *  (default $5/day) via cost-daily-check — no dedicated per-feature cap.
+   *  See PR-H (local-ultrareview F1) for the aggregator wiring. */
   shopfrontClonePreclassify: readBoolEnv("FF_SHOPFRONT_CLONE_PRECLASSIFY"),
 
   /** Screenshot retention — when ON, `storeVerifiedScam` uploads the raw
