@@ -35,6 +35,9 @@ import { cloneWatchUrlscan } from "./functions/clone-watch-urlscan";
 import { cloneWatchUrlscanRescan } from "./functions/clone-watch-urlscan-rescan";
 // PR-B2 — daily batch builder + Telegram approval flow (v151)
 import { cloneWatchNotifyBrandPrepare } from "./functions/clone-watch-notify-brand-prepare";
+// PR-D1 (#497) — weekly FP-cluster digest. Surfaces repeat FP patterns
+// to the operator as proposed matcher exceptions. Operator-feedback loop.
+import { cloneWatchFpClusterDigest } from "./functions/clone-watch-fp-cluster-digest";
 // PR-D2 (#498) — Haiku 4.5 pre-classifier. Pre-ranks pending queue by
 // confidence DESC. Writes to clone_watch_classifications sibling table
 // (v157). Pre-rank only at this stage; auto-FP follows in PR-D5 (#501).
@@ -69,6 +72,8 @@ const appFunctions = [
   cloneWatchUrlscanRescan,
   // Clone-watch approval-gated daily-batch builder (v151)
   cloneWatchNotifyBrandPrepare,
+  // Clone-watch FP-cluster digest (PR-D1, #497)
+  cloneWatchFpClusterDigest,
   // Clone-watch Haiku pre-classifier (PR-D2, #498, v157)
   cloneWatchHaikuPreclassify,
 ];
