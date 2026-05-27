@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createMiddlewareClient } from "@askarthur/supabase/middleware";
 import { logger } from "@askarthur/utils/logger";
+import { verifyAdminToken, COOKIE_NAME as ADMIN_COOKIE } from "@/lib/adminAuth";
 
 // Global edge rate limiting — 60 requests/min per IP (sliding window via Upstash)
 // Coexists with per-route limits in lib/rateLimit.ts (defense-in-depth)
@@ -102,11 +103,20 @@ export async function middleware(req: NextRequest) {
     // -------------------------------------------------------------------------
     if (pathname.startsWith("/admin") && pathname !== "/admin/login") {
       if (!user) {
-        const loginUrl = req.nextUrl.clone();
-        loginUrl.pathname = "/login";
-        return NextResponse.redirect(loginUrl);
-      }
-      if (user.app_metadata?.role !== "admin") {
+        // Dual-auth: check the HMAC admin cookie before bouncing to /login.
+        // The /api/admin/login route is the canonical secret-only flow;
+        // requireAdmin() in route handlers accepts the HMAC cookie even when
+        // Supabase Auth is enabled. Middleware previously only checked the
+        // Supabase user and redirected HMAC-only admins to the consumer
+        // /login page — caught 2026-05-27 during the PR #459 live e2e test.
+        const adminCookie = req.cookies.get(ADMIN_COOKIE)?.value;
+        if (!adminCookie || !verifyAdminToken(adminCookie)) {
+          const loginUrl = req.nextUrl.clone();
+          loginUrl.pathname = "/admin/login";
+          return NextResponse.redirect(loginUrl);
+        }
+        // HMAC-authenticated — fall through.
+      } else if (user.app_metadata?.role !== "admin") {
         // Non-admin user — fall through to existing HMAC admin auth
         // (dual-mode during transition, don't block here)
       }
