@@ -208,3 +208,34 @@ export async function getAdminUserId(): Promise<string | null> {
 }
 
 export { COOKIE_NAME, MAX_AGE };
+
+/**
+ * Stable per-admin identifier suitable for rate-limit bucketing. Returns
+ * the Supabase admin uuid when available; otherwise a SHA-256 prefix of
+ * the HMAC cookie token. Never returns the raw token. Returns null only
+ * if neither path resolves (defence-in-depth — requireAdmin should have
+ * already redirected in that case, but we don't want a downstream
+ * rate-limit to bucket every anonymous caller under the same key).
+ *
+ * MUST be called AFTER requireAdmin() so a verified admin context exists.
+ *
+ * Added 2026-05-28 (PR-G, #496) for /api/admin/clone-watch/triage rate-
+ * limiting.
+ */
+export async function getAdminRateLimitKey(): Promise<string | null> {
+  // Prefer the Supabase uuid when present — survives token rotation.
+  const uid = await getAdminUserId();
+  if (uid) return `uid:${uid}`;
+
+  // HMAC fallback: SHA-256 the cookie token. Never log this value.
+  try {
+    const cookieStore = await cookies();
+    const token = cookieStore.get(COOKIE_NAME)?.value;
+    if (!token) return null;
+    const { createHash } = await import("crypto");
+    const hash = createHash("sha256").update(token).digest("hex").slice(0, 16);
+    return `tok:${hash}`;
+  } catch {
+    return null;
+  }
+}

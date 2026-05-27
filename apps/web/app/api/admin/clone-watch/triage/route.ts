@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAdmin } from "@/lib/adminAuth";
+import { requireAdmin, getAdminRateLimitKey } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
+import { checkAdminTriageRateLimit } from "@askarthur/utils/rate-limit";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { CLONE_WATCH_TRIAGED_EVENT } from "@askarthur/scam-engine/inngest/events";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
@@ -19,6 +20,34 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
   await requireAdmin();
+
+  // Per-admin rate limit (PR-G, #496). 200 triages per 5 min sliding
+  // window. Sized for legitimate bulk-FP bursts (PR-F can fire ~50 in a
+  // single brand-group action; 200 is 4x headroom). Bounds a compromised-
+  // token blast-radius without throttling normal use. Fails open on
+  // Redis outage — the per-brand Inngest rate-limit (5/24h per brand) is
+  // the actual downstream blast-radius backstop.
+  const rateLimitKey = await getAdminRateLimitKey();
+  if (rateLimitKey) {
+    const rl = await checkAdminTriageRateLimit(rateLimitKey);
+    if (!rl.allowed) {
+      const retryAfterS =
+        rl.resetAt instanceof Date
+          ? Math.max(1, Math.ceil((rl.resetAt.getTime() - Date.now()) / 1000))
+          : 300;
+      logger.warn("clone-watch triage: rate-limited", {
+        retryAfterS,
+        keyPrefix: rateLimitKey.slice(0, 4),
+      });
+      return NextResponse.json(
+        { error: "rate_limited", retry_after_s: retryAfterS },
+        {
+          status: 429,
+          headers: { "Retry-After": String(retryAfterS) },
+        },
+      );
+    }
+  }
 
   if (!featureFlags.shopfrontCloneOutreach) {
     return NextResponse.json(

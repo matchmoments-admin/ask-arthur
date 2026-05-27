@@ -752,3 +752,73 @@ export async function checkInboundScanRateLimit(
     return storeUnavailable(failMode, "checkInboundScanRateLimit");
   }
 }
+
+/**
+ * Admin-triage rate-limit (PR-G, #496). Caps the number of triage POSTs a
+ * single admin can issue against /api/admin/clone-watch/triage in a 5-min
+ * sliding window.
+ *
+ * Sizing: 200 / 5 min. A legitimate noise-day workflow looks like ~50 FPs
+ * in a brand-group bulk action (PR-F). 200 is 4x that — comfortable
+ * headroom while still bounding a compromised-token blast radius.
+ *
+ * Identifier: SHA-256(admin_token_or_user_id) — never stores the raw
+ * token in Redis. Anonymous admin (HMAC token only, no Supabase user) +
+ * Supabase admin (uid only, no HMAC token) both hash through.
+ *
+ * Fail mode: open. A Redis outage shouldn't lock the operator out of the
+ * dashboard — the per-brand Inngest rate-limit (5 sends per brand per 24h)
+ * is the actual blast-radius backstop downstream.
+ */
+let _adminTriageLimiter: Ratelimit | null = null;
+function getAdminTriageLimiter() {
+  if (!_adminTriageLimiter) {
+    _adminTriageLimiter = new Ratelimit({
+      redis: new Redis({
+        url: process.env.UPSTASH_REDIS_REST_URL!,
+        token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+      }),
+      limiter: Ratelimit.slidingWindow(200, "5 m"),
+      prefix: "askarthur:clone-watch:triage",
+      analytics: false,
+    });
+  }
+  return _adminTriageLimiter;
+}
+
+export async function checkAdminTriageRateLimit(
+  adminIdentifier: string,
+): Promise<RateLimitResult> {
+  if (!process.env.UPSTASH_REDIS_REST_URL) {
+    // Fail-open intentionally — see header comment above.
+    return storeUnavailable("open", "checkAdminTriageRateLimit");
+  }
+  // The caller already supplies a hashed/stable identifier (token sha or
+  // Supabase uid). We add a small per-instance hash to keep the Redis
+  // key shape consistent with other limiters and obfuscate the raw
+  // identifier in Redis.
+  const identifier = await hashIdentifier(adminIdentifier, "clone-watch-triage");
+  try {
+    const res = await getAdminTriageLimiter().limit(identifier);
+    if (!res.success) {
+      return {
+        allowed: false,
+        remaining: 0,
+        resetAt: new Date(res.reset),
+        message: "rate_limited",
+        reason: "exceeded",
+      };
+    }
+    return {
+      allowed: true,
+      remaining: res.remaining,
+      resetAt: null,
+      reason: "ok",
+    };
+  } catch (err) {
+    logger.error("checkAdminTriageRateLimit: store error", {
+      error: String(err),
+    });
+    return storeUnavailable("open", "checkAdminTriageRateLimit");
+  }
+}
