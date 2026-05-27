@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { featureFlags } from "@askarthur/utils/feature-flags";
+import { logger } from "@askarthur/utils/logger";
 
 const COOKIE_NAME = "__aa_admin";
 const MAX_AGE = 60 * 60 * 24; // 24 hours
@@ -24,18 +25,35 @@ export function createAdminToken(): string {
   return `${payload}:${hmac}`;
 }
 
-/** Verify an HMAC-signed admin token with nonce */
+/**
+ * Verify an HMAC-signed admin token with nonce.
+ *
+ * Observability: every failure path emits `logger.warn("admin_token_verify_failed", { reason, … })`
+ * so silent rejections show up in the log stream. Each `reason` is a stable code
+ * (decode_failed, wrong_parts_count, legacy_empty_field, legacy_expired,
+ * legacy_hmac_mismatch, empty_field, expired, bad_nonce_shape, hmac_mismatch,
+ * unexpected_throw). Grep these to triage future auth issues.
+ *
+ * SECURITY: never log `token`, the HMAC `signature`, the computed `expected`,
+ * or the raw `nonce` value. Reason + age + length is enough to triage.
+ */
 export function verifyAdminToken(token: string): boolean {
+  const partsLengthPreDecode = token.split(":").length;
+  const tokenHadPct = token.includes("%");
   try {
     // Defensive URL-decode. /api/admin/login uses NextResponse.cookies.set
     // which URL-encodes the value (`:` → `%3A`). Most Next.js cookie readers
     // auto-decode on read but some paths (notably middleware's
     // req.cookies.get) deliver the encoded form. Decode here so both shapes
     // verify identically. Caught 2026-05-27 during the PR #459 live e2e test.
-    if (token.includes("%")) {
+    if (tokenHadPct) {
       try {
         token = decodeURIComponent(token);
       } catch {
+        logger.warn("admin_token_verify_failed", {
+          reason: "decode_failed",
+          parts_length_pre_decode: partsLengthPreDecode,
+        });
         // Malformed % sequence — fall through and let the split check fail.
       }
     }
@@ -45,40 +63,95 @@ export function verifyAdminToken(token: string): boolean {
     if (parts.length === 2) {
       // Legacy format — verify but with shorter window (1h)
       const [timestamp, signature] = parts;
-      if (!timestamp || !signature) return false;
+      if (!timestamp || !signature) {
+        logger.warn("admin_token_verify_failed", {
+          reason: "legacy_empty_field",
+          parts_length: 2,
+        });
+        return false;
+      }
       const age = Date.now() - Number(timestamp);
-      if (isNaN(age) || age > 3600 * 1000 || age < 0) return false;
+      if (isNaN(age) || age > 3600 * 1000 || age < 0) {
+        logger.warn("admin_token_verify_failed", {
+          reason: "legacy_expired",
+          age_ms: isNaN(age) ? null : age,
+        });
+        return false;
+      }
       const expected = crypto
         .createHmac("sha256", getSecret())
         .update(timestamp)
         .digest("hex");
-      return crypto.timingSafeEqual(
+      const ok = crypto.timingSafeEqual(
         Buffer.from(signature, "hex"),
         Buffer.from(expected, "hex")
       );
+      if (!ok) {
+        logger.warn("admin_token_verify_failed", {
+          reason: "legacy_hmac_mismatch",
+          age_ms: age,
+        });
+      }
+      return ok;
     }
 
-    if (parts.length !== 3) return false;
+    if (parts.length !== 3) {
+      logger.warn("admin_token_verify_failed", {
+        reason: "wrong_parts_count",
+        parts_length: parts.length,
+        token_has_pct: tokenHadPct,
+      });
+      return false;
+    }
     const [timestamp, nonce, signature] = parts;
-    if (!timestamp || !nonce || !signature) return false;
+    if (!timestamp || !nonce || !signature) {
+      logger.warn("admin_token_verify_failed", {
+        reason: "empty_field",
+        parts_length: 3,
+      });
+      return false;
+    }
 
     // Reject tokens older than MAX_AGE
     const age = Date.now() - Number(timestamp);
-    if (isNaN(age) || age > MAX_AGE * 1000 || age < 0) return false;
+    if (isNaN(age) || age > MAX_AGE * 1000 || age < 0) {
+      logger.warn("admin_token_verify_failed", {
+        reason: "expired",
+        age_ms: isNaN(age) ? null : age,
+      });
+      return false;
+    }
 
     // Validate nonce format (32 hex chars)
-    if (!/^[0-9a-f]{32}$/.test(nonce)) return false;
+    if (!/^[0-9a-f]{32}$/.test(nonce)) {
+      logger.warn("admin_token_verify_failed", {
+        reason: "bad_nonce_shape",
+        nonce_length: nonce.length,
+      });
+      return false;
+    }
 
     const expected = crypto
       .createHmac("sha256", getSecret())
       .update(`${timestamp}:${nonce}`)
       .digest("hex");
 
-    return crypto.timingSafeEqual(
+    const ok = crypto.timingSafeEqual(
       Buffer.from(signature, "hex"),
       Buffer.from(expected, "hex")
     );
-  } catch {
+    if (!ok) {
+      logger.warn("admin_token_verify_failed", {
+        reason: "hmac_mismatch",
+        age_ms: age,
+      });
+    }
+    return ok;
+  } catch (err) {
+    logger.warn("admin_token_verify_failed", {
+      reason: "unexpected_throw",
+      error: err instanceof Error ? err.message : String(err),
+    });
     return false;
   }
 }
