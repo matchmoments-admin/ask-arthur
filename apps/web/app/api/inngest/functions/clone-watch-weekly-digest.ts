@@ -118,6 +118,36 @@ export const cloneWatchWeeklyDigest = inngest.createFunction(
         .slice(0, 8);
     });
 
+    // Brands we actually reported to this week (i.e. brand_notification
+    // status = 'sent' in submitted_to JSONB). Distinct from
+    // brandBreakdown — that's confirmed TPs, which may include brands
+    // routed to manual_review / none / VDP channels where we don't send
+    // an email. This list is the public "we cooperated with these
+    // security teams" signal.
+    const reportedBrands = await step.run("fetch-reported-brands", async () => {
+      const since = new Date(Date.now() - 7 * 86400000).toISOString();
+      const { data: rows } = await sb
+        .from("shopfront_clone_alerts")
+        .select("inferred_target_domain, submitted_to")
+        .eq("source", "nrd")
+        .gte("first_seen_at", since)
+        .not("submitted_to->brand_notification->status", "is", null);
+      const brands = new Set<string>();
+      for (const row of rows ?? []) {
+        const r = row as {
+          inferred_target_domain: string;
+          submitted_to: Record<string, unknown> | null;
+        };
+        const status = (r.submitted_to?.brand_notification as
+          | { status?: string }
+          | undefined)?.status;
+        if (status === "sent") {
+          brands.add(r.inferred_target_domain);
+        }
+      }
+      return Array.from(brands).sort();
+    });
+
     // PR-B Phase 1: surface low-severity queue rows in the admin digest
     // so the operator can see what notify-brand has been suppressing.
     // (The actual brand-consolidated weekly digest send is a follow-up;
@@ -163,6 +193,7 @@ export const cloneWatchWeeklyDigest = inngest.createFunction(
       period,
       metrics,
       brandBreakdown,
+      reportedBrands,
       takedown,
     });
 
@@ -172,6 +203,7 @@ export const cloneWatchWeeklyDigest = inngest.createFunction(
       tpRate,
       fpRate,
       brandBreakdown,
+      reportedBrands,
       linkedinDraft,
       takedown,
       lowSeverityDigest,
@@ -258,6 +290,7 @@ export function buildTelegramMessage({
   tpRate,
   fpRate,
   brandBreakdown,
+  reportedBrands,
   linkedinDraft,
   takedown,
   lowSeverityDigest,
@@ -267,6 +300,7 @@ export function buildTelegramMessage({
   tpRate: number;
   fpRate: number;
   brandBreakdown: Array<{ brand: string; count: number }>;
+  reportedBrands: string[];
   linkedinDraft: string;
   takedown?: TakedownStats;
   lowSeverityDigest?: LowSeverityDigest;
@@ -274,6 +308,11 @@ export function buildTelegramMessage({
   const brandLines = brandBreakdown.length
     ? brandBreakdown.map((b) => `· ${escapeHtml(b.brand)} — ${b.count}`).join("\n")
     : "<i>(no confirmed TPs this week)</i>";
+
+  const reportedLine =
+    reportedBrands.length > 0
+      ? `Reported directly to: <b>${reportedBrands.map((b) => escapeHtml(brandDisplayName(b))).join(", ")}</b>`
+      : `Reported directly to: <i>(no direct-email channels fired this week)</i>`;
 
   const takedownLine =
     takedown && takedown.takedowns_total > 0
@@ -304,6 +343,7 @@ export function buildTelegramMessage({
     `Netcraft submits: ${metrics.submissions_netcraft}`,
     takedownLine,
     `Brand notifications: ${metrics.notifications_sent}`,
+    reportedLine,
     ``,
     `<b>Top brands (confirmed TP):</b>`,
     brandLines,
@@ -321,17 +361,27 @@ export function buildLinkedInDraft({
   period,
   metrics,
   brandBreakdown,
+  reportedBrands,
   takedown,
 }: {
   period: string;
   metrics: WeeklyMetrics;
   brandBreakdown: Array<{ brand: string; count: number }>;
+  reportedBrands: string[];
   takedown?: TakedownStats;
 }): string {
-  const brandLine = brandBreakdown
+  const targetedLine = brandBreakdown
     .slice(0, 5)
     .map((b) => brandDisplayName(b.brand))
     .join(", ");
+
+  // Brands whose security teams we successfully emailed this week.
+  // Distinct from "targeted" — that's brands seen in TPs. "Reported to"
+  // is the cooperation signal we want to surface publicly.
+  const reportedLine =
+    reportedBrands.length > 0
+      ? `Reported directly to security teams at: ${reportedBrands.map(brandDisplayName).join(", ")}.`
+      : null;
 
   const takedownLine =
     takedown && takedown.takedowns_total > 0
@@ -345,13 +395,13 @@ export function buildLinkedInDraft({
     `${metrics.triaged_tp} confirmed as likely clones after human review.`,
     `${metrics.submissions_netcraft} submitted to community blocklists for browser-block coverage.`,
     ...(takedownLine ? [takedownLine] : []),
-    `${metrics.notifications_sent} brand security teams notified.`,
+    ...(reportedLine ? [reportedLine] : []),
     ``,
-    brandLine
-      ? `Most targeted this week: ${brandLine}.`
+    targetedLine
+      ? `Most targeted this week: ${targetedLine}.`
       : `Quiet week — no confirmed clones.`,
     ``,
-    `Every newly-registered .com / .shop / .net domain is matched against our 50-entry AU brand watchlist each morning. When we spot something — typosquats, unicode look-alikes, brand-string substrings — we submit it for community blocklist coverage and let the brand know directly.`,
+    `Every newly-registered .com / .shop / .net domain is matched against our 50-entry AU brand watchlist each morning. When we spot something — typosquats, unicode look-alikes, brand-string substrings — we submit it for community blocklist coverage and let the brand's security team know directly.`,
     ``,
     `Free, runs daily. If you want your brand added or you'd like the per-week feed for your security team: brendan@askarthur.au`,
     ``,
