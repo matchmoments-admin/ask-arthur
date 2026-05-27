@@ -59,6 +59,21 @@ vi.mock("@askarthur/utils/logger", () => ({
     warn: vi.fn(),
     error: vi.fn(),
   },
+  maskE164: vi.fn((v: string) => v),
+}));
+
+// Spyable Axiom logger — every call site receives the same mock object
+// so individual tests can `expect(axiomLogger.info).toHaveBeenCalled...`
+// without rebuilding the wrapper.
+const axiomLogger = {
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  flush: vi.fn().mockResolvedValue(undefined),
+};
+vi.mock("@askarthur/utils/axiom-logger", () => ({
+  getLogger: vi.fn(() => axiomLogger),
 }));
 
 vi.mock("@vercel/functions", () => ({
@@ -459,6 +474,87 @@ describe("/api/analyze screenshot retention gate", () => {
     expect(storeVerifiedScam).toHaveBeenCalled();
     expect(typeof vi.mocked(storeVerifiedScam).mock.calls[0][3]).toBe(
       "function"
+    );
+  });
+});
+
+describe("/api/analyze Axiom instrumentation (boundary)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(checkRateLimit).mockResolvedValue({
+      allowed: true,
+      remaining: 9,
+      resetAt: null,
+    });
+  });
+
+  it("emits a single analyze.complete with verdict + durationMs + submissionType on success", async () => {
+    const res = await POST(makeRequest({ text: "Is this a scam?" }));
+    expect(res.status).toBe(200);
+
+    expect(axiomLogger.info).toHaveBeenCalledTimes(1);
+    expect(axiomLogger.info).toHaveBeenCalledWith(
+      "analyze.complete",
+      expect.objectContaining({
+        verdict: expect.any(String),
+        cached: false,
+        submissionType: "text",
+        durationMs: expect.any(Number),
+        hasImages: false,
+      }),
+    );
+
+    // Catch-block emit must NOT fire on success.
+    expect(axiomLogger.error).not.toHaveBeenCalled();
+  });
+
+  it("emits analyze.error when the route throws, and still returns 500", async () => {
+    const { analyzeWithClaude } = await import("@askarthur/scam-engine/claude");
+    vi.mocked(analyzeWithClaude).mockRejectedValueOnce(
+      new Error("anthropic upstream failure"),
+    );
+
+    const res = await POST(makeRequest({ text: "boom" }));
+    expect(res.status).toBe(500);
+
+    expect(axiomLogger.error).toHaveBeenCalledTimes(1);
+    expect(axiomLogger.error).toHaveBeenCalledWith(
+      "analyze.error",
+      expect.objectContaining({
+        error: "anthropic upstream failure",
+        errorType: "Error",
+        durationMs: expect.any(Number),
+      }),
+    );
+
+    // Success-path emit must NOT also fire when the route errored.
+    expect(axiomLogger.info).not.toHaveBeenCalled();
+  });
+
+  it("threads requestId through getLogger() so middleware and route logs join", async () => {
+    const { getLogger } = await import("@askarthur/utils/axiom-logger");
+
+    const req = new NextRequest("http://localhost:3000/api/analyze", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-real-ip": "1.2.3.4",
+        "user-agent": "test-agent",
+        "content-length": "30",
+        "Idempotency-Key": "join-test-aaaaaaaaaaaa",
+      },
+      body: JSON.stringify({ text: "hi" }),
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+
+    // Inbound Idempotency-Key takes priority — both middleware and
+    // route handlers feeding getLogger must reach the same id.
+    expect(getLogger).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: "api/analyze",
+        requestId: "join-test-aaaaaaaaaaaa",
+      }),
     );
   });
 });
