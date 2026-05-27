@@ -1,5 +1,6 @@
 import crypto from "crypto";
 
+import { readStringEnv } from "@askarthur/utils/env";
 import type { AnalysisResult } from "@askarthur/types";
 
 // Vote token shape. Encoded as URL query params + a short HMAC tag — same
@@ -17,10 +18,12 @@ const VOTES = new Set<FeedbackVote>(["up", "down"]);
 const EXPIRY_SECONDS = 7 * 24 * 60 * 60;
 
 function getSecret(): string {
+  // Trimmed reads via readStringEnv defeat trailing-whitespace HMAC drift —
+  // see packages/utils/src/env.ts.
   const secret =
-    process.env.INBOUND_SCAN_FEEDBACK_SECRET ||
-    process.env.UNSUBSCRIBE_SECRET ||
-    process.env.ADMIN_SECRET;
+    readStringEnv("INBOUND_SCAN_FEEDBACK_SECRET") ||
+    readStringEnv("UNSUBSCRIBE_SECRET") ||
+    readStringEnv("ADMIN_SECRET");
   if (!secret) {
     throw new Error(
       "INBOUND_SCAN_FEEDBACK_SECRET / UNSUBSCRIBE_SECRET / ADMIN_SECRET not configured",

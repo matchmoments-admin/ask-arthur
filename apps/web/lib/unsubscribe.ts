@@ -1,7 +1,11 @@
 import crypto from "crypto";
+import { readStringEnv } from "@askarthur/utils/env";
 
 function getSecret(): string {
-  const secret = process.env.UNSUBSCRIBE_SECRET || process.env.ADMIN_SECRET;
+  // Trimmed reads via readStringEnv defeat trailing-whitespace HMAC drift —
+  // see packages/utils/src/env.ts.
+  const secret =
+    readStringEnv("UNSUBSCRIBE_SECRET") || readStringEnv("ADMIN_SECRET");
   if (!secret) throw new Error("UNSUBSCRIBE_SECRET or ADMIN_SECRET not configured");
   return secret;
 }
