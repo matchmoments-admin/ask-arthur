@@ -27,6 +27,18 @@ export function createAdminToken(): string {
 /** Verify an HMAC-signed admin token with nonce */
 export function verifyAdminToken(token: string): boolean {
   try {
+    // Defensive URL-decode. /api/admin/login uses NextResponse.cookies.set
+    // which URL-encodes the value (`:` → `%3A`). Most Next.js cookie readers
+    // auto-decode on read but some paths (notably middleware's
+    // req.cookies.get) deliver the encoded form. Decode here so both shapes
+    // verify identically. Caught 2026-05-27 during the PR #459 live e2e test.
+    if (token.includes("%")) {
+      try {
+        token = decodeURIComponent(token);
+      } catch {
+        // Malformed % sequence — fall through and let the split check fail.
+      }
+    }
     const parts = token.split(":");
 
     // Support both old format (timestamp:hmac) and new (timestamp:nonce:hmac)
