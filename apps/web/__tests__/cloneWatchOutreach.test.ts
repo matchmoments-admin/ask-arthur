@@ -24,6 +24,12 @@ import {
   buildBatchSubject,
   buildTelegramSummaryMessage,
 } from "@/app/api/inngest/functions/clone-watch-notify-brand-prepare";
+import {
+  buildScamwatchCsv,
+  clampDays,
+  csvField,
+  firstSignal,
+} from "@/app/api/admin/clone-watch/scamwatch-export/route";
 import type { URLScanResult } from "@askarthur/scam-engine/urlscan";
 
 // Covers the pure helpers that route channels, build outbound copy, and
@@ -836,5 +842,153 @@ describe("clone-watch hardening — migration v152 contract snapshot", () => {
     // And merges submitted_to.brand_notification.status='sent'.
     expect(body).toMatch(/'status',\s*'sent'/);
     expect(body).toMatch(/shopfront_clone_alerts/);
+  });
+});
+
+describe("scamwatch-export — pure helpers", () => {
+  describe("clampDays", () => {
+    it("returns 7 on NaN / missing", () => {
+      expect(clampDays(Number.NaN)).toBe(7);
+      expect(clampDays(0)).toBe(7);
+      expect(clampDays(-3)).toBe(7);
+    });
+
+    it("caps at 90", () => {
+      expect(clampDays(91)).toBe(90);
+      expect(clampDays(365)).toBe(90);
+    });
+
+    it("returns the integer floor of valid input", () => {
+      expect(clampDays(7)).toBe(7);
+      expect(clampDays(30)).toBe(30);
+      expect(clampDays(7.9)).toBe(7);
+    });
+  });
+
+  describe("firstSignal", () => {
+    it("extracts signal_type + score from the first jsonb entry", () => {
+      expect(
+        firstSignal([{ signal_type: "levenshtein", score: 0.8333 }]),
+      ).toEqual({ signal_type: "levenshtein", score: 0.8333 });
+    });
+
+    it("returns empty string + NaN for malformed jsonb", () => {
+      expect(firstSignal(null)).toEqual({ signal_type: "", score: NaN });
+      expect(firstSignal([])).toEqual({ signal_type: "", score: NaN });
+      expect(firstSignal("not-an-array")).toEqual({
+        signal_type: "",
+        score: NaN,
+      });
+      expect(firstSignal([{}])).toEqual({ signal_type: "", score: NaN });
+    });
+  });
+
+  describe("csvField (RFC 4180)", () => {
+    it("returns plain unquoted value when no special chars", () => {
+      expect(csvField("kmart")).toBe("kmart");
+      expect(csvField(0.83)).toBe("0.83");
+    });
+
+    it("quotes + escapes embedded quotes", () => {
+      expect(csvField('say "hi"')).toBe('"say ""hi"""');
+    });
+
+    it("quotes when value contains a comma", () => {
+      expect(csvField("Sydney, NSW")).toBe('"Sydney, NSW"');
+    });
+
+    it("quotes when value contains a newline (defends against CSV injection)", () => {
+      expect(csvField("line1\nline2")).toBe('"line1\nline2"');
+    });
+
+    it("empty string for null / undefined", () => {
+      expect(csvField(null)).toBe("");
+      expect(csvField(undefined)).toBe("");
+    });
+  });
+
+  describe("buildScamwatchCsv", () => {
+    it("returns just the header on empty input (with trailing CRLF)", () => {
+      expect(buildScamwatchCsv([])).toBe(
+        "first_seen_iso,confirmed_at_iso,scam_url,scam_domain,impersonated_brand,scam_type,evidence_signal,evidence_score,severity,source,reporter_email\r\n",
+      );
+    });
+
+    it("emits one row per alert with all 11 columns + CRLF", () => {
+      const csv = buildScamwatchCsv([
+        {
+          id: 1,
+          inferred_target_domain: "nab.com.au",
+          candidate_domain: "naab.com",
+          candidate_url: "https://naab.com/login",
+          first_seen_at: "2026-05-26T03:14:00Z",
+          triage_at: "2026-05-26T08:00:00Z",
+          severity_tier: "medium",
+          signals: [{ signal_type: "levenshtein", score: 0.83 }],
+        },
+      ]);
+      const lines = csv.split("\r\n");
+      expect(lines).toHaveLength(3); // header + 1 row + trailing empty
+      const cells = lines[1].split(",");
+      expect(cells).toHaveLength(11);
+      expect(cells).toContain("nab.com.au");
+      expect(cells).toContain("naab.com");
+      expect(cells).toContain("https://naab.com/login");
+      expect(cells).toContain("Phishing - brand impersonation");
+      expect(cells).toContain("levenshtein");
+      expect(cells).toContain("0.83");
+      expect(cells).toContain("medium");
+      expect(cells).toContain("Ask Arthur clone-watch");
+      expect(cells).toContain("brendan@askarthur.au");
+    });
+
+    it("html-safe escaping isn't applied (CSV, not HTML) — but quote-escape is", () => {
+      const csv = buildScamwatchCsv([
+        {
+          id: 2,
+          inferred_target_domain: "test.com",
+          candidate_domain: "te\"st.example",
+          candidate_url: "https://te\"st.example/x",
+          first_seen_at: "2026-05-26T03:14:00Z",
+          triage_at: null,
+          severity_tier: null,
+          signals: null,
+        },
+      ]);
+      // Embedded quotes get doubled (RFC 4180)
+      expect(csv).toContain('"te""st.example"');
+      // Empty fields for null severity + missing signal
+      expect(csv).toMatch(/Phishing - brand impersonation,,,,/);
+    });
+
+    it("score formatted to 2 decimals; empty when missing", () => {
+      const csv = buildScamwatchCsv([
+        {
+          id: 3,
+          inferred_target_domain: "x.com",
+          candidate_domain: "y.com",
+          candidate_url: "https://y.com",
+          first_seen_at: "2026-05-26T03:14:00Z",
+          triage_at: "2026-05-26T04:00:00Z",
+          severity_tier: "low",
+          signals: [{ signal_type: "au_token", score: 0.91 }],
+        },
+        {
+          id: 4,
+          inferred_target_domain: "x.com",
+          candidate_domain: "z.com",
+          candidate_url: "https://z.com",
+          first_seen_at: "2026-05-26T03:14:00Z",
+          triage_at: "2026-05-26T04:00:00Z",
+          severity_tier: "low",
+          signals: [{ signal_type: "au_token" }],
+        },
+      ]);
+      const lines = csv.split("\r\n");
+      // Row 1: score "0.91"
+      expect(lines[1]).toContain(",0.91,");
+      // Row 2: score missing → empty cell between signal and severity
+      expect(lines[2]).toMatch(/au_token,,low/);
+    });
   });
 });

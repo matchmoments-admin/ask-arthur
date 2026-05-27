@@ -66,13 +66,32 @@ export default async function CloneWatchAdminPage() {
 
   return (
     <div className="max-w-5xl mx-auto px-5 py-8">
-      <h1 className="text-deep-navy text-xl font-extrabold mb-1">
-        Clone-watch triage
-      </h1>
-      <p className="text-gov-slate text-sm mb-6">
-        Daily NRD candidates awaiting human verdict. Mark FP / TP / Investigate.
-        TP-confirmed rows fan out to community blocklists + brand notification.
-      </p>
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-deep-navy text-xl font-extrabold mb-1">
+            Clone-watch triage
+          </h1>
+          <p className="text-gov-slate text-sm">
+            Daily NRD candidates awaiting human verdict. Mark FP / TP /
+            Investigate. TP-confirmed rows fan out to community blocklists +
+            brand notification.
+          </p>
+        </div>
+        <a
+          href="/api/admin/clone-watch/scamwatch-export?days=7"
+          download
+          className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold rounded-md"
+          style={{
+            border: "1px solid var(--color-line)",
+            background: "var(--color-surface)",
+            color: "var(--color-ink-2)",
+            textDecoration: "none",
+          }}
+          title="Download last 7 days of confirmed clones as CSV for manual upload to scamwatch.gov.au"
+        >
+          Scamwatch CSV (7d)
+        </a>
+      </div>
 
       <WeeklyKpis snapshot={weekly} pendingCount={pending.length} />
 
