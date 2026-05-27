@@ -19,15 +19,19 @@ import { NextRequest } from "next/server";
 
 // ── Mocks (factories are hoisted) ──
 
-vi.mock("@askarthur/supabase/middleware", () => ({
-  createMiddlewareClient: vi.fn(() => {
-    // Match the shape of NextResponse.next() — what middleware will
-    // attach `X-Request-Id` to. Use a real NextResponse so .headers
-    // behaves like production.
-    const { NextResponse } = require("next/server");
-    return { supabase: null, response: NextResponse.next() };
-  }),
-}));
+// Vitest hoists `vi.mock` factories above all top-level imports, so we
+// can't reference `NextResponse` from the file's import statement here.
+// An async factory + `await import()` is the canonical Vitest pattern
+// for accessing the real module inside a mock — works inside the hoist.
+vi.mock("@askarthur/supabase/middleware", async () => {
+  const { NextResponse } = await import("next/server");
+  return {
+    createMiddlewareClient: vi.fn(() => ({
+      supabase: null,
+      response: NextResponse.next(),
+    })),
+  };
+});
 
 vi.mock("@/lib/adminAuth", () => ({
   verifyAdminToken: vi.fn(() => false),
