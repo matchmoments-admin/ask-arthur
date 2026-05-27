@@ -228,14 +228,31 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
           `mint-batch-id:${groupKey}`,
           async () => crypto.randomUUID(),
         );
-        const candidates: CloneWatchCandidate[] = group.rows.map((r) => ({
-          candidateDomain: r.candidate_domain,
-          candidateUrl: r.candidate_url,
-          signalType: "lexical",
-          score: 0,
-          firstSeenAt: r.enqueued_at,
-          evidenceSummary: `Surfaced via daily NRD lexical sweep (severity ${r.severity_tier}).`,
-        }));
+
+        // Fetch urlscan evidence for this group's alerts so the email body
+        // can carry an inspect-without-visiting link + (when retrieval
+        // succeeded) a screenshot thumbnail. Single batched query keyed on
+        // alert_id; null/empty results are tolerated — the template
+        // gracefully omits the evidence block when nothing's there.
+        const alertIds = group.rows.map((r) => r.alert_id);
+        const evidenceByAlertId = await step.run(
+          `fetch-urlscan-evidence-${batchId}`,
+          async () => fetchUrlscanEvidence(sb, alertIds),
+        );
+
+        const candidates: CloneWatchCandidate[] = group.rows.map((r) => {
+          const evidence = evidenceByAlertId.get(r.alert_id);
+          return {
+            candidateDomain: r.candidate_domain,
+            candidateUrl: r.candidate_url,
+            signalType: "lexical",
+            score: 0,
+            firstSeenAt: r.enqueued_at,
+            evidenceSummary: `Surfaced via daily NRD lexical sweep (severity ${r.severity_tier}).`,
+            urlscanResultUrl: evidence?.resultUrl,
+            urlscanScreenshotUrl: evidence?.screenshotUrl,
+          };
+        });
 
         const legitimateDomain = group.brand;
         const subject = buildBatchSubject(group);
@@ -407,6 +424,73 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
 );
 
 // ── Pure helpers (exported for unit testing) ─────────────────────────────
+
+export interface UrlscanEvidenceForEmail {
+  /** Public urlscan.io result page URL. Always present when scan was
+   *  attempted (even if retrieval timed out — the result page exists). */
+  resultUrl: string;
+  /** Screenshot URL. Only present when retrieval succeeded. */
+  screenshotUrl?: string;
+}
+
+/**
+ * Pure helper: shape raw urlscan_evidence JSONB into the email-ready
+ * fields. Exported for unit testing.
+ *
+ * Shape variants seen in prod (2026-05-27):
+ *   * `{uuid, retrieved: false, retrieval_timeout: true}` — scan ran,
+ *      retrieval timed out; result page still exists at urlscan.io
+ *   * `{error, status, submit_failed: true}` — submit rejected (e.g.
+ *      DNS-error for parked typosquats). No uuid → no link.
+ *   * `{uuid, retrieved: true, screenshot_url, effective_url, ...}` —
+ *      full success.
+ */
+export function urlscanEvidenceFromJsonb(
+  raw: unknown,
+): UrlscanEvidenceForEmail | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const obj = raw as Record<string, unknown>;
+  const uuid = typeof obj.uuid === "string" ? obj.uuid : null;
+  if (!uuid) return undefined;
+  const screenshot =
+    typeof obj.screenshot_url === "string" ? obj.screenshot_url : undefined;
+  return {
+    resultUrl: `https://urlscan.io/result/${uuid}/`,
+    screenshotUrl: screenshot,
+  };
+}
+
+/**
+ * Batch-fetch urlscan_evidence for a list of alert ids. Returns a Map
+ * keyed on alert_id so callers can lookup per-row. Null/failure-shape
+ * rows are simply omitted from the map; the template gracefully handles
+ * the missing case.
+ */
+export async function fetchUrlscanEvidence(
+  sb: NonNullable<ReturnType<typeof createServiceClient>>,
+  alertIds: number[],
+): Promise<Map<number, UrlscanEvidenceForEmail>> {
+  const result = new Map<number, UrlscanEvidenceForEmail>();
+  if (alertIds.length === 0) return result;
+  const { data, error } = await sb
+    .from("shopfront_clone_alerts")
+    .select("id, urlscan_evidence")
+    .in("id", alertIds);
+  if (error) {
+    logger.warn("clone-watch prepare: urlscan_evidence fetch failed", {
+      error: error.message,
+      alertCount: alertIds.length,
+    });
+    return result;
+  }
+  for (const row of data ?? []) {
+    const ev = urlscanEvidenceFromJsonb(
+      (row as { id: number; urlscan_evidence: unknown }).urlscan_evidence,
+    );
+    if (ev) result.set((row as { id: number }).id, ev);
+  }
+  return result;
+}
 
 export function groupByBrandRecipient(rows: UnbatchedRow[]): BrandGroup[] {
   const map = new Map<string, BrandGroup>();

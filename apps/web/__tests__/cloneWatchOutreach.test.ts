@@ -23,6 +23,7 @@ import {
   groupByBrandRecipient,
   buildBatchSubject,
   buildTelegramSummaryMessage,
+  urlscanEvidenceFromJsonb,
 } from "@/app/api/inngest/functions/clone-watch-notify-brand-prepare";
 import {
   buildScamwatchCsv,
@@ -1034,6 +1035,65 @@ describe("scamwatch-export — pure helpers", () => {
       expect(lines[1]).toContain(",0.91,");
       // Row 2: score missing → empty cell between signal and severity
       expect(lines[2]).toMatch(/au_token,,low/);
+    });
+  });
+});
+
+describe("clone-watch-notify-brand-prepare — urlscanEvidenceFromJsonb", () => {
+  it("returns result page + screenshot when retrieval succeeded", () => {
+    const ev = urlscanEvidenceFromJsonb({
+      uuid: "019e688f-65db-7532-a5cc-26d40308c517",
+      retrieved: true,
+      screenshot_url:
+        "https://urlscan.io/screenshots/019e688f-65db-7532-a5cc-26d40308c517.png",
+      effective_url: "https://nab-fake-login.example/",
+    });
+    expect(ev).toEqual({
+      resultUrl: "https://urlscan.io/result/019e688f-65db-7532-a5cc-26d40308c517/",
+      screenshotUrl:
+        "https://urlscan.io/screenshots/019e688f-65db-7532-a5cc-26d40308c517.png",
+    });
+  });
+
+  it("returns result URL only when scan timed out mid-retrieval (uuid still present)", () => {
+    const ev = urlscanEvidenceFromJsonb({
+      uuid: "019e688f-65db-7532-a5cc-26d40308c517",
+      retrieved: false,
+      retrieval_timeout: true,
+    });
+    expect(ev).toEqual({
+      resultUrl: "https://urlscan.io/result/019e688f-65db-7532-a5cc-26d40308c517/",
+      screenshotUrl: undefined,
+    });
+  });
+
+  it("returns undefined when submit failed (no uuid, e.g. DNS error)", () => {
+    // This is the actual nab.rs shape from 2026-05-27 — DNS didn't resolve
+    // so urlscan rejected the submit before assigning a uuid.
+    const ev = urlscanEvidenceFromJsonb({
+      error: "rejected",
+      status: 400,
+      message: "DNS Error - Could not resolve domain",
+      submit_failed: true,
+    });
+    expect(ev).toBeUndefined();
+  });
+
+  it("returns undefined for null / undefined / non-object inputs", () => {
+    expect(urlscanEvidenceFromJsonb(null)).toBeUndefined();
+    expect(urlscanEvidenceFromJsonb(undefined)).toBeUndefined();
+    expect(urlscanEvidenceFromJsonb("not-an-object")).toBeUndefined();
+    expect(urlscanEvidenceFromJsonb(123)).toBeUndefined();
+  });
+
+  it("ignores non-string screenshot_url field", () => {
+    const ev = urlscanEvidenceFromJsonb({
+      uuid: "abc",
+      screenshot_url: 42, // not a string
+    });
+    expect(ev).toEqual({
+      resultUrl: "https://urlscan.io/result/abc/",
+      screenshotUrl: undefined,
     });
   });
 });

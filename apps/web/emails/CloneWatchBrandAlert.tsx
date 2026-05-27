@@ -9,6 +9,7 @@ import {
   Link,
   Hr,
   Heading,
+  Img,
 } from "@react-email/components";
 
 export interface CloneWatchCandidate {
@@ -19,6 +20,14 @@ export interface CloneWatchCandidate {
   firstSeenAt: string;
   evidenceSummary: string;
   netcraftSubmissionId?: string;
+  /** Public urlscan.io result page (always available when a urlscan
+   *  submission was attempted, even if retrieval timed out). Lets the
+   *  recipient inspect the live site evidence WITHOUT visiting the
+   *  candidate URL directly. */
+  urlscanResultUrl?: string;
+  /** Screenshot URL from urlscan_evidence.screenshot_url. Only present
+   *  when retrieval succeeded — embedded as a thumbnail in the email. */
+  urlscanScreenshotUrl?: string;
 }
 
 export interface CloneWatchBrandAlertProps {
@@ -255,6 +264,44 @@ export default function CloneWatchBrandAlert(
                     <strong>Netcraft ref:</strong>{" "}
                     <code style={codeInline}>{c.netcraftSubmissionId}</code>
                   </Text>
+                )}
+                {c.urlscanResultUrl && (
+                  <Text
+                    style={{
+                      color: "#475569",
+                      fontSize: "13px",
+                      lineHeight: "1.5",
+                      margin: "0 0 6px 0",
+                    }}
+                  >
+                    <strong>Evidence:</strong>{" "}
+                    <Link
+                      href={c.urlscanResultUrl}
+                      style={{ color: "#0D9488", textDecoration: "underline" }}
+                    >
+                      View urlscan.io scan
+                    </Link>{" "}
+                    <span style={{ color: "#94A3B8" }}>
+                      &mdash; inspect the live site safely without visiting it
+                    </span>
+                  </Text>
+                )}
+                {c.urlscanScreenshotUrl && (
+                  <Section style={{ margin: "8px 0 0 0" }}>
+                    <Img
+                      src={c.urlscanScreenshotUrl}
+                      alt={`Screenshot of ${c.candidateDomain} via urlscan.io`}
+                      width="500"
+                      style={{
+                        maxWidth: "500px",
+                        width: "100%",
+                        height: "auto",
+                        border: "1px solid #E2E8F0",
+                        borderRadius: "4px",
+                        display: "block",
+                      }}
+                    />
+                  </Section>
                 )}
               </Section>
             ))}
