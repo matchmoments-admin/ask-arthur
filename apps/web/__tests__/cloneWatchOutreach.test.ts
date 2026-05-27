@@ -664,6 +664,8 @@ describe("clone-watch-notify-brand-prepare — pure helpers", () => {
     it("renders single-batch wording with the dashboard URL", () => {
       const msg = buildTelegramSummaryMessage({
         batchesPrepared: 1,
+        groupsFailed: 0,
+        groupsSkippedCooldown: 0,
         dashboardUrl: "https://askarthur.au/admin/clone-watch#approvals",
       });
       expect(msg).toContain("1</b> batch awaiting your approval");
@@ -678,9 +680,42 @@ describe("clone-watch-notify-brand-prepare — pure helpers", () => {
     it("uses plural noun when more than one batch", () => {
       const msg = buildTelegramSummaryMessage({
         batchesPrepared: 7,
+        groupsFailed: 0,
+        groupsSkippedCooldown: 0,
         dashboardUrl: "https://askarthur.au/admin/clone-watch#approvals",
       });
       expect(msg).toContain("7</b> batches awaiting your approval");
+    });
+
+    it("surfaces cooldown-skipped groups so silent skips don't hide", () => {
+      const msg = buildTelegramSummaryMessage({
+        batchesPrepared: 2,
+        groupsFailed: 0,
+        groupsSkippedCooldown: 3,
+        dashboardUrl: "https://askarthur.au/admin/clone-watch#approvals",
+      });
+      expect(msg).toContain("3 brands skipped (24h cooldown");
+    });
+
+    it("surfaces failed groups with a warning emoji", () => {
+      const msg = buildTelegramSummaryMessage({
+        batchesPrepared: 2,
+        groupsFailed: 1,
+        groupsSkippedCooldown: 0,
+        dashboardUrl: "https://askarthur.au/admin/clone-watch#approvals",
+      });
+      expect(msg).toContain("⚠️ 1 group failed");
+    });
+
+    it("uses 'No new batches' wording when nothing is pending", () => {
+      const msg = buildTelegramSummaryMessage({
+        batchesPrepared: 0,
+        groupsFailed: 0,
+        groupsSkippedCooldown: 2,
+        dashboardUrl: "https://askarthur.au/admin/clone-watch#approvals",
+      });
+      expect(msg).toContain("No new batches awaiting approval");
+      expect(msg).toContain("2 brands skipped");
     });
   });
 });
@@ -743,5 +778,92 @@ describe("clone-watch-notify-brand-prepare — idempotency contract (migration v
     // Defense-in-depth WHERE clause: even if the caller passes ids that are
     // already-batched, the UPDATE is a no-op for non-'unbatched' rows.
     expect(body).toMatch(/WHERE\s+id\s*=\s*ANY\(p_queue_ids\)[\s\S]*?approval_status\s*=\s*'unbatched'/);
+  });
+});
+
+// v152 hardening: concurrency-safe transition + retention.
+describe("clone-watch hardening — migration v152 contract snapshot", () => {
+  const migration = readFileSync(
+    join(
+      __dirname,
+      "..",
+      "..",
+      "..",
+      "supabase",
+      "migration-v152-clone-watch-hardening.sql",
+    ),
+    "utf8",
+  );
+
+  it("transition_clone_alert_batch takes a row-level lock (FOR UPDATE)", () => {
+    // Capture the whole function definition (signature + body) so we can
+    // assert on both the RETURNS TABLE shape and the executable body.
+    const fnMatch = migration.match(
+      /CREATE OR REPLACE FUNCTION public\.transition_clone_alert_batch[\s\S]*?\$\$;/,
+    );
+    expect(fnMatch).not.toBeNull();
+    const full = fnMatch![0];
+    // The lock is what makes concurrent Send safe — two callers serialise here.
+    expect(full).toMatch(/FOR UPDATE/);
+    // Returns structured outcome so the route can distinguish race outcomes.
+    expect(full).toMatch(/observed_status/);
+    expect(full).toMatch(/observed_brand/);
+    expect(full).toMatch(/observed_recipient/);
+    // Audit trail: admin id is stamped on the row.
+    expect(full).toMatch(/approved_by_admin_id/);
+    expect(full).toMatch(/rejected_by_admin_id/);
+  });
+
+  it("drops the legacy 3-arg overload so callers can't accidentally bypass admin_id", () => {
+    expect(migration).toMatch(
+      /DROP FUNCTION IF EXISTS public\.transition_clone_alert_batch\(uuid, text, text\)/,
+    );
+  });
+
+  it("brand cooldown lookup is capped at 168h (one week) of staleness", () => {
+    const fnMatch = migration.match(
+      /CREATE OR REPLACE FUNCTION public\.list_recently_notified_brands[\s\S]*?AS \$\$([\s\S]*?)\$\$/,
+    );
+    expect(fnMatch).not.toBeNull();
+    expect(fnMatch![1]).toMatch(/LEAST\(p_cooldown_hours, 168\)/);
+  });
+
+  it("retention RPCs are chunked at ≤5K rows per call (hot-table convention)", () => {
+    for (const fn of [
+      "expire_stale_pending_clone_batches",
+      "purge_old_clone_alert_queue_rows",
+      "purge_old_fp_clone_alerts",
+    ]) {
+      const fnMatch = migration.match(
+        new RegExp(`CREATE OR REPLACE FUNCTION public\\.${fn}[\\s\\S]*?AS \\$\\$([\\s\\S]*?)\\$\\$`),
+      );
+      expect(fnMatch, `function ${fn} not found`).not.toBeNull();
+      expect(fnMatch![1]).toMatch(/LEAST\(p_chunk_size, 5000\)/);
+    }
+  });
+
+  it("purge_old_fp_clone_alerts deletes ONLY 'fp' rows — TP-confirmed history is preserved", () => {
+    const fnMatch = migration.match(
+      /CREATE OR REPLACE FUNCTION public\.purge_old_fp_clone_alerts[\s\S]*?AS \$\$([\s\S]*?)\$\$/,
+    );
+    expect(fnMatch).not.toBeNull();
+    const body = fnMatch![1];
+    expect(body).toMatch(/triage_status\s*=\s*'fp'/);
+    // No accidental tp_confirmed / tp_actioned reference.
+    expect(body).not.toMatch(/tp_confirmed/);
+    expect(body).not.toMatch(/tp_actioned/);
+  });
+
+  it("record_brand_notification_sent stamps last_notified_at on the directory row", () => {
+    const fnMatch = migration.match(
+      /CREATE OR REPLACE FUNCTION public\.record_brand_notification_sent[\s\S]*?AS \$\$([\s\S]*?)\$\$/,
+    );
+    expect(fnMatch).not.toBeNull();
+    const body = fnMatch![1];
+    expect(body).toMatch(/last_notified_at\s*=\s*now\(\)/);
+    expect(body).toMatch(/brand_contact_directory/);
+    // And merges submitted_to.brand_notification.status='sent'.
+    expect(body).toMatch(/'status',\s*'sent'/);
+    expect(body).toMatch(/shopfront_clone_alerts/);
   });
 });
