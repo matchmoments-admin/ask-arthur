@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { createServiceClient } from "@askarthur/supabase/server";
+import { readStringEnv } from "@askarthur/utils/env";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { render } from "@react-email/components";
@@ -74,7 +75,10 @@ interface BrandGroup {
   rows: UnbatchedRow[];
 }
 
-const FROM_EMAIL = process.env.RESEND_FROM_EMAIL;
+// Read at call-site (not module-load) via readStringEnv so trailing
+// whitespace in Vercel-stored values + Next.js DefinePlugin static
+// inlining of `process.env.X` literals both fail loud instead of silent.
+// See packages/utils/src/env.ts + memory `feedback_inngest_auto_sync_silent_fail`.
 const REPLY_TO_EMAIL = "brendan@askarthur.au";
 const DASHBOARD_URL = "https://askarthur.au/admin/clone-watch#approvals";
 const BRAND_COOLDOWN_HOURS = 24;
@@ -144,7 +148,8 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
       return { skipped: true, reason: "cost_brake_engaged" };
     }
 
-    if (!FROM_EMAIL) {
+    const fromEmail = readStringEnv("RESEND_FROM_EMAIL");
+    if (!fromEmail) {
       logger.error("clone-watch prepare: RESEND_FROM_EMAIL unset");
       return { skipped: true, reason: "resend_from_email_unset" };
     }
@@ -303,7 +308,7 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
                 const resend = new Resend(apiKey);
                 const result = await resend.emails.send(
                   {
-                    from: FROM_EMAIL,
+                    from: fromEmail,
                     to: [group.recipient],
                     replyTo: REPLY_TO_EMAIL,
                     subject,

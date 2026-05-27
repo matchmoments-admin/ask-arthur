@@ -28,11 +28,14 @@ import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
  * read-then-write check on shopfront_clone_alerts.submitted_to.brand_notification.
  *
  * See docs/plans/clone-watch-outreach.md §7-§8 Phases 3 + 4.
+ *
+ * NOTE 2026-05-28: this function no longer calls Resend directly. The
+ * email-channel branches enqueue into `clone_alert_notification_queue`;
+ * the actual send happens in `clone-watch-notify-brand-prepare` (auto-
+ * send) or `/api/admin/clone-watch/batches/[batchId]/send` (dashboard
+ * approval). The legacy FROM_EMAIL/REPLY_TO_EMAIL constants were removed
+ * with PR-A to avoid a misleading personal-address fallback.
  */
-
-const FROM_EMAIL =
-  process.env.RESEND_FROM_EMAIL ?? "Ask Arthur <brendan@askarthur.au>";
-const REPLY_TO_EMAIL = "brendan@askarthur.au";
 
 export type DirectoryChannel =
   | "bugcrowd_vdp"

@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { Resend } from "resend";
 import { requireAdmin, getAdminUserId } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
+import { readStringEnv } from "@askarthur/utils/env";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { logCost, PRICING } from "@/lib/cost-telemetry";
@@ -30,7 +31,9 @@ import { logCost, PRICING } from "@/lib/cost-telemetry";
 //   • Update shopfront_clone_alerts.submitted_to.brand_notification on
 //     success so /admin/clone-watch's brand-breakdown reflects reality.
 
-const FROM_EMAIL = process.env.RESEND_FROM_EMAIL;
+// Read at call-site via readStringEnv so trailing whitespace in Vercel
+// values + DefinePlugin static inlining of `process.env.X` literals both
+// fail loud instead of silent.
 const REPLY_TO_EMAIL = "brendan@askarthur.au";
 
 interface BatchRow {
@@ -73,7 +76,8 @@ export async function POST(
     );
   }
 
-  if (!FROM_EMAIL) {
+  const fromEmail = readStringEnv("RESEND_FROM_EMAIL");
+  if (!fromEmail) {
     // Fail closed: missing RESEND_FROM_EMAIL used to silently fall back
     // to a personal-looking sender, which Gmail mis-renders.
     return NextResponse.json(
@@ -238,7 +242,7 @@ export async function POST(
     const resend = new Resend(apiKey);
     const result = await resend.emails.send(
       {
-        from: FROM_EMAIL,
+        from: fromEmail,
         to: [first.recipient],
         replyTo: REPLY_TO_EMAIL,
         subject: first.email_subject,
