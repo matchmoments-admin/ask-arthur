@@ -160,10 +160,21 @@ export async function POST(
   // 4. Cross-validate recipient against brand_contact_directory. A
   //    mismatch means either (a) directory was edited after the batch
   //    was prepared, or (b) the queue row has been tampered with. Refuse.
+  //
+  //    Lookup is by `brand` because the notify-brand enqueue path stores
+  //    directoryRow.brand into queue.brand (see clone-watch-notify-brand
+  //    Inngest fn's `enqueue_clone_alert_notification` call). The earlier
+  //    code used `legitimate_domain`, which happened to match for cases
+  //    where the brand name and the legitimate domain were the same
+  //    string (e.g. "dominos.com.au"), but failed with 409
+  //    `directory_row_missing` for any brand whose name differs from its
+  //    domain — e.g. Domain (brand="Domain", legitimate_domain="domain.com.au").
+  //    Caught 2026-05-27 during the PR #459 live e2e test when the user
+  //    clicked Send on the Domain batch.
   const { data: directoryRows, error: directoryErr } = await sb
     .from("brand_contact_directory")
     .select("recipient, channel_type")
-    .eq("legitimate_domain", first.brand)
+    .eq("brand", first.brand)
     .limit(1);
   if (directoryErr) {
     logger.error("clone-watch send: directory lookup failed", {
