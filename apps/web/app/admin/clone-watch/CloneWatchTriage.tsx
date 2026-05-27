@@ -206,6 +206,59 @@ export default function CloneWatchTriage({
     });
   };
 
+  /**
+   * One-click "Mark all N alerts in this brand group as Not a clone".
+   * PR-F (#495). Bypasses the select-all → bulk-bar flow for the common
+   * noise-day workflow. Mirrors `handleBulkTriage` semantics: optimistic
+   * flip, parallel POST, restore failed rows on partial-failure. No
+   * Confirm-all equivalent — every TP must be individually intentional.
+   */
+  const handleBulkDismissBrand = (ids: number[]) => {
+    if (ids.length === 0) return;
+    setError(null);
+    setInfo(null);
+    const previous = pending;
+    const idSet = new Set(ids);
+    setPending((rows) => rows.filter((r) => !idSet.has(r.id)));
+    // Clear any subset of these that happened to be in the multi-select.
+    setSelectedIds((prev) => {
+      if (prev.size === 0) return prev;
+      const next = new Set(prev);
+      for (const id of ids) next.delete(id);
+      return next;
+    });
+
+    startTransition(async () => {
+      const results = await Promise.allSettled(
+        ids.map((alertId) =>
+          fetch("/api/admin/clone-watch/triage", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ alertId, status: "fp" }),
+          }).then((res) => ({ alertId, ok: res.ok, status: res.status })),
+        ),
+      );
+      const failed: number[] = [];
+      for (const r of results) {
+        if (r.status === "rejected" || !r.value.ok) {
+          failed.push(r.status === "fulfilled" ? r.value.alertId : 0);
+        }
+      }
+      if (failed.length === 0) {
+        setInfo(
+          `Marked ${ids.length} alert${ids.length === 1 ? "" : "s"} as Not a clone`,
+        );
+      } else {
+        const failedSet = new Set(failed);
+        const failedRows = previous.filter((r) => failedSet.has(r.id));
+        setPending((current) => [...failedRows, ...current]);
+        setError(
+          `${failed.length} of ${ids.length} alerts failed to update — restored. The rest succeeded.`,
+        );
+      }
+    });
+  };
+
   const handleBatchAction = (batchId: string, action: "send" | "reject") => {
     setError(null);
     setInfo(null);
@@ -461,6 +514,10 @@ export default function CloneWatchTriage({
                       count={group.rows.length}
                       allSelected={allSelected}
                       onToggleAll={() => toggleSelectGroup(group.ids)}
+                      onBulkDismiss={() =>
+                        handleBulkDismissBrand(group.ids)
+                      }
+                      disabled={isPending}
                     />
                   )}
                   {group.rows.map((row) => (
