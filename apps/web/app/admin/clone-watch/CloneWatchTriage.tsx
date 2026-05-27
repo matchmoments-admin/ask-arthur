@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { Mail, Search, Send, XCircle } from "lucide-react";
 import TriageRow, {
   type PendingAlertView,
 } from "@/components/admin/triage/TriageRow";
+import BulkActionBar from "@/components/admin/triage/BulkActionBar";
+import BrandGroupHeader from "@/components/admin/triage/BrandGroupHeader";
 import type { TriageStatus } from "@/components/admin/triage/types";
 
 // Re-export the alert shape under its prior name for the server-side
@@ -36,6 +38,97 @@ export default function CloneWatchTriage({
   // messages. setError() is reserved for actual errors so the styling
   // matches the message intent (red vs blue). Fixes ultrareview F10.
   const [info, setInfo] = useState<string | null>(null);
+  // Bulk-selection: a Set of pending alert ids the admin has ticked.
+  // Empty by default; cleared after any bulk action.
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
+
+  // Group pending rows by inferred_target_domain, preserving the parent
+  // order. Any group of ≥2 gets a BrandGroupHeader with "Select all N"
+  // affordance (the only place the user-requested per-brand grouping
+  // surfaces in UI — alerts in groups of 1 render as plain rows).
+  const pendingGroups = useMemo(() => {
+    const groups = new Map<string, PendingAlert[]>();
+    for (const row of pending) {
+      const key = row.inferred_target_domain;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(row);
+    }
+    return Array.from(groups.entries()).map(([brand, rows]) => ({
+      brand,
+      rows,
+      ids: rows.map((r) => r.id),
+    }));
+  }, [pending]);
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectGroup = (ids: number[]) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const allSelected = ids.every((id) => next.has(id));
+      if (allSelected) {
+        for (const id of ids) next.delete(id);
+      } else {
+        for (const id of ids) next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const handleBulkTriage = (status: TriageStatus) => {
+    if (selectedIds.size === 0) return;
+    const ids = Array.from(selectedIds);
+    setError(null);
+    setInfo(null);
+    // Optimistic flip — drop the selected rows + clear selection now.
+    // On any failure we restore the affected rows (the ones whose POST
+    // did not return ok).
+    const previous = pending;
+    setPending((rows) => rows.filter((r) => !selectedIds.has(r.id)));
+    clearSelection();
+
+    startTransition(async () => {
+      const results = await Promise.allSettled(
+        ids.map((alertId) =>
+          fetch("/api/admin/clone-watch/triage", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ alertId, status }),
+          }).then((res) => ({ alertId, ok: res.ok, status: res.status })),
+        ),
+      );
+      const failed: number[] = [];
+      for (const r of results) {
+        if (r.status === "rejected" || !r.value.ok) {
+          failed.push(
+            r.status === "fulfilled"
+              ? r.value.alertId
+              : 0, // network throw — we lose the id but the count is still right below
+          );
+        }
+      }
+      if (failed.length === 0) {
+        setInfo(`Bulk action applied to ${ids.length} alert${ids.length === 1 ? "" : "s"}`);
+      } else {
+        // Restore the failed rows from the snapshot
+        const failedSet = new Set(failed);
+        const failedRows = previous.filter((r) => failedSet.has(r.id));
+        setPending((current) => [...failedRows, ...current]);
+        setError(
+          `${failed.length} of ${ids.length} alerts failed to update — restored. The rest succeeded.`,
+        );
+      }
+    });
+  };
 
   const handleBatchAction = (batchId: string, action: "send" | "reject") => {
     setError(null);
@@ -266,19 +359,48 @@ export default function CloneWatchTriage({
               Newest first
             </span>
           </div>
-          <div>
-            {pending.map((row) => (
-              <TriageRow
-                key={row.id}
-                row={row}
-                disabled={isPending}
-                onTriage={handleTriage}
-                onScan={handleScan}
-              />
-            ))}
+          <div style={{ paddingBottom: selectedIds.size > 0 ? 80 : 0 }}>
+            {pendingGroups.map((group) => {
+              const showHeader = group.rows.length >= 2;
+              const allSelected =
+                group.rows.length > 0 &&
+                group.ids.every((id) => selectedIds.has(id));
+              return (
+                <div key={group.brand}>
+                  {showHeader && (
+                    <BrandGroupHeader
+                      brand={group.brand}
+                      count={group.rows.length}
+                      allSelected={allSelected}
+                      onToggleAll={() => toggleSelectGroup(group.ids)}
+                    />
+                  )}
+                  {group.rows.map((row) => (
+                    <TriageRow
+                      key={row.id}
+                      row={row}
+                      disabled={isPending}
+                      onTriage={handleTriage}
+                      onScan={handleScan}
+                      selected={selectedIds.has(row.id)}
+                      onToggleSelect={() => toggleSelect(row.id)}
+                    />
+                  ))}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
+
+      <BulkActionBar
+        count={selectedIds.size}
+        disabled={isPending}
+        onConfirmAll={() => handleBulkTriage("tp_confirmed")}
+        onInvestigateAll={() => handleBulkTriage("needs_investigation")}
+        onDismissAll={() => handleBulkTriage("fp")}
+        onClear={clearSelection}
+      />
     </>
   );
 }
