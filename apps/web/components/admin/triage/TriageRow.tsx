@@ -85,6 +85,10 @@ interface TriageRowProps {
   onScan: (id: number) => void;
   /** Compact mode collapses the metadata grid (used in dense lists). */
   compact?: boolean;
+  /** True when this row is part of the current bulk-selection. */
+  selected?: boolean;
+  /** Toggle bulk-selection for this row. When omitted, the checkbox is hidden. */
+  onToggleSelect?: () => void;
 }
 
 export default function TriageRow({
@@ -93,6 +97,8 @@ export default function TriageRow({
   onTriage,
   onScan,
   compact,
+  selected,
+  onToggleSelect,
 }: TriageRowProps) {
   const signal = row.signals?.[0];
   const method = signal?.signal_type ?? signal?.type ?? "unknown";
@@ -114,14 +120,35 @@ export default function TriageRow({
     <article
       className="flex flex-col"
       style={{
-        background: "var(--color-surface)",
+        background: selected ? "var(--color-teal-soft)" : "var(--color-surface)",
         borderBottom: "1px solid var(--color-line-soft)",
         padding: compact ? "12px 14px" : "14px 14px 16px",
         gap: compact ? 8 : 10,
       }}
     >
-      {/* Header: domain + score */}
+      {/* Header: checkbox (optional) + domain + score */}
       <header className="flex items-center gap-2">
+        {onToggleSelect && (
+          <label
+            className="flex items-center shrink-0 cursor-pointer"
+            style={{ padding: 2, marginRight: 2 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <input
+              type="checkbox"
+              checked={selected ?? false}
+              onChange={onToggleSelect}
+              disabled={disabled}
+              aria-label={`Select ${row.candidate_domain} for bulk action`}
+              style={{
+                width: 18,
+                height: 18,
+                accentColor: "var(--color-teal)",
+                cursor: disabled ? "not-allowed" : "pointer",
+              }}
+            />
+          </label>
+        )}
         <h3
           className="mono m-0 flex-1 min-w-0"
           style={{
