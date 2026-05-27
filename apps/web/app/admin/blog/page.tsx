@@ -31,7 +31,8 @@ export default async function AdminBlogPage() {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "strict",
-      path: "/admin",
+      // Must match the login route's path so the clear actually clears.
+      path: "/",
       maxAge: 0,
     });
     redirect("/admin/login");
