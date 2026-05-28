@@ -138,7 +138,20 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
     name: "Clone-Watch: Haiku pre-classifier",
     retries: 2,
     concurrency: { limit: 3 },
-    idempotency: "event.data.alertId",
+    // Idempotency keyed on the EVENT id, not event.data.alertId. The daily
+    // fan-out now stamps the event id with the run date
+    // (`clone-watch-preclassify:<alertId>:<YYYY-MM-DD>`), so a row that did NOT
+    // get a classification row on its first attempt (FF was off, cost-brake
+    // engaged, supabase blip, or retries exhausted) is re-fanned with a FRESH
+    // id on the next daily run and gets another chance — instead of being
+    // PERMANENTLY stranded by an alertId-keyed idempotency record (verified
+    // 2026-05-29: 6 rows from the 05-27 batch were stuck unclassified for ~2
+    // days under the old key). Re-spend is prevented at the source: the
+    // `list_clone_alerts_pending_preclassify` selector excludes any alert that
+    // already has a classifications row, so only genuinely-pending alerts are
+    // ever re-fanned. The record_clone_watch_classification UPSERT remains the
+    // belt-and-braces write-idempotency guard.
+    idempotency: "event.id",
     timeouts: { finish: "2m" },
   },
   { event: CLONE_WATCH_PRECLASSIFY_REQUESTED_EVENT },

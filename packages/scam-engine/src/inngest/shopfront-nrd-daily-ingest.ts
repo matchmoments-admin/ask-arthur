@@ -192,9 +192,21 @@ export const shopfrontNrdDailyIngest = inngest.createFunction(
           }> | null) ?? [];
         if (rows.length === 0) return { fanned_out: 0 };
 
+        // Stamp the event id with the run date so a still-pending row is
+        // re-fanned with a FRESH id on each daily sweep. A bare
+        // `clone-watch-preclassify:<id>` id was deduped by Inngest's
+        // event-send dedup AND matched the consumer's old alertId-keyed
+        // function idempotency, so any alert whose first classify attempt
+        // skipped (FF off / brake / supabase blip) or exhausted retries was
+        // PERMANENTLY stranded — the selector kept returning it but it could
+        // never re-run (verified 2026-05-29: 6 rows stuck ~2 days). The
+        // selector already excludes classified alerts, so date-rotating is
+        // safe — only genuinely-pending rows are ever re-attempted, one extra
+        // attempt per day, until classified or aged out by retention.
+        const fanDate = formatUtcDate(new Date());
         const events = rows.map((r) => ({
           name: CLONE_WATCH_PRECLASSIFY_REQUESTED_EVENT,
-          id: `clone-watch-preclassify:${r.id}`,
+          id: `clone-watch-preclassify:${r.id}:${fanDate}`,
           data: {
             alertId: r.id,
             brand: r.inferred_target_domain,

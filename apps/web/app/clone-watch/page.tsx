@@ -55,6 +55,14 @@ async function getAlerts(): Promise<CloneAlertRow[]> {
     .is("target_shop_id", null)
     .eq("source", "nrd")
     .eq("alert_state", "open")
+    // Only publish operator-CONFIRMED clones. Without this, the page rendered
+    // every open NRD row regardless of triage outcome — verified 2026-05-29 to
+    // be leaking 35 `fp` (false-positive, already cleared as NOT clones) and 1
+    // `needs_investigation` row out of 47, i.e. publicly naming legitimate
+    // businesses' domains as "possible clones". `noindex` keeps it out of
+    // search but the page is still publicly reachable, so this is a
+    // defamation/reputational fix, not cosmetic.
+    .in("triage_status", ["tp_confirmed", "tp_actioned"])
     .gte("first_seen_at", since)
     .order("severity", { ascending: false })
     .order("first_seen_at", { ascending: false })
