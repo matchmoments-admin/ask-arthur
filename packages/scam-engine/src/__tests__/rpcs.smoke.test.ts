@@ -108,6 +108,20 @@ describe.skipIf(!hasEnv)("SQL RPC smoke tests", () => {
     expect(error).toBeNull();
     expect(typeof data).toBe("number");
   });
+
+  // Clone-watch preclassify selector (v159, PR-I #509). Exercises the
+  // SECURITY DEFINER body (search_path, LEFT JOIN, LIMIT clamp) so a broken
+  // definition fails here on the first call rather than silently in the
+  // daily NRD fan-out.
+  it("list_clone_alerts_pending_preclassify executes without error", async () => {
+    const supabase = getClient();
+    const { data, error } = await supabase.rpc(
+      "list_clone_alerts_pending_preclassify",
+      { p_limit: 1 },
+    );
+    expect(error).toBeNull();
+    expect(Array.isArray(data)).toBe(true);
+  });
 });
 
 describe.skipIf(hasEnv)("SQL RPC smoke tests — env not configured", () => {

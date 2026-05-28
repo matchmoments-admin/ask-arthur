@@ -213,6 +213,7 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
           operation: "classify_error",
           units: 0,
           unitCostUsd: 0,
+          requestId: `clone-watch-preclassify:${data.alertId}`,
           metadata: {
             alert_id: data.alertId,
             brand: data.brand,
@@ -262,6 +263,7 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
         units: totalTokens,
         unitCostUsd:
           totalTokens > 0 ? callResult.estimatedCostUsd / totalTokens : 0,
+        requestId: `clone-watch-preclassify:${data.alertId}`,
         metadata: {
           alert_id: data.alertId,
           brand: data.brand,

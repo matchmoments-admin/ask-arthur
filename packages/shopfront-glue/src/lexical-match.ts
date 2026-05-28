@@ -144,6 +144,13 @@ export function lexicalMatch(
   const matchPrimary = decodeIdnLabel(primary);
   const wasIdnDecoded = matchPrimary !== primary;
 
+  // Decode EVERY label so the scam-context gate evaluates the U-label, not
+  // raw punycode (#510). Passing the raw `xn--…` form into hasScamContext
+  // both false-passes (a literal `xn--au…` satisfies the `au` token) and
+  // false-negatives (a decoded scam token never appears). decodeIdnLabel is
+  // a no-op on non-A-labels, so this is identity for ASCII domains.
+  const decodedDomain = labels.map(decodeIdnLabel).join(".");
+
   let best: MatchResult | null = null;
 
   for (const entry of watchlist) {
@@ -168,7 +175,7 @@ export function lexicalMatch(
       brand.length >= MIN_BRAND_LEN_FOR_LOOSE_SUBSTRING
         ? matchPrimary.includes(brand)
         : matchPrimary.split(/[-_]/).includes(brand);
-    if (substringHit && hasScamContext(lower, matchPrimary, brand)) {
+    if (substringHit && hasScamContext(decodedDomain, matchPrimary, brand)) {
       best = pickBetter(best, {
         brand: entry.brand,
         legitimate_domain: entry.legitimate_domains[0] ?? "",
