@@ -306,19 +306,18 @@ describe("decodeIdnLabel", () => {
 });
 
 describe("lexicalMatch — IDN decode integration (PR-E, #494)", () => {
-  it("decodes an A-label primary label before confusable-normalising", () => {
-    // "xn--bnings-cua" → "bünings" (latin small u with diaeresis is in the
-    // Latin-1 supplement, not in our CONFUSABLES map at MVP — but the
-    // decode itself proves the wiring works). The substring branch should
-    // still fire because the brand-letters are present in the decoded form
-    // around the confusable.
-    const result = lexicalMatch("xn--bnings-cua-au.shop", TEST_WATCHLIST);
-    // Either match (via substring on the decoded form) or null is acceptable
-    // for the U+00FC case (it's not in CONFUSABLES). The hard requirement is
-    // no throw + evidence carries idn_decoded when it does fire.
-    if (result) {
-      expect(result.evidence.idn_decoded).toBeDefined();
-    }
+  it("runs the scam-context gate on the decoded U-label, not the raw punycode (#510)", () => {
+    // xn--bunnings-secure-flb decodes to "bunnings-secureä". The substring
+    // gate must evaluate the DECODED U-label so the "secure" scam-context
+    // token is seen — on a neutral .com TLD (no token-TLD shortcut like
+    // .shop), this only fires because the decoded residue contains "secure".
+    // Pre-#510 the gate was fed the raw `xn--…` form; this locks the
+    // decoded-form contract going forward.
+    const result = lexicalMatch("xn--bunnings-secure-flb.com", TEST_WATCHLIST);
+    expect(result).not.toBeNull();
+    expect(result?.brand).toBe("Bunnings");
+    expect(result?.signal_type).toBe("substring");
+    expect(result?.evidence.idn_decoded).toBeDefined();
   });
 
   it("preserves the raw A-label as input_label while matching the decoded form", () => {
