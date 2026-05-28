@@ -65,6 +65,11 @@ export const cloneWatchPollNetcraft = inngest.createFunction(
     name: "Clone-Watch: Poll Netcraft takedown status",
     retries: 2,
     concurrency: { limit: 1 },
+    // Hard cap below the 10-min pg-stuck-query-watchdog edge. Worst case is
+    // POLL_BATCH_LIMIT (25) × PER_REQUEST_TIMEOUT_MS (12s) ≈ 5 min of fetches;
+    // 8m leaves headroom for step overhead and defends against a future
+    // POLL_BATCH_LIMIT bump that forgets to re-check the budget.
+    timeouts: { finish: "8m" },
   },
   [
     { cron: "*/30 * * * *" },

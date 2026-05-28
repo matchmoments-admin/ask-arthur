@@ -283,11 +283,13 @@ export const cloneWatchNotifyBrand = inngest.createFunction(
         });
       });
 
-      await persistNotification(sb, data.alertId, {
-        channel_type: directoryRow.channel_type,
-        recipient: directoryRow.recipient,
-        status: "skipped", // not yet 'sent' — batch builder will update
-        sent_at: null,
+      await step.run("persist-notification-enqueued", async () => {
+        await persistNotification(sb, data.alertId, {
+          channel_type: directoryRow.channel_type,
+          recipient: directoryRow.recipient,
+          status: "skipped", // not yet 'sent' — batch builder will update
+          sent_at: null,
+        });
       });
 
       await step.run("log-cost", async () => {

@@ -105,7 +105,15 @@ export const cloneWatchWeeklyDigest = inngest.createFunction(
         .select("inferred_target_domain, triage_status")
         .eq("source", "nrd")
         .gte("first_seen_at", since)
-        .in("triage_status", ["tp_confirmed", "tp_actioned"]);
+        .in("triage_status", ["tp_confirmed", "tp_actioned"])
+        // Bound the result — PostgREST silently caps at 1000 rows otherwise,
+        // which would under-count the digest with no error. At current TP
+        // volume (~single digits/week) this is never hit; the warn makes a
+        // future breach observable instead of silent.
+        .limit(2000);
+      if ((rows ?? []).length === 2000) {
+        logger.warn("clone-watch weekly-digest: brand-breakdown hit row cap");
+      }
       const counts = new Map<string, number>();
       for (const row of rows ?? []) {
         const brand = (row as { inferred_target_domain: string })
@@ -131,7 +139,11 @@ export const cloneWatchWeeklyDigest = inngest.createFunction(
         .select("inferred_target_domain, submitted_to")
         .eq("source", "nrd")
         .gte("first_seen_at", since)
-        .not("submitted_to->brand_notification->status", "is", null);
+        .not("submitted_to->brand_notification->status", "is", null)
+        .limit(2000);
+      if ((rows ?? []).length === 2000) {
+        logger.warn("clone-watch weekly-digest: reported-brands hit row cap");
+      }
       const brands = new Set<string>();
       for (const row of rows ?? []) {
         const r = row as {

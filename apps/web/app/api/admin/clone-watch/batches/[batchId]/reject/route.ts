@@ -39,7 +39,13 @@ export async function POST(
   }
 
   const { batchId } = await ctx.params;
-  if (!batchId || !/^[0-9a-f-]{36}$/i.test(batchId)) {
+  // Strict UUID v4-shape (the loose `[0-9a-f-]{36}` accepted 36 dashes).
+  if (
+    !batchId ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      batchId,
+    )
+  ) {
     return NextResponse.json({ error: "missing_batch_id" }, { status: 400 });
   }
 
@@ -65,7 +71,7 @@ export async function POST(
       error: error.message,
     });
     return NextResponse.json(
-      { error: "transition_failed", details: error.message },
+      { error: "transition_failed", details: "db_error" },
       { status: 500 },
     );
   }
