@@ -73,11 +73,15 @@ export const cloneWatchUrlscanRescan = inngest.createFunction(
     }
 
     await step.run("fan-out-rescans", async () => {
+      // One rescan id per alert per UTC day. Deterministic (was Date.now(),
+      // which risked two events colliding in the same millisecond AND made
+      // replays non-reproducible). The rescan cron runs daily, so a date stamp
+      // gives exactly one rescan/alert/day while still differing from the
+      // initial scan's bare-alertId event id.
+      const rescanDay = new Date().toISOString().slice(0, 10);
       const events = rows.map((r) => ({
         name: CLONE_WATCH_SCAN_REQUESTED_EVENT,
-        // New event id per rescan so the per-fn idempotency on alertId
-        // is bypassed (initial scan already used the bare alertId).
-        id: `clone-watch-urlscan-rescan:${r.id}:${Date.now()}`,
+        id: `clone-watch-urlscan-rescan:${r.id}:${rescanDay}`,
         data: {
           alertId: r.id,
           candidateUrl: r.candidate_url,

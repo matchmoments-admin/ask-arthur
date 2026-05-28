@@ -18,6 +18,16 @@
 export interface BrandEntry {
   brand: string;
   legitimate_domains: string[];
+  // Optional extra match tokens (short-forms / trading names) matched in
+  // ADDITION to `brand`. Needed where the official brand normalises to a
+  // token that real clones never use — e.g. "CBA" → "cba" misses
+  // `commbank-login.shop`, "Australia Post" → "australiapost" misses
+  // `auspost-redelivery.shop`. Each alias goes through the same
+  // confusable/substring/Levenshtein path as the brand and reports under the
+  // canonical `brand`. Keep aliases ≥5 chars and distinctive — a generic
+  // alias (e.g. "booking", "circle") reintroduces the dictionary-word FP
+  // class the scam-context gate exists to suppress.
+  aliases?: string[];
 }
 
 export const AU_BRAND_WATCHLIST: BrandEntry[] = [
@@ -49,7 +59,11 @@ export const AU_BRAND_WATCHLIST: BrandEntry[] = [
 
   // Logistics + post (overlap with ct-monitor.ts auspost keyword — handled by
   // cross-surface dedupe in shopfront-nrd-daily-ingest step 4).
-  { brand: "Australia Post", legitimate_domains: ["auspost.com.au"] },
+  {
+    brand: "Australia Post",
+    legitimate_domains: ["auspost.com.au"],
+    aliases: ["auspost"],
+  },
   { brand: "Toll", legitimate_domains: ["tollgroup.com", "mytoll.com"] },
   { brand: "StarTrack", legitimate_domains: ["startrack.com.au"] },
   { brand: "Sendle", legitimate_domains: ["sendle.com"] },
@@ -80,7 +94,11 @@ export const AU_BRAND_WATCHLIST: BrandEntry[] = [
   { brand: "Westpac", legitimate_domains: ["westpac.com.au"] },
   { brand: "NAB", legitimate_domains: ["nab.com.au"] },
   { brand: "ANZ", legitimate_domains: ["anz.com.au"] },
-  { brand: "CBA", legitimate_domains: ["commbank.com.au"] },
+  {
+    brand: "CBA",
+    legitimate_domains: ["commbank.com.au"],
+    aliases: ["commbank"],
+  },
 
   // Telcos (overlap with ct-monitor.ts telstra keyword — same dedupe path).
   { brand: "Telstra", legitimate_domains: ["telstra.com.au"] },
@@ -227,4 +245,188 @@ export const AU_BRAND_WATCHLIST: BrandEntry[] = [
   { brand: "eBay Australia", legitimate_domains: ["ebay.com.au"] },
   { brand: "Kogan", legitimate_domains: ["kogan.com"] },
   { brand: "MyDeal", legitimate_domains: ["mydeal.com.au"] },
+
+  // ── PR-J expansion (2026-05-29): smaller banking / lender / telco / super
+  // brands. Web-researched + domain-verified. Curated for the matcher:
+  // multi-word names keep their concatenated token; `aliases` carry the
+  // distinctive short-form a clone actually uses (e.g. "macquarie", "boq").
+  // Deliberately NO generic short tokens ("up", "aussie", "rest") as bare
+  // brands — they'd reintroduce the dictionary-word FP class the scam-context
+  // gate exists to suppress (so "Up" → brand "Up Bank" + alias "upbank").
+
+  // Banks + neobanks
+  { brand: "Up Bank", legitimate_domains: ["up.com.au"], aliases: ["upbank"] },
+  { brand: "Ubank", legitimate_domains: ["ubank.com.au"] },
+  {
+    brand: "ING Australia",
+    legitimate_domains: ["ing.com.au", "ingdirect.com.au"],
+    aliases: ["ingdirect"],
+  },
+  {
+    brand: "Macquarie Bank",
+    legitimate_domains: ["macquarie.com.au"],
+    aliases: ["macquarie"],
+  },
+  { brand: "Bankwest", legitimate_domains: ["bankwest.com.au"] },
+  {
+    brand: "St.George Bank",
+    legitimate_domains: ["stgeorge.com.au"],
+    aliases: ["stgeorge"],
+  },
+  { brand: "Bank of Melbourne", legitimate_domains: ["bankofmelbourne.com.au"] },
+  { brand: "BankSA", legitimate_domains: ["banksa.com.au"] },
+  {
+    brand: "Suncorp",
+    legitimate_domains: ["suncorp.com.au", "suncorpbank.com.au"],
+  },
+  { brand: "Bendigo Bank", legitimate_domains: ["bendigobank.com.au"] },
+  {
+    brand: "Bank of Queensland",
+    legitimate_domains: ["boq.com.au"],
+    aliases: ["boq"],
+  },
+  { brand: "ME Bank", legitimate_domains: ["mebank.com.au"] },
+  { brand: "Judo Bank", legitimate_domains: ["judo.bank"] },
+  { brand: "Virgin Money", legitimate_domains: ["virginmoney.com.au"] },
+
+  // Mutual / customer-owned banks
+  {
+    brand: "Great Southern Bank",
+    legitimate_domains: ["greatsouthernbank.com.au"],
+  },
+  { brand: "Heritage Bank", legitimate_domains: ["heritage.com.au"] },
+  {
+    brand: "Newcastle Permanent",
+    legitimate_domains: ["newcastlepermanent.com.au"],
+  },
+  { brand: "P&N Bank", legitimate_domains: ["pnbank.com.au"], aliases: ["pnbank"] },
+  { brand: "Beyond Bank", legitimate_domains: ["beyondbank.com.au"] },
+  {
+    brand: "Bank Australia",
+    legitimate_domains: ["bankaust.com.au"],
+    aliases: ["bankaust"],
+  },
+  {
+    brand: "Teachers Mutual Bank",
+    legitimate_domains: ["tmbank.com.au"],
+    aliases: ["tmbank"],
+  },
+  { brand: "Qudos Bank", legitimate_domains: ["qudosbank.com.au"] },
+  { brand: "Greater Bank", legitimate_domains: ["greater.com.au"] },
+  { brand: "People First Bank", legitimate_domains: ["peoplefirstbank.com.au"] },
+  { brand: "Police Bank", legitimate_domains: ["policebank.com.au"] },
+  { brand: "Unity Bank", legitimate_domains: ["unitybank.com.au"] },
+  { brand: "UniBank", legitimate_domains: ["unibank.com.au"] },
+  { brand: "Firefighters Mutual Bank", legitimate_domains: ["fmbank.com.au"] },
+  { brand: "Health Professionals Bank", legitimate_domains: ["hpbank.com.au"] },
+  {
+    brand: "Australian Military Bank",
+    legitimate_domains: ["australianmilitarybank.com.au"],
+  },
+
+  // Mortgage brokers + home-loan lenders
+  { brand: "Aussie Home Loans", legitimate_domains: ["aussie.com.au"] },
+  { brand: "Lendi", legitimate_domains: ["lendi.com.au"] },
+  { brand: "Mortgage Choice", legitimate_domains: ["mortgagechoice.com.au"] },
+  { brand: "Athena Home Loans", legitimate_domains: ["athena.com.au"] },
+  { brand: "Unloan", legitimate_domains: ["unloan.com.au"] },
+  {
+    brand: "Tiimely Home",
+    legitimate_domains: ["tiimelyhome.com.au", "tictoc.com.au"],
+  },
+  { brand: "Pepper Money", legitimate_domains: ["peppermoney.com.au"] },
+  { brand: "Liberty Financial", legitimate_domains: ["liberty.com.au"] },
+  {
+    brand: "Resimac",
+    legitimate_domains: ["resimac.com.au", "homeloans.com.au"],
+  },
+  { brand: "La Trobe Financial", legitimate_domains: ["latrobefinancial.com.au"] },
+  { brand: "Firstmac", legitimate_domains: ["firstmac.com.au"] },
+  { brand: "loans.com.au", legitimate_domains: ["loans.com.au"] },
+
+  // SME / business lenders
+  { brand: "Valiant Finance", legitimate_domains: ["valiantfinance.com"] },
+  { brand: "Prospa", legitimate_domains: ["prospa.com"] },
+  { brand: "Lumi", legitimate_domains: ["lumi.com.au"] },
+  { brand: "Moula", legitimate_domains: ["moula.com.au"] },
+  { brand: "OnDeck", legitimate_domains: ["ondeck.com.au"] },
+  { brand: "Banjo Loans", legitimate_domains: ["banjoloans.com"] },
+  { brand: "Bigstone", legitimate_domains: ["bigstone.com.au"] },
+  { brand: "Zeller", legitimate_domains: ["myzeller.com"] },
+
+  // BNPL + consumer finance
+  { brand: "Afterpay", legitimate_domains: ["afterpay.com"] },
+  { brand: "Zip", legitimate_domains: ["zip.co"] },
+  { brand: "Humm", legitimate_domains: ["shophumm.com", "hummloan.com"] },
+  {
+    brand: "Latitude Financial",
+    legitimate_domains: ["latitudefinancial.com.au"],
+  },
+  { brand: "Klarna", legitimate_domains: ["klarna.com"] },
+  { brand: "Beforepay", legitimate_domains: ["beforepay.com.au"] },
+  { brand: "Wisr", legitimate_domains: ["wisr.com.au"] },
+  { brand: "MoneyMe", legitimate_domains: ["moneyme.com.au"] },
+  { brand: "Nimble", legitimate_domains: ["nimble.com.au"] },
+  { brand: "Cash Converters", legitimate_domains: ["cashconverters.com.au"] },
+  { brand: "Harmoney", legitimate_domains: ["harmoney.com.au"] },
+
+  // Telcos + ISPs (MVNOs phished via bill / top-up SMS)
+  { brand: "Belong", legitimate_domains: ["belong.com.au"] },
+  { brand: "Boost Mobile", legitimate_domains: ["boost.com.au"] },
+  { brand: "Amaysim", legitimate_domains: ["amaysim.com.au"] },
+  { brand: "Aussie Broadband", legitimate_domains: ["aussiebroadband.com.au"] },
+  { brand: "TPG", legitimate_domains: ["tpg.com.au"] },
+  { brand: "iiNet", legitimate_domains: ["iinet.net.au"] },
+  { brand: "Dodo", legitimate_domains: ["dodo.com"] },
+  { brand: "Tangerine", legitimate_domains: ["tangerine.com.au"] },
+  { brand: "Felix Mobile", legitimate_domains: ["felixmobile.com.au"] },
+  { brand: "Superloop", legitimate_domains: ["superloop.com"] },
+  { brand: "Southern Phone", legitimate_domains: ["southernphone.com.au"] },
+  { brand: "Exetel", legitimate_domains: ["exetel.com.au"] },
+  { brand: "SpinTel", legitimate_domains: ["spintel.net.au"] },
+  { brand: "Kogan Mobile", legitimate_domains: ["koganmobile.com.au"] },
+  { brand: "Moose Mobile", legitimate_domains: ["moosemobile.com.au"] },
+
+  // Super funds + investing (refund / consolidation phishing)
+  { brand: "AustralianSuper", legitimate_domains: ["australiansuper.com"] },
+  {
+    brand: "Australian Retirement Trust",
+    legitimate_domains: ["australianretirementtrust.com.au"],
+  },
+  { brand: "Aware Super", legitimate_domains: ["aware.com.au"] },
+  { brand: "Hostplus", legitimate_domains: ["hostplus.com.au"] },
+  { brand: "REST Super", legitimate_domains: ["rest.com.au"] },
+  { brand: "HESTA", legitimate_domains: ["hesta.com.au"] },
+  { brand: "Cbus", legitimate_domains: ["cbussuper.com.au"] },
+  { brand: "UniSuper", legitimate_domains: ["unisuper.com.au"] },
+  {
+    brand: "Colonial First State",
+    legitimate_domains: ["cfs.com.au"],
+    aliases: ["cfs"],
+  },
+  { brand: "MLC", legitimate_domains: ["mlc.com.au"] },
+  { brand: "AMP", legitimate_domains: ["amp.com.au"] },
+  { brand: "Australian Ethical", legitimate_domains: ["australianethical.com.au"] },
+  { brand: "Spaceship", legitimate_domains: ["spaceship.com.au"] },
+  { brand: "Raiz", legitimate_domains: ["raizinvest.com.au"] },
+  { brand: "Verve Super", legitimate_domains: ["vervesuper.com.au"] },
+
+  // Payments + money-transfer fintech (PayID / transfer-recovery scams)
+  { brand: "Wise", legitimate_domains: ["wise.com"] },
+  { brand: "Revolut", legitimate_domains: ["revolut.com"] },
+  { brand: "PayPal", legitimate_domains: ["paypal.com"] },
+  { brand: "BPAY", legitimate_domains: ["bpay.com.au"] },
+  { brand: "Beem", legitimate_domains: ["beemit.com.au"] },
+  { brand: "Airwallex", legitimate_domains: ["airwallex.com"] },
+
+  // General insurance (claim / premium-refund phishing)
+  { brand: "NRMA", legitimate_domains: ["nrma.com.au"] },
+  { brand: "RACV", legitimate_domains: ["racv.com.au"] },
+  { brand: "RACQ", legitimate_domains: ["racq.com.au"] },
+  { brand: "AAMI", legitimate_domains: ["aami.com.au"] },
+  { brand: "Allianz", legitimate_domains: ["allianz.com.au"] },
+  { brand: "Budget Direct", legitimate_domains: ["budgetdirect.com.au"] },
+  { brand: "Youi", legitimate_domains: ["youi.com.au"] },
+  { brand: "QBE", legitimate_domains: ["qbe.com"] },
+  { brand: "GIO", legitimate_domains: ["gio.com.au"] },
 ];

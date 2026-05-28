@@ -78,14 +78,22 @@ export const shopfrontNrdDailyIngest = inngest.createFunction(
     { cron: "30 8 * * *" },
     { event: "shopfront/nrd.manual-trigger.v1" },
   ],
-  async ({ step }) => {
+  async ({ event, step }) => {
     if (!featureFlags.shopfrontCloneWatch) {
       return { skipped: true, reason: "FF_SHOPFRONT_CLONE_WATCH disabled" };
     }
 
+    // Distinguish the scheduled 08:30 UTC sweep from an ad-hoc replay fired via
+    // `shopfront/nrd.manual-trigger.v1`. Both run identical work and (pre-fix)
+    // sent an identical Telegram digest — so an ops re-run during a deploy
+    // looked like a duplicate daily sweep to anyone reading the chat (this
+    // confused a real reader 2026-05-29). We tag the digest accordingly below.
+    const isManualRun = event?.name === "shopfront/nrd.manual-trigger.v1";
+
     // Compute yesterday's NRD URL from UTC date. Override possible via
     // WHOISDS_NRD_ZIP_URL for tests, emergency source-switching, or
     // back-fills against a specific historical date.
+    const nrdListDate = formatUtcDate(yesterdayUtc());
     const nrdUrl = process.env.WHOISDS_NRD_ZIP_URL ?? computeNrdUrl(yesterdayUtc());
 
     // Download + parse in a single step: Inngest serialises step return
@@ -230,6 +238,8 @@ export const shopfrontNrdDailyIngest = inngest.createFunction(
         hits,
         inserted: upsertResult.inserted,
         failed_chunks: upsertResult.failed_chunks,
+        is_manual_run: isManualRun,
+        nrd_list_date: nrdListDate,
       });
     });
 
@@ -490,12 +500,29 @@ async function sendTelegramDigest(args: {
   hits: MatchHit[];
   inserted: number;
   failed_chunks: number;
+  is_manual_run?: boolean;
+  nrd_list_date?: string;
 }): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_ADMIN_CHAT_ID;
   if (!token || !chatId) {
     logger.warn(
       "shopfront-nrd: TELEGRAM_BOT_TOKEN / TELEGRAM_ADMIN_CHAT_ID unset — skipping digest",
+    );
+    return;
+  }
+
+  const dateSuffix = args.nrd_list_date ? ` (${args.nrd_list_date} list)` : "";
+
+  // A manual replay that surfaced no NEW rows is pure noise (the row set is
+  // idempotent on url_hash, so re-running the same list always re-finds the
+  // same hits and inserts 0). Collapse it to a single line instead of the full
+  // brand-table digest, so it can't be mistaken for the scheduled sweep.
+  if (args.is_manual_run && args.inserted === 0 && args.failed_chunks === 0) {
+    await postTelegram(
+      token,
+      chatId,
+      `<b>Clone-watch · 🔧 manual re-run</b>${dateSuffix} — ${args.hits.length} hits, <b>0 new rows</b> (idempotent replay, nothing to action).`,
     );
     return;
   }
@@ -509,7 +536,11 @@ async function sendTelegramDigest(args: {
     .slice(0, TELEGRAM_DIGEST_TOP_N);
 
   const lines: string[] = [];
-  lines.push(`<b>Clone-watch · daily NRD sweep</b>`);
+  lines.push(
+    args.is_manual_run
+      ? `<b>Clone-watch · 🔧 manual re-run</b>${dateSuffix}`
+      : `<b>Clone-watch · daily NRD sweep</b>${dateSuffix}`,
+  );
   lines.push(
     `Scanned <b>${args.domains_scanned.toLocaleString()}</b> domains · <b>${args.hits.length}</b> hits · <b>${args.inserted}</b> new rows.`,
   );
@@ -535,6 +566,14 @@ async function sendTelegramDigest(args: {
     `<i>Public: askarthur.au/clone-watch (gated noindex; flip after #371 v1 copy)</i>`,
   );
 
+  await postTelegram(token, chatId, lines.join("\n"));
+}
+
+async function postTelegram(
+  token: string,
+  chatId: string,
+  text: string,
+): Promise<void> {
   try {
     const res = await undiciFetch(
       `https://api.telegram.org/bot${token}/sendMessage`,
@@ -544,7 +583,7 @@ async function sendTelegramDigest(args: {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           chat_id: chatId,
-          text: lines.join("\n"),
+          text,
           parse_mode: "HTML",
           disable_web_page_preview: true,
         }),

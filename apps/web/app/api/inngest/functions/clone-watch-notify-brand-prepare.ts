@@ -352,18 +352,24 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
                 );
               }
             });
-            logCost({
-              feature: "shopfront_clone_notify_brand",
-              provider: "resend",
-              operation: "auto_send",
-              units: 1,
-              unitCostUsd: PRICING.RESEND_USD_PER_EMAIL,
-              metadata: {
-                batch_id: batchId,
-                brand: group.brand,
-                candidate_count: candidates.length,
-                provider_message_id: sendResult?.id ?? null,
-              },
+            // Inside step.run so a function replay (retries / checkpoint
+            // recovery) doesn't double-count the email cost — the Resend
+            // idempotencyKey already prevents a duplicate SEND, but a bare
+            // logCost here would re-insert a telemetry row on every replay.
+            await step.run(`log-cost-${batchId}`, async () => {
+              logCost({
+                feature: "shopfront_clone_notify_brand",
+                provider: "resend",
+                operation: "auto_send",
+                units: 1,
+                unitCostUsd: PRICING.RESEND_USD_PER_EMAIL,
+                metadata: {
+                  batch_id: batchId,
+                  brand: group.brand,
+                  candidate_count: candidates.length,
+                  provider_message_id: sendResult?.id ?? null,
+                },
+              });
             });
             autoSent++;
           }
@@ -398,19 +404,21 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
           }),
         );
       });
-      logCost({
-        feature: "shopfront_clone_notify_brand_prepare",
-        provider: "telegram",
-        operation: "summary_notification",
-        units: 0,
-        unitCostUsd: 0,
-        metadata: {
-          batches_prepared: batchesPrepared,
-          pending_for_approval: pendingNew,
-          auto_sent: autoSent,
-          groups_failed: groupsFailed,
-          groups_skipped_cooldown: groupsSkippedCooldown,
-        },
+      await step.run("log-cost-summary", async () => {
+        logCost({
+          feature: "shopfront_clone_notify_brand_prepare",
+          provider: "telegram",
+          operation: "summary_notification",
+          units: 0,
+          unitCostUsd: 0,
+          metadata: {
+            batches_prepared: batchesPrepared,
+            pending_for_approval: pendingNew,
+            auto_sent: autoSent,
+            groups_failed: groupsFailed,
+            groups_skipped_cooldown: groupsSkippedCooldown,
+          },
+        });
       });
     }
 

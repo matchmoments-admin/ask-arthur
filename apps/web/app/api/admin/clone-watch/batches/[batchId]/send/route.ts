@@ -87,7 +87,15 @@ export async function POST(
   }
 
   const { batchId } = await ctx.params;
-  if (!batchId || !/^[0-9a-f-]{36}$/i.test(batchId)) {
+  // Strict UUID v4-shape — the loose `[0-9a-f-]{36}` form accepted 36 dashes
+  // or 36 hex with no group structure, pushing malformed input down to the
+  // RPC where it surfaced as a 500 instead of a clean 400.
+  if (
+    !batchId ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      batchId,
+    )
+  ) {
     return NextResponse.json({ error: "missing_batch_id" }, { status: 400 });
   }
 
@@ -263,8 +271,10 @@ export async function POST(
       batchId,
       error: String(err),
     });
+    // Don't echo the raw Resend error to the client — it can include the
+    // recipient email address + message id. Full error is logged above.
     return NextResponse.json(
-      { error: "send_failed", details: String(err) },
+      { error: "send_failed", details: "resend_error" },
       { status: 502 },
     );
   }
@@ -296,7 +306,7 @@ export async function POST(
         emailSent: true,
         providerMessageId,
         error: "transition_failed_after_send",
-        details: transErr.message,
+        details: "db_error",
       },
       { status: 500 },
     );

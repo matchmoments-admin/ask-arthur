@@ -122,6 +122,49 @@ const SCAM_CONTEXT_TOKENS = [
 // class (no segment break before "au").
 const SEGMENT_BOUNDED_TOKENS = new Set(["au"]);
 
+// Per-watchlist index, built once and cached by watchlist-array identity.
+// The daily ingest calls lexicalMatch ~70k times against the SAME
+// AU_BRAND_WATCHLIST reference; without this every call re-normalised every
+// brand (O(domains × brands) regex ops) and re-scanned each entry's
+// legitimate-domain list (O(domains × brands) string compares). Building the
+// index once turns both into O(brands) total + O(1) per-domain lookups —
+// load-bearing now the watchlist is growing past ~150 brands. WeakMap keying
+// means a custom watchlist passed by a test gets its own index and is GC'd
+// with the array (no leak, no cross-test bleed).
+interface IndexToken {
+  entry: BrandEntry;
+  token: string; // normalised brand OR alias used for matching
+}
+interface WatchlistIndex {
+  legitSet: Set<string>;
+  tokens: IndexToken[];
+}
+const indexCache = new WeakMap<BrandEntry[], WatchlistIndex>();
+
+function normaliseToken(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function getWatchlistIndex(watchlist: BrandEntry[]): WatchlistIndex {
+  const cached = indexCache.get(watchlist);
+  if (cached) return cached;
+  const legitSet = new Set<string>();
+  const tokens: IndexToken[] = [];
+  for (const entry of watchlist) {
+    for (const d of entry.legitimate_domains) legitSet.add(d.toLowerCase());
+    // Brand token first so it wins same-score ties over its own aliases.
+    const brandToken = normaliseToken(entry.brand);
+    if (brandToken) tokens.push({ entry, token: brandToken });
+    for (const alias of entry.aliases ?? []) {
+      const t = normaliseToken(alias);
+      if (t) tokens.push({ entry, token: t });
+    }
+  }
+  const index: WatchlistIndex = { legitSet, tokens };
+  indexCache.set(watchlist, index);
+  return index;
+}
+
 export function lexicalMatch(
   domain: string,
   watchlist: BrandEntry[] = AU_BRAND_WATCHLIST,
@@ -129,9 +172,9 @@ export function lexicalMatch(
   const lower = domain.toLowerCase().trim();
   if (!lower) return null;
 
-  for (const entry of watchlist) {
-    if (entry.legitimate_domains.includes(lower)) return null;
-  }
+  const index = getWatchlistIndex(watchlist);
+  // O(1) self-clone exclusion (was an O(brands) scan per domain).
+  if (index.legitSet.has(lower)) return null;
 
   const labels = lower.split(".");
   const primary = labels[0] ?? lower;
@@ -151,22 +194,25 @@ export function lexicalMatch(
   // a no-op on non-A-labels, so this is identity for ASCII domains.
   const decodedDomain = labels.map(decodeIdnLabel).join(".");
 
+  // Hoisted out of the brand loop — both are functions of the domain only,
+  // not the brand, so computing them once per call instead of once per brand
+  // is a (brands)× reduction in confusable-normalisation + segment-split work.
+  const normalisedPrimary = normaliseConfusables(matchPrimary);
+  const hasConfusable = normalisedPrimary !== matchPrimary;
+  const primarySegments = matchPrimary.split(/[-_]/);
+
   let best: MatchResult | null = null;
 
-  for (const entry of watchlist) {
-    const brand = entry.brand.toLowerCase().replace(/[^a-z0-9]/g, "");
-    if (!brand) continue;
-
-    const normalised = normaliseConfusables(matchPrimary);
-    if (normalised !== matchPrimary && normalised.includes(brand)) {
+  for (const { entry, token: brand } of index.tokens) {
+    if (hasConfusable && normalisedPrimary.includes(brand)) {
       best = pickBetter(best, {
         brand: entry.brand,
         legitimate_domain: entry.legitimate_domains[0] ?? "",
         score: 0.9,
         signal_type: "confusable",
         evidence: wasIdnDecoded
-          ? { input_label: primary, idn_decoded: matchPrimary, normalised, brand }
-          : { input_label: primary, normalised, brand },
+          ? { input_label: primary, idn_decoded: matchPrimary, normalised: normalisedPrimary, brand }
+          : { input_label: primary, normalised: normalisedPrimary, brand },
       });
       continue;
     }
@@ -174,7 +220,7 @@ export function lexicalMatch(
     const substringHit =
       brand.length >= MIN_BRAND_LEN_FOR_LOOSE_SUBSTRING
         ? matchPrimary.includes(brand)
-        : matchPrimary.split(/[-_]/).includes(brand);
+        : primarySegments.includes(brand);
     if (substringHit && hasScamContext(decodedDomain, matchPrimary, brand)) {
       best = pickBetter(best, {
         brand: entry.brand,

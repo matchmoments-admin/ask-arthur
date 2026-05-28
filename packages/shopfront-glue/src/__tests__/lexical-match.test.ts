@@ -344,3 +344,48 @@ describe("lexicalMatch — IDN decode integration (PR-E, #494)", () => {
     expect(result).toBeNull();
   });
 });
+
+describe("lexicalMatch — brand aliases", () => {
+  const ALIAS_WATCHLIST: BrandEntry[] = [
+    {
+      brand: "CBA",
+      legitimate_domains: ["commbank.com.au"],
+      aliases: ["commbank"],
+    },
+    {
+      brand: "Australia Post",
+      legitimate_domains: ["auspost.com.au"],
+      aliases: ["auspost"],
+    },
+  ];
+
+  it("matches a clone via the alias short-form, reporting the canonical brand", () => {
+    // "cba" (3 chars) would never substring-match "commbank-login"; the
+    // alias is what catches the real-world phishing form.
+    const result = lexicalMatch("commbank-login.shop", ALIAS_WATCHLIST);
+    expect(result).not.toBeNull();
+    expect(result?.brand).toBe("CBA");
+    expect(result?.signal_type).toBe("substring");
+  });
+
+  it("matches an auspost-* clone the official 'Australia Post' brand misses", () => {
+    const result = lexicalMatch("auspost-redelivery.shop", ALIAS_WATCHLIST);
+    expect(result).not.toBeNull();
+    expect(result?.brand).toBe("Australia Post");
+  });
+
+  it("still excludes the alias's own legitimate domain", () => {
+    expect(lexicalMatch("commbank.com.au", ALIAS_WATCHLIST)).toBeNull();
+    expect(lexicalMatch("auspost.com.au", ALIAS_WATCHLIST)).toBeNull();
+  });
+
+  it("a brand with no aliases behaves exactly as before (regression guard)", () => {
+    const noAlias: BrandEntry[] = [
+      { brand: "Bunnings", legitimate_domains: ["bunnings.com.au"] },
+    ];
+    expect(lexicalMatch("bunnings-secure.shop", noAlias)?.brand).toBe(
+      "Bunnings",
+    );
+    expect(lexicalMatch("unrelated.com", noAlias)).toBeNull();
+  });
+});
