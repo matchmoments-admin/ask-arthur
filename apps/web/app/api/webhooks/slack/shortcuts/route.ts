@@ -79,7 +79,11 @@ async function processShortcut(
   }
 
   try {
-    const result = await analyzeForBot(text);
+    const result = await analyzeForBot(text, undefined, undefined, {
+      source: "bot_slack",
+      userId,
+      inputMode: "text",
+    });
     const slackResponse = toSlackBlocks(result);
     await postToResponseUrl(responseUrl, slackResponse);
   } catch (err) {

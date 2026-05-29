@@ -1,7 +1,26 @@
 import { runAnalysisCore } from "@askarthur/scam-engine/analyze-core";
 import { logCost, isFeatureBraked } from "@askarthur/scam-engine/cost-log";
 import { MODELS } from "@askarthur/scam-engine/anthropic";
-import type { AnalysisResult } from "@askarthur/types";
+import { storeScamReport, buildEntities } from "@askarthur/scam-engine/report-store";
+import { hashIdentifier } from "@askarthur/utils/hash";
+import { featureFlags } from "@askarthur/utils/feature-flags";
+import { logger } from "@askarthur/utils/logger";
+import type { AnalysisResult, ReportSource, InputMode } from "@askarthur/types";
+
+/**
+ * Where a bot check came from — used to attribute the `scam_reports` row so
+ * we can classify and report scam types per platform (Messenger vs WhatsApp
+ * vs Telegram vs Slack). Optional on analyzeForBot: callers that omit it
+ * skip the report write (back-compatible with the pre-attribution callers).
+ */
+export interface BotReportContext {
+  /** bot_messenger | bot_whatsapp | bot_telegram | bot_slack */
+  source: ReportSource;
+  /** Raw platform user id — hashed internally, never stored raw. */
+  userId: string;
+  /** "text" | "image" */
+  inputMode: InputMode;
+}
 
 /**
  * Thrown by analyzeForBot when the `bot_analyze` cost brake is engaged
@@ -42,6 +61,7 @@ export async function analyzeForBot(
   text: string,
   region?: string,
   images?: string[],
+  report?: BotReportContext,
 ): Promise<AnalysisResult> {
   // Circuit-breaker: if today's bot AI spend tripped its cap, stop here.
   // Throwing lets handlers send a graceful fallback instead of silently
@@ -82,6 +102,44 @@ export async function analyzeForBot(
         cacheReadTokens,
       },
     });
+  }
+
+  // Attribution: record the submission in scam_reports so we can classify
+  // and report scam types per platform alongside web/extension rows. Gated
+  // on intelligenceCore to match the web path (which only writes scam_reports
+  // when that flag is on — keeps bots and web consistent). Runs on cache hits
+  // too: every forward is a real submission worth counting in the funnel.
+  // Fire-and-forget — storeScamReport scrubs PII and never throws; we still
+  // guard the hashIdentifier await so an attribution failure can't break the
+  // user's reply.
+  if (report && featureFlags.intelligenceCore) {
+    try {
+      const reporterHash = await hashIdentifier(report.userId, `bot:${report.source}`);
+      void storeScamReport({
+        reporterHash,
+        source: report.source,
+        inputMode: report.inputMode,
+        analysis: out.result,
+        text, // scrubbed inside storeScamReport
+        region: region ?? null,
+        countryCode: null,
+        // Link scammer phone/email entities so bot-sourced scams join the
+        // cross-channel correlation graph (a scam number seen via WhatsApp +
+        // web links up). These ride on out.result already. URL entities stay
+        // deferred: runAnalysisCore doesn't surface the URL-reputation results
+        // to the bot path, only redirects on the result.
+        entities: buildEntities({
+          phones: out.result.scammerContacts?.phoneNumbers,
+          emails: out.result.scammerContacts?.emailAddresses,
+          extractionMethod: images?.length ? "claude" : "regex",
+        }),
+      });
+    } catch (err) {
+      logger.error("bot attribution storeScamReport failed", {
+        error: String(err),
+        source: report.source,
+      });
+    }
   }
 
   return out.result;
