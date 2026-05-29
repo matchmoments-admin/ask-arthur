@@ -1,6 +1,8 @@
 export {
   AU_BRAND_WATCHLIST,
   type BrandEntry,
+  getCtMonitorConfig,
+  type CtMonitorConfig,
 } from "./au-brand-watchlist";
 export {
   canonicaliseCandidateUrl,
