@@ -5,14 +5,16 @@ import { inngest } from "./client";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
+import { withAxiomLogging } from "./with-axiom-logging";
 
 export const stalenessCheckWallets = inngest.createFunction(
   {
     id: "pipeline-staleness-check-wallets",
     name: "Pipeline: Mark Stale Crypto Wallets",
   },
-  { cron: "0 3 * * *" }, // Daily at 3am UTC
-  async ({ step }) => {
+  // Staggered off the 0 3 trio (#524): URLs 0 3, IPs 10 3, wallets 20 3.
+  { cron: "20 3 * * *" },
+  withAxiomLogging({ fnId: "pipeline-staleness-check-wallets" }, async ({ step }) => {
     if (!featureFlags.dataPipeline) {
       return { skipped: true, reason: "dataPipeline feature flag disabled" };
     }
@@ -40,5 +42,5 @@ export const stalenessCheckWallets = inngest.createFunction(
     });
 
     return result;
-  }
+  })
 );

@@ -55,7 +55,11 @@ export const cloneWatchFpClusterDigest = inngest.createFunction(
     timeouts: { finish: "5m" },
   },
   [
-    { cron: "0 9 * * 0" },
+    // Moved off 0 9 (#524): the daily feedback-digest Vercel cron runs
+    // `0 9 * * *` (every day incl. Sunday), so this weekly digest collided
+    // with it every Sunday 09:00 UTC — the same PR-#431 deconfliction policy
+    // the sibling weekly-digest (0 10) and urlscan-rescan (0 11) already follow.
+    { cron: "30 9 * * 0" },
     { event: "shopfront/clone.fp-cluster-digest.manual-trigger.v1" },
   ],
   async ({ step }) => {

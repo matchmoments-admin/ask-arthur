@@ -9,14 +9,16 @@ import { inngest } from "./client";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
+import { withAxiomLogging } from "./with-axiom-logging";
 
 export const stalenessCheck = inngest.createFunction(
   {
     id: "pipeline-staleness-check",
     name: "Pipeline: Mark Stale URLs",
   },
+  // First of the staggered staleness trio (#524): URLs 0 3, IPs 10 3, wallets 20 3.
   { cron: "0 3 * * *" }, // Daily at 3am UTC
-  async ({ step }) => {
+  withAxiomLogging({ fnId: "pipeline-staleness-check" }, async ({ step }) => {
     if (!featureFlags.dataPipeline) {
       return { skipped: true, reason: "dataPipeline feature flag disabled" };
     }
@@ -42,5 +44,5 @@ export const stalenessCheck = inngest.createFunction(
     });
 
     return result;
-  }
+  })
 );
