@@ -96,20 +96,22 @@ export default function EmailStudio({ templates, overrides }: Props) {
   };
 
   return (
-    <div className="flex gap-6 p-6">
+    <div className="flex flex-col gap-6 p-4 sm:p-6 lg:flex-row">
       {/* Template list */}
-      <aside className="w-64 shrink-0">
+      <aside className="w-full shrink-0 lg:w-64">
         <h1 className="mb-1 text-lg font-semibold">Email Studio</h1>
         <p className="mb-4 text-xs text-slate-500">
           Edit the prose of outbound emails. Layout/branding stay in code.
           Brand-facing copy still needs #371 legal review.
         </p>
-        <ul className="space-y-1">
+        <ul className="max-h-56 space-y-1 overflow-y-auto lg:max-h-none">
           {templates.map((t) => (
             <li key={t.key}>
               <button
+                type="button"
+                aria-current={t.key === selectedKey ? "true" : undefined}
                 onClick={() => setSelectedKey(t.key)}
-                className={`w-full rounded px-3 py-2 text-left text-sm ${
+                className={`w-full rounded px-3 py-2 text-left text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 ${
                   t.key === selectedKey ? "bg-slate-900 text-white" : "hover:bg-slate-100"
                 }`}
               >
@@ -126,8 +128,8 @@ export default function EmailStudio({ templates, overrides }: Props) {
       </aside>
 
       {/* Editor + preview */}
-      <main className="flex flex-1 gap-6">
-        <section className="w-[420px] shrink-0">
+      <main className="flex min-w-0 flex-1 flex-col gap-6 xl:flex-row">
+        <section className="w-full shrink-0 xl:w-[420px]">
           {selected?.editable ? (
             <>
               {selected.vars.length > 0 && (
@@ -138,14 +140,21 @@ export default function EmailStudio({ templates, overrides }: Props) {
               )}
               {selected.slots.map((s) => (
                 <div key={s.key} className="mb-4">
-                  <label className="mb-1 block text-sm font-medium">{s.label}</label>
+                  <label
+                    htmlFor={`slot-${s.key}`}
+                    className="mb-1 block text-sm font-medium"
+                  >
+                    {s.label}
+                  </label>
                   <textarea
+                    id={`slot-${s.key}`}
                     value={draft[selectedKey]?.[s.key] ?? ""}
                     onChange={(e) => onSlotChange(s.key, e.target.value)}
                     rows={4}
-                    className="w-full rounded border border-slate-300 p-2 font-mono text-xs"
+                    className="w-full rounded border border-slate-300 p-2 font-mono text-xs focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
                   />
                   <button
+                    type="button"
                     onClick={() => onSlotChange(s.key, s.default)}
                     className="mt-1 text-[11px] text-slate-400 hover:text-slate-600"
                   >
@@ -155,28 +164,37 @@ export default function EmailStudio({ templates, overrides }: Props) {
               ))}
               <div className="flex flex-wrap gap-2">
                 <button
+                  type="button"
                   disabled={busy}
                   onClick={() => fetchPreview(selectedKey, draft[selectedKey])}
-                  className="rounded bg-slate-200 px-3 py-2 text-sm disabled:opacity-50"
+                  className="rounded bg-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:opacity-50"
                 >
                   Preview changes
                 </button>
                 <button
+                  type="button"
                   disabled={busy}
                   onClick={() => action("test-send", "Test email sent to you")}
-                  className="rounded bg-teal-600 px-3 py-2 text-sm text-white disabled:opacity-50"
+                  className="rounded bg-teal-600 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:opacity-50"
                 >
                   Send test to me
                 </button>
                 <button
+                  type="button"
                   disabled={busy}
                   onClick={() => action("save", "Saved")}
-                  className="rounded bg-slate-900 px-3 py-2 text-sm text-white disabled:opacity-50"
+                  className="rounded bg-slate-900 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:opacity-50"
                 >
                   Save
                 </button>
               </div>
-              {status && <p className="mt-3 text-sm text-slate-600">{status}</p>}
+              <p
+                className="mt-3 min-h-[1.25rem] text-sm text-slate-600"
+                role="status"
+                aria-live="polite"
+              >
+                {status}
+              </p>
             </>
           ) : (
             <p className="text-sm text-slate-500">
@@ -187,15 +205,15 @@ export default function EmailStudio({ templates, overrides }: Props) {
           )}
         </section>
 
-        <section className="flex-1">
-          <div className="mb-2 text-xs text-slate-500">
+        <section className="min-w-0 flex-1">
+          <div className="mb-2 text-xs text-slate-500" aria-live="polite">
             Live preview (sample data){busy ? " — rendering…" : ""}
           </div>
           <iframe
-            title="email preview"
+            title="Email preview"
             sandbox=""
             srcDoc={previewHtml}
-            className="h-[800px] w-full rounded border border-slate-200 bg-white"
+            className="h-[500px] w-full rounded border border-slate-200 bg-white sm:h-[640px] xl:h-[800px]"
           />
         </section>
       </main>
