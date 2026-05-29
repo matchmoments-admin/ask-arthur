@@ -26,15 +26,28 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
 import { inngest } from "./client";
+import { logFunctionFailure } from "../cost-log";
+import { withAxiomLogging } from "./with-axiom-logging";
 
 export const phoneFootprintRetention = inngest.createFunction(
   {
     id: "phone-footprint-retention",
     name: "Phone Footprint: Nightly retention housekeeping",
     retries: 2,
+    // Compliance job (PII anonymisation + consent lapse). A silent multi-day
+    // failure leaves expired E.164 numbers in the table — page on permanent
+    // failure (#522). logFunctionFailure writes a '%error%' cost_telemetry row
+    // the daily health-digest turns into an admin Telegram.
+    onFailure: async ({ error }) => {
+      await logFunctionFailure(
+        "phone-footprint-retention-error",
+        "retention.failed",
+        error,
+      );
+    },
   },
   { cron: "15 3 * * *" },
-  async ({ step }) => {
+  withAxiomLogging({ fnId: "phone-footprint-retention" }, async ({ step }) => {
     // ── anonymise expired footprints (>7-day grace post expires_at) ─────
     const anonymised = await step.run("anonymise-expired-footprints", async () => {
       const supabase = createServiceClient();
@@ -62,5 +75,5 @@ export const phoneFootprintRetention = inngest.createFunction(
       anonymisedFootprints: anonymised,
       lapsedMonitors: lapsed,
     };
-  },
+  }),
 );

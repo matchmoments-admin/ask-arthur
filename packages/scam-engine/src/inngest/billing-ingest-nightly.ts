@@ -40,6 +40,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
 import { inngest } from "./client";
+import { withAxiomLogging } from "./with-axiom-logging";
 
 interface VercelChargeLine {
   EffectiveCost?: number;
@@ -84,6 +85,9 @@ async function pullVercelCents(date: string): Promise<{
   )}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${token}`, "Accept-Encoding": "identity" },
+    // Finite timeout (#522 M-bill) — a hung Vercel billing endpoint must not
+    // block the step indefinitely (and, pre-fix, drop the other providers).
+    signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
@@ -170,6 +174,8 @@ async function pullGitHubActionsCents(date: string): Promise<{
       Accept: "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28",
     },
+    // Finite timeout (#522 M-bill).
+    signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
@@ -201,10 +207,31 @@ export const billingIngestNightly = inngest.createFunction(
     retries: 2,
   },
   { cron: "0 2 * * *" }, // 02:00 UTC daily — runs before cost-telemetry-retention (04:00 UTC).
-  async ({ step }) => {
+  withAxiomLogging({ fnId: "billing-ingest-nightly" }, async ({ step }) => {
     const targetDate = yesterdayIsoDate();
 
-    const vercel = await step.run("vercel", async () => {
+    // Run each provider independently (#522 M-bill). Previously the 3 steps
+    // ran sequentially and a throw in one (e.g. a flaky Vercel billing API)
+    // aborted the function, dropping the OTHER two providers' rows for the
+    // day. runProvider catches a step's post-retry failure so the remaining
+    // providers still run; the failed provider is logged and reported with
+    // cents: null. Step-level retries (fn retries: 2) still apply inside.
+    const runProvider = async (
+      label: string,
+      body: () => Promise<{ cents: number; [k: string]: unknown }>,
+    ): Promise<{ cents: number | null; error?: string; [k: string]: unknown }> => {
+      try {
+        return await step.run(label, body);
+      } catch (e) {
+        logger.error(`billing-ingest-nightly: ${label} provider failed`, {
+          date: targetDate,
+          error: String(e),
+        });
+        return { cents: null, error: String(e) };
+      }
+    };
+
+    const vercel = await runProvider("vercel", async () => {
       const { cents, raw } = await pullVercelCents(targetDate);
       const supabase = createServiceClient();
       if (!supabase) throw new Error("supabase service client unavailable");
@@ -222,7 +249,7 @@ export const billingIngestNightly = inngest.createFunction(
       return { cents, ...raw };
     });
 
-    const anthropic = await step.run("anthropic", async () => {
+    const anthropic = await runProvider("anthropic", async () => {
       const supabase = createServiceClient();
       if (!supabase) throw new Error("supabase service client unavailable");
       const { cents, raw } = await pullAnthropicCents(supabase, targetDate);
@@ -241,7 +268,7 @@ export const billingIngestNightly = inngest.createFunction(
       return { cents, ...raw };
     });
 
-    const githubActions = await step.run("github-actions", async () => {
+    const githubActions = await runProvider("github-actions", async () => {
       const { cents, raw } = await pullGitHubActionsCents(targetDate);
       const supabase = createServiceClient();
       if (!supabase) throw new Error("supabase service client unavailable");
@@ -275,5 +302,5 @@ export const billingIngestNightly = inngest.createFunction(
         "github-actions": githubActions.cents,
       },
     };
-  },
+  }),
 );
