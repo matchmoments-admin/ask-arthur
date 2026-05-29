@@ -5,6 +5,8 @@
 import { Redis } from "@upstash/redis";
 import { logger } from "@askarthur/utils/logger";
 
+import { logCost, ENGINE_PRICING } from "./cost-log";
+
 const CACHE_TTL = 21_600; // 6 hours
 const CACHE_PREFIX = "askarthur:abuseipdb";
 
@@ -92,6 +94,16 @@ export async function checkAbuseIPDB(ip: string): Promise<AbuseIPDBResult> {
       domain: data.domain ?? null,
       isWhitelisted: data.isWhitelisted ?? false,
     };
+
+    // Cost telemetry — real API call (cache miss). Free tier (1k/day) bills
+    // $0; logging units surfaces free-tier ceiling approach in /admin/costs.
+    void logCost({
+      feature: "abuseipdb",
+      provider: "abuseipdb",
+      operation: "check",
+      units: 1,
+      estimatedCostUsd: ENGINE_PRICING.ABUSEIPDB_CHECK_USD,
+    });
 
     // Cache result (fire-and-forget)
     if (redis) {

@@ -42,6 +42,12 @@ export async function GET(req: Request) {
       "SHOPFRONT_CLONE_WATCH_CAP_USD",
       1,
     ),
+    // Voyage embedding consumers (cron-hardening #519 H4). Defaults sit above
+    // the $2 global gate so the brake can actually engage (see invariant
+    // check below). news-intel-embed is near-$0/day today; scam-report-embed
+    // scales with analyze traffic and is the highest-throughput paid call.
+    NEWS_INTEL_EMBED_CAP_USD: readNumberEnv("NEWS_INTEL_EMBED_CAP_USD", 3),
+    SCAM_REPORT_EMBED_CAP_USD: readNumberEnv("SCAM_REPORT_EMBED_CAP_USD", 5),
   };
   const thresholdUsd = envReads.DAILY_COST_THRESHOLD_USD.value;
 
@@ -110,24 +116,24 @@ export async function GET(req: Request) {
   );
   const totalCostUsd = costTelemetryUsd + vonageCost;
 
-  if (totalCostUsd <= thresholdUsd) {
-    return NextResponse.json({
-      belowThreshold: true,
-      totalCostUsd,
-      costTelemetryUsd,
-      vonageCost,
-      thresholdUsd,
-      eventCount,
-    });
-  }
+  const aboveThreshold = totalCostUsd > thresholdUsd;
 
-  // Over threshold — fetch top 3 contributing features for context.
+  // Per-feature cost brakes are evaluated on EVERY run, independent of the
+  // global Telegram threshold (cron-hardening #519, M-brake). Previously all
+  // brake logic sat behind an early `return` when total spend was below the
+  // $2 global gate — which silently disabled any per-feature cap set BELOW
+  // $2 (e.g. shopfront_clone_watch at $1 could never engage: its spend can't
+  // exceed $1 without total exceeding $2, but the gate returned first). We
+  // now compute + set brakes unconditionally and gate only the Telegram
+  // digest on the global threshold. Aggregation reads the full per-feature
+  // rollup (limit 200, not a top-10 slice) so a feature outside the top-10
+  // can still trip its own brake.
   const { data: topRows } = await supabase
     .from("daily_cost_summary")
     .select("feature, provider, event_count, total_cost_usd")
     .eq("day", todayUtc)
     .order("total_cost_usd", { ascending: false })
-    .limit(10);
+    .limit(200);
 
   const top = (topRows ?? []).map((r) => ({
     feature: r.feature as string,
@@ -237,6 +243,21 @@ export async function GET(req: Request) {
     .filter((t) => t.feature === "shopfront_clone_watch")
     .reduce((sum, t) => sum + t.cost, 0);
 
+  // Voyage embedding consumers (cron-hardening #519 H4). Cost tags use
+  // hyphens (news-intel-embed, scam-report-embed); the brake KEYS use
+  // underscores (news_intel_embed, scam_report_embed) — same hyphen-tag /
+  // underscore-key split as reddit_intel. The Inngest functions call
+  // isFeatureBraked("<underscore key>") at handler entry.
+  const newsIntelEmbedThresholdUsd = envReads.NEWS_INTEL_EMBED_CAP_USD.value;
+  const newsIntelEmbedCost = top
+    .filter((t) => t.feature === "news-intel-embed")
+    .reduce((sum, t) => sum + t.cost, 0);
+
+  const scamReportEmbedThresholdUsd = envReads.SCAM_REPORT_EMBED_CAP_USD.value;
+  const scamReportEmbedCost = top
+    .filter((t) => t.feature === "scam-report-embed")
+    .reduce((sum, t) => sum + t.cost, 0);
+
   let brakeSet = false;
   let redditBrakeSet = false;
   let phoneFootprintBrakeSet = false;
@@ -244,6 +265,8 @@ export async function GET(req: Request) {
   let shopSignalBrakeSet = false;
   let shopfrontCloneOutreachBrakeSet = false;
   let shopfrontCloneWatchBrakeSet = false;
+  let newsIntelEmbedBrakeSet = false;
+  let scamReportEmbedBrakeSet = false;
   if (vulnEnrichCost > vulnEnrichThresholdUsd) {
     const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     const { error: brakeError } = await supabase
@@ -461,6 +484,90 @@ export async function GET(req: Request) {
     }
   }
 
+  if (newsIntelEmbedCost > newsIntelEmbedThresholdUsd) {
+    const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const { error: brakeError } = await supabase
+      .from("feature_brakes")
+      .upsert(
+        {
+          feature: "news_intel_embed",
+          paused_until: pausedUntil,
+          reason: `Daily spend $${newsIntelEmbedCost.toFixed(2)} exceeded $${newsIntelEmbedThresholdUsd} cap`,
+          set_by: "cost-daily-check",
+          set_cost_usd: newsIntelEmbedCost,
+          set_threshold_usd: newsIntelEmbedThresholdUsd,
+          set_at: new Date().toISOString(),
+        },
+        { onConflict: "feature" },
+      );
+    if (brakeError) {
+      logger.error("failed to set news_intel_embed brake", {
+        error: brakeError.message,
+      });
+    } else {
+      newsIntelEmbedBrakeSet = true;
+      logger.warn("news_intel_embed brake engaged", {
+        costUsd: newsIntelEmbedCost,
+        thresholdUsd: newsIntelEmbedThresholdUsd,
+        pausedUntil,
+      });
+    }
+  }
+
+  if (scamReportEmbedCost > scamReportEmbedThresholdUsd) {
+    const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const { error: brakeError } = await supabase
+      .from("feature_brakes")
+      .upsert(
+        {
+          feature: "scam_report_embed",
+          paused_until: pausedUntil,
+          reason: `Daily spend $${scamReportEmbedCost.toFixed(2)} exceeded $${scamReportEmbedThresholdUsd} cap`,
+          set_by: "cost-daily-check",
+          set_cost_usd: scamReportEmbedCost,
+          set_threshold_usd: scamReportEmbedThresholdUsd,
+          set_at: new Date().toISOString(),
+        },
+        { onConflict: "feature" },
+      );
+    if (brakeError) {
+      logger.error("failed to set scam_report_embed brake", {
+        error: brakeError.message,
+      });
+    } else {
+      scamReportEmbedBrakeSet = true;
+      logger.warn("scam_report_embed brake engaged", {
+        costUsd: scamReportEmbedCost,
+        thresholdUsd: scamReportEmbedThresholdUsd,
+        pausedUntil,
+      });
+    }
+  }
+
+  // Below the global Telegram threshold: brakes were still evaluated above
+  // (the M-brake fix), but no digest is sent. Report any brakes that engaged.
+  if (!aboveThreshold) {
+    return NextResponse.json({
+      belowThreshold: true,
+      totalCostUsd,
+      costTelemetryUsd,
+      vonageCost,
+      thresholdUsd,
+      eventCount,
+      brakesSet: {
+        vuln_au_enrichment: brakeSet,
+        reddit_intel: redditBrakeSet,
+        phone_footprint: phoneFootprintBrakeSet,
+        charity_check: charityCheckBrakeSet,
+        shop_signal: shopSignalBrakeSet,
+        shopfront_clone_outreach: shopfrontCloneOutreachBrakeSet,
+        shopfront_clone_watch: shopfrontCloneWatchBrakeSet,
+        news_intel_embed: newsIntelEmbedBrakeSet,
+        scam_report_embed: scamReportEmbedBrakeSet,
+      },
+    });
+  }
+
   // Truncate to top 3 for the Telegram message (UX — keep it scannable).
   const topForTelegram = top.slice(0, 3);
 
@@ -521,6 +628,18 @@ export async function GET(req: Request) {
       `🛑 <b>shopfront_clone_watch brake engaged</b> — paused for 24h (spend $${shopfrontCloneWatchCost.toFixed(2)} > $${shopfrontCloneWatchThresholdUsd} cap)`,
     );
   }
+  if (newsIntelEmbedBrakeSet) {
+    lines.push(
+      "",
+      `🛑 <b>news_intel_embed brake engaged</b> — paused for 24h (spend $${newsIntelEmbedCost.toFixed(2)} > $${newsIntelEmbedThresholdUsd} cap)`,
+    );
+  }
+  if (scamReportEmbedBrakeSet) {
+    lines.push(
+      "",
+      `🛑 <b>scam_report_embed brake engaged</b> — paused for 24h (spend $${scamReportEmbedCost.toFixed(2)} > $${scamReportEmbedThresholdUsd} cap)`,
+    );
+  }
   lines.push("", `Full breakdown: https://askarthur.au/admin/costs`);
 
   await sendAdminTelegramMessage(lines.join("\n"));
@@ -545,5 +664,9 @@ export async function GET(req: Request) {
     shopfrontCloneOutreachCost,
     shopfrontCloneWatchBrakeSet,
     shopfrontCloneWatchCost,
+    newsIntelEmbedBrakeSet,
+    newsIntelEmbedCost,
+    scamReportEmbedBrakeSet,
+    scamReportEmbedCost,
   });
 }

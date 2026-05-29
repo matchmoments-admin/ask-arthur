@@ -107,6 +107,15 @@ export const metaBrpReport = inngest.createFunction(
           // POST https://graph.facebook.com/v19.0/{page-id}/copyright_violations
           // with access_token, content_url, description, etc.
           //
+          // ⚠️ FOOTGUN (cron-hardening #519, N-meta): when you uncomment the
+          // real API call below, you MUST ALSO uncomment the
+          // `reported_to_meta = true` UPDATE. This function selects detections
+          // where reported_to_meta IS NOT true; if the API call ships without
+          // the UPDATE, every detection is re-submitted to Meta on EVERY 6h
+          // run forever — exactly what the rateLimit cap on this function is
+          // there to contain, but you'll still burn the daily quota. The two
+          // changes are a single unit; never ship one without the other.
+          //
           // For now, log the attempt and mark as reported for testing
           logger.info("Meta BRP report stub", {
             detectionId: detection.id,

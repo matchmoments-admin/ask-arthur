@@ -17,6 +17,8 @@ import { logger } from "@askarthur/utils/logger";
 
 import { inngest } from "./client";
 import { embed } from "../embeddings";
+import { isFeatureBraked } from "../cost-log";
+import { withAxiomLogging } from "./with-axiom-logging";
 
 interface UnembeddedRow {
   id: number;
@@ -76,7 +78,15 @@ export const feedItemsEmbed = inngest.createFunction(
     retries: 3,
   },
   { cron: "*/30 * * * *" },
-  async ({ step }) => {
+  withAxiomLogging({ fnId: "feed-items-embed" }, async ({ step }) => {
+    // Cost brake — this is a paid Voyage call. cost-daily-check sets the
+    // `news_intel_embed` brake when the day's embed spend exceeds its cap;
+    // every peer Voyage consumer (reddit-intel-*) has the same guard. No
+    // brake row → runs normally (regression-free).
+    if (await isFeatureBraked("news_intel_embed")) {
+      return { skipped: true, reason: "cost_brake_engaged" };
+    }
+
     const rows = await step.run("load-unembedded", async () => {
       const supabase = createServiceClient();
       if (!supabase) throw new Error("supabase service client unavailable");
@@ -152,5 +162,5 @@ export const feedItemsEmbed = inngest.createFunction(
       provider: result.provider,
       estimatedCostUsd: result.estimatedCostUsd,
     };
-  },
+  }),
 );

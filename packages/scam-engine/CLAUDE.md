@@ -42,7 +42,7 @@ Package tests live under `src/__tests__/` and `src/inngest/__tests__/`. There is
 - **`scamPipeline.test.ts` sometimes times out on vitest forks** (pre-existing, low-priority flake). Re-run on its own with `--no-file-parallelism` if needed.
 - **Inngest functions are durable but the IDs are stable** — changing a function name or step name resets the state machine for in-flight runs. Coordinate via a feature flag if you need to rename.
 - **Embeddings live on sibling tables, not parent tables** — see ADR-0005 + the `acnc_charity_embeddings` pattern. Never add HNSW to a write-frequent parent (`scam_reports`, `verified_scams`, `acnc_charities`).
-- **Cost-tagged spend uses `logCost()`** from `@askarthur/utils/cost-telemetry` — every paid-API call should tag `feature` + `provider`. Untagged spend doesn't show up in the `/admin/costs` dashboard or weekly Telegram digest.
+- **Cost-tagged spend uses `logCost()`** from `./cost-log` (the in-package sink — `packages/scam-engine/src/cost-log.ts`), NOT `@askarthur/utils/cost-telemetry` (that export does not exist; scam-engine cannot import apps/web's logCost either — wrong dependency direction). Every paid-API call should tag `feature` + `provider`. Untagged spend doesn't show up in the `/admin/costs` dashboard or weekly Telegram digest. For free-tier APIs, still log `units` with `estimatedCostUsd: 0` so volume/ceiling is visible. The brake check is `isFeatureBraked(feature)` from the same module.
 - **PL/pgSQL function pitfalls** when adding RPCs from this package: see "PL/pgSQL function gotchas" in the root CLAUDE.md (search_path = '' hides extension operators; `#variable_conflict use_column` needed when OUT params shadow column names).
 
 ## Where things live
