@@ -990,9 +990,18 @@ def scrape() -> None:
             except Exception as e:
                 logger.error(f"Reddit feed item upsert failed: {e}")
 
-        # Mark new posts as processed for future dedup
-        if new_post_ids:
+        # Mark new posts as processed for future dedup — ONLY on full success.
+        # On 'partial'/'error' (an IOC/wallet/entity upsert raised above), leave
+        # the posts unmarked so the next run retries them. Marking unconditionally
+        # made the cross-run dedup permanently skip posts whose IOCs never
+        # persisted, silently dropping that structured data forever (audit F).
+        if new_post_ids and status == "success":
             mark_reddit_posts_processed(conn, new_post_ids)
+        elif new_post_ids:
+            logger.warning(
+                f"Reddit: NOT marking {len(new_post_ids)} posts processed "
+                f"(status={status}) — they will be retried next run"
+            )
 
         # Cleanup old processed posts (>30 days)
         cleanup_reddit_posts(conn)

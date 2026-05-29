@@ -161,7 +161,19 @@ def _iter_recent_records(ecosystem: str, zip_url: str, since: datetime):
     logger.info(f"  downloading {ecosystem} zip from {zip_url}")
     resp = requests.get(zip_url, headers={"User-Agent": USER_AGENT}, timeout=120, stream=True)
     resp.raise_for_status()
-    buf = io.BytesIO(resp.content)
+    # Stream into a bounded buffer (stream=True was a no-op with resp.content).
+    # A poisoned/redirected URL serving a multi-GB body can't exhaust runner RAM.
+    MAX_ZIP_BYTES = 100 * 1024 * 1024  # 100 MB hard cap (zips are ~500KB normally)
+    buf = io.BytesIO()
+    downloaded = 0
+    for chunk in resp.iter_content(chunk_size=1 << 16):
+        downloaded += len(chunk)
+        if downloaded > MAX_ZIP_BYTES:
+            raise ValueError(
+                f"OSV {ecosystem} zip exceeded {MAX_ZIP_BYTES}-byte cap — aborting"
+            )
+        buf.write(chunk)
+    buf.seek(0)
     with zipfile.ZipFile(buf) as zf:
         names = zf.namelist()
         logger.info(f"  {ecosystem} zip contains {len(names)} entries")
@@ -187,15 +199,29 @@ def scrape() -> None:
     since = datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DAYS)
 
     try:
+        ecosystems_ok = 0
+        ecosystems_failed: list[str] = []
         for ecosystem, zip_url in ECOSYSTEMS.items():
             try:
                 for rec in _iter_recent_records(ecosystem, zip_url, since):
                     parsed = _parse_record(rec, ecosystem)
                     if parsed:
                         records.append(parsed)
+                ecosystems_ok += 1
             except Exception as e:
+                ecosystems_failed.append(ecosystem)
                 logger.error(f"OSV {ecosystem} fetch failed: {e}")
                 # keep going; other ecosystems may succeed
+
+        # A fully-down mirror must NOT log status='success' with 0 records —
+        # distinguish "quiet week" (some ecosystem succeeded, no new advisories)
+        # from "dead mirror" (every ecosystem raised). Audit finding.
+        if ecosystems_ok == 0 and ecosystems_failed:
+            status = "error"
+            error_msg = (
+                f"all {len(ecosystems_failed)} OSV ecosystems failed: "
+                f"{', '.join(ecosystems_failed)}"
+            )
 
         logger.info(
             f"Parsed {len(records)} OSV advisories across {len(ECOSYSTEMS)} ecosystems"

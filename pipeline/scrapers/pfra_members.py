@@ -111,6 +111,8 @@ def fetch_page(url: str) -> str:
 def upsert_members(conn, rows: Iterable[tuple[str, str, str, str]]) -> dict:
     stats = {"new": 0, "updated": 0, "skipped": 0}
     cursor = conn.cursor()
+    # Cap statement_timeout at a finite value (never 0 — incident 2026-05-09).
+    cursor.execute("SET statement_timeout = '300s'")
     rows_list = list(rows)
     if not rows_list:
         return stats
