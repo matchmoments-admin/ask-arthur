@@ -90,6 +90,7 @@ export async function runUrlBlocklistOnward(
 
   if (!scamReport) {
     await markLog(data.log_id, "failed", "scam_report_missing");
+    await emitOnwardError(config, data.scam_report_id, "scam_report_missing");
     throw new Error("scam_reports row not found");
   }
 
@@ -106,24 +107,17 @@ export async function runUrlBlocklistOnward(
   const text = buildReportBody(scamReport, scammerUrls, reportRef, config.intakeName);
   const payloadHash = createHash("sha256").update(text).digest("hex");
 
-  const sendResult = await step.run("send-email", async () => {
-    const apiKey = process.env.RESEND_API_KEY;
-    if (!apiKey) throw new Error("RESEND_API_KEY not configured");
-    const resend = new Resend(apiKey);
-    const result = await resend.emails.send({
-      from: FROM_EMAIL,
-      to: [config.intakeEmail],
-      replyTo: REPLY_TO_EMAIL,
-      subject: `Phishing URL report via Ask Arthur — ref ${reportRef}`,
-      text,
-    });
-    if (result.error) {
-      throw new Error(
-        `Resend rejected: ${result.error.message ?? String(result.error)}`,
-      );
-    }
-    return result.data;
-  });
+  let sendResult: Awaited<ReturnType<typeof sendOnward>>;
+  try {
+    sendResult = await step.run("send-email", () =>
+      sendOnward(config.intakeEmail, reportRef, text),
+    );
+  } catch (err) {
+    // Surface the failure to the daily health digest (the onward workers
+    // otherwise fail silently — ultrareview F6). Diagnostic row, $0 cost.
+    await emitOnwardError(config, data.scam_report_id, "send_failed");
+    throw err;
+  }
 
   await step.run("mark-sent", async () => {
     const sb = createServiceClient();
@@ -165,6 +159,61 @@ export async function runUrlBlocklistOnward(
   return { ok: true, providerMessageId: sendResult?.id };
 }
 
+async function sendOnward(
+  intakeEmail: string,
+  reportRef: string,
+  text: string,
+): Promise<{ id: string } | null> {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) throw new Error("RESEND_API_KEY not configured");
+  const resend = new Resend(apiKey);
+  const result = await resend.emails.send({
+    from: FROM_EMAIL,
+    to: [intakeEmail],
+    replyTo: REPLY_TO_EMAIL,
+    subject: `Phishing URL report via Ask Arthur — ref ${reportRef}`,
+    text,
+  });
+  if (result.error) {
+    throw new Error(
+      `Resend rejected: ${result.error.message ?? String(result.error)}`,
+    );
+  }
+  return result.data;
+}
+
+/**
+ * Emit a $0 diagnostic cost-telemetry row so onward-report failures surface in
+ * the daily health digest instead of failing silently in logs only.
+ * Hyphenated `onward-report-error` follows the diagnostic-tag convention
+ * (cf. `reddit-intel-error`). (ultrareview F6)
+ */
+async function emitOnwardError(
+  config: UrlBlocklistOnwardConfig,
+  scamReportId: number,
+  reason: string,
+): Promise<void> {
+  try {
+    await logCost({
+      feature: "onward-report-error",
+      provider: "resend",
+      operation: config.logOperation,
+      units: 1,
+      unitCostUsd: 0,
+      metadata: {
+        destination: config.logFeature,
+        scam_report_id: scamReportId,
+        reason,
+      },
+    });
+  } catch (err) {
+    logger.error("onward error telemetry failed", {
+      feature: config.logFeature,
+      error: String(err),
+    });
+  }
+}
+
 async function markLog(
   logId: string,
   status: "skipped" | "failed",
@@ -198,7 +247,7 @@ function buildReportBody(
     `Received: ${new Date(report.created_at).toISOString()}`,
     "",
     `Suspected phishing URL(s):`,
-    ...scammerUrls.map((u) => `  - ${u}`),
+    ...scammerUrls.map((u) => `  - ${stripUrlPii(u)}`),
     "",
     `Message context (PII-redacted):`,
     `---`,
@@ -208,6 +257,23 @@ function buildReportBody(
     `Reported in good faith for blocklist consideration. Reply-to is`,
     `monitored at brendan@askarthur.au for any follow-up.`,
   ].join("\n");
+}
+
+/**
+ * Strip the query string + fragment from a reported URL before forwarding it
+ * to a third-party blocklist. A captured phishing URL can carry victim PII in
+ * its query params (e.g. `?email=...`, `?abn=...` prefilled on the landing
+ * page); the scheme/host/path is all a blocklist needs. Falls back to a manual
+ * split if the URL doesn't parse (so a malformed URL is still truncated, never
+ * forwarded whole). (ultrareview F8)
+ */
+export function stripUrlPii(rawUrl: string): string {
+  try {
+    const u = new URL(rawUrl);
+    return `${u.protocol}//${u.host}${u.pathname}`;
+  } catch {
+    return rawUrl.split(/[?#]/)[0];
+  }
 }
 
 function extractStringArray(

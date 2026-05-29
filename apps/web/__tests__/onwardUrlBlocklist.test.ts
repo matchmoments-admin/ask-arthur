@@ -1,8 +1,31 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   runUrlBlocklistOnward,
+  stripUrlPii,
   type OnwardStepCtx,
 } from "@/lib/onward/url-blocklist-report";
+
+describe("stripUrlPii", () => {
+  it("drops the query string (which can carry victim PII)", () => {
+    expect(stripUrlPii("https://evil.test/login?email=victim@x.com&abn=123")).toBe(
+      "https://evil.test/login",
+    );
+  });
+
+  it("drops the fragment but keeps scheme/host/path", () => {
+    expect(stripUrlPii("http://evil.test/a/b#token=abc")).toBe(
+      "http://evil.test/a/b",
+    );
+  });
+
+  it("leaves a clean URL untouched (minus trailing slash semantics)", () => {
+    expect(stripUrlPii("https://evil.test/phish")).toBe("https://evil.test/phish");
+  });
+
+  it("falls back to a manual split for an unparseable URL (never forwards query whole)", () => {
+    expect(stripUrlPii("not a url?email=victim@x.com")).toBe("not a url");
+  });
+});
 
 // The runner short-circuits on a disabled flag BEFORE any Supabase/Resend
 // I/O, so the disabled path needs no mocks. This is the no-regression guard:
