@@ -49,6 +49,7 @@ import {
 } from "./events";
 import { callClaudeJson } from "../anthropic";
 import { logFunctionError, isRedditIntelBraked } from "./reddit-intel-error-log";
+import { withAxiomLogging } from "./with-axiom-logging";
 
 const COSINE_THRESHOLD = 0.62;
 const MIN_MEMBERS_FOR_NAMING = 3;
@@ -107,10 +108,6 @@ function randomSuffix(len = 4): string {
   return Math.random()
     .toString(36)
     .slice(2, 2 + len);
-}
-
-function placeholderSlug(): string {
-  return `auto-${randomSuffix(8)}`;
 }
 
 function kebabSlug(title: string): string {
@@ -200,7 +197,7 @@ export const redditIntelCluster = inngest.createFunction(
     retries: 3,
   },
   { event: REDDIT_INTEL_EMBEDDED_EVENT },
-  async ({ event, step }) => {
+  withAxiomLogging({ fnId: "reddit-intel-cluster" }, async ({ event, step }) => {
     if (!featureFlags.redditIntelIngest) {
       return { skipped: true, reason: "redditIntelIngest flag off" };
     }
@@ -330,13 +327,17 @@ export const redditIntelCluster = inngest.createFunction(
           isNewTheme: true,
           embeddingModelVersion: post.embeddingModelVersion,
         });
-        themes.push({
-          id: "<pending>", // not used — only needed if a later post in this batch could match it,
-          // but we want NEW themes from this batch to be matchable. We'll handle that by
-          // re-resolving below.
-          centroid: post.embedding.slice(),
-          memberCount: 1,
-        });
+        // NOTE (#520 H5): we deliberately do NOT push this seed into `themes`
+        // for in-batch matching. The previous attempt pushed a theme with
+        // id "<pending>", which a later same-batch post could cosine-match —
+        // and persist then wrote the literal string "<pending>" into
+        // reddit_post_intel.theme_id + the membership row (a non-existent FK
+        // target), corrupting the post's theme link. Not matching new themes
+        // within a single batch means two near-identical same-batch posts may
+        // seed two separate themes; that is benign (the ≥3-member naming
+        // threshold isn't reached by 2 posts anyway, and the next cohort's
+        // posts match whichever centroid is closer, so it self-heals).
+        // Proper in-batch dedup is deferred to a follow-up.
       }
     }
 
@@ -348,13 +349,36 @@ export const redditIntelCluster = inngest.createFunction(
       let newThemeCount = 0;
       let joinedThemeCount = 0;
 
+      // Idempotency guard (#520 H5): Inngest retries the WHOLE step on
+      // failure, and the matching above is recomputed deterministically from
+      // the memoised load step. A prior partial run may have already linked
+      // some posts; re-read their current theme_id and skip the done ones so
+      // a retry doesn't create duplicate themes. (slug has no unique
+      // constraint, so we can't rely on upsert-on-conflict.)
+      const alreadyLinked = await supabase
+        .from("reddit_post_intel")
+        .select("id, theme_id")
+        .in(
+          "id",
+          assignments.map((a) => a.postId),
+        );
+      const donePostIds = new Set(
+        (alreadyLinked.data ?? [])
+          .filter((r) => r.theme_id)
+          .map((r) => r.id as string),
+      );
+
       for (const a of assignments) {
+        if (donePostIds.has(a.postId)) continue; // already persisted in a prior attempt
         if (a.isNewTheme) {
-          // Insert new theme row first to get its UUID.
+          // Insert new theme row first to get its UUID. Slug is DETERMINISTIC
+          // (auto-<seed post id>) not Math.random()-based, so a retry of this
+          // step produces a stable handle instead of proliferating random
+          // slugs. The naming step later rewrites it to the kebab-cased title.
           const { data: created, error: insErr } = await supabase
             .from("reddit_intel_themes")
             .insert({
-              slug: placeholderSlug(),
+              slug: `auto-${a.postId}`,
               title: "Pending naming",
               centroid_embedding: vectorToPgString(a.newCentroid),
               centroid_embedding_model_version: a.embeddingModelVersion,
@@ -605,5 +629,5 @@ export const redditIntelCluster = inngest.createFunction(
       joinedThemes: persistResult.joinedThemeCount,
       themesNamed: namingResult.named,
     };
-  },
+  }),
 );

@@ -7,6 +7,8 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { submitURLScan, retrieveURLScan } from "../urlscan";
+import { logCost, ENGINE_PRICING } from "../cost-log";
+import { withAxiomLogging } from "./with-axiom-logging";
 
 const MAX_URLS_PER_RUN = 20;
 
@@ -23,7 +25,7 @@ export const urlscanEnrichment = inngest.createFunction(
     throttle: { limit: 50, period: "1h", key: "urlscan-submissions" },
   },
   { cron: "30 */4 * * *" }, // 30 min after entity enrichment
-  async ({ step }) => {
+  withAxiomLogging({ fnId: "pipeline-urlscan-enrichment" }, async ({ step }) => {
     if (!featureFlags.urlScanIO) {
       return { skipped: true, reason: "urlScanIO feature flag disabled" };
     }
@@ -69,27 +71,29 @@ export const urlscanEnrichment = inngest.createFunction(
       return { scanned: 0, reason: "no URL entities need urlscan" };
     }
 
-    // Step 2: Submit URLs for scanning
-    const submissions = await step.run("submit-urls", async () => {
-      const results: { entityId: number; uuid: string; url: string }[] = [];
-
-      for (const entity of urlEntities) {
-        const submission = await submitURLScan(entity.url);
-        if (submission) {
-          results.push({
-            entityId: entity.id,
-            uuid: submission.uuid,
-            url: entity.url,
-          });
-        }
-        // 1s delay between submissions to be polite
-        if (entity !== urlEntities[urlEntities.length - 1]) {
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-        }
-      }
-
-      return results;
-    });
+    // Step 2: Submit URLs for scanning — ONE step.run per URL (#520 H2a).
+    // Previously the whole submit loop sat in a single step; an Inngest retry
+    // of that step re-submitted every URL to URLScan, double-paying. Per-URL
+    // steps are memoised once successful, so a retry skips already-submitted
+    // URLs. Step id keyed on the stable entity id (deterministic). Cost is
+    // logged inside the step so a retry doesn't re-log either.
+    const submissions: { entityId: number; uuid: string; url: string }[] = [];
+    for (const entity of urlEntities) {
+      const submission = await step.run(`submit-${entity.id}`, async () => {
+        const result = await submitURLScan(entity.url);
+        if (!result) return null;
+        void logCost({
+          feature: "urlscan-enrichment",
+          provider: "urlscan",
+          operation: "scan.submit",
+          units: 1,
+          estimatedCostUsd: ENGINE_PRICING.URLSCAN_SUBMIT_USD,
+          metadata: { entity_id: entity.id },
+        });
+        return { entityId: entity.id, uuid: result.uuid, url: entity.url };
+      });
+      if (submission) submissions.push(submission);
+    }
 
     if (submissions.length === 0) {
       return { scanned: 0, reason: "no URLs were successfully submitted" };
@@ -98,53 +102,48 @@ export const urlscanEnrichment = inngest.createFunction(
     // Step 3: Wait 60s for scans to complete
     await step.sleep("wait-for-scans", "60s");
 
-    // Step 4: Retrieve results and merge into enrichment_data
-    const retrievalResults = await step.run("retrieve-results", async () => {
-      const supabase = createServiceClient();
-      if (!supabase) return { retrieved: 0, failed: 0 };
-
-      let retrieved = 0;
-      let failed = 0;
-
-      for (const sub of submissions) {
+    // Step 4: Retrieve + merge — ONE step.run per submission (#520 H2a/H2b).
+    // Per-URL steps mean a retry doesn't re-fetch already-retrieved scans.
+    // The merge uses the atomic merge_entity_enrichment_data RPC (v161)
+    // instead of select→spread→update, closing the read-modify-write race
+    // where a concurrent entity-enrichment write clobbered the urlscan key.
+    let retrieved = 0;
+    let failed = 0;
+    for (const sub of submissions) {
+      const ok = await step.run(`retrieve-${sub.entityId}`, async () => {
+        const supabase = createServiceClient();
+        if (!supabase) return false;
         try {
           const result = await retrieveURLScan(sub.uuid);
-          if (!result) {
-            failed++;
-            continue;
+          if (!result) return false;
+
+          const { error } = await supabase.rpc("merge_entity_enrichment_data", {
+            p_entity_id: sub.entityId,
+            p_key: "urlscan",
+            p_value: result,
+          });
+          if (error) {
+            logger.error("URLScan merge RPC failed", {
+              entityId: sub.entityId,
+              error: error.message,
+            });
+            return false;
           }
-
-          // Merge urlscan result into existing enrichment_data
-          const { data: entity } = await supabase
-            .from("scam_entities")
-            .select("enrichment_data")
-            .eq("id", sub.entityId)
-            .single();
-
-          const existingData = (entity?.enrichment_data as Record<string, unknown>) || {};
-          const updatedData = { ...existingData, urlscan: result };
-
-          await supabase
-            .from("scam_entities")
-            .update({ enrichment_data: updatedData })
-            .eq("id", sub.entityId);
-
-          retrieved++;
+          return true;
         } catch (err) {
           logger.error("URLScan retrieval failed for entity", {
             entityId: sub.entityId,
             uuid: sub.uuid,
             error: String(err),
           });
-          failed++;
+          return false;
         }
+      });
+      if (ok) retrieved++;
+      else failed++;
+    }
 
-        // 500ms delay between retrievals
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      }
-
-      return { retrieved, failed };
-    });
+    const retrievalResults = { retrieved, failed };
 
     logger.info("URLScan enrichment complete", {
       submitted: submissions.length,
@@ -152,5 +151,5 @@ export const urlscanEnrichment = inngest.createFunction(
     });
 
     return { submitted: submissions.length, ...retrievalResults };
-  }
+  })
 );
