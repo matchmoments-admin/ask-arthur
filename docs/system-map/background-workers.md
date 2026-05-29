@@ -146,14 +146,15 @@ Gated by `FF_ANALYZE_INNGEST_WEB`. When false, the legacy `waitUntil` path runs 
 
 ### Onward reporting (event-driven, no cron)
 
-| Function                        | Trigger                             | Purpose                                                |
-| ------------------------------- | ----------------------------------- | ------------------------------------------------------ |
-| `report-onward-scamwatch`       | `report.submitted.v1`               | Deep-link marker (no API; user lands on Scamwatch URL) |
-| `report-onward-acma-email-spam` | `report.submitted.v1` (email spam)  | ACMA callback                                          |
-| `report-onward-report-cyber`    | manual                              | ReportCyber callback                                   |
-| `report-onward-idcare`          | manual                              | IDcare identity-theft support referral                 |
-| `report-onward-ask-arthur-feed` | manual                              | Internal feed archive                                  |
-| `onward-brand-abuse`            | `report.submitted.v1` (brand abuse) | Queue brand report submission                          |
+| Function                        | Trigger                             | Purpose                                                                                                                                                                                                                                          |
+| ------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `report-onward-scamwatch`       | `report.submitted.v1`               | Deep-link marker (no API; user lands on Scamwatch URL)                                                                                                                                                                                           |
+| `report-onward-acma-email-spam` | `report.submitted.v1` (email spam)  | ACMA callback                                                                                                                                                                                                                                    |
+| `report-onward-report-cyber`    | manual                              | ReportCyber callback                                                                                                                                                                                                                             |
+| `report-onward-idcare`          | manual                              | IDcare identity-theft support referral                                                                                                                                                                                                           |
+| `report-onward-ask-arthur-feed` | manual                              | Internal feed archive                                                                                                                                                                                                                            |
+| `onward-brand-abuse`            | `report.submitted.v1` (brand abuse) | Queue brand report submission                                                                                                                                                                                                                    |
+| `report-brand-stewardship`      | `0 9 1 * *` (1st of month)          | WS2-cap: aggregate prior month's `onward_report_log` per impersonated brand → UPSERT `brand_stewardship_reports` ledger rows (brands with a `known_brands` email contact). Gated by `FF_BRAND_STEWARDSHIP_REPORT`. TS aggregation, bounded read. |
 
 ### Shopfront clone-watch (Layer 0 + outreach + measurement)
 

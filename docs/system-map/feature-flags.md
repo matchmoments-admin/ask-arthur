@@ -151,9 +151,10 @@ Layer 0 = daily NRD lexical sweep (live since 2026-05-24). Layers 1–5 = outrea
 
 ## Third-party reporting
 
-| Flag            | Default | Purpose                                               |
-| --------------- | ------- | ----------------------------------------------------- |
-| `metaBrpReport` | OFF     | Meta Brand Rights Protection deepfake reporter (stub) |
+| Flag                                                     | Default | Purpose                                                                                                                                                                                                                                                                                                     |
+| -------------------------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `metaBrpReport`                                          | OFF     | Meta Brand Rights Protection deepfake reporter (stub)                                                                                                                                                                                                                                                       |
+| `brandStewardshipReport` (`FF_BRAND_STEWARDSHIP_REPORT`) | OFF     | Monthly per-brand rollup over `onward_report_log` ("what we detected + reported on your behalf"). Gates the `report-brand-stewardship` aggregation cron (writes `brand_stewardship_reports` ledger) AND the brand-facing send route. Default OFF until the email template framing is legal-reviewed (#371). |
 
 ---
 
