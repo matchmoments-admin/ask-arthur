@@ -5,9 +5,11 @@ import type { AnalysisResult } from "@askarthur/types";
 
 /**
  * Thrown by analyzeForBot when the `bot_analyze` cost brake is engaged
- * (cost-daily-check tripped the daily cap). Bot handlers catch this and
- * send a "high demand — use the web checker" fallback rather than the
- * generic error, so a user still gets pointed somewhere useful.
+ * (cost-daily-check tripped the daily cap). Today every bot handler's
+ * existing catch sends the generic "try again in a moment" reply, and the
+ * queue path swallows it without retrying. The dedicated type is the seam
+ * for a future tailored "high demand — use the web checker at askarthur.au"
+ * message (planned to land with the Messenger Phase A handler).
  */
 export class BotAnalysisPausedError extends Error {
   constructor() {

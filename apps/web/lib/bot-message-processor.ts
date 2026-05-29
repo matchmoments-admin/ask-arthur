@@ -1,4 +1,4 @@
-import { analyzeForBot } from "@askarthur/bot-core/analyze";
+import { analyzeForBot, BotAnalysisPausedError } from "@askarthur/bot-core/analyze";
 import { toTelegramHTML } from "@askarthur/bot-core/format-telegram";
 import { toWhatsAppMessage } from "@askarthur/bot-core/format-whatsapp";
 import { toSlackBlocks } from "@askarthur/bot-core/format-slack";
@@ -16,7 +16,18 @@ export async function processQueuedMessage(
   message: QueuedMessage,
 ): Promise<void> {
   const images = message.images.length > 0 ? message.images : undefined;
-  const result = await analyzeForBot(message.message_text, undefined, images);
+
+  let result;
+  try {
+    result = await analyzeForBot(message.message_text, undefined, images);
+  } catch (err) {
+    // Cost brake engaged: don't treat as a failure (callers would markFailed
+    // and retry against a brake that persists for ~24h, burning the retry
+    // budget on a no-op). Swallow so the message is marked completed. The
+    // brake is already logged + Telegram-alerted by cost-daily-check when set.
+    if (err instanceof BotAnalysisPausedError) return;
+    throw err;
+  }
 
   switch (message.platform) {
     case "telegram": {
