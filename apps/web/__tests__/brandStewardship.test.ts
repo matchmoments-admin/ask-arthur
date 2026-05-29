@@ -12,6 +12,22 @@ describe("deriveBrandKey", () => {
     expect(deriveBrandKey("Australia Post")).toBe("australia_post");
     expect(deriveBrandKey("CommBank")).toBe("commbank");
   });
+
+  // Contract test (ultrareview F4): these MUST stay equal to the v119 SQL
+  // `lower(regexp_replace(brand, '[^a-zA-Z0-9]+', '_', 'g'))`. If that SQL
+  // formula ever changes (e.g. starts trimming trailing `_`), this TS copy
+  // would silently mis-join brands to known_brands contacts → a brand's
+  // stewardship report routes to the wrong/no recipient. Edge cases chosen to
+  // catch exactly that drift: punctuation runs, trailing punctuation, digits.
+  it("agrees with the SQL formula on drift-prone edge cases", () => {
+    expect(deriveBrandKey("St.George Bank")).toBe("st_george_bank");
+    // A run of non-alnum collapses to ONE underscore; trailing ")" leaves a
+    // trailing "_" (Postgres regexp_replace does NOT trim) — both must match.
+    expect(deriveBrandKey("Linkt (Transurban)")).toBe("linkt_transurban_");
+    expect(deriveBrandKey("7-Eleven")).toBe("7_eleven");
+    expect(deriveBrandKey("Domino's")).toBe("domino_s");
+    expect(deriveBrandKey(" Westpac ")).toBe("_westpac_");
+  });
 });
 
 describe("aggregateOnwardByBrand", () => {

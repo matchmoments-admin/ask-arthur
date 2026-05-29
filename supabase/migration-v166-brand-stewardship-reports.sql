@@ -14,9 +14,10 @@
 --   {
 --     "detected": <int>,                         -- distinct scam_reports impersonating the brand
 --     "reported_by_destination": { "openphish": n, "apwg": n, "acma_email_spam": n, ... },
---     "observed_taken_down": <int>,              -- onward rows we have a confirmed terminal status for
 --     "reports_sent": <int>                       -- onward rows with status='sent'
 --   }
+-- (No "taken_down" key: these intakes are fire-and-forget email forwards with
+--  no takedown callback, so we never claim a takedown we can't confirm.)
 
 CREATE TABLE IF NOT EXISTS public.brand_stewardship_reports (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

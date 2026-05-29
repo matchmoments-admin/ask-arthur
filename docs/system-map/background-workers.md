@@ -144,7 +144,7 @@ Gated by `FF_ANALYZE_INNGEST_WEB`. When false, the legacy `waitUntil` path runs 
 | ----------------- | ------------------------ | ----------------------------------------------------- |
 | `meta-brp-report` | `0 */6 * * *` (every 6h) | Meta Brand Rights Protection deepfake reporter (stub) |
 
-### Onward reporting (event-driven, no cron)
+### Onward reporting (event-driven + report cron)
 
 | Function                        | Trigger                             | Purpose                                                                                                                                                                                                                                          |
 | ------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
