@@ -5,6 +5,19 @@ import { inngest } from "./client";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
+import { withAxiomLogging } from "./with-axiom-logging";
+
+// Page size for the unclustered-links sweep. PostgREST caps a single response
+// at ~1000 rows by default, so the old unpaginated fetch SILENTLY clustered on
+// only the first page once the unclustered backlog exceeded that — paginating
+// restores correctness as well as bounding per-query memory (#523 H1a).
+const LINK_PAGE_SIZE = 1000;
+
+// Components larger than this are treated as noise (e.g. a popular
+// link-shortener entity unioning thousands of unrelated reports) and skipped
+// rather than committed as one giant cluster whose report UPDATE would lock a
+// huge slice of the hot scam_reports table (#523 H1b).
+const MAX_CLUSTER_SIZE = 5000;
 
 // Union-Find with path compression + union by rank
 class UnionFind {
@@ -66,40 +79,50 @@ export const clusterBuilder = inngest.createFunction(
     concurrency: { limit: 1 },
   },
   { cron: "0 4 * * *" }, // Daily at 4am UTC
-  async ({ step }) => {
+  withAxiomLogging({ fnId: "pipeline-cluster-builder" }, async ({ step }) => {
     if (!featureFlags.clusterBuilder) {
       return { skipped: true, reason: "clusterBuilder feature flag disabled" };
     }
 
-    // Step 1: Find entities that appear in 2+ unclustered reports
+    // Step 1: Find entities that appear in 2+ unclustered reports.
+    // Paginated (#523 H1a) — accumulate ALL unclustered links across pages so
+    // the union-find sees the complete graph; the old single unpaginated
+    // query silently capped at PostgREST's ~1000-row default.
     const entityReportMap = await step.run(
       "fetch-shared-entities",
       async () => {
         const supabase = createServiceClient();
         if (!supabase) return {};
 
-        // Find entities linked to reports that have no cluster_id
-        const { data, error } = await supabase
-          .from("report_entity_links")
-          .select("entity_id, report_id, scam_reports!inner(cluster_id)")
-          .is("scam_reports.cluster_id", null);
-
-        if (error) {
-          logger.error("Failed to fetch entity links for clustering", {
-            error: String(error),
-          });
-          throw new Error(error.message);
-        }
-
-        // Build entity -> report_ids map
         const map: Record<number, number[]> = {};
-        for (const row of data || []) {
-          const entityId = row.entity_id;
-          const reportId = row.report_id;
-          if (!map[entityId]) map[entityId] = [];
-          if (!map[entityId].includes(reportId)) {
-            map[entityId].push(reportId);
+        let from = 0;
+        for (;;) {
+          const { data, error } = await supabase
+            .from("report_entity_links")
+            .select("entity_id, report_id, scam_reports!inner(cluster_id)")
+            .is("scam_reports.cluster_id", null)
+            .order("id", { ascending: true })
+            .range(from, from + LINK_PAGE_SIZE - 1);
+
+          if (error) {
+            logger.error("Failed to fetch entity links for clustering", {
+              error: String(error),
+            });
+            throw new Error(error.message);
           }
+
+          const rows = data || [];
+          for (const row of rows) {
+            const entityId = row.entity_id;
+            const reportId = row.report_id;
+            if (!map[entityId]) map[entityId] = [];
+            if (!map[entityId].includes(reportId)) {
+              map[entityId].push(reportId);
+            }
+          }
+
+          if (rows.length < LINK_PAGE_SIZE) break; // last page
+          from += LINK_PAGE_SIZE;
         }
 
         // Only keep entities in 2+ reports (these create cluster links)
@@ -134,13 +157,30 @@ export const clusterBuilder = inngest.createFunction(
         }
       }
 
-      // Get connected components (clusters) with 2+ members
+      // Get connected components (clusters) with 2+ members. Skip noise
+      // mega-clusters (#523 H1b): a component larger than MAX_CLUSTER_SIZE is
+      // almost certainly a shared noise entity (popular shortener / CDN) that
+      // unioned unrelated reports — committing it would lock a huge slice of
+      // scam_reports. Log and skip rather than create a giant bogus campaign.
       const allComponents = uf.getComponents();
       const clusters: number[][] = [];
+      let skippedOversize = 0;
       for (const members of allComponents.values()) {
-        if (members.length >= 2) {
-          clusters.push(members.sort((a, b) => a - b));
+        if (members.length < 2) continue;
+        if (members.length > MAX_CLUSTER_SIZE) {
+          skippedOversize++;
+          logger.warn("cluster-builder: skipping oversize component", {
+            size: members.length,
+            max: MAX_CLUSTER_SIZE,
+          });
+          continue;
         }
+        clusters.push(members.sort((a, b) => a - b));
+      }
+      if (skippedOversize > 0) {
+        logger.warn("cluster-builder: oversize components skipped", {
+          count: skippedOversize,
+        });
       }
 
       return clusters;
@@ -190,50 +230,26 @@ export const clusterBuilder = inngest.createFunction(
           .select("entity_id", { count: "exact", head: true })
           .in("report_id", reportIds);
 
-        // Create cluster
-        const { data: cluster, error: clusterError } = await supabase
-          .from("scam_clusters")
-          .insert({
-            cluster_type: "entity_overlap",
-            primary_scam_type: primaryType,
-            primary_brand: primaryBrand,
-            member_count: reportIds.length,
-            entity_count: entityCount ?? 0,
-            status: "active",
-          })
-          .select("id")
-          .single();
+        // Commit cluster + members + report-stamp ATOMICALLY in one
+        // transaction (#523 H1c). The old 3-call sequence (insert cluster →
+        // insert members → update reports) left orphaned state on a crash
+        // between calls, causing the next run to re-cluster the same reports.
+        const { data: clusterId, error: commitError } = await supabase.rpc(
+          "commit_scam_cluster",
+          {
+            p_report_ids: reportIds,
+            p_primary_scam_type: primaryType,
+            p_primary_brand: primaryBrand,
+            p_entity_count: entityCount ?? 0,
+          },
+        );
 
-        if (clusterError || !cluster) {
-          logger.error("Failed to create cluster", {
-            error: String(clusterError),
+        if (commitError || !clusterId) {
+          logger.error("Failed to commit cluster", {
+            error: String(commitError),
           });
           continue;
         }
-
-        // Link members
-        const memberRows = reportIds.map((reportId) => ({
-          cluster_id: cluster.id,
-          report_id: reportId,
-        }));
-
-        const { error: memberError } = await supabase
-          .from("cluster_members")
-          .insert(memberRows);
-
-        if (memberError) {
-          logger.error("Failed to link cluster members", {
-            clusterId: cluster.id,
-            error: String(memberError),
-          });
-          continue;
-        }
-
-        // Update reports with cluster_id
-        await supabase
-          .from("scam_reports")
-          .update({ cluster_id: cluster.id })
-          .in("id", reportIds);
 
         created++;
         membersLinked += reportIds.length;
@@ -252,5 +268,5 @@ export const clusterBuilder = inngest.createFunction(
       membersLinked: results.membersLinked,
       componentsFound: components.length,
     };
-  }
+  })
 );
