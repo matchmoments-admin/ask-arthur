@@ -231,6 +231,23 @@ without verifying `git branch --show-current` first. Costs of a mis-placed
 commit are high — cherry-picking out of a stranger's branch is tedious and
 sometimes lossy if a subsequent rebase has rewritten hashes.
 
+**Enforced at the harness level** (born from two git-state incidents on
+2026-05-29 — a commit landing on `main`, and the index being wiped by
+concurrent git access):
+
+- `.claude/hooks/git-commit-guard.sh` (PreToolUse on Bash) blocks `git commit`
+  / `git push` while on `main`/`master`, and blocks `git commit` when the index
+  looks wiped (HEAD has files but the index has 0 — committing would record a
+  whole-tree deletion; recover with `git reset --mixed HEAD`). This runs on
+  EVERY commit, unlike `branch-check.sh` (Edit/Write, once-per-session).
+- **Parallel agents that run git must not share one working copy.** When you
+  fan out multiple agents that invoke `git` (even read-only `git diff` review
+  agents), launch them with `isolation: "worktree"` — concurrent `git`
+  processes contend on `.git/index.lock` and can empty/corrupt the shared
+  index. Agents that only read files (no git) are safe to share the tree.
+- Verify `git branch --show-current` immediately before each commit, not just
+  at branch creation — the pointer can move mid-session.
+
 1. **Typecheck locally** — `pnpm turbo typecheck`. Also `pytest` under
    `pipeline/scrapers/` if the change touches Python.
 2. **Stage explicit files** — never `git add -A` (the repo has several in-progress
