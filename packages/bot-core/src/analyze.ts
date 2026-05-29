@@ -1,5 +1,22 @@
 import { runAnalysisCore } from "@askarthur/scam-engine/analyze-core";
+import { logCost, isFeatureBraked } from "@askarthur/scam-engine/cost-log";
+import { MODELS } from "@askarthur/scam-engine/anthropic";
 import type { AnalysisResult } from "@askarthur/types";
+
+/**
+ * Thrown by analyzeForBot when the `bot_analyze` cost brake is engaged
+ * (cost-daily-check tripped the daily cap). Today every bot handler's
+ * existing catch sends the generic "try again in a moment" reply, and the
+ * queue path swallows it without retrying. The dedicated type is the seam
+ * for a future tailored "high demand — use the web checker at askarthur.au"
+ * message (planned to land with the Messenger Phase A handler).
+ */
+export class BotAnalysisPausedError extends Error {
+  constructor() {
+    super("bot_analyze cost brake engaged");
+    this.name = "BotAnalysisPausedError";
+  }
+}
 
 /**
  * Run the full scam analysis pipeline for a bot message.
@@ -26,6 +43,13 @@ export async function analyzeForBot(
   region?: string,
   images?: string[],
 ): Promise<AnalysisResult> {
+  // Circuit-breaker: if today's bot AI spend tripped its cap, stop here.
+  // Throwing lets handlers send a graceful fallback instead of silently
+  // burning more budget. Best-effort check — a DB error fails open.
+  if (await isFeatureBraked("bot_analyze")) {
+    throw new BotAnalysisPausedError();
+  }
+
   const out = await runAnalysisCore({
     text,
     surface: "bot",
@@ -33,5 +57,32 @@ export async function analyzeForBot(
     images,
     backgroundMode: "fire-and-forget",
   });
+
+  // Cost telemetry. Mirror the extension route's pattern: log ONLY on a
+  // real billable call (cache MISS with usage present) so cached replies
+  // don't inflate spend. Without this, bot AI spend is invisible to
+  // /admin/costs and the weekly Telegram digest. Bots run Haiku 4.5.
+  if (!out.cached && out.result.usage) {
+    const u = out.result.usage;
+    const spec = MODELS.HAIKU_4_5;
+    const cacheReadTokens = u.cacheReadInputTokens ?? 0;
+    const estimatedCostUsd =
+      u.inputTokens * spec.inputUsdPerToken +
+      u.outputTokens * spec.outputUsdPerToken +
+      cacheReadTokens * spec.cacheReadUsdPerToken;
+    void logCost({
+      feature: "bot_analyze",
+      provider: "anthropic",
+      operation: spec.id,
+      units: u.inputTokens + u.outputTokens,
+      estimatedCostUsd,
+      metadata: {
+        mode: images?.length ? "image" : "text",
+        verdict: out.result.verdict,
+        cacheReadTokens,
+      },
+    });
+  }
+
   return out.result;
 }
