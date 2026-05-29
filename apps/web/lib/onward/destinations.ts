@@ -11,7 +11,9 @@ export type OnwardDestinationEnum =
   | "acma_email_spam"
   | "idcare"
   | "brand_abuse"
-  | "ask_arthur_feed";
+  | "ask_arthur_feed"
+  | "openphish"
+  | "apwg";
 
 export interface DestinationOption {
   destination: OnwardDestinationEnum;

@@ -35,7 +35,7 @@ Defined in `apps/web/vercel.json`. All routes verify the Vercel cron signature.
 
 ---
 
-## Inngest functions (35)
+## Inngest functions (39)
 
 Defined in `packages/scam-engine/src/inngest/functions.ts`. All have idempotency keys based on `event.data.requestId` (24h dedup); cron functions use Inngest's native cron dedup.
 
@@ -144,7 +144,7 @@ Gated by `FF_ANALYZE_INNGEST_WEB`. When false, the legacy `waitUntil` path runs 
 | ----------------- | ------------------------ | ----------------------------------------------------- |
 | `meta-brp-report` | `0 */6 * * *` (every 6h) | Meta Brand Rights Protection deepfake reporter (stub) |
 
-### Onward reporting (event-driven + report cron)
+### Onward reporting (event-driven + producer/report crons)
 
 | Function                        | Trigger                             | Purpose                                                                                                                                                                                                                                          |
 | ------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -154,6 +154,9 @@ Gated by `FF_ANALYZE_INNGEST_WEB`. When false, the legacy `waitUntil` path runs 
 | `report-onward-idcare`          | manual                              | IDcare identity-theft support referral                                                                                                                                                                                                           |
 | `report-onward-ask-arthur-feed` | manual                              | Internal feed archive                                                                                                                                                                                                                            |
 | `onward-brand-abuse`            | `report.submitted.v1` (brand abuse) | Queue brand report submission                                                                                                                                                                                                                    |
+| `report-onward-openphish`       | `report.onward.openphish`           | Email phishing URL(s) to OpenPhish (`FF_ONWARD_OPENPHISH`, default OFF)                                                                                                                                                                          |
+| `report-onward-apwg`            | `report.onward.apwg`                | Email phishing URL(s) to APWG eCrime Exchange (`FF_ONWARD_APWG`, default OFF)                                                                                                                                                                    |
+| `report-onward-auto-report`     | `25 * * * *` (hourly cron)          | Proactive producer: sweeps recent HIGH_RISK `scam_reports` with a URL → auto-enqueues OpenPhish/APWG onward reports (`FF_ONWARD_AUTO_REPORT`, default OFF; only enqueues destinations whose worker flag is ON)                                   |
 | `report-brand-stewardship`      | `0 9 1 * *` (1st of month)          | WS2-cap: aggregate prior month's `onward_report_log` per impersonated brand → UPSERT `brand_stewardship_reports` ledger rows (brands with a `known_brands` email contact). Gated by `FF_BRAND_STEWARDSHIP_REPORT`. TS aggregation, bounded read. |
 
 ### Shopfront clone-watch (Layer 0 + outreach + measurement)
