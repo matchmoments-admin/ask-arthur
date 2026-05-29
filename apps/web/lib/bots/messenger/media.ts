@@ -1,4 +1,5 @@
 import { logger } from "@askarthur/utils/logger";
+import { assertSafeURL } from "@askarthur/scam-engine/ssrf-guard";
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 
@@ -19,16 +20,30 @@ const SUPPORTED_MIME_TYPES = new Set([
  */
 export async function downloadMessengerAttachment(url: string): Promise<string | null> {
   try {
+    // Defence-in-depth: the webhook is HMAC-verified so the URL is Meta-attested,
+    // but this is the only bot path that fetches a payload-supplied URL — block
+    // internal/metadata hosts at zero cost in case the trust posture ever changes.
+    assertSafeURL(url);
+
     const response = await fetch(url);
     if (!response.ok) {
       logger.error("Messenger attachment download failed", { status: response.status });
       return null;
     }
 
-    // Validate mime type from the response (webhook doesn't declare it)
-    const contentType = response.headers.get("content-type")?.split(";")[0]?.trim() ?? "";
+    // Validate mime type from the response (webhook doesn't declare it).
+    // Media types are case-insensitive (RFC 9110) — normalise before matching.
+    const contentType =
+      response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() ?? "";
     if (!SUPPORTED_MIME_TYPES.has(contentType)) {
       logger.warn("Messenger attachment: unsupported mime type", { mimeType: contentType });
+      return null;
+    }
+
+    // Bail before buffering if the server declares an over-limit size.
+    const declaredSize = Number(response.headers.get("content-length") ?? 0);
+    if (declaredSize > MAX_FILE_SIZE) {
+      logger.warn("Messenger attachment: declared size too large", { size: declaredSize });
       return null;
     }
 

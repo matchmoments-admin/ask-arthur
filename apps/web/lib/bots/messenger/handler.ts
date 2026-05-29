@@ -216,7 +216,13 @@ async function sendResult(
   result: AnalysisResult,
 ): Promise<void> {
   const formatted = toMessengerMessage(result);
-  const chunks = formatted.length > 2000 ? splitMessage(formatted, 2000) : [formatted];
+  const chunks = (formatted.length > 2000
+    ? splitMessage(formatted, 2000)
+    : [formatted]
+  ).filter((c) => c.length > 0);
+  // Defensive: the formatter always emits a verdict line + footer, but never
+  // send an empty body (the Send API 400s on `text: undefined`).
+  if (chunks.length === 0) return;
 
   // Send all but the final chunk as plain text
   for (let i = 0; i < chunks.length - 1; i++) {
@@ -259,6 +265,18 @@ function splitMessage(text: string, maxLength: number): string[] {
   let current = "";
 
   for (const line of lines) {
+    // A single line longer than the limit must be hard-split, or it would be
+    // pushed verbatim and rejected by the Send API (>2000 chars).
+    if (line.length > maxLength) {
+      if (current.trim()) {
+        chunks.push(current.trim());
+        current = "";
+      }
+      for (let i = 0; i < line.length; i += maxLength) {
+        chunks.push(line.slice(i, i + maxLength));
+      }
+      continue;
+    }
     if (current.length + line.length + 1 > maxLength) {
       chunks.push(current.trim());
       current = line;

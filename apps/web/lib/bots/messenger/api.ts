@@ -22,11 +22,16 @@ async function callSendApi(
     return;
   }
 
-  const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/me/messages?access_token=${accessToken}`;
+  // Token goes in the Authorization header (not the query string) so it can't
+  // leak via upstream proxy / access logs — matches the WhatsApp send path.
+  const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/me/messages`;
 
   const response = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
     body: JSON.stringify({
       recipient: { id: recipientId },
       messaging_type: "RESPONSE",
