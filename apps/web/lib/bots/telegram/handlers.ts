@@ -62,7 +62,11 @@ async function analyzeAndReply(ctx: Context, text: string): Promise<void> {
   await ctx.replyWithChatAction("typing");
 
   try {
-    const result = await analyzeForBot(text);
+    const result = await analyzeForBot(text, undefined, undefined, {
+      source: "bot_telegram",
+      userId: String(ctx.from?.id ?? ctx.chat?.id ?? "unknown"),
+      inputMode: "text",
+    });
     const formatted = toTelegramHTML(result);
     const keyboard = buildResultKeyboard(result.verdict);
 

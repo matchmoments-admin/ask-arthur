@@ -1,4 +1,5 @@
 import { analyzeForBot, BotAnalysisPausedError } from "@askarthur/bot-core/analyze";
+import type { ReportSource } from "@askarthur/types";
 import { toTelegramHTML } from "@askarthur/bot-core/format-telegram";
 import { toWhatsAppMessage } from "@askarthur/bot-core/format-whatsapp";
 import { toSlackBlocks } from "@askarthur/bot-core/format-slack";
@@ -19,7 +20,11 @@ export async function processQueuedMessage(
 
   let result;
   try {
-    result = await analyzeForBot(message.message_text, undefined, images);
+    result = await analyzeForBot(message.message_text, undefined, images, {
+      source: `bot_${message.platform}` as ReportSource,
+      userId: message.user_id,
+      inputMode: images ? "image" : "text",
+    });
   } catch (err) {
     // Cost brake engaged: don't treat as a failure (callers would markFailed
     // and retry against a brake that persists for ~24h, burning the retry

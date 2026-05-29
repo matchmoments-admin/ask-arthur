@@ -64,7 +64,11 @@ export async function handleSlashCommand(payload: SlackSlashPayload): Promise<vo
   }
 
   try {
-    const result = await analyzeForBot(text);
+    const result = await analyzeForBot(text, undefined, undefined, {
+      source: "bot_slack",
+      userId: user_id,
+      inputMode: "text",
+    });
     const slackResponse = toSlackBlocks(result);
 
     await postToResponseUrl(response_url, slackResponse);

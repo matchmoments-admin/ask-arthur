@@ -174,6 +174,7 @@ async function processImageMessage(
       "Analyse this image for scam indicators",
       undefined,
       [base64],
+      { source: "bot_messenger", userId: senderId, inputMode: "image" },
     );
     await sendResult(senderId, result);
   } catch (err) {
@@ -196,7 +197,11 @@ async function processAnalysis(senderId: string, text: string): Promise<void> {
   }
 
   try {
-    const result = await analyzeForBot(text);
+    const result = await analyzeForBot(text, undefined, undefined, {
+      source: "bot_messenger",
+      userId: senderId,
+      inputMode: "text",
+    });
     await sendResult(senderId, result);
   } catch (err) {
     logger.error("Messenger analysis failed", { error: String(err) });
