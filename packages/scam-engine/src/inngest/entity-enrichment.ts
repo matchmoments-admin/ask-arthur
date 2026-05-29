@@ -26,6 +26,7 @@ import { checkHIBP } from "../hibp";
 import { lookupCT } from "../ct-lookup";
 import { lookupPhoneNumber } from "../twilio-lookup";
 import { checkIPQS } from "../ipqualityscore";
+import { withAxiomLogging } from "./with-axiom-logging";
 
 const MAX_ENTITIES_PER_RUN = 30;
 
@@ -257,10 +258,38 @@ export const entityEnrichmentFanOut = inngest.createFunction(
     rateLimit: { limit: 1, period: "10m" },
   },
   { cron: "0 */4 * * *" }, // Every 4 hours
-  async ({ step }) => {
+  withAxiomLogging({ fnId: "pipeline-entity-enrichment" }, async ({ step }) => {
     if (!featureFlags.entityEnrichment) {
       return { skipped: true, reason: "entityEnrichment feature flag disabled" };
     }
+
+    // Step 0: Reap orphaned `in_progress` rows (#520 H3). If a prior run
+    // crashed between mark-in-progress and the per-entity completion, those
+    // rows are stuck `in_progress` forever — the pending/failed fetch below
+    // never re-selects them, a silent permanent enrichment gap. concurrency:1
+    // (above) guarantees no other run is legitimately mid-flight, so any
+    // `in_progress` row here is orphaned and safe to reset to `failed` so it
+    // re-enters the queue. Bounded (<= MAX_ENTITIES_PER_RUN accumulate), so no
+    // hot-table chunking needed.
+    const reaped = await step.run("reap-orphaned-in-progress", async () => {
+      const supabase = createServiceClient();
+      if (!supabase) return 0;
+      const { data, error } = await supabase
+        .from("scam_entities")
+        .update({ enrichment_status: "failed" })
+        .eq("enrichment_status", "in_progress")
+        .select("id");
+      if (error) {
+        logger.warn("entity-enrichment: reap in_progress failed", {
+          error: error.message,
+        });
+        return 0;
+      }
+      const n = (data ?? []).length;
+      if (n > 0) logger.info("entity-enrichment: reaped orphaned rows", { n });
+      return n;
+    });
+    void reaped;
 
     // Step 1: Find entities needing enrichment
     const pendingEntities = await step.run(
@@ -391,5 +420,5 @@ export const entityEnrichmentFanOut = inngest.createFunction(
     });
 
     return { total: pendingEntities.length, completed, failed, results };
-  }
+  })
 );

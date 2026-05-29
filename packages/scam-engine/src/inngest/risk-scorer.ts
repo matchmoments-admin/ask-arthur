@@ -5,6 +5,7 @@ import { inngest } from "./client";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
+import { withAxiomLogging } from "./with-axiom-logging";
 
 const MAX_ENTITIES_PER_RUN = 100;
 
@@ -15,7 +16,7 @@ export const riskScorer = inngest.createFunction(
     concurrency: { limit: 1 },
   },
   { cron: "0 */6 * * *" }, // Every 6 hours
-  async ({ step }) => {
+  withAxiomLogging({ fnId: "pipeline-risk-scorer" }, async ({ step }) => {
     if (!featureFlags.riskScoring) {
       return { skipped: true, reason: "riskScoring feature flag disabled" };
     }
@@ -51,17 +52,21 @@ export const riskScorer = inngest.createFunction(
         throw new Error(neverScored.error.message);
       }
 
-      // Query B: scored but stale — fetch a recent window (ordered by
-      // last_seen desc) then filter `last_seen > risk_scored_at` in JS.
-      // The window of MAX_ENTITIES_PER_RUN guarantees we don't miss any
-      // ranking-relevant rows: if more than that many are stale, the
-      // cron simply catches up over the next few runs.
+      // Query B: scored but stale — fetch a window then filter
+      // `last_seen > risk_scored_at` in JS.
+      //
+      // Ordered by `risk_scored_at ASC NULLS FIRST` (#520 M-risk), NOT
+      // `last_seen DESC`. The old ordering windowed by recency, so a
+      // perpetually-active high-traffic entity crowded out a stale-but-
+      // older one indefinitely (starvation). Oldest-scored-first guarantees
+      // the most-overdue entities are picked up each run and the backlog
+      // genuinely drains.
       const stale = await supabase
         .from("scam_entities")
         .select("id, last_seen, risk_scored_at")
         .not("risk_scored_at", "is", null)
         .gte("report_count", 1)
-        .order("last_seen", { ascending: false })
+        .order("risk_scored_at", { ascending: true, nullsFirst: true })
         .limit(MAX_ENTITIES_PER_RUN);
 
       if (stale.error) {
@@ -98,46 +103,32 @@ export const riskScorer = inngest.createFunction(
       return { scored: 0, reason: "no entities need re-scoring" };
     }
 
-    // Step 2: Compute scores via RPC (batched to avoid timeout)
+    // Step 2: Compute scores in ONE set-based RPC call (#520 M-risk).
+    // Previously this looped compute_entity_risk_score per id — up to 100
+    // network round-trips. compute_entity_risk_scores(ids[]) (v162) wraps the
+    // same per-entity logic server-side and returns a {scored, failed}
+    // summary, so the app makes a single round-trip.
     const results = await step.run("compute-scores", async () => {
       const supabase = createServiceClient();
       if (!supabase) return { scored: 0, failed: 0 };
 
-      let scored = 0;
-      let failed = 0;
+      const { data, error } = await supabase.rpc("compute_entity_risk_scores", {
+        p_entity_ids: entityIds,
+      });
 
-      for (const entityId of entityIds) {
-        try {
-          const { data, error } = await supabase.rpc(
-            "compute_entity_risk_score",
-            { p_entity_id: entityId }
-          );
-
-          if (error) {
-            logger.error("Risk score computation failed", {
-              entityId,
-              error: String(error),
-            });
-            failed++;
-            continue;
-          }
-
-          const result = data as { error?: string } | null;
-          if (result?.error) {
-            failed++;
-          } else {
-            scored++;
-          }
-        } catch (err) {
-          logger.error("Risk score RPC error", {
-            entityId,
-            error: String(err),
-          });
-          failed++;
-        }
+      if (error) {
+        logger.error("Batch risk score computation failed", {
+          count: entityIds.length,
+          error: String(error),
+        });
+        throw new Error(error.message);
       }
 
-      return { scored, failed };
+      const result = (data ?? { scored: 0, failed: 0 }) as {
+        scored: number;
+        failed: number;
+      };
+      return { scored: result.scored ?? 0, failed: result.failed ?? 0 };
     });
 
     logger.info("Risk scoring complete", {
@@ -146,5 +137,5 @@ export const riskScorer = inngest.createFunction(
     });
 
     return { total: entityIds.length, ...results };
-  }
+  })
 );
