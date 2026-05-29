@@ -318,6 +318,24 @@ export const AU_BRAND_WATCHLIST: BrandEntry[] = [
   { brand: "Kogan", legitimate_domains: ["kogan.com"] },
   { brand: "MyDeal", legitimate_domains: ["mydeal.com.au"] },
 
+  // Social / tech platforms — credential phishing. Meta logins are cloned
+  // heavily to harvest passwords (fake "your account will be disabled" /
+  // "confirm your Facebook" pages), and Facebook Marketplace is a primary
+  // vector for the AU scams Ask Arthur's bots field. The `brand` token
+  // ("facebook"/"instagram") is exactly what clones use, so no alias is
+  // needed; real Meta domains are excluded via legitimate_domains. CT is
+  // 'expanded' tier — flag-gated rollout via FF_CT_MONITOR_EXPANDED.
+  {
+    brand: "Facebook",
+    legitimate_domains: ["facebook.com", "m.facebook.com", "fb.com"],
+    ct: { keyword: "facebook", tier: "expanded" },
+  },
+  {
+    brand: "Instagram",
+    legitimate_domains: ["instagram.com"],
+    ct: { keyword: "instagram", tier: "expanded" },
+  },
+
   // ── PR-J expansion (2026-05-29): smaller banking / lender / telco / super
   // brands. Web-researched + domain-verified. Curated for the matcher:
   // multi-word names keep their concatenated token; `aliases` carry the
