@@ -14,7 +14,8 @@ Read the [root `CLAUDE.md`](../CLAUDE.md) for project conventions. This file doc
 ├── settings.json              # committed hook configuration (team-wide)
 ├── settings.local.json        # gitignored personal overrides
 ├── hooks/                     # deterministic gates + advisory reviewers
-│   ├── branch-check.sh        # PreToolUse — fresh-branch-off-main rule
+│   ├── branch-check.sh        # PreToolUse (Edit/Write) — fresh-branch-off-main rule
+│   ├── git-commit-guard.sh    # PreToolUse (Bash) — block commit/push on main + wiped-index
 │   ├── run-reviewer.sh        # PostToolUse dispatcher
 │   ├── propose-claudemd-update.sh  # Stop — advisory CLAUDE.md proposals
 │   └── reviewers/
@@ -40,7 +41,8 @@ The MCP server config lives at `../.mcp.json` (gitignored) with the committable 
 
 | Event        | Script                       | Purpose                                                                                                                                                                                             |
 | ------------ | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| PreToolUse   | `branch-check.sh`            | Enforce "fresh branch off main" rule once per session                                                                                                                                               |
+| PreToolUse   | `branch-check.sh`            | Enforce "fresh branch off main" rule once per session (Edit/Write tools)                                                                                                                            |
+| PreToolUse   | `git-commit-guard.sh`        | On Bash: block `git commit`/`git push` on `main`/`master`, and block `git commit` when the index is wiped (HEAD has files, index has 0). Runs on EVERY commit. Born from the 2026-05-29 incidents.  |
 | PostToolUse  | `run-reviewer.sh`            | Dispatch to advisory reviewers (below) based on edited file path. Advisory only — exit 0 always.                                                                                                    |
 | Stop         | `propose-claudemd-update.sh` | If session contains a `fix(…)` / `correct…` commit, propose a rule for the most-touched directory's CLAUDE.md. Advisory only — no file writes. Checks `stop_hook_active` to prevent infinite loops. |
 | SessionStart | inline command               | Clean up stale `/tmp/.claude-branch-checked-*` markers                                                                                                                                              |
