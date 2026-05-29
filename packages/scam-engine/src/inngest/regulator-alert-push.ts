@@ -19,6 +19,7 @@ import { logger } from "@askarthur/utils/logger";
 
 import { inngest } from "./client";
 import { sendPushNotifications } from "../push-sender";
+import { withAxiomLogging } from "./with-axiom-logging";
 
 const SOURCE_LABEL: Record<string, string> = {
   scamwatch_alert: "ACCC Scamwatch",
@@ -44,7 +45,7 @@ export const regulatorAlertPush = inngest.createFunction(
     retries: 2,
   },
   { cron: "*/30 * * * *" },
-  async ({ step }) => {
+  withAxiomLogging({ fnId: "regulator-alert-push" }, async ({ step }) => {
     if (!featureFlags.pushAlerts) {
       return { skipped: true, reason: "pushAlerts flag disabled" };
     }
@@ -119,23 +120,29 @@ export const regulatorAlertPush = inngest.createFunction(
     // ── Step 3: per-narrative push fan-out ────────────────────────────────
     // We push one notification PER narrative (not bundled) because
     // regulator alerts are authoritative — bundling them dilutes the signal.
-    // Each narrative writes its own dedup row.
-    const results = await step.run("send-and-record", async () => {
-      const supabase = createServiceClient();
-      if (!supabase) return { sent: 0, failed: 0, recorded: 0 };
+    //
+    // Each narrative is its OWN step.run("push-<id>") so a successful
+    // push+dedup-write commits independently (M-reg, cron-hardening #521).
+    // Previously the whole loop sat in one "send-and-record" step: if it
+    // threw partway, an Inngest retry replayed the WHOLE loop and re-pushed
+    // narratives that already went out to every token. Per-narrative steps
+    // are memoised once successful, so a retry skips the completed ones. The
+    // step id is keyed on the stable feed_item id (deterministic — no
+    // replay-loop risk).
+    let totalSent = 0;
+    let totalFailed = 0;
+    let recorded = 0;
 
-      let totalSent = 0;
-      let totalFailed = 0;
-      let recorded = 0;
+    for (const narrative of candidates) {
+      const r = await step.run(`push-${narrative.id}`, async () => {
+        const supabase = createServiceClient();
+        if (!supabase) return { sent: 0, failed: 0, recorded: false };
 
-      for (const narrative of candidates) {
-        const sourceLabel =
-          SOURCE_LABEL[narrative.source] ?? narrative.source;
-        const body = narrative.title;
+        const sourceLabel = SOURCE_LABEL[narrative.source] ?? narrative.source;
         const messages = tokens.map((token) => ({
           to: token,
           title: `Regulator alert: ${sourceLabel}`,
-          body,
+          body: narrative.title,
           sound: "default" as const,
           channelId: "scam-alerts",
           priority: "high" as const,
@@ -152,8 +159,6 @@ export const regulatorAlertPush = inngest.createFunction(
         const tickets = await sendPushNotifications(messages);
         const sent = tickets.filter((t) => t.status === "ok").length;
         const failed = tickets.filter((t) => t.status === "error").length;
-        totalSent += sent;
-        totalFailed += failed;
 
         // Record dedup row. ON CONFLICT DO NOTHING handles a concurrent
         // tick that races us — the loser silently no-ops.
@@ -173,13 +178,17 @@ export const regulatorAlertPush = inngest.createFunction(
             feed_item_id: narrative.id,
             error: error.message,
           });
-        } else {
-          recorded += 1;
+          return { sent, failed, recorded: false };
         }
-      }
+        return { sent, failed, recorded: true };
+      });
 
-      return { sent: totalSent, failed: totalFailed, recorded };
-    });
+      totalSent += r.sent;
+      totalFailed += r.failed;
+      if (r.recorded) recorded += 1;
+    }
+
+    const results = { sent: totalSent, failed: totalFailed, recorded };
 
     logger.info("regulator-alert-push: complete", {
       narratives: candidates.length,
@@ -192,5 +201,5 @@ export const regulatorAlertPush = inngest.createFunction(
       tokens: tokens.length,
       ...results,
     };
-  },
+  }),
 );

@@ -19,6 +19,7 @@
     "./inngest/client": "./src/inngest/client.ts",
     "./inngest/functions": "./src/inngest/functions.ts",
     "./inngest/events": "./src/inngest/events.ts",
+    "./inngest/with-axiom-logging": "./src/inngest/with-axiom-logging.ts",
     "./redirect-resolver": "./src/redirect-resolver.ts",
     "./html-sanitize": "./src/html-sanitize.ts",
     "./report-store": "./src/report-store.ts",
