@@ -48,6 +48,14 @@ export async function GET(req: Request) {
     // scales with analyze traffic and is the highest-throughput paid call.
     NEWS_INTEL_EMBED_CAP_USD: readNumberEnv("NEWS_INTEL_EMBED_CAP_USD", 3),
     SCAM_REPORT_EMBED_CAP_USD: readNumberEnv("SCAM_REPORT_EMBED_CAP_USD", 5),
+    // Bot scam-analysis (Telegram / WhatsApp / Messenger / Slack) Claude
+    // spend. Per-user rate limit (5/hr) bounds a single user, but a
+    // distributed flood across many user IDs has no per-feature ceiling
+    // until this brake. Default sits above the $2 global gate so it can
+    // engage. Higher than enrichment caps because this is the user-facing
+    // safety path — pausing it denies victims a scam-check, so the cap is
+    // a runaway-cost backstop, not a routine throttle.
+    BOT_ANALYZE_CAP_USD: readNumberEnv("BOT_ANALYZE_CAP_USD", 10),
   };
   const thresholdUsd = envReads.DAILY_COST_THRESHOLD_USD.value;
 
@@ -258,6 +266,16 @@ export async function GET(req: Request) {
     .filter((t) => t.feature === "scam-report-embed")
     .reduce((sum, t) => sum + t.cost, 0);
 
+  // Bot scam-analysis spend — single `bot_analyze` tag emitted by
+  // analyzeForBot (packages/bot-core/src/analyze.ts) on every billable
+  // Claude call across all four bot platforms. Engaging this brake makes
+  // analyzeForBot throw BotAnalysisPausedError; handlers fall back to a
+  // "try again shortly" reply.
+  const botAnalyzeThresholdUsd = envReads.BOT_ANALYZE_CAP_USD.value;
+  const botAnalyzeCost = top
+    .filter((t) => t.feature === "bot_analyze")
+    .reduce((sum, t) => sum + t.cost, 0);
+
   let brakeSet = false;
   let redditBrakeSet = false;
   let phoneFootprintBrakeSet = false;
@@ -267,6 +285,7 @@ export async function GET(req: Request) {
   let shopfrontCloneWatchBrakeSet = false;
   let newsIntelEmbedBrakeSet = false;
   let scamReportEmbedBrakeSet = false;
+  let botAnalyzeBrakeSet = false;
   if (vulnEnrichCost > vulnEnrichThresholdUsd) {
     const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     const { error: brakeError } = await supabase
@@ -544,6 +563,36 @@ export async function GET(req: Request) {
     }
   }
 
+  if (botAnalyzeCost > botAnalyzeThresholdUsd) {
+    const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const { error: brakeError } = await supabase
+      .from("feature_brakes")
+      .upsert(
+        {
+          feature: "bot_analyze",
+          paused_until: pausedUntil,
+          reason: `Daily spend $${botAnalyzeCost.toFixed(2)} exceeded $${botAnalyzeThresholdUsd} cap`,
+          set_by: "cost-daily-check",
+          set_cost_usd: botAnalyzeCost,
+          set_threshold_usd: botAnalyzeThresholdUsd,
+          set_at: new Date().toISOString(),
+        },
+        { onConflict: "feature" },
+      );
+    if (brakeError) {
+      logger.error("failed to set bot_analyze brake", {
+        error: brakeError.message,
+      });
+    } else {
+      botAnalyzeBrakeSet = true;
+      logger.warn("bot_analyze brake engaged", {
+        costUsd: botAnalyzeCost,
+        thresholdUsd: botAnalyzeThresholdUsd,
+        pausedUntil,
+      });
+    }
+  }
+
   // Below the global Telegram threshold: brakes were still evaluated above
   // (the M-brake fix), but no digest is sent. Report any brakes that engaged.
   if (!aboveThreshold) {
@@ -564,6 +613,7 @@ export async function GET(req: Request) {
         shopfront_clone_watch: shopfrontCloneWatchBrakeSet,
         news_intel_embed: newsIntelEmbedBrakeSet,
         scam_report_embed: scamReportEmbedBrakeSet,
+        bot_analyze: botAnalyzeBrakeSet,
       },
     });
   }
@@ -640,6 +690,12 @@ export async function GET(req: Request) {
       `🛑 <b>scam_report_embed brake engaged</b> — paused for 24h (spend $${scamReportEmbedCost.toFixed(2)} > $${scamReportEmbedThresholdUsd} cap)`,
     );
   }
+  if (botAnalyzeBrakeSet) {
+    lines.push(
+      "",
+      `🛑 <b>bot_analyze brake engaged</b> — paused for 24h (spend $${botAnalyzeCost.toFixed(2)} > $${botAnalyzeThresholdUsd} cap). Bots reply "try again shortly" until reset.`,
+    );
+  }
   lines.push("", `Full breakdown: https://askarthur.au/admin/costs`);
 
   await sendAdminTelegramMessage(lines.join("\n"));
@@ -668,5 +724,7 @@ export async function GET(req: Request) {
     newsIntelEmbedCost,
     scamReportEmbedBrakeSet,
     scamReportEmbedCost,
+    botAnalyzeBrakeSet,
+    botAnalyzeCost,
   });
 }
