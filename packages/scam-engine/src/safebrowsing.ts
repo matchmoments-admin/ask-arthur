@@ -3,6 +3,7 @@
 
 import { Redis } from "@upstash/redis";
 import { logger } from "@askarthur/utils/logger";
+import { isPrivateIP } from "./private-ip";
 
 // URL reputation cache — threat data changes slowly, no need to re-check every request
 const SAFE_BROWSING_CACHE_TTL = 3_600;   // 1 hour
@@ -66,8 +67,13 @@ export function isPrivateURL(urlString: string): boolean {
     // Block known internal hostnames
     if (BLOCKED_HOSTNAMES.includes(hostname)) return true;
 
-    // Block IPv6 loopback
-    if (hostname === "[::1]" || hostname === "::1") return true;
+    // IPv6 literal host (new URL brackets these). Delegate to the shared IP
+    // classifier so ULA (fd00::/8), link-local (fe80::/10), unspecified ([::])
+    // and IPv4-mapped (::ffff:169.254.169.254) are all blocked — not just ::1.
+    if (hostname.startsWith("[") && hostname.endsWith("]")) {
+      if (isPrivateIP(hostname)) return true;
+    }
+    if (hostname === "::1") return true;
 
     // Check against private IP patterns
     for (const pattern of PRIVATE_IP_PATTERNS) {

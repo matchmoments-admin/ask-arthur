@@ -11,6 +11,7 @@
     "./claude": "./src/claude.ts",
     "./pipeline": "./src/pipeline.ts",
     "./safebrowsing": "./src/safebrowsing.ts",
+    "./ssrf-dispatcher": "./src/ssrf-dispatcher.ts",
     "./whois": "./src/whois.ts",
     "./ssl": "./src/ssl.ts",
     "./url-normalize": "./src/url-normalize.ts",

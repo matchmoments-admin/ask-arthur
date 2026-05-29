@@ -1,5 +1,6 @@
 // security.txt check — validate RFC 9116 security policy file
 
+import { ssrfSafeDispatcher } from "@askarthur/scam-engine/ssrf-dispatcher";
 import type { CheckResult } from "../types";
 
 const FETCH_TIMEOUT_MS = 3000;
@@ -13,6 +14,7 @@ export async function checkSecurityTxt(baseUrl: string): Promise<CheckResult> {
       method: "GET",
       redirect: "follow",
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      ...({ dispatcher: ssrfSafeDispatcher } as Record<string, unknown>),
     });
 
     if (!res.ok) {
