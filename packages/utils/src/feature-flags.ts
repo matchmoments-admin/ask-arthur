@@ -376,6 +376,20 @@ export const featureFlags = {
    *  rows + Telegram digest. Plan: docs/plans/clone-watch-mvp.md §4 PR 2. */
   shopfrontCloneWatch: readBoolEnv("FF_SHOPFRONT_CLONE_WATCH"),
 
+  /** Onward reporting — OpenPhish community blocklist destination. Server-side
+   *  only (the Inngest worker is the only consumer). Gates the
+   *  report-onward-openphish worker: when OFF the worker marks the queued log
+   *  row skipped instead of emailing report@openphish.com. Default OFF until
+   *  the forward template is validated + RESEND deliverability to OpenPhish is
+   *  confirmed. */
+  onwardOpenphish: readBoolEnv("FF_ONWARD_OPENPHISH"),
+
+  /** Onward reporting — APWG eCrime Exchange destination
+   *  (reportphishing@apwg.org). Server-side only. Gates the
+   *  report-onward-apwg worker; same skip-when-OFF semantics as OpenPhish.
+   *  Default OFF. */
+  onwardApwg: readBoolEnv("FF_ONWARD_APWG"),
+
   /** Shopfront clone-watch outreach — master flag for Layers 1-5
    *  (admin triage dashboard, community submission, brand notification,
    *  weekly digest). Server-side only. When OFF, /admin/clone-watch

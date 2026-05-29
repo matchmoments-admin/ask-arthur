@@ -17,6 +17,8 @@ const Body = z.object({
           "idcare",
           "brand_abuse",
           "ask_arthur_feed",
+          "openphish",
+          "apwg",
         ]),
         destination_key: z.string().min(1).max(200),
       })
@@ -34,6 +36,8 @@ const DISPLAY: Record<DestEnum, string> = {
   idcare: "IDCARE",
   brand_abuse: "Brand security team",
   ask_arthur_feed: "Ask Arthur threat feed",
+  openphish: "OpenPhish blocklist",
+  apwg: "APWG eCrime Exchange",
 };
 
 /**

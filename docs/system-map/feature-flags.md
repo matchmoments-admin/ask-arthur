@@ -151,9 +151,11 @@ Layer 0 = daily NRD lexical sweep (live since 2026-05-24). Layers 1–5 = outrea
 
 ## Third-party reporting
 
-| Flag            | Default | Purpose                                               |
-| --------------- | ------- | ----------------------------------------------------- |
-| `metaBrpReport` | OFF     | Meta Brand Rights Protection deepfake reporter (stub) |
+| Flag                                      | Default | Purpose                                                                                                                                                                                                                                                                                                           |
+| ----------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `metaBrpReport`                           | OFF     | Meta Brand Rights Protection deepfake reporter (stub)                                                                                                                                                                                                                                                             |
+| `onwardOpenphish` (`FF_ONWARD_OPENPHISH`) | OFF     | Onward destination `openphish` → emails the suspected phishing URL(s) to `report@openphish.com` (free community blocklist; their REST submit needs a static IP we lack on Vercel). Gates `report-onward-openphish`; when OFF the worker marks the queued log row skipped. Skips if the report has no scammer URL. |
+| `onwardApwg` (`FF_ONWARD_APWG`)           | OFF     | Onward destination `apwg` → emails the URL(s) to `reportphishing@apwg.org` (APWG eCrime Exchange). Gates `report-onward-apwg`; same skip-when-OFF + no-URL semantics.                                                                                                                                             |
 
 ---
 
