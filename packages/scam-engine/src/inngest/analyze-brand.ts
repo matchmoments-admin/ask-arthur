@@ -5,6 +5,7 @@ import {
   ANALYZE_COMPLETED_EVENT,
   parseAnalyzeCompletedData,
 } from "./events";
+import { withAxiomLogging } from "./with-axiom-logging";
 
 // Durable consumer for analyze.completed.v1 — emits a
 // brand_impersonation_alerts row when the AI identified an impersonated
@@ -24,7 +25,7 @@ export const handleAnalyzeCompletedBrand = inngest.createFunction(
     retries: 2,
   },
   { event: ANALYZE_COMPLETED_EVENT },
-  async ({ event, step }) => {
+  withAxiomLogging({ fnId: "analyze-completed-brand" }, async ({ event, step }) => {
     const data = await step.run("parse-event", () =>
       parseAnalyzeCompletedData(event.data)
     );
@@ -59,5 +60,5 @@ export const handleAnalyzeCompletedBrand = inngest.createFunction(
     });
 
     return { alerted: true, brand: data.impersonatedBrand };
-  }
+  })
 );

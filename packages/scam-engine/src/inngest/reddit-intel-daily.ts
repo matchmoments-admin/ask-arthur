@@ -34,6 +34,7 @@ import {
 } from "./events";
 import { callClaudeJson } from "../anthropic";
 import { logFunctionError, isRedditIntelBraked } from "./reddit-intel-error-log";
+import { withAxiomLogging } from "./with-axiom-logging";
 
 // ── Versioning ────────────────────────────────────────────────────────────
 // Bump PROMPT_VERSION whenever the system prompt or output schema changes.
@@ -348,7 +349,7 @@ export const redditIntelDaily = inngest.createFunction(
     // (UNIQUE(feed_item_id) on reddit_post_intel + UPSERT on daily_summary).
   },
   { event: REDDIT_INTEL_BATCH_READY_EVENT },
-  async ({ event, step }) => {
+  withAxiomLogging({ fnId: "reddit-intel-daily" }, async ({ event, step }) => {
     if (!featureFlags.redditIntelIngest) {
       return { skipped: true, reason: "redditIntelIngest flag off" };
     }
@@ -690,5 +691,5 @@ export const redditIntelDaily = inngest.createFunction(
       cohortDate: upsertResult.cohortDate,
       estimatedCostUsd: classification.estimatedCostUsd,
     };
-  },
+  }),
 );

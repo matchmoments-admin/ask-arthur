@@ -7,6 +7,7 @@ import {
   parseAnalyzeCompletedData,
 } from "./events";
 import type { InputMode, ReportSource } from "@askarthur/types";
+import { withAxiomLogging } from "./with-axiom-logging";
 
 // Durable consumer for analyze.completed.v1 — writes a scam_reports row
 // plus entity links for every analysis, regardless of verdict.
@@ -28,7 +29,7 @@ export const handleAnalyzeCompletedReport = inngest.createFunction(
     retries: 3,
   },
   { event: ANALYZE_COMPLETED_EVENT },
-  async ({ event, step }) => {
+  withAxiomLogging({ fnId: "analyze-completed-report" }, async ({ event, step }) => {
     const data = await step.run("parse-event", () =>
       parseAnalyzeCompletedData(event.data)
     );
@@ -115,5 +116,5 @@ export const handleAnalyzeCompletedReport = inngest.createFunction(
     }
 
     return { reportId, entityCount: entities.length };
-  }
+  })
 );

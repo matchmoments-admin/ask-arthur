@@ -5,6 +5,7 @@ import {
   ANALYZE_COMPLETED_EVENT,
   parseAnalyzeCompletedData,
 } from "./events";
+import { withAxiomLogging } from "./with-axiom-logging";
 
 // Claude Haiku 4.5 token pricing (April 2026 list prices, $ per token).
 // Duplicated from apps/web/lib/cost-telemetry.ts `PRICING` to avoid a
@@ -43,7 +44,7 @@ export const handleAnalyzeCompletedCost = inngest.createFunction(
     retries: 2,
   },
   { event: ANALYZE_COMPLETED_EVENT },
-  async ({ event, step }) => {
+  withAxiomLogging({ fnId: "analyze-completed-cost" }, async ({ event, step }) => {
     const data = await step.run("parse-event", () =>
       parseAnalyzeCompletedData(event.data)
     );
@@ -108,5 +109,5 @@ export const handleAnalyzeCompletedCost = inngest.createFunction(
     });
 
     return { recorded: true };
-  }
+  })
 );
