@@ -5,6 +5,8 @@
 import { Redis } from "@upstash/redis";
 import { logger } from "@askarthur/utils/logger";
 
+import { logCost, ENGINE_PRICING } from "./cost-log";
+
 const CACHE_TTL = 86_400; // 24 hours
 const CACHE_PREFIX = "askarthur:ipqs";
 
@@ -100,6 +102,15 @@ export async function checkIPQS(phone: string): Promise<IPQSPhoneResult> {
       prepaid: data.prepaid ?? false,
       doNotCall: data.do_not_call ?? false,
     };
+
+    // Cost telemetry — real IPQS call (cache miss). ~$0.003/lookup.
+    void logCost({
+      feature: "ipqualityscore",
+      provider: "ipqs",
+      operation: "phone.lookup",
+      units: 1,
+      estimatedCostUsd: ENGINE_PRICING.IPQS_PHONE_FRAUD_USD,
+    });
 
     // Cache result (fire-and-forget)
     if (redis) {

@@ -26,6 +26,8 @@ import {
   parseScamReportStoredData,
 } from "./events";
 import { embed, type EmbeddingDomain } from "../embeddings";
+import { isFeatureBraked } from "../cost-log";
+import { withAxiomLogging } from "./with-axiom-logging";
 
 // scam_types that route to voyage-finance-2. Names follow the analyze
 // pipeline's classifier output. Anything not in this set falls back to
@@ -102,7 +104,16 @@ export const scamReportEmbed = inngest.createFunction(
     retries: 3,
   },
   { event: SCAM_REPORT_STORED_EVENT },
-  async ({ event, step }) => {
+  withAxiomLogging({ fnId: "scam-report-embed" }, async ({ event, step }) => {
+    // Cost brake — highest-throughput Voyage consumer (one embed per
+    // non-SAFE report). cost-daily-check sets the `scam_report_embed` brake
+    // when the day's embed spend exceeds its cap. No brake row → runs
+    // normally (regression-free). Checked before the row load so a braked
+    // day does zero Voyage work.
+    if (await isFeatureBraked("scam_report_embed")) {
+      return { skipped: true, reason: "cost_brake_engaged" };
+    }
+
     const data = await step.run("parse-event", () =>
       parseScamReportStoredData(event.data),
     );
@@ -227,5 +238,5 @@ export const scamReportEmbed = inngest.createFunction(
       totalTokens: result.totalTokens,
       estimatedCostUsd: result.estimatedCostUsd,
     };
-  },
+  }),
 );

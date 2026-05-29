@@ -8,6 +8,8 @@ import { Redis } from "@upstash/redis";
 import { logger } from "@askarthur/utils/logger";
 import type { PhoneLookupResult, PhoneRiskLevel } from "@askarthur/types";
 
+import { logCost, ENGINE_PRICING } from "./cost-log";
+
 export type { PhoneLookupResult };
 
 const CACHE_TTL = 86_400; // 24 hours — carrier/line type data is stable
@@ -126,6 +128,18 @@ export async function lookupPhoneNumber(phoneNumber: string): Promise<PhoneLooku
       callerName: callerNameValue,
       callerNameType,
     };
+
+    // Cost telemetry — real Twilio call (cache miss). $0.018/lookup
+    // (line-type intelligence + CNAM). Fire-and-forget; never blocks the
+    // real-time analyze path that also calls this.
+    void logCost({
+      feature: "twilio-lookup",
+      provider: "twilio",
+      operation: "lookups.v2.fetch",
+      units: 1,
+      estimatedCostUsd: ENGINE_PRICING.TWILIO_LOOKUP_V2_USD,
+      metadata: { line_type: lineType, valid: lookupResult.valid },
+    });
 
     // Cache result (fire-and-forget)
     if (redis) {

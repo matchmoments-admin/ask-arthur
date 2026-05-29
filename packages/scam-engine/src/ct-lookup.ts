@@ -5,6 +5,8 @@
 import { Redis } from "@upstash/redis";
 import { logger } from "@askarthur/utils/logger";
 
+import { logCost, ENGINE_PRICING } from "./cost-log";
+
 const CACHE_TTL = 43_200; // 12 hours
 const CACHE_PREFIX = "askarthur:ct";
 const MAX_CERTS = 20; // Limit to 20 most recent (crt.sh can return thousands)
@@ -144,6 +146,17 @@ export async function lookupCT(domain: string): Promise<CTLookupResult> {
       oldestCertDate,
       newestCertDate,
     };
+
+    // Cost telemetry — real crt.sh query (cache miss). Unmetered/free;
+    // units track volume so a sudden spike is visible in /admin/costs.
+    void logCost({
+      feature: "ct-lookup",
+      provider: "crtsh",
+      operation: "search",
+      units: 1,
+      estimatedCostUsd: ENGINE_PRICING.CT_LOOKUP_USD,
+      metadata: { certificate_count: uniqueCerts.length },
+    });
 
     // Cache result (fire-and-forget)
     if (redis) {
