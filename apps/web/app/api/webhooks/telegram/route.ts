@@ -3,6 +3,10 @@ import { bot } from "@/lib/bots/telegram/bot";
 import { verifyTelegramSecret } from "@askarthur/bot-core/webhook-verify";
 import { logger } from "@askarthur/utils/logger";
 
+// node:crypto (via bot-core verifier) is unavailable on Edge; pin Node + dynamic.
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 const handleUpdate = webhookCallback(bot, "std/http");
 
 export async function POST(req: Request) {

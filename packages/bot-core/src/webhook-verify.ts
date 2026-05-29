@@ -57,9 +57,13 @@ export function verifySlackSignature(req: Request, rawBody: string): boolean {
   const timestamp = req.headers.get("x-slack-request-timestamp");
   if (!signature || !timestamp) return false;
 
-  // Reject requests older than 5 minutes to prevent replay attacks
+  // Reject requests older than 5 minutes to prevent replay attacks. Guard a
+  // non-numeric timestamp: parseInt(...) → NaN and `NaN > 300` is false, which
+  // would SILENTLY skip the replay window. Number.isFinite closes that (the
+  // HMAC over the basestring still gates either way).
   const now = Math.floor(Date.now() / 1000);
-  if (Math.abs(now - parseInt(timestamp, 10)) > 300) return false;
+  const ts = Number(timestamp);
+  if (!Number.isFinite(ts) || Math.abs(now - ts) > 300) return false;
 
   const sigBasestring = `v0:${timestamp}:${rawBody}`;
   const hmac = createHmac("sha256", secret);
@@ -73,4 +77,35 @@ export function verifySlackSignature(req: Request, rawBody: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Length-checked, timing-safe string equality. Returns false on a length
+ * mismatch so timingSafeEqual never throws (it raises RangeError on differing
+ * buffer lengths). Use for low-value token / signature string comparisons,
+ * e.g. the Meta subscribe verify-token handshake.
+ */
+export function safeStrEqual(a: string, b: string): boolean {
+  const ba = Buffer.from(a);
+  const bb = Buffer.from(b);
+  return ba.length === bb.length && timingSafeEqual(ba, bb);
+}
+
+/**
+ * Verify a Messenger (Meta) webhook signature (HMAC-SHA256). Mirrors
+ * verifyWhatsAppSignature — both are Meta platforms using X-Hub-Signature-256.
+ * Consolidated here from the inline route verifier, which was the only one that
+ * called timingSafeEqual without a length pre-check (it relied on the throw +
+ * catch to fail closed).
+ */
+export function verifyMessengerSignature(req: Request, rawBody: string): boolean {
+  const appSecret = process.env.MESSENGER_APP_SECRET;
+  if (!appSecret) return false;
+
+  const signature = req.headers.get("x-hub-signature-256");
+  if (!signature) return false;
+
+  const expected =
+    "sha256=" + createHmac("sha256", appSecret).update(rawBody).digest("hex");
+  return safeStrEqual(signature, expected);
 }
