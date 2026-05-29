@@ -35,7 +35,7 @@ Defined in `apps/web/vercel.json`. All routes verify the Vercel cron signature.
 
 ---
 
-## Inngest functions (39)
+## Inngest functions (38)
 
 Defined in `packages/scam-engine/src/inngest/functions.ts`. All have idempotency keys based on `event.data.requestId` (24h dedup); cron functions use Inngest's native cron dedup.
 
@@ -92,13 +92,13 @@ Gated by `FF_ANALYZE_INNGEST_WEB`. When false, the legacy `waitUntil` path runs 
 
 ### News Intel (regulator narratives)
 
-| Function                   | Trigger                          | Purpose                                                                                       |
-| -------------------------- | -------------------------------- | --------------------------------------------------------------------------------------------- |
-| `feed-items-embed`         | `*/30 * * * *` (every 30 min)    | Embed Scamwatch / ACSC / ASIC narratives via Voyage                                           |
-| `feed-retention`           | `30 2 * * *` (nightly 02:30 UTC) | Archive `feed_items` >365d + prune `feed_ingestion_log` (90d) + prune `feed_http_cache` (30d) |
-| `feed-sync-verified-scams` | `0 7 * * 0` (Sun 07:00 UTC)      | Sync `verified_scams` → `feed_items`                                                          |
-| `feed-sync-user-reports`   | `0 7 * * 0` (Sun 07:00 UTC)      | Sync `scam_reports` → `feed_items`                                                            |
-| `regulator-alert-push`     | `*/30 * * * *` (every 30 min)    | Push new ASIC / Scamwatch / ACSC alerts to opted-in users                                     |
+| Function                   | Trigger                          | Purpose                                                                                                  |
+| -------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `feed-items-embed`         | `0 * * * *` (hourly)             | Embed Scamwatch / ACSC / ASIC narratives via Voyage                                                      |
+| `feed-retention`           | `30 2 * * *` (nightly 02:30 UTC) | Archive `feed_items` >365d + prune `feed_ingestion_log` (90d) + prune `feed_http_cache` (30d)            |
+| `feed-sync-verified-scams` | `0 7 * * 0` (Sun 07:00 UTC)      | Sync `verified_scams` → `feed_items`                                                                     |
+| `feed-sync-user-reports`   | `0 7 * * 0` (Sun 07:00 UTC)      | Sync `scam_reports` → `feed_items`                                                                       |
+| `regulator-alert-push`     | `0 * * * *` (hourly)             | Push new ASIC / Scamwatch / ACSC alerts to opted-in users (LOOKBACK_MINUTES 75 covers the wider cadence) |
 
 ### Charity Check
 
@@ -134,30 +134,28 @@ Gated by `FF_ANALYZE_INNGEST_WEB`. When false, the legacy `waitUntil` path runs 
 
 ### Feedback learning
 
-| Function                  | Cron                        | Purpose                                                        |
-| ------------------------- | --------------------------- | -------------------------------------------------------------- |
-| `feedback-triage-refresh` | `*/5 * * * *` (every 5 min) | `REFRESH MATERIALIZED VIEW CONCURRENTLY feedback_triage_queue` |
+| Function                  | Cron                          | Purpose                                                                                                                                                |
+| ------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `feedback-triage-refresh` | `*/30 * * * *` (every 30 min) | `REFRESH MATERIALIZED VIEW CONCURRENTLY feedback_triage_queue` — change-guarded (most ticks early-exit without refreshing) + singleton (`mode:'skip'`) |
 
 ### Metadata / external
 
-| Function          | Cron                     | Purpose                                               |
-| ----------------- | ------------------------ | ----------------------------------------------------- |
-| `meta-brp-report` | `0 */6 * * *` (every 6h) | Meta Brand Rights Protection deepfake reporter (stub) |
+`meta-brp-report` (Meta Brand Rights Protection deepfake reporter) was **deregistered from the Inngest function registry in PR #552** — it no longer runs on any cron. The source file is kept for future re-registration, and its feature flag + `feature_brakes` row still exist as a stub. See `feature-flags.md` (`metaBrpReport`).
 
 ### Onward reporting (event-driven + producer/report crons)
 
-| Function                        | Trigger                             | Purpose                                                                                                                                                                                                                                          |
-| ------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `report-onward-scamwatch`       | `report.submitted.v1`               | Deep-link marker (no API; user lands on Scamwatch URL)                                                                                                                                                                                           |
-| `report-onward-acma-email-spam` | `report.submitted.v1` (email spam)  | ACMA callback                                                                                                                                                                                                                                    |
-| `report-onward-report-cyber`    | manual                              | ReportCyber callback                                                                                                                                                                                                                             |
-| `report-onward-idcare`          | manual                              | IDcare identity-theft support referral                                                                                                                                                                                                           |
-| `report-onward-ask-arthur-feed` | manual                              | Internal feed archive                                                                                                                                                                                                                            |
-| `onward-brand-abuse`            | `report.submitted.v1` (brand abuse) | Queue brand report submission                                                                                                                                                                                                                    |
-| `report-onward-openphish`       | `report.onward.openphish`           | Email phishing URL(s) to OpenPhish (`FF_ONWARD_OPENPHISH`, default OFF)                                                                                                                                                                          |
-| `report-onward-apwg`            | `report.onward.apwg`                | Email phishing URL(s) to APWG eCrime Exchange (`FF_ONWARD_APWG`, default OFF)                                                                                                                                                                    |
-| `report-onward-auto-report`     | `25 * * * *` (hourly cron)          | Proactive producer: sweeps recent HIGH_RISK `scam_reports` with a URL → auto-enqueues OpenPhish/APWG onward reports (`FF_ONWARD_AUTO_REPORT`, default OFF; only enqueues destinations whose worker flag is ON)                                   |
-| `report-brand-stewardship`      | `0 9 1 * *` (1st of month)          | WS2-cap: aggregate prior month's `onward_report_log` per impersonated brand → UPSERT `brand_stewardship_reports` ledger rows (brands with a `known_brands` email contact). Gated by `FF_BRAND_STEWARDSHIP_REPORT`. TS aggregation, bounded read. |
+| Function                        | Trigger                             | Purpose                                                                                                                                                                                                                                                                  |
+| ------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `report-onward-scamwatch`       | `report.submitted.v1`               | Deep-link marker (no API; user lands on Scamwatch URL)                                                                                                                                                                                                                   |
+| `report-onward-acma-email-spam` | `report.submitted.v1` (email spam)  | ACMA callback                                                                                                                                                                                                                                                            |
+| `report-onward-report-cyber`    | manual                              | ReportCyber callback                                                                                                                                                                                                                                                     |
+| `report-onward-idcare`          | manual                              | IDcare identity-theft support referral                                                                                                                                                                                                                                   |
+| `report-onward-ask-arthur-feed` | manual                              | Internal feed archive                                                                                                                                                                                                                                                    |
+| `onward-brand-abuse`            | `report.submitted.v1` (brand abuse) | Queue brand report submission                                                                                                                                                                                                                                            |
+| `report-onward-openphish`       | `report.onward.openphish`           | Email phishing URL(s) to OpenPhish (`FF_ONWARD_OPENPHISH`, default OFF)                                                                                                                                                                                                  |
+| `report-onward-apwg`            | `report.onward.apwg`                | Email phishing URL(s) to APWG eCrime Exchange (`FF_ONWARD_APWG`, default OFF)                                                                                                                                                                                            |
+| `report-onward-auto-report`     | `25 */3 * * *` (every 3h)           | Proactive producer: sweeps recent HIGH_RISK `scam_reports` with a URL → auto-enqueues OpenPhish/APWG onward reports (`FF_ONWARD_AUTO_REPORT`, default OFF; only enqueues destinations whose worker flag is ON). 24h lookback + dedup index make the 3h cadence lossless. |
+| `report-brand-stewardship`      | `0 9 1 * *` (1st of month)          | WS2-cap: aggregate prior month's `onward_report_log` per impersonated brand → UPSERT `brand_stewardship_reports` ledger rows (brands with a `known_brands` email contact). Gated by `FF_BRAND_STEWARDSHIP_REPORT`. TS aggregation, bounded read.                         |
 
 ### Shopfront clone-watch (Layer 0 + outreach + measurement)
 
@@ -169,7 +167,7 @@ Layer 0 daily NRD ingest live since 2026-05-24. Outreach pipeline + measurement 
 | `shopfront-clone-submit-netcraft`      | event `shopfront/clone.triaged.v1`                                           | Layer 2 — submits TP-confirmed candidates to Netcraft v3 Report API. Skips if `FF_SHOPFRONT_CLONE_SUBMIT_NETCRAFT` OFF or `NETCRAFT_REPORT_API_KEY` unset.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `shopfront-clone-notify-brand`         | event `shopfront/clone.triaged.v1`                                           | Layers 3+4 router (no longer sends email directly — see prepare cron below). Looks up `brand_contact_directory`, then: email channels (`security_txt` / `fraud_inbox`) → `enqueue_clone_alert_notification` into the daily-batch queue; manual channels (`bugcrowd_vdp` / `contact_form` / `manual_review`) → Telegram-page admin via `brand_notification_queued` key; `none` → silently skip. Idempotency `event.data.alertId`. As of PR #488 the triage route inlines the email-channel enqueue, so this function is the redundant safety net for that branch — still load-bearing for manual channels.                                                                                                                                                                                                                        |
 | `shopfront-clone-notify-brand-prepare` | cron `30 9 * * *` + `shopfront/clone.notify-brand-prepare.manual-trigger.v1` | **Daily batch builder.** Pulls `unbatched` queue rows where `scheduled_for <= now()`; filters via `list_recently_notified_brands` (24h cooldown); caps at 50 candidates per (brand, recipient) group; mints a batch_id inside `step.run` (replay-safe); fetches `urlscan_evidence` per alert (PR #489 — link + screenshot embedded in email); renders email via React Email; calls `assign_clone_alert_batch` to freeze subject + html on the queue row. When `FF_SHOPFRONT_CLONE_NOTIFY_BRAND_AUTO_SEND=true`: dispatches via Resend on the same tick with `idempotencyKey: clone-watch-send:{batchId}`. Otherwise: rows transition to `pending` and one Telegram summary fires pointing the admin at `/admin/clone-watch#approvals`. Fails closed if `RESEND_FROM_EMAIL` unset. Singleton (`mode:'skip'`); finish-timeout 10m. |
-| `shopfront-clone-poll-netcraft`        | cron `*/30 * * * *` + manual-trigger event                                   | Polls Netcraft for takedown status, updates `submitted_to.netcraft.{state,takedown_at}`. Powers median time-to-takedown KPI.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `shopfront-clone-poll-netcraft`        | cron `0 * * * *` (hourly) + manual-trigger event                             | Polls Netcraft for takedown status, updates `submitted_to.netcraft.{state,takedown_at}`. Powers median time-to-takedown KPI.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `shopfront-clone-weekly-digest`        | cron `0 10 * * 0` (Sun)                                                      | Layer 5 — aggregates the week, Telegram-pages admin with KPI summary + LinkedIn-post draft (PR #483 — names brands we reported to as public proof).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `shopfront-clone-urlscan`              | event `shopfront/clone.scan-requested.v1`                                    | Phase A.3 — submits candidate URL to urlscan.io, waits 60s + 30s retry, retrieves, auto-classifies (parked / unresolved / likely_phishing / neutral), persists.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `shopfront-clone-urlscan-rescan`       | cron `0 11 * * *` + manual-trigger event                                     | Phase A.3 — fans out scan-requested events for stale rows (>24h since last scan, within 60-day window). Catches the parked → activated transition.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
@@ -301,15 +299,17 @@ Redeploy procedure when the Worker source changes: from `apps/cloudflare-email-w
 
 ```
 */5    pg-stuck-query-watchdog              (every 5 min)
-*/5    feedback-triage-refresh               (every 5 min, Inngest)
 */15   scraper-brake-alert                   (every 15 min)
-*/30   feed-items-embed                      (every 30 min, Inngest)
-*/30   regulator-alert-push                  (every 30 min, Inngest)
+*/30   feedback-triage-refresh               (every 30 min, Inngest; change-guarded — most ticks skip the REFRESH)
+hourly feed-items-embed                      (Inngest)
+hourly regulator-alert-push                  (Inngest)
 hourly enrich-vulnerabilities-cron           (Inngest)
 hourly phone-footprint-refresh-claimer       (Inngest, TZ=Australia/Sydney)
+hourly shopfront-clone-poll-netcraft         (Inngest)
 every 3h scam-alert-push                     (Inngest)
+every 3h report-onward-auto-report           (Inngest, at :25)
 every 4h pipeline-entity-enrichment, urlscan-enrichment (Inngest)
-every 6h pipeline-enrichment-fanout, risk-scorer, meta-brp-report (Inngest)
+every 6h pipeline-enrichment-fanout, risk-scorer (Inngest)
 every 6h bot-queue-sweep, cost-daily-check    (Vercel)
 every 12h pipeline-ct-monitor                (Inngest)
 
@@ -343,7 +343,7 @@ Anything between 02:00 and 05:00 UTC is in the housekeeping window. Anything out
 
 ## News Intel scrapers — operational note
 
-AU regulator narrative scrapers (Scamwatch HTML, ACSC RSS, ASIC JSON) shipped 2026-05-06 (PR #137 + fixes #138/#139, migration v97). Scrapers in `pipeline/scrapers/{scamwatch,acsc,asic_investor}_alerts.py` write to `feed_items` with `source IN ('scamwatch_alert','acsc','asic_investor')`. Voyage embedding via `feed-items-embed` Inngest cron (`*/30 * * * *`). Weekly digest folds in via `regulatorAlerts` section in `WeeklyIntelDigest.tsx`.
+AU regulator narrative scrapers (Scamwatch HTML, ACSC RSS, ASIC JSON) shipped 2026-05-06 (PR #137 + fixes #138/#139, migration v97). Scrapers in `pipeline/scrapers/{scamwatch,acsc,asic_investor}_alerts.py` write to `feed_items` with `source IN ('scamwatch_alert','acsc','asic_investor')`. Voyage embedding via `feed-items-embed` Inngest cron (`0 * * * *`, hourly). Weekly digest folds in via `regulatorAlerts` section in `WeeklyIntelDigest.tsx`.
 
 **Retention** (migration v98): narrative `feed_items` >365d → `feed_items_archive`; `feed_ingestion_log` pruned 90d; `feed_http_cache` pruned 30d. All housekeeping runs nightly at 02:30 UTC via `feed-retention` Inngest function.
 

@@ -188,14 +188,14 @@ The arrows show flow of work, not network calls. `[hot ⚠]` marks write-frequen
 │  • backfill-embed (man.) │                  │ pg_net unmetered   │
 │                          │                  │ from Supabase      │
 │  NEWS INTEL              │                  └────────────────────┘
-│  • feed-items-embed(30m) │                           ▲
+│  • feed-items-embed (1h) │                           ▲
 │  • feed-retention (2:30) │                           │  pg_net INSERT trigger
 │  • feed-sync-verified-   │                           │
 │    scams (weekly)        │       ┌───────────────────┴───────────────────┐
 │  • feed-sync-user-       │       │   bot_message_queue → /api/bot-webhook │
 │    reports (weekly)      │       │   (6h sweeper safety-net)              │
 │  • regulator-alert-push  │       └────────────────────────────────────────┘
-│    (30m)                 │
+│    (1h)                  │
 │                          │       ┌────────────────────────────────────────┐
 │  CHARITY                 │       │   FEATURE FLAGS (~80, default OFF)     │
 │  • acnc-backfill-embed   │       │   packages/utils/src/feature-flags.ts  │
@@ -219,14 +219,14 @@ The arrows show flow of work, not network calls. `[hot ⚠]` marks write-frequen
 │                          │       │                                        │
 │  FEEDBACK LEARNING       │       │   Server-only flags use FF_*;          │
 │  • feedback-triage-      │       │     consumer-visible use NEXT_PUBLIC_  │
-│    refresh (5m, MV)      │       │     FF_*                               │
+│    refresh (30m, MV)     │       │     FF_*                               │
 │                          │       │                                        │
 │  ONWARD REPORTING        │       │   Per-feature cost brakes:             │
 │  • {scamwatch, acma,     │       │     VULN_AU_ENRICHMENT_CAP_USD ($5)    │
 │    report-cyber, idcare, │       │     REDDIT_INTEL_CAP_USD ($10)         │
 │    feed} (event-driven)  │       │     PHONE_FOOTPRINT_CAP_USD ($5)       │
 │                          │       │     DAILY_COST_THRESHOLD_USD ($2)      │
-│  • meta-brp-report (6h)  │       └────────────────────────────────────────┘
+│                          │       └────────────────────────────────────────┘
 └──────────────────────────┘
 ```
 
