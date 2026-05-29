@@ -28,6 +28,18 @@ export interface BrandEntry {
   // alias (e.g. "booking", "circle") reintroduces the dictionary-word FP
   // class the scam-context gate exists to suppress.
   aliases?: string[];
+  // Certificate-Transparency firehose config. When present, this brand is
+  // swept by ct-monitor.ts against crt.sh under `ct.keyword` — a distinctive
+  // lowercase token that must be specific enough not to match unrelated certs
+  // via crt.sh's `%keyword%` wildcard (this is why generic short tokens like
+  // "anz"/"agl"/"amp" are deliberately NOT given a `ct` entry — they'd flood
+  // the firehose). `tier` gates rollout: 'core' is the original always-on
+  // keyword set, 'expanded' only fires when FF_CT_MONITOR_EXPANDED is enabled,
+  // so the research-driven concentrated-target expansion ships as a reversible,
+  // no-regression flag flip. The legitimate_domains union (across ALL brands,
+  // not just CT-eligible ones) is the firehose's exclusion list — see
+  // getCtMonitorConfig.
+  ct?: { keyword: string; tier: "core" | "expanded" };
 }
 
 export const AU_BRAND_WATCHLIST: BrandEntry[] = [
@@ -63,6 +75,7 @@ export const AU_BRAND_WATCHLIST: BrandEntry[] = [
     brand: "Australia Post",
     legitimate_domains: ["auspost.com.au"],
     aliases: ["auspost"],
+    ct: { keyword: "auspost", tier: "core" },
   },
   { brand: "Toll", legitimate_domains: ["tollgroup.com", "mytoll.com"] },
   { brand: "StarTrack", legitimate_domains: ["startrack.com.au"] },
@@ -91,19 +104,40 @@ export const AU_BRAND_WATCHLIST: BrandEntry[] = [
 
   // Banks (overlap with ct-monitor.ts commbank/nab/westpac keywords — cross-surface
   // dedupe routes overlapping URL hits to brand_impersonation_alerts).
-  { brand: "Westpac", legitimate_domains: ["westpac.com.au"] },
-  { brand: "NAB", legitimate_domains: ["nab.com.au"] },
-  { brand: "ANZ", legitimate_domains: ["anz.com.au"] },
+  {
+    brand: "Westpac",
+    legitimate_domains: ["westpac.com.au"],
+    ct: { keyword: "westpac", tier: "core" },
+  },
+  {
+    brand: "NAB",
+    legitimate_domains: ["nab.com.au"],
+    ct: { keyword: "nab", tier: "core" },
+  },
+  { brand: "ANZ", legitimate_domains: ["anz.com.au", "anz.com"] },
   {
     brand: "CBA",
     legitimate_domains: ["commbank.com.au"],
     aliases: ["commbank"],
+    ct: { keyword: "commbank", tier: "core" },
   },
 
   // Telcos (overlap with ct-monitor.ts telstra keyword — same dedupe path).
-  { brand: "Telstra", legitimate_domains: ["telstra.com.au"] },
-  { brand: "Optus", legitimate_domains: ["optus.com.au"] },
-  { brand: "Vodafone", legitimate_domains: ["vodafone.com.au"] },
+  {
+    brand: "Telstra",
+    legitimate_domains: ["telstra.com.au", "telstra.com"],
+    ct: { keyword: "telstra", tier: "core" },
+  },
+  {
+    brand: "Optus",
+    legitimate_domains: ["optus.com.au"],
+    ct: { keyword: "optus", tier: "expanded" },
+  },
+  {
+    brand: "Vodafone",
+    legitimate_domains: ["vodafone.com.au"],
+    ct: { keyword: "vodafone", tier: "expanded" },
+  },
 
   // ── PR-B (Phase 1) expansion: +47 brands across high-impersonation
   // sectors that the original list missed. See
@@ -112,8 +146,16 @@ export const AU_BRAND_WATCHLIST: BrandEntry[] = [
   // brand_contact_directory by migration v150.
 
   // Government services — ACSC's recurring top-impersonation list.
-  { brand: "myGov", legitimate_domains: ["my.gov.au"] },
-  { brand: "Australian Taxation Office", legitimate_domains: ["ato.gov.au"] },
+  {
+    brand: "myGov",
+    legitimate_domains: ["my.gov.au", "mygov.au"],
+    ct: { keyword: "mygov", tier: "core" },
+  },
+  {
+    brand: "Australian Taxation Office",
+    legitimate_domains: ["ato.gov.au"],
+    ct: { keyword: "ato.gov", tier: "core" },
+  },
   {
     brand: "Services Australia",
     legitimate_domains: [
@@ -121,8 +163,13 @@ export const AU_BRAND_WATCHLIST: BrandEntry[] = [
       "centrelink.gov.au",
       "medicareaustralia.gov.au",
     ],
+    ct: { keyword: "centrelink", tier: "core" },
   },
-  { brand: "Service NSW", legitimate_domains: ["service.nsw.gov.au"] },
+  {
+    brand: "Service NSW",
+    legitimate_domains: ["service.nsw.gov.au"],
+    ct: { keyword: "servicensw", tier: "core" },
+  },
   { brand: "Service Victoria", legitimate_domains: ["service.vic.gov.au"] },
   { brand: "Service WA", legitimate_domains: ["wa.gov.au"] },
   {
@@ -132,21 +179,34 @@ export const AU_BRAND_WATCHLIST: BrandEntry[] = [
   {
     brand: "NDIS",
     legitimate_domains: ["ndis.gov.au", "ndiscommission.gov.au"],
+    ct: { keyword: "ndis", tier: "expanded" },
   },
   { brand: "Australian Electoral Commission", legitimate_domains: ["aec.gov.au"] },
   { brand: "Reserve Bank of Australia", legitimate_domains: ["rba.gov.au"] },
 
   // Energy retailers — recurring refund/disconnect-threat phishing template.
   { brand: "AGL", legitimate_domains: ["agl.com.au"] },
-  { brand: "Origin Energy", legitimate_domains: ["originenergy.com.au"] },
-  { brand: "EnergyAustralia", legitimate_domains: ["energyaustralia.com.au"] },
+  {
+    brand: "Origin Energy",
+    legitimate_domains: ["originenergy.com.au"],
+    ct: { keyword: "originenergy", tier: "expanded" },
+  },
+  {
+    brand: "EnergyAustralia",
+    legitimate_domains: ["energyaustralia.com.au"],
+    ct: { keyword: "energyaustralia", tier: "expanded" },
+  },
   { brand: "Red Energy", legitimate_domains: ["redenergy.com.au"] },
   { brand: "Alinta Energy", legitimate_domains: ["alintaenergy.com.au"] },
   { brand: "Powershop", legitimate_domains: ["powershop.com.au"] },
   { brand: "Simply Energy", legitimate_domains: ["simplyenergy.com.au"] },
 
   // Airlines + travel — voucher/refund + rewards-points phishing.
-  { brand: "Qantas", legitimate_domains: ["qantas.com.au", "qantas.com"] },
+  {
+    brand: "Qantas",
+    legitimate_domains: ["qantas.com.au", "qantas.com"],
+    ct: { keyword: "qantas", tier: "expanded" },
+  },
   { brand: "Virgin Australia", legitimate_domains: ["virginaustralia.com"] },
   { brand: "Jetstar", legitimate_domains: ["jetstar.com"] },
   { brand: "Webjet", legitimate_domains: ["webjet.com.au"] },
@@ -158,8 +218,16 @@ export const AU_BRAND_WATCHLIST: BrandEntry[] = [
   { brand: "Wotif", legitimate_domains: ["wotif.com"] },
 
   // Health insurers — premium-refund / claim-update phishing.
-  { brand: "Bupa", legitimate_domains: ["bupa.com.au"] },
-  { brand: "Medibank", legitimate_domains: ["medibank.com.au"] },
+  {
+    brand: "Bupa",
+    legitimate_domains: ["bupa.com.au"],
+    ct: { keyword: "bupa", tier: "expanded" },
+  },
+  {
+    brand: "Medibank",
+    legitimate_domains: ["medibank.com.au"],
+    ct: { keyword: "medibank", tier: "expanded" },
+  },
   { brand: "HCF", legitimate_domains: ["hcf.com.au"] },
   { brand: "NIB", legitimate_domains: ["nib.com.au"] },
   { brand: "AHM", legitimate_domains: ["ahm.com.au"] },
@@ -188,7 +256,11 @@ export const AU_BRAND_WATCHLIST: BrandEntry[] = [
 
   // Tolls / public-transport cards — SMS-bill + top-up phishing. Linkt is
   // top-3 most-impersonated AU brand 2024 per Scamwatch.
-  { brand: "Linkt (Transurban)", legitimate_domains: ["linkt.com.au"] },
+  {
+    brand: "Linkt (Transurban)",
+    legitimate_domains: ["linkt.com.au"],
+    ct: { keyword: "linkt", tier: "expanded" },
+  },
   { brand: "EastLink", legitimate_domains: ["eastlink.com.au"] },
   {
     brand: "Opal (Transport for NSW)",
@@ -266,8 +338,13 @@ export const AU_BRAND_WATCHLIST: BrandEntry[] = [
     brand: "Macquarie Bank",
     legitimate_domains: ["macquarie.com.au"],
     aliases: ["macquarie"],
+    ct: { keyword: "macquarie", tier: "expanded" },
   },
-  { brand: "Bankwest", legitimate_domains: ["bankwest.com.au"] },
+  {
+    brand: "Bankwest",
+    legitimate_domains: ["bankwest.com.au"],
+    ct: { keyword: "bankwest", tier: "expanded" },
+  },
   {
     brand: "St.George Bank",
     legitimate_domains: ["stgeorge.com.au"],
@@ -278,8 +355,13 @@ export const AU_BRAND_WATCHLIST: BrandEntry[] = [
   {
     brand: "Suncorp",
     legitimate_domains: ["suncorp.com.au", "suncorpbank.com.au"],
+    ct: { keyword: "suncorp", tier: "expanded" },
   },
-  { brand: "Bendigo Bank", legitimate_domains: ["bendigobank.com.au"] },
+  {
+    brand: "Bendigo Bank",
+    legitimate_domains: ["bendigobank.com.au"],
+    ct: { keyword: "bendigobank", tier: "expanded" },
+  },
   {
     brand: "Bank of Queensland",
     legitimate_domains: ["boq.com.au"],
@@ -355,7 +437,11 @@ export const AU_BRAND_WATCHLIST: BrandEntry[] = [
   { brand: "Zeller", legitimate_domains: ["myzeller.com"] },
 
   // BNPL + consumer finance
-  { brand: "Afterpay", legitimate_domains: ["afterpay.com"] },
+  {
+    brand: "Afterpay",
+    legitimate_domains: ["afterpay.com"],
+    ct: { keyword: "afterpay", tier: "expanded" },
+  },
   { brand: "Zip", legitimate_domains: ["zip.co"] },
   { brand: "Humm", legitimate_domains: ["shophumm.com", "hummloan.com"] },
   {
@@ -388,17 +474,29 @@ export const AU_BRAND_WATCHLIST: BrandEntry[] = [
   { brand: "Moose Mobile", legitimate_domains: ["moosemobile.com.au"] },
 
   // Super funds + investing (refund / consolidation phishing)
-  { brand: "AustralianSuper", legitimate_domains: ["australiansuper.com"] },
+  {
+    brand: "AustralianSuper",
+    legitimate_domains: ["australiansuper.com"],
+    ct: { keyword: "australiansuper", tier: "expanded" },
+  },
   {
     brand: "Australian Retirement Trust",
     legitimate_domains: ["australianretirementtrust.com.au"],
   },
   { brand: "Aware Super", legitimate_domains: ["aware.com.au"] },
-  { brand: "Hostplus", legitimate_domains: ["hostplus.com.au"] },
+  {
+    brand: "Hostplus",
+    legitimate_domains: ["hostplus.com.au"],
+    ct: { keyword: "hostplus", tier: "expanded" },
+  },
   { brand: "REST Super", legitimate_domains: ["rest.com.au"] },
   { brand: "HESTA", legitimate_domains: ["hesta.com.au"] },
   { brand: "Cbus", legitimate_domains: ["cbussuper.com.au"] },
-  { brand: "UniSuper", legitimate_domains: ["unisuper.com.au"] },
+  {
+    brand: "UniSuper",
+    legitimate_domains: ["unisuper.com.au"],
+    ct: { keyword: "unisuper", tier: "expanded" },
+  },
   {
     brand: "Colonial First State",
     legitimate_domains: ["cfs.com.au"],
@@ -430,3 +528,43 @@ export const AU_BRAND_WATCHLIST: BrandEntry[] = [
   { brand: "QBE", legitimate_domains: ["qbe.com"] },
   { brand: "GIO", legitimate_domains: ["gio.com.au"] },
 ];
+
+export interface CtMonitorConfig {
+  /** crt.sh keyword + the canonical brand it reports under. */
+  keywords: { keyword: string; brand: string }[];
+  /** Exclusion set: a cert CN equal to (or a subdomain of) any of these is
+   *  the brand's own cert, not a clone. Built from the union of ALL brands'
+   *  legitimate_domains — not just the CT-eligible ones — so a hit on the
+   *  `commbank` keyword that happens to surface `anz.com.au` is still
+   *  excluded. */
+  legitimateDomains: string[];
+}
+
+/**
+ * Derive the ct-monitor.ts firehose config from the single-source-of-truth
+ * watchlist. `includeExpanded` (driven by FF_CT_MONITOR_EXPANDED) gates the
+ * research-driven concentrated-target keywords: when false, only `tier:
+ * 'core'` keywords are returned, reproducing the original hardcoded 9-keyword
+ * behaviour exactly (no regression). The legitimate-domain exclusion set is
+ * the union across every brand and is unaffected by the flag.
+ */
+export function getCtMonitorConfig(includeExpanded: boolean): CtMonitorConfig {
+  const keywords: { keyword: string; brand: string }[] = [];
+  const seen = new Set<string>();
+  for (const entry of AU_BRAND_WATCHLIST) {
+    if (!entry.ct) continue;
+    if (entry.ct.tier === "expanded" && !includeExpanded) continue;
+    if (seen.has(entry.ct.keyword)) continue;
+    seen.add(entry.ct.keyword);
+    keywords.push({ keyword: entry.ct.keyword, brand: entry.brand });
+  }
+
+  const domainSet = new Set<string>();
+  for (const entry of AU_BRAND_WATCHLIST) {
+    for (const d of entry.legitimate_domains) {
+      domainSet.add(d.toLowerCase().replace(/\.$/, ""));
+    }
+  }
+
+  return { keywords, legitimateDomains: [...domainSet] };
+}

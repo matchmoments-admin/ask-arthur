@@ -6,41 +6,22 @@ import { inngest } from "./client";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
+import { getCtMonitorConfig } from "@askarthur/shopfront-glue";
 import { normalizeURL } from "../url-normalize";
 import { withAxiomLogging } from "./with-axiom-logging";
 
-const AU_BRAND_KEYWORDS = [
-  "mygov",
-  "centrelink",
-  "ato.gov",
-  "auspost",
-  "commbank",
-  "nab",
-  "westpac",
-  "telstra",
-  "servicensw",
-];
+// Keyword set + legitimate-domain exclusions are derived from the single
+// source of truth — the AU brand watchlist in @askarthur/shopfront-glue — via
+// getCtMonitorConfig. The `core` tier reproduces the original hardcoded
+// 9-keyword list exactly; the `expanded` tier (research-driven concentrated AU
+// targets) only fires when FF_CT_MONITOR_EXPANDED is ON. See ADR-0016: this
+// CT monitor stays a distinct surface from clone-watch (writes
+// brand_impersonation_alerts, feeds the consumer extension), but both now read
+// the same watchlist so the keyword/legit-domain lists can't drift apart.
 
-const LEGITIMATE_DOMAINS = new Set([
-  "my.gov.au",
-  "mygov.au",
-  "servicesaustralia.gov.au",
-  "centrelink.gov.au",
-  "ato.gov.au",
-  "auspost.com.au",
-  "commbank.com.au",
-  "nab.com.au",
-  "anz.com",
-  "anz.com.au",
-  "westpac.com.au",
-  "telstra.com",
-  "telstra.com.au",
-  "service.nsw.gov.au",
-]);
-
-function isLegitimate(domain: string): boolean {
+function isLegitimate(domain: string, legitimateDomains: Set<string>): boolean {
   const d = domain.toLowerCase().replace(/\.$/, "");
-  for (const legit of LEGITIMATE_DOMAINS) {
+  for (const legit of legitimateDomains) {
     if (d === legit || d.endsWith(`.${legit}`)) return true;
   }
   return false;
@@ -89,6 +70,14 @@ export const ctMonitor = inngest.createFunction(
       return { skipped: true, reason: "dataPipeline feature flag disabled" };
     }
 
+    // Derive keywords + exclusions from the shared watchlist. When
+    // FF_CT_MONITOR_EXPANDED is OFF this returns exactly the original 9
+    // `core` keywords, so the monitor's behaviour is unchanged.
+    const { keywords, legitimateDomains } = getCtMonitorConfig(
+      featureFlags.ctMonitorExpanded,
+    );
+    const legitSet = new Set(legitimateDomains);
+
     // One step.run per keyword (M-ct, cron-hardening #521). Previously all 9
     // crt.sh fetches + their exponential-backoff sleeps lived in a single
     // step, so a slow/flaky keyword forced an Inngest retry to re-scan the
@@ -99,13 +88,16 @@ export const ctMonitor = inngest.createFunction(
     // inter-keyword setTimeout is dropped: sequential step execution already
     // spaces the calls, and fetchCrtSh handles 5xx backoff internally.
     const perKeyword: Array<Array<{ url: string; brand: string }>> = [];
-    for (const keyword of AU_BRAND_KEYWORDS) {
+    for (const { keyword } of keywords) {
       const found = await step.run(`scan-ct-${keyword}`, async () => {
         const certs = await fetchCrtSh(keyword);
         const out: Array<{ url: string; brand: string }> = [];
         for (const cert of certs) {
           const cn = cert.common_name?.toLowerCase().trim();
-          if (!cn || cn.startsWith("*") || isLegitimate(cn)) continue;
+          if (!cn || cn.startsWith("*") || isLegitimate(cn, legitSet)) continue;
+          // Store the keyword as the brand label (unchanged from the original
+          // hardcoded behaviour) so downstream brand_impersonation_alerts
+          // consumers see byte-identical data for the `core` keywords.
           out.push({ url: `https://${cn}`, brand: keyword });
         }
         return out;
@@ -157,13 +149,14 @@ export const ctMonitor = inngest.createFunction(
     });
 
     logger.info("CT monitor complete", {
-      scanned: AU_BRAND_KEYWORDS.length,
+      scanned: keywords.length,
+      expanded: featureFlags.ctMonitorExpanded,
       found: newDomains.length,
       inserted: upsertResult.inserted,
     });
 
     return {
-      scanned: AU_BRAND_KEYWORDS.length,
+      scanned: keywords.length,
       found: newDomains.length,
       ...upsertResult,
     };

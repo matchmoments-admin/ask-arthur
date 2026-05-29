@@ -254,6 +254,33 @@ only on internal corpus" (the existing #376 Phase A path) — the
 public-evidence flywheel weakens but the merchant-installed path
 is unaffected.
 
+## Amendment 2026-05-29 — CT monitor keyword set now derives from the shared watchlist (still a distinct surface)
+
+The CT monitor (`ct-monitor.ts`) previously hardcoded its own 9 keywords
+(`mygov`, `centrelink`, `ato.gov`, `auspost`, `commbank`, `nab`, `westpac`,
+`telstra`, `servicensw`) and its own legit-domain exclusion list. Those two
+lists had drifted from the ~150-brand `au-brand-watchlist.ts` that clone-watch
+Layer 0 uses, and the research finding that AU brand impersonation is highly
+**concentrated** (super funds post-April-2025, Linkt, energy retailers,
+Macquarie/Optus, Medibank/Bupa, Qantas) showed the fast CT signal was missing
+most of the high-loss mid-tier.
+
+The monitor now derives its keyword set **and** legit-domain exclusions from
+the shared watchlist via `getCtMonitorConfig(includeExpanded)`
+(`packages/shopfront-glue/`). A `core` tier reproduces the original 9 keywords
+byte-for-byte; an `expanded` tier (the concentrated targets) fires only when
+`FF_CT_MONITOR_EXPANDED` is ON.
+
+**This does NOT violate the "CT monitor stays a distinct surface" decision
+above.** The two surfaces are still discriminated, not merged: the CT monitor
+keeps its own 12h cadence, its own retry budget, and still writes
+`brand_impersonation_alerts` (consumer-extension feed), while clone-watch keeps
+writing `shopfront_clone_alerts`. Only the **source-of-truth for which brands
+to watch** is unified, so the keyword and legit-domain lists can no longer
+drift apart. The tables, crons, and consumer surfaces remain separate per the
+original Decision. A future discriminator-column merge (if Calidog hits ever
+overlap both concerns) remains out of scope and a future ADR.
+
 ## Related
 
 - `docs/plans/shopify-shopfront.md` §2 Layer 1 + §5 Stage 2 (a/b)
