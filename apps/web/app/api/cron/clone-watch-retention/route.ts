@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireCronAuth } from "@/lib/cron-auth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
@@ -25,11 +26,8 @@ export const dynamic = "force-dynamic";
  * "auto-expired by cleanup cron" path that was never built.
  */
 export async function GET(req: Request) {
-  const authHeader = req.headers.get("authorization");
-  const expected = process.env.CRON_SECRET;
-  if (!expected || authHeader !== `Bearer ${expected}`) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  const unauthorized = requireCronAuth(req);
+  if (unauthorized) return unauthorized;
 
   const supabase = createServiceClient();
   if (!supabase) {

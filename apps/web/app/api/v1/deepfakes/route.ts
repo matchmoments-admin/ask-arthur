@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { validateApiKey, logApiUsage } from "@/lib/apiAuth";
+import { guardV1 } from "@/lib/v1-guard";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
@@ -12,35 +12,8 @@ function parsePeriodDays(period: string | null): number {
 }
 
 export async function GET(req: NextRequest) {
-  // API key authentication
-  const auth = await validateApiKey(req, "deepfakes");
-  if (!auth.valid) {
-    return NextResponse.json(
-      { error: "Invalid or missing API key" },
-      { status: 401 }
-    );
-  }
-
-  if (auth.endpointBlocked) {
-    return NextResponse.json(
-      { error: "Your API key does not have access to this endpoint" },
-      { status: 403 }
-    );
-  }
-
-  if (auth.rateLimited) {
-    return NextResponse.json(
-      { error: "Daily API limit exceeded. Resets at midnight UTC." },
-      { status: 429, headers: { "Retry-After": "3600" } }
-    );
-  }
-
-  if (auth.minuteRateLimited) {
-    return NextResponse.json(
-      { error: "Rate limit exceeded. Please slow down." },
-      { status: 429, headers: { "Retry-After": "60" } }
-    );
-  }
+  const guard = await guardV1(req);
+  if (!guard.ok) return guard.error;
 
   const supabase = createServiceClient();
   if (!supabase) {
@@ -57,11 +30,6 @@ export async function GET(req: NextRequest) {
   const days = parsePeriodDays(period);
   const since = new Date();
   since.setDate(since.getDate() - days);
-
-  // Log usage
-  if (auth.keyHash) {
-    logApiUsage(auth.keyHash, "deepfakes");
-  }
 
   try {
     if (celebrity) {

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireCronAuth } from "@/lib/cron-auth";
 
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
@@ -56,11 +57,8 @@ const BATCH_SIZE = 40;
 const CANDIDATE_WINDOW = 1_000; // Candidates examined per run before NOT-IN filter.
 
 export async function GET(req: Request) {
-  const authHeader = req.headers.get("authorization");
-  const expected = process.env.CRON_SECRET;
-  if (!expected || authHeader !== `Bearer ${expected}`) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  const unauthorized = requireCronAuth(req);
+  if (unauthorized) return unauthorized;
 
   if (!featureFlags.redditIntelIngest) {
     return NextResponse.json({ skipped: true, reason: "flag_off" });

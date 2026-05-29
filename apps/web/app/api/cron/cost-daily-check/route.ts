@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireCronAuth } from "@/lib/cron-auth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
@@ -17,11 +18,8 @@ export const dynamic = "force-dynamic";
  * Cron, matching the pattern used by the other /api/cron/* routes.
  */
 export async function GET(req: Request) {
-  const authHeader = req.headers.get("authorization");
-  const expected = process.env.CRON_SECRET;
-  if (!expected || authHeader !== `Bearer ${expected}`) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  const unauthorized = requireCronAuth(req);
+  if (unauthorized) return unauthorized;
 
   // Read all 6 numeric env-var caps up front via the safe coercer. Track
   // any invalid values so we can write a single diagnostic row before any

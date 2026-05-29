@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireCronAuth } from "@/lib/cron-auth";
 import { Resend } from "resend";
 import { logCost, PRICING } from "@/lib/cost-telemetry";
 import { createServiceClient } from "@askarthur/supabase/server";
@@ -17,10 +18,8 @@ function escapeHtml(str: string): string {
 
 export async function GET(req: NextRequest) {
   // Verify cron secret
-  const authHeader = req.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const unauthorized = requireCronAuth(req);
+  if (unauthorized) return unauthorized;
 
   try {
     const supabase = createServiceClient();
@@ -36,22 +35,27 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // Insert as draft (manual review before publish)
-    const { error } = await supabase.from("blog_posts").insert({
-      slug: post.slug,
-      title: post.title,
-      subtitle: post.subtitle,
-      excerpt: post.excerpt,
-      content: post.content,
-      tags: post.tags,
-      author: "Arthur AI",
-      published: false,
-      status: "draft",
-      category: post.category,
-      reading_time_minutes: post.readingTimeMinutes,
-      published_at: new Date().toISOString(),
-      source_scam_ids: post.sourceScamIds,
-    });
+    // Insert as draft (manual review before publish). Upsert on the unique
+    // slug (v168) so a cron retry or repeated trigger updates the existing
+    // draft instead of accumulating duplicate rows.
+    const { error } = await supabase.from("blog_posts").upsert(
+      {
+        slug: post.slug,
+        title: post.title,
+        subtitle: post.subtitle,
+        excerpt: post.excerpt,
+        content: post.content,
+        tags: post.tags,
+        author: "Arthur AI",
+        published: false,
+        status: "draft",
+        category: post.category,
+        reading_time_minutes: post.readingTimeMinutes,
+        published_at: new Date().toISOString(),
+        source_scam_ids: post.sourceScamIds,
+      },
+      { onConflict: "slug" }
+    );
 
     if (error) {
       logger.error("Failed to insert blog post", { error: String(error) });

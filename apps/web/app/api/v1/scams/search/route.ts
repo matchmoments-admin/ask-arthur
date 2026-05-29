@@ -19,7 +19,7 @@
 // Gated by featureFlags.scamsSearchB2bApi (NEXT_PUBLIC_FF_SCAMS_SEARCH_B2B_API).
 
 import { NextRequest, NextResponse } from "next/server";
-import { validateApiKey } from "@/lib/apiAuth";
+import { guardV1 } from "@/lib/v1-guard";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
@@ -94,19 +94,9 @@ function vectorToPgString(vec: number[]): string {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = await validateApiKey(req);
-  if (!auth.valid) {
-    return NextResponse.json(
-      { error: "Invalid or missing API key" },
-      { status: 401 },
-    );
-  }
-  if (auth.rateLimited) {
-    return NextResponse.json(
-      { error: "Daily API limit exceeded. Resets at midnight UTC." },
-      { status: 429, headers: { "Retry-After": "3600" } },
-    );
-  }
+  const guard = await guardV1(req);
+  if (!guard.ok) return guard.error;
+  const auth = guard.auth;
 
   if (!featureFlags.scamsSearchB2bApi) {
     return NextResponse.json(

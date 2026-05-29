@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { requireCronAuth } from "@/lib/cron-auth";
+import { readBoolEnv } from "@askarthur/utils/env";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
@@ -132,11 +134,8 @@ function buildMessage(
 }
 
 export async function GET(req: Request) {
-  const authHeader = req.headers.get("authorization");
-  const expected = process.env.CRON_SECRET;
-  if (!expected || authHeader !== `Bearer ${expected}`) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  const unauthorized = requireCronAuth(req);
+  if (unauthorized) return unauthorized;
 
   const supabase = createServiceClient();
   if (!supabase) {
@@ -257,8 +256,7 @@ export async function GET(req: Request) {
   // in the consolidated 7am founder brief (Claude Code Routine "Daily Founder
   // Briefing"). Flip to "true" to restore the legacy daily ping during an
   // incident or while the new brief is being trusted.
-  const legacyTelegramEnabled =
-    process.env.FF_LEGACY_DIGEST_TELEGRAM === "true";
+  const legacyTelegramEnabled = readBoolEnv("FF_LEGACY_DIGEST_TELEGRAM");
 
   if (legacyTelegramEnabled) {
     await sendAdminTelegramMessage(message);

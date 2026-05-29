@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { validateApiKey } from "@/lib/apiAuth";
+import { guardV1 } from "@/lib/v1-guard";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
@@ -11,19 +11,8 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await validateApiKey(req);
-  if (!auth.valid) {
-    return NextResponse.json(
-      { error: "Invalid or missing API key" },
-      { status: 401 }
-    );
-  }
-  if (auth.rateLimited) {
-    return NextResponse.json(
-      { error: "Daily API limit exceeded. Resets at midnight UTC." },
-      { status: 429, headers: { "Retry-After": "3600" } }
-    );
-  }
+  const guard = await guardV1(req);
+  if (!guard.ok) return guard.error;
 
   const supabase = createServiceClient();
   if (!supabase) {

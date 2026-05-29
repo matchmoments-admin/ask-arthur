@@ -1,15 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@askarthur/supabase/server";
-import { validateApiKey } from "@/lib/apiAuth";
+import { guardV1 } from "@/lib/v1-guard";
 
 export async function GET(req: NextRequest) {
-  const authResult = await validateApiKey(req, "threats.read");
-  if (!authResult.valid) {
-    return NextResponse.json(
-      { error: authResult.rateLimited ? "Rate limited" : "Invalid API key" },
-      { status: authResult.rateLimited ? 429 : 401 }
-    );
-  }
+  const guard = await guardV1(req);
+  if (!guard.ok) return guard.error;
 
   const address = req.nextUrl.searchParams.get("address");
   if (!address || address.length < 10) {
