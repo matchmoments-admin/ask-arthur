@@ -1,5 +1,16 @@
 import { analyzeForBot, BotAnalysisPausedError } from "@askarthur/bot-core/analyze";
+import type { Platform } from "@askarthur/bot-core";
 import type { ReportSource } from "@askarthur/types";
+
+// Compiler-checked platform → scam_reports.source map. Using a Record (not a
+// `\`bot_${platform}\` as ReportSource` cast) means adding a Platform member
+// without a matching ReportSource fails the build, not the RPC at runtime.
+const PLATFORM_SOURCE: Record<Platform, ReportSource> = {
+  telegram: "bot_telegram",
+  whatsapp: "bot_whatsapp",
+  slack: "bot_slack",
+  messenger: "bot_messenger",
+};
 import { toTelegramHTML } from "@askarthur/bot-core/format-telegram";
 import { toWhatsAppMessage } from "@askarthur/bot-core/format-whatsapp";
 import { toSlackBlocks } from "@askarthur/bot-core/format-slack";
@@ -21,7 +32,7 @@ export async function processQueuedMessage(
   let result;
   try {
     result = await analyzeForBot(message.message_text, undefined, images, {
-      source: `bot_${message.platform}` as ReportSource,
+      source: PLATFORM_SOURCE[message.platform],
       userId: message.user_id,
       inputMode: images ? "image" : "text",
     });

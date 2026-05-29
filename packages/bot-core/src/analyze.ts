@@ -1,7 +1,7 @@
 import { runAnalysisCore } from "@askarthur/scam-engine/analyze-core";
 import { logCost, isFeatureBraked } from "@askarthur/scam-engine/cost-log";
 import { MODELS } from "@askarthur/scam-engine/anthropic";
-import { storeScamReport } from "@askarthur/scam-engine/report-store";
+import { storeScamReport, buildEntities } from "@askarthur/scam-engine/report-store";
 import { hashIdentifier } from "@askarthur/utils/hash";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
@@ -123,7 +123,16 @@ export async function analyzeForBot(
         text, // scrubbed inside storeScamReport
         region: region ?? null,
         countryCode: null,
-        entities: [], // v1: no entity linkage (fast-follow)
+        // Link scammer phone/email entities so bot-sourced scams join the
+        // cross-channel correlation graph (a scam number seen via WhatsApp +
+        // web links up). These ride on out.result already. URL entities stay
+        // deferred: runAnalysisCore doesn't surface the URL-reputation results
+        // to the bot path, only redirects on the result.
+        entities: buildEntities({
+          phones: out.result.scammerContacts?.phoneNumbers,
+          emails: out.result.scammerContacts?.emailAddresses,
+          extractionMethod: images?.length ? "claude" : "regex",
+        }),
       });
     } catch (err) {
       logger.error("bot attribution storeScamReport failed", {
