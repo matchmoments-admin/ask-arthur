@@ -5,8 +5,8 @@
 The `onward` reporting subsystem (v119) was built as a **user-initiated** flow:
 a person reviews their own scan result and picks which destinations
 (Scamwatch, ACMA, brand abuse, …) to forward it to. PRs #533/#534 extend it to
-a **system-initiated** posture: Ask Arthur proactively reports HIGH_RISK
-phishing URLs to neutral blocklists (OpenPhish, APWG) _without_ a human
+a **system-initiated** posture: Ask Arthur proactively reports HIGH*RISK
+phishing URLs to neutral blocklists (OpenPhish, APWG) \_without* a human
 clicking, and keeps a per-brand monthly ledger (`brand_stewardship_reports`) of
 what it detected + reported on each brand's behalf. We record this because it
 changes the subsystem's trust model and is hard to reverse once brands start
@@ -38,8 +38,8 @@ Two new properties are the real decision:
 ## Decision
 
 - **Proactive producer** (`report-onward-auto-report`, #533): hourly cron,
-  sweeps recent HIGH_RISK `scam_reports` carrying a scammer URL, auto-enqueues
-  onward reports to the _enabled_ URL-blocklist destinations only. Triple-gated
+  sweeps recent HIGH*RISK `scam_reports` carrying a scammer URL, auto-enqueues
+  onward reports to the \_enabled* URL-blocklist destinations only. Triple-gated
   (`FF_ONWARD_AUTO_REPORT` + per-destination `FF_ONWARD_OPENPHISH`/`FF_ONWARD_APWG`).
 - **Brand Stewardship ledger** (`brand_stewardship_reports` v166 +
   `report-brand-stewardship` monthly cron, #534): per-brand monthly rollup over

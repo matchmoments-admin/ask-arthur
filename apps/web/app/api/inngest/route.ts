@@ -45,6 +45,8 @@ import { cloneWatchFpClusterDigest } from "./functions/clone-watch-fp-cluster-di
 // confidence DESC. Writes to clone_watch_classifications sibling table
 // (v157). Pre-rank only at this stage; auto-FP follows in PR-D5 (#501).
 import { cloneWatchHaikuPreclassify } from "./functions/clone-watch-haiku-preclassify";
+// WS2-cap — monthly Brand Stewardship Report aggregation + ledger.
+import { reportBrandStewardship } from "./functions/report-brand-stewardship";
 
 // App-layer Inngest functions live here because they cross apps/web-only
 // primitives (R2 upload, Resend, local auth helpers) that shouldn't leak
@@ -82,6 +84,8 @@ const appFunctions = [
   cloneWatchFpClusterDigest,
   // Clone-watch Haiku pre-classifier (PR-D2, #498, v157)
   cloneWatchHaikuPreclassify,
+  // Brand Stewardship Report (WS2-cap)
+  reportBrandStewardship,
 ];
 
 export const { GET, POST, PUT } = serve({

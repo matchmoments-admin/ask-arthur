@@ -376,6 +376,14 @@ export const featureFlags = {
    *  rows + Telegram digest. Plan: docs/plans/clone-watch-mvp.md §4 PR 2. */
   shopfrontCloneWatch: readBoolEnv("FF_SHOPFRONT_CLONE_WATCH"),
 
+  /** Brand Stewardship Report — monthly per-brand rollup over onward_report_log
+   *  ("here's what we detected + reported on your behalf this month"). Gates
+   *  the report-brand-stewardship cron (aggregation + ledger) AND the
+   *  brand-facing send route. Server-side only. Default OFF until the email
+   *  template's framing is legal-reviewed (#371) and the first month's
+   *  prepared rows have been eyeballed via the admin dashboard. */
+  brandStewardshipReport: readBoolEnv("FF_BRAND_STEWARDSHIP_REPORT"),
+
   /** Onward reporting — OpenPhish community blocklist destination. Server-side
    *  only (the Inngest worker is the only consumer). Gates the
    *  report-onward-openphish worker: when OFF the worker marks the queued log
