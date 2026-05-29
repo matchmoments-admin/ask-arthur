@@ -77,6 +77,38 @@ export async function logCost(args: CostLogArgs): Promise<void> {
 }
 
 /**
+ * Record a permanent function failure as a `cost_telemetry` error row so the
+ * daily health-digest (which aggregates `feature LIKE '%error%'` into an admin
+ * Telegram) surfaces it — the in-package "page on failure" path for
+ * scam-engine functions that can't import apps/web's Telegram helper. Use from
+ * an Inngest `onFailure` handler (fires once after retries are exhausted).
+ * Best-effort: never throws.
+ */
+export async function logFunctionFailure(
+  feature: string,
+  operation: string,
+  error: unknown,
+): Promise<void> {
+  const supabase = createServiceClient();
+  if (!supabase) return;
+  try {
+    await supabase.from("cost_telemetry").insert({
+      feature,
+      provider: "diagnostic",
+      operation,
+      units: 0,
+      estimated_cost_usd: 0,
+      metadata: {
+        error_message: error instanceof Error ? error.message : String(error),
+        error_name: error instanceof Error ? error.name : "Unknown",
+      },
+    });
+  } catch {
+    // Diagnostic insert failed — swallow.
+  }
+}
+
+/**
  * Read-side cost-brake check for any feature. Generic version of
  * isRedditIntelBraked — returns true when feature_brakes has a row for
  * `feature` with paused_until in the future. Best-effort: any DB error

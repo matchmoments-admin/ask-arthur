@@ -17,6 +17,8 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
 import { inngest } from "./client";
+import { logFunctionFailure } from "../cost-log";
+import { withAxiomLogging } from "./with-axiom-logging";
 
 type PruneResult = { table_name: string; rows_deleted: number };
 
@@ -25,9 +27,19 @@ export const telcoEventsRetention = inngest.createFunction(
     id: "telco-events-retention",
     name: "Telco Events: Nightly retention housekeeping",
     retries: 2,
+    // Forensic-retention compliance job. Page on permanent failure (#522) so a
+    // silent multi-day stall doesn't let the 730d/365d windows drift —
+    // surfaced via the daily health-digest's '%error%' aggregation.
+    onFailure: async ({ error }) => {
+      await logFunctionFailure(
+        "telco-events-retention-error",
+        "retention.failed",
+        error,
+      );
+    },
   },
   { cron: "30 4 * * *" },
-  async ({ step }) => {
+  withAxiomLogging({ fnId: "telco-events-retention" }, async ({ step }) => {
     const results = await step.run("prune-telco-events", async () => {
       const supabase = createServiceClient();
       if (!supabase) throw new Error("supabase service client unavailable");
@@ -42,5 +54,5 @@ export const telcoEventsRetention = inngest.createFunction(
     logger.info("telco-events-retention: complete", summary);
 
     return summary;
-  },
+  }),
 );
