@@ -123,19 +123,20 @@ Every consumer page, authenticated page, admin page, and API route, grouped by d
 
 ### Admin (`/admin/*` — HMAC token + admin role)
 
-| Route                    | Purpose                                                                                                                   |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
-| `/admin/dashboard`       | Admin home                                                                                                                |
-| `/admin/feedback`        | Feedback triage queue review                                                                                              |
-| `/admin/costs`           | Cost-telemetry dashboard                                                                                                  |
-| `/admin/brand-alerts`    | Brand-impersonation alert review                                                                                          |
-| `/admin/clone-watch`     | Clone-watch triage queue (FP/TP/Investigate) + per-brand history + Netcraft takedown stats + urlscan classification chips |
-| `/admin/onward-reports`  | Pre-approve regulator submissions                                                                                         |
-| `/admin/vulnerabilities` | Vuln-intel review                                                                                                         |
-| `/admin/reports`         | Scam-report inspection                                                                                                    |
-| `/admin/users`           | User management                                                                                                           |
-| `/admin/leads`           | B2B sales pipeline                                                                                                        |
-| `/admin/stripe`          | Manual invoicing                                                                                                          |
+| Route                    | Purpose                                                                                                                                                                                                      |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `/admin/dashboard`       | Admin home                                                                                                                                                                                                   |
+| `/admin/feedback`        | Feedback triage queue review                                                                                                                                                                                 |
+| `/admin/costs`           | Cost-telemetry dashboard                                                                                                                                                                                     |
+| `/admin/brand-alerts`    | Brand-impersonation alert review                                                                                                                                                                             |
+| `/admin/clone-watch`     | Clone-watch triage queue (FP/TP/Investigate) + per-brand history + Netcraft takedown stats + urlscan classification chips                                                                                    |
+| `/admin/onward-reports`  | Pre-approve regulator submissions                                                                                                                                                                            |
+| `/admin/email-studio`    | Preview all outbound email templates + edit their prose "copy slots" (markdown, DB-backed `email_copy`); preview / test-send-to-self / save. APIs: `/api/admin/email-studio/{preview,save,test-send}`. v167. |
+| `/admin/vulnerabilities` | Vuln-intel review                                                                                                                                                                                            |
+| `/admin/reports`         | Scam-report inspection                                                                                                                                                                                       |
+| `/admin/users`           | User management                                                                                                                                                                                              |
+| `/admin/leads`           | B2B sales pipeline                                                                                                                                                                                           |
+| `/admin/stripe`          | Manual invoicing                                                                                                                                                                                             |
 
 ---
 

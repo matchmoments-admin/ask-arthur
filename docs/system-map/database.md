@@ -97,6 +97,7 @@ Supabase Postgres (project `rquomhcgnodxzkhokwni`). 75+ tables across 12 domain 
 ### Onward Reporting
 
 - `onward_report_log` — Report dispatch to regulators (ACNC, ASIC, etc). v119.
+- `email_copy`, `email_copy_history` — Admin-editable prose "copy slots" for outbound email templates (Email Studio). `email_copy` is the active per-(template,slot) override merged over code defaults by `resolveEmailCopy()`; `email_copy_history` is the append-only audit log. Service-role only. v167.
 - `provider_reports`, `provider_actions` — External provider escalations (v39).
 - `regulator_alert_pushes` — Onward report delivery tracking.
 

@@ -11,6 +11,7 @@ import CloneWatchBrandAlert, {
 } from "@/emails/CloneWatchBrandAlert";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import { logCost, PRICING } from "@/lib/cost-telemetry";
+import { resolveEmailCopy } from "@/lib/email/resolve-copy";
 
 /**
  * Daily batch builder for clone-watch brand notifications.
@@ -267,12 +268,14 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
         const legitimateDomain = group.brand;
         const subject = buildBatchSubject(group);
         const html = await step.run(`render-batch-${batchId}`, async () => {
+          const copy = await resolveEmailCopy("clone_watch_brand_alert");
           return render(
             CloneWatchBrandAlert({
               brandName: legitimateDomain,
               legitimateDomain,
               candidates,
               reportRef: `CW-batch-${batchId}`,
+              copy,
             }),
           );
         });

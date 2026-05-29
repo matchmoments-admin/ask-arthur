@@ -8,6 +8,7 @@ import BrandAbuseReport from "@/emails/BrandAbuseReport";
 import { redactPII } from "@/lib/onward/redact";
 import { logCost, PRICING } from "@/lib/cost-telemetry";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
+import { resolveEmailCopy } from "@/lib/email/resolve-copy";
 
 /**
  * Manual-review gate threshold. The first N successful sends to any given
@@ -179,6 +180,9 @@ export const onwardBrandAbuse = inngest.createFunction(
       "scammer_emails",
     ]);
 
+    const copy = await step.run("resolve-copy", () =>
+      resolveEmailCopy("brand_abuse"),
+    );
     const html = await step.run("render-email", () =>
       render(
         BrandAbuseReport({
@@ -192,6 +196,7 @@ export const onwardBrandAbuse = inngest.createFunction(
           redFlags,
           receivedAt: new Date(scamReport.created_at).toISOString(),
           reportRef,
+          copy,
         })
       )
     );

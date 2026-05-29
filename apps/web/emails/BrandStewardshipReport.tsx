@@ -10,6 +10,8 @@ import {
   Hr,
   Heading,
 } from "@react-email/components";
+import { renderCopySlot } from "@/lib/email/resolve-copy";
+import { BRAND_STEWARDSHIP_SLOTS } from "@/lib/email/copy-registry";
 
 export interface BrandStewardshipReportProps {
   brandName: string;
@@ -27,6 +29,8 @@ export interface BrandStewardshipReportProps {
   reportRef: string;
   /** Unsubscribe / STOP mailto. */
   stopUrl?: string;
+  /** Editable prose overrides (Email Studio). Falls back to slot defaults. */
+  copy?: Record<string, string>;
 }
 
 /**
@@ -54,7 +58,13 @@ export default function BrandStewardshipReport({
   sampleDomains,
   reportRef,
   stopUrl,
+  copy,
 }: BrandStewardshipReportProps) {
+  const slot = (key: keyof typeof BRAND_STEWARDSHIP_SLOTS) =>
+    renderCopySlot(copy?.[key] ?? BRAND_STEWARDSHIP_SLOTS[key].default, {
+      brandName,
+      periodLabel,
+    });
   const stopMailto =
     stopUrl ??
     `mailto:brendan@askarthur.au?subject=${encodeURIComponent(
@@ -122,12 +132,11 @@ export default function BrandStewardshipReport({
               borderTop: "none",
             }}
           >
-            {/* DRAFT COPY — pending #371 */}
-            <Text style={{ color: "#334155", fontSize: "16px", lineHeight: "1.6", margin: "0 0 20px 0" }}>
-              Hello <strong>{brandName}</strong> team — here&apos;s what Ask
-              Arthur, an Australian scam-detection service, detected and
-              reported on your behalf in <strong>{periodLabel}</strong>.
-            </Text>
+            {/* Editable slot: greeting (Email Studio; falls back to default) */}
+            <div
+              style={{ color: "#334155", fontSize: "16px", lineHeight: "1.6", margin: "0 0 20px 0" }}
+              dangerouslySetInnerHTML={{ __html: slot("greeting") }}
+            />
 
             {/* Stat block */}
             <Section
@@ -188,29 +197,23 @@ export default function BrandStewardshipReport({
             >
               What we do
             </Heading>
-            {/* DRAFT COPY — pending #371 */}
-            <Text style={{ color: "#334155", fontSize: "14px", lineHeight: "1.6", margin: "0 0 16px 0" }}>
-              Ask Arthur proactively surfaces domains impersonating Australian
-              brands and forwards the suspected phishing URLs to neutral
-              community blocklists (such as OpenPhish and APWG) in the public
-              interest, at no cost to you. We do not file takedowns on your
-              behalf and we make no determination that any domain is malicious —
-              we share factual signals so your fraud / takedown team can act.
-            </Text>
+            {/* Editable slot: what_we_do */}
+            <div
+              style={{ color: "#334155", fontSize: "14px", lineHeight: "1.6", margin: "0 0 16px 0" }}
+              dangerouslySetInnerHTML={{ __html: slot("what_we_do") }}
+            />
 
-            {/* DRAFT COPY — pending #371 */}
             <Heading
               as="h3"
               style={{ color: "#1B2A4A", fontSize: "15px", fontWeight: 700, margin: "0 0 8px 0" }}
             >
               Working together
             </Heading>
-            <Text style={{ color: "#334155", fontSize: "14px", lineHeight: "1.6", margin: "0 0 8px 0" }}>
-              We keep a full evidence record for every domain above. Reply to
-              this email if you&apos;d like the underlying evidence pack, a
-              different report format, or to discuss working together more
-              closely.
-            </Text>
+            {/* Editable slot: working_together */}
+            <div
+              style={{ color: "#334155", fontSize: "14px", lineHeight: "1.6", margin: "0 0 8px 0" }}
+              dangerouslySetInnerHTML={{ __html: slot("working_together") }}
+            />
 
             <Hr style={{ borderColor: "#E2E8F0", margin: "24px 0" }} />
 

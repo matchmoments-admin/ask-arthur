@@ -398,6 +398,45 @@ export type Database = {
         }
         Relationships: []
       }
+      brand_contact_directory: {
+        Row: {
+          brand: string
+          channel_type: string
+          evidence_format: string
+          evidence_source_url: string | null
+          last_notified_at: string | null
+          last_verified_at: string
+          legitimate_domain: string
+          notes: string | null
+          recipient: string | null
+          updated_at: string
+        }
+        Insert: {
+          brand: string
+          channel_type: string
+          evidence_format?: string
+          evidence_source_url?: string | null
+          last_notified_at?: string | null
+          last_verified_at?: string
+          legitimate_domain: string
+          notes?: string | null
+          recipient?: string | null
+          updated_at?: string
+        }
+        Update: {
+          brand?: string
+          channel_type?: string
+          evidence_format?: string
+          evidence_source_url?: string | null
+          last_notified_at?: string | null
+          last_verified_at?: string
+          legitimate_domain?: string
+          notes?: string | null
+          recipient?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       brand_impersonation_alerts: {
         Row: {
           brand_category: string | null
@@ -539,6 +578,60 @@ export type Database = {
           scammer_phones?: string[] | null
           scammer_urls?: string[] | null
           twitter_post_id?: string | null
+        }
+        Relationships: []
+      }
+      brand_stewardship_reports: {
+        Row: {
+          approved_by_admin_id: string | null
+          brand_key: string
+          brand_name: string
+          created_at: string
+          evidence_scam_report_ids: number[]
+          id: string
+          metrics: Json
+          period_month: string
+          prepared_at: string
+          provider: string | null
+          provider_message_id: string | null
+          recipient_email: string | null
+          sent_at: string | null
+          status: string
+          status_reason: string | null
+        }
+        Insert: {
+          approved_by_admin_id?: string | null
+          brand_key: string
+          brand_name: string
+          created_at?: string
+          evidence_scam_report_ids?: number[]
+          id?: string
+          metrics?: Json
+          period_month: string
+          prepared_at?: string
+          provider?: string | null
+          provider_message_id?: string | null
+          recipient_email?: string | null
+          sent_at?: string | null
+          status?: string
+          status_reason?: string | null
+        }
+        Update: {
+          approved_by_admin_id?: string | null
+          brand_key?: string
+          brand_name?: string
+          created_at?: string
+          evidence_scam_report_ids?: number[]
+          id?: string
+          metrics?: Json
+          period_month?: string
+          prepared_at?: string
+          provider?: string | null
+          provider_message_id?: string | null
+          recipient_email?: string | null
+          sent_at?: string | null
+          status?: string
+          status_reason?: string | null
         }
         Relationships: []
       }
@@ -788,6 +881,202 @@ export type Database = {
           total_checks?: number
         }
         Relationships: []
+      }
+      clone_alert_brand_replies: {
+        Row: {
+          alert_id: number | null
+          body_excerpt: string | null
+          brand: string | null
+          classified_as: string
+          from_email: string
+          id: number
+          meta: Json
+          raw_message_id: string | null
+          received_at: string
+          subject: string | null
+        }
+        Insert: {
+          alert_id?: number | null
+          body_excerpt?: string | null
+          brand?: string | null
+          classified_as?: string
+          from_email: string
+          id?: number
+          meta?: Json
+          raw_message_id?: string | null
+          received_at?: string
+          subject?: string | null
+        }
+        Update: {
+          alert_id?: number | null
+          body_excerpt?: string | null
+          brand?: string | null
+          classified_as?: string
+          from_email?: string
+          id?: number
+          meta?: Json
+          raw_message_id?: string | null
+          received_at?: string
+          subject?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "clone_alert_brand_replies_alert_id_fkey"
+            columns: ["alert_id"]
+            isOneToOne: false
+            referencedRelation: "shopfront_clone_alerts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      clone_alert_notification_queue: {
+        Row: {
+          alert_id: number
+          approval_status: string
+          approval_url: string | null
+          approved_at: string | null
+          approved_by_admin_id: string | null
+          batch_id: string | null
+          brand: string
+          candidate_domain: string
+          candidate_url: string
+          channel_type: string
+          email_body_html: string | null
+          email_subject: string | null
+          enqueued_at: string
+          id: number
+          prepared_at: string | null
+          processed_at: string | null
+          provider_message_id: string | null
+          recipient: string
+          rejected_by_admin_id: string | null
+          scheduled_for: string
+          severity_tier: string
+          status: string
+        }
+        Insert: {
+          alert_id: number
+          approval_status?: string
+          approval_url?: string | null
+          approved_at?: string | null
+          approved_by_admin_id?: string | null
+          batch_id?: string | null
+          brand: string
+          candidate_domain: string
+          candidate_url: string
+          channel_type: string
+          email_body_html?: string | null
+          email_subject?: string | null
+          enqueued_at?: string
+          id?: number
+          prepared_at?: string | null
+          processed_at?: string | null
+          provider_message_id?: string | null
+          recipient: string
+          rejected_by_admin_id?: string | null
+          scheduled_for: string
+          severity_tier: string
+          status?: string
+        }
+        Update: {
+          alert_id?: number
+          approval_status?: string
+          approval_url?: string | null
+          approved_at?: string | null
+          approved_by_admin_id?: string | null
+          batch_id?: string | null
+          brand?: string
+          candidate_domain?: string
+          candidate_url?: string
+          channel_type?: string
+          email_body_html?: string | null
+          email_subject?: string | null
+          enqueued_at?: string
+          id?: number
+          prepared_at?: string | null
+          processed_at?: string | null
+          provider_message_id?: string | null
+          recipient?: string
+          rejected_by_admin_id?: string | null
+          scheduled_for?: string
+          severity_tier?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "clone_alert_notification_queue_alert_id_fkey"
+            columns: ["alert_id"]
+            isOneToOne: false
+            referencedRelation: "shopfront_clone_alerts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "clone_alert_notification_queue_brand_fkey"
+            columns: ["brand"]
+            isOneToOne: false
+            referencedRelation: "brand_contact_directory"
+            referencedColumns: ["brand"]
+          },
+        ]
+      }
+      clone_watch_classifications: {
+        Row: {
+          alert_id: number
+          attack_intent: string | null
+          brand: string
+          candidate_domain: string
+          classified_at: string
+          clone_tactic: string | null
+          confidence: number
+          input_tokens: number | null
+          is_clone: boolean
+          model_id: string
+          output_tokens: number | null
+          prompt_version: string
+          reason: string
+          risk_indicators: Json
+        }
+        Insert: {
+          alert_id: number
+          attack_intent?: string | null
+          brand: string
+          candidate_domain: string
+          classified_at?: string
+          clone_tactic?: string | null
+          confidence: number
+          input_tokens?: number | null
+          is_clone: boolean
+          model_id: string
+          output_tokens?: number | null
+          prompt_version: string
+          reason: string
+          risk_indicators?: Json
+        }
+        Update: {
+          alert_id?: number
+          attack_intent?: string | null
+          brand?: string
+          candidate_domain?: string
+          classified_at?: string
+          clone_tactic?: string | null
+          confidence?: number
+          input_tokens?: number | null
+          is_clone?: boolean
+          model_id?: string
+          output_tokens?: number | null
+          prompt_version?: string
+          reason?: string
+          risk_indicators?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "clone_watch_classifications_alert_id_fkey"
+            columns: ["alert_id"]
+            isOneToOne: true
+            referencedRelation: "shopfront_clone_alerts"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       cluster_members: {
         Row: {
@@ -1438,6 +1727,57 @@ export type Database = {
           source?: string
           swap_date?: string | null
           swapped?: boolean
+        }
+        Relationships: []
+      }
+      email_copy: {
+        Row: {
+          content_md: string
+          slot_key: string
+          template_key: string
+          updated_at: string
+          updated_by_admin_id: string | null
+        }
+        Insert: {
+          content_md: string
+          slot_key: string
+          template_key: string
+          updated_at?: string
+          updated_by_admin_id?: string | null
+        }
+        Update: {
+          content_md?: string
+          slot_key?: string
+          template_key?: string
+          updated_at?: string
+          updated_by_admin_id?: string | null
+        }
+        Relationships: []
+      }
+      email_copy_history: {
+        Row: {
+          content_md: string
+          edited_at: string
+          edited_by_admin_id: string | null
+          id: string
+          slot_key: string
+          template_key: string
+        }
+        Insert: {
+          content_md: string
+          edited_at?: string
+          edited_by_admin_id?: string | null
+          id?: string
+          slot_key: string
+          template_key: string
+        }
+        Update: {
+          content_md?: string
+          edited_at?: string
+          edited_by_admin_id?: string | null
+          id?: string
+          slot_key?: string
+          template_key?: string
         }
         Relationships: []
       }
@@ -5055,6 +5395,193 @@ export type Database = {
         }
         Relationships: []
       }
+      shopfront_clone_alerts: {
+        Row: {
+          alert_state: string
+          candidate_domain: string
+          candidate_url: string
+          created_at: string
+          fetch_status: string | null
+          first_seen_at: string
+          id: number
+          inferred_target_domain: string | null
+          last_fetched_at: string | null
+          last_seen_at: string
+          severity: number
+          severity_tier: string
+          signals: Json
+          source: string
+          submitted_to: Json
+          target_shop_id: number | null
+          triage_at: string | null
+          triage_by: string | null
+          triage_notes: string | null
+          triage_status: string | null
+          updated_at: string
+          url_hash: string
+          urlscan_classification: string | null
+          urlscan_evidence: Json | null
+          urlscan_scanned_at: string | null
+          urlscan_uuid: string | null
+        }
+        Insert: {
+          alert_state?: string
+          candidate_domain: string
+          candidate_url: string
+          created_at?: string
+          fetch_status?: string | null
+          first_seen_at?: string
+          id?: number
+          inferred_target_domain?: string | null
+          last_fetched_at?: string | null
+          last_seen_at?: string
+          severity: number
+          severity_tier: string
+          signals?: Json
+          source: string
+          submitted_to?: Json
+          target_shop_id?: number | null
+          triage_at?: string | null
+          triage_by?: string | null
+          triage_notes?: string | null
+          triage_status?: string | null
+          updated_at?: string
+          url_hash: string
+          urlscan_classification?: string | null
+          urlscan_evidence?: Json | null
+          urlscan_scanned_at?: string | null
+          urlscan_uuid?: string | null
+        }
+        Update: {
+          alert_state?: string
+          candidate_domain?: string
+          candidate_url?: string
+          created_at?: string
+          fetch_status?: string | null
+          first_seen_at?: string
+          id?: number
+          inferred_target_domain?: string | null
+          last_fetched_at?: string | null
+          last_seen_at?: string
+          severity?: number
+          severity_tier?: string
+          signals?: Json
+          source?: string
+          submitted_to?: Json
+          target_shop_id?: number | null
+          triage_at?: string | null
+          triage_by?: string | null
+          triage_notes?: string | null
+          triage_status?: string | null
+          updated_at?: string
+          url_hash?: string
+          urlscan_classification?: string | null
+          urlscan_evidence?: Json | null
+          urlscan_scanned_at?: string | null
+          urlscan_uuid?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shopfront_clone_alerts_target_shop_id_fkey"
+            columns: ["target_shop_id"]
+            isOneToOne: false
+            referencedRelation: "shopfront_shops"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      shopfront_shops: {
+        Row: {
+          created_at: string
+          id: number
+          installed_at: string
+          shop_domain: string
+          shopify_shop_id: string | null
+          uninstalled_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: number
+          installed_at?: string
+          shop_domain: string
+          shopify_shop_id?: string | null
+          uninstalled_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: number
+          installed_at?: string
+          shop_domain?: string
+          shopify_shop_id?: string | null
+          uninstalled_at?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      shopfront_takedown_attempts: {
+        Row: {
+          attempt_type: string
+          body_md: string
+          clone_alert_id: number
+          created_at: string
+          drafted_at: string
+          id: number
+          initiated_by: string
+          initiated_by_user_id: string | null
+          outcome: string | null
+          outcome_notes: string | null
+          recipient_email: string | null
+          recipient_org: string | null
+          response_at: string | null
+          sent_at: string | null
+          template_version: string
+        }
+        Insert: {
+          attempt_type: string
+          body_md: string
+          clone_alert_id: number
+          created_at?: string
+          drafted_at?: string
+          id?: number
+          initiated_by: string
+          initiated_by_user_id?: string | null
+          outcome?: string | null
+          outcome_notes?: string | null
+          recipient_email?: string | null
+          recipient_org?: string | null
+          response_at?: string | null
+          sent_at?: string | null
+          template_version: string
+        }
+        Update: {
+          attempt_type?: string
+          body_md?: string
+          clone_alert_id?: number
+          created_at?: string
+          drafted_at?: string
+          id?: number
+          initiated_by?: string
+          initiated_by_user_id?: string | null
+          outcome?: string | null
+          outcome_notes?: string | null
+          recipient_email?: string | null
+          recipient_org?: string | null
+          response_at?: string | null
+          sent_at?: string | null
+          template_version?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shopfront_takedown_attempts_clone_alert_id_fkey"
+            columns: ["clone_alert_id"]
+            isOneToOne: false
+            referencedRelation: "shopfront_clone_alerts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sim_swap_beta_invites: {
         Row: {
           created_at: string
@@ -6454,6 +6981,10 @@ export type Database = {
       }
     }
     Functions: {
+      _prune_chunked: {
+        Args: { p_interval: string; p_table: string; p_ts_col: string }
+        Returns: number
+      }
       anonymise_expired_footprints: { Args: never; Returns: number }
       archive_feed_items_batch: {
         Args: { p_batch_size?: number; p_default_days?: number }
@@ -6482,6 +7013,17 @@ export type Database = {
         }[]
       }
       assert_fleet_capacity: { Args: { p_org_id: string }; Returns: undefined }
+      assign_clone_alert_batch: {
+        Args: {
+          p_approval_url: string
+          p_auto_approved?: boolean
+          p_batch_id: string
+          p_email_body_html: string
+          p_email_subject: string
+          p_queue_ids: number[]
+        }
+        Returns: number
+      }
       backfill_pfra_member_abns: { Args: never; Returns: number }
       bulk_upsert_feed_crypto_wallet:
         | {
@@ -6638,8 +7180,87 @@ export type Database = {
         Returns: number
       }
       cleanup_old_reddit_posts: { Args: { p_days?: number }; Returns: number }
+      clone_alert_recipient_is_suppressed: {
+        Args: { p_email: string }
+        Returns: boolean
+      }
+      clone_watch_brand_breakdown: {
+        Args: { p_days?: number }
+        Returns: {
+          brand: string
+          brand_notifications: number
+          first_hit_at: string
+          fp: number
+          last_hit_at: string
+          netcraft_submits: number
+          pending: number
+          total_candidates: number
+          tp_actioned: number
+          tp_confirmed: number
+        }[]
+      }
+      clone_watch_classification_trends: {
+        Args: { p_brand?: string; p_days?: number }
+        Returns: {
+          brand: string
+          classified_count: number
+          clone_count: number
+          top_tactic: string
+          week_start: string
+        }[]
+      }
+      clone_watch_public_impact: {
+        Args: { p_days?: number }
+        Returns: {
+          brand_notifications_total: number
+          brands_protected: number
+          candidates_total: number
+          computed_at: string
+          netcraft_submits_total: number
+          tp_confirmed_total: number
+          window_days: number
+        }[]
+      }
+      clone_watch_takedown_stats: {
+        Args: { p_days?: number }
+        Returns: {
+          computed_at: string
+          fastest_minutes: number
+          median_minutes: number
+          p90_minutes: number
+          slowest_minutes: number
+          takedowns_total: number
+          window_days: number
+        }[]
+      }
+      clone_watch_weekly_metrics: {
+        Args: { p_days?: number }
+        Returns: {
+          brands_touched: number
+          candidates_total: number
+          notifications_sent: number
+          pending: number
+          submissions_netcraft: number
+          triaged_fp: number
+          triaged_investigate: number
+          triaged_tp: number
+        }[]
+      }
+      commit_scam_cluster: {
+        Args: {
+          p_entity_count: number
+          p_primary_brand: string
+          p_primary_scam_type: string
+          p_report_ids: number[]
+        }
+        Returns: number
+      }
       compute_entity_risk_score: {
         Args: { p_entity_id: number }
+        Returns: Json
+      }
+      compute_entity_risk_scores: {
+        Args: { p_entity_ids: number[] }
         Returns: Json
       }
       consume_sim_swap_credit: {
@@ -6683,11 +7304,28 @@ export type Database = {
         }
         Returns: number
       }
+      enqueue_clone_alert_notification: {
+        Args: {
+          p_alert_id: number
+          p_brand: string
+          p_candidate_domain: string
+          p_candidate_url: string
+          p_channel_type: string
+          p_recipient: string
+          p_scheduled_for: string
+          p_severity_tier: string
+        }
+        Returns: number
+      }
       ensure_monthly_partition: {
         Args: { p_month: string; p_parent: string }
         Returns: undefined
       }
       ensure_next_month_partitions: { Args: never; Returns: undefined }
+      expire_stale_pending_clone_batches: {
+        Args: { p_chunk_size?: number; p_older_than_hours?: number }
+        Returns: number
+      }
       fraud_manager_search: {
         Args: { p_query: string; p_type?: string }
         Returns: {
@@ -6840,6 +7478,19 @@ export type Database = {
         Args: { p_region?: string; p_verdict: string }
         Returns: undefined
       }
+      ingest_clone_alert_brand_reply: {
+        Args: {
+          p_alert_id: number
+          p_body_excerpt: string
+          p_brand: string
+          p_classified_as: string
+          p_from_email: string
+          p_meta?: Json
+          p_raw_message_id: string
+          p_subject: string
+        }
+        Returns: number
+      }
       link_report_entity: {
         Args: {
           p_entity_id: number
@@ -6849,6 +7500,96 @@ export type Database = {
         }
         Returns: number
       }
+      list_clone_alerts_for_urlscan_rescan: {
+        Args: { p_limit?: number; p_stale_after_hours?: number }
+        Returns: {
+          candidate_domain: string
+          candidate_url: string
+          id: number
+          inferred_target_domain: string
+          last_scanned_at: string
+          previous_classification: string
+        }[]
+      }
+      list_clone_alerts_pending_netcraft_poll: {
+        Args: { p_limit?: number }
+        Returns: {
+          candidate_url: string
+          id: number
+          netcraft_uuid: string
+          submitted_at: string
+        }[]
+      }
+      list_clone_alerts_pending_notification_batch: {
+        Args: { p_limit?: number; p_severity?: string }
+        Returns: {
+          alert_id: number
+          brand: string
+          candidate_domain: string
+          candidate_url: string
+          channel_type: string
+          enqueued_at: string
+          id: number
+          recipient: string
+          severity_tier: string
+        }[]
+      }
+      list_clone_alerts_pending_preclassify: {
+        Args: { p_limit?: number }
+        Returns: {
+          candidate_domain: string
+          candidate_url: string
+          id: number
+          inferred_target_domain: string
+        }[]
+      }
+      list_clone_alerts_pending_triage: {
+        Args: { p_limit?: number }
+        Returns: {
+          auto_classification_attack_intent: string
+          auto_classification_clone_tactic: string
+          auto_classification_confidence: number
+          auto_classification_is_clone: boolean
+          auto_classification_reason: string
+          candidate_domain: string
+          candidate_url: string
+          first_seen_at: string
+          id: number
+          inferred_target_domain: string
+          likely_tp: boolean
+          severity_tier: string
+          signals: Json
+          triage_status: string
+          urlscan_classification: string
+          urlscan_effective_url: string
+          urlscan_scanned_at: string
+          urlscan_screenshot_url: string
+        }[]
+      }
+      list_clone_alerts_pending_urlscan: {
+        Args: { p_limit?: number }
+        Returns: {
+          candidate_domain: string
+          candidate_url: string
+          first_seen_at: string
+          id: number
+          inferred_target_domain: string
+        }[]
+      }
+      list_clone_alerts_unbatched_for_prepare: {
+        Args: { p_limit?: number }
+        Returns: {
+          alert_id: number
+          brand: string
+          candidate_domain: string
+          candidate_url: string
+          channel_type: string
+          enqueued_at: string
+          id: number
+          recipient: string
+          severity_tier: string
+        }[]
+      }
       list_long_running_queries: {
         Args: { min_minutes: number }
         Returns: {
@@ -6856,6 +7597,31 @@ export type Database = {
           minutes: number
           pid: number
           query_preview: string
+        }[]
+      }
+      list_recently_notified_brands: {
+        Args: { p_cooldown_hours?: number; p_legitimate_domains: string[] }
+        Returns: {
+          last_notified_at: string
+          legitimate_domain: string
+        }[]
+      }
+      load_clone_alert_batch: {
+        Args: { p_batch_id: string }
+        Returns: {
+          alert_id: number
+          approval_status: string
+          approved_at: string
+          brand: string
+          candidate_domain: string
+          candidate_url: string
+          channel_type: string
+          email_body_html: string
+          email_subject: string
+          id: number
+          prepared_at: string
+          recipient: string
+          severity_tier: string
         }[]
       }
       log_api_usage: {
@@ -6870,6 +7636,10 @@ export type Database = {
           name: string
           source_url: string
         }[]
+      }
+      mark_clone_alert_notifications_processed: {
+        Args: { p_queue_ids: number[]; p_status?: string }
+        Returns: number
       }
       mark_stale_crypto_wallets: {
         Args: { p_stale_days?: number }
@@ -7029,6 +7799,37 @@ export type Database = {
           summary: string
         }[]
       }
+      merge_clone_alert_submission: {
+        Args: {
+          p_alert_id: number
+          p_key: string
+          p_set_triage_status?: string
+          p_value: Json
+        }
+        Returns: {
+          id: number
+          submitted_to: Json
+          triage_status: string
+        }[]
+      }
+      merge_entity_enrichment_data: {
+        Args: { p_entity_id: number; p_key: string; p_value: Json }
+        Returns: undefined
+      }
+      persist_clone_alert_urlscan: {
+        Args: {
+          p_alert_id: number
+          p_classification: string
+          p_set_triage_status?: string
+          p_urlscan_evidence: Json
+          p_urlscan_uuid: string
+        }
+        Returns: {
+          id: number
+          triage_status: string
+          urlscan_classification: string
+        }[]
+      }
       phone_footprint_internal: {
         Args: { p_msisdn_e164: string }
         Returns: Json
@@ -7042,6 +7843,36 @@ export type Database = {
           rows_deleted: number
           table_name: string
         }[]
+      }
+      purge_old_clone_alert_queue_rows: {
+        Args: { p_chunk_size?: number; p_older_than_days?: number }
+        Returns: number
+      }
+      purge_old_fp_clone_alerts: {
+        Args: { p_chunk_size?: number; p_older_than_days?: number }
+        Returns: number
+      }
+      record_brand_notification_sent: {
+        Args: { p_batch_id: string; p_provider_message_id?: string }
+        Returns: number
+      }
+      record_clone_watch_classification: {
+        Args: {
+          p_alert_id: number
+          p_attack_intent: string
+          p_brand: string
+          p_candidate_domain: string
+          p_clone_tactic: string
+          p_confidence: number
+          p_input_tokens: number
+          p_is_clone: boolean
+          p_model_id: string
+          p_output_tokens: number
+          p_prompt_version: string
+          p_reason: string
+          p_risk_indicators: Json
+        }
+        Returns: undefined
       }
       record_financial_impact: {
         Args: {
@@ -7075,6 +7906,19 @@ export type Database = {
           similarity_score: number
           state: string
           town_city: string
+        }[]
+      }
+      set_clone_alert_triage: {
+        Args: {
+          p_admin_id: string
+          p_alert_id: number
+          p_notes?: string
+          p_status: string
+        }
+        Returns: {
+          id: number
+          triage_at: string
+          triage_status: string
         }[]
       }
       set_user_admin: {
@@ -7113,6 +7957,20 @@ export type Database = {
         Returns: undefined
       }
       terminate_stuck_query: { Args: { target_pid: number }; Returns: boolean }
+      transition_clone_alert_batch: {
+        Args: {
+          p_admin_id?: string
+          p_batch_id: string
+          p_new_status: string
+          p_provider_message_id?: string
+        }
+        Returns: {
+          observed_brand: string
+          observed_recipient: string
+          observed_status: string
+          updated_count: number
+        }[]
+      }
       update_shop_check_signal: {
         Args: {
           p_composite_score?: number
@@ -7122,6 +7980,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      upsert_clone_alerts_batch: { Args: { p_rows: Json }; Returns: number }
       upsert_feed_item: {
         Args: {
           p_category?: string
@@ -7238,6 +8097,8 @@ export type Database = {
         | "idcare"
         | "brand_abuse"
         | "ask_arthur_feed"
+        | "openphish"
+        | "apwg"
       onward_status:
         | "queued"
         | "sending"
@@ -7386,6 +8247,8 @@ export const Constants = {
         "idcare",
         "brand_abuse",
         "ask_arthur_feed",
+        "openphish",
+        "apwg",
       ],
       onward_status: [
         "queued",
