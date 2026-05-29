@@ -14,6 +14,7 @@ import { onwardBrandAbuse } from "./functions/onward-brand-abuse";
 import { onwardAcmaEmailSpam } from "./functions/onward-acma";
 import { onwardOpenphish } from "./functions/onward-openphish";
 import { onwardApwg } from "./functions/onward-apwg";
+import { onwardAutoReport } from "./functions/onward-auto-report";
 import {
   onwardScamwatch,
   onwardReportCyber,
@@ -61,6 +62,7 @@ const appFunctions = [
   onwardAcmaEmailSpam,
   onwardOpenphish,
   onwardApwg,
+  onwardAutoReport,
   onwardScamwatch,
   onwardReportCyber,
   onwardIdcare,

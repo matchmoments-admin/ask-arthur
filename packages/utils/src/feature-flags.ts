@@ -390,6 +390,17 @@ export const featureFlags = {
    *  Default OFF. */
   onwardApwg: readBoolEnv("FF_ONWARD_APWG"),
 
+  /** Onward reporting — proactive auto-report producer. When ON, the hourly
+   *  onward-auto-report cron sweeps recent HIGH_RISK scam_reports that carry a
+   *  scammer URL and enqueues onward reports to the enabled URL-blocklist
+   *  destinations (OpenPhish / APWG) WITHOUT waiting for a user to click. This
+   *  is the "report on behalf of brands without being asked" path. Server-side
+   *  only. Default OFF. Composes with the per-destination flags: the producer
+   *  only enqueues a destination whose own worker flag (onwardOpenphish /
+   *  onwardApwg) is ON, so no skipped rows are generated for dark destinations,
+   *  and sending is gated twice (producer flag + worker flag). */
+  onwardAutoReport: readBoolEnv("FF_ONWARD_AUTO_REPORT"),
+
   /** Shopfront clone-watch outreach — master flag for Layers 1-5
    *  (admin triage dashboard, community submission, brand notification,
    *  weekly digest). Server-side only. When OFF, /admin/clone-watch
