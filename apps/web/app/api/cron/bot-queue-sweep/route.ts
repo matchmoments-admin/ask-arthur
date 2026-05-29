@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireCronAuth } from "@/lib/cron-auth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { markCompleted, markFailed, type QueuedMessage } from "@askarthur/bot-core/queue";
 import { logger } from "@askarthur/utils/logger";
@@ -24,11 +25,8 @@ export const maxDuration = 60;
  * scheduled invocations; see Vercel docs).
  */
 export async function POST(req: Request) {
-  const authHeader = req.headers.get("authorization");
-  const expected = process.env.CRON_SECRET;
-  if (!expected || authHeader !== `Bearer ${expected}`) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  const unauthorized = requireCronAuth(req);
+  if (unauthorized) return unauthorized;
 
   const supabase = createServiceClient();
   if (!supabase) {

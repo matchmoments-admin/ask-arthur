@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { requireCronAuth } from "@/lib/cron-auth";
+import { readBoolEnv } from "@askarthur/utils/env";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
@@ -33,11 +35,8 @@ type StuckBackend = {
 };
 
 export async function GET(req: Request) {
-  const authHeader = req.headers.get("authorization");
-  const expected = process.env.CRON_SECRET;
-  if (!expected || authHeader !== `Bearer ${expected}`) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  const unauthorized = requireCronAuth(req);
+  if (unauthorized) return unauthorized;
 
   const supabase = createServiceClient();
   if (!supabase) {
@@ -72,7 +71,7 @@ export async function GET(req: Request) {
     { parseMode: "HTML" },
   );
 
-  const autoTerminate = process.env.PG_WATCHDOG_AUTO_TERMINATE === "true";
+  const autoTerminate = readBoolEnv("PG_WATCHDOG_AUTO_TERMINATE");
   const terminated: number[] = [];
   if (autoTerminate) {
     for (const row of stuck) {

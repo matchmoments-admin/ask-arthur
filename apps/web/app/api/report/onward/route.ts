@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createServiceClient } from "@askarthur/supabase/server";
+import { checkFormRateLimit } from "@askarthur/utils/rate-limit";
 import { logger } from "@askarthur/utils/logger";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 
@@ -40,6 +41,21 @@ const DISPLAY: Record<DestEnum, string> = {
   apwg: "APWG eCrime Exchange",
 };
 
+// Canonical destination_key per fixed destination. Mirrors
+// get_onward_destinations() (v119) + the OpenPhish/APWG workers (v165). A
+// submitted key for any non-brand destination MUST equal this exact value, so
+// an anonymous caller can't fan out volume by varying the free-text key.
+// brand_abuse keys are validated dynamically against active known_brands.
+const FIXED_DESTINATION_KEYS: Record<Exclude<DestEnum, "brand_abuse">, string> = {
+  scamwatch: "scamwatch.gov.au",
+  reportcyber: "cyber.gov.au",
+  acma_email_spam: "report@submit.spam.acma.gov.au",
+  idcare: "idcare.org",
+  ask_arthur_feed: "askarthur.au",
+  openphish: "report@openphish.com",
+  apwg: "reportphishing@apwg.org",
+};
+
 /**
  * POST /api/report/onward
  *
@@ -50,6 +66,20 @@ const DISPLAY: Record<DestEnum, string> = {
  * tuple no-ops with the existing log row's status.
  */
 export async function POST(req: NextRequest) {
+  // Rate limit (mirrors scam-contacts/report): this route fans out to external
+  // regulator/brand intakes, so cap per-IP submissions even for anonymous use.
+  const ip =
+    req.headers.get("x-real-ip") ||
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    "unknown";
+  const rateCheck = await checkFormRateLimit(ip);
+  if (!rateCheck.allowed) {
+    return NextResponse.json(
+      { error: "rate_limited", message: rateCheck.message },
+      { status: 429 }
+    );
+  }
+
   let body: z.infer<typeof Body>;
   try {
     body = Body.parse(await req.json());
@@ -77,6 +107,40 @@ export async function POST(req: NextRequest) {
     .maybeSingle();
   if (reportErr || !report) {
     return NextResponse.json({ error: "Report not found" }, { status: 404 });
+  }
+
+  // Validate destination_key per destination so a caller can't fan out volume
+  // with arbitrary free-text keys. Fixed destinations must use their canonical
+  // key; brand_abuse keys must match an active known_brands.brand_key.
+  const brandKeys = body.selected
+    .filter((s) => s.destination === "brand_abuse")
+    .map((s) => s.destination_key);
+  let validBrandKeys = new Set<string>();
+  if (brandKeys.length > 0) {
+    const { data: brands } = await supabase
+      .from("known_brands")
+      .select("brand_key")
+      .eq("is_active", true)
+      .in("brand_key", brandKeys);
+    validBrandKeys = new Set(
+      (brands ?? []).map((b) => b.brand_key as string)
+    );
+  }
+  for (const sel of body.selected) {
+    const allowed =
+      sel.destination === "brand_abuse"
+        ? validBrandKeys.has(sel.destination_key)
+        : FIXED_DESTINATION_KEYS[sel.destination] === sel.destination_key;
+    if (!allowed) {
+      return NextResponse.json(
+        {
+          error: "invalid_destination",
+          destination: sel.destination,
+          destination_key: sel.destination_key,
+        },
+        { status: 400 }
+      );
+    }
   }
 
   type ResultRow = {
