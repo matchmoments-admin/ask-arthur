@@ -401,6 +401,18 @@ export const featureFlags = {
    *  and sending is gated twice (producer flag + worker flag). */
   onwardAutoReport: readBoolEnv("FF_ONWARD_AUTO_REPORT"),
 
+  /** CT monitor expanded keyword set — when ON, ct-monitor.ts sweeps crt.sh
+   *  for the research-driven concentrated AU target brands (super funds,
+   *  Linkt, energy retailers, Macquarie/Optus/Vodafone, Medibank/Bupa, Qantas,
+   *  Afterpay, NDIS, etc.) in addition to the original `core` 9. Server-side
+   *  only (the Inngest cron is the only consumer). Default OFF so the
+   *  expansion is a reversible flag flip — when OFF the monitor's behaviour is
+   *  byte-identical to the pre-expansion hardcoded keyword list. Keyword set +
+   *  legit-domain exclusions are derived from the shared AU brand watchlist
+   *  via getCtMonitorConfig. Flip ON after confirming the larger keyword set
+   *  stays inside crt.sh's free-use tolerance on the 12h cadence. */
+  ctMonitorExpanded: readBoolEnv("FF_CT_MONITOR_EXPANDED"),
+
   /** Shopfront clone-watch outreach — master flag for Layers 1-5
    *  (admin triage dashboard, community submission, brand notification,
    *  weekly digest). Server-side only. When OFF, /admin/clone-watch
