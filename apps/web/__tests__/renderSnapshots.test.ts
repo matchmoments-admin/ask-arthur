@@ -17,6 +17,8 @@ import CaseStudy from "../emails/nurture/CaseStudy";
 import TechnicalOverview from "../emails/nurture/TechnicalOverview";
 import Deadline from "../emails/nurture/Deadline";
 import WeeklyIntelDigest from "../emails/WeeklyIntelDigest";
+import BrandStewardshipReport from "../emails/BrandStewardshipReport";
+import BrandAbuseReport from "../emails/BrandAbuseReport";
 
 const skip = !process.env.SNAPSHOT_EMAILS;
 const out = "/tmp/email-snapshots";
@@ -79,6 +81,42 @@ describe.skipIf(skip)("email snapshots", () => {
       ["nurture-4-CaseStudy", await render(CaseStudy(NURTURE_PROPS))],
       ["nurture-5-TechnicalOverview", await render(TechnicalOverview(NURTURE_PROPS))],
       ["nurture-6-Deadline", await render(Deadline(NURTURE_PROPS))],
+      [
+        "BrandStewardshipReport",
+        await render(
+          BrandStewardshipReport({
+            brandName: "7-Eleven",
+            periodLabel: "May 2026",
+            detected: 4,
+            reportedByDestination: { openphish: 4, apwg: 4 },
+            reportsSent: 8,
+            sampleDomains: [
+              "7eleven-fuelrewards.shop",
+              "7-eleven-au.com",
+              "7elevenrewards.online",
+            ],
+            reportRef: "BSR-7_eleven-2026-05",
+          }),
+        ),
+      ],
+      [
+        "BrandAbuseReport",
+        await render(
+          BrandAbuseReport({
+            brandName: "Bunnings",
+            scamType: "phishing",
+            channel: "email",
+            scammerUrls: ["https://bunnings-rewards.shop/login"],
+            scammerPhones: [],
+            scammerEmails: [],
+            redactedContent:
+              "Your Bunnings rewards are expiring. Verify at the link to keep [EMAIL].",
+            redFlags: ["urgency / expiry pressure", "lookalike domain"],
+            receivedAt: "2026-05-29",
+            reportRef: "ASK-001234",
+          }),
+        ),
+      ],
     ];
 
     for (const [name, html] of renders) {
