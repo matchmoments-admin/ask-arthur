@@ -269,7 +269,11 @@ The monitor now derives its keyword set **and** legit-domain exclusions from
 the shared watchlist via `getCtMonitorConfig(includeExpanded)`
 (`packages/shopfront-glue/`). A `core` tier reproduces the original 9 keywords
 byte-for-byte; an `expanded` tier (the concentrated targets) fires only when
-`FF_CT_MONITOR_EXPANDED` is ON.
+`FF_CT_MONITOR_EXPANDED` is ON. (Precise no-regression claim: the _keyword
+sweep_ is byte-for-byte when the flag is OFF. The _legit-domain exclusion set_
+is now the union across all ~150 watchlist brands — a strict superset of the
+original 14, so strictly more conservative: it can only suppress a brand's own
+cert, never surface a new alert.)
 
 **This does NOT violate the "CT monitor stays a distinct surface" decision
 above.** The two surfaces are still discriminated, not merged: the CT monitor
