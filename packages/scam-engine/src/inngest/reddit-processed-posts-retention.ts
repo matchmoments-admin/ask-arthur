@@ -27,6 +27,7 @@ const RETENTION_DAYS = 30;
 export const redditProcessedPostsRetention = inngest.createFunction(
   {
     id: "reddit-processed-posts-retention",
+    timeouts: { finish: "4m" },
     name: "Reddit Intel: Prune reddit_processed_posts dedup tracker",
     retries: 2,
   },

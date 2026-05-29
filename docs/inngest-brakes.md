@@ -46,7 +46,7 @@ Inventory of every Inngest function and its safety brakes. Maintained as a check
 | `feed-sync-verified-scams`                | cron weekly Sun 07:00 UTC                            | —     | —                        | —      | —                        | —                   | —           | —           |
 | `feed-sync-user-reports`                  | cron weekly Sun 07:00 UTC                            | —     | —                        | —      | —                        | —                   | —           | —           |
 | **Other**                                 |                                                      |       |                          |        |                          |                     |             |             |
-| `meta-brp-report`                         | cron every 6h                                        | 1     | 200/d (`Meta-BRP-Daily`) | —      | —                        | `metaBrpReporter`   | — _Track C_ | — _Track C_ |
+| `meta-brp-report`                         | NOT REGISTERED (#552 - stub only; was every 6h)      | 1     | 200/d (`Meta-BRP-Daily`) | —      | —                        | `metaBrpReporter`   | — _Track C_ | — _Track C_ |
 | `scam-alert-push`                         | cron every 3h                                        | —     | —                        | —      | —                        | `pushAlerts`        | —           | —           |
 
 ## Outstanding gaps (P1 tickets)

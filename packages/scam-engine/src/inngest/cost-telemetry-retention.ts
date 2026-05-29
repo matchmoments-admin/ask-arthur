@@ -29,6 +29,7 @@ const RAW_RETENTION_DAYS = 90;
 export const costTelemetryRetention = inngest.createFunction(
   {
     id: "cost-telemetry-retention",
+    timeouts: { finish: "4m" },
     name: "Cost Telemetry: Nightly rollup + 90-day prune",
     retries: 2,
   },

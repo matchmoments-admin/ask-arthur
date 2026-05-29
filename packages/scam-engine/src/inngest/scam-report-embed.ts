@@ -99,6 +99,8 @@ async function logCost(args: {
 export const scamReportEmbed = inngest.createFunction(
   {
     id: "scam-report-embed",
+    concurrency: { limit: 3 },
+    timeouts: { finish: "3m" },
     name: "Analyze: Embed scam_report row",
     idempotency: "event.data.reportId",
     retries: 3,

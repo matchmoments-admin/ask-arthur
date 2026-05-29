@@ -34,6 +34,8 @@ interface ScamReportRow {
 export const onwardAcmaEmailSpam = inngest.createFunction(
   {
     id: "report-onward-acma-email-spam",
+    concurrency: { limit: 2 },
+    timeouts: { finish: "2m" },
     name: "Onward report: ACMA spam intake",
     retries: 4,
     rateLimit: {

@@ -27,6 +27,7 @@ const ARCHIVE_LOOP_GUARD = 50; // hard cap on loop iterations
 export const feedRetention = inngest.createFunction(
   {
     id: "feed-retention",
+    timeouts: { finish: "4m" },
     name: "News Intel: Nightly retention housekeeping",
     retries: 2,
   },

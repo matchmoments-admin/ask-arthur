@@ -249,6 +249,7 @@ async function enrichEmail(value: string): Promise<Record<string, unknown>> {
 export const entityEnrichmentFanOut = inngest.createFunction(
   {
     id: "pipeline-entity-enrichment",
+    timeouts: { finish: "6m" },
     name: "Pipeline: Enrich Pending Entities",
     concurrency: { limit: 1 },
     // Each fan-out run triggers up to 30 × (Twilio Lookup + AbuseIPDB + IPQS +

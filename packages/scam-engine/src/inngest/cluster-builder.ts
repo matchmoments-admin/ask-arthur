@@ -75,6 +75,7 @@ class UnionFind {
 export const clusterBuilder = inngest.createFunction(
   {
     id: "pipeline-cluster-builder",
+    timeouts: { finish: "6m" },
     name: "Pipeline: Build Scam Clusters",
     concurrency: { limit: 1 },
   },

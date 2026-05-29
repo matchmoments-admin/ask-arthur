@@ -45,7 +45,7 @@ Supabase Postgres (project `rquomhcgnodxzkhokwni`). 75+ tables across 12 domain 
 ### Feedback & Triage (write-hot)
 
 - `verdict_feedback` — User thumbs-up / thumbs-down + reason codes. v47, v66, v67.
-- `feedback_triage_queue` `[hot ⚠]` (MV) — Active-learning queue: `triage_score = uncertainty × impact_weight`. Refreshed 5-min cron. v94.
+- `feedback_triage_queue` `[hot ⚠]` (MV) — Active-learning queue: `triage_score = uncertainty × impact_weight`. Refreshed by 30-min change-guarded cron. v94.
 
 ### Phone Footprint
 
@@ -243,7 +243,7 @@ All have `BRIN(created_at)` for cheap range queries.
 
 ### Feedback & Triage
 
-- `refresh_feedback_triage_queue()` — `REFRESH MATERIALIZED VIEW CONCURRENTLY feedback_triage_queue`. Service-role only. Called by `feedback-triage-refresh` cron (5 min).
+- `refresh_feedback_triage_queue()` — `REFRESH MATERIALIZED VIEW CONCURRENTLY feedback_triage_queue`. Service-role only. Called by `feedback-triage-refresh` cron (30 min, change-guarded — most ticks early-exit without refreshing).
 
 ### Cost & Telemetry
 
@@ -384,7 +384,7 @@ Per [ADR-0005](../adr/0005-pgvector-index-policy.md) and CLAUDE.md Critical Rule
 | `acnc_charities`        | Yes (daily scraper updates weekly) | Embedding moved to **sibling** `acnc_charity_embeddings` (v121). Parent: trigram GIN + BTree only. v122 dropped parent embedding cols.             |
 | `scam_reports`          | Yes (unbounded user submissions)   | **Direct HNSW partial index** `WHERE embedding IS NOT NULL` (v89). Avoids reindexing during NULL→populated transition.                             |
 | `verified_scams`        | No (editor-curated, <100 rows)     | **Direct HNSW** (v89). Read-only anchor corpus — cost amortised.                                                                                   |
-| `feedback_triage_queue` | No (MV refreshed 5-min)            | No embedding; `triage_score` REAL only. Indexes: `feedback_id UNIQUE`, `triage_score`.                                                             |
+| `feedback_triage_queue` | No (MV refreshed 30-min)           | No embedding; `triage_score` REAL only. Indexes: `feedback_id UNIQUE`, `triage_score`.                                                             |
 | `feed_items`            | Yes (daily scraper ingest)         | **Partial IVFFlat** for narrative rows only (v97, `lists=50`). No sibling — partial index keeps cost bounded.                                      |
 | `scam_entities`         | Yes (upserted per report link)     | No embedding; `report_count` aggregate. Indexes: `(entity_type, normalized_value) UNIQUE`, `normalized_value`, `entity_type`, `report_count DESC`. |
 

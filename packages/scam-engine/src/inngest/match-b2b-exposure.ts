@@ -148,7 +148,7 @@ export const matchB2bExposure = inngest.createFunction(
   {
     id: "match-b2b-exposure",
     name: "Vuln intel: match B2B product inventory against vulnerability DB",
-    concurrency: { limit: 5 },
+    concurrency: { limit: 3 },
     // Throttle to keep the GIN query path cheap if a customer fans out
     // hundreds of requests. 200/min is well above expected steady-state.
     throttle: { limit: 200, period: "1m" },

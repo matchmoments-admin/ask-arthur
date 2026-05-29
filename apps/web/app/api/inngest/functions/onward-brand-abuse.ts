@@ -48,6 +48,8 @@ interface ScamReportRow {
 export const onwardBrandAbuse = inngest.createFunction(
   {
     id: "report-onward-brand-abuse",
+    concurrency: { limit: 2 },
+    timeouts: { finish: "2m" },
     name: "Onward report: Brand abuse email",
     retries: 4,
     rateLimit: {

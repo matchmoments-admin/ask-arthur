@@ -14,6 +14,7 @@ const MAX_DOMAINS_PER_RUN = 20;
 export const enrichmentFanOut = inngest.createFunction(
   {
     id: "pipeline-enrichment-fanout",
+    timeouts: { finish: "6m" },
     name: "Pipeline: Enrich Pending URLs",
     concurrency: { limit: 1 }, // Only one enrichment run at a time
     // Defence-in-depth against manual re-trigger storms from the Inngest

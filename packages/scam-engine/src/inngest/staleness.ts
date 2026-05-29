@@ -14,6 +14,8 @@ import { withAxiomLogging } from "./with-axiom-logging";
 export const stalenessCheck = inngest.createFunction(
   {
     id: "pipeline-staleness-check",
+    concurrency: { limit: 1 },
+    timeouts: { finish: "4m" },
     name: "Pipeline: Mark Stale URLs",
   },
   // First of the staggered staleness trio (#524): URLs 0 3, IPs 10 3, wallets 20 3.

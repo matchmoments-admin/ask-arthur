@@ -40,8 +40,8 @@ Supabase Edge Function (supabase/functions/intel-inbound-email)
    │  • Zod validation
    │  • upsert into feed_items ON CONFLICT (source, external_id) DO NOTHING
    ▼
-feed_items   ──── existing feed-items-embed Inngest, every 30 min ──▶ Voyage embed
-             ──── existing regulator-alert-push Inngest, every 30 min ──▶ HIGH-confidence pushes
+feed_items   ──── existing feed-items-embed Inngest, hourly ──▶ Voyage embed
+             ──── existing regulator-alert-push Inngest, hourly ──▶ HIGH-confidence pushes
              ──── (planned) Wave-3 weekly regulator-intel-cluster ──▶ themes for blog/digest
 ```
 
@@ -165,7 +165,7 @@ In the Cloudflare dashboard → `askarthur-inbound.com` → **Email** → **Emai
 
 1. Send a test email from any account → `acsc+ingest@askarthur-inbound.com`, subject `Pipeline smoke test`.
 2. Within ~10s, expect a row in `public.feed_items WHERE source='inbound_acsc'` (see Monitoring queries below).
-3. Within 30 min (next `feed-items-embed` tick), expect `embedding IS NOT NULL`.
+3. Within ~1 hour (next `feed-items-embed` tick), expect `embedding IS NOT NULL`.
 
 ### 6. Subscribe to the actual feeds
 
@@ -183,7 +183,7 @@ WHERE source LIKE 'inbound_%'
 ORDER BY created_at DESC
 LIMIT 10;
 
--- B. After ≤30 min — did Voyage embed it?
+-- B. After ≤1 hour — did Voyage embed it?
 SELECT id, source, embedding IS NOT NULL AS embedded, created_at
 FROM public.feed_items
 WHERE source LIKE 'inbound_%'
@@ -198,14 +198,14 @@ WHERE source LIKE 'inbound_%'
 GROUP BY source
 ORDER BY items_24h DESC;
 
--- D. Backfill check — anything stuck unembedded after >30 min?
--- The feed-items-embed cron runs every 30 min; rows landing mid-tick wait
--- up to ~30 min before the next pass. For a true alert threshold, use E.
+-- D. Backfill check — anything stuck unembedded after >1 hour?
+-- The feed-items-embed cron runs hourly; rows landing mid-tick wait
+-- up to ~1 hour before the next pass. For a true alert threshold, use E.
 SELECT source, count(*) AS stale_unembedded
 FROM public.feed_items
 WHERE source LIKE 'inbound_%'
   AND embedding IS NULL
-  AND created_at < now() - interval '30 minutes'
+  AND created_at < now() - interval '1 hour'
 GROUP BY source;
 
 -- E. Embed-cron health (alert threshold) — narrative rows >1h old still

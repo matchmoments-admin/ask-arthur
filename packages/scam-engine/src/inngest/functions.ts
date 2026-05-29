@@ -12,7 +12,10 @@ import { riskScorer } from "./risk-scorer";
 import { urlscanEnrichment } from "./urlscan-enrichment";
 import { scamAlertCron } from "./scam-alerts";
 import { syncVerifiedScamsToFeed, syncUserReportsToFeed } from "./feed-sync";
-import { metaBrpReport } from "./meta-brp-report";
+// meta-brp-report intentionally NOT registered (PR-C): it's a pure stub —
+// FF_META_BRP_REPORTER is unset so it fired every 6h only to skip, and the
+// Graph API integration is still commented out. The file is kept so it can be
+// re-registered when the real Meta BRP integration ships.
 import { enrichVulnerability, enrichVulnerabilitiesCron } from "./enrich-vulnerability";
 import { matchB2bExposure } from "./match-b2b-exposure";
 
@@ -109,7 +112,6 @@ export const inngestFunctions = [
   scamAlertCron,
   syncVerifiedScamsToFeed,
   syncUserReportsToFeed,
-  metaBrpReport,
   enrichVulnerability,
   enrichVulnerabilitiesCron,
   matchB2bExposure,

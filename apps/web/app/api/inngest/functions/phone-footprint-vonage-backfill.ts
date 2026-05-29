@@ -130,7 +130,9 @@ export const phoneFootprintVonageBackfillMonitor = inngest.createFunction(
     // if Inngest retries.
     idempotency: "event.data.requestId + ':' + event.data.monitorId",
     retries: 1,
-    concurrency: { limit: 5 }, // ~5 simultaneous Vonage NI + CAMARA calls
+    // Capped at 3 (PR-B rebalance, down from 5): reserves ≥2 of Hobby's 5
+    // concurrent slots for the latency-sensitive analyze fan-out.
+    concurrency: { limit: 3 },
   },
   { event: VONAGE_BACKFILL_MONITOR_EVENT },
   async ({ event, step }) => {
