@@ -83,6 +83,14 @@ export const cloneWatchUrlscan = inngest.createFunction(
     idempotency: "event.id",
     // Hard cap matches sleep budget + buffer
     timeouts: { finish: "5m" },
+    // Belt-and-suspenders global ceiling (v169 / Inngest PR-A): cap total
+    // urlscan executions/day across ALL sources (initial-scan fan-out from
+    // nrd-ingest + the daily rescan) regardless of the alert pool size. 60 ≈
+    // the intended ~50/day + headroom, within the urlscan free tier (100/day).
+    // No `key` → a single global bucket (CEL rejects constant-string keys).
+    // Makes a pool blow-up structurally incapable of recreating the May 27–29
+    // burst even if a future dedup bug slips through.
+    throttle: { limit: 60, period: "1d" },
   },
   { event: CLONE_WATCH_SCAN_REQUESTED_EVENT },
   async ({ event, step }) => {
