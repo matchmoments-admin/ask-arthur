@@ -19,8 +19,11 @@ vi.mock("@askarthur/utils/logger", () => ({
   logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
 }));
 
-// Mock node:dns for email-security and domain-blacklist checks
+// Mock node:dns for email-security + domain-blacklist checks, and `lookup`
+// (pulled in transitively via @askarthur/scam-engine/ssrf-dispatcher, which the
+// scanner now uses for SSRF-safe fetches).
 vi.mock("node:dns", () => ({
+  lookup: vi.fn((_hostname, _options, cb) => cb?.(null, "127.0.0.1", 4)),
   promises: {
     resolveTxt: vi.fn().mockRejectedValue(new Error("ENOTFOUND")),
     resolve4: vi.fn().mockRejectedValue(new Error("ENOTFOUND")),

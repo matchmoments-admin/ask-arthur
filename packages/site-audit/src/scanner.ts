@@ -1,6 +1,7 @@
 // Site audit scanner orchestrator — runs all checks via Promise.allSettled
 
 import { isPrivateURL } from "@askarthur/scam-engine/safebrowsing";
+import { ssrfSafeDispatcher } from "@askarthur/scam-engine/ssrf-dispatcher";
 import { extractDomain } from "@askarthur/scam-engine/url-normalize";
 import { logger } from "@askarthur/utils/logger";
 import { checkSecurityHeaders } from "./checks/security-headers";
@@ -86,6 +87,9 @@ async function attemptFetch(
       redirect: "follow",
       headers: { "User-Agent": userAgent },
       signal: controller.signal,
+      // SSRF: validate the resolved IP of every connection (incl. each
+      // redirect hop), closing the rebinding window isPrivateURL can't catch.
+      ...({ dispatcher: ssrfSafeDispatcher } as Record<string, unknown>),
     });
 
     clearTimeout(fetchTimeout);

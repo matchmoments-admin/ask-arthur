@@ -3,6 +3,7 @@
 
 import { logger } from "@askarthur/utils/logger";
 import { isPrivateURL } from "./safebrowsing";
+import { ssrfSafeDispatcher } from "./ssrf-dispatcher";
 import { extractDomain } from "./url-normalize";
 import type { RedirectHop, RedirectChain } from "@askarthur/types";
 
@@ -164,12 +165,15 @@ export async function resolveRedirectChain(
     let response: Response;
 
     try {
-      // Try HEAD first (cheaper)
+      // Try HEAD first (cheaper). The ssrfSafeDispatcher validates the
+      // DNS-resolved IP of every connection, closing the rebinding /
+      // hostname→private-IP window the per-hop isPrivateURL check can't catch.
       response = await fetch(currentUrl, {
         method: "HEAD",
         redirect: "manual",
         headers: { "User-Agent": config.userAgent },
         signal: AbortSignal.timeout(config.perHopTimeoutMs),
+        ...({ dispatcher: ssrfSafeDispatcher } as Record<string, unknown>),
       });
 
       // If HEAD returns 405 Method Not Allowed, fallback to GET
@@ -179,6 +183,7 @@ export async function resolveRedirectChain(
           redirect: "manual",
           headers: { "User-Agent": config.userAgent },
           signal: AbortSignal.timeout(config.perHopTimeoutMs),
+          ...({ dispatcher: ssrfSafeDispatcher } as Record<string, unknown>),
         });
       }
     } catch (err) {

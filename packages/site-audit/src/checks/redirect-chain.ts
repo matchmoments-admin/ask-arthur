@@ -1,5 +1,6 @@
 // Redirect chain analysis — follows redirects manually to detect suspicious chains
 
+import { ssrfSafeDispatcher } from "@askarthur/scam-engine/ssrf-dispatcher";
 import type { CheckResult, RedirectHop } from "../types";
 
 const MAX_HOPS = 10;
@@ -24,6 +25,7 @@ export async function checkRedirectChain(
           redirect: "manual",
           headers: { "User-Agent": "AskArthur-SiteAudit/1.0" },
           signal: controller.signal,
+          ...({ dispatcher: ssrfSafeDispatcher } as Record<string, unknown>),
         });
       } finally {
         clearTimeout(timer);

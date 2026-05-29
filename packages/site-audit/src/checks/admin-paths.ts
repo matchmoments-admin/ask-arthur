@@ -1,5 +1,6 @@
 // Exposed admin path detection — HEAD requests to common sensitive paths
 
+import { ssrfSafeDispatcher } from "@askarthur/scam-engine/ssrf-dispatcher";
 import type { CheckResult } from "../types";
 
 // Common paths that should not be publicly accessible
@@ -46,6 +47,7 @@ export async function checkExposedAdminPaths(
         method: "HEAD",
         redirect: "follow",
         signal: AbortSignal.timeout(timeoutMs),
+        ...({ dispatcher: ssrfSafeDispatcher } as Record<string, unknown>),
       });
 
       // 2xx response means the path is accessible

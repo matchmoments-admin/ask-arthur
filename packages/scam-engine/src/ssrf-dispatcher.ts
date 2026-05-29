@@ -22,32 +22,12 @@ import { lookup as nodeDnsLookup } from "node:dns";
 import type { LookupFunction } from "node:net";
 import { Agent } from "undici";
 
-// IPv4 + IPv6 private / loopback / metadata patterns. Operates on RESOLVED
-// IP strings — distinct from `safebrowsing.isPrivateURL` which inspects URL
-// hostname strings (catches IP literals but not hostnames that resolve to
-// private IPs).
-const PRIVATE_IP_PATTERNS: RegExp[] = [
-  // IPv4
-  /^127\./, //                                   loopback
-  /^10\./, //                                    RFC1918 class A
-  /^172\.(1[6-9]|2\d|3[01])\./, //               RFC1918 class B
-  /^192\.168\./, //                              RFC1918 class C
-  /^169\.254\./, //                              link-local (incl AWS / GCP metadata)
-  /^0\./, //                                     current network
-  /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./, // shared / CGNAT
-  /^198\.1[89]\./, //                            benchmarking
-  // IPv6
-  /^::1$/i, //                                   loopback
-  /^::$/, //                                     unspecified
-  /^fc/i, //                                     unique local (fc00::/7)
-  /^fd/i, //                                     unique local (fd00::/8)
-  /^fe[89ab]/i, //                               link-local (fe80::/10)
-];
-
-/** True when `address` is a private / loopback / metadata IPv4 or IPv6. */
-export function isPrivateIP(address: string): boolean {
-  return PRIVATE_IP_PATTERNS.some((re) => re.test(address.toLowerCase()));
-}
+// The IP classifier lives in the pure `./private-ip` module (no undici import)
+// so `safebrowsing.isPrivateURL` can share the exact same blocklist without
+// pulling in this Agent. Re-exported here for the dispatcher's own callers +
+// the tests that import `isPrivateIP` from this path.
+import { isPrivateIP } from "./private-ip";
+export { isPrivateIP } from "./private-ip";
 
 /**
  * Build a `LookupFunction` for `new Agent({ connect: { lookup } })`.
