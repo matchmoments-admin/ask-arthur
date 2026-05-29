@@ -1,11 +1,15 @@
-// Feedback triage MV refresh — runs every 5 min so the /admin/feedback page
-// reflects new disagreements within one cron tick. The materialised view
-// itself is defined in migration-v94; this function only calls the
-// SECURITY DEFINER RPC that wraps REFRESH MATERIALIZED VIEW CONCURRENTLY.
+// Feedback triage MV refresh — runs every 30 min (relaxed */5 → */15 #524 →
+// */30 PR-C) so the /admin/feedback page reflects new disagreements. The
+// materialised view is defined in migration-v94 (WHERE created_at > now()-30d
+// AND user_says <> 'correct'); this function calls the SECURITY DEFINER RPC
+// that wraps REFRESH MATERIALIZED VIEW CONCURRENTLY.
 //
-// Concurrency=1 because two simultaneous REFRESH CONCURRENTLY calls would
-// serialise on the MV anyway; making it explicit prevents Inngest queueing
-// duplicates if a refresh ever takes longer than the 5-min interval.
+// A change-guard (PR-C) early-exits the tick when the MV is already current,
+// so most ticks are a few cheap index lookups instead of a full REFRESH. The
+// guard must account for the MV's 30-day sliding window — rows aged past 30d
+// have to be REFRESHed OUT even when no new feedback arrives — and it fails
+// SAFE (refreshes) on any guard-query error so a transient DB blip can't leave
+// the MV silently stale. singleton:{mode:"skip"} drops an overlapping tick.
 
 import { inngest } from "./client";
 import { createServiceClient } from "@askarthur/supabase/server";
@@ -33,14 +37,17 @@ export const feedbackTriageRefresh = inngest.createFunction(
       return { skipped: true, reason: "supabase_unavailable" };
     }
 
-    // Change-guard (PR-C): is there disagreement feedback newer than what the
-    // MV already holds? Both columns are indexed (verdict_feedback.created_at
-    // v47; feedback_triage_queue.feedback_created_at v94), so this is two
-    // index lookups. The MV only contains user_says <> 'correct' rows, so its
-    // max feedback_created_at IS the latest disagreement already reflected.
+    // Change-guard (PR-C). All columns indexed (verdict_feedback.created_at v47;
+    // feedback_triage_queue.feedback_created_at v94), so this is 3 index lookups
+    // vs a REFRESH MATERIALIZED VIEW CONCURRENTLY. The MV is a 30-day sliding
+    // window of disagreements (user_says <> 'correct'), so we refresh when a new
+    // disagreement arrives OR a materialised row has aged past the window.
     const needsRefresh = await step.run("check-new-feedback", async () => {
-      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-      const { data: latestFb } = await supabase
+      const cutoffMs = Date.now() - 30 * 24 * 60 * 60 * 1000;
+      const since = new Date(cutoffMs).toISOString();
+
+      // Newest disagreement in the source table within the 30-day window.
+      const { data: latestFb, error: fbErr } = await supabase
         .from("verdict_feedback")
         .select("created_at")
         .neq("user_says", "correct")
@@ -48,17 +55,40 @@ export const feedbackTriageRefresh = inngest.createFunction(
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
-      if (!latestFb?.created_at) return false; // no recent disagreement at all
-      const { data: mvLatest } = await supabase
+      // Newest + oldest rows currently materialised in the MV.
+      const { data: mvNewest, error: newErr } = await supabase
         .from("feedback_triage_queue")
         .select("feedback_created_at")
         .order("feedback_created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
-      if (!mvLatest?.feedback_created_at) return true; // MV empty → populate it
+      const { data: mvOldest, error: oldErr } = await supabase
+        .from("feedback_triage_queue")
+        .select("feedback_created_at")
+        .order("feedback_created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      // Fail SAFE: if any guard query errored we can't prove the MV is current,
+      // so refresh rather than masquerade an error as a "no new feedback" skip.
+      if (fbErr || newErr || oldErr) return true;
+
+      // (a) A materialised row has aged past the 30-day window → REFRESH drops it.
+      if (
+        mvOldest?.feedback_created_at &&
+        new Date(mvOldest.feedback_created_at).getTime() <= cutoffMs
+      ) {
+        return true;
+      }
+      // (b) No disagreement in the window → the MV should be empty; refresh only
+      //     if it still holds rows (e.g. the last disagreement was archived).
+      if (!latestFb?.created_at) return Boolean(mvNewest?.feedback_created_at);
+      // (c) MV empty but a disagreement exists → populate it.
+      if (!mvNewest?.feedback_created_at) return true;
+      // (d) A newer disagreement exists than the MV holds → refresh to include it.
       return (
         new Date(latestFb.created_at).getTime() >
-        new Date(mvLatest.feedback_created_at).getTime()
+        new Date(mvNewest.feedback_created_at).getTime()
       );
     });
 
