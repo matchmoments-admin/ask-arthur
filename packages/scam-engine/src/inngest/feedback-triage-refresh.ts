@@ -10,6 +10,7 @@
 import { inngest } from "./client";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
+import { withAxiomLogging } from "./with-axiom-logging";
 
 export const feedbackTriageRefresh = inngest.createFunction(
   {
@@ -17,8 +18,13 @@ export const feedbackTriageRefresh = inngest.createFunction(
     name: "Feedback Triage: Refresh Materialised View",
     concurrency: 1,
   },
-  { cron: "*/5 * * * *" },
-  async ({ step }) => {
+  // Cadence relaxed */5 → */15 (#524). The unconditional REFRESH MATERIALIZED
+  // VIEW CONCURRENTLY did real I/O on the hot feedback_triage_queue MV every 5
+  // min (~288 runs/day, almost all no-ops) to serve one internal /admin page;
+  // 15 min is ample freshness there and cuts the refresh load ~3×. (A
+  // change-guard early-exit would cut it further — deferred follow-up.)
+  { cron: "*/15 * * * *" },
+  withAxiomLogging({ fnId: "feedback-triage-refresh" }, async ({ step }) => {
     return await step.run("refresh-mv", async () => {
       const supabase = createServiceClient();
       if (!supabase) {
@@ -32,5 +38,5 @@ export const feedbackTriageRefresh = inngest.createFunction(
       }
       return { ok: true };
     });
-  },
+  }),
 );

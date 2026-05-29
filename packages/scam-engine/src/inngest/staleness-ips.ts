@@ -5,14 +5,17 @@ import { inngest } from "./client";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
+import { withAxiomLogging } from "./with-axiom-logging";
 
 export const stalenessCheckIPs = inngest.createFunction(
   {
     id: "pipeline-staleness-check-ips",
     name: "Pipeline: Mark Stale IPs",
   },
-  { cron: "0 3 * * *" }, // Daily at 3am UTC
-  async ({ step }) => {
+  // Staggered off the 0 3 trio (#524): URLs 0 3, IPs 10 3, wallets 20 3 — so
+  // the three staleness crons don't fire simultaneously against the DB.
+  { cron: "10 3 * * *" },
+  withAxiomLogging({ fnId: "pipeline-staleness-check-ips" }, async ({ step }) => {
     if (!featureFlags.dataPipeline) {
       return { skipped: true, reason: "dataPipeline feature flag disabled" };
     }
@@ -38,5 +41,5 @@ export const stalenessCheckIPs = inngest.createFunction(
     });
 
     return result;
-  }
+  })
 );
