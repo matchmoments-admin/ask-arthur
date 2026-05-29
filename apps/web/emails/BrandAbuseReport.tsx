@@ -10,6 +10,8 @@ import {
   Link,
   Hr,
 } from "@react-email/components";
+import { renderCopySlot } from "@/lib/email/resolve-copy";
+import { BRAND_ABUSE_SLOTS } from "@/lib/email/copy-registry";
 
 export interface BrandAbuseReportProps {
   brandName: string;
@@ -22,6 +24,8 @@ export interface BrandAbuseReportProps {
   redFlags: string[];
   receivedAt: string;
   reportRef: string;
+  /** Editable prose overrides (Email Studio). Falls back to slot defaults. */
+  copy?: Record<string, string>;
 }
 
 /**
@@ -47,8 +51,11 @@ export default function BrandAbuseReport({
   redFlags,
   receivedAt,
   reportRef,
+  copy,
 }: BrandAbuseReportProps) {
   const allContacts = [...scammerPhones, ...scammerEmails];
+  const slot = (key: keyof typeof BRAND_ABUSE_SLOTS) =>
+    renderCopySlot(copy?.[key] ?? BRAND_ABUSE_SLOTS[key].default, { brandName });
   return (
     <Html>
       <Head>
@@ -103,18 +110,17 @@ export default function BrandAbuseReport({
               borderTop: "none",
             }}
           >
-            <Text style={{ color: "#334155", fontSize: "14px", lineHeight: 1.6, margin: "0 0 14px 0" }}>
-              Hello {brandName} security team,
-            </Text>
+            {/* Editable slot: greeting */}
+            <div
+              style={{ color: "#334155", fontSize: "14px", lineHeight: 1.6, margin: "0 0 14px 0" }}
+              dangerouslySetInnerHTML={{ __html: slot("greeting") }}
+            />
 
-            <Text style={{ color: "#334155", fontSize: "14px", lineHeight: 1.6, margin: "0 0 14px 0" }}>
-              A member of the Australian public reported a communication
-              impersonating {brandName} via Ask Arthur (askarthur.au), an
-              Australian scam-detection service. We&apos;re forwarding the
-              evidence so you can action takedowns or customer alerts as
-              appropriate. The reporter has consented to this forward; their
-              personal details have been removed.
-            </Text>
+            {/* Editable slot: intro */}
+            <div
+              style={{ color: "#334155", fontSize: "14px", lineHeight: 1.6, margin: "0 0 14px 0" }}
+              dangerouslySetInnerHTML={{ __html: slot("intro") }}
+            />
 
             <Section style={{ marginTop: "20px" }}>
               <Heading as="h3" style={{ color: "#1B2A4A", fontSize: "16px", margin: "0 0 12px 0" }}>

@@ -11,6 +11,8 @@ import {
   Heading,
   Img,
 } from "@react-email/components";
+import { renderCopySlot } from "@/lib/email/resolve-copy";
+import { CLONE_WATCH_SLOTS } from "@/lib/email/copy-registry";
 
 export interface CloneWatchCandidate {
   candidateDomain: string;
@@ -52,6 +54,8 @@ export interface CloneWatchBrandAlertProps {
   /** Optional Ask Arthur ref for support correlation (defaults to the
    *  candidate domain — every email is identifiable by domain anyway). */
   reportRef?: string;
+  /** Editable prose overrides (Email Studio). Falls back to slot defaults. */
+  copy?: Record<string, string>;
 }
 
 /**
@@ -70,7 +74,12 @@ export interface CloneWatchBrandAlertProps {
 export default function CloneWatchBrandAlert(
   props: CloneWatchBrandAlertProps,
 ) {
-  const { brandName, legitimateDomain, ackRequestUrl, reportRef } = props;
+  const { brandName, legitimateDomain, ackRequestUrl, reportRef, copy } = props;
+  const slot = (key: keyof typeof CLONE_WATCH_SLOTS) =>
+    renderCopySlot(copy?.[key] ?? CLONE_WATCH_SLOTS[key].default, {
+      brandName,
+      legitimateDomain,
+    });
 
   // Normalise to candidates[] regardless of which prop shape the caller used.
   const candidates: CloneWatchCandidate[] =
@@ -357,20 +366,16 @@ export default function CloneWatchBrandAlert(
             >
               What you might do
             </Heading>
-            <Text
+            {/* Editable slot: what_you_might_do */}
+            <div
               style={{
                 color: "#334155",
                 fontSize: "14px",
                 lineHeight: "1.6",
                 margin: "0 0 16px 0",
               }}
-            >
-              If this matches your fraud-monitoring criteria, common next
-              steps are filing an abuse report with the registrar,
-              requesting browser-vendor blocking, or escalating to your
-              trademark counsel. Reply to this email if you&apos;d like the
-              underlying evidence pack in a different format.
-            </Text>
+              dangerouslySetInnerHTML={{ __html: slot("what_you_might_do") }}
+            />
 
             {ackRequestUrl && (
               <>

@@ -19,6 +19,7 @@ import {
   Phone,
   Send,
   FileText,
+  Mail,
 } from "lucide-react";
 
 export interface AdminNavItem {
@@ -52,6 +53,7 @@ export const ADMIN_NAV_SECTIONS: AdminNavSection[] = [
       { id: "vuln", name: "Vulnerabilities", href: "/admin/vulnerabilities", icon: Lock },
       { id: "phone", name: "Phone footprint", href: "/admin/phone-footprint", icon: Phone },
       { id: "onward", name: "Onward reports", href: "/admin/onward-reports", icon: Send },
+      { id: "email-studio", name: "Email Studio", href: "/admin/email-studio", icon: Mail },
       { id: "blog", name: "Blog", href: "/admin/blog", icon: FileText },
     ],
   },
