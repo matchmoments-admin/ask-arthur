@@ -128,6 +128,10 @@ def bulk_upsert_vulnerabilities(
         return stats
 
     cursor = conn.cursor()
+    # Cap statement_timeout at a finite value (never 0 — incident 2026-05-09).
+    # The correlated array-union ON CONFLICT subquery could otherwise hang on a
+    # lock. 300s is the established convention; batches commit well under it.
+    cursor.execute("SET statement_timeout = '300s'")
     upsert_start = time.time()
 
     sql = """

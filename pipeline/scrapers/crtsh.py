@@ -77,7 +77,7 @@ MAX_RETRIES = 3
 BASE_DELAY = 2  # seconds
 
 
-def _fetch_crtsh(keyword: str) -> list[dict]:
+def _fetch_crtsh(keyword: str) -> list[dict] | None:
     """Fetch certificates from crt.sh for a keyword with exponential backoff."""
     url = f"https://crt.sh/?q=%25{quote(keyword)}%25&output=json"
 
@@ -112,10 +112,10 @@ def _fetch_crtsh(keyword: str) -> list[dict]:
             time.sleep(delay)
         except Exception as e:
             logger.error(f"crt.sh unexpected error for '{keyword}': {e}")
-            return []
+            return None
 
     logger.error(f"crt.sh failed after {MAX_RETRIES} retries for '{keyword}'")
-    return []
+    return None
 
 
 def is_legitimate_domain(domain: str) -> bool:
@@ -137,8 +137,14 @@ def scrape() -> None:
     status = "success"
 
     try:
+        keywords_failed = 0
         for keyword in AU_BRAND_KEYWORDS:
             certs = _fetch_crtsh(keyword)
+            if certs is None:
+                # Failed query (retries exhausted / error) — distinct from a
+                # genuinely empty result, so an all-down crt.sh is detectable.
+                keywords_failed += 1
+                continue
             if not certs:
                 continue
 
@@ -186,6 +192,12 @@ def scrape() -> None:
         logger.info(
             f"Found {len(urls)} suspicious domains across {len(AU_BRAND_KEYWORDS)} keywords"
         )
+
+        # Every keyword query failed → crt.sh is down, not a quiet result.
+        # Don't let that log status='success' with 0 records.
+        if keywords_failed == len(AU_BRAND_KEYWORDS):
+            status = "error"
+            error_msg = error_msg or "all crt.sh keyword queries failed"
 
     except Exception as e:
         error_msg = str(e)
