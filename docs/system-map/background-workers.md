@@ -144,16 +144,19 @@ Gated by `FF_ANALYZE_INNGEST_WEB`. When false, the legacy `waitUntil` path runs 
 | ----------------- | ------------------------ | ----------------------------------------------------- |
 | `meta-brp-report` | `0 */6 * * *` (every 6h) | Meta Brand Rights Protection deepfake reporter (stub) |
 
-### Onward reporting (event-driven, no cron)
+### Onward reporting (event-driven + one producer cron)
 
-| Function                        | Trigger                             | Purpose                                                |
-| ------------------------------- | ----------------------------------- | ------------------------------------------------------ |
-| `report-onward-scamwatch`       | `report.submitted.v1`               | Deep-link marker (no API; user lands on Scamwatch URL) |
-| `report-onward-acma-email-spam` | `report.submitted.v1` (email spam)  | ACMA callback                                          |
-| `report-onward-report-cyber`    | manual                              | ReportCyber callback                                   |
-| `report-onward-idcare`          | manual                              | IDcare identity-theft support referral                 |
-| `report-onward-ask-arthur-feed` | manual                              | Internal feed archive                                  |
-| `onward-brand-abuse`            | `report.submitted.v1` (brand abuse) | Queue brand report submission                          |
+| Function                        | Trigger                             | Purpose                                                                                                                                                                                                        |
+| ------------------------------- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `report-onward-scamwatch`       | `report.submitted.v1`               | Deep-link marker (no API; user lands on Scamwatch URL)                                                                                                                                                         |
+| `report-onward-acma-email-spam` | `report.submitted.v1` (email spam)  | ACMA callback                                                                                                                                                                                                  |
+| `report-onward-report-cyber`    | manual                              | ReportCyber callback                                                                                                                                                                                           |
+| `report-onward-idcare`          | manual                              | IDcare identity-theft support referral                                                                                                                                                                         |
+| `report-onward-ask-arthur-feed` | manual                              | Internal feed archive                                                                                                                                                                                          |
+| `onward-brand-abuse`            | `report.submitted.v1` (brand abuse) | Queue brand report submission                                                                                                                                                                                  |
+| `report-onward-openphish`       | `report.onward.openphish`           | Email phishing URL(s) to OpenPhish (`FF_ONWARD_OPENPHISH`, default OFF)                                                                                                                                        |
+| `report-onward-apwg`            | `report.onward.apwg`                | Email phishing URL(s) to APWG eCrime Exchange (`FF_ONWARD_APWG`, default OFF)                                                                                                                                  |
+| `report-onward-auto-report`     | `25 * * * *` (hourly cron)          | Proactive producer: sweeps recent HIGH_RISK `scam_reports` with a URL → auto-enqueues OpenPhish/APWG onward reports (`FF_ONWARD_AUTO_REPORT`, default OFF; only enqueues destinations whose worker flag is ON) |
 
 ### Shopfront clone-watch (Layer 0 + outreach + measurement)
 
