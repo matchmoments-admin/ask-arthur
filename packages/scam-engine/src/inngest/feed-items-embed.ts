@@ -74,10 +74,11 @@ async function logCost(args: {
 export const feedItemsEmbed = inngest.createFunction(
   {
     id: "feed-items-embed",
+    timeouts: { finish: "4m" },
     name: "News Intel: Embed narrative feed_items",
     retries: 3,
   },
-  { cron: "*/30 * * * *" },
+  { cron: "0 * * * *" },
   withAxiomLogging({ fnId: "feed-items-embed" }, async ({ step }) => {
     // Cost brake — this is a paid Voyage call. cost-daily-check sets the
     // `news_intel_embed` brake when the day's embed spend exceeds its cap;

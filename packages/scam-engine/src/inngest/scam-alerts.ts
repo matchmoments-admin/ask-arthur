@@ -12,6 +12,8 @@ import { logger } from "@askarthur/utils/logger";
 export const scamAlertCron = inngest.createFunction(
   {
     id: "scam-alert-push",
+    concurrency: { limit: 1 },
+    timeouts: { finish: "4m" },
     name: "Scam Alert Push Notifications",
   },
   { cron: "0 */3 * * *" },

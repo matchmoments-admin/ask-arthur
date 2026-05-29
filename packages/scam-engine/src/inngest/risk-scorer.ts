@@ -12,6 +12,7 @@ const MAX_ENTITIES_PER_RUN = 100;
 export const riskScorer = inngest.createFunction(
   {
     id: "pipeline-risk-scorer",
+    timeouts: { finish: "4m" },
     name: "Pipeline: Compute Entity Risk Scores",
     concurrency: { limit: 1 },
   },

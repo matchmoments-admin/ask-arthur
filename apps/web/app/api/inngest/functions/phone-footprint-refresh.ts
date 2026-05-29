@@ -92,6 +92,8 @@ interface MonitorRow {
 export const phoneFootprintRefreshClaimer = inngest.createFunction(
   {
     id: "phone-footprint-refresh-claimer",
+    singleton: { mode: "skip" },
+    timeouts: { finish: "4m" },
     name: "Phone Footprint: claim due refreshes",
     concurrency: { limit: 1 }, // one claimer at a time
     retries: 1,
@@ -159,12 +161,12 @@ export const phoneFootprintRefreshMonitor = inngest.createFunction(
     name: "Phone Footprint: refresh one monitor",
     idempotency: "event.data.queueId", // one refresh per claimed queue row
     retries: 2,
-    // Inngest plan caps function-level concurrency at 5; the original
-    // limit:10 was rejected by the resync validator after the v3.54
-    // SDK upgrade. Halving max parallelism here just means refreshes
-    // queue up — no functional regression, only throughput. Bump back
-    // to 10 if/when we move to a higher Inngest plan.
-    concurrency: { limit: 5 },
+    // Capped at 3 (PR-B rebalance, down from 5): reserves ≥2 of Hobby's 5
+    // concurrent slots for the latency-sensitive analyze fan-out so a refresh
+    // burst can't starve user-facing analysis. Lower parallelism just queues
+    // refreshes — no functional regression, only throughput. Bump back up
+    // if/when we move to a higher Inngest plan.
+    concurrency: { limit: 3 },
   },
   { event: REFRESH_MONITOR_EVENT },
   withAxiomLogging(

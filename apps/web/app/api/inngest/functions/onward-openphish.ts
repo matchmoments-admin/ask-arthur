@@ -20,6 +20,8 @@ const OPENPHISH_INTAKE = "report@openphish.com";
 export const onwardOpenphish = inngest.createFunction(
   {
     id: "report-onward-openphish",
+    concurrency: { limit: 2 },
+    timeouts: { finish: "2m" },
     name: "Onward report: OpenPhish blocklist",
     retries: 4,
     rateLimit: {

@@ -203,6 +203,7 @@ async function pullGitHubActionsCents(date: string): Promise<{
 export const billingIngestNightly = inngest.createFunction(
   {
     id: "billing-ingest-nightly",
+    timeouts: { finish: "6m" },
     name: "Billing: Nightly per-provider infra-spend rollup",
     retries: 2,
   },

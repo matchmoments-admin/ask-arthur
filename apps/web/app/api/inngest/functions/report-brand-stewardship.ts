@@ -131,6 +131,7 @@ export function priorMonthStart(now: Date): Date {
 export const reportBrandStewardship = inngest.createFunction(
   {
     id: "report-brand-stewardship",
+    timeouts: { finish: "4m" },
     name: "Brand Stewardship: monthly report aggregation",
     retries: 2,
   },

@@ -27,7 +27,9 @@ const SOURCE_LABEL: Record<string, string> = {
   asic_investor: "ASIC",
 };
 
-const LOOKBACK_MINUTES = 60; // catch anything ingested in the last hour
+// Widened 60 → 75 (PR-C) so the hourly cadence (was */30) keeps a 15-min
+// overlap between ticks — nothing ingested near a tick boundary slips through.
+const LOOKBACK_MINUTES = 75;
 const MAX_PER_TICK = 10;     // safety cap — never push >10 narratives per cron tick
 
 interface NarrativeRow {
@@ -41,10 +43,11 @@ interface NarrativeRow {
 export const regulatorAlertPush = inngest.createFunction(
   {
     id: "regulator-alert-push",
+    timeouts: { finish: "4m" },
     name: "News Intel: Push regulator alerts",
     retries: 2,
   },
-  { cron: "*/30 * * * *" },
+  { cron: "0 * * * *" },
   withAxiomLogging({ fnId: "regulator-alert-push" }, async ({ step }) => {
     if (!featureFlags.pushAlerts) {
       return { skipped: true, reason: "pushAlerts flag disabled" };

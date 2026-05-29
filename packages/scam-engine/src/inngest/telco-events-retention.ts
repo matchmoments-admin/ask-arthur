@@ -25,6 +25,7 @@ type PruneResult = { table_name: string; rows_deleted: number };
 export const telcoEventsRetention = inngest.createFunction(
   {
     id: "telco-events-retention",
+    timeouts: { finish: "4m" },
     name: "Telco Events: Nightly retention housekeeping",
     retries: 2,
     // Forensic-retention compliance job. Page on permanent failure (#522) so a

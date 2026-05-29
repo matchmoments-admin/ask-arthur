@@ -19,6 +19,8 @@ const APWG_INTAKE = "reportphishing@apwg.org";
 export const onwardApwg = inngest.createFunction(
   {
     id: "report-onward-apwg",
+    concurrency: { limit: 2 },
+    timeouts: { finish: "2m" },
     name: "Onward report: APWG eCrime Exchange",
     retries: 4,
     rateLimit: {

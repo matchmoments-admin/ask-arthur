@@ -78,7 +78,7 @@ export const phoneFootprintPdfRender = inngest.createFunction(
     // or user double-click doesn't double-render + double-charge Resend.
     idempotency: "event.data.requestId || event.data.footprintId",
     retries: 1,
-    concurrency: { limit: 5 },
+    concurrency: { limit: 3 },
   },
   { event: PHONE_FOOTPRINT_PDF_EVENT },
   async ({ event, step }) => {

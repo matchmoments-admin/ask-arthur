@@ -24,6 +24,7 @@ import { withAxiomLogging } from "./with-axiom-logging";
 export const handleAnalyzeCompletedReport = inngest.createFunction(
   {
     id: "analyze-completed-report",
+    timeouts: { finish: "3m" },
     name: "Analyze: Persist scam report",
     idempotency: "event.data.requestId",
     retries: 3,

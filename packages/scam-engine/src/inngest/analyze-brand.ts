@@ -20,6 +20,7 @@ import { withAxiomLogging } from "./with-axiom-logging";
 export const handleAnalyzeCompletedBrand = inngest.createFunction(
   {
     id: "analyze-completed-brand",
+    timeouts: { finish: "2m" },
     name: "Analyze: Create brand impersonation alert",
     idempotency: "event.data.requestId",
     retries: 2,

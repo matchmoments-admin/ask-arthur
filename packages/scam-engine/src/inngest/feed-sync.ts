@@ -12,6 +12,8 @@ const LIMIT_PER_RUN = 50;
 export const syncVerifiedScamsToFeed = inngest.createFunction(
   {
     id: "feed-sync-verified-scams",
+    concurrency: { limit: 1 },
+    timeouts: { finish: "4m" },
     name: "Feed: Sync Verified Scams",
   },
   { cron: "0 7 * * 0" },
@@ -85,6 +87,8 @@ export const syncVerifiedScamsToFeed = inngest.createFunction(
 export const syncUserReportsToFeed = inngest.createFunction(
   {
     id: "feed-sync-user-reports",
+    concurrency: { limit: 1 },
+    timeouts: { finish: "4m" },
     name: "Feed: Sync User Reports",
   },
   { cron: "0 7 * * 0" },

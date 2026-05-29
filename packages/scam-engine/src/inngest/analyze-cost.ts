@@ -39,6 +39,7 @@ function claudeHaikuCostUsd(inputTokens: number, outputTokens: number): number {
 export const handleAnalyzeCompletedCost = inngest.createFunction(
   {
     id: "analyze-completed-cost",
+    timeouts: { finish: "2m" },
     name: "Analyze: Record Claude cost telemetry",
     idempotency: "event.data.requestId",
     retries: 2,

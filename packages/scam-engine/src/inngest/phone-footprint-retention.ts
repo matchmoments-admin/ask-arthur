@@ -32,6 +32,7 @@ import { withAxiomLogging } from "./with-axiom-logging";
 export const phoneFootprintRetention = inngest.createFunction(
   {
     id: "phone-footprint-retention",
+    timeouts: { finish: "4m" },
     name: "Phone Footprint: Nightly retention housekeeping",
     retries: 2,
     // Compliance job (PII anonymisation + consent lapse). A silent multi-day

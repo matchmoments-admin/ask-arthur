@@ -37,6 +37,7 @@ type ArchiveResult = { table_name: string; rows_moved: number };
 export const archiveShadowsRetention = inngest.createFunction(
   {
     id: "archive-shadows-retention",
+    timeouts: { finish: "4m" },
     name: "Archive shadows: nightly housekeeping (6 tables)",
     retries: 2,
   },

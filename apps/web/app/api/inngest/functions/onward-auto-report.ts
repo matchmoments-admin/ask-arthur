@@ -79,10 +79,12 @@ interface CandidateRow {
 export const onwardAutoReport = inngest.createFunction(
   {
     id: "report-onward-auto-report",
+    singleton: { mode: "skip" },
+    timeouts: { finish: "4m" },
     name: "Onward report: proactive auto-report producer",
     retries: 2,
   },
-  { cron: "25 * * * *" }, // hourly, offset to avoid colliding with other crons
+  { cron: "25 */3 * * *" }, // every 3h (PR-C, was hourly); :25 offset avoids cron pileup. 24h lookback + dedup index make the wider cadence lossless.
   async ({ step }) => {
     if (!featureFlags.onwardAutoReport) {
       return { skipped: true, reason: "FF_ONWARD_AUTO_REPORT disabled" };

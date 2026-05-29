@@ -62,6 +62,8 @@ async function fetchCrtSh(keyword: string): Promise<Array<{ common_name: string 
 export const ctMonitor = inngest.createFunction(
   {
     id: "pipeline-ct-monitor",
+    concurrency: { limit: 1 },
+    timeouts: { finish: "6m" },
     name: "Pipeline: CT Log Monitor",
   },
   { cron: "0 */12 * * *" }, // Every 12 hours

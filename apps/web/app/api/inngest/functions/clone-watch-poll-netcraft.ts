@@ -72,7 +72,7 @@ export const cloneWatchPollNetcraft = inngest.createFunction(
     timeouts: { finish: "8m" },
   },
   [
-    { cron: "*/30 * * * *" },
+    { cron: "0 * * * *" },
     { event: "shopfront/clone.poll-netcraft.manual-trigger.v1" },
   ],
   async ({ step }) => {

@@ -41,6 +41,8 @@ async function markStatus(
 export const onwardScamwatch = inngest.createFunction(
   {
     id: "report-onward-scamwatch",
+    concurrency: { limit: 2 },
+    timeouts: { finish: "1m" },
     name: "Onward report: Scamwatch (deep-link)",
     retries: 0,
   },
