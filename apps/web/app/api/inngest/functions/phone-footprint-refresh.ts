@@ -23,6 +23,7 @@ import "server-only";
 // PDF function — apps/web depends on scam-engine, not the other way.
 
 import { inngest } from "@askarthur/scam-engine/inngest/client";
+import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import {
   buildPhoneFootprint,
   computeDelta,
@@ -166,11 +167,13 @@ export const phoneFootprintRefreshMonitor = inngest.createFunction(
     concurrency: { limit: 5 },
   },
   { event: REFRESH_MONITOR_EVENT },
-  async ({ event, step }) => {
-    const { monitorId, queueId } = event.data as {
-      monitorId: number;
-      queueId: number;
-    };
+  withAxiomLogging(
+    { fnId: "phone-footprint-refresh-monitor" },
+    async ({ event, step }) => {
+      const { monitorId, queueId } = event.data as {
+        monitorId: number;
+        queueId: number;
+      };
 
     // Cost brake check — set by /api/cron/cost-daily-check when today's
     // phone_footprint spend exceeds PHONE_FOOTPRINT_CAP_USD. Mark the queue
@@ -203,7 +206,14 @@ export const phoneFootprintRefreshMonitor = inngest.createFunction(
         userId: monitor.user_id ?? undefined,
         orgId: monitor.org_id ?? undefined,
         ownershipProven: true, // monitor existence implies prior OTP
-        requestId: `refresh-${monitorId}-${Date.now()}`,
+        // Derive requestId from the stable queueId, NOT Date.now()
+        // (cron-hardening #521). This requestId becomes the footprint's
+        // request_id / idempotency anchor on persist; keying it on wall-clock
+        // meant an Inngest replay of the "orchestrate" step (e.g. step-cache
+        // miss after a mid-run deploy) minted a DIFFERENT id, defeating the
+        // persist idempotency and risking a duplicate snapshot. queueId is
+        // one-per-claimed-row, so the id is now replay-stable.
+        requestId: `refresh-${monitorId}-${queueId}`,
         // Threading prev through enables the orchestrator's carrier-drift
         // fallback for pillar 4 in countries without Vonage CAMARA
         // (currently AU + most of the world). Cheap weak-signal detection
@@ -233,6 +243,11 @@ export const phoneFootprintRefreshMonitor = inngest.createFunction(
       const supa = createServiceClient();
       if (!supa) return { count: 0, error: "supabase_unavailable" };
 
+      // Resolve prev_footprint_id ONCE — it's constant across every delta in
+      // this loop (cron-hardening #521). Previously this awaited a DB lookup
+      // inside the per-delta loop, issuing N identical round-trips.
+      const prevFootprintId = prev ? await getFootprintIdByRef(prev) : null;
+
       let count = 0;
       for (const delta of deltas) {
         const idemKey = `monitor:${monitorId}:fp:${newId}:${delta.type}`;
@@ -240,7 +255,7 @@ export const phoneFootprintRefreshMonitor = inngest.createFunction(
           .from("phone_footprint_alerts")
           .insert({
             monitor_id: monitorId,
-            prev_footprint_id: prev ? (await getFootprintIdByRef(prev)) : null,
+            prev_footprint_id: prevFootprintId,
             next_footprint_id: newId,
             alert_type: delta.type,
             severity: delta.severity,
@@ -282,7 +297,8 @@ export const phoneFootprintRefreshMonitor = inngest.createFunction(
       newFootprintId: newId,
       alertsDispatched: dispatched.count,
     };
-  },
+    },
+  ),
 );
 
 // ---------------------------------------------------------------------------

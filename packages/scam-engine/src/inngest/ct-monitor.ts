@@ -7,6 +7,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { normalizeURL } from "../url-normalize";
+import { withAxiomLogging } from "./with-axiom-logging";
 
 const AU_BRAND_KEYWORDS = [
   "mygov",
@@ -83,31 +84,46 @@ export const ctMonitor = inngest.createFunction(
     name: "Pipeline: CT Log Monitor",
   },
   { cron: "0 */12 * * *" }, // Every 12 hours
-  async ({ step }) => {
+  withAxiomLogging({ fnId: "pipeline-ct-monitor" }, async ({ step }) => {
     if (!featureFlags.dataPipeline) {
       return { skipped: true, reason: "dataPipeline feature flag disabled" };
     }
 
-    const newDomains = await step.run("scan-ct-logs", async () => {
-      const found: Array<{ url: string; brand: string }> = [];
-      const seen = new Set<string>();
-
-      for (const keyword of AU_BRAND_KEYWORDS) {
+    // One step.run per keyword (M-ct, cron-hardening #521). Previously all 9
+    // crt.sh fetches + their exponential-backoff sleeps lived in a single
+    // step, so a slow/flaky keyword forced an Inngest retry to re-scan the
+    // ENTIRE keyword set (re-hitting crt.sh). Per-keyword steps are memoised
+    // once successful, so a retry only re-runs the keyword that failed, and
+    // each step's internal backoff is bounded to that one keyword. Step id is
+    // keyed on the stable keyword (deterministic — no replay-loop risk). The
+    // inter-keyword setTimeout is dropped: sequential step execution already
+    // spaces the calls, and fetchCrtSh handles 5xx backoff internally.
+    const perKeyword: Array<Array<{ url: string; brand: string }>> = [];
+    for (const keyword of AU_BRAND_KEYWORDS) {
+      const found = await step.run(`scan-ct-${keyword}`, async () => {
         const certs = await fetchCrtSh(keyword);
-
+        const out: Array<{ url: string; brand: string }> = [];
         for (const cert of certs) {
           const cn = cert.common_name?.toLowerCase().trim();
-          if (!cn || cn.startsWith("*") || isLegitimate(cn) || seen.has(cn)) continue;
-          seen.add(cn);
-          found.push({ url: `https://${cn}`, brand: keyword });
+          if (!cn || cn.startsWith("*") || isLegitimate(cn)) continue;
+          out.push({ url: `https://${cn}`, brand: keyword });
         }
+        return out;
+      });
+      perKeyword.push(found);
+    }
 
-        // Rate-limit between keywords
-        await new Promise((r) => setTimeout(r, 500));
+    // Dedup across keywords in plain (deterministic) code, after the steps.
+    const seen = new Set<string>();
+    const newDomains: Array<{ url: string; brand: string }> = [];
+    for (const arr of perKeyword) {
+      for (const entry of arr) {
+        const cn = entry.url.replace(/^https:\/\//, "");
+        if (seen.has(cn)) continue;
+        seen.add(cn);
+        newDomains.push(entry);
       }
-
-      return found;
-    });
+    }
 
     if (newDomains.length === 0) {
       return { found: 0 };
@@ -151,5 +167,5 @@ export const ctMonitor = inngest.createFunction(
       found: newDomains.length,
       ...upsertResult,
     };
-  }
+  })
 );
