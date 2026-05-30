@@ -241,7 +241,11 @@ jobs:
 
   notify-failure:
     needs: scrape
-    if: failure()
+    # `failure()` catches a real feed error (the final gate step exits 1).
+    # `cancelled()` catches a timed-out (90-min cap) or manually-cancelled run —
+    # there the `if: always()` gate is SKIPPED, so failures already recorded in
+    # scraper_failures.txt would otherwise go un-paged. Page on both.
+    if: failure() || cancelled()
     runs-on: ubuntu-latest
     steps:
       - name: Send Slack notification

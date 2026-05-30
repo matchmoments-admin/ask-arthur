@@ -4,7 +4,8 @@ import { checkBotRateLimit } from "@askarthur/bot-core/rate-limit";
 import { logger } from "@askarthur/utils/logger";
 import { sendTextMessage, sendInteractiveButtons } from "./api";
 import { downloadWhatsAppMedia } from "./media";
-import { isReplay, getBotRedis } from "../replay-dedup";
+import { isReplay } from "../replay-dedup";
+import { getBotRedis } from "../redis";
 
 const DISCLOSURE_MESSAGE =
   "Welcome to Ask Arthur \u2014 Australia's scam detection service. " +
