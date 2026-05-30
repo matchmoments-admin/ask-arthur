@@ -120,11 +120,16 @@ export async function GET(req: NextRequest) {
 
     const enrichment = (data.enrichment_data ?? {}) as Record<string, unknown>;
     const twilio = (enrichment.twilio ?? {}) as Record<string, unknown>;
+    // Read both the current nested {twilio:{carrier,…}} shape AND the v41-migrated
+    // FLAT twilio_* keys, so the ~11 legacy scam_contacts rows still resolve.
+    const carrier = twilio.carrier ?? enrichment.twilio_carrier ?? null;
+    const lineType = twilio.line_type ?? enrichment.twilio_line_type ?? null;
+    const isVoip = twilio.is_voip ?? enrichment.twilio_is_voip ?? null;
 
     // B2B authenticated response — full data. confidenceScore/Level keep their
     // key names (sourced from risk_score/risk_level). uniqueReporterCount /
-    // primaryScamType / brandImpersonated are not on scam_entities (they live
-    // on the linked scam_reports) and are dropped — no live B2B consumer.
+    // primaryScamType / brandImpersonated are not on scam_entities (they'd need a
+    // report_entity_links→scam_reports join) and are dropped — no live consumer.
     if (isAuthenticated) {
       return NextResponse.json(
         {
@@ -134,9 +139,9 @@ export async function GET(req: NextRequest) {
           reportCount: data.report_count,
           confidenceScore: data.risk_score,
           confidenceLevel: data.risk_level,
-          currentCarrier: twilio.carrier ?? null,
-          lineType: twilio.line_type ?? null,
-          isVoip: twilio.is_voip ?? null,
+          currentCarrier: carrier,
+          lineType: lineType,
+          isVoip: isVoip,
           countryCode: data.country_code,
           emailDomain: enrichment.email_domain ?? null,
           firstReportedAt: data.first_seen,

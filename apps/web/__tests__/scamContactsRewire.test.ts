@@ -41,7 +41,7 @@ function makeSupabase(opts: {
   chain.maybeSingle = vi
     .fn()
     .mockResolvedValue(opts.maybeSingle ?? { data: null, error: null });
-  const rpc = vi.fn((name: string) =>
+  const rpc = vi.fn((name: string, _args?: Record<string, unknown>) =>
     Promise.resolve(opts.rpcByName?.[name] ?? { data: null, error: null }),
   );
   return { client: { from: vi.fn(() => chain), rpc }, rpc };
