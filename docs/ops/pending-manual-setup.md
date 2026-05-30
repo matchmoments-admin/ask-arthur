@@ -11,6 +11,39 @@ shipped code path is fully active.
 
 ---
 
+## 0. Add `AXIOM_QUERY_TOKEN` to Vercel prod (activates the Axiom fleet watchdog)
+
+**Why:** the `/api/cron/axiom-fleet-watch` cron (every 15 min) polls the
+`ask-arthur` Axiom dataset and pages admin Telegram only on a genuinely-bad
+condition (Inngest `fn.error` spike, runaway `fn.start` volume, or HTTP 5xx
+spike). It needs a **query-scoped** Axiom API token — distinct from
+`NEXT_PUBLIC_AXIOM_TOKEN`, which is ingest-only. Until the var is set the cron
+no-ops (`{skipped: true}`), so the alerting is inert.
+
+**Effort:** ~1 min + a redeploy. No code change.
+
+**Steps:**
+
+1. In Axiom: **Settings → API tokens → Create token**, scope **Query** (an
+   `xaat-` API token with Query permission, or an `xapt-` personal token).
+2. In Vercel: **Project → Settings → Environment Variables → Add** —
+   name `AXIOM_QUERY_TOKEN`, value the token, target **Production** (Preview
+   optional). It's a server secret, so leave it encrypted.
+3. **Redeploy** (env vars are snapshotted at deploy time — the running cron
+   won't see the new var until a fresh deploy; see the Vercel-env-snapshot
+   note). The next `*/15` tick then queries Axiom for real.
+4. Verify: the cron's run output should show `{checked: true, …}` instead of
+   `{skipped: true}`. To test paging without waiting for a real incident,
+   temporarily set `AXIOM_FLEET_5XX_THRESHOLD=1` (or trigger a 5xx) and confirm
+   the Telegram DM, then revert.
+
+**Optional tuning env vars** (sane defaults, only set to override):
+`AXIOM_FLEET_ERROR_THRESHOLD` (5), `AXIOM_FLEET_PER_FN_ERROR_THRESHOLD` (3),
+`AXIOM_FLEET_RUNAWAY_THRESHOLD` (300), `AXIOM_FLEET_5XX_THRESHOLD` (10).
+Also requires `TELEGRAM_ADMIN_CHAT_ID` (already set for pg-stuck-query-watchdog).
+
+---
+
 ## 1. Enable HIBP leaked-password protection (P1)
 
 **Why:** the only remaining security advisor WARN. Supabase Auth checks
@@ -84,7 +117,7 @@ After the bucket exists, configure three retention features:
 1. In the new bucket, go to **Settings → Object Lock**.
 2. Toggle **Enable Object Lock**.
 3. **Default retention:** `Compliance` mode, `30 days`.
-4. Save. *Compliance mode is irreversible — even an authenticated user with full bucket permissions cannot delete an object until its retention period expires.*
+4. Save. _Compliance mode is irreversible — even an authenticated user with full bucket permissions cannot delete an object until its retention period expires._
 
 **Versioning:**
 
@@ -121,7 +154,7 @@ re-view them**:
 
 - **Access Key ID** (short string, used as `R2_DR_ACCESS_KEY_ID`)
 - **Secret Access Key** (long string, used as `R2_DR_SECRET_ACCESS_KEY`)
-- *(Optional)* the S3-compatible endpoint URL — the **Account ID** is
+- _(Optional)_ the S3-compatible endpoint URL — the **Account ID** is
   the subdomain part: `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`.
 
 ### Step 2D — Find the R2 Account ID (~30 sec)
@@ -140,12 +173,12 @@ Save as `R2_ACCOUNT_ID`.
 1. Open: `https://github.com/matchmoments-admin/ask-arthur/settings/secrets/actions`
 2. **New repository secret** for each of:
 
-   | Secret name | Value | Source |
-   |---|---|---|
-   | `R2_ACCOUNT_ID` | `<your-cloudflare-account-id>` | Step 2D |
-   | `R2_DR_BUCKET` | `safeverify-dr` | Step 2A bucket name |
-   | `R2_DR_ACCESS_KEY_ID` | `<short access key>` | Step 2C |
-   | `R2_DR_SECRET_ACCESS_KEY` | `<long secret>` | Step 2C |
+   | Secret name               | Value                          | Source              |
+   | ------------------------- | ------------------------------ | ------------------- |
+   | `R2_ACCOUNT_ID`           | `<your-cloudflare-account-id>` | Step 2D             |
+   | `R2_DR_BUCKET`            | `safeverify-dr`                | Step 2A bucket name |
+   | `R2_DR_ACCESS_KEY_ID`     | `<short access key>`           | Step 2C             |
+   | `R2_DR_SECRET_ACCESS_KEY` | `<long secret>`                | Step 2C             |
 
    Note: `SUPABASE_DB_URL` is already configured for `scrape-feeds.yml`
    — don't re-add it.
