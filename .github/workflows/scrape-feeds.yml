@@ -68,13 +68,13 @@ jobs:
         if: |
           github.event.inputs.feed == 'all' || github.event.inputs.feed == 'scamwatch_alerts'
           || (github.event_name == 'schedule' && (github.event.schedule == '0 */3 * * *' || github.event.schedule == '0 */6 * * *' || github.event.schedule == '0 */12 * * *' || github.event.schedule == '0 16 * * *'))
-        run: python -m scamwatch_alerts
+        run: python -m scamwatch_alerts || echo "scamwatch_alerts" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
       - name: ACSC alerts + advisories (RSS)
         if: |
           github.event.inputs.feed == 'all' || github.event.inputs.feed == 'acsc_alerts'
           || (github.event_name == 'schedule' && (github.event.schedule == '0 */3 * * *' || github.event.schedule == '0 */6 * * *' || github.event.schedule == '0 */12 * * *' || github.event.schedule == '0 16 * * *'))
-        run: python -m acsc_alerts
+        run: python -m acsc_alerts || echo "acsc_alerts" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
       # One-shot diagnostic probe — workflow_dispatch only. Captures HTTP
       # status, timing, and headers across multiple UA/method permutations
@@ -91,19 +91,19 @@ jobs:
         if: |
           github.event.inputs.feed == 'all' || github.event.inputs.feed == 'urlhaus'
           || (github.event_name == 'schedule' && (github.event.schedule == '0 */6 * * *' || github.event.schedule == '0 */12 * * *' || github.event.schedule == '0 16 * * *'))
-        run: python -m urlhaus
+        run: python -m urlhaus || echo "urlhaus" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
       - name: OpenPhish
         if: |
           github.event.inputs.feed == 'all' || github.event.inputs.feed == 'openphish'
           || (github.event_name == 'schedule' && (github.event.schedule == '0 */6 * * *' || github.event.schedule == '0 */12 * * *' || github.event.schedule == '0 16 * * *'))
-        run: python -m openphish
+        run: python -m openphish || echo "openphish" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
       - name: PhishTank
         if: |
           github.event.inputs.feed == 'all' || github.event.inputs.feed == 'phishtank'
           || (github.event_name == 'schedule' && (github.event.schedule == '0 */6 * * *' || github.event.schedule == '0 */12 * * *' || github.event.schedule == '0 16 * * *'))
-        run: python -m phishtank
+        run: python -m phishtank || echo "phishtank" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
       # ThreatFox — DISABLED 2026-05-11. abuse.ch API key returning 401
       # Unauthorized since 2026-02-23 (80+ days of error rows). Coverage
@@ -119,31 +119,31 @@ jobs:
         if: |
           github.event.inputs.feed == 'all' || github.event.inputs.feed == 'phishstats'
           || (github.event_name == 'schedule' && (github.event.schedule == '0 */12 * * *' || github.event.schedule == '0 16 * * *'))
-        run: python -m phishstats
+        run: python -m phishstats || echo "phishstats" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
       - name: Phishing.Database
         if: |
           github.event.inputs.feed == 'all' || github.event.inputs.feed == 'phishing_database'
           || (github.event_name == 'schedule' && (github.event.schedule == '0 */12 * * *' || github.event.schedule == '0 16 * * *'))
-        run: python -m phishing_database
+        run: python -m phishing_database || echo "phishing_database" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
       - name: Phishing Army
         if: |
           github.event.inputs.feed == 'all' || github.event.inputs.feed == 'phishing_army'
           || (github.event_name == 'schedule' && (github.event.schedule == '0 */12 * * *' || github.event.schedule == '0 16 * * *'))
-        run: python -m phishing_army
+        run: python -m phishing_army || echo "phishing_army" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
       - name: Feodo Tracker
         if: |
           github.event.inputs.feed == 'all' || github.event.inputs.feed == 'feodo'
           || (github.event_name == 'schedule' && (github.event.schedule == '0 */12 * * *' || github.event.schedule == '0 16 * * *'))
-        run: python -m feodo
+        run: python -m feodo || echo "feodo" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
       - name: Spamhaus DROP/EDROP
         if: |
           github.event.inputs.feed == 'all' || github.event.inputs.feed == 'spamhaus'
           || (github.event_name == 'schedule' && (github.event.schedule == '0 */12 * * *' || github.event.schedule == '0 16 * * *'))
-        run: python -m spamhaus
+        run: python -m spamhaus || echo "spamhaus" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
       # ──────────────────────────────────────────────────────────────────
       # tier-daily — snapshots and lower-velocity sources (02:00 AEST)
@@ -152,7 +152,7 @@ jobs:
         if: |
           github.event.inputs.feed == 'all' || github.event.inputs.feed == 'asic_investor_alerts'
           || (github.event_name == 'schedule' && github.event.schedule == '0 16 * * *')
-        run: python -m asic_investor_alerts
+        run: python -m asic_investor_alerts || echo "asic_investor_alerts" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
       # AUSTRAC media releases — RSS (PR-B3 v131). Money-mule + payments-fraud
       # typology reports. Low-volume (~1-3 releases/week), so daily is enough.
@@ -160,13 +160,13 @@ jobs:
         if: |
           github.event.inputs.feed == 'all' || github.event.inputs.feed == 'austrac'
           || (github.event_name == 'schedule' && github.event.schedule == '0 16 * * *')
-        run: python -m austrac
+        run: python -m austrac || echo "austrac" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
       - name: IPsum
         if: |
           github.event.inputs.feed == 'all' || github.event.inputs.feed == 'ipsum'
           || (github.event_name == 'schedule' && github.event.schedule == '0 16 * * *')
-        run: python -m ipsum
+        run: python -m ipsum || echo "ipsum" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
       - name: AbuseIPDB seed
         if: |
@@ -174,7 +174,7 @@ jobs:
           || (github.event_name == 'schedule' && github.event.schedule == '0 16 * * *')
         env:
           ABUSEIPDB_API_KEY: ${{ secrets.ABUSEIPDB_API_KEY }}
-        run: python -m abuseipdb
+        run: python -m abuseipdb || echo "abuseipdb" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
       # CryptoScamDB — DISABLED 2026-05-11. Source repo returns 404 at
       # raw.githubusercontent.com (project archived/moved). To re-enable:
@@ -185,7 +185,7 @@ jobs:
         if: |
           github.event.inputs.feed == 'all' || github.event.inputs.feed == 'crtsh'
           || (github.event_name == 'schedule' && github.event.schedule == '0 16 * * *')
-        run: python -m crtsh
+        run: python -m crtsh || echo "crtsh" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
       # ACNC Charity Register mirror — gated independently of ENABLE_SCRAPER.
       - name: Scrape ACNC Charity Register
@@ -195,7 +195,7 @@ jobs:
           && vars.ENABLE_CHARITY_CHECK_INGEST == 'true'
         env:
           FF_CHARITY_CHECK_INGEST: 'true'
-        run: python -m acnc_register
+        run: python -m acnc_register || echo "acnc_register" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
       # PFRA member registry — quarterly upstream, daily probe is mostly no-op.
       - name: Scrape PFRA member registry
@@ -205,7 +205,7 @@ jobs:
           && vars.ENABLE_CHARITY_CHECK_INGEST == 'true'
         env:
           FF_CHARITY_CHECK_INGEST: 'true'
-        run: python -m pfra_members
+        run: python -m pfra_members || echo "pfra_members" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
       # Reddit — kept on its own daily 06:00 UTC slot (matched here by 0 16
       # for daily, but we still want the original cadence to avoid double-runs
@@ -221,7 +221,23 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
-        run: python -m reddit_scams
+        run: python -m reddit_scams || echo "reddit_scams" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
+
+      # Fail the job (→ notify-failure) if ANY scraper exited non-zero. Each
+      # scraper step above captures its failure into scraper_failures.txt via
+      # `|| echo` instead of failing inline, so a single feed's error no longer
+      # aborts the remaining sequential steps (the pre-#564 cascade). This gate
+      # restores the "page on real failure" intent of #556/#564 while preserving
+      # full ingestion coverage on every run.
+      - name: Fail if any scraper errored
+        if: always()
+        run: |
+          if [ -s "$GITHUB_WORKSPACE/scraper_failures.txt" ]; then
+            echo "Scrapers that exited non-zero this run:"
+            cat "$GITHUB_WORKSPACE/scraper_failures.txt"
+            exit 1
+          fi
+          echo "All scrapers completed without a hard error."
 
   notify-failure:
     needs: scrape
