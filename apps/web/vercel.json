@@ -72,6 +72,10 @@
     {
       "path": "/api/cron/scraper-brake-alert",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/axiom-fleet-watch",
+      "schedule": "*/15 * * * *"
     }
   ],
   "functions": {

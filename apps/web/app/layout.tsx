@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Public_Sans } from "next/font/google";
 import PlausibleProvider from "next-plausible";
+import { AxiomWebVitals } from "next-axiom";
 import "./globals.css";
 
 const publicSans = Public_Sans({
@@ -51,6 +52,10 @@ export default function RootLayout({
         <PlausibleProvider domain={process.env.NEXT_PUBLIC_PLAUSIBLE_DOMAIN || "askarthur.au"} />
       </head>
       <body className="bg-white text-gov-slate antialiased">
+        {/* Reports Core Web Vitals (LCP/CLS/INP/FCP/TTFB) to the ask-arthur
+            Axiom dataset (source: "web-vitals") so page-speed regressions are
+            visible on the dashboard. Client-only, fire-and-forget, no alerting. */}
+        <AxiomWebVitals />
         <a
           href="#main-content"
           className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:bg-deep-navy focus:text-white focus:px-4 focus:py-2 focus:rounded"

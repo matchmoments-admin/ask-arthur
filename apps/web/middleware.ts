@@ -264,14 +264,27 @@ export async function middleware(req: NextRequest) {
   function logRequest(res: NextResponse, rateRemaining: number | undefined): void {
     try {
       const log = getLogger({ source: "middleware", requestId });
-      log.info("request", {
+      const fields = {
         method: req.method,
         path: req.nextUrl.pathname,
         status: res.status,
         authState,
         durationMs: Date.now() - start,
         rateRemaining,
-      });
+      };
+      // Level by status so server errors are never sampled away: INFO is
+      // 10%-sampled in prod (axiom-logger), so a 5xx logged at info has only a
+      // ~10% chance of landing — useless for catching outages. WARN/ERROR
+      // always ship. 5xx → error (real server fault, also drives the
+      // axiom-fleet-watch 5xx-spike alert); 429 → warn (rate-limit pressure
+      // worth seeing unsampled); everything else stays info/sampled.
+      if (res.status >= 500) {
+        log.error("request", fields);
+      } else if (res.status === 429) {
+        log.warn("request", fields);
+      } else {
+        log.info("request", fields);
+      }
       // Fire-and-forget — neutralise rejection so a flaky Axiom can't
       // surface as an unhandled-rejection runtime warning.
       log.flush().catch(() => {});
