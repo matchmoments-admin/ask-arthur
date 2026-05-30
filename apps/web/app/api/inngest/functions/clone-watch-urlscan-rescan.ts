@@ -1,4 +1,5 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
+import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import {
   CLONE_WATCH_SCAN_REQUESTED_EVENT,
   type CloneWatchScanRequestedData,
@@ -52,7 +53,7 @@ export const cloneWatchUrlscanRescan = inngest.createFunction(
     { cron: "0 11 * * *" },
     { event: "shopfront/clone.urlscan-rescan.manual-trigger.v1" },
   ],
-  async ({ step }) => {
+  withAxiomLogging({ fnId: "shopfront-clone-urlscan-rescan" }, async ({ step }) => {
     if (!featureFlags.shopfrontCloneUrlscan) {
       return { skipped: true, reason: "FF_SHOPFRONT_CLONE_URLSCAN disabled" };
     }
@@ -112,5 +113,5 @@ export const cloneWatchUrlscanRescan = inngest.createFunction(
     });
 
     return { ok: true, fanned_out: rows.length };
-  },
+  }),
 );

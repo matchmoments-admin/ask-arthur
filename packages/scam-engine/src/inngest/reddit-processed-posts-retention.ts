@@ -21,6 +21,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
 import { inngest } from "./client";
+import { withAxiomLogging } from "./with-axiom-logging";
 
 const RETENTION_DAYS = 30;
 
@@ -32,7 +33,7 @@ export const redditProcessedPostsRetention = inngest.createFunction(
     retries: 2,
   },
   { cron: "45 3 * * *" },
-  async ({ step }) => {
+  withAxiomLogging({ fnId: "reddit-processed-posts-retention" }, async ({ step }) => {
     const deleted = await step.run("cleanup-old-reddit-posts", async () => {
       const supabase = createServiceClient();
       if (!supabase) throw new Error("supabase service client unavailable");
@@ -49,5 +50,5 @@ export const redditProcessedPostsRetention = inngest.createFunction(
     });
 
     return { deletedRows: deleted, retentionDays: RETENTION_DAYS };
-  },
+  }),
 );

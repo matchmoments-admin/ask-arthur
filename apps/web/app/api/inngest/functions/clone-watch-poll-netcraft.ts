@@ -1,4 +1,5 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
+import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
@@ -75,7 +76,7 @@ export const cloneWatchPollNetcraft = inngest.createFunction(
     { cron: "0 * * * *" },
     { event: "shopfront/clone.poll-netcraft.manual-trigger.v1" },
   ],
-  async ({ step }) => {
+  withAxiomLogging({ fnId: "shopfront-clone-poll-netcraft" }, async ({ step }) => {
     if (!featureFlags.shopfrontCloneOutreach) {
       return { skipped: true, reason: "FF_SHOPFRONT_CLONE_OUTREACH disabled" };
     }
@@ -206,7 +207,7 @@ export const cloneWatchPollNetcraft = inngest.createFunction(
       still_pending,
       errors,
     };
-  },
+  }),
 );
 
 type PollOutcome =

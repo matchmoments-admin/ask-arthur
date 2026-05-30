@@ -23,6 +23,7 @@ import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 
 import { inngest } from "./client";
+import { withAxiomLogging } from "./with-axiom-logging";
 import {
   B2B_EXPOSURE_MATCHED_EVENT,
   B2B_EXPOSURE_REQUESTED_EVENT,
@@ -156,7 +157,7 @@ export const matchB2bExposure = inngest.createFunction(
     idempotency: "event.data.requestId",
   },
   { event: B2B_EXPOSURE_REQUESTED_EVENT },
-  async ({ event, step }) => {
+  withAxiomLogging({ fnId: "match-b2b-exposure" }, async ({ event, step }) => {
     if (!featureFlags.vulnB2bExposure) {
       return { skipped: true, reason: "ffVulnB2bExposure is off" };
     }
@@ -284,5 +285,5 @@ export const matchB2bExposure = inngest.createFunction(
     });
 
     return { matched: matchTriples.length, candidates: candidates.length };
-  },
+  }),
 );

@@ -17,6 +17,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
 import { inngest } from "./client";
+import { withAxiomLogging } from "./with-axiom-logging";
 
 const ARCHIVE_BATCH_SIZE = 5000;
 const ARCHIVE_DEFAULT_DAYS = 365;
@@ -32,7 +33,7 @@ export const feedRetention = inngest.createFunction(
     retries: 2,
   },
   { cron: "30 2 * * *" },
-  async ({ step }) => {
+  withAxiomLogging({ fnId: "feed-retention" }, async ({ step }) => {
     // ── archive narrative feed_items rows older than 365 days ─────────────
     const archived = await step.run("archive-feed-items", async () => {
       const supabase = createServiceClient();
@@ -84,5 +85,5 @@ export const feedRetention = inngest.createFunction(
       prunedLogRows: prunedLog,
       prunedCacheRows: prunedCache,
     };
-  },
+  }),
 );

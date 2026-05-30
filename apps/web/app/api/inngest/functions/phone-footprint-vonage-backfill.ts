@@ -22,6 +22,7 @@ import "server-only";
 // fleet doesn't OOM the runtime.
 
 import { inngest } from "@askarthur/scam-engine/inngest/client";
+import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import {
   buildPhoneFootprint,
   type Footprint,
@@ -57,7 +58,7 @@ export const phoneFootprintVonageBackfillPager = inngest.createFunction(
     concurrency: { limit: 1 },
   },
   { event: VONAGE_BACKFILL_REQUESTED_EVENT },
-  async ({ event, step }) => {
+  withAxiomLogging({ fnId: "phone-footprint-vonage-backfill-pager" }, async ({ event, step }) => {
     const { requestId } = event.data as { requestId: string };
     if (!requestId) {
       return { error: "missing_request_id" };
@@ -95,7 +96,7 @@ export const phoneFootprintVonageBackfillPager = inngest.createFunction(
     }
 
     return { totalEmitted, pageCount };
-  },
+  }),
 );
 
 async function loadPage(cursor: number | null): Promise<MonitorRow[]> {
@@ -135,7 +136,7 @@ export const phoneFootprintVonageBackfillMonitor = inngest.createFunction(
     concurrency: { limit: 3 },
   },
   { event: VONAGE_BACKFILL_MONITOR_EVENT },
-  async ({ event, step }) => {
+  withAxiomLogging({ fnId: "phone-footprint-vonage-backfill-monitor" }, async ({ event, step }) => {
     const { monitorId, requestId } = event.data as {
       monitorId: number;
       requestId: string;
@@ -173,7 +174,7 @@ export const phoneFootprintVonageBackfillMonitor = inngest.createFunction(
       newFootprintId: newId,
       vonageCoverage: footprint.coverage.vonage,
     };
-  },
+  }),
 );
 
 async function loadMonitor(id: number): Promise<MonitorRow | null> {

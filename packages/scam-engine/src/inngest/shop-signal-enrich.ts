@@ -27,6 +27,7 @@
 // ADR: docs/adr/0008-shop-signal-deep-check-user-initiated.md.
 
 import { inngest } from "./client";
+import { withAxiomLogging } from "./with-axiom-logging";
 import { logger } from "@askarthur/utils/logger";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -316,6 +317,7 @@ export const shopSignalEnrich = inngest.createFunction(
   // Inngest's `step` is structurally a superset of EnrichStep; the cast is
   // only needed because its step.run carries a tighter (Jsonify) result
   // type. runShopSignalEnrich only ever calls step.run.
-  ({ event, step }) =>
+  withAxiomLogging({ fnId: "shop-signal-enrich" }, ({ event, step }) =>
     runShopSignalEnrich(step as unknown as EnrichStep, event.data),
+  ),
 );

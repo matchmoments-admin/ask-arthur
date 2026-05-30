@@ -1,4 +1,5 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
+import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
@@ -85,7 +86,7 @@ export const onwardAutoReport = inngest.createFunction(
     retries: 2,
   },
   { cron: "25 */3 * * *" }, // every 3h (PR-C, was hourly); :25 offset avoids cron pileup. 24h lookback + dedup index make the wider cadence lossless.
-  async ({ step }) => {
+  withAxiomLogging({ fnId: "report-onward-auto-report" }, async ({ step }) => {
     if (!featureFlags.onwardAutoReport) {
       return { skipped: true, reason: "FF_ONWARD_AUTO_REPORT disabled" };
     }
@@ -192,5 +193,5 @@ export const onwardAutoReport = inngest.createFunction(
     });
 
     return { ok: true, candidates: candidates.length, enqueued: fresh.length };
-  },
+  }),
 );

@@ -1,4 +1,5 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
+import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import {
   runUrlBlocklistOnward,
@@ -30,7 +31,7 @@ export const onwardApwg = inngest.createFunction(
     },
   },
   { event: "report.onward.apwg" },
-  async ({ event, step }) =>
+  withAxiomLogging({ fnId: "report-onward-apwg" }, async ({ event, step }) =>
     runUrlBlocklistOnward(
       // Inngest's step tools don't structurally match OnwardStepCtx (overloaded
       // generic run()); shapes are compatible at runtime.
@@ -42,5 +43,5 @@ export const onwardApwg = inngest.createFunction(
         logFeature: "onward_apwg",
         logOperation: "apwg_url_forward",
       },
-    ),
+    )),
 );

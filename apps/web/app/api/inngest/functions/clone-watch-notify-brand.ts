@@ -1,4 +1,5 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
+import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import {
   CLONE_WATCH_TRIAGED_EVENT,
   parseCloneWatchTriagedData,
@@ -114,7 +115,7 @@ export const cloneWatchNotifyBrand = inngest.createFunction(
     },
   },
   { event: CLONE_WATCH_TRIAGED_EVENT },
-  async ({ event, step }) => {
+  withAxiomLogging({ fnId: "shopfront-clone-notify-brand" }, async ({ event, step }) => {
     const data = parseCloneWatchTriagedData(event.data);
 
     if (!featureFlags.shopfrontCloneOutreach) {
@@ -326,7 +327,7 @@ export const cloneWatchNotifyBrand = inngest.createFunction(
     }
 
     return { skipped: true, reason: "unknown_channel_type" };
-  },
+  }),
 );
 
 interface NotificationFragment {

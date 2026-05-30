@@ -3,6 +3,7 @@
 // Copies enrichment data across all same-domain URLs.
 
 import { inngest } from "./client";
+import { withAxiomLogging } from "./with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -24,7 +25,7 @@ export const enrichmentFanOut = inngest.createFunction(
     rateLimit: { limit: 1, period: "30m" },
   },
   { cron: "0 */6 * * *" }, // Every 6 hours
-  async ({ step }) => {
+  withAxiomLogging({ fnId: "pipeline-enrichment-fanout" }, async ({ step }) => {
     if (!featureFlags.dataPipeline) {
       return { skipped: true, reason: "dataPipeline feature flag disabled" };
     }
@@ -124,5 +125,5 @@ export const enrichmentFanOut = inngest.createFunction(
     });
 
     return { domains: pendingDomains.length, urlsUpdated: totalUpdated, results };
-  }
+  })
 );

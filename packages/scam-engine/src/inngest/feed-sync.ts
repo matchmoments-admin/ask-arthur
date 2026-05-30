@@ -2,6 +2,7 @@
 // for the public scam feed. Runs weekly (Sunday 07:00 UTC, after Reddit scraper).
 
 import { inngest } from "./client";
+import { withAxiomLogging } from "./with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -17,7 +18,7 @@ export const syncVerifiedScamsToFeed = inngest.createFunction(
     name: "Feed: Sync Verified Scams",
   },
   { cron: "0 7 * * 0" },
-  async ({ step }) => {
+  withAxiomLogging({ fnId: "feed-sync-verified-scams" }, async ({ step }) => {
     if (!featureFlags.dataPipeline) {
       return { skipped: true, reason: "dataPipeline feature flag disabled" };
     }
@@ -81,7 +82,7 @@ export const syncVerifiedScamsToFeed = inngest.createFunction(
     });
 
     return result;
-  }
+  })
 );
 
 export const syncUserReportsToFeed = inngest.createFunction(
@@ -92,7 +93,7 @@ export const syncUserReportsToFeed = inngest.createFunction(
     name: "Feed: Sync User Reports",
   },
   { cron: "0 7 * * 0" },
-  async ({ step }) => {
+  withAxiomLogging({ fnId: "feed-sync-user-reports" }, async ({ step }) => {
     if (!featureFlags.dataPipeline) {
       return { skipped: true, reason: "dataPipeline feature flag disabled" };
     }
@@ -158,5 +159,5 @@ export const syncUserReportsToFeed = inngest.createFunction(
     });
 
     return result;
-  }
+  })
 );

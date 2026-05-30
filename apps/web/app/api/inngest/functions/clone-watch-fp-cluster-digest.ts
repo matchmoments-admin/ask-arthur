@@ -1,4 +1,5 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
+import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
@@ -62,7 +63,7 @@ export const cloneWatchFpClusterDigest = inngest.createFunction(
     { cron: "30 9 * * 0" },
     { event: "shopfront/clone.fp-cluster-digest.manual-trigger.v1" },
   ],
-  async ({ step }) => {
+  withAxiomLogging({ fnId: "shopfront-clone-fp-cluster-digest" }, async ({ step }) => {
     logger.info("clone-watch fp-cluster-digest: invoked");
 
     if (!featureFlags.shopfrontCloneWatch) {
@@ -148,7 +149,7 @@ export const cloneWatchFpClusterDigest = inngest.createFunction(
       fp_count: rows.length,
       window_days: WINDOW_DAYS,
     };
-  },
+  }),
 );
 
 // ── Pure helpers (exported for unit testing) ─────────────────────────────

@@ -31,6 +31,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
 import { inngest } from "./client";
+import { withAxiomLogging } from "./with-axiom-logging";
 import { embed } from "../embeddings";
 
 // Tuneable per-run limits. 200 rows/batch is well under Voyage's 1000-input
@@ -100,7 +101,7 @@ export const acncCharityBackfillEmbed = inngest.createFunction(
     { cron: "0 4 * * *" }, // daily 04:00 UTC
     { event: ACNC_CHARITY_EMBED_BACKFILL_EVENT },
   ],
-  async ({ step }) => {
+  withAxiomLogging({ fnId: "acnc-charity-backfill-embed" }, async ({ step }) => {
     let totalEmbedded = 0;
     let totalTokens = 0;
     let totalCostUsd = 0;
@@ -229,5 +230,5 @@ export const acncCharityBackfillEmbed = inngest.createFunction(
       estimatedCostUsd: totalCostUsd,
       modelId: lastModelId,
     };
-  },
+  }),
 );
