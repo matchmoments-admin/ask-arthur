@@ -6,6 +6,7 @@ import { logger } from "@askarthur/utils/logger";
 import type { AnalysisResult } from "@askarthur/types";
 import { sendTextMessage, sendQuickReplies, type MessengerQuickReply } from "./api";
 import { downloadMessengerAttachment } from "./media";
+import { isReplay } from "../replay-dedup";
 
 const DISCLOSURE_MESSAGE =
   "Welcome to Ask Arthur — Australia's scam detection service. " +
@@ -91,6 +92,13 @@ export async function handleMessengerWebhook(
 
     // Ignore echoes of the Page's own outbound messages (avoids self-analysis loops)
     if (event.message?.is_echo) continue;
+
+    // Skip retries/replays of a message we've already handled (Meta re-delivers
+    // on any slow/non-2xx response). Postbacks/quick-replies carry no mid; those
+    // are idempotent static replies, so leaving them undeduped is harmless.
+    if (event.message?.mid && (await isReplay("messenger", event.message.mid))) {
+      continue;
+    }
 
     try {
       // Quick-reply tap or persistent-menu postback

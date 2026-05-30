@@ -175,6 +175,32 @@ describe("POST /api/scam-contacts/report — re-wired to scam_entities", () => {
     expect(res.status).toBe(200);
     expect(lookupPhoneNumber).not.toHaveBeenCalled();
   });
+
+  it("skips Twilio enrichment for a NEW phone when feature_brakes.scam_contacts_twilio is set", async () => {
+    // maybeSingle backs isFeatureBraked's feature_brakes read (the report path
+    // itself only uses .rpc()), so a future paused_until brakes Twilio while the
+    // entity is still reported.
+    const { client } = makeSupabase({
+      rpcByName: {
+        report_scam_entity: {
+          data: [{ entity_id: 7, is_new: true, report_count: 1 }],
+          error: null,
+        },
+      },
+      maybeSingle: {
+        data: { paused_until: new Date(Date.now() + 3_600_000).toISOString() },
+        error: null,
+      },
+    });
+    useSupabase(client);
+    const res = await POST(postReq({ contacts: [{ type: "phone", value: "0412345678" }] }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    // Entity still reported, but no paid Twilio call and no carrier/lineType.
+    expect(json.contacts[0]).toMatchObject({ value: "+61412345678", reportCount: 1 });
+    expect(json.contacts[0].carrier).toBeUndefined();
+    expect(lookupPhoneNumber).not.toHaveBeenCalled();
+  });
 });
 
 describe("GET /api/scam-contacts/lookup — re-wired to scam_entities", () => {

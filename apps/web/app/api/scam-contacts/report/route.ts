@@ -4,6 +4,7 @@ import { checkFormRateLimit } from "@askarthur/utils/rate-limit";
 import { geolocateIP } from "@askarthur/scam-engine/geolocate";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { lookupPhoneNumber } from "@/lib/twilioLookup";
+import { isFeatureBraked } from "@askarthur/scam-engine/cost-log";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import {
   normalizePhoneE164,
@@ -74,6 +75,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // 5b. Twilio cost brake — operator/cron kill-switch (feature_brakes row,
+    // same pattern as apivoid/reddit-intel). Checked once per request, not per
+    // contact, to bound DB reads. When set, entities still get reported; only
+    // the paid Twilio enrichment on new phones is skipped. This is the pre-flip
+    // safety valve for NEXT_PUBLIC_FF_SCAM_REPORTING: a report flood (past the
+    // 5/hr/IP limiter, e.g. distributed) can't run up unbounded Twilio spend.
+    const twilioBraked = await isFeatureBraked("scam_contacts_twilio");
+
     // 6. Process each contact
     const results: Array<{
       value: string;
@@ -128,7 +137,7 @@ export async function POST(req: NextRequest) {
       };
 
       // Twilio enrichment for new phone entities → enrichment_data.twilio
-      if (is_new && contact.type === "phone") {
+      if (is_new && contact.type === "phone" && !twilioBraked) {
         try {
           const lookup = await lookupPhoneNumber(normalizedValue);
           await supabase.rpc("merge_entity_enrichment_data", {
