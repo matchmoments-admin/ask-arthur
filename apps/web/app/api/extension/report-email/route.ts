@@ -63,26 +63,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 5. Report sender email as scam contact
+    // 5. Report sender email as a scam entity (unified scam_entities model;
+    //    replaces the dropped upsert_scam_contact RPC). report_count + last_seen
+    //    are maintained by the RPC's ON CONFLICT.
     if (isValidEmailFormat(senderEmail)) {
       const normalizedEmail = normalizeEmail(senderEmail);
 
-      const { error: contactError } = await supabase.rpc(
-        "upsert_scam_contact",
-        {
-          p_normalized_value: normalizedEmail,
-          p_contact_type: "email",
-          p_reporter_hash: reporterHash,
-          p_scam_type: null,
-          p_brand_impersonated: null,
-          p_channel: "email",
-          p_region: null,
-          p_analysis_id: null,
-        }
-      );
+      const { error: contactError } = await supabase.rpc("upsert_scam_entity", {
+        p_entity_type: "email",
+        p_normalized_value: normalizedEmail,
+        p_raw_value: senderEmail,
+      });
 
       if (contactError) {
-        logger.error("upsert_scam_contact failed for email report", {
+        logger.error("upsert_scam_entity failed for email report", {
           error: contactError.message,
         });
       }
