@@ -1,4 +1,5 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
+import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
@@ -136,7 +137,7 @@ export const reportBrandStewardship = inngest.createFunction(
     retries: 2,
   },
   { cron: "0 9 1 * *" }, // 1st of month, 09:00 UTC
-  async ({ step }) => {
+  withAxiomLogging({ fnId: "report-brand-stewardship" }, async ({ step }) => {
     if (!featureFlags.brandStewardshipReport) {
       return { skipped: true, reason: "FF_BRAND_STEWARDSHIP_REPORT disabled" };
     }
@@ -305,5 +306,5 @@ export const reportBrandStewardship = inngest.createFunction(
       brands: aggregated.size,
       ...prepared,
     };
-  },
+  }),
 );

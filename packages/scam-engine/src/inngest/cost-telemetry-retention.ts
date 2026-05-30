@@ -22,6 +22,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
 import { inngest } from "./client";
+import { withAxiomLogging } from "./with-axiom-logging";
 
 const ROLLUP_WINDOW_DAYS = 7;
 const RAW_RETENTION_DAYS = 90;
@@ -34,7 +35,7 @@ export const costTelemetryRetention = inngest.createFunction(
     retries: 2,
   },
   { cron: "0 4 * * *" },
-  async ({ step }) => {
+  withAxiomLogging({ fnId: "cost-telemetry-retention" }, async ({ step }) => {
     const rolled = await step.run("refresh-rollup", async () => {
       const supabase = createServiceClient();
       if (!supabase) throw new Error("supabase service client unavailable");
@@ -66,5 +67,5 @@ export const costTelemetryRetention = inngest.createFunction(
       rolledUpRows: rolled,
       prunedRawRows: pruned,
     };
-  },
+  }),
 );

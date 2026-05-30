@@ -1,4 +1,5 @@
 import { inngest } from "./client";
+import { withAxiomLogging } from "./with-axiom-logging";
 import { logger } from "@askarthur/utils/logger";
 
 // Subscribes to the Inngest system event fired when ANY function's final
@@ -17,7 +18,7 @@ export const onAnalyzeFailed = inngest.createFunction(
     name: "Analyze: subscribe to function failures",
   },
   { event: "inngest/function.failed" },
-  async ({ event }) => {
+  withAxiomLogging({ fnId: "analyze-failure-subscriber" }, async ({ event }) => {
     // The system event's data shape is:
     // {
     //   function_id: string,
@@ -55,5 +56,5 @@ export const onAnalyzeFailed = inngest.createFunction(
     // Phase 4b TODO: Sentry.captureException + Telegram admin ping here.
 
     return { logged: true, fnId };
-  }
+  })
 );

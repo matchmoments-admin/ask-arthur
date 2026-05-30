@@ -1,4 +1,5 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
+import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import {
   runUrlBlocklistOnward,
@@ -31,7 +32,7 @@ export const onwardOpenphish = inngest.createFunction(
     },
   },
   { event: "report.onward.openphish" },
-  async ({ event, step }) =>
+  withAxiomLogging({ fnId: "report-onward-openphish" }, async ({ event, step }) =>
     runUrlBlocklistOnward(
       // Inngest's step tools don't structurally match OnwardStepCtx (overloaded
       // generic run()); shapes are compatible at runtime.
@@ -43,5 +44,5 @@ export const onwardOpenphish = inngest.createFunction(
         logFeature: "onward_openphish",
         logOperation: "openphish_url_forward",
       },
-    ),
+    )),
 );

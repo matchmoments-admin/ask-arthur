@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
+import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { readStringEnv } from "@askarthur/utils/env";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -100,7 +101,7 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
     { cron: "30 9 * * *" },
     { event: "shopfront/clone.notify-brand-prepare.manual-trigger.v1" },
   ],
-  async ({ step }) => {
+  withAxiomLogging({ fnId: "shopfront-clone-notify-brand-prepare" }, async ({ step }) => {
     logger.info("clone-watch prepare: invoked", {
       autoSend: featureFlags.shopfrontCloneNotifyBrandAutoSend,
     });
@@ -441,7 +442,7 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
       groups_skipped_cooldown: groupsSkippedCooldown,
       mode: autoSend ? "auto_send" : "manual_approval",
     };
-  },
+  }),
 );
 
 // ── Pure helpers (exported for unit testing) ─────────────────────────────

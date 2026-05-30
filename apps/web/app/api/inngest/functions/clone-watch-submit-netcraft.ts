@@ -1,4 +1,5 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
+import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import {
   CLONE_WATCH_TRIAGED_EVENT,
   parseCloneWatchTriagedData,
@@ -36,7 +37,7 @@ export const cloneWatchSubmitNetcraft = inngest.createFunction(
     idempotency: "event.data.alertId",
   },
   { event: CLONE_WATCH_TRIAGED_EVENT },
-  async ({ event, step }) => {
+  withAxiomLogging({ fnId: "shopfront-clone-submit-netcraft" }, async ({ event, step }) => {
     const data = parseCloneWatchTriagedData(event.data);
 
     if (!featureFlags.shopfrontCloneOutreach) {
@@ -160,7 +161,7 @@ export const cloneWatchSubmitNetcraft = inngest.createFunction(
       alertId: data.alertId,
       netcraftUuid: submission.netcraftUuid,
     };
-  },
+  }),
 );
 
 export function buildSubmissionReason(data: {

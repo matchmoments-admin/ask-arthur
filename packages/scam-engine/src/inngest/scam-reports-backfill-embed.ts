@@ -18,6 +18,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
 import { inngest } from "./client";
+import { withAxiomLogging } from "./with-axiom-logging";
 import { SCAM_REPORTS_BACKFILL_EMBED_EVENT } from "./events";
 import { embed, type EmbeddingDomain } from "../embeddings";
 
@@ -116,7 +117,7 @@ export const scamReportsBackfillEmbed = inngest.createFunction(
     concurrency: { limit: 1 },
   },
   { event: SCAM_REPORTS_BACKFILL_EMBED_EVENT },
-  async ({ step }) => {
+  withAxiomLogging({ fnId: "scam-reports-backfill-embed" }, async ({ step }) => {
     let scamReportsEmbedded = 0;
     let verifiedScamsEmbedded = 0;
     let totalTokens = 0;
@@ -359,5 +360,5 @@ export const scamReportsBackfillEmbed = inngest.createFunction(
       estimatedCostUsd: totalCostUsd,
       modelId: lastModelId,
     };
-  },
+  }),
 );

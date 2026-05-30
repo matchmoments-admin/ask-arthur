@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
+import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import {
   CLONE_WATCH_PRECLASSIFY_REQUESTED_EVENT,
   parseCloneWatchPreclassifyRequestedData,
@@ -155,7 +156,7 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
     timeouts: { finish: "2m" },
   },
   { event: CLONE_WATCH_PRECLASSIFY_REQUESTED_EVENT },
-  async ({ event, step }) => {
+  withAxiomLogging({ fnId: "shopfront-clone-haiku-preclassify" }, async ({ event, step }) => {
     const data = parseCloneWatchPreclassifyRequestedData(event.data);
 
     if (!featureFlags.shopfrontClonePreclassify) {
@@ -311,7 +312,7 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
       clone_tactic: classification.clone_tactic,
       attack_intent: classification.attack_intent,
     };
-  },
+  }),
 );
 
 // Export the schema + prompt version for unit testing.

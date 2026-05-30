@@ -1,4 +1,5 @@
 import { inngest } from "./client";
+import { withAxiomLogging } from "./with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -39,7 +40,7 @@ export const metaBrpReport = inngest.createFunction(
     rateLimit: { limit: 200, period: "1d" },
   },
   { cron: "0 */6 * * *" }, // every 6 hours
-  async ({ step }) => {
+  withAxiomLogging({ fnId: "meta-brp-report" }, async ({ step }) => {
     if (!featureFlags.metaBrpReporter) {
       return { skipped: true, reason: "FF_META_BRP_REPORTER is off" };
     }
@@ -155,5 +156,5 @@ export const metaBrpReport = inngest.createFunction(
     }
 
     return { reported, failed, total: detections.length };
-  }
+  })
 );

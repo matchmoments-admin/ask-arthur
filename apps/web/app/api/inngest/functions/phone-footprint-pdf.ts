@@ -13,6 +13,7 @@ import "server-only";
 // engine-side Inngest functions.
 
 import { inngest } from "@askarthur/scam-engine/inngest/client";
+import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { renderFootprintPdf } from "@askarthur/scam-engine/phone-footprint";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
@@ -81,7 +82,7 @@ export const phoneFootprintPdfRender = inngest.createFunction(
     concurrency: { limit: 3 },
   },
   { event: PHONE_FOOTPRINT_PDF_EVENT },
-  async ({ event, step }) => {
+  withAxiomLogging({ fnId: "phone-footprint-pdf-render" }, async ({ event, step }) => {
     const data = event.data as EventData;
 
     const footprint = await step.run("load-footprint", () =>
@@ -149,7 +150,7 @@ export const phoneFootprintPdfRender = inngest.createFunction(
     });
 
     return { ok: true, footprintId: data.footprintId, r2Key };
-  },
+  }),
 );
 
 function emailBody(footprint: Footprint, signedUrl: string): string {

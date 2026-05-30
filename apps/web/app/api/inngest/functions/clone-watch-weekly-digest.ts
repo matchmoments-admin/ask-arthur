@@ -1,4 +1,5 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
+import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
@@ -37,7 +38,7 @@ export const cloneWatchWeeklyDigest = inngest.createFunction(
     { cron: "0 10 * * 0" },
     { event: "shopfront/clone.weekly-digest.manual-trigger.v1" },
   ],
-  async ({ step }) => {
+  withAxiomLogging({ fnId: "shopfront-clone-weekly-digest" }, async ({ step }) => {
     if (!featureFlags.shopfrontCloneOutreach) {
       return { skipped: true, reason: "FF_SHOPFRONT_CLONE_OUTREACH disabled" };
     }
@@ -248,7 +249,7 @@ export const cloneWatchWeeklyDigest = inngest.createFunction(
     });
 
     return { ok: true, period, metrics };
-  },
+  }),
 );
 
 export interface WeeklyMetrics {

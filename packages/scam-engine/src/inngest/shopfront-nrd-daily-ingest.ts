@@ -22,6 +22,7 @@ import JSZip from "jszip";
 import { fetch as undiciFetch } from "undici";
 
 import { inngest } from "./client";
+import { withAxiomLogging } from "./with-axiom-logging";
 import {
   CLONE_WATCH_SCAN_REQUESTED_EVENT,
   CLONE_WATCH_PRECLASSIFY_REQUESTED_EVENT,
@@ -78,7 +79,7 @@ export const shopfrontNrdDailyIngest = inngest.createFunction(
     { cron: "30 8 * * *" },
     { event: "shopfront/nrd.manual-trigger.v1" },
   ],
-  async ({ event, step }) => {
+  withAxiomLogging({ fnId: "shopfront-nrd-daily-ingest" }, async ({ event, step }) => {
     if (!featureFlags.shopfrontCloneWatch) {
       return { skipped: true, reason: "FF_SHOPFRONT_CLONE_WATCH disabled" };
     }
@@ -256,7 +257,7 @@ export const shopfrontNrdDailyIngest = inngest.createFunction(
       rows_inserted: upsertResult.inserted,
       failed_chunks: upsertResult.failed_chunks,
     };
-  },
+  }),
 );
 
 // ── URL computation ──────────────────────────────────────────────────────

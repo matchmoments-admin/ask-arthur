@@ -1,4 +1,5 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
+import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 
 /**
@@ -47,13 +48,13 @@ export const onwardScamwatch = inngest.createFunction(
     retries: 0,
   },
   { event: "report.onward.scamwatch" },
-  async ({ event, step }) => {
+  withAxiomLogging({ fnId: "report-onward-scamwatch" }, async ({ event, step }) => {
     const data = event.data as OnwardEventData;
     await step.run("mark-skipped", () =>
       markStatus(data.log_id, "skipped", "no_api_user_redirect_required")
     );
     return { ok: true, action: "user_redirect" };
-  }
+  })
 );
 
 export const onwardReportCyber = inngest.createFunction(
@@ -63,13 +64,13 @@ export const onwardReportCyber = inngest.createFunction(
     retries: 0,
   },
   { event: "report.onward.reportcyber" },
-  async ({ event, step }) => {
+  withAxiomLogging({ fnId: "report-onward-reportcyber" }, async ({ event, step }) => {
     const data = event.data as OnwardEventData;
     await step.run("mark-skipped", () =>
       markStatus(data.log_id, "skipped", "no_api_user_redirect_required")
     );
     return { ok: true, action: "user_redirect" };
-  }
+  })
 );
 
 export const onwardIdcare = inngest.createFunction(
@@ -79,13 +80,13 @@ export const onwardIdcare = inngest.createFunction(
     retries: 0,
   },
   { event: "report.onward.idcare" },
-  async ({ event, step }) => {
+  withAxiomLogging({ fnId: "report-onward-idcare" }, async ({ event, step }) => {
     const data = event.data as OnwardEventData;
     await step.run("mark-skipped", () =>
       markStatus(data.log_id, "skipped", "phone_handoff_user_action_required")
     );
     return { ok: true, action: "phone_handoff" };
-  }
+  })
 );
 
 export const onwardAskArthurFeed = inngest.createFunction(
@@ -95,7 +96,7 @@ export const onwardAskArthurFeed = inngest.createFunction(
     retries: 0,
   },
   { event: "report.onward.ask_arthur_feed" },
-  async ({ event, step }) => {
+  withAxiomLogging({ fnId: "report-onward-ask-arthur-feed" }, async ({ event, step }) => {
     const data = event.data as OnwardEventData;
     // The actual feed contribution happens via /api/scam-contacts/report.
     // This worker only writes the audit-log marker for the "Here's what we
@@ -104,5 +105,5 @@ export const onwardAskArthurFeed = inngest.createFunction(
       markStatus(data.log_id, "sent", "audit_marker_only")
     );
     return { ok: true, action: "audit_marker" };
-  }
+  })
 );

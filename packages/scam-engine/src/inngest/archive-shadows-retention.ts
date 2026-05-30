@@ -28,6 +28,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
 import { inngest } from "./client";
+import { withAxiomLogging } from "./with-axiom-logging";
 
 const BATCH_SIZE = 5000;
 const LOOP_GUARD = 50;
@@ -42,7 +43,7 @@ export const archiveShadowsRetention = inngest.createFunction(
     retries: 2,
   },
   { cron: "0 5 * * *" },
-  async ({ step }) => {
+  withAxiomLogging({ fnId: "archive-shadows-retention" }, async ({ step }) => {
     const totals: Record<string, number> = {
       flagged_ads: 0,
       deepfake_detections: 0,
@@ -73,5 +74,5 @@ export const archiveShadowsRetention = inngest.createFunction(
 
     logger.info("archive-shadows-retention: complete", totals);
     return totals;
-  },
+  }),
 );

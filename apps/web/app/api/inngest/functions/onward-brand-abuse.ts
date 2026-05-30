@@ -1,4 +1,5 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
+import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { Resend } from "resend";
@@ -59,7 +60,7 @@ export const onwardBrandAbuse = inngest.createFunction(
     },
   },
   { event: "report.onward.brand_abuse" },
-  async ({ event, step }) => {
+  withAxiomLogging({ fnId: "report-onward-brand-abuse" }, async ({ event, step }) => {
     const data = event.data as {
       log_id: string;
       scam_report_id: number;
@@ -274,7 +275,7 @@ export const onwardBrandAbuse = inngest.createFunction(
     });
 
     return { ok: true, sent: true, providerMessageId: sendResult?.id };
-  }
+  })
 );
 
 async function markLog(

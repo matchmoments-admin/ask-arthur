@@ -1,4 +1,5 @@
 import { inngest } from "./client";
+import { withAxiomLogging } from "./with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { sendPushNotifications, buildScamAlertMessage } from "../push-sender";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -17,7 +18,7 @@ export const scamAlertCron = inngest.createFunction(
     name: "Scam Alert Push Notifications",
   },
   { cron: "0 */3 * * *" },
-  async ({ step }) => {
+  withAxiomLogging({ fnId: "scam-alert-push" }, async ({ step }) => {
     if (!featureFlags.pushAlerts) {
       return { skipped: true, reason: "pushAlerts flag disabled" };
     }
@@ -103,5 +104,5 @@ export const scamAlertCron = inngest.createFunction(
     });
 
     return result;
-  }
+  })
 );

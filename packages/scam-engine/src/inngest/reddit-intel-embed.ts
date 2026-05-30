@@ -21,6 +21,7 @@ import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 
 import { inngest } from "./client";
+import { withAxiomLogging } from "./with-axiom-logging";
 import {
   REDDIT_INTEL_SUMMARISED_EVENT,
   REDDIT_INTEL_EMBEDDED_EVENT,
@@ -97,7 +98,7 @@ export const redditIntelEmbed = inngest.createFunction(
     retries: 3,
   },
   { event: REDDIT_INTEL_SUMMARISED_EVENT },
-  async ({ event, step }) => {
+  withAxiomLogging({ fnId: "reddit-intel-embed" }, async ({ event, step }) => {
     if (!featureFlags.redditIntelIngest) {
       return { skipped: true, reason: "redditIntelIngest flag off" };
     }
@@ -247,5 +248,5 @@ export const redditIntelEmbed = inngest.createFunction(
       provider: result.provider,
       estimatedCostUsd: result.estimatedCostUsd,
     };
-  },
+  }),
 );
