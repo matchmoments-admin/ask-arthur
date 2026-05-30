@@ -2,6 +2,10 @@ import { verifySlackSignature } from "@askarthur/bot-core/webhook-verify";
 import { logger } from "@askarthur/utils/logger";
 import { parseSlashCommand, handleSlashCommand } from "@/lib/bots/slack/handler";
 
+// node:crypto (via bot-core verifier) is unavailable on Edge; pin Node + dynamic.
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 /**
  * POST: Slack slash command handler (/checkscam).
  * Must acknowledge within 3 seconds, then process via response_url.

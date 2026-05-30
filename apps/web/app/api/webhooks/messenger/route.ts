@@ -1,6 +1,14 @@
 import { logger } from "@askarthur/utils/logger";
 import { handleMessengerWebhook } from "@/lib/bots/messenger/handler";
-import { createHmac, timingSafeEqual } from "crypto";
+import {
+  verifyMessengerSignature,
+  safeStrEqual,
+} from "@askarthur/bot-core/webhook-verify";
+
+// node:crypto (via bot-core) is unavailable on Edge; pin Node + dynamic so the
+// HMAC verifier always has its runtime and the handler isn't statically cached.
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 /**
  * GET: Messenger webhook verification (Meta sends this when subscribing).
@@ -12,7 +20,8 @@ export async function GET(req: Request) {
   const token = url.searchParams.get("hub.verify_token");
   const challenge = url.searchParams.get("hub.challenge");
 
-  if (mode === "subscribe" && token === process.env.MESSENGER_VERIFY_TOKEN) {
+  const expectedToken = process.env.MESSENGER_VERIFY_TOKEN;
+  if (mode === "subscribe" && token && expectedToken && safeStrEqual(token, expectedToken)) {
     return new Response(challenge, { status: 200 });
   }
 
@@ -48,23 +57,4 @@ export async function POST(req: Request) {
   );
 
   return new Response("EVENT_RECEIVED", { status: 200 });
-}
-
-function verifyMessengerSignature(req: Request, rawBody: string): boolean {
-  const appSecret = process.env.MESSENGER_APP_SECRET;
-  if (!appSecret) return false;
-
-  const signature = req.headers.get("x-hub-signature-256");
-  if (!signature) return false;
-
-  const expected = "sha256=" + createHmac("sha256", appSecret).update(rawBody).digest("hex");
-
-  try {
-    return timingSafeEqual(
-      Buffer.from(signature),
-      Buffer.from(expected),
-    );
-  } catch {
-    return false;
-  }
 }

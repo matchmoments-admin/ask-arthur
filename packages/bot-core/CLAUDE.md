@@ -24,17 +24,19 @@ If you fix a phishing-URL display in `format-telegram.ts` and don't touch the ot
 
 ## Public API surface (key exports)
 
-| Export                  | Purpose                                                   | Consumers                              |
-| ----------------------- | --------------------------------------------------------- | -------------------------------------- |
-| `analyzeForBot`         | Shared analysis entry point for bot routes                | `apps/web/app/api/webhooks/*/route.ts` |
-| `toTelegramMessage`     | Render `AnalysisResult` to Telegram HTML                  | telegram webhook handler               |
-| `toWhatsAppMessage`     | Render `AnalysisResult` to WhatsApp markdown              | whatsapp webhook handler               |
-| `toSlackBlocks`         | Render `AnalysisResult` to Slack Block Kit JSON           | slack webhook handler                  |
-| `toMessengerMessage`    | Render `AnalysisResult` to Messenger plain text           | messenger webhook handler              |
-| `verifyTelegramWebhook` | Constant-time HMAC verification (Telegram bot API)        | telegram route guard                   |
-| `verifyWhatsAppWebhook` | Meta App signature verification                           | whatsapp route guard                   |
-| `verifySlackWebhook`    | Slack signing-secret v0 signature verification            | slack route guard                      |
-| `enqueueBotReply`       | Insert a row into `bot_message_queue` for pg_net dispatch | bot route handlers                     |
+| Export                     | Purpose                                                   | Consumers                               |
+| -------------------------- | --------------------------------------------------------- | --------------------------------------- |
+| `analyzeForBot`            | Shared analysis entry point for bot routes                | `apps/web/app/api/webhooks/*/route.ts`  |
+| `toTelegramMessage`        | Render `AnalysisResult` to Telegram HTML                  | telegram webhook handler                |
+| `toWhatsAppMessage`        | Render `AnalysisResult` to WhatsApp markdown              | whatsapp webhook handler                |
+| `toSlackBlocks`            | Render `AnalysisResult` to Slack Block Kit JSON           | slack webhook handler                   |
+| `toMessengerMessage`       | Render `AnalysisResult` to Messenger plain text           | messenger webhook handler               |
+| `verifyTelegramSecret`     | Constant-time secret-token check (Telegram bot API)       | telegram route guard                    |
+| `verifyWhatsAppSignature`  | Meta App X-Hub-Signature-256 verification (WhatsApp)      | whatsapp route guard                    |
+| `verifySlackSignature`     | Slack signing-secret v0 signature verification            | slack route + shortcuts guards          |
+| `verifyMessengerSignature` | Meta App X-Hub-Signature-256 verification (Messenger)     | messenger route guard                   |
+| `safeStrEqual`             | Length-checked timing-safe string compare (no throw)      | verify-token handshakes + messenger sig |
+| `enqueueBotReply`          | Insert a row into `bot_message_queue` for pg_net dispatch | bot route handlers                      |
 
 ## Scoped commands
 
@@ -51,7 +53,7 @@ There is no separate typecheck script — typecheck via the web app: `pnpm --fil
 - **Telegram MarkdownV2 vs HTML.** We use HTML in `format-telegram.ts` because escaping is simpler. Don't mix.
 - **WhatsApp interactive templates.** `format-whatsapp.ts` produces inline messages only; interactive list/button templates require Meta pre-approval and aren't implemented here.
 - **Messenger 2000-char limit.** `format-messenger.ts` splits long messages into multi-part replies. Don't bypass this — Meta drops over-length messages silently.
-- **Webhook signature checks are timing-safe.** Never replace `verify*Webhook` with naïve string comparison.
+- **Webhook signature checks are timing-safe.** Never replace the `verify*Signature` / `verifyTelegramSecret` helpers with a naïve `===` comparison.
 
 ## Where things live
 

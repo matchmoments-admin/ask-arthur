@@ -1,6 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createHmac } from "crypto";
-import { verifyTelegramSecret, verifyWhatsAppSignature, verifySlackSignature } from "../webhook-verify";
+import {
+  verifyTelegramSecret,
+  verifyWhatsAppSignature,
+  verifySlackSignature,
+  verifyMessengerSignature,
+  safeStrEqual,
+} from "../webhook-verify";
 
 describe("verifyTelegramSecret", () => {
   beforeEach(() => {
@@ -109,5 +115,68 @@ describe("verifySlackSignature", () => {
       },
     });
     expect(verifySlackSignature(req, body)).toBe(false);
+  });
+
+  it("rejects a non-numeric timestamp (NaN replay-window guard)", () => {
+    // parseInt("garbage") → NaN and `NaN > 300` is false, which previously
+    // SILENTLY skipped the replay window. Even with a valid HMAC over the
+    // basestring, a non-finite timestamp must be rejected.
+    const sigBasestring = `v0:garbage:${body}`;
+    const hmac = createHmac("sha256", secret).update(sigBasestring).digest("hex");
+    const req = new Request("https://example.com", {
+      headers: {
+        "x-slack-signature": `v0=${hmac}`,
+        "x-slack-request-timestamp": "garbage",
+      },
+    });
+    expect(verifySlackSignature(req, body)).toBe(false);
+  });
+});
+
+describe("safeStrEqual", () => {
+  it("returns true for identical strings", () => {
+    expect(safeStrEqual("abc123", "abc123")).toBe(true);
+  });
+  it("returns false for different same-length strings", () => {
+    expect(safeStrEqual("abc123", "abc124")).toBe(false);
+  });
+  it("returns false (no throw) on length mismatch", () => {
+    expect(safeStrEqual("short", "much-longer-value")).toBe(false);
+  });
+});
+
+describe("verifyMessengerSignature", () => {
+  const secret = "messenger-app-secret";
+  const body = '{"object":"page","entry":[]}';
+
+  beforeEach(() => {
+    vi.stubEnv("MESSENGER_APP_SECRET", secret);
+  });
+
+  it("returns true for a valid signature", () => {
+    const hmac = createHmac("sha256", secret).update(body).digest("hex");
+    const req = new Request("https://example.com", {
+      headers: { "x-hub-signature-256": `sha256=${hmac}` },
+    });
+    expect(verifyMessengerSignature(req, body)).toBe(true);
+  });
+
+  it("returns false for an invalid signature", () => {
+    const req = new Request("https://example.com", {
+      headers: { "x-hub-signature-256": "sha256=deadbeef" },
+    });
+    expect(verifyMessengerSignature(req, body)).toBe(false);
+  });
+
+  it("returns false (no throw) for a length-mismatched signature header", () => {
+    const req = new Request("https://example.com", {
+      headers: { "x-hub-signature-256": "sha256=short" },
+    });
+    expect(verifyMessengerSignature(req, body)).toBe(false);
+  });
+
+  it("returns false when the header is missing", () => {
+    const req = new Request("https://example.com");
+    expect(verifyMessengerSignature(req, body)).toBe(false);
   });
 });
