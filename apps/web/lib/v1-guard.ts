@@ -77,9 +77,23 @@ export async function guardV1(
 }
 
 /** `/api/v1/scams/search` -> `scams.search`; `/api/v1/usage` -> `usage`. */
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function deriveEndpoint(req: NextRequest): string {
   const path = req.nextUrl.pathname
     .replace(/^\/api\/v1\//, "")
     .replace(/\/+$/, "");
-  return path.split("/").filter(Boolean).join(".") || "v1";
+  // Collapse dynamic id segments (numeric or UUID) to a literal "id" so the
+  // per-endpoint usage log + allowed_endpoints scoping key stay low-cardinality
+  // — `/v1/entities/42` derives `entities.id`, not `entities.42`. Routes whose
+  // dynamic segment isn't numeric/UUID (e.g. a theme slug) pass an explicit
+  // slug to guardV1 instead of relying on this.
+  return (
+    path
+      .split("/")
+      .filter(Boolean)
+      .map((seg) => (/^\d+$/.test(seg) || UUID_RE.test(seg) ? "id" : seg))
+      .join(".") || "v1"
+  );
 }
