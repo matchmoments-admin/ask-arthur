@@ -161,7 +161,7 @@ Every consumer page, authenticated page, admin page, and API route, grouped by d
 | `/api/charity-check/autocomplete`   | GET    | open   | Charity name autocomplete                               |
 | `/api/phone-footprint/[msisdn]`     | POST   | open   | Phone-number footprint (free teaser; paid via monitors) |
 | `/api/phone-footprint/[msisdn]/pdf` | GET    | open   | PDF report export (Inngest queued)                      |
-| `/api/scam-contacts/lookup`         | POST   | apikey | Lookup known scam contact                               |
+| `/api/scam-contacts/lookup`         | GET    | apikey | Lookup known scam contact                               |
 | `/api/scam-contacts/report`         | POST   | open   | Report a scam contact                                   |
 | `/api/scam-urls/lookup`             | POST   | apikey | Lookup scam URL with WHOIS / SSL                        |
 | `/api/scam-urls/report`             | POST   | open   | Report a scam URL                                       |

@@ -27,7 +27,7 @@ Supabase Postgres (project `rquomhcgnodxzkhokwni`). 75+ tables across 12 domain 
 - `report_entity_links` — M-to-many: reports ↔ entities (extraction method, role). v21.
 - `scam_clusters` — Entity co-occurrence clusters. v22.
 - `cluster_members` — Cluster membership.
-- `scam_contacts`, `scam_ips`, `scam_crypto_wallets`, `scam_urls` — Entity feeds (via `bulk_upsert_*` RPCs).
+- `scam_ips`, `scam_crypto_wallets`, `scam_urls` — Entity feeds (via `bulk_upsert_*` RPCs). (`scam_contacts` was dropped at v41; the phone/email subset is now served by `scam_entities` + the `report_scam_entity` RPC.)
 
 ### Feeds / Intel
 
@@ -212,7 +212,8 @@ All have `BRIN(created_at)` for cheap range queries.
 - `create_scam_report(...)` — Insert report row, return PK. Source of truth for v21 intelligence core. ON CONFLICT idempotent via v73 `idempotency_key`.
 - `upsert_scam_entity(...)` — Insert / bump entity, return `{entity_id, is_new}`. Idempotent.
 - `link_report_entity(...)` — M-to-many junction. Idempotent `ON CONFLICT (report_id, entity_id, role)`.
-- `upsert_scam_url(...)`, `upsert_scam_contact(...)` — Feed-specific entity upserts.
+- `report_scam_entity(...)` — Public report-a-scam-contact / scam-URL entry point onto the unified `scam_entities` model. Upserts the entity (phone / email / url) + bumps `report_count`. Backs the `/api/scam-contacts/*` + `/api/scam-urls/report` routes (replaces the dropped `upsert_scam_contact` path). v170.
+- `upsert_scam_url(...)` — Feed-specific entity upsert.
 - `trigger_entity_enrichment_pending(...)` — Flag entity for async enrichment.
 - `bulk_upsert_feed_url(...)`, `bulk_upsert_feed_ip(...)`, `bulk_upsert_feed_crypto_wallet(...)`, `bulk_upsert_feed_entity(...)` — Batch feed ingestion.
 - `upsert_feed_item(...)` — Feed item insert / update.
