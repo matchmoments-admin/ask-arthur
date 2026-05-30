@@ -5,6 +5,7 @@ import { checkBotRateLimit } from "@askarthur/bot-core/rate-limit";
 import { logger } from "@askarthur/utils/logger";
 import { sendTextMessage, sendInteractiveButtons } from "./api";
 import { downloadWhatsAppMedia } from "./media";
+import { isReplay } from "../replay-dedup";
 
 const DISCLOSURE_MESSAGE =
   "Welcome to Ask Arthur \u2014 Australia's scam detection service. " +
@@ -51,6 +52,7 @@ async function sendDisclosureIfNew(from: string): Promise<boolean> {
 }
 
 interface WhatsAppMessage {
+  id?: string;
   from: string;
   type: string;
   text?: { body: string };
@@ -77,6 +79,11 @@ export async function handleWhatsAppWebhook(payload: WhatsAppWebhookPayload): Pr
   if (!messages || messages.length === 0) return;
 
   for (const message of messages) {
+    // Skip retries/replays of an already-handled message (WhatsApp re-delivers
+    // on any slow/non-2xx response). Keyed on the platform message id.
+    if (message.id && (await isReplay("whatsapp", message.id))) {
+      continue;
+    }
     try {
       await processMessage(message);
     } catch (err) {
