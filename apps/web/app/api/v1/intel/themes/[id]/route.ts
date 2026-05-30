@@ -16,7 +16,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const guard = await guardV1(req);
+  const guard = await guardV1(req, "intel.themes.id");
   if (!guard.ok) return guard.error;
   if (!featureFlags.redditIntelB2bApi) {
     return NextResponse.json(

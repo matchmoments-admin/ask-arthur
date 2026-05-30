@@ -212,7 +212,7 @@ All have `BRIN(created_at)` for cheap range queries.
 - `create_scam_report(...)` — Insert report row, return PK. Source of truth for v21 intelligence core. ON CONFLICT idempotent via v73 `idempotency_key`.
 - `upsert_scam_entity(...)` — Insert / bump entity, return `{entity_id, is_new}`. Idempotent.
 - `link_report_entity(...)` — M-to-many junction. Idempotent `ON CONFLICT (report_id, entity_id, role)`.
-- `report_scam_entity(...)` — Public report-a-scam-contact / scam-URL entry point onto the unified `scam_entities` model. Upserts the entity (phone / email / url) + bumps `report_count`. Backs the `/api/scam-contacts/*` + `/api/scam-urls/report` routes (replaces the dropped `upsert_scam_contact` path). v170.
+- `report_scam_entity(...)` — Public report-a-scam-contact entry point onto the unified `scam_entities` model. Upserts the entity (phone / email) + bumps `report_count`, optionally links to a `scam_report`, returns `report_count`. Backs `/api/scam-contacts/report` + `/api/extension/report-email` (`/api/scam-contacts/lookup` reads `scam_entities` directly); replaces the dropped `upsert_scam_contact` path. `/api/scam-urls/report` is separate (still `upsert_scam_url`). v170.
 - `upsert_scam_url(...)` — Feed-specific entity upsert.
 - `trigger_entity_enrichment_pending(...)` — Flag entity for async enrichment.
 - `bulk_upsert_feed_url(...)`, `bulk_upsert_feed_ip(...)`, `bulk_upsert_feed_crypto_wallet(...)`, `bulk_upsert_feed_entity(...)` — Batch feed ingestion.

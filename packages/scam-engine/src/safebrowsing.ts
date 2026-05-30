@@ -34,18 +34,9 @@ export interface URLCheckResult {
   sources: string[];
 }
 
-// SSRF protection: private/internal IP ranges that must never be fetched
-const PRIVATE_IP_PATTERNS = [
-  /^127\./,                          // Loopback (127.0.0.0/8)
-  /^10\./,                           // Class A private (10.0.0.0/8)
-  /^172\.(1[6-9]|2\d|3[01])\./,     // Class B private (172.16.0.0/12)
-  /^192\.168\./,                     // Class C private (192.168.0.0/16)
-  /^169\.254\./,                     // Link-local (169.254.0.0/16, includes AWS metadata)
-  /^0\./,                            // Current network (0.0.0.0/8)
-  /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./, // Shared address space (100.64.0.0/10)
-  /^198\.1[89]\./,                   // Benchmarking (198.18.0.0/15)
-];
-
+// SSRF protection: private/internal IP ranges live in the shared ./private-ip
+// classifier (isPrivateIP) — the single source of truth so the IPv4 + IPv6
+// blocklists can't drift between this syntactic layer and the ssrf-dispatcher.
 const BLOCKED_HOSTNAMES = [
   "localhost",
   "metadata.google.internal",        // GCP metadata
@@ -67,20 +58,13 @@ export function isPrivateURL(urlString: string): boolean {
     // Block known internal hostnames
     if (BLOCKED_HOSTNAMES.includes(hostname)) return true;
 
-    // IPv6 literal host (new URL brackets these). Delegate to the shared IP
-    // classifier so ULA (fd00::/8), link-local (fe80::/10), unspecified ([::])
-    // and IPv4-mapped (::ffff:169.254.169.254) are all blocked — not just ::1.
-    if (hostname.startsWith("[") && hostname.endsWith("]")) {
-      if (isPrivateIP(hostname)) return true;
-    }
-    if (hostname === "::1") return true;
+    // IPv4 / IPv6 literal host (incl. bracketed IPv6, ULA/link-local/[::],
+    // and IPv4-mapped) — delegate to the shared classifier so the IP ranges
+    // are defined in exactly one place.
+    if (isPrivateIP(hostname)) return true;
 
-    // Check against private IP patterns
-    for (const pattern of PRIVATE_IP_PATTERNS) {
-      if (pattern.test(hostname)) return true;
-    }
-
-    // Block alternative IP notations (decimal, hex, octal)
+    // Block alternative IP notations (decimal, hex, octal) — these are
+    // integer/hex encodings the classifier doesn't decode.
     // e.g., http://2130706433 (= 127.0.0.1), http://0x7f000001
     if (/^\d+$/.test(hostname)) return true;  // decimal IP
     if (/^0x[0-9a-f]+$/i.test(hostname)) return true;  // hex IP
