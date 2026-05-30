@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { checkFormRateLimit } from "@askarthur/utils/rate-limit";
-import { hashIdentifier } from "@askarthur/utils/hash";
 import { geolocateIP } from "@askarthur/scam-engine/geolocate";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { lookupPhoneNumber } from "@/lib/twilioLookup";
@@ -59,13 +58,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { contacts, scamType, brandImpersonated, channel, analysisId } = parsed.data;
+    // scamType / brandImpersonated / channel are still accepted in the payload
+    // (back-compat) but now live on the linked scam_report, not the entity.
+    const { contacts, analysisId } = parsed.data;
 
-    // 3. Generate reporter hash from IP + User-Agent
-    const ua = req.headers.get("user-agent") || "unknown";
-    const reporterHash = await hashIdentifier(ip, ua);
-
-    // 4. Geo-IP for region
+    // 3. Geo-IP for country_code on the entity
     const geo = await geolocateIP(ip);
 
     // 5. Supabase client
@@ -98,49 +95,52 @@ export async function POST(req: NextRequest) {
         normalizedValue = normalizeEmail(contact.value);
       }
 
-      // Call upsert_scam_contact RPC
-      const { data: rpcResult, error: rpcError } = await supabase.rpc(
-        "upsert_scam_contact",
+      // Upsert onto the unified scam_entities model (v170 report_scam_entity).
+      // Replaces the dropped upsert_scam_contact RPC. analysisId is passed as
+      // the optional report link — the RPC only links if it's a real
+      // scam_reports.id, so a non-report value is a safe no-op. scamType /
+      // brandImpersonated / channel / region live on the linked scam_report,
+      // not the entity, so they're no longer passed here.
+      const { data: rpcRows, error: rpcError } = await supabase.rpc(
+        "report_scam_entity",
         {
+          p_entity_type: contact.type,
           p_normalized_value: normalizedValue,
-          p_contact_type: contact.type,
-          p_reporter_hash: reporterHash,
-          p_scam_type: scamType || null,
-          p_brand_impersonated: brandImpersonated || null,
-          p_channel: channel || null,
-          p_region: geo.region || null,
-          p_analysis_id: analysisId || null,
+          p_raw_value: contact.value,
+          p_country_code: geo.countryCode || null,
+          p_report_id: analysisId ?? null,
+          p_role: "sender",
         }
       );
 
-      if (rpcError) {
-        logger.error("upsert_scam_contact RPC failed", {
-          error: rpcError.message,
-          code: rpcError.code,
+      if (rpcError || !rpcRows || rpcRows.length === 0) {
+        logger.error("report_scam_entity RPC failed", {
+          error: rpcError?.message,
+          code: rpcError?.code,
         });
         continue;
       }
 
-      const { scam_contact_id, report_count, is_new } = rpcResult;
+      const { entity_id, is_new, report_count } = rpcRows[0];
       const entry: (typeof results)[number] = {
         value: normalizedValue,
         reportCount: report_count,
       };
 
-      // Twilio enrichment for new phone contacts
+      // Twilio enrichment for new phone entities → enrichment_data.twilio
       if (is_new && contact.type === "phone") {
         try {
           const lookup = await lookupPhoneNumber(normalizedValue);
-          await supabase
-            .from("scam_contacts")
-            .update({
-              current_carrier: lookup.carrier,
+          await supabase.rpc("merge_entity_enrichment_data", {
+            p_entity_id: entity_id,
+            p_key: "twilio",
+            p_value: {
+              carrier: lookup.carrier,
               line_type: lookup.lineType,
               is_voip: lookup.isVoip,
               country_code: lookup.countryCode,
-            })
-            .eq("id", scam_contact_id);
-
+            },
+          });
           entry.carrier = lookup.carrier || undefined;
           entry.lineType = lookup.lineType || undefined;
         } catch (err) {
@@ -148,14 +148,15 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Email domain extraction for new email contacts
+      // Email domain for new email entities → enrichment_data.email_domain
       if (is_new && contact.type === "email") {
         const domain = extractEmailDomain(normalizedValue);
         if (domain) {
-          await supabase
-            .from("scam_contacts")
-            .update({ email_domain: domain })
-            .eq("id", scam_contact_id);
+          await supabase.rpc("merge_entity_enrichment_data", {
+            p_entity_id: entity_id,
+            p_key: "email_domain",
+            p_value: domain,
+          });
         }
       }
 

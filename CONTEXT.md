@@ -29,6 +29,7 @@ _Avoid_: submission, ticket, case, incident.
 
 **Scam Entity**:
 A phone, email, URL, domain, or IP extracted from a Scam Report. Carries first-seen/last-seen timeline and a risk score that updates as new Scam Reports reference it.
+_Naming note:_ the `/api/scam-contacts/*` routes + the `scamContactReporting` feature flag are the legacy surface name for the phone/email subset of Scam Entities (public reporting + reputation lookup) — "contact" here is not a separate concept; it's a Scam Entity. (The routes/flag keep the legacy name; no code rename — see migration v170 which re-wired them onto the unified `scam_entities` model via `report_scam_entity`.)
 _Avoid_: indicator, IOC, observable, artifact.
 
 **Scam Cluster**:

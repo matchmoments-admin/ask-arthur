@@ -38,8 +38,9 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // Determine contact type and normalize
+    // Determine entity type and normalize
     let normalizedValue: string | null = null;
+    let entityType: "phone" | "email";
     if (query.includes("@")) {
       if (!isValidEmailFormat(query)) {
         return NextResponse.json(
@@ -47,6 +48,7 @@ export async function GET(req: NextRequest) {
           { status: 400 }
         );
       }
+      entityType = "email";
       normalizedValue = normalizeEmail(query);
     } else {
       if (!isValidPhoneFormat(query)) {
@@ -55,6 +57,7 @@ export async function GET(req: NextRequest) {
           { status: 400 }
         );
       }
+      entityType = "phone";
       normalizedValue = normalizePhoneE164(query);
     }
 
@@ -98,11 +101,15 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Service unavailable" }, { status: 503 });
     }
 
+    // Reputation now lives on the unified scam_entities model (v41 consolidation).
     const { data, error } = await supabase
-      .from("scam_contacts")
-      .select("*")
+      .from("scam_entities")
+      .select(
+        "entity_type, normalized_value, report_count, risk_score, risk_level, country_code, enrichment_data, first_seen, last_seen"
+      )
+      .eq("entity_type", entityType)
       .eq("normalized_value", normalizedValue)
-      .single();
+      .maybeSingle();
 
     if (error || !data) {
       return NextResponse.json(
@@ -111,26 +118,34 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // B2B authenticated response — full data
+    const enrichment = (data.enrichment_data ?? {}) as Record<string, unknown>;
+    const twilio = (enrichment.twilio ?? {}) as Record<string, unknown>;
+    // Read both the current nested {twilio:{carrier,…}} shape AND the v41-migrated
+    // FLAT twilio_* keys, so the ~11 legacy scam_contacts rows still resolve.
+    const carrier = twilio.carrier ?? enrichment.twilio_carrier ?? null;
+    const lineType = twilio.line_type ?? enrichment.twilio_line_type ?? null;
+    const isVoip = twilio.is_voip ?? enrichment.twilio_is_voip ?? null;
+
+    // B2B authenticated response — full data. confidenceScore/Level keep their
+    // key names (sourced from risk_score/risk_level). uniqueReporterCount /
+    // primaryScamType / brandImpersonated are not on scam_entities (they'd need a
+    // report_entity_links→scam_reports join) and are dropped — no live consumer.
     if (isAuthenticated) {
       return NextResponse.json(
         {
           found: true,
-          contactType: data.contact_type,
+          contactType: data.entity_type,
           normalizedValue: data.normalized_value,
           reportCount: data.report_count,
-          uniqueReporterCount: data.unique_reporter_count,
-          confidenceScore: data.confidence_score,
-          confidenceLevel: data.confidence_level,
-          currentCarrier: data.current_carrier,
-          lineType: data.line_type,
-          isVoip: data.is_voip,
-          primaryScamType: data.primary_scam_type,
-          brandImpersonated: data.brand_impersonated,
+          confidenceScore: data.risk_score,
+          confidenceLevel: data.risk_level,
+          currentCarrier: carrier,
+          lineType: lineType,
+          isVoip: isVoip,
           countryCode: data.country_code,
-          emailDomain: data.email_domain,
-          firstReportedAt: data.first_reported_at,
-          lastReportedAt: data.last_reported_at,
+          emailDomain: enrichment.email_domain ?? null,
+          firstReportedAt: data.first_seen,
+          lastReportedAt: data.last_seen,
         },
         { headers: { "Cache-Control": "public, s-maxage=300, stale-while-revalidate=60" } }
       );
@@ -140,7 +155,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(
       {
         found: true,
-        threatLevel: data.confidence_level,
+        threatLevel: data.risk_level,
         reportCount: data.report_count,
       },
       { headers: { "Cache-Control": "public, s-maxage=300, stale-while-revalidate=60" } }
