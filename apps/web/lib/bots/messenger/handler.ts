@@ -1,4 +1,3 @@
-import { Redis } from "@upstash/redis";
 import { analyzeForBot } from "@askarthur/bot-core/analyze";
 import { toMessengerMessage } from "@askarthur/bot-core/format-messenger";
 import { checkBotRateLimit } from "@askarthur/bot-core/rate-limit";
@@ -6,23 +5,13 @@ import { logger } from "@askarthur/utils/logger";
 import type { AnalysisResult } from "@askarthur/types";
 import { sendTextMessage, sendQuickReplies, type MessengerQuickReply } from "./api";
 import { downloadMessengerAttachment } from "./media";
-import { isReplay } from "../replay-dedup";
+import { isReplay, getBotRedis } from "../replay-dedup";
 
 const DISCLOSURE_MESSAGE =
   "Welcome to Ask Arthur — Australia's scam detection service. " +
   "I use Anthropic's Claude AI to analyse messages for scam indicators. " +
   "Your messages are processed in real-time and never stored.\n\n" +
   "Forward me a suspicious message or screenshot to check it.";
-
-let _redis: Redis | null = null;
-function getRedis(): Redis | null {
-  if (_redis) return _redis;
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) return null;
-  _redis = new Redis({ url, token });
-  return _redis;
-}
 
 async function hashUserId(id: string): Promise<string> {
   const data = new TextEncoder().encode(id);
@@ -38,7 +27,7 @@ async function hashUserId(id: string): Promise<string> {
  * Returns true if the disclosure was sent (i.e. this is a new user).
  */
 async function sendDisclosureIfNew(senderId: string): Promise<boolean> {
-  const redis = getRedis();
+  const redis = getBotRedis();
   if (!redis) return false;
 
   const hash = await hashUserId(senderId);

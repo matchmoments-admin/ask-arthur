@@ -10,7 +10,13 @@ import { logger } from "@askarthur/utils/logger";
 // of the same id is recognised and skipped.
 
 let _redis: Redis | null = null;
-function getRedis(): Redis | null {
+/**
+ * Lazy memoised Upstash client shared across the bot surface (replay dedup here
+ * + the messenger/whatsapp first-time-disclosure tracking). Returns null when
+ * the env isn't configured so callers degrade gracefully. `@upstash/redis` is a
+ * stateless REST client, so a module-level singleton is safe.
+ */
+export function getBotRedis(): Redis | null {
   if (_redis) return _redis;
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
@@ -18,6 +24,9 @@ function getRedis(): Redis | null {
   _redis = new Redis({ url, token });
   return _redis;
 }
+
+/** The bot platforms that route inbound webhooks through dedup. */
+export type BotPlatform = "telegram" | "whatsapp" | "messenger";
 
 // 6 hours — comfortably longer than Telegram's ~24h-but-backoff retry curve
 // settles and Meta's minutes-long retry window, while bounding key growth.
@@ -35,11 +44,11 @@ const DEDUP_TTL_SECONDS = 6 * 60 * 60;
  * blip, which is the worse failure mode.
  */
 export async function isReplay(
-  platform: string,
+  platform: BotPlatform,
   id: string | number | undefined | null,
 ): Promise<boolean> {
   if (id === undefined || id === null || id === "") return false;
-  const redis = getRedis();
+  const redis = getBotRedis();
   if (!redis) return false;
   try {
     const key = `botdedup:${platform}:${id}`;
