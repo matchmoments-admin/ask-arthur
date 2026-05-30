@@ -156,16 +156,16 @@ def run_backfill(conn) -> int:
         cursor.close()
 
 
-def scrape() -> None:
+def scrape() -> str:
     """Entry point. Gated by FF_CHARITY_CHECK_INGEST so an accidental run
     on a fresh checkout (or a partially-configured CI environment) is a
     no-op."""
     if os.environ.get("FF_CHARITY_CHECK_INGEST", "").strip().lower() != "true":
         logger.info("FF_CHARITY_CHECK_INGEST not set to 'true' — skipping PFRA scrape")
-        return
+        return "skipped"
 
     if enforce_backoff_or_skip(FEED_NAME, threshold=BACKOFF_THRESHOLD, record_type="charity"):
-        return
+        return "skipped"
 
     start = time.time()
     error_msg: str | None = None
@@ -215,6 +215,12 @@ def scrape() -> None:
         f"{stats['skipped']} skipped, {backfilled} ABNs backfilled in {duration_ms}ms"
     )
 
+    return status
+
 
 if __name__ == "__main__":
-    scrape()
+    import sys
+
+    # Exit non-zero on a hard failure so the GitHub Actions notify-failure step
+    # fires. "success"/"partial"/"skipped" all exit 0; only "error" exits 1.
+    sys.exit(1 if scrape() == "error" else 0)

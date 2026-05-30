@@ -30,9 +30,9 @@ def _detect_chain(address: str) -> str:
     return "OTHER"
 
 
-def scrape() -> None:
+def scrape() -> str:
     if enforce_backoff_or_skip(FEED_NAME, threshold=BACKOFF_THRESHOLD, record_type="crypto_wallet"):
-        return
+        return "skipped"
     start = time.time()
     wallets: list[dict] = []
     seen_addresses: set[str] = set()
@@ -125,6 +125,12 @@ def scrape() -> None:
         f"{stats['skipped']} skipped in {duration_ms}ms"
     )
 
+    return status
+
 
 if __name__ == "__main__":
-    scrape()
+    import sys
+
+    # Exit non-zero on a hard failure so the GitHub Actions notify-failure step
+    # fires. "success"/"partial"/"skipped" all exit 0; only "error" exits 1.
+    sys.exit(1 if scrape() == "error" else 0)

@@ -177,9 +177,9 @@ def _extract_urls(article: dict) -> Iterable[dict]:
         }
 
 
-def scrape() -> None:
+def scrape() -> str:
     if enforce_backoff_or_skip(FEED_NAME, threshold=BACKOFF_THRESHOLD, record_type="url"):
-        return
+        return "skipped"
     start = time.time()
     error_msg: str | None = None
     status = "success"
@@ -257,6 +257,12 @@ def scrape() -> None:
         f"urls new={url_stats['new']}, {duration_ms}ms"
     )
 
+    return status
+
 
 if __name__ == "__main__":
-    scrape()
+    import sys
+
+    # Exit non-zero on a hard failure so the GitHub Actions notify-failure step
+    # fires. "success"/"partial"/"skipped" all exit 0; only "error" exits 1.
+    sys.exit(1 if scrape() == "error" else 0)

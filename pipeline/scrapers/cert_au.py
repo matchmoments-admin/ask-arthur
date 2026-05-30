@@ -41,7 +41,7 @@ FEED_URL = "https://www.cyber.gov.au/api/v1/advisories"
 RSS_URL = "https://www.cyber.gov.au/about-us/view-all-content/advisories/rss.xml"
 
 
-def scrape() -> None:
+def scrape() -> str:
     start = time.time()
     urls: list[dict] = []
     error_msg = None
@@ -90,6 +90,8 @@ def scrape() -> None:
         f"CERT AU complete: {stats['new']} new, {stats['updated']} updated, "
         f"{stats['skipped']} skipped in {duration_ms}ms"
     )
+
+    return status
 
 
 def _fetch_json_api() -> list[dict]:
@@ -356,4 +358,8 @@ def scrape_vulnerabilities() -> None:
 
 
 if __name__ == "__main__":
-    scrape()
+    import sys
+
+    # Exit non-zero on a hard failure so the GitHub Actions notify-failure step
+    # fires. "success"/"partial"/"skipped" all exit 0; only "error" exits 1.
+    sys.exit(1 if scrape() == "error" else 0)

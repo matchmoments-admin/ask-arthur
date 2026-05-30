@@ -34,9 +34,9 @@ def _map_threat_type(threat_type_desc: str) -> str | None:
     return THREAT_TYPE_MAP.get(key, key or None)
 
 
-def scrape() -> None:
+def scrape() -> str:
     if enforce_backoff_or_skip(FEED_NAME, threshold=BACKOFF_THRESHOLD, record_type="url"):
-        return
+        return "skipped"
     start = time.time()
     urls: list[dict] = []
     ips: list[dict] = []
@@ -177,6 +177,12 @@ def scrape() -> None:
         f"IPs({ip_stats['new']} new, {ip_stats['updated']} updated) in {duration_ms}ms"
     )
 
+    return status
+
 
 if __name__ == "__main__":
-    scrape()
+    import sys
+
+    # Exit non-zero on a hard failure so the GitHub Actions notify-failure step
+    # fires. "success"/"partial"/"skipped" all exit 0; only "error" exits 1.
+    sys.exit(1 if scrape() == "error" else 0)

@@ -25,9 +25,9 @@ MIN_CONFIDENCE = 75
 BACKOFF_THRESHOLD = 3
 
 
-def scrape() -> None:
+def scrape() -> str:
     if enforce_backoff_or_skip(FEED_NAME, threshold=BACKOFF_THRESHOLD, record_type="ip"):
-        return
+        return "skipped"
     start = time.time()
     ips: list[dict] = []
     error_msg = None
@@ -44,7 +44,7 @@ def scrape() -> None:
                 error_message="ABUSEIPDB_API_KEY not configured",
                 record_type="ip",
             )
-        return
+        return "error"
 
     try:
         logger.info(f"Fetching AbuseIPDB blacklist (minConfidence={MIN_CONFIDENCE})")
@@ -115,6 +115,12 @@ def scrape() -> None:
         f"{stats['skipped']} skipped in {duration_ms}ms"
     )
 
+    return status
+
 
 if __name__ == "__main__":
-    scrape()
+    import sys
+
+    # Exit non-zero on a hard failure so the GitHub Actions notify-failure step
+    # fires. "success"/"partial"/"skipped" all exit 0; only "error" exits 1.
+    sys.exit(1 if scrape() == "error" else 0)
