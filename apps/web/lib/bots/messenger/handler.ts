@@ -5,7 +5,8 @@ import { logger } from "@askarthur/utils/logger";
 import type { AnalysisResult } from "@askarthur/types";
 import { sendTextMessage, sendQuickReplies, type MessengerQuickReply } from "./api";
 import { downloadMessengerAttachment } from "./media";
-import { isReplay, getBotRedis } from "../replay-dedup";
+import { isReplay } from "../replay-dedup";
+import { getBotRedis } from "../redis";
 
 const DISCLOSURE_MESSAGE =
   "Welcome to Ask Arthur — Australia's scam detection service. " +

@@ -1,5 +1,6 @@
-import { Redis } from "@upstash/redis";
+import type { Platform } from "@askarthur/bot-core";
 import { logger } from "@askarthur/utils/logger";
+import { getBotRedis } from "./redis";
 
 // Bot platforms (Telegram, Meta) retry a webhook delivery whenever the
 // endpoint is slow or returns non-2xx. Because every inbound message kicks off
@@ -9,24 +10,9 @@ import { logger } from "@askarthur/utils/logger";
 // in Redis with a TTL well past any platform's retry window, so a re-delivery
 // of the same id is recognised and skipped.
 
-let _redis: Redis | null = null;
-/**
- * Lazy memoised Upstash client shared across the bot surface (replay dedup here
- * + the messenger/whatsapp first-time-disclosure tracking). Returns null when
- * the env isn't configured so callers degrade gracefully. `@upstash/redis` is a
- * stateless REST client, so a module-level singleton is safe.
- */
-export function getBotRedis(): Redis | null {
-  if (_redis) return _redis;
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) return null;
-  _redis = new Redis({ url, token });
-  return _redis;
-}
-
-/** The bot platforms that route inbound webhooks through dedup. */
-export type BotPlatform = "telegram" | "whatsapp" | "messenger";
+// Derived from the canonical bot-core Platform union rather than re-spelt, so it
+// tracks automatically. Slack has no inbound-message webhook replay path.
+type ReplayablePlatform = Exclude<Platform, "slack">;
 
 // 6 hours — comfortably longer than Telegram's ~24h-but-backoff retry curve
 // settles and Meta's minutes-long retry window, while bounding key growth.
@@ -44,7 +30,7 @@ const DEDUP_TTL_SECONDS = 6 * 60 * 60;
  * blip, which is the worse failure mode.
  */
 export async function isReplay(
-  platform: BotPlatform,
+  platform: ReplayablePlatform,
   id: string | number | undefined | null,
 ): Promise<boolean> {
   if (id === undefined || id === null || id === "") return false;

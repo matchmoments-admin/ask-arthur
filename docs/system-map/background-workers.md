@@ -39,7 +39,7 @@ Defined in `apps/web/vercel.json`. All routes verify the Vercel cron signature.
 
 Defined in `packages/scam-engine/src/inngest/functions.ts`. All have idempotency keys based on `event.data.requestId` (24h dedup); cron functions use Inngest's native cron dedup.
 
-All registered functions are wrapped in `withAxiomLogging` (#553 / #565); actual log emission is gated by `FF_AXIOM_ENABLED`, which is **now ON in prod + preview as of ~2026-05-29** (was default-OFF before).
+All registered functions are wrapped in `withAxiomLogging` (#553 / #565); actual log emission is gated by `FF_AXIOM_ENABLED`, which is **ON in prod + preview since 2026-05-29** (was default-OFF before). The `ask-arthur` Axiom dataset (`NEXT_PUBLIC_AXIOM_DATASET`) was created 2026-05-31 and the ingest path verified end-to-end — Axiom does not auto-create datasets, so until it existed the lifecycle logs were silently dropped at the destination.
 
 ### Analyze pipeline (fan-out on `analyze.completed.v1`)
 
