@@ -39,6 +39,8 @@ Defined in `apps/web/vercel.json`. All routes verify the Vercel cron signature.
 
 Defined in `packages/scam-engine/src/inngest/functions.ts`. All have idempotency keys based on `event.data.requestId` (24h dedup); cron functions use Inngest's native cron dedup.
 
+All registered functions are wrapped in `withAxiomLogging` (#553 / #565); actual log emission is gated by `FF_AXIOM_ENABLED`, which is **now ON in prod + preview as of ~2026-05-29** (was default-OFF before).
+
 ### Analyze pipeline (fan-out on `analyze.completed.v1`)
 
 | Function                     | Trigger                                     | Purpose                                                                  |
@@ -177,6 +179,8 @@ Layer 0 daily NRD ingest live since 2026-05-24. Outreach pipeline + measurement 
 ## Python scrapers (23 in `pipeline/scrapers/`)
 
 Run on GitHub Actions, gated by `ENABLE_SCRAPER` (regular) / `ENABLE_VULN_SCRAPER` (vulnerability) / `ENABLE_CHARITY_CHECK_INGEST` (ACNC + PFRA).
+
+**Exit-code semantics** (#564): each scraper's `__main__` exits non-zero **only** on a hard `"error"` status — `skipped` / `partial` / `success` all exit 0 — so the GitHub Actions notify-failure step pages only on real failures, not on a quiet no-op run. Per #567, `scrape-feeds.yml` also captures per-feed failures into a file and runs a final gate step that fails the job at the end, so one feed's error no longer aborts the rest of the sequential run.
 
 ### Narrative scrapers (write to `feed_items`)
 

@@ -178,6 +178,12 @@ When daily spend exceeds the cap, `cost-daily-check` upserts a `feature_brakes` 
 
 **Use bare numbers** (`5`, `10`) — non-numeric values silently disable the brake because `parseFloat("$10")` is `NaN`.
 
+### Operator kill-switches (`feature_brakes` rows, not env vars)
+
+Distinct from the `*_CAP_USD` env-var caps above: some `feature_brakes` rows are operator/cron-settable kill-switches that gate a paid sub-step, **not** an env-var threshold.
+
+- **`scam_contacts_twilio`** (#563) — checked via `isFeatureBraked("scam_contacts_twilio")` in `apps/web/app/api/scam-contacts/report/route.ts`. A pre-flip safety valve for `NEXT_PUBLIC_FF_SCAM_REPORTING`: when the row is set, entities are still reported via `/api/scam-contacts/report`, but the paid Twilio enrichment on newly-seen phone numbers is skipped. There is **no `SCAM_CONTACTS_TWILIO_CAP_USD` env var** — an operator (or a future cost cron) sets the `feature_brakes` row directly.
+
 ---
 
 ## Environment variables

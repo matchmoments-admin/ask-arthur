@@ -323,7 +323,7 @@ Two server-only flags worth knowing without opening that page:
 - **`FF_ANALYZE_INNGEST_WEB`** — when `true`, `/api/analyze` emits `analyze.completed.v1` and durable Inngest consumers take over `scam_reports` / brand alerts / cost telemetry writes. When unset or `false`, the legacy `waitUntil` path runs. Canary separately from other flags.
 - **`PG_WATCHDOG_AUTO_TERMINATE`** — when `true`, the `pg-stuck-query-watchdog` cron auto-terminates non-VACUUM backends running ≥60 min. Born from incident 2026-05-09.
 
-**Cost brakes:** `DAILY_COST_THRESHOLD_USD` (default `2`), `VULN_AU_ENRICHMENT_CAP_USD` (`5`), `REDDIT_INTEL_CAP_USD` (`10`), `PHONE_FOOTPRINT_CAP_USD` (`5`), `CHARITY_CHECK_CAP_USD` (`5`), `SHOP_SIGNAL_CAP_USD` (`15`), `BOT_ANALYZE_CAP_USD` (`10`, Telegram/WhatsApp/Messenger/Slack Claude spend). Use bare numbers — `parseFloat("$10")` is `NaN` and silently disables the brake.
+**Cost brakes:** `DAILY_COST_THRESHOLD_USD` (default `2`), `VULN_AU_ENRICHMENT_CAP_USD` (`5`), `REDDIT_INTEL_CAP_USD` (`10`), `PHONE_FOOTPRINT_CAP_USD` (`5`), `CHARITY_CHECK_CAP_USD` (`5`), `SHOP_SIGNAL_CAP_USD` (`15`), `BOT_ANALYZE_CAP_USD` (`10`, Telegram/WhatsApp/Messenger/Slack Claude spend). Use bare numbers — `parseFloat("$10")` is `NaN` and silently disables the brake. Separately, some kill-switches live as operator/cron-settable `feature_brakes` rows rather than env vars (e.g. `scam_contacts_twilio`, which skips paid Twilio enrichment while still accepting reports) — see [docs/system-map/feature-flags.md](./docs/system-map/feature-flags.md).
 
 ### Analyze request correlation
 
