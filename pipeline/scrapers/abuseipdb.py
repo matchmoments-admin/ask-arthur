@@ -35,16 +35,22 @@ def scrape() -> str:
 
     api_key = os.environ.get("ABUSEIPDB_API_KEY")
     if not api_key:
-        logger.error("ABUSEIPDB_API_KEY not set, skipping")
+        # A missing API key is a CONFIG state, not a scrape failure — the run
+        # didn't fail, it correctly declined for lack of credentials. Log it as
+        # "skipped" (visible in the ingestion log with the reason) and return
+        # "skipped" so __main__ exits 0 and the GH Actions notify-failure step
+        # does NOT page. This branch is before enforce_backoff_or_skip, so a
+        # hard "error" here would never self-mute and would page on every run.
+        logger.warning("ABUSEIPDB_API_KEY not set, skipping")
         with get_db() as conn:
             log_ingestion(
                 conn,
                 feed_name=FEED_NAME,
-                status="error",
+                status="skipped",
                 error_message="ABUSEIPDB_API_KEY not configured",
                 record_type="ip",
             )
-        return "error"
+        return "skipped"
 
     try:
         logger.info(f"Fetching AbuseIPDB blacklist (minConfidence={MIN_CONFIDENCE})")
