@@ -4,6 +4,11 @@ import { toSlackBlocks } from "@askarthur/bot-core/format-slack";
 import { checkBotRateLimit } from "@askarthur/bot-core/rate-limit";
 import { logger } from "@askarthur/utils/logger";
 
+// node:crypto (via bot-core verifier) is unavailable on Edge; pin Node + dynamic
+// (same as the other 4 webhook routes — this is the 5th node:crypto consumer).
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 interface ShortcutPayload {
   type: string;
   callback_id: string;
