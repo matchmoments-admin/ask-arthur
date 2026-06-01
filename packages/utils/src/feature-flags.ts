@@ -384,6 +384,14 @@ export const featureFlags = {
    *  prepared rows have been eyeballed via the admin dashboard. */
   brandStewardshipReport: readBoolEnv("FF_BRAND_STEWARDSHIP_REPORT"),
 
+  /** Brand Stewardship Report — REAL brand-recipient sends. Gates the admin
+   *  send route from emailing the actual brand security contact. Hard
+   *  precondition: #371 legal sign-off of the outreach copy. Default OFF.
+   *  NOTE: this flag is BYPASSED when BRAND_STEWARDSHIP_SHADOW_RECIPIENT is set
+   *  — shadow sends go to our own inbox for validation and carry no
+   *  defamation/legal risk, so they don't need #371. Server-side only. */
+  brandStewardshipSend: readBoolEnv("FF_BRAND_STEWARDSHIP_SEND"),
+
   /** Onward reporting — OpenPhish community blocklist destination. Server-side
    *  only (the Inngest worker is the only consumer). Gates the
    *  report-onward-openphish worker: when OFF the worker marks the queued log

@@ -19,6 +19,7 @@
     "@askarthur/extension-audit": "workspace:^",
     "@askarthur/mcp-audit": "workspace:^",
     "@askarthur/scam-engine": "workspace:*",
+    "@askarthur/shopfront-glue": "workspace:*",
     "@askarthur/site-audit": "workspace:*",
     "@askarthur/supabase": "workspace:*",
     "@askarthur/types": "workspace:*",

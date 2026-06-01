@@ -7,6 +7,9 @@ import {
   parseWatchlist,
   buildAliasRows,
 } from "../../scripts/gen-brand-aliases-seed.mjs";
+// The runtime (.ts) twin used by app code — must match the build-time (.mjs)
+// copy and the SQL brand_normalize() exactly.
+import { brandNormalize as brandNormalizeTs } from "../brand-normalize";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const watchlistTs = readFileSync(
@@ -20,6 +23,14 @@ describe("brandNormalize (must stay byte-identical to SQL brand_normalize)", () 
     expect(brandNormalize("National Australia Bank")).toBe("nationalaustraliabank");
     expect(brandNormalize("JB Hi-Fi")).toBe("jbhifi");
     expect(brandNormalize("7-Eleven")).toBe("7eleven");
+  });
+
+  it("the runtime (.ts) twin matches the build-time (.mjs) copy on edge cases", () => {
+    for (const s of ["NAB", "National Australia Bank", "JB Hi-Fi", "7-Eleven", "", "   ", "-"]) {
+      expect(brandNormalizeTs(s)).toBe(brandNormalize(s));
+    }
+    expect(brandNormalizeTs(null)).toBe(brandNormalize(null));
+    expect(brandNormalizeTs(undefined)).toBe(brandNormalize(undefined));
   });
 
   it("returns null for empty / whitespace-only / symbol-only input", () => {
@@ -57,6 +68,12 @@ describe("brand-alias seed generation over the real watchlist", () => {
     expect(rows.get("commbank")).toBe("CBA");
     expect(rows.get("nab")).toBe("NAB");
     expect(rows.get("anz")).toBe("ANZ");
+  });
+
+  it("the .ts and .mjs normalizers agree on every watchlist brand name", () => {
+    for (const { brand } of entries) {
+      expect(brandNormalizeTs(brand)).toBe(brandNormalize(brand));
+    }
   });
 
   it("has no normalization collisions (guards future watchlist edits)", () => {

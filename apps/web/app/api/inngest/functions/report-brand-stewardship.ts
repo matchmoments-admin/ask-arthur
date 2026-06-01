@@ -1,6 +1,7 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
+import { brandNormalize } from "@askarthur/shopfront-glue";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
@@ -103,10 +104,22 @@ export function aggregateOnwardByBrand(
   return out;
 }
 
-/** Match an aggregated brand string to an active known_brands email contact. */
+/**
+ * Match an aggregated brand string to an active known_brands email contact.
+ *
+ * Two passes:
+ *  1. Direct — exact brand_key or lowercased brand_name match (original v166
+ *     behaviour, unchanged).
+ *  2. Canonical-equivalence — resolve BOTH the report's free-text brand and
+ *     each contact's name to the canonical brand via the brand_aliases layer
+ *     (v174) and match on that. This is what lets a scam_report impersonating
+ *     "National Australia Bank" reach the known_brands contact stored as "NAB".
+ *     `resolveCanonical` is optional so existing callers/tests are unaffected.
+ */
 export function matchKnownBrand(
   brand: string,
   contacts: KnownBrandContact[],
+  resolveCanonical?: (s: string) => string | null,
 ): KnownBrandContact | null {
   const key = deriveBrandKey(brand);
   const lowerBrand = brand.toLowerCase();
@@ -117,6 +130,15 @@ export function matchKnownBrand(
       c.brand_name.toLowerCase() === lowerBrand
     ) {
       return c;
+    }
+  }
+  if (resolveCanonical) {
+    const canon = resolveCanonical(brand)?.toLowerCase() ?? null;
+    if (canon) {
+      for (const c of contacts) {
+        if (!c.security_contact_email) continue;
+        if (resolveCanonical(c.brand_name)?.toLowerCase() === canon) return c;
+      }
     }
   }
   return null;
@@ -225,6 +247,39 @@ export const reportBrandStewardship = inngest.createFunction(
       return (data ?? []) as KnownBrandContact[];
     });
 
+    // Canonical brand-alias layer (v174): load alias_normalized -> canonical so
+    // a free-text impersonated_brand can be matched to a known_brands contact
+    // even when the strings differ ("National Australia Bank" -> "NAB"). Step
+    // returns a plain Record (Map doesn't survive Inngest's JSON serialisation);
+    // the Map + resolver closure are built outside the step.
+    const aliasPairs = await step.run("load-brand-aliases", async () => {
+      const sb = createServiceClient();
+      if (!sb) return {} as Record<string, string>;
+      const map: Record<string, string> = {};
+      // 231 rows today; page defensively in case the layer grows.
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await sb
+          .from("brand_aliases")
+          .select("alias_normalized, canonical_brand")
+          .range(from, from + 999);
+        if (error) {
+          logger.error("brand-stewardship: brand_aliases load failed", {
+            error: error.message,
+          });
+          break;
+        }
+        for (const row of data ?? []) {
+          map[row.alias_normalized as string] = row.canonical_brand as string;
+        }
+        if ((data?.length ?? 0) < 1000) break;
+      }
+      return map;
+    });
+    const resolveCanonical = (s: string): string | null => {
+      const k = brandNormalize(s);
+      return k ? (aliasPairs[k] ?? null) : null;
+    };
+
     const prepared = await step.run("upsert-reports", async () => {
       const sb = createServiceClient();
       if (!sb) return { prepared: 0, skipped_no_contact: 0 };
@@ -244,7 +299,7 @@ export const reportBrandStewardship = inngest.createFunction(
       const nowIso = new Date().toISOString();
 
       for (const [brand, m] of aggregated) {
-        const contact = matchKnownBrand(brand, contacts);
+        const contact = matchKnownBrand(brand, contacts, resolveCanonical);
         if (!contact || !contact.security_contact_email) {
           skippedNoContact += 1;
           continue;

@@ -81,6 +81,48 @@ describe("matchKnownBrand", () => {
   it("returns null when no brand matches", () => {
     expect(matchKnownBrand("Telstra", contacts)).toBeNull();
   });
+
+  describe("canonical-equivalence fallback (brand_aliases layer)", () => {
+    // Fake resolver standing in for resolve_brand / the loaded brand_aliases map:
+    // every "Commonwealth Bank" spelling canonicalises to "CBA".
+    const resolve = (s: string): string | null => {
+      const k = s.toLowerCase().replace(/[^a-z0-9]+/g, "");
+      const m: Record<string, string> = {
+        commonwealthbank: "CBA",
+        commonwealthbankofaustralia: "CBA",
+        commbank: "CBA",
+        cba: "CBA",
+        nationalaustraliabank: "NAB",
+        nab: "NAB",
+      };
+      return m[k] ?? null;
+    };
+    const withEmail = [
+      { brand_key: "cba", brand_name: "CommBank", security_contact_email: "soc@cba.com.au" },
+    ];
+
+    it("matches a long-form report brand to a short-form contact via canonical", () => {
+      // Direct match fails ("Commonwealth Bank of Australia" ≠ "CommBank"),
+      // canonical fallback succeeds (both → "CBA").
+      const m = matchKnownBrand("Commonwealth Bank of Australia", withEmail, resolve);
+      expect(m?.security_contact_email).toBe("soc@cba.com.au");
+    });
+
+    it("does not fall back when the resolver yields no canonical", () => {
+      expect(matchKnownBrand("Some Unknown Co", withEmail, resolve)).toBeNull();
+    });
+
+    it("never returns a canonical match that lacks an email", () => {
+      const noEmail = [
+        { brand_key: "nab", brand_name: "NAB", security_contact_email: null },
+      ];
+      expect(matchKnownBrand("National Australia Bank", noEmail, resolve)).toBeNull();
+    });
+
+    it("behaves identically to before when no resolver is passed", () => {
+      expect(matchKnownBrand("Commonwealth Bank of Australia", withEmail)).toBeNull();
+    });
+  });
 });
 
 describe("priorMonthStart", () => {
