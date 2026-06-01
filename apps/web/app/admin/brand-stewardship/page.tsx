@@ -1,5 +1,6 @@
 import { requireAdmin } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
+import { readStringEnv } from "@askarthur/utils/env";
 import BrandStewardshipDashboard, {
   type StewardshipRow,
 } from "./BrandStewardshipDashboard";
@@ -57,7 +58,10 @@ export default async function BrandStewardshipPage() {
         each month) for brands with a known security contact. Preview the
         brand-facing email here before it&apos;s sent.
       </p>
-      <BrandStewardshipDashboard rows={rows} />
+      <BrandStewardshipDashboard
+        rows={rows}
+        shadowRecipient={readStringEnv("BRAND_STEWARDSHIP_SHADOW_RECIPIENT") || null}
+      />
     </div>
   );
 }

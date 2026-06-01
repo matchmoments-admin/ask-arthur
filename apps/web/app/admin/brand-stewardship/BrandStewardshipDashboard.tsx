@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Eye, Loader2, X, Clock } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Eye, Loader2, X, Clock, Send } from "lucide-react";
 
 export interface StewardshipRow {
   id: string;
@@ -36,12 +37,42 @@ function monthLabel(periodMonth: string): string {
 
 export default function BrandStewardshipDashboard({
   rows,
+  shadowRecipient,
 }: {
   rows: StewardshipRow[];
+  /** When set, ALL sends are routed here (validation mode) instead of the brand. */
+  shadowRecipient: string | null;
 }) {
+  const router = useRouter();
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  async function send(id: string, brandName: string) {
+    const where = shadowRecipient
+      ? `the SHADOW inbox (${shadowRecipient})`
+      : "the brand's real security contact";
+    if (!window.confirm(`Send the ${brandName} monthly summary to ${where}?`)) {
+      return;
+    }
+    setBusyId(id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/admin/brand-stewardship/${id}/send`, {
+        method: "POST",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.detail ?? data.error ?? `Send failed (${res.status})`);
+      }
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Send failed");
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   async function openPreview(id: string) {
     setPreviewId(id);
@@ -80,6 +111,15 @@ export default function BrandStewardshipDashboard({
 
   return (
     <>
+      {shadowRecipient && (
+        <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <strong>Shadow-send mode active.</strong> All sends go to{" "}
+          <code className="text-amber-900">{shadowRecipient}</code> — not the
+          brand. Unset <code>BRAND_STEWARDSHIP_SHADOW_RECIPIENT</code> to send to
+          real contacts (also requires <code>FF_BRAND_STEWARDSHIP_SEND</code>).
+        </div>
+      )}
+
       {error && (
         <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
@@ -141,7 +181,7 @@ export default function BrandStewardshipDashboard({
                   </p>
                 )}
 
-                <div className="mt-3 flex justify-end">
+                <div className="mt-3 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                   <button
                     type="button"
                     onClick={() => openPreview(r.id)}
@@ -150,6 +190,21 @@ export default function BrandStewardshipDashboard({
                     <Eye size={14} />
                     Preview email
                   </button>
+                  {(r.status === "prepared" || r.status === "failed") && (
+                    <button
+                      type="button"
+                      onClick={() => send(r.id, r.brandName)}
+                      disabled={busyId === r.id}
+                      className="inline-flex min-h-[40px] items-center justify-center gap-2 rounded-full bg-deep-navy px-4 py-2 text-xs font-bold uppercase tracking-widest text-white hover:bg-navy disabled:opacity-50"
+                    >
+                      {busyId === r.id ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        <Send size={14} />
+                      )}
+                      {shadowRecipient ? "Send to shadow" : "Send to brand"}
+                    </button>
+                  )}
                 </div>
               </li>
             ))}
