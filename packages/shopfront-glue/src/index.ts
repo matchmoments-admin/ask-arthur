@@ -13,3 +13,4 @@ export {
   type MatchResult,
   type SignalType,
 } from "./lexical-match";
+export { brandNormalize } from "./brand-normalize";
