@@ -282,10 +282,6 @@ export const AU_BRAND_WATCHLIST: BrandEntry[] = [
     ],
   },
   {
-    brand: "Domain",
-    legitimate_domains: ["domain.com.au", "allhomes.com.au"],
-  },
-  {
     brand: "Carsales",
     legitimate_domains: [
       "carsales.com.au",
@@ -426,7 +422,6 @@ export const AU_BRAND_WATCHLIST: BrandEntry[] = [
 
   // Mortgage brokers + home-loan lenders
   { brand: "Aussie Home Loans", legitimate_domains: ["aussie.com.au"] },
-  { brand: "Lendi", legitimate_domains: ["lendi.com.au"] },
   { brand: "Mortgage Choice", legitimate_domains: ["mortgagechoice.com.au"] },
   { brand: "Athena Home Loans", legitimate_domains: ["athena.com.au"] },
   { brand: "Unloan", legitimate_domains: ["unloan.com.au"] },
