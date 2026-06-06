@@ -6,8 +6,9 @@ import { readStringEnv } from "@askarthur/utils/env";
 import { logger } from "@askarthur/utils/logger";
 import { render } from "@react-email/components";
 import { Resend } from "resend";
-import CloneWatchBrandAlert from "@/emails/CloneWatchBrandAlert";
-import { resolveEmailCopy } from "@/lib/email/resolve-copy";
+import CloneWatchRunSummary, {
+  type CloneWatchRunSummaryItem,
+} from "@/emails/CloneWatchRunSummary";
 import { logCost, PRICING } from "@/lib/cost-telemetry";
 
 /**
@@ -29,11 +30,14 @@ import { logCost, PRICING } from "@/lib/cost-telemetry";
  *   responds. A clone that's already dead/taken-down isn't worth a notification.
  *
  *   ON PASS: set triage_status='tp_confirmed' (clears the manual queue + feeds
- *   the public /clone-watch page) and send the CloneWatchBrandAlert email.
+ *   the public /clone-watch page).
+ *
+ * NOTIFICATION: ONE run-summary email per run (not one per clone), listing each
+ * auto-confirmed clone + the hosting IP/country/ASN urlscan already captured.
  *
  * SEND ROUTING (shadow-first, mirroring the brand-stewardship design):
  *   • CLONE_WATCH_SHADOW_RECIPIENT (falls back to BRAND_STEWARDSHIP_SHADOW_RECIPIENT)
- *     set → email goes THERE (validation; sending to ourselves carries no
+ *     set → the summary goes THERE (validation; sending to ourselves carries no
  *     defamation/legal risk, so it does NOT need the #371 sign-off).
  *   • unset → auto-confirm only, NO email. Real-brand auto-send is intentionally
  *     out of scope here (it stays the #371-gated manual/batch path).
@@ -53,13 +57,19 @@ const AUTO_TRIAGE_RUN_CAP = 15; // hard cap on auto-confirm+send per run
 const LIVENESS_TIMEOUT_MS = 8000;
 const RECENT_WINDOW_DAYS = 14;
 
-interface AlertRow {
+export interface AlertRow {
   id: number;
   inferred_target_domain: string | null;
   candidate_domain: string;
   candidate_url: string;
   signals: unknown;
-  urlscan_evidence: { screenshot_url?: string; result_url?: string } | null;
+  urlscan_evidence: {
+    screenshot_url?: string;
+    result_url?: string;
+    // Hosting attribution urlscan already captures (clone-watch-urlscan.ts
+    // serialiseEvidence → server: result.serverInfo).
+    server?: { ip?: string | null; country?: string | null; asn?: string | null };
+  } | null;
   first_seen_at: string;
 }
 
@@ -78,6 +88,24 @@ export function primarySignalType(signals: unknown): string | null {
 export function passesStrictSignal(signals: unknown): boolean {
   const t = primarySignalType(signals);
   return t !== null && ELIGIBLE_SIGNALS.has(t);
+}
+
+/**
+ * Project an alert into a run-summary item, lifting the hosting attribution
+ * (IP / country / ASN) urlscan already stored in urlscan_evidence.server.
+ * Pure — unit-tested.
+ */
+export function toSummaryItem(alert: AlertRow): CloneWatchRunSummaryItem {
+  const server = alert.urlscan_evidence?.server ?? null;
+  return {
+    brand: alert.inferred_target_domain ?? alert.candidate_domain,
+    candidateDomain: alert.candidate_domain,
+    candidateUrl: alert.candidate_url,
+    hostingIp: server?.ip ?? null,
+    hostingCountry: server?.country ?? null,
+    asn: server?.asn ?? null,
+    screenshotUrl: alert.urlscan_evidence?.screenshot_url ?? null,
+  };
 }
 
 /**
@@ -177,12 +205,18 @@ export const cloneWatchAutoTriage = inngest.createFunction(
       return { ok: true, eligible: 0, confirmed: 0, emailed: 0 };
     }
 
+    // Stable run date (YYYY-MM-DD) — computed in a step so it's memoised across
+    // Inngest replays and is safe to key the email idempotency on.
+    const runDate = await step.run("run-date", () =>
+      new Date().toISOString().slice(0, 10),
+    );
+
     let confirmed = 0;
-    let emailed = 0;
     let offline = 0;
+    const items: CloneWatchRunSummaryItem[] = [];
 
     for (const alert of eligible) {
-      // 2. Liveness gate — own step so a slow fetch doesn't re-run the rest.
+      // Liveness gate — own step so a slow fetch doesn't re-run the rest.
       const live = await step.run(`liveness-${alert.id}`, () =>
         isCandidateLive(alert.candidate_url),
       );
@@ -195,9 +229,10 @@ export const cloneWatchAutoTriage = inngest.createFunction(
         continue;
       }
 
-      // 3. Auto-confirm. Marks tp_confirmed (clears the manual queue + surfaces
-      //    on the public /clone-watch page). Does NOT emit the triaged event,
-      //    so no real-brand fan-out / Netcraft.
+      // Auto-confirm (tp_confirmed) + stamp submitted_to in one step. Marks the
+      // alert confirmed (clears the manual queue + surfaces on /clone-watch)
+      // and records the shadow-summary handling. Does NOT emit the triaged
+      // event, so no real-brand fan-out / Netcraft.
       const confirmedOk = await step.run(`confirm-${alert.id}`, async () => {
         const sb = createServiceClient();
         if (!sb) return false;
@@ -205,7 +240,8 @@ export const cloneWatchAutoTriage = inngest.createFunction(
           p_alert_id: alert.id,
           p_status: "tp_confirmed",
           p_admin_id: null,
-          p_notes: "auto-triage: strict bar (Haiku≥0.9 + confusable/levenshtein + urlscan likely_phishing) + liveness pass",
+          p_notes:
+            "auto-triage: strict bar (Haiku≥0.9 + confusable/levenshtein + urlscan likely_phishing) + liveness pass",
         });
         if (error) {
           logger.error("clone-watch auto-triage: confirm rpc failed", {
@@ -214,15 +250,40 @@ export const cloneWatchAutoTriage = inngest.createFunction(
           });
           return false;
         }
+        // Mark handled (shadow summary) so the notify-brand consumer + dashboard
+        // treat it as already-notified. Non-fatal.
+        const { error: stampErr } = await sb.rpc("merge_clone_alert_submission", {
+          p_alert_id: alert.id,
+          p_key: "brand_notification",
+          p_value: {
+            channel_type: "shadow_summary",
+            recipient: shadowRecipient,
+            status: "sent",
+            sent_at: new Date().toISOString(),
+            ts: new Date().toISOString(),
+          },
+          p_set_triage_status: null,
+        });
+        if (stampErr) {
+          logger.warn("clone-watch auto-triage: submitted_to stamp failed", {
+            alertId: alert.id,
+            error: stampErr.message,
+          });
+        }
         return true;
       });
       if (!confirmedOk) continue;
       confirmed += 1;
 
-      // 4. Shadow-only email. No shadow recipient → auto-confirm only.
-      if (!shadowRecipient) continue;
+      // Collect the hosting attribution urlscan already captured for the digest.
+      items.push(toSummaryItem(alert));
+    }
 
-      const sent = await step.run(`email-${alert.id}`, async () => {
+    // ONE run-summary email to the shadow recipient (validation). No shadow
+    // recipient → auto-confirm only, no email.
+    let emailed = false;
+    if (shadowRecipient && items.length > 0) {
+      emailed = await step.run("send-run-summary", async () => {
         const apiKey = process.env.RESEND_API_KEY;
         const fromEmail = readStringEnv("RESEND_FROM_EMAIL");
         if (!apiKey || !fromEmail) {
@@ -232,27 +293,13 @@ export const cloneWatchAutoTriage = inngest.createFunction(
           });
           return false;
         }
-        const brand = alert.inferred_target_domain as string;
-        const copy = await resolveEmailCopy("clone_watch_brand_alert");
         const html = await render(
-          CloneWatchBrandAlert({
-            brandName: brand,
-            legitimateDomain: brand,
-            candidates: [
-              {
-                candidateDomain: alert.candidate_domain,
-                candidateUrl: alert.candidate_url,
-                signalType: primarySignalType(alert.signals) ?? "unknown",
-                score: 1,
-                firstSeenAt: alert.first_seen_at,
-                evidenceSummary:
-                  "Auto-triaged: strict-confidence clone, page confirmed live.",
-                urlscanResultUrl: alert.urlscan_evidence?.result_url,
-                urlscanScreenshotUrl: alert.urlscan_evidence?.screenshot_url,
-              },
-            ],
-            reportRef: `CW-auto-${alert.id}`,
-            copy,
+          CloneWatchRunSummary({
+            runDate,
+            eligible: eligible.length,
+            confirmed,
+            offline,
+            items,
           }),
         );
         const resend = new Resend(apiKey);
@@ -260,79 +307,43 @@ export const cloneWatchAutoTriage = inngest.createFunction(
           {
             from: fromEmail,
             to: [shadowRecipient],
-            subject: `[SHADOW] Clone alert — ${brand} (${alert.candidate_domain})`,
+            subject: `[SHADOW] Clone-watch auto-triage — ${confirmed} confirmed (${runDate})`,
             html,
           },
-          { idempotencyKey: `clone-auto-send:${alert.id}` },
+          { idempotencyKey: `clone-auto-summary:${runDate}` },
         );
         if (result.error) {
           logger.error("clone-watch auto-triage: Resend rejected", {
-            alertId: alert.id,
             error: result.error.message ?? String(result.error),
           });
           return false;
         }
-
-        // Stamp submitted_to so the dashboard reflects the shadow send and the
-        // notify-brand consumer treats it as already-handled.
-        await sb_stamp(alert.id, shadowRecipient, result.data?.id ?? null);
-
         logCost({
           feature: "shopfront_clone_auto_triage",
           provider: "resend",
-          operation: "shadow_alert",
+          operation: "run_summary",
           units: 1,
           unitCostUsd: PRICING.RESEND_USD_PER_EMAIL,
-          metadata: { alert_id: alert.id, recipient: "shadow" },
+          metadata: { run_date: runDate, confirmed, recipient: "shadow" },
         });
         return true;
       });
-      if (sent) emailed += 1;
     }
 
     logger.info("clone-watch auto-triage: complete", {
       eligible: eligible.length,
       confirmed,
-      emailed,
       offline,
+      emailed,
       shadow: Boolean(shadowRecipient),
     });
     return {
       ok: true,
       eligible: eligible.length,
       confirmed,
-      emailed,
       offline,
+      emailed,
       mode: shadowRecipient ? "shadow" : "confirm_only",
     };
   }),
 );
-
-/** Stamp brand_notification submission state (shadow send). Non-fatal. */
-async function sb_stamp(
-  alertId: number,
-  recipient: string,
-  messageId: string | null,
-): Promise<void> {
-  const sb = createServiceClient();
-  if (!sb) return;
-  const { error } = await sb.rpc("merge_clone_alert_submission", {
-    p_alert_id: alertId,
-    p_key: "brand_notification",
-    p_value: {
-      channel_type: "shadow",
-      recipient,
-      status: "sent",
-      provider_message_id: messageId,
-      sent_at: new Date().toISOString(),
-      ts: new Date().toISOString(),
-    },
-    p_set_triage_status: null,
-  });
-  if (error) {
-    logger.warn("clone-watch auto-triage: submitted_to stamp failed", {
-      alertId,
-      error: error.message,
-    });
-  }
-}

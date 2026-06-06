@@ -2,7 +2,57 @@ import { describe, expect, it } from "vitest";
 import {
   primarySignalType,
   passesStrictSignal,
+  toSummaryItem,
+  type AlertRow,
 } from "@/app/api/inngest/functions/clone-watch-auto-triage";
+
+function alert(overrides: Partial<AlertRow> = {}): AlertRow {
+  return {
+    id: 1,
+    inferred_target_domain: "nab.com.au",
+    candidate_domain: "nab-login.shop",
+    candidate_url: "https://nab-login.shop/",
+    signals: [{ signal_type: "confusable" }],
+    urlscan_evidence: null,
+    first_seen_at: "2026-06-07T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("toSummaryItem", () => {
+  it("lifts hosting IP/country/ASN from urlscan_evidence.server", () => {
+    const item = toSummaryItem(
+      alert({
+        urlscan_evidence: {
+          screenshot_url: "https://urlscan.io/screenshots/x.png",
+          server: { ip: "203.0.113.7", country: "RU", asn: "AS12345" },
+        },
+      }),
+    );
+    expect(item).toMatchObject({
+      brand: "nab.com.au",
+      candidateDomain: "nab-login.shop",
+      hostingIp: "203.0.113.7",
+      hostingCountry: "RU",
+      asn: "AS12345",
+      screenshotUrl: "https://urlscan.io/screenshots/x.png",
+    });
+  });
+
+  it("falls back to nulls when urlscan evidence / server is missing", () => {
+    const item = toSummaryItem(alert({ urlscan_evidence: null }));
+    expect(item.hostingIp).toBeNull();
+    expect(item.hostingCountry).toBeNull();
+    expect(item.asn).toBeNull();
+    expect(item.screenshotUrl).toBeNull();
+  });
+
+  it("uses candidate_domain as the brand when inferred_target_domain is null", () => {
+    expect(toSummaryItem(alert({ inferred_target_domain: null })).brand).toBe(
+      "nab-login.shop",
+    );
+  });
+});
 
 describe("primarySignalType", () => {
   it("reads signal_type from the first signal", () => {
