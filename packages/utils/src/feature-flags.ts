@@ -472,6 +472,13 @@ export const featureFlags = {
    *  shopfront_clone_alerts.attribution (v177). Default OFF. Server-side only. */
   cloneWatchAttribution: readBoolEnv("FF_CLONE_WATCH_ATTRIBUTION"),
 
+  /** Feed CONFIRMED clones (domain + hosting IP) into the unified scam_entities
+   *  index so the consumer reputation lookup / scam-map / B2B feeds see them.
+   *  BLAST-RADIUS: scam_entities powers consumer-facing reputation — only
+   *  strict-bar/operator-confirmed clones reach this. Default OFF; keep off
+   *  until the clone-watch FP rate is validated. Server-side only. */
+  cloneWatchFeedEntities: readBoolEnv("FF_CLONE_WATCH_FEED_ENTITIES"),
+
   /** PR-B2 — auto-approve brand notifications instead of requiring an
    *  admin click in Telegram. Default OFF: every batch shows up as a
    *  Telegram preview with an HMAC-signed approve URL; the admin clicks

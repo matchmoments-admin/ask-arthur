@@ -9,6 +9,7 @@ import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { CLONE_WATCH_TRIAGED_EVENT } from "@askarthur/scam-engine/inngest/events";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import { logCost } from "@/lib/cost-telemetry";
+import { feedCloneEntity } from "@/lib/clone-watch/feed-entity";
 
 const TriageBodySchema = z.object({
   alertId: z.number().int().positive(),
@@ -85,7 +86,7 @@ export async function POST(req: Request) {
   const { data: alert, error: loadErr } = await supabase
     .from("shopfront_clone_alerts")
     .select(
-      "id, inferred_target_domain, candidate_domain, candidate_url, severity_tier, signals",
+      "id, inferred_target_domain, candidate_domain, candidate_url, severity_tier, signals, urlscan_evidence",
     )
     .eq("id", parsed.alertId)
     .maybeSingle();
@@ -114,6 +115,23 @@ export async function POST(req: Request) {
       error: error.message,
     });
     return NextResponse.json({ error: "triage_failed" }, { status: 500 });
+  }
+
+  // Feed an operator-confirmed clone (+ hosting IP) into the unified
+  // scam_entities index (flag-gated FF_CLONE_WATCH_FEED_ENTITIES; non-fatal).
+  if (parsed.status === "tp_confirmed") {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const server = (alert as any).urlscan_evidence?.server ?? null;
+    await feedCloneEntity(
+      alert.candidate_domain as string,
+      server?.ip ?? null,
+      server?.country ?? null,
+    ).catch((err) =>
+      logger.warn("clone-watch triage: feed-entity failed", {
+        alertId: parsed.alertId,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
   }
 
   // Inline enqueue for the brand-notification path. Replaces the

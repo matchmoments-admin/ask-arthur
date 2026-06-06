@@ -10,6 +10,7 @@ import CloneWatchRunSummary, {
   type CloneWatchRunSummaryItem,
 } from "@/emails/CloneWatchRunSummary";
 import { logCost, PRICING } from "@/lib/cost-telemetry";
+import { feedCloneEntity } from "@/lib/clone-watch/feed-entity";
 
 /**
  * Clone-watch auto-triage — auto-confirm the high-confidence, still-live tail
@@ -277,6 +278,17 @@ export const cloneWatchAutoTriage = inngest.createFunction(
 
       // Collect the hosting attribution urlscan already captured for the digest.
       items.push(toSummaryItem(alert));
+
+      // Feed the confirmed clone (+ hosting IP) into the unified entity index so
+      // the rest of the app sees it. Own step + non-fatal (flag-gated inside).
+      const srv = alert.urlscan_evidence?.server ?? null;
+      await step.run(`feed-entity-${alert.id}`, () =>
+        feedCloneEntity(
+          alert.candidate_domain,
+          srv?.ip ?? null,
+          srv?.country ?? null,
+        ).then(() => true),
+      );
     }
 
     // ONE run-summary email to the shadow recipient (validation). No shadow
