@@ -27,9 +27,10 @@ export const handleAnalyzeCompletedBrand = inngest.createFunction(
   },
   { event: ANALYZE_COMPLETED_EVENT },
   withAxiomLogging({ fnId: "analyze-completed-brand" }, async ({ event, step }) => {
-    const data = await step.run("parse-event", () =>
-      parseAnalyzeCompletedData(event.data)
-    );
+    // Parsed inline (not in a step.run): pure, deterministic Zod parse — see
+    // analyze-report.ts. Removing the step means the common no-brand / SAFE
+    // early-returns below cost zero durable steps (just one function exec).
+    const data = parseAnalyzeCompletedData(event.data);
 
     if (!data.impersonatedBrand) {
       return { skipped: true, reason: "no impersonated brand" };

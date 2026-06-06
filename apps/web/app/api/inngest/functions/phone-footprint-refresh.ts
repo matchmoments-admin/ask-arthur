@@ -32,12 +32,19 @@ import {
 } from "@askarthur/scam-engine/phone-footprint";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 import { dispatchAlert } from "@/lib/phone-footprint/alert-dispatch";
 
 export const REFRESH_MONITOR_EVENT = "phone-footprint/refresh.monitor.v1" as const;
 
 const CLAIM_BATCH_SIZE = 50;
-const CLAIMER_CRON = "TZ=Australia/Sydney 0 * * * *"; // hourly on the hour
+// Every 6h (was hourly). Phone Footprint is dark in prod (FF_VONAGE_ENABLED +
+// the consumer flag both unset), so the hourly claimer was running a DB query
+// against an empty queue 24×/day for ~1,440 wasted Inngest executions/mo. A
+// background monitor's re-scan tolerates ≤6h of scheduling latency, so this is
+// lossless when the feature launches; tighten back toward hourly here if a
+// future tier needs sub-6h refresh granularity.
+const CLAIMER_CRON = "TZ=Australia/Sydney 0 */6 * * *";
 
 /**
  * Check the cost-brake row set by /api/cron/cost-daily-check.
@@ -100,6 +107,13 @@ export const phoneFootprintRefreshClaimer = inngest.createFunction(
   },
   { cron: CLAIMER_CRON },
   async ({ step }) => {
+    // Short-circuit before any step when the feature is dark, so a scheduled
+    // tick costs a single function execution (0 steps) instead of an empty-
+    // queue DB round-trip. When Vonage is enabled the claimer runs in full.
+    if (!featureFlags.vonageEnabled) {
+      return { skipped: true, reason: "FF_VONAGE_ENABLED disabled" };
+    }
+
     const claimed = await step.run("claim-due", async () => {
       const supa = createServiceClient();
       if (!supa) return [];

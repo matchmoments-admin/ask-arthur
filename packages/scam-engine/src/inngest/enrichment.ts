@@ -24,7 +24,7 @@ export const enrichmentFanOut = inngest.createFunction(
     // 5×20 WHOIS+SSL lookups on the same domains. Cron-safe because 30m < 6h.
     rateLimit: { limit: 1, period: "30m" },
   },
-  { cron: "0 */6 * * *" }, // Every 6 hours
+  { cron: "0 */12 * * *" }, // Every 12h (was 6h). Pending-status domain queue is self-draining + capped per run (MAX_DOMAINS_PER_RUN) — wider cadence only adds WHOIS/SSL-freshness lag, no domains skipped.
   withAxiomLogging({ fnId: "pipeline-enrichment-fanout" }, async ({ step }) => {
     if (!featureFlags.dataPipeline) {
       return { skipped: true, reason: "dataPipeline feature flag disabled" };

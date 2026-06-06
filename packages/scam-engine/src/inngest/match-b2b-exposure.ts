@@ -162,9 +162,9 @@ export const matchB2bExposure = inngest.createFunction(
       return { skipped: true, reason: "ffVulnB2bExposure is off" };
     }
 
-    const data = await step.run("parse-event", () =>
-      parseB2bExposureRequestedData(event.data),
-    );
+    // Inline (not a step.run): pure deterministic Zod parse, free to re-run on
+    // retry — memoising it as a durable step only cost an Inngest execution.
+    const data = parseB2bExposureRequestedData(event.data);
 
     const productNames = Array.from(new Set(data.products.map((p) => p.name)));
 

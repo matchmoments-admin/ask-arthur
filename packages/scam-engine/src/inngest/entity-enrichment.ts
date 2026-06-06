@@ -258,7 +258,7 @@ export const entityEnrichmentFanOut = inngest.createFunction(
     // AbuseIPDB free-tier 1k/day cap in two clicks. Cron-safe (10m < 4h).
     rateLimit: { limit: 1, period: "10m" },
   },
-  { cron: "0 */4 * * *" }, // Every 4 hours
+  { cron: "0 */8 * * *" }, // Every 8h (was 4h). Pending-status queue is self-draining + capped per run, so wider cadence only adds enrichment-freshness lag — no entities skipped.
   withAxiomLogging({ fnId: "pipeline-entity-enrichment" }, async ({ step }) => {
     if (!featureFlags.entityEnrichment) {
       return { skipped: true, reason: "entityEnrichment feature flag disabled" };

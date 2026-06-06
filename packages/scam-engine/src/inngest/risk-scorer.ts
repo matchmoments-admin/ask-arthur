@@ -16,7 +16,7 @@ export const riskScorer = inngest.createFunction(
     name: "Pipeline: Compute Entity Risk Scores",
     concurrency: { limit: 1 },
   },
-  { cron: "0 */6 * * *" }, // Every 6 hours
+  { cron: "0 */12 * * *" }, // Every 12h (was 6h). Scores entities with new reports since last scoring (pending-based, self-draining) — wider cadence only delays re-scoring, no entities skipped.
   withAxiomLogging({ fnId: "pipeline-risk-scorer" }, async ({ step }) => {
     if (!featureFlags.riskScoring) {
       return { skipped: true, reason: "riskScoring feature flag disabled" };

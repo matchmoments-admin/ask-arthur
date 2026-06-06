@@ -207,9 +207,9 @@ export const redditIntelCluster = inngest.createFunction(
       return { paused: true, reason: "feature_brakes.reddit_intel is set" };
     }
 
-    const data = await step.run("parse-event", () =>
-      parseRedditIntelEmbeddedData(event.data),
-    );
+    // Inline (not a step.run): pure deterministic Zod parse, free to re-run on
+    // retry — memoising it as a durable step only cost an Inngest execution.
+    const data = parseRedditIntelEmbeddedData(event.data);
 
     // ── Step 1: load unassigned posts in this cohort + active themes ─────
     const { posts, themes } = await step.run("load-state", async () => {

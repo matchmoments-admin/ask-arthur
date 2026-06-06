@@ -17,7 +17,10 @@ export const scamAlertCron = inngest.createFunction(
     timeouts: { finish: "4m" },
     name: "Scam Alert Push Notifications",
   },
-  { cron: "0 */3 * * *" },
+  // Every 6h (was 3h). pushAlerts is dark in prod, so this currently only
+  // early-returns; the lookback window below is widened to 6h in lockstep so
+  // the cadence stays gap-free (no missed threats) when push launches.
+  { cron: "0 */6 * * *" },
   withAxiomLogging({ fnId: "scam-alert-push" }, async ({ step }) => {
     if (!featureFlags.pushAlerts) {
       return { skipped: true, reason: "pushAlerts flag disabled" };
@@ -28,9 +31,10 @@ export const scamAlertCron = inngest.createFunction(
       return { skipped: true, reason: "Supabase not configured" };
     }
 
-    // Step 1: Find new HIGH-confidence threats since last run (3 hours)
+    // Step 1: Find new HIGH-confidence threats since last run (6 hours,
+    // matched to the 6h cron cadence above so no threats fall through a gap).
     const threats = await step.run("fetch-new-threats", async () => {
-      const since = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+      const since = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
 
       const { data, error } = await supabase
         .from("scam_urls")

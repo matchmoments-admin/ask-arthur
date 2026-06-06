@@ -87,9 +87,9 @@ export async function runShopSignalEnrich(
   step: EnrichStep,
   rawEventData: unknown,
 ): Promise<{ shopCheckId: string; score: number; band: ShopCheckBand }> {
-  const data = await step.run("parse-event", () =>
-    parseShopCheckRequestedData(rawEventData),
-  );
+  // Inline (not a step.run): pure deterministic Zod parse, free to re-run on
+  // retry — memoising it as a durable step only cost an Inngest execution.
+  const data = parseShopCheckRequestedData(rawEventData);
   const { shopCheckId, url, commerceFlags } = data;
 
   // Best-effort "processing" marker — purely cosmetic for the poll, so a

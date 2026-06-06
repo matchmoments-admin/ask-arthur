@@ -78,7 +78,12 @@ export const feedItemsEmbed = inngest.createFunction(
     name: "News Intel: Embed narrative feed_items",
     retries: 3,
   },
-  { cron: "0 * * * *" },
+  // Every 4h (was hourly). Embeds power /intel semantic search; a few hours of
+  // index-freshness lag is acceptable and lossless — get_unembedded_narrative_
+  // feed_items re-selects any not-yet-embedded rows each run, so a transient
+  // backlog (inflow > BATCH_LIMIT in one window) simply drains over the next
+  // runs. No feed_items are ever skipped, only embedded slightly later.
+  { cron: "0 */4 * * *" },
   withAxiomLogging({ fnId: "feed-items-embed" }, async ({ step }) => {
     // Cost brake — this is a paid Voyage call. cost-daily-check sets the
     // `news_intel_embed` brake when the day's embed spend exceeds its cap;

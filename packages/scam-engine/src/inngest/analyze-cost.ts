@@ -46,9 +46,10 @@ export const handleAnalyzeCompletedCost = inngest.createFunction(
   },
   { event: ANALYZE_COMPLETED_EVENT },
   withAxiomLogging({ fnId: "analyze-completed-cost" }, async ({ event, step }) => {
-    const data = await step.run("parse-event", () =>
-      parseAnalyzeCompletedData(event.data)
-    );
+    // Parsed inline (not in a step.run): pure, deterministic Zod parse — see
+    // analyze-report.ts. Removing the step means the common cache-hit / no-usage
+    // early-returns below cost zero durable steps (just one function exec).
+    const data = parseAnalyzeCompletedData(event.data);
 
     if (!data.usage) {
       return { skipped: true, reason: "no usage (cache hit or mock)" };
