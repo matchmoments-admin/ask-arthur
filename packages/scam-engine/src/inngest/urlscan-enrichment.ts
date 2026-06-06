@@ -25,7 +25,7 @@ export const urlscanEnrichment = inngest.createFunction(
     rateLimit: { limit: 1, period: "10m" },
     throttle: { limit: 50, period: "1h", key: "urlscan-submissions" },
   },
-  { cron: "30 */4 * * *" }, // 30 min after entity enrichment
+  { cron: "30 */8 * * *" }, // Every 8h (was 4h), 30 min after entity enrichment. Pending-status queue is self-draining + capped per run — wider cadence only adds enrichment lag.
   withAxiomLogging({ fnId: "pipeline-urlscan-enrichment" }, async ({ step }) => {
     if (!featureFlags.urlScanIO) {
       return { skipped: true, reason: "urlScanIO feature flag disabled" };

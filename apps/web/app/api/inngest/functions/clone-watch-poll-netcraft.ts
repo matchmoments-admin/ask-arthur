@@ -72,10 +72,12 @@ export const cloneWatchPollNetcraft = inngest.createFunction(
     // POLL_BATCH_LIMIT bump that forgets to re-check the budget.
     timeouts: { finish: "8m" },
   },
-  [
-    { cron: "0 * * * *" },
-    { event: "shopfront/clone.poll-netcraft.manual-trigger.v1" },
-  ],
+  // No cron trigger: Netcraft submission is dark in prod
+  // (FF_SHOPFRONT_CLONE_SUBMIT_NETCRAFT + NETCRAFT_REPORT_API_KEY both unset),
+  // so an hourly poll only burned ~720 Inngest executions/mo to early-return.
+  // The manual-trigger event is retained so polling resumes the moment
+  // submission is enabled — re-add `{ cron: "0 * * * *" }` here at that point.
+  [{ event: "shopfront/clone.poll-netcraft.manual-trigger.v1" }],
   withAxiomLogging({ fnId: "shopfront-clone-poll-netcraft" }, async ({ step }) => {
     if (!featureFlags.shopfrontCloneOutreach) {
       return { skipped: true, reason: "FF_SHOPFRONT_CLONE_OUTREACH disabled" };

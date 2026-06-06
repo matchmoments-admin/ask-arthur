@@ -31,9 +31,11 @@ export const handleAnalyzeCompletedReport = inngest.createFunction(
   },
   { event: ANALYZE_COMPLETED_EVENT },
   withAxiomLogging({ fnId: "analyze-completed-report" }, async ({ event, step }) => {
-    const data = await step.run("parse-event", () =>
-      parseAnalyzeCompletedData(event.data)
-    );
+    // Parsed inline (not in a step.run): parseAnalyzeCompletedData is a pure,
+    // deterministic Zod parse with no I/O, so memoising it as a durable step
+    // bought nothing but cost one Inngest execution per analysis. Re-running it
+    // on retry is free and yields identical output. (Was a "parse-event" step.)
+    const data = parseAnalyzeCompletedData(event.data);
 
     if (!data.consumerFlags.intelligenceCore) {
       return { skipped: true, reason: "intelligenceCore flag off at emission" };

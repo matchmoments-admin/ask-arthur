@@ -25,11 +25,14 @@ export const feedbackTriageRefresh = inngest.createFunction(
     singleton: { mode: "skip" },
     timeouts: { finish: "4m" },
   },
-  // Cadence relaxed */5 → */15 (#524) → */30 (PR-C). On top of the cadence cut,
-  // a change-guard early-exits the tick when the MV already reflects the latest
-  // disagreement feedback — so most ticks become two cheap index lookups
-  // instead of a real REFRESH MATERIALIZED VIEW CONCURRENTLY on the hot MV.
-  { cron: "*/30 * * * *" },
+  // Cadence relaxed */5 → */15 (#524) → */30 (PR-C) → hourly (invocation cut).
+  // On top of the cadence cut, a change-guard early-exits the tick when the MV
+  // already reflects the latest disagreement feedback — so most ticks become two
+  // cheap index lookups instead of a real REFRESH MATERIALIZED VIEW CONCURRENTLY
+  // on the hot MV. This is an admin triage view (30-day sliding window, decoupled
+  // from cron cadence), so hourly freshness is ample — no data loss, just halved
+  // tick volume (1,440 → 720 runs/mo).
+  { cron: "0 * * * *" },
   withAxiomLogging({ fnId: "feedback-triage-refresh" }, async ({ step }) => {
     const supabase = createServiceClient();
     if (!supabase) {

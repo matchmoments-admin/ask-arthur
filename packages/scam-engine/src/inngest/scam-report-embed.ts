@@ -116,9 +116,9 @@ export const scamReportEmbed = inngest.createFunction(
       return { skipped: true, reason: "cost_brake_engaged" };
     }
 
-    const data = await step.run("parse-event", () =>
-      parseScamReportStoredData(event.data),
-    );
+    // Inline (not a step.run): pure deterministic Zod parse, free to re-run on
+    // retry — memoising it as a durable step only cost an Inngest execution.
+    const data = parseScamReportStoredData(event.data);
 
     // Re-check the gate at consumer side too — a misconfigured emitter
     // shouldn't be able to force an embed of a SAFE / short report.

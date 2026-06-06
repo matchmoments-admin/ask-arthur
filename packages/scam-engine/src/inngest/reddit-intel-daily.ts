@@ -364,9 +364,9 @@ export const redditIntelDaily = inngest.createFunction(
       return { paused: true, reason: "feature_brakes.reddit_intel is set" };
     }
 
-    const data = await step.run("parse-event", () =>
-      parseRedditIntelBatchReadyData(event.data),
-    );
+    // Inline (not a step.run): pure deterministic Zod parse, free to re-run on
+    // retry — memoising it as a durable step only cost an Inngest execution.
+    const data = parseRedditIntelBatchReadyData(event.data);
 
     // ── Step 1: load post bodies from feed_items ─────────────────────────
     const posts = await step.run("load-posts", async () => {

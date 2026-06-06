@@ -27,9 +27,11 @@ const SOURCE_LABEL: Record<string, string> = {
   asic_investor: "ASIC",
 };
 
-// Widened 60 → 75 (PR-C) so the hourly cadence (was */30) keeps a 15-min
-// overlap between ticks — nothing ingested near a tick boundary slips through.
-const LOOKBACK_MINUTES = 75;
+// Widened 60 → 75 (PR-C) → 195 (invocation cut). Tracks the cron cadence
+// (now every 3h = 180 min) plus a 15-min overlap, so nothing ingested near a
+// tick boundary slips through. The "haven't been pushed yet" dedup below makes
+// the overlap safe (no duplicate pushes).
+const LOOKBACK_MINUTES = 195;
 const MAX_PER_TICK = 10;     // safety cap — never push >10 narratives per cron tick
 
 interface NarrativeRow {
@@ -47,7 +49,10 @@ export const regulatorAlertPush = inngest.createFunction(
     name: "News Intel: Push regulator alerts",
     retries: 2,
   },
-  { cron: "0 * * * *" },
+  // Every 3h (was hourly). pushAlerts is dark in prod, so this currently only
+  // early-returns; LOOKBACK_MINUTES above is widened to 195 (3h + 15m overlap)
+  // in lockstep so the cadence stays gap-free when push launches.
+  { cron: "0 */3 * * *" },
   withAxiomLogging({ fnId: "regulator-alert-push" }, async ({ step }) => {
     if (!featureFlags.pushAlerts) {
       return { skipped: true, reason: "pushAlerts flag disabled" };
