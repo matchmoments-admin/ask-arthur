@@ -451,6 +451,14 @@ export const featureFlags = {
    *  manual-approval gate has been calibrated. */
   shopfrontCloneNotifyBrand: readBoolEnv("FF_SHOPFRONT_CLONE_NOTIFY_BRAND"),
 
+  /** Auto-triage the confident, still-live clone tail (clone-watch-auto-triage
+   *  Inngest fn) — auto-confirms alerts that clear the strict bar (Haiku≥0.9 +
+   *  confusable/levenshtein + urlscan likely_phishing) AND pass a liveness
+   *  re-fetch, so operators stop clicking through the obvious cases. Sends the
+   *  alert email only to CLONE_WATCH_SHADOW_RECIPIENT (validation); real-brand
+   *  auto-send stays the #371-gated path. Default OFF. Server-side only. */
+  cloneWatchAutoTriage: readBoolEnv("FF_CLONE_WATCH_AUTO_TRIAGE"),
+
   /** PR-B2 — auto-approve brand notifications instead of requiring an
    *  admin click in Telegram. Default OFF: every batch shows up as a
    *  Telegram preview with an HMAC-signed approve URL; the admin clicks
