@@ -37,6 +37,7 @@ import { cloneWatchPollNetcraft } from "./functions/clone-watch-poll-netcraft";
 import { cloneWatchUrlscan } from "./functions/clone-watch-urlscan";
 import { cloneWatchUrlscanRescan } from "./functions/clone-watch-urlscan-rescan";
 import { cloneWatchAutoTriage } from "./functions/clone-watch-auto-triage";
+import { cloneWatchEnrichAttribution } from "./functions/clone-watch-enrich-attribution";
 // PR-B2 — daily batch builder + Telegram approval flow (v151)
 import { cloneWatchNotifyBrandPrepare } from "./functions/clone-watch-notify-brand-prepare";
 // PR-D1 (#497) — weekly FP-cluster digest. Surfaces repeat FP patterns
@@ -80,6 +81,7 @@ const appFunctions = [
   cloneWatchUrlscan,
   cloneWatchUrlscanRescan,
   cloneWatchAutoTriage,
+  cloneWatchEnrichAttribution,
   // Clone-watch approval-gated daily-batch builder (v151)
   cloneWatchNotifyBrandPrepare,
   // Clone-watch FP-cluster digest (PR-D1, #497)

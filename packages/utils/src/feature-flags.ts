@@ -465,6 +465,13 @@ export const featureFlags = {
    *  so Telegram stops being noisy after every match. Server-side only. */
   cloneWatchTelegramQuiet: readBoolEnv("FF_CLONE_WATCH_TELEGRAM_QUIET"),
 
+  /** Enrich tp_confirmed clones with an attribution dossier — WHOIS (registrar /
+   *  created / registrant country), Certificate-Transparency siblings (campaign
+   *  clustering), and IP abuse reputation — reusing existing scam-engine helpers
+   *  (clone-watch-enrich-attribution Inngest fn). Stored in
+   *  shopfront_clone_alerts.attribution (v177). Default OFF. Server-side only. */
+  cloneWatchAttribution: readBoolEnv("FF_CLONE_WATCH_ATTRIBUTION"),
+
   /** PR-B2 — auto-approve brand notifications instead of requiring an
    *  admin click in Telegram. Default OFF: every batch shows up as a
    *  Telegram preview with an HMAC-signed approve URL; the admin clicks
