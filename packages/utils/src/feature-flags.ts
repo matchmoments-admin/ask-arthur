@@ -459,6 +459,12 @@ export const featureFlags = {
    *  auto-send stays the #371-gated path. Default OFF. Server-side only. */
   cloneWatchAutoTriage: readBoolEnv("FF_CLONE_WATCH_AUTO_TRIAGE"),
 
+  /** Quiet the daily NRD-sweep Telegram digest (shopfront-nrd-daily-ingest).
+   *  OPT-IN: default OFF preserves the current digest. Set true once the
+   *  auto-triage run-summary email replaces it as the operator's notification,
+   *  so Telegram stops being noisy after every match. Server-side only. */
+  cloneWatchTelegramQuiet: readBoolEnv("FF_CLONE_WATCH_TELEGRAM_QUIET"),
+
   /** PR-B2 — auto-approve brand notifications instead of requiring an
    *  admin click in Telegram. Default OFF: every batch shows up as a
    *  Telegram preview with an HMAC-signed approve URL; the admin clicks

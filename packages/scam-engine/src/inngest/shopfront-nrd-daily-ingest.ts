@@ -504,6 +504,14 @@ async function sendTelegramDigest(args: {
   is_manual_run?: boolean;
   nrd_list_date?: string;
 }): Promise<void> {
+  // Opt-in quiet: once the auto-triage run-summary email is the operator's
+  // notification, FF_CLONE_WATCH_TELEGRAM_QUIET silences this daily digest so
+  // Telegram stops being noisy after every NRD match. Default OFF = unchanged.
+  if (featureFlags.cloneWatchTelegramQuiet) {
+    logger.info("shopfront-nrd: Telegram digest suppressed (FF_CLONE_WATCH_TELEGRAM_QUIET)");
+    return;
+  }
+
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_ADMIN_CHAT_ID;
   if (!token || !chatId) {
