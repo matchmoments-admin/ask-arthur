@@ -21,6 +21,8 @@ import { featureFlags } from "@askarthur/utils/feature-flags";
 export interface CloneAttribution {
   whois: {
     registrar: string | null;
+    /** Registrar abuse-report email — the takedown contact for brands/police. */
+    registrarAbuseEmail: string | null;
     registrantCountry: string | null;
     createdDate: string | null;
     nameServers: string[];
@@ -82,6 +84,7 @@ export function shapeAttribution(args: {
     whois: whois
       ? {
           registrar: whois.registrar,
+          registrarAbuseEmail: whois.registrarAbuseEmail ?? null,
           registrantCountry: whois.registrantCountry,
           createdDate: whois.createdDate,
           nameServers: whois.nameServers ?? [],

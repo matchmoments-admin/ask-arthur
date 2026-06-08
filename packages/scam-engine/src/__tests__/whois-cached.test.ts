@@ -32,6 +32,7 @@ function supabaseChain(maybeSingleResult: unknown) {
 
 const WHOIS_RESULT = {
   registrar: "GoDaddy",
+  registrarAbuseEmail: "abuse@godaddy.com",
   registrantCountry: "AU",
   createdDate: "2018-01-01",
   expiresDate: "2030-01-01",

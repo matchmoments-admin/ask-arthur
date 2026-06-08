@@ -9,6 +9,7 @@ describe("shapeAttribution", () => {
       domain: "nab-login.shop",
       whois: {
         registrar: "NameCheap",
+        registrarAbuseEmail: "abuse@namecheap.com",
         registrantCountry: "RU",
         createdDate: "2026-06-01",
         expiresDate: "2027-06-01",
@@ -40,7 +41,7 @@ describe("shapeAttribution", () => {
       enrichedAt: AT,
     });
 
-    expect(d.whois).toMatchObject({ registrar: "NameCheap", registrantCountry: "RU", createdDate: "2026-06-01" });
+    expect(d.whois).toMatchObject({ registrar: "NameCheap", registrarAbuseEmail: "abuse@namecheap.com", registrantCountry: "RU", createdDate: "2026-06-01" });
     expect(d.ip_rep).toMatchObject({ abuseConfidenceScore: 88, isp: "Evil Hosting" });
     expect(d.hosting).toEqual({ ip: "203.0.113.7", country: "RU", asn: "AS12345" });
     expect(d.ct?.issuer).toBe("Let's Encrypt");
