@@ -85,12 +85,12 @@ export const onwardAutoReport = inngest.createFunction(
     name: "Onward report: proactive auto-report producer",
     retries: 2,
   },
-  // Every 12h (was 3h; originally hourly). FF_ONWARD_AUTO_REPORT is dark in
-  // prod, so this only early-returned. With a 24h LOOKBACK_HOURS window the
-  // 12h cadence keeps 2× overlap (gap-free) and the dedup index makes the
-  // re-scan idempotent — lossless even when the flag is flipped on. :25 offset
-  // avoids cron pileup with the on-the-hour fleet.
-  { cron: "25 */12 * * *" },
+  // Manual-trigger only (no cron). FF_ONWARD_AUTO_REPORT is dark in prod, so a
+  // scheduled producer just burned executions to early-return. Invoke on demand
+  // via the `report.onward.auto-report.manual-trigger.v1` event. **At launch,
+  // restore the producer by re-adding `{ cron: "25 */12 * * *" }`** alongside
+  // this event trigger — the 24h LOOKBACK_HOURS window keeps it gap-free at 12h.
+  { event: "report.onward.auto-report.manual-trigger.v1" },
   withAxiomLogging({ fnId: "report-onward-auto-report" }, async ({ step }) => {
     if (!featureFlags.onwardAutoReport) {
       return { skipped: true, reason: "FF_ONWARD_AUTO_REPORT disabled" };

@@ -17,10 +17,12 @@ export const scamAlertCron = inngest.createFunction(
     timeouts: { finish: "4m" },
     name: "Scam Alert Push Notifications",
   },
-  // Every 6h (was 3h). pushAlerts is dark in prod, so this currently only
-  // early-returns; the lookback window below is widened to 6h in lockstep so
-  // the cadence stays gap-free (no missed threats) when push launches.
-  { cron: "0 */6 * * *" },
+  // Manual-trigger only (no cron). pushAlerts is dark in prod, so a scheduled
+  // tick just burned executions to early-return. Invoke on demand via the
+  // `scam-alert/push.manual-trigger.v1` event. **At launch, restore the sweep
+  // by re-adding `{ cron: "0 */6 * * *" }`** alongside this event trigger — the
+  // 6h lookback window below is already matched to that cadence.
+  { event: "scam-alert/push.manual-trigger.v1" },
   withAxiomLogging({ fnId: "scam-alert-push" }, async ({ step }) => {
     if (!featureFlags.pushAlerts) {
       return { skipped: true, reason: "pushAlerts flag disabled" };

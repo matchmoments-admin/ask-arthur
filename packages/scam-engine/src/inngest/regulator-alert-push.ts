@@ -49,10 +49,12 @@ export const regulatorAlertPush = inngest.createFunction(
     name: "News Intel: Push regulator alerts",
     retries: 2,
   },
-  // Every 3h (was hourly). pushAlerts is dark in prod, so this currently only
-  // early-returns; LOOKBACK_MINUTES above is widened to 195 (3h + 15m overlap)
-  // in lockstep so the cadence stays gap-free when push launches.
-  { cron: "0 */3 * * *" },
+  // Manual-trigger only (no cron). pushAlerts is dark in prod, so a scheduled
+  // tick just burned executions to early-return. Invoke on demand via the
+  // `news-intel/regulator-alert.manual-trigger.v1` event. **At launch, restore
+  // the sweep by re-adding `{ cron: "0 */3 * * *" }`** alongside this event
+  // trigger — LOOKBACK_MINUTES (195) above is matched to that 3h cadence.
+  { event: "news-intel/regulator-alert.manual-trigger.v1" },
   withAxiomLogging({ fnId: "regulator-alert-push" }, async ({ step }) => {
     if (!featureFlags.pushAlerts) {
       return { skipped: true, reason: "pushAlerts flag disabled" };
