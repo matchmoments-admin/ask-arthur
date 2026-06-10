@@ -17,8 +17,11 @@ import {
   suggestTriageTransition,
   PARKED_HOST_PATTERNS,
   serialiseSubmitFailure,
-  serialiseRetrievalTimeout,
-} from "@/app/api/inngest/functions/clone-watch-urlscan";
+  serialiseSubmitEvidence,
+  serialiseRetrievalPending,
+  reputationFromEvidence,
+  type ReputationVerdict,
+} from "@/lib/clone-watch/urlscan-classify";
 import {
   groupByBrandRecipient,
   buildBatchSubject,
@@ -488,6 +491,20 @@ describe("clone-watch-urlscan — classifyScan", () => {
     ).toBe("likely_phishing");
   });
 
+  it("classifies a reputation hit as likely_phishing even with a null render", () => {
+    // SB/VT decisive — covers the case where urlscan never completes.
+    expect(classifyScan(null, true)).toBe("likely_phishing");
+  });
+
+  it("reputation precedence: known-bad beats a parked-marketplace render", () => {
+    expect(
+      classifyScan(
+        { ...baseResult, effectiveUrl: "https://sedo.com/search/details/?domain=x" },
+        true,
+      ),
+    ).toBe("likely_phishing");
+  });
+
   it("classifies a benign resolving page as neutral", () => {
     expect(
       classifyScan({
@@ -546,63 +563,72 @@ describe("clone-watch-urlscan — PARKED_HOST_PATTERNS", () => {
   });
 });
 
-// Issue #441 regression coverage — the persist-on-failure paths write a
-// non-null urlscan_scanned_at so tomorrow's rescan cron picks the row
-// back up. Without these stubs the row was stuck forever.
-describe("clone-watch-urlscan — failure-evidence serialisers (#441)", () => {
-  describe("serialiseSubmitFailure", () => {
-    it("records the urlscan error reason + http status for rate limits", () => {
-      const ev = serialiseSubmitFailure({
-        ok: false,
-        error: "rate_limited",
-        status: 429,
-        message: "Too Many Requests",
-      });
-      expect(ev.submit_failed).toBe(true);
-      expect(ev.error).toBe("rate_limited");
-      expect(ev.status).toBe(429);
-      expect(ev.message).toBe("Too Many Requests");
-      expect(typeof ev.attempted_at).toBe("string");
-    });
+// v178 async rebuild — evidence serialisers carry the urlscan UUID + the SB/VT
+// reputation verdict across the submit→retrieve boundary.
+describe("clone-watch-urlscan — evidence serialisers (v178 async rebuild)", () => {
+  const cleanRep: ReputationVerdict = { isMalicious: false, sources: [] };
+  const badRep: ReputationVerdict = {
+    isMalicious: true,
+    sources: ["Google Safe Browsing"],
+  };
 
-    it("records 'rejected' with the 400-body for blocklisted candidates", () => {
-      // alert 468 (westpachomesb.info) shape — urlscan refuses some
-      // candidates with a 400 + descriptive body.
-      const ev = serialiseSubmitFailure({
-        ok: false,
-        error: "rejected",
-        status: 400,
-        message: "Submission failed: scanning this URL is not allowed",
+  describe("serialiseSubmitEvidence", () => {
+    it("records the awaited uuid + reputation verdict", () => {
+      const ev = serialiseSubmitEvidence("uuid-1", badRep, "2026-06-10T00:00:00Z");
+      expect(ev.stage).toBe("submitted");
+      expect(ev.uuid).toBe("uuid-1");
+      expect(ev.retrieved).toBe(false);
+      expect(ev.reputation).toEqual({
+        is_malicious: true,
+        sources: ["Google Safe Browsing"],
       });
-      expect(ev.error).toBe("rejected");
-      expect(ev.status).toBe(400);
-      expect((ev.message as string)).toContain("not allowed");
-    });
-
-    it("handles network errors with no status code", () => {
-      const ev = serialiseSubmitFailure({
-        ok: false,
-        error: "network_error",
-        message: "Error: getaddrinfo ENOTFOUND",
-      });
-      expect(ev.status).toBeNull();
-      expect(ev.error).toBe("network_error");
-    });
-
-    it("handles no-api-key without a message", () => {
-      const ev = serialiseSubmitFailure({ ok: false, error: "no_api_key" });
-      expect(ev.status).toBeNull();
-      expect(ev.message).toBeNull();
     });
   });
 
-  describe("serialiseRetrievalTimeout", () => {
-    it("records the uuid so a future operator can manually re-fetch", () => {
-      const ev = serialiseRetrievalTimeout("019e6233-a2ba-7308-ba79-b2bbe38aefc0");
-      expect(ev.uuid).toBe("019e6233-a2ba-7308-ba79-b2bbe38aefc0");
+  describe("serialiseSubmitFailure", () => {
+    it("records error + http status + reputation for rate limits", () => {
+      const ev = serialiseSubmitFailure("rate_limited", 429, cleanRep, "2026-06-10T00:00:00Z");
+      expect(ev.submit_failed).toBe(true);
+      expect(ev.error).toBe("rate_limited");
+      expect(ev.status).toBe(429);
+      expect(typeof ev.attempted_at).toBe("string");
+      expect(ev.reputation).toEqual({ is_malicious: false, sources: [] });
+    });
+
+    it("handles a null status (network error)", () => {
+      const ev = serialiseSubmitFailure("network_error", null, cleanRep, "2026-06-10T00:00:00Z");
+      expect(ev.status).toBeNull();
+      expect(ev.error).toBe("network_error");
+    });
+  });
+
+  describe("serialiseRetrievalPending", () => {
+    it("carries the uuid + reputation forward for the next retrieve tick", () => {
+      const ev = serialiseRetrievalPending("uuid-2", badRep, "2026-06-10T00:00:00Z");
+      expect(ev.uuid).toBe("uuid-2");
       expect(ev.retrieved).toBe(false);
-      expect(ev.retrieval_timeout).toBe(true);
-      expect(typeof ev.scanned_at).toBe("string");
+      expect(ev.reputation).toEqual({
+        is_malicious: true,
+        sources: ["Google Safe Browsing"],
+      });
+    });
+  });
+
+  describe("reputationFromEvidence", () => {
+    it("round-trips the reputation verdict stored at submit time", () => {
+      const stored = serialiseSubmitEvidence("uuid-3", badRep, "2026-06-10T00:00:00Z");
+      const rep = reputationFromEvidence(stored);
+      expect(rep.isMalicious).toBe(true);
+      expect(rep.sources).toEqual(["Google Safe Browsing"]);
+    });
+
+    it("defaults safely on missing/legacy evidence shapes", () => {
+      expect(reputationFromEvidence(null)).toEqual({ isMalicious: false, sources: [] });
+      expect(reputationFromEvidence({})).toEqual({ isMalicious: false, sources: [] });
+      expect(reputationFromEvidence({ reputation: { is_malicious: "yes" } })).toEqual({
+        isMalicious: false,
+        sources: [],
+      });
     });
   });
 });
