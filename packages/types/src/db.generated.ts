@@ -398,6 +398,27 @@ export type Database = {
         }
         Relationships: []
       }
+      brand_aliases: {
+        Row: {
+          alias_normalized: string
+          canonical_brand: string
+          created_at: string
+          source: string
+        }
+        Insert: {
+          alias_normalized: string
+          canonical_brand: string
+          created_at?: string
+          source?: string
+        }
+        Update: {
+          alias_normalized?: string
+          canonical_brand?: string
+          created_at?: string
+          source?: string
+        }
+        Relationships: []
+      }
       brand_contact_directory: {
         Row: {
           brand: string
@@ -5398,6 +5419,7 @@ export type Database = {
       shopfront_clone_alerts: {
         Row: {
           alert_state: string
+          attribution: Json | null
           candidate_domain: string
           candidate_url: string
           created_at: string
@@ -5421,11 +5443,14 @@ export type Database = {
           url_hash: string
           urlscan_classification: string | null
           urlscan_evidence: Json | null
+          urlscan_failure_streak: number
           urlscan_scanned_at: string | null
+          urlscan_submitted_at: string | null
           urlscan_uuid: string | null
         }
         Insert: {
           alert_state?: string
+          attribution?: Json | null
           candidate_domain: string
           candidate_url: string
           created_at?: string
@@ -5449,11 +5474,14 @@ export type Database = {
           url_hash: string
           urlscan_classification?: string | null
           urlscan_evidence?: Json | null
+          urlscan_failure_streak?: number
           urlscan_scanned_at?: string | null
+          urlscan_submitted_at?: string | null
           urlscan_uuid?: string | null
         }
         Update: {
           alert_state?: string
+          attribution?: Json | null
           candidate_domain?: string
           candidate_url?: string
           created_at?: string
@@ -5477,7 +5505,9 @@ export type Database = {
           url_hash?: string
           urlscan_classification?: string | null
           urlscan_evidence?: Json | null
+          urlscan_failure_streak?: number
           urlscan_scanned_at?: string | null
+          urlscan_submitted_at?: string | null
           urlscan_uuid?: string | null
         }
         Relationships: [
@@ -6437,6 +6467,7 @@ export type Database = {
           identifier: string
           identifier_type: string
           ingested_at: string
+          is_stub: boolean
           last_modified_at: string | null
           lifecycle_status: string
           patched_in_versions: Json
@@ -6468,6 +6499,7 @@ export type Database = {
           identifier: string
           identifier_type: string
           ingested_at?: string
+          is_stub?: boolean
           last_modified_at?: string | null
           lifecycle_status?: string
           patched_in_versions?: Json
@@ -6499,6 +6531,7 @@ export type Database = {
           identifier?: string
           identifier_type?: string
           ingested_at?: string
+          is_stub?: boolean
           last_modified_at?: string | null
           lifecycle_status?: string
           patched_in_versions?: Json
@@ -6635,6 +6668,95 @@ export type Database = {
           status?: string
         }
         Relationships: []
+      }
+      vulnerability_mention_extractions: {
+        Row: {
+          cve_count: number
+          extracted_at: string
+          feed_item_id: number
+          model_id: string | null
+          prompt_version: string | null
+          source_feed: string
+        }
+        Insert: {
+          cve_count?: number
+          extracted_at?: string
+          feed_item_id: number
+          model_id?: string | null
+          prompt_version?: string | null
+          source_feed: string
+        }
+        Update: {
+          cve_count?: number
+          extracted_at?: string
+          feed_item_id?: number
+          model_id?: string | null
+          prompt_version?: string | null
+          source_feed?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vulnerability_mention_extractions_feed_item_id_fkey"
+            columns: ["feed_item_id"]
+            isOneToOne: true
+            referencedRelation: "feed_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      vulnerability_mentions: {
+        Row: {
+          claimed_exploited: boolean
+          created_at: string
+          cve_identifier: string
+          excerpt: string | null
+          feed_item_id: number
+          id: number
+          mention_url: string | null
+          published_at: string | null
+          source_feed: string
+          vulnerability_id: number | null
+        }
+        Insert: {
+          claimed_exploited?: boolean
+          created_at?: string
+          cve_identifier: string
+          excerpt?: string | null
+          feed_item_id: number
+          id?: never
+          mention_url?: string | null
+          published_at?: string | null
+          source_feed: string
+          vulnerability_id?: number | null
+        }
+        Update: {
+          claimed_exploited?: boolean
+          created_at?: string
+          cve_identifier?: string
+          excerpt?: string | null
+          feed_item_id?: number
+          id?: never
+          mention_url?: string | null
+          published_at?: string | null
+          source_feed?: string
+          vulnerability_id?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vulnerability_mentions_feed_item_id_fkey"
+            columns: ["feed_item_id"]
+            isOneToOne: false
+            referencedRelation: "feed_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vulnerability_mentions_vulnerability_id_fkey"
+            columns: ["vulnerability_id"]
+            isOneToOne: false
+            referencedRelation: "vulnerabilities"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {
@@ -7025,6 +7147,7 @@ export type Database = {
         Returns: number
       }
       backfill_pfra_member_abns: { Args: never; Returns: number }
+      brand_normalize: { Args: { p_raw: string }; Returns: string }
       bulk_upsert_feed_crypto_wallet:
         | {
             Args: {
@@ -7460,6 +7583,13 @@ export type Database = {
         }
         Returns: Json
       }
+      get_world_scam_stats: {
+        Args: { days_back?: number }
+        Returns: {
+          country_code: string
+          scam_count: number
+        }[]
+      }
       grant_sim_swap_credits: {
         Args: {
           p_bucket: string
@@ -7572,6 +7702,33 @@ export type Database = {
           candidate_domain: string
           candidate_url: string
           first_seen_at: string
+          id: number
+          inferred_target_domain: string
+        }[]
+      }
+      list_clone_alerts_pending_urlscan_retrieve: {
+        Args: {
+          p_limit?: number
+          p_max_failure_streak?: number
+          p_min_age_minutes?: number
+        }
+        Returns: {
+          candidate_domain: string
+          candidate_url: string
+          id: number
+          urlscan_evidence: Json
+          urlscan_uuid: string
+        }[]
+      }
+      list_clone_alerts_pending_urlscan_submit: {
+        Args: {
+          p_limit?: number
+          p_max_failure_streak?: number
+          p_min_confidence?: number
+        }
+        Returns: {
+          candidate_domain: string
+          candidate_url: string
           id: number
           inferred_target_domain: string
         }[]
@@ -7856,6 +8013,10 @@ export type Database = {
         Args: { p_batch_id: string; p_provider_message_id?: string }
         Returns: number
       }
+      record_clone_alert_urlscan_submit: {
+        Args: { p_alert_id: number; p_evidence?: Json; p_urlscan_uuid: string }
+        Returns: undefined
+      }
       record_clone_watch_classification: {
         Args: {
           p_alert_id: number
@@ -7884,6 +8045,21 @@ export type Database = {
         }
         Returns: Json
       }
+      record_vulnerability_mention: {
+        Args: {
+          p_claimed_exploited: boolean
+          p_cve_identifier: string
+          p_excerpt: string
+          p_feed_item_id: number
+          p_identifier_type: string
+          p_mention_url: string
+          p_published_at: string
+          p_source_feed: string
+          p_stub_category: string
+          p_stub_title: string
+        }
+        Returns: number
+      }
       refresh_cost_telemetry_daily_rollup: {
         Args: { p_days?: number }
         Returns: number
@@ -7896,6 +8072,22 @@ export type Database = {
           paid_remaining: number
         }[]
       }
+      report_scam_entity: {
+        Args: {
+          p_country_code?: string
+          p_entity_type: string
+          p_normalized_value: string
+          p_raw_value?: string
+          p_report_id?: number
+          p_role?: string
+        }
+        Returns: {
+          entity_id: number
+          is_new: boolean
+          report_count: number
+        }[]
+      }
+      resolve_brand: { Args: { p_raw: string }; Returns: string }
       search_charities: {
         Args: { p_limit?: number; p_query: string }
         Returns: {
