@@ -153,17 +153,26 @@ export async function submitURLScanWithDetails(
  * Retrieve results for a previously submitted scan.
  * Should be called 60+ seconds after submission.
  * Returns null if results aren't ready yet (404).
+ *
+ * MUST send the API-Key: submissions use `visibility: "unlisted"` (see
+ * submitURLScanWithDetails), and urlscan returns 404 from the result API for
+ * unlisted scans unless the owning key is presented. Without the header every
+ * retrieval 404'd → null, which read as "not ready yet" forever — the root
+ * cause of the 100% clone-watch urlscan failure (0/343 retrieved). The scans
+ * rendered fine; we just never authenticated the fetch.
  */
 export async function retrieveURLScan(uuid: string): Promise<URLScanResult | null> {
   try {
+    const apiKey = process.env.URLSCAN_API_KEY;
     const res = await fetch(
       `https://urlscan.io/api/v1/result/${uuid}/`,
       {
+        headers: apiKey ? { "API-Key": apiKey } : undefined,
         signal: AbortSignal.timeout(10_000),
       }
     );
 
-    // 404 = scan not yet complete
+    // 404 = scan not yet complete (or unlisted result without a valid key)
     if (res.status === 404) {
       logger.info("URLScan result not ready yet", { uuid });
       return null;
