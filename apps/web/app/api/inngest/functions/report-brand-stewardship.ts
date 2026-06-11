@@ -258,16 +258,29 @@ export const reportBrandStewardship = inngest.createFunction(
     name: "Brand Stewardship: monthly report aggregation",
     retries: 2,
   },
-  { cron: "0 9 1 * *" }, // 1st of month, 09:00 UTC
-  withAxiomLogging({ fnId: "report-brand-stewardship" }, async ({ step }) => {
+  [
+    { cron: "0 9 1 * *" }, // 1st of month, 09:00 UTC
+    // Manual re-run (ops / pre-launch shadow review). Optional event.data.
+    // periodMonth ("YYYY-MM-01") overrides the window — e.g. to prepare the
+    // CURRENT month for a review before the scheduled 1st-of-month run.
+    { event: "report/brand-stewardship.manual-trigger.v1" },
+  ],
+  withAxiomLogging({ fnId: "report-brand-stewardship" }, async ({ event, step }) => {
     if (!featureFlags.brandStewardshipReport) {
       return { skipped: true, reason: "FF_BRAND_STEWARDSHIP_REPORT disabled" };
     }
 
+    const periodOverride = (
+      event?.data as { periodMonth?: string } | undefined
+    )?.periodMonth;
+
     // Compute the reporting window inside a step so it's memoised across
-    // Inngest replays (deterministic).
+    // Inngest replays (deterministic). Defaults to the prior calendar month;
+    // a manual periodMonth override targets a specific month.
     const period = await step.run("compute-period", async () => {
-      const start = priorMonthStart(new Date());
+      const start = periodOverride
+        ? new Date(`${periodOverride}T00:00:00Z`)
+        : priorMonthStart(new Date());
       const end = new Date(
         Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1),
       );
