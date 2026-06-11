@@ -1,10 +1,79 @@
 import { describe, expect, it } from "vitest";
 import {
   aggregateOnwardByBrand,
+  aggregateClonesByDomain,
   deriveBrandKey,
   matchKnownBrand,
   priorMonthStart,
+  type CloneAlertRow,
 } from "@/app/api/inngest/functions/report-brand-stewardship";
+
+const cloneRow = (over: Partial<CloneAlertRow>): CloneAlertRow => ({
+  id: over.id ?? 1,
+  candidate_domain: over.candidate_domain ?? "anz-login.click",
+  inferred_target_domain:
+    over.inferred_target_domain === undefined
+      ? "anz.com.au"
+      : over.inferred_target_domain,
+  urlscan_classification:
+    over.urlscan_classification === undefined ? "neutral" : over.urlscan_classification,
+  urlscan_evidence:
+    over.urlscan_evidence ?? { server: { ip: "1.2.3.4", asn: "AS123", country: "SG" } },
+  attribution: over.attribution ?? null,
+});
+
+describe("aggregateClonesByDomain", () => {
+  it("groups by inferred_target_domain, extracts hosting, ranks phishing first", () => {
+    const agg = aggregateClonesByDomain([
+      cloneRow({ id: 1, candidate_domain: "anz-login.click", inferred_target_domain: "anz.com.au" }),
+      cloneRow({
+        id: 2,
+        candidate_domain: "anz-rewards.click",
+        inferred_target_domain: "anz.com.au",
+        urlscan_classification: "likely_phishing",
+      }),
+      cloneRow({ id: 3, candidate_domain: "kmart-sale.shop", inferred_target_domain: "kmart.com.au" }),
+    ]);
+    expect(agg.get("anz.com.au")?.detected).toBe(2);
+    expect(agg.get("kmart.com.au")?.detected).toBe(1);
+    const anz = agg.get("anz.com.au")!;
+    expect(anz.domains[0].classification).toBe("likely_phishing"); // sorted first
+    expect(anz.domains[0].ip).toBe("1.2.3.4");
+    expect(anz.domains[0].asn).toBe("AS123");
+    expect(anz.byClassification.likely_phishing).toBe(1);
+    expect(anz.alertIds).toContain(2);
+  });
+
+  it("dedupes the same candidate domain across rows", () => {
+    const agg = aggregateClonesByDomain([
+      cloneRow({ id: 1, candidate_domain: "dup.click" }),
+      cloneRow({ id: 2, candidate_domain: "dup.click" }),
+    ]);
+    expect(agg.get("anz.com.au")?.detected).toBe(1);
+  });
+
+  it("pulls registrar + abuse email from attribution when present", () => {
+    const agg = aggregateClonesByDomain([
+      cloneRow({
+        attribution: {
+          whois: { registrar: "NameSilo, LLC", registrarAbuseEmail: "abuse@namesilo.com" },
+        },
+      }),
+    ]);
+    const d = agg.get("anz.com.au")!.domains[0];
+    expect(d.registrar).toBe("NameSilo, LLC");
+    expect(d.abuse_email).toBe("abuse@namesilo.com");
+  });
+
+  it("skips rows without an inferred_target_domain", () => {
+    expect(aggregateClonesByDomain([cloneRow({ inferred_target_domain: null })]).size).toBe(0);
+  });
+
+  it("normalises the brand-domain key to lowercase", () => {
+    const agg = aggregateClonesByDomain([cloneRow({ inferred_target_domain: "ANZ.com.au" })]);
+    expect(agg.has("anz.com.au")).toBe(true);
+  });
+});
 
 describe("deriveBrandKey", () => {
   it("matches the SQL convention (lower + non-alnum → _)", () => {
