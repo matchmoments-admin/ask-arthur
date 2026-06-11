@@ -40,6 +40,50 @@ describe("BrandStewardshipReport email", () => {
     expect(html).toContain("No outbound reports this period.");
   });
 
+  it("renders the clone-watch hosting + registrar section", async () => {
+    const html = await render(
+      BrandStewardshipReport({
+        brandName: "ANZ",
+        periodLabel: "May 2026",
+        detected: 0,
+        reportedByDestination: {},
+        reportsSent: 0,
+        cloneDetections: {
+          detected: 3,
+          byClassification: { likely_phishing: 1, neutral: 2 },
+          domains: [
+            {
+              domain: "login-anz-rewards.click",
+              classification: "likely_phishing",
+              ip: "43.160.223.254",
+              asn: "AS132203",
+              country: "SG",
+              registrar: "NameSilo, LLC",
+              abuseEmail: "abuse@namesilo.com",
+            },
+            {
+              domain: "anz-secure.top",
+              classification: "neutral",
+              ip: "1.2.3.4",
+              asn: "AS16276",
+              country: "FR",
+              registrar: null,
+              abuseEmail: null,
+            },
+          ],
+        },
+        reportRef: "BSR-anz-2026-05",
+      }),
+    );
+    expect(html).toContain("login-anz-rewards.click");
+    expect(html).toContain("43.160.223.254"); // hosting IP
+    expect(html).toContain("AS132203"); // ASN
+    expect(html).toContain("NameSilo, LLC"); // registrar
+    expect(html).toContain("abuse@namesilo.com"); // abuse contact
+    expect(html).toContain("Likely phishing"); // classification chip
+    expect(html).toContain("full list available on request"); // overflow line (detected 3 > 2 shown)
+  });
+
   // Honesty guard: these are fire-and-forget blocklist forwards with no
   // takedown callback — the email must NEVER claim a takedown.
   it("never claims a takedown", async () => {

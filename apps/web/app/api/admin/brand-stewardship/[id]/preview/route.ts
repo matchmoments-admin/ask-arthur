@@ -3,6 +3,7 @@ import { render } from "@react-email/components";
 import { requireAdmin } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import BrandStewardshipReport from "@/emails/BrandStewardshipReport";
+import { cloneDetectionsFromMetrics } from "@/lib/email/brand-stewardship-clone-detections";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +11,7 @@ interface StewardshipMetrics {
   detected?: number;
   reported_by_destination?: Record<string, number>;
   reports_sent?: number;
+  clones?: unknown;
 }
 
 /** Human period label from a YYYY-MM-01 date, e.g. "May 2026". */
@@ -61,6 +63,7 @@ export async function GET(
     detected: metrics.detected ?? 0,
     reportedByDestination: metrics.reported_by_destination ?? {},
     reportsSent: metrics.reports_sent ?? 0,
+    cloneDetections: cloneDetectionsFromMetrics(metrics.clones),
     reportRef: `BSR-${row.brand_key}-${period.slice(0, 7)}`,
   });
   const html = await render(el);

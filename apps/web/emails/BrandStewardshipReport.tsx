@@ -25,12 +25,44 @@ export interface BrandStewardshipReportProps {
   reportsSent: number;
   /** Up to ~3 example impersonating domains (send route joins scam_reports). */
   sampleDomains?: string[];
+  /**
+   * Clone-watch lookalike-domain detections for the period, with hosting +
+   * registrar attribution so the brand can action takedowns themselves.
+   * metrics.clones — populated by report-brand-stewardship's clone aggregation.
+   */
+  cloneDetections?: CloneDetections;
   /** Correlation ref, e.g. "BSR-7_eleven-2026-05". */
   reportRef: string;
   /** Unsubscribe / STOP mailto. */
   stopUrl?: string;
   /** Editable prose overrides (Email Studio). Falls back to slot defaults. */
   copy?: Record<string, string>;
+}
+
+export interface CloneDetectionRow {
+  /** The lookalike domain, e.g. "login-anz-rewards.click". */
+  domain: string;
+  /** urlscan classification: likely_phishing | parked_for_sale | neutral | null. */
+  classification: string | null;
+  /** Hosting IP from the urlscan render. */
+  ip: string | null;
+  /** Hosting ASN, e.g. "AS132203". */
+  asn: string | null;
+  /** Two-letter hosting country. */
+  country: string | null;
+  /** Domain registrar (WHOIS), e.g. "NameSilo, LLC". */
+  registrar: string | null;
+  /** Registrar abuse contact the brand can email for takedown. */
+  abuseEmail: string | null;
+}
+
+export interface CloneDetections {
+  /** Total distinct lookalike domains detected this period. */
+  detected: number;
+  /** Per-classification counts for the headline. */
+  byClassification?: Record<string, number>;
+  /** Per-clone detail rows (already capped by the caller, ~25). */
+  domains: CloneDetectionRow[];
 }
 
 /**
@@ -56,6 +88,7 @@ export default function BrandStewardshipReport({
   reportedByDestination,
   reportsSent,
   sampleDomains,
+  cloneDetections,
   reportRef,
   stopUrl,
   copy,
@@ -189,6 +222,73 @@ export default function BrandStewardshipReport({
               </Section>
             )}
 
+            {/* Clone-watch lookalike domains with hosting + registrar so the
+                brand can file takedowns directly. Honesty: "detected", not
+                "malicious" — classification is urlscan's, shown verbatim. */}
+            {cloneDetections && cloneDetections.detected > 0 && (
+              <Section style={{ margin: "0 0 4px 0" }}>
+                <Text style={labelStyle}>
+                  Lookalike domains &amp; where they&apos;re hosted
+                </Text>
+                <Text style={{ color: "#475569", fontSize: "13px", lineHeight: "1.5", margin: "0 0 12px 0" }}>
+                  Hosting and registrar details for each lookalike let your team
+                  file takedowns directly with the host or registrar.
+                </Text>
+                {cloneDetections.domains.map((c) => (
+                  <Section
+                    key={c.domain}
+                    style={{
+                      borderLeft: `3px solid ${classColor(c.classification)}`,
+                      backgroundColor: "#F8FAFC",
+                      borderRadius: "4px",
+                      padding: "10px 14px",
+                      margin: "0 0 8px 0",
+                    }}
+                  >
+                    <Text style={{ margin: "0 0 3px 0" }}>
+                      <code style={codeInline}>{c.domain}</code>
+                      {c.classification && (
+                        <span
+                          style={{
+                            marginLeft: "8px",
+                            fontSize: "11px",
+                            fontWeight: 700,
+                            color: classColor(c.classification),
+                            textTransform: "uppercase" as const,
+                          }}
+                        >
+                          {classLabel(c.classification)}
+                        </span>
+                      )}
+                    </Text>
+                    <Text style={{ color: "#64748B", fontSize: "12px", lineHeight: "1.5", margin: 0 }}>
+                      {hostingLine(c)}
+                    </Text>
+                    {(c.registrar || c.abuseEmail) && (
+                      <Text style={{ color: "#64748B", fontSize: "12px", lineHeight: "1.5", margin: 0 }}>
+                        Registrar: {c.registrar ?? "unknown"}
+                        {c.abuseEmail && (
+                          <>
+                            {" — abuse: "}
+                            <Link href={`mailto:${c.abuseEmail}`} style={{ color: "#0F766E" }}>
+                              {c.abuseEmail}
+                            </Link>
+                          </>
+                        )}
+                      </Text>
+                    )}
+                  </Section>
+                ))}
+                {cloneDetections.detected > cloneDetections.domains.length && (
+                  <Text style={{ color: "#94A3B8", fontSize: "12px", margin: "4px 0 0 0" }}>
+                    + {cloneDetections.detected - cloneDetections.domains.length} more
+                    lookalike{cloneDetections.detected - cloneDetections.domains.length === 1 ? "" : "s"} —
+                    full list available on request.
+                  </Text>
+                )}
+              </Section>
+            )}
+
             <Hr style={{ borderColor: "#E2E8F0", margin: "20px 0" }} />
 
             <Heading
@@ -256,6 +356,40 @@ const labelStyle = {
   letterSpacing: "0.05em",
   margin: "0 0 6px 0",
 } as const;
+
+/** Accent colour per urlscan classification (left border + chip). */
+function classColor(classification: string | null): string {
+  switch (classification) {
+    case "likely_phishing":
+      return "#DC2626"; // red
+    case "parked_for_sale":
+      return "#D97706"; // amber
+    default:
+      return "#64748B"; // slate (neutral / unknown)
+  }
+}
+
+/** Human label for a urlscan classification chip. */
+function classLabel(classification: string | null): string {
+  switch (classification) {
+    case "likely_phishing":
+      return "Likely phishing";
+    case "parked_for_sale":
+      return "Parked for sale";
+    case "neutral":
+      return "Resolves";
+    case "unresolved":
+      return "Unresolved";
+    default:
+      return classification ?? "";
+  }
+}
+
+/** "Hosted: <ip> · <ASN> · <country>" with graceful fallback. */
+function hostingLine(c: CloneDetectionRow): string {
+  const parts = [c.ip, c.asn, c.country].filter(Boolean) as string[];
+  return parts.length > 0 ? `Hosted: ${parts.join(" · ")}` : "Hosting: not captured";
+}
 
 /** Map onward_report_log destination keys to human labels. */
 function humaniseDestination(dest: string): string {

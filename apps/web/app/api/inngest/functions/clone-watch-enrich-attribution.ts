@@ -27,8 +27,13 @@ import {
  */
 
 const BRAKE = "shopfront_clone_outreach";
-const ENRICH_RUN_CAP = 15;
-const RECENT_WINDOW_DAYS = 14;
+// Bumped 15 → 60: attribution now feeds the monthly Brand Stewardship email,
+// which lists registrar + abuse contact for EVERY detected clone (not just
+// operator-confirmed ones), so the enricher must keep pace with the full NRD
+// detection volume (~30/day). WHOIS/CT/geo are free-tier ($0); the run is still
+// brake-capped + bounded by this cap.
+const ENRICH_RUN_CAP = 60;
+const RECENT_WINDOW_DAYS = 35; // covers a full prior calendar month for the report
 
 interface PendingAlert {
   id: number;
@@ -60,10 +65,17 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
       const since = new Date(
         Date.now() - RECENT_WINDOW_DAYS * 24 * 60 * 60 * 1000,
       ).toISOString();
+      // Enrich ALL report-eligible NRD clones (was tp_confirmed-only): the
+      // Brand Stewardship email now surfaces registrar + abuse contact for
+      // every detected clone so brands can action takedowns themselves. Gate
+      // on a completed urlscan render (urlscan_scanned_at) so the dossier's
+      // hosting block is populated; FP/neutral domains still get enriched
+      // because they still appear in the brand's monthly tally.
       const { data, error } = await sb
         .from("shopfront_clone_alerts")
         .select("id, candidate_domain, urlscan_evidence")
-        .eq("triage_status", "tp_confirmed")
+        .eq("source", "nrd")
+        .not("urlscan_scanned_at", "is", null)
         .is("attribution", null)
         .gte("first_seen_at", since)
         .order("first_seen_at", { ascending: false })

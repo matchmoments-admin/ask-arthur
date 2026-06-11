@@ -8,6 +8,7 @@ import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { logCost, PRICING } from "@/lib/cost-telemetry";
 import BrandStewardshipReport from "@/emails/BrandStewardshipReport";
+import { cloneDetectionsFromMetrics } from "@/lib/email/brand-stewardship-clone-detections";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +16,7 @@ interface StewardshipMetrics {
   detected?: number;
   reported_by_destination?: Record<string, number>;
   reports_sent?: number;
+  clones?: unknown;
 }
 
 function periodLabel(periodMonth: string): string {
@@ -114,6 +116,7 @@ export async function POST(
       detected: metrics.detected ?? 0,
       reportedByDestination: metrics.reported_by_destination ?? {},
       reportsSent: metrics.reports_sent ?? 0,
+      cloneDetections: cloneDetectionsFromMetrics(metrics.clones),
       reportRef: `BSR-${row.brand_key}-${period.slice(0, 7)}`,
     }),
   );
