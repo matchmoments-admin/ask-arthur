@@ -51,6 +51,10 @@ import { cloneWatchFpClusterDigest } from "./functions/clone-watch-fp-cluster-di
 import { cloneWatchHaikuPreclassify } from "./functions/clone-watch-haiku-preclassify";
 // WS2-cap — monthly Brand Stewardship Report aggregation + ledger.
 import { reportBrandStewardship } from "./functions/report-brand-stewardship";
+// Brand-contact coverage follow-ups: security.txt discovery (long-tail contacts)
+// + internal all-clones digest to the operator (full picture incl. no-contact).
+import { knownBrandsDiscover } from "./functions/known-brands-discover";
+import { cloneWatchInternalDigest } from "./functions/clone-watch-internal-digest";
 
 // App-layer Inngest functions live here because they cross apps/web-only
 // primitives (R2 upload, Resend, local auth helpers) that shouldn't leak
@@ -91,6 +95,9 @@ const appFunctions = [
   cloneWatchFpClusterDigest,
   // Clone-watch Haiku pre-classifier (PR-D2, #498, v157)
   cloneWatchHaikuPreclassify,
+  // Brand-contact coverage follow-ups
+  knownBrandsDiscover,
+  cloneWatchInternalDigest,
   // Brand Stewardship Report (WS2-cap)
   reportBrandStewardship,
 ];
