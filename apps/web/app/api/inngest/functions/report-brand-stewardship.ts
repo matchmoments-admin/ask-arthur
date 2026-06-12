@@ -165,7 +165,10 @@ export interface CloneAlertRow {
   inferred_target_domain: string | null;
   urlscan_classification: string | null;
   urlscan_evidence: { server?: { ip?: string; asn?: string; country?: string } } | null;
-  attribution: { whois?: { registrar?: string; registrarAbuseEmail?: string } } | null;
+  attribution: {
+    whois?: { registrar?: string; registrarAbuseEmail?: string };
+    hosting?: { ip?: string; asn?: string; country?: string };
+  } | null;
 }
 
 export interface CloneDetail {
@@ -187,13 +190,17 @@ export interface CloneBrandMetrics {
 
 function toCloneDetail(row: CloneAlertRow): CloneDetail {
   const server = row.urlscan_evidence?.server ?? {};
+  // Fall back to the attribution dossier's hosting block when the live urlscan
+  // render didn't capture server info (e.g. a clone enriched before its scan
+  // completed). Belt-and-suspenders so a clone shows whatever hosting we have.
+  const attrHosting = row.attribution?.hosting ?? {};
   const whois = row.attribution?.whois ?? {};
   return {
     domain: row.candidate_domain,
     classification: row.urlscan_classification ?? null,
-    ip: server.ip ?? null,
-    asn: server.asn ?? null,
-    country: server.country ?? null,
+    ip: server.ip ?? attrHosting.ip ?? null,
+    asn: server.asn ?? attrHosting.asn ?? null,
+    country: server.country ?? attrHosting.country ?? null,
     registrar: whois.registrar ?? null,
     abuse_email: whois.registrarAbuseEmail ?? null,
   };

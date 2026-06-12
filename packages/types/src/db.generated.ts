@@ -2833,7 +2833,7 @@ export type Database = {
           evidence_format: string | null
           id: number
           is_active: boolean
-          last_verified_at: string
+          last_verified_at: string | null
           notes: string | null
           security_contact_email: string | null
           security_contact_url: string | null
@@ -2849,7 +2849,7 @@ export type Database = {
           evidence_format?: string | null
           id?: number
           is_active?: boolean
-          last_verified_at?: string
+          last_verified_at?: string | null
           notes?: string | null
           security_contact_email?: string | null
           security_contact_url?: string | null
@@ -2865,7 +2865,7 @@ export type Database = {
           evidence_format?: string | null
           id?: number
           is_active?: boolean
-          last_verified_at?: string
+          last_verified_at?: string | null
           notes?: string | null
           security_contact_email?: string | null
           security_contact_url?: string | null
