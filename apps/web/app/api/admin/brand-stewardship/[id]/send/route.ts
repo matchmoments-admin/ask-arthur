@@ -93,6 +93,28 @@ export async function POST(
         { status: 422 },
       );
     }
+    // Verified-gate: a REAL-brand send requires an authoritatively-verified
+    // contact (known_brands.last_verified_at set, e.g. from the brand's own
+    // security.txt or a human check). Best-effort placeholder contacts (v179
+    // seed, last_verified_at NULL) can therefore ONLY ever reach the shadow
+    // inbox — never a real brand — until someone verifies the real address.
+    const { data: kb } = await sb
+      .from("known_brands")
+      .select("last_verified_at")
+      .eq("brand_key", row.brand_key as string)
+      .eq("security_contact_email", recipient as string)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (!kb?.last_verified_at) {
+      return NextResponse.json(
+        {
+          error: "contact_unverified",
+          detail:
+            "Recipient contact is not verified (known_brands.last_verified_at is null). Verify the real security contact before sending to the brand.",
+        },
+        { status: 403 },
+      );
+    }
   }
 
   const fromEmail = readStringEnv("RESEND_FROM_EMAIL");
