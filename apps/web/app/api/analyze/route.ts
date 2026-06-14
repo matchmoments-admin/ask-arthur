@@ -16,7 +16,7 @@ import { geolocateFromHeaders } from "@askarthur/scam-engine/geolocate";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { ANALYZE_COMPLETED_EVENT } from "@askarthur/scam-engine/inngest/events";
 import { detectCharityIntent, type CharityIntent } from "@askarthur/scam-engine/charity-intent";
-import { detectCommerceSignal, buildShopSignal } from "@askarthur/scam-engine/shop-signal";
+import { applyShopSignal } from "@askarthur/scam-engine/shop-signal";
 import { WebAnalyzeInputSchema, type RedirectChain } from "@askarthur/types";
 import { storeVerifiedScam, incrementStats } from "@askarthur/scam-engine/pipeline";
 import { storeScamReport, buildEntities } from "@askarthur/scam-engine/report-store";
@@ -305,33 +305,15 @@ export async function POST(req: NextRequest) {
     const finalVerdict = merged.verdict;
     const maliciousURLs = urlResults.filter((r) => r.isMalicious);
 
-    // 6a. Shop Signal — Stage 0 of Shop Guard. Pure post-processor: when the
-    // submission looks commerce-shaped (URL with shopping TLD / cart path /
-    // Shopify-style platform hint OR text with commerce verbs), extract
-    // commerce-specific tags from the merged red-flag list and surface them
-    // as a structured signal the ResultCard + bot formatters render as
-    // chips. No paid API at Stage 0 — APIVoid + RDAP land in Stage 1 once
-    // the 30-day measurement window justifies them. Plan:
-    // docs/plans/shop-guard-v2.md.
-    //
-    // DUAL CALL-SITE: same block also lives at
-    // packages/scam-engine/src/analyze-core.ts (search for
-    // `featureFlags.shopSignal && detectCommerceSignal`). The web route
-    // doesn't yet delegate to runAnalysisCore (Phase 5 work), so any logic
-    // change here must mirror there. Both branches read the same Module
-    // (shop-signal.ts) — only the surrounding plumbing differs.
-    //
-    // Assignment shape mirrors analyze-core.ts:236 — mutate `aiResult` so
-    // the value threads through storeScamReport({ analysis: aiResult }) on
-    // the legacy waitUntil path AND the analyze.completed.v1 event payload
-    // on the durable Inngest path. The local-var pattern (pre-2026-05-20)
-    // dropped shopSignal from both persistence paths so the 30-day Stage-0
-    // measurement queries returned zero rows. `allUrls` matches the
-    // post-redirect URL list analyze-core uses (variable name there is
-    // `urlsToCheck`); using bare `urls` would miss bit.ly→.shop redirects.
-    if (featureFlags.shopSignal && detectCommerceSignal(text, allUrls)) {
-      aiResult.shopSignal = buildShopSignal(merged.redFlags, referrerSource);
-    }
+    // 6a. Shop Signal — Stage 0 of Shop Guard. Shared with runAnalysisCore via
+    // the single applyShopSignal() helper (ADR-0007 anti-drift): it mutates
+    // aiResult.shopSignal in place so the value threads through both the legacy
+    // waitUntil storeScamReport path and the analyze.completed.v1 event payload,
+    // and it takes the post-redirect URL list (allUrls) so bit.ly→.shop
+    // redirects are detected. The web route calls the helper directly until the
+    // Phase 5 buildAnalyze(variant, deps) factory consolidates the plumbing.
+    // Plan: docs/plans/shop-guard-v2.md.
+    applyShopSignal(aiResult, text, allUrls, referrerSource);
 
     // Screenshot retention gate. `scrubPII` is text-only — a stored
     // screenshot is unredacted raw user content. When FF_SCREENSHOT_RETENTION

@@ -1,10 +1,33 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// applyShopSignal reads featureFlags.shopSignal; mock it as a mutable object so
+// each test can flip the flag without touching process.env / module reloads.
+vi.mock("@askarthur/utils/feature-flags", () => ({
+  featureFlags: { shopSignal: true },
+}));
+
+import type { AnalysisResult } from "@askarthur/types";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 
 import {
+  applyShopSignal,
   buildShopSignal,
   detectCommerceSignal,
   extractCommerceFlags,
 } from "../shop-signal";
+
+function makeResult(overrides?: Partial<AnalysisResult>): AnalysisResult {
+  return {
+    verdict: "SUSPICIOUS",
+    confidence: 0.8,
+    summary: "Looks like a marketplace scam.",
+    redFlags: ["Fake PayID confirmation email from a Gmail address"],
+    nextSteps: ["Do not pay"],
+    scamType: "other",
+    channel: "other",
+    ...overrides,
+  };
+}
 
 describe("detectCommerceSignal", () => {
   describe("URL-side signals", () => {
@@ -205,5 +228,53 @@ describe("buildShopSignal", () => {
     const out = buildShopSignal([]);
     expect(() => new Date(out.generatedAt)).not.toThrow();
     expect(new Date(out.generatedAt).toISOString()).toBe(out.generatedAt);
+  });
+});
+
+// applyShopSignal is the single ADR-0007 source of truth both /api/analyze and
+// runAnalysisCore call. These tests pin the two drifts the helper exists to make
+// impossible: F1 (value not persisted) and F2 (pre- vs post-redirect URL list).
+describe("applyShopSignal", () => {
+  beforeEach(() => {
+    (featureFlags as { shopSignal: boolean }).shopSignal = true;
+  });
+
+  it("mutates result.shopSignal in place when commerce-shaped + flag on (F1 guard)", () => {
+    const result = makeResult();
+    const ret = applyShopSignal(result, "buy now while stocks last", ["https://x.shop/cart"]);
+    expect(ret).toBeUndefined(); // mutates, returns void
+    expect(result.shopSignal?.isCommerce).toBe(true);
+    // commerceFlags derived from result.redFlags, not a separate list.
+    expect(result.shopSignal?.commerceFlags).toContain("fake-payment-confirmation");
+  });
+
+  it("is a no-op when the flag is off", () => {
+    (featureFlags as { shopSignal: boolean }).shopSignal = false;
+    const result = makeResult();
+    applyShopSignal(result, "buy now", ["https://x.shop/cart"]);
+    expect(result.shopSignal).toBeUndefined();
+  });
+
+  it("is a no-op when the submission is not commerce-shaped", () => {
+    const result = makeResult();
+    applyShopSignal(result, "Hi mum it's me my phone is broken", ["https://example.com"]);
+    expect(result.shopSignal).toBeUndefined();
+  });
+
+  it("detects commerce via a post-redirect URL the pre-redirect list lacked (F2 guard)", () => {
+    const result = makeResult();
+    // Caller is responsible for passing the post-redirect set; a bit.ly that
+    // resolved to a .shop must be present for the signal to fire.
+    applyShopSignal(result, "no commerce verbs here", [
+      "https://bit.ly/abc",
+      "https://designer-bags.shop",
+    ]);
+    expect(result.shopSignal?.isCommerce).toBe(true);
+  });
+
+  it("threads referrerSource onto the payload", () => {
+    const result = makeResult();
+    applyShopSignal(result, "buy now", ["https://x.shop"], "instagram-inapp");
+    expect(result.shopSignal?.referrerSource).toBe("instagram-inapp");
   });
 });
