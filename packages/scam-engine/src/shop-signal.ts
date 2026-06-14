@@ -23,7 +23,8 @@
 // apps/web/app/share-target/route.ts; this Module just carries the value
 // through onto the ShopSignal payload.
 
-import type { ReferrerSource } from "@askarthur/types";
+import type { AnalysisResult, ReferrerSource } from "@askarthur/types";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 
 const COMMERCE_TLDS = new Set([
   "shop",
@@ -190,4 +191,34 @@ export function buildShopSignal(
     generatedAt: new Date().toISOString(),
     ...(referrerSource && { referrerSource }),
   };
+}
+
+/**
+ * Single source of truth for the Shop Signal step — the ADR-0007 dual call-site.
+ *
+ * Both /api/analyze (apps/web/app/api/analyze/route.ts) and runAnalysisCore
+ * (analyze-core.ts) call this instead of open-coding the
+ * `featureFlags.shopSignal && detectCommerceSignal(...)` → `buildShopSignal(...)`
+ * branch, which had drifted twice (PR #329): shopSignal not persisted (F1) and
+ * a pre-redirect vs post-redirect URL-list mismatch (F2).
+ *
+ * The signature makes both drifts structurally impossible:
+ *   - it MUTATES `result.shopSignal` in place, so the value always threads
+ *     through the caller's persistence / event payloads (kills F1);
+ *   - it derives commerce flags from `result.redFlags` (the merged list both
+ *     call sites already assign) and REQUIRES the caller to pass the URL list,
+ *     which must be the post-redirect set (`urlsToCheck` / `allUrls`) so the
+ *     bit.ly→.shop redirect case is detected on every surface (kills F2).
+ *
+ * No-op when the flag is off or the submission isn't commerce-shaped.
+ */
+export function applyShopSignal(
+  result: AnalysisResult,
+  text: string | null | undefined,
+  urls: string[],
+  referrerSource?: ReferrerSource,
+): void {
+  if (featureFlags.shopSignal && detectCommerceSignal(text, urls)) {
+    result.shopSignal = buildShopSignal(result.redFlags, referrerSource);
+  }
 }
