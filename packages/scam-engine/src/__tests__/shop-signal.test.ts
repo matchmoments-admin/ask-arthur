@@ -24,7 +24,6 @@ function makeResult(overrides?: Partial<AnalysisResult>): AnalysisResult {
     redFlags: ["Fake PayID confirmation email from a Gmail address"],
     nextSteps: ["Do not pay"],
     scamType: "other",
-    impersonatedBrand: null,
     channel: "other",
     ...overrides,
   };
