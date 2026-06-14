@@ -14,6 +14,12 @@
 // Pricing constants here MUST be kept in sync with apps/web/lib/cost-
 // telemetry.ts PRICING. They are inlined because the cost-telemetry module
 // lives in the web app and packages/* must not import upward.
+//
+// Scope note: `MODELS` below is the ONLY home for Claude (Anthropic) token
+// pricing in this package. The non-Claude paid-API rates (Twilio, IPQS,
+// AbuseIPDB, URLScan, crt.sh) live separately in `cost-log.ts::ENGINE_PRICING`.
+// The two tables are intentionally disjoint — Claude is per-token, the rest are
+// per-call — and neither imports the other.
 
 import Anthropic from "@anthropic-ai/sdk";
 import crypto from "node:crypto";

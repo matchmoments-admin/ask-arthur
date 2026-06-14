@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import crypto from "crypto";
 import { logger } from "@askarthur/utils/logger";
-import { scrubPII } from "./pipeline";
+import { scrubPII } from "./sanitize";
 import {
   PROMPT_VERSION,
   type Verdict,

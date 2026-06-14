@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { createServiceClient } from "@askarthur/supabase/server";
-import { scrubPII } from "@askarthur/scam-engine/pipeline";
+import { scrubPII } from "@askarthur/scam-engine/sanitize";
 import { logger } from "@askarthur/utils/logger";
 
 interface ScamGroup {

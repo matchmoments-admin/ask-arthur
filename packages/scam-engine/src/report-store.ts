@@ -11,7 +11,7 @@ import type {
   InputMode,
 } from "@askarthur/types";
 import { logger } from "@askarthur/utils/logger";
-import { scrubPII } from "./pipeline";
+import { scrubPII } from "./sanitize";
 import { normalizePhoneE164, normalizeEmail } from "./phone-normalize";
 import { normalizeURL, extractDomain } from "./url-normalize";
 
