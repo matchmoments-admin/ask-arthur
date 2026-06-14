@@ -44,50 +44,19 @@ import { acncCharityBackfillEmbed } from "./acnc-charity-backfill-embed";
 import { scamReportEmbed } from "./scam-report-embed";
 import { scamReportsBackfillEmbed } from "./scam-reports-backfill-embed";
 
-// Feedback learning loop (W1.1): refresh the feedback_triage_queue MV
-// every 5 min so /admin/feedback stays current.
-import { feedbackTriageRefresh } from "./feedback-triage-refresh";
-
 // News Intel: embed regulator narratives (Scamwatch/ACSC/ASIC) into
 // feed_items.embedding so hybrid retrieval can fold them in alongside
 // scam_reports + reddit_post_intel. Cron-driven 30-min poll.
 import { feedItemsEmbed } from "./feed-items-embed";
 
-// News Intel: nightly retention housekeeping — archive narratives >365d
-// to feed_items_archive, prune feed_ingestion_log >90d, prune
-// feed_http_cache >30d. 02:30 UTC.
-import { feedRetention } from "./feed-retention";
-
-// News Intel: push notifications for newly-ingested regulator narratives.
-// Cron */30 min — single ASIC/Scamwatch alert is more authoritative than
-// 100 user reports, so it gets a dedicated push (not bundled like scam-alerts).
-import { regulatorAlertPush } from "./regulator-alert-push";
-
-// Phone Footprint: nightly anonymisation + monitor consent sweep. Wires
-// up RPCs that v75 created but no scheduler invoked. 03:15 UTC.
-import { phoneFootprintRetention } from "./phone-footprint-retention";
-
-// Reddit Intel: prune reddit_processed_posts dedup tracker (30-day
-// horizon matches scraper re-encounter window). 03:45 UTC.
-import { redditProcessedPostsRetention } from "./reddit-processed-posts-retention";
-
-// Cost Telemetry: nightly rollup + 90d prune. Rollup table preserves
-// long-range aggregates; raw rows >90d deleted. 04:00 UTC.
-import { costTelemetryRetention } from "./cost-telemetry-retention";
-
-// Billing ingest: nightly per-provider infra-spend rollup → infra_cost_daily
-// (v134). Pulls Vercel /v1/billing/charges + Anthropic sums from
-// cost_telemetry + Supabase Pro-base prorate. 02:00 UTC.
-import { billingIngestNightly } from "./billing-ingest-nightly";
-
-// Telco events: nightly prune across 7 append-only tables. 730d for
-// sim/device-swap-events (forensic); 365d for the rest. 04:30 UTC.
-import { telcoEventsRetention } from "./telco-events-retention";
-
-// Archive shadows: nightly archival mover for 6 medium-volume tables
-// (flagged_ads, deepfake_detections, media_analyses, scan_results,
-// verdict_feedback, brand_impersonation_alerts). 05:00 UTC.
-import { archiveShadowsRetention } from "./archive-shadows-retention";
+// NOTE: 9 platform-housekeeping functions (feedback-triage-refresh,
+// feed-retention, regulator-alert-push, phone-footprint-retention,
+// reddit-processed-posts-retention, cost-telemetry-retention,
+// billing-ingest-nightly, telco-events-retention, archive-shadows-retention)
+// moved to apps/web/app/api/inngest/functions/ — they're platform jobs, not
+// scam-analysis, and don't belong in this package's module identity (arch
+// review #588 finding 2). They're registered directly in
+// apps/web/app/api/inngest/route.ts. Function IDs are unchanged.
 
 // Shop Signal: Deep Shop Check enrichment — consumes shop.check.requested.v1
 // (user-initiated), runs ABN + WHOIS + APIVoid, writes back to shop_checks.
@@ -130,26 +99,8 @@ export const inngestFunctions = [
   // scam_reports + verified_scams embeddings
   scamReportEmbed,
   scamReportsBackfillEmbed,
-  // Feedback learning loop
-  feedbackTriageRefresh,
   // News Intel: regulator-narrative embedding
   feedItemsEmbed,
-  // News Intel: nightly retention housekeeping
-  feedRetention,
-  // News Intel: regulator-alert push fan-out
-  regulatorAlertPush,
-  // Phone Footprint: nightly anonymisation + monitor consent sweep
-  phoneFootprintRetention,
-  // Reddit Intel: nightly dedup-tracker prune (30d)
-  redditProcessedPostsRetention,
-  // Cost Telemetry: nightly rollup + 90d prune
-  costTelemetryRetention,
-  // Billing ingest: nightly per-provider infra-spend rollup (v134)
-  billingIngestNightly,
-  // Telco events: nightly prune (730d sim/device-swap; 365d others)
-  telcoEventsRetention,
-  // Archive shadows: nightly archival mover (6 medium-volume tables)
-  archiveShadowsRetention,
   // Shop Signal: Deep Shop Check enrichment (user-initiated)
   shopSignalEnrich,
   // Shopfront Clone-Watch: Layer 0 daily NRD sweep (S0E.2)

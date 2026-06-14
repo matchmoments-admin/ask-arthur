@@ -25,9 +25,9 @@
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
-import { inngest } from "./client";
-import { logFunctionFailure } from "../cost-log";
-import { withAxiomLogging } from "./with-axiom-logging";
+import { inngest } from "@askarthur/scam-engine/inngest/client";
+import { logFunctionFailure } from "@askarthur/scam-engine/cost-log";
+import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 
 export const phoneFootprintRetention = inngest.createFunction(
   {

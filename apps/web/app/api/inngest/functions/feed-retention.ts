@@ -16,8 +16,8 @@
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
-import { inngest } from "./client";
-import { withAxiomLogging } from "./with-axiom-logging";
+import { inngest } from "@askarthur/scam-engine/inngest/client";
+import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 
 const ARCHIVE_BATCH_SIZE = 5000;
 const ARCHIVE_DEFAULT_DAYS = 365;

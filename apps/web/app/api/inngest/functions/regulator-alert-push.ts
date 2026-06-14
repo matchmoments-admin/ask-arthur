@@ -17,9 +17,9 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 
-import { inngest } from "./client";
-import { sendPushNotifications } from "../push-sender";
-import { withAxiomLogging } from "./with-axiom-logging";
+import { inngest } from "@askarthur/scam-engine/inngest/client";
+import { sendPushNotifications } from "@askarthur/scam-engine/push-sender";
+import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 
 const SOURCE_LABEL: Record<string, string> = {
   scamwatch_alert: "ACCC Scamwatch",
