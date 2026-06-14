@@ -21,8 +21,8 @@
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
-import { inngest } from "./client";
-import { withAxiomLogging } from "./with-axiom-logging";
+import { inngest } from "@askarthur/scam-engine/inngest/client";
+import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 
 const ROLLUP_WINDOW_DAYS = 7;
 const RAW_RETENTION_DAYS = 90;

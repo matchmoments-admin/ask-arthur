@@ -11,10 +11,10 @@
 // SAFE (refreshes) on any guard-query error so a transient DB blip can't leave
 // the MV silently stale. singleton:{mode:"skip"} drops an overlapping tick.
 
-import { inngest } from "./client";
+import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
-import { withAxiomLogging } from "./with-axiom-logging";
+import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 
 export const feedbackTriageRefresh = inngest.createFunction(
   {

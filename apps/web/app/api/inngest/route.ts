@@ -55,6 +55,19 @@ import { reportBrandStewardship } from "./functions/report-brand-stewardship";
 // + internal all-clones digest to the operator (full picture incl. no-contact).
 import { knownBrandsDiscover } from "./functions/known-brands-discover";
 import { cloneWatchInternalDigest } from "./functions/clone-watch-internal-digest";
+// Platform housekeeping (retention / rollup / push) — moved out of
+// @askarthur/scam-engine in #588 (finding 2): these are platform jobs, not
+// scam-analysis, so they don't belong in the engine package's module identity.
+// Function IDs are unchanged, so the move is registration-location-only.
+import { feedbackTriageRefresh } from "./functions/feedback-triage-refresh";
+import { feedRetention } from "./functions/feed-retention";
+import { regulatorAlertPush } from "./functions/regulator-alert-push";
+import { phoneFootprintRetention } from "./functions/phone-footprint-retention";
+import { redditProcessedPostsRetention } from "./functions/reddit-processed-posts-retention";
+import { costTelemetryRetention } from "./functions/cost-telemetry-retention";
+import { billingIngestNightly } from "./functions/billing-ingest-nightly";
+import { telcoEventsRetention } from "./functions/telco-events-retention";
+import { archiveShadowsRetention } from "./functions/archive-shadows-retention";
 
 // App-layer Inngest functions live here because they cross apps/web-only
 // primitives (R2 upload, Resend, local auth helpers) that shouldn't leak
@@ -100,6 +113,17 @@ const appFunctions = [
   cloneWatchInternalDigest,
   // Brand Stewardship Report (WS2-cap)
   reportBrandStewardship,
+  // Platform housekeeping — moved from @askarthur/scam-engine (#588 finding 2).
+  // Retention/rollup/push crons; IDs unchanged.
+  feedbackTriageRefresh,
+  feedRetention,
+  regulatorAlertPush,
+  phoneFootprintRetention,
+  redditProcessedPostsRetention,
+  costTelemetryRetention,
+  billingIngestNightly,
+  telcoEventsRetention,
+  archiveShadowsRetention,
 ];
 
 export const { GET, POST, PUT } = serve({
