@@ -18,7 +18,14 @@
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
-/** Per-call USD unit costs for scam-engine paid APIs. $0 = free tier today. */
+/** Per-call USD unit costs for scam-engine paid APIs. $0 = free tier today.
+ *
+ *  Claude token costs are deliberately NOT here: per-token Claude pricing lives
+ *  in `anthropic.ts::MODELS` (priced per model tier), and Claude spend is logged
+ *  at the call site that knows the token usage (e.g. apps/web /api/analyze, the
+ *  reddit-intel functions) — not via this flat per-call table. If you add a new
+ *  Claude call path, compute cost from `anthropic.ts::MODELS` and pass it to
+ *  `logCost({ provider: "anthropic", estimatedCostUsd })`. */
 export const ENGINE_PRICING = {
   // Twilio Lookup v2: line-type intelligence ($0.008) + CNAM ($0.01).
   TWILIO_LOOKUP_V2_USD: 0.018,

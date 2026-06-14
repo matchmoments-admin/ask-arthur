@@ -6,7 +6,7 @@ import {
   type Verdict,
 } from "@askarthur/types";
 import { logger } from "@askarthur/utils/logger";
-import { scrubPII } from "./pipeline";
+import { scrubPII } from "./sanitize";
 import { SYSTEM_PROMPT_HASH } from "./claude";
 
 // ── Cache key design ────────────────────────────────────────────────────

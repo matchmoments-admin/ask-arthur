@@ -2,7 +2,8 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { downloadMediaBuffer } from "./r2";
 import { transcribeAudio } from "./whisper";
 import { analyzeWithClaude, detectInjectionAttempt } from "@askarthur/scam-engine/claude";
-import { scrubPII, incrementStats } from "@askarthur/scam-engine/pipeline";
+import { scrubPII } from "@askarthur/scam-engine/sanitize";
+import { incrementStats } from "@askarthur/scam-engine/pipeline";
 import { logger } from "@askarthur/utils/logger";
 
 export interface MediaJob {

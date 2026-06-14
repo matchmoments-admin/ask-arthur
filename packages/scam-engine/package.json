@@ -10,6 +10,7 @@
     "./rerank": "./src/rerank.ts",
     "./claude": "./src/claude.ts",
     "./pipeline": "./src/pipeline.ts",
+    "./sanitize": "./src/sanitize.ts",
     "./safebrowsing": "./src/safebrowsing.ts",
     "./ssrf-dispatcher": "./src/ssrf-dispatcher.ts",
     "./whois": "./src/whois.ts",

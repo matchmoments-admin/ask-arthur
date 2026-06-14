@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { logger } from "@askarthur/utils/logger";
 import { checkRateLimit } from "@askarthur/utils/rate-limit";
-import { scrubPII } from "@askarthur/scam-engine/pipeline";
+import { scrubPII } from "@askarthur/scam-engine/sanitize";
 import { assertSafeURL } from "@askarthur/scam-engine/ssrf-guard";
 import { stripEmailHtml } from "@askarthur/scam-engine/html-sanitize";
 import { sanitizeUnicode, escapeXml } from "@askarthur/scam-engine/claude";
