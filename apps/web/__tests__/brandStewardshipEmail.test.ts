@@ -23,6 +23,10 @@ describe("BrandStewardshipReport email", () => {
     expect(html).toContain("APWG eCrime Exchange");
     expect(html).toContain("7eleven-fuelrewards.shop");
     expect(html).toContain("ABN 72 695 772 313");
+    // CTA block (always rendered) with UTM-tagged links.
+    expect(html).toContain("Leave a Trustpilot review");
+    expect(html).toContain("utm_campaign=brand-stewardship");
+    expect(html).toContain("au.trustpilot.com/evaluate/askarthur.au");
   });
 
   it("renders cleanly with zero detections / no examples", async () => {
@@ -51,6 +55,9 @@ describe("BrandStewardshipReport email", () => {
         cloneDetections: {
           detected: 3,
           byClassification: { likely_phishing: 1, neutral: 2 },
+          byCountry: { SG: 1, FR: 1, US: 1 },
+          byRegistrar: { "NameSilo, LLC": 1, "GoDaddy.com, LLC": 1, Unknown: 1 },
+          byAsn: { AS132203: 1, AS16276: 1, AS13335: 1 },
           domains: [
             {
               domain: "login-anz-rewards.click",
@@ -72,6 +79,7 @@ describe("BrandStewardshipReport email", () => {
             },
           ],
         },
+        shareUrl: "https://askarthur.au/clone-report/test-token-uuid",
         reportRef: "BSR-anz-2026-05",
       }),
     );
@@ -82,6 +90,13 @@ describe("BrandStewardshipReport email", () => {
     expect(html).toContain("abuse@namesilo.com"); // abuse contact
     expect(html).toContain("Likely phishing"); // classification chip
     expect(html).toContain("full list available on request"); // overflow line (detected 3 > 2 shown)
+    // Breakdown bars + abuse-report links + share link.
+    expect(html).toContain("Where they&#x27;re hosted (country)");
+    expect(html).toContain("Who registered them");
+    expect(html).toContain("Report to registrar");
+    expect(html).toContain("supportcenter.godaddy.com"); // GoDaddy abuse URL from the registrar breakdown
+    expect(html).toContain("abuse.cloudflare.com"); // host abuse for the Cloudflare ASN row
+    expect(html).toContain("/clone-report/test-token-uuid"); // share link
   });
 
   // Honesty guard: these are fire-and-forget blocklist forwards with no

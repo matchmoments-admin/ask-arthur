@@ -134,6 +134,15 @@ export const AU_BRAND_WATCHLIST: BrandEntry[] = [
     ct: { keyword: "optus", tier: "expanded" },
   },
   {
+    // National Broadband Network — heavily impersonated for "outage refund" /
+    // "router upgrade" SMS phishing. "nbn" (3 chars) floods the firehose, so
+    // gate the distinctive "nbnco" token behind the expanded tier.
+    brand: "NBN Co",
+    legitimate_domains: ["nbnco.com.au", "nbn.com.au"],
+    aliases: ["nbnco"],
+    ct: { keyword: "nbnco", tier: "expanded" },
+  },
+  {
     brand: "Vodafone",
     legitimate_domains: ["vodafone.com.au"],
     ct: { keyword: "vodafone", tier: "expanded" },
@@ -173,6 +182,10 @@ export const AU_BRAND_WATCHLIST: BrandEntry[] = [
   { brand: "Service Victoria", legitimate_domains: ["service.vic.gov.au"] },
   { brand: "Service WA", legitimate_domains: ["wa.gov.au"] },
   {
+    brand: "Service Queensland",
+    legitimate_domains: ["service.qld.gov.au", "qld.gov.au"],
+  },
+  {
     brand: "Department of Home Affairs",
     legitimate_domains: ["homeaffairs.gov.au", "immi.homeaffairs.gov.au"],
   },
@@ -183,6 +196,14 @@ export const AU_BRAND_WATCHLIST: BrandEntry[] = [
   },
   { brand: "Australian Electoral Commission", legitimate_domains: ["aec.gov.au"] },
   { brand: "Reserve Bank of Australia", legitimate_domains: ["rba.gov.au"] },
+  {
+    // Corporate regulator — recurring "company renewal fee" / "business name
+    // invoice" phishing target. "asic" alone is too generic for the CT firehose
+    // (collides with application-specific-integrated-circuit certs), so no ct.
+    brand: "Australian Securities and Investments Commission",
+    legitimate_domains: ["asic.gov.au"],
+    aliases: ["asic.gov"],
+  },
 
   // Energy retailers — recurring refund/disconnect-threat phishing template.
   { brand: "AGL", legitimate_domains: ["agl.com.au"] },

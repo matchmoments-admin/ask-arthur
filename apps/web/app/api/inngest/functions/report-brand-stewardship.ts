@@ -184,8 +184,19 @@ export interface CloneDetail {
 export interface CloneBrandMetrics {
   detected: number;
   byClassification: Record<string, number>;
+  /** Consumable analytics — counts across ALL deduped clones (not just the
+   *  capped detail list), so the email's breakdown bars reflect the full set. */
+  byCountry: Record<string, number>;
+  byRegistrar: Record<string, number>;
+  byAsn: Record<string, number>;
   domains: CloneDetail[];
   alertIds: number[];
+}
+
+/** Bucket a nullable dimension value, folding empties into "Unknown". */
+function bump(map: Record<string, number>, value: string | null | undefined): void {
+  const key = value && value.trim() ? value.trim() : "Unknown";
+  map[key] = (map[key] ?? 0) + 1;
 }
 
 function toCloneDetail(row: CloneAlertRow): CloneDetail {
@@ -231,7 +242,15 @@ export function aggregateClonesByDomain(
 
     let m = out.get(brandDomain);
     if (!m) {
-      m = { detected: 0, byClassification: {}, domains: [], alertIds: [] };
+      m = {
+        detected: 0,
+        byClassification: {},
+        byCountry: {},
+        byRegistrar: {},
+        byAsn: {},
+        domains: [],
+        alertIds: [],
+      };
       out.set(brandDomain, m);
       seenDomain.set(brandDomain, new Set());
     }
@@ -243,7 +262,11 @@ export function aggregateClonesByDomain(
     m.alertIds.push(row.id);
     const cls = row.urlscan_classification ?? "unclassified";
     m.byClassification[cls] = (m.byClassification[cls] ?? 0) + 1;
-    m.domains.push(toCloneDetail(row));
+    const detail = toCloneDetail(row);
+    bump(m.byCountry, detail.country);
+    bump(m.byRegistrar, detail.registrar);
+    bump(m.byAsn, detail.asn);
+    m.domains.push(detail);
   }
 
   // Sort + cap each brand's detail list (most actionable first).
@@ -503,6 +526,9 @@ export const reportBrandStewardship = inngest.createFunction(
           metrics.clones = {
             detected: e.clones.detected,
             by_classification: e.clones.byClassification,
+            by_country: e.clones.byCountry,
+            by_registrar: e.clones.byRegistrar,
+            by_asn: e.clones.byAsn,
             domains: e.clones.domains,
             alert_ids: e.clones.alertIds,
           };
