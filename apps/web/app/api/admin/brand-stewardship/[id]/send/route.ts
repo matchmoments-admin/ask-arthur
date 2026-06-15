@@ -160,21 +160,23 @@ export async function POST(
     `STOP brand-protection summaries — ${row.brand_name}`,
   )}`;
 
-  const html = await render(
-    BrandStewardshipReport({
-      brandName: row.brand_name as string,
-      periodLabel: label,
-      detected: metrics.detected ?? 0,
-      reportedByDestination: metrics.reported_by_destination ?? {},
-      reportsSent: metrics.reports_sent ?? 0,
-      cloneDetections: cloneDetectionsFromMetrics(metrics.clones),
-      reportRef: `BSR-${row.brand_key}-${period.slice(0, 7)}`,
-      shareUrl: row.share_token
-        ? `https://askarthur.au/clone-report/${row.share_token}`
-        : undefined,
-      stopUrl: unsubscribeUrl,
-    }),
-  );
+  const el = BrandStewardshipReport({
+    brandName: row.brand_name as string,
+    periodLabel: label,
+    detected: metrics.detected ?? 0,
+    reportedByDestination: metrics.reported_by_destination ?? {},
+    reportsSent: metrics.reports_sent ?? 0,
+    cloneDetections: cloneDetectionsFromMetrics(metrics.clones),
+    reportRef: `BSR-${row.brand_key}-${period.slice(0, 7)}`,
+    shareUrl: row.share_token
+      ? `https://askarthur.au/clone-report/${row.share_token}`
+      : undefined,
+    stopUrl: unsubscribeUrl,
+  });
+  // Send multipart (HTML + text). A missing text/plain part raises the spam
+  // score for cold B2B mail — render the same component to plain text.
+  const html = await render(el);
+  const text = await render(el, { plainText: true });
 
   let messageId: string | null = null;
   try {
@@ -185,6 +187,7 @@ export async function POST(
         to: [recipient as string],
         subject: `${row.brand_name} brand-protection summary — ${label}`,
         html,
+        text,
         headers: {
           "List-Unsubscribe": `<${unsubscribeUrl}>, <${stopMailto}>`,
           "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
