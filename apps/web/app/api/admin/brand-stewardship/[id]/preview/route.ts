@@ -45,7 +45,7 @@ export async function GET(
   const { data: row, error } = await sb
     .from("brand_stewardship_reports")
     .select(
-      "id, brand_key, brand_name, period_month, metrics, recipient_email, status",
+      "id, brand_key, brand_name, period_month, metrics, recipient_email, status, share_token",
     )
     .eq("id", id)
     .maybeSingle();
@@ -65,6 +65,9 @@ export async function GET(
     reportsSent: metrics.reports_sent ?? 0,
     cloneDetections: cloneDetectionsFromMetrics(metrics.clones),
     reportRef: `BSR-${row.brand_key}-${period.slice(0, 7)}`,
+    shareUrl: row.share_token
+      ? `https://askarthur.au/clone-report/${row.share_token}`
+      : undefined,
   });
   const html = await render(el);
 
