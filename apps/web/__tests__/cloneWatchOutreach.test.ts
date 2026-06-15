@@ -70,7 +70,7 @@ describe("clone-watch-submit-netcraft", () => {
   describe("NETCRAFT_REPORT_ENDPOINT_URL", () => {
     it("points at v3 of the Netcraft Report API", () => {
       expect(NETCRAFT_REPORT_ENDPOINT_URL).toBe(
-        "https://report.netcraft.com/api/v3/report",
+        "https://report.netcraft.com/api/v3/report/urls",
       );
     });
   });
