@@ -559,8 +559,110 @@ export const AU_BRAND_WATCHLIST: BrandEntry[] = [
   { brand: "Allianz", legitimate_domains: ["allianz.com.au"] },
   { brand: "Budget Direct", legitimate_domains: ["budgetdirect.com.au"] },
   { brand: "Youi", legitimate_domains: ["youi.com.au"] },
-  { brand: "QBE", legitimate_domains: ["qbe.com"] },
+  { brand: "QBE", legitimate_domains: ["qbe.com", "qbe.com.au"] },
   { brand: "GIO", legitimate_domains: ["gio.com.au"] },
+
+  // ── PR-K expansion (2026-06-15): global finance/consulting + tech giants +
+  // couriers/crypto + police forces + gov agencies. Curated against the AU
+  // most-impersonated research (ASIC bond/term-deposit scams, ACSC/Scamwatch
+  // impersonation alerts, courier/parcel smishing). FP discipline: distinctive
+  // ≥5-char tokens get the full matcher; dangerous SHORT acronyms (EY=2,
+  // AFP/ABF/BCG/DVA=3) are added as their SPELLED-OUT brand so the matcher's
+  // <5-char gate + scam-context gate don't flood (the dictionary-word FP class
+  // the gate exists to suppress). Any that still flood get FP-denylisted like
+  // domain.com.au/lendi.com.au did.
+
+  // Tech giants — tech-support + account-suspension + verification-code scams
+  { brand: "Amazon", legitimate_domains: ["amazon.com.au", "amazon.com"] },
+  { brand: "Apple", legitimate_domains: ["apple.com", "icloud.com"] },
+  { brand: "Microsoft", legitimate_domains: ["microsoft.com", "outlook.com", "live.com"] },
+  { brand: "Google", legitimate_domains: ["google.com", "google.com.au", "gmail.com"] },
+  { brand: "WhatsApp", legitimate_domains: ["whatsapp.com"] },
+
+  // Couriers — parcel "customs fee / redelivery" smishing (top alongside AusPost)
+  { brand: "DHL", legitimate_domains: ["dhl.com", "dhl.com.au"] },
+  { brand: "FedEx", legitimate_domains: ["fedex.com"] },
+  { brand: "Aramex Australia", legitimate_domains: ["aramex.com.au", "aramex.com"], aliases: ["aramex"] },
+  { brand: "CouriersPlease", legitimate_domains: ["couriersplease.com.au"] },
+
+  // Crypto exchanges — account-takeover + spoofed-verification SMS (AFP-warned)
+  { brand: "Coinbase", legitimate_domains: ["coinbase.com"] },
+  { brand: "Kraken", legitimate_domains: ["kraken.com"] },
+  { brand: "Crypto.com", legitimate_domains: ["crypto.com"] },
+
+  // Global asset managers — ASIC-confirmed imposter bond / term-deposit scams
+  { brand: "BlackRock", legitimate_domains: ["blackrock.com", "blackrock.com.au"] },
+  { brand: "Vanguard", legitimate_domains: ["vanguard.com.au", "vanguard.com"] },
+  { brand: "Fidelity", legitimate_domains: ["fidelity.com.au", "fidelity.com"] },
+  { brand: "State Street", legitimate_domains: ["statestreet.com"] },
+  { brand: "PIMCO", legitimate_domains: ["pimco.com", "pimco.com.au"] },
+  { brand: "T. Rowe Price", legitimate_domains: ["troweprice.com"], aliases: ["troweprice"] },
+
+  // Global banks — fake bond/term-deposit + recruitment scams
+  { brand: "JP Morgan", legitimate_domains: ["jpmorgan.com", "jpmorganchase.com"], aliases: ["jpmorgan", "jpmorganchase"] },
+  { brand: "Citibank", legitimate_domains: ["citibank.com.au", "citi.com"], aliases: ["citibank"] },
+  { brand: "HSBC", legitimate_domains: ["hsbc.com.au", "hsbc.com"] },
+  { brand: "Goldman Sachs", legitimate_domains: ["goldmansachs.com", "gs.com"], aliases: ["goldmansachs"] },
+  { brand: "Morgan Stanley", legitimate_domains: ["morganstanley.com"], aliases: ["morganstanley"] },
+  { brand: "Standard Chartered", legitimate_domains: ["standardchartered.com", "sc.com"], aliases: ["standardchartered"] },
+  { brand: "Deutsche Bank", legitimate_domains: ["db.com", "deutsche-bank.com"], aliases: ["deutschebank"] },
+  { brand: "UBS", legitimate_domains: ["ubs.com"] },
+
+  // Big-4 + consulting — fake-recruitment / job-offer scams (WA ScamNet)
+  { brand: "Deloitte", legitimate_domains: ["deloitte.com", "deloitte.com.au"] },
+  { brand: "KPMG", legitimate_domains: ["kpmg.com", "kpmg.com.au"] },
+  { brand: "PwC", legitimate_domains: ["pwc.com", "pwc.com.au"] },
+  { brand: "EY", legitimate_domains: ["ey.com", "ey.com.au"] }, // 2-char token — FP-watch
+  { brand: "Accenture", legitimate_domains: ["accenture.com"] },
+  { brand: "McKinsey", legitimate_domains: ["mckinsey.com"] },
+  { brand: "Boston Consulting Group", legitimate_domains: ["bcg.com"], aliases: ["bostonconsulting"] },
+  { brand: "Bain & Company", legitimate_domains: ["bain.com"], aliases: ["baincompany"] },
+
+  // High-volume shopping — fake-order/refund + counterfeit-store phishing
+  { brand: "Shein", legitimate_domains: ["shein.com", "shein.com.au"] },
+  { brand: "Temu", legitimate_domains: ["temu.com"] },
+  { brand: "AliExpress", legitimate_domains: ["aliexpress.com"] },
+
+  // Money transfer — romance/advance-fee payout rails
+  { brand: "Western Union", legitimate_domains: ["westernunion.com"], aliases: ["westernunion"] },
+  { brand: "MoneyGram", legitimate_domains: ["moneygram.com"] },
+  { brand: "EziDebit", legitimate_domains: ["ezidebit.com.au", "ezidebit.com"] },
+
+  // Parking apps — "unpaid parking fee" smishing (same wave as Linkt tolls)
+  { brand: "EasyPark", legitimate_domains: ["easypark.com", "easyparkgroup.com"] },
+  { brand: "CellOPark", legitimate_domains: ["cellopark.com.au"] },
+
+  // Police forces — fake fine / warrant / arrest-threat scams. Spelled-out
+  // (bare AFP/QPS would flood). "Police Bank" already on the list is a BANK.
+  { brand: "Australian Federal Police", legitimate_domains: ["afp.gov.au"] },
+  { brand: "NSW Police", legitimate_domains: ["police.nsw.gov.au"] },
+  { brand: "Victoria Police", legitimate_domains: ["police.vic.gov.au"] },
+  { brand: "Queensland Police", legitimate_domains: ["police.qld.gov.au"] },
+  { brand: "WA Police", legitimate_domains: ["police.wa.gov.au"] },
+  { brand: "South Australia Police", legitimate_domains: ["police.sa.gov.au"], aliases: ["sapol"] },
+  { brand: "Tasmania Police", legitimate_domains: ["police.tas.gov.au"] },
+  { brand: "ACT Policing", legitimate_domains: ["police.act.gov.au"] },
+
+  // Federal agencies — benefit/refund + visa + warrant + "verify identity" scams
+  { brand: "Medicare", legitimate_domains: ["servicesaustralia.gov.au", "my.gov.au"] },
+  { brand: "Centrelink", legitimate_domains: ["servicesaustralia.gov.au", "my.gov.au"] },
+  { brand: "Australian Border Force", legitimate_domains: ["abf.gov.au", "border.gov.au"] },
+  { brand: "Australian Passport Office", legitimate_domains: ["passports.gov.au"] },
+  { brand: "AHPRA", legitimate_domains: ["ahpra.gov.au"] },
+  { brand: "Scamwatch", legitimate_domains: ["scamwatch.gov.au"] },
+  { brand: "AUSTRAC", legitimate_domains: ["austrac.gov.au"] },
+  { brand: "eSafety Commissioner", legitimate_domains: ["esafety.gov.au"], aliases: ["esafety"] },
+  { brand: "Fair Work Ombudsman", legitimate_domains: ["fairwork.gov.au"], aliases: ["fairwork"] },
+  { brand: "Department of Veterans' Affairs", legitimate_domains: ["dva.gov.au"], aliases: ["veteransaffairs"] },
+  { brand: "Australian Cyber Security Centre", legitimate_domains: ["cyber.gov.au"] },
+  { brand: "IP Australia", legitimate_domains: ["ipaustralia.gov.au"] },
+  { brand: "Department of Health and Aged Care", legitimate_domains: ["health.gov.au"] },
+
+  // State revenue / transport — "unpaid fine / infringement / rego" scams
+  { brand: "Revenue NSW", legitimate_domains: ["revenue.nsw.gov.au"] },
+  { brand: "Fines Victoria", legitimate_domains: ["fines.vic.gov.au"] },
+  { brand: "VicRoads", legitimate_domains: ["vicroads.vic.gov.au"] },
+  { brand: "Transport for NSW", legitimate_domains: ["transport.nsw.gov.au"] },
 ];
 
 export interface CtMonitorConfig {

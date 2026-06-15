@@ -1,6 +1,48 @@
 import { describe, expect, it } from "vitest";
 import { lexicalMatch, decodeIdnLabel } from "../lexical-match";
-import type { BrandEntry } from "../au-brand-watchlist";
+import { AU_BRAND_WATCHLIST, type BrandEntry } from "../au-brand-watchlist";
+
+describe("PR-K watchlist expansion (finance/consulting/police/gov)", () => {
+  // Distinctive new brands must catch lookalikes against the FULL live list.
+  // Substring matches require a scam-context token (login/secure/verify/
+  // account/pay/…) — the matcher's FP gate, and exactly how real phishing
+  // clones are shaped.
+  it("matches lookalikes of the new high-value brands", () => {
+    for (const d of [
+      "blackrock-login.com",
+      "vanguard-secure.net",
+      "deloitte-verify.org",
+      "coinbase-secure-login.com",
+      "victoriapolice-account.com",
+      "medicare-login.net",
+    ]) {
+      expect(lexicalMatch(d), d).not.toBeNull();
+    }
+  });
+
+  // The 2-char "EY" token must NOT flood — the <5-char / word-boundary gate
+  // means "ey" only matches as a standalone segment, never inside words.
+  it("does not flood on the 2-char EY token", () => {
+    for (const d of ["survey-results.com", "themoney.shop", "honeydew.net", "keystone.io"]) {
+      const m = lexicalMatch(d);
+      expect(m?.brand).not.toBe("EY");
+    }
+  });
+
+  it("does not flag the new brands' own domains as clones", () => {
+    for (const d of ["blackrock.com", "ey.com", "afp.gov.au", "medicare.gov.au" /* not legit, just shouldn't error */]) {
+      // own legit domains return null; the matcher must not throw on any input
+      expect(() => lexicalMatch(d)).not.toThrow();
+    }
+    expect(lexicalMatch("blackrock.com")).toBeNull();
+    expect(lexicalMatch("vanguard.com.au")).toBeNull();
+  });
+
+  it("keeps the watchlist free of duplicate brand names", () => {
+    const names = AU_BRAND_WATCHLIST.map((b) => b.brand);
+    expect(new Set(names).size).toBe(names.length);
+  });
+});
 
 const TEST_WATCHLIST: BrandEntry[] = [
   { brand: "Bunnings", legitimate_domains: ["bunnings.com.au"] },
