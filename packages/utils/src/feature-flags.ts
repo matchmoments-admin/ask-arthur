@@ -452,6 +452,16 @@ export const featureFlags = {
     "FF_SHOPFRONT_CLONE_SUBMIT_NETCRAFT",
   ),
 
+  /** Auto-report high-confidence branded clones to Netcraft WITHOUT waiting
+   *  for manual triage. Gates the clone-watch-netcraft-auto producer cron,
+   *  which emits one shopfront/clone.netcraft-auto.v1 per gated candidate
+   *  (preclassifier is_clone AND confidence ≥ threshold, branded, not in the
+   *  FP denylist, not already submitted); the existing submit-netcraft worker
+   *  (dedup + denylist + rate-limit) does the submission. Default OFF — flip
+   *  only after the dry-run count is reviewed. Netcraft re-verifies before any
+   *  blocklisting, so good-faith over-reporting of likely clones is safe. */
+  shopfrontCloneNetcraftAuto: readBoolEnv("FF_SHOPFRONT_CLONE_NETCRAFT_AUTO"),
+
   /** Layer 3+4 — brand-direct notification. Server-side only. Gates the
    *  shopfront-clone-notify-brand Inngest fn. Default OFF until
    *  brand_contact_directory is seeded for the full watchlist and the

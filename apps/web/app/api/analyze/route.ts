@@ -479,6 +479,17 @@ export async function POST(req: NextRequest) {
       }));
     }
 
+    // Persistence-only list for the onward-report pipeline: ONLY URLs a
+    // reputation engine (Safe Browsing / VirusTotal) actually flagged, so the
+    // onward producer forwards only relevant scam URLs to blocklists — never a
+    // benign/brand-real domain that co-occurred in a HIGH_RISK report.
+    // storeScamReport writes these to analysis_result.scammerUrls (host/path
+    // only). Gated on FF_SCAM_URL_REPORTING; empty array → key not written.
+    const reportableScammerUrls: string[] | undefined =
+      featureFlags.scamUrlReporting && maliciousURLs.length > 0
+        ? maliciousURLs.map((r) => r.url)
+        : undefined;
+
     // 8d. Intelligence Core: store unified report + entity linkage.
     //
     // When FF_ANALYZE_INNGEST_WEB is ON the `analyze-completed-report`
@@ -511,6 +522,7 @@ export async function POST(req: NextRequest) {
             await storeScamReport({
               reporterHash, source: "web", inputMode: mode || (images.length > 0 ? "image" : "text"),
               analysis: aiResult, text, region, countryCode, verifiedScamId, entities: entitiesToLink,
+              scammerUrls: reportableScammerUrls,
             });
           })().catch(err => logger.error("Report pipeline failed", { error: String(err) }))
         );
@@ -519,6 +531,7 @@ export async function POST(req: NextRequest) {
           storeScamReport({
             reporterHash, source: "web", inputMode: mode || (images.length > 0 ? "image" : "text"),
             analysis: aiResult, text, region, countryCode, entities: entitiesToLink,
+            scammerUrls: reportableScammerUrls,
           }).catch(err => logger.error("storeScamReport failed", { error: String(err) }))
         );
       }

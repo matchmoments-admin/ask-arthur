@@ -453,11 +453,34 @@ export const CloneWatchTriagedDataSchema = z.object({
   severityTier: z.string().min(1).max(32),
   signalType: z.string().min(1).max(64),
   score: z.number(),
-  triagedAt: z.string().datetime(),
+  // Accept any parseable datetime (strict ISO-Z, ISO-with-offset, or a raw
+  // Postgres `triaged_at` like `2026-06-15 06:20:00.591+00`) and normalise to
+  // canonical ISO-Z. The bare `z.string().datetime()` rejected timezone
+  // offsets (Zod 4 default), which crashed both the submit-netcraft and
+  // notify-brand consumers when a backfill re-emitted this event with a
+  // DB-sourced timestamp (Axiom burst 2026-06-15). Normalising here means the
+  // emit site can pass a DB column value or `new Date().toISOString()` and the
+  // consumers always see a clean ISO-Z string.
+  triagedAt: z
+    .string()
+    .min(1)
+    .refine((s) => !Number.isNaN(Date.parse(s)), {
+      message: "Invalid datetime",
+    })
+    .transform((s) => new Date(s).toISOString()),
 });
 export type CloneWatchTriagedData = z.infer<typeof CloneWatchTriagedDataSchema>;
 
 export const CLONE_WATCH_TRIAGED_EVENT = "shopfront/clone.triaged.v1" as const;
+
+// Auto-report path: emitted (per high-confidence branded clone) by the
+// clone-watch-netcraft-auto producer cron, consumed ONLY by the Netcraft
+// submit worker (a second trigger alongside CLONE_WATCH_TRIAGED_EVENT) — NOT
+// by notify-brand, so auto-reporting to Netcraft never triggers brand emails.
+// Same data shape as the triaged event (CloneWatchTriagedDataSchema), so the
+// worker parses both with parseCloneWatchTriagedData.
+export const CLONE_WATCH_NETCRAFT_AUTO_EVENT =
+  "shopfront/clone.netcraft-auto.v1" as const;
 
 export interface CloneWatchTriagedEvent {
   name: typeof CLONE_WATCH_TRIAGED_EVENT;

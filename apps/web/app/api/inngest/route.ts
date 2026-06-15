@@ -26,6 +26,10 @@ import {
 // triaged.v1 emitted from /api/admin/clone-watch/triage. Plan:
 // docs/plans/clone-watch-outreach.md.
 import { cloneWatchSubmitNetcraft } from "./functions/clone-watch-submit-netcraft";
+// Auto-report high-confidence branded clones to Netcraft without manual triage
+// (gated FF_SHOPFRONT_CLONE_NETCRAFT_AUTO). Emits netcraft-auto.v1 → the
+// submit-netcraft worker's second trigger. Needs post-deploy Inngest resync.
+import { cloneWatchNetcraftAuto } from "./functions/clone-watch-netcraft-auto";
 import { cloneWatchNotifyBrand } from "./functions/clone-watch-notify-brand";
 import { cloneWatchWeeklyDigest } from "./functions/clone-watch-weekly-digest";
 // Phase B — poll Netcraft for takedown status every 30 min. Powers the
@@ -92,6 +96,7 @@ const appFunctions = [
   onwardAskArthurFeed,
   // Clone-watch outreach (v143)
   cloneWatchSubmitNetcraft,
+  cloneWatchNetcraftAuto,
   cloneWatchNotifyBrand,
   cloneWatchWeeklyDigest,
   // Clone-watch measurement closure Phase B (v145)

@@ -52,6 +52,15 @@ export const handleAnalyzeCompletedReport = inngest.createFunction(
       extractionMethod: data.imageCount > 0 ? "claude" : "regex",
     });
 
+    // Only persist URLs a reputation engine actually flagged malicious, so the
+    // onward producer forwards ONLY relevant scam URLs to blocklists (never a
+    // benign/brand-real domain that merely co-occurred in a HIGH_RISK report).
+    // Gated on the FF_SCAM_URL_REPORTING snapshot taken at emission.
+    const scammerUrls =
+      data.consumerFlags.scamUrlReporting && data.urlResults
+        ? data.urlResults.filter((r) => r.isMalicious).map((r) => r.url)
+        : undefined;
+
     const reportId = await step.run("store-scam-report", async () => {
       // storeScamReport is internally idempotent via the idempotencyKey
       // passthrough to create_scam_report. Safe to call on retry.
@@ -76,6 +85,7 @@ export const handleAnalyzeCompletedReport = inngest.createFunction(
         verifiedScamId: null, // Phase 2b: set once verify consumer creates the verified_scams row
         entities,
         idempotencyKey: data.requestId,
+        scammerUrls,
       });
 
       if (result === null) {
