@@ -204,6 +204,11 @@ function bump(map: Record<string, number>, value: string | null | undefined): vo
   map[key] = (map[key] ?? 0) + 1;
 }
 
+/** Minimal HTML escape for the Telegram (HTML parse-mode) digest. */
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 function toCloneDetail(row: CloneAlertRow): CloneDetail {
   const server = row.urlscan_evidence?.server ?? {};
   // Fall back to the attribution dossier's hosting block when the live urlscan
@@ -461,7 +466,14 @@ export const reportBrandStewardship = inngest.createFunction(
 
     const prepared = await step.run("upsert-reports", async () => {
       const sb = createServiceClient();
-      if (!sb) return { prepared: 0, skipped_no_contact: 0, clones_attached: 0 };
+      if (!sb)
+        return {
+          prepared: 0,
+          skipped_no_contact: 0,
+          clones_attached: 0,
+          no_contact_clone_brands: 0,
+          no_contact_top: [] as Array<{ domain: string; count: number }>,
+        };
 
       // Never clobber a report already sent for this period.
       const { data: sentRows } = await sb
@@ -504,9 +516,18 @@ export const reportBrandStewardship = inngest.createFunction(
         byKey.set(key, e);
       }
 
+      // Clones for brands with NO known security contact. We can't email them,
+      // but we DON'T drop them silently — they become 'no_contact' rows so the
+      // admin can do manual outreach (find a security.txt, or LinkedIn the
+      // brand's security lead). Surfaced in the dashboard + the Telegram digest.
+      const noContact = new Map<string, CloneBrandMetrics>();
+
       for (const [brandDomain, cm] of cloneAgg) {
         const contact = contactByDomain.get(brandDomain);
-        if (!contact) continue; // brand has no email contact — skip clone-only
+        if (!contact) {
+          noContact.set(brandDomain, cm);
+          continue;
+        }
         const key = (
           contact.brand_key || deriveBrandKey(contact.brand_name)
         ).toLowerCase();
@@ -563,24 +584,85 @@ export const reportBrandStewardship = inngest.createFunction(
         }
         preparedCount += 1;
       }
+
+      // No-contact clone brands → 'skipped'/'no_contact' rows (recipient null),
+      // carrying the clone metrics so the dashboard shows the volume + a Preview.
+      // brand_key is namespaced so it never collides with a real (contacted)
+      // row for the same brand in a later month.
+      let noContactCount = 0;
+      const noContactBrands: Array<{ domain: string; count: number }> = [];
+      for (const [brandDomain, cm] of noContact) {
+        const key = `nocontact_${deriveBrandKey(brandDomain)}`;
+        if (alreadySent.has(key)) continue;
+        const { error } = await sb.from("brand_stewardship_reports").upsert(
+          {
+            brand_key: key,
+            brand_name: brandDomain,
+            period_month: periodMonth,
+            metrics: {
+              detected: 0,
+              reported_by_destination: {},
+              reports_sent: 0,
+              clones: {
+                detected: cm.detected,
+                by_classification: cm.byClassification,
+                by_country: cm.byCountry,
+                by_registrar: cm.byRegistrar,
+                by_asn: cm.byAsn,
+                domains: cm.domains,
+                alert_ids: cm.alertIds,
+              },
+            },
+            evidence_scam_report_ids: [],
+            recipient_email: null,
+            status: "skipped",
+            status_reason: "no_contact",
+            prepared_at: nowIso,
+          },
+          { onConflict: "brand_key,period_month" },
+        );
+        if (error) {
+          logger.error("brand-stewardship: no-contact upsert failed", {
+            brandDomain,
+            period: periodMonth,
+            error: error.message,
+          });
+          continue;
+        }
+        noContactCount += 1;
+        noContactBrands.push({ domain: brandDomain, count: cm.detected });
+      }
+      noContactBrands.sort((a, b) => b.count - a.count);
+
       return {
         prepared: preparedCount,
         skipped_no_contact: skippedNoContact,
         clones_attached: clonesAttached,
+        no_contact_clone_brands: noContactCount,
+        no_contact_top: noContactBrands.slice(0, 15),
       };
     });
 
     await step.run("telegram-digest", async () => {
-      await sendAdminTelegramMessage(
-        [
-          `<b>Brand Stewardship — ${periodMonth} prepared</b>`,
-          `Onward-active brands: <b>${aggregated.size}</b> · clone-active brands: <b>${cloneAgg.size}</b>`,
-          `Reports prepared (have contact): <b>${prepared.prepared}</b>`,
-          `…of which carry clone detections: <b>${prepared.clones_attached}</b>`,
-          `Skipped (no known_brands contact): ${prepared.skipped_no_contact}`,
-          `Review + send at askarthur.au/admin/brand-stewardship`,
-        ].join("\n"),
-      );
+      const lines = [
+        `<b>Brand Stewardship — ${periodMonth} prepared</b>`,
+        `Onward-active brands: <b>${aggregated.size}</b> · clone-active brands: <b>${cloneAgg.size}</b>`,
+        `Reports prepared (have contact): <b>${prepared.prepared}</b>`,
+        `…of which carry clone detections: <b>${prepared.clones_attached}</b>`,
+        `Skipped (no known_brands contact): ${prepared.skipped_no_contact}`,
+      ];
+      // Manual-outreach nudge: clone-targeted brands we can't email (no contact).
+      if (prepared.no_contact_clone_brands > 0) {
+        lines.push(
+          ``,
+          `⚠️ <b>${prepared.no_contact_clone_brands} clone-targeted brand(s) have NO security contact</b> — manual outreach (security.txt / LinkedIn):`,
+          ...prepared.no_contact_top.map(
+            (b) => `· ${escapeHtml(b.domain)} — ${b.count} clone${b.count === 1 ? "" : "s"}`,
+          ),
+        );
+      }
+      lines.push(``, `Review + send at askarthur.au/admin/brand-stewardship`);
+      await sendAdminTelegramMessage(lines.join("\n"));
     });
 
     logger.info("brand-stewardship: complete", {

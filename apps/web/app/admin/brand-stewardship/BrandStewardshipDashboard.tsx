@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Eye, Loader2, X, Clock, Send } from "lucide-react";
+import { Eye, Loader2, X, Clock, Send, AlertTriangle } from "lucide-react";
 
 export interface StewardshipRow {
   id: string;
@@ -10,6 +10,7 @@ export interface StewardshipRow {
   brandName: string;
   periodMonth: string; // YYYY-MM-01
   detected: number;
+  clonesDetected: number;
   reportsSent: number;
   recipientEmail: string | null;
   status: string;
@@ -101,9 +102,15 @@ export default function BrandStewardshipDashboard({
     );
   }
 
+  // No-contact rows (clones detected, but no security contact → can't email)
+  // are surfaced separately as a manual-outreach worklist; everything else
+  // flows through the normal per-period review/send list.
+  const noContactRows = rows.filter((r) => r.statusReason === "no_contact");
+  const normalRows = rows.filter((r) => r.statusReason !== "no_contact");
+
   // Group by period, newest first (rows arrive pre-sorted by period desc).
   const byPeriod = new Map<string, StewardshipRow[]>();
-  for (const r of rows) {
+  for (const r of normalRows) {
     const list = byPeriod.get(r.periodMonth) ?? [];
     list.push(r);
     byPeriod.set(r.periodMonth, list);
@@ -124,6 +131,48 @@ export default function BrandStewardshipDashboard({
         <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
         </div>
+      )}
+
+      {noContactRows.length > 0 && (
+        <section className="mb-8 rounded-lg border border-amber-300 bg-amber-50 p-4">
+          <h2 className="flex items-center gap-2 text-amber-900 text-lg font-bold mb-1">
+            <AlertTriangle size={18} />
+            Manual outreach — no security contact ({noContactRows.length})
+          </h2>
+          <p className="text-amber-900/80 text-sm mb-3 leading-relaxed">
+            We detected clones impersonating these brands but have no email
+            contact in <code>known_brands</code>, so the monthly report can&apos;t
+            be sent. Find a <code>security.txt</code> / abuse address (then add it
+            and verify), or do manual outreach (e.g. LinkedIn the brand&apos;s
+            security lead). Preview shows what they&apos;d receive.
+          </p>
+          <ul className="space-y-2">
+            {noContactRows.map((r) => (
+              <li
+                key={r.id}
+                className="flex items-center justify-between gap-3 rounded-md border border-amber-200 bg-white px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <p className="font-bold text-deep-navy text-sm truncate">
+                    {r.brandName}
+                  </p>
+                  <p className="text-xs text-gov-slate mt-0.5">
+                    {r.clonesDetected} clone{r.clonesDetected === 1 ? "" : "s"} ·{" "}
+                    {monthLabel(r.periodMonth)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => openPreview(r.id)}
+                  className="inline-flex shrink-0 min-h-[36px] items-center justify-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold uppercase tracking-widest text-deep-navy hover:bg-slate-50"
+                >
+                  <Eye size={14} />
+                  Preview
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {[...byPeriod.entries()].map(([period, list]) => (
@@ -169,8 +218,9 @@ export default function BrandStewardshipDashboard({
                   </span>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs text-gov-slate">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs text-gov-slate">
                   <Field label="Detected" value={String(r.detected)} />
+                  <Field label="Clones" value={String(r.clonesDetected)} />
                   <Field label="Reports sent" value={String(r.reportsSent)} />
                   <Field label="Brand key" value={r.brandKey} />
                 </div>
