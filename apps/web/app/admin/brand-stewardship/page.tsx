@@ -11,6 +11,7 @@ interface MetricsShape {
   detected?: number;
   reported_by_destination?: Record<string, number>;
   reports_sent?: number;
+  clones?: { detected?: number };
 }
 
 export default async function BrandStewardshipPage() {
@@ -37,6 +38,7 @@ export default async function BrandStewardshipPage() {
         brandName: r.brand_name as string,
         periodMonth: String(r.period_month).slice(0, 10),
         detected: m.detected ?? 0,
+        clonesDetected: m.clones?.detected ?? 0,
         reportsSent: m.reports_sent ?? 0,
         recipientEmail: (r.recipient_email as string | null) ?? null,
         status: r.status as string,
