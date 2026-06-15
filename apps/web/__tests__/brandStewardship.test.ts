@@ -65,6 +65,36 @@ describe("aggregateClonesByDomain", () => {
     expect(d.abuse_email).toBe("abuse@namesilo.com");
   });
 
+  it("does not throw when a JSONB dimension is a non-string (array/number registrar)", () => {
+    // Regression for 2026-06-15: one prod clone had attribution.whois.registrar
+    // as an ARRAY (WHOIS returned multiple records), and bump() called .trim()
+    // on it → `TypeError: t.trim is not a function`, aborting the whole monthly
+    // prepare run. The aggregator must coerce non-string JSONB values.
+    const agg = aggregateClonesByDomain([
+      cloneRow({
+        id: 1,
+        candidate_domain: "anz-arr.click",
+        attribution: {
+          whois: { registrar: ["GoDaddy.com, LLC", "Reseller"] },
+        } as unknown as CloneAlertRow["attribution"],
+      }),
+      cloneRow({
+        id: 2,
+        candidate_domain: "anz-num.click",
+        // No server.asn so the numeric hosting.asn is what reaches bump().
+        urlscan_evidence: { server: { ip: "5.6.7.8", country: "US" } } as unknown as CloneAlertRow["urlscan_evidence"],
+        attribution: {
+          hosting: { asn: 13335 },
+        } as unknown as CloneAlertRow["attribution"],
+      }),
+    ]);
+    const m = agg.get("anz.com.au")!;
+    expect(m.detected).toBe(2);
+    // coerced to a string bucket, not crashed
+    expect(Object.keys(m.byRegistrar)).toContain("GoDaddy.com, LLC,Reseller");
+    expect(Object.keys(m.byAsn)).toContain("13335");
+  });
+
   it("skips rows without an inferred_target_domain", () => {
     expect(aggregateClonesByDomain([cloneRow({ inferred_target_domain: null })]).size).toBe(0);
   });

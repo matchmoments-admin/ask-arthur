@@ -10,6 +10,7 @@ import { logCost, PRICING } from "@/lib/cost-telemetry";
 import BrandStewardshipReport from "@/emails/BrandStewardshipReport";
 import { cloneDetectionsFromMetrics } from "@/lib/email/brand-stewardship-clone-detections";
 import { signUnsubscribeUrl } from "@/lib/unsubscribe";
+import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 
 const UNSUBSCRIBE_BASE = "https://askarthur.au/api/brand-stewardship/unsubscribe";
 
@@ -206,6 +207,26 @@ export async function POST(
       .from("brand_stewardship_reports")
       .update({ status: "failed", status_reason: `resend_error: ${reason.slice(0, 200)}` })
       .eq("id", id);
+    // Push a Telegram alert so a failed brand send isn't missed (the admin gets
+    // the 502 in-UI, but cold-outreach failures — bad address, Resend reject —
+    // are worth a proactive ping, especially for a REAL (non-shadow) send).
+    try {
+      await sendAdminTelegramMessage(
+        [
+          `🚨 <b>Brand-stewardship send FAILED</b>`,
+          ``,
+          `Brand: <b>${row.brand_name}</b>`,
+          `Recipient: <code>${recipient}</code>${isShadow ? " (shadow)" : " (REAL)"}`,
+          `Reason: <code>${reason.slice(0, 200)}</code>`,
+          `Row id: <code>${id}</code> — marked <code>failed</code>. Review at askarthur.au/admin/brand-stewardship`,
+        ].join("\n"),
+      );
+    } catch (tgErr) {
+      logger.error("brand-stewardship send: telegram alert failed", {
+        id,
+        error: String(tgErr),
+      });
+    }
     return NextResponse.json({ error: "send_failed", detail: reason }, { status: 502 });
   }
 
