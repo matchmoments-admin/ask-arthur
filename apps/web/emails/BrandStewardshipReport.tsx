@@ -32,6 +32,11 @@ const LINKEDIN_URL = "https://www.linkedin.com/company/askarthur";
  *  /partner page ships. */
 const PARTNERSHIP_URL = "https://askarthur.au/contact";
 
+// The email shows a readable slice of the lookalikes; the rest live on the
+// share page (which stores up to CLONE_DETAIL_CAP=100). Keeps the email well
+// under Gmail's ~102 KB clipping threshold.
+const EMAIL_CLONE_DISPLAY_CAP = 20;
+
 export interface BrandStewardshipReportProps {
   brandName: string;
   /** Human period label, e.g. "May 2026". */
@@ -295,7 +300,7 @@ export default function BrandStewardshipReport({
                   </Text>
                 )}
 
-                {cloneDetections.domains.map((c) => (
+                {cloneDetections.domains.slice(0, EMAIL_CLONE_DISPLAY_CAP).map((c) => (
                   <Section
                     key={c.domain}
                     style={{
@@ -361,11 +366,19 @@ export default function BrandStewardshipReport({
                     </Text>
                   </Section>
                 ))}
-                {cloneDetections.detected > cloneDetections.domains.length && (
+                {cloneDetections.detected >
+                  Math.min(cloneDetections.domains.length, EMAIL_CLONE_DISPLAY_CAP) && (
                   <Text style={{ color: "#94A3B8", fontSize: "12px", margin: "4px 0 0 0" }}>
-                    + {cloneDetections.detected - cloneDetections.domains.length} more
-                    lookalike{cloneDetections.detected - cloneDetections.domains.length === 1 ? "" : "s"} —
-                    full list available on request.
+                    +{" "}
+                    {cloneDetections.detected -
+                      Math.min(cloneDetections.domains.length, EMAIL_CLONE_DISPLAY_CAP)}{" "}
+                    more lookalike
+                    {cloneDetections.detected -
+                      Math.min(cloneDetections.domains.length, EMAIL_CLONE_DISPLAY_CAP) ===
+                    1
+                      ? ""
+                      : "s"}{" "}
+                    — {shareUrl ? "see the full breakdown above" : "full list available on request"}.
                   </Text>
                 )}
               </Section>

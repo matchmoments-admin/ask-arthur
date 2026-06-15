@@ -20,19 +20,25 @@ export const ICANN_COMPLAINT_URL = "https://www.icann.org/compliance/complaint";
  * Known registrar abuse-report pages, keyed by a normalised registrar token.
  * Matched by substring against the normalised WHOIS registrar string so the
  * many surface forms ("GoDaddy.com, LLC", "GoDaddy.com LLC") all resolve.
+ *
+ * URLs verified live 2026-06-15. Note: Namecheap / NameSilo / Dynadot /
+ * Cloudflare return 403 to scripted `curl` (bot/WAF) but resolve fine in a
+ * browser — these are the canonical abuse pages. Anything we're NOT confident
+ * about is omitted and falls back to the per-domain WHOIS abuse email +
+ * ICANN_COMPLAINT_URL (e.g. Google Domains, now defunct/migrated to Squarespace
+ * with no clean abuse URL, is deliberately not listed).
  */
 const REGISTRAR_ABUSE_URLS: ReadonlyArray<{ match: string; url: string }> = [
   { match: "godaddy", url: "https://supportcenter.godaddy.com/AbuseReport" },
   { match: "namecheap", url: "https://www.namecheap.com/legal/abuse-policy/report-abuse/" },
   { match: "namesilo", url: "https://www.namesilo.com/Support/Report-Abuse" },
   { match: "dynadot", url: "https://www.dynadot.com/report-abuse" },
-  { match: "hostinger", url: "https://www.hostinger.com/abuse-reports" },
+  { match: "hostinger", url: "https://www.hostinger.com/legal/abuse-policy" },
   // Cloudflare is both a registrar AND a common reverse-proxy host — one form
   // covers both. See hostAbuseUrl() for the hosting-side use.
   { match: "cloudflare", url: "https://abuse.cloudflare.com/" },
   { match: "porkbun", url: "https://porkbun.com/abuse" },
   { match: "tucows", url: "https://tucowsdomains.com/report-abuse/" },
-  { match: "google", url: "https://support.google.com/domains/answer/9072198" },
 ];
 
 function normalise(s: string): string {
