@@ -47,6 +47,11 @@ export const BRAND_STEWARDSHIP_SLOTS = {
     default:
       "We keep a full evidence record for every domain above. Reply to this email if you'd like the underlying evidence pack, a different report format, or to discuss working together more closely.",
   },
+  partnership: {
+    label: "CTA lead-in (feedback / partnership)",
+    default:
+      "If this summary helped your team, a quick review or shout-out helps a small Australian service reach more brands — and we'd love to explore protecting **{{brandName}}** more deeply together.",
+  },
 } satisfies Record<string, SlotDef>;
 
 export const BRAND_ABUSE_SLOTS = {

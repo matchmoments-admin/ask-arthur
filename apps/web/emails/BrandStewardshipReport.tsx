@@ -12,6 +12,25 @@ import {
 } from "@react-email/components";
 import { renderCopySlot } from "@/lib/email/resolve-copy";
 import { BRAND_STEWARDSHIP_SLOTS } from "@/lib/email/copy-registry";
+import {
+  registrarAbuseUrl,
+  hostAbuseUrl,
+  ICANN_COMPLAINT_URL,
+} from "@/lib/email/registrar-abuse";
+import { withUtm } from "@/lib/utm";
+
+const CTA_UTM = {
+  source: "email",
+  medium: "email",
+  campaign: "brand-stewardship",
+} as const;
+
+const TRUSTPILOT_URL = "https://au.trustpilot.com/evaluate/askarthur.au";
+const LINKEDIN_URL = "https://www.linkedin.com/company/askarthur";
+/** Partnership enquiry destination. /for-business doesn't exist yet; /contact
+ *  is the live partnership-enquiry surface. Swap here if a /for-business or
+ *  /partner page ships. */
+const PARTNERSHIP_URL = "https://askarthur.au/contact";
 
 export interface BrandStewardshipReportProps {
   brandName: string;
@@ -33,6 +52,9 @@ export interface BrandStewardshipReportProps {
   cloneDetections?: CloneDetections;
   /** Correlation ref, e.g. "BSR-7_eleven-2026-05". */
   reportRef: string;
+  /** Public read-only share page URL (forward-to-your-team). When present, a
+   *  "Share with your team" link + a CTA pointing here are rendered. */
+  shareUrl?: string;
   /** Unsubscribe / STOP mailto. */
   stopUrl?: string;
   /** Editable prose overrides (Email Studio). Falls back to slot defaults. */
@@ -61,6 +83,11 @@ export interface CloneDetections {
   detected: number;
   /** Per-classification counts for the headline. */
   byClassification?: Record<string, number>;
+  /** Consumable analytics — counts across ALL clones (not just the shown
+   *  detail rows). Drives the breakdown bars. */
+  byCountry?: Record<string, number>;
+  byRegistrar?: Record<string, number>;
+  byAsn?: Record<string, number>;
   /** Per-clone detail rows (already capped by the caller, ~25). */
   domains: CloneDetectionRow[];
 }
@@ -90,6 +117,7 @@ export default function BrandStewardshipReport({
   sampleDomains,
   cloneDetections,
   reportRef,
+  shareUrl,
   stopUrl,
   copy,
 }: BrandStewardshipReportProps) {
@@ -234,6 +262,39 @@ export default function BrandStewardshipReport({
                   Hosting and registrar details for each lookalike let your team
                   file takedowns directly with the host or registrar.
                 </Text>
+
+                {/* Consumable analytics — where the clones are hosted +
+                    registered, at a glance. Pure inline-CSS bars so every email
+                    client renders them; the share page has the interactive
+                    version. */}
+                <BreakdownBars
+                  title="Where they're hosted (country)"
+                  data={cloneDetections.byCountry}
+                />
+                <BreakdownBars
+                  title="Who registered them"
+                  data={cloneDetections.byRegistrar}
+                  linkFor={(label) =>
+                    registrarAbuseUrl(label) ?? ICANN_COMPLAINT_URL
+                  }
+                />
+                <BreakdownBars
+                  title="Hosting network (ASN)"
+                  data={cloneDetections.byAsn}
+                  linkFor={(label) => hostAbuseUrl(label)}
+                />
+
+                {shareUrl && (
+                  <Text style={{ margin: "4px 0 14px 0" }}>
+                    <Link
+                      href={shareUrl}
+                      style={{ color: "#0F766E", fontSize: "13px", fontWeight: 700 }}
+                    >
+                      Share this breakdown with your team →
+                    </Link>
+                  </Text>
+                )}
+
                 {cloneDetections.domains.map((c) => (
                   <Section
                     key={c.domain}
@@ -277,6 +338,27 @@ export default function BrandStewardshipReport({
                         )}
                       </Text>
                     )}
+                    {/* One-click abuse-report channels: registrar (or ICANN
+                        fallback) + host where we know a self-serve form. */}
+                    <Text style={{ fontSize: "12px", lineHeight: "1.5", margin: "2px 0 0 0" }}>
+                      <Link
+                        href={registrarAbuseUrl(c.registrar) ?? ICANN_COMPLAINT_URL}
+                        style={{ color: "#0F766E", fontWeight: 700 }}
+                      >
+                        Report to registrar →
+                      </Link>
+                      {hostAbuseUrl(c.asn) && (
+                        <>
+                          {"  ·  "}
+                          <Link
+                            href={hostAbuseUrl(c.asn) as string}
+                            style={{ color: "#0F766E", fontWeight: 700 }}
+                          >
+                            Report to host →
+                          </Link>
+                        </>
+                      )}
+                    </Text>
                   </Section>
                 ))}
                 {cloneDetections.detected > cloneDetections.domains.length && (
@@ -315,6 +397,44 @@ export default function BrandStewardshipReport({
               dangerouslySetInnerHTML={{ __html: slot("working_together") }}
             />
 
+            {/* CTA card — feedback / shout-out / partnership. Links UTM-tagged
+                so Plausible attributes them to this email. */}
+            <Section
+              style={{
+                backgroundColor: "#1B2A4A",
+                borderRadius: "8px",
+                padding: "20px 24px",
+                margin: "20px 0 0 0",
+              }}
+            >
+              <Heading
+                as="h3"
+                style={{ color: "#FFFFFF", fontSize: "15px", fontWeight: 700, margin: "0 0 6px 0" }}
+              >
+                Was this useful?
+              </Heading>
+              <div
+                style={{ color: "#B8C1D1", fontSize: "13px", lineHeight: "1.6", margin: "0 0 12px 0" }}
+                dangerouslySetInnerHTML={{ __html: slot("partnership") }}
+              />
+              <Text style={{ margin: 0, lineHeight: "1.8" }}>
+                <Link
+                  href={withUtm(TRUSTPILOT_URL, CTA_UTM)}
+                  style={ctaLink}
+                >
+                  Leave a Trustpilot review →
+                </Link>
+                <br />
+                <Link href={withUtm(LINKEDIN_URL, CTA_UTM)} style={ctaLink}>
+                  Give us a shout-out on LinkedIn →
+                </Link>
+                <br />
+                <Link href={withUtm(PARTNERSHIP_URL, CTA_UTM)} style={ctaLink}>
+                  Explore a partnership →
+                </Link>
+              </Text>
+            </Section>
+
             <Hr style={{ borderColor: "#E2E8F0", margin: "24px 0" }} />
 
             <Text style={{ color: "#64748B", fontSize: "12px", lineHeight: "1.5", margin: 0 }}>
@@ -348,6 +468,92 @@ const codeInline = {
   padding: "1px 4px",
   borderRadius: "3px",
 } as const;
+
+const ctaLink = {
+  color: "#7DD3C0",
+  fontSize: "13px",
+  fontWeight: 700,
+  textDecoration: "none" as const,
+} as const;
+
+/**
+ * Inline-CSS horizontal bar breakdown — one row per category, sorted desc,
+ * top 6, "Unknown" sunk to the bottom. Email-client-safe (no SVG/JS): a track
+ * div + a filled div sized by percentage. `linkFor` optionally turns each
+ * label into an abuse-report link (used for the registrar breakdown).
+ */
+function BreakdownBars({
+  title,
+  data,
+  linkFor,
+}: {
+  title: string;
+  data?: Record<string, number>;
+  linkFor?: (label: string) => string | null;
+}) {
+  const entries = Object.entries(data ?? {}).filter(([, n]) => n > 0);
+  if (entries.length === 0) return null;
+  entries.sort((a, b) => {
+    // Keep "Unknown" last regardless of count — it's the least actionable.
+    if (a[0] === "Unknown" && b[0] !== "Unknown") return 1;
+    if (b[0] === "Unknown" && a[0] !== "Unknown") return -1;
+    return b[1] - a[1];
+  });
+  const top = entries.slice(0, 6);
+  const max = Math.max(...top.map(([, n]) => n));
+
+  return (
+    <Section style={{ margin: "0 0 14px 0" }}>
+      <Text
+        style={{
+          fontSize: "11px",
+          textTransform: "uppercase" as const,
+          color: "#64748B",
+          letterSpacing: "0.05em",
+          margin: "0 0 6px 0",
+          fontWeight: 700,
+        }}
+      >
+        {title}
+      </Text>
+      {top.map(([label, n]) => {
+        const pct = Math.max(6, Math.round((n / max) * 100));
+        const href = linkFor?.(label) ?? null;
+        return (
+          <Section key={label} style={{ margin: "0 0 5px 0" }}>
+            <Text style={{ fontSize: "12px", color: "#334155", margin: "0 0 2px 0" }}>
+              {href ? (
+                <Link href={href} style={{ color: "#0F766E" }}>
+                  {label}
+                </Link>
+              ) : (
+                label
+              )}{" "}
+              <span style={{ color: "#94A3B8" }}>· {n}</span>
+            </Text>
+            <div
+              style={{
+                backgroundColor: "#E2E8F0",
+                borderRadius: "3px",
+                height: "8px",
+                width: "100%",
+              }}
+            >
+              <div
+                style={{
+                  backgroundColor: "#0F766E",
+                  borderRadius: "3px",
+                  height: "8px",
+                  width: `${pct}%`,
+                }}
+              />
+            </div>
+          </Section>
+        );
+      })}
+    </Section>
+  );
+}
 
 const labelStyle = {
   fontSize: "12px",

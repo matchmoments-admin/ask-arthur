@@ -42,6 +42,9 @@ describe("buildInternalDigestHtml", () => {
   const metrics = (over: Partial<CloneBrandMetrics>): CloneBrandMetrics => ({
     detected: over.detected ?? 1,
     byClassification: over.byClassification ?? { neutral: 1 },
+    byCountry: over.byCountry ?? { SG: 1 },
+    byRegistrar: over.byRegistrar ?? { NameSilo: 1 },
+    byAsn: over.byAsn ?? { AS123: 1 },
     domains: over.domains ?? [
       {
         domain: "anz-login.click",
