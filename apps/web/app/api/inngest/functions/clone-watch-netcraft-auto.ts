@@ -29,13 +29,27 @@ import { logCost } from "@/lib/cost-telemetry";
  * throw, so a transient Netcraft hiccup never raises an Inngest fn error / the
  * Axiom fleet alert.
  *
+ * Daily cap (no flooding). The candidate RPC (v185) folds in a 24h budget:
+ * it counts clones already auto-bulk-submitted in the last 24h and returns at
+ * most (DAILY_CAP − that), hard-capped at 50, ordered best-confidence-first. So
+ * a normal day is ONE bulk request of ≤50 URLs, and re-firing the manual
+ * trigger cannot exceed the day's budget — structurally impossible to flood.
+ *
+ * Test mode. Fire the manual-trigger event with `{ test: true }` to validate
+ * the exact payload against Netcraft's TEST endpoint (validates only — NO
+ * report is created, NO confirmation emails). Nothing is persisted. This is the
+ * sanctioned way to prove the path works without touching the live submit API.
+ *
  * Triple-gated: FF_SHOPFRONT_CLONE_NETCRAFT_AUTO (this producer) +
  * FF_SHOPFRONT_CLONE_SUBMIT_NETCRAFT + FF_SHOPFRONT_CLONE_OUTREACH. Default OFF.
- * Cron 09:30 UTC + a manual-trigger event for the one-off backlog.
+ * Cron 09:30 UTC + a manual-trigger event.
  */
 
 const NETCRAFT_REPORT_ENDPOINT = "https://report.netcraft.com/api/v3/report/urls";
-const BATCH_LIMIT = 100; // well under Netcraft's bulk ceiling; one request
+// Validation-only endpoint: checks the payload, creates no report, sends no
+// email. Used by test mode so we never abuse the live intake while validating.
+const NETCRAFT_TEST_ENDPOINT = "https://report.netcraft.com/api/v3/test/report/urls";
+const DAILY_CAP = 50; // max clones auto-submitted to Netcraft per 24h
 const MIN_CONFIDENCE = 0.7;
 
 /** Row shape returned by list_clone_alerts_pending_netcraft_auto. */
@@ -95,13 +109,19 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
   ],
   withAxiomLogging(
     { fnId: "shopfront-clone-netcraft-auto" },
-    async ({ step }) => {
-      if (!featureFlags.shopfrontCloneNetcraftAuto) {
+    async ({ event, step }) => {
+      // Test mode validates the payload against Netcraft's test endpoint only —
+      // no report, no email, no persistence. Bypasses the FF gate so we can
+      // prove the path works while the feature is still dark.
+      const isTest = (event?.data as { test?: unknown } | undefined)?.test === true;
+
+      if (!isTest && !featureFlags.shopfrontCloneNetcraftAuto) {
         return { skipped: true, reason: "FF_SHOPFRONT_CLONE_NETCRAFT_AUTO disabled" };
       }
       if (
-        !featureFlags.shopfrontCloneSubmitNetcraft ||
-        !featureFlags.shopfrontCloneOutreach
+        !isTest &&
+        (!featureFlags.shopfrontCloneSubmitNetcraft ||
+          !featureFlags.shopfrontCloneOutreach)
       ) {
         return { skipped: true, reason: "netcraft_submit_or_outreach_disabled" };
       }
@@ -112,7 +132,7 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
       const candidates = await step.run("load-candidates", async () => {
         const { data, error } = await sb.rpc(
           "list_clone_alerts_pending_netcraft_auto",
-          { p_limit: BATCH_LIMIT, p_min_confidence: MIN_CONFIDENCE },
+          { p_min_confidence: MIN_CONFIDENCE, p_daily_cap: DAILY_CAP },
         );
         if (error) {
           logger.error("netcraft-auto: candidate fetch failed", {
@@ -124,25 +144,30 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
       });
 
       if (candidates.length === 0) {
-        return { ok: true, candidates: 0, submitted: 0 };
+        // Either the daily cap is exhausted or there are no pending candidates.
+        return { ok: true, test: isTest, candidates: 0, submitted: 0, reason: "no_candidates_or_cap_reached" };
       }
 
-      // ONE bulk submission for the whole batch — no per-request flood.
+      // ONE bulk request for the whole (≤50) batch — no per-request flood.
+      // Test mode hits the validation-only endpoint (no report, no email).
       const result = await step.run("submit-netcraft-bulk", async () => {
         const body = buildNetcraftBulkBody(
           candidates,
           process.env.NETCRAFT_REPORTER_EMAIL ?? "brendan@askarthur.au",
         );
         const apiKey = process.env.NETCRAFT_REPORT_API_KEY;
-        const res = await fetch(NETCRAFT_REPORT_ENDPOINT, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+        const res = await fetch(
+          isTest ? NETCRAFT_TEST_ENDPOINT : NETCRAFT_REPORT_ENDPOINT,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+            },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(30_000),
           },
-          body: JSON.stringify(body),
-          signal: AbortSignal.timeout(30_000),
-        });
+        );
         const text = await res.text();
         let parsed: Record<string, unknown> = {};
         try {
@@ -156,9 +181,28 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
           uuid: typeof parsed.uuid === "string" ? parsed.uuid : null,
           state: typeof parsed.state === "string" ? parsed.state : null,
           errText: res.ok ? null : text.slice(0, 200),
+          raw: parsed,
           urlCount: body.urls.length,
         };
       });
+
+      // Test mode: report the validation outcome, persist NOTHING.
+      if (isTest) {
+        logger.info("netcraft-auto: TEST-endpoint validation", {
+          ok: result.ok,
+          status: result.status,
+          urlCount: result.urlCount,
+          response: result.raw,
+        });
+        return {
+          ok: result.ok,
+          test: true,
+          validated: result.ok,
+          status: result.status,
+          urlCount: result.urlCount,
+          response: result.raw,
+        };
+      }
 
       if (!result.ok) {
         // Soft-fail: $0 diagnostic so the daily digest surfaces it, but do NOT
