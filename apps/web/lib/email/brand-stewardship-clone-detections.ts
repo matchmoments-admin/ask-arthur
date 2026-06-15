@@ -20,6 +20,9 @@ interface StoredCloneDomain {
 interface StoredClones {
   detected?: number;
   by_classification?: Record<string, number>;
+  by_country?: Record<string, number>;
+  by_registrar?: Record<string, number>;
+  by_asn?: Record<string, number>;
   domains?: StoredCloneDomain[];
 }
 
@@ -33,6 +36,9 @@ export function cloneDetectionsFromMetrics(
   return {
     detected: c.detected,
     byClassification: c.by_classification,
+    byCountry: c.by_country,
+    byRegistrar: c.by_registrar,
+    byAsn: c.by_asn,
     domains: c.domains.map((d) => ({
       domain: d.domain,
       classification: d.classification ?? null,
