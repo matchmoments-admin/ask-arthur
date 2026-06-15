@@ -9,6 +9,9 @@ import { logger } from "@askarthur/utils/logger";
 import { logCost, PRICING } from "@/lib/cost-telemetry";
 import BrandStewardshipReport from "@/emails/BrandStewardshipReport";
 import { cloneDetectionsFromMetrics } from "@/lib/email/brand-stewardship-clone-detections";
+import { signUnsubscribeUrl } from "@/lib/unsubscribe";
+
+const UNSUBSCRIBE_BASE = "https://askarthur.au/api/brand-stewardship/unsubscribe";
 
 export const dynamic = "force-dynamic";
 
@@ -93,6 +96,25 @@ export async function POST(
         { status: 422 },
       );
     }
+    // Unsubscribe-gate: honour an opt-out before any real send. Shadow sends
+    // (to ourselves) skip this — they're for our own validation.
+    const { data: unsub } = await sb
+      .from("brand_report_unsubscribes")
+      .select("email")
+      .eq("email", (recipient as string).toLowerCase())
+      .maybeSingle();
+    if (unsub) {
+      await sb
+        .from("brand_stewardship_reports")
+        .update({ status: "skipped", status_reason: "recipient_unsubscribed" })
+        .eq("id", id)
+        .neq("status", "sent");
+      return NextResponse.json({
+        ok: true,
+        status: "skipped",
+        reason: "recipient_unsubscribed",
+      });
+    }
     // Verified-gate: a REAL-brand send requires an authoritatively-verified
     // contact (known_brands.last_verified_at set, e.g. from the brand's own
     // security.txt or a human check). Best-effort placeholder contacts (v179
@@ -131,6 +153,13 @@ export async function POST(
   const period = String(row.period_month).slice(0, 10);
   const label = periodLabel(period);
 
+  // One-click signed unsubscribe (RFC 8058) + a mailto STOP fallback. The
+  // in-body "Unsubscribe" link uses the same signed URL (a one-click GET).
+  const unsubscribeUrl = signUnsubscribeUrl(recipient as string, UNSUBSCRIBE_BASE);
+  const stopMailto = `mailto:brendan@askarthur.au?subject=${encodeURIComponent(
+    `STOP brand-protection summaries — ${row.brand_name}`,
+  )}`;
+
   const html = await render(
     BrandStewardshipReport({
       brandName: row.brand_name as string,
@@ -143,6 +172,7 @@ export async function POST(
       shareUrl: row.share_token
         ? `https://askarthur.au/clone-report/${row.share_token}`
         : undefined,
+      stopUrl: unsubscribeUrl,
     }),
   );
 
@@ -155,6 +185,10 @@ export async function POST(
         to: [recipient as string],
         subject: `${row.brand_name} brand-protection summary — ${label}`,
         html,
+        headers: {
+          "List-Unsubscribe": `<${unsubscribeUrl}>, <${stopMailto}>`,
+          "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        },
       },
       { idempotencyKey: `bsr-send:${id}` },
     );
