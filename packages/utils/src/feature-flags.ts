@@ -417,6 +417,13 @@ export const featureFlags = {
    *  and sending is gated twice (producer flag + worker flag). */
   onwardAutoReport: readBoolEnv("FF_ONWARD_AUTO_REPORT"),
 
+  /** Onward reporting — ACMA spam intake destination
+   *  (report@submit.spam.acma.gov.au). Server-side only. Gates the
+   *  report-onward-acma-email-spam worker so the destination can be darkened
+   *  without a deploy (matches the OpenPhish/APWG skip-when-OFF semantics).
+   *  Default OFF. */
+  onwardAcma: readBoolEnv("FF_ONWARD_ACMA"),
+
   /** CT monitor expanded keyword set — when ON, ct-monitor.ts sweeps crt.sh
    *  for the research-driven concentrated AU target brands (super funds,
    *  Linkt, energy retailers, Macquarie/Optus/Vodafone, Medibank/Bupa, Qantas,

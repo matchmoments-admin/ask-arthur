@@ -18,13 +18,49 @@ interface ReviewRow {
   sent_so_far_for_brand: number;
 }
 
+interface SentStats {
+  total: number;
+  last30d: number;
+  byDestination: Record<string, number>;
+}
+
+/**
+ * Proof / SPF-pitch stat: reports we've actually SENT on brands' behalf
+ * (status='sent' only — never claims a takedown). Date math lives here, not in
+ * the component render. 0 today until the onward flags are flipped.
+ */
+async function loadSentStats(
+  supabase: NonNullable<ReturnType<typeof createServiceClient>>,
+): Promise<SentStats> {
+  const stats: SentStats = { total: 0, last30d: 0, byDestination: {} };
+  const { data: sentRows } = await supabase
+    .from("onward_report_log")
+    .select("destination, sent_at")
+    .eq("status", "sent")
+    .limit(5000);
+  const cutoff = Date.now() - 30 * 86400000;
+  for (const r of sentRows ?? []) {
+    stats.total += 1;
+    if (r.sent_at && new Date(r.sent_at as string).getTime() > cutoff) {
+      stats.last30d += 1;
+    }
+    const d = r.destination as string;
+    stats.byDestination[d] = (stats.byDestination[d] ?? 0) + 1;
+  }
+  return stats;
+}
+
 export default async function OnwardReportsPage() {
   await requireAdmin();
   const supabase = createServiceClient();
   let manualReview: ReviewRow[] = [];
   let recent: ReviewRow[] = [];
+  const sentStats = supabase
+    ? await loadSentStats(supabase)
+    : { total: 0, last30d: 0, byDestination: {} as Record<string, number> };
 
   if (supabase) {
+
     // Manual-review queue (held pending admin approval)
     const { data: pending } = await supabase
       .from("onward_report_log")
@@ -126,6 +162,39 @@ export default async function OnwardReportsPage() {
         the email goes out. Approving fires the Inngest worker with the
         threshold bypassed; rejecting marks the row skipped with your reason.
       </p>
+
+      {/* Proof stat — reports actually SENT on brands' behalf (the SPF number). */}
+      <section className="mb-6 rounded-lg border border-slate-200 bg-slate-50 px-5 py-4">
+        <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
+          <span>
+            <span className="text-2xl font-bold text-deep-navy">
+              {sentStats.total.toLocaleString()}
+            </span>{" "}
+            <span className="text-sm text-gov-slate">
+              reports sent on brands&apos; behalf (all time)
+            </span>
+          </span>
+          <span className="text-sm text-gov-slate">
+            <strong className="text-deep-navy">{sentStats.last30d}</strong> in
+            the last 30 days
+          </span>
+        </div>
+        {Object.keys(sentStats.byDestination).length > 0 ? (
+          <p className="mt-2 text-xs text-gov-slate">
+            {Object.entries(sentStats.byDestination)
+              .sort((a, b) => b[1] - a[1])
+              .map(([d, n]) => `${d}: ${n}`)
+              .join(" · ")}
+          </p>
+        ) : (
+          <p className="mt-2 text-xs text-gov-slate">
+            None yet — the onward pipeline is gated off (FF_ONWARD_AUTO_REPORT /
+            FF_ONWARD_OPENPHISH). Counts only <code>status=&apos;sent&apos;</code>;
+            never claims a takedown.
+          </p>
+        )}
+      </section>
+
       <OnwardReportsDashboard manualReview={manualReview} recent={recent} />
     </div>
   );
