@@ -41,6 +41,37 @@ export interface StoreScamReportParams {
    * header handling. See supabase/migration-v73-analyze-idempotency.sql.
    */
   idempotencyKey?: string;
+  /**
+   * URLs to persist onto analysis_result.scammerUrls (string[]) so the
+   * onward-report producer can forward them to URL blocklists. The CALLER
+   * is responsible for the relevance gate — pass ONLY URLs a reputation
+   * engine flagged malicious (isMalicious), and only when the
+   * FF_SCAM_URL_REPORTING flag is on. This module stays env-agnostic; it
+   * just strips each URL to scheme/host/path (no query/fragment, so no
+   * victim PII lands at rest) and caps the list. Omit / empty = the key is
+   * not written, which the producer's extractScammerUrls reads as "no URL".
+   */
+  scammerUrls?: string[];
+}
+
+/** Max scammer URLs persisted per report — bounds the JSON blob. */
+const MAX_SCAMMER_URLS = 20;
+
+/**
+ * Strip a URL to scheme/host/path, dropping query + fragment. A captured
+ * scam/phishing URL can carry victim PII in its query params (e.g.
+ * `?email=...`), and we forward these onward to third-party blocklists, so we
+ * never store (or later send) the raw query string. Mirrors stripUrlPii in
+ * apps/web/lib/onward/url-blocklist-report.ts; falls back to a manual split so
+ * a malformed URL is still truncated, never stored whole.
+ */
+export function stripUrlToHostPath(rawUrl: string): string {
+  try {
+    const u = new URL(rawUrl);
+    return `${u.protocol}//${u.host}${u.pathname}`;
+  } catch {
+    return rawUrl.split(/[?#]/)[0];
+  }
 }
 
 /**
@@ -71,6 +102,17 @@ export async function storeScamReport(
     // content). Stage-1 PR 3 replaces this with a typed shop_checks row.
     if (params.analysis.shopSignal) {
       scrubbedResult.shopSignal = params.analysis.shopSignal;
+    }
+    // Persist caller-vetted (isMalicious-filtered) scammer URLs as a plain
+    // string[] so the onward-report producer's extractScammerUrls finds them.
+    // Strip to host/path + dedupe + cap. Only written when non-empty.
+    if (params.scammerUrls && params.scammerUrls.length > 0) {
+      const cleaned = Array.from(
+        new Set(params.scammerUrls.map(stripUrlToHostPath).filter(Boolean)),
+      ).slice(0, MAX_SCAMMER_URLS);
+      if (cleaned.length > 0) {
+        scrubbedResult.scammerUrls = cleaned;
+      }
     }
 
     // 1. Create report row
