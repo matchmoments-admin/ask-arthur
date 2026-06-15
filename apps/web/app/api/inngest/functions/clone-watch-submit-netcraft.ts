@@ -2,7 +2,6 @@ import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import {
   CLONE_WATCH_TRIAGED_EVENT,
-  CLONE_WATCH_NETCRAFT_AUTO_EVENT,
   parseCloneWatchTriagedData,
 } from "@askarthur/scam-engine/inngest/events";
 import { createServiceClient } from "@askarthur/supabase/server";
@@ -53,17 +52,11 @@ export const cloneWatchSubmitNetcraft = inngest.createFunction(
     // real TP-clone rate (~a few/day), so it only ever clips a triage burst.
     rateLimit: { limit: 30, period: "1h" },
   },
-  // Two triggers, same data shape (CloneWatchTriagedData):
-  //   - CLONE_WATCH_TRIAGED_EVENT      → manual admin triage (also fans out to
-  //     notify-brand)
-  //   - CLONE_WATCH_NETCRAFT_AUTO_EVENT → the netcraft-auto producer cron
-  //     (Netcraft-only, no brand notification)
-  // Idempotency(alertId) + the submitted_to.netcraft dedup mean a clone reached
-  // by both paths is still submitted at most once.
-  [
-    { event: CLONE_WATCH_TRIAGED_EVENT },
-    { event: CLONE_WATCH_NETCRAFT_AUTO_EVENT },
-  ],
+  // Per-candidate submission for the manual admin-triage path (one human triage
+  // = one URL = one Netcraft call, so no rate-limit risk). The bulk auto-report
+  // backlog goes through clone-watch-netcraft-auto instead (one batched call),
+  // which is why this worker no longer carries a second auto-report trigger.
+  { event: CLONE_WATCH_TRIAGED_EVENT },
   withAxiomLogging({ fnId: "shopfront-clone-submit-netcraft" }, async ({ event, step }) => {
     const data = parseCloneWatchTriagedData(event.data);
 
