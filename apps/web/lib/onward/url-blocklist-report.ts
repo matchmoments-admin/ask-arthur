@@ -1,4 +1,5 @@
 import { createServiceClient } from "@askarthur/supabase/server";
+import { readStringEnv } from "@askarthur/utils/env";
 import { logger } from "@askarthur/utils/logger";
 import { Resend } from "resend";
 import { createHash } from "node:crypto";
@@ -166,12 +167,21 @@ async function sendOnward(
 ): Promise<{ id: string } | null> {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) throw new Error("RESEND_API_KEY not configured");
+  // Canary / validation mode: when ONWARD_CANARY_RECIPIENT is set, ALL onward
+  // URL-blocklist reports go to that inbox (ours) instead of the real intake —
+  // lets us verify the full pipeline (real status='sent' + provider_message_id)
+  // without emailing OpenPhish/APWG until the format + acceptance are confirmed.
+  const canary = readStringEnv("ONWARD_CANARY_RECIPIENT");
+  const to = canary || intakeEmail;
+  const subject = canary
+    ? `[CANARY → ${intakeEmail}] Phishing URL report via Ask Arthur — ref ${reportRef}`
+    : `Phishing URL report via Ask Arthur — ref ${reportRef}`;
   const resend = new Resend(apiKey);
   const result = await resend.emails.send({
     from: FROM_EMAIL,
-    to: [intakeEmail],
+    to: [to],
     replyTo: REPLY_TO_EMAIL,
-    subject: `Phishing URL report via Ask Arthur — ref ${reportRef}`,
+    subject,
     text,
   });
   if (result.error) {
