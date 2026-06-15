@@ -157,7 +157,12 @@ export function priorMonthStart(now: Date): Date {
 // ── Clone-watch detections (the lookalike-domain + hosting/registrar source) ──
 
 const CLONE_FETCH_LIMIT = 3000;
-const CLONE_DETAIL_CAP = 25; // per-brand detail rows carried into the email
+// Per-brand detail rows stored in metrics.clones.domains. Sized so the public
+// share page (/clone-report/[token]) is effectively the FULL list for all
+// real-world volumes (observed max ~30/brand); the email renders a much smaller
+// slice (EMAIL_CLONE_DISPLAY_CAP in BrandStewardshipReport) and links here for
+// the rest. by_country/registrar/asn + `detected` always reflect the true total.
+const CLONE_DETAIL_CAP = 100;
 
 export interface CloneAlertRow {
   id: number;

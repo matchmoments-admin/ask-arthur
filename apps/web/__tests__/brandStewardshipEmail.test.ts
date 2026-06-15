@@ -95,7 +95,7 @@ describe("BrandStewardshipReport email", () => {
     expect(html).toContain("NameSilo, LLC"); // registrar
     expect(html).toContain("abuse@namesilo.com"); // abuse contact
     expect(html).toContain("Likely phishing"); // classification chip
-    expect(html).toContain("full list available on request"); // overflow line (detected 3 > 2 shown)
+    expect(html).toContain("see the full breakdown above"); // overflow line w/ shareUrl (detected 3 > 2 shown)
     // Breakdown bars + abuse-report links + share link.
     expect(html).toContain("Where they&#x27;re hosted (country)");
     expect(html).toContain("Who registered them");
