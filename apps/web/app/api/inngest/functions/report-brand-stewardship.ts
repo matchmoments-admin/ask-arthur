@@ -198,9 +198,17 @@ export interface CloneBrandMetrics {
   alertIds: number[];
 }
 
-/** Bucket a nullable dimension value, folding empties into "Unknown". */
-function bump(map: Record<string, number>, value: string | null | undefined): void {
-  const key = value && value.trim() ? value.trim() : "Unknown";
+/**
+ * Bucket a nullable dimension value, folding empties into "Unknown".
+ * Coerces with String() because the values come from the clone attribution
+ * JSONB (asn / country / registrar), where a value can be a NUMBER at runtime
+ * (e.g. an ASN stored as an integer) despite the typed shape — calling .trim()
+ * on a number threw `TypeError: t.trim is not a function` and aborted the whole
+ * monthly prepare run (2026-06-15).
+ */
+function bump(map: Record<string, number>, value: unknown): void {
+  const s = value == null ? "" : String(value).trim();
+  const key = s || "Unknown";
   map[key] = (map[key] ?? 0) + 1;
 }
 
