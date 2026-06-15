@@ -264,8 +264,10 @@ export default function BrandStewardshipReport({
                   Lookalike domains &amp; where they&apos;re hosted
                 </Text>
                 <Text style={{ color: "#475569", fontSize: "13px", lineHeight: "1.5", margin: "0 0 12px 0" }}>
-                  Hosting and registrar details for each lookalike let your team
-                  file takedowns directly with the host or registrar.
+                  These are the suspected clone / lookalike domains we detected
+                  impersonating <strong>{brandName}</strong> this period and
+                  reported on your behalf. Each one&apos;s hosting and registrar
+                  details are below so your team can action takedowns directly.
                 </Text>
 
                 {/* Consumable analytics — where the clones are hosted +
@@ -343,27 +345,30 @@ export default function BrandStewardshipReport({
                         )}
                       </Text>
                     )}
-                    {/* One-click abuse-report channels: registrar (or ICANN
-                        fallback) + host where we know a self-serve form. */}
-                    <Text style={{ fontSize: "12px", lineHeight: "1.5", margin: "2px 0 0 0" }}>
-                      <Link
-                        href={registrarAbuseUrl(c.registrar) ?? ICANN_COMPLAINT_URL}
-                        style={{ color: "#0F766E", fontWeight: 700 }}
-                      >
-                        Report to registrar →
-                      </Link>
-                      {hostAbuseUrl(c.asn) && (
-                        <>
-                          {"  ·  "}
+                    {/* One-click abuse-report channels: registrar (only when we
+                        actually know the registrar) + host where we know a
+                        self-serve form. Hidden entirely when we have neither. */}
+                    {(c.registrar || hostAbuseUrl(c.asn)) && (
+                      <Text style={{ fontSize: "12px", lineHeight: "1.5", margin: "2px 0 0 0" }}>
+                        {c.registrar && (
+                          <Link
+                            href={registrarAbuseUrl(c.registrar) ?? ICANN_COMPLAINT_URL}
+                            style={{ color: "#0F766E", fontWeight: 700 }}
+                          >
+                            Report to registrar →
+                          </Link>
+                        )}
+                        {c.registrar && hostAbuseUrl(c.asn) && "  ·  "}
+                        {hostAbuseUrl(c.asn) && (
                           <Link
                             href={hostAbuseUrl(c.asn) as string}
                             style={{ color: "#0F766E", fontWeight: 700 }}
                           >
                             Report to host →
                           </Link>
-                        </>
-                      )}
-                    </Text>
+                        )}
+                      </Text>
+                    )}
                   </Section>
                 ))}
                 {cloneDetections.detected >
