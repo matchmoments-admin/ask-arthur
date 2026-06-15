@@ -473,15 +473,6 @@ export type CloneWatchTriagedData = z.infer<typeof CloneWatchTriagedDataSchema>;
 
 export const CLONE_WATCH_TRIAGED_EVENT = "shopfront/clone.triaged.v1" as const;
 
-// Auto-report path: emitted (per high-confidence branded clone) by the
-// clone-watch-netcraft-auto producer cron, consumed ONLY by the Netcraft
-// submit worker (a second trigger alongside CLONE_WATCH_TRIAGED_EVENT) — NOT
-// by notify-brand, so auto-reporting to Netcraft never triggers brand emails.
-// Same data shape as the triaged event (CloneWatchTriagedDataSchema), so the
-// worker parses both with parseCloneWatchTriagedData.
-export const CLONE_WATCH_NETCRAFT_AUTO_EVENT =
-  "shopfront/clone.netcraft-auto.v1" as const;
-
 export interface CloneWatchTriagedEvent {
   name: typeof CLONE_WATCH_TRIAGED_EVENT;
   id: string;

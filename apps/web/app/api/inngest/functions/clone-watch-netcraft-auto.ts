@@ -1,5 +1,4 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
-import { CLONE_WATCH_NETCRAFT_AUTO_EVENT } from "@askarthur/scam-engine/inngest/events";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -9,29 +8,34 @@ import { logCost } from "@/lib/cost-telemetry";
 /**
  * Clone-Watch — Netcraft AUTO-report producer (PR3).
  *
- * Today a clone only reaches Netcraft when a human manually triages it
- * (the admin triage route emits CLONE_WATCH_TRIAGED_EVENT). That leaves the
- * high-confidence branded tail unreported. This cron sweeps clones the Haiku
- * preclassifier judged a likely clone (is_clone AND confidence >= threshold)
- * that target a real brand, aren't FP-denylisted, and haven't been submitted,
- * and emits one shopfront/clone.netcraft-auto.v1 per candidate.
+ * Today a clone only reaches Netcraft when a human manually triages it (the
+ * admin triage route emits CLONE_WATCH_TRIAGED_EVENT → the per-candidate
+ * submit-netcraft worker). That leaves the high-confidence branded tail
+ * unreported. This cron sweeps clones the Haiku preclassifier judged a likely
+ * clone (is_clone AND confidence >= threshold) that target a real brand,
+ * aren't FP-denylisted, and haven't been submitted.
  *
- * That event is a SECOND trigger on the existing clone-watch-submit-netcraft
- * worker (NOT on notify-brand), so auto-reporting submits to Netcraft without
- * sending any brand email. The worker's idempotency(alertId) + the
- * submitted_to.netcraft dedup + its 30/hr rate-limit + FP_BRAND_DENYLIST all
- * still apply, so this never double-reports and stays a good citizen. Netcraft
- * re-verifies every submission before any blocklisting.
+ * BULK submission (not per-candidate fan-out). The first cut fanned out one
+ * `shopfront/clone.netcraft-auto.v1` event per candidate into the per-candidate
+ * worker; with 100–160 candidates that made 100–160 separate Netcraft API calls
+ * and tripped Netcraft's per-request rate limit (HTTP 429 — Axiom error burst
+ * 2026-06-15 ~07:30 UTC). Netcraft's /api/v3/report/urls accepts an ARRAY of
+ * urls in ONE call (the manual backfill submitted 107 at once with no 429), so
+ * we submit the whole batch in a single keyless request and mark every alert
+ * with the returned uuid. One request → no 429.
+ *
+ * A non-2xx from Netcraft is logged as a $0 diagnostic (surfaces in the daily
+ * cost digest) and the batch is left unmarked for the next run — we do NOT
+ * throw, so a transient Netcraft hiccup never raises an Inngest fn error / the
+ * Axiom fleet alert.
  *
  * Triple-gated: FF_SHOPFRONT_CLONE_NETCRAFT_AUTO (this producer) +
- * FF_SHOPFRONT_CLONE_SUBMIT_NETCRAFT + FF_SHOPFRONT_CLONE_OUTREACH (the worker).
- * Default OFF — flip only after the dry-run count is reviewed.
- *
- * Cron 09:30 UTC — after the 09:00 urlscan submit + preclassify have settled.
- * Also fires on a manual-trigger event for the one-off backlog run.
+ * FF_SHOPFRONT_CLONE_SUBMIT_NETCRAFT + FF_SHOPFRONT_CLONE_OUTREACH. Default OFF.
+ * Cron 09:30 UTC + a manual-trigger event for the one-off backlog.
  */
 
-const BATCH_LIMIT = 100;
+const NETCRAFT_REPORT_ENDPOINT = "https://report.netcraft.com/api/v3/report/urls";
+const BATCH_LIMIT = 100; // well under Netcraft's bulk ceiling; one request
 const MIN_CONFIDENCE = 0.7;
 
 /** Row shape returned by list_clone_alerts_pending_netcraft_auto. */
@@ -44,69 +48,43 @@ export interface NetcraftAutoCandidate {
   signals: unknown;
 }
 
-interface NetcraftAutoEvent {
-  name: typeof CLONE_WATCH_NETCRAFT_AUTO_EVENT;
-  id: string;
-  data: {
-    alertId: number;
-    brand: string;
-    candidateDomain: string;
-    candidateUrl: string;
-    severityTier: string;
-    signalType: string;
-    score: number;
-    triagedAt: string;
-  };
+export interface NetcraftBulkBody {
+  email: string;
+  reason: string;
+  urls: Array<{ url: string; country: string }>;
 }
 
 /**
- * Pure mapping from candidate rows → per-candidate auto-report events. Mirrors
- * the payload the admin triage route builds for CLONE_WATCH_TRIAGED_EVENT
- * (signalType/score read off signals[0]); the worker parses both shapes with
- * parseCloneWatchTriagedData. `triagedAt` is passed in (deterministic id stays
- * `clone-netcraft-auto:<id>` so re-runs dedup at the Inngest layer).
+ * Pure builder for the bulk Netcraft report body. One batch-level reason (the
+ * bulk endpoint takes a single reason for all urls); each url is AU. Dedupes
+ * urls so the same candidate_url isn't sent twice in one batch.
  */
-export function buildNetcraftAutoEvents(
+export function buildNetcraftBulkBody(
   candidates: NetcraftAutoCandidate[],
-  triagedAt: string,
-): NetcraftAutoEvent[] {
-  return candidates.map((c) => {
-    const signal = Array.isArray(c.signals) ? c.signals[0] : null;
-    const signalType =
-      signal &&
-      typeof signal === "object" &&
-      "signal_type" in signal &&
-      typeof (signal as { signal_type?: unknown }).signal_type === "string"
-        ? (signal as { signal_type: string }).signal_type
-        : "unknown";
-    const score =
-      signal &&
-      typeof signal === "object" &&
-      "score" in signal &&
-      typeof (signal as { score?: unknown }).score === "number"
-        ? (signal as { score: number }).score
-        : 0;
-    return {
-      name: CLONE_WATCH_NETCRAFT_AUTO_EVENT,
-      id: `clone-netcraft-auto:${c.id}`,
-      data: {
-        alertId: c.id,
-        brand: c.inferred_target_domain,
-        candidateDomain: c.candidate_domain,
-        candidateUrl: c.candidate_url,
-        severityTier: c.severity_tier ?? "low",
-        signalType,
-        score,
-        triagedAt,
-      },
-    };
-  });
+  reporterEmail: string,
+): NetcraftBulkBody {
+  const seen = new Set<string>();
+  const urls: Array<{ url: string; country: string }> = [];
+  for (const c of candidates) {
+    if (!c.candidate_url || seen.has(c.candidate_url)) continue;
+    seen.add(c.candidate_url);
+    urls.push({ url: c.candidate_url, country: "AU" });
+  }
+  return {
+    email: reporterEmail,
+    reason:
+      "Possible clones / lookalike-typosquat domains of Australian brands, " +
+      "detected via Ask Arthur clone-watch's daily NRD lexical sweep " +
+      "(askarthur.au brand watchlist; high-confidence preclassifier matches). " +
+      "Submitted in good faith for Netcraft classification.",
+    urls,
+  };
 }
 
 export const cloneWatchNetcraftAuto = inngest.createFunction(
   {
     id: "shopfront-clone-netcraft-auto",
-    name: "Clone-Watch: Netcraft auto-report producer (gated)",
+    name: "Clone-Watch: Netcraft auto-report producer (bulk, gated)",
     retries: 1,
     singleton: { mode: "skip" },
     timeouts: { finish: "4m" },
@@ -121,8 +99,6 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
       if (!featureFlags.shopfrontCloneNetcraftAuto) {
         return { skipped: true, reason: "FF_SHOPFRONT_CLONE_NETCRAFT_AUTO disabled" };
       }
-      // The worker would no-op without these anyway; gate the producer too so we
-      // don't enqueue events that can't be actioned.
       if (
         !featureFlags.shopfrontCloneSubmitNetcraft ||
         !featureFlags.shopfrontCloneOutreach
@@ -148,35 +124,111 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
       });
 
       if (candidates.length === 0) {
-        return { ok: true, candidates: 0, enqueued: 0 };
+        return { ok: true, candidates: 0, submitted: 0 };
       }
 
-      const enqueued = await step.run("emit-events", async () => {
-        const events = buildNetcraftAutoEvents(
+      // ONE bulk submission for the whole batch — no per-request flood.
+      const result = await step.run("submit-netcraft-bulk", async () => {
+        const body = buildNetcraftBulkBody(
           candidates,
-          new Date().toISOString(),
+          process.env.NETCRAFT_REPORTER_EMAIL ?? "brendan@askarthur.au",
         );
-        await inngest.send(events);
-        return events.length;
+        const apiKey = process.env.NETCRAFT_REPORT_API_KEY;
+        const res = await fetch(NETCRAFT_REPORT_ENDPOINT, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+          },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(30_000),
+        });
+        const text = await res.text();
+        let parsed: Record<string, unknown> = {};
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          parsed = { raw: text };
+        }
+        return {
+          ok: res.ok,
+          status: res.status,
+          uuid: typeof parsed.uuid === "string" ? parsed.uuid : null,
+          state: typeof parsed.state === "string" ? parsed.state : null,
+          errText: res.ok ? null : text.slice(0, 200),
+          urlCount: body.urls.length,
+        };
+      });
+
+      if (!result.ok) {
+        // Soft-fail: $0 diagnostic so the daily digest surfaces it, but do NOT
+        // throw — a transient Netcraft non-2xx must not raise an Inngest fn
+        // error (which pages the Axiom fleet watch). Left unmarked → retried
+        // next run.
+        await step.run("log-submit-failure", async () => {
+          logCost({
+            feature: "shopfront-clone-netcraft-auto-error",
+            provider: "netcraft",
+            operation: "bulk_submit",
+            units: result.urlCount,
+            unitCostUsd: 0,
+            metadata: { status: result.status, error: result.errText },
+          });
+        });
+        logger.warn("netcraft-auto: bulk submit non-2xx (will retry next run)", {
+          status: result.status,
+          urlCount: result.urlCount,
+        });
+        return { ok: false, candidates: candidates.length, submitted: 0, status: result.status };
+      }
+
+      // Mark every alert in the batch submitted (atomic per-alert JSONB merge,
+      // same RPC the per-candidate worker uses) with the batch uuid.
+      const marked = await step.run("persist-submissions", async () => {
+        const submittedAt = new Date().toISOString();
+        let n = 0;
+        for (const c of candidates) {
+          const { error } = await sb.rpc("merge_clone_alert_submission", {
+            p_alert_id: c.id,
+            p_key: "netcraft",
+            p_value: {
+              uuid: result.uuid,
+              state: result.state,
+              submitted_at: submittedAt,
+              via: "auto_bulk",
+            },
+            p_set_triage_status: "tp_actioned",
+          });
+          if (error) {
+            logger.error("netcraft-auto: mark-submitted failed", {
+              alertId: c.id,
+              error: error.message,
+            });
+          } else {
+            n++;
+          }
+        }
+        return n;
       });
 
       await step.run("log-cost", async () => {
         logCost({
           feature: "shopfront_clone_netcraft_auto",
           provider: "netcraft",
-          operation: "enqueue_batch",
-          units: enqueued,
+          operation: "bulk_submit",
+          units: marked,
           unitCostUsd: 0, // keyless intake
-          metadata: { candidates: candidates.length, enqueued },
+          metadata: { candidates: candidates.length, marked, netcraft_uuid: result.uuid },
         });
       });
 
-      logger.info("netcraft-auto: enqueued", {
+      logger.info("netcraft-auto: bulk submission complete", {
         candidates: candidates.length,
-        enqueued,
+        marked,
+        netcraftUuid: result.uuid,
       });
 
-      return { ok: true, candidates: candidates.length, enqueued };
+      return { ok: true, candidates: candidates.length, submitted: marked, netcraftUuid: result.uuid };
     },
   ),
 );

@@ -1,12 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  buildNetcraftAutoEvents,
+  buildNetcraftBulkBody,
   type NetcraftAutoCandidate,
 } from "@/app/api/inngest/functions/clone-watch-netcraft-auto";
-import { parseCloneWatchTriagedData } from "@askarthur/scam-engine/inngest/events";
-
-const TS = "2026-06-15T09:30:00.000Z";
 
 function candidate(o: Partial<NetcraftAutoCandidate> = {}): NetcraftAutoCandidate {
   return {
@@ -20,55 +17,48 @@ function candidate(o: Partial<NetcraftAutoCandidate> = {}): NetcraftAutoCandidat
   };
 }
 
-describe("buildNetcraftAutoEvents", () => {
-  it("maps a candidate to a netcraft-auto event with a stable id + valid triaged shape", () => {
-    const [ev] = buildNetcraftAutoEvents([candidate()], TS);
-    expect(ev.name).toBe("shopfront/clone.netcraft-auto.v1");
-    expect(ev.id).toBe("clone-netcraft-auto:501");
-    expect(ev.data).toMatchObject({
-      alertId: 501,
-      brand: "qantas.com.au",
-      candidateDomain: "qantasw.shop",
-      candidateUrl: "https://qantasw.shop/login",
-      severityTier: "low",
-      signalType: "lexical",
-      score: 0.82,
-      triagedAt: TS,
-    });
-  });
-
-  it("produces data the worker's parseCloneWatchTriagedData accepts (round-trip)", () => {
-    const [ev] = buildNetcraftAutoEvents([candidate()], TS);
-    const parsed = parseCloneWatchTriagedData(ev.data);
-    expect(parsed.alertId).toBe(501);
-    expect(parsed.triagedAt).toBe(TS);
-  });
-
-  it("falls back to unknown/0 when signals are missing or malformed", () => {
-    const [ev] = buildNetcraftAutoEvents(
-      [candidate({ signals: null })],
-      TS,
+describe("buildNetcraftBulkBody", () => {
+  it("submits ALL candidate urls in ONE bulk body (no per-candidate fan-out)", () => {
+    const body = buildNetcraftBulkBody(
+      [
+        candidate({ id: 1, candidate_url: "https://a.test/x" }),
+        candidate({ id: 2, candidate_url: "https://b.test/y" }),
+        candidate({ id: 3, candidate_url: "https://c.test/z" }),
+      ],
+      "brendan@askarthur.au",
     );
-    expect(ev.data.signalType).toBe("unknown");
-    expect(ev.data.score).toBe(0);
-  });
-
-  it("defaults severityTier to low when null", () => {
-    const [ev] = buildNetcraftAutoEvents(
-      [candidate({ severity_tier: null })],
-      TS,
-    );
-    expect(ev.data.severityTier).toBe("low");
-  });
-
-  it("maps each candidate independently", () => {
-    const evs = buildNetcraftAutoEvents(
-      [candidate({ id: 1 }), candidate({ id: 2 })],
-      TS,
-    );
-    expect(evs.map((e) => e.id)).toEqual([
-      "clone-netcraft-auto:1",
-      "clone-netcraft-auto:2",
+    expect(body.email).toBe("brendan@askarthur.au");
+    expect(body.urls).toEqual([
+      { url: "https://a.test/x", country: "AU" },
+      { url: "https://b.test/y", country: "AU" },
+      { url: "https://c.test/z", country: "AU" },
     ]);
+    expect(body.reason).toMatch(/clone-watch/i);
+  });
+
+  it("dedupes repeated candidate_urls in one batch", () => {
+    const body = buildNetcraftBulkBody(
+      [
+        candidate({ id: 1, candidate_url: "https://dup.test/x" }),
+        candidate({ id: 2, candidate_url: "https://dup.test/x" }),
+      ],
+      "brendan@askarthur.au",
+    );
+    expect(body.urls).toHaveLength(1);
+  });
+
+  it("skips empty candidate_urls", () => {
+    const body = buildNetcraftBulkBody(
+      [candidate({ id: 1, candidate_url: "" }), candidate({ id: 2 })],
+      "brendan@askarthur.au",
+    );
+    expect(body.urls).toEqual([
+      { url: "https://qantasw.shop/login", country: "AU" },
+    ]);
+  });
+
+  it("produces an empty url list for no candidates", () => {
+    const body = buildNetcraftBulkBody([], "brendan@askarthur.au");
+    expect(body.urls).toEqual([]);
   });
 });
