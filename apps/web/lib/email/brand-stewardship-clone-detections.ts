@@ -19,6 +19,7 @@ interface StoredCloneDomain {
 
 interface StoredClones {
   detected?: number;
+  netcraft_reported?: number;
   by_classification?: Record<string, number>;
   by_country?: Record<string, number>;
   by_registrar?: Record<string, number>;
@@ -35,6 +36,7 @@ export function cloneDetectionsFromMetrics(
   }
   return {
     detected: c.detected,
+    netcraftReported: c.netcraft_reported ?? 0,
     byClassification: c.by_classification,
     byCountry: c.by_country,
     byRegistrar: c.by_registrar,

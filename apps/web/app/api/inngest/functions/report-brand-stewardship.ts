@@ -175,6 +175,7 @@ export interface CloneAlertRow {
     whois?: { registrar?: string; registrarAbuseEmail?: string };
     hosting?: { ip?: string; asn?: string; country?: string };
   } | null;
+  submitted_to: Record<string, unknown> | null;
 }
 
 export interface CloneDetail {
@@ -189,6 +190,8 @@ export interface CloneDetail {
 
 export interface CloneBrandMetrics {
   detected: number;
+  /** Distinct clone domains we submitted to Netcraft (browser/blocklist). */
+  netcraftReported: number;
   byClassification: Record<string, number>;
   /** Consumable analytics — counts across ALL deduped clones (not just the
    *  capped detail list), so the email's breakdown bars reflect the full set. */
@@ -263,6 +266,7 @@ export function aggregateClonesByDomain(
     if (!m) {
       m = {
         detected: 0,
+        netcraftReported: 0,
         byClassification: {},
         byCountry: {},
         byRegistrar: {},
@@ -278,6 +282,9 @@ export function aggregateClonesByDomain(
     seen.add(row.candidate_domain);
 
     m.detected += 1;
+    if (row.submitted_to && "netcraft" in row.submitted_to) {
+      m.netcraftReported += 1;
+    }
     m.alertIds.push(row.id);
     const cls = row.urlscan_classification ?? "unclassified";
     m.byClassification[cls] = (m.byClassification[cls] ?? 0) + 1;
@@ -399,7 +406,7 @@ export const reportBrandStewardship = inngest.createFunction(
       const { data, error } = await sb
         .from("shopfront_clone_alerts")
         .select(
-          "id, candidate_domain, inferred_target_domain, urlscan_classification, urlscan_evidence, attribution",
+          "id, candidate_domain, inferred_target_domain, urlscan_classification, urlscan_evidence, attribution, submitted_to",
         )
         .eq("source", "nrd")
         .gte("first_seen_at", period.startIso)
@@ -568,6 +575,7 @@ export const reportBrandStewardship = inngest.createFunction(
         if (e.clones) {
           metrics.clones = {
             detected: e.clones.detected,
+            netcraft_reported: e.clones.netcraftReported,
             by_classification: e.clones.byClassification,
             by_country: e.clones.byCountry,
             by_registrar: e.clones.byRegistrar,
@@ -622,6 +630,7 @@ export const reportBrandStewardship = inngest.createFunction(
               reports_sent: 0,
               clones: {
                 detected: cm.detected,
+                netcraft_reported: cm.netcraftReported,
                 by_classification: cm.byClassification,
                 by_country: cm.byCountry,
                 by_registrar: cm.byRegistrar,
