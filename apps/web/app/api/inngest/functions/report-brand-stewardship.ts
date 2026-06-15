@@ -5,6 +5,7 @@ import { brandNormalize } from "@askarthur/shopfront-glue";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
+import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
 
 /**
  * Monthly Brand Stewardship Report — aggregation + ledger (WS2-cap).
@@ -404,6 +405,9 @@ export const reportBrandStewardship = inngest.createFunction(
         .gte("first_seen_at", period.startIso)
         .lt("first_seen_at", period.endIso)
         .not("inferred_target_domain", "is", null)
+        // Exclude confirmed false positives, but KEEP untriaged rows (null) —
+        // most detections are untriaged and the digest is meant to show them.
+        .or("triage_status.is.null,triage_status.neq.fp")
         .limit(CLONE_FETCH_LIMIT);
       if (error) {
         logger.error("brand-stewardship: clone fetch failed", {
@@ -417,7 +421,12 @@ export const reportBrandStewardship = inngest.createFunction(
           period: periodMonth,
         });
       }
-      return (data ?? []) as unknown as CloneAlertRow[];
+      // Drop generic-dictionary FP brands (domain.com.au / lendi.com.au / …)
+      // so they never surface in the digest or the LinkedIn worklist, even if
+      // a stale detection wasn't triaged 'fp'. Mirrors the Netcraft denylist.
+      return ((data ?? []) as unknown as CloneAlertRow[]).filter(
+        (r) => !isFpBrand(r.inferred_target_domain),
+      );
     });
     const cloneAgg = aggregateClonesByDomain(cloneRows);
 

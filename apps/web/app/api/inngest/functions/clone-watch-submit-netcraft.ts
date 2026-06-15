@@ -8,6 +8,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { logCost } from "@/lib/cost-telemetry";
+import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
 
 /**
  * Layer 2 — Submit a TP-confirmed clone-watch hit to Netcraft for
@@ -31,14 +32,6 @@ import { logCost } from "@/lib/cost-telemetry";
 // The earlier /report path 404s.
 const NETCRAFT_REPORT_ENDPOINT = "https://report.netcraft.com/api/v3/report/urls";
 
-// Brands dropped from the watchlist (v176) because the brand token is a generic
-// dictionary word → matches are ~always false positives. NEVER submit clones
-// inferred against these to Netcraft. Keyed on inferred_target_domain.
-const FP_BRAND_DENYLIST = new Set<string>([
-  "domain.com.au",
-  "allhomes.com.au",
-  "lendi.com.au",
-]);
 
 export const cloneWatchSubmitNetcraft = inngest.createFunction(
   {
@@ -65,7 +58,7 @@ export const cloneWatchSubmitNetcraft = inngest.createFunction(
     // generic dictionary word, so the matches are essentially always false
     // positives (e.g. "online-domainkaufen.online" → domain.com.au). Reporting
     // those to Netcraft would flag legitimate sites + burn our reporter standing.
-    if (FP_BRAND_DENYLIST.has(data.brand.trim().toLowerCase())) {
+    if (isFpBrand(data.brand)) {
       return { skipped: true, reason: "fp_brand_denylist" };
     }
 
