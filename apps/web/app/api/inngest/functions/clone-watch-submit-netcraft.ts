@@ -26,7 +26,10 @@ import { logCost } from "@/lib/cost-telemetry";
  *
  * See docs/plans/clone-watch-outreach.md §6 Phase 2.
  */
-const NETCRAFT_REPORT_ENDPOINT = "https://report.netcraft.com/api/v3/report";
+// Netcraft v3 submit endpoint is /report/urls (the changelog + the akacdev
+// client confirm /report/urls with urls[n] as objects, returning {uuid,state}).
+// The earlier /report path 404s.
+const NETCRAFT_REPORT_ENDPOINT = "https://report.netcraft.com/api/v3/report/urls";
 
 export const cloneWatchSubmitNetcraft = inngest.createFunction(
   {
