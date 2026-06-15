@@ -99,7 +99,14 @@ describe("BrandStewardshipReport email", () => {
     // Breakdown bars + abuse-report links + share link.
     expect(html).toContain("Where they&#x27;re hosted (country)");
     expect(html).toContain("Who registered them");
-    expect(html).toContain("Report to registrar");
+    // Plain-language intro so the brand understands what they're seeing.
+    expect(html).toContain("suspected clone");
+    expect(html).toContain("reported on your behalf");
+    // Per-clone "Report to registrar" appears ONLY for the clone that has a
+    // registrar (login-anz-rewards.click); anz-secure.top has registrar=null so
+    // its link is hidden → exactly one in the per-clone list. (The "Who
+    // registered them" breakdown bar links are separate.)
+    expect((html.match(/Report to registrar/g) ?? []).length).toBe(1);
     expect(html).toContain("supportcenter.godaddy.com"); // GoDaddy abuse URL from the registrar breakdown
     expect(html).toContain("abuse.cloudflare.com"); // host abuse for the Cloudflare ASN row
     expect(html).toContain("/clone-report/test-token-uuid"); // share link
