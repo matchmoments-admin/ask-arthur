@@ -38,6 +38,10 @@ export const cloneWatchSubmitNetcraft = inngest.createFunction(
     retries: 3,
     concurrency: { limit: 4 },
     idempotency: "event.data.alertId",
+    // Anti-abuse: trickle submissions like a normal reporter (Netcraft's public
+    // intake is keyless — be a good citizen). Global 30/hr is far above our
+    // real TP-clone rate (~a few/day), so it only ever clips a triage burst.
+    rateLimit: { limit: 30, period: "1h" },
   },
   { event: CLONE_WATCH_TRIAGED_EVENT },
   withAxiomLogging({ fnId: "shopfront-clone-submit-netcraft" }, async ({ event, step }) => {
@@ -52,11 +56,11 @@ export const cloneWatchSubmitNetcraft = inngest.createFunction(
         reason: "FF_SHOPFRONT_CLONE_SUBMIT_NETCRAFT disabled",
       };
     }
+    // Netcraft's public intake (/api/v3/report/urls) is KEYLESS — it's
+    // email-identified ("we'll email results to <email>"), no Authorization
+    // required. The key is optional: when present we send it (counts toward the
+    // submitter leaderboard); when absent we still submit keyless.
     const apiKey = process.env.NETCRAFT_REPORT_API_KEY;
-    if (!apiKey) {
-      logger.warn("clone-watch netcraft: NETCRAFT_REPORT_API_KEY not set");
-      return { skipped: true, reason: "NETCRAFT_REPORT_API_KEY not set" };
-    }
 
     // Dedup — never re-submit the same alert.
     const alreadySubmitted = await step.run("check-dedup", async () => {
@@ -90,7 +94,9 @@ export const cloneWatchSubmitNetcraft = inngest.createFunction(
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
+          // Optional — keyless submission is supported; include the key only
+          // when configured (leaderboard attribution).
+          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
         },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(20_000),
