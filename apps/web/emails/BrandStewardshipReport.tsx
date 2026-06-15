@@ -445,9 +445,10 @@ export default function BrandStewardshipReport({
             </Text>
             <Text style={{ color: "#94A3B8", fontSize: "12px", margin: "16px 0 0 0" }}>
               You&apos;re receiving this monthly summary because Ask Arthur
-              tracks domains impersonating <strong>{brandName}</strong>.{" "}
-              <Link href={stopMailto} style={{ color: "#94A3B8" }}>
-                Stop these reports
+              tracks domains impersonating <strong>{brandName}</strong>. Don&apos;t
+              want these?{" "}
+              <Link href={stopMailto} style={{ color: "#94A3B8", textDecoration: "underline" }}>
+                Unsubscribe
               </Link>
             </Text>
             <Text style={{ color: "#94A3B8", fontSize: "12px", lineHeight: "1.5", margin: "8px 0 0 0" }}>

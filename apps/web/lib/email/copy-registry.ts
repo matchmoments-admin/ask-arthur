@@ -40,7 +40,7 @@ export const BRAND_STEWARDSHIP_SLOTS = {
   what_we_do: {
     label: "What we do",
     default:
-      "Ask Arthur proactively surfaces domains impersonating Australian brands and forwards the suspected phishing URLs to neutral community blocklists (such as OpenPhish and APWG) in the public interest, at no cost to you. We do not file takedowns on your behalf and we make no determination that any domain is malicious — we share factual signals so your fraud / takedown team can act.",
+      "**Ask Arthur** aims to protect Australians from scams in every way we can — ideally through prevention, like our free [scam checker](https://askarthur.au/?utm_source=email&utm_campaign=brand-stewardship), and by reporting potential brand impersonation, like the lookalike domains in this email.",
   },
   working_together: {
     label: "Working together",

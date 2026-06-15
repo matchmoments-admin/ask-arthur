@@ -27,6 +27,12 @@ describe("BrandStewardshipReport email", () => {
     expect(html).toContain("Leave a Trustpilot review");
     expect(html).toContain("utm_campaign=brand-stewardship");
     expect(html).toContain("au.trustpilot.com/evaluate/askarthur.au");
+    // Brief "What we do" with the prevention message + scam-checker link.
+    expect(html).toContain("aims to protect Australians from scams");
+    expect(html).toContain("scam checker");
+    expect(html).toContain("askarthur.au/?utm_source=email");
+    // Unsubscribe link in the footer.
+    expect(html).toContain("Unsubscribe");
   });
 
   it("renders cleanly with zero detections / no examples", async () => {
