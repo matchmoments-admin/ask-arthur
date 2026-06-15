@@ -31,6 +31,15 @@ import { logCost } from "@/lib/cost-telemetry";
 // The earlier /report path 404s.
 const NETCRAFT_REPORT_ENDPOINT = "https://report.netcraft.com/api/v3/report/urls";
 
+// Brands dropped from the watchlist (v176) because the brand token is a generic
+// dictionary word → matches are ~always false positives. NEVER submit clones
+// inferred against these to Netcraft. Keyed on inferred_target_domain.
+const FP_BRAND_DENYLIST = new Set<string>([
+  "domain.com.au",
+  "allhomes.com.au",
+  "lendi.com.au",
+]);
+
 export const cloneWatchSubmitNetcraft = inngest.createFunction(
   {
     id: "shopfront-clone-submit-netcraft",
@@ -47,6 +56,15 @@ export const cloneWatchSubmitNetcraft = inngest.createFunction(
   withAxiomLogging({ fnId: "shopfront-clone-submit-netcraft" }, async ({ event, step }) => {
     const data = parseCloneWatchTriagedData(event.data);
 
+    // FP-brand guard: NEVER report clones inferred against these brands — they
+    // were dropped from the watchlist (v176) because the brand token is a
+    // generic dictionary word, so the matches are essentially always false
+    // positives (e.g. "online-domainkaufen.online" → domain.com.au). Reporting
+    // those to Netcraft would flag legitimate sites + burn our reporter standing.
+    if (FP_BRAND_DENYLIST.has(data.brand.trim().toLowerCase())) {
+      return { skipped: true, reason: "fp_brand_denylist" };
+    }
+
     if (!featureFlags.shopfrontCloneOutreach) {
       return { skipped: true, reason: "FF_SHOPFRONT_CLONE_OUTREACH disabled" };
     }
@@ -62,27 +80,41 @@ export const cloneWatchSubmitNetcraft = inngest.createFunction(
     // submitter leaderboard); when absent we still submit keyless.
     const apiKey = process.env.NETCRAFT_REPORT_API_KEY;
 
-    // Dedup — never re-submit the same alert.
-    const alreadySubmitted = await step.run("check-dedup", async () => {
+    // Dedup + load the hosting/registrar attribution (to enrich the reason —
+    // gives Netcraft's classifier the IP / ASN / country / registrar we already
+    // captured, which speeds classification).
+    const alert = await step.run("check-dedup", async () => {
       const sb = createServiceClient();
-      if (!sb) return false;
+      if (!sb) return { already: false } as CloneHosting & { already: boolean };
       const { data: row } = await sb
         .from("shopfront_clone_alerts")
-        .select("submitted_to")
+        .select("submitted_to, urlscan_evidence, attribution")
         .eq("id", data.alertId)
         .maybeSingle();
       const submitted_to =
         (row?.submitted_to as Record<string, unknown> | null) ?? {};
-      return Boolean(submitted_to.netcraft);
+      const server =
+        ((row?.urlscan_evidence as { server?: CloneHosting } | null)?.server) ??
+        {};
+      const attr = (row?.attribution as
+        | { whois?: { registrar?: string }; hosting?: CloneHosting }
+        | null) ?? {};
+      return {
+        already: Boolean(submitted_to.netcraft),
+        ip: server.ip ?? attr.hosting?.ip ?? null,
+        country: server.country ?? attr.hosting?.country ?? null,
+        asn: server.asn ?? attr.hosting?.asn ?? null,
+        registrar: attr.whois?.registrar ?? null,
+      };
     });
-    if (alreadySubmitted) {
+    if (alert.already) {
       return { skipped: true, reason: "already_submitted" };
     }
 
     const submission = await step.run("submit-netcraft", async () => {
       const body = {
         email: process.env.NETCRAFT_REPORTER_EMAIL ?? "brendan@askarthur.au",
-        reason: buildSubmissionReason(data),
+        reason: buildSubmissionReason(data, alert),
         urls: [
           {
             url: data.candidateUrl,
@@ -173,18 +205,34 @@ export const cloneWatchSubmitNetcraft = inngest.createFunction(
   }),
 );
 
-export function buildSubmissionReason(data: {
-  brand: string;
-  candidateDomain: string;
-  signalType: string;
-  score: number;
-}): string {
-  return [
+export interface CloneHosting {
+  ip?: string | null;
+  country?: string | null;
+  asn?: string | null;
+  registrar?: string | null;
+}
+
+export function buildSubmissionReason(
+  data: {
+    brand: string;
+    candidateDomain: string;
+    signalType: string;
+    score: number;
+  },
+  hosting?: CloneHosting,
+): string {
+  const parts = [
     `Possible clone of ${data.brand}.`,
     `Detected via daily NRD lexical sweep (Ask Arthur clone-watch).`,
     `Signal: ${data.signalType} match, score ${data.score.toFixed(2)}.`,
     `Surfaced under askarthur.au's Australian brand watchlist.`,
-  ].join(" ");
+  ];
+  // Enrich with the hosting/registrar attribution we captured, to help
+  // Netcraft's classifier.
+  const host = [hosting?.ip, hosting?.asn, hosting?.country].filter(Boolean);
+  if (host.length) parts.push(`Hosting: ${host.join(" · ")}.`);
+  if (hosting?.registrar) parts.push(`Registrar: ${hosting.registrar}.`);
+  return parts.join(" ");
 }
 
 // Re-exported for the route layer / tests / future logging consumers.
