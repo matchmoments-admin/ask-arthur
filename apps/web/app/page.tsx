@@ -22,7 +22,7 @@ const jsonLd = {
       description:
         "Australia's AI-powered scam detection platform helping Australians identify fraudulent messages, emails, and images.",
       sameAs: [
-        "https://www.linkedin.com/company/askarthur",
+        "https://www.linkedin.com/company/114874091",
       ],
       contactPoint: {
         "@type": "ContactPoint",

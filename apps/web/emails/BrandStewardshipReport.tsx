@@ -26,7 +26,7 @@ const CTA_UTM = {
 } as const;
 
 const TRUSTPILOT_URL = "https://au.trustpilot.com/evaluate/askarthur.au";
-const LINKEDIN_URL = "https://www.linkedin.com/company/askarthur";
+const LINKEDIN_URL = "https://www.linkedin.com/company/114874091";
 /** Partnership enquiry destination. /for-business doesn't exist yet; /contact
  *  is the live partnership-enquiry surface. Swap here if a /for-business or
  *  /partner page ships. */

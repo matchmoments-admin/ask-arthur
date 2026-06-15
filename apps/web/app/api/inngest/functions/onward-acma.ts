@@ -1,6 +1,7 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { Resend } from "resend";
 import { createHash } from "node:crypto";
@@ -47,6 +48,12 @@ export const onwardAcmaEmailSpam = inngest.createFunction(
   },
   { event: "report.onward.acma_email_spam" },
   withAxiomLogging({ fnId: "report-onward-acma-email-spam" }, async ({ event, step }) => {
+    // Kill-switch: when OFF, no-op without emailing ACMA (matches the
+    // OpenPhish/APWG skip-when-OFF semantics). Default OFF.
+    if (!featureFlags.onwardAcma) {
+      return { skipped: true, reason: "FF_ONWARD_ACMA disabled" };
+    }
+
     const data = event.data as {
       log_id: string;
       scam_report_id: number;
