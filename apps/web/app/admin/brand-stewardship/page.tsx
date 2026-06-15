@@ -24,7 +24,7 @@ export default async function BrandStewardshipPage() {
     const { data } = await supabase
       .from("brand_stewardship_reports")
       .select(
-        "id, brand_key, brand_name, period_month, metrics, recipient_email, status, status_reason, prepared_at, sent_at",
+        "id, brand_key, brand_name, period_month, metrics, recipient_email, status, status_reason, prepared_at, sent_at, share_token, outreach_done_at",
       )
       .order("period_month", { ascending: false })
       .order("prepared_at", { ascending: false })
@@ -45,6 +45,8 @@ export default async function BrandStewardshipPage() {
         statusReason: (r.status_reason as string | null) ?? null,
         preparedAt: (r.prepared_at as string | null) ?? null,
         sentAt: (r.sent_at as string | null) ?? null,
+        shareToken: (r.share_token as string | null) ?? null,
+        outreachDoneAt: (r.outreach_done_at as string | null) ?? null,
       };
     });
   }

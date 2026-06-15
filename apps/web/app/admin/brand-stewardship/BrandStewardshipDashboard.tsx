@@ -2,7 +2,16 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Eye, Loader2, X, Clock, Send, AlertTriangle } from "lucide-react";
+import {
+  Eye,
+  Loader2,
+  X,
+  Clock,
+  Send,
+  AlertTriangle,
+  Copy,
+  Check,
+} from "lucide-react";
 
 export interface StewardshipRow {
   id: string;
@@ -17,6 +26,31 @@ export interface StewardshipRow {
   statusReason: string | null;
   preparedAt: string | null;
   sentAt: string | null;
+  shareToken: string | null;
+  outreachDoneAt: string | null;
+}
+
+/** "stake.com.au" → "Stake" for human-readable outreach copy. */
+function cleanBrand(domainOrName: string): string {
+  const label = domainOrName.split(".")[0] ?? domainOrName;
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+/** The copy-paste LinkedIn outreach message for a no-contact brand. */
+function linkedInMessage(r: StewardshipRow): string {
+  const brand = cleanBrand(r.brandName);
+  const shareUrl = r.shareToken
+    ? `https://askarthur.au/clone-report/${r.shareToken}`
+    : "https://askarthur.au";
+  const n = r.clonesDetected;
+  return [
+    `Hi ${brand} team — I'm Brendan from Ask Arthur, an Australian scam-detection service.`,
+    ``,
+    `This month we detected ${n} lookalike domain${n === 1 ? "" : "s"} impersonating ${brand} — typosquats set up to phish your customers. Here's the full breakdown of where each one is hosted and registered:`,
+    shareUrl,
+    ``,
+    `We already report these to global blocklists automatically, but wanted your team to have the list directly. With the Scams Prevention Framework now in effect, we'd be glad to send ${brand} a free monthly clone report — a simple way to show you're proactively protecting customers. Keen to help.`,
+  ].join("\n");
 }
 
 const STATUS_TONE: Record<string, string> = {
@@ -48,7 +82,39 @@ export default function BrandStewardshipDashboard({
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  async function copyMessage(r: StewardshipRow) {
+    try {
+      await navigator.clipboard.writeText(linkedInMessage(r));
+      setCopiedId(r.id);
+      setTimeout(() => setCopiedId((c) => (c === r.id ? null : c)), 2000);
+    } catch {
+      setError("Couldn't copy to clipboard — try selecting the message manually.");
+    }
+  }
+
+  async function markOutreachDone(id: string, done: boolean) {
+    setBusyId(id);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/admin/brand-stewardship/${id}/outreach-done`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ done }),
+        },
+      );
+      if (!res.ok) throw new Error(`Update failed (${res.status})`);
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Update failed");
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   async function send(id: string, brandName: string) {
     const where = shadowRecipient
@@ -107,6 +173,8 @@ export default function BrandStewardshipDashboard({
   // flows through the normal per-period review/send list.
   const noContactRows = rows.filter((r) => r.statusReason === "no_contact");
   const normalRows = rows.filter((r) => r.statusReason !== "no_contact");
+  const noContactPending = noContactRows.filter((r) => !r.outreachDoneAt);
+  const noContactDone = noContactRows.filter((r) => r.outreachDoneAt);
 
   // Group by period, newest first (rows arrive pre-sorted by period desc).
   const byPeriod = new Map<string, StewardshipRow[]>();
@@ -137,41 +205,113 @@ export default function BrandStewardshipDashboard({
         <section className="mb-8 rounded-lg border border-amber-300 bg-amber-50 p-4">
           <h2 className="flex items-center gap-2 text-amber-900 text-lg font-bold mb-1">
             <AlertTriangle size={18} />
-            Manual outreach — no security contact ({noContactRows.length})
+            Manual LinkedIn outreach — no security contact ({noContactPending.length} to do)
           </h2>
           <p className="text-amber-900/80 text-sm mb-3 leading-relaxed">
-            We detected clones impersonating these brands but have no email
-            contact in <code>known_brands</code>, so the monthly report can&apos;t
-            be sent. Find a <code>security.txt</code> / abuse address (then add it
-            and verify), or do manual outreach (e.g. LinkedIn the brand&apos;s
-            security lead). Preview shows what they&apos;d receive.
+            Clones detected impersonating these brands, but we have no email
+            contact to send the report to. Hit <strong>Copy LinkedIn message</strong>,
+            paste it into a DM / connection note to the brand&apos;s security or
+            fraud lead, then tick <strong>Done</strong>. Great partnership exposure
+            — and proof for them they&apos;re acting on the Scams Prevention
+            Framework. The list resets each month.
           </p>
-          <ul className="space-y-2">
-            {noContactRows.map((r) => (
-              <li
-                key={r.id}
-                className="flex items-center justify-between gap-3 rounded-md border border-amber-200 bg-white px-3 py-2"
-              >
-                <div className="min-w-0">
-                  <p className="font-bold text-deep-navy text-sm truncate">
-                    {r.brandName}
-                  </p>
-                  <p className="text-xs text-gov-slate mt-0.5">
-                    {r.clonesDetected} clone{r.clonesDetected === 1 ? "" : "s"} ·{" "}
-                    {monthLabel(r.periodMonth)}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => openPreview(r.id)}
-                  className="inline-flex shrink-0 min-h-[36px] items-center justify-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold uppercase tracking-widest text-deep-navy hover:bg-slate-50"
+
+          {noContactPending.length === 0 ? (
+            <p className="text-sm text-amber-900/70">
+              All caught up for this month 🎉
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {noContactPending.map((r) => (
+                <li
+                  key={r.id}
+                  className="rounded-md border border-amber-200 bg-white px-3 py-2.5"
                 >
-                  <Eye size={14} />
-                  Preview
-                </button>
-              </li>
-            ))}
-          </ul>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-bold text-deep-navy text-sm truncate">
+                        {cleanBrand(r.brandName)}{" "}
+                        <span className="font-normal text-gov-slate">
+                          ({r.brandName})
+                        </span>
+                      </p>
+                      <p className="text-xs text-gov-slate mt-0.5">
+                        {r.clonesDetected} clone{r.clonesDetected === 1 ? "" : "s"}{" "}
+                        · {monthLabel(r.periodMonth)}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => copyMessage(r)}
+                        className="inline-flex min-h-[36px] items-center justify-center gap-2 rounded-full bg-deep-navy px-3 py-1.5 text-xs font-bold uppercase tracking-widest text-white hover:bg-navy"
+                      >
+                        {copiedId === r.id ? (
+                          <>
+                            <Check size={14} /> Copied
+                          </>
+                        ) : (
+                          <>
+                            <Copy size={14} /> Copy LinkedIn message
+                          </>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openPreview(r.id)}
+                        className="inline-flex min-h-[36px] items-center justify-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold uppercase tracking-widest text-deep-navy hover:bg-slate-50"
+                      >
+                        <Eye size={14} /> Preview
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => markOutreachDone(r.id, true)}
+                        disabled={busyId === r.id}
+                        className="inline-flex min-h-[36px] items-center justify-center gap-2 rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-bold uppercase tracking-widest text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
+                      >
+                        {busyId === r.id ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          <Check size={14} />
+                        )}
+                        Done
+                      </button>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {noContactDone.length > 0 && (
+            <details className="mt-3">
+              <summary className="cursor-pointer text-xs font-bold uppercase tracking-widest text-amber-900/70">
+                Done this month ({noContactDone.length})
+              </summary>
+              <ul className="mt-2 space-y-1">
+                {noContactDone.map((r) => (
+                  <li
+                    key={r.id}
+                    className="flex items-center justify-between gap-3 rounded-md bg-white/60 px-3 py-1.5 text-xs text-gov-slate"
+                  >
+                    <span className="truncate">
+                      <Check size={12} className="inline text-emerald-600 mr-1" />
+                      {cleanBrand(r.brandName)} — {r.clonesDetected} clone
+                      {r.clonesDetected === 1 ? "" : "s"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => markOutreachDone(r.id, false)}
+                      disabled={busyId === r.id}
+                      className="shrink-0 text-amber-900/70 underline disabled:opacity-50"
+                    >
+                      undo
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
         </section>
       )}
 
