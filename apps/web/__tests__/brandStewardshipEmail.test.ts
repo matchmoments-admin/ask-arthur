@@ -60,6 +60,7 @@ describe("BrandStewardshipReport email", () => {
         reportsSent: 0,
         cloneDetections: {
           detected: 3,
+          netcraftReported: 2,
           byClassification: { likely_phishing: 1, neutral: 2 },
           byCountry: { SG: 1, FR: 1, US: 1 },
           byRegistrar: { "NameSilo, LLC": 1, "GoDaddy.com, LLC": 1, Unknown: 1 },
@@ -102,6 +103,15 @@ describe("BrandStewardshipReport email", () => {
     // Plain-language intro so the brand understands what they're seeing.
     expect(html).toContain("suspected clone");
     expect(html).toContain("reported on your behalf");
+    // Header reconciles with the clone list: detected=0 (onward) + 3 clones → "3"
+    // detected, and the 2 Netcraft-reported clones show in "Reported on your behalf"
+    // (no more "0 detected / No outbound reports" contradiction). Strip the
+    // react-email <!-- --> comment markers first.
+    const clean = html.replace(/<!--.*?-->/g, "");
+    expect(clean).toMatch(/>3<\/p>/); // combined detected count, not 0
+    expect(clean).toContain("Reported on your behalf (2 report");
+    expect(clean).toContain("Netcraft (browser + blocklist takedown)");
+    expect(clean).not.toContain("No outbound reports this period");
     // Per-clone "Report to registrar" appears ONLY for the clone that has a
     // registrar (login-anz-rewards.click); anz-secure.top has registrar=null so
     // its link is hidden → exactly one in the per-clone list. (The "Who

@@ -20,6 +20,7 @@ const cloneRow = (over: Partial<CloneAlertRow>): CloneAlertRow => ({
   urlscan_evidence:
     over.urlscan_evidence ?? { server: { ip: "1.2.3.4", asn: "AS123", country: "SG" } },
   attribution: over.attribution ?? null,
+  submitted_to: over.submitted_to ?? null,
 });
 
 describe("aggregateClonesByDomain", () => {
@@ -93,6 +94,17 @@ describe("aggregateClonesByDomain", () => {
     // coerced to a string bucket, not crashed
     expect(Object.keys(m.byRegistrar)).toContain("GoDaddy.com, LLC,Reseller");
     expect(Object.keys(m.byAsn)).toContain("13335");
+  });
+
+  it("counts netcraftReported from submitted_to.netcraft (deduped by domain)", () => {
+    const agg = aggregateClonesByDomain([
+      cloneRow({ id: 1, candidate_domain: "a.click", submitted_to: { netcraft: { uuid: "x" } } }),
+      cloneRow({ id: 2, candidate_domain: "b.click", submitted_to: null }),
+      cloneRow({ id: 3, candidate_domain: "c.click", submitted_to: { netcraft: { uuid: "y" } } }),
+    ]);
+    const m = agg.get("anz.com.au")!;
+    expect(m.detected).toBe(3);
+    expect(m.netcraftReported).toBe(2);
   });
 
   it("skips rows without an inferred_target_domain", () => {

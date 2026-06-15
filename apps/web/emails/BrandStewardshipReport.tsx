@@ -86,6 +86,8 @@ export interface CloneDetectionRow {
 export interface CloneDetections {
   /** Total distinct lookalike domains detected this period. */
   detected: number;
+  /** Distinct clone domains submitted to Netcraft (browser/blocklist). */
+  netcraftReported?: number;
   /** Per-classification counts for the headline. */
   byClassification?: Record<string, number>;
   /** Consumable analytics — counts across ALL clones (not just the shown
@@ -137,9 +139,21 @@ export default function BrandStewardshipReport({
       `STOP brand-stewardship reports — ${brandName}`,
     )}`;
 
-  const destinations = Object.entries(reportedByDestination).filter(
-    ([, n]) => n > 0,
-  );
+  // The header stat reconciles BOTH detection pipelines so it never contradicts
+  // the clone list below: scam-report impersonations (detected / onward) +
+  // clone-watch lookalike domains (cloneDetections). Likewise "reported on your
+  // behalf" merges onward blocklist forwards (OpenPhish/APWG) with the clones we
+  // submitted to Netcraft.
+  const cloneCount = cloneDetections?.detected ?? 0;
+  const netcraftReported = cloneDetections?.netcraftReported ?? 0;
+  const totalDetected = detected + cloneCount;
+  const totalReported = reportsSent + netcraftReported;
+  const destinations: Array<[string, number]> = [
+    ...Object.entries(reportedByDestination).filter(([, n]) => n > 0),
+    ...(netcraftReported > 0
+      ? ([["netcraft", netcraftReported]] as Array<[string, number]>)
+      : []),
+  ];
 
   return (
     <Html>
@@ -215,16 +229,16 @@ export default function BrandStewardshipReport({
               }}
             >
               <Text style={{ color: "#1B2A4A", fontSize: "32px", fontWeight: 700, margin: 0 }}>
-                {detected}
+                {totalDetected}
               </Text>
               <Text style={{ color: "#475569", fontSize: "14px", margin: "2px 0 0 0" }}>
-                domain{detected === 1 ? "" : "s"} detected impersonating{" "}
+                domain{totalDetected === 1 ? "" : "s"} detected impersonating{" "}
                 {brandName}
               </Text>
               <Hr style={{ borderColor: "#E2E8F0", margin: "16px 0" }} />
               <Text style={{ color: "#1B2A4A", fontSize: "14px", fontWeight: 700, margin: "0 0 6px 0" }}>
-                Reported on your behalf ({reportsSent} report
-                {reportsSent === 1 ? "" : "s"})
+                Reported on your behalf ({totalReported} report
+                {totalReported === 1 ? "" : "s"})
               </Text>
               {destinations.length > 0 ? (
                 destinations.map(([dest, n]) => (
@@ -631,6 +645,8 @@ function humaniseDestination(dest: string): string {
       return "Scamwatch";
     case "reportcyber":
       return "ReportCyber";
+    case "netcraft":
+      return "Netcraft (browser + blocklist takedown)";
     default:
       return dest;
   }

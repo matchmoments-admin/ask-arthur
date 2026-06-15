@@ -41,6 +41,7 @@ describe("parseSecurityTxtContacts", () => {
 describe("buildInternalDigestHtml", () => {
   const metrics = (over: Partial<CloneBrandMetrics>): CloneBrandMetrics => ({
     detected: over.detected ?? 1,
+    netcraftReported: over.netcraftReported ?? 0,
     byClassification: over.byClassification ?? { neutral: 1 },
     byCountry: over.byCountry ?? { SG: 1 },
     byRegistrar: over.byRegistrar ?? { NameSilo: 1 },
