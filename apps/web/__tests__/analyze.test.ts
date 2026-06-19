@@ -558,3 +558,68 @@ describe("/api/analyze Axiom instrumentation (boundary)", () => {
     );
   });
 });
+
+describe("/api/analyze image cache (FF_ANALYZE_IMAGE_CACHE)", () => {
+  const PNG_B64 = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), // PNG magic
+    Buffer.from("payload"),
+  ]).toString("base64");
+  const original = process.env.FF_ANALYZE_IMAGE_CACHE;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(checkRateLimit).mockResolvedValue({ allowed: true, remaining: 9, resetAt: null });
+  });
+  afterEach(() => {
+    if (original === undefined) delete process.env.FF_ANALYZE_IMAGE_CACHE;
+    else process.env.FF_ANALYZE_IMAGE_CACHE = original;
+  });
+
+  it("does NOT cache image submissions when the flag is OFF (default)", async () => {
+    delete process.env.FF_ANALYZE_IMAGE_CACHE;
+    const { getCachedAnalysis, setCachedAnalysis } = await import(
+      "@askarthur/scam-engine/analysis-cache"
+    );
+
+    const res = await POST(makeRequest({ image: PNG_B64 }));
+    expect(res.status).toBe(200);
+    // Image-only + flag off → not cache-eligible → neither helper touched.
+    expect(getCachedAnalysis).not.toHaveBeenCalled();
+    expect(setCachedAnalysis).not.toHaveBeenCalled();
+  });
+
+  it("keys image caching on images + mode when the flag is ON", async () => {
+    process.env.FF_ANALYZE_IMAGE_CACHE = "true";
+    const { getCachedAnalysis, setCachedAnalysis } = await import(
+      "@askarthur/scam-engine/analysis-cache"
+    );
+
+    const res = await POST(makeRequest({ image: PNG_B64 }));
+    expect(res.status).toBe(200);
+    expect(getCachedAnalysis).toHaveBeenCalledWith(
+      expect.objectContaining({ surface: "web", images: [PNG_B64], mode: "image" }),
+    );
+    expect(setCachedAnalysis).toHaveBeenCalledWith(
+      expect.objectContaining({ surface: "web", images: [PNG_B64], mode: "image" }),
+      expect.anything(),
+    );
+  });
+
+  it("returns a cached verdict on an image cache hit when the flag is ON", async () => {
+    process.env.FF_ANALYZE_IMAGE_CACHE = "true";
+    const { getCachedAnalysis } = await import("@askarthur/scam-engine/analysis-cache");
+    vi.mocked(getCachedAnalysis).mockResolvedValueOnce({
+      verdict: "HIGH_RISK",
+      confidence: 0.95,
+      summary: "Seen before",
+      redFlags: ["x"],
+      nextSteps: ["y"],
+    } as never);
+
+    const res = await POST(makeRequest({ image: PNG_B64 }));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.cached).toBe(true);
+    expect(data.verdict).toBe("HIGH_RISK");
+  });
+});

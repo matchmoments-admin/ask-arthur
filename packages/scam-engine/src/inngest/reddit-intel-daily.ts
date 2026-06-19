@@ -32,7 +32,8 @@ import {
   REDDIT_INTEL_SUMMARISED_EVENT,
   parseRedditIntelBatchReadyData,
 } from "./events";
-import { callClaudeJson } from "../anthropic";
+import { callClaudeJson, type ClaudeModelKey } from "../anthropic";
+import { readStringEnv } from "@askarthur/utils/env";
 import { logFunctionError, isRedditIntelBraked } from "./reddit-intel-error-log";
 import { withAxiomLogging } from "./with-axiom-logging";
 
@@ -42,6 +43,23 @@ import { withAxiomLogging } from "./with-axiom-logging";
 // when the prompt has materially evolved.
 
 const PROMPT_VERSION = "reddit-intel-v1@2026-05-01";
+
+/**
+ * Resolve the Claude model for the daily classify call. Defaults to Sonnet 4.6
+ * (the historical model), overridable to Haiku 4.5 via the
+ * `REDDIT_INTEL_CLASSIFY_MODEL` env var for the cost pilot. Unknown/unset values
+ * fall back to Sonnet so a typo can never break the cron. Read at call time
+ * (not module load) via the build-safe `readStringEnv`, so a Vercel env flip +
+ * redeploy takes effect without a code change. Classify is the dominant
+ * reddit-intel AI cost; Haiku is 3×/15× cheaper. The call keeps `useToolUse`
+ * (forced strict JSON) + one retry-with-feedback, which is the defense Haiku's
+ * higher malformed-output rate wants — so the pilot is low-risk + reversible.
+ */
+export function resolveClassifyModel(): ClaudeModelKey {
+  const raw = readStringEnv("REDDIT_INTEL_CLASSIFY_MODEL");
+  if (raw === "HAIKU_4_5" || raw === "SONNET_4_6") return raw;
+  return "SONNET_4_6";
+}
 const ALLOWED_INTENT_LABELS = [
   "phishing",
   "romance_scam",
@@ -443,7 +461,10 @@ export const redditIntelDaily = inngest.createFunction(
         // firing (3 Inngest × 2 schema retries), well under the A$10/day
         // brake.
         const response = await classifyWithRetry<typeof SonnetOutputSchema>({
-          model: "SONNET_4_6",
+          // Sonnet 4.6 by default; flip to Haiku 4.5 via REDDIT_INTEL_CLASSIFY_MODEL
+          // for the cost pilot (see resolveClassifyModel). Pricing, metadata.model,
+          // and reddit_post_intel.model_version all follow the resolved id.
+          model: resolveClassifyModel(),
           system: SYSTEM_PROMPT,
           user: JSON.stringify(envelope),
           schema: SonnetOutputSchema,

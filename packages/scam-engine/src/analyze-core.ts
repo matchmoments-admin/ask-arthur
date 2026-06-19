@@ -136,9 +136,18 @@ export async function runAnalysisCore(
     referrerSource,
   } = input;
 
+  // Vision vs text mode — derived from image presence. Hoisted above the cache
+  // read so it can scope the cache key (see below): the same image bytes must
+  // not be replayed under a key that omits them or the mode.
+  const aiMode: "image" | "text" = images?.length ? "image" : "text";
+
   // 1. Cache read (unless caller opted out).
+  // BUGFIX: previously this passed only { text, surface }, so image submissions
+  // were cached under a text-only key — two different images with empty text
+  // collided and replayed each other's verdict (and bot/extension image scans
+  // shared keys). Pass `images` + `mode` so the key is content-addressable.
   if (!skipCacheRead) {
-    const cached = await getCachedAnalysis({ text, surface });
+    const cached = await getCachedAnalysis({ text, surface, images, mode: aiMode });
     if (cached) {
       const cachedTasks: Promise<unknown>[] =
         backgroundMode === "skip"
@@ -179,10 +188,7 @@ export async function runAnalysisCore(
     urlsToCheck = Array.from(new Set([...urls, ...finalUrls]));
   }
 
-  // 4. Parallel: AI analysis + URL reputation.
-  const aiMode: "image" | "text" | undefined = images?.length
-    ? "image"
-    : "text";
+  // 4. Parallel: AI analysis + URL reputation. (aiMode derived above.)
   const [aiResult, urlResults] = await Promise.all([
     analyzeWithClaude(
       text,
@@ -253,7 +259,8 @@ export async function runAnalysisCore(
       ),
     );
     if (!skipCacheWrite) {
-      tasks.push(setCachedAnalysis({ text, surface }, result));
+      // Match the read key — include images + mode (see cache-read bugfix note).
+      tasks.push(setCachedAnalysis({ text, surface, images, mode: aiMode }, result));
     }
   }
 
