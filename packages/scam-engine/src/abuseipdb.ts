@@ -7,7 +7,8 @@ import { logger } from "@askarthur/utils/logger";
 
 import { logCost, ENGINE_PRICING } from "./cost-log";
 
-const CACHE_TTL = 21_600; // 6 hours
+const CACHE_TTL = 86_400; // 24 hours — IP reputation moves slowly; longer TTL
+                          // protects the 1,000/day free-tier cap (bumped from 6h)
 const CACHE_PREFIX = "askarthur:abuseipdb";
 
 let _redis: Redis | null = null;

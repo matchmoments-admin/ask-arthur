@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { getUser } from "@/lib/auth";
 import { getOrg } from "@/lib/org";
+import { logCost, PRICING } from "@/lib/cost-telemetry";
 
 const InviteSchema = z.object({
   email: z.string().email().trim().toLowerCase(),
@@ -118,7 +119,22 @@ export async function POST(req: NextRequest) {
           </div>
         `,
       }),
-    }).catch(() => {});
+    })
+      .then((r) => {
+        // Cost telemetry — this route sends via a raw fetch (not the shared
+        // @/lib/resend helpers, which log internally), so it was the one Resend
+        // send invisible to /admin/costs. Log only on a successful dispatch.
+        if (r.ok) {
+          logCost({
+            feature: "org_invite",
+            provider: "resend",
+            operation: "emails.send",
+            units: 1,
+            unitCostUsd: PRICING.RESEND_USD_PER_EMAIL,
+          });
+        }
+      })
+      .catch(() => {});
   }
 
   return NextResponse.json(
