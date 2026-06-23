@@ -102,7 +102,7 @@ export default async function AboutPage() {
 
         <section className="mb-20">
           <h2 className="text-deep-navy text-2xl md:text-3xl font-extrabold mb-8 text-center">
-            Why we build Ask Arthur
+            Why we built Ask Arthur
           </h2>
 
           <div className="space-y-5 text-base md:text-lg text-gov-slate leading-relaxed italic">
