@@ -102,58 +102,38 @@ export default async function AboutPage() {
 
         <section className="mb-20">
           <h2 className="text-deep-navy text-2xl md:text-3xl font-extrabold mb-8 text-center">
-            A note from the founder
+            Why we build Ask Arthur
           </h2>
 
           <div className="space-y-5 text-base md:text-lg text-gov-slate leading-relaxed italic">
             <p>
-              Every scam story I&apos;ve heard shares one thing: urgency. A
-              message that tells you to act now. A phone call that won&apos;t
-              let you hang up. A link you must click before the
-              &ldquo;offer&rdquo; disappears, the &ldquo;account&rdquo; closes,
-              or the &ldquo;fine&rdquo; doubles. Urgency is the scammer&apos;s
-              most reliable tool, because a person who&apos;s rushing is a
-              person who isn&apos;t thinking.
+              Scams work by rushing you. Act now, click before it&apos;s gone,
+              pay before the fine doubles. When you&apos;re rushing, you&apos;re
+              not thinking.
             </p>
 
             <p>
               <strong className="not-italic font-semibold text-deep-navy">
                 Ask Arthur is the pause.
               </strong>{" "}
-              It&apos;s the moment you step back, take a breath, and get a
-              second opinion before you click, transfer, or sign in. Paste the
-              message in, read what Arthur has to say, and give yourself time
-              to think. When Arthur isn&apos;t sure, Arthur will say so — and
-              always err on the side of caution. That caution is the whole
-              point.
+              Take a breath and get a second opinion before you click,
+              transfer, or sign in. Paste the message in and see what Arthur
+              thinks. When Arthur isn&apos;t sure, Arthur says so.
             </p>
 
             <p>
-              Everyone deserves that pause. Not just the tech-savvy, not just
-              people with a family member who works in cyber, and not just
-              those who already know the tricks. Anyone with a phone and a
-              bank account is a target now, every single day. Being scammed is
-              never your fault — scammers are skilled professionals who
-              deceive people of every age.
+              Being scammed is never your fault. Scammers are skilled
+              professionals, and anyone with a phone is a target.
             </p>
 
             <p>
-              The act of asking is itself protective. When you stop to check,
-              you break the spell the scammer is relying on. And you&apos;re
-              not just protecting yourself — every scam you report helps
-              someone further behind you on the same path. Maybe you
-              weren&apos;t fooled, but reporting it might save someone who
-              would have been.
-            </p>
-
-            <p>
-              If something doesn&apos;t feel right or doesn&apos;t quite add up
-              — just ask Arthur. We&apos;ll take a look together.
+              If something doesn&apos;t feel right, just ask Arthur. We&apos;ll
+              take a look together.
             </p>
           </div>
 
           <p className="mt-8 text-sm text-gov-slate not-italic">
-            — Brendan Milton, Founder
+            — Brendan
           </p>
         </section>
 
@@ -192,12 +172,8 @@ export default async function AboutPage() {
             Reporting helps the next person
           </h2>
           <p className="text-gov-slate leading-relaxed text-center">
-            Scams evolve daily. Our Feed pulls signals from Reddit, public
-            reports, and our own users to surface what&apos;s active right
-            now — so the next person who sees the same message already has the
-            answer. Every check you run, every scam you flag, strengthens the
-            pause for someone behind you. You don&apos;t have to have been
-            fooled to help. Asking is enough.
+            Every scam you flag helps the next person spot the same trick. You
+            don&apos;t have to have been fooled to help — asking is enough.
           </p>
         </section>
 
