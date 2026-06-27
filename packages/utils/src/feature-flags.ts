@@ -392,6 +392,14 @@ export const featureFlags = {
    *  prepared rows have been eyeballed via the admin dashboard. */
   brandStewardshipReport: readBoolEnv("FF_BRAND_STEWARDSHIP_REPORT"),
 
+  /** Admin clone-summary digest — extends the existing clone-watch internal
+   *  digest into a Scamwatch-submission aid: ALL clone URLs per brand + a
+   *  "registrars that provided them" rollup (with abuse emails) + a bounded
+   *  Telegram summary. Operator-only (the existing shadow recipient); never
+   *  emailed to ACCC/ACMA (Scamwatch has no intake). Server-side only. Default
+   *  OFF — when off, the internal digest renders byte-identical to today. */
+  adminCloneSummaryDigest: readBoolEnv("FF_ADMIN_CLONE_SUMMARY_DIGEST"),
+
   /** Brand Stewardship Report — REAL brand-recipient sends. Gates the admin
    *  send route from emailing the actual brand security contact. Hard
    *  precondition: #371 legal sign-off of the outreach copy. Default OFF.
