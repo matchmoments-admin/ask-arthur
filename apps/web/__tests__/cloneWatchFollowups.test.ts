@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { parseSecurityTxtContacts } from "@/app/api/inngest/functions/known-brands-discover";
-import { buildInternalDigestHtml } from "@/app/api/inngest/functions/clone-watch-internal-digest";
+import {
+  buildInternalDigestHtml,
+  buildRegistrarRollup,
+} from "@/app/api/inngest/functions/clone-watch-internal-digest";
 import type { CloneBrandMetrics } from "@/app/api/inngest/functions/report-brand-stewardship";
 
 describe("parseSecurityTxtContacts", () => {
@@ -89,5 +92,72 @@ describe("buildInternalDigestHtml", () => {
     const html = buildInternalDigestHtml("June 2026", byBrand);
     expect(html).toContain("a&lt;script&gt;.com");
     expect(html).not.toContain("a<script>.com");
+  });
+
+  it("FULL mode renders every clone URL per brand + a registrar rollup (off path unchanged)", () => {
+    const byBrand = new Map<string, CloneBrandMetrics>([
+      [
+        "anz.com.au",
+        metrics({
+          detected: 2,
+          byRegistrar: { NameSilo: 2 },
+          domains: [
+            { domain: "anz-a.click", classification: null, ip: null, asn: null, country: null, registrar: "NameSilo", abuse_email: "abuse@namesilo.com" },
+          ],
+        }),
+      ],
+    ]);
+    const urlsByBrand = new Map<string, string[]>([
+      ["anz.com.au", ["https://anz-a.click/login", "https://anz-b.click/verify"]],
+    ]);
+    const html = buildInternalDigestHtml("June 2026", byBrand, { urlsByBrand, full: true });
+    // every URL rendered (uncapped)
+    expect(html).toContain("https://anz-a.click/login");
+    expect(html).toContain("https://anz-b.click/verify");
+    // registrar rollup with abuse email
+    expect(html).toContain("Registrars that provided these clones");
+    expect(html).toContain("NameSilo");
+    expect(html).toContain("abuse@namesilo.com");
+    expect(html).toContain("report.scamwatch.gov.au");
+  });
+
+  it("FULL mode notes the Unknown-registrar bucket", () => {
+    const byBrand = new Map<string, CloneBrandMetrics>([
+      ["x.com", metrics({ detected: 3, byRegistrar: { Unknown: 3 }, domains: [] })],
+    ]);
+    const html = buildInternalDigestHtml("June 2026", byBrand, {
+      urlsByBrand: new Map([["x.com", ["https://x-clone.click"]]]),
+      full: true,
+    });
+    expect(html).toContain("Registrar unknown for 3 domains");
+  });
+});
+
+describe("buildRegistrarRollup", () => {
+  const m = (byRegistrar: Record<string, number>, domains: CloneBrandMetrics["domains"]): CloneBrandMetrics => ({
+    detected: Object.values(byRegistrar).reduce((a, b) => a + b, 0),
+    netcraftReported: 0,
+    byClassification: {},
+    byCountry: {},
+    byRegistrar,
+    byAsn: {},
+    domains,
+    alertIds: [],
+  });
+
+  it("sums per-brand registrar counts across brands, maps abuse emails, and counts Unknown", () => {
+    const byBrand = new Map<string, CloneBrandMetrics>([
+      ["a.com", m({ NameSilo: 2, Unknown: 1 }, [
+        { domain: "a1", classification: null, ip: null, asn: null, country: null, registrar: "NameSilo", abuse_email: "abuse@namesilo.com" },
+      ])],
+      ["b.com", m({ NameSilo: 3, GoDaddy: 1 }, [
+        { domain: "b1", classification: null, ip: null, asn: null, country: null, registrar: "GoDaddy", abuse_email: "abuse@godaddy.com" },
+      ])],
+    ]);
+    const { rows, unknownCount } = buildRegistrarRollup(byBrand);
+    // NameSilo total = 2 + 3 = 5, sorted first
+    expect(rows[0]).toMatchObject({ registrar: "NameSilo", clones: 5, abuseEmail: "abuse@namesilo.com" });
+    expect(rows.find((r) => r.registrar === "GoDaddy")).toMatchObject({ clones: 1, abuseEmail: "abuse@godaddy.com" });
+    expect(unknownCount).toBe(1);
   });
 });
