@@ -148,6 +148,65 @@ export function matchKnownBrand(
   return null;
 }
 
+// ── Reddit community-report mentions ──────────────────────────────────────
+// reddit_post_intel.brands_impersonated is a per-post list of brands named in
+// community scam reports. We aggregate it into "your brand was named in N
+// community reports this month" — a brand-facing signal that exists even when
+// there were zero clones. Caveat (carried from the plan): the scrape is global
+// r/Scams, so overlap skews US/global brands; AU banks rarely appear.
+
+const REDDIT_FETCH_LIMIT = 5000;
+const REDDIT_SAMPLE_NARRATIVES = 3;
+
+export interface RedditPostIntelRow {
+  brands_impersonated: string[] | null;
+  narrative_summary: string | null;
+}
+
+export interface RedditBrandMetrics {
+  /** Representative raw brand string (for known_brands matching). */
+  rawBrand: string;
+  /** Distinct Reddit posts in the period that named this brand. */
+  mentions: number;
+  /** Up to N PII-scrubbed one-sentence narratives as evidence. */
+  sampleNarratives: string[];
+}
+
+/**
+ * Aggregate reddit_post_intel.brands_impersonated by normalized brand for the
+ * period — one mention per distinct normalized brand per POST (a post listing
+ * the same brand twice counts once). Carries a representative raw string for
+ * known_brands matching + up to N scrubbed narrative snippets. Pure + tested.
+ */
+export function aggregateRedditByBrand(
+  rows: RedditPostIntelRow[],
+): Map<string, RedditBrandMetrics> {
+  const out = new Map<string, RedditBrandMetrics>();
+  for (const row of rows) {
+    const seen = new Set<string>();
+    for (const raw of row.brands_impersonated ?? []) {
+      const norm = brandNormalize(raw);
+      if (!norm || seen.has(norm)) continue;
+      seen.add(norm);
+      let m = out.get(norm);
+      if (!m) {
+        m = { rawBrand: raw.trim(), mentions: 0, sampleNarratives: [] };
+        out.set(norm, m);
+      }
+      m.mentions += 1;
+      const narrative = row.narrative_summary?.trim();
+      if (
+        narrative &&
+        m.sampleNarratives.length < REDDIT_SAMPLE_NARRATIVES &&
+        !m.sampleNarratives.includes(narrative)
+      ) {
+        m.sampleNarratives.push(narrative);
+      }
+    }
+  }
+  return out;
+}
+
 /** First day of the prior calendar month (UTC) given a reference date. */
 export function priorMonthStart(now: Date): Date {
   return new Date(
@@ -437,7 +496,28 @@ export const reportBrandStewardship = inngest.createFunction(
     });
     const cloneAgg = aggregateClonesByDomain(cloneRows);
 
-    if (aggregated.size === 0 && cloneAgg.size === 0) {
+    // Reddit community-report mentions for the period (data-prep only — the
+    // brand-facing send stays gated on #371). Bounded window read; no paid API.
+    const redditRows = await step.run("fetch-reddit-mentions", async () => {
+      const sb = createServiceClient();
+      if (!sb) return [] as RedditPostIntelRow[];
+      const { data, error } = await sb
+        .from("reddit_post_intel")
+        .select("brands_impersonated, narrative_summary")
+        .gte("processed_at", period.startIso)
+        .lt("processed_at", period.endIso)
+        .limit(REDDIT_FETCH_LIMIT);
+      if (error) {
+        logger.error("brand-stewardship: reddit mention fetch failed", {
+          error: error.message,
+        });
+        return [] as RedditPostIntelRow[];
+      }
+      return (data ?? []) as RedditPostIntelRow[];
+    });
+    const redditAgg = aggregateRedditByBrand(redditRows);
+
+    if (aggregated.size === 0 && cloneAgg.size === 0 && redditAgg.size === 0) {
       return { ok: true, period: periodMonth, brands: 0 };
     }
 
@@ -495,6 +575,8 @@ export const reportBrandStewardship = inngest.createFunction(
           prepared: 0,
           skipped_no_contact: 0,
           clones_attached: 0,
+          reddit_attached: 0,
+          reddit_skipped_no_contact: 0,
           no_contact_clone_brands: 0,
           no_contact_top: [] as Array<{ domain: string; count: number }>,
         };
@@ -524,6 +606,7 @@ export const reportBrandStewardship = inngest.createFunction(
         contact: KnownBrandContact;
         onward?: BrandMetrics;
         clones?: CloneBrandMetrics;
+        reddit?: RedditBrandMetrics;
       };
       const byKey = new Map<string, Merged>();
       let skippedNoContact = 0;
@@ -560,8 +643,28 @@ export const reportBrandStewardship = inngest.createFunction(
         byKey.set(key, e);
       }
 
+      // Reddit mentions → attach to contacted brands only (gated to a known
+      // contact, same as onward). Reddit-only contacted brands create a report
+      // even with zero clones/onward. No-contact reddit brands are dropped
+      // (name-based, no domain worklist to join) — counted in the tally.
+      let redditSkippedNoContact = 0;
+      for (const [, rm] of redditAgg) {
+        const contact = matchKnownBrand(rm.rawBrand, contacts, resolveCanonical);
+        if (!contact || !contact.security_contact_email) {
+          redditSkippedNoContact += 1;
+          continue;
+        }
+        const key = (
+          contact.brand_key || deriveBrandKey(contact.brand_name)
+        ).toLowerCase();
+        const e = byKey.get(key) ?? { contact };
+        e.reddit = rm;
+        byKey.set(key, e);
+      }
+
       let preparedCount = 0;
       let clonesAttached = 0;
+      let redditAttached = 0;
       const nowIso = new Date().toISOString();
 
       for (const [key, e] of byKey) {
@@ -584,6 +687,13 @@ export const reportBrandStewardship = inngest.createFunction(
             alert_ids: e.clones.alertIds,
           };
           clonesAttached += 1;
+        }
+        if (e.reddit) {
+          metrics.reddit = {
+            mentions: e.reddit.mentions,
+            sample_narratives: e.reddit.sampleNarratives,
+          };
+          redditAttached += 1;
         }
 
         const { error } = await sb.from("brand_stewardship_reports").upsert(
@@ -664,6 +774,8 @@ export const reportBrandStewardship = inngest.createFunction(
         prepared: preparedCount,
         skipped_no_contact: skippedNoContact,
         clones_attached: clonesAttached,
+        reddit_attached: redditAttached,
+        reddit_skipped_no_contact: redditSkippedNoContact,
         no_contact_clone_brands: noContactCount,
         no_contact_top: noContactBrands.slice(0, 15),
       };
@@ -675,6 +787,7 @@ export const reportBrandStewardship = inngest.createFunction(
         `Onward-active brands: <b>${aggregated.size}</b> · clone-active brands: <b>${cloneAgg.size}</b>`,
         `Reports prepared (have contact): <b>${prepared.prepared}</b>`,
         `…of which carry clone detections: <b>${prepared.clones_attached}</b>`,
+        `…of which carry Reddit mentions: <b>${prepared.reddit_attached}</b> (reddit-active brands: ${redditAgg.size})`,
         `Skipped (no known_brands contact): ${prepared.skipped_no_contact}`,
       ];
       // Manual-outreach nudge: clone-targeted brands we can't email (no contact).
