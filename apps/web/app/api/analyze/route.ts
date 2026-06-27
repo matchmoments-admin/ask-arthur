@@ -427,22 +427,11 @@ export async function POST(req: NextRequest) {
           const lookup = await lookupPhoneNumber(lookupTarget.e164);
           phoneIntelligence = lookup;
 
-          // Cost telemetry — Twilio Lookup v2 bills ~$0.018 per mobile lookup
-          // (line-type + carrier + CNAM). Caching happens upstream in
-          // twilio-lookup.ts so this fires once per unique E.164 per 24h.
-          logCost({
-            feature: "twilio_lookup",
-            provider: "twilio",
-            operation: "lookup-v2",
-            units: 1,
-            unitCostUsd: 0.018,
-            metadata: {
-              line_type: lookup.lineType,
-              country: lookup.countryCode,
-              is_voip: lookup.isVoip,
-              risk_level: lookup.riskLevel,
-            },
-          });
+          // Cost telemetry for Twilio Lookup is emitted inside lookupPhoneNumber
+          // (scam-engine/twilio-lookup.ts) — and only on a real cache MISS, under
+          // the canonical "twilio-lookup" feature label. The previous route-level
+          // logCost here double-counted (fired on cache hits too) with a divergent
+          // "twilio_lookup" label, which could trip the daily cost-threshold page.
 
           // Inject key findings as red flags
           if (lookup.isVoip) {

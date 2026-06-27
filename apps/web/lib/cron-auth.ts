@@ -13,8 +13,8 @@ import { timingSafeEqual } from "node:crypto";
  * Fails CLOSED when `CRON_SECRET` is unset (the `!expected` guard). A missing
  * secret MUST reject, never authorize the literal string `"Bearer undefined"`.
  *
- * Born from the /ultracode audit (2026-05-30): `weekly-email`, `weekly-blog`
- * and `pipeline-health` compared against `` `Bearer ${process.env.CRON_SECRET}` ``
+ * Born from the /ultracode audit (2026-05-30): `weekly-email` and `weekly-blog`
+ * compared against `` `Bearer ${process.env.CRON_SECRET}` ``
  * with no `!expected` guard, so an unset secret authorized `Bearer undefined`;
  * `nurture` wrapped the check in `if (cronSecret)` and skipped auth entirely.
  * Centralising the check here is the single source of truth that prevents that

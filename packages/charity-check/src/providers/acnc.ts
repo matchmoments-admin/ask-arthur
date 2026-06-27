@@ -39,6 +39,7 @@
 import { logger } from "@askarthur/utils/logger";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { embedQuery } from "@askarthur/scam-engine/embeddings";
+import { logCost } from "@askarthur/scam-engine/cost-log";
 
 import { unavailablePillar, type CharityProviderContract } from "../provider-contract";
 import type { CharityCheckInput, CharityPillarResult } from "../types";
@@ -368,10 +369,18 @@ async function runSemanticMatch(
     const result = await embedQuery([name], { domain: "generic" });
     if (result.vectors.length === 0) return null;
 
-    // Cost is logged via cost_telemetry by the caller chain — for the
-    // consumer-path call here, the per-call $ is tiny (~$0.0000006) and
-    // the dashboard's daily aggregate matters more than per-call rows.
-    // Skipping insert here keeps the consumer path fast.
+    // Cost telemetry — embedQuery computes the cost but does not persist it; the
+    // caller must. Per-call $ is tiny but it's a real paid Voyage call, so log it
+    // (fire-and-forget) rather than leave the consumer charity-check path with an
+    // invisible spend line once FF_CHARITY_CHECK goes broad.
+    void logCost({
+      feature: "charity_check",
+      provider: "voyage",
+      operation: "embeddings.query",
+      units: result.totalTokens,
+      estimatedCostUsd: result.estimatedCostUsd,
+      metadata: { domain: "generic" },
+    });
 
     const { data, error } = await supa.rpc("match_charities_by_embedding", {
       p_query_embedding: vectorToPgString(result.vectors[0]),

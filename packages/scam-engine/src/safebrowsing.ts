@@ -3,11 +3,15 @@
 
 import { Redis } from "@upstash/redis";
 import { logger } from "@askarthur/utils/logger";
+import { logCost } from "./cost-log";
 import { isPrivateIP } from "./private-ip";
 
-// URL reputation cache — threat data changes slowly, no need to re-check every request
-const SAFE_BROWSING_CACHE_TTL = 3_600;   // 1 hour
-const VIRUSTOTAL_CACHE_TTL = 21_600;     // 6 hours
+// URL reputation cache — threat data changes slowly, no need to re-check every request.
+// Naming is historical: MALICIOUS verdicts use SAFE_BROWSING_CACHE_TTL (short — we
+// want to re-confirm a flagged URL sooner), CLEAN verdicts use the longer TTL (a
+// non-malicious URL rarely flips, so cache it longer to protect the free-tier caps).
+const SAFE_BROWSING_CACHE_TTL = 3_600;   // 1 hour  (malicious results)
+const CLEAN_URL_CACHE_TTL = 86_400;      // 24 hours (non-malicious results — bumped from 6h)
 const URL_CACHE_PREFIX = "askarthur:urlrep";
 
 let _redis: Redis | null = null;
@@ -124,6 +128,15 @@ async function checkGoogleSafeBrowsing(urls: string[]): Promise<Set<string>> {
           malicious.add(match.threat.url);
         }
       }
+      // Cost telemetry — free tier (no per-call charge) but track units so the
+      // request volume is visible in /admin/costs ahead of any paid escalation.
+      void logCost({
+        feature: "url-reputation",
+        provider: "google-safe-browsing",
+        operation: "threatMatches.find",
+        units: urls.length,
+        estimatedCostUsd: 0,
+      });
     }
   } catch {
     // Non-blocking: log but don't fail
@@ -141,6 +154,18 @@ async function checkVirusTotal(urls: string[]): Promise<Set<string>> {
 
   // VirusTotal has rate limits, check up to 4 URLs
   const urlsToCheck = urls.slice(0, 4);
+
+  // Cost telemetry — VirusTotal's public tier is free; the paid tier is metered
+  // per lookup. We log units with $0 today (key unset / public tier); if a paid
+  // key is ever configured, add a VIRUSTOTAL_CHECK_USD rate to ENGINE_PRICING so
+  // this spend stops being invisible (the failure mode cost-log.ts exists for).
+  void logCost({
+    feature: "url-reputation",
+    provider: "virustotal",
+    operation: "urls.get",
+    units: urlsToCheck.length,
+    estimatedCostUsd: 0,
+  });
 
   await Promise.allSettled(
     urlsToCheck.map(async (url) => {
@@ -227,7 +252,7 @@ export async function checkURLReputation(
     for (const r of freshResults) {
       hashURL(r.url)
         .then((hash) => {
-          const ttl = r.isMalicious ? SAFE_BROWSING_CACHE_TTL : VIRUSTOTAL_CACHE_TTL;
+          const ttl = r.isMalicious ? SAFE_BROWSING_CACHE_TTL : CLEAN_URL_CACHE_TTL;
           return redis.set(`${URL_CACHE_PREFIX}:${hash}`, r, { ex: ttl });
         })
         .catch(() => {});

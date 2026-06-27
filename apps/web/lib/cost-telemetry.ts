@@ -118,19 +118,26 @@ export function logCost(ev: CostEvent): void {
   if (!supabase) return;
 
   const p: Promise<void> = (async () => {
-    const { error } = await supabase.from("cost_telemetry").insert({
-      feature: ev.feature,
-      provider: ev.provider,
-      operation: ev.operation,
-      units,
-      unit_cost_usd: unitCost,
-      estimated_cost_usd: total,
-      metadata: ev.metadata ?? {},
-      user_id: ev.userId ?? null,
-      request_id: ev.requestId ?? null,
-    });
-    if (error) {
-      logger.warn("logCost insert failed", { error: String(error) });
+    try {
+      const { error } = await supabase.from("cost_telemetry").insert({
+        feature: ev.feature,
+        provider: ev.provider,
+        operation: ev.operation,
+        units,
+        unit_cost_usd: unitCost,
+        estimated_cost_usd: total,
+        metadata: ev.metadata ?? {},
+        user_id: ev.userId ?? null,
+        request_id: ev.requestId ?? null,
+      });
+      if (error) {
+        logger.warn("logCost insert failed", { error: String(error) });
+      }
+    } catch (err) {
+      // Telemetry must never throw to the caller (or surface as an unhandled
+      // rejection). A malformed/unavailable client is swallowed as a warn —
+      // the paid call it measures has already happened and must not be broken.
+      logger.warn("logCost insert threw", { error: String(err) });
     }
   })();
 

@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { scrubPII } from "@askarthur/scam-engine/sanitize";
 import { logger } from "@askarthur/utils/logger";
+import { logCost, claudeHaikuCostUsd } from "@/lib/cost-telemetry";
 
 interface ScamGroup {
   scam_type: string;
@@ -134,6 +135,22 @@ Return ONLY valid JSON:
       },
     ],
   });
+
+  // Cost telemetry — the weekly Anthropic spend here was previously untracked
+  // (only the Resend send was logged). Trivial at ~52 runs/yr but closes the
+  // /admin/costs blind spot. Fire-and-forget.
+  {
+    const inputTokens = response.usage?.input_tokens ?? 0;
+    const outputTokens = response.usage?.output_tokens ?? 0;
+    logCost({
+      feature: "weekly_blog",
+      provider: "anthropic",
+      operation: "claude-haiku-4-5-20251001",
+      units: inputTokens + outputTokens,
+      estimatedCostUsd: claudeHaikuCostUsd(inputTokens, outputTokens),
+      metadata: { input_tokens: inputTokens, output_tokens: outputTokens },
+    });
+  }
 
   const responseText =
     response.content[0].type === "text" ? response.content[0].text : "";

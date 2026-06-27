@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { logger } from "@askarthur/utils/logger";
+import { logCost, claudeHaikuCostUsd } from "@/lib/cost-telemetry";
 import { checkRateLimit } from "@askarthur/utils/rate-limit";
 import { scrubPII } from "@askarthur/scam-engine/sanitize";
 import { assertSafeURL } from "@askarthur/scam-engine/ssrf-guard";
@@ -281,6 +282,23 @@ export async function POST(req: NextRequest) {
         ],
       });
       responseText = response.content[0]?.type === "text" ? response.content[0].text : "";
+
+      // Cost telemetry — this route was previously invisible to /admin/costs
+      // (no logCost). Haiku 4.5; fire-and-forget, never blocks the response.
+      const inputTokens = response.usage?.input_tokens ?? 0;
+      const outputTokens = response.usage?.output_tokens ?? 0;
+      logCost({
+        feature: "persona_check",
+        provider: "anthropic",
+        operation: "claude-haiku-4-5-20251001",
+        units: inputTokens + outputTokens,
+        estimatedCostUsd: claudeHaikuCostUsd(inputTokens, outputTokens),
+        metadata: {
+          input_tokens: inputTokens,
+          output_tokens: outputTokens,
+          type,
+        },
+      });
     } catch (claudeErr) {
       logger.error("Claude API call failed", { error: String(claudeErr) });
       return NextResponse.json({ error: "Analysis service temporarily unavailable. Please try again." }, { status: 503 });
