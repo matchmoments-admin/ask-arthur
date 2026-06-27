@@ -75,6 +75,7 @@ export async function analyzeForBot(
     surface: "bot",
     region: region ?? null,
     images,
+    ragThemesEnabled: featureFlags.ragThemes,
     backgroundMode: "fire-and-forget",
   });
 

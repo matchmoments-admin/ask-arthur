@@ -29,6 +29,9 @@ export interface RelevantTheme {
   narrative: string | null;
   modusOperandi: string | null;
   representativeBrands: string[];
+  /** Top social-engineering tactics aggregated across the theme's posts
+   *  (v186). The most transferable signal across brand/channel variation. */
+  topTacticTags: string[];
   signalStrength: "noise" | "weak" | "strong";
   memberCount: number;
   similarity: number;
@@ -52,6 +55,7 @@ interface ThemeRow {
   narrative: string | null;
   modus_operandi: string | null;
   representative_brands: string[] | null;
+  top_tactic_tags: string[] | null;
   signal_strength: "noise" | "weak" | "strong";
   member_count: number;
   similarity: number;
@@ -116,6 +120,7 @@ export async function getRelevantThemes(
       narrative: r.narrative,
       modusOperandi: r.modus_operandi,
       representativeBrands: r.representative_brands ?? [],
+      topTacticTags: r.top_tactic_tags ?? [],
       signalStrength: r.signal_strength,
       memberCount: r.member_count,
       similarity: r.similarity,
@@ -156,7 +161,11 @@ export function renderThemesForPrompt(themes: RelevantTheme[]): string {
     const modus = t.modusOperandi
       ? `\n  Modus operandi: ${t.modusOperandi}`
       : "";
-    lines.push(`- "${t.title}":${narrative}${brands}${modus}`);
+    const tactics =
+      t.topTacticTags.length > 0
+        ? `\n  Common tactics: ${t.topTacticTags.slice(0, 4).join(", ")}`
+        : "";
+    lines.push(`- "${t.title}":${narrative}${brands}${modus}${tactics}`);
   }
   lines.push(
     "If the user's message matches one of these patterns, name it in the summary using the title above.",

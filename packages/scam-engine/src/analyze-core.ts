@@ -47,6 +47,7 @@ import type {
   ReferrerSource,
 } from "@askarthur/types";
 import { applyShopSignal } from "./shop-signal";
+import { getRelevantThemes, renderThemesForPrompt } from "./retrieval/themes";
 
 export type AnalyzeSurface = AnalyzeCacheSurface;
 
@@ -87,6 +88,15 @@ export interface AnalyzeCoreInput {
    * the response when shop-signal also fires.
    */
   referrerSource?: ReferrerSource;
+  /**
+   * When true, inject the top Reddit-intel themes (community-reported AU scam
+   * patterns) into the Claude prompt — the same RAG augmentation the web
+   * /api/analyze route already applies. Extends it to bot + extension surfaces
+   * (both route through here). Caller passes featureFlags.ragThemes. Adds one
+   * cached Voyage embed (~$0.000003) per text submission; decorative — a
+   * failure degrades to no themes, never an analyze error.
+   */
+  ragThemesEnabled?: boolean;
 }
 
 export interface AnalyzeCoreOutput {
@@ -134,6 +144,7 @@ export async function runAnalysisCore(
     backgroundMode = "waitUntil",
     requestId,
     referrerSource,
+    ragThemesEnabled = false,
   } = input;
 
   // Vision vs text mode — derived from image presence. Hoisted above the cache
@@ -188,6 +199,16 @@ export async function runAnalysisCore(
     urlsToCheck = Array.from(new Set([...urls, ...finalUrls]));
   }
 
+  // 3b. RAG: inject recent community-reported AU scam themes into the prompt
+  // (same augmentation the web /api/analyze route applies — extended here so
+  // bot + extension surfaces benefit too). Never-throws → "" on any failure;
+  // not part of the cache key, so a Stage-1 cache hit serves a themeless
+  // verdict (consistent with the web bespoke path + the image-cache).
+  const themesPromptBlock =
+    ragThemesEnabled && text
+      ? await getRelevantThemes(text, { requestId }).then(renderThemesForPrompt)
+      : "";
+
   // 4. Parallel: AI analysis + URL reputation. (aiMode derived above.)
   const [aiResult, urlResults] = await Promise.all([
     analyzeWithClaude(
@@ -195,6 +216,7 @@ export async function runAnalysisCore(
       images,
       aiMode,
       redirectChains.length > 0 ? redirectChains : undefined,
+      themesPromptBlock || undefined,
     ),
     urlsToCheck.length > 0
       ? checkURLReputation(urlsToCheck)

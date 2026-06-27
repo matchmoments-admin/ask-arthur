@@ -602,6 +602,24 @@ export type Database = {
         }
         Relationships: []
       }
+      brand_report_unsubscribes: {
+        Row: {
+          email: string
+          source: string | null
+          unsubscribed_at: string
+        }
+        Insert: {
+          email: string
+          source?: string | null
+          unsubscribed_at?: string
+        }
+        Update: {
+          email?: string
+          source?: string | null
+          unsubscribed_at?: string
+        }
+        Relationships: []
+      }
       brand_stewardship_reports: {
         Row: {
           approved_by_admin_id: string | null
@@ -611,12 +629,15 @@ export type Database = {
           evidence_scam_report_ids: number[]
           id: string
           metrics: Json
+          outreach_done_at: string | null
+          outreach_done_by: string | null
           period_month: string
           prepared_at: string
           provider: string | null
           provider_message_id: string | null
           recipient_email: string | null
           sent_at: string | null
+          share_token: string
           status: string
           status_reason: string | null
         }
@@ -628,12 +649,15 @@ export type Database = {
           evidence_scam_report_ids?: number[]
           id?: string
           metrics?: Json
+          outreach_done_at?: string | null
+          outreach_done_by?: string | null
           period_month: string
           prepared_at?: string
           provider?: string | null
           provider_message_id?: string | null
           recipient_email?: string | null
           sent_at?: string | null
+          share_token?: string
           status?: string
           status_reason?: string | null
         }
@@ -645,12 +669,15 @@ export type Database = {
           evidence_scam_report_ids?: number[]
           id?: string
           metrics?: Json
+          outreach_done_at?: string | null
+          outreach_done_by?: string | null
           period_month?: string
           prepared_at?: string
           provider?: string | null
           provider_message_id?: string | null
           recipient_email?: string | null
           sent_at?: string | null
+          share_token?: string
           status?: string
           status_reason?: string | null
         }
@@ -4026,6 +4053,7 @@ export type Database = {
           signal_strength: string
           slug: string
           title: string
+          top_tactic_tags: string[] | null
           updated_at: string
           wow_delta_pct: number | null
         }
@@ -4047,6 +4075,7 @@ export type Database = {
           signal_strength?: string
           slug: string
           title: string
+          top_tactic_tags?: string[] | null
           updated_at?: string
           wow_delta_pct?: number | null
         }
@@ -4068,6 +4097,7 @@ export type Database = {
           signal_strength?: string
           slug?: string
           title?: string
+          top_tactic_tags?: string[] | null
           updated_at?: string
           wow_delta_pct?: number | null
         }
@@ -7641,6 +7671,17 @@ export type Database = {
           previous_classification: string
         }[]
       }
+      list_clone_alerts_pending_netcraft_auto: {
+        Args: { p_daily_cap?: number; p_min_confidence?: number }
+        Returns: {
+          candidate_domain: string
+          candidate_url: string
+          id: number
+          inferred_target_domain: string
+          severity_tier: string
+          signals: Json
+        }[]
+      }
       list_clone_alerts_pending_netcraft_poll: {
         Args: { p_limit?: number }
         Returns: {
@@ -7936,6 +7977,7 @@ export type Database = {
           similarity: number
           slug: string
           title: string
+          top_tactic_tags: string[]
         }[]
       }
       match_verified_scams: {

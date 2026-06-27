@@ -493,6 +493,7 @@ export const redditIntelCluster = inngest.createFunction(
           brands: string[];
           modusOperandi: string | null;
           narrativeSummary: string | null;
+          tactics: string[];
         }>
       > = {};
 
@@ -500,7 +501,7 @@ export const redditIntelCluster = inngest.createFunction(
         const { data: members } = await supabase
           .from("reddit_post_intel")
           .select(
-            "intent_label, brands_impersonated, modus_operandi, narrative_summary",
+            "intent_label, brands_impersonated, modus_operandi, narrative_summary, tactic_tags",
           )
           .eq("theme_id", tid)
           .limit(5);
@@ -509,6 +510,7 @@ export const redditIntelCluster = inngest.createFunction(
           brands: (m.brands_impersonated as string[]) ?? [],
           modusOperandi: (m.modus_operandi as string | null) ?? null,
           narrativeSummary: (m.narrative_summary as string | null) ?? null,
+          tactics: (m.tactic_tags as string[] | null) ?? [],
         }));
       }
 
@@ -558,6 +560,20 @@ export const redditIntelCluster = inngest.createFunction(
           continue;
         }
         const slug = kebabSlug(named_theme.title);
+        // Aggregate the most frequent social-engineering tactics across the
+        // theme's sampled posts (v186) so the RAG prompt can surface them.
+        // Sample-based (the same ≤5 members fetched for naming context) — it
+        // self-heals on the next naming pass as a cluster grows.
+        const tacticCounts = new Map<string, number>();
+        for (const s of samples[named_theme.themeId] ?? []) {
+          for (const tag of s.tactics) {
+            tacticCounts.set(tag, (tacticCounts.get(tag) ?? 0) + 1);
+          }
+        }
+        const topTactics = [...tacticCounts.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 4)
+          .map(([tag]) => tag);
         const { error } = await supabase
           .from("reddit_intel_themes")
           .update({
@@ -566,6 +582,7 @@ export const redditIntelCluster = inngest.createFunction(
             narrative: named_theme.narrative,
             modus_operandi: named_theme.modusOperandi ?? null,
             representative_brands: named_theme.representativeBrands,
+            top_tactic_tags: topTactics.length > 0 ? topTactics : null,
             updated_at: new Date().toISOString(),
           })
           .eq("id", named_theme.themeId);
