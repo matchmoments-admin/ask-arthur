@@ -191,9 +191,17 @@ export const cloneWatchInternalDigest = inngest.createFunction(
     if (!featureFlags.brandStewardshipReport) {
       return { skipped: true, reason: "FF_BRAND_STEWARDSHIP_REPORT disabled" };
     }
-    const recipient = readStringEnv("BRAND_STEWARDSHIP_SHADOW_RECIPIENT");
+    // Operator recipient — prefer the clone-watch admin inbox
+    // (CLONE_WATCH_SHADOW_RECIPIENT, the same var clone-watch-auto-triage uses),
+    // falling back to the brand-stewardship shadow recipient. Decoupled so the
+    // internal digest does NOT depend on BRAND_STEWARDSHIP_SHADOW_RECIPIENT —
+    // setting that var would also redirect real brand-report sends to the shadow
+    // inbox, which we must not do while real-brand sends are live.
+    const recipient =
+      readStringEnv("CLONE_WATCH_SHADOW_RECIPIENT") ||
+      readStringEnv("BRAND_STEWARDSHIP_SHADOW_RECIPIENT");
     if (!recipient) {
-      return { skipped: true, reason: "no BRAND_STEWARDSHIP_SHADOW_RECIPIENT" };
+      return { skipped: true, reason: "no clone-watch / brand-stewardship recipient" };
     }
     const fromEmail = readStringEnv("RESEND_FROM_EMAIL");
     const apiKey = process.env.RESEND_API_KEY;
