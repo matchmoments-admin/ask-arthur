@@ -38,6 +38,7 @@ const sampleRow = {
   modus_operandi:
     "Buyer fakes urgency, sends a forged PayID confirmation email.",
   representative_brands: ["PayID", "Facebook Marketplace"],
+  top_tactic_tags: ["urgency_window", "authority_appeal"],
   signal_strength: "strong" as const,
   member_count: 14,
   similarity: 0.78,
@@ -82,6 +83,7 @@ describe("getRelevantThemes", () => {
       narrative: sampleRow.narrative,
       modusOperandi: sampleRow.modus_operandi,
       representativeBrands: ["PayID", "Facebook Marketplace"],
+      topTacticTags: ["urgency_window", "authority_appeal"],
       signalStrength: "strong",
       memberCount: 14,
       similarity: 0.78,
@@ -161,6 +163,7 @@ describe("renderThemesForPrompt", () => {
         modusOperandi:
           "Buyer sends forged PayID confirmation requesting an account upgrade fee.",
         representativeBrands: ["PayID", "Facebook Marketplace"],
+        topTacticTags: ["urgency_window", "authority_appeal"],
         signalStrength: "strong",
         memberCount: 14,
         similarity: 0.8,
@@ -172,9 +175,28 @@ describe("renderThemesForPrompt", () => {
     expect(out).toContain("Marketplace buyer offers PayID");
     expect(out).toContain("Targets: PayID, Facebook Marketplace");
     expect(out).toContain("Modus operandi:");
+    expect(out).toContain("Common tactics: urgency_window, authority_appeal");
     expect(out).toContain(
       "name it in the summary using the title above",
     );
+  });
+
+  it("omits the tactics line when there are no tactic tags", () => {
+    const themes: RelevantTheme[] = [
+      {
+        id: "1",
+        slug: "x",
+        title: "X",
+        narrative: "n",
+        modusOperandi: null,
+        representativeBrands: [],
+        topTacticTags: [],
+        signalStrength: "weak",
+        memberCount: 1,
+        similarity: 0.5,
+      },
+    ];
+    expect(renderThemesForPrompt(themes)).not.toContain("Common tactics");
   });
 
   it("caps targets at 3 brands", () => {
@@ -186,6 +208,7 @@ describe("renderThemesForPrompt", () => {
         narrative: null,
         modusOperandi: null,
         representativeBrands: ["A", "B", "C", "D", "E"],
+        topTacticTags: [],
         signalStrength: "weak",
         memberCount: 1,
         similarity: 0.5,

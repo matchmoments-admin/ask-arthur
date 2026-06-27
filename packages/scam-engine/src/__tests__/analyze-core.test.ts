@@ -22,8 +22,13 @@ vi.mock("../analysis-cache", () => ({
   getCachedAnalysis: vi.fn(),
   setCachedAnalysis: vi.fn(),
 }));
+vi.mock("../retrieval/themes", () => ({
+  getRelevantThemes: vi.fn(() => Promise.resolve([])),
+  renderThemesForPrompt: vi.fn(() => ""),
+}));
 
 import { runAnalysisCore } from "../analyze-core";
+import { getRelevantThemes, renderThemesForPrompt } from "../retrieval/themes";
 import { analyzeWithClaude, detectInjectionAttempt } from "../claude";
 import { extractURLs, checkURLReputation } from "../safebrowsing";
 import { resolveRedirects, extractFinalUrls } from "../redirect-resolver";
@@ -40,6 +45,8 @@ const mockStore = vi.mocked(storeVerifiedScam);
 const mockStats = vi.mocked(incrementStats);
 const mockCacheGet = vi.mocked(getCachedAnalysis);
 const mockCacheSet = vi.mocked(setCachedAnalysis);
+const mockGetThemes = vi.mocked(getRelevantThemes);
+const mockRenderThemes = vi.mocked(renderThemesForPrompt);
 
 const safeAi = {
   verdict: "SAFE" as const,
@@ -136,6 +143,29 @@ describe("runAnalysisCore — cache path", () => {
   });
 });
 
+describe("runAnalysisCore — RAG themes (bot/extension cross-feed)", () => {
+  it("injects the rendered themes block as the 5th analyzeWithClaude arg when enabled", async () => {
+    mockAnalyze.mockResolvedValue(safeAi);
+    mockGetThemes.mockResolvedValueOnce([{ title: "PayID scam" }] as never);
+    mockRenderThemes.mockReturnValueOnce("RECENT AUSTRALIAN SCAM PATTERNS:\n- PayID scam");
+
+    await runAnalysisCore({ text: "is this paid real", surface: "bot", ragThemesEnabled: true });
+
+    expect(mockGetThemes).toHaveBeenCalledWith("is this paid real", expect.anything());
+    // analyzeWithClaude(text, images, mode, redirectChains, themesPromptBlock)
+    expect(mockAnalyze.mock.calls[0][4]).toBe("RECENT AUSTRALIAN SCAM PATTERNS:\n- PayID scam");
+  });
+
+  it("does NOT fetch themes when ragThemesEnabled is absent", async () => {
+    mockAnalyze.mockResolvedValue(safeAi);
+
+    await runAnalysisCore({ text: "hello", surface: "extension" });
+
+    expect(mockGetThemes).not.toHaveBeenCalled();
+    expect(mockAnalyze.mock.calls[0][4]).toBeUndefined();
+  });
+});
+
 describe("runAnalysisCore — full pipeline (cache miss)", () => {
   it("returns the merged AI verdict when no other signals fire", async () => {
     mockAnalyze.mockResolvedValue(safeAi);
@@ -203,6 +233,7 @@ describe("runAnalysisCore — full pipeline (cache miss)", () => {
       ["base64data"],
       "image",
       undefined,
+      undefined, // themesPromptBlock — ragThemesEnabled not set here
     );
   });
 

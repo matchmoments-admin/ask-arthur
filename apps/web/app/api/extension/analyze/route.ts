@@ -53,6 +53,7 @@ export async function POST(req: NextRequest) {
       text,
       surface: "extension",
       resolveRedirectsEnabled: featureFlags.redirectResolve,
+      ragThemesEnabled: featureFlags.ragThemes,
       backgroundMode: "waitUntil",
       requestId: auth.requestId ?? undefined,
     });
