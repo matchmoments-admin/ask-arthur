@@ -58,6 +58,7 @@ import { reportBrandStewardship } from "./functions/report-brand-stewardship";
 // Brand-contact coverage follow-ups: security.txt discovery (long-tail contacts)
 // + internal all-clones digest to the operator (full picture incl. no-contact).
 import { knownBrandsDiscover } from "./functions/known-brands-discover";
+import { redditBrandsDiscover } from "./functions/reddit-brands-discover";
 import { cloneWatchInternalDigest } from "./functions/clone-watch-internal-digest";
 // Platform housekeeping (retention / rollup / push) — moved out of
 // @askarthur/scam-engine in #588 (finding 2): these are platform jobs, not
@@ -115,6 +116,7 @@ const appFunctions = [
   cloneWatchHaikuPreclassify,
   // Brand-contact coverage follow-ups
   knownBrandsDiscover,
+  redditBrandsDiscover,
   cloneWatchInternalDigest,
   // Brand Stewardship Report (WS2-cap)
   reportBrandStewardship,

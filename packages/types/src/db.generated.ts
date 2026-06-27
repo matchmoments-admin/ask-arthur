@@ -4232,6 +4232,45 @@ export type Database = {
         }
         Relationships: []
       }
+      reddit_watchlist_candidates: {
+        Row: {
+          brand_normalized: string
+          created_at: string
+          first_seen_at: string
+          id: number
+          last_seen_at: string
+          mention_count: number
+          raw_brand: string
+          resolved_canonical: string | null
+          source: string
+          status: string
+        }
+        Insert: {
+          brand_normalized: string
+          created_at?: string
+          first_seen_at?: string
+          id?: never
+          last_seen_at?: string
+          mention_count?: number
+          raw_brand: string
+          resolved_canonical?: string | null
+          source?: string
+          status?: string
+        }
+        Update: {
+          brand_normalized?: string
+          created_at?: string
+          first_seen_at?: string
+          id?: never
+          last_seen_at?: string
+          mention_count?: number
+          raw_brand?: string
+          resolved_canonical?: string | null
+          source?: string
+          status?: string
+        }
+        Relationships: []
+      }
       regulator_alert_pushes: {
         Row: {
           error_count: number
@@ -8242,6 +8281,15 @@ export type Database = {
           p_platform: string
           p_region?: string
           p_user_id?: string
+        }
+        Returns: undefined
+      }
+      upsert_reddit_watchlist_candidate: {
+        Args: {
+          p_brand_normalized: string
+          p_mention_count: number
+          p_raw_brand: string
+          p_resolved_canonical: string
         }
         Returns: undefined
       }

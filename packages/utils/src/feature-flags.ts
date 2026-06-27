@@ -251,6 +251,14 @@ export const featureFlags = {
    *  ~270 posts/week volume; daily cost-telemetry alert set at A$50. */
   redditIntelIngest: readBoolEnv("FF_REDDIT_INTEL_INGEST"),
 
+  /** Reddit Brands Discover — weekly cron that aggregates
+   *  reddit_post_intel.brands_impersonated, resolves via the v174 alias layer,
+   *  drops already-watched brands, and writes the unwatched remainder to
+   *  reddit_watchlist_candidates + a Telegram digest. Feeds the human
+   *  watchlist-curation loop; never auto-mutates the clone-watch monitored set.
+   *  Server-side only; no paid API → no cost brake needed. */
+  redditBrandsDiscover: readBoolEnv("FF_REDDIT_BRANDS_DISCOVER"),
+
   /** Reddit Intel Wave 2 — dashboard widgets (RedditIntelPanel, theme cards,
    *  brand watchlist, theme-velocity drill-down). Independent of the ingest
    *  flag — when ingest is on but dashboard is off, data is collected but
