@@ -8,6 +8,7 @@ import {
   renderThemesForPrompt,
 } from "@askarthur/scam-engine/retrieval/themes";
 import { featureFlags } from "@askarthur/utils/feature-flags";
+import { readBoolEnv } from "@askarthur/utils/env";
 import { resolveRequestId } from "@askarthur/utils/request-id";
 import { extractContactsFromText, normalizePhoneE164 } from "@askarthur/scam-engine/phone-normalize";
 import { extractURLs, checkURLReputation } from "@askarthur/scam-engine/safebrowsing";
@@ -173,10 +174,20 @@ export async function POST(req: NextRequest) {
     // 2c. Pre-filter for prompt injection attempts
     const injectionCheck = text ? detectInjectionAttempt(text) : { detected: false, patterns: [] };
 
-    // 3. Check cache for text-only requests (skip for images — content-addressable hashing is complex)
-    const isTextOnly = text && images.length === 0;
-    if (isTextOnly) {
-      const cached = await getCachedAnalysis({ text, surface: "web" });
+    // 3. Cache lookup. Text is always cacheable; images only when
+    // FF_ANALYZE_IMAGE_CACHE is ON (default OFF — image caching is a behaviour
+    // change to the core scan, so it ships dark and flips on after verification).
+    // The key is content-addressable on text + image bytes + mode
+    // (buildAnalyzeCacheKey), so a replay is the same input → same verdict.
+    const imageCacheEnabled = readBoolEnv("FF_ANALYZE_IMAGE_CACHE");
+    // Canonical mode for the cache key — deterministic regardless of the
+    // optional client `mode`: text-only → "text"; image → "image" (or "qrcode"
+    // so a QR decode never collides with a vision scan of the same bytes).
+    const cacheMode = images.length > 0 ? (mode === "qrcode" ? "qrcode" : "image") : "text";
+    const cacheEligible =
+      (!!text || images.length > 0) && (images.length === 0 || imageCacheEnabled);
+    if (cacheEligible) {
+      const cached = await getCachedAnalysis({ text, surface: "web", images, mode: cacheMode });
       if (cached) {
         const geo = geolocateFromHeaders(req.headers);
         waitUntil(incrementStats(cached.verdict, geo.region));
@@ -184,7 +195,7 @@ export async function POST(req: NextRequest) {
           requestId,
           verdict: cached.verdict,
           cached: true,
-          submissionType: "text",
+          submissionType: mode ?? (images.length > 0 ? "image" : "text"),
           start,
         });
         return NextResponse.json(
@@ -340,9 +351,13 @@ export async function POST(req: NextRequest) {
       )
     );
 
-    // Cache text-only analysis results for future requests
-    if (isTextOnly) {
-      waitUntil(setCachedAnalysis({ text, surface: "web" }, aiResult));
+    // Cache the analysis result for future requests (text always; images only
+    // when FF_ANALYZE_IMAGE_CACHE is on). Keyed on text + image bytes + mode —
+    // matches the read above.
+    if (cacheEligible) {
+      waitUntil(
+        setCachedAnalysis({ text, surface: "web", images, mode: cacheMode }, aiResult),
+      );
     }
 
     // 8. Extract scammer contacts when feature is on

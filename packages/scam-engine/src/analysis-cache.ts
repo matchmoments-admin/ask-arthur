@@ -145,7 +145,11 @@ export async function buildAnalyzeCacheKey(input: AnalyzeCacheInput): Promise<st
   const flagsHash = input.outputAffectingFlags
     ? (await sha256OfObject(input.outputAffectingFlags)).slice(0, 8)
     : "0";
-  return `${CACHE_PREFIX}:srf${surface}:m${model}:s${SYSTEM_PROMPT_HASH}:t${textHash}:i${imagesHash}:f${flagsHash}:mode${modeTag(input)}`;
+  // Analysis MODE is part of the key: the same image bytes analysed as a vision
+  // screenshot vs a `qrcode` decode produce different verdicts, so they must not
+  // collide. `modeTag` only captures text/image PRESENCE, not the requested mode.
+  const md = input.mode ?? "auto";
+  return `${CACHE_PREFIX}:srf${surface}:m${model}:s${SYSTEM_PROMPT_HASH}:t${textHash}:i${imagesHash}:f${flagsHash}:md${md}:mode${modeTag(input)}`;
 }
 
 /**

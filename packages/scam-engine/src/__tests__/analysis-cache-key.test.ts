@@ -64,6 +64,15 @@ describe("buildAnalyzeCacheKey", () => {
     expect(a).toBe(b);
   });
 
+  it("mode axis separates vision vs qrcode of the SAME image (collision guard)", async () => {
+    // Same image bytes, same (empty) text — but one is a vision screenshot
+    // analysis and the other a QR-code decode. Different verdicts → must not
+    // share a cache key. modeTag alone (presence-based) would collide here.
+    const vision = await buildAnalyzeCacheKey({ images: ["imgX"], mode: "image" });
+    const qr = await buildAnalyzeCacheKey({ images: ["imgX"], mode: "qrcode" });
+    expect(vision).not.toBe(qr);
+  });
+
   it("mode tag distinguishes text-only, image-only, and mixed inputs", async () => {
     const t = await buildAnalyzeCacheKey({ text: "hi" });
     const i = await buildAnalyzeCacheKey({ images: ["img1"] });

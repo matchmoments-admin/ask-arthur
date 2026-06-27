@@ -13,10 +13,10 @@
  * not asserted here — `anthropic-tool-use.test.ts` covers Zod behaviour;
  * this test pins the retry-flow contract.
  */
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-import { classifyWithRetry } from "../inngest/reddit-intel-daily";
+import { classifyWithRetry, resolveClassifyModel } from "../inngest/reddit-intel-daily";
 
 // Minimal schema shape — just enough to satisfy the helper's generic.
 const StubSchema = z.object({ ok: z.boolean() });
@@ -143,5 +143,34 @@ describe("classifyWithRetry", () => {
     expect(secondCallArgs.model).toBe("SONNET_4_6");
     expect(secondCallArgs.system).toBe("stub system prompt");
     expect(secondCallArgs.maxTokens).toBe(100);
+  });
+});
+
+describe("resolveClassifyModel — Haiku cost pilot flag", () => {
+  const KEY = "REDDIT_INTEL_CLASSIFY_MODEL";
+  const original = process.env[KEY];
+  afterEach(() => {
+    if (original === undefined) delete process.env[KEY];
+    else process.env[KEY] = original;
+  });
+
+  it("defaults to SONNET_4_6 when the env var is unset", () => {
+    delete process.env[KEY];
+    expect(resolveClassifyModel()).toBe("SONNET_4_6");
+  });
+
+  it("returns HAIKU_4_5 when the env var selects it (the pilot)", () => {
+    process.env[KEY] = "HAIKU_4_5";
+    expect(resolveClassifyModel()).toBe("HAIKU_4_5");
+  });
+
+  it("tolerates surrounding whitespace (Vercel-stored value)", () => {
+    process.env[KEY] = " HAIKU_4_5\n";
+    expect(resolveClassifyModel()).toBe("HAIKU_4_5");
+  });
+
+  it("falls back to SONNET_4_6 on an unknown value (typo can't break the cron)", () => {
+    process.env[KEY] = "haiku"; // not a ClaudeModelKey
+    expect(resolveClassifyModel()).toBe("SONNET_4_6");
   });
 });

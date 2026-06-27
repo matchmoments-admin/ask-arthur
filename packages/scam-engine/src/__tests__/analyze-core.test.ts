@@ -106,6 +106,34 @@ describe("runAnalysisCore — cache path", () => {
     expect(mockCacheGet).not.toHaveBeenCalled();
     expect(mockAnalyze).toHaveBeenCalledTimes(1);
   });
+
+  it("keys the cache on images + mode for image submissions (collision bugfix)", async () => {
+    // Regression for the text-only-key collision: image submissions must pass
+    // `images` and `mode` to both the read and write so two different images
+    // can't replay each other's verdict.
+    mockAnalyze.mockResolvedValue(safeAi);
+
+    // Empty text + image is the exact collision scenario the bugfix targets.
+    await runAnalysisCore({ text: "", images: ["imgA"], surface: "web" });
+
+    expect(mockCacheGet).toHaveBeenCalledWith(
+      expect.objectContaining({ surface: "web", images: ["imgA"], mode: "image" }),
+    );
+    expect(mockCacheSet).toHaveBeenCalledWith(
+      expect.objectContaining({ surface: "web", images: ["imgA"], mode: "image" }),
+      expect.anything(),
+    );
+  });
+
+  it("keys text-only submissions with mode 'text'", async () => {
+    mockAnalyze.mockResolvedValue(safeAi);
+
+    await runAnalysisCore({ text: "hello", surface: "web" });
+
+    expect(mockCacheGet).toHaveBeenCalledWith(
+      expect.objectContaining({ text: "hello", surface: "web", mode: "text" }),
+    );
+  });
 });
 
 describe("runAnalysisCore — full pipeline (cache miss)", () => {
