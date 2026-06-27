@@ -21,6 +21,7 @@ interface StewardshipMetrics {
   reported_by_destination?: Record<string, number>;
   reports_sent?: number;
   clones?: unknown;
+  reddit?: { mentions?: number; sample_narratives?: string[] };
 }
 
 function periodLabel(periodMonth: string): string {
@@ -168,6 +169,8 @@ export async function POST(
     reportedByDestination: metrics.reported_by_destination ?? {},
     reportsSent: metrics.reports_sent ?? 0,
     cloneDetections: cloneDetectionsFromMetrics(metrics.clones),
+    redditMentions: metrics.reddit?.mentions ?? 0,
+    redditNarratives: metrics.reddit?.sample_narratives ?? [],
     reportRef: `BSR-${row.brand_key}-${period.slice(0, 7)}`,
     shareUrl: row.share_token
       ? `https://askarthur.au/clone-report/${row.share_token}`

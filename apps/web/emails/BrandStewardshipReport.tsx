@@ -55,6 +55,12 @@ export interface BrandStewardshipReportProps {
    * metrics.clones — populated by report-brand-stewardship's clone aggregation.
    */
   cloneDetections?: CloneDetections;
+  /** metrics.reddit.mentions — distinct community (Reddit) scam reports naming
+   *  the brand this period. 0/undefined → the community section is omitted. */
+  redditMentions?: number;
+  /** metrics.reddit.sample_narratives — up to ~3 PII-scrubbed one-sentence
+   *  summaries of those reports, shown as evidence. */
+  redditNarratives?: string[];
   /** Correlation ref, e.g. "BSR-7_eleven-2026-05". */
   reportRef: string;
   /** Public read-only share page URL (forward-to-your-team). When present, a
@@ -123,6 +129,8 @@ export default function BrandStewardshipReport({
   reportsSent,
   sampleDomains,
   cloneDetections,
+  redditMentions = 0,
+  redditNarratives = [],
   reportRef,
   shareUrl,
   stopUrl,
@@ -400,6 +408,35 @@ export default function BrandStewardshipReport({
                     — {shareUrl ? "see the full breakdown above" : "full list available on request"}.
                   </Text>
                 )}
+              </Section>
+            )}
+
+            {/* Community (Reddit) scam reports — factual "named in N reports".
+                Additive: omitted entirely when there are no mentions. */}
+            {redditMentions > 0 && (
+              <Section style={{ margin: "0 0 4px 0" }}>
+                <Heading
+                  as="h3"
+                  style={{ color: "#1B2A4A", fontSize: "15px", fontWeight: 700, margin: "0 0 8px 0" }}
+                >
+                  Community scam reports
+                </Heading>
+                <Text style={{ color: "#334155", fontSize: "14px", lineHeight: "1.6", margin: "0 0 8px 0" }}>
+                  {brandName} was named in <strong>{redditMentions}</strong> community
+                  scam report{redditMentions === 1 ? "" : "s"} (public forums) this
+                  period — people describing scams that impersonate your brand.
+                </Text>
+                {redditNarratives.length > 0 && (
+                  <ul style={{ color: "#475569", fontSize: "13px", lineHeight: "1.5", margin: "0 0 4px 0", paddingLeft: "18px" }}>
+                    {redditNarratives.slice(0, 3).map((n, i) => (
+                      <li key={i} style={{ margin: "0 0 4px 0" }}>{n}</li>
+                    ))}
+                  </ul>
+                )}
+                <Text style={{ color: "#94A3B8", fontSize: "12px", margin: "4px 0 0 0" }}>
+                  Reported by members of the public; quotes are de-identified. Counts
+                  reflect distinct reports observed, not verified incidents.
+                </Text>
               </Section>
             )}
 

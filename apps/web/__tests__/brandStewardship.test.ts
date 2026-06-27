@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   aggregateOnwardByBrand,
   aggregateClonesByDomain,
+  aggregateRedditByBrand,
   deriveBrandKey,
   matchKnownBrand,
   priorMonthStart,
@@ -247,5 +248,41 @@ describe("priorMonthStart", () => {
     expect(priorMonthStart(new Date("2026-01-01T09:00:00Z")).toISOString()).toBe(
       "2025-12-01T00:00:00.000Z",
     );
+  });
+});
+
+describe("aggregateRedditByBrand", () => {
+  it("counts one mention per distinct normalized brand per post + keeps narratives", () => {
+    const agg = aggregateRedditByBrand([
+      { brands_impersonated: ["PayPal", "Amazon"], narrative_summary: "Fake PayPal refund text." },
+      { brands_impersonated: ["paypal"], narrative_summary: "PayPal login phish email." },
+      { brands_impersonated: null, narrative_summary: "x" },
+    ]);
+    expect(agg.get("paypal")?.mentions).toBe(2);
+    expect(agg.get("amazon")?.mentions).toBe(1);
+    expect(agg.get("paypal")?.sampleNarratives).toEqual([
+      "Fake PayPal refund text.",
+      "PayPal login phish email.",
+    ]);
+  });
+
+  it("dedupes a brand named twice in one post and skips symbol-only entries", () => {
+    const agg = aggregateRedditByBrand([
+      { brands_impersonated: ["NAB", "NAB", "!!!"], narrative_summary: null },
+    ]);
+    expect(agg.get("nab")?.mentions).toBe(1);
+    expect(agg.size).toBe(1);
+  });
+
+  it("caps sample narratives at 3 and dedupes identical narratives", () => {
+    const agg = aggregateRedditByBrand([
+      { brands_impersonated: ["Auspost"], narrative_summary: "A" },
+      { brands_impersonated: ["Auspost"], narrative_summary: "A" }, // dup → not added
+      { brands_impersonated: ["Auspost"], narrative_summary: "B" },
+      { brands_impersonated: ["Auspost"], narrative_summary: "C" },
+      { brands_impersonated: ["Auspost"], narrative_summary: "D" }, // 4th distinct → capped
+    ]);
+    expect(agg.get("auspost")?.mentions).toBe(5);
+    expect(agg.get("auspost")?.sampleNarratives).toEqual(["A", "B", "C"]);
   });
 });
