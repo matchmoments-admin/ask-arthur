@@ -372,7 +372,9 @@ export function createWarningBanner(
 }
 
 /**
- * Creates a small green safe indicator for SAFE ads (no banner).
+ * Creates a small neutral "checked" indicator for SAFE ads (no banner).
+ * "Never reassure": deliberately not a green tick and does not say "safe" —
+ * amber dot + eye glyph nudges the user to stay alert (mirrors web ResultCard).
  */
 export function createSafeIndicator(): HTMLElement {
   const host = document.createElement("div");
@@ -385,7 +387,7 @@ export function createSafeIndicator(): HTMLElement {
       .shield {
         width: 20px;
         height: 20px;
-        background: ${EXT_COLORS.safe.border};
+        background: ${EXT_COLORS.suspicious.border};
         border-radius: 50%;
         display: flex;
         align-items: center;
@@ -394,10 +396,10 @@ export function createSafeIndicator(): HTMLElement {
         color: white;
         opacity: 0.7;
         cursor: default;
-        title: "Checked by Ask Arthur — appears safe";
+        title: "Checked by Ask Arthur — no clear red flags, but stay alert";
       }
     </style>
-    <div class="shield" title="Checked by Ask Arthur — appears safe">\u2713</div>
+    <div class="shield" title="Checked by Ask Arthur — no clear red flags, but stay alert">\ud83d\udc41</div>
   `;
 
   return host;

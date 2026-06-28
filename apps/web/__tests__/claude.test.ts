@@ -202,6 +202,31 @@ describe("validateResult", () => {
     expect(result.verdict).toBe("SUSPICIOUS");
   });
 
+  it("downgrades a low-confidence SAFE to UNCERTAIN (warning-bias policy)", () => {
+    // "Never reassure": a weakly-confident SAFE must not survive as SAFE — it
+    // becomes UNCERTAIN ("we can't confirm this is safe"), same as any other
+    // low-confidence verdict. SAFE used to be exempt from this downgrade.
+    const result = validateResult({
+      verdict: "SAFE",
+      confidence: 0.4,
+      summary: "Looks fine",
+      redFlags: [],
+      nextSteps: [],
+    });
+    expect(result.verdict).toBe("UNCERTAIN");
+  });
+
+  it("keeps a high-confidence SAFE as SAFE", () => {
+    const result = validateResult({
+      verdict: "SAFE",
+      confidence: 0.9,
+      summary: "Clearly legitimate",
+      redFlags: [],
+      nextSteps: [],
+    });
+    expect(result.verdict).toBe("SAFE");
+  });
+
   it("clamps confidence to 0-1 range", () => {
     expect(
       validateResult({ verdict: "SAFE", confidence: 1.5, summary: "", redFlags: [], nextSteps: [] })

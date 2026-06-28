@@ -208,6 +208,7 @@ When Australian brands are detected, include relevant official contact info in n
 - Scamwatch: "Report this scam to Scamwatch at scamwatch.gov.au"
 - IDCARE: "If you shared personal info, contact IDCARE on 1800 595 160"
 
+Bias toward caution. When the evidence is genuinely ambiguous, or you are not clearly confident the content is legitimate, do NOT return SAFE — return SUSPICIOUS. Only return SAFE when the content is positively and clearly legitimate. It is better to warn and be wrong than to reassure and be wrong.
 For SAFE verdicts, still explain why the message appears legitimate.
 For SUSPICIOUS, explain what warrants caution without causing panic.
 For HIGH_RISK, be clear and specific about the danger while remaining calm.
@@ -258,9 +259,12 @@ export function validateResult(parsed: Record<string, unknown>): AnalysisResult 
   // Clamp confidence to 0-1
   const confidence = Math.max(0, Math.min(1, Number(parsed.confidence) || 0.5));
 
-  // Apply confidence threshold: low confidence → UNCERTAIN verdict
-  // This prevents false positives on legitimate messages when Claude isn't sure
-  if (confidence < UNCERTAIN_CONFIDENCE_THRESHOLD && verdict !== "SAFE") {
+  // Apply confidence threshold: low confidence → UNCERTAIN verdict.
+  // Warning-bias policy ("never reassure"): a weakly-confident SAFE must not
+  // reassure the user, so SAFE is NO LONGER exempt — a low-confidence SAFE is
+  // downgraded to UNCERTAIN ("we can't confirm this is safe") like any other
+  // verdict. Only a clearly-confident SAFE (>= threshold) survives as SAFE.
+  if (confidence < UNCERTAIN_CONFIDENCE_THRESHOLD) {
     verdict = "UNCERTAIN";
   }
 

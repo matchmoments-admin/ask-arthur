@@ -1,12 +1,13 @@
 import { View, Text, StyleSheet } from "react-native";
-import { CheckCircle, CircleAlert, HelpCircle, XCircle } from "lucide-react-native";
+import { Eye, CircleAlert, HelpCircle, XCircle } from "lucide-react-native";
 import type { LucideIcon } from "lucide-react-native";
 import { VerdictColors } from "@/constants/colors";
 import { Fonts } from "@/constants/fonts";
 import { VERDICT_LABEL, type Verdict } from "@askarthur/types";
 
+// "Never reassure": SAFE uses a neutral Eye icon, not a green check-circle.
 const VERDICT_ICON: Record<Verdict, LucideIcon> = {
-  SAFE: CheckCircle,
+  SAFE: Eye,
   UNCERTAIN: HelpCircle,
   SUSPICIOUS: CircleAlert,
   HIGH_RISK: XCircle,

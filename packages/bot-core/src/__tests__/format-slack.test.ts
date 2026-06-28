@@ -56,9 +56,9 @@ describe("toSlackBlocks", () => {
     expect(fieldsBlock?.fields?.some((f) => f.text.includes("phishing"))).toBe(true);
   });
 
-  it("uses green color for SAFE verdict", () => {
+  it("uses amber (not green) color for SAFE verdict — never reassure", () => {
     const response = toSlackBlocks(makeResult({ verdict: "SAFE" }));
-    expect(response.attachments[0].color).toBe("#22c55e");
+    expect(response.attachments[0].color).toBe("#eab308");
   });
 
   it("includes context footer", () => {
