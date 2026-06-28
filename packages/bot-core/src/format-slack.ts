@@ -1,13 +1,15 @@
 import { VERDICT_LABEL, type AnalysisResult } from "@askarthur/types";
 
+// "Never reassure": SAFE uses a neutral eye + amber attachment colour, not a
+// green tick — the lightest tier still nudges the user (mirrors web ResultCard).
 const VERDICT_EMOJI: Record<string, string> = {
-  SAFE: ":white_check_mark:",
+  SAFE: ":eye:",
   SUSPICIOUS: ":warning:",
   HIGH_RISK: ":rotating_light:",
 };
 
 const VERDICT_COLOR: Record<string, string> = {
-  SAFE: "#22c55e",
+  SAFE: "#eab308",
   SUSPICIOUS: "#f59e0b",
   HIGH_RISK: "#ef4444",
 };

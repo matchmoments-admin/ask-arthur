@@ -1,7 +1,9 @@
 import { VERDICT_LABEL, type AnalysisResult } from "@askarthur/types";
 
+// "Never reassure": SAFE uses a neutral eye (\ud83d\udc41\ufe0f), not a green tick \u2014 the
+// lightest tier still nudges the user to stay alert (mirrors web ResultCard).
 const VERDICT_EMOJI: Record<string, string> = {
-  SAFE: "\u2705",
+  SAFE: "\ud83d\udc41\ufe0f",
   SUSPICIOUS: "\u26a0\ufe0f",
   HIGH_RISK: "\ud83d\udea8",
 };

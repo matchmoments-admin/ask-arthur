@@ -23,6 +23,11 @@ export const Colors = {
   // Verdict
   safe: "#388E3C",
   safeBg: "#ECFDF5",
+  // "Never reassure" caution palette — used by the SAFE *verdict* so it reads
+  // amber, not green (the raw `safe`/`safeBg` tokens stay green for non-verdict
+  // UI like the breach-clean state).
+  caution: "#B45309",
+  cautionBg: "#FFFBEB",
   uncertain: "#6B7C93",
   uncertainBg: "#F0F2F5",
   suspicious: "#F57C00",
@@ -38,7 +43,8 @@ export const Colors = {
 } as const;
 
 export const VerdictColors = {
-  SAFE: { text: Colors.safe, bg: Colors.safeBg },
+  // SAFE reads amber ("never reassure"), not green — see caution tokens above.
+  SAFE: { text: Colors.caution, bg: Colors.cautionBg },
   UNCERTAIN: { text: Colors.uncertain, bg: Colors.uncertainBg },
   SUSPICIOUS: { text: Colors.suspicious, bg: Colors.suspiciousBg },
   HIGH_RISK: { text: Colors.highRisk, bg: Colors.highRiskBg },

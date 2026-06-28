@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Heart, Briefcase, HelpCircle, Loader2, ShieldAlert, ShieldCheck, AlertTriangle, Link, Mail } from "lucide-react";
+import { Heart, Briefcase, HelpCircle, Loader2, ShieldAlert, Eye, AlertTriangle, Link, Mail } from "lucide-react";
+import { VERDICT_LABEL, type Verdict } from "@askarthur/types";
 
 type PersonaType = "romance" | "employment" | "general" | null;
 type Status = "idle" | "selecting" | "input" | "analyzing" | "complete" | "error";
@@ -42,7 +43,8 @@ const VERDICT_STYLES: Record<string, { icon: React.ComponentType<{ size?: number
   "HIGH_RISK": { icon: ShieldAlert, bg: "bg-red-50", border: "border-red-200", text: "text-red-800" },
   "SUSPICIOUS": { icon: AlertTriangle, bg: "bg-amber-50", border: "border-amber-200", text: "text-amber-800" },
   "UNCERTAIN": { icon: AlertTriangle, bg: "bg-slate-50", border: "border-slate-200", text: "text-slate-700" },
-  "SAFE": { icon: ShieldCheck, bg: "bg-green-50", border: "border-green-200", text: "text-green-800" },
+  // "Never reassure": SAFE reads amber with a neutral Eye icon, never green.
+  "SAFE": { icon: Eye, bg: "bg-amber-50", border: "border-amber-200", text: "text-amber-800" },
 };
 
 const URL_REGEX = /https?:\/\/[^\s<>"']+/gi;
@@ -257,7 +259,7 @@ export default function PersonaChecker() {
           <VerdictIcon size={24} className={`${style.text} shrink-0 mt-0.5`} />
           <div>
             <p className={`font-bold text-sm ${style.text}`}>
-              {result.riskLevel} — {result.verdict}
+              {result.riskLevel} — {VERDICT_LABEL[result.verdict as Verdict] ?? result.verdict}
             </p>
             <p className="text-sm text-gov-slate mt-1">{result.summary}</p>
             <p className="text-xs text-slate-400 mt-1" style={{ fontVariantNumeric: "tabular-nums" }}>
