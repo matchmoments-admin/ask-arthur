@@ -20,6 +20,7 @@ import {
   Send,
   FileText,
   Mail,
+  ListChecks,
 } from "lucide-react";
 
 export interface AdminNavItem {
@@ -48,6 +49,7 @@ export const ADMIN_NAV_SECTIONS: AdminNavSection[] = [
   {
     label: "Monitoring",
     items: [
+      { id: "checks", name: "Recent checks", href: "/admin/checks", icon: ListChecks },
       { id: "costs", name: "Costs", href: "/admin/costs", icon: Coins },
       { id: "health", name: "System health", href: "/admin/health", icon: Activity },
       { id: "vuln", name: "Vulnerabilities", href: "/admin/vulnerabilities", icon: Lock },
