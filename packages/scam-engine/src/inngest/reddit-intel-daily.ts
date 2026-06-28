@@ -42,7 +42,15 @@ import { withAxiomLogging } from "./with-axiom-logging";
 // reddit_post_intel.prompt_version stores this so we can ignore stale rows
 // when the prompt has materially evolved.
 
-const PROMPT_VERSION = "reddit-intel-v1@2026-05-01";
+// v2 (2026-06-28): output-cost trim — the classify call is output-bound
+// (~85% of spend; avg ~11.5k output tokens, ~half hitting the 12k cap). Capped
+// quotes at 1/post (was 3) and shortened leadNarrative (~120 words, was 200-300)
+// to cut output ~25-30% AND free output budget so 40-post batches stop hitting
+// the cap (which silently truncated the tail of perPost). Sonnet 4.6 retained —
+// the cost is post-volume × verbosity, not model tier, and Haiku's higher
+// malformed-output rate isn't worth it here. System-prompt caching was already
+// on and is irrelevant (input is ~11% of cost).
+const PROMPT_VERSION = "reddit-intel-v2@2026-06-28";
 
 /**
  * Resolve the Claude model for the daily classify call. Defaults to Sonnet 4.6
@@ -114,11 +122,11 @@ For each post, return:
   tacticTags         — array of social-engineering tactics: urgency_window, authority_appeal, celebrity_endorsement, reciprocity, scarcity, fear_of_missing_out, isolation, time_pressure, fake_legitimacy, account_takeover_threat, romance_grooming.
   countryHints       — array of ISO 3166-1 alpha-2 country codes inferred from the post (e.g. ["AU"], ["AU", "NZ"]). Empty if not inferrable.
   narrativeSummary   — one neutral sentence (≤30 words) describing what happened.
-  quotes             — array of up to 3 PII-scrubbed verbatim quotes from the post. **HARD LIMIT: each quote MUST be ≤140 characters. Count carefully — quotes longer than 140 chars will be truncated. Trim aggressively if needed.** Pick quotes that are characteristic of the scam tactic (e.g. exact pressure phrases used by the scammer). NEVER include the victim's name, location, employer, or other identifying info. Each quote object: { text, speakerRole: 'victim'|'scammer'|'witness'|'unknown', themeTag, confidence }.
+  quotes             — array containing AT MOST 1 quote: the single most characteristic PII-scrubbed verbatim quote from the post (an empty array is fine if none stands out). **HARD LIMIT: the quote MUST be ≤140 characters. Count carefully — quotes longer than 140 chars will be truncated. Trim aggressively if needed.** Pick the quote most characteristic of the scam tactic (e.g. an exact pressure phrase used by the scammer). NEVER include the victim's name, location, employer, or other identifying info. Each quote object: { text, speakerRole: 'victim'|'scammer'|'witness'|'unknown', themeTag, confidence }.
 
 DAILY AGGREGATE OUTPUT
 After all per-post entries, produce ONE aggregate covering the batch:
-  leadNarrative      — 200-300 words. Three paragraphs. Para 1: what scam types dominated. Para 2: notable shifts (new brands impersonated, new tactics, geographic patterns). Para 3: one piece of practical guidance for Australians.
+  leadNarrative      — ~120 words, two short paragraphs. Para 1: the dominant scam types AND notable shifts (new brands impersonated, new tactics, geographic patterns). Para 2: one piece of practical guidance for Australians. Be concise — quantify before adjective.
   emergingThreats    — array of up to 5 objects { title, summary, samplePostId, indicatorCount }. Pick threats that appeared multiple times or in novel forms.
   brandWatchlist     — array of up to 5 objects { brand, mentionCount } for brands impersonated in this batch.
   stats              — object: { totalPosts, topCategories: {label: count}, topBrands: {brand: count} }
@@ -162,11 +170,22 @@ const PerPostSchema = z.object({
   tacticTags: z.array(z.string().max(60)).default([]),
   countryHints: z.array(z.string().length(2)).default([]),
   narrativeSummary: z.string().max(400).nullish(),
-  quotes: z.array(QuoteSchema).max(3).default([]),
+  // v2: capped at 1 (was 3) — quotes were a large share of per-post output
+  // tokens. Schema stays tolerant: extra quotes are sliced, not rejected.
+  quotes: z
+    .array(QuoteSchema)
+    .transform((q) => q.slice(0, 1))
+    .default([]),
 });
 
 const DailySummarySchema = z.object({
-  leadNarrative: z.string().min(50).max(3_000),
+  // v2: ~120 words target (was 200-300) — the prompt drives the token saving.
+  // The schema only truncates (never rejects) so a modest overrun can't fail
+  // the whole batch and waste a retry; the cost win comes from the prompt.
+  leadNarrative: z
+    .string()
+    .min(50)
+    .transform((s) => (s.length <= 1_800 ? s : s.slice(0, 1_799) + "…")),
   emergingThreats: z
     .array(
       z.object({
@@ -468,9 +487,12 @@ export const redditIntelDaily = inngest.createFunction(
           system: SYSTEM_PROMPT,
           user: JSON.stringify(envelope),
           schema: SonnetOutputSchema,
-          // Per-post output ~150 tokens × 40 max + summary ~600 = 6,600.
-          // Cap at 12k for ~80% headroom — Sonnet billing is on actual
-          // usage so over-allocating costs nothing.
+          // Output budget kept at 12k. Pre-v2 this was the binding constraint:
+          // actual output averaged ~11.5k for 40 posts and ~half the runs hit
+          // the cap, which truncates the tail of `perPost` (load-bearing). The
+          // v2 trim (1 quote/post, ~120-word narrative) frees budget so the
+          // per-post classifications fit comfortably under 12k. Billing is on
+          // actual usage, so the headroom itself costs nothing.
           maxTokens: 12_000,
           // 240s = 4 min. Sonnet 4.6 outputs at ~50-100 tokens/sec, so 12k
           // worst-case output finishes in ~4 min. Inngest function-level
