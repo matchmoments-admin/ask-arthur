@@ -74,6 +74,11 @@ const InboundEmailPayload = z.object({
 
 type InboundEmailPayload = z.infer<typeof InboundEmailPayload>;
 
+// Trim stored body to this many chars (cost: hot-table size + hourly Voyage
+// embed re-reads). The Worker caps the wire payload at 50 KB; this is the
+// at-rest store limit. Enough for the lede + a useful embedding window.
+const BODY_STORE_LIMIT = 4000;
+
 // ── Helpers ─────────────────────────────────────────────────────────────
 
 function timingSafeEqual(a: string, b: string): boolean {
@@ -197,6 +202,18 @@ Deno.serve(async (req: Request) => {
   }
   const payload: InboundEmailPayload = parsed.data;
 
+  // Regulator-only inbound (2026-06-29): drop the curated security-press tier
+  // at ingest. These multi-story industry digests (SecurityWeek, The Hacker
+  // News, TLDR Infosec, Krebs, Risky Biz) are off-mission for the AU
+  // consumer-facing /scam-feed and were the bulk of the 152-row quarantine
+  // backlog (content that's wrong, not just unprocessed). 204 tells the
+  // Worker "drop quietly, no retry". tier_1_regulator / tier_2_industry
+  // (AU CERTs + victim support) + the generic fallback still flow through.
+  const tier = provenanceTierFor(payload.source);
+  if (tier === "tier_3_curated") {
+    return new Response(null, { status: 204 });
+  }
+
   // Write to feed_items. Service-role client; service-role env vars are
   // injected by Supabase Edge runtime.
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -220,14 +237,19 @@ Deno.serve(async (req: Request) => {
       external_id: payload.external_id,
       title: payload.subject,
       description: null,
-      body_md: payload.body_md,
+      // Store a trimmed body. The full 50 KB is never read per-row on the
+      // public feed; it's only ballast on a hot table that the hourly Voyage
+      // embed job re-reads. ~4 KB keeps the lede + enough for embedding while
+      // cutting storage + embed cost. (Worker still sends up to 50 KB; we
+      // truncate at the store boundary.)
+      body_md: payload.body_md.slice(0, BODY_STORE_LIMIT),
       url: payload.url ?? null,
       source_url: payload.url ?? null,
       tags: payload.tags ?? null,
       published_at: payload.received_at,
       source_created_at: payload.received_at,
       country_code: countryCodeFor(payload.source),
-      provenance_tier: provenanceTierFor(payload.source),
+      provenance_tier: tier,
       // Quarantine inbound emails by default. The newsletter classifier
       // (P3 of the feed-quality recovery plan, 2026-05-16) promotes real
       // newsletter content to published=true via the per-source
