@@ -1,0 +1,957 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ask Arthur — Platform Overview</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+  :root {
+    --navy: #0A2540;
+    --navy-light: #0F2D4F;
+    --blue: #2563EB;
+    --blue-light: #3B82F6;
+    --green: #10B981;
+    --green-dark: #059669;
+    --amber: #F59E0B;
+    --grey: #F1F5F9;
+    --grey-mid: #94A3B8;
+    --sub: #475569;
+    --dark: #0F172A;
+    --white: #FFFFFF;
+    --card-dark: #0F2D4F;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #000;
+    overflow: hidden;
+  }
+
+  .deck {
+    width: 100vw;
+    height: 100vh;
+    position: relative;
+  }
+
+  .slide {
+    width: 100vw;
+    height: 100vh;
+    position: absolute;
+    top: 0;
+    left: 0;
+    display: none;
+    padding: 72px 130px;
+    overflow: hidden;
+    transition: opacity 0.4s ease;
+  }
+
+  .slide.active { display: flex; flex-direction: column; }
+
+  .slide--navy { background: var(--navy); color: var(--white); }
+  .slide--white { background: var(--white); color: var(--dark); }
+  .slide--dark { background: var(--dark); color: var(--white); }
+
+  .slide__label {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--blue);
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+  }
+
+  .slide__title {
+    font-size: 52px;
+    font-weight: 800;
+    line-height: 1.15;
+    margin-bottom: 22px;
+    max-width: 1300px;
+  }
+
+  .slide__subtitle {
+    font-size: 21px;
+    font-weight: 400;
+    line-height: 1.55;
+    max-width: 1200px;
+    opacity: 0.7;
+  }
+
+  .accent-line {
+    width: 80px;
+    height: 3px;
+    background: var(--green);
+    margin: 30px 0;
+  }
+
+  .top-bar { position: absolute; top: 0; left: 0; right: 0; height: 4px; background: var(--blue); }
+  .bottom-bar { position: absolute; bottom: 0; left: 0; right: 0; height: 4px; background: var(--blue); }
+
+  .slide-num {
+    position: absolute;
+    bottom: 30px;
+    right: 60px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--grey-mid);
+  }
+
+  .brand-mark {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--blue);
+    letter-spacing: 4px;
+    margin-bottom: 8px;
+  }
+  .brand-line {
+    width: 120px;
+    height: 2px;
+    background: var(--blue);
+    margin-bottom: 70px;
+  }
+
+  /* Stats row */
+  .stats-row {
+    display: flex;
+    gap: 56px;
+    margin-top: 30px;
+  }
+  .stat__value {
+    font-size: 40px;
+    font-weight: 800;
+    color: var(--green);
+  }
+  .stat__label {
+    font-size: 15px;
+    color: var(--grey-mid);
+    margin-top: 4px;
+    max-width: 240px;
+  }
+
+  /* Footer bar */
+  .footer-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 64px;
+    background: rgba(0,0,0,0.2);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 130px;
+    font-size: 15px;
+    color: var(--grey-mid);
+  }
+
+  /* Cards grid */
+  .cards { display: flex; gap: 22px; flex-wrap: wrap; margin-top: 22px; }
+  .card {
+    border-radius: 16px;
+    padding: 28px;
+    flex: 1;
+    min-width: 260px;
+    position: relative;
+    overflow: hidden;
+  }
+  .card--grey { background: var(--grey); }
+  .card--navy { background: var(--navy); color: var(--white); }
+  .card--dark { background: var(--card-dark); color: var(--white); }
+  .card--blue { background: var(--blue); color: var(--white); }
+  .card--outline { background: transparent; border: 2px solid #E2E8F0; }
+  .card__accent { position: absolute; top: 0; left: 0; right: 0; height: 4px; border-radius: 16px 16px 0 0; }
+  .card__num { font-size: 44px; font-weight: 800; opacity: 0.3; margin-bottom: 8px; }
+  .card__title { font-size: 21px; font-weight: 700; margin-bottom: 8px; }
+  .card__body { font-size: 16px; line-height: 1.6; opacity: 0.8; }
+
+  /* Layer diagram */
+  .layer {
+    display: flex;
+    align-items: center;
+    border-radius: 12px;
+    padding: 20px 28px;
+    margin-bottom: 12px;
+    position: relative;
+  }
+  .layer__bar { width: 5px; height: 100%; position: absolute; left: 0; top: 0; border-radius: 12px 0 0 12px; }
+  .layer__content { flex: 1; margin-left: 16px; }
+  .layer__title { font-size: 20px; font-weight: 700; color: var(--navy); }
+  .layer__desc { font-size: 15px; color: var(--sub); margin-top: 4px; }
+  .layer__badge {
+    font-size: 13px;
+    font-weight: 600;
+    color: white;
+    padding: 6px 18px;
+    border-radius: 20px;
+    white-space: nowrap;
+  }
+
+  /* Table */
+  .table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+  .table th {
+    background: var(--navy);
+    color: white;
+    text-align: left;
+    padding: 13px 20px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .table th:first-child { border-radius: 8px 0 0 8px; }
+  .table th:last-child { border-radius: 0 8px 8px 0; }
+  .table td {
+    padding: 12px 20px;
+    font-size: 15px;
+    border-bottom: 1px solid #E2E8F0;
+  }
+  .table tr:nth-child(even) td { background: var(--grey); }
+
+  /* Bullet list */
+  .bullets { list-style: none; margin-top: 12px; }
+  .bullets li {
+    padding: 6px 0 6px 24px;
+    font-size: 17px;
+    line-height: 1.5;
+    position: relative;
+  }
+  .bullets li::before {
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    position: absolute;
+    left: 0;
+    top: 14px;
+  }
+
+  /* Navigation */
+  .nav {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 8px;
+    z-index: 100;
+    background: rgba(0,0,0,0.6);
+    padding: 8px 16px;
+    border-radius: 24px;
+    backdrop-filter: blur(10px);
+  }
+  .nav__dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.3);
+    cursor: pointer;
+    transition: all 0.3s;
+  }
+  .nav__dot.active { background: var(--blue); transform: scale(1.3); }
+
+  /* Callout box */
+  .callout {
+    background: var(--grey);
+    border-radius: 12px;
+    padding: 22px 30px;
+    margin-top: 20px;
+    font-size: 17px;
+    line-height: 1.5;
+    color: var(--navy);
+    font-weight: 500;
+  }
+  .callout--green { background: #ECFDF5; color: #065F46; }
+  .callout--amber { background: #FFFBEB; color: #92400E; }
+
+  /* Metric boxes */
+  .metrics { display: flex; gap: 22px; margin-top: 20px; }
+  .metric {
+    background: var(--grey);
+    border-radius: 12px;
+    padding: 22px;
+    flex: 1;
+    text-align: center;
+  }
+  .metric__value { font-size: 34px; font-weight: 800; color: var(--green); }
+  .metric__label { font-size: 14px; font-weight: 600; color: var(--navy); margin-top: 4px; }
+  .metric__note { font-size: 13px; color: var(--sub); margin-top: 2px; }
+
+  /* Architecture flow (front-end → back-end tiers) */
+  .tier-row {
+    background: var(--grey);
+    border-radius: 12px;
+    padding: 14px 22px;
+    display: flex;
+    align-items: center;
+    gap: 18px;
+  }
+  .tier-row--accent { background: var(--navy); }
+  .tier-row__label {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+    color: var(--blue);
+    min-width: 132px;
+  }
+  .tier-row--accent .tier-row__label { color: var(--green); }
+  .tier-row__items { display: flex; gap: 9px; flex-wrap: wrap; flex: 1; }
+  .chip {
+    background: var(--white);
+    border: 1px solid #E2E8F0;
+    border-radius: 8px;
+    padding: 7px 13px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--navy);
+  }
+  .tier-row--accent .chip { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.18); color: #E2E8F0; }
+  .tier-arrow { text-align: center; color: var(--grey-mid); font-size: 16px; line-height: 1; margin: 4px 0; }
+
+  /* Status pills — the live/rollout/roadmap taxonomy */
+  .status {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    padding: 4px 11px;
+    border-radius: 20px;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .status--live { background: #DCFCE7; color: #065F46; }
+  .status--rollout { background: #DBEAFE; color: #1E40AF; }
+  .status--roadmap { background: #FEF3C7; color: #92400E; }
+  .status--live-d { background: rgba(16,185,129,0.18); color: #6EE7B7; }
+  .status--rollout-d { background: rgba(59,130,246,0.2); color: #93C5FD; }
+  .status--roadmap-d { background: rgba(245,158,11,0.18); color: #FCD34D; }
+
+  /* Feature rows (label + desc + status) */
+  .frow {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    padding: 13px 20px;
+    border-radius: 10px;
+    background: var(--grey);
+    margin-bottom: 10px;
+  }
+  .frow--d { background: var(--card-dark); }
+  .frow__name { font-size: 17px; font-weight: 700; color: var(--navy); min-width: 230px; }
+  .frow--d .frow__name { color: white; }
+  .frow__desc { font-size: 15px; color: var(--sub); flex: 1; }
+  .frow--d .frow__desc { color: rgba(255,255,255,0.7); }
+
+  /* Two-column feature grid */
+  .fgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 22px; margin-top: 18px; }
+
+  .legend { display: flex; gap: 18px; margin-top: 18px; align-items: center; font-size: 13px; color: var(--sub); }
+  .legend span { display: flex; align-items: center; gap: 7px; }
+  .legend .dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+</style>
+</head>
+<body>
+
+<div class="deck">
+
+  <!-- SLIDE 1: Title -->
+  <div class="slide slide--navy active" data-slide="0">
+    <div class="top-bar"></div>
+    <div class="brand-mark">ASK ARTHUR</div>
+    <div class="brand-line"></div>
+
+    <h1 class="slide__title" style="font-size: 60px; line-height: 1.2; margin-bottom: 20px;">
+      Australia's scam detection<br>and intelligence platform
+    </h1>
+
+    <p class="slide__subtitle" style="max-width: 1180px; margin-bottom: 0;">
+      Free, instant AI scam-checking for everyone — and the upstream URL, domain
+      and brand-impersonation intelligence that helps banks, telcos and platforms
+      stop scams where they start.
+    </p>
+
+    <div class="accent-line"></div>
+
+    <div class="stats-row">
+      <div><div class="stat__value">A$2.18B</div><div class="stat__label">Lost to scams in Australia each year</div></div>
+      <div><div class="stat__value">20+</div><div class="stat__label">Live threat-intelligence feeds</div></div>
+      <div><div class="stat__value">&lt;$0.001</div><div class="stat__label">Cost per AI scam check</div></div>
+      <div><div class="stat__value">1 Jul 2026</div><div class="stat__label">Scams Prevention Framework deadline</div></div>
+    </div>
+
+    <div class="footer-bar">
+      <span>askarthur.au</span>
+      <span>Platform overview &nbsp;|&nbsp; 2026</span>
+    </div>
+  </div>
+
+  <!-- SLIDE 2: Problem -->
+  <div class="slide slide--white" data-slide="1">
+    <div class="slide__label">THE PROBLEM</div>
+    <h2 class="slide__title" style="color: var(--navy);">No one watches where<br>scams are born</h2>
+    <p class="slide__subtitle" style="color: var(--sub); font-size: 20px; margin-bottom: 28px;">
+      Banks monitor transactions. Telcos block calls. But the phishing sites, fake
+      shops, fake investment platforms and brand-impersonating domains where scams
+      <em>originate</em>? Nobody watches that layer systematically.
+    </p>
+
+    <p style="font-size: 17px; font-weight: 600; color: var(--navy); margin-bottom: 14px;">Where incumbents operate vs. where scams originate</p>
+
+    <div class="layer" style="background: #FEF3C7;">
+      <div class="layer__bar" style="background: var(--amber);"></div>
+      <div class="layer__content">
+        <div class="layer__title">Scam Origination Layer</div>
+        <div class="layer__desc">URLs, domains, phishing sites, fake shops & ads, brand impersonation</div>
+      </div>
+      <span class="layer__badge" style="background: var(--amber);">ASK ARTHUR WATCHES HERE</span>
+    </div>
+    <div class="layer" style="background: #DBEAFE;">
+      <div class="layer__bar" style="background: var(--blue);"></div>
+      <div class="layer__content">
+        <div class="layer__title">Communication Layer</div>
+        <div class="layer__desc">Phone calls, SMS, social media messages, emails</div>
+      </div>
+      <span class="layer__badge" style="background: var(--blue);">Telco / network tools</span>
+    </div>
+    <div class="layer" style="background: #DCFCE7;">
+      <div class="layer__bar" style="background: var(--green);"></div>
+      <div class="layer__content">
+        <div class="layer__title">Transaction Layer</div>
+        <div class="layer__desc">Bank transfers, card payments, crypto transactions</div>
+      </div>
+      <span class="layer__badge" style="background: var(--green);">Bank fraud systems</span>
+    </div>
+
+    <div class="callout" style="margin-top: 22px;">
+      Catching impersonation at the <strong>origination layer</strong> — the moment a
+      look-alike domain is registered or a fake shop appears — is the only point where
+      a scam can be stopped <em>before</em> the victim ever sees it.
+    </div>
+    <div class="bottom-bar"></div>
+    <div class="slide-num">02</div>
+  </div>
+
+  <!-- SLIDE 3: What Ask Arthur does (the flywheel) -->
+  <div class="slide slide--white" data-slide="2">
+    <div class="slide__label">HOW IT WORKS</div>
+    <h2 class="slide__title" style="color: var(--navy); font-size: 46px;">One free consumer tool.<br>One growing intelligence engine.</h2>
+    <p class="slide__subtitle" style="color: var(--sub); font-size: 19px; margin-bottom: 24px;">
+      Anyone can check suspicious content for free, through any channel. Claude AI
+      returns an instant verdict, and every check — PII-scrubbed — enriches a threat
+      database that powers brand protection and a B2B intelligence API.
+    </p>
+
+    <div class="cards" style="gap: 20px;">
+      <div class="card card--grey" style="flex: 1.4;">
+        <div class="card__accent" style="background: var(--blue);"></div>
+        <div class="card__title" style="color: var(--navy); margin-top: 8px;">Consumer product — free</div>
+        <p style="font-size: 15px; color: var(--sub); margin-bottom: 12px;">No sign-up, no PII stored</p>
+        <ul class="bullets" style="font-size: 15px;">
+          <li>Check text, links, screenshots, QR codes & emails</li>
+          <li>Instant verdict: SAFE / SUSPICIOUS / HIGH_RISK</li>
+          <li>Plain-English reasons + recovery guidance</li>
+          <li>Across web, bots, extension & mobile</li>
+        </ul>
+      </div>
+      <div class="card card--navy" style="flex: 1.4;">
+        <div class="card__accent" style="background: var(--green);"></div>
+        <div class="card__title" style="margin-top: 8px;">Intelligence engine</div>
+        <p style="font-size: 15px; opacity: 0.7; margin-bottom: 12px;">Where the value compounds</p>
+        <ul class="bullets" style="font-size: 15px; color: rgba(255,255,255,0.85);">
+          <li style="color: rgba(255,255,255,0.85);">20+ automated AU & global threat feeds</li>
+          <li style="color: rgba(255,255,255,0.85);">Clone & impersonation monitoring for AU brands</li>
+          <li style="color: rgba(255,255,255,0.85);">Semantic search over a PII-scrubbed scam corpus</li>
+          <li style="color: rgba(255,255,255,0.85);">B2B Threat Intelligence API for regulated entities</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="callout callout--green" style="margin-top: 20px; display: flex; align-items: center; gap: 40px;">
+      <div><strong style="font-size: 26px;">The flywheel:</strong></div>
+      <div style="font-size: 16px; font-weight: 500;">More people checking scams &nbsp;→&nbsp; richer threat intelligence &nbsp;→&nbsp; better protection for everyone &nbsp;→&nbsp; more people checking.</div>
+    </div>
+    <div class="bottom-bar"></div>
+    <div class="slide-num">03</div>
+  </div>
+
+  <!-- SLIDE 4: Ways to check (consumer surfaces) -->
+  <div class="slide slide--white" data-slide="3">
+    <div class="slide__label">WAYS TO CHECK</div>
+    <h2 class="slide__title" style="color: var(--navy); font-size: 46px;">Meet people where scams reach them</h2>
+    <p class="slide__subtitle" style="color: var(--sub); font-size: 18px; margin-bottom: 8px;">
+      The same AI verdict engine, available through every channel a scam can arrive in.
+    </p>
+
+    <div class="fgrid">
+      <div class="frow"><span class="frow__name">Web app</span><span class="frow__desc">Paste anything suspicious at askarthur.au</span><span class="status status--live">Live</span></div>
+      <div class="frow"><span class="frow__name">Telegram bot</span><span class="frow__desc">Forward a message, get a verdict</span><span class="status status--live">Live</span></div>
+      <div class="frow"><span class="frow__name">Browser extension</span><span class="frow__desc">Chrome / Firefox — in-page link guard</span><span class="status status--rollout">Built · rolling out</span></div>
+      <div class="frow"><span class="frow__name">Mobile app</span><span class="frow__desc">iOS / Android — QR & screenshot scan</span><span class="status status--rollout">Built · rolling out</span></div>
+      <div class="frow"><span class="frow__name">WhatsApp & Slack</span><span class="frow__desc">Check in the apps people already use</span><span class="status status--rollout">Built · rolling out</span></div>
+      <div class="frow"><span class="frow__name">Facebook Messenger</span><span class="frow__desc">Conversational checking for everyone</span><span class="status status--rollout">Built · rolling out</span></div>
+    </div>
+
+    <div class="callout" style="margin-top: 20px;">
+      <strong>Inputs supported:</strong> text · links (with redirect-chain resolution) ·
+      screenshots & images · QR codes · forwarded emails. &nbsp; Audio/video analysis is on the roadmap.
+    </div>
+
+    <div class="legend">
+      <span><span class="dot" style="background:#10B981;"></span>Live now</span>
+      <span><span class="dot" style="background:#3B82F6;"></span>Built · rolling out (per-channel registration)</span>
+      <span><span class="dot" style="background:#F59E0B;"></span>On the roadmap</span>
+    </div>
+    <div class="bottom-bar"></div>
+    <div class="slide-num">04</div>
+  </div>
+
+  <!-- SLIDE 5: Core scanning — what it surfaces -->
+  <div class="slide slide--white" data-slide="4">
+    <div class="slide__label">CORE SCANNING &nbsp;·&nbsp; LIVE</div>
+    <h2 class="slide__title" style="color: var(--navy); font-size: 46px;">What a single check surfaces</h2>
+
+    <div style="display: flex; gap: 40px; margin-top: 8px;">
+      <div style="flex: 1;">
+        <p style="font-size: 17px; font-weight: 700; color: var(--navy); margin-bottom: 8px;">The verdict</p>
+        <ul class="bullets" style="font-size: 16px;">
+          <li>Claude Haiku 4.5 analysis in seconds</li>
+          <li>Three-tier result: SAFE / SUSPICIOUS / HIGH_RISK</li>
+          <li>Plain-English reasons a non-technical user understands</li>
+          <li>Recovery guidance on risky verdicts (what to do next)</li>
+        </ul>
+      </div>
+      <div style="flex: 1;">
+        <p style="font-size: 17px; font-weight: 700; color: var(--navy); margin-bottom: 8px;">Enrichment behind the verdict</p>
+        <ul class="bullets" style="font-size: 16px;">
+          <li>Google Safe Browsing reputation</li>
+          <li>Redirect-chain resolution (where a short link really goes)</li>
+          <li>Email authentication checks (SPF / DMARC / DKIM)</li>
+          <li>Shop Signal — fake-shop & dodgy-commerce detection</li>
+          <li>Async WHOIS / SSL / Certificate-Transparency / URLScan</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="callout callout--green" style="margin-top: 22px;">
+      Every check is replay-safe and PII-scrubbed before storage, then feeds the
+      intelligence engine — so a scam reported once helps protect the next person who sees it.
+    </div>
+    <div class="bottom-bar"></div>
+    <div class="slide-num">05</div>
+  </div>
+
+  <!-- SLIDE 6: Clone & brand protection -->
+  <div class="slide slide--white" data-slide="5">
+    <div class="slide__label">CLONE & BRAND PROTECTION &nbsp;·&nbsp; LIVE</div>
+    <h2 class="slide__title" style="color: var(--navy); font-size: 44px;">Catching impersonation before victims do</h2>
+
+    <div class="cards" style="gap: 18px; margin-top: 8px;">
+      <div class="card card--grey">
+        <div class="card__accent" style="background: var(--green);"></div>
+        <div class="card__title" style="color: var(--navy); font-size: 19px; margin-top: 6px;">Clone-watch</div>
+        <div class="card__body" style="color: var(--sub);">Daily sweep of newly-registered domains against a watchlist of Australian brands — surfaces look-alike domains the day they appear.</div>
+      </div>
+      <div class="card card--grey">
+        <div class="card__accent" style="background: var(--blue);"></div>
+        <div class="card__title" style="color: var(--navy); font-size: 19px; margin-top: 6px;">Certificate Transparency</div>
+        <div class="card__body" style="color: var(--sub);">Monitors public TLS-certificate logs (crt.sh) for certificates issued to brand-impersonating domains.</div>
+      </div>
+      <div class="card card--grey">
+        <div class="card__accent" style="background: var(--amber);"></div>
+        <div class="card__title" style="color: var(--navy); font-size: 19px; margin-top: 6px;">Shop Signal</div>
+        <div class="card__body" style="color: var(--sub);">Flags fake or high-risk online shops at scan time, with optional paid commerce-reputation enrichment.</div>
+      </div>
+      <div class="card card--grey">
+        <div class="card__accent" style="background: var(--navy);"></div>
+        <div class="card__title" style="color: var(--navy); font-size: 19px; margin-top: 6px;">Brand notification</div>
+        <div class="card__body" style="color: var(--sub);">Routes confirmed impersonations to each brand's security / fraud channel (security.txt, VDP, fraud inbox) for takedown.</div>
+      </div>
+    </div>
+
+    <div class="callout callout--green" style="margin-top: 20px;">
+      <strong>Working in production:</strong> the first live brand notification (to a major
+      Australian bank) was sent in May 2026. This is the platform's direct contribution to
+      the SPF <strong>Prevent</strong> principle — see slide 10.
+    </div>
+    <div class="bottom-bar"></div>
+    <div class="slide-num">06</div>
+  </div>
+
+  <!-- SLIDE 7: Intelligence engine -->
+  <div class="slide slide--navy" data-slide="6">
+    <div class="top-bar"></div>
+    <div class="slide__label">THE INTELLIGENCE ENGINE</div>
+    <h2 class="slide__title" style="font-size: 46px;">A compounding view of the<br>Australian scam landscape</h2>
+
+    <div class="cards" style="margin-top: 24px; gap: 22px;">
+      <div class="card card--dark">
+        <div class="card__accent" style="background: var(--blue);"></div>
+        <div class="card__title">Feeds in</div>
+        <div class="card__body">
+          20+ automated scrapers — phishing & malware IOC feeds (URLhaus, OpenPhish,
+          PhishTank, Spamhaus…), Australian regulator narratives (Scamwatch, ACSC, ASIC,
+          AUSTRAC), Reddit scam discussion, and an inbound-email feed for threat newsletters.
+        </div>
+      </div>
+      <div class="card card--dark">
+        <div class="card__accent" style="background: var(--green);"></div>
+        <div class="card__title">Refined</div>
+        <div class="card__body">
+          PII scrubbed, entities linked, narratives extracted and clustered into themes
+          (Reddit Intel, Sonnet 4.6 + Voyage embeddings), risk-scored — turning raw reports
+          into structured, searchable intelligence.
+        </div>
+      </div>
+      <div class="card card--dark">
+        <div class="card__accent" style="background: var(--amber);"></div>
+        <div class="card__title">Surfaced</div>
+        <div class="card__body">
+          Trending threats, emerging campaigns, impersonated brands and semantic search
+          over the corpus — to consumers as warnings, and to partners through the B2B API.
+        </div>
+      </div>
+    </div>
+
+    <div class="callout--green" style="background: rgba(16,185,129,0.14); border-radius: 12px; padding: 20px 28px; margin-top: 26px; color: #6EE7B7; font-size: 19px; font-weight: 600;">
+      The data moat: a uniquely Australian, real-time, community-fed scam corpus that gets
+      more valuable with every check and every feed.
+    </div>
+    <div class="slide-num" style="color: rgba(255,255,255,0.3);">07</div>
+  </div>
+
+  <!-- SLIDE 8: B2B API -->
+  <div class="slide slide--white" data-slide="7">
+    <div class="slide__label">B2B THREAT INTELLIGENCE API</div>
+    <h2 class="slide__title" style="color: var(--navy); font-size: 44px;">Intelligence regulated entities can act on</h2>
+    <p class="slide__subtitle" style="color: var(--sub); font-size: 18px; margin-bottom: 22px;">
+      API-key authenticated, rate-limited, documented with OpenAPI. The core threat,
+      entity and cluster endpoints are live today.
+    </p>
+
+    <div style="display: flex; gap: 40px;">
+      <div style="flex: 1.1;">
+        <table class="table" style="margin-top: 0;">
+          <thead><tr><th>Endpoint group</th><th>What it returns</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Threats</strong></td><td>URL/wallet lookup, trending, domains, stats</td><td><span class="status status--live">Live</span></td></tr>
+            <tr><td><strong>Entities</strong></td><td>Lookup, batch, full entity record</td><td><span class="status status--live">Live</span></td></tr>
+            <tr><td><strong>Clusters</strong></td><td>Linked-campaign groupings</td><td><span class="status status--live">Live</span></td></tr>
+            <tr><td><strong>Deepfakes</strong></td><td>Reported deepfake index + trending</td><td><span class="status status--live">Live</span></td></tr>
+            <tr><td><strong>Semantic search</strong></td><td>Natural-language search over scams & intel</td><td><span class="status status--rollout">Rolling out</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="flex: 0.9;">
+        <p style="font-size: 17px; font-weight: 700; color: var(--navy); margin-bottom: 8px;">Built for compliance teams</p>
+        <ul class="bullets" style="font-size: 16px;">
+          <li>Every entity enriched with WHOIS + SSL + reputation</li>
+          <li>SHA-256-hashed keys, per-key daily rate limits</li>
+          <li>Self-service keys, usage dashboard, OpenAPI docs</li>
+          <li>Onward reporting to Scamwatch / ACMA / ReportCyber</li>
+          <li>Government-ready export views</li>
+        </ul>
+      </div>
+    </div>
+    <div class="bottom-bar"></div>
+    <div class="slide-num">08</div>
+  </div>
+
+  <!-- SLIDE 9: Specialised tools -->
+  <div class="slide slide--white" data-slide="8">
+    <div class="slide__label">SPECIALISED TOOLS</div>
+    <h2 class="slide__title" style="color: var(--navy); font-size: 44px;">Beyond the core scanner</h2>
+    <p class="slide__subtitle" style="color: var(--sub); font-size: 18px; margin-bottom: 6px;">
+      Focused capabilities built on the same engine and data.
+    </p>
+
+    <div class="fgrid">
+      <div class="frow"><span class="frow__name">Persona Check</span><span class="frow__desc">Reputation lookup on a person or entity</span><span class="status status--live">Live</span></div>
+      <div class="frow"><span class="frow__name">Site Audit</span><span class="frow__desc">Website security-posture scanner</span><span class="status status--live">Live</span></div>
+      <div class="frow"><span class="frow__name">Extension Audit</span><span class="frow__desc">Static analysis of browser extensions</span><span class="status status--live">Live</span></div>
+      <div class="frow"><span class="frow__name">MCP / Skill Audit</span><span class="frow__desc">Security scan of AI servers, packages & skills</span><span class="status status--live">Live</span></div>
+      <div class="frow"><span class="frow__name">Charity Check</span><span class="frow__desc">ACNC charity-legitimacy lookup (63k+ charities)</span><span class="status status--rollout">Built · rolling out</span></div>
+      <div class="frow"><span class="frow__name">Phone Footprint</span><span class="frow__desc">Phone-number exposure & monitoring</span><span class="status status--rollout">Built · rolling out</span></div>
+      <div class="frow"><span class="frow__name">Breach Defence</span><span class="frow__desc">Breach index, typosquat & recovery playbooks</span><span class="status status--roadmap">Roadmap</span></div>
+      <div class="frow"><span class="frow__name">Audio / video & deepfake</span><span class="frow__desc">Media-based scam & deepfake detection</span><span class="status status--roadmap">Roadmap</span></div>
+    </div>
+
+    <div class="callout" style="margin-top: 18px;">
+      The Extension and MCP/Skill audits are an AI-native differentiator — Ask Arthur audits
+      the very tools (browser extensions, AI agents) that increasingly carry threats.
+    </div>
+    <div class="bottom-bar"></div>
+    <div class="slide-num">09</div>
+  </div>
+
+  <!-- SLIDE 10: SPF mapping -->
+  <div class="slide slide--white" data-slide="9">
+    <div class="slide__label">SCAMS PREVENTION FRAMEWORK</div>
+    <h2 class="slide__title" style="color: var(--navy); font-size: 44px;">Built for the 1 July 2026 deadline</h2>
+    <p class="slide__subtitle" style="color: var(--sub); font-size: 18px; margin-bottom: 20px;">
+      The SPF Act (Royal Assent Feb 2025) obliges 200+ banks, telcos and digital platforms
+      to <strong>Prevent · Detect · Disrupt · Report</strong> scams — with penalties up to A$52.7M.
+      Ask Arthur maps directly to these obligations.
+    </p>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+      <div class="card card--grey" style="border-left: 4px solid var(--green); padding: 22px;">
+        <div class="card__title" style="color: var(--navy); font-size: 18px;">Prevent</div>
+        <div class="card__body" style="color: var(--sub);">Certificate-Transparency & clone-watch alerts on brand-impersonating domains; real-time consumer warnings.</div>
+      </div>
+      <div class="card card--grey" style="border-left: 4px solid var(--blue); padding: 22px;">
+        <div class="card__title" style="color: var(--navy); font-size: 18px;">Detect</div>
+        <div class="card__body" style="color: var(--sub);">20+ feeds + community reports as external scam intelligence; domain aggregation surfaces emerging campaigns.</div>
+      </div>
+      <div class="card card--grey" style="border-left: 4px solid var(--amber); padding: 22px;">
+        <div class="card__title" style="color: var(--navy); font-size: 18px;">Disrupt</div>
+        <div class="card__body" style="color: var(--sub);">Actionable intelligence via API drives URL blocking and customer warnings; entity risk scores power decisions.</div>
+      </div>
+      <div class="card card--grey" style="border-left: 4px solid var(--green); padding: 22px;">
+        <div class="card__title" style="color: var(--navy); font-size: 18px;">Report</div>
+        <div class="card__body" style="color: var(--sub);">Trending-threats endpoint + government-ready exports + onward reporting to regulators (potential AFCX feed).</div>
+      </div>
+    </div>
+
+    <div class="callout callout--green" style="margin-top: 18px;">
+      Plus a free in-product <strong>SPF self-assessment</strong> (SPF / DMARC / DKIM email-auth
+      health check) that any organisation can run today at askarthur.au.
+    </div>
+    <div class="bottom-bar"></div>
+    <div class="slide-num">10</div>
+  </div>
+
+  <!-- SLIDE 11: Partnerships -->
+  <div class="slide slide--navy" data-slide="10">
+    <div class="top-bar"></div>
+    <div class="slide__label">WAYS TO WORK TOGETHER</div>
+    <h2 class="slide__title" style="font-size: 46px;">How partnerships could work</h2>
+    <p class="slide__subtitle" style="font-size: 18px; margin-bottom: 22px; opacity: 0.8;">
+      The same platform serves very different partners — these models can run in parallel.
+    </p>
+
+    <div class="cards" style="gap: 18px;">
+      <div class="card card--dark">
+        <div class="card__accent" style="background: var(--blue);"></div>
+        <div class="card__title" style="font-size: 19px;">Regulated entities</div>
+        <div class="card__body">Banks, telcos & platforms license the Threat Intelligence API to evidence SPF Detect / Disrupt / Report — from a 90-day pilot to ongoing feeds.</div>
+      </div>
+      <div class="card card--dark">
+        <div class="card__accent" style="background: var(--green);"></div>
+        <div class="card__title" style="font-size: 19px;">Brand protection</div>
+        <div class="card__body">Brands add their domains to clone-watch and receive early impersonation alerts and takedown support for their customers.</div>
+      </div>
+      <div class="card card--dark">
+        <div class="card__accent" style="background: var(--amber);"></div>
+        <div class="card__title" style="font-size: 19px;">Data-sharing & fusion</div>
+        <div class="card__body">Two-way intelligence sharing with industry and government bodies (AFCX Intel Loop, NASC fusion cell) — contribute and consume.</div>
+      </div>
+    </div>
+    <div class="cards" style="gap: 18px; margin-top: 18px;">
+      <div class="card card--dark">
+        <div class="card__accent" style="background: var(--blue);"></div>
+        <div class="card__title" style="font-size: 19px;">Distribution</div>
+        <div class="card__body">Embed the free checker (badge / widget), co-brand with community & consumer organisations, or reach members through trusted channels.</div>
+      </div>
+      <div class="card card--dark">
+        <div class="card__accent" style="background: var(--green);"></div>
+        <div class="card__title" style="font-size: 19px;">White-label / OEM</div>
+        <div class="card__body">Power another product's scam-checking with the verdict engine and intelligence under the partner's own brand.</div>
+      </div>
+      <div class="card card--dark">
+        <div class="card__accent" style="background: var(--amber);"></div>
+        <div class="card__title" style="font-size: 19px;">Research & policy</div>
+        <div class="card__body">Aggregated, PII-scrubbed trend data for academics, journalists and policymakers tracking the Australian scam landscape.</div>
+      </div>
+    </div>
+    <div class="slide-num" style="color: rgba(255,255,255,0.3);">11</div>
+  </div>
+
+  <!-- SLIDE 12: Built & operating -->
+  <div class="slide slide--white" data-slide="11">
+    <div class="slide__label">BUILT & OPERATING</div>
+    <h2 class="slide__title" style="color: var(--navy); font-size: 46px;">A production platform, not a prototype</h2>
+
+    <div class="metrics" style="margin-bottom: 22px;">
+      <div class="metric"><div class="metric__value">20+</div><div class="metric__label">Live threat feeds</div><div class="metric__note">Automated, daily</div></div>
+      <div class="metric"><div class="metric__value">6+</div><div class="metric__label">Consumer channels</div><div class="metric__note">Web, bots, extension, mobile</div></div>
+      <div class="metric"><div class="metric__value">API</div><div class="metric__label">B2B endpoints live</div><div class="metric__note">Threats, entities, clusters</div></div>
+      <div class="metric"><div class="metric__value">&lt;$0.001</div><div class="metric__label">Per AI check</div><div class="metric__note">~95% gross margin at scale</div></div>
+    </div>
+
+    <div style="display: flex; gap: 30px;">
+      <div style="flex: 1;">
+        <p style="font-size: 17px; font-weight: 700; color: var(--navy); margin-bottom: 8px;">Operational maturity</p>
+        <ul class="bullets" style="font-size: 16px;">
+          <li>Per-feature AI cost telemetry + automatic spend brakes</li>
+          <li>Structured observability (Axiom) + stuck-query watchdog</li>
+          <li>PII-scrubbing and replay-safe analysis by design</li>
+        </ul>
+      </div>
+      <div style="flex: 1;">
+        <p style="font-size: 17px; font-weight: 700; color: var(--navy); margin-bottom: 8px;">Sovereign & Australian</p>
+        <ul class="bullets" style="font-size: 16px;">
+          <li>Built in Australia, for the Australian threat landscape</li>
+          <li>Privacy-first: no account required, no PII stored</li>
+          <li>Capital-efficient, fast-moving development</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="callout callout--green" style="margin-top: 18px;">
+      Most capabilities shown are <strong>already built</strong>; several consumer products are
+      rolling out from behind feature flags. The roadmap is sequencing, not invention.
+    </div>
+    <div class="bottom-bar"></div>
+    <div class="slide-num">12</div>
+  </div>
+
+  <!-- SLIDE 13: Architecture -->
+  <div class="slide slide--white" data-slide="12">
+    <div class="slide__label">ARCHITECTURE</div>
+    <h2 class="slide__title" style="color: var(--navy); font-size: 42px;">How the front end and back end fit together</h2>
+
+    <div class="tier-row" style="margin-top: 4px;">
+      <span class="tier-row__label">Front end</span>
+      <div class="tier-row__items">
+        <span class="chip">Web app</span>
+        <span class="chip">Browser extension</span>
+        <span class="chip">Mobile app</span>
+        <span class="chip">Telegram / WhatsApp / Slack / Messenger bots</span>
+      </div>
+    </div>
+    <div class="tier-arrow">▼</div>
+    <div class="tier-row">
+      <span class="tier-row__label">Application</span>
+      <div class="tier-row__items">
+        <span class="chip">Next.js 16 on Vercel</span>
+        <span class="chip">/api/analyze</span>
+        <span class="chip">B2B /api/v1/*</span>
+        <span class="chip">Bot webhooks</span>
+        <span class="chip">Auth middleware</span>
+      </div>
+    </div>
+    <div class="tier-arrow">▼</div>
+    <div class="tier-row">
+      <span class="tier-row__label">Analysis engine</span>
+      <div class="tier-row__items">
+        <span class="chip">Claude Haiku 4.5 verdict + merge</span>
+        <span class="chip">Safe Browsing</span>
+        <span class="chip">Redirect resolution</span>
+        <span class="chip">Email auth (SPF/DMARC/DKIM)</span>
+        <span class="chip">Shop Signal</span>
+        <span class="chip">SSRF guard</span>
+      </div>
+    </div>
+    <div class="tier-arrow">▼</div>
+    <div class="tier-row">
+      <span class="tier-row__label">Data layer</span>
+      <div class="tier-row__items">
+        <span class="chip">Supabase Postgres — PII-scrubbed reports, entities, feeds</span>
+        <span class="chip">Voyage embeddings (pgvector)</span>
+        <span class="chip">Redis — rate limit / cache</span>
+        <span class="chip">Cloudflare R2</span>
+      </div>
+    </div>
+    <div class="tier-arrow">▲ &nbsp;continuously enriched by</div>
+    <div class="tier-row tier-row--accent">
+      <span class="tier-row__label">Background</span>
+      <div class="tier-row__items">
+        <span class="chip">Inngest durable workers — enrichment, clustering, clone-watch, alerts</span>
+        <span class="chip">20+ Python scrapers (GitHub Actions)</span>
+        <span class="chip">Cloudflare email-intel worker</span>
+      </div>
+    </div>
+
+    <div class="callout callout--green" style="margin-top: 18px;">
+      <strong>Outputs:</strong> consumer verdicts · the B2B Threat Intelligence API ·
+      clone & brand-impersonation alerts · onward reporting to regulators — all drawn from the same data layer.
+    </div>
+    <div class="bottom-bar"></div>
+    <div class="slide-num">13</div>
+  </div>
+
+  <!-- SLIDE 14: Work with us -->
+  <div class="slide slide--navy" data-slide="13">
+    <div class="top-bar"></div>
+    <div class="slide__label">WORK WITH US</div>
+    <h2 class="slide__title" style="font-size: 56px;">Let's stop scams<br>at the source</h2>
+    <p style="font-size: 21px; color: var(--grey-mid); margin-bottom: 30px; max-width: 1100px; line-height: 1.5;">
+      Whether you're a regulated entity preparing for the SPF deadline, a brand worried about
+      impersonation, a government or industry body, or a distribution partner who wants to
+      protect your community — there's a way to work together.
+    </p>
+
+    <p style="font-size: 18px; font-weight: 600; color: var(--green); margin-bottom: 14px;">What you can do today</p>
+    <div style="display: flex; gap: 60px;">
+      <ul class="bullets" style="flex: 1;">
+        <li style="color: rgba(255,255,255,0.85);">Try the free scam checker at askarthur.au</li>
+        <li style="color: rgba(255,255,255,0.85);">Run the free SPF / DMARC / DKIM self-assessment</li>
+      </ul>
+      <ul class="bullets" style="flex: 1;">
+        <li style="color: rgba(255,255,255,0.85);">Request a B2B Threat Intelligence API pilot</li>
+        <li style="color: rgba(255,255,255,0.85);">Add your brand's domains to clone-watch</li>
+      </ul>
+    </div>
+
+    <div style="position: absolute; bottom: 80px; left: 130px; right: 130px; display: flex; justify-content: space-between; align-items: center;">
+      <div>
+        <div style="font-size: 22px; font-weight: 700; color: white;">askarthur.au</div>
+        <div style="font-size: 16px; color: var(--grey-mid);">brendan@askarthur.au</div>
+      </div>
+      <div style="text-align: right; font-size: 16px; color: var(--grey-mid);">
+        Australia's scam detection & intelligence platform
+      </div>
+    </div>
+    <div class="slide-num" style="color: rgba(255,255,255,0.3);">14</div>
+  </div>
+
+</div>
+
+<!-- Navigation dots -->
+<div class="nav" id="nav"></div>
+
+<!-- Keyboard instructions -->
+<div style="position: fixed; top: 20px; right: 20px; background: rgba(0,0,0,0.5); color: white; padding: 8px 16px; border-radius: 8px; font-size: 12px; font-family: Inter, sans-serif; z-index: 200; opacity: 0.6;">
+  Arrow keys or click to navigate
+</div>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  const nav = document.getElementById('nav');
+  let current = 0;
+
+  // Create nav dots
+  slides.forEach((_, i) => {
+    const dot = document.createElement('div');
+    dot.className = 'nav__dot' + (i === 0 ? ' active' : '');
+    dot.onclick = () => goTo(i);
+    nav.appendChild(dot);
+  });
+
+  function goTo(n) {
+    slides[current].classList.remove('active');
+    nav.children[current].classList.remove('active');
+    current = Math.max(0, Math.min(n, slides.length - 1));
+    slides[current].classList.add('active');
+    nav.children[current].classList.add('active');
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') { e.preventDefault(); goTo(current + 1); }
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); goTo(current - 1); }
+    if (e.key === 'Home') goTo(0);
+    if (e.key === 'End') goTo(slides.length - 1);
+  });
+
+  // Click to advance (left third = back, rest = forward)
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('.nav')) return;
+    if (e.clientX < window.innerWidth / 3) goTo(current - 1);
+    else goTo(current + 1);
+  });
+</script>
+
+</body>
+</html>
