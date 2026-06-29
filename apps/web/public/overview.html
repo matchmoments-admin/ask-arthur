@@ -23,23 +23,27 @@
   }
 </style>
 <style>
-  html,body{height:100%;overflow:hidden;background:#0C2340;}
-  #deck{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;}
-  #stage{position:relative;width:1920px;height:1080px;transform-origin:center center;}
-  .slide{position:absolute;inset:0;display:none;}
-  .slide.active{display:block;}
-  .slide > section{height:100%;width:100%;}
-  #nav{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);display:flex;gap:8px;z-index:50;background:rgba(12,35,64,.55);backdrop-filter:blur(8px);padding:8px 14px;border-radius:24px;}
+  /* Responsive deck shell. Each section is authored on a fixed 1920x1080 stage;
+     we scale the stage to the viewport WIDTH (--s) so every slide always fills
+     the width (no letterbox margins / clipped cards) and stack them vertically
+     with scroll-snap. Big on any viewport, recomputes on resize. No runtime. */
+  html,body{margin:0;padding:0;background:#0C2340;}
+  html{scroll-snap-type:y proximity;}
+  :root{--s:1;}
+  .slide{position:relative;width:100vw;height:calc(1080px * var(--s));overflow:hidden;scroll-snap-align:start;background:#0C2340;}
+  .stage{width:1920px;height:1080px;transform-origin:top left;transform:scale(var(--s));}
+  .stage > section{height:100%;width:100%;}
+  #nav{position:fixed;right:16px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:9px;z-index:50;background:rgba(12,35,64,.5);backdrop-filter:blur(8px);padding:12px 9px;border-radius:22px;}
   .dot{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.32);cursor:pointer;transition:all .25s;border:0;padding:0;}
-  .dot.active{background:#27C083;transform:scale(1.35);}
-  #hint{position:fixed;top:16px;right:16px;z-index:50;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.1em;color:rgba(255,255,255,.5);background:rgba(12,35,64,.5);padding:6px 12px;border-radius:8px;}
-  @media print{ .slide{display:block !important;position:static;page-break-after:always;} #stage{transform:none !important;height:auto;width:auto;} #nav,#hint{display:none;} html,body{overflow:visible;height:auto;} #deck{position:static;} }
+  .dot.active{background:#27C083;transform:scale(1.4);}
+  #hint{position:fixed;top:14px;right:14px;z-index:50;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.1em;color:rgba(255,255,255,.5);background:rgba(12,35,64,.5);padding:6px 12px;border-radius:8px;}
+  @media (max-width:700px){ #hint{display:none;} #nav{right:8px;padding:9px 7px;} }
+  @media print{ html{scroll-snap-type:none;} #nav,#hint{display:none;} .slide{page-break-after:always;} }
 </style>
 </head>
 <body>
-<div id="deck"><div id="stage">
 <!-- 01 COVER -->
-<div class="slide"><section data-label="Cover" data-speaker-notes="Ask Arthur: Australia's scam detection and intelligence platform. Free for everyone, and the upstream intelligence that helps banks, telcos and platforms stop scams at the source." style="height:100%;width:100%;box-sizing:border-box;background:radial-gradient(680px 680px at 102% -12%,rgba(22,160,106,.18),transparent 58%),#0C2340;color:#F4F7FB;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:84px 104px 64px;position:relative;overflow:hidden;">
+<div class="slide"><div class="stage"><section data-label="Cover" data-speaker-notes="Ask Arthur: Australia's scam detection and intelligence platform. Free for everyone, and the upstream intelligence that helps banks, telcos and platforms stop scams at the source." style="height:100%;width:100%;box-sizing:border-box;background:radial-gradient(680px 680px at 102% -12%,rgba(22,160,106,.18),transparent 58%),#0C2340;color:#F4F7FB;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:84px 104px 64px;position:relative;overflow:hidden;">
   <div data-rise style="display:flex;align-items:center;justify-content:space-between;">
     <span style="font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:600;letter-spacing:.28em;">ASK ARTHUR</span>
     <span style="font-family:'IBM Plex Mono',monospace;font-size:15px;letter-spacing:.18em;color:#8FA2BA;">PLATFORM OVERVIEW · 2026</span>
@@ -70,10 +74,10 @@
       <div style="font-size:19px;color:#9FB2C9;margin-top:8px;line-height:1.4;">Scams Prevention Framework deadline</div>
     </div>
   </div>
-</section></div>
+</section></div></div>
 
 <!-- 02 PROBLEM -->
-<div class="slide"><section data-label="The Problem" data-speaker-notes="Banks watch transactions, telcos block calls — but nobody systematically watches the origination layer where scams are actually born. That's the only place a scam can be stopped before a victim sees it." style="height:100%;width:100%;box-sizing:border-box;background:#FFFFFF;color:#0C2340;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:80px 104px 52px;position:relative;overflow:hidden;">
+<div class="slide"><div class="stage"><section data-label="The Problem" data-speaker-notes="Banks watch transactions, telcos block calls — but nobody systematically watches the origination layer where scams are actually born. That's the only place a scam can be stopped before a victim sees it." style="height:100%;width:100%;box-sizing:border-box;background:#FFFFFF;color:#0C2340;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:80px 104px 52px;position:relative;overflow:hidden;">
   <div data-rise style="display:flex;align-items:baseline;gap:18px;">
     <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600;letter-spacing:.16em;color:#16A06A;">01</span>
     <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:500;letter-spacing:.22em;text-transform:uppercase;color:#7A8AA0;">The problem</span>
@@ -102,10 +106,10 @@
     </div>
   </div>
   <div data-rise3 style="display:flex;justify-content:space-between;border-top:1px solid #E6EAF1;padding-top:18px;font-family:'IBM Plex Mono',monospace;font-size:13px;letter-spacing:.1em;color:#9AA7B8;"><span>askarthur.au</span><span>STOP SCAMS AT THE SOURCE</span></div>
-</section></div>
+</section></div></div>
 
 <!-- 03 HOW IT WORKS -->
-<div class="slide"><section data-label="How it works" data-speaker-notes="One free consumer tool anyone can use through any channel, and one growing intelligence engine. Every check — PII-scrubbed — enriches a threat database that powers brand protection and a B2B API. That's the flywheel." style="height:100%;width:100%;box-sizing:border-box;background:#FFFFFF;color:#0C2340;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:80px 104px 52px;position:relative;overflow:hidden;">
+<div class="slide"><div class="stage"><section data-label="How it works" data-speaker-notes="One free consumer tool anyone can use through any channel, and one growing intelligence engine. Every check — PII-scrubbed — enriches a threat database that powers brand protection and a B2B API. That's the flywheel." style="height:100%;width:100%;box-sizing:border-box;background:#FFFFFF;color:#0C2340;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:80px 104px 52px;position:relative;overflow:hidden;">
   <div data-rise style="display:flex;align-items:baseline;gap:18px;">
     <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600;letter-spacing:.16em;color:#16A06A;">02</span>
     <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:500;letter-spacing:.22em;text-transform:uppercase;color:#7A8AA0;">How it works</span>
@@ -141,10 +145,10 @@
     <span style="font-size:21px;font-weight:600;color:#28384E;">richer threat intelligence</span><span style="color:#16A06A;font-size:22px;">→</span>
     <span style="font-size:21px;font-weight:600;color:#28384E;">better protection for everyone</span><span style="color:#16A06A;font-size:22px;">↻</span>
   </div>
-</section></div>
+</section></div></div>
 
 <!-- 04 WAYS TO CHECK -->
-<div class="slide"><section data-label="Ways to check" data-speaker-notes="The same AI verdict engine, available through every channel a scam can arrive in — web, Telegram, browser extension, mobile, WhatsApp/Slack, Messenger. Inputs: text, links with redirect resolution, screenshots, QR codes, forwarded emails." style="height:100%;width:100%;box-sizing:border-box;background:#FFFFFF;color:#0C2340;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:80px 104px 52px;position:relative;overflow:hidden;">
+<div class="slide"><div class="stage"><section data-label="Ways to check" data-speaker-notes="The same AI verdict engine, available through every channel a scam can arrive in — web, Telegram, browser extension, mobile, WhatsApp/Slack, Messenger. Inputs: text, links with redirect resolution, screenshots, QR codes, forwarded emails." style="height:100%;width:100%;box-sizing:border-box;background:#FFFFFF;color:#0C2340;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:80px 104px 52px;position:relative;overflow:hidden;">
   <div data-rise style="display:flex;align-items:baseline;gap:18px;">
     <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600;letter-spacing:.16em;color:#16A06A;">03</span>
     <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:500;letter-spacing:.22em;text-transform:uppercase;color:#7A8AA0;">Ways to check</span>
@@ -178,10 +182,10 @@
     </div>
   </div>
   <div data-rise3 style="margin-top:26px;font-size:18px;color:#5C6B7E;"><span style="color:#0C2340;font-weight:600;">Inputs supported:</span> text · links (with redirect-chain resolution) · screenshots &amp; images · QR codes · forwarded emails. <span style="color:#9AA7B8;">Audio/video analysis is on the roadmap.</span></div>
-</section></div>
+</section></div></div>
 
 <!-- 05 CORE SCANNING -->
-<div class="slide"><section data-label="Core scanning" data-speaker-notes="A single check returns a three-tier verdict from Claude Haiku 4.5 in seconds, with plain-English reasons and recovery guidance — backed by Safe Browsing, redirect resolution, email auth, Shop Signal and async WHOIS/SSL/CT checks. Every check is replay-safe and PII-scrubbed before it feeds the engine." style="height:100%;width:100%;box-sizing:border-box;background:#FFFFFF;color:#0C2340;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:80px 104px 52px;position:relative;overflow:hidden;">
+<div class="slide"><div class="stage"><section data-label="Core scanning" data-speaker-notes="A single check returns a three-tier verdict from Claude Haiku 4.5 in seconds, with plain-English reasons and recovery guidance — backed by Safe Browsing, redirect resolution, email auth, Shop Signal and async WHOIS/SSL/CT checks. Every check is replay-safe and PII-scrubbed before it feeds the engine." style="height:100%;width:100%;box-sizing:border-box;background:#FFFFFF;color:#0C2340;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:80px 104px 52px;position:relative;overflow:hidden;">
   <div data-rise style="display:flex;align-items:baseline;gap:18px;">
     <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600;letter-spacing:.16em;color:#16A06A;">04</span>
     <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:500;letter-spacing:.22em;text-transform:uppercase;color:#7A8AA0;">Core scanning · Live</span>
@@ -214,10 +218,10 @@
     </div>
   </div>
   <div data-rise3 style="margin-top:26px;font-size:19px;color:#5C6B7E;border-left:3px solid #16A06A;padding-left:20px;line-height:1.5;">Every check is replay-safe and PII-scrubbed before storage, then feeds the intelligence engine — so a scam reported once helps protect the next person who sees it.</div>
-</section></div>
+</section></div></div>
 
 <!-- 06 CLONE & BRAND -->
-<div class="slide"><section data-label="Brand protection" data-speaker-notes="Clone-watch sweeps newly-registered domains against a watchlist of Australian brands; Certificate Transparency monitors public TLS logs; Shop Signal flags fake shops; confirmed impersonations are routed to each brand's security channel for takedown. The first live brand notification — to a major Australian bank — went out in May 2026." style="height:100%;width:100%;box-sizing:border-box;background:#FFFFFF;color:#0C2340;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:80px 104px 52px;position:relative;overflow:hidden;">
+<div class="slide"><div class="stage"><section data-label="Brand protection" data-speaker-notes="Clone-watch sweeps newly-registered domains against a watchlist of Australian brands; Certificate Transparency monitors public TLS logs; Shop Signal flags fake shops; confirmed impersonations are routed to each brand's security channel for takedown. The first live brand notification — to a major Australian bank — went out in May 2026." style="height:100%;width:100%;box-sizing:border-box;background:#FFFFFF;color:#0C2340;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:80px 104px 52px;position:relative;overflow:hidden;">
   <div data-rise style="display:flex;align-items:baseline;gap:18px;">
     <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600;letter-spacing:.16em;color:#16A06A;">05</span>
     <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:500;letter-spacing:.22em;text-transform:uppercase;color:#7A8AA0;">Clone &amp; brand protection · Live</span>
@@ -245,10 +249,10 @@
     <span style="font-family:'IBM Plex Mono',monospace;font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:#16A06A;white-space:nowrap;">In production</span>
     <span style="font-size:20px;color:#28384E;line-height:1.45;">The first live brand notification — to a major Australian bank — was sent in <span style="font-weight:700;color:#0C2340;">May 2026</span>. This is the platform's direct contribution to the SPF <span style="font-weight:700;color:#0C2340;">Prevent</span> principle.</span>
   </div>
-</section></div>
+</section></div></div>
 
 <!-- 07 INTELLIGENCE ENGINE (dark) -->
-<div class="slide"><section data-label="Intelligence engine" data-speaker-notes="20+ scrapers feed in IOC feeds, regulator narratives and community discussion. That raw input is PII-scrubbed, entity-linked, clustered into themes and risk-scored, then surfaced as trending threats and semantic search — to consumers as warnings and to partners through the API. The result is a uniquely Australian, real-time scam corpus that compounds in value." style="height:100%;width:100%;box-sizing:border-box;background:radial-gradient(620px 460px at 58% -14%,rgba(39,192,131,.14),transparent 64%),#0C2340;color:#F4F7FB;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:80px 104px 56px;position:relative;overflow:hidden;">
+<div class="slide"><div class="stage"><section data-label="Intelligence engine" data-speaker-notes="20+ scrapers feed in IOC feeds, regulator narratives and community discussion. That raw input is PII-scrubbed, entity-linked, clustered into themes and risk-scored, then surfaced as trending threats and semantic search — to consumers as warnings and to partners through the API. The result is a uniquely Australian, real-time scam corpus that compounds in value." style="height:100%;width:100%;box-sizing:border-box;background:radial-gradient(620px 460px at 58% -14%,rgba(39,192,131,.14),transparent 64%),#0C2340;color:#F4F7FB;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:80px 104px 56px;position:relative;overflow:hidden;">
   <div data-rise style="display:flex;align-items:baseline;gap:18px;">
     <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600;letter-spacing:.16em;color:#27C083;">06</span>
     <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:500;letter-spacing:.22em;text-transform:uppercase;color:#9FB2C9;">The intelligence engine</span>
@@ -274,10 +278,10 @@
     </div>
   </div>
   <div data-rise3 style="margin-top:26px;font-size:20px;color:#DCE5F0;border-left:3px solid #27C083;padding-left:20px;line-height:1.5;"><span style="font-weight:700;color:#fff;">The data moat:</span> a uniquely Australian, real-time, community-fed scam corpus that gets more valuable with every check and every feed.</div>
-</section></div>
+</section></div></div>
 
 <!-- 08 B2B API -->
-<div class="slide"><section data-label="B2B API" data-speaker-notes="API-key authenticated, rate-limited, OpenAPI-documented. Threats, entities and clusters endpoints are live today; deepfakes live; semantic search rolling out. Built for compliance teams: every entity enriched, hashed keys with per-key rate limits, self-service keys and dashboards, onward reporting to regulators and government-ready exports." style="height:100%;width:100%;box-sizing:border-box;background:#FFFFFF;color:#0C2340;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:80px 104px 52px;position:relative;overflow:hidden;">
+<div class="slide"><div class="stage"><section data-label="B2B API" data-speaker-notes="API-key authenticated, rate-limited, OpenAPI-documented. Threats, entities and clusters endpoints are live today; deepfakes live; semantic search rolling out. Built for compliance teams: every entity enriched, hashed keys with per-key rate limits, self-service keys and dashboards, onward reporting to regulators and government-ready exports." style="height:100%;width:100%;box-sizing:border-box;background:#FFFFFF;color:#0C2340;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:80px 104px 52px;position:relative;overflow:hidden;">
   <div data-rise style="display:flex;align-items:baseline;gap:18px;">
     <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600;letter-spacing:.16em;color:#16A06A;">07</span>
     <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:500;letter-spacing:.22em;text-transform:uppercase;color:#7A8AA0;">B2B Threat Intelligence API</span>
@@ -304,10 +308,10 @@
       </div>
     </div>
   </div>
-</section></div>
+</section></div></div>
 
 <!-- 09 SPECIALISED TOOLS -->
-<div class="slide"><section data-label="Specialised tools" data-speaker-notes="Focused capabilities on the same engine: Persona Check, Site Audit, Extension Audit and MCP/Skill Audit are live; Charity Check and Phone Footprint rolling out; Breach Defence and audio/video deepfake on the roadmap. The Extension and MCP/Skill audits are an AI-native differentiator — auditing the very tools that increasingly carry threats." style="height:100%;width:100%;box-sizing:border-box;background:#FFFFFF;color:#0C2340;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:80px 104px 52px;position:relative;overflow:hidden;">
+<div class="slide"><div class="stage"><section data-label="Specialised tools" data-speaker-notes="Focused capabilities on the same engine: Persona Check, Site Audit, Extension Audit and MCP/Skill Audit are live; Charity Check and Phone Footprint rolling out; Breach Defence and audio/video deepfake on the roadmap. The Extension and MCP/Skill audits are an AI-native differentiator — auditing the very tools that increasingly carry threats." style="height:100%;width:100%;box-sizing:border-box;background:#FFFFFF;color:#0C2340;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:80px 104px 52px;position:relative;overflow:hidden;">
   <div data-rise style="display:flex;align-items:baseline;gap:18px;">
     <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600;letter-spacing:.16em;color:#16A06A;">08</span>
     <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:500;letter-spacing:.22em;text-transform:uppercase;color:#7A8AA0;">Specialised tools</span>
@@ -325,10 +329,10 @@
     <div data-rise3 style="border:1px solid #E6EAF1;border-radius:18px;padding:26px;background:#FBFCFE;display:flex;flex-direction:column;justify-content:space-between;"><div><div style="font-size:23px;font-weight:700;">Audio / video &amp; deepfake</div><div style="font-size:18px;color:#5C6B7E;margin-top:8px;line-height:1.4;">Media-based scam &amp; deepfake detection</div></div><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#8794A6;margin-top:16px;">○ Roadmap</span></div>
   </div>
   <div data-rise3 style="margin-top:24px;font-size:18px;color:#5C6B7E;line-height:1.5;">The Extension and MCP/Skill audits are an <span style="color:#0C2340;font-weight:600;">AI-native differentiator</span> — Ask Arthur audits the very tools (browser extensions, AI agents) that increasingly carry threats.</div>
-</section></div>
+</section></div></div>
 
 <!-- 10 SPF FRAMEWORK (dark) -->
-<div class="slide"><section data-label="SPF Framework" data-speaker-notes="The SPF Act obliges 200+ banks, telcos and platforms to Prevent, Detect, Disrupt and Report scams by 1 July 2026, with penalties up to A$52.7M. Ask Arthur maps directly to all four obligations — plus a free in-product SPF self-assessment any organisation can run today." style="height:100%;width:100%;box-sizing:border-box;background:#0C2340;color:#F4F7FB;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:80px 104px 56px;position:relative;overflow:hidden;">
+<div class="slide"><div class="stage"><section data-label="SPF Framework" data-speaker-notes="The SPF Act obliges 200+ banks, telcos and platforms to Prevent, Detect, Disrupt and Report scams by 1 July 2026, with penalties up to A$52.7M. Ask Arthur maps directly to all four obligations — plus a free in-product SPF self-assessment any organisation can run today." style="height:100%;width:100%;box-sizing:border-box;background:#0C2340;color:#F4F7FB;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:80px 104px 56px;position:relative;overflow:hidden;">
   <div data-rise style="display:flex;align-items:baseline;gap:18px;">
     <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600;letter-spacing:.16em;color:#27C083;">09</span>
     <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:500;letter-spacing:.22em;text-transform:uppercase;color:#9FB2C9;">Scams Prevention Framework</span>
@@ -345,10 +349,10 @@
     <div data-rise3 style="border:1px solid rgba(255,255,255,.14);border-radius:20px;padding:30px 28px;background:rgba(255,255,255,.04);display:flex;flex-direction:column;gap:14px;"><div style="font-family:'IBM Plex Mono',monospace;font-size:14px;letter-spacing:.14em;text-transform:uppercase;color:#27C083;">Report</div><div style="font-size:19px;color:#DCE5F0;line-height:1.5;">Trending-threats endpoint + government-ready exports + onward reporting to regulators (potential AFCX feed).</div></div>
   </div>
   <div data-rise3 style="margin-top:24px;font-size:19px;color:#DCE5F0;border-left:3px solid #27C083;padding-left:20px;line-height:1.5;">Plus a free in-product <span style="font-weight:700;color:#fff;">SPF self-assessment</span> (SPF / DMARC / DKIM email-auth health check) that any organisation can run today at askarthur.au.</div>
-</section></div>
+</section></div></div>
 
 <!-- 11 PARTNERSHIPS -->
-<div class="slide"><section data-label="Partnerships" data-speaker-notes="The same platform serves very different partners, and these models can run in parallel: regulated entities licensing the API, brand protection, two-way data-sharing and fusion, distribution of the free checker, white-label/OEM, and aggregated research and policy data." style="height:100%;width:100%;box-sizing:border-box;background:#FFFFFF;color:#0C2340;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:80px 104px 52px;position:relative;overflow:hidden;">
+<div class="slide"><div class="stage"><section data-label="Partnerships" data-speaker-notes="The same platform serves very different partners, and these models can run in parallel: regulated entities licensing the API, brand protection, two-way data-sharing and fusion, distribution of the free checker, white-label/OEM, and aggregated research and policy data." style="height:100%;width:100%;box-sizing:border-box;background:#FFFFFF;color:#0C2340;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:80px 104px 52px;position:relative;overflow:hidden;">
   <div data-rise style="display:flex;align-items:baseline;gap:18px;">
     <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600;letter-spacing:.16em;color:#16A06A;">10</span>
     <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:500;letter-spacing:.22em;text-transform:uppercase;color:#7A8AA0;">Ways to work together</span>
@@ -363,10 +367,10 @@
     <div data-rise3 style="border:1px solid #E6EAF1;border-radius:20px;padding:30px 30px;background:#FBFCFE;display:flex;flex-direction:column;gap:12px;"><div style="font-size:24px;font-weight:700;">White-label / OEM</div><div style="font-size:18px;color:#5C6B7E;line-height:1.45;">Power another product's scam-checking with the verdict engine and intelligence under the partner's own brand.</div></div>
     <div data-rise3 style="border:1px solid #E6EAF1;border-radius:20px;padding:30px 30px;background:#FBFCFE;display:flex;flex-direction:column;gap:12px;"><div style="font-size:24px;font-weight:700;">Research &amp; policy</div><div style="font-size:18px;color:#5C6B7E;line-height:1.45;">Aggregated, PII-scrubbed trend data for academics, journalists and policymakers tracking the Australian scam landscape.</div></div>
   </div>
-</section></div>
+</section></div></div>
 
 <!-- 12 BUILT & OPERATING -->
-<div class="slide"><section data-label="Built & operating" data-speaker-notes="This is a production platform, not a prototype: 20+ live feeds running daily, 6+ consumer channels, live B2B endpoints, under a tenth of a cent per check at roughly 95% gross margin. Operationally mature with cost telemetry and observability, and sovereign — built in Australia, privacy-first. Most capabilities are already built; the roadmap is sequencing, not invention." style="height:100%;width:100%;box-sizing:border-box;background:#FFFFFF;color:#0C2340;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:80px 104px 52px;position:relative;overflow:hidden;">
+<div class="slide"><div class="stage"><section data-label="Built & operating" data-speaker-notes="This is a production platform, not a prototype: 20+ live feeds running daily, 6+ consumer channels, live B2B endpoints, under a tenth of a cent per check at roughly 95% gross margin. Operationally mature with cost telemetry and observability, and sovereign — built in Australia, privacy-first. Most capabilities are already built; the roadmap is sequencing, not invention." style="height:100%;width:100%;box-sizing:border-box;background:#FFFFFF;color:#0C2340;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:80px 104px 52px;position:relative;overflow:hidden;">
   <div data-rise style="display:flex;align-items:baseline;gap:18px;">
     <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600;letter-spacing:.16em;color:#16A06A;">11</span>
     <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:500;letter-spacing:.22em;text-transform:uppercase;color:#7A8AA0;">Built &amp; operating</span>
@@ -397,10 +401,10 @@
     </div>
   </div>
   <div data-rise3 style="margin-top:8px;font-size:18px;color:#5C6B7E;line-height:1.5;">Most capabilities shown are <span style="color:#0C2340;font-weight:600;">already built</span>; several consumer products are rolling out from behind feature flags. The roadmap is sequencing, not invention.</div>
-</section></div>
+</section></div></div>
 
 <!-- 13 ARCHITECTURE -->
-<div class="slide"><section data-label="Architecture" data-speaker-notes="Front end (web, extension, mobile, bots) hits a Next.js application layer on Vercel, which runs the analysis engine — Claude Haiku verdict plus Safe Browsing, redirect resolution, email auth, Shop Signal and an SSRF guard — over a Supabase/pgvector data layer with Redis and R2. Background Inngest workers and 20+ Python scrapers continuously enrich it. Outputs: consumer verdicts, the B2B API, brand alerts and regulator reporting." style="height:100%;width:100%;box-sizing:border-box;background:#FFFFFF;color:#0C2340;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:80px 104px 52px;position:relative;overflow:hidden;">
+<div class="slide"><div class="stage"><section data-label="Architecture" data-speaker-notes="Front end (web, extension, mobile, bots) hits a Next.js application layer on Vercel, which runs the analysis engine — Claude Haiku verdict plus Safe Browsing, redirect resolution, email auth, Shop Signal and an SSRF guard — over a Supabase/pgvector data layer with Redis and R2. Background Inngest workers and 20+ Python scrapers continuously enrich it. Outputs: consumer verdicts, the B2B API, brand alerts and regulator reporting." style="height:100%;width:100%;box-sizing:border-box;background:#FFFFFF;color:#0C2340;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:80px 104px 52px;position:relative;overflow:hidden;">
   <div data-rise style="display:flex;align-items:baseline;gap:18px;">
     <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600;letter-spacing:.16em;color:#16A06A;">12</span>
     <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:500;letter-spacing:.22em;text-transform:uppercase;color:#7A8AA0;">Architecture</span>
@@ -423,10 +427,10 @@
     </div>
   </div>
   <div data-rise3 style="margin-top:22px;font-size:18px;color:#5C6B7E;line-height:1.5;"><span style="color:#0C2340;font-weight:600;">Outputs:</span> consumer verdicts · the B2B Threat Intelligence API · clone &amp; brand-impersonation alerts · onward reporting to regulators — all drawn from the same data layer.</div>
-</section></div>
+</section></div></div>
 
 <!-- 14 CTA (dark) -->
-<div class="slide"><section data-label="Work with us" data-speaker-notes="Whether you're a regulated entity preparing for the SPF deadline, a brand worried about impersonation, a government or industry body, or a distribution partner — there's a way to work together. Today you can try the free checker, run the SPF self-assessment, request a B2B API pilot, or add your brand to clone-watch." style="height:100%;width:100%;box-sizing:border-box;background:radial-gradient(720px 720px at 112% 118%,rgba(39,192,131,.18),transparent 58%),#0C2340;color:#F4F7FB;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:84px 104px 64px;position:relative;overflow:hidden;">
+<div class="slide"><div class="stage"><section data-label="Work with us" data-speaker-notes="Whether you're a regulated entity preparing for the SPF deadline, a brand worried about impersonation, a government or industry body, or a distribution partner — there's a way to work together. Today you can try the free checker, run the SPF self-assessment, request a B2B API pilot, or add your brand to clone-watch." style="height:100%;width:100%;box-sizing:border-box;background:radial-gradient(720px 720px at 112% 118%,rgba(39,192,131,.18),transparent 58%),#0C2340;color:#F4F7FB;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:84px 104px 64px;position:relative;overflow:hidden;">
   <div data-rise style="display:flex;align-items:baseline;gap:18px;">
     <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600;letter-spacing:.16em;color:#27C083;">13</span>
     <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:500;letter-spacing:.22em;text-transform:uppercase;color:#9FB2C9;">Work with us</span>
@@ -453,37 +457,39 @@
     </div>
     <span style="font-family:'IBM Plex Mono',monospace;font-size:15px;letter-spacing:.16em;color:#8FA2BA;text-transform:uppercase;">Australia's scam detection &amp; intelligence platform</span>
   </div>
-</section></div>
-</div></div>
+</section></div></div>
 <div id="nav"></div>
-<div id="hint">← → or click to navigate</div>
+<div id="hint">scroll · ← → · or tap a dot</div>
 <script>
-  var stage=document.getElementById('stage');
-  var slides=[].slice.call(stage.querySelectorAll('.slide'));
+  var slides=[].slice.call(document.querySelectorAll('.slide'));
   var nav=document.getElementById('nav');
   var cur=0;
-  function fit(){var s=Math.min(window.innerWidth/1920, window.innerHeight/1080);stage.style.transform='scale('+s+')';}
-  slides.forEach(function(_,i){var b=document.createElement('button');b.className='dot'+(i===0?' active':'');b.setAttribute('aria-label','Slide '+(i+1));b.onclick=function(){go(i);};nav.appendChild(b);});
-  function go(n){
-    slides[cur].classList.remove('active');slides[cur].removeAttribute('data-deck-active');
-    nav.children[cur].classList.remove('active');
-    cur=Math.max(0,Math.min(n,slides.length-1));
-    var el=slides[cur];el.classList.add('active');
-    void el.offsetWidth;
-    el.setAttribute('data-deck-active','');
-    nav.children[cur].classList.add('active');
-  }
-  window.addEventListener('resize',fit);
+  function fit(){document.documentElement.style.setProperty('--s', window.innerWidth/1920);}
+  window.addEventListener('resize',fit); fit();
+  slides.forEach(function(s,i){
+    var b=document.createElement('button');
+    b.className='dot'+(i===0?' active':'');
+    b.setAttribute('aria-label','Slide '+(i+1));
+    b.onclick=function(){slides[i].scrollIntoView({behavior:'smooth',block:'start'});};
+    nav.appendChild(b);
+  });
+  function setActive(i){ if(i===cur)return; nav.children[cur].classList.remove('active'); cur=i; nav.children[cur].classList.add('active'); }
+  // Reveal animations + active-dot tracking as each slide scrolls into view.
+  var io=new IntersectionObserver(function(es){
+    es.forEach(function(e){
+      if(e.isIntersecting){
+        e.target.setAttribute('data-deck-active','');
+        if(e.intersectionRatio>=0.5) setActive(slides.indexOf(e.target));
+      }
+    });
+  },{threshold:[0.01,0.5,0.9]});
+  slides.forEach(function(s){io.observe(s);});
   document.addEventListener('keydown',function(e){
-    if(e.key==='ArrowRight'||e.key==='ArrowDown'||e.key===' '){e.preventDefault();go(cur+1);}
-    else if(e.key==='ArrowLeft'||e.key==='ArrowUp'){e.preventDefault();go(cur-1);}
-    else if(e.key==='Home'){go(0);}else if(e.key==='End'){go(slides.length-1);}
+    if(e.key==='ArrowRight'||e.key==='ArrowDown'||e.key===' '){e.preventDefault();if(cur<slides.length-1)slides[cur+1].scrollIntoView({behavior:'smooth',block:'start'});}
+    else if(e.key==='ArrowLeft'||e.key==='ArrowUp'){e.preventDefault();if(cur>0)slides[cur-1].scrollIntoView({behavior:'smooth',block:'start'});}
+    else if(e.key==='Home'){slides[0].scrollIntoView({behavior:'smooth'});}
+    else if(e.key==='End'){slides[slides.length-1].scrollIntoView({behavior:'smooth'});}
   });
-  document.addEventListener('click',function(e){
-    if(e.target.closest('#nav'))return;
-    if(e.clientX < window.innerWidth/3) go(cur-1); else go(cur+1);
-  });
-  fit();go(0);
 </script>
 </body>
 </html>
