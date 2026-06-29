@@ -184,15 +184,15 @@ Run on GitHub Actions, gated by `ENABLE_SCRAPER` (regular) / `ENABLE_VULN_SCRAPE
 
 ### Narrative scrapers (write to `feed_items`)
 
-| Scraper                   | Source                | Schedule        | Notes                                                                                    |
-| ------------------------- | --------------------- | --------------- | ---------------------------------------------------------------------------------------- |
-| `acnc_register.py`        | ACNC CKAN dataset     | Daily 16:00 UTC | Gated `ENABLE_CHARITY_CHECK_INGEST`. Chunked TOUCH_LAST_SEEN_SQL pattern (post-PR #187). |
-| `scamwatch_alerts.py`     | scamwatch.gov.au HTML | 3h tier (`*/3`) | Narrative extraction                                                                     |
-| `acsc_alerts.py`          | cyber.gov.au RSS      | 3h tier         | UA-fallback for Cloudflare WAF (Mozilla UA on retry)                                     |
-| `asic_investor_alerts.py` | asic.gov.au JSON      | Daily 16:00 UTC | Investor alerts snapshot                                                                 |
-| `austrac.py`              | austrac.gov.au RSS    | Daily 16:00 UTC | Money-mule + payments-fraud typology reports. PR-B3 v131. First Phase B Wave 2 scraper.  |
-| `probe_acsc.py`           | cyber.gov.au probe    | Manual          | Diagnostic for WAF behaviour                                                             |
-| `reddit_scams.py`         | Reddit `r/Scams`      | Daily 06:00 UTC | Source for Reddit Intel pipeline                                                         |
+| Scraper                   | Source                | Schedule                                          | Notes                                                                                                                                                                                                                                                    |
+| ------------------------- | --------------------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `acnc_register.py`        | ACNC CKAN dataset     | Daily 16:00 UTC                                   | Gated `ENABLE_CHARITY_CHECK_INGEST`. Chunked TOUCH_LAST_SEEN_SQL pattern (post-PR #187).                                                                                                                                                                 |
+| `scamwatch_alerts.py`     | scamwatch.gov.au HTML | 3h tier (`*/3`)                                   | Narrative extraction                                                                                                                                                                                                                                     |
+| `acsc_alerts.py`          | cyber.gov.au RSS      | 3h tier                                           | UA-fallback for Cloudflare WAF (Mozilla UA on retry)                                                                                                                                                                                                     |
+| `asic_investor_alerts.py` | asic.gov.au JSON      | Daily 16:00 UTC                                   | Investor alerts snapshot                                                                                                                                                                                                                                 |
+| `austrac.py`              | austrac.gov.au RSS    | **Manual only** (disabled on schedule 2026-06-29) | Money-mule + payments-fraud typology reports. PR-B3 v131. Akamai blocks CI datacenter IPs regardless of UA → tripped its circuit breaker; feed is healthy from a browser UA/normal IP. Re-probe with `gh workflow run scrape-feeds.yml -f feed=austrac`. |
+| `probe_acsc.py`           | cyber.gov.au probe    | Manual                                            | Diagnostic for WAF behaviour                                                                                                                                                                                                                             |
+| `reddit_scams.py`         | Reddit `r/Scams`      | Daily 06:00 UTC                                   | Source for Reddit Intel pipeline                                                                                                                                                                                                                         |
 
 ### IOC scrapers (write to `vulnerability_iocs` and entity tables)
 
