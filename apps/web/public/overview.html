@@ -23,17 +23,24 @@
   }
 </style>
 <style>
-  html,body{margin:0;padding:0;height:100%;background:#0C2340;}
+  /* One slide at a time, scaled to viewport WIDTH (--s). The page background
+     adapts to the active slide's own colour (white behind light slides, navy
+     behind dark ones) so a slide shorter than the viewport never shows a
+     mismatched bar. No external runtime. */
+  html,body{margin:0;padding:0;height:100%;background:#0C2340;transition:background .35s ease;}
   :root{--s:1;}
   #deck{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;overflow:auto;}
   .slide{display:none;width:100vw;height:calc(1080px * var(--s));flex:0 0 auto;}
   .slide.active{display:block;}
   .stage{width:1920px;height:1080px;transform:scale(var(--s));transform-origin:top left;}
   .stage > section{height:100%;width:100%;}
-  #nav{position:fixed;right:16px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:9px;z-index:50;background:rgba(12,35,64,.5);backdrop-filter:blur(8px);padding:12px 9px;border-radius:22px;}
-  .dot{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.32);cursor:pointer;transition:all .25s;border:0;padding:0;}
+  #deck a{color:inherit;text-decoration:none;}
+  .cta-link{border-bottom:1px solid rgba(39,192,131,.5);transition:border-color .2s,color .2s;cursor:pointer;}
+  .cta-link:hover{border-color:#27C083;color:#27C083;}
+  #nav{position:fixed;right:16px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:9px;z-index:50;background:rgba(120,135,160,.22);backdrop-filter:blur(8px);padding:12px 9px;border-radius:22px;}
+  .dot{width:9px;height:9px;border-radius:50%;background:rgba(120,135,160,.55);cursor:pointer;transition:all .25s;border:0;padding:0;}
   .dot.active{background:#27C083;transform:scale(1.4);}
-  #hint{position:fixed;top:14px;right:14px;z-index:50;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.1em;color:rgba(255,255,255,.5);background:rgba(12,35,64,.5);padding:6px 12px;border-radius:8px;}
+  #hint{position:fixed;top:14px;right:14px;z-index:50;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.1em;color:#8FA2BA;background:rgba(120,135,160,.16);padding:6px 12px;border-radius:8px;}
   @media (max-width:700px){ #hint{display:none;} #nav{right:8px;padding:9px 7px;} }
   @media print{ .slide{display:block !important;page-break-after:always;height:auto;} .stage{transform:none;} #deck{position:static;display:block;overflow:visible;} #nav,#hint{display:none;} }
 </style>
@@ -441,17 +448,17 @@
     <div data-rise3 style="border:1px solid rgba(255,255,255,.16);border-radius:22px;padding:32px 34px;background:rgba(255,255,255,.04);">
       <div style="font-family:'IBM Plex Mono',monospace;font-size:14px;letter-spacing:.14em;text-transform:uppercase;color:#27C083;margin-bottom:18px;">What you can do today</div>
       <div style="display:flex;flex-direction:column;gap:15px;font-size:19px;line-height:1.4;color:#DCE5F0;">
-        <div style="display:flex;gap:13px;"><span style="color:#27C083;font-weight:700;">→</span>Try the free scam checker at askarthur.au</div>
-        <div style="display:flex;gap:13px;"><span style="color:#27C083;font-weight:700;">→</span>Run the free SPF / DMARC / DKIM self-assessment</div>
-        <div style="display:flex;gap:13px;"><span style="color:#27C083;font-weight:700;">→</span>Request a B2B Threat Intelligence API pilot</div>
-        <div style="display:flex;gap:13px;"><span style="color:#27C083;font-weight:700;">→</span>Add your brand's domains to clone-watch</div>
+        <div style="display:flex;gap:13px;"><span style="color:#27C083;font-weight:700;">→</span><a class="cta-link" href="https://askarthur.au/" target="_blank" rel="noopener">Try the free scam checker at askarthur.au</a></div>
+        <div style="display:flex;gap:13px;"><span style="color:#27C083;font-weight:700;">→</span><a class="cta-link" href="https://askarthur.au/spf-assessment" target="_blank" rel="noopener">Run the free SPF / DMARC / DKIM self-assessment</a></div>
+        <div style="display:flex;gap:13px;"><span style="color:#27C083;font-weight:700;">→</span><a class="cta-link" href="https://askarthur.au/contact" target="_blank" rel="noopener">Request a B2B Threat Intelligence API pilot</a></div>
+        <div style="display:flex;gap:13px;"><span style="color:#27C083;font-weight:700;">→</span><a class="cta-link" href="https://askarthur.au/clone-watch" target="_blank" rel="noopener">Add your brand's domains to clone-watch</a></div>
       </div>
     </div>
   </div>
   <div data-rise3 style="display:flex;align-items:center;justify-content:space-between;border-top:1px solid rgba(255,255,255,.16);padding-top:24px;flex-wrap:wrap;gap:20px;">
     <div style="display:flex;gap:40px;align-items:center;">
       <span style="font-size:26px;font-weight:800;letter-spacing:-.01em;">askarthur.au</span>
-      <span style="font-size:22px;color:#C3D0E0;">brendan@askarthur.au</span>
+      <a class="cta-link" href="mailto:brendan@askarthur.au" style="font-size:22px;color:#C3D0E0;">brendan@askarthur.au</a>
     </div>
     <span style="font-family:'IBM Plex Mono',monospace;font-size:15px;letter-spacing:.16em;color:#8FA2BA;text-transform:uppercase;">Australia's scam detection &amp; intelligence platform</span>
   </div>
@@ -464,6 +471,7 @@
   var slides=[].slice.call(document.querySelectorAll('.slide'));
   var nav=document.getElementById('nav');
   var cur=0;
+  var bgs=slides.map(function(s){var st=(s.querySelector('section').getAttribute('style')||'');return st.indexOf('#0C2340')>-1?'#0C2340':'#FFFFFF';});
   function fit(){document.documentElement.style.setProperty('--s', window.innerWidth/1920);}
   window.addEventListener('resize',fit); fit();
   slides.forEach(function(s,i){
@@ -481,6 +489,8 @@
     void el.offsetWidth;
     el.setAttribute('data-deck-active','');
     nav.children[cur].classList.add('active');
+    document.documentElement.style.background=bgs[cur];
+    document.body.style.background=bgs[cur];
     deck.scrollTop=0;
   }
   document.addEventListener('keydown',function(e){
@@ -489,7 +499,7 @@
     else if(e.key==='Home'){go(0);}else if(e.key==='End'){go(slides.length-1);}
   });
   deck.addEventListener('click',function(e){
-    if(e.target.closest('#nav'))return;
+    if(e.target.closest('#nav')||e.target.closest('a'))return;   /* links navigate; don't advance */
     if(e.clientX < window.innerWidth/3) go(cur-1); else go(cur+1);
   });
   go(0);
