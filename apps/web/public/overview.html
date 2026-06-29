@@ -459,7 +459,6 @@
           <input id="sr-email" type="email" required placeholder="you@yourbrand.com.au" autocomplete="email" style="flex:1;min-width:200px;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.06);color:#F4F7FB;border-radius:10px;padding:12px 14px;font-size:16px;font-family:Figtree,system-ui,sans-serif;outline:none;">
           <button id="sr-btn" type="submit" style="border:0;background:#27C083;color:#0C2340;font-weight:700;border-radius:10px;padding:12px 18px;font-size:16px;font-family:Figtree,system-ui,sans-serif;cursor:pointer;">Email me a sample</button>
         </form>
-        <div id="sr-ts" style="margin-top:10px;"></div>
         <div id="sr-msg" style="margin-top:8px;font-size:14px;color:#C3D0E0;min-height:18px;"></div>
       </div>
     </div>
@@ -514,17 +513,18 @@
   go(0);
 </script>
 <script>
-  /* CTA sample-report form: lazy-loads Turnstile on first focus, then POSTs
-     email + token to the Turnstile-verified, rate-limited API. Clicks inside
-     the form are stopped so the deck's click-to-advance doesn't fire. */
+  /* CTA sample-report form. The Turnstile widget is rendered in a fixed
+     overlay appended to <body> — NOT inside the deck's transform:scale stage,
+     where Turnstile silently fails to render. Flow: submit -> overlay with the
+     check -> on token, POST to the Turnstile-verified, rate-limited API. */
   (function(){
     var form=document.getElementById('sr-form'); if(!form) return;
     var emailEl=document.getElementById('sr-email');
     var btn=document.getElementById('sr-btn');
     var msg=document.getElementById('sr-msg');
-    var tsEl=document.getElementById('sr-ts');
-    var token='', widgetId=null;
-    ['sr-form','sr-ts','sr-msg'].forEach(function(id){
+    var widgetId=null, overlay=null, tsHost=null, pendingEmail='';
+
+    ['sr-form','sr-msg'].forEach(function(id){
       var el=document.getElementById(id);
       if(el) el.addEventListener('click', function(e){ e.stopPropagation(); });
     });
@@ -534,28 +534,52 @@
       s.src='https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
       s.async=true; s.defer=true; s.onload=cb; document.head.appendChild(s);
     }
-    function renderTs(){
-      if(widgetId!==null||!window.turnstile) return;
-      fetch('/api/turnstile-config').then(function(r){return r.json();}).then(function(d){
-        if(!d.siteKey) return;
-        widgetId=window.turnstile.render(tsEl,{sitekey:d.siteKey,theme:'dark',
-          callback:function(t){token=t;},'expired-callback':function(){token='';},'error-callback':function(){token='';}});
-      }).catch(function(){});
+    function buildOverlay(){
+      overlay=document.createElement('div');
+      overlay.style.cssText='position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;background:rgba(8,20,38,.74);';
+      var card=document.createElement('div');
+      card.style.cssText='background:#0F2D4F;border:1px solid rgba(255,255,255,.18);border-radius:16px;padding:26px 28px;width:340px;max-width:90vw;text-align:center;font-family:Figtree,system-ui,sans-serif;color:#F4F7FB;';
+      card.innerHTML='<div style="font-size:17px;font-weight:600;margin-bottom:6px;">Quick check</div><div style="font-size:14px;color:#C3D0E0;margin-bottom:16px;">Verify you’re human to send your sample report.</div>';
+      tsHost=document.createElement('div'); tsHost.style.cssText='display:flex;justify-content:center;min-height:72px;';
+      card.appendChild(tsHost);
+      var cancel=document.createElement('button');
+      cancel.textContent='Cancel';
+      cancel.style.cssText='margin-top:14px;background:none;border:0;color:#8FA2BA;font-size:13px;cursor:pointer;';
+      cancel.onclick=function(){ overlay.style.display='none'; };
+      card.appendChild(cancel);
+      overlay.appendChild(card);
+      overlay.addEventListener('click', function(e){ if(e.target===overlay) overlay.style.display='none'; });
+      document.body.appendChild(overlay);
     }
-    emailEl.addEventListener('focus', function(){ loadTs(renderTs); }, {once:true});
-    form.addEventListener('submit', function(e){
-      e.preventDefault();
-      if(!token){ msg.style.color='#FCA5A5'; msg.textContent='Please complete the verification check.'; loadTs(renderTs); return; }
+    function onToken(token){
+      overlay.style.display='none';
       btn.disabled=true; msg.style.color='#C3D0E0'; msg.textContent='Sending…';
       fetch('/api/clone-watch/sample-report',{method:'POST',headers:{'content-type':'application/json'},
-        body:JSON.stringify({email:emailEl.value,turnstileToken:token})})
+        body:JSON.stringify({email:pendingEmail,turnstileToken:token})})
         .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
         .then(function(res){
           btn.disabled=false;
           if(res.ok){ msg.style.color='#27C083'; msg.textContent='Sent — check your inbox for the sample report.'; form.reset(); }
-          else{ msg.style.color='#FCA5A5'; msg.textContent=(res.d&&res.d.message)||'Couldn\'t send. Please try again.';
-                if(window.turnstile&&widgetId!==null){window.turnstile.reset(widgetId);} token=''; }
+          else{ msg.style.color='#FCA5A5'; msg.textContent=(res.d&&res.d.message)||'Couldn’t send. Please try again.'; }
         }).catch(function(){ btn.disabled=false; msg.style.color='#FCA5A5'; msg.textContent='Network error — please try again.'; });
+    }
+    function verify(){
+      if(!overlay) buildOverlay();
+      overlay.style.display='flex';
+      loadTs(function(){
+        fetch('/api/turnstile-config').then(function(r){return r.json();}).then(function(d){
+          if(!d.siteKey){ overlay.style.display='none'; msg.style.color='#FCA5A5'; msg.textContent='Verification unavailable right now.'; return; }
+          if(widgetId!==null){ window.turnstile.reset(widgetId); }
+          else { widgetId=window.turnstile.render(tsHost,{sitekey:d.siteKey,theme:'dark',callback:onToken}); }
+        }).catch(function(){ overlay.style.display='none'; });
+      });
+    }
+    form.addEventListener('submit', function(e){
+      e.preventDefault();
+      pendingEmail=(emailEl.value||'').trim();
+      if(!pendingEmail) return;
+      msg.textContent='';
+      verify();
     });
   })();
 </script>
