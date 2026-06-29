@@ -64,3 +64,57 @@ describe("withAxiomLogging", () => {
     await expect(wrapped(ctx({}))).resolves.toBe("done");
   });
 });
+
+describe("withAxiomLogging — production-only cron guard", () => {
+  const cronCtx = (): HandlerCtx =>
+    ({ event: { name: "inngest/scheduled.timer" }, runId: "run_c" }) as unknown as HandlerCtx;
+
+  beforeEach(() => {
+    delete process.env.FF_AXIOM_ENABLED;
+    delete process.env.VERCEL_ENV;
+    delete process.env.INNGEST_ALLOW_NONPROD_CRONS;
+  });
+  afterEach(() => {
+    delete process.env.VERCEL_ENV;
+    delete process.env.INNGEST_ALLOW_NONPROD_CRONS;
+    vi.restoreAllMocks();
+  });
+
+  it("skips a cron tick on a non-production deployment", async () => {
+    process.env.VERCEL_ENV = "preview";
+    const handler = vi.fn(async () => "ran");
+    const wrapped = withAxiomLogging({ fnId: "cron-fn" }, handler);
+    const result = await wrapped(cronCtx());
+    expect(handler).not.toHaveBeenCalled();
+    expect(result).toEqual({ skipped: true, reason: "non_production_cron" });
+  });
+
+  it("runs a cron tick on the production deployment", async () => {
+    process.env.VERCEL_ENV = "production";
+    const handler = vi.fn(async () => "ran");
+    const wrapped = withAxiomLogging({ fnId: "cron-fn" }, handler);
+    await expect(wrapped(cronCtx())).resolves.toBe("ran");
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs a non-prod cron tick when INNGEST_ALLOW_NONPROD_CRONS=true", async () => {
+    process.env.VERCEL_ENV = "preview";
+    process.env.INNGEST_ALLOW_NONPROD_CRONS = "true";
+    const handler = vi.fn(async () => "ran");
+    const wrapped = withAxiomLogging({ fnId: "cron-fn" }, handler);
+    await expect(wrapped(cronCtx())).resolves.toBe("ran");
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("never skips event/manual triggers off-prod (only scheduled.timer)", async () => {
+    process.env.VERCEL_ENV = "preview";
+    const handler = vi.fn(async () => "ran");
+    const wrapped = withAxiomLogging({ fnId: "evt-fn" }, handler);
+    const evtCtx = {
+      event: { name: "known-brands/discover.manual-trigger.v1" },
+      runId: "run_e",
+    } as unknown as HandlerCtx;
+    await expect(wrapped(evtCtx)).resolves.toBe("ran");
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+});

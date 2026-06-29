@@ -27,3 +27,20 @@ export function readStringEnv(name: string): string {
 export function readBoolEnv(name: string): boolean {
   return readStringEnv(name) === "true";
 }
+
+/**
+ * True only on the Vercel **production** deployment.
+ *
+ * Vercel sets `VERCEL_ENV` to one of `production` | `preview` | `development`.
+ * Preview/branch deployments (and local dev, where the var is absent) return
+ * false. Bracket access defeats the build-time-inlining failure mode above.
+ *
+ * Use this to gate side-effecting scheduled work: Inngest creates a separate
+ * branch environment per Vercel preview, and those previews share the
+ * production secrets (admin Telegram chat id, Supabase service key), so an
+ * unguarded cron fires into prod resources from every open preview. See the
+ * cron guard in `@askarthur/scam-engine/inngest/with-axiom-logging`.
+ */
+export function isProductionDeployment(): boolean {
+  return readStringEnv("VERCEL_ENV") === "production";
+}

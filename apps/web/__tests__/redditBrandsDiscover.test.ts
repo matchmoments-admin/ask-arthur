@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   aggregateBrandMentions,
   buildWatchedKeySet,
+  CANDIDATE_DENYLIST,
 } from "@/app/api/inngest/functions/reddit-brands-discover";
+import { brandNormalize } from "@askarthur/shopfront-glue";
 
 describe("aggregateBrandMentions", () => {
   it("counts one mention per distinct normalized brand per post", () => {
@@ -46,5 +48,30 @@ describe("buildWatchedKeySet", () => {
     expect(set.has("cba")).toBe(true);
     expect(set.has("australiapost")).toBe(true);
     expect(set.has("anz")).toBe(false);
+  });
+});
+
+describe("CANDIDATE_DENYLIST", () => {
+  it("matches the noise brands seen in the digest (platforms + US-only)", () => {
+    for (const noise of [
+      "Reddit",
+      "Discord",
+      "LinkedIn",
+      "Facebook Marketplace",
+      "Meta",
+      "TikTok",
+      "Cash App",
+      "Venmo",
+      "Wells Fargo",
+      "Bank of America",
+    ]) {
+      expect(CANDIDATE_DENYLIST.has(brandNormalize(noise))).toBe(true);
+    }
+  });
+
+  it("does not denylist legitimate AU brands", () => {
+    for (const keep of ["Australia Post", "CommBank", "Telstra", "NAB"]) {
+      expect(CANDIDATE_DENYLIST.has(brandNormalize(keep))).toBe(false);
+    }
   });
 });
