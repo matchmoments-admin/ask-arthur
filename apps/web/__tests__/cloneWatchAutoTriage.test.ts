@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   primarySignalType,
   passesStrictSignal,
+  isAutoParkEligible,
   toSummaryItem,
   type AlertRow,
 } from "@/app/api/inngest/functions/clone-watch-auto-triage";
@@ -90,5 +91,24 @@ describe("passesStrictSignal", () => {
         { signal_type: "confusable" },
       ]),
     ).toBe(false);
+  });
+});
+
+describe("isAutoParkEligible", () => {
+  it("parks not-a-clone rows with a weak (non-confusable/levenshtein) signal", () => {
+    expect(isAutoParkEligible(true, [{ signal_type: "substring" }])).toBe(true);
+    expect(isAutoParkEligible(true, [{ signal_type: "au_token" }])).toBe(true);
+    expect(isAutoParkEligible(true, [])).toBe(true);
+  });
+
+  it("KEEPS not-a-clone rows that carry a strong brand-similarity signal", () => {
+    // The conservative cut — a human still eyeballs these despite is_clone=false.
+    expect(isAutoParkEligible(true, [{ signal_type: "confusable" }])).toBe(false);
+    expect(isAutoParkEligible(true, [{ signal_type: "levenshtein" }])).toBe(false);
+  });
+
+  it("never parks a row Haiku considers a clone, regardless of signal", () => {
+    expect(isAutoParkEligible(false, [{ signal_type: "substring" }])).toBe(false);
+    expect(isAutoParkEligible(false, [{ signal_type: "confusable" }])).toBe(false);
   });
 });

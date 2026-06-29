@@ -220,7 +220,8 @@ function TakedownStatsRow({ stats }: { stats: TakedownStats }) {
     return (
       <div className="mb-6 rounded-lg bg-slate-50 border border-slate-200 px-4 py-3 text-xs text-slate-500">
         Netcraft takedown data populates once the first TP-confirmed row clears
-        Netcraft processing. Polling cron runs every 30 min — see
+        Netcraft processing. Polling is event-triggered (no cron) while Netcraft
+        submission is dark — see
         <code className="ml-1 px-1.5 py-0.5 bg-white border border-slate-200 rounded">
           shopfront-clone-poll-netcraft
         </code>
