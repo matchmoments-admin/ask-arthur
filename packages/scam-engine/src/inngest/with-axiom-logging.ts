@@ -32,8 +32,13 @@
 
 import type { GetFunctionInput } from "inngest";
 import { getLogger } from "@askarthur/utils/axiom-logger";
+import { isProductionDeployment, readBoolEnv } from "@askarthur/utils/env";
 
 import { inngest } from "./client";
+
+// Inngest's internal event name for a cron-scheduled invocation (vs. an
+// event/manual trigger). Mirrors `internalEvents.ScheduledTimer` in the SDK.
+const CRON_TICK_EVENT = "inngest/scheduled.timer";
 
 // The full Inngest handler context for OUR client (step, event, runId,
 // attempt, logger, …). Using Inngest's own type keeps the wrapped handlers
@@ -53,6 +58,27 @@ export function withAxiomLogging<TResult>(
   handler: (ctx: InngestCtx) => Promise<TResult>,
 ): (ctx: InngestCtx) => Promise<TResult> {
   return async (ctx: InngestCtx): Promise<TResult> => {
+    // Production-only cron guard. Inngest provisions a separate branch
+    // environment per Vercel preview deployment, and every preview shares the
+    // production secrets (admin Telegram chat id, Supabase service key). An
+    // unguarded cron therefore fires from EVERY open preview into the prod
+    // admin chat and against the prod DB — the cause of the duplicate
+    // "Known-brands discovery" / "Reddit brands discover" Telegram bursts
+    // (prod fired each cron exactly once; the extra copies were branch envs).
+    // We skip only scheduled.timer ticks, so event/manual triggers still run
+    // in preview for testing. INNGEST_ALLOW_NONPROD_CRONS=true forces a cron
+    // to run off-prod when you genuinely need to exercise a cron-only fn.
+    if (
+      ctx.event?.name === CRON_TICK_EVENT &&
+      !isProductionDeployment() &&
+      !readBoolEnv("INNGEST_ALLOW_NONPROD_CRONS")
+    ) {
+      return {
+        skipped: true,
+        reason: "non_production_cron",
+      } as unknown as TResult;
+    }
+
     const rawRequestId = (ctx.event?.data as Record<string, unknown> | undefined)
       ?.requestId;
     const requestId =

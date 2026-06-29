@@ -87,20 +87,27 @@ export const knownBrandsDiscover = inngest.createFunction(
     { event: "known-brands/discover.manual-trigger.v1" },
   ],
   withAxiomLogging({ fnId: "known-brands-discover" }, async ({ step }) => {
-    const existingDomains = await step.run("load-existing", async () => {
+    const existingKeys = await step.run("load-existing", async () => {
       const sb = createServiceClient();
       if (!sb) return [] as string[];
-      const { data } = await sb.from("known_brands").select("brand_domain");
+      const { data } = await sb.from("known_brands").select("brand_name");
       return (data ?? [])
-        .map((r) => (r.brand_domain as string | null)?.trim().toLowerCase())
-        .filter((d): d is string => Boolean(d));
+        .map((r) => deriveBrandKey((r.brand_name as string | null) ?? ""))
+        .filter((k): k is string => Boolean(k));
     });
-    const covered = new Set(existingDomains);
+    const covered = new Set(existingKeys);
 
-    // Watched brands whose primary domain has no known_brands row yet.
+    // Watched brands with no known_brands row yet, keyed on brand_key (which
+    // matches the upsert's ON CONFLICT(brand_name) arbiter — brand_key is
+    // derived from brand_name on both sides). Previously this keyed on
+    // brand_domain while the upsert keyed on brand_name with
+    // ignoreDuplicates: true, so any brand whose name already existed under a
+    // different domain was never written, stayed "uncovered", and got
+    // re-probed + re-counted as discovered on EVERY run — the perpetual
+    // "Probed 1 → discovered 1" digest. A probe domain is still required.
     const candidates = AU_BRAND_WATCHLIST.filter((b) => {
       const d = b.legitimate_domains?.[0]?.toLowerCase();
-      return d && !covered.has(d);
+      return Boolean(d) && !covered.has(deriveBrandKey(b.brand));
     }).slice(0, DISCOVER_RUN_CAP);
 
     if (candidates.length === 0) {
@@ -109,6 +116,7 @@ export const knownBrandsDiscover = inngest.createFunction(
 
     let probed = 0;
     let discovered = 0;
+    const discoveredBrands: string[] = [];
     for (const b of candidates) {
       const outcome = await step.run(`probe-${deriveBrandKey(b.brand)}`, async () => {
         const domain = b.legitimate_domains[0];
@@ -151,17 +159,26 @@ export const knownBrandsDiscover = inngest.createFunction(
         return { hasContact };
       });
       probed++;
-      if (outcome.hasContact) discovered++;
+      if (outcome.hasContact) {
+        discovered++;
+        discoveredBrands.push(b.brand);
+      }
     }
 
-    await step.run("telegram", async () => {
-      await sendAdminTelegramMessage(
-        [
-          `<b>Known-brands discovery</b>`,
-          `Probed <b>${probed}</b> watched brands → discovered <b>${discovered}</b> security.txt contacts.`,
-        ].join("\n"),
-      );
-    });
+    // Notify only when something NEW was found. A "0 discovered" run is the
+    // steady state (most brands publish no security.txt) and was the bulk of
+    // the daily noise — log it, don't page.
+    if (discovered > 0) {
+      await step.run("telegram", async () => {
+        await sendAdminTelegramMessage(
+          [
+            `<b>Known-brands discovery</b>`,
+            `Discovered <b>${discovered}</b> new security.txt contact(s) from ${probed} probed:`,
+            ...discoveredBrands.map((name) => `• ${name}`),
+          ].join("\n"),
+        );
+      });
+    }
 
     logger.info("known-brands-discover: complete", { probed, discovered });
     return { ok: true, probed, discovered };

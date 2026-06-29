@@ -32,6 +32,28 @@ const MENTION_THRESHOLD = 3;
 // Cap how many candidates the Telegram digest lists (the table holds them all).
 const DIGEST_CAP = 25;
 
+// Brands that are never useful clone-watch candidates for an AU-focused
+// watchlist, so they're dropped before BOTH the table upsert and the digest
+// (they were the bulk of the weekly noise):
+//   (a) Platform names the upstream classifier mis-tags as "impersonated" when
+//       a scam merely happened ON that platform (Reddit/Discord/Marketplace…).
+//   (b) US-only / non-AU brands with no AU consumer-impersonation surface.
+// Extend as new noise surfaces. Matched on brandNormalize() (same normaliser
+// the aggregator uses), so casing/spacing variants collapse to one key.
+const CANDIDATE_DENYLIST_RAW: readonly string[] = [
+  // (a) Platforms — scam venue, not an impersonated brand
+  "Reddit", "Discord", "LinkedIn", "Facebook", "Facebook Marketplace", "Meta",
+  "Instagram", "TikTok", "Telegram", "WhatsApp", "Steam", "Shop", "X", "Twitter",
+  "YouTube", "Snapchat",
+  // (b) US-only / non-AU brands
+  "Cash App", "Venmo", "Zelle", "Wells Fargo", "Bank of America", "Chase",
+  "Robinhood", "MrBeast",
+];
+// Exported for testing. Holds brandNormalize() keys, not raw labels.
+export const CANDIDATE_DENYLIST = new Set(
+  CANDIDATE_DENYLIST_RAW.map((b) => brandNormalize(b)).filter(Boolean),
+);
+
 interface CandidateAgg {
   brandNormalized: string;
   rawBrand: string;
@@ -144,11 +166,13 @@ export const redditBrandsDiscover = inngest.createFunction(
       return [...agg.values()].filter((c) => c.mentionCount >= MENTION_THRESHOLD);
     });
 
-    // 3. Drop brands already watched (by canonical key OR alias, and also by
+    // 3. Drop (a) denylisted noise (platform names + non-AU brands), then
+    //    (b) brands already watched (by canonical key OR alias, and also by
     //    the resolved canonical so a known-but-differently-spelled brand
     //    doesn't surface). What remains = unwatched, actively-impersonated.
     const watched = buildWatchedKeySet(AU_BRAND_WATCHLIST);
     const fresh = candidates.filter((c) => {
+      if (CANDIDATE_DENYLIST.has(c.brandNormalized)) return false;
       if (watched.has(c.brandNormalized)) return false;
       const canonical = resolveCanonical(c.rawBrand);
       const canonicalKey = canonical ? brandNormalize(canonical) : null;
@@ -156,8 +180,35 @@ export const redditBrandsDiscover = inngest.createFunction(
       return true;
     });
 
+    // 3b. Which of the fresh candidates have we NOT surfaced before? The
+    //     digest fires only on genuinely new brands — the table already holds
+    //     the standing list, so re-announcing it every week was pure noise.
+    const knownCandidateKeys = await step.run("load-existing-candidates", async () => {
+      const sb = createServiceClient();
+      if (!sb) return [] as string[];
+      const keys: string[] = [];
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await sb
+          .from("reddit_watchlist_candidates")
+          .select("brand_normalized")
+          .range(from, from + 999);
+        if (error) {
+          logger.warn("reddit-brands-discover: existing-candidate load failed", {
+            error: error.message,
+          });
+          break;
+        }
+        for (const r of data ?? []) keys.push(r.brand_normalized as string);
+        if ((data?.length ?? 0) < 1000) break;
+      }
+      return keys;
+    });
+    const knownCandidates = new Set(knownCandidateKeys);
+    const newlySurfaced = fresh.filter((c) => !knownCandidates.has(c.brandNormalized));
+
     // 4. Upsert candidates (status-preserving RPC — never resets a dismissed
-    //    candidate to pending).
+    //    candidate to pending). All fresh rows are upserted (keeps mention
+    //    counts current); only the net-new ones drive the digest below.
     const upserted = await step.run("upsert-candidates", async () => {
       const sb = createServiceClient();
       if (!sb) return 0;
@@ -181,37 +232,46 @@ export const redditBrandsDiscover = inngest.createFunction(
       return n;
     });
 
-    // 5. Telegram digest of the top fresh candidates.
-    await step.run("telegram", async () => {
-      if (fresh.length === 0) {
-        await sendAdminTelegramMessage(
-          "<b>Reddit brands discover</b>\nNo new unwatched brands above threshold this run.",
+    // 5. Telegram digest — ONLY when there are net-new candidates. Silent
+    //    otherwise (logged below), so a stable list no longer re-pings weekly.
+    if (newlySurfaced.length > 0) {
+      await step.run("telegram", async () => {
+        const top = [...newlySurfaced]
+          .sort((a, b) => b.mentionCount - a.mentionCount)
+          .slice(0, DIGEST_CAP);
+        const lines = top.map(
+          (c) =>
+            `• <b>${c.rawBrand}</b> — ${c.mentionCount} mentions${
+              resolveCanonical(c.rawBrand) ? " (known alias)" : ""
+            }`,
         );
-        return;
-      }
-      const top = [...fresh]
-        .sort((a, b) => b.mentionCount - a.mentionCount)
-        .slice(0, DIGEST_CAP);
-      const lines = top.map(
-        (c) =>
-          `• <b>${c.rawBrand}</b> — ${c.mentionCount} mentions${
-            resolveCanonical(c.rawBrand) ? " (known alias)" : " (unknown)"
-          }`,
-      );
-      await sendAdminTelegramMessage(
-        [
-          `<b>Reddit brands discover</b>`,
-          `${fresh.length} unwatched brand(s) impersonated on Reddit (last ${WINDOW_DAYS}d, ≥${MENTION_THRESHOLD} mentions). Review in reddit_watchlist_candidates:`,
-          ...lines,
-        ].join("\n"),
-      );
-    });
+        const more =
+          newlySurfaced.length > DIGEST_CAP
+            ? [`…and ${newlySurfaced.length - DIGEST_CAP} more.`]
+            : [];
+        await sendAdminTelegramMessage(
+          [
+            `<b>Reddit brands discover</b>`,
+            `<b>${newlySurfaced.length}</b> new brand(s) impersonated on Reddit (last ${WINDOW_DAYS}d, ≥${MENTION_THRESHOLD} mentions) — not yet on the clone-watch list. Add any worth monitoring to packages/shopfront-glue/src/au-brand-watchlist.ts:`,
+            ...lines,
+            ...more,
+          ].join("\n"),
+        );
+      });
+    }
 
     logger.info("reddit-brands-discover: complete", {
       candidates: candidates.length,
       fresh: fresh.length,
+      newlySurfaced: newlySurfaced.length,
       upserted,
     });
-    return { ok: true, candidates: candidates.length, fresh: fresh.length, upserted };
+    return {
+      ok: true,
+      candidates: candidates.length,
+      fresh: fresh.length,
+      newlySurfaced: newlySurfaced.length,
+      upserted,
+    };
   }),
 );
