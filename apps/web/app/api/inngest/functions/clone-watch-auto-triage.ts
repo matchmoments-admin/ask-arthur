@@ -48,13 +48,27 @@ import { feedCloneEntity } from "@/lib/clone-watch/feed-entity";
  * (we have no Netcraft key anyway). It is fully inert until
  * FF_CLONE_WATCH_AUTO_TRIAGE is ON.
  *
- * Expected runtime « 5 min: capped at AUTO_TRIAGE_RUN_CAP alerts/run.
+ * AUTO-PARK (the mirror of auto-confirm): the daily NRD sweep leaves a long
+ * tail of `pending` rows the Haiku pre-classifier already labelled
+ * is_clone=FALSE. The ones whose only signal is the noisy weak class (NOT
+ * confusable/levenshtein) are lexical-matcher false positives that otherwise
+ * sit in the human queue forever. We park those to `needs_investigation`
+ * (reversible, no fan-out — same bucket as the UI "Park" button), which clears
+ * them from "awaiting triage". We intentionally KEEP is_clone=false rows that
+ * DO carry a strong brand-similarity signal for human eyes (the conservative
+ * cut: ~1% of historical confirmed clones were is_clone=false, all but a
+ * handful via the weak signal class). Auto-park runs even when nothing is
+ * auto-confirmable, so it must precede the confirm-path early-return.
+ *
+ * Expected runtime « 5 min: capped at AUTO_TRIAGE_RUN_CAP confirms +
+ * AUTO_PARK_RUN_CAP parks/run.
  */
 
 const STRICT_CONFIDENCE = 0.9;
 const ELIGIBLE_SIGNALS = new Set(["confusable", "levenshtein"]);
 const FETCH_CANDIDATE_LIMIT = 50; // pre-filter pool
 const AUTO_TRIAGE_RUN_CAP = 15; // hard cap on auto-confirm+send per run
+const AUTO_PARK_RUN_CAP = 200; // hard cap on auto-park per run (clears the backlog tail)
 const LIVENESS_TIMEOUT_MS = 8000;
 const RECENT_WINDOW_DAYS = 14;
 
@@ -89,6 +103,18 @@ export function primarySignalType(signals: unknown): string | null {
 export function passesStrictSignal(signals: unknown): boolean {
   const t = primarySignalType(signals);
   return t !== null && ELIGIBLE_SIGNALS.has(t);
+}
+
+/**
+ * Auto-park eligibility (the conservative cut): a row is parked when the Haiku
+ * pre-classifier said it's NOT a clone AND its signal is weak (the high-FP
+ * class the strict bar excludes). is_clone=false rows that DO carry a strong
+ * brand-similarity signal (confusable/levenshtein) are deliberately KEPT for a
+ * human, since that's where Haiku's rare (~1%) false-negatives concentrate.
+ * Pure — unit-tested.
+ */
+export function isAutoParkEligible(isNotClone: boolean, signals: unknown): boolean {
+  return isNotClone && !passesStrictSignal(signals);
 }
 
 /**
@@ -150,6 +176,62 @@ export const cloneWatchAutoTriage = inngest.createFunction(
       readStringEnv("BRAND_STEWARDSHIP_SHADOW_RECIPIENT") ||
       null;
 
+    // 0. Auto-park the weak not-a-clone tail. Runs BEFORE the confirm-path
+    //    early-return so it clears the queue even when nothing is
+    //    auto-confirmable (the common case today). One bulk UPDATE, no fan-out.
+    const parked = await step.run("auto-park-weak-non-clones", async () => {
+      const sb = createServiceClient();
+      if (!sb) return 0;
+      const { data: pending, error } = await sb
+        .from("shopfront_clone_alerts")
+        .select("id, signals")
+        .eq("triage_status", "pending")
+        .eq("source", "nrd")
+        .limit(AUTO_PARK_RUN_CAP);
+      if (error) {
+        logger.error("clone-watch auto-triage: auto-park select failed", {
+          error: error.message,
+        });
+        return 0;
+      }
+      if (!pending || pending.length === 0) return 0;
+
+      // Haiku is_clone=false set for these alerts.
+      const { data: cls } = await sb
+        .from("clone_watch_classifications")
+        .select("alert_id, is_clone")
+        .in(
+          "alert_id",
+          pending.map((a) => a.id),
+        )
+        .eq("is_clone", false);
+      const notClone = new Set((cls ?? []).map((c) => c.alert_id as number));
+
+      // Park is_clone=false AND weak signal (NOT confusable/levenshtein). Keep
+      // strong-signal not-clone rows for human review (conservative cut).
+      const parkIds = pending
+        .filter((a) => isAutoParkEligible(notClone.has(a.id), a.signals))
+        .map((a) => a.id);
+      if (parkIds.length === 0) return 0;
+
+      const { error: upErr } = await sb
+        .from("shopfront_clone_alerts")
+        .update({
+          triage_status: "needs_investigation",
+          triage_at: new Date().toISOString(),
+          triage_notes:
+            "auto-park: Haiku is_clone=false + weak (non-confusable/levenshtein) signal — lexical-matcher FP, parked from the human queue (reversible)",
+        })
+        .in("id", parkIds);
+      if (upErr) {
+        logger.error("clone-watch auto-triage: auto-park update failed", {
+          error: upErr.message,
+        });
+        return 0;
+      }
+      return parkIds.length;
+    });
+
     // 1. Pre-filter pool: pending, urlscan-flagged, recent NRD alerts.
     const eligible = await step.run("select-eligible", async () => {
       const sb = createServiceClient();
@@ -163,7 +245,7 @@ export const cloneWatchAutoTriage = inngest.createFunction(
         .select(
           "id, inferred_target_domain, candidate_domain, candidate_url, signals, urlscan_evidence, first_seen_at",
         )
-        .is("triage_status", null)
+        .eq("triage_status", "pending")
         .eq("source", "nrd")
         .eq("urlscan_classification", "likely_phishing")
         .gte("first_seen_at", since)
@@ -203,7 +285,7 @@ export const cloneWatchAutoTriage = inngest.createFunction(
     });
 
     if (eligible.length === 0) {
-      return { ok: true, eligible: 0, confirmed: 0, emailed: 0 };
+      return { ok: true, parked, eligible: 0, confirmed: 0, emailed: 0 };
     }
 
     // Stable run date (YYYY-MM-DD) — computed in a step so it's memoised across
@@ -343,6 +425,7 @@ export const cloneWatchAutoTriage = inngest.createFunction(
     }
 
     logger.info("clone-watch auto-triage: complete", {
+      parked,
       eligible: eligible.length,
       confirmed,
       offline,
@@ -351,6 +434,7 @@ export const cloneWatchAutoTriage = inngest.createFunction(
     });
     return {
       ok: true,
+      parked,
       eligible: eligible.length,
       confirmed,
       offline,
