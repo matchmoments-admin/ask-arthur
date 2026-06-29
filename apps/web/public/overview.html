@@ -23,25 +23,23 @@
   }
 </style>
 <style>
-  /* Responsive deck shell. Each section is authored on a fixed 1920x1080 stage;
-     we scale the stage to the viewport WIDTH (--s) so every slide always fills
-     the width (no letterbox margins / clipped cards) and stack them vertically
-     with scroll-snap. Big on any viewport, recomputes on resize. No runtime. */
-  html,body{margin:0;padding:0;background:#0C2340;}
-  html{scroll-snap-type:y proximity;}
+  html,body{margin:0;padding:0;height:100%;background:#0C2340;}
   :root{--s:1;}
-  .slide{position:relative;width:100vw;height:calc(1080px * var(--s));overflow:hidden;scroll-snap-align:start;background:#0C2340;}
-  .stage{width:1920px;height:1080px;transform-origin:top left;transform:scale(var(--s));}
+  #deck{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;overflow:auto;}
+  .slide{display:none;width:100vw;height:calc(1080px * var(--s));flex:0 0 auto;}
+  .slide.active{display:block;}
+  .stage{width:1920px;height:1080px;transform:scale(var(--s));transform-origin:top left;}
   .stage > section{height:100%;width:100%;}
   #nav{position:fixed;right:16px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:9px;z-index:50;background:rgba(12,35,64,.5);backdrop-filter:blur(8px);padding:12px 9px;border-radius:22px;}
   .dot{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.32);cursor:pointer;transition:all .25s;border:0;padding:0;}
   .dot.active{background:#27C083;transform:scale(1.4);}
   #hint{position:fixed;top:14px;right:14px;z-index:50;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.1em;color:rgba(255,255,255,.5);background:rgba(12,35,64,.5);padding:6px 12px;border-radius:8px;}
   @media (max-width:700px){ #hint{display:none;} #nav{right:8px;padding:9px 7px;} }
-  @media print{ html{scroll-snap-type:none;} #nav,#hint{display:none;} .slide{page-break-after:always;} }
+  @media print{ .slide{display:block !important;page-break-after:always;height:auto;} .stage{transform:none;} #deck{position:static;display:block;overflow:visible;} #nav,#hint{display:none;} }
 </style>
 </head>
 <body>
+<div id="deck">
 <!-- 01 COVER -->
 <div class="slide"><div class="stage"><section data-label="Cover" data-speaker-notes="Ask Arthur: Australia's scam detection and intelligence platform. Free for everyone, and the upstream intelligence that helps banks, telcos and platforms stop scams at the source." style="height:100%;width:100%;box-sizing:border-box;background:radial-gradient(680px 680px at 102% -12%,rgba(22,160,106,.18),transparent 58%),#0C2340;color:#F4F7FB;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:84px 104px 64px;position:relative;overflow:hidden;">
   <div data-rise style="display:flex;align-items:center;justify-content:space-between;">
@@ -281,7 +279,7 @@
 </section></div></div>
 
 <!-- 08 B2B API -->
-<div class="slide"><div class="stage"><section data-label="B2B API" data-speaker-notes="API-key authenticated, rate-limited, OpenAPI-documented. Threats, entities and clusters endpoints are live today; deepfakes live; semantic search rolling out. Built for compliance teams: every entity enriched, hashed keys with per-key rate limits, self-service keys and dashboards, onward reporting to regulators and government-ready exports." style="height:100%;width:100%;box-sizing:border-box;background:#FFFFFF;color:#0C2340;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:80px 104px 52px;position:relative;overflow:hidden;">
+<div class="slide"><div class="stage"><section data-label="B2B API" data-speaker-notes="API-key authenticated, rate-limited, OpenAPI-documented. Threats, entities and clusters endpoints are live today; semantic search rolling out. Built for compliance teams: every entity enriched, hashed keys with per-key rate limits, self-service keys and dashboards, onward reporting to regulators and government-ready exports." style="height:100%;width:100%;box-sizing:border-box;background:#FFFFFF;color:#0C2340;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:80px 104px 52px;position:relative;overflow:hidden;">
   <div data-rise style="display:flex;align-items:baseline;gap:18px;">
     <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600;letter-spacing:.16em;color:#16A06A;">07</span>
     <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:500;letter-spacing:.22em;text-transform:uppercase;color:#7A8AA0;">B2B Threat Intelligence API</span>
@@ -294,7 +292,7 @@
       <div style="display:grid;grid-template-columns:1fr 1.5fr auto;align-items:center;padding:20px 22px;border-top:1px solid #E6EAF1;"><span style="font-size:21px;font-weight:700;">Threats</span><span style="font-size:18px;color:#5C6B7E;">URL/wallet lookup, trending, domains, stats</span><span style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#16A06A;">● LIVE</span></div>
       <div style="display:grid;grid-template-columns:1fr 1.5fr auto;align-items:center;padding:20px 22px;border-top:1px solid #E6EAF1;"><span style="font-size:21px;font-weight:700;">Entities</span><span style="font-size:18px;color:#5C6B7E;">Lookup, batch, full entity record</span><span style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#16A06A;">● LIVE</span></div>
       <div style="display:grid;grid-template-columns:1fr 1.5fr auto;align-items:center;padding:20px 22px;border-top:1px solid #E6EAF1;"><span style="font-size:21px;font-weight:700;">Clusters</span><span style="font-size:18px;color:#5C6B7E;">Linked-campaign groupings</span><span style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#16A06A;">● LIVE</span></div>
-      <div style="display:grid;grid-template-columns:1fr 1.5fr auto;align-items:center;padding:20px 22px;border-top:1px solid #E6EAF1;"><span style="font-size:21px;font-weight:700;">Deepfakes</span><span style="font-size:18px;color:#5C6B7E;">Reported deepfake index + trending</span><span style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#16A06A;">● LIVE</span></div>
+      
       <div style="display:grid;grid-template-columns:1fr 1.5fr auto;align-items:center;padding:20px 22px;border-top:1px solid #E6EAF1;"><span style="font-size:21px;font-weight:700;">Semantic search</span><span style="font-size:18px;color:#5C6B7E;">Natural-language search over scams &amp; intel</span><span style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#B8791A;">● ROLLING OUT</span></div>
     </div>
     <div data-rise3 style="border:1px solid #0C2340;background:#0C2340;color:#F4F7FB;border-radius:22px;padding:34px 36px;display:flex;flex-direction:column;">
@@ -311,7 +309,7 @@
 </section></div></div>
 
 <!-- 09 SPECIALISED TOOLS -->
-<div class="slide"><div class="stage"><section data-label="Specialised tools" data-speaker-notes="Focused capabilities on the same engine: Persona Check, Site Audit, Extension Audit and MCP/Skill Audit are live; Charity Check and Phone Footprint rolling out; Breach Defence and audio/video deepfake on the roadmap. The Extension and MCP/Skill audits are an AI-native differentiator — auditing the very tools that increasingly carry threats." style="height:100%;width:100%;box-sizing:border-box;background:#FFFFFF;color:#0C2340;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:80px 104px 52px;position:relative;overflow:hidden;">
+<div class="slide"><div class="stage"><section data-label="Specialised tools" data-speaker-notes="Focused capabilities on the same engine: Persona Check, Site Audit, Extension Audit and MCP/Skill Audit are live; Charity Check and Phone Footprint rolling out; Breach Defence and audio/video analysis on the roadmap. The Extension and MCP/Skill audits are an AI-native differentiator — auditing the very tools that increasingly carry threats." style="height:100%;width:100%;box-sizing:border-box;background:#FFFFFF;color:#0C2340;font-family:Figtree,system-ui,sans-serif;display:flex;flex-direction:column;padding:80px 104px 52px;position:relative;overflow:hidden;">
   <div data-rise style="display:flex;align-items:baseline;gap:18px;">
     <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600;letter-spacing:.16em;color:#16A06A;">08</span>
     <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:500;letter-spacing:.22em;text-transform:uppercase;color:#7A8AA0;">Specialised tools</span>
@@ -326,7 +324,7 @@
     <div data-rise3 style="border:1px solid #E6EAF1;border-radius:18px;padding:26px;background:#FBFCFE;display:flex;flex-direction:column;justify-content:space-between;"><div><div style="font-size:23px;font-weight:700;">Charity Check</div><div style="font-size:18px;color:#5C6B7E;margin-top:8px;line-height:1.4;">ACNC charity-legitimacy lookup (63k+)</div></div><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#B8791A;margin-top:16px;">● Built · rolling out</span></div>
     <div data-rise3 style="border:1px solid #E6EAF1;border-radius:18px;padding:26px;background:#FBFCFE;display:flex;flex-direction:column;justify-content:space-between;"><div><div style="font-size:23px;font-weight:700;">Phone Footprint</div><div style="font-size:18px;color:#5C6B7E;margin-top:8px;line-height:1.4;">Phone-number exposure &amp; monitoring</div></div><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#B8791A;margin-top:16px;">● Built · rolling out</span></div>
     <div data-rise3 style="border:1px solid #E6EAF1;border-radius:18px;padding:26px;background:#FBFCFE;display:flex;flex-direction:column;justify-content:space-between;"><div><div style="font-size:23px;font-weight:700;">Breach Defence</div><div style="font-size:18px;color:#5C6B7E;margin-top:8px;line-height:1.4;">Breach index, typosquat &amp; recovery playbooks</div></div><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#8794A6;margin-top:16px;">○ Roadmap</span></div>
-    <div data-rise3 style="border:1px solid #E6EAF1;border-radius:18px;padding:26px;background:#FBFCFE;display:flex;flex-direction:column;justify-content:space-between;"><div><div style="font-size:23px;font-weight:700;">Audio / video &amp; deepfake</div><div style="font-size:18px;color:#5C6B7E;margin-top:8px;line-height:1.4;">Media-based scam &amp; deepfake detection</div></div><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#8794A6;margin-top:16px;">○ Roadmap</span></div>
+    <div data-rise3 style="border:1px solid #E6EAF1;border-radius:18px;padding:26px;background:#FBFCFE;display:flex;flex-direction:column;justify-content:space-between;"><div><div style="font-size:23px;font-weight:700;">Audio / video analysis</div><div style="font-size:18px;color:#5C6B7E;margin-top:8px;line-height:1.4;">Media-based scam detection (audio &amp; video)</div></div><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#8794A6;margin-top:16px;">○ Roadmap</span></div>
   </div>
   <div data-rise3 style="margin-top:24px;font-size:18px;color:#5C6B7E;line-height:1.5;">The Extension and MCP/Skill audits are an <span style="color:#0C2340;font-weight:600;">AI-native differentiator</span> — Ask Arthur audits the very tools (browser extensions, AI agents) that increasingly carry threats.</div>
 </section></div></div>
@@ -458,9 +456,11 @@
     <span style="font-family:'IBM Plex Mono',monospace;font-size:15px;letter-spacing:.16em;color:#8FA2BA;text-transform:uppercase;">Australia's scam detection &amp; intelligence platform</span>
   </div>
 </section></div></div>
+</div>
 <div id="nav"></div>
-<div id="hint">scroll · ← → · or tap a dot</div>
+<div id="hint">← → or click to navigate</div>
 <script>
+  var deck=document.getElementById('deck');
   var slides=[].slice.call(document.querySelectorAll('.slide'));
   var nav=document.getElementById('nav');
   var cur=0;
@@ -470,26 +470,29 @@
     var b=document.createElement('button');
     b.className='dot'+(i===0?' active':'');
     b.setAttribute('aria-label','Slide '+(i+1));
-    b.onclick=function(){slides[i].scrollIntoView({behavior:'smooth',block:'start'});};
+    b.onclick=function(ev){ev.stopPropagation();go(i);};
     nav.appendChild(b);
   });
-  function setActive(i){ if(i===cur)return; nav.children[cur].classList.remove('active'); cur=i; nav.children[cur].classList.add('active'); }
-  // Reveal animations + active-dot tracking as each slide scrolls into view.
-  var io=new IntersectionObserver(function(es){
-    es.forEach(function(e){
-      if(e.isIntersecting){
-        e.target.setAttribute('data-deck-active','');
-        if(e.intersectionRatio>=0.5) setActive(slides.indexOf(e.target));
-      }
-    });
-  },{threshold:[0.01,0.5,0.9]});
-  slides.forEach(function(s){io.observe(s);});
+  function go(n){
+    slides[cur].classList.remove('active');slides[cur].removeAttribute('data-deck-active');
+    nav.children[cur].classList.remove('active');
+    cur=Math.max(0,Math.min(n,slides.length-1));
+    var el=slides[cur];el.classList.add('active');
+    void el.offsetWidth;
+    el.setAttribute('data-deck-active','');
+    nav.children[cur].classList.add('active');
+    deck.scrollTop=0;
+  }
   document.addEventListener('keydown',function(e){
-    if(e.key==='ArrowRight'||e.key==='ArrowDown'||e.key===' '){e.preventDefault();if(cur<slides.length-1)slides[cur+1].scrollIntoView({behavior:'smooth',block:'start'});}
-    else if(e.key==='ArrowLeft'||e.key==='ArrowUp'){e.preventDefault();if(cur>0)slides[cur-1].scrollIntoView({behavior:'smooth',block:'start'});}
-    else if(e.key==='Home'){slides[0].scrollIntoView({behavior:'smooth'});}
-    else if(e.key==='End'){slides[slides.length-1].scrollIntoView({behavior:'smooth'});}
+    if(e.key==='ArrowRight'||e.key==='ArrowDown'||e.key===' '){e.preventDefault();go(cur+1);}
+    else if(e.key==='ArrowLeft'||e.key==='ArrowUp'){e.preventDefault();go(cur-1);}
+    else if(e.key==='Home'){go(0);}else if(e.key==='End'){go(slides.length-1);}
   });
+  deck.addEventListener('click',function(e){
+    if(e.target.closest('#nav'))return;
+    if(e.clientX < window.innerWidth/3) go(cur-1); else go(cur+1);
+  });
+  go(0);
 </script>
 </body>
 </html>
