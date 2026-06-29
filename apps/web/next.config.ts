@@ -164,6 +164,14 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  async rewrites() {
+    return [
+      // Clean URL for the static platform-overview deck
+      // (apps/web/public/overview.html). The file carries its own
+      // `noindex` meta, so it's link-shareable but not search-indexed.
+      { source: "/overview", destination: "/overview.html" },
+    ];
+  },
 };
 
 // `withAxiom` wraps the config so future Web Vitals / client-side log
