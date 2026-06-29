@@ -13,6 +13,7 @@ import type { Metadata } from "next";
 import { AlertTriangle, ShieldQuestion } from "lucide-react";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
+import SampleReportForm from "@/components/SampleReportForm";
 
 export const revalidate = 3600; // 1 hour ISR
 
@@ -274,6 +275,8 @@ export default async function CloneWatchPage() {
           </div>
         </div>
       </div>
+
+      <SampleReportForm />
 
       {alerts.length === 0 ? (
         <div className="text-center py-16">

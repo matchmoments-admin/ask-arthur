@@ -453,6 +453,15 @@
         <div style="display:flex;gap:13px;"><span style="color:#27C083;font-weight:700;">→</span><a class="cta-link" href="https://askarthur.au/contact" target="_blank" rel="noopener">Request a B2B Threat Intelligence API pilot</a></div>
         <div style="display:flex;gap:13px;"><span style="color:#27C083;font-weight:700;">→</span><a class="cta-link" href="https://askarthur.au/clone-watch" target="_blank" rel="noopener">Add your brand's domains to clone-watch</a></div>
       </div>
+      <div style="margin-top:22px;padding-top:20px;border-top:1px solid rgba(255,255,255,.12);">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:#27C083;margin-bottom:10px;">Or get a sample clone-watch report</div>
+        <form id="sr-form" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+          <input id="sr-email" type="email" required placeholder="you@yourbrand.com.au" autocomplete="email" style="flex:1;min-width:200px;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.06);color:#F4F7FB;border-radius:10px;padding:12px 14px;font-size:16px;font-family:Figtree,system-ui,sans-serif;outline:none;">
+          <button id="sr-btn" type="submit" style="border:0;background:#27C083;color:#0C2340;font-weight:700;border-radius:10px;padding:12px 18px;font-size:16px;font-family:Figtree,system-ui,sans-serif;cursor:pointer;">Email me a sample</button>
+        </form>
+        <div id="sr-ts" style="margin-top:10px;"></div>
+        <div id="sr-msg" style="margin-top:8px;font-size:14px;color:#C3D0E0;min-height:18px;"></div>
+      </div>
     </div>
   </div>
   <div data-rise3 style="display:flex;align-items:center;justify-content:space-between;border-top:1px solid rgba(255,255,255,.16);padding-top:24px;flex-wrap:wrap;gap:20px;">
@@ -503,6 +512,52 @@
     if(e.clientX < window.innerWidth/3) go(cur-1); else go(cur+1);
   });
   go(0);
+</script>
+<script>
+  /* CTA sample-report form: lazy-loads Turnstile on first focus, then POSTs
+     email + token to the Turnstile-verified, rate-limited API. Clicks inside
+     the form are stopped so the deck's click-to-advance doesn't fire. */
+  (function(){
+    var form=document.getElementById('sr-form'); if(!form) return;
+    var emailEl=document.getElementById('sr-email');
+    var btn=document.getElementById('sr-btn');
+    var msg=document.getElementById('sr-msg');
+    var tsEl=document.getElementById('sr-ts');
+    var token='', widgetId=null;
+    ['sr-form','sr-ts','sr-msg'].forEach(function(id){
+      var el=document.getElementById(id);
+      if(el) el.addEventListener('click', function(e){ e.stopPropagation(); });
+    });
+    function loadTs(cb){
+      if(window.turnstile){cb();return;}
+      var s=document.createElement('script');
+      s.src='https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+      s.async=true; s.defer=true; s.onload=cb; document.head.appendChild(s);
+    }
+    function renderTs(){
+      if(widgetId!==null||!window.turnstile) return;
+      fetch('/api/turnstile-config').then(function(r){return r.json();}).then(function(d){
+        if(!d.siteKey) return;
+        widgetId=window.turnstile.render(tsEl,{sitekey:d.siteKey,theme:'dark',
+          callback:function(t){token=t;},'expired-callback':function(){token='';},'error-callback':function(){token='';}});
+      }).catch(function(){});
+    }
+    emailEl.addEventListener('focus', function(){ loadTs(renderTs); }, {once:true});
+    form.addEventListener('submit', function(e){
+      e.preventDefault();
+      if(!token){ msg.style.color='#FCA5A5'; msg.textContent='Please complete the verification check.'; loadTs(renderTs); return; }
+      btn.disabled=true; msg.style.color='#C3D0E0'; msg.textContent='Sending…';
+      fetch('/api/clone-watch/sample-report',{method:'POST',headers:{'content-type':'application/json'},
+        body:JSON.stringify({email:emailEl.value,turnstileToken:token})})
+        .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
+        .then(function(res){
+          btn.disabled=false;
+          if(res.ok){ msg.style.color='#27C083'; msg.textContent='Sent — check your inbox for the sample report.'; form.reset(); }
+          else{ msg.style.color='#FCA5A5'; msg.textContent=(res.d&&res.d.message)||'Couldn\'t send. Please try again.';
+                if(window.turnstile&&widgetId!==null){window.turnstile.reset(widgetId);} token=''; }
+        }).catch(function(){ btn.disabled=false; msg.style.color='#FCA5A5'; msg.textContent='Network error — please try again.'; });
+    });
+  })();
 </script>
 </body>
 </html>
