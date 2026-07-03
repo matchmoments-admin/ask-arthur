@@ -10,7 +10,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "telegram:dev": "tsx scripts/telegram-dev.ts",
-    "report-card:export": "tsx scripts/clone-watch-report-export.ts"
+    "report-card:export": "tsx scripts/clone-watch-report-export.ts",
+    "linkedin:test": "tsx scripts/linkedin-post-test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",
