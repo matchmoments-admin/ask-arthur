@@ -43,7 +43,10 @@ function mintAdminToken(secret: string): string {
 }
 
 async function main() {
-  const secret = process.env.ADMIN_SECRET;
+  // Trim to match the server: adminAuth verifies with readStringEnv() (which
+  // trims), so a stored secret with trailing whitespace would otherwise mint a
+  // cookie whose HMAC the server rejects.
+  const secret = process.env.ADMIN_SECRET?.trim();
   if (!secret) throw new Error("ADMIN_SECRET is required (same value as the deployed app)");
 
   const base = (arg("base") ?? process.env.REPORT_CARD_BASE_URL ?? "http://localhost:3000").replace(/\/$/, "");

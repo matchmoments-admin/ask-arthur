@@ -48,7 +48,9 @@ export default async function ReportCardPage({
   }
 
   const only = slide ? Math.min(Math.max(parseInt(slide, 10) || 1, 1), SLIDE_COUNT) : null;
-  const slides = [1, 2, 3].filter((n) => only == null || n === only);
+  const slides = Array.from({ length: SLIDE_COUNT }, (_, i) => i + 1).filter(
+    (n) => only == null || n === only,
+  );
 
   return (
     <div className={`${archivo.variable} ${plexMono.variable} rc-root${only ? " rc-solo" : ""}`}>
@@ -81,8 +83,8 @@ function SlideHero({ data }: { data: CloneWatchReportCard }) {
         </p>
         <div className="kstrip">
           <div className="k"><div className="n g">{data.kpis.reportedToNetcraft}</div><div className="l">reported to Netcraft for takedown review</div></div>
-          <div className="k"><div className="n">{data.kpis.confirmed}</div><div className="l">operator-confirmed as clones</div></div>
           <div className="k"><div className="n">{data.kpis.likelyPhishing}</div><div className="l">flagged as likely phishing</div></div>
+          <div className="k"><div className="n">{data.kpis.parkedForSale}</div><div className="l">parked / squatting domains</div></div>
         </div>
         <div className="spacer" />
         <p className="mono note">Lookalike domain = a freshly-registered address made to resemble a real brand. Detected, not all confirmed malicious.</p>
@@ -115,7 +117,7 @@ function SlideBrands({ data }: { data: CloneWatchReportCard }) {
         </div>
         <div className="spacer" />
         {globals && <p className="lead" style={{ fontSize: 24 }}><b className="ink">Global brands too:</b> {globals} — all aimed at Australians.</p>}
-        <div className="foot"><span>Registrars enabling them: {regs}</span><span><b>askarthur.au</b></span></div>
+        <div className="foot"><span>Registrars: {regs}{data.unknownRegistrarCount > 0 ? ` · ${data.unknownRegistrarCount} WHOIS-hidden` : ""}</span><span><b>askarthur.au</b></span></div>
       </div>
     </section>
   );
