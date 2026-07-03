@@ -1,0 +1,201 @@
+import { createServiceClient } from "@askarthur/supabase/server";
+import { logger } from "@askarthur/utils/logger";
+import {
+  aggregateClonesByDomain,
+  priorMonthStart,
+  type CloneAlertRow,
+  type CloneBrandMetrics,
+} from "@/app/api/inngest/functions/report-brand-stewardship";
+import { buildRegistrarRollup } from "@/app/api/inngest/functions/clone-watch-internal-digest";
+import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
+import { rollupRegistrars } from "@/lib/clone-watch/registrar-canonical";
+
+/**
+ * Read-only data layer for the monthly Clone-Watch LinkedIn report card
+ * (/admin/report-card). The single source of truth for the public monthly
+ * numbers.
+ *
+ * Deliberately reuses the SAME fetch window + filters + aggregateClonesByDomain
+ * aggregator as clone-watch-internal-digest.ts, so this public surface is
+ * numerically identical to the internal Telegram digest the operator already
+ * trusts (804 detected / 129 brands / 378 unknown-registrar for June 2026).
+ * On top of the shared aggregate it adds the three things a PUBLIC card needs:
+ *   1. canonicalised, NULL-excluded registrar leaderboard (registrar-canonical.ts)
+ *   2. an AU-vs-global brand split for the ranking + footnote
+ *   3. the reporting KPIs (detected -> reported -> phishing / parked)
+ *
+ * Pure read path - one SELECT, no writes, no Inngest, no cron. Callable on
+ * demand from the admin route; safe to run any number of times.
+ */
+
+/** The digest's window/source/FP filters, verbatim, so counts reconcile. */
+const CLONE_SOURCE = "nrd";
+const FETCH_LIMIT = 5000;
+
+export interface RankedBrand {
+  brand: string;
+  clones: number;
+}
+
+export interface CloneWatchReportCard {
+  /** ISO month start, e.g. "2026-06-01". */
+  periodMonth: string;
+  /** Human label, e.g. "June 2026". */
+  periodLabel: string;
+  total: number;
+  brands: number;
+  kpis: {
+    reportedToNetcraft: number;
+    likelyPhishing: number;
+    parkedForSale: number;
+  };
+  topAuBrands: RankedBrand[];
+  globalBrands: RankedBrand[];
+  topRegistrars: Array<{ registrar: string; clones: number }>;
+  /** Rows whose registrar is redacted/unknown - reported for honesty, excluded
+   *  from the leaderboard (rendered as a "N WHOIS-hidden" footnote). */
+  unknownRegistrarCount: number;
+}
+
+function monthWindow(month?: string): {
+  startIso: string;
+  endIso: string;
+  label: string;
+  periodMonth: string;
+} {
+  let start: Date;
+  if (month) {
+    // Normalise any YYYY-MM or YYYY-MM-DD input to the MONTH START, so a
+    // full-date arg can't produce a partial-month window mislabelled as the
+    // whole month.
+    const ym = month.slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(ym)) {
+      throw new Error(`invalid month "${month}" (expected YYYY-MM)`);
+    }
+    start = new Date(`${ym}-01T00:00:00Z`);
+  } else {
+    start = priorMonthStart(new Date());
+  }
+  if (Number.isNaN(start.getTime())) {
+    throw new Error(`invalid month "${month}" (expected YYYY-MM)`);
+  }
+  const end = new Date(
+    Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1),
+  );
+  return {
+    startIso: start.toISOString(),
+    endIso: end.toISOString(),
+    periodMonth: start.toISOString().slice(0, 10),
+    label: start.toLocaleDateString("en-AU", {
+      month: "long",
+      year: "numeric",
+      timeZone: "UTC",
+    }),
+  };
+}
+
+/** Australian government domain (.gov.au, incl. state variants like .vic.gov.au). */
+function isGovDomain(domain: string): boolean {
+  return domain.toLowerCase().includes(".gov.");
+}
+
+/**
+ * AU brand = an Australian TLD, excluding government (we rank "brands").
+ *
+ * NOTE: this is a TLD heuristic, so an AU company on a .com (e.g. Stake /
+ * hellostake.com) is classified GLOBAL, and a multinational's .com.au shopfront
+ * is classified AU. The clone watchlist has no is-AU flag to key off, so the
+ * operator curates edge cases at approval time. Good enough for the ranking;
+ * the total/brands counts are unaffected.
+ */
+function isAuBrand(domain: string): boolean {
+  const d = domain.toLowerCase();
+  return d.endsWith(".au") && !isGovDomain(d);
+}
+
+function sumClassification(
+  byBrand: Map<string, CloneBrandMetrics>,
+  cls: string,
+): number {
+  let n = 0;
+  for (const m of byBrand.values()) n += m.byClassification[cls] ?? 0;
+  return n;
+}
+
+/**
+ * Build the monthly report-card figures for the given month (default: prior
+ * calendar month). Reconciles exactly to the internal digest.
+ */
+export async function getCloneWatchReportCard(
+  month?: string,
+): Promise<CloneWatchReportCard> {
+  const { startIso, endIso, label, periodMonth } = monthWindow(month);
+  const sb = createServiceClient();
+  if (!sb) throw new Error("service client unavailable");
+
+  const { data, error } = await sb
+    .from("shopfront_clone_alerts")
+    .select(
+      "id, candidate_domain, inferred_target_domain, urlscan_classification, urlscan_evidence, attribution, submitted_to",
+    )
+    .eq("source", CLONE_SOURCE)
+    .gte("first_seen_at", startIso)
+    .lt("first_seen_at", endIso)
+    .not("inferred_target_domain", "is", null)
+    .or("triage_status.is.null,triage_status.neq.fp")
+    .limit(FETCH_LIMIT);
+
+  if (error) throw new Error(`report-card fetch failed: ${error.message}`);
+
+  // Warn on the RAW result length (pre-FP-filter), matching the digest, so an
+  // FP row dropped after fetch can't mask a truncated (capped) DB result.
+  const raw = (data ?? []) as unknown as CloneAlertRow[];
+  if (raw.length === FETCH_LIMIT) {
+    logger.warn("report-card: clone fetch hit LIMIT", {
+      limit: FETCH_LIMIT,
+      period: periodMonth,
+    });
+  }
+  const rows = raw.filter((r) => !isFpBrand(r.inferred_target_domain));
+
+  const byBrand = aggregateClonesByDomain(rows);
+
+  // Reporting KPIs from the shared aggregate (deduped by candidate_domain).
+  let total = 0;
+  let reportedToNetcraft = 0;
+  for (const m of byBrand.values()) {
+    total += m.detected;
+    reportedToNetcraft += m.netcraftReported;
+  }
+
+  // Registrar leaderboard: reuse the digest's rollup (single source of truth),
+  // then canonicalise + drop the Unknown bucket. buildRegistrarRollup already
+  // sums byRegistrar across brands; rollupRegistrars accepts its {registrar,
+  // clones} row shape directly.
+  const { rows: rawRegistrars, unknownCount } = buildRegistrarRollup(byBrand);
+  const topRegistrars = rollupRegistrars(rawRegistrars).slice(0, 6);
+
+  const ranked = [...byBrand.entries()]
+    .map(([brand, m]) => ({ brand, clones: m.detected }))
+    .sort((a, b) => b.clones - a.clones || a.brand.localeCompare(b.brand));
+
+  return {
+    periodMonth,
+    periodLabel: label,
+    total,
+    brands: byBrand.size,
+    kpis: {
+      reportedToNetcraft,
+      likelyPhishing: sumClassification(byBrand, "likely_phishing"),
+      parkedForSale: sumClassification(byBrand, "parked_for_sale"),
+    },
+    // Gov domains are excluded from BOTH public rankings (they're neither
+    // consumer "brands" nor global); they still count toward total/brands.
+    topAuBrands: ranked.filter((r) => isAuBrand(r.brand)).slice(0, 8),
+    globalBrands: ranked
+      .filter((r) => !isAuBrand(r.brand) && !isGovDomain(r.brand))
+      .slice(0, 5),
+    topRegistrars,
+    unknownRegistrarCount: unknownCount,
+  };
+}
