@@ -47,6 +47,7 @@ CREATE OR REPLACE FUNCTION public.review_verdict_severity(v text)
 RETURNS integer
 LANGUAGE sql
 IMMUTABLE
+SET search_path = ''
 AS $$
   SELECT CASE v
     WHEN 'manipulated' THEN 2
