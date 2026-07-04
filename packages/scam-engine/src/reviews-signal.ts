@@ -107,13 +107,23 @@ export function scoreReviewDistribution(
   const dist = corpus.distribution;
   const distN = dist ? distributionTotal(dist) : 0;
 
+  // The absolute low-tail rules below assert facts about the WHOLE corpus
+  // ("not a single 1-star"), so they may only fire on a complete census. When
+  // a store has more reviews than we fetched (the Okendo pagination cap), the
+  // distribution is a recency-biased slice and "zero 1-star" in the slice says
+  // nothing about the full set — firing here would false-positive a large,
+  // legitimate store into a permanent registry mark. Ratio-based rules (skew,
+  // verified) stay representative on a sample, so only 1a/1b are gated.
+  const isCompleteCensus =
+    corpus.totalReviews === null || distN >= corpus.totalReviews;
+
   // Rule 1 — missing low tail. Two variants, because seeded/imported review
   // sets characteristically lack the unhappy-customer tail a genuine large
   // corpus accumulates (the kouvrfashion case: 748 reviews, zero 1-star, only
   // 7 two-star = 0.9% low tail).
   //   1a: not a single 1-star review across ≥200 reviews.
   //   1b: <1% of ≥300 reviews sit in the bottom two bands.
-  if (dist) {
+  if (dist && isCompleteCensus) {
     const lowTail = dist.one + dist.two;
     if (distN >= MIN_N_ZERO_ONE_STAR && dist.one === 0) {
       implausible = true;
@@ -186,18 +196,16 @@ const FAKE_LIKELIHOOD_THRESHOLD = 0.7;
  * Fuse the deterministic band with the optional Claude language likelihood.
  *
  * Two-key design — the strongest verdict (`manipulated`) requires the
- * statistics and the language pass to AGREE, which suppresses false positives
- * on legit stores with genuinely great reviews:
- *   - manipulated: `implausible` distribution AND the LLM agrees (≥0.7), OR
- *     `implausible` alone when the LLM was skipped/braked (likelihood null) —
- *     statistical implausibility at high N is strong on its own.
+ * statistics AND the language pass to AGREE. `manipulated` is the only verdict
+ * that writes a permanent, no-TTL mark to the community reputation registry,
+ * so it must never rest on statistics alone: without an affirmative LLM
+ * confirmation (flag off, braked, timed out, or failed → likelihood null) the
+ * worst we return is `suspicious`. This makes the registry trustworthy and
+ * means a transient LLM failure can't escalate a store to a permanent flag.
+ *   - manipulated: `implausible` distribution AND the LLM agrees (≥0.7).
  *   - suspicious: a single concern present (a stat concern OR a high LLM
  *     likelihood) that didn't rise to `manipulated`.
  *   - clean: no concern.
- *
- * (The plan sketched the `suspicious` tier as an exclusive-or; inclusive-or is
- * used here so a `skewed` + high-LLM store — two agreeing weak signals — is
- * still surfaced as `suspicious` rather than silently dropping to `clean`.)
  */
 export function fuseReviewsVerdict(
   statBand: StatBand,
@@ -205,10 +213,9 @@ export function fuseReviewsVerdict(
 ): ReviewsVerdict {
   const llmFake =
     fakeLikelihood !== null && fakeLikelihood >= FAKE_LIKELIHOOD_THRESHOLD;
-  const llmAbsent = fakeLikelihood === null;
   const statConcern = statBand === "implausible" || statBand === "skewed";
 
-  if (statBand === "implausible" && (llmFake || llmAbsent)) {
+  if (statBand === "implausible" && llmFake) {
     return "manipulated";
   }
   if (statConcern || llmFake) {

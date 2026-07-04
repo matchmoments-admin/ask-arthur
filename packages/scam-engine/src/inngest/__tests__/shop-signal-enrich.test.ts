@@ -252,9 +252,10 @@ describe("runShopSignalEnrich", () => {
     expect(insert).not.toHaveBeenCalled();
   });
 
-  it("folds a manipulated review verdict into the composite score (stat-only)", async () => {
-    // The kouvrfashion shape: no ABN + implausible reviews, LLM pass OFF. The
-    // reviews step fetches, detects, and the real pure scorer runs.
+  it("caps a stat-only implausible verdict at suspicious (LLM off)", async () => {
+    // The kouvrfashion shape: no ABN + implausible reviews, LLM pass OFF.
+    // Without AI confirmation the worst verdict is `suspicious`, never the
+    // permanent `manipulated` mark.
     featureFlagsMock.shopSignalReviews = true;
     mockImplausibleReviewsShop();
     const { client, insert, rpc } = fakeSupabase();
@@ -268,8 +269,8 @@ describe("runShopSignalEnrich", () => {
       commerceFlags: [],
     });
 
-    // unknown domain (6) + no-abn (18) + manipulated reviews (25) = 49.
-    expect(result.score).toBe(49);
+    // unknown domain (6) + no-abn (18) + suspicious reviews (12) = 36.
+    expect(result.score).toBe(36);
     expect(result.band).toBe("some-concern");
     // The LLM pass is off, so it must not be called.
     expect(assessReviewLanguage).not.toHaveBeenCalled();
@@ -278,7 +279,7 @@ describe("runShopSignalEnrich", () => {
     const deepCheck = (written![1] as {
       p_patch: { deepCheck: { reviews?: { verdict: string; app: string } } };
     }).p_patch.deepCheck;
-    expect(deepCheck.reviews?.verdict).toBe("manipulated");
+    expect(deepCheck.reviews?.verdict).toBe("suspicious");
     expect(deepCheck.reviews?.app).toBe("okendo");
     expect(insert).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -286,16 +287,17 @@ describe("runShopSignalEnrich", () => {
         estimated_cost_usd: 0,
       }),
     );
-    // A concerning verdict is recorded in the durable per-domain registry.
-    // extractDomain returns the registrable domain (subdomains deduped).
-    expect(rpc).toHaveBeenCalledWith(
-      "upsert_shop_review_finding",
-      expect.objectContaining({
-        p_domain: "example.com",
-        p_review_app: "okendo",
-        p_verdict: "manipulated",
-      }),
+    // A concerning verdict is recorded in the durable per-domain registry
+    // exactly once (extractDomain returns the registrable domain).
+    const registryCalls = rpc.mock.calls.filter(
+      (c) => c[0] === "upsert_shop_review_finding",
     );
+    expect(registryCalls).toHaveLength(1);
+    expect(registryCalls[0][1]).toMatchObject({
+      p_domain: "example.com",
+      p_review_app: "okendo",
+      p_verdict: "suspicious",
+    });
   });
 
   it("does not register a clean review verdict in the reputation registry", async () => {
@@ -396,14 +398,15 @@ describe("runShopSignalEnrich", () => {
       commerceFlags: [],
     });
 
-    // Brake engaged → no Claude call → stat-only manipulated (25). 6+18+25=49.
+    // Brake engaged → no Claude call → no AI confirmation → capped at
+    // suspicious (12), not the permanent manipulated mark. 6+18+12=36.
     expect(assessReviewLanguage).not.toHaveBeenCalled();
-    expect(result.score).toBe(49);
+    expect(result.score).toBe(36);
     const written = completePatch(rpc);
     expect(
       (written![1] as { p_patch: { deepCheck: { reviews?: { verdict: string } } } })
         .p_patch.deepCheck.reviews?.verdict,
-    ).toBe("manipulated");
+    ).toBe("suspicious");
     // No anthropic cost row when the pass didn't run.
     expect(insert).not.toHaveBeenCalledWith(
       expect.objectContaining({ provider: "anthropic" }),

@@ -47,26 +47,30 @@ function detectOkendo(html: string): DetectedReviewApp | null {
   return { app: "okendo", identifier: sub.toLowerCase(), ...(productId && { productId }) };
 }
 
+// These three return null (not an empty-identifier object) when the app is
+// mentioned but no usable id is found, so a page that merely references one app
+// (a vendor list, cookie banner, blog) doesn't short-circuit the `??` fallback
+// chain and hide the app the store actually uses.
 function detectYotpo(html: string): DetectedReviewApp | null {
   if (!/yotpo/i.test(html)) return null;
   const key = html.match(YOTPO_APP_KEY)?.[1];
-  // Detect the app even without a key so the coverage gap is visible; an empty
-  // identifier makes the orchestrator skip with `no-identifier`.
-  return { app: "yotpo", identifier: key ?? "" };
+  if (!key) return null;
+  return { app: "yotpo", identifier: key };
 }
 
 function detectLoox(html: string): DetectedReviewApp | null {
   if (!/loox\.(io|app)/i.test(html) && !/looxReviews/i.test(html)) return null;
-  // Loox's public storefront id lives in its widget config; shape unconfirmed,
-  // so best-effort. Empty identifier → orchestrator skips.
+  // Loox's public storefront id lives in its widget config; shape unconfirmed.
   const id = html.match(/loox[^"]*?["']?(?:store|shop)Id["']?\s*[:=]\s*["']([A-Za-z0-9-]{6,})/i)?.[1];
-  return { app: "loox", identifier: id ?? "" };
+  if (!id) return null;
+  return { app: "loox", identifier: id };
 }
 
 function detectJudgeMe(html: string): DetectedReviewApp | null {
   if (!/jdgm-|judge\.me/i.test(html)) return null;
   const shop = html.match(MYSHOPIFY_DOMAIN)?.[1];
-  return { app: "judgeme", identifier: shop?.toLowerCase() ?? "" };
+  if (!shop) return null;
+  return { app: "judgeme", identifier: shop.toLowerCase() };
 }
 
 /**

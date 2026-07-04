@@ -43,46 +43,86 @@ interface OkendoPage {
   nextUrl?: string | null;
 }
 
+// Upper bound on a plausible review count — anything larger is a garbage /
+// hostile JSON-LD value and would overflow the registry's `integer` column.
+const MAX_PLAUSIBLE_REVIEWS = 100_000_000;
+
+interface LdAggregate {
+  count: number;
+  average: number | null;
+  /** True when the aggregate is (or is nested under) a `@type: Product` node. */
+  fromProduct: boolean;
+}
+
 /** Recursively collect JSON-LD AggregateRating nodes from a parsed LD block. */
 function collectAggregates(
   node: unknown,
-  out: { count: number; average: number | null }[],
+  out: LdAggregate[],
+  parentIsProduct = false,
 ): void {
   if (!node || typeof node !== "object") return;
   if (Array.isArray(node)) {
-    for (const item of node) collectAggregates(item, out);
+    for (const item of node) collectAggregates(item, out, parentIsProduct);
     return;
   }
   const obj = node as Record<string, unknown>;
+  const typeStr =
+    typeof obj["@type"] === "string" ? (obj["@type"] as string).toLowerCase() : "";
+  const isProduct = typeStr === "product";
   const agg = obj.aggregateRating as Record<string, unknown> | undefined;
-  const isAggType =
-    typeof obj["@type"] === "string" &&
-    (obj["@type"] as string).toLowerCase() === "aggregaterating";
+  const isAggType = typeStr === "aggregaterating";
   const source = isAggType ? obj : agg;
   if (source) {
     const rawCount = source.reviewCount ?? source.ratingCount;
     const count = Number(rawCount);
     const average = source.ratingValue != null ? Number(source.ratingValue) : null;
     if (Number.isFinite(count) && count > 0) {
-      out.push({ count, average: Number.isFinite(average) ? average : null });
+      // A nested aggregateRating is product-scoped when its host node is a
+      // Product; a standalone AggregateRating inherits its parent's scope.
+      const fromProduct = isAggType ? parentIsProduct : isProduct;
+      out.push({
+        count,
+        average: Number.isFinite(average) ? average : null,
+        fromProduct,
+      });
     }
   }
-  for (const value of Object.values(obj)) collectAggregates(value, out);
+  for (const value of Object.values(obj)) {
+    collectAggregates(value, out, isProduct || parentIsProduct);
+  }
+}
+
+function clampAverage(v: number | null): number | null {
+  if (v === null) return null;
+  return v >= 0 && v <= 5 ? v : null;
+}
+function clampCount(v: number): number | null {
+  return v >= 0 && v <= MAX_PLAUSIBLE_REVIEWS ? Math.round(v) : null;
 }
 
 /**
  * Read the exact review count + average from the page's JSON-LD
- * AggregateRating. A store can carry several (per-variant / per-product); the
- * one with the largest count is the product-level aggregate we want.
+ * AggregateRating. Values are clamped to sane ranges so a hostile page can't
+ * overflow the registry columns.
+ *
+ * `preferProduct` must be true ONLY when the reviews fetch was product-scoped
+ * (so `distribution` covers that one product and a product aggregate is the
+ * right total). On a store-wide fetch, preferring a small featured-product
+ * aggregate would understate `totalReviews` and make a truncated store-wide
+ * sample read as a complete census — defeating the partial-sample guard in
+ * scoreReviewDistribution. There we take the largest (store-wide) count.
  */
-function parseAggregate(html: string): {
+function parseAggregate(
+  html: string,
+  preferProduct: boolean,
+): {
   totalReviews: number | null;
   averageRating: number | null;
 } {
   const blocks = html.matchAll(
     /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi,
   );
-  const aggregates: { count: number; average: number | null }[] = [];
+  const aggregates: LdAggregate[] = [];
   for (const m of blocks) {
     try {
       collectAggregates(JSON.parse(m[1]), aggregates);
@@ -93,8 +133,15 @@ function parseAggregate(html: string): {
   if (aggregates.length === 0) {
     return { totalReviews: null, averageRating: null };
   }
-  const best = aggregates.reduce((a, b) => (b.count > a.count ? b : a));
-  return { totalReviews: best.count, averageRating: best.average };
+  const products = preferProduct
+    ? aggregates.filter((a) => a.fromProduct)
+    : [];
+  const pool = products.length > 0 ? products : aggregates;
+  const best = pool.reduce((a, b) => (b.count > a.count ? b : a));
+  return {
+    totalReviews: clampCount(best.count),
+    averageRating: clampAverage(best.average),
+  };
 }
 
 function truncate(text: string): string {
@@ -138,12 +185,29 @@ export async function fetchOkendoReviews(
   let ratingCount = 0;
 
   const deadline = Date.now() + TOTAL_BUDGET_MS;
+  const seen = new Set<string>();
   let nextPath: string | null = firstPath;
 
   for (let page = 0; page < MAX_PAGES && nextPath; page++) {
     const remaining = deadline - Date.now();
     if (remaining <= 0) break;
-    const res = await fetchReviewApiJson(`${OKENDO_API_BASE}${nextPath}`, remaining);
+    // Okendo's nextUrl is a "/stores/…" path relative to the /v1 base, so it is
+    // appended (NOT resolved via `new URL`, which drops /v1 for a leading-slash
+    // path). Guard against an off-host or repeated URL — a self-referential
+    // nextUrl would otherwise re-count the same page and inflate the sample
+    // past the real count, defeating scoreReviewDistribution's census check.
+    const pageUrl = /^https?:\/\//i.test(nextPath)
+      ? nextPath
+      : `${OKENDO_API_BASE}${nextPath.startsWith("/") ? "" : "/"}${nextPath}`;
+    let host: string;
+    try {
+      host = new URL(pageUrl).host;
+    } catch {
+      break;
+    }
+    if (host !== "api.okendo.io" || seen.has(pageUrl)) break;
+    seen.add(pageUrl);
+    const res = await fetchReviewApiJson(pageUrl, remaining);
     if (res.error || !res.data) {
       // On page 1 a hard failure is a real skip; on later pages we keep what
       // we already have rather than discarding a partial-but-usable corpus.
@@ -186,7 +250,8 @@ export async function fetchOkendoReviews(
     return { ok: false, reason: "empty" };
   }
 
-  const aggregate = parseAggregate(html);
+  // Prefer a product aggregate only when we fetched product-scoped reviews.
+  const aggregate = parseAggregate(html, detected.productId != null);
   return {
     app: "okendo",
     // Prefer the exact JSON-LD count; fall back to what we fetched.

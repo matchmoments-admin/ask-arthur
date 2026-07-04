@@ -5485,6 +5485,57 @@ export type Database = {
         }
         Relationships: []
       }
+      shop_review_findings: {
+        Row: {
+          average_rating: number | null
+          check_count: number
+          composite_score: number | null
+          distribution: Json | null
+          domain: string
+          fake_likelihood: number | null
+          first_flagged_at: string
+          last_checked_at: string
+          latest_verdict: string
+          reasons: Json
+          review_app: string
+          sample_url: string | null
+          total_reviews: number | null
+          worst_verdict: string
+        }
+        Insert: {
+          average_rating?: number | null
+          check_count?: number
+          composite_score?: number | null
+          distribution?: Json | null
+          domain: string
+          fake_likelihood?: number | null
+          first_flagged_at?: string
+          last_checked_at?: string
+          latest_verdict: string
+          reasons?: Json
+          review_app: string
+          sample_url?: string | null
+          total_reviews?: number | null
+          worst_verdict: string
+        }
+        Update: {
+          average_rating?: number | null
+          check_count?: number
+          composite_score?: number | null
+          distribution?: Json | null
+          domain?: string
+          fake_likelihood?: number | null
+          first_flagged_at?: string
+          last_checked_at?: string
+          latest_verdict?: string
+          reasons?: Json
+          review_app?: string
+          sample_url?: string | null
+          total_reviews?: number | null
+          worst_verdict?: string
+        }
+        Relationships: []
+      }
       shopfront_clone_alerts: {
         Row: {
           alert_state: string
@@ -8169,6 +8220,7 @@ export type Database = {
         }[]
       }
       resolve_brand: { Args: { p_raw: string }; Returns: string }
+      review_verdict_severity: { Args: { v: string }; Returns: number }
       search_charities: {
         Args: { p_limit?: number; p_query: string }
         Returns: {
@@ -8349,6 +8401,21 @@ export type Database = {
           p_verdict: string
         }
         Returns: string
+      }
+      upsert_shop_review_finding: {
+        Args: {
+          p_average_rating: number
+          p_composite_score: number
+          p_distribution: Json
+          p_domain: string
+          p_fake_likelihood: number
+          p_reasons: Json
+          p_review_app: string
+          p_sample_url: string
+          p_total_reviews: number
+          p_verdict: string
+        }
+        Returns: undefined
       }
       upsert_site_and_store_audit: {
         Args: {
