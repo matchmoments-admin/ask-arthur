@@ -7,12 +7,14 @@ import {
 import { verifyShopAbnDeep } from "../../abn-extract";
 import { getDomainCreatedDate } from "../../whois-cached";
 import { getSiteTrustworthiness } from "../../providers/apivoid";
+import { fetchShopPage } from "../../fetch-shop-page";
+import { detectAndFetchReviews } from "../../providers/reviews";
 import { createServiceClient } from "@askarthur/supabase/server";
 
 // featureFlags is a mutable mock object so a test can flip the paid feed
-// on; beforeEach resets it to OFF.
+// or the reviews signal on; beforeEach resets both to OFF.
 const { featureFlagsMock } = vi.hoisted(() => ({
-  featureFlagsMock: { shopSignalPaidFeed: false },
+  featureFlagsMock: { shopSignalPaidFeed: false, shopSignalReviews: false },
 }));
 
 // The enrichment adapters all do network I/O — mock them. The pure helpers
@@ -26,6 +28,8 @@ vi.mock("../../whois-cached", async (importOriginal) => ({
 vi.mock("../../providers/apivoid", () => ({
   getSiteTrustworthiness: vi.fn(),
 }));
+vi.mock("../../fetch-shop-page", () => ({ fetchShopPage: vi.fn() }));
+vi.mock("../../providers/reviews", () => ({ detectAndFetchReviews: vi.fn() }));
 vi.mock("@askarthur/supabase/server", () => ({
   createServiceClient: vi.fn(),
 }));
@@ -63,6 +67,7 @@ function completePatch(rpc: ReturnType<typeof vi.fn>) {
 beforeEach(() => {
   vi.clearAllMocks();
   featureFlagsMock.shopSignalPaidFeed = false;
+  featureFlagsMock.shopSignalReviews = false;
 });
 
 describe("runShopSignalEnrich", () => {
@@ -199,6 +204,61 @@ describe("runShopSignalEnrich", () => {
     });
 
     expect(insert).not.toHaveBeenCalled();
+  });
+
+  it("folds a manipulated review verdict into the composite score", async () => {
+    // The kouvrfashion shape: no ABN + implausible reviews. The reviews step
+    // fetches the page, detects the app, and the real pure scorer runs.
+    featureFlagsMock.shopSignalReviews = true;
+    vi.mocked(verifyShopAbnDeep).mockResolvedValue({
+      status: "no-abn",
+      abn: null,
+      entityName: null,
+    });
+    vi.mocked(getDomainCreatedDate).mockResolvedValue({
+      createdDate: null,
+      source: "live",
+    });
+    vi.mocked(fetchShopPage).mockResolvedValue({
+      html: "<html>okendo</html>",
+      finalUrl: "https://shop.example.com/",
+      status: 200,
+      error: null,
+    });
+    vi.mocked(detectAndFetchReviews).mockResolvedValue({
+      app: "okendo",
+      totalReviews: 748,
+      averageRating: 4.8,
+      distribution: { one: 0, two: 7, three: 15, four: 75, five: 651 },
+      verifiedBuyerRatio: 1,
+      reviews: [{ rating: 5, text: "great", author: null, date: null, verified: true }],
+      fetchedFrom: "api.okendo.io",
+    });
+    const { client, insert, rpc } = fakeSupabase();
+    vi.mocked(createServiceClient).mockReturnValue(
+      client as unknown as ReturnType<typeof createServiceClient>,
+    );
+
+    const result = await runShopSignalEnrich(step, {
+      shopCheckId: SHOP_CHECK_ID,
+      url: "https://shop.example.com/product",
+      commerceFlags: [],
+    });
+
+    // unknown domain (6) + no-abn (18) + manipulated reviews (25) = 49.
+    expect(result.score).toBe(49);
+    expect(result.band).toBe("some-concern");
+
+    // The enrichment carries the reviews block, and a $0 volume row is logged.
+    const written = completePatch(rpc);
+    const deepCheck = (written![1] as {
+      p_patch: { deepCheck: { reviews?: { verdict: string; app: string } } };
+    }).p_patch.deepCheck;
+    expect(deepCheck.reviews?.verdict).toBe("manipulated");
+    expect(deepCheck.reviews?.app).toBe("okendo");
+    expect(insert).toHaveBeenCalledWith(
+      expect.objectContaining({ feature: "shop_signal_reviews", estimated_cost_usd: 0 }),
+    );
   });
 
   it("writes an apivoid-error telemetry row when the paid call genuinely fails", async () => {
