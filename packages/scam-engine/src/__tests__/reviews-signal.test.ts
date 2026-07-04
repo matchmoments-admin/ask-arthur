@@ -60,6 +60,25 @@ describe("scoreReviewDistribution", () => {
     expect(scoreReviewDistribution(thin, null).statBand).toBe("implausible");
   });
 
+  it("does NOT fire the absolute low-tail rules on a partial sample", () => {
+    // 3000-review store, but only 1200 fetched (Okendo pagination cap). The
+    // sample has zero 1-star, but that says nothing about the full corpus —
+    // firing would false-positive a large legit store into a permanent mark.
+    const partial = corpus({
+      totalReviews: 3000,
+      distribution: { one: 0, two: 5, three: 40, four: 300, five: 855 }, // sums 1200
+    });
+    expect(scoreReviewDistribution(partial, null).statBand).toBe("plausible");
+  });
+
+  it("DOES fire the same distribution when it is the complete census", () => {
+    const complete = corpus({
+      totalReviews: 1200,
+      distribution: { one: 0, two: 5, three: 40, four: 300, five: 855 },
+    });
+    expect(scoreReviewDistribution(complete, null).statBand).toBe("implausible");
+  });
+
   it("flags an extreme five-star skew as skewed (not implausible)", () => {
     // 200 reviews, 196 five-star (98%) but with a couple of 1-stars present.
     const skew = corpus({
@@ -100,8 +119,10 @@ describe("fuseReviewsVerdict", () => {
     expect(fuseReviewsVerdict("implausible", 0.85)).toBe("manipulated");
   });
 
-  it("returns manipulated on implausible stats alone when the LLM was skipped", () => {
-    expect(fuseReviewsVerdict("implausible", null)).toBe("manipulated");
+  it("caps at suspicious on implausible stats alone when the LLM is absent", () => {
+    // `manipulated` (the permanent registry mark) requires AI confirmation;
+    // without it (flag off / braked / failed → null) the worst is suspicious.
+    expect(fuseReviewsVerdict("implausible", null)).toBe("suspicious");
   });
 
   it("downgrades to suspicious when the LLM disagrees with implausible stats", () => {

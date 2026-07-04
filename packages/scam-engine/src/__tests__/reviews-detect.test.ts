@@ -43,13 +43,23 @@ describe("detectReviewApp", () => {
     });
   });
 
-  it("detects Loox", () => {
-    const html = `<div id="looxReviews"></div><script src="https://loox.io/widget/loox.js"></script>`;
-    expect(detectReviewApp(html)?.app).toBe("loox");
+  it("detects Loox (with a store id)", () => {
+    const html = `<div id="looxReviews"></div><script src="https://loox.io/widget/loox.js"></script><script>window.looxSettings={"storeId":"abc123xyz"};</script>`;
+    expect(detectReviewApp(html)).toEqual({ app: "loox", identifier: "abc123xyz" });
   });
 
   it("returns null when no review app is fingerprinted", () => {
     expect(detectReviewApp("<html><body>a plain page</body></html>")).toBeNull();
+  });
+
+  it("does not let a stray app mention short-circuit real detection", () => {
+    // Uses Loox (with an id), but the word 'yotpo' also appears with no key.
+    // detectYotpo must return null (not an empty-id object) so Loox wins.
+    const html = `<!-- yotpo mentioned here, no key -->
+      <div id="looxReviews"></div>
+      <script src="https://loox.io/widget/loox.js"></script>
+      <script>window.looxSettings={"storeId":"abc123xyz"};</script>`;
+    expect(detectReviewApp(html)?.app).toBe("loox");
   });
 });
 
@@ -146,6 +156,37 @@ describe("fetchOkendoReviews", () => {
     const corpus = await fetchOkendoReviews(detected, OKENDO_HTML);
     if (!("app" in corpus)) throw new Error("expected a corpus");
     expect(corpus.distribution?.five).toBe(1);
+  });
+
+  it("rejects a hostile JSON-LD aggregate and falls back to safe values", async () => {
+    fetchMock.mockResolvedValueOnce({
+      data: { reviews: [review(5, true)], nextUrl: null },
+      error: null,
+    });
+    const evilHtml = `<script type="application/ld+json">
+      {"@type":"Product","aggregateRating":{"@type":"AggregateRating",
+       "ratingValue":"10","reviewCount":999999999999}}
+      </script>`;
+    const corpus = await fetchOkendoReviews(detected, evilHtml);
+    if (!("app" in corpus)) throw new Error("expected a corpus");
+    // ratingValue 10 (>5) and count 1e12 (>100M) are clamped to null, so the
+    // adapter falls back to the fetched sample — never the overflow values.
+    expect(corpus.averageRating).toBe(5); // computed from the one fetched review
+    expect(corpus.totalReviews).toBe(1); // fetched count, not 999999999999
+  });
+
+  it("prefers the product aggregate over a larger store-wide one", async () => {
+    fetchMock.mockResolvedValueOnce({
+      data: { reviews: [review(5, true)], nextUrl: null },
+      error: null,
+    });
+    const html = `
+      <script type="application/ld+json">{"@type":"Organization","aggregateRating":{"@type":"AggregateRating","ratingValue":"4.5","reviewCount":5000}}</script>
+      <script type="application/ld+json">{"@type":"Product","aggregateRating":{"@type":"AggregateRating","ratingValue":"4.8","reviewCount":748}}</script>`;
+    const corpus = await fetchOkendoReviews(detected, html);
+    if (!("app" in corpus)) throw new Error("expected a corpus");
+    expect(corpus.totalReviews).toBe(748); // product, not the store-wide 5000
+    expect(corpus.averageRating).toBe(4.8);
   });
 });
 

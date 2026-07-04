@@ -367,20 +367,27 @@ export async function runShopSignalEnrich(
         shopCheckId,
       });
     }
-    // Durable reputation registry — best-effort, in-step (no extra Inngest
-    // step). A concerning verdict is recorded even if the shop_checks row was
-    // already swept, so the community warning outlives the individual check.
-    if (reviews.data) {
+  });
+
+  // Durable reputation registry — its OWN step so an Inngest replay of an
+  // earlier step can never re-run it (the RPC's check_count increment is not
+  // idempotent). Best-effort: it never throws, so the step always completes and
+  // memoises, even on a registry write failure. A concerning verdict is
+  // recorded even if the shop_checks row was already swept, so the community
+  // warning outlives the individual check.
+  if (reviews.data) {
+    const finding = reviews.data;
+    await step.run("register-finding", async () => {
       try {
-        await registerReviewFinding(url, reviews.data, score);
+        await registerReviewFinding(url, finding, score);
       } catch (err) {
         logger.warn("shop-signal-enrich: registerReviewFinding threw", {
           shopCheckId,
           error: String(err),
         });
       }
-    }
-  });
+    });
+  }
 
   return { shopCheckId, score, band };
 }
