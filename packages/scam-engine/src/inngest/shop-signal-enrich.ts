@@ -52,10 +52,12 @@ import { computeCompositeScore, bandToVerdict } from "../shop-check-score";
 import { extractDomain } from "../url-normalize";
 import { fetchShopPage } from "../fetch-shop-page";
 import { detectAndFetchReviews } from "../providers/reviews";
+import { assessReviewLanguage } from "../providers/reviews/language";
 import {
   scoreReviewDistribution,
   fuseReviewsVerdict,
 } from "../reviews-signal";
+import { isFeatureBraked } from "../cost-log";
 
 /** Merge a deepCheck patch into shop_checks.signal. Throws on RPC error. */
 async function writeDeepCheck(
@@ -160,22 +162,43 @@ export async function runShopSignalEnrich(
   // 3m budget. PR 4 adds the Claude language pass; for now `fakeLikelihood` is
   // null and the fusion is statistics-only.
   const reviews = await step.run("reviews", async () => {
-    if (!featureFlags.shopSignalReviews) {
-      return { verdict: null, data: null } as {
-        verdict: "clean" | "suspicious" | "manipulated" | null;
-        data: ShopCheckReviews | null;
-      };
-    }
+    const none = { verdict: null, data: null, llmCostUsd: null } as {
+      verdict: "clean" | "suspicious" | "manipulated" | null;
+      data: ShopCheckReviews | null;
+      llmCostUsd: number | null;
+    };
+    if (!featureFlags.shopSignalReviews) return none;
     const page = await fetchShopPage(url);
-    if (!page.html) return { verdict: null, data: null };
+    if (!page.html) return none;
     const corpus = await detectAndFetchReviews(page.html);
-    if ("ok" in corpus) return { verdict: null, data: null };
+    if ("ok" in corpus) return none;
 
     const { statBand, statReasons } = scoreReviewDistribution(
       corpus,
       domainAge.ageDays,
     );
-    const verdict = fuseReviewsVerdict(statBand, null);
+
+    // Paid Claude language pass — flag- AND brake-gated. It corroborates the
+    // statistics into a `manipulated` verdict (two-key fusion) and, crucially,
+    // can refute a distribution-only false positive back down to `suspicious`.
+    // Left null (statistics-only fusion) when the flag is off, the brake is
+    // engaged, or the call fails — never a hard dependency.
+    let fakeLikelihood: number | null = null;
+    let llmReasons: string[] = [];
+    let llmCostUsd: number | null = null;
+    if (
+      featureFlags.shopSignalReviewsLlm &&
+      !(await isFeatureBraked("shop_signal_reviews"))
+    ) {
+      const llm = await assessReviewLanguage(corpus.reviews, shopCheckId);
+      if (llm) {
+        fakeLikelihood = llm.fakeLikelihood;
+        llmReasons = llm.reasons;
+        llmCostUsd = llm.costUsd;
+      }
+    }
+
+    const verdict = fuseReviewsVerdict(statBand, fakeLikelihood);
     const data: ShopCheckReviews = {
       app: corpus.app,
       verdict,
@@ -183,11 +206,11 @@ export async function runShopSignalEnrich(
       averageRating: corpus.averageRating,
       distribution: corpus.distribution,
       verifiedBuyerRatio: corpus.verifiedBuyerRatio,
-      fakeLikelihood: null,
-      reasons: statReasons,
+      fakeLikelihood,
+      reasons: [...statReasons, ...llmReasons],
       fetchedFrom: corpus.fetchedFrom,
     };
-    return { verdict, data };
+    return { verdict, data, llmCostUsd };
   });
 
   // Cost telemetry — best-effort. feature='shop_signal' so cost-daily-check
@@ -247,6 +270,20 @@ export async function runShopSignalEnrich(
             app: reviews.data.app,
             verdict: reviews.data.verdict,
           },
+        });
+      }
+      // Paid Claude language pass — real spend, same `shop_signal_reviews` tag
+      // so cost-daily-check sums it into the REVIEWS_LLM_CAP_USD brake.
+      if (reviews.llmCostUsd !== null) {
+        await supabase.from("cost_telemetry").insert({
+          feature: "shop_signal_reviews",
+          provider: "anthropic",
+          operation: "reviews-language",
+          units: 1,
+          unit_cost_usd: 0,
+          estimated_cost_usd: reviews.llmCostUsd,
+          request_id: shopCheckId,
+          metadata: { source: "deep-check", app: reviews.data?.app ?? null },
         });
       }
     } catch (err) {
