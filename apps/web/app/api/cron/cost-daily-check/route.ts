@@ -32,6 +32,7 @@ export async function GET(req: Request) {
     PHONE_FOOTPRINT_CAP_USD: readNumberEnv("PHONE_FOOTPRINT_CAP_USD", 5),
     CHARITY_CHECK_CAP_USD: readNumberEnv("CHARITY_CHECK_CAP_USD", 5),
     SHOP_SIGNAL_CAP_USD: readNumberEnv("SHOP_SIGNAL_CAP_USD", 15),
+    REVIEWS_LLM_CAP_USD: readNumberEnv("REVIEWS_LLM_CAP_USD", 5),
     SHOPFRONT_CLONE_OUTREACH_CAP_USD: readNumberEnv(
       "SHOPFRONT_CLONE_OUTREACH_CAP_USD",
       5,
@@ -210,6 +211,20 @@ export async function GET(req: Request) {
     )
     .reduce((sum, t) => sum + t.cost, 0);
 
+  // Shop Signal reviews — the paid Claude language pass over sampled review
+  // text (the free review fetch logs $0 under the same tag). Separate cap from
+  // SHOP_SIGNAL_CAP_USD so an APIVoid overspend doesn't dark the much cheaper
+  // review pass, and vice-versa. Engaging this brake pauses only the LLM leg;
+  // the free deterministic distribution check keeps running. Default $5/day.
+  const shopSignalReviewsThresholdUsd = envReads.REVIEWS_LLM_CAP_USD.value;
+  const shopSignalReviewsCost = top
+    .filter(
+      (t) =>
+        t.feature === "shop_signal_reviews" ||
+        t.feature === "shop-signal-reviews-error",
+    )
+    .reduce((sum, t) => sum + t.cost, 0);
+
   // Clone-watch outreach — aggregate across 8 sub-features:
   //   Netcraft submit + poll, brand notify, weekly digest,
   //   urlscan + urlscan rescan,
@@ -279,6 +294,7 @@ export async function GET(req: Request) {
   let phoneFootprintBrakeSet = false;
   let charityCheckBrakeSet = false;
   let shopSignalBrakeSet = false;
+  let shopSignalReviewsBrakeSet = false;
   let shopfrontCloneOutreachBrakeSet = false;
   let shopfrontCloneWatchBrakeSet = false;
   let newsIntelEmbedBrakeSet = false;
@@ -432,6 +448,36 @@ export async function GET(req: Request) {
       logger.warn("shop_signal brake engaged", {
         costUsd: shopSignalCost,
         thresholdUsd: shopSignalThresholdUsd,
+        pausedUntil,
+      });
+    }
+  }
+
+  if (shopSignalReviewsCost > shopSignalReviewsThresholdUsd) {
+    const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const { error: brakeError } = await supabase
+      .from("feature_brakes")
+      .upsert(
+        {
+          feature: "shop_signal_reviews",
+          paused_until: pausedUntil,
+          reason: `Daily spend $${shopSignalReviewsCost.toFixed(2)} exceeded $${shopSignalReviewsThresholdUsd} cap`,
+          set_by: "cost-daily-check",
+          set_cost_usd: shopSignalReviewsCost,
+          set_threshold_usd: shopSignalReviewsThresholdUsd,
+          set_at: new Date().toISOString(),
+        },
+        { onConflict: "feature" },
+      );
+    if (brakeError) {
+      logger.error("failed to set shop_signal_reviews brake", {
+        error: brakeError.message,
+      });
+    } else {
+      shopSignalReviewsBrakeSet = true;
+      logger.warn("shop_signal_reviews brake engaged", {
+        costUsd: shopSignalReviewsCost,
+        thresholdUsd: shopSignalReviewsThresholdUsd,
         pausedUntil,
       });
     }
@@ -607,6 +653,7 @@ export async function GET(req: Request) {
         phone_footprint: phoneFootprintBrakeSet,
         charity_check: charityCheckBrakeSet,
         shop_signal: shopSignalBrakeSet,
+        shop_signal_reviews: shopSignalReviewsBrakeSet,
         shopfront_clone_outreach: shopfrontCloneOutreachBrakeSet,
         shopfront_clone_watch: shopfrontCloneWatchBrakeSet,
         news_intel_embed: newsIntelEmbedBrakeSet,
@@ -664,6 +711,12 @@ export async function GET(req: Request) {
       `🛑 <b>shop_signal brake engaged</b> — paused for 24h (spend $${shopSignalCost.toFixed(2)} > $${shopSignalThresholdUsd} cap)`,
     );
   }
+  if (shopSignalReviewsBrakeSet) {
+    lines.push(
+      "",
+      `🛑 <b>shop_signal_reviews brake engaged</b> — paused for 24h (spend $${shopSignalReviewsCost.toFixed(2)} > $${shopSignalReviewsThresholdUsd} cap)`,
+    );
+  }
   if (shopfrontCloneOutreachBrakeSet) {
     lines.push(
       "",
@@ -714,6 +767,8 @@ export async function GET(req: Request) {
     charityCheckCost,
     shopSignalBrakeSet,
     shopSignalCost,
+    shopSignalReviewsBrakeSet,
+    shopSignalReviewsCost,
     shopfrontCloneOutreachBrakeSet,
     shopfrontCloneOutreachCost,
     shopfrontCloneWatchBrakeSet,

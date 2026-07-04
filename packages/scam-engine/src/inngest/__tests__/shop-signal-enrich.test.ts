@@ -9,12 +9,18 @@ import { getDomainCreatedDate } from "../../whois-cached";
 import { getSiteTrustworthiness } from "../../providers/apivoid";
 import { fetchShopPage } from "../../fetch-shop-page";
 import { detectAndFetchReviews } from "../../providers/reviews";
+import { assessReviewLanguage } from "../../providers/reviews/language";
+import { isFeatureBraked } from "../../cost-log";
 import { createServiceClient } from "@askarthur/supabase/server";
 
 // featureFlags is a mutable mock object so a test can flip the paid feed
-// or the reviews signal on; beforeEach resets both to OFF.
+// or the reviews signal on; beforeEach resets all to OFF.
 const { featureFlagsMock } = vi.hoisted(() => ({
-  featureFlagsMock: { shopSignalPaidFeed: false, shopSignalReviews: false },
+  featureFlagsMock: {
+    shopSignalPaidFeed: false,
+    shopSignalReviews: false,
+    shopSignalReviewsLlm: false,
+  },
 }));
 
 // The enrichment adapters all do network I/O — mock them. The pure helpers
@@ -30,6 +36,12 @@ vi.mock("../../providers/apivoid", () => ({
 }));
 vi.mock("../../fetch-shop-page", () => ({ fetchShopPage: vi.fn() }));
 vi.mock("../../providers/reviews", () => ({ detectAndFetchReviews: vi.fn() }));
+vi.mock("../../providers/reviews/language", () => ({
+  assessReviewLanguage: vi.fn(),
+}));
+vi.mock("../../cost-log", () => ({
+  isFeatureBraked: vi.fn().mockResolvedValue(false),
+}));
 vi.mock("@askarthur/supabase/server", () => ({
   createServiceClient: vi.fn(),
 }));
@@ -54,6 +66,38 @@ function fakeSupabase() {
   return { client, rpc, insert };
 }
 
+/** Mock the kouvrfashion shape: no ABN, unknown domain, implausible Okendo
+ *  distribution (zero 1-star at scale). Score contributions before reviews:
+ *  unknown domain (6) + no-abn (18) = 24. */
+function mockImplausibleReviewsShop() {
+  vi.mocked(verifyShopAbnDeep).mockResolvedValue({
+    status: "no-abn",
+    abn: null,
+    entityName: null,
+  });
+  vi.mocked(getDomainCreatedDate).mockResolvedValue({
+    createdDate: null,
+    source: "live",
+  });
+  vi.mocked(fetchShopPage).mockResolvedValue({
+    html: "<html>okendo</html>",
+    finalUrl: "https://shop.example.com/",
+    status: 200,
+    error: null,
+  });
+  vi.mocked(detectAndFetchReviews).mockResolvedValue({
+    app: "okendo",
+    totalReviews: 748,
+    averageRating: 4.8,
+    distribution: { one: 0, two: 7, three: 15, four: 75, five: 651 },
+    verifiedBuyerRatio: 1,
+    reviews: [
+      { rating: 5, text: "great", author: null, date: null, verified: true },
+    ],
+    fetchedFrom: "api.okendo.io",
+  });
+}
+
 /** Find the write-back rpc call that carries the terminal `complete` patch. */
 function completePatch(rpc: ReturnType<typeof vi.fn>) {
   return rpc.mock.calls.find(
@@ -68,6 +112,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   featureFlagsMock.shopSignalPaidFeed = false;
   featureFlagsMock.shopSignalReviews = false;
+  featureFlagsMock.shopSignalReviewsLlm = false;
+  vi.mocked(isFeatureBraked).mockResolvedValue(false);
 });
 
 describe("runShopSignalEnrich", () => {
@@ -206,34 +252,11 @@ describe("runShopSignalEnrich", () => {
     expect(insert).not.toHaveBeenCalled();
   });
 
-  it("folds a manipulated review verdict into the composite score", async () => {
-    // The kouvrfashion shape: no ABN + implausible reviews. The reviews step
-    // fetches the page, detects the app, and the real pure scorer runs.
+  it("folds a manipulated review verdict into the composite score (stat-only)", async () => {
+    // The kouvrfashion shape: no ABN + implausible reviews, LLM pass OFF. The
+    // reviews step fetches, detects, and the real pure scorer runs.
     featureFlagsMock.shopSignalReviews = true;
-    vi.mocked(verifyShopAbnDeep).mockResolvedValue({
-      status: "no-abn",
-      abn: null,
-      entityName: null,
-    });
-    vi.mocked(getDomainCreatedDate).mockResolvedValue({
-      createdDate: null,
-      source: "live",
-    });
-    vi.mocked(fetchShopPage).mockResolvedValue({
-      html: "<html>okendo</html>",
-      finalUrl: "https://shop.example.com/",
-      status: 200,
-      error: null,
-    });
-    vi.mocked(detectAndFetchReviews).mockResolvedValue({
-      app: "okendo",
-      totalReviews: 748,
-      averageRating: 4.8,
-      distribution: { one: 0, two: 7, three: 15, four: 75, five: 651 },
-      verifiedBuyerRatio: 1,
-      reviews: [{ rating: 5, text: "great", author: null, date: null, verified: true }],
-      fetchedFrom: "api.okendo.io",
-    });
+    mockImplausibleReviewsShop();
     const { client, insert, rpc } = fakeSupabase();
     vi.mocked(createServiceClient).mockReturnValue(
       client as unknown as ReturnType<typeof createServiceClient>,
@@ -248,8 +271,9 @@ describe("runShopSignalEnrich", () => {
     // unknown domain (6) + no-abn (18) + manipulated reviews (25) = 49.
     expect(result.score).toBe(49);
     expect(result.band).toBe("some-concern");
+    // The LLM pass is off, so it must not be called.
+    expect(assessReviewLanguage).not.toHaveBeenCalled();
 
-    // The enrichment carries the reviews block, and a $0 volume row is logged.
     const written = completePatch(rpc);
     const deepCheck = (written![1] as {
       p_patch: { deepCheck: { reviews?: { verdict: string; app: string } } };
@@ -257,7 +281,78 @@ describe("runShopSignalEnrich", () => {
     expect(deepCheck.reviews?.verdict).toBe("manipulated");
     expect(deepCheck.reviews?.app).toBe("okendo");
     expect(insert).toHaveBeenCalledWith(
-      expect.objectContaining({ feature: "shop_signal_reviews", estimated_cost_usd: 0 }),
+      expect.objectContaining({
+        feature: "shop_signal_reviews",
+        estimated_cost_usd: 0,
+      }),
+    );
+  });
+
+  it("lets the Claude language pass refute implausible stats down to suspicious", async () => {
+    featureFlagsMock.shopSignalReviews = true;
+    featureFlagsMock.shopSignalReviewsLlm = true;
+    mockImplausibleReviewsShop();
+    // The LLM reads the actual text and disagrees (looks genuine).
+    vi.mocked(assessReviewLanguage).mockResolvedValue({
+      fakeLikelihood: 0.1,
+      reasons: ["reviews read genuine"],
+      costUsd: 0.0002,
+    });
+    const { client, insert, rpc } = fakeSupabase();
+    vi.mocked(createServiceClient).mockReturnValue(
+      client as unknown as ReturnType<typeof createServiceClient>,
+    );
+
+    const result = await runShopSignalEnrich(step, {
+      shopCheckId: SHOP_CHECK_ID,
+      url: "https://shop.example.com/product",
+      commerceFlags: [],
+    });
+
+    // Two-key fusion: implausible stats but LLM disagreement (0.1) → suspicious
+    // (12), not manipulated (25). unknown (6) + no-abn (18) + suspicious (12) = 36.
+    expect(result.score).toBe(36);
+    const written = completePatch(rpc);
+    const deepCheck = (written![1] as {
+      p_patch: { deepCheck: { reviews?: { verdict: string } } };
+    }).p_patch.deepCheck;
+    expect(deepCheck.reviews?.verdict).toBe("suspicious");
+    // The paid call's cost is logged under the anthropic provider.
+    expect(insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        feature: "shop_signal_reviews",
+        provider: "anthropic",
+      }),
+    );
+  });
+
+  it("skips the Claude pass when the reviews brake is engaged", async () => {
+    featureFlagsMock.shopSignalReviews = true;
+    featureFlagsMock.shopSignalReviewsLlm = true;
+    vi.mocked(isFeatureBraked).mockResolvedValue(true);
+    mockImplausibleReviewsShop();
+    const { client, insert, rpc } = fakeSupabase();
+    vi.mocked(createServiceClient).mockReturnValue(
+      client as unknown as ReturnType<typeof createServiceClient>,
+    );
+
+    const result = await runShopSignalEnrich(step, {
+      shopCheckId: SHOP_CHECK_ID,
+      url: "https://shop.example.com/product",
+      commerceFlags: [],
+    });
+
+    // Brake engaged → no Claude call → stat-only manipulated (25). 6+18+25=49.
+    expect(assessReviewLanguage).not.toHaveBeenCalled();
+    expect(result.score).toBe(49);
+    const written = completePatch(rpc);
+    expect(
+      (written![1] as { p_patch: { deepCheck: { reviews?: { verdict: string } } } })
+        .p_patch.deepCheck.reviews?.verdict,
+    ).toBe("manipulated");
+    // No anthropic cost row when the pass didn't run.
+    expect(insert).not.toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "anthropic" }),
     );
   });
 
