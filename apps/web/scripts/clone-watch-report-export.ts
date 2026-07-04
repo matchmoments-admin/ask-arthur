@@ -25,7 +25,7 @@ import path from "node:path";
 import puppeteer from "puppeteer";
 
 // Keep in sync with SLIDE_COUNT in app/admin/report-card/page.tsx.
-const SLIDE_COUNT = 8;
+const SLIDE_COUNT = 7;
 const WIDTH = 1080;
 const HEIGHT = 1350;
 
