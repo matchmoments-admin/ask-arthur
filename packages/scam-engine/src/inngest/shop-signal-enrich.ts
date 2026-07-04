@@ -79,6 +79,46 @@ async function writeDeepCheck(
 }
 
 /**
+ * Best-effort: record a concerning on-page review finding in the durable
+ * per-domain registry (shop_review_findings) that backs community reputation
+ * warnings. Only suspicious/manipulated verdicts are registered — a clean
+ * store never creates a warning entry. Unlike shop_checks (per-click, 90-day
+ * TTL) this is deduped by domain and never expires; the RPC keeps the worst
+ * verdict ever seen. Never throws — a registry failure must not fail the check.
+ */
+async function registerReviewFinding(
+  url: string,
+  reviews: ShopCheckReviews,
+  compositeScore: number,
+): Promise<void> {
+  if (reviews.verdict !== "suspicious" && reviews.verdict !== "manipulated") {
+    return;
+  }
+  const domain = extractDomain(url);
+  if (!domain) return;
+  const supabase = createServiceClient();
+  if (!supabase) return;
+  const { error } = await supabase.rpc("upsert_shop_review_finding", {
+    p_domain: domain,
+    p_review_app: reviews.app,
+    p_verdict: reviews.verdict,
+    p_total_reviews: reviews.totalReviews,
+    p_average_rating: reviews.averageRating,
+    p_distribution: reviews.distribution,
+    p_fake_likelihood: reviews.fakeLikelihood,
+    p_composite_score: compositeScore,
+    p_reasons: reviews.reasons,
+    p_sample_url: url,
+  });
+  if (error) {
+    logger.warn("shop-signal-enrich: review-finding upsert failed", {
+      domain,
+      error: error.message,
+    });
+  }
+}
+
+/**
  * The minimal `step` surface runShopSignalEnrich depends on. Inngest's real
  * `step` satisfies it structurally; tests pass a synchronous pass-through
  * stub. Kept local because Inngest's own step type is more constrained
@@ -326,6 +366,19 @@ export async function runShopSignalEnrich(
       logger.warn("shop-signal-enrich: write-back found no row", {
         shopCheckId,
       });
+    }
+    // Durable reputation registry — best-effort, in-step (no extra Inngest
+    // step). A concerning verdict is recorded even if the shop_checks row was
+    // already swept, so the community warning outlives the individual check.
+    if (reviews.data) {
+      try {
+        await registerReviewFinding(url, reviews.data, score);
+      } catch (err) {
+        logger.warn("shop-signal-enrich: registerReviewFinding threw", {
+          shopCheckId,
+          error: String(err),
+        });
+      }
     }
   });
 
