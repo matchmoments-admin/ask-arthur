@@ -286,6 +286,60 @@ describe("runShopSignalEnrich", () => {
         estimated_cost_usd: 0,
       }),
     );
+    // A concerning verdict is recorded in the durable per-domain registry.
+    // extractDomain returns the registrable domain (subdomains deduped).
+    expect(rpc).toHaveBeenCalledWith(
+      "upsert_shop_review_finding",
+      expect.objectContaining({
+        p_domain: "example.com",
+        p_review_app: "okendo",
+        p_verdict: "manipulated",
+      }),
+    );
+  });
+
+  it("does not register a clean review verdict in the reputation registry", async () => {
+    featureFlagsMock.shopSignalReviews = true;
+    vi.mocked(verifyShopAbnDeep).mockResolvedValue({
+      status: "not-applicable",
+      abn: null,
+      entityName: null,
+    });
+    vi.mocked(getDomainCreatedDate).mockResolvedValue({
+      createdDate: "2015-01-01",
+      source: "live",
+    });
+    vi.mocked(fetchShopPage).mockResolvedValue({
+      html: "<html>okendo</html>",
+      finalUrl: "https://legit.example.com/",
+      status: 200,
+      error: null,
+    });
+    // A small, healthy store: below every minimum-N floor → plausible → clean.
+    vi.mocked(detectAndFetchReviews).mockResolvedValue({
+      app: "okendo",
+      totalReviews: 40,
+      averageRating: 4.6,
+      distribution: { one: 1, two: 1, three: 3, four: 10, five: 25 },
+      verifiedBuyerRatio: 0.8,
+      reviews: [{ rating: 5, text: "good", author: null, date: null, verified: true }],
+      fetchedFrom: "api.okendo.io",
+    });
+    const { client, rpc } = fakeSupabase();
+    vi.mocked(createServiceClient).mockReturnValue(
+      client as unknown as ReturnType<typeof createServiceClient>,
+    );
+
+    await runShopSignalEnrich(step, {
+      shopCheckId: SHOP_CHECK_ID,
+      url: "https://legit.example.com/p",
+      commerceFlags: [],
+    });
+
+    const registryCalls = rpc.mock.calls.filter(
+      (c) => c[0] === "upsert_shop_review_finding",
+    );
+    expect(registryCalls).toHaveLength(0);
   });
 
   it("lets the Claude language pass refute implausible stats down to suspicious", async () => {
