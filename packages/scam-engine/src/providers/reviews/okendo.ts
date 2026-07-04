@@ -102,11 +102,20 @@ function clampCount(v: number): number | null {
 
 /**
  * Read the exact review count + average from the page's JSON-LD
- * AggregateRating. The reviews API is per-product, so we prefer a
- * product-scoped aggregate (falling back to the largest); values are clamped
- * to sane ranges so a hostile page can't overflow the registry columns.
+ * AggregateRating. Values are clamped to sane ranges so a hostile page can't
+ * overflow the registry columns.
+ *
+ * `preferProduct` must be true ONLY when the reviews fetch was product-scoped
+ * (so `distribution` covers that one product and a product aggregate is the
+ * right total). On a store-wide fetch, preferring a small featured-product
+ * aggregate would understate `totalReviews` and make a truncated store-wide
+ * sample read as a complete census — defeating the partial-sample guard in
+ * scoreReviewDistribution. There we take the largest (store-wide) count.
  */
-function parseAggregate(html: string): {
+function parseAggregate(
+  html: string,
+  preferProduct: boolean,
+): {
   totalReviews: number | null;
   averageRating: number | null;
 } {
@@ -124,7 +133,9 @@ function parseAggregate(html: string): {
   if (aggregates.length === 0) {
     return { totalReviews: null, averageRating: null };
   }
-  const products = aggregates.filter((a) => a.fromProduct);
+  const products = preferProduct
+    ? aggregates.filter((a) => a.fromProduct)
+    : [];
   const pool = products.length > 0 ? products : aggregates;
   const best = pool.reduce((a, b) => (b.count > a.count ? b : a));
   return {
@@ -239,7 +250,8 @@ export async function fetchOkendoReviews(
     return { ok: false, reason: "empty" };
   }
 
-  const aggregate = parseAggregate(html);
+  // Prefer a product aggregate only when we fetched product-scoped reviews.
+  const aggregate = parseAggregate(html, detected.productId != null);
   return {
     app: "okendo",
     // Prefer the exact JSON-LD count; fall back to what we fetched.

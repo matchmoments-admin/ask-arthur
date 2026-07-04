@@ -188,6 +188,25 @@ describe("fetchOkendoReviews", () => {
     expect(corpus.totalReviews).toBe(748); // product, not the store-wide 5000
     expect(corpus.averageRating).toBe(4.8);
   });
+
+  it("uses the store-wide aggregate when the fetch is NOT product-scoped", async () => {
+    // No productId → store-wide fetch → the small featured-product aggregate
+    // must NOT win, else a truncated store-wide sample reads as a full census.
+    fetchMock.mockResolvedValueOnce({
+      data: { reviews: [review(5, true)], nextUrl: null },
+      error: null,
+    });
+    const html = `
+      <script type="application/ld+json">{"@type":"Organization","aggregateRating":{"@type":"AggregateRating","ratingValue":"4.5","reviewCount":5000}}</script>
+      <script type="application/ld+json">{"@type":"Product","aggregateRating":{"@type":"AggregateRating","ratingValue":"4.8","reviewCount":748}}</script>`;
+    const storeWide = {
+      app: "okendo" as const,
+      identifier: "686ec01f-11bd-4b9a-af9e-cf24566476e4",
+    }; // no productId
+    const corpus = await fetchOkendoReviews(storeWide, html);
+    if (!("app" in corpus)) throw new Error("expected a corpus");
+    expect(corpus.totalReviews).toBe(5000); // store-wide, not the product 748
+  });
 });
 
 describe("detectAndFetchReviews", () => {
