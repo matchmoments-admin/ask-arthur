@@ -152,8 +152,8 @@ function SlideTakeaway({ data }: { data: CloneWatchReportCard }) {
         <div className="txt">We sweep newly-registered domains against ~50 major Australian brands daily, enrich with WHOIS + certificate data, and review by hand — each with a public evidence page on urlscan.io.</div>
       </div>
       <div className="close">
-        <div className="cta">Check before you click.<br /><a href="https://askarthur.au">askarthur.au</a></div>
-        <p className="partner">Targeted brand? We share the full clone list with affected brands — <b>reach out to partner.</b></p>
+        <div className="cta">Check any link at<br /><a href="https://askarthur.au">askarthur.au</a></div>
+        <p className="partner">Targeted brand? We share the full clone list with affected brands — partner with us at <a href="https://askarthur.au/contact">askarthur.au/contact</a></p>
         <div className="foot rule2" style={{ marginTop: 28 }}>
           <span className="mono" style={{ fontSize: 22, color: "var(--muted)" }}>Australian Clone Watch · published monthly</span>
           <span className="page">03 <span className="tot">/ 03</span></span>

@@ -86,6 +86,7 @@ export const reportCardCss = `
 .rc-root .close{margin-top:auto;}
 .rc-root .cta{font-size:58px;font-weight:900;letter-spacing:-0.02em;line-height:1.06;color:var(--ink);}
 .rc-root .cta a{display:inline-block;color:var(--rust);text-decoration:none;}
-.rc-root .partner{margin:20px 0 0;font-size:25px;line-height:1.5;color:var(--sub);max-width:900px;}
+.rc-root .partner{margin:20px 0 0;font-size:25px;line-height:1.5;color:var(--sub);max-width:940px;}
 .rc-root .partner b{color:var(--ink);font-weight:700;}
+.rc-root .partner a{color:var(--rust);font-weight:700;text-decoration:none;}
 `;
