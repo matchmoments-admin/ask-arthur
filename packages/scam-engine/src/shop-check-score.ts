@@ -52,6 +52,21 @@ const APIVOID_POINTS: Record<"safe" | "suspicious" | "risky", number> = {
   safe: 0,
 };
 
+// On-page review authenticity (Deep Shop Check Stage 1, fused enum from
+// reviews-signal.ts). Deliberately capped below the +35 hard-evidence tiers
+// (fresh domain, an APIVoid `risky` blocklist hit) and below ABN
+// `unregistered` (+30 — a checkable factual claim that failed): review
+// manipulation is circumstantial and evadable, so `manipulated` alone tops
+// out the some-concern band (25 < 60) and never reaches high-concern on its
+// own. It must still corroborate other signals into high-concern — e.g.
+// `no-abn` (18) + `manipulated` (25) = 43, plus one commerce chip (+6) or a
+// `suspicious` APIVoid verdict (+18) clears 60.
+const REVIEWS_POINTS: Record<"clean" | "suspicious" | "manipulated", number> = {
+  manipulated: 25,
+  suspicious: 12,
+  clean: 0,
+};
+
 const FLAG_POINTS = 6;
 const FLAG_CAP = 3; // at most +18 from Stage-0 commerce flags
 
@@ -62,6 +77,11 @@ export interface CompositeScoreInput {
   apivoidVerdict: "safe" | "suspicious" | "risky" | null;
   /** Count of Stage-0 commerce flags carried from the analyze result. */
   commerceFlagCount: number;
+  /**
+   * Fused on-page review-authenticity verdict, or null when the store uses
+   * no supported review app / the corpus was unavailable.
+   */
+  reviewsVerdict: "clean" | "suspicious" | "manipulated" | null;
 }
 
 export interface CompositeScore {
@@ -101,6 +121,7 @@ export function computeCompositeScore(
   raw += DOMAIN_AGE_POINTS[input.domainAgeBand];
   raw += ABN_POINTS[input.abnStatus];
   raw += input.apivoidVerdict ? APIVOID_POINTS[input.apivoidVerdict] : 0;
+  raw += input.reviewsVerdict ? REVIEWS_POINTS[input.reviewsVerdict] : 0;
   raw +=
     Math.min(Math.max(input.commerceFlagCount, 0), FLAG_CAP) * FLAG_POINTS;
 

@@ -199,6 +199,8 @@ export async function runShopSignalEnrich(
     abnStatus: abn.status,
     apivoidVerdict: paidVerdict?.verdict ?? null,
     commerceFlagCount: commerceFlags.length,
+    // Wired in PR 3 (the `reviews` step); null here keeps the score identical.
+    reviewsVerdict: null,
   });
 
   const enrichment: ShopCheckEnrichment = {
