@@ -31,6 +31,7 @@ describe("computeCompositeScore", () => {
     abnStatus: "verified" as const,
     apivoidVerdict: "safe" as const,
     commerceFlagCount: 0,
+    reviewsVerdict: null,
   };
 
   it("scores a clean established shop at zero / low-concern", () => {
@@ -120,6 +121,54 @@ describe("computeCompositeScore", () => {
     ).toBe(18);
   });
 
+  it("weights the fused review verdict, treating null as no signal", () => {
+    expect(
+      computeCompositeScore({ ...clean, reviewsVerdict: "manipulated" }).score,
+    ).toBe(25);
+    expect(
+      computeCompositeScore({ ...clean, reviewsVerdict: "suspicious" }).score,
+    ).toBe(12);
+    expect(
+      computeCompositeScore({ ...clean, reviewsVerdict: "clean" }).score,
+    ).toBe(0);
+    expect(
+      computeCompositeScore({ ...clean, reviewsVerdict: null }).score,
+    ).toBe(0);
+  });
+
+  it("never lets manipulated reviews reach high-concern on their own", () => {
+    // The +25 ceiling is deliberate: circumstantial review manipulation must
+    // corroborate, not railroad. 25 sits at the top of some-concern (< 60).
+    const result = computeCompositeScore({
+      ...clean,
+      reviewsVerdict: "manipulated",
+    });
+    expect(result.score).toBe(25);
+    expect(result.band).toBe("some-concern");
+  });
+
+  it("corroborates manipulated reviews with other signals into high-concern", () => {
+    // The kouvrfashion shape: no ABN + manipulated reviews is some-concern on
+    // its own (18 + 25 = 43), and a suspicious site-reputation verdict (+18)
+    // tips it to high-concern (61).
+    const noAbnManipulated = computeCompositeScore({
+      ...clean,
+      abnStatus: "no-abn",
+      reviewsVerdict: "manipulated",
+    });
+    expect(noAbnManipulated.score).toBe(43);
+    expect(noAbnManipulated.band).toBe("some-concern");
+
+    const corroborated = computeCompositeScore({
+      ...clean,
+      abnStatus: "no-abn",
+      apivoidVerdict: "suspicious",
+      reviewsVerdict: "manipulated",
+    });
+    expect(corroborated.score).toBe(61);
+    expect(corroborated.band).toBe("high-concern");
+  });
+
   it("clamps the worst case to 100 / high-concern", () => {
     expect(
       computeCompositeScore({
@@ -127,6 +176,7 @@ describe("computeCompositeScore", () => {
         abnStatus: "unregistered",
         apivoidVerdict: "risky",
         commerceFlagCount: 5,
+        reviewsVerdict: "manipulated",
       }),
     ).toEqual({ score: 100, band: "high-concern" });
   });

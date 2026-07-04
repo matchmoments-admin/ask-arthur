@@ -377,6 +377,24 @@ export const featureFlags = {
    *  start consuming the trial. Plan: docs/plans/shop-guard-v2.md §4 PR 2. */
   shopSignalPaidFeed: readBoolEnv("FF_SHOP_SIGNAL_PAID_FEED"),
 
+  /** Shop Guard Stage 1 — on-page review-authenticity signal. Detects the
+   *  store's review app (Okendo / Judge.me / Loox / Yotpo), reads its public
+   *  data endpoint, and runs a free deterministic distribution check
+   *  (implausible star spread, review velocity vs domain age). Server-side
+   *  only (the Inngest enrichment worker is the only consumer). Independent of
+   *  `shopSignalPaidFeed` — the free layer runs even if APIVoid is in trouble.
+   *  Default OFF until the PR 2 live-probe confirms the per-app extractors.
+   *  Plan: docs/plans/shop-guard-v2.md — reviews addendum. */
+  shopSignalReviews: readBoolEnv("FF_SHOP_SIGNAL_REVIEWS"),
+
+  /** Shop Guard Stage 1 — the paid Claude language pass over sampled review
+   *  text that corroborates the deterministic review check into a
+   *  `manipulated` verdict. Gated separately (and by isFeatureBraked(
+   *  "shop_signal_reviews") + REVIEWS_LLM_CAP_USD) so the free distribution
+   *  layer can run with this dark. Server-side only. Default OFF until the
+   *  cap/brake are canaried. Plan: docs/plans/shop-guard-v2.md — reviews. */
+  shopSignalReviewsLlm: readBoolEnv("FF_SHOP_SIGNAL_REVIEWS_LLM"),
+
   /** Shopfront clone-watch Layer 0 — daily NRD lexical sweep against the
    *  static AU brand watchlist. Server-side only (the Inngest function is
    *  the only consumer). Default OFF until WHOISDS_NRD_ZIP_URL is set in

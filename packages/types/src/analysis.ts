@@ -227,6 +227,36 @@ export const ShopCheckAbnSchema = z.object({
 });
 export type ShopCheckAbn = z.infer<typeof ShopCheckAbnSchema>;
 
+// On-page review-authenticity signal. Populated only when the store uses a
+// supported review app (Okendo / Judge.me / Loox / Yotpo) whose public data
+// endpoint we could read; absent otherwise (a graceful skip, never an
+// accusation). `verdict` fuses a deterministic distribution check with an
+// optional Claude language pass — see reviews-signal.ts.
+//
+// The star distribution is keyed one..five (not 1..5) because Zod object
+// keys must be identifiers and the enrichment is round-tripped through JSON.
+export const ShopCheckReviewsSchema = z.object({
+  app: z.enum(["okendo", "judgeme", "loox", "yotpo"]),
+  verdict: z.enum(["clean", "suspicious", "manipulated"]),
+  totalReviews: z.number().nullable(),
+  averageRating: z.number().nullable(),
+  distribution: z
+    .object({
+      one: z.number(),
+      two: z.number(),
+      three: z.number(),
+      four: z.number(),
+      five: z.number(),
+    })
+    .nullable(),
+  verifiedBuyerRatio: z.number().nullable(),
+  // null when the paid Claude language pass was skipped (flag off) or braked.
+  fakeLikelihood: z.number().min(0).max(1).nullable(),
+  reasons: z.array(z.string()),
+  fetchedFrom: z.string(),
+});
+export type ShopCheckReviews = z.infer<typeof ShopCheckReviewsSchema>;
+
 // The enrichment payload stored under `shop_checks.signal.deepCheck`.
 // `status` is always present; the result fields land only when the
 // Inngest enrichment completes.
@@ -234,6 +264,7 @@ export const ShopCheckEnrichmentSchema = z.object({
   status: ShopCheckStatusSchema,
   domainAge: ShopCheckDomainAgeSchema.optional(),
   abn: ShopCheckAbnSchema.optional(),
+  reviews: ShopCheckReviewsSchema.optional(),
   paidProviderVerdict: PaidProviderVerdictSchema.optional(),
   compositeScore: z.number().min(0).max(100).optional(),
   band: ShopCheckBandSchema.optional(),
