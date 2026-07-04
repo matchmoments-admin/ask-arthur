@@ -90,7 +90,7 @@ function Slide({ n, data }: { n: number; data: CloneWatchReportCard }) {
     case 1: return <SlideHook data={data} />;
     case 2: return <SlideScale data={data} />;
     case 3: return <SlideAuBrands data={data} />;
-    case 4: return <SlideAnatomy data={data} />;
+    case 4: return <SlideSuperFund data={data} />;
     case 5: return <SlideGlobal data={data} />;
     case 6: return <SlideRegistrars data={data} />;
     case 7: return <SlideActed data={data} />;
@@ -203,7 +203,41 @@ function SlideAuBrands({ data }: { data: CloneWatchReportCard }) {
   );
 }
 
-/* ── 04 — why a lookalike works ──────────────────────────────────────────── */
+/** "the most-targeted" / "the 2nd most-targeted" / … from a 1-based rank. */
+function auRankPhrase(rank: number): string {
+  if (rank <= 1) return "the most-targeted";
+  const ord = rank === 2 ? "2nd" : rank === 3 ? "3rd" : `${rank}th`;
+  return `the ${ord} most-targeted`;
+}
+
+/* ── 04 — super-fund spotlight (falls back to anatomy if no fund appears) ─── */
+function SlideSuperFund({ data }: { data: CloneWatchReportCard }) {
+  const sf = data.superFund;
+  if (!sf) return <SlideAnatomy data={data} />;
+  const period = data.periodLabel.toUpperCase();
+  const name = prettyBrand(sf.brand);
+  return (
+    <section className="slide">
+      <div className="hdr">
+        <span className="l">THE SUPER-FUND ANGLE</span>
+        <span className="r">SUPER FUND · {period}</span>
+      </div>
+      <h2 className="h2b sf">A super fund was {auRankPhrase(sf.auRank)}<br />Australian brand.</h2>
+      <div className="spotstat">
+        <span className="spotnum">{sf.clones}</span>
+        <span className="spotname">{name}<span>lookalike domains · {data.periodLabel}</span></span>
+      </div>
+      <p className="spotlead">Retirement savings are a front-line target now — <b>not just your bank login.</b> One super-fund password can open a lifetime of savings.</p>
+      <div className="note">Lookalike domains impersonating {name}; {name} is the targeted party, not the source. Detected, not all confirmed malicious.</div>
+      <div className="foot rule2 bot">
+        <div className="reg">Ranked among Australian (.au) brands by lookalike domains detected in {data.periodLabel}.</div>
+        <Pg n={4} />
+      </div>
+    </section>
+  );
+}
+
+/* ── 04b — why a lookalike works (fallback when no super fund appears) ────── */
 function SlideAnatomy({ data }: { data: CloneWatchReportCard }) {
   const period = data.periodLabel.toUpperCase();
   return (
@@ -361,6 +395,19 @@ const BRAND_DISPLAY: Record<string, string> = {
   iinet: "iiNet",
   ebay: "eBay",
   youtube: "YouTube",
+  // AU super funds (for the spotlight name — proper casing, not capitalise-first)
+  hesta: "HESTA",
+  australiansuper: "AustralianSuper",
+  unisuper: "UniSuper",
+  hostplus: "Hostplus",
+  aware: "Aware Super",
+  cbus: "Cbus",
+  rest: "Rest Super",
+  caresuper: "CareSuper",
+  ngssuper: "NGS Super",
+  telstrasuper: "TelstraSuper",
+  visionsuper: "Vision Super",
+  spiritsuper: "Spirit Super",
 };
 
 /** "target.com.au" → "Target"; strips the TLD and applies a display-name

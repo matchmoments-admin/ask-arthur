@@ -113,4 +113,13 @@ export const reportCardCss = `
 
 /* card 6 - registrar names run longer than brand names: shrink + ellipsis */
 .rc-root .row .name.reg-name{font-size:26px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+
+/* card 4 - super-fund spotlight */
+.rc-root .h2b.sf{font-size:74px;margin:40px 0 0;}
+.rc-root .spotstat{display:flex;align-items:center;gap:40px;margin:46px 0 0;border-top:2px solid var(--ink);border-bottom:2px solid var(--ink);padding:36px 0;}
+.rc-root .spotnum{font-size:184px;line-height:0.78;font-weight:900;letter-spacing:-0.04em;color:var(--rust);}
+.rc-root .spotname{font-size:66px;font-weight:900;letter-spacing:-0.02em;color:var(--ink);line-height:1;}
+.rc-root .spotname span{display:block;margin-top:16px;font-family:var(--font-jbmono),monospace;font-size:23px;font-weight:500;letter-spacing:0;color:var(--sub);}
+.rc-root .spotlead{margin:40px 0 0;font-size:36px;line-height:1.3;color:var(--body);font-weight:500;max-width:920px;}
+.rc-root .spotlead b{color:var(--ink);font-weight:800;}
 `;

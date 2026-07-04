@@ -47,6 +47,38 @@ export interface RankedBrand {
   clones: number;
 }
 
+/**
+ * AU superannuation-fund brand domains on the clone watchlist. Used to surface
+ * the "super fund" editorial angle when a fund ranks among the most-impersonated
+ * AU brands (retirement savings as a front-line target). Keyed by full domain
+ * so the ambiguous ones ("rest", "aware") can't false-match. Extend as funds are
+ * added to the watchlist.
+ */
+const SUPER_FUND_DOMAINS: ReadonlySet<string> = new Set([
+  "hesta.com.au",
+  "australiansuper.com",
+  "aware.com.au",
+  "hostplus.com.au",
+  "unisuper.com.au",
+  "rest.com.au",
+  "cbus.com.au",
+  "caresuper.com.au",
+  "australianretirementtrust.com.au",
+  "spiritsuper.com.au",
+  "ngssuper.com.au",
+  "brightersuper.com.au",
+  "telstrasuper.com.au",
+  "visionsuper.com.au",
+]);
+
+export interface SuperFundSpotlight {
+  /** The impersonated fund's domain, e.g. "hesta.com.au". */
+  brand: string;
+  clones: number;
+  /** 1-based rank among AU brands (1 = most-targeted AU brand). */
+  auRank: number;
+}
+
 export interface MonthOverMonth {
   /** Whether a fair MoM comparison exists (both months fully tracked). When
    *  false, the card shows a baseline framing rather than a misleading delta. */
@@ -84,6 +116,10 @@ export interface CloneWatchReportCard {
    *  second fetch+aggregate over the prior window (no dependency on the durable
    *  clone_watch_report_summary snapshot — that lands in WS3). */
   mom: MonthOverMonth;
+  /** The highest-ranked AU super fund among the impersonated brands, if any —
+   *  powers the "super fund" spotlight slide. null when no watchlisted fund
+   *  appears this month (the slide falls back to the evergreen "why it works"). */
+  superFund: SuperFundSpotlight | null;
 }
 
 function monthWindow(month?: string): {
@@ -287,6 +323,22 @@ export async function getCloneWatchReportCard(
     .map(([brand, m]) => ({ brand, clones: m.detected }))
     .sort((a, b) => b.clones - a.clones || a.brand.localeCompare(b.brand));
 
+  // Super-fund spotlight: the highest-ranked AU brand that's a watchlisted super
+  // fund, with its rank among AU brands. Ranked-desc order means findIndex picks
+  // the most-targeted fund. null when no fund appears (slide falls back).
+  const auRanked = ranked.filter((r) => isAuBrand(r.brand));
+  const sfIdx = auRanked.findIndex((r) =>
+    SUPER_FUND_DOMAINS.has(r.brand.toLowerCase()),
+  );
+  const superFund: SuperFundSpotlight | null =
+    sfIdx >= 0
+      ? {
+          brand: auRanked[sfIdx].brand,
+          clones: auRanked[sfIdx].clones,
+          auRank: sfIdx + 1,
+        }
+      : null;
+
   return {
     periodMonth,
     periodLabel: label,
@@ -306,5 +358,6 @@ export async function getCloneWatchReportCard(
     topRegistrars,
     unknownRegistrarCount: unknownCount,
     mom,
+    superFund,
   };
 }
