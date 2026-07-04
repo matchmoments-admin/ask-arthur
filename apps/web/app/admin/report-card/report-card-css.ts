@@ -89,4 +89,28 @@ export const reportCardCss = `
 .rc-root .partner{margin:20px 0 0;font-size:25px;line-height:1.5;color:var(--sub);max-width:940px;}
 .rc-root .partner b{color:var(--ink);font-weight:700;}
 .rc-root .partner a{color:var(--rust);font-weight:700;text-decoration:none;}
+
+/* card 1 - hook now stands alone (KPIs moved to "what we did"), so it gets more air */
+.rc-root .hero.hero-lg{margin-top:150px;}
+
+/* card 2 - scale + month-on-month delta */
+.rc-root .momrow{display:flex;align-items:flex-end;gap:34px;margin-top:34px;}
+.rc-root .mombig{font-size:214px;line-height:0.82;font-weight:900;letter-spacing:-0.035em;color:var(--ink);}
+.rc-root .delta{font-family:var(--font-jbmono),monospace;font-size:46px;font-weight:700;line-height:1;padding:14px 24px;border:3px solid;margin-bottom:24px;white-space:nowrap;}
+.rc-root .delta.up{color:var(--rust);border-color:var(--rust);}
+.rc-root .delta.down{color:#2E7D5B;border-color:#2E7D5B;}
+.rc-root .delta.flat{color:var(--muted2);border-color:var(--line);}
+.rc-root .cmpline{margin:32px 0 0;font-size:34px;line-height:1.35;color:var(--body);font-weight:500;max-width:920px;}
+.rc-root .cmpline b{color:var(--ink);font-weight:800;}
+.rc-root .baseline{margin:38px 0 0;border-left:4px solid var(--orange);padding-left:26px;font-size:38px;line-height:1.3;color:var(--body);font-weight:500;max-width:880px;}
+.rc-root .baseline b{color:var(--ink);font-weight:800;}
+.rc-root .statstrip{margin-top:auto;display:flex;border-top:2px solid var(--ink);padding-top:32px;}
+.rc-root .statstrip .st{flex:1;padding:0 34px;border-left:1px solid rgba(12,36,64,0.18);}
+.rc-root .statstrip .st:first-child{padding-left:0;border-left:none;}
+.rc-root .statstrip .st .n{font-size:70px;font-weight:800;line-height:1;color:var(--ink);}
+.rc-root .statstrip .st .n.accent{color:var(--rust);}
+.rc-root .statstrip .st .l{margin-top:14px;font-size:24px;color:var(--sub);line-height:1.3;}
+
+/* card 6 - registrar names run longer than brand names: shrink + ellipsis */
+.rc-root .row .name.reg-name{font-size:26px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 `;

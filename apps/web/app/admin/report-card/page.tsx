@@ -10,8 +10,14 @@ import { reportCardCss } from "./report-card-css";
  * /admin/report-card - renders the monthly "Australian Clone Watch" LinkedIn
  * carousel from live data, in the "Modern LinkedIn monthly report" ledger style
  * (ported from the user's claude.ai/design project). Read-only, on-demand: NO
- * Inngest, NO cron, one SELECT per render. The Puppeteer export script hits
- * ?slide=N for each slide.
+ * Inngest, NO cron, two SELECTs per render (report month + prior month for the
+ * MoM delta). The Puppeteer export script hits ?slide=N for each slide.
+ *
+ * Super-hook-led 8-slide structure:
+ *   01 hook (the number)        05 global brands aimed at AU
+ *   02 scale + MoM delta        06 registrar accountability (aggregate)
+ *   03 top AU brands            07 what we did (reported / phishing / parked)
+ *   04 why a lookalike works    08 civic CTA + method link
  *
  * Query params:
  *   ?month=YYYY-MM   the report month (default: prior calendar month)
@@ -20,6 +26,12 @@ import { reportCardCss } from "./report-card-css";
  *
  * Rendered full-bleed via position:fixed so it escapes the /admin AdminShell
  * chrome (which has no transformed ancestor - verified) for clean screenshots.
+ *
+ * Framing guardrails baked in (per the honesty guardrails memory): "lookalike /
+ * copycat / suspected", never "confirmed clones"; Netcraft = reported for review,
+ * NOT taken down; registrars shown ONLY in aggregate (no single-registrar
+ * shaming); the MoM window is always stated, and a delta only shows once both
+ * months are fully tracked (see FIRST_FULL_MONTH in report-card-data.ts).
  */
 
 const archivo = Archivo({ subsets: ["latin"], weight: ["400", "500", "600", "700", "800", "900"], display: "swap", variable: "--font-archivo" });
@@ -27,7 +39,17 @@ const jbMono = JetBrains_Mono({ subsets: ["latin"], weight: ["400", "500", "700"
 
 export const dynamic = "force-dynamic";
 
-const SLIDE_COUNT = 3;
+const SLIDE_COUNT = 8;
+const TOT = String(SLIDE_COUNT).padStart(2, "0");
+
+/** "01 / 08" page marker in the footer rule. */
+function Pg({ n }: { n: number }) {
+  return (
+    <span className="page">
+      {String(n).padStart(2, "0")} <span className="tot">/ {TOT}</span>
+    </span>
+  );
+}
 
 export default async function ReportCardPage({
   searchParams,
@@ -64,12 +86,19 @@ export default async function ReportCardPage({
 }
 
 function Slide({ n, data }: { n: number; data: CloneWatchReportCard }) {
-  if (n === 1) return <SlideHook data={data} />;
-  if (n === 2) return <SlideData data={data} />;
-  return <SlideTakeaway data={data} />;
+  switch (n) {
+    case 1: return <SlideHook data={data} />;
+    case 2: return <SlideScale data={data} />;
+    case 3: return <SlideAuBrands data={data} />;
+    case 4: return <SlideAnatomy data={data} />;
+    case 5: return <SlideGlobal data={data} />;
+    case 6: return <SlideRegistrars data={data} />;
+    case 7: return <SlideActed data={data} />;
+    default: return <SlideClose data={data} />;
+  }
 }
 
-/* ── Card 1 — hook ───────────────────────────────────────────────────────── */
+/* ── 01 — hook (the number) ──────────────────────────────────────────────── */
 function SlideHook({ data }: { data: CloneWatchReportCard }) {
   const period = data.periodLabel.toUpperCase();
   return (
@@ -78,7 +107,7 @@ function SlideHook({ data }: { data: CloneWatchReportCard }) {
         <span className="l">CLONE WATCH</span>
         <span className="r">ASK ARTHUR · {period}</span>
       </div>
-      <div className="hero">
+      <div className="hero hero-lg">
         <div className="eyebrow">LOOKALIKE DOMAINS DETECTED</div>
         <div className="heronum">{data.total}</div>
         <div className="herobar" />
@@ -86,26 +115,69 @@ function SlideHook({ data }: { data: CloneWatchReportCard }) {
           newly-registered <b>copycat domains</b> built to mimic <b>{data.brands} brands</b> Australians use every day — in a single month.
         </p>
       </div>
-      <div className="kpis">
-        <div className="kpi accent"><div className="n">{data.kpis.reportedToNetcraft}</div><div className="l">reported to Netcraft for takedown review</div></div>
-        <div className="kpi"><div className="n">{data.kpis.likelyPhishing}</div><div className="l">flagged as likely phishing</div></div>
-        <div className="kpi"><div className="n">{data.kpis.parkedForSale}</div><div className="l">parked / squatting domains</div></div>
-      </div>
       <div className="note">Lookalike domain = a freshly-registered address made to resemble a real brand. Detected, not all confirmed malicious.</div>
       <div className="foot">
         <div className="brandline"><b>askarthur.au</b> <span>— free scam &amp; clone checker</span></div>
-        <span className="page">01 <span className="tot">/ 03</span></span>
+        <Pg n={1} />
       </div>
     </section>
   );
 }
 
-/* ── Card 2 — data ───────────────────────────────────────────────────────── */
-function SlideData({ data }: { data: CloneWatchReportCard }) {
+/* ── 02 — scale + month-on-month delta ───────────────────────────────────── */
+function SlideScale({ data }: { data: CloneWatchReportCard }) {
+  const period = data.periodLabel.toUpperCase();
+  const { mom } = data;
+  const perBrand = Math.round(data.total / Math.max(data.brands, 1));
+  const perDay = Math.round(data.total / 30);
+  const dir = mom.totalDelta > 0 ? "up" : mom.totalDelta < 0 ? "down" : "flat";
+  const arrow = mom.totalDelta > 0 ? "▲" : mom.totalDelta < 0 ? "▼" : "—";
+  return (
+    <section className="slide">
+      <div className="hdr">
+        <span className="l">THE SCALE</span>
+        <span className="r">{period}</span>
+      </div>
+      <h2 className="h2" style={{ marginTop: 34 }}>One month of copycats</h2>
+      <div className="subhead">Newly-registered lookalike domains, {data.periodLabel}.</div>
+
+      {mom.available ? (
+        <>
+          <div className="momrow">
+            <span className="mombig">{data.total}</span>
+            <span className={`delta ${dir}`}>{arrow} {mom.totalPct != null ? `${Math.abs(mom.totalPct)}%` : ""}</span>
+          </div>
+          <p className="cmpline">
+            <b>{mom.priorTotal}</b> in {mom.priorLabel} → <b>{data.total}</b> in {data.periodLabel}
+            {mom.brandsDelta !== 0 && <> · {mom.brandsDelta > 0 ? "+" : ""}{mom.brandsDelta} brands targeted</>}.
+          </p>
+        </>
+      ) : (
+        <>
+          <div className="momrow"><span className="mombig">{data.total}</span></div>
+          <p className="baseline">
+            {data.periodLabel} is our <b>first full month</b> of tracking — the baseline every future Clone Watch is measured against.
+          </p>
+        </>
+      )}
+
+      <div className="statstrip">
+        <div className="st"><div className="n">{data.brands}</div><div className="l">Australian brands targeted</div></div>
+        <div className="st"><div className="n">{perBrand}</div><div className="l">copycats per brand (avg)</div></div>
+        <div className="st"><div className="n accent">{perDay}</div><div className="l">new lookalikes a day</div></div>
+      </div>
+      <div className="foot">
+        <div className="brandline"><b>askarthur.au</b> <span>— free scam &amp; clone checker</span></div>
+        <Pg n={2} />
+      </div>
+    </section>
+  );
+}
+
+/* ── 03 — top AU brands ──────────────────────────────────────────────────── */
+function SlideAuBrands({ data }: { data: CloneWatchReportCard }) {
   const max = data.topAuBrands[0]?.clones ?? 1;
   const period = data.periodLabel.toUpperCase();
-  const globals = data.globalBrands.map((b) => `${prettyBrand(b.brand)} (${b.clones})`).join(", ");
-  const regs = data.topRegistrars.slice(0, 3).map((r) => `${r.registrar} ${r.clones}`).join(" · ");
   return (
     <section className="slide">
       <div className="hdr">
@@ -123,22 +195,21 @@ function SlideData({ data }: { data: CloneWatchReportCard }) {
           </div>
         ))}
       </div>
-      {globals && <p className="globals"><b>Global brands, too:</b> {globals} — all aimed at Australians.</p>}
       <div className="foot rule2 bot">
-        <div className="reg">Registrars: {regs}{data.unknownRegistrarCount > 0 ? ` · ${data.unknownRegistrarCount} WHOIS-hidden` : ""}</div>
-        <span className="page">02 <span className="tot">/ 03</span></span>
+        <div className="reg">Ranked by lookalike domains detected in {data.periodLabel}. Suspected impersonation — detection does not confirm intent.</div>
+        <Pg n={3} />
       </div>
     </section>
   );
 }
 
-/* ── Card 3 — takeaway ───────────────────────────────────────────────────── */
-function SlideTakeaway({ data }: { data: CloneWatchReportCard }) {
+/* ── 04 — why a lookalike works ──────────────────────────────────────────── */
+function SlideAnatomy({ data }: { data: CloneWatchReportCard }) {
   const period = data.periodLabel.toUpperCase();
   return (
     <section className="slide">
       <div className="hdr">
-        <span className="l">WHAT IT MEANS</span>
+        <span className="l">WHY IT WORKS</span>
         <span className="r">ASK ARTHUR · {period}</span>
       </div>
       <h2 className="h2b">The address bar is the front line.</h2>
@@ -147,16 +218,131 @@ function SlideTakeaway({ data }: { data: CloneWatchReportCard }) {
         <div className="step"><span className="sn">02</span><p>The message can look perfect. <b>The web address is where it slips.</b></p></div>
         <div className="step"><span className="sn">03</span><p>Before you log in or pay: <b>check the link, not just the logo.</b></p></div>
       </div>
-      <div className="know">
+      <div className="foot rule2" style={{ marginTop: "auto" }}>
+        <span className="mono" style={{ fontSize: 22, color: "var(--muted)" }}>Anatomy of a lookalike domain</span>
+        <Pg n={4} />
+      </div>
+    </section>
+  );
+}
+
+/* ── 05 — global brands aimed at Australians ─────────────────────────────── */
+function SlideGlobal({ data }: { data: CloneWatchReportCard }) {
+  const period = data.periodLabel.toUpperCase();
+  const max = data.globalBrands[0]?.clones ?? 1;
+  const hasGlobals = data.globalBrands.length > 0;
+  return (
+    <section className="slide">
+      <div className="hdr">
+        <span className="l">NOT JUST LOCAL</span>
+        <span className="r">GLOBAL BRANDS · {period}</span>
+      </div>
+      <h2 className="h2">Global brands, aimed at Australians</h2>
+      <div className="subhead">International brands cloned to target AU users, {data.periodLabel}.</div>
+      {hasGlobals ? (
+        <div className="rows">
+          {data.globalBrands.map((b, i) => (
+            <div className="row" key={b.brand}>
+              <div className="name">{prettyBrand(b.brand)}</div>
+              <div className="track"><div className={`fill${i === 0 ? " accent" : ""}`} style={{ width: `${((b.clones / max) * 100).toFixed(1)}%` }} /></div>
+              <div className={`val${i === 0 ? " accent" : ""}`}>{b.clones}</div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="globals" style={{ marginTop: 40 }}>No international-brand lookalikes surfaced this month — the copycats stayed local.</p>
+      )}
+      <p className="globals">Registered abroad, pointed at Australia — a lookalike doesn&apos;t care where a brand is based.</p>
+      <div className="foot rule2 bot">
+        <div className="reg">Global = brand on a non-AU TLD. Detected {data.periodLabel}; suspected impersonation.</div>
+        <Pg n={5} />
+      </div>
+    </section>
+  );
+}
+
+/* ── 06 — registrar accountability (aggregate only) ──────────────────────── */
+function SlideRegistrars({ data }: { data: CloneWatchReportCard }) {
+  const period = data.periodLabel.toUpperCase();
+  const regs = data.topRegistrars.slice(0, 6);
+  const max = regs[0]?.clones ?? 1;
+  return (
+    <section className="slide">
+      <div className="hdr">
+        <span className="l">WHERE THEY&apos;RE REGISTERED</span>
+        <span className="r">IN AGGREGATE · {period}</span>
+      </div>
+      <h2 className="h2">Who the clones register through</h2>
+      <div className="subhead">Domain registrars by lookalike count — aggregate, not a callout.</div>
+      <div className="rows">
+        {regs.map((r, i) => (
+          <div className="row" key={r.registrar}>
+            <div className="name reg-name">{r.registrar}</div>
+            <div className="track"><div className={`fill${i === 0 ? " accent" : ""}`} style={{ width: `${((r.clones / max) * 100).toFixed(1)}%` }} /></div>
+            <div className={`val${i === 0 ? " accent" : ""}`}>{r.clones}</div>
+          </div>
+        ))}
+      </div>
+      <div className="know" style={{ marginTop: 36 }}>
+        <div className="lab">THE ANONYMITY GAP</div>
+        <div className="txt"><b style={{ color: "var(--ink)" }}>{data.unknownRegistrarCount}</b> of {data.total} lookalike domains hide their registrar behind WHOIS privacy — no name attached to the registration at all.</div>
+      </div>
+      <div className="foot rule2 bot">
+        <div className="reg">Registrars named in aggregate for accountability, not to single any one out.</div>
+        <Pg n={6} />
+      </div>
+    </section>
+  );
+}
+
+/* ── 07 — what we did (reported / phishing / parked) ─────────────────────── */
+function SlideActed({ data }: { data: CloneWatchReportCard }) {
+  const period = data.periodLabel.toUpperCase();
+  return (
+    <section className="slide">
+      <div className="hdr">
+        <span className="l">WHAT WE DID</span>
+        <span className="r">ASK ARTHUR · {period}</span>
+      </div>
+      <h2 className="h2b">Detected — then acted.</h2>
+      <div className="kpis" style={{ marginTop: 40 }}>
+        <div className="kpi accent"><div className="n">{data.kpis.reportedToNetcraft}</div><div className="l">reported to Netcraft for takedown review</div></div>
+        <div className="kpi"><div className="n">{data.kpis.likelyPhishing}</div><div className="l">flagged as likely phishing</div></div>
+        <div className="kpi"><div className="n">{data.kpis.parkedForSale}</div><div className="l">parked / squatting domains</div></div>
+      </div>
+      <div className="know" style={{ marginTop: 56 }}>
         <div className="lab">HOW WE KNOW</div>
         <div className="txt">We sweep newly-registered domains against ~50 major Australian brands daily, enrich with WHOIS + certificate data, and review by hand — each with a public evidence page on urlscan.io.</div>
+      </div>
+      <div className="note">Reported to Netcraft for review is a takedown <b>request</b>, not a confirmed takedown.</div>
+      <div className="foot rule2 bot">
+        <div className="reg">Full URL-level evidence list available to affected brands on request.</div>
+        <Pg n={7} />
+      </div>
+    </section>
+  );
+}
+
+/* ── 08 — civic CTA + method link ────────────────────────────────────────── */
+function SlideClose({ data }: { data: CloneWatchReportCard }) {
+  const period = data.periodLabel.toUpperCase();
+  return (
+    <section className="slide">
+      <div className="hdr">
+        <span className="l">CHECK BEFORE YOU CLICK</span>
+        <span className="r">ASK ARTHUR · {period}</span>
+      </div>
+      <h2 className="h2b">Check the link,<br />not just the logo.</h2>
+      <div className="know">
+        <div className="lab">HOW WE KNOW — AND HOW YOU CAN CHECK</div>
+        <div className="txt">Our method, sources and definitions are public at <b style={{ color: "var(--rust)" }}>askarthur.au/clone-watch</b> — every reported domain links to independent evidence on urlscan.io.</div>
       </div>
       <div className="close">
         <div className="cta">Check any link at<br /><a href="https://askarthur.au">askarthur.au</a></div>
         <p className="partner">Targeted brand? We share the full clone list with affected brands — partner with us at <a href="https://askarthur.au/contact">askarthur.au/contact</a></p>
         <div className="foot rule2" style={{ marginTop: 28 }}>
-          <span className="mono" style={{ fontSize: 22, color: "var(--muted)" }}>Australian Clone Watch · published monthly</span>
-          <span className="page">03 <span className="tot">/ 03</span></span>
+          <span className="mono" style={{ fontSize: 22, color: "var(--muted)" }}>Australian Clone Watch · {data.periodLabel} · published monthly</span>
+          <Pg n={8} />
         </div>
       </div>
     </section>
@@ -164,7 +350,7 @@ function SlideTakeaway({ data }: { data: CloneWatchReportCard }) {
 }
 
 /** Correct display casing for brands whose name isn't a naive capitalise-first
- *  (only needs the ones that can surface in the global footnote). */
+ *  (covers both the AU ranking and the global footnote). */
 const BRAND_DISPLAY: Record<string, string> = {
   whatsapp: "WhatsApp",
   paypal: "PayPal",

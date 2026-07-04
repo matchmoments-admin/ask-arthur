@@ -32,9 +32,34 @@ import { rollupRegistrars } from "@/lib/clone-watch/registrar-canonical";
 const CLONE_SOURCE = "nrd";
 const FETCH_LIMIT = 5000;
 
+/**
+ * First month with a FULL month of clone-watch coverage. Clone Watch launched
+ * 2026-05-24, so May 2026 holds only ~1 week of detections — comparing a full
+ * month against that launch stub would overstate month-on-month growth. We only
+ * surface a MoM delta when BOTH the report month and its prior month are at or
+ * after this threshold, so the first honest comparison is July-2026-vs-June-2026.
+ * Editions before that render a "first full month tracked" baseline instead.
+ */
+const FIRST_FULL_MONTH = "2026-06"; // YYYY-MM
+
 export interface RankedBrand {
   brand: string;
   clones: number;
+}
+
+export interface MonthOverMonth {
+  /** Whether a fair MoM comparison exists (both months fully tracked). When
+   *  false, the card shows a baseline framing rather than a misleading delta. */
+  available: boolean;
+  /** Human label for the prior month, e.g. "May 2026". */
+  priorLabel: string;
+  priorTotal: number;
+  priorBrands: number;
+  /** current.total - prior.total (can be negative). */
+  totalDelta: number;
+  /** Rounded percentage change vs prior; null when prior total is 0. */
+  totalPct: number | null;
+  brandsDelta: number;
 }
 
 export interface CloneWatchReportCard {
@@ -55,6 +80,10 @@ export interface CloneWatchReportCard {
   /** Rows whose registrar is redacted/unknown - reported for honesty, excluded
    *  from the leaderboard (rendered as a "N WHOIS-hidden" footnote). */
   unknownRegistrarCount: number;
+  /** Live month-on-month comparison vs the prior calendar month. Computed by a
+   *  second fetch+aggregate over the prior window (no dependency on the durable
+   *  clone_watch_report_summary snapshot — that lands in WS3). */
+  mom: MonthOverMonth;
 }
 
 function monthWindow(month?: string): {
@@ -122,17 +151,19 @@ function sumClassification(
   return n;
 }
 
-/**
- * Build the monthly report-card figures for the given month (default: prior
- * calendar month). Reconciles exactly to the internal digest.
- */
-export async function getCloneWatchReportCard(
-  month?: string,
-): Promise<CloneWatchReportCard> {
-  const { startIso, endIso, label, periodMonth } = monthWindow(month);
-  const sb = createServiceClient();
-  if (!sb) throw new Error("service client unavailable");
+type ServiceClient = NonNullable<ReturnType<typeof createServiceClient>>;
 
+/**
+ * Fetch + FP-filter + aggregate one calendar-month window into the digest's
+ * per-brand metric map. Extracted so the same reconciled path serves both the
+ * report month and its prior month (for the MoM delta).
+ */
+async function fetchMonthByBrand(
+  sb: ServiceClient,
+  startIso: string,
+  endIso: string,
+  periodMonth: string,
+): Promise<Map<string, CloneBrandMetrics>> {
   const { data, error } = await sb
     .from("shopfront_clone_alerts")
     .select(
@@ -157,8 +188,57 @@ export async function getCloneWatchReportCard(
     });
   }
   const rows = raw.filter((r) => !isFpBrand(r.inferred_target_domain));
+  return aggregateClonesByDomain(rows);
+}
 
-  const byBrand = aggregateClonesByDomain(rows);
+/** Sum detected clones + distinct brand count across a per-brand metric map. */
+function totalsOf(byBrand: Map<string, CloneBrandMetrics>): {
+  total: number;
+  brands: number;
+} {
+  let total = 0;
+  for (const m of byBrand.values()) total += m.detected;
+  return { total, brands: byBrand.size };
+}
+
+/** The prior calendar month's window + labels, derived from a month start ISO. */
+function priorWindow(startIso: string): {
+  startIso: string;
+  endIso: string;
+  periodMonth: string;
+  label: string;
+} {
+  const cur = new Date(startIso);
+  const start = new Date(
+    Date.UTC(cur.getUTCFullYear(), cur.getUTCMonth() - 1, 1),
+  );
+  return {
+    startIso: start.toISOString(),
+    endIso: startIso, // the prior month ends exactly where the current begins
+    periodMonth: start.toISOString().slice(0, 10),
+    label: start.toLocaleDateString("en-AU", {
+      month: "long",
+      year: "numeric",
+      timeZone: "UTC",
+    }),
+  };
+}
+
+/**
+ * Build the monthly report-card figures for the given month (default: prior
+ * calendar month). Reconciles exactly to the internal digest.
+ *
+ * Two reads per render (report month + prior month for the MoM delta) — admin
+ * on-demand surface, force-dynamic, negligible traffic.
+ */
+export async function getCloneWatchReportCard(
+  month?: string,
+): Promise<CloneWatchReportCard> {
+  const { startIso, endIso, label, periodMonth } = monthWindow(month);
+  const sb = createServiceClient();
+  if (!sb) throw new Error("service client unavailable");
+
+  const byBrand = await fetchMonthByBrand(sb, startIso, endIso, periodMonth);
 
   // Reporting KPIs from the shared aggregate (deduped by candidate_domain).
   let total = 0;
@@ -167,6 +247,34 @@ export async function getCloneWatchReportCard(
     total += m.detected;
     reportedToNetcraft += m.netcraftReported;
   }
+
+  // Live month-on-month delta: a second reconciled fetch over the prior window.
+  const prevWin = priorWindow(startIso);
+  const priorByBrand = await fetchMonthByBrand(
+    sb,
+    prevWin.startIso,
+    prevWin.endIso,
+    prevWin.periodMonth,
+  );
+  const prior = totalsOf(priorByBrand);
+  // Only a fair comparison when BOTH months are fully tracked (see
+  // FIRST_FULL_MONTH); otherwise the card renders a baseline, not a delta.
+  const momAvailable =
+    periodMonth.slice(0, 7) >= FIRST_FULL_MONTH &&
+    prevWin.periodMonth.slice(0, 7) >= FIRST_FULL_MONTH &&
+    prior.total > 0;
+  const mom: MonthOverMonth = {
+    available: momAvailable,
+    priorLabel: prevWin.label,
+    priorTotal: prior.total,
+    priorBrands: prior.brands,
+    totalDelta: total - prior.total,
+    totalPct:
+      prior.total > 0
+        ? Math.round(((total - prior.total) / prior.total) * 100)
+        : null,
+    brandsDelta: byBrand.size - prior.brands,
+  };
 
   // Registrar leaderboard: reuse the digest's rollup (single source of truth),
   // then canonicalise + drop the Unknown bucket. buildRegistrarRollup already
@@ -197,5 +305,6 @@ export async function getCloneWatchReportCard(
       .slice(0, 5),
     topRegistrars,
     unknownRegistrarCount: unknownCount,
+    mom,
   };
 }

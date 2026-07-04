@@ -24,7 +24,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import puppeteer from "puppeteer";
 
-const SLIDE_COUNT = 3;
+// Keep in sync with SLIDE_COUNT in app/admin/report-card/page.tsx.
+const SLIDE_COUNT = 8;
 const WIDTH = 1080;
 const HEIGHT = 1350;
 

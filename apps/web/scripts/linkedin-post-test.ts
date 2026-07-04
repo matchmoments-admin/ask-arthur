@@ -65,9 +65,23 @@ async function main() {
   console.log("\n--publish set: creating the PUBLIC post on the page...");
   const post = await createDocumentPost({ documentUrn, title, commentary, accessToken: token });
   console.log(`  posted -> ${post}`);
-  console.log("  adding first comment (link)...");
-  await addComment({ postUrn: post, text: comment, accessToken: token });
   console.log(`\n✓ PUBLISHED: ${postUrl(post)}`);
+
+  // First comment (the links). The Community Management API DEVELOPMENT TIER
+  // grants post-create but NOT comment-create (403 ACCESS_DENIED). A comment
+  // failure must NOT fail the run: the post is already live above, so exiting
+  // non-zero here would make the operator (or the future auto-post cron) retry
+  // and DOUBLE-POST. Surface the text to paste by hand instead.
+  console.log("\n  adding first comment (link)...");
+  try {
+    await addComment({ postUrn: post, text: comment, accessToken: token });
+    console.log("  ✓ first comment added");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.log(`  ⚠ could not add first comment automatically: ${msg}`);
+    console.log("  → add this as the FIRST COMMENT manually:\n");
+    console.log(`      ${comment}\n`);
+  }
 }
 
 main().catch((err) => {
