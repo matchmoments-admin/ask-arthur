@@ -16,6 +16,7 @@ import {
   Building2,
   CalendarClock,
   Loader2,
+  MessageSquare,
   Search,
   ShieldQuestion,
   Store,
@@ -107,6 +108,26 @@ function reputationLabel(
       return "Treated with caution by the site-reputation feed";
     case "safe":
       return "No reputation flags on the site-reputation feed";
+  }
+}
+
+function reviewsLabel(reviews: ShopCheckResult["reviews"]): string {
+  if (!reviews) return "On-page reviews weren't available to check";
+  const count = reviews.totalReviews;
+  const avg = reviews.averageRating;
+  const stats =
+    count !== null && avg !== null
+      ? `${count.toLocaleString()} reviews at ${avg}★`
+      : count !== null
+        ? `${count.toLocaleString()} reviews`
+        : "the on-page reviews";
+  switch (reviews.verdict) {
+    case "manipulated":
+      return `${stats} — the rating pattern looks unusual (e.g. an implausibly thin low-star tail), a common sign of seeded reviews`;
+    case "suspicious":
+      return `${stats} — some aspects of the rating pattern are worth a second look`;
+    case "clean":
+      return `${stats} — the review pattern looks normal`;
   }
 }
 
@@ -298,6 +319,23 @@ export default function DeepShopCheckTray({
                 </p>
               </div>
             </li>
+            {result.reviews && (
+              <li className="flex gap-2.5">
+                <MessageSquare
+                  size={16}
+                  className="text-gov-slate shrink-0 mt-0.5"
+                  aria-hidden="true"
+                />
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gov-slate">
+                    Customer reviews
+                  </p>
+                  <p className="text-sm text-deep-navy leading-snug">
+                    {reviewsLabel(result.reviews)}
+                  </p>
+                </div>
+              </li>
+            )}
           </ul>
 
           <p className="flex gap-1.5 text-xs text-gov-slate leading-relaxed pt-1">

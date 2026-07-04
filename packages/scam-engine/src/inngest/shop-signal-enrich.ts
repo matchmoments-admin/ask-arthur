@@ -6,12 +6,12 @@
 // composite score, and writes the result back onto the shop_checks row the
 // client is polling via GET /api/shop-check/[id].
 //
-// Expected duration: ~5–50s (page fetch ~6s — up to ~16s when the ABN is
+// Expected duration: ~5–60s (page fetch ~6s — up to ~16s when the ABN is
 // not on the homepage and verifyShopAbnDeep walks /about-/terms-style
-// candidate pages — + WHOIS 5s + ABR 10s + APIVoid 10s, mostly
-// sequential). Well under the 5-min Inngest budget and the 10-min
-// pg-stuck-query-watchdog horizon — the only DB work is three small RPC
-// calls.
+// candidate pages — + WHOIS 5s + ABR 10s + APIVoid 10s + reviews ~6s page
+// fetch plus bounded review-app pagination, mostly sequential). Well under
+// the 5-min Inngest budget and the 10-min pg-stuck-query-watchdog horizon —
+// the only DB work is three small RPC calls.
 //
 // Every enrichment adapter degrades gracefully (null/empty, never throws),
 // so a "failed" run is almost always a successful `complete` with partial
@@ -34,6 +34,7 @@ import { featureFlags } from "@askarthur/utils/feature-flags";
 import type {
   ShopCheckBand,
   ShopCheckEnrichment,
+  ShopCheckReviews,
   Verdict,
 } from "@askarthur/types";
 import {
@@ -49,6 +50,12 @@ import {
 import { getSiteTrustworthiness } from "../providers/apivoid";
 import { computeCompositeScore, bandToVerdict } from "../shop-check-score";
 import { extractDomain } from "../url-normalize";
+import { fetchShopPage } from "../fetch-shop-page";
+import { detectAndFetchReviews } from "../providers/reviews";
+import {
+  scoreReviewDistribution,
+  fuseReviewsVerdict,
+} from "../reviews-signal";
 
 /** Merge a deepCheck patch into shop_checks.signal. Throws on RPC error. */
 async function writeDeepCheck(
@@ -145,6 +152,44 @@ export async function runShopSignalEnrich(
     return { attempted: true as const, result: outcome, skipReason: null };
   });
 
+  // Reviews — on-page review-authenticity signal. Flag-gated; when off, or on
+  // any graceful skip (no supported app, endpoint unavailable), this returns a
+  // null verdict that contributes 0 to the composite score. Fetches the page
+  // HTML afresh (a second ~6s fetch on top of verify-abn's) rather than
+  // threading it across a step boundary — simplest, and still far inside the
+  // 3m budget. PR 4 adds the Claude language pass; for now `fakeLikelihood` is
+  // null and the fusion is statistics-only.
+  const reviews = await step.run("reviews", async () => {
+    if (!featureFlags.shopSignalReviews) {
+      return { verdict: null, data: null } as {
+        verdict: "clean" | "suspicious" | "manipulated" | null;
+        data: ShopCheckReviews | null;
+      };
+    }
+    const page = await fetchShopPage(url);
+    if (!page.html) return { verdict: null, data: null };
+    const corpus = await detectAndFetchReviews(page.html);
+    if ("ok" in corpus) return { verdict: null, data: null };
+
+    const { statBand, statReasons } = scoreReviewDistribution(
+      corpus,
+      domainAge.ageDays,
+    );
+    const verdict = fuseReviewsVerdict(statBand, null);
+    const data: ShopCheckReviews = {
+      app: corpus.app,
+      verdict,
+      totalReviews: corpus.totalReviews,
+      averageRating: corpus.averageRating,
+      distribution: corpus.distribution,
+      verifiedBuyerRatio: corpus.verifiedBuyerRatio,
+      fakeLikelihood: null,
+      reasons: statReasons,
+      fetchedFrom: corpus.fetchedFrom,
+    };
+    return { verdict, data };
+  });
+
   // Cost telemetry — best-effort. feature='shop_signal' so cost-daily-check
   // aggregates it into the SHOP_SIGNAL_CAP_USD brake. WHOIS + ABR are
   // free-tier — no cost rows for them.
@@ -185,6 +230,25 @@ export async function runShopSignalEnrich(
           metadata: { source: "deep-check", reason: apivoid.skipReason },
         });
       }
+      // Reviews fetch is free-tier (public review-app endpoints); still log a
+      // $0 row so volume/ceiling is visible in the cost dashboard. The paid
+      // Claude pass (PR 4) will add its own cost to this same feature tag.
+      if (reviews.data) {
+        await supabase.from("cost_telemetry").insert({
+          feature: "shop_signal_reviews",
+          provider: reviews.data.app,
+          operation: "reviews-fetch",
+          units: 1,
+          unit_cost_usd: 0,
+          estimated_cost_usd: 0,
+          request_id: shopCheckId,
+          metadata: {
+            source: "deep-check",
+            app: reviews.data.app,
+            verdict: reviews.data.verdict,
+          },
+        });
+      }
     } catch (err) {
       logger.warn("shop-signal-enrich: log-cost failed", {
         shopCheckId,
@@ -199,14 +263,14 @@ export async function runShopSignalEnrich(
     abnStatus: abn.status,
     apivoidVerdict: paidVerdict?.verdict ?? null,
     commerceFlagCount: commerceFlags.length,
-    // Wired in PR 3 (the `reviews` step); null here keeps the score identical.
-    reviewsVerdict: null,
+    reviewsVerdict: reviews.verdict,
   });
 
   const enrichment: ShopCheckEnrichment = {
     status: "complete",
     domainAge,
     abn,
+    ...(reviews.data && { reviews: reviews.data }),
     ...(paidVerdict && { paidProviderVerdict: paidVerdict }),
     compositeScore: score,
     band,
