@@ -27,6 +27,12 @@ interface AttributedRow {
   week: string;
   conversions: number;
 }
+interface ContentPostRow {
+  landing_path: string;
+  readers: number;
+  readers_who_scanned: number;
+  readers_who_contacted: number;
+}
 
 function thirtyDaysAgoIsoDate(): string {
   return new Date(Date.now() - 30 * 86400000).toISOString().split("T")[0];
@@ -48,16 +54,18 @@ export default async function AnalyticsPage() {
   let attributed: AttributedRow[] = [];
   let contentReaders = 0;
   let readersWhoScanned = 0;
+  let contentPosts: ContentPostRow[] = [];
 
   if (supabase) {
     const since = thirtyDaysAgoIsoDate();
 
-    const [ds, sbt, nsr, uac, funnel] = await Promise.all([
+    const [ds, sbt, nsr, uac, funnel, cpf] = await Promise.all([
       supabase.from("daily_scans").select("day, scans").gte("day", since).order("day", { ascending: false }),
       supabase.from("scans_by_type").select("day, input_type, scans").gte("day", since),
       supabase.from("no_scan_visitor_rate").select("day, no_scan_visitors, total_visitors, no_scan_pct").gte("day", since).order("day", { ascending: false }),
       supabase.from("utm_attributed_conversions").select("event_type, source, medium, campaign, week, conversions").order("week", { ascending: false }).limit(200),
       supabase.from("blog_to_scan_funnel").select("content_readers, readers_who_scanned").single(),
+      supabase.from("content_post_funnel").select("landing_path, readers, readers_who_scanned, readers_who_contacted").limit(50),
     ]);
 
     dailyScans = (ds.data ?? []).map((r) => ({ day: r.day as string, scans: Number(r.scans) }));
@@ -82,6 +90,12 @@ export default async function AnalyticsPage() {
     }));
     contentReaders = Number(funnel.data?.content_readers ?? 0);
     readersWhoScanned = Number(funnel.data?.readers_who_scanned ?? 0);
+    contentPosts = (cpf.data ?? []).map((r) => ({
+      landing_path: r.landing_path as string,
+      readers: Number(r.readers),
+      readers_who_scanned: Number(r.readers_who_scanned),
+      readers_who_contacted: Number(r.readers_who_contacted),
+    }));
   }
 
   // --- Derived headline metrics (last 7 days) --------------------------------
@@ -124,6 +138,7 @@ export default async function AnalyticsPage() {
         b2bLeads7={b2bLeads7}
         contentReaders={contentReaders}
         readersWhoScanned={readersWhoScanned}
+        contentPosts={contentPosts}
         dailyScans={dailyScans}
         scansByType={scansByType}
         noScanRate={noScanRate}
