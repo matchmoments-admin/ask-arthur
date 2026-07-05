@@ -1,5 +1,8 @@
 import { createServiceClient } from "@askarthur/supabase/server";
-import type { CloneWatchReportCard } from "@/lib/clone-watch/report-card-data";
+import type {
+  CloneWatchReportCard,
+  CloneWatchTrendRows,
+} from "@/lib/clone-watch/report-card-data";
 
 /**
  * Shared writer/reader for clone_watch_report_summary (v189) — the single column
@@ -48,6 +51,37 @@ export async function upsertSummary(
     .from("clone_watch_report_summary")
     .upsert(summaryRow(card, publishedPostUrn), { onConflict: "period_month" });
   if (error) throw new Error(`summary upsert failed: ${error.message}`);
+}
+
+/**
+ * Persist the FULL per-brand + per-registrar trend rows for a month (v193).
+ * Delete-then-insert so a re-snapshot/backfill is idempotent. Small row counts
+ * (a few hundred/month) — not a hot table, no chunking needed.
+ */
+export async function writeTrendRows(
+  sb: ServiceClient,
+  rows: CloneWatchTrendRows,
+): Promise<void> {
+  const pm = rows.periodMonth;
+
+  await sb.from("clone_watch_monthly_brand_stats").delete().eq("period_month", pm);
+  if (rows.brandRows.length > 0) {
+    const { error } = await sb
+      .from("clone_watch_monthly_brand_stats")
+      .insert(rows.brandRows.map((r) => ({ period_month: pm, ...r })));
+    if (error) throw new Error(`brand trend insert failed: ${error.message}`);
+  }
+
+  await sb
+    .from("clone_watch_monthly_registrar_stats")
+    .delete()
+    .eq("period_month", pm);
+  if (rows.registrarRows.length > 0) {
+    const { error } = await sb
+      .from("clone_watch_monthly_registrar_stats")
+      .insert(rows.registrarRows.map((r) => ({ period_month: pm, ...r })));
+    if (error) throw new Error(`registrar trend insert failed: ${error.message}`);
+  }
 }
 
 /**

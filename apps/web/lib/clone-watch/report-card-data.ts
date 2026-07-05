@@ -230,6 +230,60 @@ async function fetchMonthByBrand(
   return aggregateClonesByDomain(rows);
 }
 
+export interface BrandTrendRow {
+  brand: string;
+  is_au: boolean;
+  clones: number;
+  reported_to_netcraft: number;
+  likely_phishing: number;
+  parked: number;
+}
+export interface RegistrarTrendRow {
+  registrar: string;
+  clones: number;
+}
+export interface CloneWatchTrendRows {
+  periodMonth: string; // "YYYY-MM-01"
+  brandRows: BrandTrendRow[];
+  registrarRows: RegistrarTrendRow[];
+}
+
+/**
+ * Full per-brand + per-registrar rows for a month (NOT just the top-N the
+ * report card keeps). Reuses the exact same reconciled aggregation as
+ * getCloneWatchReportCard, so trend rows sum back to the summary card. Written
+ * to the v193 trend tables by the monthly snapshot cron.
+ */
+export async function getCloneWatchTrendRows(
+  month?: string,
+): Promise<CloneWatchTrendRows> {
+  const { startIso, endIso, periodMonth } = monthWindow(month);
+  const sb = createServiceClient();
+  if (!sb) throw new Error("service client unavailable");
+
+  const byBrand = await fetchMonthByBrand(sb, startIso, endIso, periodMonth);
+
+  const brandRows: BrandTrendRow[] = [...byBrand.entries()]
+    .map(([brand, m]) => ({
+      brand,
+      is_au: isAuBrand(brand),
+      clones: m.detected,
+      reported_to_netcraft: m.netcraftReported,
+      likely_phishing: m.byClassification["likely_phishing"] ?? 0,
+      parked: m.byClassification["parked_for_sale"] ?? 0,
+    }))
+    .sort((a, b) => b.clones - a.clones || a.brand.localeCompare(b.brand));
+
+  // Full canonicalised registrar list (not sliced) + drop the Unknown bucket —
+  // its count already lives in clone_watch_report_summary.unknown_registrar_count.
+  const { rows: rawRegistrars } = buildRegistrarRollup(byBrand);
+  const registrarRows: RegistrarTrendRow[] = rollupRegistrars(rawRegistrars).map(
+    (r) => ({ registrar: r.registrar, clones: r.clones }),
+  );
+
+  return { periodMonth, brandRows, registrarRows };
+}
+
 /** Sum detected clones + distinct brand count across a per-brand metric map. */
 function totalsOf(byBrand: Map<string, CloneBrandMetrics>): {
   total: number;

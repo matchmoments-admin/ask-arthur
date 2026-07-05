@@ -3,8 +3,11 @@ import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logg
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { priorMonthStart } from "@/app/api/inngest/functions/report-brand-stewardship";
-import { getCloneWatchReportCard } from "@/lib/clone-watch/report-card-data";
-import { upsertSummary } from "@/lib/clone-watch/report-summary";
+import {
+  getCloneWatchReportCard,
+  getCloneWatchTrendRows,
+} from "@/lib/clone-watch/report-card-data";
+import { upsertSummary, writeTrendRows } from "@/lib/clone-watch/report-summary";
 
 /**
  * clone-watch-report-summary — durable monthly Clone Watch snapshot.
@@ -75,8 +78,21 @@ export const cloneWatchReportSummary = inngest.createFunction(
         return { period: card.periodMonth, total: card.total, brands: card.brands };
       });
 
-      logger.info("clone-watch-report-summary: snapshot written", result);
-      return { ok: true, ...result };
+      // Full per-brand + per-registrar trend rows (v193) — powers per-brand /
+      // per-registrar MoM on the owned-media pages. Idempotent delete+insert.
+      const trend = await step.run("write-trend-rows", async () => {
+        const sb = createServiceClient();
+        if (!sb) throw new Error("service client unavailable");
+        const rows = await getCloneWatchTrendRows(periodYm);
+        await writeTrendRows(sb, rows);
+        return {
+          brandRows: rows.brandRows.length,
+          registrarRows: rows.registrarRows.length,
+        };
+      });
+
+      logger.info("clone-watch-report-summary: snapshot written", { ...result, ...trend });
+      return { ok: true, ...result, ...trend };
     },
   ),
 );
