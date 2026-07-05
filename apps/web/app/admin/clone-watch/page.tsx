@@ -6,6 +6,7 @@ import CloneWatchTriage, {
   type PendingAlert,
   type PendingBatch,
 } from "./CloneWatchTriage";
+import BackfillButton from "./BackfillButton";
 import DisputesPanel, { type DisputeRow } from "./DisputesPanel";
 
 export const dynamic = "force-dynamic";
@@ -91,20 +92,23 @@ export default async function CloneWatchAdminPage() {
             brand notification.
           </p>
         </div>
-        <a
-          href="/api/admin/clone-watch/scamwatch-export?days=7"
-          download
-          className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold rounded-md"
-          style={{
-            border: "1px solid var(--color-line)",
-            background: "var(--color-surface)",
-            color: "var(--color-ink-2)",
-            textDecoration: "none",
-          }}
-          title="Download last 7 days of confirmed clones as CSV for manual upload to scamwatch.gov.au"
-        >
-          Scamwatch CSV (7d)
-        </a>
+        <div className="flex shrink-0 items-center gap-2">
+          <BackfillButton />
+          <a
+            href="/api/admin/clone-watch/scamwatch-export?days=7"
+            download
+            className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold rounded-md"
+            style={{
+              border: "1px solid var(--color-line)",
+              background: "var(--color-surface)",
+              color: "var(--color-ink-2)",
+              textDecoration: "none",
+            }}
+            title="Download last 7 days of confirmed clones as CSV for manual upload to scamwatch.gov.au"
+          >
+            Scamwatch CSV (7d)
+          </a>
+        </div>
       </div>
 
       <WeeklyKpis snapshot={weekly} pendingCount={pending.length} />
