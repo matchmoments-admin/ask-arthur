@@ -123,20 +123,21 @@ Every consumer page, authenticated page, admin page, and API route, grouped by d
 
 ### Admin (`/admin/*` — HMAC token + admin role)
 
-| Route                    | Purpose                                                                                                                                                                                                      |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `/admin/dashboard`       | Admin home                                                                                                                                                                                                   |
-| `/admin/feedback`        | Feedback triage queue review                                                                                                                                                                                 |
-| `/admin/costs`           | Cost-telemetry dashboard                                                                                                                                                                                     |
-| `/admin/brand-alerts`    | Brand-impersonation alert review                                                                                                                                                                             |
-| `/admin/clone-watch`     | Clone-watch triage queue (FP/TP/Investigate) + per-brand history + Netcraft takedown stats + urlscan classification chips                                                                                    |
-| `/admin/onward-reports`  | Pre-approve regulator submissions                                                                                                                                                                            |
-| `/admin/email-studio`    | Preview all outbound email templates + edit their prose "copy slots" (markdown, DB-backed `email_copy`); preview / test-send-to-self / save. APIs: `/api/admin/email-studio/{preview,save,test-send}`. v167. |
-| `/admin/vulnerabilities` | Vuln-intel review                                                                                                                                                                                            |
-| `/admin/reports`         | Scam-report inspection                                                                                                                                                                                       |
-| `/admin/users`           | User management                                                                                                                                                                                              |
-| `/admin/leads`           | B2B sales pipeline                                                                                                                                                                                           |
-| `/admin/stripe`          | Manual invoicing                                                                                                                                                                                             |
+| Route                    | Purpose                                                                                                                                                                                                                         |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/admin/dashboard`       | Admin home                                                                                                                                                                                                                      |
+| `/admin/feedback`        | Feedback triage queue review                                                                                                                                                                                                    |
+| `/admin/costs`           | Cost-telemetry dashboard                                                                                                                                                                                                        |
+| `/admin/analytics`       | First-party analytics — daily scans, activation, no-scan rate, first-touch UTM/channel attribution, and per-content-page conversion. Reads the v190/v191 `security_invoker` views via service role. `FF_ANALYTICS_ATTRIBUTION`. |
+| `/admin/brand-alerts`    | Brand-impersonation alert review                                                                                                                                                                                                |
+| `/admin/clone-watch`     | Clone-watch triage queue (FP/TP/Investigate) + per-brand history + Netcraft takedown stats + urlscan classification chips                                                                                                       |
+| `/admin/onward-reports`  | Pre-approve regulator submissions                                                                                                                                                                                               |
+| `/admin/email-studio`    | Preview all outbound email templates + edit their prose "copy slots" (markdown, DB-backed `email_copy`); preview / test-send-to-self / save. APIs: `/api/admin/email-studio/{preview,save,test-send}`. v167.                    |
+| `/admin/vulnerabilities` | Vuln-intel review                                                                                                                                                                                                               |
+| `/admin/reports`         | Scam-report inspection                                                                                                                                                                                                          |
+| `/admin/users`           | User management                                                                                                                                                                                                                 |
+| `/admin/leads`           | B2B sales pipeline                                                                                                                                                                                                              |
+| `/admin/stripe`          | Manual invoicing                                                                                                                                                                                                                |
 
 ---
 
@@ -264,6 +265,15 @@ Every consumer page, authenticated page, admin page, and API route, grouped by d
 | -------------------------- | ------ | -------------------------------------------------------------------------- |
 | `/api/report/onward`       | POST   | Submit scam report to regulators (Scamwatch / ACMA / iDcare / CyberReport) |
 | `/api/report/destinations` | GET    | List available reporting destinations                                      |
+
+### First-party analytics + attribution (open, `FF_ANALYTICS_ATTRIBUTION`)
+
+First-touch is captured by `middleware.ts`, which sets the `aa_attribution` cookie (`anonymous_id`, `utm_*`, `referrer`, `landing_path`; httpOnly · Secure · SameSite=Lax · 90d) on the visitor's **first** request — write-once, and **no DB write** (a pageview costs 0 rows). Rows are written only on named events, via `logEvent()` (`apps/web/lib/analytics-events.ts`).
+
+| Route         | Method | Purpose                                                                                                                                                                                                                                            |
+| ------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/api/events` | POST   | Client-safe event ingestion (`scan_started`, `feed_view`, `pageview`, `extension_install`). Server-authoritative events (`scan_completed`, `contact_submit`, `scam_report_submitted`) are emitted server-side and **rejected** here (no spoofing). |
+| `/go/[slug]`  | GET    | Branded short-link redirect (`apps/web/lib/short-links.ts`) — logs `link_click` server-side (survives referrer-stripping), 302s to the destination with UTMs, and sets the first-touch cookie itself (clean short URLs carry no UTM query).        |
 
 ### Phone footprint monitoring (auth or apikey)
 

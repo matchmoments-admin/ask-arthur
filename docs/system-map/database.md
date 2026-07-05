@@ -78,6 +78,13 @@ Supabase Postgres (project `rquomhcgnodxzkhokwni`). 75+ tables across 12 domain 
 - `cost_telemetry_partitioned` — RANGE(created_at) monthly shell, awaiting operator cutover. v71.
 - `feature_brakes` — Cost caps per feature (e.g., `reddit_intel`: A$10/day). v65.
 
+### Analytics / Attribution (v190–v191)
+
+- `visitors` — One row per anonymous visitor; **write-once first-touch** attribution (`anonymous_id` PK, `first_utm_*`, `first_referrer`, `first_referring_domain`, `landing_path`, `first_seen_at`). Upserted lazily (ignore-on-conflict, so first touch wins) from the event-write path — **never from middleware**. v190.
+- `analytics_events` — Append-only named-event log (`event_type`, `event_props` jsonb, `path`, `utm_*`, `referrer`, `request_id`; FK → `visitors`). **Metadata only — never scanned content, phone numbers, URLs, or images.** Not on the hot-table list; INSERT-only appends, lean btree indexes. v190.
+- **Views** (`security_invoker`, read by `/admin/analytics` via service role): `daily_scans`, `scans_by_type`, `scans_new_vs_returning`, `no_scan_visitor_rate`, `utm_attributed_conversions`, `blog_to_scan_funnel` (v190); `content_post_funnel` — per-post content→conversion keyed on first-touch `landing_path` (v191).
+- RLS: deny-all default; `service_role` bypass (same posture as `cost_telemetry`). All writes go via the service-role `/api/events` route + `logEvent()`; zero anon-insert. Gated by `FF_ANALYTICS_ATTRIBUTION` (ON in prod 2026-07-05).
+
 ### Deepfake / Media
 
 - `deepfake_detections` — Media analysis results (file, hash, deepfake_confidence, predicted_labels). v54.
@@ -337,7 +344,7 @@ Audit waves:
 
 ---
 
-## Migration timeline (v2 → v172)
+## Migration timeline (v2 → v191)
 
 Approximate domain bundling:
 
@@ -361,6 +368,7 @@ Approximate domain bundling:
 | v140–v149 | Clone-watch core: shopfront_clone_alerts (v140) → ingest RPC (v141) → triage columns + directory seed (v143/v143b) → KPI RPCs (v144/v145) → inbound replies (v146) → atomic JSONB merge (v147) → urlscan evidence (v148) → 60-day rescan window (v149)                                                                                                                                                                                                                                                                                                                                           |
 | v150–v156 | Clone-watch outreach hardening: directory expansion to 106 brands (v150); notification queue + batch-approval RPCs (v151); cost-brake-aware send + cooldown + race-loser detection (v152); `record_brand_notification_sent` lookup-by-brand fix (v153); FK `clone_alert_notification_queue.brand → brand_contact_directory.brand` + 5 orphan cleanup (v154); big-four banks bugcrowd_vdp → fraud_inbox with real phishing inboxes (v155); silence 13 no-inbox brands → `none` channel (v156).                                                                                                    |
 | v157–v172 | Clone-watch preclassify selectors + public revoke sweep (v157–v160); entity enrichment merge / risk-score batch / cluster commit (v161–v163); retention chunking + timeout caps (v164); onward OpenPhish/APWG enum + Brand Stewardship reports + Email Studio copy slots (v165–v167); blog slug unique + clone-watch urlscan failure-streak (v168–v169); `report_scam_entity` public RPC (v170); restore `get_world_scam_stats` (v171, #562); anon-RLS tighten — drop anon Public-read on `scam_entities`/`scam_reports`/`report_entity_links` (v172, #566, **HELD — not yet applied to prod**). |
+| v173–v191 | Vulnerability mentions (v173); canonical brand-alias layer (v174–v176); clone-alert attribution + urlscan async (v177–v178); known-brands contact seed (v179); brand-stewardship share-token / unsubscribes / outreach-done (v181–v183); Netcraft auto-candidates + daily cap (v184–v185); clone-watch report summary (v189); **first-party analytics** — `visitors` + `analytics_events` + 6 attribution views (v190, #666), `content_post_funnel` per-post view (v191, #667).                                                                                                                  |
 
 ---
 
