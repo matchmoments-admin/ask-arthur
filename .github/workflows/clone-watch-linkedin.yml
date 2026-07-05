@@ -1,0 +1,166 @@
+name: Clone Watch → LinkedIn (monthly)
+
+# Recurring "Australian Clone Watch" LinkedIn post — design in
+# docs/ops/clone-watch-linkedin-automation.md.
+#
+#   prepare  → renders the 7-slide carousel PDF against PROD + generates the
+#              deterministic caption (numbers reconcile to the digest) + pings
+#              Telegram with the run link and the caption for review.
+#   publish  → GATED behind the `clone-watch-linkedin` Environment (required
+#              reviewer = the founder). On approval, publishes to the Ask Arthur
+#              company page and confirms with the post URL + the first comment to
+#              paste (LinkedIn Dev-Tier can't post comments) + a reshare nudge.
+#
+# Shipped with the monthly cron DISABLED — run once via "Run workflow"
+# (workflow_dispatch) as a dry run, then uncomment the schedule to go live.
+
+on:
+  workflow_dispatch:
+    inputs:
+      month:
+        description: "Report month YYYY-MM (blank = prior calendar month)"
+        required: false
+        type: string
+  # schedule:
+  #   - cron: "0 1 2 * *"  # 2nd of month 01:00 UTC (~11:00 AEST), after the summary snapshot cron
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      month: ${{ steps.month.outputs.value }}
+      title: ${{ steps.caption.outputs.title }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve report month
+        id: month
+        run: |
+          if [ -n "${{ inputs.month }}" ]; then
+            M="${{ inputs.month }}"
+          else
+            # first-of-this-month minus one day → last day of the prior month.
+            M=$(date -u -d "$(date -u +%Y-%m-01) -1 day" +%Y-%m)
+          fi
+          echo "value=$M" >> "$GITHUB_OUTPUT"
+          echo "Report month: $M"
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium for Puppeteer
+        run: pnpm --filter @askarthur/web exec puppeteer browsers install chrome
+
+      - name: Render carousel PDF (against prod)
+        working-directory: apps/web
+        env:
+          ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+        run: pnpm report-card:export -- --base=https://askarthur.au --month=${{ steps.month.outputs.value }} --out=out
+
+      - name: Generate caption
+        id: caption
+        working-directory: apps/web
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          pnpm clone-watch:caption -- --month=${{ steps.month.outputs.value }} --out=out
+          echo "title=$(cat out/title.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload edition artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: clone-watch-edition
+          path: apps/web/out
+          retention-days: 14
+
+      - name: Telegram — ready for review
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        working-directory: apps/web
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_ADMIN_CHAT_ID" ]; then
+            echo "Telegram not configured — skipping ping"; exit 0
+          fi
+          BODY="🕵️ *${{ steps.caption.outputs.title }}* is ready for review.
+
+Approve the publish here → $RUN_URL
+
+Caption preview:
+$(head -c 900 out/caption.txt)"
+          curl -sS -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+            --data-urlencode "chat_id=$TELEGRAM_ADMIN_CHAT_ID" \
+            --data-urlencode "text=$BODY" \
+            --data-urlencode "parse_mode=Markdown" >/dev/null
+
+  publish:
+    needs: prepare
+    runs-on: ubuntu-latest
+    # The approval gate: this Environment must have a required reviewer (the
+    # founder). The job pauses here until approved in the GitHub Actions UI.
+    environment: clone-watch-linkedin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Download edition artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: clone-watch-edition
+          path: apps/web/out
+
+      - name: Publish to LinkedIn (company page)
+        id: publish
+        working-directory: apps/web
+        env:
+          LINKEDIN_CLIENT_ID: ${{ secrets.LINKEDIN_CLIENT_ID }}
+          LINKEDIN_CLIENT_SECRET: ${{ secrets.LINKEDIN_CLIENT_SECRET }}
+          LINKEDIN_REFRESH_TOKEN: ${{ secrets.LINKEDIN_REFRESH_TOKEN }}
+          LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
+          LINKEDIN_ORG_URN: ${{ secrets.LINKEDIN_ORG_URN }}
+        run: |
+          set -o pipefail
+          pnpm linkedin:test -- \
+            --pdf=out/clone-watch-${{ needs.prepare.outputs.month }}.pdf \
+            --caption-file=out/caption.txt \
+            --comment="$(cat out/first-comment.txt)" \
+            --title="${{ needs.prepare.outputs.title }}" \
+            --publish | tee publish.log
+          URL=$(grep -oE 'https://www\.linkedin\.com/feed/update/[^ ]+' publish.log | head -1)
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Telegram — published + manual steps
+        if: always() && steps.publish.outcome == 'success'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+        working-directory: apps/web
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_ADMIN_CHAT_ID" ]; then
+            echo "Telegram not configured — skipping ping"; exit 0
+          fi
+          BODY="✅ *Published:* ${{ steps.publish.outputs.url }}
+
+Two manual steps (Dev-Tier can't do these):
+1️⃣ Paste this as the FIRST COMMENT:
+$(cat out/first-comment.txt)
+
+2️⃣ Reshare from your personal profile for reach."
+          curl -sS -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+            --data-urlencode "chat_id=$TELEGRAM_ADMIN_CHAT_ID" \
+            --data-urlencode "text=$BODY" \
+            --data-urlencode "parse_mode=Markdown" >/dev/null
