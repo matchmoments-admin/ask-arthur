@@ -10,6 +10,7 @@
 // per v140 RLS); page renders server-side, never via browser supabase-js.
 
 import type { Metadata } from "next";
+import Link from "next/link";
 import { AlertTriangle, ShieldQuestion } from "lucide-react";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -103,6 +104,34 @@ async function getPublicImpact(): Promise<{
       ? (takedownRes.data[0] as PublicTakedownStats)
       : null;
   return { impact, takedown };
+}
+
+interface EditionRow {
+  period_month: string;
+  total_domains: number;
+  brand_count: number;
+}
+
+// The monthly editions (durable summary rows) — powers the "Monthly reports"
+// index + latest-headline line on the pillar. Read via service client, same
+// posture as getAlerts().
+async function getEditions(): Promise<EditionRow[]> {
+  const supabase = createServiceClient();
+  if (!supabase) return [];
+  const { data } = await supabase
+    .from("clone_watch_report_summary")
+    .select("period_month, total_domains, brand_count")
+    .order("period_month", { ascending: false })
+    .limit(24);
+  return (data ?? []) as EditionRow[];
+}
+
+function editionLabel(periodMonth: string): string {
+  return new Date(`${periodMonth}T00:00:00Z`).toLocaleDateString("en-AU", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
 }
 
 function firstSignal(signals: unknown): SignalEntry | null {
@@ -211,14 +240,16 @@ function PublicImpactBlock({
 }
 
 export default async function CloneWatchPage() {
-  const [alerts, impactBundle] = await Promise.all([
+  const [alerts, impactBundle, editions] = await Promise.all([
     getAlerts(),
     featureFlags.shopfrontCloneOutreach
       ? getPublicImpact()
       : Promise.resolve(null),
+    getEditions(),
   ]);
   const impact = impactBundle?.impact ?? null;
   const takedown = impactBundle?.takedown ?? null;
+  const latest = editions[0] ?? null;
 
   return (
     <>
@@ -242,6 +273,40 @@ export default async function CloneWatchPage() {
 
       {impact && impact.candidates_total > 0 && (
         <PublicImpactBlock impact={impact} takedown={takedown} />
+      )}
+
+      {editions.length > 0 && (
+        <section aria-labelledby="editions-heading" className="mb-10">
+          <h2
+            id="editions-heading"
+            className="text-xs font-bold uppercase tracking-widest text-deep-navy mb-3"
+          >
+            Monthly reports
+          </h2>
+          {latest && (
+            <p className="text-sm text-gov-slate mb-3 leading-relaxed">
+              Latest edition —{" "}
+              <Link href={`/clone-watch/${latest.period_month.slice(0, 7)}`} className="font-semibold text-deep-navy underline">
+                {editionLabel(latest.period_month)}
+              </Link>
+              : {latest.total_domains.toLocaleString()} lookalike domains across{" "}
+              {latest.brand_count.toLocaleString()} brands. See{" "}
+              <Link href="/clone-watch/method" className="underline">how we measure this</Link>.
+            </p>
+          )}
+          <ul className="flex flex-wrap gap-2">
+            {editions.map((e) => (
+              <li key={e.period_month}>
+                <Link
+                  href={`/clone-watch/${e.period_month.slice(0, 7)}`}
+                  className="inline-flex items-center rounded-full border border-deep-navy/25 px-3 py-1 text-xs font-medium text-deep-navy hover:bg-deep-navy/5"
+                >
+                  {editionLabel(e.period_month)}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 mb-10 text-sm leading-relaxed text-amber-900">

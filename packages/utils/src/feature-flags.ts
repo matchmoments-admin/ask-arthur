@@ -576,6 +576,14 @@ export const featureFlags = {
    *  only. See docs/adr/0010-screenshot-retention-gated.md. */
   screenshotRetention: readBoolEnv("FF_SCREENSHOT_RETENTION"),
 
+  /** Clone Watch owned-media public surface — makes the pillar, monthly index
+   *  (/clone-watch/[period]) and methodology pages indexable + sitemap-listed +
+   *  cross-linked. Client-visible (NEXT_PUBLIC_) so pages can flip their
+   *  `robots` meta and conditionally render cross-links. Default OFF: the routes
+   *  render behind `noindex` regardless, but going PUBLIC waits on #371's
+   *  lawyer-vetted copy. Flip to true (with the vetted copy) to launch. */
+  cloneWatchPublic: process.env.NEXT_PUBLIC_FF_CLONE_WATCH_PUBLIC === "true",
+
   /** First-party analytics + inbound first-touch attribution. When ON, the
    *  middleware sets the write-once `aa_attribution` cookie (anonymous_id +
    *  first-touch UTMs/referrer) and the logEvent() writer + /api/events route
