@@ -96,6 +96,7 @@ export const LeadSourceSchema = z.enum([
   "banking_page",
   "telco_page",
   "digital_platforms_page",
+  "clone_watch",
 ]);
 export type LeadSource = z.infer<typeof LeadSourceSchema>;
 

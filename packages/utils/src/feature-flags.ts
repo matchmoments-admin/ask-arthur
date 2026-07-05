@@ -584,6 +584,15 @@ export const featureFlags = {
    *  lawyer-vetted copy. Flip to true (with the vetted copy) to launch. */
   cloneWatchPublic: process.env.NEXT_PUBLIC_FF_CLONE_WATCH_PUBLIC === "true",
 
+  /** Clone Watch lead magnet — the /api/clone-list-request endpoint that emails
+   *  a requester their brand's suspected-lookalike CSV. Server-only, default
+   *  OFF. Kept DARK until founder sign-off on the sensitivity: any work email
+   *  can request any brand's list (mitigations: work-email gate, rate-limit,
+   *  tp_confirmed-only "suspected lookalikes for review" framing, and the
+   *  clone_watch_disputes correction process). Decoupled from the public-pages
+   *  flag so the endpoint can't go live implicitly. */
+  cloneListRequest: readBoolEnv("FF_CLONE_LIST_REQUEST"),
+
   /** First-party analytics + inbound first-touch attribution. When ON, the
    *  middleware sets the write-once `aa_attribution` cookie (anonymous_id +
    *  first-touch UTMs/referrer) and the logEvent() writer + /api/events route
