@@ -12,6 +12,7 @@
     "telegram:dev": "tsx scripts/telegram-dev.ts",
     "report-card:export": "tsx scripts/clone-watch-report-export.ts",
     "clone-watch:caption": "tsx scripts/clone-watch-caption.ts",
+    "clone-watch:publish": "tsx scripts/clone-watch-publish.ts",
     "linkedin:test": "tsx scripts/linkedin-post-test.ts"
   },
   "dependencies": {
