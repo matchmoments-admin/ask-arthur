@@ -6,6 +6,7 @@ import CloneWatchTriage, {
   type PendingAlert,
   type PendingBatch,
 } from "./CloneWatchTriage";
+import DisputesPanel, { type DisputeRow } from "./DisputesPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -22,22 +23,35 @@ export default async function CloneWatchAdminPage() {
   let weekly: WeeklySnapshot = EMPTY_WEEKLY;
   let brandBreakdown: BrandBreakdownRow[] = [];
   let takedown: TakedownStats = EMPTY_TAKEDOWN;
+  let disputes: DisputeRow[] = [];
 
   if (supabase) {
-    const [pendingRes, weeklyRes, brandRes, takedownRes, pendingBatchesRes] =
-      await Promise.all([
-        supabase.rpc("list_clone_alerts_pending_triage", { p_limit: 200 }),
-        supabase.rpc("clone_watch_weekly_metrics", { p_days: 7 }),
-        supabase.rpc("clone_watch_brand_breakdown", { p_days: 30 }),
-        supabase.rpc("clone_watch_takedown_stats", { p_days: 30 }),
-        supabase
-          .from("clone_alert_notification_queue")
-          .select(
-            "batch_id, brand, recipient, candidate_domain, email_subject, prepared_at",
-          )
-          .eq("approval_status", "pending")
-          .order("prepared_at", { ascending: true }),
-      ]);
+    const [
+      pendingRes,
+      weeklyRes,
+      brandRes,
+      takedownRes,
+      pendingBatchesRes,
+      disputesRes,
+    ] = await Promise.all([
+      supabase.rpc("list_clone_alerts_pending_triage", { p_limit: 200 }),
+      supabase.rpc("clone_watch_weekly_metrics", { p_days: 7 }),
+      supabase.rpc("clone_watch_brand_breakdown", { p_days: 30 }),
+      supabase.rpc("clone_watch_takedown_stats", { p_days: 30 }),
+      supabase
+        .from("clone_alert_notification_queue")
+        .select(
+          "batch_id, brand, recipient, candidate_domain, email_subject, prepared_at",
+        )
+        .eq("approval_status", "pending")
+        .order("prepared_at", { ascending: true }),
+      supabase
+        .from("clone_watch_disputes")
+        .select("id, subject_type, subject, disputant, claim, resolution, created_at, resolved_at")
+        .order("created_at", { ascending: false })
+        .limit(50),
+    ]);
+    disputes = (disputesRes.data ?? []) as DisputeRow[];
     if (Array.isArray(pendingRes.data)) {
       pending = pendingRes.data as PendingAlert[];
     }
@@ -103,6 +117,8 @@ export default async function CloneWatchAdminPage() {
       />
 
       <BrandBreakdownTable rows={brandBreakdown} computedAt={computedAt} />
+
+      <DisputesPanel disputes={disputes} />
     </div>
   );
 }
