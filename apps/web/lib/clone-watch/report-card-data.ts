@@ -32,9 +32,66 @@ import { rollupRegistrars } from "@/lib/clone-watch/registrar-canonical";
 const CLONE_SOURCE = "nrd";
 const FETCH_LIMIT = 5000;
 
+/**
+ * First month with a FULL month of clone-watch coverage. Clone Watch launched
+ * 2026-05-24, so May 2026 holds only ~1 week of detections — comparing a full
+ * month against that launch stub would overstate month-on-month growth. We only
+ * surface a MoM delta when BOTH the report month and its prior month are at or
+ * after this threshold, so the first honest comparison is July-2026-vs-June-2026.
+ * Editions before that render a "first full month tracked" baseline instead.
+ */
+const FIRST_FULL_MONTH = "2026-06"; // YYYY-MM
+
 export interface RankedBrand {
   brand: string;
   clones: number;
+}
+
+/**
+ * AU superannuation-fund brand domains on the clone watchlist. Used to surface
+ * the "super fund" editorial angle when a fund ranks among the most-impersonated
+ * AU brands (retirement savings as a front-line target). Keyed by full domain
+ * so the ambiguous ones ("rest", "aware") can't false-match. Extend as funds are
+ * added to the watchlist.
+ */
+const SUPER_FUND_DOMAINS: ReadonlySet<string> = new Set([
+  "hesta.com.au",
+  "australiansuper.com",
+  "aware.com.au",
+  "hostplus.com.au",
+  "unisuper.com.au",
+  "rest.com.au",
+  "cbus.com.au",
+  "caresuper.com.au",
+  "australianretirementtrust.com.au",
+  "spiritsuper.com.au",
+  "ngssuper.com.au",
+  "brightersuper.com.au",
+  "telstrasuper.com.au",
+  "visionsuper.com.au",
+]);
+
+export interface SuperFundSpotlight {
+  /** The impersonated fund's domain, e.g. "hesta.com.au". */
+  brand: string;
+  clones: number;
+  /** 1-based rank among AU brands (1 = most-targeted AU brand). */
+  auRank: number;
+}
+
+export interface MonthOverMonth {
+  /** Whether a fair MoM comparison exists (both months fully tracked). When
+   *  false, the card shows a baseline framing rather than a misleading delta. */
+  available: boolean;
+  /** Human label for the prior month, e.g. "May 2026". */
+  priorLabel: string;
+  priorTotal: number;
+  priorBrands: number;
+  /** current.total - prior.total (can be negative). */
+  totalDelta: number;
+  /** Rounded percentage change vs prior; null when prior total is 0. */
+  totalPct: number | null;
+  brandsDelta: number;
 }
 
 export interface CloneWatchReportCard {
@@ -55,6 +112,17 @@ export interface CloneWatchReportCard {
   /** Rows whose registrar is redacted/unknown - reported for honesty, excluded
    *  from the leaderboard (rendered as a "N WHOIS-hidden" footnote). */
   unknownRegistrarCount: number;
+  /** Live month-on-month comparison vs the prior calendar month. Computed by a
+   *  second fetch+aggregate over the prior window (no dependency on the durable
+   *  clone_watch_report_summary snapshot — that lands in WS3). Currently unrendered
+   *  (the scale/MoM slide was cut from the 7-deck for the June baseline); retained
+   *  because the recurring-automation build re-introduces a conditional MoM slide
+   *  once there's an honest delta (July-vs-June onward). */
+  mom: MonthOverMonth;
+  /** The highest-ranked AU super fund among the impersonated brands, if any —
+   *  powers the "super fund" spotlight slide. null when no watchlisted fund
+   *  appears this month (the slide falls back to the evergreen "why it works"). */
+  superFund: SuperFundSpotlight | null;
 }
 
 function monthWindow(month?: string): {
@@ -122,17 +190,19 @@ function sumClassification(
   return n;
 }
 
-/**
- * Build the monthly report-card figures for the given month (default: prior
- * calendar month). Reconciles exactly to the internal digest.
- */
-export async function getCloneWatchReportCard(
-  month?: string,
-): Promise<CloneWatchReportCard> {
-  const { startIso, endIso, label, periodMonth } = monthWindow(month);
-  const sb = createServiceClient();
-  if (!sb) throw new Error("service client unavailable");
+type ServiceClient = NonNullable<ReturnType<typeof createServiceClient>>;
 
+/**
+ * Fetch + FP-filter + aggregate one calendar-month window into the digest's
+ * per-brand metric map. Extracted so the same reconciled path serves both the
+ * report month and its prior month (for the MoM delta).
+ */
+async function fetchMonthByBrand(
+  sb: ServiceClient,
+  startIso: string,
+  endIso: string,
+  periodMonth: string,
+): Promise<Map<string, CloneBrandMetrics>> {
   const { data, error } = await sb
     .from("shopfront_clone_alerts")
     .select(
@@ -157,8 +227,57 @@ export async function getCloneWatchReportCard(
     });
   }
   const rows = raw.filter((r) => !isFpBrand(r.inferred_target_domain));
+  return aggregateClonesByDomain(rows);
+}
 
-  const byBrand = aggregateClonesByDomain(rows);
+/** Sum detected clones + distinct brand count across a per-brand metric map. */
+function totalsOf(byBrand: Map<string, CloneBrandMetrics>): {
+  total: number;
+  brands: number;
+} {
+  let total = 0;
+  for (const m of byBrand.values()) total += m.detected;
+  return { total, brands: byBrand.size };
+}
+
+/** The prior calendar month's window + labels, derived from a month start ISO. */
+function priorWindow(startIso: string): {
+  startIso: string;
+  endIso: string;
+  periodMonth: string;
+  label: string;
+} {
+  const cur = new Date(startIso);
+  const start = new Date(
+    Date.UTC(cur.getUTCFullYear(), cur.getUTCMonth() - 1, 1),
+  );
+  return {
+    startIso: start.toISOString(),
+    endIso: startIso, // the prior month ends exactly where the current begins
+    periodMonth: start.toISOString().slice(0, 10),
+    label: start.toLocaleDateString("en-AU", {
+      month: "long",
+      year: "numeric",
+      timeZone: "UTC",
+    }),
+  };
+}
+
+/**
+ * Build the monthly report-card figures for the given month (default: prior
+ * calendar month). Reconciles exactly to the internal digest.
+ *
+ * Two reads per render (report month + prior month for the MoM delta) — admin
+ * on-demand surface, force-dynamic, negligible traffic.
+ */
+export async function getCloneWatchReportCard(
+  month?: string,
+): Promise<CloneWatchReportCard> {
+  const { startIso, endIso, label, periodMonth } = monthWindow(month);
+  const sb = createServiceClient();
+  if (!sb) throw new Error("service client unavailable");
+
+  const byBrand = await fetchMonthByBrand(sb, startIso, endIso, periodMonth);
 
   // Reporting KPIs from the shared aggregate (deduped by candidate_domain).
   let total = 0;
@@ -167,6 +286,34 @@ export async function getCloneWatchReportCard(
     total += m.detected;
     reportedToNetcraft += m.netcraftReported;
   }
+
+  // Live month-on-month delta: a second reconciled fetch over the prior window.
+  const prevWin = priorWindow(startIso);
+  const priorByBrand = await fetchMonthByBrand(
+    sb,
+    prevWin.startIso,
+    prevWin.endIso,
+    prevWin.periodMonth,
+  );
+  const prior = totalsOf(priorByBrand);
+  // Only a fair comparison when BOTH months are fully tracked (see
+  // FIRST_FULL_MONTH); otherwise the card renders a baseline, not a delta.
+  const momAvailable =
+    periodMonth.slice(0, 7) >= FIRST_FULL_MONTH &&
+    prevWin.periodMonth.slice(0, 7) >= FIRST_FULL_MONTH &&
+    prior.total > 0;
+  const mom: MonthOverMonth = {
+    available: momAvailable,
+    priorLabel: prevWin.label,
+    priorTotal: prior.total,
+    priorBrands: prior.brands,
+    totalDelta: total - prior.total,
+    totalPct:
+      prior.total > 0
+        ? Math.round(((total - prior.total) / prior.total) * 100)
+        : null,
+    brandsDelta: byBrand.size - prior.brands,
+  };
 
   // Registrar leaderboard: reuse the digest's rollup (single source of truth),
   // then canonicalise + drop the Unknown bucket. buildRegistrarRollup already
@@ -178,6 +325,23 @@ export async function getCloneWatchReportCard(
   const ranked = [...byBrand.entries()]
     .map(([brand, m]) => ({ brand, clones: m.detected }))
     .sort((a, b) => b.clones - a.clones || a.brand.localeCompare(b.brand));
+
+  // Super-fund spotlight: the highest-ranked super fund, with its rank among
+  // Australian brands. Super funds ARE Australian brands even on a .com (e.g.
+  // australiansuper.com) — which the .au TLD heuristic would classify "global"
+  // and hide from the spotlight — so rank against AU brands PLUS watchlisted
+  // funds. Ranked-desc order means findIndex picks the most-targeted fund.
+  const isFund = (d: string) => SUPER_FUND_DOMAINS.has(d.toLowerCase());
+  const auOrFund = ranked.filter((r) => isAuBrand(r.brand) || isFund(r.brand));
+  const sfIdx = auOrFund.findIndex((r) => isFund(r.brand));
+  const superFund: SuperFundSpotlight | null =
+    sfIdx >= 0
+      ? {
+          brand: auOrFund[sfIdx].brand,
+          clones: auOrFund[sfIdx].clones,
+          auRank: sfIdx + 1,
+        }
+      : null;
 
   return {
     periodMonth,
@@ -197,5 +361,7 @@ export async function getCloneWatchReportCard(
       .slice(0, 5),
     topRegistrars,
     unknownRegistrarCount: unknownCount,
+    mom,
+    superFund,
   };
 }
