@@ -68,7 +68,12 @@ async function main() {
     const pngPaths: string[] = [];
     for (let n = 1; n <= SLIDE_COUNT; n++) {
       const url = `${base}/admin/report-card?slide=${n}${monthQ}`;
-      await page.goto(url, { waitUntil: "networkidle0", timeout: 60_000 });
+      // domcontentloaded (not networkidle0): the route is a server component so
+      // the .slide markup is in the initial HTML, and a deployed page's analytics
+      // (Plausible) keep the network perpetually busy — networkidle0 never fires
+      // against prod and the goto times out. The .slide + fonts.ready guards below
+      // handle render/font readiness.
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 });
       // Guard: a requireAdmin() redirect or an error would land us off-page.
       const ok = await page.$(".rc-root.rc-solo .slide");
       if (!ok) throw new Error(`slide ${n} did not render (auth/redirect/data error?) at ${url}`);
@@ -94,7 +99,7 @@ async function main() {
       img:last-child{page-break-after:auto;}
     </style></head><body>${imgs.map((d) => `<img src="${d}">`).join("")}</body></html>`;
     const pdfPage = await browser.newPage();
-    await pdfPage.setContent(html, { waitUntil: "networkidle0" });
+    await pdfPage.setContent(html, { waitUntil: "load" });
     const pdfPath = path.join(outDir, `clone-watch-${month ?? "latest"}.pdf`);
     await pdfPage.pdf({ path: pdfPath, width: `${WIDTH}px`, height: `${HEIGHT}px`, printBackground: true, pageRanges: `1-${SLIDE_COUNT}` });
     console.log(`\n✓ PDF → ${pdfPath}`);
