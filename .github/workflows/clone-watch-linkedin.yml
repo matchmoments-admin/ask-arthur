@@ -11,8 +11,9 @@ name: Clone Watch → LinkedIn (monthly)
 #              company page and confirms with the post URL + the first comment to
 #              paste (LinkedIn Dev-Tier can't post comments) + a reshare nudge.
 #
-# Shipped with the monthly cron DISABLED — run once via "Run workflow"
-# (workflow_dispatch) as a dry run, then uncomment the schedule to go live.
+# Dry run passed 2026-07-05 (render→caption→artifact→Telegram all green, approval
+# gate paused correctly). Cron ENABLED — first auto-post is the July edition
+# (~Aug 2). Every run still requires founder approval before publishing.
 
 on:
   workflow_dispatch:
@@ -21,8 +22,8 @@ on:
         description: "Report month YYYY-MM (blank = prior calendar month)"
         required: false
         type: string
-  # schedule:
-  #   - cron: "0 1 2 * *"  # 2nd of month 01:00 UTC (~11:00 AEST), after the summary snapshot cron
+  schedule:
+    - cron: "0 1 2 * *" # 2nd of month 01:00 UTC (~11:00 AEST), after the summary snapshot cron
 
 permissions:
   contents: read
