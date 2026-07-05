@@ -89,10 +89,16 @@ export function generateCloneWatchCaption(
   // ── Findings (numbered; count adapts) ─────────────────────────────────────
   const findings: string[] = [];
 
-  // Finding 1 — top AU brands.
+  // Finding 1 — top AU brands. Drop the super-fund brand from the "close behind"
+  // list when it gets its own spotlight in finding 2, so it isn't named twice.
+  const sfName = card.superFund ? prettyBrand(card.superFund.brand) : null;
   if (au.length > 0) {
     const lead = au[0];
-    const rest = au.slice(1, 5).map((b) => `${b.name} (${b.n})`);
+    const rest = au
+      .slice(1)
+      .filter((b) => b.name !== sfName)
+      .slice(0, 4)
+      .map((b) => `${b.name} (${b.n})`);
     const restClause = rest.length ? `, with ${joinAnd(rest)} close behind` : "";
     findings.push(
       `${lead.name} was the most-copied Australian brand (${lead.n} lookalike domains)${restClause}.`,
