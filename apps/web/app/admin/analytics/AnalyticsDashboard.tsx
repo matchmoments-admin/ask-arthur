@@ -24,6 +24,13 @@ interface AttributedRow {
   conversions: number;
 }
 
+interface ContentPostRow {
+  landing_path: string;
+  readers: number;
+  readers_who_scanned: number;
+  readers_who_contacted: number;
+}
+
 interface Props {
   scans7: number;
   activationPct7: number | null;
@@ -31,6 +38,7 @@ interface Props {
   b2bLeads7: number;
   contentReaders: number;
   readersWhoScanned: number;
+  contentPosts: ContentPostRow[];
   dailyScans: DayScan[];
   scansByType: TypeScan[];
   noScanRate: NoScanRow[];
@@ -57,6 +65,7 @@ export default function AnalyticsDashboard({
   b2bLeads7,
   contentReaders,
   readersWhoScanned,
+  contentPosts,
   dailyScans,
   scansByType,
   noScanRate,
@@ -99,6 +108,41 @@ export default function AnalyticsDashboard({
           <StatTile label="…who scanned" value={count.format(readersWhoScanned)} />
           <StatTile label="Conversion" value={pct(contentConvPct)} />
         </div>
+      </section>
+
+      {/* Per-post content → conversion (first-touch landing_path) */}
+      <section>
+        <h2 className="text-deep-navy mb-2 text-sm font-bold">Conversion by content page</h2>
+        {contentPosts.length === 0 ? (
+          <p className="text-slate-400 text-sm">No content-sourced visitors yet.</p>
+        ) : (
+          <div className="overflow-x-auto rounded-lg border border-slate-200">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-gov-slate">
+                <tr>
+                  <th className="px-3 py-2 text-left font-semibold">Landing page</th>
+                  <th className="px-3 py-2 text-right font-semibold">Readers</th>
+                  <th className="px-3 py-2 text-right font-semibold">Scanned</th>
+                  <th className="px-3 py-2 text-right font-semibold">Contacted</th>
+                  <th className="px-3 py-2 text-right font-semibold">Scan %</th>
+                </tr>
+              </thead>
+              <tbody>
+                {contentPosts.map((r) => (
+                  <tr key={r.landing_path} className="border-t border-slate-100">
+                    <td className="px-3 py-2 font-mono text-xs">{r.landing_path}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{count.format(r.readers)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{count.format(r.readers_who_scanned)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{count.format(r.readers_who_contacted)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {pct(r.readers === 0 ? null : (100 * r.readers_who_scanned) / r.readers)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
 
       {/* Scans by input type */}

@@ -3,6 +3,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { scrubPII } from "@askarthur/scam-engine/sanitize";
 import { logger } from "@askarthur/utils/logger";
 import { logCost, claudeHaikuCostUsd } from "@/lib/cost-telemetry";
+import { appendBlogCtaBlock } from "@/lib/blog-cta";
 
 interface ScamGroup {
   scam_type: string;
@@ -124,7 +125,7 @@ Return ONLY valid JSON:
   "title": "SEO-optimised title (under 70 chars)",
   "subtitle": "A brief contextual subtitle (1 sentence, under 120 chars)",
   "excerpt": "1-2 sentence summary for preview cards (under 160 chars)",
-  "content": "Full markdown blog post (500-800 words). Include: intro, section per scam type with ## headings, a > [!TIP] callout with protection advice, how to protect yourself section, conclusion with link to askarthur.au. Use > [!WARNING] for key scam warnings.",
+  "content": "Full markdown blog post (500-800 words). Start with a one-line **TL;DR:** summary. Then: intro, a section per scam type with ## headings, a > [!TIP] callout with protection advice, and a 'how to protect yourself' section. Use > [!WARNING] for key scam warnings. Do NOT add your own calls-to-action, sign-offs, or 'try our tool' / 'visit askarthur.au' links — a standard CTA block is appended automatically.",
   "tags": ["tag1", "tag2", "tag3"],
   "category": "${autoCategory}"
 }`,
@@ -174,7 +175,10 @@ Return ONLY valid JSON:
     const title = scrubPII(parsed.title || "");
     const subtitle = scrubPII(parsed.subtitle || "");
     const excerpt = scrubPII(parsed.excerpt || "");
-    const content = scrubPII(parsed.content || "");
+    // Append the canonical CTA/internal-link block AFTER scrubbing — the block
+    // is our own trusted copy (no PII) and its internal links must survive the
+    // scrubber untouched. Closes the content -> scan/contact loop.
+    const content = appendBlogCtaBlock(scrubPII(parsed.content || ""));
 
     const readingTimeMinutes = Math.max(
       1,

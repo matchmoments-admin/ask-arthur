@@ -152,6 +152,11 @@ describe("generateWeeklyBlogPost", () => {
     expect(result!.sourceScamIds).not.toContain(10);
     // Should have 9 IDs total (4 + 3 + 2)
     expect(result!.sourceScamIds).toHaveLength(9);
+    // Canonical CTA block is injected: free-scan + contact links, no UTMs.
+    expect(result!.content).toContain("Check something suspicious in seconds");
+    expect(result!.content).toContain("](/)");
+    expect(result!.content).toContain("](/contact)");
+    expect(result!.content).not.toContain("utm_");
   });
 
   // BL-09: Slug format is YYYY-MM-DD-title-words
