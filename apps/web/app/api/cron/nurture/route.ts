@@ -35,11 +35,15 @@ export async function GET(req: NextRequest) {
   }
 
   // Fetch leads that need nurture emails
-  // Only process leads not in terminal states (won/lost)
+  // Only process leads not in terminal states (won/lost). clone_watch leads
+  // are EXCLUDED: this is the SPF-compliance drip, and a brand that asked "show
+  // me my clones" shouldn't get a 6-step compliance sequence (reads as bait-
+  // and-switch). Their touch is the clone-list email + booking CTA instead.
   const { data: leads, error } = await supabase
     .from("leads")
     .select("id, name, email, nurture_step, nurture_last_sent_at, created_at")
     .not("status", "in", '("won","lost")')
+    .neq("source", "clone_watch")
     .lt("nurture_step", 6)
     .order("created_at", { ascending: true })
     .limit(50);
