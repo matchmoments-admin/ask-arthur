@@ -15,6 +15,7 @@ import { AlertTriangle, ShieldQuestion } from "lucide-react";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import SampleReportForm from "@/components/SampleReportForm";
+import CloneListRequestForm from "@/components/CloneListRequestForm";
 
 export const revalidate = 3600; // 1 hour ISR
 
@@ -306,6 +307,12 @@ export default async function CloneWatchPage() {
               </li>
             ))}
           </ul>
+        </section>
+      )}
+
+      {featureFlags.cloneListRequest && (
+        <section className="mb-10">
+          <CloneListRequestForm />
         </section>
       )}
 

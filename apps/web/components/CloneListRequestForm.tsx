@@ -2,6 +2,12 @@
 
 import { useState } from "react";
 
+// Booking-call next step. Set NEXT_PUBLIC_BOOKING_URL to a hosted booking page
+// (Outlook "Bookings with me" / Google Calendar appointment schedule); falls
+// back to /contact.
+const BOOKING_URL =
+  process.env.NEXT_PUBLIC_BOOKING_URL || "/contact";
+
 // Clone Watch lead magnet form. Posts to /api/clone-list-request (dark unless
 // FF_CLONE_LIST_REQUEST is on). Placed on the pillar / monthly-index pages and
 // gated there by the public flag — this component is presentation only.
@@ -35,8 +41,13 @@ export default function CloneListRequestForm({ defaultBrand = "" }: { defaultBra
         return;
       }
       if (!res.ok) throw new Error(String(res.status));
+      const data = (await res.json().catch(() => ({}))) as { monitored?: boolean };
       setState("done");
-      setMsg("Sent — check your inbox for your brand's Clone Watch list.");
+      setMsg(
+        data.monitored === false
+          ? `We don't monitor ${brand.trim()} yet — we've logged your request and will be in touch.`
+          : "Sent — check your inbox for your brand's Clone Watch list.",
+      );
     } catch {
       setState("error");
       setMsg("Something went wrong. Please try again.");
@@ -46,7 +57,15 @@ export default function CloneListRequestForm({ defaultBrand = "" }: { defaultBra
   if (state === "done") {
     return (
       <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5 text-sm text-emerald-900">
-        {msg}
+        <p className="mb-3">{msg}</p>
+        <a
+          href={BOOKING_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center rounded-full bg-deep-navy px-5 py-2 text-sm font-semibold text-white"
+        >
+          Book a 15-min call →
+        </a>
       </div>
     );
   }

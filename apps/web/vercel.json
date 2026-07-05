@@ -2,6 +2,10 @@
   "ignoreCommand": "bash vercel-ignored-build-step.sh",
   "crons": [
     {
+      "path": "/api/cron/clone-lead-digest",
+      "schedule": "30 8 * * 1"
+    },
+    {
       "path": "/api/cron/weekly-blog",
       "schedule": "0 12 * * 1"
     },

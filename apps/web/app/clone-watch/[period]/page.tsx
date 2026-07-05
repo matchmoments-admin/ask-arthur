@@ -15,6 +15,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
+import CloneListRequestForm from "@/components/CloneListRequestForm";
 
 export const revalidate = 3600; // 1 hour ISR
 
@@ -254,6 +255,12 @@ export default async function CloneWatchMonthPage({
         <StatTile label="Parked / for sale" value={row.parked_for_sale.toLocaleString()} />
         <StatTile label="Registrant hidden (WHOIS privacy)" value={row.unknown_registrar_count.toLocaleString()} />
       </div>
+
+      {featureFlags.cloneListRequest && (
+        <div className="mb-8">
+          <CloneListRequestForm />
+        </div>
+      )}
 
       <div className="rounded-xl border border-deep-navy/15 bg-deep-navy/[0.04] p-5">
         <p className="text-sm text-deep-navy font-semibold mb-1">Spotted a fake site?</p>
