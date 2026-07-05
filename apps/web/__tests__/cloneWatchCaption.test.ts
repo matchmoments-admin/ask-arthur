@@ -103,4 +103,49 @@ describe("generateCloneWatchCaption", () => {
     const c = generateCloneWatchCaption(JUNE, "https://askarthur.au/clone-watch/method");
     expect(c.firstComment).toContain("How we count these → https://askarthur.au/clone-watch/method");
   });
+
+  it("super fund as the #1 AU brand: folded into finding 1, not named/crowned twice", () => {
+    const fundLeads: CloneWatchReportCard = {
+      ...JUNE,
+      topAuBrands: [
+        { brand: "hesta.com.au", clones: 50 },
+        { brand: "target.com.au", clones: 43 },
+        { brand: "kmart.com.au", clones: 28 },
+      ],
+      superFund: { brand: "hesta.com.au", clones: 50, auRank: 1 },
+    };
+    const c = generateCloneWatchCaption(fundLeads);
+    expect(c.body).toContain(
+      "A super fund led the month: HESTA was the most-copied Australian brand (50 lookalike domains)",
+    );
+    // no separate spotlight finding, and not two contradictory "#1" claims
+    expect(c.body).not.toContain("It's not just shopping — or banking. HESTA");
+    expect(c.body).not.toContain("the most-targeted Australian brand (50)");
+    // Target/Kmart still listed as close behind (HESTA excluded from that list)
+    expect(c.body).toContain("with Target (43) and Kmart (28) close behind");
+  });
+
+  it("single finding: 'One thing stood out' (singular), no orphan numbering", () => {
+    const only1: CloneWatchReportCard = {
+      ...JUNE,
+      superFund: null,
+      globalBrands: [],
+      topRegistrars: [],
+    };
+    const c = generateCloneWatchCaption(only1);
+    expect(c.body).toContain("One thing stood out this month:");
+    expect(c.body).not.toContain("things stood out");
+    expect(c.body).not.toContain("2. ");
+  });
+
+  it("MoM that rounds to 0%: 'essentially flat', never 'up 0%'", () => {
+    const barelyUp: CloneWatchReportCard = {
+      ...JULY,
+      total: 1001,
+      mom: { available: true, priorLabel: "June 2026", priorTotal: 1000, priorBrands: 129, totalDelta: 1, totalPct: 0, brandsDelta: 0 },
+    };
+    const c = generateCloneWatchCaption(barelyUp);
+    expect(c.body).toContain("That's essentially flat on June 2026 (1000 → 1001)");
+    expect(c.body).not.toMatch(/up 0%|down 0%/);
+  });
 });
