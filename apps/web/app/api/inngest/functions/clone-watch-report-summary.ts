@@ -4,6 +4,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { priorMonthStart } from "@/app/api/inngest/functions/report-brand-stewardship";
 import { getCloneWatchReportCard } from "@/lib/clone-watch/report-card-data";
+import { upsertSummary } from "@/lib/clone-watch/report-summary";
 
 /**
  * clone-watch-report-summary — durable monthly Clone Watch snapshot.
@@ -68,26 +69,9 @@ export const cloneWatchReportSummary = inngest.createFunction(
       const result = await step.run("upsert-summary", async () => {
         const sb = createServiceClient();
         if (!sb) throw new Error("service client unavailable");
-        const { error } = await sb.from("clone_watch_report_summary").upsert(
-          {
-            period_month: card.periodMonth, // "YYYY-MM-01"
-            total_domains: card.total,
-            brand_count: card.brands,
-            reported_to_netcraft: card.kpis.reportedToNetcraft,
-            likely_phishing: card.kpis.likelyPhishing,
-            parked_for_sale: card.kpis.parkedForSale,
-            unknown_registrar_count: card.unknownRegistrarCount,
-            top_au_brands: card.topAuBrands,
-            global_brands: card.globalBrands,
-            top_registrars: card.topRegistrars,
-            super_fund: card.superFund,
-            mom: card.mom,
-            updated_at: new Date().toISOString(),
-            // published_post_urn intentionally omitted → preserved on conflict.
-          },
-          { onConflict: "period_month" },
-        );
-        if (error) throw new Error(`summary upsert failed: ${error.message}`);
+        // Shared writer (report-summary.ts) — omits published_post_urn so a
+        // re-snapshot preserves a URN the LinkedIn publish step recorded.
+        await upsertSummary(sb, card);
         return { period: card.periodMonth, total: card.total, brands: card.brands };
       });
 

@@ -125,7 +125,7 @@ jobs:
           name: clone-watch-edition
           path: apps/web/out
 
-      - name: Publish to LinkedIn (company page)
+      - name: Publish to LinkedIn (guarded — company page)
         id: publish
         working-directory: apps/web
         env:
@@ -134,21 +134,24 @@ jobs:
           LINKEDIN_REFRESH_TOKEN: ${{ secrets.LINKEDIN_REFRESH_TOKEN }}
           LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
           LINKEDIN_ORG_URN: ${{ secrets.LINKEDIN_ORG_URN }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           MONTH: ${{ needs.prepare.outputs.month }}
           TITLE: ${{ needs.prepare.outputs.title }}
         run: |
           set -o pipefail
-          pnpm linkedin:test -- \
+          # clone-watch:publish self-guards: it SKIPS (green) if this month already
+          # has a recorded post URN, and records the URN after a successful post —
+          # so this step is safe to re-run and can't double-post.
+          pnpm clone-watch:publish -- \
             --pdf="out/clone-watch-$MONTH.pdf" \
             --caption-file=out/caption.txt \
             --comment="$(cat out/first-comment.txt)" \
             --title="$TITLE" \
-            --publish | tee publish.log
-          # Don't let a non-matching grep (or a SIGPIPE from `| head`) fail this
-          # step AFTER a successful publish — a red run tempts a re-run, which
-          # would DOUBLE-POST. `|| true` + `-m1` keep the step green post-publish.
-          URL=$(grep -m1 -oE 'https://www\.linkedin\.com/feed/update/[^ ]+' publish.log || true)
-          echo "url=$URL" >> "$GITHUB_OUTPUT"
+            --month="$MONTH" | tee publish.log
+          # `|| true` so a parse miss can't red the step after a live post.
+          echo "result=$(grep -m1 -oE 'RESULT=[a-z]+' publish.log | cut -d= -f2 || true)" >> "$GITHUB_OUTPUT"
+          echo "url=$(grep -m1 -oE 'URL=[^[:space:]]+' publish.log | cut -d= -f2 || true)" >> "$GITHUB_OUTPUT"
 
       - name: Telegram — published + manual steps
         if: always() && steps.publish.outcome == 'success'
@@ -156,13 +159,19 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
           POST_URL: ${{ steps.publish.outputs.url }}
+          RESULT: ${{ steps.publish.outputs.result }}
+          MONTH: ${{ needs.prepare.outputs.month }}
         working-directory: apps/web
         run: |
           if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_ADMIN_CHAT_ID" ]; then
             echo "Telegram not configured — skipping ping"; exit 0
           fi
-          COMMENT=$(cat out/first-comment.txt)
-          TEXT=$(printf '✅ *Published:* %s\n\nTwo manual steps (Dev-Tier cannot do these):\n1️⃣ Paste this as the FIRST COMMENT:\n%s\n\n2️⃣ Reshare from your personal profile for reach.' "$POST_URL" "$COMMENT")
+          if [ "$RESULT" = "skipped" ]; then
+            TEXT=$(printf '⏭ Clone Watch: %s was already posted (%s) — skipped, no double-post.' "$MONTH" "$POST_URL")
+          else
+            COMMENT=$(cat out/first-comment.txt)
+            TEXT=$(printf '✅ *Published:* %s\n\nTwo manual steps (Dev-Tier cannot do these):\n1️⃣ Paste this as the FIRST COMMENT:\n%s\n\n2️⃣ Reshare from your personal profile for reach.' "$POST_URL" "$COMMENT")
+          fi
           curl -sS -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
             --data-urlencode "chat_id=$TELEGRAM_ADMIN_CHAT_ID" \
             --data-urlencode "text=$TEXT" \
