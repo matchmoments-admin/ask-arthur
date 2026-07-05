@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import Image from "next/image";
+import InstallCtaButton from "./InstallCtaButton";
 
 export const metadata: Metadata = {
   title: "Chrome Extension — Ask Arthur | AI Scam Detection for Facebook",
@@ -203,14 +204,7 @@ export default function ExtensionPage() {
           Works on Chrome, Edge, Brave, and any Chromium browser.
         </p>
         {process.env.NEXT_PUBLIC_CHROME_WEB_STORE_URL ? (
-          <a
-            href={process.env.NEXT_PUBLIC_CHROME_WEB_STORE_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center justify-center h-14 px-10 bg-deep-navy text-white font-semibold rounded-full hover:bg-navy transition-colors text-lg"
-          >
-            Add to Chrome — It&apos;s Free
-          </a>
+          <InstallCtaButton href={process.env.NEXT_PUBLIC_CHROME_WEB_STORE_URL} />
         ) : (
           <span
             aria-disabled="true"

@@ -3,7 +3,61 @@ import { createMiddlewareClient } from "@askarthur/supabase/middleware";
 import { logger } from "@askarthur/utils/logger";
 import { getLogger } from "@askarthur/utils/axiom-logger";
 import { resolveRequestId } from "@askarthur/utils/request-id";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 import { verifyAdminToken, COOKIE_NAME as ADMIN_COOKIE } from "@/lib/adminAuth";
+
+// First-touch attribution cookie. Captured once on the visitor's FIRST landing
+// and never overwritten, so a later organic return doesn't clobber the paid /
+// LinkedIn first-touch. Read server-side by logEvent() (httpOnly — client JS
+// can't see it) to stamp every conversion with the channel that produced it.
+const ATTRIBUTION_COOKIE = "aa_attribution";
+const ATTRIBUTION_MAX_AGE = 60 * 60 * 24 * 90; // 90 days
+const UTM_KEYS = [
+  "utm_source",
+  "utm_medium",
+  "utm_campaign",
+  "utm_content",
+  "utm_term",
+] as const;
+
+// Set the aa_attribution cookie on `res` if the visitor doesn't already have
+// one (first-touch guard). No-op unless FF_ANALYTICS_ATTRIBUTION is on. Cheap
+// and side-effect-free — deliberately does NOT touch Supabase; the visitors
+// row is upserted lazily from the event-write path, never from middleware
+// (a DB write here would reintroduce the 2026-05-09 timeout class).
+function maybeSetAttribution(req: NextRequest, res: NextResponse): void {
+  if (!featureFlags.analyticsAttribution) return;
+  // /go/* short links are clean (no UTM query), so capturing here would record
+  // an empty first-touch and the guard would then ignore the destination's
+  // UTMs. The /go route is the sole authority for those — it bakes the slug's
+  // UTMs into the cookie itself.
+  if (req.nextUrl.pathname.startsWith("/go/")) return;
+  if (req.cookies.has(ATTRIBUTION_COOKIE)) return;
+  try {
+    const sp = req.nextUrl.searchParams;
+    const utm: Record<string, string> = {};
+    for (const k of UTM_KEYS) {
+      const v = sp.get(k);
+      if (v) utm[k] = v;
+    }
+    const payload = {
+      ...utm,
+      referrer: req.headers.get("referer") ?? "",
+      landing_path: req.nextUrl.pathname,
+      anonymous_id: crypto.randomUUID(),
+      ts: new Date().toISOString(),
+    };
+    res.cookies.set(ATTRIBUTION_COOKIE, JSON.stringify(payload), {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax", // sent on top-level cross-site arrivals from a link/ad
+      path: "/",
+      maxAge: ATTRIBUTION_MAX_AGE,
+    });
+  } catch {
+    // Never let attribution capture break a request.
+  }
+}
 
 // Global edge rate limiting — 60 requests/min per IP (sliding window via Upstash)
 // Coexists with per-route limits in lib/rateLimit.ts (defense-in-depth)
@@ -95,6 +149,13 @@ export async function middleware(req: NextRequest) {
   // ---------------------------------------------------------------------------
   const authEnabled = process.env.NEXT_PUBLIC_FF_AUTH === "true";
   const { supabase, response } = createMiddlewareClient(req, requestHeaders);
+
+  // First-touch attribution — set on the shared `response`, which is what every
+  // normal exit returns (including the non-API GET page-load short-circuit
+  // below, i.e. the actual "arrival from LinkedIn" path). Redirect / 401 / 429
+  // early-return responses are auth/machine paths, not first touches, so they
+  // don't need it. Guarded + first-touch-safe inside the helper.
+  maybeSetAttribution(req, response);
   let authState: "auth_disabled" | "anonymous" | "user" | "admin" =
     authEnabled ? "anonymous" : "auth_disabled";
 

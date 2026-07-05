@@ -13,6 +13,7 @@ import InvalidSubmissionState from "./result/InvalidSubmissionState";
 import SimilarReports from "./result/SimilarReports";
 import { compressImage } from "@/lib/compressImage";
 import { tryDecodeQR } from "@/lib/qrDecode";
+import { track } from "@/lib/track";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { detectCharityIntent } from "@askarthur/scam-engine/charity-intent";
 import { useMediaAnalysis } from "@/lib/hooks/useMediaAnalysis";
@@ -399,6 +400,14 @@ export default function ScamChecker() {
         has_images: images.length > 0,
         referrer_source: referrerSource ?? "direct",
       },
+    });
+
+    // First-party attribution mirror — scan_started is the activation trigger.
+    // Metadata only (input type + referrer bucket, no content). scan_completed
+    // is emitted server-side from /api/analyze.
+    track("scan_started", {
+      input_type: inputMode,
+      referrer_source: referrerSource ?? "direct",
     });
 
     try {

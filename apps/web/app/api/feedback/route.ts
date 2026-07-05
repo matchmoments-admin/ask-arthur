@@ -3,6 +3,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { hashIdentifier } from "@askarthur/utils";
 import { logger } from "@askarthur/utils/logger";
 import { checkRateLimit } from "@askarthur/utils/rate-limit";
+import { logEvent } from "@/lib/analytics-events";
 import { z } from "zod";
 
 const REASON_CODES = [
@@ -75,6 +76,17 @@ export async function POST(req: NextRequest) {
     if (error) {
       logger.error("Failed to store verdict feedback", { error: error.message });
       return NextResponse.json({ error: "Failed to store feedback." }, { status: 500 });
+    }
+
+    // First-party attribution — the "report this scam" button is the corpus-
+    // contribution conversion. Only the explicit user_reported action counts;
+    // correct/false_positive/false_negative are quality signals, not reports.
+    if (parsed.data.userSays === "user_reported") {
+      void logEvent({
+        eventType: "scam_report_submitted",
+        eventProps: { verdict_category: parsed.data.verdictGiven },
+        path: "/api/feedback",
+      });
     }
 
     return NextResponse.json({ submitted: true });

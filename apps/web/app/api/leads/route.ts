@@ -5,6 +5,7 @@ import { checkFormRateLimit } from "@askarthur/utils/rate-limit";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { logCost, PRICING } from "@/lib/cost-telemetry";
+import { logEvent } from "@/lib/analytics-events";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import {
   createFeedbackPage,
@@ -78,6 +79,23 @@ export async function POST(req: NextRequest) {
         { status: 500 }
       );
     }
+
+    // First-party attribution — the B2B lead is the revenue KPI. Metadata
+    // only: no name / email / company. `form` distinguishes a general (B2B /
+    // partner) enquiry from typed product feedback. No-ops without a cookie.
+    const leadFeedbackType =
+      (lead.assessment_data as { feedback_type?: string } | null)
+        ?.feedback_type ?? null;
+    void logEvent({
+      eventType: "contact_submit",
+      eventProps: {
+        source: lead.source ?? "website",
+        form: leadFeedbackType === "general" ? "partner" : "contact",
+        ...(lead.sector ? { sector: lead.sector } : {}),
+        ...(leadFeedbackType ? { feedback_type: leadFeedbackType } : {}),
+      },
+      path: "/contact",
+    });
 
     // Fire-and-forget notifications. The Supabase insert above is the
     // durable source of truth; any of these three channels failing must
