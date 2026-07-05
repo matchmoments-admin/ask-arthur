@@ -39,9 +39,11 @@ jobs:
 
       - name: Resolve report month
         id: month
+        env:
+          MONTH_INPUT: ${{ inputs.month }}
         run: |
-          if [ -n "${{ inputs.month }}" ]; then
-            M="${{ inputs.month }}"
+          if [ -n "$MONTH_INPUT" ]; then
+            M="$MONTH_INPUT"
           else
             # first-of-this-month minus one day → last day of the prior month.
             M=$(date -u -d "$(date -u +%Y-%m-01) -1 day" +%Y-%m)
@@ -63,7 +65,8 @@ jobs:
         working-directory: apps/web
         env:
           ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
-        run: pnpm report-card:export -- --base=https://askarthur.au --month=${{ steps.month.outputs.value }} --out=out
+          MONTH: ${{ steps.month.outputs.value }}
+        run: pnpm report-card:export -- --base=https://askarthur.au --month="$MONTH" --out=out
 
       - name: Generate caption
         id: caption
@@ -71,8 +74,9 @@ jobs:
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          MONTH: ${{ steps.month.outputs.value }}
         run: |
-          pnpm clone-watch:caption -- --month=${{ steps.month.outputs.value }} --out=out
+          pnpm clone-watch:caption -- --month="$MONTH" --out=out
           echo "title=$(cat out/title.txt)" >> "$GITHUB_OUTPUT"
 
       - name: Upload edition artifact
@@ -87,13 +91,14 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TITLE: ${{ steps.caption.outputs.title }}
         working-directory: apps/web
         run: |
           if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_ADMIN_CHAT_ID" ]; then
             echo "Telegram not configured — skipping ping"; exit 0
           fi
           PREVIEW=$(head -c 900 out/caption.txt)
-          TEXT=$(printf '🕵️ *%s* is ready for review.\n\nApprove the publish here → %s\n\nCaption preview:\n%s' "${{ steps.caption.outputs.title }}" "$RUN_URL" "$PREVIEW")
+          TEXT=$(printf '🕵️ *%s* is ready for review.\n\nApprove the publish here → %s\n\nCaption preview:\n%s' "$TITLE" "$RUN_URL" "$PREVIEW")
           curl -sS -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
             --data-urlencode "chat_id=$TELEGRAM_ADMIN_CHAT_ID" \
             --data-urlencode "text=$TEXT" \
@@ -129,15 +134,20 @@ jobs:
           LINKEDIN_REFRESH_TOKEN: ${{ secrets.LINKEDIN_REFRESH_TOKEN }}
           LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
           LINKEDIN_ORG_URN: ${{ secrets.LINKEDIN_ORG_URN }}
+          MONTH: ${{ needs.prepare.outputs.month }}
+          TITLE: ${{ needs.prepare.outputs.title }}
         run: |
           set -o pipefail
           pnpm linkedin:test -- \
-            --pdf=out/clone-watch-${{ needs.prepare.outputs.month }}.pdf \
+            --pdf="out/clone-watch-$MONTH.pdf" \
             --caption-file=out/caption.txt \
             --comment="$(cat out/first-comment.txt)" \
-            --title="${{ needs.prepare.outputs.title }}" \
+            --title="$TITLE" \
             --publish | tee publish.log
-          URL=$(grep -oE 'https://www\.linkedin\.com/feed/update/[^ ]+' publish.log | head -1)
+          # Don't let a non-matching grep (or a SIGPIPE from `| head`) fail this
+          # step AFTER a successful publish — a red run tempts a re-run, which
+          # would DOUBLE-POST. `|| true` + `-m1` keep the step green post-publish.
+          URL=$(grep -m1 -oE 'https://www\.linkedin\.com/feed/update/[^ ]+' publish.log || true)
           echo "url=$URL" >> "$GITHUB_OUTPUT"
 
       - name: Telegram — published + manual steps
@@ -145,14 +155,28 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+          POST_URL: ${{ steps.publish.outputs.url }}
         working-directory: apps/web
         run: |
           if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_ADMIN_CHAT_ID" ]; then
             echo "Telegram not configured — skipping ping"; exit 0
           fi
           COMMENT=$(cat out/first-comment.txt)
-          TEXT=$(printf '✅ *Published:* %s\n\nTwo manual steps (Dev-Tier cannot do these):\n1️⃣ Paste this as the FIRST COMMENT:\n%s\n\n2️⃣ Reshare from your personal profile for reach.' "${{ steps.publish.outputs.url }}" "$COMMENT")
+          TEXT=$(printf '✅ *Published:* %s\n\nTwo manual steps (Dev-Tier cannot do these):\n1️⃣ Paste this as the FIRST COMMENT:\n%s\n\n2️⃣ Reshare from your personal profile for reach.' "$POST_URL" "$COMMENT")
           curl -sS -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
             --data-urlencode "chat_id=$TELEGRAM_ADMIN_CHAT_ID" \
             --data-urlencode "text=$TEXT" \
             --data-urlencode "parse_mode=Markdown" >/dev/null
+
+      - name: Telegram — publish failed
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_ADMIN_CHAT_ID" ]; then exit 0; fi
+          TEXT=$(printf '⚠️ Clone Watch publish FAILED after approval. Check the run before re-running (a re-run may double-post): %s' "$RUN_URL")
+          curl -sS -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+            --data-urlencode "chat_id=$TELEGRAM_ADMIN_CHAT_ID" \
+            --data-urlencode "text=$TEXT" >/dev/null

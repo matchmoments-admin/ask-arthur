@@ -92,6 +92,10 @@ export function generateCloneWatchCaption(
   // Finding 1 — top AU brands. Drop the super-fund brand from the "close behind"
   // list when it gets its own spotlight in finding 2, so it isn't named twice.
   const sfName = card.superFund ? prettyBrand(card.superFund.brand) : null;
+  // When the super fund is itself the #1 AU brand, it IS the lead of finding 1,
+  // so fold the super angle into finding 1 and skip the separate spotlight —
+  // otherwise the same brand is named twice with two contradictory "#1" claims.
+  const fundIsLead = card.superFund != null && card.superFund.auRank === 1;
   if (au.length > 0) {
     const lead = au[0];
     const rest = au
@@ -101,19 +105,21 @@ export function generateCloneWatchCaption(
       .map((b) => `${b.name} (${b.n})`);
     const restClause = rest.length ? `, with ${joinAnd(rest)} close behind` : "";
     findings.push(
-      `${lead.name} was the most-copied Australian brand (${lead.n} lookalike domains)${restClause}.`,
+      fundIsLead
+        ? `A super fund led the month: ${lead.name} was the most-copied Australian brand (${lead.n} lookalike domains)${restClause}. Retirement savings are a front-line target now — one super-fund login can open a lifetime of savings.`
+        : `${lead.name} was the most-copied Australian brand (${lead.n} lookalike domains)${restClause}.`,
     );
   }
 
-  // Finding 2 — super-fund angle if a fund appears (keeps slide 3 + caption in
-  // lockstep); else a global-brands finding when globals exist.
+  // Finding 2 — super-fund spotlight when a fund appears BUT isn't already the
+  // lead (keeps slide 3 + caption in lockstep); else a global-brands finding.
   const globals = card.globalBrands.map((b) => ({ name: prettyBrand(b.brand), n: b.clones }));
-  if (card.superFund) {
+  if (card.superFund && !fundIsLead) {
     const fund = prettyBrand(card.superFund.brand);
     findings.push(
       `It's not just shopping — or banking. ${fund}, an industry super fund, was ${rankPhrase(card.superFund.auRank)} Australian brand (${card.superFund.clones}). Retirement savings are a front-line target now; one super-fund login can open a lifetime of savings.`,
     );
-  } else if (globals.length > 0) {
+  } else if (!card.superFund && globals.length > 0) {
     const top = globals.slice(0, 3).map((b) => `${b.name} (${b.n})`);
     findings.push(
       `It's not just local brands. Global names were aimed at Australians too — ${joinAnd(top)} among the most-cloned.`,
@@ -131,7 +137,7 @@ export function generateCloneWatchCaption(
 
   const findingsBlock =
     findings.length > 0
-      ? `${cap(numberWord(findings.length))} things stood out this month:\n\n` +
+      ? `${cap(numberWord(findings.length))} ${findings.length === 1 ? "thing" : "things"} stood out this month:\n\n` +
         findings.map((f, i) => `${i + 1}. ${f}`).join("\n\n")
       : "";
 
@@ -153,12 +159,12 @@ export function generateCloneWatchCaption(
     seriesLine = `This is month one. Next month you'll see whether ${card.total} is the floor or the trend.`;
   } else {
     const { totalPct, priorTotal, priorLabel } = card.mom;
-    const dir = card.mom.totalDelta > 0 ? "up" : card.mom.totalDelta < 0 ? "down" : "flat";
-    const pct = totalPct != null ? `${Math.abs(totalPct)}%` : "";
-    seriesLine =
-      dir === "flat"
-        ? `That's flat on ${priorLabel} (${priorTotal} → ${card.total}). We publish this every month — the trend is the story.`
-        : `That's ${dir} ${pct} on ${priorLabel} (${priorTotal} → ${card.total}). We publish this every month — the trend is the story.`;
+    // "flat" when the move rounds to <1% either way, so we never print "up 0%".
+    const flat = card.mom.totalDelta === 0 || totalPct == null || totalPct === 0;
+    const dir = card.mom.totalDelta > 0 ? "up" : "down";
+    seriesLine = flat
+      ? `That's essentially flat on ${priorLabel} (${priorTotal} → ${card.total}). We publish this every month — the trend is the story.`
+      : `That's ${dir} ${Math.abs(totalPct)}% on ${priorLabel} (${priorTotal} → ${card.total}). We publish this every month — the trend is the story.`;
   }
 
   const body = [
