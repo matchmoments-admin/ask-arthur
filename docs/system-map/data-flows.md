@@ -1,6 +1,6 @@
 # Ask Arthur — Canonical Data Flows
 
-Six end-to-end flows that explain how the system talks to itself. Each flow lists the entry point, the work the request does inline, what gets handed off async, and which tables / RPCs / Inngest events are involved.
+Eight end-to-end flows that explain how the system talks to itself. Each flow lists the entry point, the work the request does inline, what gets handed off async, and which tables / RPCs / Inngest events are involved.
 
 For any route mentioned, see [web-surface.md](./web-surface.md). For any table or RPC, see [database.md](./database.md). For any cron or Inngest function, see [background-workers.md](./background-workers.md).
 
@@ -568,6 +568,42 @@ Brand replies to brendan@askarthur.au
 **Why HMAC retry + Telegram alert + `eventEmitted:false`:** the failure mode of the silent-drop was indistinguishable from "click didn't work" — `triage_at` was set in the DB but the admin saw nothing happen. The three layers of defence ensure that either (a) Inngest gets the event eventually (retry), (b) the admin is paged when retries exhaust (Telegram), or (c) the dashboard surfaces the partial-success as a warning toast (`eventEmitted:false`).
 
 ---
+
+## 8. First-party attribution & analytics events — `aa_attribution` cookie → `analytics_events`
+
+The owned complement to Plausible: capture an anonymous visitor's **first touch** once, then stamp it onto every later conversion so a scan / report / lead traces back to the channel (and article) that produced it. Gated by `FF_ANALYTICS_ATTRIBUTION` (ON in prod).
+
+```
+arrival  (LinkedIn / blog / organic / direct)
+  │
+  ├─ middleware.ts  maybeSetAttribution()
+  │    • sets aa_attribution cookie ONCE — first-touch guard, never overwritten
+  │      { anonymous_id, utm_*, referrer, landing_path }  httpOnly · Secure · Lax · 90d
+  │    • NO DB WRITE here — a pageview costs 0 rows
+  │
+  └─ /go/[slug] short links: the route itself logs link_click + sets the cookie
+       (clean short URLs carry no UTM query, so middleware skips them)
+
+user takes a real action → named event
+  │  CLIENT : track() → POST /api/events   (scan_started, feed_view — client-safe only)
+  │  SERVER : emitAnalyzeComplete → scan_completed ; /api/leads → contact_submit ;
+  │           /api/feedback (user_reported) → scam_report_submitted ; /go → link_click
+  ▼
+logEvent(ev) / writeEvent(attr, ev)          [apps/web/lib/analytics-events.ts]
+  1. read aa_attribution cookie (httpOnly, server-side)
+  2. upsert visitors        (ignore-on-conflict → FIRST touch wins)
+  3. insert analytics_events (metadata only, stamped with the first-touch utm/referrer)
+  • fire-and-forget · waitUntil · never throws  (mirrors logCost())
+  ▼
+Supabase:  visitors ⋈ analytics_events  (join on anonymous_id)
+  ▼
+security_invoker views  →  /admin/analytics
+  daily_scans · scans_by_type · scans_new_vs_returning · no_scan_visitor_rate
+  · utm_attributed_conversions · blog_to_scan_funnel
+  · content_post_funnel   (per-post, keyed on the reader's first-touch landing_path)
+```
+
+**Key invariant — first touch is the attribution key.** `visitors.landing_path` and `first_utm_*` are written once and never overwritten, so a conversion days later still credits the campaign / article that first brought the visitor in. This is why the injected blog CTAs (`apps/web/lib/blog-cta.ts`, #667) are **internal links with no UTMs** — the cookie already carries attribution; UTM-ing internal navigation would wrongly re-source the session. **Privacy:** `event_props` is metadata only (input _type_, verdict _category_, timing) — scanned content never enters this path; the first-party store is deliberately where scan telemetry lives instead of a third-party pixel.
 
 ## Cross-flow patterns
 

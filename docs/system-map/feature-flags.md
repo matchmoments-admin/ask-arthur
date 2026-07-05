@@ -150,6 +150,14 @@ Layer 0 = daily NRD lexical sweep (live since 2026-05-24). Layers 1–5 = outrea
 | `similarReports`                                      | OFF     | "Similar reports we've seen" on verdict page                                                                                                 |
 | `ragThemes`                                           | OFF     | Inject top-K Reddit themes into Haiku prompt                                                                                                 |
 
+## First-party analytics & attribution
+
+| Flag                                                       | Default                    | Purpose                                                                                                                                                                                                                                                                                                                |
+| ---------------------------------------------------------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `analyticsAttribution` (server `FF_ANALYTICS_ATTRIBUTION`) | OFF (code); **ON in prod** | Gates the middleware first-touch `aa_attribution` cookie + the `logEvent()` / `/api/events` write path into `visitors` + `analytics_events` (v190). Server-only; no client UI. Verified end-to-end and canaried ON in prod 2026-07-05 (#666). Owned complement to Plausible — see [data-flows.md](./data-flows.md) §8. |
+
+The blog-generator CTA/internal-link injection (`apps/web/lib/blog-cta.ts`, #667) is a compile-time constant, not a flag: `INCLUDE_PILLAR_LINK` (default OFF) gates the `/clone-watch` pillar link until the public pillar + method pages ship and their copy is vetted (#371).
+
 ## Third-party reporting
 
 | Flag                                                     | Default | Purpose                                                                                                                                                                                                                                                                                                                                                                                                               |
@@ -259,6 +267,7 @@ Distinct from the `*_CAP_USD` env-var caps above: some `feature_brakes` rows are
 - `NEXT_PUBLIC_FF_REDDIT_INTEL_PUBLIC_PAGES`, `NEXT_PUBLIC_FF_REDDIT_INTEL_B2B_API`
 - (Full list lives in `packages/utils/src/feature-flags.ts`)
 - `FF_ANALYZE_INNGEST_WEB` — Server-only canary for the analyze Phase 2 pipeline
+- `FF_ANALYTICS_ATTRIBUTION` — Server-only; first-party attribution cookie + `analytics_events` write path (v190). Set **ON** in prod (2026-07-05)
 
 ### Inngest
 

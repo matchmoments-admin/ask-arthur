@@ -277,17 +277,17 @@ ask-arthur/
 | Authenticated pages (`/app/*`, `/admin/*`) |   ~26 | [web-surface.md](./web-surface.md)               |
 | API routes                                 |  ~120 | [web-surface.md](./web-surface.md)               |
 | Bot platforms wired up                     |     5 | [web-surface.md](./web-surface.md)               |
-| Postgres tables                            |   75+ | [database.md](./database.md)                     |
+| Postgres tables                            |   77+ | [database.md](./database.md)                     |
 | Postgres RPCs (all `SECURITY DEFINER`)     |    71 | [database.md](./database.md)                     |
 | Postgres triggers                          |     9 | [database.md](./database.md)                     |
 | Archive shadow tables                      |    11 | [database.md](./database.md)                     |
-| Migrations (v2 → v122)                     |   121 | [database.md](./database.md)                     |
+| Migrations (v2 → v191)                     |  150+ | [database.md](./database.md)                     |
 | Vercel cron routes                         |    16 | [background-workers.md](./background-workers.md) |
 | Inngest functions                          |   35+ | [background-workers.md](./background-workers.md) |
 | Python scrapers                            |    23 | [background-workers.md](./background-workers.md) |
 | GitHub Actions workflows                   |     8 | [background-workers.md](./background-workers.md) |
 | Feature flags                              |   ~80 | [feature-flags.md](./feature-flags.md)           |
-| Canonical data flows                       |     6 | [data-flows.md](./data-flows.md)                 |
+| Canonical data flows                       |     8 | [data-flows.md](./data-flows.md)                 |
 
 ## When to update which file
 
