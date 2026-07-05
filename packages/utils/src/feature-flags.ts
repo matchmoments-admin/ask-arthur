@@ -575,6 +575,15 @@ export const featureFlags = {
    *  privacy-policy update, and upload-failure observability. Server-side
    *  only. See docs/adr/0010-screenshot-retention-gated.md. */
   screenshotRetention: readBoolEnv("FF_SCREENSHOT_RETENTION"),
+
+  /** First-party analytics + inbound first-touch attribution. When ON, the
+   *  middleware sets the write-once `aa_attribution` cookie (anonymous_id +
+   *  first-touch UTMs/referrer) and the logEvent() writer + /api/events route
+   *  persist named events to analytics_events (v190). Server-side only — gates
+   *  the middleware cookie write and the event-ingestion path, not any client
+   *  UI. Default OFF until the v190 schema is applied and preview verification
+   *  passes; then canary ON. Zero paid-API spend → no cost brake needed. */
+  analyticsAttribution: readBoolEnv("FF_ANALYTICS_ATTRIBUTION"),
 } as const;
 
 export type FeatureFlag = keyof typeof featureFlags;

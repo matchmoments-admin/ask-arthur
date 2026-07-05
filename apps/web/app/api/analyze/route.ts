@@ -8,6 +8,7 @@ import {
   renderThemesForPrompt,
 } from "@askarthur/scam-engine/retrieval/themes";
 import { featureFlags } from "@askarthur/utils/feature-flags";
+import { logEvent } from "@/lib/analytics-events";
 import { readBoolEnv } from "@askarthur/utils/env";
 import { resolveRequestId } from "@askarthur/utils/request-id";
 import { extractContactsFromText, normalizePhoneE164 } from "@askarthur/scam-engine/phone-normalize";
@@ -734,4 +735,17 @@ function emitAnalyzeComplete(args: {
   } catch {
     // Never let logging break the success path.
   }
+
+  // First-party attribution event (metadata only — no scanned content). Fires
+  // on both the cache-hit and main success paths, same as the Axiom emit above.
+  // No-ops without an aa_attribution cookie; the FF gate lives in the writer.
+  void logEvent({
+    eventType: "scan_completed",
+    eventProps: {
+      input_type: args.submissionType,
+      verdict_category: args.verdict,
+    },
+    path: "/api/analyze",
+    requestId: args.requestId,
+  });
 }

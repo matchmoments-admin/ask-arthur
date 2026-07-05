@@ -6,6 +6,7 @@ import { Search, SlidersHorizontal, Loader2 } from "lucide-react";
 import FeedCard from "./FeedCard";
 import Pill from "./Pill";
 import { CATEGORY_CONFIG, COUNTRY_OPTIONS } from "@/lib/feed";
+import { track } from "@/lib/track";
 import type { FeedItem } from "@/lib/feed";
 
 type FeedListProps = {
@@ -38,6 +39,11 @@ export default function FeedList({ initialItems, initialTotal }: FeedListProps) 
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+
+  // First-party attribution — one feed_view per session-mount of the feed.
+  useEffect(() => {
+    track("feed_view");
+  }, []);
 
   // Filters — seeded from URL on mount so deep-links auto-apply
   const [source, setSource] = useState(initialSource);

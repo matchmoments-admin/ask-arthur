@@ -62,7 +62,12 @@ export default function PrivacyPage() {
               <li>
                 <strong>Analytics</strong> — we use Plausible Analytics, a
                 privacy-first analytics tool that collects no personal data and
-                uses no cookies.
+                uses no cookies. We also keep a first-party record of anonymous
+                usage events (such as when a check is run or a page is viewed) to
+                understand how the service is used and which channels bring people
+                to us. These records hold no scanned content and no personal
+                information — only the type of action, an anonymous identifier,
+                and, where present, the campaign that referred you.
               </li>
               <li>
                 <strong>Email address</strong> — only if you voluntarily
@@ -388,10 +393,23 @@ export default function PrivacyPage() {
               8. Cookies &amp; Tracking
             </h2>
             <p className="text-gov-slate text-base leading-relaxed">
-              Ask Arthur does not use cookies. We use Plausible Analytics, which
-              is a privacy-first analytics platform that does not use cookies,
-              does not collect personal data, and is fully compliant with GDPR,
-              CCPA, and PECR.
+              We use Plausible Analytics, a privacy-first analytics platform that
+              does not use cookies, does not collect personal data, and is fully
+              compliant with GDPR, CCPA, and PECR.
+            </p>
+            <p className="text-gov-slate text-base leading-relaxed mt-3">
+              We do set one first-party cookie,{" "}
+              <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-sm">
+                aa_attribution
+              </code>
+              . It stores an anonymous identifier and, if you arrived from a
+              campaign link, the referring channel — so we can understand which
+              of our posts and articles are useful, without tracking you across
+              other websites. It contains no personal information and no scanned
+              content, is set only on our own domain, and expires after 90 days.
+              Because it is strictly first-party and cookieless analytics is used
+              for page metrics, no consent banner is required for Australian
+              visitors under the Privacy Act 1988 (Cth).
             </p>
           </section>
 
