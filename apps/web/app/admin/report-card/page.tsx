@@ -10,14 +10,17 @@ import { reportCardCss } from "./report-card-css";
  * /admin/report-card - renders the monthly "Australian Clone Watch" LinkedIn
  * carousel from live data, in the "Modern LinkedIn monthly report" ledger style
  * (ported from the user's claude.ai/design project). Read-only, on-demand: NO
- * Inngest, NO cron, two SELECTs per render (report month + prior month for the
- * MoM delta). The Puppeteer export script hits ?slide=N for each slide.
+ * Inngest, NO cron, two SELECTs per render (report month + prior month — the
+ * prior-month read feeds `mom`, retained for the conditional MoM/scale slide the
+ * recurring-automation build re-introduces once July-vs-June has a real delta).
+ * The Puppeteer export script hits ?slide=N for each slide.
  *
- * Super-hook-led 8-slide structure:
- *   01 hook (the number)        05 global brands aimed at AU
- *   02 scale + MoM delta        06 registrar accountability (aggregate)
- *   03 top AU brands            07 what we did (reported / phishing / parked)
- *   04 why a lookalike works    08 civic CTA + method link
+ * Super-hook-led 7-slide structure:
+ *   01 hook (the number)              05 what it means (address bar / anatomy)
+ *   02 top AU brands                  06 what we did (reported / phishing / parked)
+ *   03 super-fund spotlight (HESTA;   07 civic CTA + method link
+ *      falls back to global brands)
+ *   04 registrar accountability (aggregate)
  *
  * Query params:
  *   ?month=YYYY-MM   the report month (default: prior calendar month)

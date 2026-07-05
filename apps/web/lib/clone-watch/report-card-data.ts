@@ -114,7 +114,10 @@ export interface CloneWatchReportCard {
   unknownRegistrarCount: number;
   /** Live month-on-month comparison vs the prior calendar month. Computed by a
    *  second fetch+aggregate over the prior window (no dependency on the durable
-   *  clone_watch_report_summary snapshot — that lands in WS3). */
+   *  clone_watch_report_summary snapshot — that lands in WS3). Currently unrendered
+   *  (the scale/MoM slide was cut from the 7-deck for the June baseline); retained
+   *  because the recurring-automation build re-introduces a conditional MoM slide
+   *  once there's an honest delta (July-vs-June onward). */
   mom: MonthOverMonth;
   /** The highest-ranked AU super fund among the impersonated brands, if any —
    *  powers the "super fund" spotlight slide. null when no watchlisted fund
@@ -323,18 +326,19 @@ export async function getCloneWatchReportCard(
     .map(([brand, m]) => ({ brand, clones: m.detected }))
     .sort((a, b) => b.clones - a.clones || a.brand.localeCompare(b.brand));
 
-  // Super-fund spotlight: the highest-ranked AU brand that's a watchlisted super
-  // fund, with its rank among AU brands. Ranked-desc order means findIndex picks
-  // the most-targeted fund. null when no fund appears (slide falls back).
-  const auRanked = ranked.filter((r) => isAuBrand(r.brand));
-  const sfIdx = auRanked.findIndex((r) =>
-    SUPER_FUND_DOMAINS.has(r.brand.toLowerCase()),
-  );
+  // Super-fund spotlight: the highest-ranked super fund, with its rank among
+  // Australian brands. Super funds ARE Australian brands even on a .com (e.g.
+  // australiansuper.com) — which the .au TLD heuristic would classify "global"
+  // and hide from the spotlight — so rank against AU brands PLUS watchlisted
+  // funds. Ranked-desc order means findIndex picks the most-targeted fund.
+  const isFund = (d: string) => SUPER_FUND_DOMAINS.has(d.toLowerCase());
+  const auOrFund = ranked.filter((r) => isAuBrand(r.brand) || isFund(r.brand));
+  const sfIdx = auOrFund.findIndex((r) => isFund(r.brand));
   const superFund: SuperFundSpotlight | null =
     sfIdx >= 0
       ? {
-          brand: auRanked[sfIdx].brand,
-          clones: auRanked[sfIdx].clones,
+          brand: auOrFund[sfIdx].brand,
+          clones: auOrFund[sfIdx].clones,
           auRank: sfIdx + 1,
         }
       : null;
