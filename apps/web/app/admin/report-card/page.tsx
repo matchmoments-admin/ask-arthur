@@ -4,6 +4,7 @@ import {
   getCloneWatchReportCard,
   type CloneWatchReportCard,
 } from "@/lib/clone-watch/report-card-data";
+import { prettyBrand } from "@/lib/clone-watch/brand-display";
 import { reportCardCss } from "./report-card-css";
 
 /**
@@ -337,38 +338,4 @@ function SlideClose({ data, page }: SlideProps) {
       </div>
     </section>
   );
-}
-
-/** Correct display casing for brands whose name isn't a naive capitalise-first
- *  (covers both the AU ranking and the global footnote). */
-const BRAND_DISPLAY: Record<string, string> = {
-  whatsapp: "WhatsApp",
-  paypal: "PayPal",
-  hellostake: "Stake",
-  aliexpress: "AliExpress",
-  fedex: "FedEx",
-  shein: "SHEIN",
-  iinet: "iiNet",
-  ebay: "eBay",
-  youtube: "YouTube",
-  // AU super funds (for the spotlight name — proper casing, not capitalise-first)
-  hesta: "HESTA",
-  australiansuper: "AustralianSuper",
-  unisuper: "UniSuper",
-  hostplus: "Hostplus",
-  aware: "Aware Super",
-  cbus: "Cbus",
-  rest: "Rest Super",
-  caresuper: "CareSuper",
-  ngssuper: "NGS Super",
-  telstrasuper: "TelstraSuper",
-  visionsuper: "Vision Super",
-  spiritsuper: "Spirit Super",
-};
-
-/** "target.com.au" → "Target"; strips the TLD and applies a display-name
- *  override where naive capitalise-first would look wrong. */
-function prettyBrand(domain: string): string {
-  const label = (domain.split(".")[0] ?? domain).toLowerCase();
-  return BRAND_DISPLAY[label] ?? label.charAt(0).toUpperCase() + label.slice(1);
 }
