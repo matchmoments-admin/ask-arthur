@@ -91,15 +91,11 @@ jobs:
           if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_ADMIN_CHAT_ID" ]; then
             echo "Telegram not configured — skipping ping"; exit 0
           fi
-          BODY="🕵️ *${{ steps.caption.outputs.title }}* is ready for review.
-
-Approve the publish here → $RUN_URL
-
-Caption preview:
-$(head -c 900 out/caption.txt)"
+          PREVIEW=$(head -c 900 out/caption.txt)
+          TEXT=$(printf '🕵️ *%s* is ready for review.\n\nApprove the publish here → %s\n\nCaption preview:\n%s' "${{ steps.caption.outputs.title }}" "$RUN_URL" "$PREVIEW")
           curl -sS -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
             --data-urlencode "chat_id=$TELEGRAM_ADMIN_CHAT_ID" \
-            --data-urlencode "text=$BODY" \
+            --data-urlencode "text=$TEXT" \
             --data-urlencode "parse_mode=Markdown" >/dev/null
 
   publish:
@@ -153,14 +149,9 @@ $(head -c 900 out/caption.txt)"
           if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_ADMIN_CHAT_ID" ]; then
             echo "Telegram not configured — skipping ping"; exit 0
           fi
-          BODY="✅ *Published:* ${{ steps.publish.outputs.url }}
-
-Two manual steps (Dev-Tier can't do these):
-1️⃣ Paste this as the FIRST COMMENT:
-$(cat out/first-comment.txt)
-
-2️⃣ Reshare from your personal profile for reach."
+          COMMENT=$(cat out/first-comment.txt)
+          TEXT=$(printf '✅ *Published:* %s\n\nTwo manual steps (Dev-Tier cannot do these):\n1️⃣ Paste this as the FIRST COMMENT:\n%s\n\n2️⃣ Reshare from your personal profile for reach.' "${{ steps.publish.outputs.url }}" "$COMMENT")
           curl -sS -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
             --data-urlencode "chat_id=$TELEGRAM_ADMIN_CHAT_ID" \
-            --data-urlencode "text=$BODY" \
+            --data-urlencode "text=$TEXT" \
             --data-urlencode "parse_mode=Markdown" >/dev/null
