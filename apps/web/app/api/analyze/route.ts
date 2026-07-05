@@ -680,6 +680,15 @@ export async function POST(req: NextRequest) {
     } catch {
       // Never let logging surface a new error.
     }
+    // First-party scan_failed event — completes the scan funnel (started →
+    // completed | failed) and makes the error rate visible in analytics_events,
+    // not just Axiom. No-ops without an attribution cookie; never throws.
+    void logEvent({
+      eventType: "scan_failed",
+      eventProps: { stage: "analyze" },
+      path: "/api/analyze",
+      requestId: resolveRequestId(req.headers),
+    });
     return NextResponse.json(
       {
         error: "analysis_failed",

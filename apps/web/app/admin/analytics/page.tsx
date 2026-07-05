@@ -33,6 +33,16 @@ interface ContentPostRow {
   readers_who_scanned: number;
   readers_who_contacted: number;
 }
+interface EventDayRow {
+  day: string;
+  event_type: string;
+  events: number;
+}
+interface NewReturnRow {
+  day: string;
+  new_scanner_scans: number;
+  returning_scanner_scans: number;
+}
 
 function thirtyDaysAgoIsoDate(): string {
   return new Date(Date.now() - 30 * 86400000).toISOString().split("T")[0];
@@ -55,17 +65,21 @@ export default async function AnalyticsPage() {
   let contentReaders = 0;
   let readersWhoScanned = 0;
   let contentPosts: ContentPostRow[] = [];
+  let eventDaily: EventDayRow[] = [];
+  let newReturn: NewReturnRow[] = [];
 
   if (supabase) {
     const since = thirtyDaysAgoIsoDate();
 
-    const [ds, sbt, nsr, uac, funnel, cpf] = await Promise.all([
+    const [ds, sbt, nsr, uac, funnel, cpf, evd, nvr] = await Promise.all([
       supabase.from("daily_scans").select("day, scans").gte("day", since).order("day", { ascending: false }),
       supabase.from("scans_by_type").select("day, input_type, scans").gte("day", since),
       supabase.from("no_scan_visitor_rate").select("day, no_scan_visitors, total_visitors, no_scan_pct").gte("day", since).order("day", { ascending: false }),
       supabase.from("utm_attributed_conversions").select("event_type, source, medium, campaign, week, conversions").order("week", { ascending: false }).limit(200),
       supabase.from("blog_to_scan_funnel").select("content_readers, readers_who_scanned").single(),
       supabase.from("content_post_funnel").select("landing_path, readers, readers_who_scanned, readers_who_contacted").limit(50),
+      supabase.from("analytics_event_daily").select("day, event_type, events").gte("day", since),
+      supabase.from("scans_new_vs_returning").select("day, new_scanner_scans, returning_scanner_scans").gte("day", since),
     ]);
 
     dailyScans = (ds.data ?? []).map((r) => ({ day: r.day as string, scans: Number(r.scans) }));
@@ -96,6 +110,16 @@ export default async function AnalyticsPage() {
       readers_who_scanned: Number(r.readers_who_scanned),
       readers_who_contacted: Number(r.readers_who_contacted),
     }));
+    eventDaily = (evd.data ?? []).map((r) => ({
+      day: r.day as string,
+      event_type: r.event_type as string,
+      events: Number(r.events),
+    }));
+    newReturn = (nvr.data ?? []).map((r) => ({
+      day: r.day as string,
+      new_scanner_scans: Number(r.new_scanner_scans),
+      returning_scanner_scans: Number(r.returning_scanner_scans),
+    }));
   }
 
   // --- Derived headline metrics (last 7 days) --------------------------------
@@ -120,6 +144,24 @@ export default async function AnalyticsPage() {
     .filter((r) => r.event_type === "contact_submit" && within(r.week, now - 7 * dayMs))
     .reduce((s, r) => s + r.conversions, 0);
 
+  // Scan funnel (7d) — summed per event type from analytics_event_daily.
+  const eventSum7 = (type: string) =>
+    eventDaily
+      .filter((r) => r.event_type === type && within(r.day, sevenDaysAgo))
+      .reduce((s, r) => s + r.events, 0);
+  const funnel7 = {
+    started: eventSum7("scan_started"),
+    completed: eventSum7("scan_completed"),
+    failed: eventSum7("scan_failed"),
+    reported: eventSum7("scam_report_submitted"),
+    contacted: eventSum7("contact_submit"),
+  };
+
+  // New vs returning scanners (7d).
+  const recentNvr = newReturn.filter((r) => within(r.day, sevenDaysAgo));
+  const newScans7 = recentNvr.reduce((s, r) => s + r.new_scanner_scans, 0);
+  const returningScans7 = recentNvr.reduce((s, r) => s + r.returning_scanner_scans, 0);
+
   return (
     <div className="max-w-5xl mx-auto px-5 py-8">
       <h1 className="text-deep-navy text-xl font-extrabold mb-1">Analytics &amp; attribution</h1>
@@ -136,6 +178,9 @@ export default async function AnalyticsPage() {
         activationPct7={activationPct7}
         noScanPct7={noScanPct7}
         b2bLeads7={b2bLeads7}
+        funnel7={funnel7}
+        newScans7={newScans7}
+        returningScans7={returningScans7}
         contentReaders={contentReaders}
         readersWhoScanned={readersWhoScanned}
         contentPosts={contentPosts}

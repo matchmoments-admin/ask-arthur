@@ -36,6 +36,15 @@ interface Props {
   activationPct7: number | null;
   noScanPct7: number | null;
   b2bLeads7: number;
+  funnel7: {
+    started: number;
+    completed: number;
+    failed: number;
+    reported: number;
+    contacted: number;
+  };
+  newScans7: number;
+  returningScans7: number;
   contentReaders: number;
   readersWhoScanned: number;
   contentPosts: ContentPostRow[];
@@ -63,6 +72,9 @@ export default function AnalyticsDashboard({
   activationPct7,
   noScanPct7,
   b2bLeads7,
+  funnel7,
+  newScans7,
+  returningScans7,
   contentReaders,
   readersWhoScanned,
   contentPosts,
@@ -71,6 +83,19 @@ export default function AnalyticsDashboard({
   noScanRate,
   attributed,
 }: Props) {
+  // Scan-funnel rates (7d).
+  const completionPct =
+    funnel7.started === 0 ? null : (100 * funnel7.completed) / funnel7.started;
+  const errorPct =
+    funnel7.completed + funnel7.failed === 0
+      ? null
+      : (100 * funnel7.failed) / (funnel7.completed + funnel7.failed);
+  const reportPct =
+    funnel7.completed === 0 ? null : (100 * funnel7.reported) / funnel7.completed;
+  const returningPct =
+    newScans7 + returningScans7 === 0
+      ? null
+      : (100 * returningScans7) / (newScans7 + returningScans7);
   // Aggregate scans-by-type across the loaded window.
   const typeAgg = new Map<string, number>();
   for (const r of scansByType) {
@@ -100,7 +125,32 @@ export default function AnalyticsDashboard({
         <StatTile label="B2B leads (7d)" value={count.format(b2bLeads7)} hint="contact_submit — revenue KPI" />
       </div>
 
-      {/* Content → scan funnel */}
+      {/* Scan funnel (7d) */}
+      <section>
+        <h2 className="text-deep-navy mb-2 text-sm font-bold">Scan funnel (7d)</h2>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+          <StatTile label="Started" value={count.format(funnel7.started)} hint="scan_started" />
+          <StatTile label="Completed" value={count.format(funnel7.completed)} hint={`${pct(completionPct)} of started`} />
+          <StatTile label="Failed" value={count.format(funnel7.failed)} hint={`${pct(errorPct)} error rate`} />
+          <StatTile label="Reported" value={count.format(funnel7.reported)} hint={`${pct(reportPct)} of completed`} />
+          <StatTile label="Contacted" value={count.format(funnel7.contacted)} hint="contact_submit" />
+        </div>
+        <p className="text-slate-400 mt-2 text-xs">
+          Started is a client event (can be ad-blocked); completed / failed are server-authoritative.
+        </p>
+      </section>
+
+      {/* New vs returning scanners (7d) */}
+      <section>
+        <h2 className="text-deep-navy mb-2 text-sm font-bold">New vs returning scanners (7d)</h2>
+        <div className="grid grid-cols-3 gap-3">
+          <StatTile label="New-scanner scans" value={count.format(newScans7)} hint="first-seen day = scan day" />
+          <StatTile label="Returning-scanner scans" value={count.format(returningScans7)} />
+          <StatTile label="Returning share" value={pct(returningPct)} hint="grow this over time" />
+        </div>
+      </section>
+
+      {/* Content → scan bridge */}
       <section>
         <h2 className="text-deep-navy mb-2 text-sm font-bold">Content → scan bridge</h2>
         <div className="grid grid-cols-3 gap-3">

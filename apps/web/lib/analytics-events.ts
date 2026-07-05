@@ -24,6 +24,7 @@ export const ANALYTICS_EVENT_TYPES = [
   "pageview",
   "scan_started",
   "scan_completed",
+  "scan_failed",
   "scam_report_submitted",
   "extension_install",
   "contact_submit",
