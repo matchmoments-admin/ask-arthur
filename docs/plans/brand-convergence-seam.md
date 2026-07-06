@@ -146,6 +146,17 @@ Ordered smallest-self-contained-win first. Every phase is independently reversib
 
 Additionally (non-HIGH, addressed): C's inaccurate `idx_scam_reports_brand` justification is dropped — we rely solely on `idx_scam_reports_created` for the 30d range and run the Disk-IO query pre-flag. C's table **rename is dropped** (see §6). B's `UNIQUE(brand_normalized, source)` row-split is rejected in favour of C's single-row `source_counts` model.
 
+### 4b. Inngest invocation budget (per ADR-0019: Hobby plan — 5 slots, 50k step-runs/month)
+
+| Phase | New/changed Inngest work                                                                               | Function runs/week | Step-runs/week                                            |
+| ----- | ------------------------------------------------------------------------------------------------------ | ------------------ | --------------------------------------------------------- |
+| 1     | `scam_reports` source **folded into** the existing weekly `reddit-brands-discover` — no new fn/cron    | +0                 | +1 (the `aggregate-scam-brands` step)                     |
+| 2     | column write inside the existing daily `shopfront-nrd-daily-ingest`                                    | +0                 | +0                                                        |
+| 2b    | synchronous read in `/api/analyze` — **not Inngest**                                                   | +0                 | +0                                                        |
+| 3     | **NEW** `brand-register-refresh` — daily `30 3 * * *`, `concurrency 1`, `singleton: skip`, 6 steps/run | **+7**             | +42 when `FF_BRAND_REGISTER` ON; ~+7 no-op runs while OFF |
+
+**Net: +7 Inngest function runs/week (one new daily cron), ≈+43 step-runs/week when everything is enabled — ≈180 step-runs/month, ~0.4% of the 50k Hobby cap.** While the flags are default-OFF the register cron fires 7×/week and returns before any `step.run` (the flag check precedes them), so the standing cost is ~7 no-op runs/week. No new function contends with the analyze fan-out's reserved slots (ADR-0019).
+
 ---
 
 ## 5. Tests & docs to update
@@ -169,7 +180,7 @@ Additionally (non-HIGH, addressed): C's inaccurate `idx_scam_reports_brand` just
 - `docs/adr/0015-clone-detection-signal-model.md` — note corroboration is a separate ordering term, severity untouched.
 - `docs/adr/0018-proactive-onward-reporting.md` + `docs/plans/contact-feedback-and-onward-reporting.md` — canonical layer now consumed beyond the monthly POC.
 - `ROADMAP.md` (line ~226 brand monitoring), `BACKLOG.md` — fold/supersede **#26, #31, #32**.
-- **New** `docs/adr/0019-canonical-brand-key-seam.md` — the ADR in §7.
+- **New** `docs/adr/0020-canonical-brand-key-seam.md` — the ADR in §7 (0019 was already taken by the Inngest-cadence ADR). **Shipped.**
 - **`CONTEXT.md` (was omitted — now required).** CONTEXT.md has **no glossary entry** for the canonical brand key; the nearest terms (`Brand Match` = a Clone Signal type; `AU Brand Watchlist` = the static array) are already bound to other concepts, so do **not** overload them. Add entries for: **canonical brand** (the `brand_normalize()` → `brand_aliases` → `canonical_brand` key, v174/v175); **brand register** (the `brand_register` rollup — explicitly contrasted against _Scam Cluster_ and ADR-0018's _Brand Stewardship ledger_, both rollups with different keys); **watchlist candidate** (a **brand pending curation review** — must be disambiguated from the existing _candidate domain_, which means a possible clone); **cross-stream corroboration** (the additive-ordering-term-only invariant, tied to ADR-0015). **Reuse the existing inline phrase "impersonated brand"** for the brand-being-impersonated concept (already settled across _Scam Report_ / _Scam Cluster_) — do not coin "targeted"/"victim" brand — and consider promoting it to a defined term while touching the file.
 
 ### 5a. Vocabulary reconciliation (reuse, do not re-coin)
@@ -199,7 +210,9 @@ Additionally (non-HIGH, addressed): C's inaccurate `idx_scam_reports_brand` just
 
 ---
 
-## 7. ADR skeleton — `docs/adr/0019-canonical-brand-key-seam.md`
+## 7. ADR skeleton — shipped as `docs/adr/0020-canonical-brand-key-seam.md`
+
+> Note: renumbered to **0020** (0019 was already the Inngest-cadence ADR). The accepted ADR supersedes the skeleton below.
 
 ```markdown
 # 19. Canonical brand-key Seam across the three brand streams

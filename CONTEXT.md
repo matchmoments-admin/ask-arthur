@@ -95,6 +95,20 @@ _Avoid_: "Stage 0E" (the issue-ticket stage label, not user-facing), "NRD sweep"
 **AU Brand Watchlist**:
 The static `BrandEntry[]` array at `packages/shopfront-glue/src/au-brand-watchlist.ts` — ~50 Australian retail, bank, telco, and logistics brand names + their `legitimate_domains` exclusion lists. Per-entry: `{ brand: string, legitimate_domains: string[] }`. Used by Layer 0 (`lexicalMatch()` runs every newly-registered domain against the full list) and reused by Phase A (unioned with installed `shopfront_shops` brand names) and Phase B (corpus-mining adds dynamic patterns to the same matcher). The file IS the seam — opt-out and lawyer-vetting happen by editing this file, not by adding a feature flag.
 
+**Canonical Brand** (the brand-key Seam, v174/v175 + ADR-0020):
+The one join key for brand identity across every stream. `brand_normalize(raw)` (lowercase + strip to `[a-z0-9]`) produces `alias_normalized`, the key into `brand_aliases (alias_normalized → canonical_brand)`; `resolve_brand(raw)` / the `buildBrandResolver` Module returns the `canonical_brand` (the human display name, e.g. "NAB"), or null when unrecognised. Every free-text brand mention — `scam_reports.impersonated_brand`, `reddit_post_intel.brands_impersonated[]`, a clone alert's `target_brand_normalized` — resolves through this to collapse "NAB"/"nab"/"National Australia Bank" to one identity. Read-side only: the raw columns stay the source of truth.
+_Avoid_: "brand slug" (that's `deriveBrandKey`, the underscore-form display-only ref); "brand name" when you mean the canonical key.
+
+**Watchlist Candidate** (`reddit_watchlist_candidates`, multi-source since v196):
+A **brand pending curation review** for the AU Brand Watchlist — a brand actively impersonated (Reddit mentions and/or reported scams, per `source_counts`) but not yet monitored. Has a `status` lifecycle (`pending`/`reviewed`/`dismissed`) and never auto-promotes. **Distinct from a _candidate domain_** (a domain being evaluated as a possible clone) — a Watchlist Candidate is a brand, a candidate domain is a URL.
+_Avoid_: bare "candidate" (ambiguous — say "watchlist candidate" or "candidate domain").
+
+**Cross-Stream Corroboration** (Phase 2, ADR-0020):
+When a clone alert's Canonical Brand is also a live Watchlist Candidate (Reddit + reported scams naming it now), the alert is _corroborated_ — surfaced as separate `cross_stream_corroborated` / `corroboration_mention_count` columns and an additive triage ORDER-BY term. It is an ordering hint ONLY; it never mutates the deterministic clone `severity` (ADR-0015).
+
+**Brand Register** (`brand_register`, "brand 360", Phase 3):
+The per-brand rollup that aligns the three streams — one row per Canonical Brand with 30-day scam/reddit/clone counts, watchlist membership, curation status, and a `cross_stream_priority` (an additive ordering hint, not a clone severity). Pure-derived, rebuilt nightly by `brand-register-refresh`; a `DROP TABLE` is lossless. **Distinct from** the ADR-0018 _Brand Stewardship ledger_ (a monthly proof-of-reporting artifact over `onward_report_log`) and from a _Scam Cluster_ (a report graph keyed by shared entities).
+
 ## Relationships
 
 - An **Analysis Result** produces exactly one **Verdict**.
@@ -124,3 +138,4 @@ The static `BrandEntry[]` array at `packages/shopfront-glue/src/au-brand-watchli
 - **"case"** is used informally to mean both **Scam Report** (the user-submitted item) and a Breach Defence case (a separate Phase-1 commercial concept tracked in `BACKLOG.md → Database Hygiene & SPF Readiness`). Keep distinct: prefer **Scam Report** for the consumer-flow item; reserve "case" for Breach Defence work, and define it precisely if/when that surface ships.
 - **"alert"** is still overloaded across the platform: brand alerts (the existing `brand_impersonation_alerts` table — AU govt/bank/telco surface), cost-telemetry alerts (Telegram digests), and oncall alerts (none yet) all live alongside the now-defined **Clone Alert** (clone-detection composite, in `shopfront_clone_alerts`). When the bare word "alert" appears in code or docs, prefer one of the specific terms.
 - **"campaign"** is overloaded: marketing campaigns (the `docs/campaigns/` folder) and scam campaigns (a near-synonym for **Scam Cluster** with an impersonated-brand axis). Prefer **Scam Cluster** for the scam-side meaning.
+- **"candidate"** carries two unrelated meanings: a **candidate domain** (a domain being evaluated as a possible clone — Brand/Visual/Semantic Match, Clone Alert) and a **Watchlist Candidate** (a _brand_ pending curation review in `reddit_watchlist_candidates`). Never write bare "candidate" — say "candidate domain" (a URL) or "watchlist candidate" (a brand).

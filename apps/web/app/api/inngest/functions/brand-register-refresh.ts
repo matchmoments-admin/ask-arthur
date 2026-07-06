@@ -141,9 +141,13 @@ export const brandRegisterRefresh = inngest.createFunction(
   {
     id: "brand-register-refresh",
     name: "Brand Register: nightly brand-360 rollup",
+    // ADR-0019 fleet conventions: finite finish-timeout + singleton-skip so a
+    // slow tick can't occupy an Inngest slot or stack overlapping runs. Daily
+    // cadence + concurrency 1 keeps it well clear of the analyze fan-out budget.
     timeouts: { finish: "5m" },
     retries: 1,
     concurrency: { limit: 1 },
+    singleton: { mode: "skip" },
   },
   [
     { cron: "30 3 * * *" }, // daily 03:30 UTC
