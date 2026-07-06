@@ -259,6 +259,16 @@ export const featureFlags = {
    *  Server-side only; no paid API → no cost brake needed. */
   redditBrandsDiscover: readBoolEnv("FF_REDDIT_BRANDS_DISCOVER"),
 
+  /** Scam-reports source for the brands-discover queue (Phase 1 of the
+   *  brand-convergence-seam plan). When ON, the existing reddit-brands-discover
+   *  weekly cron adds a SECOND aggregation source — brands people report to
+   *  Arthur as impersonated (scam_reports.impersonated_brand, 30d window) — and
+   *  upserts them into the same watchlist_candidates queue with
+   *  source='scam_reports'. Gates ONLY the new source step; the Reddit source
+   *  runs exactly as before when OFF. No new cron; read-only windowed aggregate
+   *  over scam_reports → no cost brake needed. */
+  scamBrandsSource: readBoolEnv("FF_SCAM_BRANDS_SOURCE"),
+
   /** Reddit Intel Wave 2 — dashboard widgets (RedditIntelPanel, theme cards,
    *  brand watchlist, theme-velocity drill-down). Independent of the ingest
    *  flag — when ingest is on but dashboard is off, data is collected but
@@ -509,6 +519,31 @@ export const featureFlags = {
    *  alert email only to CLONE_WATCH_SHADOW_RECIPIENT (validation); real-brand
    *  auto-send stays the #371-gated path. Default OFF. Server-side only. */
   cloneWatchAutoTriage: readBoolEnv("FF_CLONE_WATCH_AUTO_TRIAGE"),
+
+  /** Cross-stream corroboration priority in the clone-watch triage queue
+   *  (Phase 2 of the brand-convergence-seam plan). When ON, the admin pending-
+   *  triage list passes p_corroboration_priority=true so alerts whose brand is
+   *  also live in the watchlist-candidate queue (Reddit + reported scams) sort
+   *  to the top. The corroboration columns are ALWAYS returned; this flag only
+   *  reorders — it never touches the deterministic clone severity (ADR-0015).
+   *  Default OFF. Server-side only. */
+  cloneTriageCorroboration: readBoolEnv("FF_CLONE_TRIAGE_CORROBORATION"),
+
+  /** Analyze-verdict clone citation (Phase 2b of the brand-convergence-seam
+   *  plan). When ON, /api/analyze checks each submitted URL against the
+   *  clone-watch list (by url_hash, existing index) and, for an operator-
+   *  CONFIRMED clone only (tp_confirmed/tp_actioned — never a raw lexical
+   *  match), adds a red flag citing the impersonated domain. Closes the loop:
+   *  the background NRD/CT sweep pays off in a real user check. Only phase that
+   *  changes user-facing output → canary separately. Default OFF. */
+  analyzeCloneCitation: readBoolEnv("FF_ANALYZE_CLONE_CITATION"),
+
+  /** Brand Register — the "brand 360" rollup (Phase 3 of the brand-convergence-
+   *  seam plan). Gates BOTH the nightly brand-register-refresh Inngest fn (when
+   *  OFF the cron no-ops) AND the /admin/brand-register page. One row per
+   *  canonical brand with 30-day scam/reddit/clone counts + watchlist + curation
+   *  state. Pure-derived, rebuilt nightly; DROP TABLE is lossless. Default OFF. */
+  brandRegister: readBoolEnv("FF_BRAND_REGISTER"),
 
   /** Quiet the daily NRD-sweep Telegram digest (shopfront-nrd-daily-ingest).
    *  OPT-IN: default OFF preserves the current digest. Set true once the

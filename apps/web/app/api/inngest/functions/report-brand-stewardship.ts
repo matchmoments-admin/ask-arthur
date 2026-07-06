@@ -1,9 +1,14 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
-import { brandNormalize } from "@askarthur/shopfront-glue";
+import {
+  brandNormalize,
+  buildBrandResolver,
+  type BrandAliasRecord,
+} from "@askarthur/shopfront-glue";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
+import { loadAliasRecord } from "@/lib/brand-aliases";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
 
@@ -542,31 +547,10 @@ export const reportBrandStewardship = inngest.createFunction(
     // the Map + resolver closure are built outside the step.
     const aliasPairs = await step.run("load-brand-aliases", async () => {
       const sb = createServiceClient();
-      if (!sb) return {} as Record<string, string>;
-      const map: Record<string, string> = {};
-      // 231 rows today; page defensively in case the layer grows.
-      for (let from = 0; ; from += 1000) {
-        const { data, error } = await sb
-          .from("brand_aliases")
-          .select("alias_normalized, canonical_brand")
-          .range(from, from + 999);
-        if (error) {
-          logger.error("brand-stewardship: brand_aliases load failed", {
-            error: error.message,
-          });
-          break;
-        }
-        for (const row of data ?? []) {
-          map[row.alias_normalized as string] = row.canonical_brand as string;
-        }
-        if ((data?.length ?? 0) < 1000) break;
-      }
-      return map;
+      if (!sb) return {} as BrandAliasRecord;
+      return loadAliasRecord(sb, "brand-stewardship");
     });
-    const resolveCanonical = (s: string): string | null => {
-      const k = brandNormalize(s);
-      return k ? (aliasPairs[k] ?? null) : null;
-    };
+    const resolveCanonical = buildBrandResolver(aliasPairs);
 
     const prepared = await step.run("upsert-reports", async () => {
       const sb = createServiceClient();

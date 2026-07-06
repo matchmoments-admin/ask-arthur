@@ -29,6 +29,7 @@ import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import {
   AU_BRAND_WATCHLIST,
+  brandNormalize,
   canonicaliseCandidateUrl,
   lexicalMatch,
   urlHash,
@@ -343,6 +344,10 @@ export function buildUpsertRow(hit: MatchHit) {
   return {
     target_shop_id: "",
     inferred_target_domain: hit.legitimate_domain,
+    // Sibling canonical brand key (Phase 2, brand-convergence-seam). Free here —
+    // the matcher already resolved the brand. Lets the triage queue corroborate
+    // this clone against the watchlist-candidate stream without re-deriving.
+    target_brand_normalized: brandNormalize(hit.brand) ?? "",
     candidate_domain: hit.candidate_domain,
     candidate_url: hit.candidate_url,
     url_hash: hit.url_hash,

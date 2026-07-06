@@ -30,6 +30,7 @@ import { uploadScreenshot } from "@/lib/r2";
 import { logger, maskE164 } from "@askarthur/utils/logger";
 import { getLogger } from "@askarthur/utils/axiom-logger";
 import { logCost, claudeHaikuCostUsd } from "@/lib/cost-telemetry";
+import { lookupCloneAlert } from "@/lib/clone-alert-lookup";
 
 /**
  * Resolve the client IP from request headers.
@@ -316,6 +317,23 @@ export async function POST(req: NextRequest) {
     aiResult.nextSteps = merged.nextSteps;
     const finalVerdict = merged.verdict;
     const maliciousURLs = urlResults.filter((r) => r.isMalicious);
+
+    // 6a-clone. Clone-watch citation (Phase 2b, brand-convergence-seam) —
+    // flag-gated, default OFF. If a submitted URL is an operator-CONFIRMED
+    // clone-watch alert, add a red flag so the background NRD/CT sweep pays off
+    // in a real user check. Only CONFIRMED alerts are cited (never raw lexical
+    // matches). Never throws; the lookup rides the existing url_hash index.
+    if (featureFlags.analyzeCloneCitation && allUrls.length > 0) {
+      const clone = await lookupCloneAlert(allUrls);
+      if (clone) {
+        aiResult.redFlags = [
+          ...aiResult.redFlags,
+          `This link is on Ask Arthur's clone-watch list as a confirmed impersonation of ${clone.impersonatedDomain} (first flagged ${new Date(
+            clone.firstFlaggedAt,
+          ).toLocaleDateString("en-AU")}).`,
+        ];
+      }
+    }
 
     // 6a. Shop Signal — Stage 0 of Shop Guard. Shared with runAnalysisCore via
     // the single applyShopSignal() helper (ADR-0007 anti-drift): it mutates

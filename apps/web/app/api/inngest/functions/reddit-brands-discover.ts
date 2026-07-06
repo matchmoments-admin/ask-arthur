@@ -1,9 +1,15 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
-import { AU_BRAND_WATCHLIST, brandNormalize } from "@askarthur/shopfront-glue";
+import {
+  AU_BRAND_WATCHLIST,
+  brandNormalize,
+  buildBrandResolver,
+  type BrandAliasRecord,
+} from "@askarthur/shopfront-glue";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
+import { loadAliasRecord } from "@/lib/brand-aliases";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 
 /**
@@ -99,6 +105,53 @@ export function buildWatchedKeySet(
   return set;
 }
 
+/** One-row-per-canonical-brand view carrying per-source counts + the summed
+ *  total (the digest shows the breakdown; the DB stores the total). */
+export interface MergedCandidate {
+  brandNormalized: string;
+  rawBrand: string;
+  reddit: number;
+  scam: number;
+  total: number;
+}
+
+/** Merge the Reddit + reported-scam fresh-candidate lists into one row per
+ *  canonical brand. A brand seen in both keeps the Reddit raw string as its
+ *  representative and sums the two counts. Pure + unit-tested — the TS mirror of
+ *  what upsert_watchlist_candidate does per-source in the DB. Exported for
+ *  testing. */
+export function mergeCandidateSources(
+  reddit: CandidateAgg[],
+  scam: CandidateAgg[],
+): MergedCandidate[] {
+  const merged = new Map<string, MergedCandidate>();
+  for (const c of reddit) {
+    merged.set(c.brandNormalized, {
+      brandNormalized: c.brandNormalized,
+      rawBrand: c.rawBrand,
+      reddit: c.mentionCount,
+      scam: 0,
+      total: c.mentionCount,
+    });
+  }
+  for (const c of scam) {
+    const ex = merged.get(c.brandNormalized);
+    if (ex) {
+      ex.scam = c.mentionCount;
+      ex.total += c.mentionCount;
+    } else {
+      merged.set(c.brandNormalized, {
+        brandNormalized: c.brandNormalized,
+        rawBrand: c.rawBrand,
+        reddit: 0,
+        scam: c.mentionCount,
+        total: c.mentionCount,
+      });
+    }
+  }
+  return [...merged.values()];
+}
+
 export const redditBrandsDiscover = inngest.createFunction(
   {
     id: "reddit-brands-discover",
@@ -120,30 +173,10 @@ export const redditBrandsDiscover = inngest.createFunction(
     //    per-row RPC). Plain Record so it survives Inngest step serialisation.
     const aliasPairs = await step.run("load-brand-aliases", async () => {
       const sb = createServiceClient();
-      if (!sb) return {} as Record<string, string>;
-      const map: Record<string, string> = {};
-      for (let from = 0; ; from += 1000) {
-        const { data, error } = await sb
-          .from("brand_aliases")
-          .select("alias_normalized, canonical_brand")
-          .range(from, from + 999);
-        if (error) {
-          logger.error("reddit-brands-discover: brand_aliases load failed", {
-            error: error.message,
-          });
-          break;
-        }
-        for (const row of data ?? []) {
-          map[row.alias_normalized as string] = row.canonical_brand as string;
-        }
-        if ((data?.length ?? 0) < 1000) break;
-      }
-      return map;
+      if (!sb) return {} as BrandAliasRecord;
+      return loadAliasRecord(sb, "reddit-brands-discover");
     });
-    const resolveCanonical = (s: string): string | null => {
-      const k = brandNormalize(s);
-      return k ? (aliasPairs[k] ?? null) : null;
-    };
+    const resolveCanonical = buildBrandResolver(aliasPairs);
 
     // 2. Aggregate brand mentions over the window.
     const candidates = await step.run("aggregate-mentions", async () => {
@@ -170,19 +203,57 @@ export const redditBrandsDiscover = inngest.createFunction(
     //    (b) brands already watched (by canonical key OR alias, and also by
     //    the resolved canonical so a known-but-differently-spelled brand
     //    doesn't surface). What remains = unwatched, actively-impersonated.
+    //    The SAME filter applies to every source (Reddit + reported-scams).
     const watched = buildWatchedKeySet(AU_BRAND_WATCHLIST);
-    const fresh = candidates.filter((c) => {
+    const isFreshCandidate = (c: CandidateAgg): boolean => {
       if (CANDIDATE_DENYLIST.has(c.brandNormalized)) return false;
       if (watched.has(c.brandNormalized)) return false;
       const canonical = resolveCanonical(c.rawBrand);
       const canonicalKey = canonical ? brandNormalize(canonical) : null;
       if (canonicalKey && watched.has(canonicalKey)) return false;
       return true;
-    });
+    };
+    const fresh = candidates.filter(isFreshCandidate);
 
-    // 3b. Which of the fresh candidates have we NOT surfaced before? The
-    //     digest fires only on genuinely new brands — the table already holds
-    //     the standing list, so re-announcing it every week was pure noise.
+    // 3b. Second source (Phase 1, flag-gated): brands people REPORT to Arthur as
+    //     impersonated — a windowed, read-only aggregate over scam_reports (no
+    //     write, no index on the hot table; server-side GROUP BY so only
+    //     aggregated rows ship). Same 30-day window + threshold + fresh-filter
+    //     as Reddit. When FF_SCAM_BRANDS_SOURCE is OFF the step returns nothing
+    //     and the Reddit path is unchanged.
+    const scamCandidatesRaw = await step.run("aggregate-scam-brands", async () => {
+      if (!featureFlags.scamBrandsSource) return [] as CandidateAgg[];
+      const sb = createServiceClient();
+      if (!sb) return [] as CandidateAgg[];
+      const since = new Date(
+        Date.now() - WINDOW_DAYS * 24 * 3600 * 1000,
+      ).toISOString();
+      const { data, error } = await sb.rpc("aggregate_scam_report_brands", {
+        p_since: since,
+        p_min_count: MENTION_THRESHOLD,
+      });
+      if (error) {
+        logger.error("reddit-brands-discover: scam-brand aggregate failed", {
+          error: error.message,
+        });
+        return [] as CandidateAgg[];
+      }
+      const rows = (data ?? []) as Array<{
+        brand_normalized: string;
+        raw_brand: string;
+        mention_count: number;
+      }>;
+      return rows.map((r) => ({
+        brandNormalized: r.brand_normalized,
+        rawBrand: r.raw_brand,
+        mentionCount: r.mention_count,
+      }));
+    });
+    const scamFresh = scamCandidatesRaw.filter(isFreshCandidate);
+
+    // 3c. Which fresh candidates (from EITHER source) have we NOT surfaced
+    //     before? The digest fires only on genuinely new brands — the table
+    //     already holds the standing list, so re-announcing it weekly is noise.
     const knownCandidateKeys = await step.run("load-existing-candidates", async () => {
       const sb = createServiceClient();
       if (!sb) return [] as string[];
@@ -204,31 +275,44 @@ export const redditBrandsDiscover = inngest.createFunction(
       return keys;
     });
     const knownCandidates = new Set(knownCandidateKeys);
-    const newlySurfaced = fresh.filter((c) => !knownCandidates.has(c.brandNormalized));
 
-    // 4. Upsert candidates (status-preserving RPC — never resets a dismissed
-    //    candidate to pending). All fresh rows are upserted (keeps mention
-    //    counts current); only the net-new ones drive the digest below.
+    // Merge the two sources into one per-brand view for the digest, then keep
+    // only the genuinely net-new brands (the DB stores the summed count).
+    const newlySurfaced = mergeCandidateSources(fresh, scamFresh).filter(
+      (m) => !knownCandidates.has(m.brandNormalized),
+    );
+
+    // 4. Upsert every fresh candidate from both sources (status-preserving RPC —
+    //    never resets a dismissed candidate to pending). Each source writes its
+    //    own count and the RPC recomputes the total; only the net-new brands
+    //    drive the digest below.
     const upserted = await step.run("upsert-candidates", async () => {
       const sb = createServiceClient();
       if (!sb) return 0;
       let n = 0;
-      for (const c of fresh) {
-        const { error } = await sb.rpc("upsert_reddit_watchlist_candidate", {
+      const upsertOne = async (
+        c: CandidateAgg,
+        source: "reddit" | "scam_reports",
+      ) => {
+        const { error } = await sb.rpc("upsert_watchlist_candidate", {
           p_brand_normalized: c.brandNormalized,
           p_raw_brand: c.rawBrand,
-          p_mention_count: c.mentionCount,
+          p_source: source,
+          p_source_count: c.mentionCount,
           p_resolved_canonical: resolveCanonical(c.rawBrand),
         });
         if (error) {
           logger.warn("reddit-brands-discover: upsert failed", {
             brand: c.rawBrand,
+            source,
             error: error.message,
           });
-          continue;
+          return;
         }
         n++;
-      }
+      };
+      for (const c of fresh) await upsertOne(c, "reddit");
+      for (const c of scamFresh) await upsertOne(c, "scam_reports");
       return n;
     });
 
@@ -237,22 +321,23 @@ export const redditBrandsDiscover = inngest.createFunction(
     if (newlySurfaced.length > 0) {
       await step.run("telegram", async () => {
         const top = [...newlySurfaced]
-          .sort((a, b) => b.mentionCount - a.mentionCount)
+          .sort((a, b) => b.total - a.total)
           .slice(0, DIGEST_CAP);
-        const lines = top.map(
-          (c) =>
-            `• <b>${c.rawBrand}</b> — ${c.mentionCount} mentions${
-              resolveCanonical(c.rawBrand) ? " (known alias)" : ""
-            }`,
-        );
+        const lines = top.map((m) => {
+          const parts: string[] = [];
+          if (m.reddit > 0) parts.push(`Reddit ×${m.reddit}`);
+          if (m.scam > 0) parts.push(`scams ×${m.scam}`);
+          const aliasTag = resolveCanonical(m.rawBrand) ? " (known alias)" : "";
+          return `• <b>${m.rawBrand}</b> — ${parts.join(", ")}${aliasTag}`;
+        });
         const more =
           newlySurfaced.length > DIGEST_CAP
             ? [`…and ${newlySurfaced.length - DIGEST_CAP} more.`]
             : [];
         await sendAdminTelegramMessage(
           [
-            `<b>Reddit brands discover</b>`,
-            `<b>${newlySurfaced.length}</b> new brand(s) impersonated on Reddit (last ${WINDOW_DAYS}d, ≥${MENTION_THRESHOLD} mentions) — not yet on the clone-watch list. Add any worth monitoring to packages/shopfront-glue/src/au-brand-watchlist.ts:`,
+            `<b>Brands discover</b>`,
+            `<b>${newlySurfaced.length}</b> new brand(s) impersonated (Reddit + reported scams, last ${WINDOW_DAYS}d, ≥${MENTION_THRESHOLD} mentions) — not yet on the clone-watch list. Add any worth monitoring to packages/shopfront-glue/src/au-brand-watchlist.ts:`,
             ...lines,
             ...more,
           ].join("\n"),
@@ -263,6 +348,7 @@ export const redditBrandsDiscover = inngest.createFunction(
     logger.info("reddit-brands-discover: complete", {
       candidates: candidates.length,
       fresh: fresh.length,
+      scamFresh: scamFresh.length,
       newlySurfaced: newlySurfaced.length,
       upserted,
     });
@@ -270,6 +356,7 @@ export const redditBrandsDiscover = inngest.createFunction(
       ok: true,
       candidates: candidates.length,
       fresh: fresh.length,
+      scamFresh: scamFresh.length,
       newlySurfaced: newlySurfaced.length,
       upserted,
     };
