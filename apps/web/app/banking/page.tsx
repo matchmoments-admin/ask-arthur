@@ -127,21 +127,19 @@ export default function BankingPage() {
           </p>
           <div className="bg-deep-navy rounded-2xl p-6 overflow-x-auto">
             <pre className="text-sm text-slate-300 font-mono leading-relaxed">
-              <code>{`curl -X POST https://api.askarthur.au/v1/threat/check \\
-  -H "Authorization: Bearer YOUR_API_KEY" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "type": "url",
-    "value": "https://suspicious-site.example.com",
-    "context": "customer_reported"
-  }'
+              <code>{`curl "https://askarthur.au/api/v1/threats/urls/lookup?url=https://commbank-secure-login.example" \\
+  -H "Authorization: Bearer YOUR_API_KEY"
 
 # Response
 {
-  "verdict": "HIGH_RISK",
-  "confidence": 0.94,
-  "signals": ["known_phishing_domain", "recently_registered"],
-  "recommendation": "Block and report to ACCC"
+  "found": true,
+  "domain": "commbank-secure-login.example",
+  "confidenceScore": 0.94,
+  "confidenceLevel": "high",
+  "primaryScamType": "phishing",
+  "brandImpersonated": "CommBank",
+  "googleSafeBrowsing": true,
+  "reportCount": 37
 }`}</code>
             </pre>
           </div>

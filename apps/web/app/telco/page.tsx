@@ -131,21 +131,19 @@ export default function TelcoPage() {
           </p>
           <div className="bg-deep-navy rounded-2xl p-6 overflow-x-auto">
             <pre className="text-sm text-slate-300 font-mono leading-relaxed">
-              <code>{`curl -X POST https://api.askarthur.au/v1/threat/check \\
-  -H "Authorization: Bearer YOUR_API_KEY" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "type": "phone",
-    "value": "+61400000000",
-    "context": "inbound_sms"
-  }'
+              <code>{`curl "https://askarthur.au/api/v1/threats/urls/lookup?url=https://telstra-account-verify.example" \\
+  -H "Authorization: Bearer YOUR_API_KEY"
 
 # Response
 {
-  "verdict": "SUSPICIOUS",
-  "confidence": 0.78,
-  "signals": ["spoofed_sender_id", "known_scam_pattern"],
-  "recommendation": "Flag for review"
+  "found": true,
+  "domain": "telstra-account-verify.example",
+  "confidenceScore": 0.78,
+  "confidenceLevel": "medium",
+  "primaryScamType": "phishing",
+  "brandImpersonated": "Telstra",
+  "googleSafeBrowsing": false,
+  "reportCount": 12
 }`}</code>
             </pre>
           </div>
