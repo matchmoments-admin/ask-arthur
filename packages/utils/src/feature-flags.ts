@@ -529,6 +529,15 @@ export const featureFlags = {
    *  Default OFF. Server-side only. */
   cloneTriageCorroboration: readBoolEnv("FF_CLONE_TRIAGE_CORROBORATION"),
 
+  /** Analyze-verdict clone citation (Phase 2b of the brand-convergence-seam
+   *  plan). When ON, /api/analyze checks each submitted URL against the
+   *  clone-watch list (by url_hash, existing index) and, for an operator-
+   *  CONFIRMED clone only (tp_confirmed/tp_actioned — never a raw lexical
+   *  match), adds a red flag citing the impersonated domain. Closes the loop:
+   *  the background NRD/CT sweep pays off in a real user check. Only phase that
+   *  changes user-facing output → canary separately. Default OFF. */
+  analyzeCloneCitation: readBoolEnv("FF_ANALYZE_CLONE_CITATION"),
+
   /** Quiet the daily NRD-sweep Telegram digest (shopfront-nrd-daily-ingest).
    *  OPT-IN: default OFF preserves the current digest. Set true once the
    *  auto-triage run-summary email replaces it as the operator's notification,
