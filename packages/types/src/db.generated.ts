@@ -139,6 +139,62 @@ export type Database = {
           },
         ]
       }
+      analytics_events: {
+        Row: {
+          anonymous_id: string
+          created_at: string
+          event_props: Json
+          event_type: string
+          id: string
+          path: string | null
+          referrer: string | null
+          request_id: string | null
+          utm_campaign: string | null
+          utm_content: string | null
+          utm_medium: string | null
+          utm_source: string | null
+          utm_term: string | null
+        }
+        Insert: {
+          anonymous_id: string
+          created_at?: string
+          event_props?: Json
+          event_type: string
+          id?: string
+          path?: string | null
+          referrer?: string | null
+          request_id?: string | null
+          utm_campaign?: string | null
+          utm_content?: string | null
+          utm_medium?: string | null
+          utm_source?: string | null
+          utm_term?: string | null
+        }
+        Update: {
+          anonymous_id?: string
+          created_at?: string
+          event_props?: Json
+          event_type?: string
+          id?: string
+          path?: string | null
+          referrer?: string | null
+          request_id?: string | null
+          utm_campaign?: string | null
+          utm_content?: string | null
+          utm_medium?: string | null
+          utm_source?: string | null
+          utm_term?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "analytics_events_anonymous_id_fkey"
+            columns: ["anonymous_id"]
+            isOneToOne: false
+            referencedRelation: "visitors"
+            referencedColumns: ["anonymous_id"]
+          },
+        ]
+      }
       api_keys: {
         Row: {
           allowed_endpoints: string[]
@@ -599,6 +655,45 @@ export type Database = {
           scammer_phones?: string[] | null
           scammer_urls?: string[] | null
           twitter_post_id?: string | null
+        }
+        Relationships: []
+      }
+      brand_register: {
+        Row: {
+          canonical_brand: string
+          clone_open_alerts: number
+          created_at: string
+          cross_stream_priority: number
+          curation_status: string | null
+          display_name: string
+          on_au_watchlist: boolean
+          reddit_30d: number
+          scam_30d: number
+          updated_at: string
+        }
+        Insert: {
+          canonical_brand: string
+          clone_open_alerts?: number
+          created_at?: string
+          cross_stream_priority?: number
+          curation_status?: string | null
+          display_name: string
+          on_au_watchlist?: boolean
+          reddit_30d?: number
+          scam_30d?: number
+          updated_at?: string
+        }
+        Update: {
+          canonical_brand?: string
+          clone_open_alerts?: number
+          created_at?: string
+          cross_stream_priority?: number
+          curation_status?: string | null
+          display_name?: string
+          on_au_watchlist?: boolean
+          reddit_30d?: number
+          scam_30d?: number
+          updated_at?: string
         }
         Relationships: []
       }
@@ -1125,6 +1220,147 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      clone_watch_disputes: {
+        Row: {
+          claim: string
+          created_at: string
+          disputant: string | null
+          evidence: Json
+          id: string
+          notes: string | null
+          resolution: string
+          resolved_at: string | null
+          subject: string
+          subject_type: string
+        }
+        Insert: {
+          claim: string
+          created_at?: string
+          disputant?: string | null
+          evidence?: Json
+          id?: string
+          notes?: string | null
+          resolution?: string
+          resolved_at?: string | null
+          subject: string
+          subject_type: string
+        }
+        Update: {
+          claim?: string
+          created_at?: string
+          disputant?: string | null
+          evidence?: Json
+          id?: string
+          notes?: string | null
+          resolution?: string
+          resolved_at?: string | null
+          subject?: string
+          subject_type?: string
+        }
+        Relationships: []
+      }
+      clone_watch_monthly_brand_stats: {
+        Row: {
+          brand: string
+          clones: number
+          is_au: boolean
+          likely_phishing: number
+          parked: number
+          period_month: string
+          reported_to_netcraft: number
+        }
+        Insert: {
+          brand: string
+          clones?: number
+          is_au?: boolean
+          likely_phishing?: number
+          parked?: number
+          period_month: string
+          reported_to_netcraft?: number
+        }
+        Update: {
+          brand?: string
+          clones?: number
+          is_au?: boolean
+          likely_phishing?: number
+          parked?: number
+          period_month?: string
+          reported_to_netcraft?: number
+        }
+        Relationships: []
+      }
+      clone_watch_monthly_registrar_stats: {
+        Row: {
+          clones: number
+          period_month: string
+          registrar: string
+        }
+        Insert: {
+          clones?: number
+          period_month: string
+          registrar: string
+        }
+        Update: {
+          clones?: number
+          period_month?: string
+          registrar?: string
+        }
+        Relationships: []
+      }
+      clone_watch_report_summary: {
+        Row: {
+          brand_count: number
+          generated_at: string
+          global_brands: Json
+          likely_phishing: number
+          mom: Json | null
+          parked_for_sale: number
+          period_month: string
+          published_post_urn: string | null
+          reported_to_netcraft: number
+          super_fund: Json | null
+          top_au_brands: Json
+          top_registrars: Json
+          total_domains: number
+          unknown_registrar_count: number
+          updated_at: string
+        }
+        Insert: {
+          brand_count?: number
+          generated_at?: string
+          global_brands?: Json
+          likely_phishing?: number
+          mom?: Json | null
+          parked_for_sale?: number
+          period_month: string
+          published_post_urn?: string | null
+          reported_to_netcraft?: number
+          super_fund?: Json | null
+          top_au_brands?: Json
+          top_registrars?: Json
+          total_domains?: number
+          unknown_registrar_count?: number
+          updated_at?: string
+        }
+        Update: {
+          brand_count?: number
+          generated_at?: string
+          global_brands?: Json
+          likely_phishing?: number
+          mom?: Json | null
+          parked_for_sale?: number
+          period_month?: string
+          published_post_urn?: string | null
+          reported_to_netcraft?: number
+          super_fund?: Json | null
+          top_au_brands?: Json
+          top_registrars?: Json
+          total_domains?: number
+          unknown_registrar_count?: number
+          updated_at?: string
+        }
+        Relationships: []
       }
       cluster_members: {
         Row: {
@@ -4243,6 +4479,7 @@ export type Database = {
           raw_brand: string
           resolved_canonical: string | null
           source: string
+          source_counts: Json
           status: string
         }
         Insert: {
@@ -4255,6 +4492,7 @@ export type Database = {
           raw_brand: string
           resolved_canonical?: string | null
           source?: string
+          source_counts?: Json
           status?: string
         }
         Update: {
@@ -4267,6 +4505,7 @@ export type Database = {
           raw_brand?: string
           resolved_canonical?: string | null
           source?: string
+          source_counts?: Json
           status?: string
         }
         Relationships: []
@@ -5554,6 +5793,7 @@ export type Database = {
           signals: Json
           source: string
           submitted_to: Json
+          target_brand_normalized: string | null
           target_shop_id: number | null
           triage_at: string | null
           triage_by: string | null
@@ -5585,6 +5825,7 @@ export type Database = {
           signals?: Json
           source: string
           submitted_to?: Json
+          target_brand_normalized?: string | null
           target_shop_id?: number | null
           triage_at?: string | null
           triage_by?: string | null
@@ -5616,6 +5857,7 @@ export type Database = {
           signals?: Json
           source?: string
           submitted_to?: Json
+          target_brand_normalized?: string | null
           target_shop_id?: number | null
           triage_at?: string | null
           triage_by?: string | null
@@ -6566,6 +6808,45 @@ export type Database = {
         }
         Relationships: []
       }
+      visitors: {
+        Row: {
+          anonymous_id: string
+          first_referrer: string | null
+          first_referring_domain: string | null
+          first_seen_at: string
+          first_utm_campaign: string | null
+          first_utm_content: string | null
+          first_utm_medium: string | null
+          first_utm_source: string | null
+          first_utm_term: string | null
+          landing_path: string | null
+        }
+        Insert: {
+          anonymous_id: string
+          first_referrer?: string | null
+          first_referring_domain?: string | null
+          first_seen_at?: string
+          first_utm_campaign?: string | null
+          first_utm_content?: string | null
+          first_utm_medium?: string | null
+          first_utm_source?: string | null
+          first_utm_term?: string | null
+          landing_path?: string | null
+        }
+        Update: {
+          anonymous_id?: string
+          first_referrer?: string | null
+          first_referring_domain?: string | null
+          first_seen_at?: string
+          first_utm_campaign?: string | null
+          first_utm_content?: string | null
+          first_utm_medium?: string | null
+          first_utm_source?: string | null
+          first_utm_term?: string | null
+          landing_path?: string | null
+        }
+        Relationships: []
+      }
       vulnerabilities: {
         Row: {
           affected_products: Json
@@ -6880,6 +7161,30 @@ export type Database = {
       }
     }
     Views: {
+      analytics_event_daily: {
+        Row: {
+          day: string | null
+          event_type: string | null
+          events: number | null
+        }
+        Relationships: []
+      }
+      blog_to_scan_funnel: {
+        Row: {
+          content_readers: number | null
+          readers_who_scanned: number | null
+        }
+        Relationships: []
+      }
+      content_post_funnel: {
+        Row: {
+          landing_path: string | null
+          readers: number | null
+          readers_who_contacted: number | null
+          readers_who_scanned: number | null
+        }
+        Relationships: []
+      }
       critical_vulnerabilities_au: {
         Row: {
           affected_products: Json | null
@@ -6942,6 +7247,13 @@ export type Database = {
           feature: string | null
           provider: string | null
           total_cost_usd: number | null
+        }
+        Relationships: []
+      }
+      daily_scans: {
+        Row: {
+          day: string | null
+          scans: number | null
         }
         Relationships: []
       }
@@ -7032,6 +7344,15 @@ export type Database = {
         }
         Relationships: []
       }
+      no_scan_visitor_rate: {
+        Row: {
+          day: string | null
+          no_scan_pct: number | null
+          no_scan_visitors: number | null
+          total_visitors: number | null
+        }
+        Relationships: []
+      }
       scam_reports_all: {
         Row: {
           analysis_result: Json | null
@@ -7052,6 +7373,22 @@ export type Database = {
           source: string | null
           verdict: string | null
           verified_scam_id: number | null
+        }
+        Relationships: []
+      }
+      scans_by_type: {
+        Row: {
+          day: string | null
+          input_type: string | null
+          scans: number | null
+        }
+        Relationships: []
+      }
+      scans_new_vs_returning: {
+        Row: {
+          day: string | null
+          new_scanner_scans: number | null
+          returning_scanner_scans: number | null
         }
         Relationships: []
       }
@@ -7208,6 +7545,17 @@ export type Database = {
         }
         Relationships: []
       }
+      utm_attributed_conversions: {
+        Row: {
+          campaign: string | null
+          conversions: number | null
+          event_type: string | null
+          medium: string | null
+          source: string | null
+          week: string | null
+        }
+        Relationships: []
+      }
       v_phone_footprint_metrics: {
         Row: {
           anon_lookups: number | null
@@ -7226,6 +7574,21 @@ export type Database = {
       _prune_chunked: {
         Args: { p_interval: string; p_table: string; p_ts_col: string }
         Returns: number
+      }
+      aggregate_open_clone_alerts_by_brand: {
+        Args: never
+        Returns: {
+          open_count: number
+          target_brand_normalized: string
+        }[]
+      }
+      aggregate_scam_report_brands: {
+        Args: { p_min_count: number; p_since: string }
+        Returns: {
+          brand_normalized: string
+          mention_count: number
+          raw_brand: string
+        }[]
       }
       anonymise_expired_footprints: { Args: never; Returns: number }
       archive_feed_items_batch: {
@@ -7805,7 +8168,7 @@ export type Database = {
         }[]
       }
       list_clone_alerts_pending_triage: {
-        Args: { p_limit?: number }
+        Args: { p_corroboration_priority?: boolean; p_limit?: number }
         Returns: {
           auto_classification_attack_intent: string
           auto_classification_clone_tactic: string
@@ -7814,6 +8177,9 @@ export type Database = {
           auto_classification_reason: string
           candidate_domain: string
           candidate_url: string
+          corroboration_mention_count: number
+          corroboration_source_counts: Json
+          cross_stream_corroborated: boolean
           first_seen_at: string
           id: number
           inferred_target_domain: string
@@ -8204,6 +8570,7 @@ export type Database = {
           paid_remaining: number
         }[]
       }
+      replace_brand_register: { Args: { p_rows: Json }; Returns: number }
       report_scam_entity: {
         Args: {
           p_country_code?: string
@@ -8435,6 +8802,16 @@ export type Database = {
           audit_id: number
           share_token: string
         }[]
+      }
+      upsert_watchlist_candidate: {
+        Args: {
+          p_brand_normalized: string
+          p_raw_brand: string
+          p_resolved_canonical: string
+          p_source: string
+          p_source_count: number
+        }
+        Returns: undefined
       }
       user_owns_key_hash: { Args: { p_key_hash: string }; Returns: boolean }
     }
