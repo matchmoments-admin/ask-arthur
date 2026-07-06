@@ -259,6 +259,16 @@ export const featureFlags = {
    *  Server-side only; no paid API → no cost brake needed. */
   redditBrandsDiscover: readBoolEnv("FF_REDDIT_BRANDS_DISCOVER"),
 
+  /** Scam-reports source for the brands-discover queue (Phase 1 of the
+   *  brand-convergence-seam plan). When ON, the existing reddit-brands-discover
+   *  weekly cron adds a SECOND aggregation source — brands people report to
+   *  Arthur as impersonated (scam_reports.impersonated_brand, 30d window) — and
+   *  upserts them into the same watchlist_candidates queue with
+   *  source='scam_reports'. Gates ONLY the new source step; the Reddit source
+   *  runs exactly as before when OFF. No new cron; read-only windowed aggregate
+   *  over scam_reports → no cost brake needed. */
+  scamBrandsSource: readBoolEnv("FF_SCAM_BRANDS_SOURCE"),
+
   /** Reddit Intel Wave 2 — dashboard widgets (RedditIntelPanel, theme cards,
    *  brand watchlist, theme-velocity drill-down). Independent of the ingest
    *  flag — when ingest is on but dashboard is off, data is collected but
