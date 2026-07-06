@@ -48,6 +48,12 @@ export interface PendingAlertView {
   auto_classification_attack_intent?: string | null;
   auto_classification_reason?: string | null;
   likely_tp?: boolean | null;
+  // Phase 2 (brand-convergence-seam) — cross-stream corroboration. TRUE when
+  // this clone's brand is also live in the watchlist-candidate queue (Reddit
+  // mentions + reported scams). Additive triage signal; never affects severity.
+  cross_stream_corroborated?: boolean | null;
+  corroboration_mention_count?: number | null;
+  corroboration_source_counts?: Record<string, number> | null;
 }
 
 const URLSCAN_TONE: Record<
@@ -250,6 +256,31 @@ export default function TriageRow({
             row.auto_classification_is_clone ? (
               <> · {row.auto_classification_clone_tactic}</>
             ) : null}
+          </span>
+        )}
+        {row.cross_stream_corroborated && (
+          <span
+            className="uppercase"
+            title="This brand is also live in the watchlist-candidate queue (Reddit mentions + reported scams)"
+            style={{
+              padding: "2px 8px",
+              borderRadius: 6,
+              fontSize: 10.5,
+              letterSpacing: "0.06em",
+              fontWeight: 600,
+              color: "var(--color-tp-fg)",
+              background: "var(--color-tp-bg)",
+              border: "1px solid var(--color-tp-ring)",
+            }}
+          >
+            also impersonated
+            {(() => {
+              const sc = row.corroboration_source_counts ?? {};
+              const parts: string[] = [];
+              if (sc.reddit) parts.push(`Reddit ×${sc.reddit}`);
+              if (sc.scam_reports) parts.push(`scams ×${sc.scam_reports}`);
+              return parts.length ? <> · {parts.join(" · ")}</> : null;
+            })()}
           </span>
         )}
       </div>

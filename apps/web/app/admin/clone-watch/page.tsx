@@ -35,7 +35,12 @@ export default async function CloneWatchAdminPage() {
       pendingBatchesRes,
       disputesRes,
     ] = await Promise.all([
-      supabase.rpc("list_clone_alerts_pending_triage", { p_limit: 200 }),
+      supabase.rpc("list_clone_alerts_pending_triage", {
+        p_limit: 200,
+        // Phase 2 (brand-convergence-seam): when ON, alerts whose brand is also
+        // live in the watchlist-candidate queue sort to the top. Additive only.
+        p_corroboration_priority: featureFlags.cloneTriageCorroboration,
+      }),
       supabase.rpc("clone_watch_weekly_metrics", { p_days: 7 }),
       supabase.rpc("clone_watch_brand_breakdown", { p_days: 30 }),
       supabase.rpc("clone_watch_takedown_stats", { p_days: 30 }),

@@ -520,6 +520,15 @@ export const featureFlags = {
    *  auto-send stays the #371-gated path. Default OFF. Server-side only. */
   cloneWatchAutoTriage: readBoolEnv("FF_CLONE_WATCH_AUTO_TRIAGE"),
 
+  /** Cross-stream corroboration priority in the clone-watch triage queue
+   *  (Phase 2 of the brand-convergence-seam plan). When ON, the admin pending-
+   *  triage list passes p_corroboration_priority=true so alerts whose brand is
+   *  also live in the watchlist-candidate queue (Reddit + reported scams) sort
+   *  to the top. The corroboration columns are ALWAYS returned; this flag only
+   *  reorders — it never touches the deterministic clone severity (ADR-0015).
+   *  Default OFF. Server-side only. */
+  cloneTriageCorroboration: readBoolEnv("FF_CLONE_TRIAGE_CORROBORATION"),
+
   /** Quiet the daily NRD-sweep Telegram digest (shopfront-nrd-daily-ingest).
    *  OPT-IN: default OFF preserves the current digest. Set true once the
    *  auto-triage run-summary email replaces it as the operator's notification,
