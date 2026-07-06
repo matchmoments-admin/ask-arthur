@@ -14,3 +14,4 @@ export {
   type SignalType,
 } from "./lexical-match";
 export { brandNormalize } from "./brand-normalize";
+export { buildBrandResolver, type BrandAliasRecord } from "./brand-resolver";

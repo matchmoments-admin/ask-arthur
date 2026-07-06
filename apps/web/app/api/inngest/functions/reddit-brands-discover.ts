@@ -1,9 +1,15 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
-import { AU_BRAND_WATCHLIST, brandNormalize } from "@askarthur/shopfront-glue";
+import {
+  AU_BRAND_WATCHLIST,
+  brandNormalize,
+  buildBrandResolver,
+  type BrandAliasRecord,
+} from "@askarthur/shopfront-glue";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
+import { loadAliasRecord } from "@/lib/brand-aliases";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 
 /**
@@ -120,30 +126,10 @@ export const redditBrandsDiscover = inngest.createFunction(
     //    per-row RPC). Plain Record so it survives Inngest step serialisation.
     const aliasPairs = await step.run("load-brand-aliases", async () => {
       const sb = createServiceClient();
-      if (!sb) return {} as Record<string, string>;
-      const map: Record<string, string> = {};
-      for (let from = 0; ; from += 1000) {
-        const { data, error } = await sb
-          .from("brand_aliases")
-          .select("alias_normalized, canonical_brand")
-          .range(from, from + 999);
-        if (error) {
-          logger.error("reddit-brands-discover: brand_aliases load failed", {
-            error: error.message,
-          });
-          break;
-        }
-        for (const row of data ?? []) {
-          map[row.alias_normalized as string] = row.canonical_brand as string;
-        }
-        if ((data?.length ?? 0) < 1000) break;
-      }
-      return map;
+      if (!sb) return {} as BrandAliasRecord;
+      return loadAliasRecord(sb, "reddit-brands-discover");
     });
-    const resolveCanonical = (s: string): string | null => {
-      const k = brandNormalize(s);
-      return k ? (aliasPairs[k] ?? null) : null;
-    };
+    const resolveCanonical = buildBrandResolver(aliasPairs);
 
     // 2. Aggregate brand mentions over the window.
     const candidates = await step.run("aggregate-mentions", async () => {
