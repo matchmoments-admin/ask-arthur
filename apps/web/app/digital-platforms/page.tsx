@@ -133,21 +133,19 @@ export default function DigitalPlatformsPage() {
           </p>
           <div className="bg-deep-navy rounded-2xl p-6 overflow-x-auto">
             <pre className="text-sm text-slate-300 font-mono leading-relaxed">
-              <code>{`curl -X POST https://api.askarthur.au/v1/threat/check \\
-  -H "Authorization: Bearer YOUR_API_KEY" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "type": "url",
-    "value": "https://ad-landing-page.example.com",
-    "context": "ad_review"
-  }'
+              <code>{`curl "https://askarthur.au/api/v1/threats/urls/lookup?url=https://ad-crypto-doubler.example" \\
+  -H "Authorization: Bearer YOUR_API_KEY"
 
 # Response
 {
-  "verdict": "HIGH_RISK",
-  "confidence": 0.91,
-  "signals": ["impersonation", "fake_investment_scheme"],
-  "recommendation": "Reject ad and suspend advertiser"
+  "found": true,
+  "domain": "ad-crypto-doubler.example",
+  "confidenceScore": 0.91,
+  "confidenceLevel": "high",
+  "primaryScamType": "investment",
+  "brandImpersonated": null,
+  "googleSafeBrowsing": true,
+  "reportCount": 24
 }`}</code>
             </pre>
           </div>
