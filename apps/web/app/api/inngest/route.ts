@@ -59,6 +59,7 @@ import { reportBrandStewardship } from "./functions/report-brand-stewardship";
 // + internal all-clones digest to the operator (full picture incl. no-contact).
 import { knownBrandsDiscover } from "./functions/known-brands-discover";
 import { redditBrandsDiscover } from "./functions/reddit-brands-discover";
+import { brandRegisterRefresh } from "./functions/brand-register-refresh";
 import { cloneWatchInternalDigest } from "./functions/clone-watch-internal-digest";
 import { cloneWatchReportSummary } from "./functions/clone-watch-report-summary";
 // Platform housekeeping (retention / rollup / push) — moved out of
@@ -118,6 +119,7 @@ const appFunctions = [
   // Brand-contact coverage follow-ups
   knownBrandsDiscover,
   redditBrandsDiscover,
+  brandRegisterRefresh,
   cloneWatchInternalDigest,
   cloneWatchReportSummary,
   // Brand Stewardship Report (WS2-cap)

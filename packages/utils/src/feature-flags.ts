@@ -538,6 +538,13 @@ export const featureFlags = {
    *  changes user-facing output → canary separately. Default OFF. */
   analyzeCloneCitation: readBoolEnv("FF_ANALYZE_CLONE_CITATION"),
 
+  /** Brand Register — the "brand 360" rollup (Phase 3 of the brand-convergence-
+   *  seam plan). Gates BOTH the nightly brand-register-refresh Inngest fn (when
+   *  OFF the cron no-ops) AND the /admin/brand-register page. One row per
+   *  canonical brand with 30-day scam/reddit/clone counts + watchlist + curation
+   *  state. Pure-derived, rebuilt nightly; DROP TABLE is lossless. Default OFF. */
+  brandRegister: readBoolEnv("FF_BRAND_REGISTER"),
+
   /** Quiet the daily NRD-sweep Telegram digest (shopfront-nrd-daily-ingest).
    *  OPT-IN: default OFF preserves the current digest. Set true once the
    *  auto-triage run-summary email replaces it as the operator's notification,
