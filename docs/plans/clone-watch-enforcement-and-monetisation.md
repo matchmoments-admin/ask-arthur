@@ -1,6 +1,30 @@
 # Clone Watch → Enforcement + Monetisation — Implementation Plan
 
-_Status: DRAFT for review · Authored 2026-07-07 · Branch `clone-watch/enforcement-monetisation-plan`_
+_Status: IN PROGRESS · Authored 2026-07-07 · Branch `clone-watch/enforcement-monetisation-plan`_
+
+## Shipped so far (2026-07-07)
+
+All merged to `main` + prod (project `rquomhcgnodxzkhokwni`), each migrate → review → fix → merge → smoke. Everything below is **dark** behind default-OFF flags — no prod behaviour change yet.
+
+| PR   | Wave | Migration | What                                                                                   |
+| ---- | ---- | --------- | -------------------------------------------------------------------------------------- |
+| #682 | 0-A  | v199      | Netcraft `no threats` ≠ takedown; `lifecycle_state` + `advance_clone_lifecycle`        |
+| #683 | 0-B  | v200      | re-check cron + `apply_clone_urlscan_verdict` (weaponisation) + `weaponised.v1`        |
+| #684 | 1.1  | v201      | enforcement case model (`shopfront_takedown_attempts` → cases) + `merge_takedown_case` |
+| #685 | 1.2  | —         | enforcement **plan** step (opens cases on weaponise; no outbound sends)                |
+| #686 | 1.6  | v202      | read-only admin enforcement tab + `list_enforcement_cases`                             |
+| #687 | 2.1  | v203      | scrape-proof masked `brand_exposure_summary` teaser RPC                                |
+| #688 | 2.2  | —         | public `/brand-exposure` checker page + teaser API                                     |
+
+**Actual migration order** (supersedes the "linear v199→v202" note below): v199 alert lifecycle · v200 urlscan verdict · v201 enforcement cases · v202 list-cases RPC · v203 exposure teaser. Next free: **v204**.
+
+**Wave 0 = COMPLETE** (the founder's "no threats / press these" ask, live-capable once flags flip). **Wave 2 = COMPLETE** (free exposure funnel, dark behind `FF_BRAND_EXPOSURE`). **Wave 1 = infrastructure done** (case model + plan + admin visibility); the outbound pieces below remain.
+
+### Remaining — GATED ON FOUNDER SIGN-OFF (deliberately not shipped autonomously)
+
+- **Wave 1 outbound execution** (auto-send APWG/OpenPhish; human-gated registrar/host/UDRP sends): the plan gates these behind **legal sign-off** + the itch.io false-takedown invariant + a **shared Netcraft submission quota** (critic gap F2). Cases are opened + visible in the admin tab; nothing sends until this is wired with approval.
+- **Wave 3 paid Brand Monitor + billing**: charges real customers — needs the pricing decision + the `org_id` JWT claim confirmed (F1) before RLS-scoped brand data + Stripe go live.
+- **Wave 1 re-emergence monitor** (safe, low-value until cases are actioned) + **UDRP/auDRP bundle** adapters.
 
 Turns Ask Arthur's live **Clone Watch** detection engine into (a) a working
 **enforcement feedback loop** — fixing the "no threats found" gap the founder
