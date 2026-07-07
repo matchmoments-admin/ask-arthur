@@ -1,4 +1,8 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
+import {
+  CLONE_WATCH_WEAPONISED_EVENT,
+  type CloneWatchWeaponisedData,
+} from "@askarthur/scam-engine/inngest/events";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { retrieveURLScan } from "@askarthur/scam-engine/urlscan";
 import { createServiceClient } from "@askarthur/supabase/server";
@@ -81,6 +85,39 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
     let classified = 0;
     let stillPending = 0;
     let reputationFallback = 0;
+    const weaponisedEvents: CloneWatchWeaponisedData[] = [];
+
+    // Drive the v199 enforcement lifecycle from the urlscan verdict via the
+    // edge-guarded v200 RPC (never downgrades reported/terminal states).
+    // Returns the weaponised.v1 payload iff the alert NEWLY weaponised, so the
+    // caller can emit exactly one event per transition — the result is carried
+    // in the step's RETURN value (not a closure side-effect) so it survives
+    // Inngest step-memoisation on replay.
+    const applyVerdict = async (
+      row: RetrieveRow,
+      classification: string,
+    ): Promise<CloneWatchWeaponisedData | null> => {
+      const { data, error } = await sb.rpc("apply_clone_urlscan_verdict", {
+        p_alert_id: row.id,
+        p_classification: classification,
+      });
+      if (error) {
+        throw new Error(
+          `apply_clone_urlscan_verdict failed for alert ${row.id}: ${error.message}`,
+        );
+      }
+      const verdict = data as {
+        newly_weaponised?: boolean;
+        prior?: string;
+      } | null;
+      if (!verdict?.newly_weaponised) return null;
+      return {
+        alertId: row.id,
+        candidateDomain: row.candidate_domain,
+        candidateUrl: row.candidate_url,
+        via: verdict.prior === "detected" ? "initial" : "recheck",
+      };
+    };
 
     for (const row of pending) {
       const outcome = await step.run(`retrieve-${row.id}`, async () => {
@@ -103,7 +140,8 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
             p_classification: classification,
             p_set_triage_status: suggestTriageTransition(classification),
           });
-          return { kind: "classified" as const, classification };
+          const weaponised = await applyVerdict(row, classification);
+          return { kind: "classified" as const, classification, weaponised };
         }
 
         // Render not ready. If reputation is decisive, classify now and stop
@@ -120,7 +158,8 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
             p_classification: "likely_phishing",
             p_set_triage_status: null, // operator confirms TP (ultrareview F5)
           });
-          return { kind: "reputation_fallback" as const };
+          const weaponised = await applyVerdict(row, "likely_phishing");
+          return { kind: "reputation_fallback" as const, weaponised };
         }
 
         await sb.rpc("persist_clone_alert_urlscan", {
@@ -134,7 +173,7 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
           p_classification: null, // failure_streak++; retried next tick
           p_set_triage_status: null,
         });
-        return { kind: "still_pending" as const };
+        return { kind: "still_pending" as const, weaponised: null };
       });
 
       if (outcome.kind === "classified") classified++;
@@ -142,6 +181,21 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
         classified++;
         reputationFallback++;
       } else stillPending++;
+      if (outcome.weaponised) weaponisedEvents.push(outcome.weaponised);
+    }
+
+    // Emit one weaponised.v1 per newly-weaponised alert (the escalation seam;
+    // Wave 1 enforcement consumes it). Batched, id-keyed for idempotency.
+    if (weaponisedEvents.length > 0) {
+      await step.run("emit-weaponised", async () => {
+        await inngest.send(
+          weaponisedEvents.map((d) => ({
+            name: CLONE_WATCH_WEAPONISED_EVENT,
+            id: `clone-weaponised-${d.alertId}-${d.via}`,
+            data: d,
+          })),
+        );
+      });
     }
 
     await step.run("log-cost", async () => {

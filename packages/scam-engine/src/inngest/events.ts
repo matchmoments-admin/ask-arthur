@@ -548,3 +548,38 @@ export function parseCloneWatchPreclassifyRequestedData(
 ): CloneWatchPreclassifyRequestedData {
   return CloneWatchPreclassifyRequestedDataSchema.parse(raw);
 }
+
+// ── shopfront/clone.weaponised.v1 ───────────────────────────────────────
+// Emitted (v200, Wave 0 PR-B) when a lookalike's urlscan verdict flips to
+// likely_phishing and apply_clone_urlscan_verdict transitions the alert to
+// 'weaponised' — i.e. OUR scanner saw the phish. This is the escalation seam:
+// the Wave 1 enforcement layer consumes it to (re-)submit to Netcraft with the
+// fresh-evidence "we saw it, you didn't" reason and fan out to other takedown
+// channels. Deliberately has NO consumer in Wave 0 — the re-check loop only
+// DETECTS weaponisation; ENFORCEMENT is Wave 1.
+const CloneWatchWeaponisedDataSchema = z.object({
+  alertId: z.number().int().positive(),
+  candidateDomain: z.string().min(1).max(255),
+  candidateUrl: z.string().min(1).max(2048),
+  // 'initial' = weaponised on the first scan; 'recheck' = a previously
+  // monitoring/declined domain that turned malicious on re-scan (the value case).
+  via: z.enum(["initial", "recheck"]),
+});
+export type CloneWatchWeaponisedData = z.infer<
+  typeof CloneWatchWeaponisedDataSchema
+>;
+
+export const CLONE_WATCH_WEAPONISED_EVENT =
+  "shopfront/clone.weaponised.v1" as const;
+
+export interface CloneWatchWeaponisedEvent {
+  name: typeof CLONE_WATCH_WEAPONISED_EVENT;
+  id: string;
+  data: CloneWatchWeaponisedData;
+}
+
+export function parseCloneWatchWeaponisedData(
+  raw: unknown,
+): CloneWatchWeaponisedData {
+  return CloneWatchWeaponisedDataSchema.parse(raw);
+}

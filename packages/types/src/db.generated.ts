@@ -7618,6 +7618,14 @@ export type Database = {
         }[]
       }
       anonymise_expired_footprints: { Args: never; Returns: number }
+      apply_clone_urlscan_verdict: {
+        Args: {
+          p_alert_id: number
+          p_classification: string
+          p_evidence?: Json
+        }
+        Returns: Json
+      }
       archive_feed_items_batch: {
         Args: { p_batch_size?: number; p_default_days?: number }
         Returns: {

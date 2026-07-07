@@ -168,6 +168,21 @@ export const cloneWatchSubmitNetcraft = inngest.createFunction(
         },
         p_set_triage_status: "tp_actioned",
       });
+      // Advance the enforcement lifecycle (v199) to 'reported' so the poll
+      // worklist and dashboard reflect that this lookalike is now under
+      // Netcraft review. Best-effort — a failure here must not undo the
+      // submission that already succeeded, so the error is logged, not thrown
+      // (the next poll re-derives the terminal state regardless).
+      const { error: advanceErr } = await sb.rpc("advance_clone_lifecycle", {
+        p_alert_id: data.alertId,
+        p_to_state: "reported",
+      });
+      if (advanceErr) {
+        logger.warn("clone-watch netcraft: lifecycle advance to reported failed", {
+          alertId: data.alertId,
+          error: advanceErr.message,
+        });
+      }
     });
 
     await step.run("log-cost", async () => {
