@@ -332,6 +332,20 @@ export async function POST(req: NextRequest) {
             clone.firstFlaggedAt,
           ).toLocaleDateString("en-AU")}).`,
         ];
+        // Observability: surface how often the citation fires + which brands.
+        // Axiom (structured log) + first-party analytics (volume in
+        // analytics_events). Never raw scanned content — domains only.
+        logger.info("analyze.clone_citation", {
+          impersonated: clone.impersonatedDomain,
+          candidate: clone.candidateDomain,
+          requestId,
+        });
+        void logEvent({
+          eventType: "clone_citation_shown",
+          eventProps: { impersonated: clone.impersonatedDomain },
+          path: "/api/analyze",
+          requestId,
+        });
       }
     }
 

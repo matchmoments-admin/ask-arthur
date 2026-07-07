@@ -31,6 +31,7 @@ export const ANALYTICS_EVENT_TYPES = [
   "feed_view",
   "digest_click",
   "link_click",
+  "clone_citation_shown",
 ] as const;
 
 export type AnalyticsEventType = (typeof ANALYTICS_EVENT_TYPES)[number];
