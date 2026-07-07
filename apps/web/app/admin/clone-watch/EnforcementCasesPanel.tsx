@@ -7,8 +7,14 @@
  * human sees every case here BEFORE any outbound send is enabled. Actions
  * (approve / send / mark actioned) land in a later PR; this is visibility only.
  *
- * Presentational — no client interactivity yet, so it stays a server component.
+ * Presentational server component; the per-case four-eyes send action for the
+ * emailable human-gated channels is the small client EnforcementSendButton.
  */
+
+import EnforcementSendButton from "./EnforcementSendButton";
+
+// Channels that send an evidenced abuse email (vs GSB/SmartScreen form deep-links).
+const EMAILABLE_HUMAN_CHANNELS = new Set(["registrar_abuse", "hosting_abuse"]);
 
 export interface EnforcementCase {
   case_id: number;
@@ -135,6 +141,10 @@ export default function EnforcementCasesPanel({
                         >
                           Report ↗
                         </a>
+                      ) : EMAILABLE_HUMAN_CHANNELS.has(c.channel) &&
+                        (c.case_status === "queued" ||
+                          c.case_status === "pending_approval") ? (
+                        <EnforcementSendButton caseId={c.case_id} />
                       ) : (
                         "—"
                       )}
