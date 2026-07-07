@@ -9,14 +9,18 @@ import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 /**
  * Phase B — Netcraft takedown-status polling.
  *
- * Runs every 30 min. Pulls up to 50 alerts whose Netcraft submission UUID
- * is set but `takedown_at` isn't. For each, hits Netcraft v3 status
- * endpoint and updates `submitted_to.netcraft.{state, last_checked_at,
- * takedown_at}` when the state transitions to a terminal "blocked /
- * processed" value.
+ * Pulls alerts whose Netcraft submission UUID is set but that haven't reached a
+ * terminal lifecycle state, hits the Netcraft v3 status endpoint, and maps the
+ * verdict onto the enforcement lifecycle (v199) via advance_clone_lifecycle:
+ *   - `malicious` / `already blocked` → 'taken_down' (stamps takedown_at).
+ *   - `no threats`                    → 'declined' (stamps netcraft_declined_at;
+ *                                        NOT a takedown — handed to the re-check
+ *                                        loop, re-submitted only on weaponisation).
+ *   - `processing`/`suspicious`/`unavailable`/unknown → keep polling.
  *
- * Powers the median-time-to-takedown KPI on /admin/clone-watch + the
- * weekly digest + the LinkedIn draft.
+ * Powers the median-time-to-takedown KPI on /admin/clone-watch + the weekly
+ * digest + the LinkedIn draft — which is why a declined lookalike must NOT be
+ * recorded as a takedown (the pre-v199 bug that inflated the KPI).
  *
  * Gated by FF_SHOPFRONT_CLONE_OUTREACH + FF_SHOPFRONT_CLONE_SUBMIT_NETCRAFT
  * + NETCRAFT_REPORT_API_KEY presence. Skip-with-reason when any is missing
@@ -28,20 +32,30 @@ import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 
 const NETCRAFT_STATUS_ENDPOINT = "https://report.netcraft.com/api/v3/submission";
 
-// Netcraft v3 state machine — the exact terminal values aren't reproduced
-// in their public docs, so we treat any state matching this allowlist as
-// "completed enough to record takedown_at". On first prod observation,
-// extend this set if Netcraft uses a different label. Untrusted state
-// values are passed through unchanged into submitted_to so we have raw
-// evidence to debug.
-const TERMINAL_STATES = new Set([
-  "processed",
-  "complete",
-  "closed",
-  "taken_down",
-  "no_action_required", // Netcraft determined the URL was safe — terminal regardless
-  "not_phishing", // alternative label seen in some Netcraft responses
-]);
+// Netcraft Report API v3 state machine (verified against the v3 changelog).
+// The real per-submission states are: `processing`, `no threats`,
+// `unavailable`, `suspicious`, `malicious` — with the deprecated
+// `phishing`/`malware`/`web shell`/`already blocked` folded into `malicious`.
+// States are normalised (lowercased, spaces→underscores) before comparison.
+//
+// This split is the fix for the founder-reported bug: a `no threats` verdict is
+// Netcraft DECLINING to act (it grades on live content; our NRD hits are parked
+// / cloaked / pre-weaponisation at scan time) — it is NOT a takedown. Recording
+// it as terminal (the old behaviour) both dropped the domain from all future
+// re-checks AND miscounted it as a takedown, inflating the time-to-takedown KPI.
+//
+// ACTIONED → lifecycle 'taken_down' (stamp takedown_at). This is the ONLY path
+//            that records a takedown.
+// DECLINED → lifecycle 'declined' (stamp netcraft_declined_at). Re-check
+//            eligible; re-submitted only on a fresh weaponisation transition.
+// everything else (processing/suspicious/unavailable/unknown) → keep polling.
+const NETCRAFT_ACTIONED = new Set(["malicious", "already_blocked"]);
+const NETCRAFT_DECLINED = new Set(["no_threats"]);
+
+/** Lowercase + collapse whitespace to underscores so "no threats" → "no_threats". */
+function normaliseNetcraftState(state: string): string {
+  return state.toLowerCase().trim().replace(/\s+/g, "_");
+}
 
 // Batch size is bounded by the 5-min Inngest soft-target and the 10-min
 // pg-stuck-query-watchdog hard cap. 25 rows × 12s per-fetch timeout = 5
@@ -110,6 +124,7 @@ export const cloneWatchPollNetcraft = inngest.createFunction(
     }
 
     let takedowns = 0;
+    let declined = 0;
     let still_pending = 0;
     let errors = 0;
 
@@ -123,9 +138,11 @@ export const cloneWatchPollNetcraft = inngest.createFunction(
         continue;
       }
       if (outcome.kind === "takedown") takedowns++;
+      else if (outcome.kind === "declined") declined++;
       else still_pending++;
 
       await step.run(`persist-${row.id}`, async () => {
+        const nowIso = new Date().toISOString();
         // Load existing netcraft fragment to preserve `submitted_at` + first
         // takedown_at. Atomic-merge writes the new fragment as ONE key
         // (avoids the cross-fn race that submit-netcraft + notify-brand
@@ -141,21 +158,62 @@ export const cloneWatchPollNetcraft = inngest.createFunction(
           (existing.netcraft as Record<string, unknown>) ?? {};
         const fragment: Record<string, unknown> = {
           ...existingNetcraft,
-          // Stored lowercased so re-poll lookups + TERMINAL_STATES.has(...)
-          // compare consistently. Closes ultrareview H5.
-          state: outcome.state.toLowerCase(),
-          last_checked_at: new Date().toISOString(),
+          // outcome.state is already normalised (lowercase, underscores) so
+          // re-poll lookups + set membership compare consistently.
+          state: outcome.state,
+          last_checked_at: nowIso,
         };
+        // ACTIONED — the ONLY path that records a takedown. Idempotent on
+        // takedown_at so a re-poll doesn't reset the first-seen time.
         if (outcome.kind === "takedown" && !existingNetcraft.takedown_at) {
-          fragment.takedown_at = new Date().toISOString();
+          fragment.takedown_at = nowIso;
           fragment.takedown_state_observed = outcome.state;
         }
-        await sb.rpc("merge_clone_alert_submission", {
+        // DECLINED — Netcraft "no threats". Record it distinctly; do NOT stamp
+        // takedown_at. The lifecycle transition below keeps it re-check eligible.
+        if (outcome.kind === "declined") {
+          fragment.declined_at = nowIso;
+          fragment.declined_state_observed = outcome.state;
+        }
+        // This step does TWO writes (the netcraft fragment + the lifecycle
+        // transition). supabase-js does NOT throw on a Postgres error, so we
+        // must inspect each result and throw — otherwise a half-applied write
+        // (e.g. takedown_at stamped but lifecycle_state not advanced) would be
+        // silently committed and, because the poll worklist filters
+        // `takedown_at IS NULL`, the row would be excluded from re-polling and
+        // never self-heal. Both RPCs are idempotent, so throwing lets Inngest
+        // retry the whole step to a consistent state.
+        const { error: mergeErr } = await sb.rpc("merge_clone_alert_submission", {
           p_alert_id: row.id,
           p_key: "netcraft",
           p_value: fragment,
           p_set_triage_status: null,
         });
+        if (mergeErr) {
+          throw new Error(
+            `merge_clone_alert_submission failed for alert ${row.id}: ${mergeErr.message}`,
+          );
+        }
+
+        // Drive the enforcement lifecycle through the single guarded RPC.
+        // A `pending` verdict leaves the alert at 'reported' (keep polling).
+        const nextState =
+          outcome.kind === "takedown"
+            ? "taken_down"
+            : outcome.kind === "declined"
+              ? "declined"
+              : null;
+        if (nextState) {
+          const { error: advanceErr } = await sb.rpc("advance_clone_lifecycle", {
+            p_alert_id: row.id,
+            p_to_state: nextState,
+          });
+          if (advanceErr) {
+            throw new Error(
+              `advance_clone_lifecycle(${nextState}) failed for alert ${row.id}: ${advanceErr.message}`,
+            );
+          }
+        }
       });
     }
 
@@ -189,6 +247,7 @@ export const cloneWatchPollNetcraft = inngest.createFunction(
         metadata: {
           polled: pending.length,
           takedowns_recorded: takedowns,
+          declined,
           still_pending,
           errors,
         },
@@ -198,6 +257,7 @@ export const cloneWatchPollNetcraft = inngest.createFunction(
     logger.info("clone-watch netcraft poll: complete", {
       polled: pending.length,
       takedowns,
+      declined,
       still_pending,
       errors,
     });
@@ -206,6 +266,7 @@ export const cloneWatchPollNetcraft = inngest.createFunction(
       ok: true,
       polled: pending.length,
       takedowns_recorded: takedowns,
+      declined,
       still_pending,
       errors,
     };
@@ -213,8 +274,9 @@ export const cloneWatchPollNetcraft = inngest.createFunction(
 );
 
 type PollOutcome =
-  | { kind: "takedown"; state: string }
-  | { kind: "pending"; state: string }
+  | { kind: "takedown"; state: string } // Netcraft actioned it (malicious/blocked)
+  | { kind: "declined"; state: string } // Netcraft "no threats" — NOT terminal
+  | { kind: "pending"; state: string } // processing/suspicious/unavailable
   | { kind: "error"; state: string };
 
 async function pollOne(
@@ -237,21 +299,26 @@ async function pollOne(
       return { kind: "error", state: `http_${res.status}` };
     }
     const json = (await res.json()) as Record<string, unknown>;
-    const state =
+    const rawState =
       (typeof json.state === "string" && json.state) ||
       (typeof json.status === "string" && json.status) ||
       "unknown";
-    // M2 observability — log raw state on every poll so we can spot
-    // Netcraft state-machine drift (e.g. they add a new terminal label
-    // we don't recognise). Cheap log line; no PII.
+    const state = normaliseNetcraftState(rawState);
+    const kind: PollOutcome["kind"] = NETCRAFT_ACTIONED.has(state)
+      ? "takedown"
+      : NETCRAFT_DECLINED.has(state)
+        ? "declined"
+        : "pending";
+    // M2 observability — log raw + normalised state on every poll so we can
+    // spot Netcraft state-machine drift (a new label we don't recognise falls
+    // through to "pending" and keeps being polled rather than mis-terminalised).
     logger.info("clone-watch netcraft poll: observed state", {
       alertId: row.id,
+      rawState,
       state,
-      isTerminal: TERMINAL_STATES.has(state.toLowerCase()),
+      kind,
     });
-    return TERMINAL_STATES.has(state.toLowerCase())
-      ? { kind: "takedown", state }
-      : { kind: "pending", state };
+    return { kind, state } as PollOutcome;
   } catch (err) {
     logger.warn("clone-watch netcraft poll: fetch failed", {
       alertId: row.id,
@@ -262,5 +329,5 @@ async function pollOne(
 }
 
 // Export for testing.
-export { TERMINAL_STATES, pollOne };
+export { NETCRAFT_ACTIONED, NETCRAFT_DECLINED, normaliseNetcraftState, pollOne };
 export type { PendingPollRow, PollOutcome };

@@ -5782,12 +5782,17 @@ export type Database = {
           candidate_domain: string
           candidate_url: string
           created_at: string
+          evidence: Json
           fetch_status: string | null
           first_seen_at: string
           id: number
           inferred_target_domain: string | null
           last_fetched_at: string | null
+          last_rechecked_at: string | null
           last_seen_at: string
+          lifecycle_state: string
+          netcraft_declined_at: string | null
+          recheck_count: number
           severity: number
           severity_tier: string
           signals: Json
@@ -5807,6 +5812,7 @@ export type Database = {
           urlscan_scanned_at: string | null
           urlscan_submitted_at: string | null
           urlscan_uuid: string | null
+          weaponised_at: string | null
         }
         Insert: {
           alert_state?: string
@@ -5814,12 +5820,17 @@ export type Database = {
           candidate_domain: string
           candidate_url: string
           created_at?: string
+          evidence?: Json
           fetch_status?: string | null
           first_seen_at?: string
           id?: number
           inferred_target_domain?: string | null
           last_fetched_at?: string | null
+          last_rechecked_at?: string | null
           last_seen_at?: string
+          lifecycle_state?: string
+          netcraft_declined_at?: string | null
+          recheck_count?: number
           severity: number
           severity_tier: string
           signals?: Json
@@ -5839,6 +5850,7 @@ export type Database = {
           urlscan_scanned_at?: string | null
           urlscan_submitted_at?: string | null
           urlscan_uuid?: string | null
+          weaponised_at?: string | null
         }
         Update: {
           alert_state?: string
@@ -5846,12 +5858,17 @@ export type Database = {
           candidate_domain?: string
           candidate_url?: string
           created_at?: string
+          evidence?: Json
           fetch_status?: string | null
           first_seen_at?: string
           id?: number
           inferred_target_domain?: string | null
           last_fetched_at?: string | null
+          last_rechecked_at?: string | null
           last_seen_at?: string
+          lifecycle_state?: string
+          netcraft_declined_at?: string | null
+          recheck_count?: number
           severity?: number
           severity_tier?: string
           signals?: Json
@@ -5871,6 +5888,7 @@ export type Database = {
           urlscan_scanned_at?: string | null
           urlscan_submitted_at?: string | null
           urlscan_uuid?: string | null
+          weaponised_at?: string | null
         }
         Relationships: [
           {
@@ -7575,6 +7593,15 @@ export type Database = {
         Args: { p_interval: string; p_table: string; p_ts_col: string }
         Returns: number
       }
+      advance_clone_lifecycle: {
+        Args: {
+          p_alert_id: number
+          p_evidence?: Json
+          p_mark_rechecked?: boolean
+          p_to_state: string
+        }
+        Returns: undefined
+      }
       aggregate_open_clone_alerts_by_brand: {
         Args: never
         Returns: {
@@ -8112,6 +8139,18 @@ export type Database = {
           p_role?: string
         }
         Returns: number
+      }
+      list_clone_alerts_for_recheck: {
+        Args: { p_cadence_hours?: number; p_limit?: number }
+        Returns: {
+          candidate_domain: string
+          candidate_url: string
+          id: number
+          last_rechecked_at: string
+          lifecycle_state: string
+          recheck_count: number
+          urlscan_classification: string
+        }[]
       }
       list_clone_alerts_for_urlscan_rescan: {
         Args: { p_limit?: number; p_stale_after_hours?: number }
