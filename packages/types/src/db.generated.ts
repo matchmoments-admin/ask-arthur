@@ -3362,6 +3362,60 @@ export type Database = {
         }
         Relationships: []
       }
+      monitored_brands: {
+        Row: {
+          aliases: string[]
+          brand_name: string
+          brand_normalized: string
+          created_at: string
+          created_by: string | null
+          id: number
+          is_active: boolean
+          legitimate_domains: string[]
+          org_id: string
+          plan: string | null
+          updated_at: string
+          verification_method: string | null
+          verification_status: string
+          verification_token: string | null
+          verified_at: string | null
+        }
+        Insert: {
+          aliases?: string[]
+          brand_name: string
+          brand_normalized: string
+          created_at?: string
+          created_by?: string | null
+          id?: never
+          is_active?: boolean
+          legitimate_domains?: string[]
+          org_id: string
+          plan?: string | null
+          updated_at?: string
+          verification_method?: string | null
+          verification_status?: string
+          verification_token?: string | null
+          verified_at?: string | null
+        }
+        Update: {
+          aliases?: string[]
+          brand_name?: string
+          brand_normalized?: string
+          created_at?: string
+          created_by?: string | null
+          id?: never
+          is_active?: boolean
+          legitimate_domains?: string[]
+          org_id?: string
+          plan?: string | null
+          updated_at?: string
+          verification_method?: string | null
+          verification_status?: string
+          verification_token?: string | null
+          verified_at?: string | null
+        }
+        Relationships: []
+      }
       monitored_celebrities: {
         Row: {
           aliases: string[] | null
@@ -8199,6 +8253,15 @@ export type Database = {
           p_role?: string
         }
         Returns: number
+      }
+      list_active_monitored_brands: {
+        Args: never
+        Returns: {
+          aliases: string[]
+          brand: string
+          brand_normalized: string
+          legitimate_domains: string[]
+        }[]
       }
       list_clone_alerts_for_recheck: {
         Args: { p_cadence_hours?: number; p_limit?: number }
