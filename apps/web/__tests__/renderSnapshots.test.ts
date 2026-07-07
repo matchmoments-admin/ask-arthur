@@ -32,19 +32,25 @@ const INTEL_FIXTURE = {
   weekStart: "2026-05-04",
   weekEnd: "2026-05-11",
   totalPostsClassified: 412,
+  // Synthesis-shape stories: no slug/href (no per-story page), a novelty chip,
+  // and a this-week count. Mirrors the FF_REDDIT_INTEL_WEEKLY_SYNTHESIS path.
   emergingThemes: [
     {
-      id: "t1",
-      slug: "fake-debt-collectors",
-      title: "Fake debt collector calls escalate",
+      id: "story-1",
+      slug: null,
+      href: null,
+      signalLabel: "New this week",
+      title: "Booking.com lookalike domains target AU travellers",
       narrative:
-        "Multiple AU callers report aggressive collection scripts referencing real legal-firm names.",
+        "Search-ad clones capture card details on fake payment pages after a lookalike booking confirmation.",
       memberCount: 32,
-      representativeBrands: ["Telstra", "ATO"],
+      representativeBrands: ["Booking.com"],
     },
     {
-      id: "t2",
-      slug: "tinder-snapchat-sextortion",
+      id: "story-2",
+      slug: null,
+      href: null,
+      signalLabel: "Rising",
       title: "Tinder-to-Snapchat sextortion",
       narrative:
         "Match conversations migrate to Snapchat where image exchange triggers extortion.",

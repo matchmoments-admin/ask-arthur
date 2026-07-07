@@ -36,12 +36,17 @@ import { withUtm } from "@/lib/utm";
 interface EmergingTheme {
   /** UUID primary key — used as the deep-link fallback when slug is null. */
   id: string;
-  /** URL-friendly slug; null on legacy rows. */
+  /** URL-friendly slug; null on legacy rows and synthesis stories. */
   slug: string | null;
   title: string;
   narrative: string | null;
   memberCount: number;
   representativeBrands: string[];
+  /** Deep link to a durable theme page. Null for synthesis stories, which
+   *  have no per-theme page — those render as plain (non-linked) headlines. */
+  href?: string | null;
+  /** "New this week" / "Rising" chip, or null/undefined for no chip. */
+  signalLabel?: string | null;
 }
 
 interface BrandWatchEntry {
@@ -103,9 +108,15 @@ function humaniseCategory(label: string): string {
     .join(" ");
 }
 
-function themeUrl(theme: EmergingTheme): string {
-  const key = theme.slug ?? theme.id;
-  return withUtm(`https://askarthur.au/intel/themes/${key}`, EMAIL_UTM);
+// Resolve a deep link for an emerging item, or null when it has no durable
+// page. Synthesis stories (no href, no slug) return null → rendered as plain
+// headlines. Theme rows carry a prebuilt UTM href, or a slug we build from.
+function themeHref(theme: EmergingTheme): string | null {
+  if (theme.href) return theme.href;
+  if (theme.slug) {
+    return withUtm(`https://askarthur.au/intel/themes/${theme.slug}`, EMAIL_UTM);
+  }
+  return null;
 }
 
 function buildDek(props: WeeklyIntelDigestProps): string {
@@ -339,7 +350,7 @@ export default function WeeklyIntelDigest(props: WeeklyIntelDigestProps) {
                         opacity: 0.7,
                       }}
                     >
-                      Active themes
+                      Emerging
                     </Text>
                   </Column>
                   <Column
@@ -421,16 +432,42 @@ export default function WeeklyIntelDigest(props: WeeklyIntelDigestProps) {
                         }}
                       >
                         {i + 1}.{" "}
-                        <Link
-                          href={themeUrl(theme)}
-                          style={{
-                            color: NAVY,
-                            textDecoration: "underline",
-                            textUnderlineOffset: "3px",
-                          }}
-                        >
-                          {theme.title} ↗
-                        </Link>
+                        {themeHref(theme) ? (
+                          <Link
+                            href={themeHref(theme) as string}
+                            style={{
+                              color: NAVY,
+                              textDecoration: "underline",
+                              textUnderlineOffset: "3px",
+                            }}
+                          >
+                            {theme.title} ↗
+                          </Link>
+                        ) : (
+                          <span>{theme.title}</span>
+                        )}
+                        {theme.signalLabel && (
+                          <span
+                            style={{
+                              fontFamily: SANS,
+                              fontSize: "10px",
+                              fontWeight: 700,
+                              letterSpacing: "1px",
+                              textTransform: "uppercase" as const,
+                              color: WHITE,
+                              backgroundColor: NAVY,
+                              borderRadius: "4px",
+                              padding: "2px 6px",
+                              marginLeft: "8px",
+                              // inline-block so Outlook/Word honours the padding
+                              // + background box rather than clipping it.
+                              display: "inline-block",
+                              whiteSpace: "nowrap" as const,
+                            }}
+                          >
+                            {theme.signalLabel}
+                          </span>
+                        )}
                       </Text>
                       {theme.narrative && (
                         <Text
@@ -462,7 +499,7 @@ export default function WeeklyIntelDigest(props: WeeklyIntelDigestProps) {
                         }}
                       >
                         {theme.memberCount}{" "}
-                        {theme.memberCount === 1 ? "report" : "reports"}
+                        {theme.memberCount === 1 ? "report" : "reports"} this week
                         {theme.representativeBrands.length > 0 && (
                           <>
                             {" · "}

@@ -113,6 +113,60 @@ export async function getActiveRedditIntelThemes(
   }));
 }
 
+export interface WeeklyIntelDigestRow {
+  weekStart: string;
+  weekEnd: string;
+  cohortPostCount: number;
+  stories: Array<{
+    rank: number;
+    title: string;
+    narrative: string;
+    category: string;
+    representativeBrands: string[];
+    noveltySignal: "new" | "rising" | "ongoing";
+    weeklyReportCount: number;
+  }>;
+  topBrands: Array<{ brand: string; mentionCount: number }>;
+  topCategories: Array<{ label: string; count: number }>;
+  novelty: { brands: string[]; tactics: string[] };
+  generatedAt: string;
+}
+
+/**
+ * Latest synthesised weekly digest row (Track B, reddit_intel_weekly_digest).
+ * Read-side accessor for the dashboard widget + a future B2B /api/v1/intel/digest
+ * — the same table the Monday email persists via the synthesis engine, so all
+ * surfaces read one canonical "emerging this week" object. (The email path calls
+ * the engine directly for get-or-create; this reader is the pure read.) Returns
+ * null when no week has been synthesised yet — callers render an empty state.
+ */
+export async function getLatestWeeklyIntelDigest(): Promise<WeeklyIntelDigestRow | null> {
+  const supabase = createServiceClient();
+  if (!supabase) return null;
+
+  const { data, error } = await supabase
+    .from("reddit_intel_weekly_digest")
+    .select(
+      "week_start, week_end, cohort_post_count, stories, top_brands, top_categories, novelty, generated_at",
+    )
+    .order("week_start", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !data) return null;
+
+  return {
+    weekStart: data.week_start as string,
+    weekEnd: data.week_end as string,
+    cohortPostCount: (data.cohort_post_count as number) ?? 0,
+    stories: (data.stories as WeeklyIntelDigestRow["stories"]) ?? [],
+    topBrands: (data.top_brands as WeeklyIntelDigestRow["topBrands"]) ?? [],
+    topCategories: (data.top_categories as WeeklyIntelDigestRow["topCategories"]) ?? [],
+    novelty: (data.novelty as WeeklyIntelDigestRow["novelty"]) ?? { brands: [], tactics: [] },
+    generatedAt: (data.generated_at as string) ?? "",
+  };
+}
+
 /**
  * Freshness probe — when did the daily classifier last run? Used by the
  * widget header to show "last updated X hours ago" + amber/red badges
