@@ -62,6 +62,15 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
       if (!featureFlags.shopfrontCloneRecheck) {
         return { skipped: true, reason: "FF_SHOPFRONT_CLONE_RECHECK disabled" };
       }
+      // The re-check loop's ONLY job is to trigger urlscan re-scans. If the
+      // urlscan pipeline can't run, don't mark candidates rechecked (which would
+      // bump last_rechecked_at and exclude them for a full cadence with no scan).
+      if (!featureFlags.shopfrontCloneUrlscan) {
+        return { skipped: true, reason: "FF_SHOPFRONT_CLONE_URLSCAN disabled" };
+      }
+      if (!process.env.URLSCAN_API_KEY) {
+        return { skipped: true, reason: "URLSCAN_API_KEY not set" };
+      }
       const braked = await step.run("check-brake", () => isFeatureBraked(BRAKE));
       if (braked) {
         return { skipped: true, reason: `feature_brakes.${BRAKE} engaged` };

@@ -11,10 +11,11 @@
 -- But the raw advance_clone_lifecycle() sets any target unconditionally, which
 -- would let an out-of-order urlscan result DOWNGRADE a 'reported' alert back to
 -- 'monitoring', or RESURRECT a terminal 'taken_down' one. This RPC encodes the
--- ALLOWED EDGES from a urlscan verdict, atomically (single read+update inside
--- one function call — no read-modify-write race between the concurrent urlscan
--- retrieve and the netcraft poll), and reports whether it newly weaponised so
--- the caller can emit shopfront/clone.weaponised.v1 exactly once per transition.
+-- ALLOWED EDGES from a urlscan verdict and serialises the read-modify-write with
+-- SELECT ... FOR UPDATE, so a concurrent advance_clone_lifecycle (submit→reported,
+-- poll→declined/taken_down) on the same alert can't clobber it with a stale read
+-- — the edge-guard would be meaningless otherwise. It reports whether it newly
+-- weaponised so the caller can emit shopfront/clone.weaponised.v1 once per change.
 --
 -- Edges:
 --   likely_phishing + state ∈ {detected,monitoring,declined} → weaponised
@@ -39,9 +40,13 @@ DECLARE
   v_current text;
   v_next    text;
 BEGIN
+  -- FOR UPDATE locks the row so a concurrent advance_clone_lifecycle serialises
+  -- behind us — otherwise a stale read here could blindly overwrite a fresher
+  -- state written between this SELECT and the UPDATE below.
   SELECT lifecycle_state INTO v_current
   FROM public.shopfront_clone_alerts
-  WHERE id = p_alert_id;
+  WHERE id = p_alert_id
+  FOR UPDATE;
 
   IF v_current IS NULL THEN
     RETURN NULL; -- no such alert
