@@ -32,6 +32,9 @@ export const ANALYTICS_EVENT_TYPES = [
   "digest_click",
   "link_click",
   "clone_citation_shown",
+  // Brand-exposure funnel (Wave 2) — measures the "Is your brand being cloned?"
+  // checker so we can attribute leads back to Clone Watch. Server-emitted only.
+  "brand_exposure_checked",
 ] as const;
 
 export type AnalyticsEventType = (typeof ANALYTICS_EVENT_TYPES)[number];

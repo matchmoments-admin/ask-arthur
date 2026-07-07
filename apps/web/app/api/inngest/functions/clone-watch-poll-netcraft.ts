@@ -4,6 +4,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { logCost } from "@/lib/cost-telemetry";
+import { logEnforcementEvent } from "@/lib/clone-watch/enforcement-telemetry";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 
 /**
@@ -92,7 +93,9 @@ export const cloneWatchPollNetcraft = inngest.createFunction(
   // The manual-trigger event is retained so polling resumes the moment
   // submission is enabled — re-add `{ cron: "0 * * * *" }` here at that point.
   [{ event: "shopfront/clone.poll-netcraft.manual-trigger.v1" }],
-  withAxiomLogging({ fnId: "shopfront-clone-poll-netcraft" }, async ({ step }) => {
+  withAxiomLogging(
+    { fnId: "shopfront-clone-poll-netcraft" },
+    async ({ step, runId }) => {
     if (!featureFlags.shopfrontCloneOutreach) {
       return { skipped: true, reason: "FF_SHOPFRONT_CLONE_OUTREACH disabled" };
     }
@@ -213,6 +216,26 @@ export const cloneWatchPollNetcraft = inngest.createFunction(
               `advance_clone_lifecycle(${nextState}) failed for alert ${row.id}: ${advanceErr.message}`,
             );
           }
+        }
+
+        // Reported-takedown observability — always-ship (rare, audit-critical).
+        // Inside the step so it fires exactly once per outcome, not on replay.
+        if (outcome.kind === "takedown") {
+          logEnforcementEvent("actioned", {
+            alertId: row.id,
+            domain: row.candidate_url,
+            channel: "netcraft",
+            outcome: outcome.state,
+            runId,
+          });
+        } else if (outcome.kind === "declined") {
+          logEnforcementEvent("declined", {
+            alertId: row.id,
+            domain: row.candidate_url,
+            channel: "netcraft",
+            outcome: outcome.state,
+            runId,
+          });
         }
       });
     }
