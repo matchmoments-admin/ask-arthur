@@ -8,6 +8,9 @@ import CloneWatchTriage, {
 } from "./CloneWatchTriage";
 import BackfillButton from "./BackfillButton";
 import DisputesPanel, { type DisputeRow } from "./DisputesPanel";
+import EnforcementCasesPanel, {
+  type EnforcementCase,
+} from "./EnforcementCasesPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +28,7 @@ export default async function CloneWatchAdminPage() {
   let brandBreakdown: BrandBreakdownRow[] = [];
   let takedown: TakedownStats = EMPTY_TAKEDOWN;
   let disputes: DisputeRow[] = [];
+  let enforcementCases: EnforcementCase[] = [];
 
   if (supabase) {
     const [
@@ -58,6 +62,16 @@ export default async function CloneWatchAdminPage() {
         .limit(50),
     ]);
     disputes = (disputesRes.data ?? []) as DisputeRow[];
+
+    // Enforcement cases (v202) — read-only worklist. Separate query so a missing
+    // RPC (pre-migration preview) degrades to an empty panel, not a page error.
+    const casesRes = await supabase.rpc("list_enforcement_cases", {
+      p_limit: 200,
+      p_include_closed: false,
+    });
+    if (Array.isArray(casesRes.data)) {
+      enforcementCases = casesRes.data as EnforcementCase[];
+    }
     if (Array.isArray(pendingRes.data)) {
       pending = pendingRes.data as PendingAlert[];
     }
@@ -126,6 +140,8 @@ export default async function CloneWatchAdminPage() {
       />
 
       <BrandBreakdownTable rows={brandBreakdown} computedAt={computedAt} />
+
+      <EnforcementCasesPanel cases={enforcementCases} />
 
       <DisputesPanel disputes={disputes} />
     </div>

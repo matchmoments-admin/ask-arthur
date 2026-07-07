@@ -7981,6 +7981,13 @@ export type Database = {
         }
         Returns: number
       }
+      enforcement_case_counts: {
+        Args: never
+        Returns: {
+          case_status: string
+          n: number
+        }[]
+      }
       enqueue_clone_alert_notification: {
         Args: {
           p_alert_id: number
@@ -8325,6 +8332,27 @@ export type Database = {
           id: number
           recipient: string
           severity_tier: string
+        }[]
+      }
+      list_enforcement_cases: {
+        Args: { p_include_closed?: boolean; p_limit?: number }
+        Returns: {
+          acts_on_parked: boolean
+          candidate_domain: string
+          candidate_url: string
+          case_id: number
+          case_status: string
+          channel: string
+          channel_autonomy: string
+          clone_alert_id: number
+          created_at: string
+          evidence_bundle: Json
+          external_ref: string
+          lifecycle_state: string
+          next_action_at: string
+          submitted_at: string
+          target_brand_normalized: string
+          updated_at: string
         }[]
       }
       list_long_running_queries: {
