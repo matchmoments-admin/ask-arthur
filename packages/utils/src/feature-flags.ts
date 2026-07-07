@@ -525,6 +525,12 @@ export const featureFlags = {
    *  gate for the full CSV. Default OFF; flip on a preview to dogfood. */
   brandExposure: readBoolEnv("FF_BRAND_EXPOSURE"),
 
+  /** Wave 3 — merge verified customer/pilot brands (monitored_brands, v207) into
+   *  the daily NRD matcher watchlist. Off or zero verified rows → the matcher
+   *  uses exactly the static AU list (no behaviour change). Canary separately
+   *  from brand self-registration so the matcher change ships dark first. */
+  brandDynamicWatchlist: readBoolEnv("FF_BRAND_DYNAMIC_WATCHLIST"),
+
   /** Layer 2 — Netcraft community submission. Server-side only. Gates the
    *  shopfront-clone-submit-netcraft Inngest fn. Independent of the
    *  master shopfrontCloneOutreach flag so the brand-notification path can

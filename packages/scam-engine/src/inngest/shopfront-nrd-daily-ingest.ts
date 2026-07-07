@@ -34,6 +34,7 @@ import {
   lexicalMatch,
   urlHash,
 } from "@askarthur/shopfront-glue";
+import type { BrandEntry } from "@askarthur/shopfront-glue/au-brand-watchlist";
 import { ssrfSafeDispatcher } from "../ssrf-dispatcher";
 
 const ZIP_DOWNLOAD_TIMEOUT_MS = 60_000;
@@ -307,10 +308,44 @@ async function parseNrdZip(zipBuffer: Uint8Array): Promise<string[]> {
 
 // ── Matching ──────────────────────────────────────────────────────────────
 
+/**
+ * The active watchlist = the static AU brand list, plus (when
+ * FF_BRAND_DYNAMIC_WATCHLIST is on) the verified, active customer/pilot brands
+ * from monitored_brands (v207). Merged in-memory and deduped by normalized
+ * brand — NO index is added to the hot shopfront_clone_alerts table (the dynamic
+ * read is one bounded query per daily run). With the flag off or zero verified
+ * brands, this returns exactly the static list, so the matcher is unchanged.
+ */
+async function buildActiveWatchlist(): Promise<BrandEntry[]> {
+  if (!featureFlags.brandDynamicWatchlist) return AU_BRAND_WATCHLIST;
+  const sb = createServiceClient();
+  if (!sb) return AU_BRAND_WATCHLIST;
+  const { data } = await sb.rpc("list_active_monitored_brands");
+  const dynamic = (data as
+    | { brand: string; legitimate_domains: string[]; aliases: string[] }[]
+    | null) ?? [];
+  if (dynamic.length === 0) return AU_BRAND_WATCHLIST;
+
+  const seen = new Set(AU_BRAND_WATCHLIST.map((e) => brandNormalize(e.brand)));
+  const merged: BrandEntry[] = [...AU_BRAND_WATCHLIST];
+  for (const d of dynamic) {
+    const key = brandNormalize(d.brand);
+    if (seen.has(key)) continue; // static list wins; no duplicate brand entries
+    seen.add(key);
+    merged.push({
+      brand: d.brand,
+      legitimate_domains: d.legitimate_domains ?? [],
+      aliases: d.aliases ?? [],
+    });
+  }
+  return merged;
+}
+
 async function matchDomains(domains: string[]): Promise<MatchHit[]> {
+  const watchlist = await buildActiveWatchlist();
   const hits: MatchHit[] = [];
   for (const domain of domains) {
-    const result = lexicalMatch(domain, AU_BRAND_WATCHLIST);
+    const result = lexicalMatch(domain, watchlist);
     if (!result) continue;
     const candidate_url = canonicaliseCandidateUrl(domain);
     const url_hash = await urlHash(candidate_url);
