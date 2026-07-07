@@ -6,7 +6,7 @@ import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { logCost } from "@/lib/cost-telemetry";
 import { logEnforcementEvent } from "@/lib/clone-watch/enforcement-telemetry";
-import { sendOnward } from "@/lib/onward/url-blocklist-report";
+import { sendOnward, stripUrlPii } from "@/lib/onward/url-blocklist-report";
 
 /**
  * Clone-Watch enforcement — EXECUTE step (Wave 1 outbound, founder-approved).
@@ -53,10 +53,14 @@ function dailyCap(): number {
 
 function reportText(row: PendingSendRow): string {
   const brand = row.target_brand_normalized ?? "an Australian brand";
+  // Strip query/fragment PII before it reaches a third-party blocklist — a
+  // captured clone URL can carry victim identifiers in params (?email=…). Same
+  // guard the sibling onward path applies (F8).
+  const safeUrl = stripUrlPii(row.candidate_url);
   return [
     `Suspected phishing / brand-impersonation URL reported by Ask Arthur (askarthur.au):`,
     ``,
-    `URL: ${row.candidate_url}`,
+    `URL: ${safeUrl}`,
     `Impersonated brand: ${brand}`,
     ``,
     `This domain was detected as a lookalike of ${brand} and independently`,
@@ -125,49 +129,79 @@ export const cloneWatchEnforcementExecute = inngest.createFunction(
         const intake = INTAKE[row.channel];
         if (!intake) continue; // defensive — RPC only returns apwg/openphish
 
+        const advanceCase = async (status: string, externalRef: string | null) => {
+          const { error } = await sb.rpc("merge_takedown_case", {
+            p_alert_id: row.clone_alert_id,
+            p_channel: row.channel,
+            p_autonomy: "auto",
+            p_acts_on_parked: false,
+            p_status: status,
+            p_evidence: { intake },
+            p_external_ref: externalRef,
+            p_next_action_at: null,
+          });
+          if (error) throw new Error(`merge_takedown_case(${status}): ${error.message}`);
+        };
+
+        // CLAIM-then-SEND idempotency — this is an IRREVERSIBLE outbound email to
+        // a third-party blocklist, so a duplicate send is a real harm. The order
+        // matters: (1) re-read the case and SKIP if it isn't 'queued' (a prior
+        // partial run already claimed/sent it → replay-safe); (2) claim it
+        // (queued→submitted) BEFORE sending, so a later re-select can never
+        // re-send a report that already went out; (3) send; (4) on send failure,
+        // revert to 'queued' for a clean retry — nothing was delivered, so the
+        // retry is not a duplicate. This closes the "merge fails after send →
+        // re-sent every 3h forever" loop the review caught.
         const outcome = await step.run(`send-${row.case_id}`, async () => {
+          const { data: caseRow } = await sb
+            .from("shopfront_takedown_attempts")
+            .select("case_status")
+            .eq("id", row.case_id)
+            .maybeSingle();
+          if (!caseRow || caseRow.case_status !== "queued") {
+            return { kind: "skipped" as const };
+          }
+
+          // Claim before sending. If this throws, nothing was sent yet — safe to retry.
+          await advanceCase("submitted", null);
+
+          const ref = `clone-${row.case_id}`;
+          let result: { id: string } | null;
           try {
-            const ref = `clone-${row.case_id}`;
-            const result = await sendOnward(intake, ref, reportText(row));
-            // Advance the case to submitted (records submitted_at) with the
-            // provider message id as the external ref.
-            const { error } = await sb.rpc("merge_takedown_case", {
-              p_alert_id: row.clone_alert_id,
-              p_channel: row.channel,
-              p_autonomy: "auto",
-              p_acts_on_parked: false,
-              p_status: "submitted",
-              p_evidence: { intake, report_ref: ref },
-              p_external_ref: result?.id ?? null,
-              p_next_action_at: null,
-            });
-            if (error) {
-              throw new Error(`merge_takedown_case failed: ${error.message}`);
-            }
-            // Reported-takedown telemetry (always-ship; inside the step so it
-            // fires once). This is the event the founder watches.
-            logEnforcementEvent("reported", {
-              alertId: row.clone_alert_id,
-              caseId: row.case_id,
-              domain: row.candidate_domain,
-              brand: row.target_brand_normalized,
-              channel: row.channel,
-              autonomy: "auto",
-              runId,
-              extra: { intake, provider_message_id: result?.id ?? null },
-            });
-            return { ok: true as const };
+            result = await sendOnward(intake, ref, reportText(row));
           } catch (err) {
+            // Send failed AFTER claim → revert so it retries cleanly (no dup —
+            // nothing was delivered). Best-effort; if the revert itself fails the
+            // case stays 'submitted' (visible in the admin tab as external_ref-less).
+            try {
+              await advanceCase("queued", null);
+            } catch {
+              /* leave submitted; surfaced in admin tab for manual retry */
+            }
             logger.warn("clone-watch enforcement execute: send failed", {
               caseId: row.case_id,
               channel: row.channel,
               error: err instanceof Error ? err.message : String(err),
             });
-            return { ok: false as const };
+            return { kind: "error" as const };
           }
+
+          // Record the provider message id as the durable "sent" marker.
+          await advanceCase("submitted", result?.id ?? null);
+          logEnforcementEvent("reported", {
+            alertId: row.clone_alert_id,
+            caseId: row.case_id,
+            domain: row.candidate_domain,
+            brand: row.target_brand_normalized,
+            channel: row.channel,
+            autonomy: "auto",
+            runId,
+            extra: { intake, provider_message_id: result?.id ?? null },
+          });
+          return { kind: "sent" as const };
         });
-        if (outcome.ok) sent++;
-        else errors++;
+        if (outcome.kind === "sent") sent++;
+        else if (outcome.kind === "error") errors++;
       }
 
       await step.run("log-cost", async () => {
