@@ -1,4 +1,4 @@
-import type { ScammerContacts, PhoneLookupResult, ShopSignal, Verdict } from "@askarthur/types";
+import type { ReportingAction, ScammerContacts, PhoneLookupResult, ShopSignal, Verdict } from "@askarthur/types";
 
 export type { Verdict };
 
@@ -35,4 +35,9 @@ export interface AnalysisResponse {
    *  Drives the commerce-flag chip row under the verdict in ResultCard.
    *  Plan: docs/plans/shop-guard-v2.md. */
   shopSignal?: ShopSignal;
+  /** Next Steps funnel — geo/brand-aware best-report actions, present only
+   *  when FF_NEXT_STEPS_ROUTING is on and the verdict is non-SAFE. */
+  bestNextStep?: ReportingAction[];
+  /** Coarse AU jurisdiction (state code) derived server-side from IP. */
+  stateCode?: string | null;
 }

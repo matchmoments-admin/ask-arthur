@@ -468,6 +468,21 @@ export const featureFlags = {
    *  Default OFF. */
   onwardAcma: readBoolEnv("FF_ONWARD_ACMA"),
 
+  /** Next Steps reporting funnel — when ON, /api/analyze attaches
+   *  `bestNextStep` (ordered best-report actions) + `stateCode` to non-SAFE
+   *  responses, and NextStepsCard renders the geo/brand-aware "what do I do
+   *  now" nudge. Pure/synchronous — no added latency, no external call. The
+   *  card renders iff `bestNextStep` is present, so this single server flag
+   *  gates the whole feature. Default OFF. */
+  nextStepsRouting: readBoolEnv("FF_NEXT_STEPS_ROUTING"),
+
+  /** Next Steps — route-click telemetry. When ON, the client fires a
+   *  metadata-only `reporting_route_click` analytics event (routeLabel +
+   *  jurisdiction + scamType, no PII, no content) so the partnership funnel
+   *  can show "N NSW users routed to ID Support NSW". Gates the click
+   *  endpoint. Default OFF. */
+  routeClickTelemetry: readBoolEnv("FF_ROUTE_CLICK_TELEMETRY"),
+
   /** CT monitor expanded keyword set — when ON, ct-monitor.ts sweeps crt.sh
    *  for the research-driven concentrated AU target brands (super funds,
    *  Linkt, energy retailers, Macquarie/Optus/Vodafone, Medibank/Bupa, Qantas,

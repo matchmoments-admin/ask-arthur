@@ -35,6 +35,10 @@ export const ANALYTICS_EVENT_TYPES = [
   // Brand-exposure funnel (Wave 2) — measures the "Is your brand being cloned?"
   // checker so we can attribute leads back to Clone Watch. Server-emitted only.
   "brand_exposure_checked",
+  // Next Steps reporting funnel — which report destination a user tapped, by
+  // jurisdiction + scam type. Metadata-only (no PII, no content); the
+  // partnership-value metric ("N NSW users routed to ID Support NSW").
+  "reporting_route_click",
 ] as const;
 
 export type AnalyticsEventType = (typeof ANALYTICS_EVENT_TYPES)[number];

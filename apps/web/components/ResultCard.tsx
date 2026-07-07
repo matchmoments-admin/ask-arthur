@@ -7,8 +7,9 @@ import ResultFeedback from "./result/ResultFeedback";
 import ResultActionButtons from "./result/ResultActionButtons";
 import OnwardReportPicker from "./result/OnwardReportPicker";
 import DeepShopCheckTray from "./result/DeepShopCheckTray";
+import NextStepsCard from "./NextStepsCard";
 import type { EvidenceContext } from "@/lib/onward/destinations";
-import type { ScammerContacts, ShopSignal, Verdict } from "@askarthur/types";
+import type { ReportingAction, ScammerContacts, ShopSignal, Verdict } from "@askarthur/types";
 import { COMMERCE_FLAG_LABELS } from "@askarthur/types";
 
 interface ResultCardProps {
@@ -50,6 +51,13 @@ interface ResultCardProps {
    *  shopSignal, the Deep Shop Check tray (Stage 1) renders below the
    *  chip row. */
   commerceUrl?: string;
+  /** Next Steps funnel — server-computed best-report actions (present only
+   *  when FF_NEXT_STEPS_ROUTING is on). Their presence gates NextStepsCard;
+   *  the card recomputes client-side from the routing context so the
+   *  micro-question + change-location work without a round-trip. */
+  bestNextStep?: ReportingAction[];
+  /** Server-derived AU jurisdiction seed for NextStepsCard. */
+  stateCode?: string | null;
 }
 
 interface VerdictStyle {
@@ -129,6 +137,7 @@ export default function ResultCard({
   scammerContacts,
   scammerUrls,
   channel,
+  countryCode,
   onCheckAnother,
   contentHash,
   analysisId,
@@ -136,6 +145,8 @@ export default function ResultCard({
   charityIntent,
   shopSignal,
   commerceUrl,
+  bestNextStep,
+  stateCode,
 }: ResultCardProps) {
   const config = VERDICT_CONFIG[verdict];
   const title = resolveTitle(verdict, scamType);
@@ -308,6 +319,37 @@ export default function ResultCard({
           </li>
         ))}
       </ul>
+
+      {/* Next Steps funnel — geo/brand-aware "what do I do now" routing.
+          Renders only when the server attached best-report actions (flag on +
+          non-SAFE). The card recomputes client-side from the routing context. */}
+      {bestNextStep && bestNextStep.length > 0 && verdict !== "SAFE" && (
+        <NextStepsCard
+          verdict={verdict}
+          scamType={scamType}
+          impersonatedBrand={impersonatedBrand}
+          channel={channel}
+          countryCode={countryCode}
+          initialStateCode={stateCode}
+          onRouteClick={(action, jurisdiction) => {
+            // Metadata-only funnel signal (no PII, no content). Fire-and-forget;
+            // the endpoint drops it unless FF_ROUTE_CLICK_TELEMETRY is on.
+            void fetch("/api/events", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                eventType: "reporting_route_click",
+                eventProps: {
+                  routeLabel: action.label.slice(0, 120),
+                  jurisdiction: jurisdiction ?? "none",
+                  scamType: (scamType ?? "unknown").slice(0, 120),
+                },
+                path: "/",
+              }),
+            }).catch(() => {});
+          }}
+        />
+      )}
 
       {/* Remember disclaimer */}
       <div className="mt-6 border-y border-slate-200 py-4">

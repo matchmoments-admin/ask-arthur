@@ -352,6 +352,38 @@ export const BotAnalyzeInputSchema = z.object({
 });
 export type BotAnalyzeInput = z.infer<typeof BotAnalyzeInputSchema>;
 
+// ── Next Steps routing — geo/brand-aware "best report destination" ───────
+//
+// Attached to the analyze response (as `bestNextStep`) for non-SAFE verdicts
+// when FF_NEXT_STEPS_ROUTING is on. A small ordered list of concrete report
+// actions surfaced by NextStepsCard — the SINGLE best destination first, a
+// short secondary after. Pure/synchronous to compute (no network/DB), so it
+// adds no analyze latency. The deeper multi-destination flow stays in the
+// existing OnwardReportPicker / get_onward_destinations RPC — this is only
+// the "what do I do right now" nudge. Destination data + sources live in
+// apps/web/lib/onward/destinations.ts (single source of truth).
+export const ActionKindSchema = z.enum(["call", "email", "url", "copy", "info"]);
+export type ActionKind = z.infer<typeof ActionKindSchema>;
+
+export const ReportingActionSchema = z.object({
+  kind: ActionKindSchema,
+  /** e.g. "Report to Scamwatch" */
+  label: z.string(),
+  /** phone number, mailto/URL target, or copyable text */
+  value: z.string(),
+  /** one-line "what this does" */
+  description: z.string().optional(),
+  /** lower = shown first */
+  priority: z.number(),
+  /** For email actions — pre-filled forward metadata. */
+  emailSubject: z.string().optional(),
+  emailBody: z.string().optional(),
+  /** Renders as an urgent callout (e.g. 000 / "call your bank now"). Never
+   *  auto-actions — info + tap-to-call only. */
+  urgent: z.boolean().optional(),
+});
+export type ReportingAction = z.infer<typeof ReportingActionSchema>;
+
 // ── Output schema — shared across surfaces ───────────────────────────────
 //
 // Subset of `AnalysisResult` actually returned to clients, plus
@@ -386,5 +418,12 @@ export const AnalyzeOutputSchema = z.object({
   isVoipCaller: z.boolean().optional(), // backward compat
   cached: z.boolean().optional(),
   shopSignal: ShopSignalSchema.optional(),
+  /** AU state code (NSW/VIC/…) derived server-side from the geolocated
+   *  region via parseStateFromRegion. Coarse jurisdiction only — the full
+   *  "City, State" string is never returned to the client. */
+  stateCode: z.string().nullable().optional(),
+  /** Ordered best-report actions for a non-SAFE verdict — see
+   *  ReportingActionSchema. Present only when FF_NEXT_STEPS_ROUTING is on. */
+  bestNextStep: z.array(ReportingActionSchema).optional(),
 });
 export type AnalyzeOutput = z.infer<typeof AnalyzeOutputSchema>;
