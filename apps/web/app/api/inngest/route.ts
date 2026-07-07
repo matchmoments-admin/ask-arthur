@@ -45,6 +45,9 @@ import { cloneWatchEnforcementPlan } from "./functions/clone-watch-enforcement-p
 // Enforcement execute (Wave 1 outbound) — the ONLY machine-send path: auto-report
 // weaponised lookalikes to APWG + OpenPhish, cap-bounded + canary-capable.
 import { cloneWatchEnforcementExecute } from "./functions/clone-watch-enforcement-execute";
+// Re-emergence monitor (Wave 1) — reopens 'actioned' cases whose taken-down
+// domain resolves again. Read-only DNS + status flip; no outbound.
+import { cloneWatchReemergenceMonitor } from "./functions/clone-watch-reemergence-monitor";
 // urlscan evidence — async 2-stage rebuild (v178): submit (gated on
 // preclassify + SB/VT reputation) then a later batched retrieve. Replaces the
 // old per-candidate submit→90s-poll monolith that timed out 100% of the time.
@@ -117,6 +120,7 @@ const appFunctions = [
   cloneWatchLifecycleRecheck,
   cloneWatchEnforcementPlan,
   cloneWatchEnforcementExecute,
+  cloneWatchReemergenceMonitor,
   // Clone-watch urlscan evidence — async submit/retrieve rebuild (v178)
   cloneWatchUrlscanSubmit,
   cloneWatchUrlscanRetrieve,

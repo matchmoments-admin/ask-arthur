@@ -513,6 +513,12 @@ export const featureFlags = {
    *  daily cap CLONE_SUBMISSION_DAILY_CAP. */
   cloneEnforceAutoBlocklist: readBoolEnv("FF_CLONE_ENFORCE_AUTO_BLOCKLIST"),
 
+  /** Wave 1 — re-emergence monitor. Re-resolves DNS for 'actioned' takedown
+   *  cases; if a taken-down clone resolves again, reopens the case as
+   *  're_emerged'. Read-only DNS + a case status flip (no outbound) — safe.
+   *  Sub-flag of FF_CLONE_ENFORCEMENT. Default OFF. */
+  cloneReemergenceMonitor: readBoolEnv("FF_CLONE_REEMERGENCE_MONITOR"),
+
   /** Wave 2 — the public "Is your brand being cloned?" exposure checker
    *  (/brand-exposure page + /api/brand-exposure teaser). A$0 lead-gen funnel:
    *  masked teaser (scrape-proof via brand_exposure_summary, v203) → work-email
