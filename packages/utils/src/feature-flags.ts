@@ -503,6 +503,12 @@ export const featureFlags = {
    *  invariant). Default OFF. Kill-switch: feature_brakes.clone_enforcement. */
   cloneEnforcement: readBoolEnv("FF_CLONE_ENFORCEMENT"),
 
+  /** Wave 2 — the public "Is your brand being cloned?" exposure checker
+   *  (/brand-exposure page + /api/brand-exposure teaser). A$0 lead-gen funnel:
+   *  masked teaser (scrape-proof via brand_exposure_summary, v203) → work-email
+   *  gate for the full CSV. Default OFF; flip on a preview to dogfood. */
+  brandExposure: readBoolEnv("FF_BRAND_EXPOSURE"),
+
   /** Layer 2 — Netcraft community submission. Server-side only. Gates the
    *  shopfront-clone-submit-netcraft Inngest fn. Independent of the
    *  master shopfrontCloneOutreach flag so the brand-notification path can
