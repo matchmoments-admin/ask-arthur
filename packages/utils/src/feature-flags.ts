@@ -483,6 +483,13 @@ export const featureFlags = {
    *  endpoint. Default OFF. */
   routeClickTelemetry: readBoolEnv("FF_ROUTE_CLICK_TELEMETRY"),
 
+  /** Partner dashboard — admin-gated, partner-type-framed threat + funnel
+   *  dashboard (the pilot demo asset). When OFF, /admin/partner-dashboard
+   *  returns notFound(). Reads only de-identified aggregates (jurisdiction
+   *  summary + route-click funnel) via service role — no PII, no migration.
+   *  Default OFF. */
+  partnerDashboard: readBoolEnv("FF_PARTNER_DASHBOARD"),
+
   /** CT monitor expanded keyword set — when ON, ct-monitor.ts sweeps crt.sh
    *  for the research-driven concentrated AU target brands (super funds,
    *  Linkt, energy retailers, Macquarie/Optus/Vodafone, Medibank/Bupa, Qantas,
