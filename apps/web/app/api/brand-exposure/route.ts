@@ -6,6 +6,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { checkFormRateLimit } from "@askarthur/utils/rate-limit";
 
+import { logEvent } from "@/lib/analytics-events";
 import { resolveWatchlistBrand } from "@/lib/clone-watch/resolve-brand";
 
 /**
@@ -63,10 +64,20 @@ export async function POST(req: NextRequest) {
   }
 
   const row = Array.isArray(data) ? data[0] : null;
+  const count = row?.detected_count ?? 0;
+
+  // Funnel telemetry — measure exposure checks so leads attribute back to Clone
+  // Watch. Server-emitted, metadata only (no PII); fire-and-forget.
+  void logEvent({
+    eventType: "brand_exposure_checked",
+    eventProps: { brand: entry.brand, monitored: true, count },
+    path: "/brand-exposure",
+  });
+
   return NextResponse.json({
     monitored: true,
     brand: entry.brand,
-    count: row?.detected_count ?? 0,
+    count,
     earliest: row?.earliest ?? null,
     examples: row?.examples ?? [],
   });

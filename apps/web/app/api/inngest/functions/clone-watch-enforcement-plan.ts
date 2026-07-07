@@ -9,6 +9,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { logCost } from "@/lib/cost-telemetry";
+import { logEnforcementEvent } from "@/lib/clone-watch/enforcement-telemetry";
 import {
   selectChannels,
   type EnforcementAlert,
@@ -48,7 +49,7 @@ export const cloneWatchEnforcementPlan = inngest.createFunction(
   { event: CLONE_WATCH_WEAPONISED_EVENT },
   withAxiomLogging(
     { fnId: "shopfront-clone-enforcement-plan" },
-    async ({ event, step }) => {
+    async ({ event, step, runId }) => {
       if (!featureFlags.cloneEnforcement) {
         return { skipped: true, reason: "FF_CLONE_ENFORCEMENT disabled" };
       }
@@ -125,6 +126,23 @@ export const cloneWatchEnforcementPlan = inngest.createFunction(
             via: data.via,
           },
         });
+      });
+
+      // Reported-takedown observability — one always-ship event per weaponised
+      // lookalike (rare + audit-critical), with the channel plan attached.
+      logEnforcementEvent("cases_opened", {
+        alertId: data.alertId,
+        domain: alert.candidate_domain,
+        channel: "plan",
+        runId,
+        extra: {
+          via: data.via,
+          opened,
+          channels: plans.map((p) => p.channel),
+          human_channels: plans
+            .filter((p) => p.autonomy !== "auto")
+            .map((p) => p.channel),
+        },
       });
 
       logger.info("clone-watch enforcement plan: cases opened", {
