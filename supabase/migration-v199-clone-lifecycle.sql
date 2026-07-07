@@ -33,8 +33,9 @@
 -- NOT IN SCOPE: visual pHash/TLSH (ADR-0016 Phase C) — evidence.visual_hash slot
 -- is reserved, nothing computes it yet. Netcraft submission stays dark.
 --
--- Idempotent + re-appliable. shopfront_clone_alerts is a hot write-frequent
--- table, so the backfill is chunked (≤5K/iteration, statement_timeout capped).
+-- Idempotent + re-appliable. The backfill touches ≈862 of 1,253 rows in a
+-- single bounded UPDATE (measured well under the 5K single-statement threshold;
+-- shopfront_clone_alerts is not in the hot-table list), so no chunking is needed.
 
 -- ─────────────────────────────────────────────────────────────────────────
 -- 1. Columns
@@ -171,10 +172,20 @@ BEGIN
     RAISE EXCEPTION 'advance_clone_lifecycle: invalid target state %', p_to_state
       USING ERRCODE = '22023';
   END IF;
+  -- evidence is merged with jsonb `||`, which for a non-object operand does NOT
+  -- merge — it array-wraps, silently corrupting the object shape every consumer
+  -- reads (evidence->'screenshot_url' etc). Reject anything but an object.
+  IF p_evidence IS NOT NULL AND jsonb_typeof(p_evidence) <> 'object' THEN
+    RAISE EXCEPTION 'advance_clone_lifecycle: p_evidence must be a jsonb object, got %',
+      jsonb_typeof(p_evidence) USING ERRCODE = '22023';
+  END IF;
 
   UPDATE public.shopfront_clone_alerts
   SET lifecycle_state = p_to_state,
-      -- first-touch timestamps (COALESCE so a re-entry doesn't reset them)
+      -- weaponised_at is first-touch (COALESCE) — when the domain FIRST turned
+      -- malicious. netcraft_declined_at is last-touch (bare now()) — a re-check
+      -- may re-decline a re-submitted domain, and the LATEST decline is what
+      -- drives re-check cadence and "still declined as of" reporting.
       weaponised_at = CASE WHEN p_to_state = 'weaponised'
                            THEN COALESCE(weaponised_at, now()) ELSE weaponised_at END,
       netcraft_declined_at = CASE WHEN p_to_state = 'declined'

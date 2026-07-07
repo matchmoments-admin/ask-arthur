@@ -175,25 +175,44 @@ export const cloneWatchPollNetcraft = inngest.createFunction(
           fragment.declined_at = nowIso;
           fragment.declined_state_observed = outcome.state;
         }
-        await sb.rpc("merge_clone_alert_submission", {
+        // This step does TWO writes (the netcraft fragment + the lifecycle
+        // transition). supabase-js does NOT throw on a Postgres error, so we
+        // must inspect each result and throw — otherwise a half-applied write
+        // (e.g. takedown_at stamped but lifecycle_state not advanced) would be
+        // silently committed and, because the poll worklist filters
+        // `takedown_at IS NULL`, the row would be excluded from re-polling and
+        // never self-heal. Both RPCs are idempotent, so throwing lets Inngest
+        // retry the whole step to a consistent state.
+        const { error: mergeErr } = await sb.rpc("merge_clone_alert_submission", {
           p_alert_id: row.id,
           p_key: "netcraft",
           p_value: fragment,
           p_set_triage_status: null,
         });
+        if (mergeErr) {
+          throw new Error(
+            `merge_clone_alert_submission failed for alert ${row.id}: ${mergeErr.message}`,
+          );
+        }
 
         // Drive the enforcement lifecycle through the single guarded RPC.
         // A `pending` verdict leaves the alert at 'reported' (keep polling).
-        if (outcome.kind === "takedown") {
-          await sb.rpc("advance_clone_lifecycle", {
+        const nextState =
+          outcome.kind === "takedown"
+            ? "taken_down"
+            : outcome.kind === "declined"
+              ? "declined"
+              : null;
+        if (nextState) {
+          const { error: advanceErr } = await sb.rpc("advance_clone_lifecycle", {
             p_alert_id: row.id,
-            p_to_state: "taken_down",
+            p_to_state: nextState,
           });
-        } else if (outcome.kind === "declined") {
-          await sb.rpc("advance_clone_lifecycle", {
-            p_alert_id: row.id,
-            p_to_state: "declined",
-          });
+          if (advanceErr) {
+            throw new Error(
+              `advance_clone_lifecycle(${nextState}) failed for alert ${row.id}: ${advanceErr.message}`,
+            );
+          }
         }
       });
     }
