@@ -5932,55 +5932,91 @@ export type Database = {
       }
       shopfront_takedown_attempts: {
         Row: {
+          acts_on_parked: boolean
+          approved_at: string | null
+          approved_by_user_id: string | null
           attempt_type: string
-          body_md: string
+          body_md: string | null
+          case_status: string
+          channel_autonomy: string
           clone_alert_id: number
           created_at: string
           drafted_at: string
+          evidence_bundle: Json
+          external_ref: string | null
           id: number
           initiated_by: string
           initiated_by_user_id: string | null
+          last_reemergence_check_at: string | null
+          next_action_at: string | null
           outcome: string | null
           outcome_notes: string | null
           recipient_email: string | null
           recipient_org: string | null
           response_at: string | null
           sent_at: string | null
-          template_version: string
+          submitted_at: string | null
+          template_version: string | null
+          updated_at: string
+          verification_checklist: Json | null
         }
         Insert: {
+          acts_on_parked?: boolean
+          approved_at?: string | null
+          approved_by_user_id?: string | null
           attempt_type: string
-          body_md: string
+          body_md?: string | null
+          case_status?: string
+          channel_autonomy?: string
           clone_alert_id: number
           created_at?: string
           drafted_at?: string
+          evidence_bundle?: Json
+          external_ref?: string | null
           id?: number
           initiated_by: string
           initiated_by_user_id?: string | null
+          last_reemergence_check_at?: string | null
+          next_action_at?: string | null
           outcome?: string | null
           outcome_notes?: string | null
           recipient_email?: string | null
           recipient_org?: string | null
           response_at?: string | null
           sent_at?: string | null
-          template_version: string
+          submitted_at?: string | null
+          template_version?: string | null
+          updated_at?: string
+          verification_checklist?: Json | null
         }
         Update: {
+          acts_on_parked?: boolean
+          approved_at?: string | null
+          approved_by_user_id?: string | null
           attempt_type?: string
-          body_md?: string
+          body_md?: string | null
+          case_status?: string
+          channel_autonomy?: string
           clone_alert_id?: number
           created_at?: string
           drafted_at?: string
+          evidence_bundle?: Json
+          external_ref?: string | null
           id?: number
           initiated_by?: string
           initiated_by_user_id?: string | null
+          last_reemergence_check_at?: string | null
+          next_action_at?: string | null
           outcome?: string | null
           outcome_notes?: string | null
           recipient_email?: string | null
           recipient_org?: string | null
           response_at?: string | null
           sent_at?: string | null
-          template_version?: string
+          submitted_at?: string | null
+          template_version?: string | null
+          updated_at?: string
+          verification_checklist?: Json | null
         }
         Relationships: [
           {
@@ -8517,6 +8553,19 @@ export type Database = {
       merge_entity_enrichment_data: {
         Args: { p_entity_id: number; p_key: string; p_value: Json }
         Returns: undefined
+      }
+      merge_takedown_case: {
+        Args: {
+          p_acts_on_parked?: boolean
+          p_alert_id: number
+          p_autonomy: string
+          p_channel: string
+          p_evidence?: Json
+          p_external_ref?: string
+          p_next_action_at?: string
+          p_status?: string
+        }
+        Returns: number
       }
       persist_clone_alert_urlscan: {
         Args: {
