@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
 import PricingTiers from "@/components/PricingTiers";
+import BrandProtectionTiers from "@/components/BrandProtectionTiers";
 
 export const metadata: Metadata = {
   title: "API Pricing — Ask Arthur",
@@ -24,6 +25,8 @@ export default function PricingPage() {
         </p>
 
         <PricingTiers />
+
+        <BrandProtectionTiers />
       </main>
 
       <Footer />

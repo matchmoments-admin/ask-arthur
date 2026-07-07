@@ -11,6 +11,15 @@ export const SubscriptionPlanSchema = z.enum([
   "extension_pro",
   "mobile_premium",
   "bot_premium",
+  // Brand Protection (Clone Watch monetisation, Wave 3) — billed on brands
+  // monitored + takedown allotment, NOT API volume (kept out of TIER_LIMITS).
+  "brand_monitor",
+  "brand_monitor_plus",
+  "brand_enterprise",
+  // Sales-led partnership pilot (police / government / non-profit) — a deliberately
+  // low, custom price to de-risk a first partnership and learn the buyer's needs.
+  // Provisioned manually (billing_provider='manual') — never public self-serve.
+  "brand_pilot",
 ]);
 export type SubscriptionPlan = z.infer<typeof SubscriptionPlanSchema>;
 
@@ -175,4 +184,81 @@ export interface MobileTierLimit {
 export const MOBILE_TIER_LIMITS: Record<"free" | "premium", MobileTierLimit> = {
   free: { dailyChecks: 25, offlineDB: false, pushAlerts: true, callScreening: false, smsFilter: false },
   premium: { dailyChecks: 500, offlineDB: true, pushAlerts: true, callScreening: true, smsFilter: true },
+} as const;
+
+// ---------------------------------------------------------------------------
+// Brand Protection plans (Clone Watch monetisation, Wave 3)
+// ---------------------------------------------------------------------------
+// Billed on brands-monitored + takedown allotment, NOT API volume — a separate
+// axis from TIER_LIMITS. `brand_pilot` is the sales-led partnership tier (first
+// target: police) — a low, custom price to de-risk a first partnership and learn
+// the buyer's needs; provisioned manually, never public self-serve checkout.
+
+export type BrandPlanKey =
+  | "brand_pilot"
+  | "brand_monitor"
+  | "brand_monitor_plus"
+  | "brand_enterprise";
+
+export interface BrandPlan {
+  key: BrandPlanKey;
+  name: string;
+  /** Monthly price in AUD. null = custom / contact sales. */
+  monthlyAud: number | null;
+  /** Max brands monitored. null = portfolio / by agreement. */
+  brands: number | null;
+  /** Included managed takedowns per month. null = unlimited in agreed scope. */
+  takedownsPerMonth: number | null;
+  /** Sales motion — self-serve checkout vs contact/partnership. */
+  motion: "self_serve" | "contact" | "partnership";
+  /** Public on the pricing page? Partnership pilots are sales-led, not listed. */
+  public: boolean;
+  blurb: string;
+}
+
+export const BRAND_PLANS: Record<BrandPlanKey, BrandPlan> = {
+  brand_pilot: {
+    key: "brand_pilot",
+    name: "Partnership Pilot",
+    monthlyAud: 300,
+    brands: 1,
+    takedownsPerMonth: 5,
+    motion: "partnership",
+    public: false,
+    blurb:
+      "For police, government and non-profits. A low-cost pilot to take pressure off frontline scam response while we learn what your team needs.",
+  },
+  brand_monitor: {
+    key: "brand_monitor",
+    name: "Brand Monitor",
+    monthlyAud: 1950,
+    brands: 1,
+    takedownsPerMonth: 5,
+    motion: "self_serve",
+    public: true,
+    blurb:
+      "Continuous lookalike-domain monitoring for one brand, with an evidence dashboard and managed takedowns.",
+  },
+  brand_monitor_plus: {
+    key: "brand_monitor_plus",
+    name: "Brand Monitor+",
+    monthlyAud: 2950,
+    brands: 3,
+    takedownsPerMonth: 15,
+    motion: "self_serve",
+    public: true,
+    blurb:
+      "Up to three brands, higher takedown allotment, and priority evidence support.",
+  },
+  brand_enterprise: {
+    key: "brand_enterprise",
+    name: "Enterprise",
+    monthlyAud: null,
+    brands: null,
+    takedownsPerMonth: null,
+    motion: "contact",
+    public: true,
+    blurb:
+      "Portfolio monitoring, unlimited in-scope takedowns, threat-intel feed and SPF evidence tooling for banks, telcos and super funds.",
+  },
 } as const;
