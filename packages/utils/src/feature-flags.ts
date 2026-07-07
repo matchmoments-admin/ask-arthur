@@ -487,6 +487,14 @@ export const featureFlags = {
    *  Default OFF. Plan: docs/plans/clone-watch-outreach.md. */
   shopfrontCloneOutreach: readBoolEnv("FF_SHOPFRONT_CLONE_OUTREACH"),
 
+  /** Wave 0 PR-B — lifecycle re-check loop (clone-watch-lifecycle-recheck cron).
+   *  Re-scans 'monitoring'/'declined' lookalikes on a cadence so a domain that
+   *  was parked / cloaked / Netcraft-declined at first scan is caught when it
+   *  later weaponises. Server-side only. Default OFF — canary independently of
+   *  Netcraft submission so the loop can run scan-only (populate lifecycle +
+   *  emit weaponised.v1) with zero outbound reporting risk. */
+  shopfrontCloneRecheck: readBoolEnv("FF_SHOPFRONT_CLONE_RECHECK"),
+
   /** Layer 2 — Netcraft community submission. Server-side only. Gates the
    *  shopfront-clone-submit-netcraft Inngest fn. Independent of the
    *  master shopfrontCloneOutreach flag so the brand-notification path can
