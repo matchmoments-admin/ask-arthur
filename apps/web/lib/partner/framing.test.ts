@@ -4,6 +4,7 @@ import {
   resolvePartnerType,
   resolveJurisdiction,
   regionToStateCode,
+  tallyRanked,
   AU_JURISDICTIONS,
 } from "./framing";
 
@@ -59,5 +60,29 @@ describe("regionToStateCode (tolerant of both stored region forms)", () => {
     expect(regionToStateCode("KR")).toBeNull();
     expect(regionToStateCode("Lo Prado, Santiago Metropolitan")).toBeNull();
     expect(regionToStateCode(null)).toBeNull();
+  });
+});
+
+describe("tallyRanked (daily-summary arrays → ranked top-N)", () => {
+  it("ranks by frequency, ties break alphabetically", () => {
+    const out = tallyRanked([
+      ["phishing", "impersonation"],
+      ["impersonation"],
+      ["impersonation", "investment"],
+      ["investment"],
+    ]);
+    expect(out[0]).toEqual({ name: "impersonation", count: 3 });
+    expect(out[1]).toEqual({ name: "investment", count: 2 });
+    expect(out[2]).toEqual({ name: "phishing", count: 1 });
+  });
+
+  it("ignores null rows and blank entries, and honours the limit", () => {
+    const out = tallyRanked([null, ["ATO"], [""], undefined, ["ATO"], ["myGov"]], 1);
+    expect(out).toEqual([{ name: "ATO", count: 2 }]);
+  });
+
+  it("returns empty for no data", () => {
+    expect(tallyRanked([])).toEqual([]);
+    expect(tallyRanked([null, undefined])).toEqual([]);
   });
 });
