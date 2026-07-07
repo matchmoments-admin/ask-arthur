@@ -1,6 +1,7 @@
 import { createServiceClient } from "@askarthur/supabase/server";
 import { canonicaliseCandidateUrl, urlHash } from "@askarthur/shopfront-glue";
 import { logger } from "@askarthur/utils/logger";
+import { logCost } from "@/lib/cost-telemetry";
 
 // Phase 2b (docs/plans/brand-convergence-seam.md): let the background clone-watch
 // sweep pay off in a real user check. Given the URLs a user submitted to
@@ -70,6 +71,17 @@ export async function lookupCloneAlert(
 
   if (error) {
     logger.warn("lookupCloneAlert: query failed", { error: error.message });
+    // Surface a systemic lookup failure to Telegram: the daily health-digest
+    // cron pages on cost_telemetry rows whose feature matches '%error%'. $0 —
+    // this is a DB read, not paid spend; the row is an error signal, not cost.
+    logCost({
+      feature: "clone-citation-error",
+      provider: "supabase",
+      operation: "lookup_clone_alert",
+      units: 1,
+      estimatedCostUsd: 0,
+      metadata: { error: error.message },
+    });
     return null;
   }
   const row = data?.[0];
