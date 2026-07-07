@@ -8392,6 +8392,16 @@ export type Database = {
           legitimate_domain: string
         }[]
       }
+      list_takedown_cases_for_reemergence: {
+        Args: { p_cadence_hours?: number; p_limit?: number }
+        Returns: {
+          candidate_domain: string
+          case_id: number
+          channel: string
+          clone_alert_id: number
+          last_reemergence_check_at: string
+        }[]
+      }
       load_clone_alert_batch: {
         Args: { p_batch_id: string }
         Returns: {
@@ -8433,6 +8443,10 @@ export type Database = {
       }
       mark_stale_ips: { Args: { p_stale_days?: number }; Returns: Json }
       mark_stale_urls: { Args: { p_stale_days?: number }; Returns: Json }
+      mark_takedown_reemergence_checked: {
+        Args: { p_case_id: number; p_reemerged: boolean }
+        Returns: undefined
+      }
       match_charities_by_embedding: {
         Args: {
           p_match_count?: number
