@@ -761,6 +761,8 @@ export default function ScamChecker() {
             commerceUrl={
               result.shopSignal ? deriveCommerceUrl(text) : undefined
             }
+            bestNextStep={result.bestNextStep}
+            stateCode={result.stateCode}
             onCheckAnother={handleReset}
           />
       )}

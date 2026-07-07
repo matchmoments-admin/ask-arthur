@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { logEvent } from "@/lib/analytics-events";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 
 // Client-side analytics ingestion. Deliberately restricted to events that can
 // ONLY be observed in the browser (scan_started, feed_view, pageview). The
@@ -19,6 +20,9 @@ const CLIENT_EVENT_TYPES = [
   "feed_view",
   "pageview",
   "extension_install",
+  // Next Steps funnel — a report-destination tap. Client-only-observable and
+  // metadata-only; further gated by FF_ROUTE_CLICK_TELEMETRY below.
+  "reporting_route_click",
 ] as const;
 
 const EventSchema = z.object({
@@ -43,6 +47,15 @@ export async function POST(req: NextRequest) {
   const parsed = EventSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: "invalid_event" }, { status: 400 });
+  }
+
+  // Route-click telemetry is off by default — accept-and-drop when the flag is
+  // off so the client never errors and no partial data lands mid-canary.
+  if (
+    parsed.data.eventType === "reporting_route_click" &&
+    !featureFlags.routeClickTelemetry
+  ) {
+    return new NextResponse(null, { status: 204 });
   }
 
   // Fire-and-forget: logEvent no-ops without an attribution cookie and never

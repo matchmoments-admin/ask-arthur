@@ -31,6 +31,8 @@ import { logger, maskE164 } from "@askarthur/utils/logger";
 import { getLogger } from "@askarthur/utils/axiom-logger";
 import { logCost, claudeHaikuCostUsd } from "@/lib/cost-telemetry";
 import { lookupCloneAlert } from "@/lib/clone-alert-lookup";
+import { parseStateFromRegion } from "@/lib/chart-tokens";
+import { resolveBestNextStep } from "@/lib/nextStep";
 
 /**
  * Resolve the client IP from request headers.
@@ -200,6 +202,24 @@ export async function POST(req: NextRequest) {
           submissionType: mode ?? (images.length > 0 ? "image" : "text"),
           start,
         });
+        const cachedStateCode =
+          featureFlags.nextStepsRouting && cached.verdict !== "SAFE" && geo.region
+            ? parseStateFromRegion(geo.region)
+            : null;
+        const cachedNextStep =
+          featureFlags.nextStepsRouting && cached.verdict !== "SAFE"
+            ? {
+                stateCode: cachedStateCode,
+                bestNextStep: resolveBestNextStep({
+                  verdict: cached.verdict,
+                  scamType: cached.scamType ?? null,
+                  impersonatedBrand: cached.impersonatedBrand ?? null,
+                  channel: cached.channel ?? null,
+                  countryCode: geo.countryCode,
+                  stateCode: cachedStateCode,
+                }),
+              }
+            : null;
         return NextResponse.json(
           {
             verdict: cached.verdict,
@@ -211,6 +231,14 @@ export async function POST(req: NextRequest) {
             maliciousURLs: 0,
             countryCode: geo.countryCode,
             cached: true,
+            // Forward the routing context so NextStepsCard's client-side
+            // recompute (micro-question / change-location) has the same inputs
+            // the server used — otherwise a cache hit drops brand routes and
+            // leaks generic framing for sensitive scams. Matches the main path.
+            ...(cached.scamType && { scamType: cached.scamType }),
+            ...(cached.impersonatedBrand && { impersonatedBrand: cached.impersonatedBrand }),
+            ...(cached.channel && { channel: cached.channel }),
+            ...(cachedNextStep ?? {}),
           },
           {
             headers: {
@@ -661,6 +689,29 @@ export async function POST(req: NextRequest) {
       hasImages: images.length > 0,
       flagPath: featureFlags.analyzeInngestWeb ? "inngest-web" : "wait-until-legacy",
     });
+
+    // Next Steps routing — attach the geo/brand-aware best-report actions for
+    // non-SAFE verdicts when the flag is on. Pure/synchronous: no network, no
+    // DB, so it adds zero latency. `region` is derived server-side into a
+    // coarse `stateCode`; the full "City, State" string never leaves the server.
+    const nextStepFields =
+      featureFlags.nextStepsRouting && finalVerdict !== "SAFE"
+        ? (() => {
+            const stateCode = region ? parseStateFromRegion(region) : null;
+            return {
+              stateCode,
+              bestNextStep: resolveBestNextStep({
+                verdict: finalVerdict,
+                scamType: aiResult.scamType ?? null,
+                impersonatedBrand: aiResult.impersonatedBrand ?? null,
+                channel: aiResult.channel ?? null,
+                countryCode,
+                stateCode,
+              }),
+            };
+          })()
+        : null;
+
     return NextResponse.json(
       {
         verdict: aiResult.verdict,
@@ -683,6 +734,7 @@ export async function POST(req: NextRequest) {
         ...(isVoipCaller != null && { isVoipCaller }),       // backward compat
         ...(charityIntent && { charityIntent }),
         ...(aiResult.shopSignal && { shopSignal: aiResult.shopSignal }),
+        ...(nextStepFields ?? {}),
       },
       {
         headers: {
