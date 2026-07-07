@@ -160,7 +160,14 @@ export async function runUrlBlocklistOnward(
   return { ok: true, providerMessageId: sendResult?.id };
 }
 
-async function sendOnward(
+/**
+ * Low-level phishing-URL report email primitive, reused by the clone-enforcement
+ * execute step. Honours ONWARD_CANARY_RECIPIENT: when set, every report is routed
+ * to that inbox (ours) instead of the real intake — the itch.io-safe way to
+ * validate the pipeline end-to-end before any report actually reaches APWG /
+ * OpenPhish. Throws on Resend rejection.
+ */
+export async function sendOnward(
   intakeEmail: string,
   reportRef: string,
   text: string,

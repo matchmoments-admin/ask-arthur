@@ -503,6 +503,16 @@ export const featureFlags = {
    *  invariant). Default OFF. Kill-switch: feature_brakes.clone_enforcement. */
   cloneEnforcement: readBoolEnv("FF_CLONE_ENFORCEMENT"),
 
+  /** Wave 1 — the ONLY machine-send channel: auto-report weaponised lookalikes to
+   *  the reversible, re-verified ecosystem blocklists (APWG + OpenPhish) via
+   *  email. Domain-level levers (registrar/host/UDRP) NEVER auto-send — they stay
+   *  human-gated (itch.io invariant). Sub-flag of FF_CLONE_ENFORCEMENT so the send
+   *  can canary after cases have been eyeballed in the admin tab. Default OFF.
+   *  Set ONWARD_CANARY_RECIPIENT first to route the initial reports to our own
+   *  inbox until the format + acceptance are confirmed. Bounded by the shared
+   *  daily cap CLONE_SUBMISSION_DAILY_CAP. */
+  cloneEnforceAutoBlocklist: readBoolEnv("FF_CLONE_ENFORCE_AUTO_BLOCKLIST"),
+
   /** Wave 2 — the public "Is your brand being cloned?" exposure checker
    *  (/brand-exposure page + /api/brand-exposure teaser). A$0 lead-gen funnel:
    *  masked teaser (scrape-proof via brand_exposure_summary, v203) → work-email

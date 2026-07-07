@@ -7956,6 +7956,7 @@ export type Database = {
           paid_remaining: number
         }[]
       }
+      count_todays_takedown_submissions: { Args: never; Returns: number }
       create_organization: {
         Args: {
           p_abn?: string
@@ -8361,6 +8362,18 @@ export type Database = {
           submitted_at: string
           target_brand_normalized: string
           updated_at: string
+        }[]
+      }
+      list_enforcement_cases_pending_send: {
+        Args: { p_limit?: number }
+        Returns: {
+          candidate_domain: string
+          candidate_url: string
+          case_id: number
+          channel: string
+          clone_alert_id: number
+          evidence_bundle: Json
+          target_brand_normalized: string
         }[]
       }
       list_long_running_queries: {
