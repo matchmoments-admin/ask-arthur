@@ -113,7 +113,7 @@ export async function getWeeklyIntelForEmail(): Promise<WeeklyRedditIntel | null
  * stats, and ranks emerging themes by members-added-this-week (velocity)
  * rather than cumulative size.
  */
-export async function getWeeklyRedditIntelFromThemes(): Promise<WeeklyRedditIntel | null> {
+async function getWeeklyRedditIntelFromThemes(): Promise<WeeklyRedditIntel | null> {
   const supabase = createServiceClient();
   if (!supabase) return null;
 

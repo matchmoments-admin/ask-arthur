@@ -10,14 +10,14 @@
 -- email render is a pure idempotent read and the dashboard / B2B can consume the
 -- same canonical object.
 --
--- One row per ISO week (Monday anchor). Service-role only — the synthesis engine
+-- One row per weekly digest. Service-role only — the synthesis engine
 -- (packages/scam-engine) writes it; the weekly-email cron + dashboard read it.
--- Idempotent: re-running synthesis on the same week overwrites (get-or-create).
+-- Idempotent: re-running synthesis for the same window overwrites (get-or-create).
 -- Tiny table (~52 rows/year); no hot-path writes, no large index needed.
 
 CREATE TABLE IF NOT EXISTS public.reddit_intel_weekly_digest (
-  -- Monday (UTC) of the ISO week this digest covers. Natural primary key so a
-  -- re-send / re-generate on the same week upserts rather than duplicates.
+  -- Start of the rolling 7-day window the digest covers (= run date − 7d).
+  -- Doubles as the PK, so get-or-create dedupes re-runs on the same run date.
   week_start            date        NOT NULL,
   week_end              date        NOT NULL,
 
@@ -26,10 +26,10 @@ CREATE TABLE IF NOT EXISTS public.reddit_intel_weekly_digest (
 
   -- The ranked "emerging this week" stories. Array of:
   --   { rank, title, narrative, category, representativeBrands[],
-  --     noveltySignal: 'new'|'rising'|'ongoing', weeklyReportCount,
-  --     exampleQuote: { text, speakerRole } | null }
+  --     noveltySignal: 'new'|'rising'|'ongoing', weeklyReportCount }
   -- weeklyReportCount is code-derived (deterministic category count), never
-  -- model-invented — anti-FUD: quantify before adjective.
+  -- model-invented — anti-FUD: quantify before adjective. The pull-quote lives
+  -- once in scam_of_the_week, not per-story.
   stories               jsonb       NOT NULL DEFAULT '[]'::jsonb,
 
   -- Deterministic aggregates for the email stats card + "by the numbers" /

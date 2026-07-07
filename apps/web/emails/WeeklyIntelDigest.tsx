@@ -350,7 +350,7 @@ export default function WeeklyIntelDigest(props: WeeklyIntelDigestProps) {
                         opacity: 0.7,
                       }}
                     >
-                      Active themes
+                      Emerging
                     </Text>
                   </Column>
                   <Column
@@ -459,6 +459,9 @@ export default function WeeklyIntelDigest(props: WeeklyIntelDigestProps) {
                               borderRadius: "4px",
                               padding: "2px 6px",
                               marginLeft: "8px",
+                              // inline-block so Outlook/Word honours the padding
+                              // + background box rather than clipping it.
+                              display: "inline-block",
                               whiteSpace: "nowrap" as const,
                             }}
                           >

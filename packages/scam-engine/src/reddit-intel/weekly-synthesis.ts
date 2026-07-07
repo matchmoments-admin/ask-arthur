@@ -62,7 +62,6 @@ export interface WeeklyIntelStory {
   noveltySignal: "new" | "rising" | "ongoing";
   /** Code-derived count of this week's posts in `category`. Never model-invented. */
   weeklyReportCount: number;
-  exampleQuote: { text: string; speakerRole: string } | null;
 }
 
 export interface WeeklyIntelDigest {
@@ -108,7 +107,6 @@ interface CohortRow {
   intent_label: string | null;
   brands_impersonated: string[] | null;
   tactic_tags: string[] | null;
-  novelty_signals: string[] | null;
   narrative_summary: string | null;
   confidence: number | null;
 }
@@ -196,9 +194,16 @@ export async function synthesizeWeeklyIntel(
 
   const now = new Date();
   const weekEnd = isoDate(now);
+  // Rolling 7-day window ending at run time. `weekStart` doubles as the row PK,
+  // so get-or-create dedupes re-runs on the SAME calendar date (the realistic
+  // case: the Monday cron + its safety-sweeper both fire the same day). A run
+  // on a *different* weekday (manual trigger, cross-midnight retry) computes a
+  // different weekStart and mints a fresh row + Sonnet call — an accepted ~cents
+  // tradeoff, not an ISO-week guarantee. The cron schedule (Mon 14:00 UTC) is
+  // what keeps these landing on Mondays.
   const weekStart = isoDate(new Date(now.getTime() - COHORT_DAYS * 86_400_000));
 
-  // 1. Get-or-create: reuse an existing row for this week unless forced.
+  // 1. Get-or-create: reuse an existing row for this window unless forced.
   if (!opts.force) {
     const { data: existing } = await supabase
       .from("reddit_intel_weekly_digest")
@@ -214,20 +219,20 @@ export async function synthesizeWeeklyIntel(
     return null;
   }
 
-  // 3. This week's cohort.
+  // 3. This week's cohort. Filter confidence in SQL (not JS after .limit) so
+  //    the MAX_COHORT_ROWS cap applies to already-qualified rows — otherwise a
+  //    busy week would cap at 500 raw rows then drop low-confidence ones,
+  //    shrinking and recency-biasing the sample.
   const { data: cohort, error: cohortErr } = await supabase
     .from("reddit_post_intel")
-    .select(
-      "intent_label, brands_impersonated, tactic_tags, novelty_signals, narrative_summary, confidence",
-    )
+    .select("intent_label, brands_impersonated, tactic_tags, narrative_summary, confidence")
     .gte("processed_at", `${weekStart}T00:00:00Z`)
+    .gte("confidence", MIN_CONFIDENCE)
     .order("processed_at", { ascending: false })
     .limit(MAX_COHORT_ROWS);
 
   if (cohortErr) throw new Error(`weekly-synthesis cohort fetch: ${cohortErr.message}`);
-  const rows = (cohort ?? []).filter(
-    (r): r is CohortRow => (r.confidence ?? 0) >= MIN_CONFIDENCE,
-  );
+  const rows = (cohort ?? []) as CohortRow[];
   if (rows.length === 0) {
     logger.info("weekly-synthesis: empty cohort in window — nothing to synthesise", {
       weekStart,
@@ -241,11 +246,16 @@ export async function synthesizeWeeklyIntel(
   const baselineStart = isoDate(
     new Date(now.getTime() - (COHORT_DAYS + BASELINE_DAYS) * 86_400_000),
   );
+  // Deterministic order so the 5000-row cap (if ever hit) samples the most
+  // recent baseline rather than an arbitrary Postgres page order — otherwise a
+  // perennial brand could fall outside an unordered sample and be mis-flagged
+  // "new this week". At current ~1k rows/28d the cap isn't reached.
   const { data: baseline } = await supabase
     .from("reddit_post_intel")
     .select("brands_impersonated, tactic_tags")
     .gte("processed_at", `${baselineStart}T00:00:00Z`)
     .lt("processed_at", `${weekStart}T00:00:00Z`)
+    .order("processed_at", { ascending: false })
     .limit(5000);
 
   const { catTotals, topBrands, topCategories, novelBrands, novelTactics } =
@@ -295,7 +305,9 @@ export async function synthesizeWeeklyIntel(
     system: SYSTEM_PROMPT,
     user: `${userEnvelope}\n\nTHIS WEEK'S NARRATIVES:\n${narrativeLines}`,
     schema: SynthOutputSchema,
-    maxTokens: 2000,
+    // Headroom for a full 5-story tool-use response (~900 tok typical) so a
+    // long week can't truncate mid-JSON → schema-parse throw after paying.
+    maxTokens: 3000,
     timeoutMs: 60_000,
     useToolUse: true,
     toolName: "submit_weekly_stories",
@@ -303,7 +315,14 @@ export async function synthesizeWeeklyIntel(
     requestId: `weekly-synth-${weekStart}`,
   });
 
-  // 8. Attach code-derived counts + quote; clamp to available categories.
+  // 8. Attach the code-derived weekly count. Resolve the model's category to a
+  //    real cohort key by a normalised (case/underscore/space-insensitive)
+  //    match, so a drifted label like "Romance scam" still maps to the
+  //    romance_scam count instead of silently rendering "0 reports this week".
+  const normCat = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const countByNorm: Record<string, number> = {};
+  for (const [label, count] of Object.entries(catTotals)) countByNorm[normCat(label)] = count;
+
   const stories: WeeklyIntelStory[] = result.stories.map((s, i) => ({
     rank: i + 1,
     title: s.title,
@@ -311,8 +330,7 @@ export async function synthesizeWeeklyIntel(
     category: s.category,
     representativeBrands: s.representativeBrands,
     noveltySignal: s.noveltySignal,
-    weeklyReportCount: catTotals[s.category] ?? 0,
-    exampleQuote: null,
+    weeklyReportCount: countByNorm[normCat(s.category)] ?? 0,
   }));
 
   const digest: WeeklyIntelDigest = {
@@ -329,25 +347,9 @@ export async function synthesizeWeeklyIntel(
     generatedAt: now.toISOString(),
   };
 
-  // 9. Persist (upsert) + cost telemetry.
-  const { error: upsertErr } = await supabase.from("reddit_intel_weekly_digest").upsert(
-    {
-      week_start: weekStart,
-      week_end: weekEnd,
-      cohort_post_count: rows.length,
-      stories: digest.stories,
-      top_brands: topBrands,
-      top_categories: topCategories,
-      novelty: digest.novelty,
-      scam_of_the_week: scamOfTheWeek,
-      model_version: modelId,
-      prompt_version: PROMPT_VERSION,
-      generated_at: now.toISOString(),
-    },
-    { onConflict: "week_start" },
-  );
-  if (upsertErr) throw new Error(`weekly-synthesis upsert: ${upsertErr.message}`);
-
+  // 9. Log cost FIRST (the Claude call already spent money), THEN persist — so a
+  //    transient upsert failure can't leave real Sonnet spend invisible to
+  //    /admin/costs, the weekly digest, and the reddit_intel brake accounting.
   await supabase.from("cost_telemetry").insert({
     feature: "reddit-intel-weekly-synthesis",
     provider: "anthropic",
@@ -365,6 +367,24 @@ export async function synthesizeWeeklyIntel(
       week_start: weekStart,
     },
   });
+
+  const { error: upsertErr } = await supabase.from("reddit_intel_weekly_digest").upsert(
+    {
+      week_start: weekStart,
+      week_end: weekEnd,
+      cohort_post_count: rows.length,
+      stories: digest.stories,
+      top_brands: topBrands,
+      top_categories: topCategories,
+      novelty: digest.novelty,
+      scam_of_the_week: scamOfTheWeek,
+      model_version: modelId,
+      prompt_version: PROMPT_VERSION,
+      generated_at: now.toISOString(),
+    },
+    { onConflict: "week_start" },
+  );
+  if (upsertErr) throw new Error(`weekly-synthesis upsert: ${upsertErr.message}`);
 
   logger.info("weekly-synthesis: generated digest", {
     weekStart,

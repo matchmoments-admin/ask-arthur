@@ -133,9 +133,11 @@ export interface WeeklyIntelDigestRow {
 }
 
 /**
- * Latest synthesised weekly digest (Track B, reddit_intel_weekly_digest).
- * The canonical "emerging this week" object shared by the Monday email, the
- * dashboard, and B2B. Read-only; the synthesis engine owns writes. Returns
+ * Latest synthesised weekly digest row (Track B, reddit_intel_weekly_digest).
+ * Read-side accessor for the dashboard widget + a future B2B /api/v1/intel/digest
+ * — the same table the Monday email persists via the synthesis engine, so all
+ * surfaces read one canonical "emerging this week" object. (The email path calls
+ * the engine directly for get-or-create; this reader is the pure read.) Returns
  * null when no week has been synthesised yet — callers render an empty state.
  */
 export async function getLatestWeeklyIntelDigest(): Promise<WeeklyIntelDigestRow | null> {
