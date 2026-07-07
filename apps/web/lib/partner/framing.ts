@@ -142,3 +142,29 @@ export function regionToStateCode(region: string | null): string | null {
   const last = region.split(", ").pop()?.trim().toUpperCase() ?? "";
   return AU_CODE_SET.has(last) ? last : null;
 }
+
+export interface RankedItem {
+  name: string;
+  count: number;
+}
+
+/**
+ * Tally a set of per-row ranked arrays (e.g. each day's `top_scam_types`) into
+ * one overall ranked list by frequency of appearance across rows. Ties break
+ * alphabetically for a stable order. This is what turns the daily-summary
+ * arrays into the "top scam types / brands" the partner dashboard shows.
+ */
+export function tallyRanked(rows: (string[] | null | undefined)[], limit = 8): RankedItem[] {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    for (const raw of row ?? []) {
+      const name = (raw ?? "").trim();
+      if (!name) continue;
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+  }
+  return [...counts.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+    .slice(0, limit);
+}

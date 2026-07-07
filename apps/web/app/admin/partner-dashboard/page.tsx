@@ -11,10 +11,15 @@ import {
 } from "@/lib/partner/framing";
 import {
   getJurisdictionThreatPicture,
+  getJurisdictionTrend,
   getRouteClickFunnel,
+  type TrendPoint,
 } from "@/lib/partner/dashboard-data";
+import type { RankedItem } from "@/lib/partner/framing";
 
 export const dynamic = "force-dynamic";
+
+const TREND_WINDOW_DAYS = 30;
 
 const AUD = new Intl.NumberFormat("en-AU", {
   style: "currency",
@@ -36,10 +41,12 @@ export default async function PartnerDashboardPage({
   const params = await searchParams;
   const framing = PARTNER_FRAMING[resolvePartnerType(params.partner)];
   const jurisdiction = resolveJurisdiction(params.jurisdiction) ?? "NSW";
+  const scoped = framing.scope === "jurisdiction" ? jurisdiction : null;
 
-  const [threat, funnel] = await Promise.all([
-    getJurisdictionThreatPicture(framing.scope === "jurisdiction" ? jurisdiction : null),
-    getRouteClickFunnel(framing.scope === "jurisdiction" ? jurisdiction : null),
+  const [threat, trend, funnel] = await Promise.all([
+    getJurisdictionThreatPicture(scoped),
+    getJurisdictionTrend(jurisdiction, TREND_WINDOW_DAYS),
+    getRouteClickFunnel(scoped),
   ]);
 
   const buildHref = (partner: string, j: string) =>
@@ -102,12 +109,14 @@ export default async function PartnerDashboardPage({
         )}
       </nav>
 
-      {/* Panel: regional threat picture */}
+      {/* Panel: regional threat picture — map (all-time volume) + jurisdiction
+          trend (last 30 days) + ranked top scam types / brands. */}
       {framing.panels.includes("regional_threat") && (
         <section className="rounded-lg border border-slate-200 p-5">
           <h2 className="text-lg font-bold text-deep-navy mb-1">Regional threat picture</h2>
           <p className="text-sm text-gov-slate mb-4">
-            Reported scam volume by state (de-identified aggregates).
+            Reported scam volume by state (all-time) and {jurisdiction} trend over the last{" "}
+            {TREND_WINDOW_DAYS} days — de-identified aggregates.
           </p>
           {threat.unavailable ? (
             <p className="text-sm text-gov-slate">Threat aggregate source unavailable.</p>
@@ -116,18 +125,20 @@ export default async function PartnerDashboardPage({
               <div className="max-w-sm">
                 <AustraliaMap stateData={threat.stateData} />
               </div>
-              {threat.focus && (
-                <div className="space-y-3">
-                  <h3 className="font-bold text-deep-navy">{threat.focus.jurisdiction}</h3>
-                  <div className="grid grid-cols-3 gap-3">
-                    <Stat label="Reports" value={threat.focus.totalReports.toLocaleString()} />
-                    <Stat label="High-risk" value={threat.focus.highRiskReports.toLocaleString()} />
-                    <Stat label="Reported loss" value={AUD.format(threat.focus.totalLoss)} />
-                  </div>
-                  <TagRow label="Top scam types" tags={threat.focus.topScamTypes} />
-                  <TagRow label="Top impersonated brands" tags={threat.focus.topBrands} />
+              <div className="space-y-4">
+                <h3 className="font-bold text-deep-navy">{jurisdiction}</h3>
+                <div className="grid grid-cols-3 gap-3">
+                  <Stat label={`Reports (${TREND_WINDOW_DAYS}d)`} value={trend.totalReports.toLocaleString()} />
+                  <Stat label={`High-risk (${TREND_WINDOW_DAYS}d)`} value={trend.totalHighRisk.toLocaleString()} />
+                  <Stat
+                    label="Reported loss (all-time)"
+                    value={threat.focusLoss != null ? AUD.format(threat.focusLoss) : "—"}
+                  />
                 </div>
-              )}
+                <TrendBars series={trend.series} />
+                <RankedRow label="Top scam types" items={trend.topScamTypes} />
+                <RankedRow label="Top impersonated brands" items={trend.topBrands} />
+              </div>
             </div>
           )}
         </section>
@@ -180,21 +191,62 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function TagRow({ label, tags }: { label: string; tags: string[] }) {
+function RankedRow({ label, items }: { label: string; items: RankedItem[] }) {
   return (
     <div>
       <div className="text-xs font-semibold uppercase tracking-wide text-gov-slate mb-1">{label}</div>
-      {tags.length === 0 ? (
+      {items.length === 0 ? (
         <span className="text-sm text-gov-slate">—</span>
       ) : (
         <div className="flex flex-wrap gap-1.5">
-          {tags.map((t) => (
-            <span key={t} className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs text-deep-navy">
-              {t}
+          {items.map((it, i) => (
+            <span
+              key={it.name}
+              className="flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs text-deep-navy"
+            >
+              <span className="text-gov-slate">{i + 1}.</span>
+              {it.name}
+              <span className="rounded-full bg-slate-100 px-1.5 font-semibold tabular-nums">{it.count}</span>
             </span>
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// Lightweight inline bar chart (no chart lib) — daily reports over the window.
+function TrendBars({ series }: { series: TrendPoint[] }) {
+  if (series.length === 0) {
+    return (
+      <div>
+        <div className="text-xs font-semibold uppercase tracking-wide text-gov-slate mb-1">
+          Reports per day
+        </div>
+        <p className="text-sm text-gov-slate">No activity in this window.</p>
+      </div>
+    );
+  }
+  const max = Math.max(1, ...series.map((p) => p.reports));
+  return (
+    <div>
+      <div className="text-xs font-semibold uppercase tracking-wide text-gov-slate mb-1">
+        Reports per day
+      </div>
+      <div className="flex items-end gap-1 h-20" role="img" aria-label="Daily reports trend">
+        {series.map((p) => (
+          <div
+            key={p.date}
+            className="flex-1 min-w-[3px] rounded-t bg-deep-navy"
+            style={{ height: `${Math.max(4, (p.reports / max) * 100)}%` }}
+            title={`${p.date}: ${p.reports} report(s), ${p.highRisk} high-risk`}
+          />
+        ))}
+      </div>
+      <div className="flex justify-between text-[10px] text-gov-slate mt-1">
+        <span>{series[0].date}</span>
+        <span>{series[series.length - 1].date}</span>
+      </div>
     </div>
   );
 }
