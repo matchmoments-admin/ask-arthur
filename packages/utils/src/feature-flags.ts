@@ -495,6 +495,14 @@ export const featureFlags = {
    *  emit weaponised.v1) with zero outbound reporting risk. */
   shopfrontCloneRecheck: readBoolEnv("FF_SHOPFRONT_CLONE_RECHECK"),
 
+  /** Wave 1 master — multi-channel enforcement layer (clone-watch-enforcement-*
+   *  Inngest fns). When ON, a weaponised.v1 event opens enforcement CASES in
+   *  shopfront_takedown_attempts (the audit record). Opening cases performs NO
+   *  outbound reporting — every domain-level send stays human-gated behind its
+   *  own channel flag + the /admin enforcement tab (the itch.io false-takedown
+   *  invariant). Default OFF. Kill-switch: feature_brakes.clone_enforcement. */
+  cloneEnforcement: readBoolEnv("FF_CLONE_ENFORCEMENT"),
+
   /** Layer 2 — Netcraft community submission. Server-side only. Gates the
    *  shopfront-clone-submit-netcraft Inngest fn. Independent of the
    *  master shopfrontCloneOutreach flag so the brand-notification path can

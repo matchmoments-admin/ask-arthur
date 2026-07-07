@@ -39,6 +39,9 @@ import { cloneWatchPollNetcraft } from "./functions/clone-watch-poll-netcraft";
 // lookalikes so a domain that weaponises after its first scan is caught and
 // promoted to 'weaponised' (→ shopfront/clone.weaponised.v1).
 import { cloneWatchLifecycleRecheck } from "./functions/clone-watch-lifecycle-recheck";
+// Enforcement plan (Wave 1) — opens multi-channel takedown cases (audit record)
+// when a lookalike weaponises. Opens cases only; sends stay human-gated.
+import { cloneWatchEnforcementPlan } from "./functions/clone-watch-enforcement-plan";
 // urlscan evidence — async 2-stage rebuild (v178): submit (gated on
 // preclassify + SB/VT reputation) then a later batched retrieve. Replaces the
 // old per-candidate submit→90s-poll monolith that timed out 100% of the time.
@@ -109,6 +112,7 @@ const appFunctions = [
   // Clone-watch measurement closure Phase B (v145)
   cloneWatchPollNetcraft,
   cloneWatchLifecycleRecheck,
+  cloneWatchEnforcementPlan,
   // Clone-watch urlscan evidence — async submit/retrieve rebuild (v178)
   cloneWatchUrlscanSubmit,
   cloneWatchUrlscanRetrieve,
