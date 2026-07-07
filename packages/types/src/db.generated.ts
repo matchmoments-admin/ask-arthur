@@ -7701,6 +7701,14 @@ export type Database = {
         Returns: number
       }
       backfill_pfra_member_abns: { Args: never; Returns: number }
+      brand_exposure_summary: {
+        Args: { p_brand_normalized: string }
+        Returns: {
+          detected_count: number
+          earliest: string
+          examples: Json
+        }[]
+      }
       brand_normalize: { Args: { p_raw: string }; Returns: string }
       bulk_upsert_feed_crypto_wallet:
         | {
