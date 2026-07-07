@@ -283,6 +283,17 @@ export const featureFlags = {
    *  is the only consumer. */
   redditIntelEmail: readBoolEnv("FF_REDDIT_INTEL_EMAIL"),
 
+  /** Reddit Intel — weekly LLM synthesis path for the Monday digest's
+   *  "emerging this week" section. When ON, the weekly-email cron builds the
+   *  digest from THIS week's reddit_post_intel cohort via one Sonnet call
+   *  (packages/scam-engine reddit-intel/weekly-synthesis) persisted to
+   *  reddit_intel_weekly_digest — dynamic-by-construction, bypassing the
+   *  collapsed theme clustering. When OFF, the cron falls back to the
+   *  velocity-ranked theme-table path. Canary independently of
+   *  redditIntelEmail. Shares the feature_brakes.reddit_intel kill-switch.
+   *  Plan: docs/plans/weekly-intel-dynamic.md (Track B). Server-side only. */
+  redditIntelWeeklySynthesis: readBoolEnv("FF_REDDIT_INTEL_WEEKLY_SYNTHESIS"),
+
   /** Reddit Intel Wave 3 — public B2B API at /api/v1/intel/* (themes, digest,
    *  quotes). Returns 503 when off; validateApiKey is checked first regardless. */
   redditIntelB2bApi:

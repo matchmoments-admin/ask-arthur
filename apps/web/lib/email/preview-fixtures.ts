@@ -90,8 +90,10 @@ export function buildPreviewElement(
         totalPostsClassified: 412,
         emergingThemes: [
           {
-            id: "t1",
-            slug: "fake-debt-collectors",
+            id: "story-1",
+            slug: null,
+            href: null,
+            signalLabel: "New this week",
             title: "Fake debt collector calls escalate",
             narrative: "AU callers report aggressive collection scripts referencing real legal-firm names.",
             memberCount: 32,

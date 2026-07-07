@@ -4,7 +4,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { sendWeeklyDigest, sendWeeklyIntelDigest } from "@/lib/resend";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
-import { getWeeklyRedditIntel } from "@/lib/reddit-intel-weekly";
+import { getWeeklyIntelForEmail } from "@/lib/reddit-intel-weekly";
 import { getWeeklyRegulatorAlerts } from "@/lib/regulator-alerts-weekly";
 
 // When the redditIntelEmail flag is on we always send to brendan even if
@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
 
     // ── Reddit Intel digest path (gated) ───────────────────────────────────
     if (featureFlags.redditIntelEmail) {
-      const intel = await getWeeklyRedditIntel();
+      const intel = await getWeeklyIntelForEmail();
       if (!intel) {
         logger.info("weekly-email: redditIntelEmail flag on but no intel data yet");
         return NextResponse.json({
