@@ -66,6 +66,15 @@ export interface RegulatorAlertEntry {
   publishedAt: string | null;
 }
 
+export interface CloneWatchEntry {
+  /** The impersonating / cloned domain (no scheme). */
+  fakeDomain: string;
+  /** The brand it impersonates, if known. */
+  brand: string | null;
+  /** The brand's real/official domain, if known (for the "vs" contrast). */
+  realDomain: string | null;
+}
+
 export interface WeeklyIntelDigestProps {
   weekStart: string;
   weekEnd: string;
@@ -77,6 +86,10 @@ export interface WeeklyIntelDigestProps {
   modelVersion: string;
   promptVersion: string;
   regulatorAlerts?: RegulatorAlertEntry[];
+  /** Newly detected impersonation/cloned sites this week (clone-watch). Renders
+   *  a "Clone Watch" section only when non-empty, so it vanishes on quiet weeks
+   *  — the newsletter never depends on it. */
+  cloneWatch?: CloneWatchEntry[];
 }
 
 // ── Brand palette (matches AskArthurBriefing) ─────────────────────────────
@@ -145,6 +158,7 @@ export default function WeeklyIntelDigest(props: WeeklyIntelDigestProps) {
     modelVersion,
     promptVersion,
     regulatorAlerts,
+    cloneWatch,
   } = props;
 
   const headline =
@@ -603,6 +617,96 @@ export default function WeeklyIntelDigest(props: WeeklyIntelDigestProps) {
                     &mdash; {scamOfTheWeekQuote.speakerRole} report
                   </Text>
                 </Section>
+              </div>
+            )}
+
+            {/* Clone Watch — newly detected lookalike/impersonation domains
+                this week (proprietary clone-watch stream). Renders only when
+                non-empty so it vanishes cleanly on quiet weeks. Fake domains are
+                rendered as PLAIN monospace text, never hyperlinked — we must
+                never turn a scam domain into a clickable link in an email. */}
+            {cloneWatch && cloneWatch.length > 0 && (
+              <div style={{ paddingTop: "32px" }}>
+                <Text
+                  style={{
+                    margin: "0 0 4px 0",
+                    padding: 0,
+                    fontFamily: SANS,
+                    fontSize: "11px",
+                    fontWeight: 700,
+                    letterSpacing: "2px",
+                    textTransform: "uppercase" as const,
+                    color: NAVY,
+                    opacity: 0.75,
+                  }}
+                >
+                  Clone watch
+                </Text>
+                <Text
+                  style={{
+                    margin: "0 0 12px 0",
+                    padding: 0,
+                    fontFamily: SERIF,
+                    fontSize: "15px",
+                    lineHeight: "24px",
+                    color: NAVY,
+                    fontWeight: 400,
+                  }}
+                >
+                  Lookalike sites we spotted this week. Don&rsquo;t enter your
+                  details on these &mdash; check the address bar carefully.
+                </Text>
+                {cloneWatch.map((clone, i) => (
+                  <div
+                    key={`clone-${i}`}
+                    style={{
+                      marginBottom: i === cloneWatch.length - 1 ? 0 : "12px",
+                      paddingBottom: i === cloneWatch.length - 1 ? 0 : "12px",
+                      borderBottom:
+                        i === cloneWatch.length - 1
+                          ? "none"
+                          : `1px solid ${DIVIDER}`,
+                    }}
+                  >
+                    {clone.brand && (
+                      <Text
+                        style={{
+                          margin: "0 0 4px 0",
+                          padding: 0,
+                          fontFamily: SANS,
+                          fontSize: "14px",
+                          lineHeight: "20px",
+                          fontWeight: 700,
+                          color: NAVY,
+                        }}
+                      >
+                        {clone.brand}
+                      </Text>
+                    )}
+                    <Text
+                      style={{
+                        margin: 0,
+                        padding: 0,
+                        fontFamily:
+                          "'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace",
+                        fontSize: "13px",
+                        lineHeight: "20px",
+                        color: NAVY,
+                      }}
+                    >
+                      <span style={{ fontWeight: 700 }}>Fake:</span>{" "}
+                      {clone.fakeDomain}
+                      {clone.realDomain ? (
+                        <>
+                          {"  "}
+                          <span style={{ opacity: 0.55 }}>
+                            (real: {clone.realDomain})
+                          </span>
+                        </>
+                      ) : null}
+                    </Text>
+                  </div>
+                ))}
               </div>
             )}
 

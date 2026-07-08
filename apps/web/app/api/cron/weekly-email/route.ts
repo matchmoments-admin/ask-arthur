@@ -6,6 +6,7 @@ import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { getWeeklyIntelForEmail } from "@/lib/reddit-intel-weekly";
 import { getWeeklyRegulatorAlerts } from "@/lib/regulator-alerts-weekly";
+import { getWeeklyCloneWatch } from "@/lib/clone-watch/weekly-clone-watch";
 
 // When the redditIntelEmail flag is on we always send to brendan even if
 // the email_subscribers table is empty — the digest is the operator's
@@ -52,7 +53,12 @@ export async function GET(req: NextRequest) {
       const subscriberEmails = (subs ?? []).map((s) => s.email as string);
       const recipients = Array.from(new Set([OPERATOR_EMAIL, ...subscriberEmails]));
 
-      const regulatorAlerts = await getWeeklyRegulatorAlerts();
+      // Sibling fresh streams — both degrade gracefully to empty so the
+      // newsletter stands on Reddit alone when they're quiet.
+      const [regulatorAlerts, cloneWatch] = await Promise.all([
+        getWeeklyRegulatorAlerts(),
+        getWeeklyCloneWatch(),
+      ]);
 
       try {
         await sendWeeklyIntelDigest(recipients, {
@@ -66,6 +72,7 @@ export async function GET(req: NextRequest) {
           modelVersion: intel.modelVersion,
           promptVersion: intel.promptVersion,
           regulatorAlerts,
+          cloneWatch,
         });
       } catch (err) {
         // Log the failure to cost_telemetry so it's queryable alongside
