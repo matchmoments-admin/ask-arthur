@@ -61,6 +61,15 @@ const InboundEmailPayload = z.object({
     "inbound_aarp_fraud",
     "inbound_mse",
     "inbound_frankonfraud",
+    // v213 source expansion — competitor_intel (choice_au, nts_scams,
+    // cyber_safe_center, fraud_hq, get_safe_online) + publishable AU regulator
+    // (wa_scamnet).
+    "inbound_choice_au",
+    "inbound_nts_scams",
+    "inbound_cyber_safe_center",
+    "inbound_fraud_hq",
+    "inbound_get_safe_online",
+    "inbound_wa_scamnet",
   ]),
   // Message-id hash from the Worker. Drives ON CONFLICT idempotency.
   external_id: z.string().min(8).max(128),
@@ -93,6 +102,13 @@ const COMPETITOR_INTEL_SOURCES: ReadonlySet<string> = new Set([
   "inbound_aarp_fraud",
   "inbound_mse",
   "inbound_frankonfraud",
+  // v213 — CHOICE, NTS, Cyber Safe Center, Fraud HQ, Get Safe Online.
+  // (wa_scamnet is NOT here — it's a publishable AU state regulator.)
+  "inbound_choice_au",
+  "inbound_nts_scams",
+  "inbound_cyber_safe_center",
+  "inbound_fraud_hq",
+  "inbound_get_safe_online",
 ]);
 const COMPETITOR_INTEL_CATEGORY = "competitor_intel";
 
@@ -141,6 +157,8 @@ function countryCodeFor(source: string): string | null {
     case "inbound_idcare":
     case "inbound_auscert":
     case "inbound_ato":
+    case "inbound_choice_au": // v213 — AU independent consumer
+    case "inbound_wa_scamnet": // v213 — AU state regulator
       return "AU";
     case "inbound_ftc":
     case "inbound_aarp_fraud": // v209 — US consumer fraud alerts
@@ -148,6 +166,8 @@ function countryCodeFor(source: string): string | null {
       return "US";
     case "inbound_which_scams": // v209 — UK consumer scam newsletter
     case "inbound_mse": // v209 — UK money newsletter
+    case "inbound_nts_scams": // v213 — UK trading standards
+    case "inbound_get_safe_online": // v213 — UK online-safety charity
       return "GB";
     // Global publishers — leave null so the UI suppresses the flag chip.
     case "inbound_riskybiz":
@@ -156,6 +176,8 @@ function countryCodeFor(source: string): string | null {
     case "inbound_tldr_infosec":
     case "inbound_thn":
     case "inbound_securityweek":
+    case "inbound_cyber_safe_center": // v213 — global consumer
+    case "inbound_fraud_hq": // v213 — global consumer
     case "inbound_generic":
     default:
       return null;
@@ -179,6 +201,7 @@ function provenanceTierFor(source: string): string {
     case "inbound_acma":
     case "inbound_ftc":
     case "inbound_ato": // v129: AU Tax Office scam alerts — regulator
+    case "inbound_wa_scamnet": // v213: Consumer Protection WA — state regulator, publishable
       return "tier_1_regulator";
     // Industry / CERTs / victim support
     case "inbound_auscert":
@@ -198,6 +221,12 @@ function provenanceTierFor(source: string): string {
     case "inbound_aarp_fraud":
     case "inbound_mse":
     case "inbound_frankonfraud":
+    // v213 competitor_intel additions:
+    case "inbound_choice_au":
+    case "inbound_nts_scams":
+    case "inbound_cyber_safe_center":
+    case "inbound_fraud_hq":
+    case "inbound_get_safe_online":
       return "tier_3_curated";
     default:
       return "tier_4_osint";
