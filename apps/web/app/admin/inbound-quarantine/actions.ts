@@ -15,6 +15,26 @@ export async function promoteRow(id: number): Promise<{ ok: boolean; error?: str
   const supabase = createServiceClient();
   if (!supabase) return { ok: false, error: "supabase_unavailable" };
 
+  // Refuse to publish competitor-intel rows (v209, ADR-0021). These are
+  // third-party editorial content ingested as intelligence only — republishing
+  // them on the public /scam-feed is the copyright/trust exposure the category
+  // exists to prevent. A `.neq("category", ...)` filter can't do this safely
+  // because SQL `<>` also excludes the many legitimate NULL-category rows, so
+  // we pre-check the row explicitly.
+  const { data: row, error: readError } = await supabase
+    .from("feed_items")
+    .select("source, category")
+    .eq("id", id)
+    .maybeSingle();
+  if (readError) {
+    logger.error("inbound-quarantine promote read failed", { id, error: String(readError) });
+    return { ok: false, error: readError.message };
+  }
+  if (!row) return { ok: false, error: "not_found" };
+  if (row.category === "competitor_intel") {
+    return { ok: false, error: "competitor_intel_never_publish" };
+  }
+
   const { error } = await supabase
     .from("feed_items")
     .update({ published: true })

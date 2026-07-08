@@ -54,6 +54,13 @@ const InboundEmailPayload = z.object({
     "inbound_tldr_infosec",
     "inbound_thn",
     "inbound_securityweek",
+    // v209 competitor-intel consumer scam newsletters (ingest-but-never-publish,
+    // ADR-0021). Bypass the tier_3 drop below and are stamped
+    // category='competitor_intel' at insert.
+    "inbound_which_scams",
+    "inbound_aarp_fraud",
+    "inbound_mse",
+    "inbound_frankonfraud",
   ]),
   // Message-id hash from the Worker. Drives ON CONFLICT idempotency.
   external_id: z.string().min(8).max(128),
@@ -73,6 +80,21 @@ const InboundEmailPayload = z.object({
 });
 
 type InboundEmailPayload = z.infer<typeof InboundEmailPayload>;
+
+// Competitor consumer scam-newsletter sources (v209, ADR-0021). These are a
+// distinct class: on-mission enough to keep (unlike the tier_3 security press
+// dropped below), but third-party editorial content we must NEVER republish.
+// They flow through the tier_3 drop gate and are stamped
+// category='competitor_intel' so the admin promote action refuses them and they
+// stay published=false forever — intelligence for the weekly cohort, never feed
+// content. See docs/adr/0021-competitor-intel-source-class.md.
+const COMPETITOR_INTEL_SOURCES: ReadonlySet<string> = new Set([
+  "inbound_which_scams",
+  "inbound_aarp_fraud",
+  "inbound_mse",
+  "inbound_frankonfraud",
+]);
+const COMPETITOR_INTEL_CATEGORY = "competitor_intel";
 
 // Trim stored body to this many chars (cost: hot-table size + hourly Voyage
 // embed re-reads). The Worker caps the wire payload at 50 KB; this is the
@@ -114,7 +136,12 @@ function countryCodeFor(source: string): string | null {
     case "inbound_ato":
       return "AU";
     case "inbound_ftc":
+    case "inbound_aarp_fraud": // v209 — US consumer fraud alerts
+    case "inbound_frankonfraud": // v209 — US fraud intel
       return "US";
+    case "inbound_which_scams": // v209 — UK consumer scam newsletter
+    case "inbound_mse": // v209 — UK money newsletter
+      return "GB";
     // Global publishers — leave null so the UI suppresses the flag chip.
     case "inbound_riskybiz":
     case "inbound_krebs":
@@ -157,6 +184,13 @@ function provenanceTierFor(source: string): string {
     case "inbound_tldr_infosec": // v129
     case "inbound_thn":          // v129
     case "inbound_securityweek": // v129
+    // v209 competitor consumer scam newsletters — editorial provenance is
+    // honestly tier_3, but COMPETITOR_INTEL_SOURCES exempts them from the
+    // tier_3 drop gate (ADR-0021). They are never published regardless.
+    case "inbound_which_scams":
+    case "inbound_aarp_fraud":
+    case "inbound_mse":
+    case "inbound_frankonfraud":
       return "tier_3_curated";
     default:
       return "tier_4_osint";
@@ -209,8 +243,14 @@ Deno.serve(async (req: Request) => {
   // backlog (content that's wrong, not just unprocessed). 204 tells the
   // Worker "drop quietly, no retry". tier_1_regulator / tier_2_industry
   // (AU CERTs + victim support) + the generic fallback still flow through.
+  // Competitor consumer scam newsletters (v209, ADR-0021) are tier_3_curated by
+  // provenance but are DELIBERATELY exempted from the drop — they're on-mission
+  // intelligence. They land quarantined (category='competitor_intel',
+  // published=false) and the admin promote action refuses them, so they never
+  // reach the public feed. Every other tier_3_curated source is still dropped.
   const tier = provenanceTierFor(payload.source);
-  if (tier === "tier_3_curated") {
+  const isCompetitorIntel = COMPETITOR_INTEL_SOURCES.has(payload.source);
+  if (tier === "tier_3_curated" && !isCompetitorIntel) {
     return new Response(null, { status: 204 });
   }
 
@@ -250,6 +290,10 @@ Deno.serve(async (req: Request) => {
       source_created_at: payload.received_at,
       country_code: countryCodeFor(payload.source),
       provenance_tier: tier,
+      // Competitor newsletters get a marker category so the admin promote
+      // action can refuse them (ADR-0021). Other inbound rows keep category
+      // NULL, unchanged from prior behaviour.
+      category: isCompetitorIntel ? COMPETITOR_INTEL_CATEGORY : null,
       // Quarantine inbound emails by default. The newsletter classifier
       // (P3 of the feed-quality recovery plan, 2026-05-16) promotes real
       // newsletter content to published=true via the per-source
