@@ -101,6 +101,13 @@ const COMPETITOR_INTEL_CATEGORY = "competitor_intel";
 // at-rest store limit. Enough for the lede + a useful embedding window.
 const BODY_STORE_LIMIT = 4000;
 
+// Competitor newsletters (v212, Arthur's Watch Phase 2) are multi-scam digests
+// — the Phase 2 extraction must see the WHOLE newsletter, not just the lede, or
+// it silently drops every scam after the first ~4 KB. Store the full body for
+// these (capped just under the feed_items_body_md_size check of 50000 chars).
+// Volume is ~a handful of newsletters/week, so the extra ballast is negligible.
+const COMPETITOR_BODY_STORE_LIMIT = 45000;
+
 // ── Helpers ─────────────────────────────────────────────────────────────
 
 function timingSafeEqual(a: string, b: string): boolean {
@@ -282,7 +289,10 @@ Deno.serve(async (req: Request) => {
       // embed job re-reads. ~4 KB keeps the lede + enough for embedding while
       // cutting storage + embed cost. (Worker still sends up to 50 KB; we
       // truncate at the store boundary.)
-      body_md: payload.body_md.slice(0, BODY_STORE_LIMIT),
+      body_md: payload.body_md.slice(
+        0,
+        isCompetitorIntel ? COMPETITOR_BODY_STORE_LIMIT : BODY_STORE_LIMIT,
+      ),
       url: payload.url ?? null,
       source_url: payload.url ?? null,
       tags: payload.tags ?? null,

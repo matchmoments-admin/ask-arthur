@@ -294,6 +294,15 @@ export const featureFlags = {
    *  Plan: docs/plans/weekly-intel-dynamic.md (Track B). Server-side only. */
   redditIntelWeeklySynthesis: readBoolEnv("FF_REDDIT_INTEL_WEEKLY_SYNTHESIS"),
 
+  /** Arthur's Watch Phase 2 — competitor-newsletter intelligence extraction.
+   *  When ON, a cron (packages/scam-engine inngest/competitor-intel-extract-cron)
+   *  runs one Sonnet call per newly-ingested competitor_intel feed_items row to
+   *  split it into per-scam observations (competitor_intel_observations, v212),
+   *  in Arthur's own words — never verbatim (ADR-0021 / plan §3). Shares the
+   *  feature_brakes.reddit_intel kill-switch + cost_telemetry
+   *  feature='competitor-intel-extract'. Server-side only; default OFF. */
+  competitorIntelExtract: readBoolEnv("FF_COMPETITOR_INTEL_EXTRACT"),
+
   /** Reddit Intel Wave 3 — public B2B API at /api/v1/intel/* (themes, digest,
    *  quotes). Returns 503 when off; validateApiKey is checked first regardless. */
   redditIntelB2bApi:

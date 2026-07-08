@@ -49,6 +49,10 @@ import { scamReportsBackfillEmbed } from "./scam-reports-backfill-embed";
 // scam_reports + reddit_post_intel. Cron-driven 30-min poll.
 import { feedItemsEmbed } from "./feed-items-embed";
 
+// Arthur's Watch Phase 2: split ingested competitor newsletters into per-scam
+// observations via one Sonnet call each. Cron-driven 6h poll; flag-gated.
+import { competitorIntelExtractCron } from "./competitor-intel-extract-cron";
+
 // NOTE: 9 platform-housekeeping functions (feedback-triage-refresh,
 // feed-retention, regulator-alert-push, phone-footprint-retention,
 // reddit-processed-posts-retention, cost-telemetry-retention,
@@ -101,6 +105,8 @@ export const inngestFunctions = [
   scamReportsBackfillEmbed,
   // News Intel: regulator-narrative embedding
   feedItemsEmbed,
+  // Arthur's Watch Phase 2: competitor-newsletter extraction (flag-gated)
+  competitorIntelExtractCron,
   // Shop Signal: Deep Shop Check enrichment (user-initiated)
   shopSignalEnrich,
   // Shopfront Clone-Watch: Layer 0 daily NRD sweep (S0E.2)
