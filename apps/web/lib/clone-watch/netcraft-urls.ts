@@ -205,6 +205,60 @@ export function selectFalseNegativeCandidates(
   return { candidates, terminal, transient, notInUrls, driftStates: [...driftStates] };
 }
 
+export interface ReconcileAlert {
+  id: number;
+  candidate_domain: string;
+}
+
+export interface ReconcileClassification {
+  /** Netcraft actioned (malicious) → lifecycle taken_down (+ stamp takedown_at). */
+  takenDown: number[];
+  /** Netcraft declined (no threats / unavailable) → lifecycle declined. */
+  declined: number[];
+  /** Still moving / no match / unknown → leave lifecycle, just mark reconciled. */
+  other: number[];
+}
+
+/**
+ * Map each submitted alert to a lifecycle bucket by its OWN per-URL state
+ * (never the submission rollup). Precedence per matched host: malicious wins
+ * (taken_down); else any suspicious/processing → still moving (other); else
+ * no-threats/unavailable → declined; else other. Unmatched hosts → other.
+ */
+export function classifyByUrlState(
+  alerts: ReconcileAlert[],
+  urls: NetcraftUrlEntry[],
+): ReconcileClassification {
+  const byHost = new Map<string, Set<string>>();
+  for (const entry of urls) {
+    const host = normHost(entry.hostname || entry.url);
+    if (!host) continue;
+    (byHost.get(host) ?? byHost.set(host, new Set()).get(host)!).add(
+      normState(entry.url_state),
+    );
+  }
+  const takenDown: number[] = [];
+  const declined: number[] = [];
+  const other: number[] = [];
+  for (const alert of alerts) {
+    const S = byHost.get(normHost(alert.candidate_domain));
+    if (!S || S.size === 0) {
+      other.push(alert.id);
+      continue;
+    }
+    if (S.has(NETCRAFT_URL_STATE.MALICIOUS)) takenDown.push(alert.id);
+    else if (S.has(NETCRAFT_URL_STATE.SUSPICIOUS) || S.has(NETCRAFT_URL_STATE.PROCESSING))
+      other.push(alert.id);
+    else if (
+      S.has(NETCRAFT_URL_STATE.NO_THREATS) ||
+      S.has(NETCRAFT_URL_STATE.UNAVAILABLE)
+    )
+      declined.push(alert.id);
+    else other.push(alert.id);
+  }
+  return { takenDown, declined, other };
+}
+
 /**
  * Keyless fetch of a submission's per-URL truth. Reads the submission object
  * first (is_archived / has_issues / state_counts). If `opts.escalatableStates`

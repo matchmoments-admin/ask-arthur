@@ -31,6 +31,7 @@ import { cloneWatchSubmitNetcraft } from "./functions/clone-watch-submit-netcraf
 // submit-netcraft worker's second trigger. Needs post-deploy Inngest resync.
 import { cloneWatchNetcraftAuto } from "./functions/clone-watch-netcraft-auto";
 import { cloneWatchNetcraftIssue } from "./functions/clone-watch-netcraft-issue";
+import { cloneWatchNetcraftReconcile } from "./functions/clone-watch-netcraft-reconcile";
 import { cloneWatchNotifyBrand } from "./functions/clone-watch-notify-brand";
 import { cloneWatchWeeklyDigest } from "./functions/clone-watch-weekly-digest";
 // Phase B — poll Netcraft for takedown status every 30 min. Powers the
@@ -115,6 +116,7 @@ const appFunctions = [
   cloneWatchSubmitNetcraft,
   cloneWatchNetcraftAuto,
   cloneWatchNetcraftIssue,
+  cloneWatchNetcraftReconcile,
   cloneWatchNotifyBrand,
   cloneWatchWeeklyDigest,
   // Clone-watch measurement closure Phase B (v145)

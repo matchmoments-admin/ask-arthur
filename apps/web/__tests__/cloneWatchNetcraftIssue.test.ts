@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  classifyByUrlState,
   normHost,
   selectFalseNegativeCandidates,
   type NetcraftUrlEntry,
@@ -215,6 +216,47 @@ describe("smoke: real Netcraft submission acDb (state=malicious rollup)", () => 
       allowUnavailable: true,
     });
     expect(r.candidates).toHaveLength(0);
+  });
+});
+
+describe("classifyByUrlState — lifecycle reconcile (PR3.1)", () => {
+  const ra = (id: number, domain: string) => ({ id, candidate_domain: domain });
+
+  it("malicious → taken_down; no-threats/unavailable → declined; else other", () => {
+    const alerts = [ra(1, "a.com"), ra(2, "b.com"), ra(3, "c.com"), ra(4, "d.com")];
+    const urls = [
+      urlEntry("a.com", "malicious"),
+      urlEntry("b.com", "no threats"),
+      urlEntry("c.com", "unavailable"),
+      urlEntry("d.com", "processing"),
+    ];
+    const r = classifyByUrlState(alerts, urls);
+    expect(r.takenDown).toEqual([1]);
+    expect(r.declined.sort()).toEqual([2, 3]);
+    expect(r.other).toEqual([4]);
+  });
+
+  it("malicious wins over other states on the same host", () => {
+    const r = classifyByUrlState(
+      [ra(1, "a.com")],
+      [urlEntry("a.com", "no threats"), urlEntry("a.com", "malicious")],
+    );
+    expect(r.takenDown).toEqual([1]);
+    expect(r.declined).toEqual([]);
+  });
+
+  it("suspicious/processing keep a host in 'other' even alongside no-threats", () => {
+    const r = classifyByUrlState(
+      [ra(1, "a.com")],
+      [urlEntry("a.com", "no threats"), urlEntry("a.com", "suspicious")],
+    );
+    expect(r.other).toEqual([1]);
+    expect(r.declined).toEqual([]);
+  });
+
+  it("an alert absent from /urls falls to 'other' (reconciled, not lost)", () => {
+    const r = classifyByUrlState([ra(9, "gone.com")], [urlEntry("other.com", "malicious")]);
+    expect(r.other).toEqual([9]);
   });
 });
 
