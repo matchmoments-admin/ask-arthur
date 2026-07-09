@@ -28,41 +28,41 @@ export interface NetcraftResults {
   configured: boolean;
 }
 
-interface WorklistRow {
+interface WorklistAlert {
   id: number;
   candidate_url: string;
   candidate_domain: string;
   inferred_target_domain: string | null;
   target_brand_normalized: string | null;
-  netcraft_uuid: string;
 }
 
 export async function getNetcraftResults(): Promise<NetcraftResults> {
   const sb = createServiceClient();
   if (!sb) return { pending: [], filed: [], configured: false };
 
+  // v216 RPC is uuid-atomic: one row per submission with its alerts aggregated.
   const { data: worklist } = await sb.rpc(
     "list_clone_alerts_pending_netcraft_issue",
-    { p_max_age_days: 14, p_limit: 500 },
+    { p_max_age_days: 30, p_uuid_limit: 100 },
   );
 
-  // Group the worklist by submission uuid for display.
-  const groups = new Map<string, WorklistRow[]>();
-  for (const r of (worklist as WorklistRow[] | null) ?? []) {
-    const list = groups.get(r.netcraft_uuid) ?? [];
-    list.push(r);
-    groups.set(r.netcraft_uuid, list);
-  }
-  const pending: PendingIssueRow[] = [...groups.entries()].map(([uuid, rows]) => ({
-    netcraft_uuid: uuid,
-    alertCount: rows.length,
-    brands: [
-      ...new Set(
-        rows.map((r) => r.target_brand_normalized || r.inferred_target_domain || "?"),
-      ),
-    ],
-    sampleUrl: rows[0]?.candidate_url ?? "",
-  }));
+  const pending: PendingIssueRow[] = (
+    (worklist as Array<{ netcraft_uuid: string; alerts: unknown }> | null) ?? []
+  ).map((r) => {
+    const alerts = Array.isArray(r.alerts) ? (r.alerts as WorklistAlert[]) : [];
+    return {
+      netcraft_uuid: r.netcraft_uuid,
+      alertCount: alerts.length,
+      brands: [
+        ...new Set(
+          alerts.map(
+            (a) => a.target_brand_normalized || a.inferred_target_domain || "?",
+          ),
+        ),
+      ],
+      sampleUrl: alerts[0]?.candidate_url ?? "",
+    };
+  });
 
   // Recently-filed issues (netcraft_issue.issue_reported_at present).
   const { data: filedRows } = await sb

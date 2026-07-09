@@ -25,7 +25,6 @@ function alert(id: number, domain: string, brand = "Instagram"): PendingAlert {
     candidate_domain: domain,
     inferred_target_domain: "instagram.com",
     target_brand_normalized: brand,
-    netcraft_uuid: "UUID1",
   };
 }
 
@@ -132,6 +131,46 @@ describe("selectFalseNegativeCandidates", () => {
   });
 });
 
+describe("selectFalseNegativeCandidates — drain buckets (PR2)", () => {
+  const alerts = [alert(1, "inistagram.ir")];
+
+  it("routes a matched malicious host to terminal 'actioned' (not a candidate)", () => {
+    const r = selectFalseNegativeCandidates(alerts, [urlEntry("inistagram.ir", "malicious")], {
+      allowUnavailable: true,
+    });
+    expect(r.candidates).toHaveLength(0);
+    expect(r.terminal).toEqual([{ alert: alerts[0], reason: "actioned" }]);
+  });
+
+  it.each(["suspicious", "processing"])(
+    "routes a matched %s host to transient (recheck, never dropped)",
+    (state) => {
+      const r = selectFalseNegativeCandidates(alerts, [urlEntry("inistagram.ir", state)], {
+        allowUnavailable: true,
+      });
+      expect(r.candidates).toHaveLength(0);
+      expect(r.transient.map((a) => a.id)).toEqual([1]);
+      expect(r.terminal).toHaveLength(0);
+    },
+  );
+
+  it("routes 'unavailable' to terminal 'unavailable_deferred' at go-live (not allowed)", () => {
+    const r = selectFalseNegativeCandidates(alerts, [urlEntry("inistagram.ir", "unavailable")], {
+      allowUnavailable: false,
+    });
+    expect(r.candidates).toHaveLength(0);
+    expect(r.terminal).toEqual([{ alert: alerts[0], reason: "unavailable_deferred" }]);
+  });
+
+  it("routes an unknown-only host to terminal 'no_escalatable_state' + drift", () => {
+    const r = selectFalseNegativeCandidates(alerts, [urlEntry("inistagram.ir", "quarantined")], {
+      allowUnavailable: true,
+    });
+    expect(r.terminal).toEqual([{ alert: alerts[0], reason: "no_escalatable_state" }]);
+    expect(r.driftStates).toContain("quarantined");
+  });
+});
+
 describe("smoke: real Netcraft submission acDb (state=malicious rollup)", () => {
   // Real /urls payload from submission acDbnxLBA2jy1dd2Q2P8tqQCma2ZvDQx — the
   // batch Brendan's email reported as "malicious" while 37/38 URLs were NEVER
@@ -146,7 +185,6 @@ describe("smoke: real Netcraft submission acDb (state=malicious rollup)", () => 
       candidate_domain: domain,
       inferred_target_domain: "brand.com",
       target_brand_normalized: "Brand",
-      netcraft_uuid: "acDb",
     };
   }
 
