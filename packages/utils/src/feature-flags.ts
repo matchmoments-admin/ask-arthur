@@ -602,6 +602,15 @@ export const featureFlags = {
    *  dry-run). Server-side only. */
   cloneNetcraftIssue: readBoolEnv("FF_CLONE_NETCRAFT_ISSUE"),
 
+  /** Netcraft per-URL lifecycle reconciler. Gates the
+   *  shopfront-clone-netcraft-reconcile Inngest fn, which reads per-URL verdicts
+   *  from GET /submission/{uuid}/urls and advances each auto-submitted clone's
+   *  lifecycle_state by its own url_state (malicious→taken_down + KPI stamp,
+   *  no-threats/unavailable→declined→feeds the weaponisation recheck). The single
+   *  Netcraft verdict source; the rollup poll stays dark. Sub-flag of
+   *  FF_SHOPFRONT_CLONE_OUTREACH. Default OFF. Server-side only. */
+  cloneLifecycleReconcile: readBoolEnv("FF_CLONE_LIFECYCLE_RECONCILE"),
+
   /** Layer 3+4 — brand-direct notification. Server-side only. Gates the
    *  shopfront-clone-notify-brand Inngest fn. Default OFF until
    *  brand_contact_directory is seeded for the full watchlist and the

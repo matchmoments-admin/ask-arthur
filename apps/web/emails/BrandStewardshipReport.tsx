@@ -94,6 +94,16 @@ export interface CloneDetections {
   detected: number;
   /** Distinct clone domains submitted to Netcraft (browser/blocklist). */
   netcraftReported?: number;
+  /** Netcraft actioned it (taken_down). */
+  takenDown?: number;
+  /** Netcraft graded it non-malicious — still live/parked ("unactioned"). */
+  declined?: number;
+  /** We filed a report_issue to force a re-review. */
+  escalated?: number;
+  /** Flipped to active phishing after Netcraft declined. */
+  weaponised?: number;
+  /** Escalated → then taken down. */
+  reTakenDown?: number;
   /** Per-classification counts for the headline. */
   byClassification?: Record<string, number>;
   /** Consumable analytics — counts across ALL clones (not just the shown
@@ -291,6 +301,66 @@ export default function BrandStewardshipReport({
                   reported on your behalf. Each one&apos;s hosting and registrar
                   details are below so your team can action takedowns directly.
                 </Text>
+
+                {/* Netcraft outcome — the honest lifecycle of what we reported.
+                    Verbs are precise: "actioned by Netcraft" (not "removed"),
+                    "graded no-threat" for declines, "we escalated" for our
+                    report_issue push-back, "flipped to active phishing" for
+                    weaponisation-after-decline. Only rendered when there's a
+                    Netcraft-reported subset with a known outcome. */}
+                {(cloneDetections.declined ?? 0) +
+                  (cloneDetections.takenDown ?? 0) +
+                  (cloneDetections.weaponised ?? 0) >
+                  0 && (
+                  <Section
+                    style={{
+                      margin: "0 0 14px 0",
+                      padding: "12px 14px",
+                      background: "#f8fafc",
+                      borderRadius: "6px",
+                      borderLeft: "3px solid #0f766e",
+                    }}
+                  >
+                    <Text style={{ ...labelStyle, margin: "0 0 6px 0" }}>
+                      What Netcraft did with them
+                    </Text>
+                    {(cloneDetections.takenDown ?? 0) > 0 && (
+                      <Text style={outcomeLine}>
+                        ✅ <strong>{cloneDetections.takenDown}</strong> actioned by
+                        Netcraft (added to browser / blocklist protection).
+                      </Text>
+                    )}
+                    {(cloneDetections.declined ?? 0) > 0 && (
+                      <Text style={outcomeLine}>
+                        ⚠️ <strong>{cloneDetections.declined}</strong> graded
+                        &ldquo;no threat&rdquo; and left live — lookalikes of{" "}
+                        {brandName} sitting parked, unactioned, and free to be
+                        weaponised at any time.
+                      </Text>
+                    )}
+                    {(cloneDetections.escalated ?? 0) > 0 && (
+                      <Text style={outcomeLine}>
+                        ↩️ <strong>{cloneDetections.escalated}</strong> of those we
+                        escalated back to Netcraft to force a re-review
+                        {(cloneDetections.reTakenDown ?? 0) > 0 && (
+                          <>
+                            {" "}
+                            — <strong>{cloneDetections.reTakenDown}</strong> were
+                            then actioned
+                          </>
+                        )}
+                        .
+                      </Text>
+                    )}
+                    {(cloneDetections.weaponised ?? 0) > 0 && (
+                      <Text style={outcomeLine}>
+                        🔥 <strong>{cloneDetections.weaponised}</strong> later
+                        flipped to active phishing — confirming that
+                        &ldquo;no&nbsp;threat&rdquo; did not mean safe.
+                      </Text>
+                    )}
+                  </Section>
+                )}
 
                 {/* Consumable analytics — where the clones are hosted +
                     registered, at a glance. Pure inline-CSS bars so every email
@@ -631,6 +701,13 @@ const labelStyle = {
   color: "#64748B",
   letterSpacing: "0.05em",
   margin: "0 0 6px 0",
+} as const;
+
+const outcomeLine = {
+  fontSize: "13px",
+  lineHeight: "1.5",
+  color: "#334155",
+  margin: "0 0 4px 0",
 } as const;
 
 /** Accent colour per urlscan classification (left border + chip). */

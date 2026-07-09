@@ -45,6 +45,11 @@ describe("buildInternalDigestHtml", () => {
   const metrics = (over: Partial<CloneBrandMetrics>): CloneBrandMetrics => ({
     detected: over.detected ?? 1,
     netcraftReported: over.netcraftReported ?? 0,
+    takenDown: over.takenDown ?? 0,
+    declined: over.declined ?? 0,
+    escalated: over.escalated ?? 0,
+    weaponised: over.weaponised ?? 0,
+    reTakenDown: over.reTakenDown ?? 0,
     byClassification: over.byClassification ?? { neutral: 1 },
     byCountry: over.byCountry ?? { SG: 1 },
     byRegistrar: over.byRegistrar ?? { NameSilo: 1 },
@@ -137,6 +142,11 @@ describe("buildRegistrarRollup", () => {
   const m = (byRegistrar: Record<string, number>, domains: CloneBrandMetrics["domains"]): CloneBrandMetrics => ({
     detected: Object.values(byRegistrar).reduce((a, b) => a + b, 0),
     netcraftReported: 0,
+    takenDown: 0,
+    declined: 0,
+    escalated: 0,
+    weaponised: 0,
+    reTakenDown: 0,
     byClassification: {},
     byCountry: {},
     byRegistrar,

@@ -22,6 +22,9 @@ const cloneRow = (over: Partial<CloneAlertRow>): CloneAlertRow => ({
     over.urlscan_evidence ?? { server: { ip: "1.2.3.4", asn: "AS123", country: "SG" } },
   attribution: over.attribution ?? null,
   submitted_to: over.submitted_to ?? null,
+  lifecycle_state: over.lifecycle_state ?? null,
+  netcraft_declined_at: over.netcraft_declined_at ?? null,
+  weaponised_at: over.weaponised_at ?? null,
 });
 
 describe("aggregateClonesByDomain", () => {
@@ -106,6 +109,27 @@ describe("aggregateClonesByDomain", () => {
     const m = agg.get("anz.com.au")!;
     expect(m.detected).toBe(3);
     expect(m.netcraftReported).toBe(2);
+  });
+
+  it("counts the lifecycle-transition metrics (taken_down / declined / escalated / weaponised / re-taken-down)", () => {
+    const agg = aggregateClonesByDomain([
+      cloneRow({ id: 1, candidate_domain: "a.click", lifecycle_state: "taken_down" }),
+      cloneRow({ id: 2, candidate_domain: "b.click", lifecycle_state: "declined" }),
+      cloneRow({ id: 3, candidate_domain: "c.click", lifecycle_state: "weaponised" }),
+      // escalated (report_issue filed) AND taken_down → re-taken-down win
+      cloneRow({
+        id: 4,
+        candidate_domain: "d.click",
+        lifecycle_state: "taken_down",
+        submitted_to: { netcraft: { uuid: "z" }, netcraft_issue: { issue_reported_at: "2026-07-10" } },
+      }),
+    ]);
+    const m = agg.get("anz.com.au")!;
+    expect(m.takenDown).toBe(2);
+    expect(m.declined).toBe(1);
+    expect(m.weaponised).toBe(1);
+    expect(m.escalated).toBe(1);
+    expect(m.reTakenDown).toBe(1);
   });
 
   it("skips rows without an inferred_target_domain", () => {
