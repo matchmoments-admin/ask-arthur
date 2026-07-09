@@ -29,6 +29,15 @@ const MAX_ITEMS = 5;
 // Fetch more than we show so brand-dedup + live-first ordering have material.
 const SCAN_LIMIT = 100;
 
+// Defang a domain so no mail client can auto-linkify it into a clickable link
+// (H1). Gmail/Apple/Outlook turn a bare `foo.com` in a text node into a live
+// anchor regardless of markup, which would hand a 65+ subscriber a one-tap route
+// to the live phishing site the section is warning them about. `[.]` is the
+// standard threat-intel convention: readable, un-clickable.
+function defang(domain: string | null): string | null {
+  return domain ? domain.replace(/\./g, "[.]") : domain;
+}
+
 export interface CloneWatchEntry {
   /** The impersonating / cloned domain (no scheme). */
   fakeDomain: string;
@@ -99,7 +108,14 @@ export async function getWeeklyCloneWatch(): Promise<CloneWatchEntry[]> {
     const brandKey = (brand ?? r.candidate_domain).toLowerCase();
     if (seenBrands.has(brandKey)) continue;
     seenBrands.add(brandKey);
-    out.push({ fakeDomain: r.candidate_domain, brand, realDomain });
+    // Defang both domains (H1) — the email must never carry a live, auto-
+    // linkifiable scam domain. `realDomain` too (it's a real brand's domain,
+    // but keeping both inert is simplest and consistent).
+    out.push({
+      fakeDomain: defang(r.candidate_domain) ?? r.candidate_domain,
+      brand,
+      realDomain: defang(realDomain),
+    });
     if (out.length >= MAX_ITEMS) break;
   }
 

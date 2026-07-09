@@ -1,11 +1,16 @@
 # Phase 1 runbook — competitor scam-newsletter ingest
 
-> **STATUS: infra SHIPPED 2026-07-08.** Migrations v209 + v210 applied to prod;
-> Edge Function `intel-inbound-email` redeployed (v10); Worker
-> `askarthur-intel-inbound-email` redeployed; 5 CF email-routing rules created;
-> full contract verified via synthetic row (constraint accepts, category stamps,
-> promote-guard refuses, embed-eligible). **Remaining = the human subscribe step
-> (§"Step 4") — nothing else blocks ingest.**
+> **STATUS: infra SHIPPED 2026-07-08, expanded 2026-07-09.** Migrations v209 + v210
+> applied to prod (source class + `competitor_intel` category constraint); v211
+> removed the dormant `inbound_twis`; **v213 added 6 more sources** (5 competitor:
+> `choice_au`, `nts_scams`, `cyber_safe_center`, `fraud_hq`, `get_safe_online`; +1
+> publishable AU regulator: `wa_scamnet`); v214 added the
+> `feed_items.competitor_extracted_at` attempt-marker column. Edge Function
+> `intel-inbound-email` redeployed (competitor gate + 45k body-store); Worker
+> `askarthur-intel-inbound-email` redeployed; **10 CF email-routing rules** created
+> (9 competitor tags + `wa_scamnet`); full contract verified via synthetic row
+> (constraint accepts, category stamps, promote-guard refuses, embed-eligible).
+> **Remaining = the human subscribe step (§"Step 4") — nothing else blocks ingest.**
 >
 > Operationalises Phase 1 of [`arthurs-watch-newsletter.md`](./arthurs-watch-newsletter.md).
 > Uses the `add-inbound-email-source` skill. **Cost: A$0/email** (embedding only,
@@ -72,12 +77,18 @@ Sign up at each with the **tagged address** so it routes to the right source slu
 Subaddressing is on, so if a form rejects the `+ingest` part, drop it and use
 `<tag>@askarthur-inbound.com` — same rule matches.
 
-| Newsletter                    | Subscribe with this address                | Sign-up link                                        | Notes                                                                                                         |
-| ----------------------------- | ------------------------------------------ | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| **Which? Scam Alerts** (UK)   | `which_scams+ingest@askarthur-inbound.com` | https://signup.which.co.uk/wlp-scamalert-newsletter | The benchmark. Free, weekly, open signup.                                                                     |
-| **AARP Watchdog Alerts** (US) | `aarp_fraud+ingest@askarthur-inbound.com`  | https://www.aarp.org/watchdogalerts                 | Free, twice-monthly. May want a US ZIP — use any valid US ZIP (e.g. 20049, AARP HQ).                          |
-| **MoneySavingExpert** (UK)    | `mse+ingest@askarthur-inbound.com`         | https://www.moneysavingexpert.com/site/signup/      | Weekly (Wed). Scam section inside the money email. Open signup.                                               |
-| ~~This Week in Scams~~        | —                                          | —                                                   | **Removed 2026-07-08 (v211)** — Substack dormant / no longer relevant. Trialed in v209, removed forward-only. |
+| Newsletter                                     | Subscribe with this address                      | Sign-up link                                                                                | Notes                                                                                                                        |
+| ---------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| **Which? Scam Alerts** (UK)                    | `which_scams+ingest@askarthur-inbound.com`       | https://signup.which.co.uk/wlp-scamalert-newsletter                                         | The benchmark. Free, weekly, open signup.                                                                                    |
+| **AARP Watchdog Alerts** (US)                  | `aarp_fraud+ingest@askarthur-inbound.com`        | https://www.aarp.org/watchdogalerts                                                         | Free, twice-monthly. May want a US ZIP — use any valid US ZIP (e.g. 20049, AARP HQ).                                         |
+| **MoneySavingExpert** (UK)                     | `mse+ingest@askarthur-inbound.com`               | https://www.moneysavingexpert.com/site/signup/                                              | Weekly (Wed). Scam section inside the money email. Open signup.                                                              |
+| ~~This Week in Scams~~                         | —                                                | —                                                                                           | **Removed 2026-07-08 (v211)** — Substack dormant / no longer relevant. Trialed in v209, removed forward-only.                |
+| **CHOICE — Scams, recalls & rip-offs** (AU)    | `choice_au+ingest@askarthur-inbound.com`         | https://www.choice.com.au/promotions/scams-recalls-and-rip-offs                             | **v213.** competitor_intel. Independent AU consumer non-profit — fills the AU gap.                                           |
+| **National Trading Standards Scams Team** (UK) | `nts_scams+ingest@askarthur-inbound.com`         | https://eastsussex.us11.list-manage.com/subscribe?u=dafe4e690c111df03a8f7e9c1&id=72393d4c03 | **v213.** competitor_intel. UK NTS fortnightly; doorstep/postal/phone coverage.                                              |
+| **Cyber Safe Center** (INT)                    | `cyber_safe_center+ingest@askarthur-inbound.com` | https://cybersafecenter.beehiiv.com/subscribe                                               | **v213.** competitor_intel. Global consumer scam/phishing weekly (Beehiiv).                                                  |
+| **Fraud HQ** (INT)                             | `fraud_hq+ingest@askarthur-inbound.com`          | https://fraudhq.beehiiv.com/subscribe                                                       | **v213.** competitor_intel. Global consumer-framed fraud intel (Beehiiv).                                                    |
+| **Get Safe Online — PROTECT!** (UK)            | `get_safe_online+ingest@askarthur-inbound.com`   | https://www.getsafeonline.org/subscribe-to-our-newsletter/                                  | **v213.** competitor_intel. UK online-safety charity editorial. (Verify cadence on subscribe.)                               |
+| **WA ScamNet** (AU)                            | `wa_scamnet+ingest@askarthur-inbound.com`        | https://www.scamnet.wa.gov.au/scamnet/Scam_prevention-Scam_Alert_Me.htm                     | **v213. The one publishable regulator here — `tier_1_regulator`, NOT competitor_intel.** Consumer Protection WA (state gov). |
 
 **Bonus already-ingested / optional:**
 
@@ -99,12 +110,17 @@ automatically.
 SELECT source, category, published, embedding IS NOT NULL AS embedded,
        substring(title,1,60) AS title, created_at
 FROM public.feed_items
-WHERE source IN ('inbound_which_scams','inbound_aarp_fraud','inbound_mse','inbound_frankonfraud')
+WHERE source IN ('inbound_which_scams','inbound_aarp_fraud','inbound_mse','inbound_frankonfraud',
+                 'inbound_choice_au','inbound_nts_scams','inbound_cyber_safe_center',
+                 'inbound_fraud_hq','inbound_get_safe_online')
 ORDER BY created_at DESC LIMIT 20;
 ```
 
+(All 9 competitor slugs — `wa_scamnet` is deliberately excluded here: it's a
+`tier_1_regulator`, publishable, and lands `category` NULL, not `competitor_intel`.)
+
 Expect `category='competitor_intel'`, `published=false`, `embedded=true` within
-one embed cycle (~4h). Then re-run `mcp__supabase__get_advisors` after v209.
+one embed cycle (~4h). Then re-run `mcp__supabase__get_advisors` after v209/v213.
 
 ## Open decision surfaced by "good info for the feed too"
 

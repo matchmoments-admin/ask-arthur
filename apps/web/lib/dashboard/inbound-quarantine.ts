@@ -52,6 +52,12 @@ export async function getQuarantineRows(): Promise<QuarantineRow[]> {
     .or(
       "source.like.inbound_%,and(source.eq.reddit,title.eq.Pipeline smoke test from Claude)",
     )
+    // Hide competitor_intel rows from the promote/delete backlog (M10) — they're
+    // ingest-but-never-publish (ADR-0021), so a Promote button on them is a dead
+    // affordance (the server action refuses them anyway). NULL-safe: a bare
+    // `.neq` would also drop the legitimate NULL-category rows we want to show.
+    // (Chained .or() groups AND together in PostgREST.)
+    .or("category.is.null,category.neq.competitor_intel")
     .order("created_at", { ascending: false })
     .limit(200);
 

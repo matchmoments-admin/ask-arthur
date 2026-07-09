@@ -31,7 +31,7 @@ Supabase Postgres (project `rquomhcgnodxzkhokwni`). 75+ tables across 12 domain 
 
 ### Feeds / Intel
 
-- `feed_items` `[hot ⚠]` — Unified feed: reddit narratives + news alerts (`source IN ('scamwatch_alert','acsc','asic_investor','user_report','verified_scam')`). **Partial IVFFlat** for narrative rows only (v97). Retention: >365d → archive (v98).
+- `feed_items` `[hot ⚠]` — Unified feed: reddit narratives + news alerts (`source IN ('scamwatch_alert','acsc','asic_investor','user_report','verified_scam')`, plus the `inbound_*` competitor + regulator newsletter sources). **Partial IVFFlat** for narrative rows only (v97). Retention: >365d → archive (v98). **v214** adds `competitor_extracted_at timestamptz` — an attempt marker set by the `competitor-intel-extract` cron so already-processed competitor rows aren't re-extracted.
 - `feed_ingestion_log` — Scraper run metadata + error telemetry (v11). Pruned 90d.
 - `feed_http_cache` — ETag / Last-Modified cache for RSS scrapers, service-role only (v97). Pruned 30d.
 - `feed_summaries` — Aggregated digest per feed per day (v48).
@@ -41,6 +41,7 @@ Supabase Postgres (project `rquomhcgnodxzkhokwni`). 75+ tables across 12 domain 
 - `reddit_intel_quotes` — PII-scrubbed quotes (≤140 char). DELETE after 365d. v82.
 - `reddit_intel_daily_summary` — Daily lead narrative + `emerging_threats` / `brand_watchlist` JSONB. v82.
 - `reddit_processed_posts` — Dedup registry (`feed_item_id`, `external_post_id UNIQUE`).
+- `competitor_intel_observations` — Per-scam extractions split out of competitor newsletters by the `competitor-intel-extract` cron (Arthur's Watch Phase 2). One row per distinct scam found in a competitor `feed_items` row. Service-role-only RLS; FK → `feed_items(id)` ON DELETE CASCADE; `UNIQUE(feed_item_id, scam_title)` for idempotent re-runs. Intelligence only — never published (ADR-0021). v212.
 
 ### Feedback & Triage (write-hot)
 
@@ -344,7 +345,7 @@ Audit waves:
 
 ---
 
-## Migration timeline (v2 → v191)
+## Migration timeline (v2 → v214)
 
 Approximate domain bundling:
 
@@ -369,6 +370,8 @@ Approximate domain bundling:
 | v150–v156 | Clone-watch outreach hardening: directory expansion to 106 brands (v150); notification queue + batch-approval RPCs (v151); cost-brake-aware send + cooldown + race-loser detection (v152); `record_brand_notification_sent` lookup-by-brand fix (v153); FK `clone_alert_notification_queue.brand → brand_contact_directory.brand` + 5 orphan cleanup (v154); big-four banks bugcrowd_vdp → fraud_inbox with real phishing inboxes (v155); silence 13 no-inbox brands → `none` channel (v156).                                                                                                    |
 | v157–v172 | Clone-watch preclassify selectors + public revoke sweep (v157–v160); entity enrichment merge / risk-score batch / cluster commit (v161–v163); retention chunking + timeout caps (v164); onward OpenPhish/APWG enum + Brand Stewardship reports + Email Studio copy slots (v165–v167); blog slug unique + clone-watch urlscan failure-streak (v168–v169); `report_scam_entity` public RPC (v170); restore `get_world_scam_stats` (v171, #562); anon-RLS tighten — drop anon Public-read on `scam_entities`/`scam_reports`/`report_entity_links` (v172, #566, **HELD — not yet applied to prod**). |
 | v173–v191 | Vulnerability mentions (v173); canonical brand-alias layer (v174–v176); clone-alert attribution + urlscan async (v177–v178); known-brands contact seed (v179); brand-stewardship share-token / unsubscribes / outreach-done (v181–v183); Netcraft auto-candidates + daily cap (v184–v185); clone-watch report summary (v189); **first-party analytics** — `visitors` + `analytics_events` + 6 attribution views (v190, #666), `content_post_funnel` per-post view (v191, #667).                                                                                                                  |
+| v192–v207 | Shop Signal reviews + brand-convergence Seam + analytics/attribution refinements (see BACKLOG / memory for the per-migration detail).                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| v208–v214 | **Weekly Intel + Arthur's Watch stack.** Dynamic weekly-digest synthesis store `reddit_intel_weekly_digest` (v208, PR #699); then Arthur's Watch competitor-newsletter intelligence — `feed_items.source` class extension (v209), `competitor_intel` category constraint (v210), remove dormant `inbound_twis` (v211), `competitor_intel_observations` per-scam extraction table (v212), +6 inbound sources (5 competitor + `wa_scamnet` regulator, v213), `feed_items.competitor_extracted_at` attempt marker (v214). See ADR-0021 + `docs/plans/arthurs-watch-newsletter.md`.                  |
 
 ---
 

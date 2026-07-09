@@ -1,7 +1,23 @@
 # Arthur's Watch — consumer newsletter reshape + competitor-newsletter intelligence
 
-> **Status:** PLAN (2026-07-08). Scope of the session that produced this doc was
-> plan + ADR only — no code shipped. Extends
+> **Status:** PARTIALLY SHIPPED (updated 2026-07-09).
+> **Phase 1 (competitor-newsletter ingest) SHIPPED** — migrations v209–v214 applied
+> (source class, `competitor_intel` category constraint, `inbound_twis` removed as
+> dormant, +6 v213 sources, `feed_items.competitor_extracted_at` attempt marker),
+> Edge Function `competitor_intel` gate + 45k body-store, Worker `KNOWN_TAGS`,
+> promote-guard; 9 competitor sources + `wa_scamnet` (publishable regulator) wired.
+> **A Phase 2 extraction sub-step SHIPPED** — the `competitor_intel_observations`
+> table (v212), the `competitor-intel-extract` engine
+> (`packages/scam-engine/src/reddit-intel/competitor-intel-extract.ts`), the 6h
+> Inngest cron `competitor-intel-extract` (`0 */6 * * *`), the flag
+> `FF_COMPETITOR_INTEL_EXTRACT` (default OFF), and the `competitor-intel-extract`
+> cost label (shares `feature_brakes.reddit_intel` / `REDDIT_INTEL_CAP_USD`). Flag
+> is **ON in prod**, but the code is **pending merge/deploy** on branch
+> `reddit-intel/arthurs-watch-plan`.
+> **Still unbuilt:** the coverage-gap operator digest (`FF_INTEL_COVERAGE_GAP_DIGEST`,
+> Phase 2 proper), the public aperture blend (`FF_WEEKLY_APERTURE_BLEND`, Phase 3),
+> and the Arthur's Watch voice reshape (`FF_ARTHURS_WATCH_VOICE`, Phase 4).
+> Extends
 > [`weekly-intel-dynamic.md`](./weekly-intel-dynamic.md) (Track A/B shipped in
 > PR #699 / v208) by answering its open question §5-Q2 (aperture) and adding a
 > consumer-voice reshape (§5-Q3 is left as weekly-only).
@@ -21,7 +37,10 @@
 >    second newsletter. Existing `email_subscribers` become the consumer list.
 > 3. Send stays **in-house on Resend + React Email** for now. Beehiiv is a
 >    later, optional bridge (Phase 6), not this build.
-> 4. This session: **plan + ADR only.**
+> 4. ~~This session: **plan + ADR only.**~~ **SUPERSEDED 2026-07-09** — Phase 1
+>    ingest + a Phase 2 extraction sub-step (`competitor_intel_observations`,
+>    the `competitor-intel-extract` cron, `FF_COMPETITOR_INTEL_EXTRACT`) have
+>    since shipped. See the status header above.
 
 ---
 

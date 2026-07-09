@@ -65,17 +65,26 @@ const SCAM_TYPES = [
 
 const ObservationSchema = z.object({
   scamTitle: z.string().min(4).max(120),
-  scamType: z.enum(SCAM_TYPES).default("other"),
-  brands: z.array(z.string().max(80)).max(5).default([]),
-  tactic: z.string().max(200).nullable().default(null),
+  // `.catch` (not just `.default`) so an out-of-taxonomy value like "scam"
+  // degrades to "other" instead of failing the WHOLE array parse (M11).
+  scamType: z.enum(SCAM_TYPES).catch("other"),
+  brands: z.array(z.string().max(80)).max(5).catch([]),
+  tactic: z.string().max(200).nullable().catch(null),
   summary: z.string().min(10).max(400),
+  // Uppercase-normalise before the ISO-3166 check (the model occasionally
+  // returns "gb"), and `.catch(null)` so a malformed code degrades to null
+  // rather than nuking the observation.
   countryCode: z
-    .string()
-    .regex(/^[A-Z]{2}$/)
-    .nullable()
-    .default(null),
-  novelty: z.enum(["new", "rising", "ongoing"]).nullable().default(null),
-  confidence: z.number().min(0).max(1).default(0.6),
+    .preprocess(
+      (v) => (typeof v === "string" ? v.toUpperCase() : v),
+      z
+        .string()
+        .regex(/^[A-Z]{2}$/)
+        .nullable(),
+    )
+    .catch(null),
+  novelty: z.enum(["new", "rising", "ongoing"]).nullable().catch(null),
+  confidence: z.number().min(0).max(1).catch(0.6),
 });
 export type CompetitorObservation = z.infer<typeof ObservationSchema>;
 
@@ -98,8 +107,9 @@ export interface ExtractResult {
 
 /**
  * Extract per-scam observations from one competitor-newsletter feed_items row.
- * Idempotent: skips rows that already have observations unless {force:true}.
- * Best-effort and self-contained so an Inngest cron can call it per row.
+ * Idempotent via the feed_items.competitor_extracted_at attempt-marker (set on
+ * every attempt, including zero-yield), skipped unless {force:true}. Best-effort
+ * and self-contained so an Inngest cron can call it per row.
  */
 export async function extractCompetitorObservations(
   feedItemId: number,
@@ -115,7 +125,7 @@ export async function extractCompetitorObservations(
 
   const { data: item, error: readErr } = await supabase
     .from("feed_items")
-    .select("id, source, category, title, body_md, country_code")
+    .select("id, source, category, title, body_md, country_code, competitor_extracted_at")
     .eq("id", feedItemId)
     .maybeSingle();
   if (readErr) throw new Error(`competitor-extract read: ${readErr.message}`);
@@ -124,14 +134,13 @@ export async function extractCompetitorObservations(
     return { feedItemId, observations: 0, skipped: "not_competitor" };
   }
 
-  if (!opts.force) {
-    const { count } = await supabase
-      .from("competitor_intel_observations")
-      .select("id", { count: "exact", head: true })
-      .eq("feed_item_id", feedItemId);
-    if ((count ?? 0) > 0) {
-      return { feedItemId, observations: 0, skipped: "already_extracted" };
-    }
+  // Idempotency (H2): key off the attempt-marker, NOT observation presence. A
+  // newsletter that legitimately yields 0 scams (confirmation/welcome/quiet
+  // issue) writes no observations but IS marked attempted below, so it is never
+  // re-extracted (the old observation-count check re-ran Sonnet on every run for
+  // 45 days for every empty email).
+  if (!opts.force && item.competitor_extracted_at) {
+    return { feedItemId, observations: 0, skipped: "already_extracted" };
   }
 
   const body = (item.body_md ?? "").slice(0, BODY_CHARS_IN_PROMPT);
@@ -156,43 +165,80 @@ export async function extractCompetitorObservations(
 
   // Log cost FIRST (money already spent) so a persistence hiccup can't hide
   // real Sonnet spend from /admin/costs + the reddit_intel brake accounting.
-  await supabase.from("cost_telemetry").insert({
-    feature: "competitor-intel-extract",
-    provider: "anthropic",
-    operation: "messages.create",
-    units: usage.inputTokens + usage.outputTokens,
-    estimated_cost_usd: estimatedCostUsd,
-    metadata: {
-      model: modelId,
-      input_tokens: usage.inputTokens,
-      output_tokens: usage.outputTokens,
+  // Best-effort (M6): a cost-log failure must NOT abort the observations upsert
+  // below — otherwise we'd pay for the call, persist nothing, and re-extract.
+  try {
+    await supabase.from("cost_telemetry").insert({
+      feature: "competitor-intel-extract",
+      provider: "anthropic",
+      operation: "messages.create",
+      units: usage.inputTokens + usage.outputTokens,
+      estimated_cost_usd: estimatedCostUsd,
+      metadata: {
+        model: modelId,
+        input_tokens: usage.inputTokens,
+        output_tokens: usage.outputTokens,
+        feed_item_id: feedItemId,
+        source: item.source,
+        observation_count: result.observations.length,
+        prompt_version: PROMPT_VERSION,
+      },
+    });
+  } catch (costErr) {
+    logger.warn("competitor-intel-extract: cost log failed", {
+      feedItemId,
+      error: costErr instanceof Error ? costErr.message : String(costErr),
+    });
+  }
+
+  // Dedupe by scam_title (the upsert conflict key) before writing — two
+  // observations with the same short title in one batch would raise Postgres
+  // 21000 "cannot affect row a second time" and lose the WHOLE newsletter (M5).
+  const seenTitles = new Set<string>();
+  const rows = result.observations
+    .filter((o) => {
+      const key = o.scamTitle.toLowerCase();
+      if (seenTitles.has(key)) return false;
+      seenTitles.add(key);
+      return true;
+    })
+    .map((o) => ({
       feed_item_id: feedItemId,
       source: item.source,
-      observation_count: result.observations.length,
+      scam_title: o.scamTitle,
+      scam_type: o.scamType,
+      brands: o.brands,
+      tactic: o.tactic,
+      summary: o.summary,
+      country_code: o.countryCode ?? item.country_code ?? null,
+      novelty: o.novelty,
+      confidence: o.confidence,
+      model_version: modelId,
       prompt_version: PROMPT_VERSION,
-    },
-  });
-
-  const rows = result.observations.map((o) => ({
-    feed_item_id: feedItemId,
-    source: item.source,
-    scam_title: o.scamTitle,
-    scam_type: o.scamType,
-    brands: o.brands,
-    tactic: o.tactic,
-    summary: o.summary,
-    country_code: o.countryCode ?? item.country_code ?? null,
-    novelty: o.novelty,
-    confidence: o.confidence,
-    model_version: modelId,
-    prompt_version: PROMPT_VERSION,
-  }));
+    }));
 
   if (rows.length > 0) {
     const { error: upsertErr } = await supabase
       .from("competitor_intel_observations")
       .upsert(rows, { onConflict: "feed_item_id,scam_title" });
+    // Throw on upsert failure so the marker is NOT set and the row retries next
+    // run (rare after the dedupe above). The cron catches + surfaces this.
     if (upsertErr) throw new Error(`competitor-extract upsert: ${upsertErr.message}`);
+  }
+
+  // Mark attempted (H2) — reached only on a successful upsert OR a zero-yield
+  // extraction, so a no-scam newsletter is marked done and never re-extracted.
+  // Best-effort: a failed marker write just risks one idempotent re-extraction
+  // later (the upsert's ON CONFLICT makes that a no-op for observations).
+  const { error: markErr } = await supabase
+    .from("feed_items")
+    .update({ competitor_extracted_at: new Date().toISOString() })
+    .eq("id", feedItemId);
+  if (markErr) {
+    logger.warn("competitor-intel-extract: mark-extracted failed", {
+      feedItemId,
+      error: markErr.message,
+    });
   }
 
   logger.info("competitor-intel-extract: extracted observations", {

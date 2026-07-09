@@ -30,6 +30,7 @@
 // feature_brakes.reddit_intel kill-switch (checked inside the extractor).
 
 import { createServiceClient } from "@askarthur/supabase/server";
+import { getLogger } from "@askarthur/utils/axiom-logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 
@@ -38,17 +39,17 @@ import { withAxiomLogging } from "./with-axiom-logging";
 import { extractCompetitorObservations } from "../reddit-intel/competitor-intel-extract";
 
 // Max newsletters extracted per run. Small — inflow is a few/week; a larger
-// backlog simply drains over subsequent runs (idempotent).
+// backlog simply drains over subsequent runs (idempotent via the marker).
 const BATCH_LIMIT = 8;
 // Only look back this far for candidates (bounds the scan as the table grows).
 const LOOKBACK_DAYS = 45;
-// Ceiling on candidate rows fetched before filtering out already-extracted ones.
-const CANDIDATE_SCAN = 200;
 
 export const competitorIntelExtractCron = inngest.createFunction(
-  { id: "competitor-intel-extract", retries: 1 },
+  // finish ceiling bounds a pathological run (≤8 sequential Sonnet calls) so it
+  // can't sit open indefinitely (L16); matches feed-items-embed's shape.
+  { id: "competitor-intel-extract", retries: 1, timeouts: { finish: "6m" } },
   { cron: "0 */6 * * *" },
-  withAxiomLogging({ fnId: "competitor-intel-extract" }, async ({ step }) => {
+  withAxiomLogging({ fnId: "competitor-intel-extract" }, async ({ step, runId }) => {
     if (!featureFlags.competitorIntelExtract) {
       return { skipped: true, reason: "flag_off" };
     }
@@ -59,26 +60,21 @@ export const competitorIntelExtractCron = inngest.createFunction(
 
       const since = new Date(Date.now() - LOOKBACK_DAYS * 86_400_000).toISOString();
 
+      // Marker-based candidate selection (H2): un-attempted competitor rows
+      // only. The idx_feed_items_competitor_unextracted partial index backs this
+      // exact predicate. No observations join needed — a zero-yield newsletter
+      // is still marked competitor_extracted_at, so it drops out here.
       const { data: items, error: itemsErr } = await supabase
         .from("feed_items")
         .select("id")
         .eq("category", "competitor_intel")
+        .is("competitor_extracted_at", null)
         .gte("created_at", since)
         .order("created_at", { ascending: false })
-        .limit(CANDIDATE_SCAN);
+        .limit(BATCH_LIMIT);
       if (itemsErr) throw new Error(`load candidates: ${itemsErr.message}`);
 
-      const ids = (items ?? []).map((r) => r.id as number);
-      if (ids.length === 0) return [] as number[];
-
-      const { data: done, error: doneErr } = await supabase
-        .from("competitor_intel_observations")
-        .select("feed_item_id")
-        .in("feed_item_id", ids);
-      if (doneErr) throw new Error(`load extracted: ${doneErr.message}`);
-
-      const extracted = new Set((done ?? []).map((r) => r.feed_item_id as number));
-      return ids.filter((id) => !extracted.has(id)).slice(0, BATCH_LIMIT);
+      return (items ?? []).map((r) => r.id as number);
     });
 
     if (candidates.length === 0) {
@@ -101,16 +97,22 @@ export const competitorIntelExtractCron = inngest.createFunction(
             feedItemId: id,
             error: message,
           });
-          const sb = createServiceClient();
-          if (sb) {
-            await sb.from("cost_telemetry").insert({
-              feature: "reddit-intel-error",
-              provider: "diagnostic",
-              operation: "competitor-intel-extract",
-              units: 0,
-              estimated_cost_usd: 0,
-              metadata: { feed_item_id: id, error_message: message.slice(0, 500) },
-            });
+          // Best-effort error sink (L12): this insert must never throw out of
+          // the step (that would fail the function + step-retry → a paid re-run).
+          try {
+            const sb = createServiceClient();
+            if (sb) {
+              await sb.from("cost_telemetry").insert({
+                feature: "reddit-intel-error",
+                provider: "diagnostic",
+                operation: "competitor-intel-extract",
+                units: 0,
+                estimated_cost_usd: 0,
+                metadata: { feed_item_id: id, error_message: message.slice(0, 500) },
+              });
+            }
+          } catch {
+            /* swallow — console log above already recorded it */
           }
           return { observations: 0, error: true };
         }
@@ -124,6 +126,24 @@ export const competitorIntelExtractCron = inngest.createFunction(
       totalObservations,
       failures,
     });
+
+    // Surface failures to Axiom (M7): row failures are caught + swallowed above,
+    // so withAxiomLogging would otherwise emit a healthy fn.complete even when
+    // every newsletter failed. A WARN always ships (bypasses INFO sampling), so
+    // an all-fail run is visible in the #515 dashboards without a DB query.
+    if (failures > 0) {
+      const log = getLogger({
+        source: "inngest",
+        requestId: runId,
+        fn: "competitor-intel-extract",
+      });
+      log.warn("competitor-intel-extract.failures", {
+        failures,
+        processed: candidates.length,
+        totalObservations,
+      });
+      void log.flush();
+    }
 
     return { processed: candidates.length, totalObservations, failures };
   }),

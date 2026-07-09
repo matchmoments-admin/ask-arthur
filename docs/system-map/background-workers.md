@@ -96,13 +96,14 @@ Gated by `FF_ANALYZE_INNGEST_WEB`. When false, the legacy `waitUntil` path runs 
 
 ### News Intel (regulator narratives)
 
-| Function                   | Trigger                          | Purpose                                                                                                  |
-| -------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `feed-items-embed`         | `0 * * * *` (hourly)             | Embed Scamwatch / ACSC / ASIC narratives via Voyage                                                      |
-| `feed-retention`           | `30 2 * * *` (nightly 02:30 UTC) | Archive `feed_items` >365d + prune `feed_ingestion_log` (90d) + prune `feed_http_cache` (30d)            |
-| `feed-sync-verified-scams` | `0 7 * * 0` (Sun 07:00 UTC)      | Sync `verified_scams` → `feed_items`                                                                     |
-| `feed-sync-user-reports`   | `0 7 * * 0` (Sun 07:00 UTC)      | Sync `scam_reports` → `feed_items`                                                                       |
-| `regulator-alert-push`     | `0 * * * *` (hourly)             | Push new ASIC / Scamwatch / ACSC alerts to opted-in users (LOOKBACK_MINUTES 75 covers the wider cadence) |
+| Function                   | Trigger                          | Purpose                                                                                                                                                                                                                                                                                                                                                   |
+| -------------------------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `feed-items-embed`         | `0 * * * *` (hourly)             | Embed Scamwatch / ACSC / ASIC narratives via Voyage                                                                                                                                                                                                                                                                                                       |
+| `competitor-intel-extract` | `0 */6 * * *` (every 6h)         | Arthur's Watch Phase 2 — split competitor newsletters into per-scam observations (`competitor_intel_observations`, v212). Flag-gated `FF_COMPETITOR_INTEL_EXTRACT` (default OFF); marks `feed_items.competitor_extracted_at`; logs `cost_telemetry` `feature='competitor-intel-extract'` + shares `feature_brakes.reddit_intel` / `REDDIT_INTEL_CAP_USD`. |
+| `feed-retention`           | `30 2 * * *` (nightly 02:30 UTC) | Archive `feed_items` >365d + prune `feed_ingestion_log` (90d) + prune `feed_http_cache` (30d)                                                                                                                                                                                                                                                             |
+| `feed-sync-verified-scams` | `0 7 * * 0` (Sun 07:00 UTC)      | Sync `verified_scams` → `feed_items`                                                                                                                                                                                                                                                                                                                      |
+| `feed-sync-user-reports`   | `0 7 * * 0` (Sun 07:00 UTC)      | Sync `scam_reports` → `feed_items`                                                                                                                                                                                                                                                                                                                        |
+| `regulator-alert-push`     | `0 * * * *` (hourly)             | Push new ASIC / Scamwatch / ACSC alerts to opted-in users (LOOKBACK_MINUTES 75 covers the wider cadence)                                                                                                                                                                                                                                                  |
 
 ### Charity Check
 
@@ -319,6 +320,7 @@ every 3h report-onward-auto-report           (Inngest, at :25)
 every 4h pipeline-entity-enrichment, urlscan-enrichment (Inngest)
 every 6h pipeline-enrichment-fanout, risk-scorer (Inngest)
 every 6h bot-queue-sweep, cost-daily-check    (Vercel)
+every 6h competitor-intel-extract            (Inngest, FF_COMPETITOR_INTEL_EXTRACT)
 every 12h pipeline-ct-monitor                (Inngest)
 
 02:00 ensure-partitions                       (Vercel)
@@ -352,7 +354,7 @@ Anything between 02:00 and 05:00 UTC is in the housekeeping window. Anything out
 
 ## News Intel scrapers — operational note
 
-AU regulator narrative scrapers (Scamwatch HTML, ACSC RSS, ASIC JSON) shipped 2026-05-06 (PR #137 + fixes #138/#139, migration v97). Scrapers in `pipeline/scrapers/{scamwatch,acsc,asic_investor}_alerts.py` write to `feed_items` with `source IN ('scamwatch_alert','acsc','asic_investor')`. Voyage embedding via `feed-items-embed` Inngest cron (`0 * * * *`, hourly). Weekly digest folds in via `regulatorAlerts` section in `WeeklyIntelDigest.tsx`.
+AU regulator narrative scrapers (Scamwatch HTML, ACSC RSS, ASIC JSON) shipped 2026-05-06 (PR #137 + fixes #138/#139, migration v97). Scrapers in `pipeline/scrapers/{scamwatch,acsc,asic_investor}_alerts.py` write to `feed_items` with `source IN ('scamwatch_alert','acsc','asic_investor')`. Voyage embedding via `feed-items-embed` Inngest cron (`0 * * * *`, hourly). Weekly digest folds in via `regulatorAlerts` section + Clone Watch section (`getWeeklyCloneWatch` → `cloneWatch` prop) in `WeeklyIntelDigest.tsx`.
 
 **Retention** (migration v98): narrative `feed_items` >365d → `feed_items_archive`; `feed_ingestion_log` pruned 90d; `feed_http_cache` pruned 30d. All housekeeping runs nightly at 02:30 UTC via `feed-retention` Inngest function.
 

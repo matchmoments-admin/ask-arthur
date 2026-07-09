@@ -54,11 +54,15 @@ export async function GET(req: NextRequest) {
       const recipients = Array.from(new Set([OPERATOR_EMAIL, ...subscriberEmails]));
 
       // Sibling fresh streams — both degrade gracefully to empty so the
-      // newsletter stands on Reddit alone when they're quiet.
-      const [regulatorAlerts, cloneWatch] = await Promise.all([
+      // newsletter stands on Reddit alone when they're quiet. allSettled (not
+      // all) so a THROWN error in either reader coalesces to [] rather than
+      // rejecting the pair and 500-ing the whole send (L13).
+      const [regRes, cloneRes] = await Promise.allSettled([
         getWeeklyRegulatorAlerts(),
         getWeeklyCloneWatch(),
       ]);
+      const regulatorAlerts = regRes.status === "fulfilled" ? regRes.value : [];
+      const cloneWatch = cloneRes.status === "fulfilled" ? cloneRes.value : [];
 
       try {
         await sendWeeklyIntelDigest(recipients, {
