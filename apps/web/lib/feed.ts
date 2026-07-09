@@ -56,6 +56,21 @@ export const SOURCE_CONFIG: Record<
   inbound_securityweek: { label: "SecurityWeek", icon: "Mail" },
   inbound_riskybiz: { label: "Risky Business", icon: "Mail" },
   inbound_generic: { label: "Newsletter", icon: "Mail" },
+  // Arthur's Watch competitor scam-newsletters (v209/v213) — ingest-but-never-
+  // publish (ADR-0021), so these never actually render on the public feed;
+  // registered here to satisfy the source-config drift guard and label them
+  // correctly if that ever changes.
+  inbound_which_scams: { label: "Which? Scam Alerts", icon: "Mail" },
+  inbound_aarp_fraud: { label: "AARP Fraud Watch", icon: "Mail" },
+  inbound_mse: { label: "MoneySavingExpert", icon: "Mail" },
+  inbound_frankonfraud: { label: "FrankonFraud", icon: "Mail" },
+  inbound_choice_au: { label: "CHOICE", icon: "Mail" },
+  inbound_nts_scams: { label: "NTS Scams Team", icon: "Mail" },
+  inbound_cyber_safe_center: { label: "Cyber Safe Center", icon: "Mail" },
+  inbound_fraud_hq: { label: "Fraud HQ", icon: "Mail" },
+  inbound_get_safe_online: { label: "Get Safe Online", icon: "Mail" },
+  // WA ScamNet (v213) — AU state regulator, publishable (not competitor_intel).
+  inbound_wa_scamnet: { label: "WA ScamNet", icon: "Shield", isRegulator: true },
 };
 
 // Humanise an unregistered source slug for the fallback label so the UI

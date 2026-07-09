@@ -58,6 +58,24 @@ const KNOWN_TAGS = [
   "tldr_infosec",
   "thn",
   "securityweek",
+  // v209 competitor consumer scam newsletters (Arthur's Watch Phase 1).
+  // Ingest-but-never-publish (ADR-0021): the Edge Function exempts these from
+  // the tier_3 drop and stamps category='competitor_intel'. The Worker only
+  // needs the tag here so resolveSource() attributes them to inbound_<tag>
+  // instead of inbound_generic.
+  "which_scams",
+  "aarp_fraud",
+  "mse",
+  "frankonfraud",
+  // v213 source expansion (competitor_intel: choice_au, nts_scams,
+  // cyber_safe_center, fraud_hq, get_safe_online; publishable regulator:
+  // wa_scamnet). Classification is enforced in the Edge Function.
+  "choice_au",
+  "nts_scams",
+  "cyber_safe_center",
+  "fraud_hq",
+  "get_safe_online",
+  "wa_scamnet",
   // User-scan tag (F1 — scan@askarthur-inbound.com → /api/inbound-scan).
   // Differs from the others: messages are NOT written to feed_items;
   // they're forwarded to a different endpoint that analyses + replies.

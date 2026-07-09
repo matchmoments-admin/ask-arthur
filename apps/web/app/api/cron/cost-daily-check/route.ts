@@ -157,7 +157,8 @@ export async function GET(req: Request) {
   // spend is nowhere near the $2 Telegram threshold.
   //
   // Reddit Intel uses the same pattern: aggregate today's spend across
-  // reddit-intel-classify + reddit-intel-embed + reddit-intel-name-themes
+  // reddit-intel-classify + reddit-intel-embed + reddit-intel-name-themes +
+  // competitor-intel-extract (Arthur's Watch Phase 2, shares this brake)
   // (excluding reddit-intel-error which is $0 diagnostic). If sum exceeds
   // REDDIT_INTEL_CAP_USD, brake the whole pipeline for 24h.
   const vulnEnrichThresholdUsd = envReads.VULN_AU_ENRICHMENT_CAP_USD.value;
@@ -171,7 +172,8 @@ export async function GET(req: Request) {
       (t) =>
         t.feature === "reddit-intel-classify" ||
         t.feature === "reddit-intel-embed" ||
-        t.feature === "reddit-intel-name-themes",
+        t.feature === "reddit-intel-name-themes" ||
+        t.feature === "competitor-intel-extract",
     )
     .reduce((sum, t) => sum + t.cost, 0);
 

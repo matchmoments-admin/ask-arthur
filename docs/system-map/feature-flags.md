@@ -102,13 +102,15 @@ Paused after PR 2 over OAIC NDB data-availability finding. All flags OFF, schema
 
 ## Reddit Intelligence (Waves 1–3)
 
-| Flag                     | Default | Wave | Purpose                              |
-| ------------------------ | ------- | ---- | ------------------------------------ |
-| `redditIntelIngest`      | OFF     | 1    | Daily Sonnet classifier + IOC linker |
-| `redditIntelDashboard`   | OFF     | 2    | Dashboard widgets + theme cards      |
-| `redditIntelEmail`       | OFF     | 2    | Weekly email digest                  |
-| `redditIntelB2bApi`      | OFF     | 3    | `/api/v1/intel/*` public B2B API     |
-| `redditIntelPublicPages` | OFF     | 3    | Public `/intel/themes/[slug]` pages  |
+| Flag                                                                     | Default              | Wave | Purpose                                                                                                                                                               |
+| ------------------------------------------------------------------------ | -------------------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `redditIntelIngest`                                                      | OFF                  | 1    | Daily Sonnet classifier + IOC linker                                                                                                                                  |
+| `redditIntelDashboard`                                                   | OFF                  | 2    | Dashboard widgets + theme cards                                                                                                                                       |
+| `redditIntelEmail`                                                       | OFF                  | 2    | Weekly email digest                                                                                                                                                   |
+| `redditIntelWeeklySynthesis` (server `FF_REDDIT_INTEL_WEEKLY_SYNTHESIS`) | **ON in prod**       | 2    | Dynamic weekly digest — synthesise "emerging this week" from the week's cohort (Track A+B, v208, PR #699). When OFF, the Monday email falls back to the static shape. |
+| `redditIntelB2bApi`                                                      | OFF                  | 3    | `/api/v1/intel/*` public B2B API                                                                                                                                      |
+| `redditIntelPublicPages`                                                 | OFF                  | 3    | Public `/intel/themes/[slug]` pages                                                                                                                                   |
+| `competitorIntelExtract` (server `FF_COMPETITOR_INTEL_EXTRACT`)          | OFF (**ON in prod**) | —    | Phase-2 competitor-newsletter → per-scam observation extraction cron; shares `feature_brakes.reddit_intel`. Writes `competitor_intel_observations` (v212).            |
 
 ## Phone Footprint
 
@@ -272,6 +274,8 @@ Distinct from the `*_CAP_USD` env-var caps above: some `feature_brakes` rows are
 - (Full list lives in `packages/utils/src/feature-flags.ts`)
 - `FF_ANALYZE_INNGEST_WEB` — Server-only canary for the analyze Phase 2 pipeline
 - `FF_ANALYTICS_ATTRIBUTION` — Server-only; first-party attribution cookie + `analytics_events` write path (v190). Set **ON** in prod (2026-07-05)
+- `FF_REDDIT_INTEL_WEEKLY_SYNTHESIS` — Server-only; dynamic weekly-digest synthesis (Track A+B, v208, PR #699). **ON in prod**
+- `FF_COMPETITOR_INTEL_EXTRACT` — Server-only; gates the 6h `competitor-intel-extract` cron (competitor-newsletter → per-scam `competitor_intel_observations`, v212). Default OFF (**ON in prod**); shares `feature_brakes.reddit_intel` / `REDDIT_INTEL_CAP_USD`
 
 ### Inngest
 
