@@ -14,7 +14,9 @@ import { domainToASCII } from "node:url";
  */
 
 const NETCRAFT_API_BASE = "https://report.netcraft.com/api/v3";
-const DEFAULT_TIMEOUT_MS = 12_000;
+// Tightened from 12s (FIX-10): under Netcraft degradation we want to bail early
+// so the whole run stays under the 5m finish budget / 10m watchdog.
+const DEFAULT_TIMEOUT_MS = 8_000;
 // Our bulk batches are ≤50 URLs; /urls paginates at 25 by default, so we must
 // ask for more or we silently drop candidates ≥26. 500 covers any real batch in
 // one call (Netcraft returned all 38 of acDb with ?count=100).
@@ -30,13 +32,13 @@ export const NETCRAFT_URL_STATE = {
   REJECTED: "rejected",
 } as const;
 
-// States that mean "actioned or not yet settled" — never escalate these.
-const NOT_ESCALATABLE = new Set<string>([
-  NETCRAFT_URL_STATE.MALICIOUS,
+// Actioned — a matched alert whose host is malicious is done (taken down).
+const ACTIONED = new Set<string>([NETCRAFT_URL_STATE.MALICIOUS]);
+// Unsettled — still moving; wait and re-check rather than file or drop.
+const UNSETTLED = new Set<string>([
   NETCRAFT_URL_STATE.SUSPICIOUS,
   NETCRAFT_URL_STATE.PROCESSING,
 ]);
-
 // Every state we recognise — anything outside this set is drift we log.
 const KNOWN_STATES = new Set<string>(Object.values(NETCRAFT_URL_STATE));
 
@@ -52,19 +54,26 @@ export interface NetcraftSubmissionUrls {
   status: number;
   /** Authoritative archival flag — the /report_issue endpoint 404s once archived. */
   isArchived: boolean;
-  /** Submission already has an issue filed (advisory — per-alert stamp governs). */
+  /** Submission already has an issue filed. */
   hasIssues: boolean;
   urls: NetcraftUrlEntry[];
   /** total_count from the /urls envelope, for pagination-gap detection. */
   totalCount: number;
+  /** Per-state histogram from the submission object (state_counts.urls). */
+  stateCounts: Record<string, number>;
+  /**
+   * True when the submission object showed zero escalatable states, so the
+   * /urls GET was skipped entirely (efficiency) — every alert on this uuid is
+   * actioned/unsettled and should be drained, not filed.
+   */
+  noEscalatable: boolean;
 }
 
 /**
  * Normalise a hostname or URL to a comparable ASCII (punycode) host.
- * Resolves the IDN-homograph class (e.g. `inistagram.ir`): our candidate_domain
- * is ASCII punycode from whoisds, but Netcraft may return decoded Unicode.
- * Also strips scheme, port (URL.hostname already drops it), leading `www.`,
- * trailing dot, and lowercases.
+ * Resolves the IDN-homograph class: our candidate_domain is ASCII punycode from
+ * whoisds, but Netcraft may return decoded Unicode. Also strips scheme, port
+ * (URL.hostname already drops it), leading `www.`, trailing dot, and lowercases.
  */
 export function normHost(input: string): string {
   if (!input) return "";
@@ -96,102 +105,126 @@ export interface PendingAlert {
   candidate_domain: string;
   inferred_target_domain: string | null;
   target_brand_normalized: string | null;
-  netcraft_uuid: string;
+}
+
+/** A matched alert that must be drained (never re-fetched) with a reason. */
+export interface TerminalAlert {
+  alert: PendingAlert;
+  reason: "actioned" | "unavailable_deferred" | "no_escalatable_state";
 }
 
 export interface SelectResult {
+  /** Branded false negatives to escalate. */
   candidates: FalseNegativeCandidate[];
-  /** Alerts whose host never appeared in /urls — stamped 'not_in_urls' to drain. */
+  /** Matched but done — stamp terminal so they drain. */
+  terminal: TerminalAlert[];
+  /** Matched but still moving (suspicious/processing) — recheck later. */
+  transient: PendingAlert[];
+  /** Host never appeared in /urls (may be incomplete ingest — guard the drain). */
   notInUrls: PendingAlert[];
-  /** url_state values seen that are outside KNOWN_STATES — logged as drift. */
+  /** url_state values seen outside KNOWN_STATES — logged as drift. */
   driftStates: string[];
 }
 
 /**
- * Pure predicate: given our grouped alerts for one submission and that
- * submission's per-URL entries, pick the branded false negatives.
+ * Pure predicate: given our alerts for one submission + that submission's
+ * per-URL entries, classify each alert into exactly one bucket.
  *
- * An alert is a candidate iff its host matches ≥1 /urls entry, NONE of the
- * matched entries is actioned/unsettled (malicious/suspicious/processing), and
- * at least one matched entry is in the allowed set:
- *   - allowUnavailable=false (go-live): { "no threats" } only. Netcraft graded
- *     it clean after fetching → a genuine, disputable false negative.
- *   - allowUnavailable=true  (dry-run / PR3 w/ screenshots): also "unavailable"
- *     (parked/cloaked — Netcraft couldn't fetch).
+ * Escalatable = { "no threats" } at go-live; also "unavailable" in dry-run
+ * (allowUnavailable). Classification per matched host's state set S:
+ *   - malicious in S           → terminal 'actioned'
+ *   - suspicious/processing S   → transient (recheck; don't file or drop)
+ *   - escalatable in S (no above) → candidate
+ *   - unavailable only, not allowed → terminal 'unavailable_deferred' (PR3)
+ *   - only unknown/rejected     → terminal 'no_escalatable_state' (+ drift)
  */
 export function selectFalseNegativeCandidates(
   alerts: PendingAlert[],
   urls: NetcraftUrlEntry[],
   opts: { allowUnavailable: boolean },
 ): SelectResult {
-  const allow = new Set<string>([NETCRAFT_URL_STATE.NO_THREATS]);
-  if (opts.allowUnavailable) allow.add(NETCRAFT_URL_STATE.UNAVAILABLE);
+  const escalatable = new Set<string>([NETCRAFT_URL_STATE.NO_THREATS]);
+  if (opts.allowUnavailable) escalatable.add(NETCRAFT_URL_STATE.UNAVAILABLE);
 
-  // host → list of entries (a host can appear on multiple URLs in a batch)
-  const byHost = new Map<string, NetcraftUrlEntry[]>();
+  const byHost = new Map<string, string[]>();
   const driftStates = new Set<string>();
   for (const entry of urls) {
     const host = normHost(entry.hostname || entry.url);
     if (!host) continue;
-    const list = byHost.get(host) ?? [];
-    list.push(entry);
-    byHost.set(host, list);
     const s = normState(entry.url_state);
+    (byHost.get(host) ?? byHost.set(host, []).get(host)!).push(s);
     if (s && !KNOWN_STATES.has(s)) driftStates.add(s);
   }
 
   const candidates: FalseNegativeCandidate[] = [];
+  const terminal: TerminalAlert[] = [];
+  const transient: PendingAlert[] = [];
   const notInUrls: PendingAlert[] = [];
 
   for (const alert of alerts) {
     const host = normHost(alert.candidate_domain || alert.candidate_url);
-    const matched = byHost.get(host);
-    if (!matched || matched.length === 0) {
+    const states = byHost.get(host);
+    if (!states || states.length === 0) {
       notInUrls.push(alert);
       continue;
     }
-    const states = matched.map((m) => normState(m.url_state));
-    // Any actioned/unsettled entry on this host → do not escalate.
-    if (states.some((s) => NOT_ESCALATABLE.has(s))) continue;
-    // Pick the first escalatable state (prefer "no threats" over "unavailable").
+    const S = new Set(states);
+    if ([...S].some((s) => ACTIONED.has(s))) {
+      terminal.push({ alert, reason: "actioned" });
+      continue;
+    }
+    if ([...S].some((s) => UNSETTLED.has(s))) {
+      transient.push(alert);
+      continue;
+    }
     const hit =
-      states.find((s) => s === NETCRAFT_URL_STATE.NO_THREATS) ??
-      states.find((s) => allow.has(s));
-    if (!hit) continue;
-    candidates.push({
-      alertId: alert.id,
-      candidateUrl: alert.candidate_url,
-      candidateDomain: alert.candidate_domain,
-      brand:
-        alert.target_brand_normalized ||
-        alert.inferred_target_domain ||
-        "an Australian brand",
-      urlState: hit,
+      (S.has(NETCRAFT_URL_STATE.NO_THREATS) && NETCRAFT_URL_STATE.NO_THREATS) ||
+      [...S].find((s) => escalatable.has(s));
+    if (hit) {
+      candidates.push({
+        alertId: alert.id,
+        candidateUrl: alert.candidate_url,
+        candidateDomain: alert.candidate_domain,
+        brand:
+          alert.target_brand_normalized ||
+          alert.inferred_target_domain ||
+          "an Australian brand",
+        urlState: hit,
+      });
+      continue;
+    }
+    // No escalatable state and not allowed: unavailable → defer to PR3, else no-op.
+    terminal.push({
+      alert,
+      reason: S.has(NETCRAFT_URL_STATE.UNAVAILABLE)
+        ? "unavailable_deferred"
+        : "no_escalatable_state",
     });
   }
 
-  return { candidates, notInUrls, driftStates: [...driftStates] };
+  return { candidates, terminal, transient, notInUrls, driftStates: [...driftStates] };
 }
 
 /**
- * Keyless fetch of a submission's per-URL truth. Returns the submission-level
- * is_archived/has_issues plus the (paginated-complete) url list.
+ * Keyless fetch of a submission's per-URL truth. Reads the submission object
+ * first (is_archived / has_issues / state_counts). If `opts.escalatableStates`
+ * is given and the state_counts histogram shows none of them, the /urls GET is
+ * SKIPPED (noEscalatable=true) — the whole batch is actioned/unsettled.
  *
- * Throws on network/transport error (Inngest retries). A non-200 on the
- * submission GET is returned structured (ok:false) — a 404 there means the
- * submission is gone/archived, which the caller treats as a permanent skip.
+ * Throws on network/transport error (Inngest retries). A non-200 on either GET
+ * is returned structured (ok:false); a 404 on the submission means archived.
  */
 export async function fetchNetcraftSubmissionUrls(
   uuid: string,
-  timeoutMs = DEFAULT_TIMEOUT_MS,
+  opts?: { escalatableStates?: string[]; timeoutMs?: number },
 ): Promise<NetcraftSubmissionUrls> {
+  const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const encoded = encodeURIComponent(uuid);
 
   const subRes = await fetch(`${NETCRAFT_API_BASE}/submission/${encoded}`, {
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!subRes.ok) {
-    // 404 → submission archived/removed. Any non-200 → skip this run.
     return {
       ok: false,
       status: subRes.status,
@@ -199,11 +232,35 @@ export async function fetchNetcraftSubmissionUrls(
       hasIssues: false,
       urls: [],
       totalCount: 0,
+      stateCounts: {},
+      noEscalatable: false,
     };
   }
   const sub = (await subRes.json()) as Record<string, unknown>;
   const isArchived = sub.is_archived === 1 || sub.is_archived === true;
   const hasIssues = sub.has_issues === 1 || sub.has_issues === true;
+  const stateCounts =
+    ((sub.state_counts as { urls?: Record<string, number> } | undefined)?.urls) ??
+    {};
+
+  // Pre-filter: skip the /urls GET when the histogram has no escalatable state.
+  if (opts?.escalatableStates && Object.keys(stateCounts).length > 0) {
+    const anyEscalatable = opts.escalatableStates.some(
+      (s) => (stateCounts[s] ?? 0) > 0,
+    );
+    if (!anyEscalatable) {
+      return {
+        ok: true,
+        status: 200,
+        isArchived,
+        hasIssues,
+        urls: [],
+        totalCount: 0,
+        stateCounts,
+        noEscalatable: true,
+      };
+    }
+  }
 
   const urlsRes = await fetch(
     `${NETCRAFT_API_BASE}/submission/${encoded}/urls?count=${URLS_PAGE_COUNT}`,
@@ -217,6 +274,8 @@ export async function fetchNetcraftSubmissionUrls(
       hasIssues,
       urls: [],
       totalCount: 0,
+      stateCounts,
+      noEscalatable: false,
     };
   }
   const body = (await urlsRes.json()) as {
@@ -231,7 +290,9 @@ export async function fetchNetcraftSubmissionUrls(
     hasIssues,
     urls,
     totalCount: typeof body.total_count === "number" ? body.total_count : urls.length,
+    stateCounts,
+    noEscalatable: false,
   };
 }
 
-export { NETCRAFT_API_BASE };
+export { NETCRAFT_API_BASE, DEFAULT_TIMEOUT_MS };
