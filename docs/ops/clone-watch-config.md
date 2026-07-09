@@ -267,7 +267,9 @@ Shipped across PRs #424 / #425 / #431 / #432 / #433; hardened across #468 / #469
 - **09:30 UTC** — `shopfront-clone-notify-brand-prepare` runs (daily batch builder). Groups queue rows by (brand, recipient), filters via 24h cooldown, caps each group at 50 candidates, fetches `urlscan_evidence` per alert (link + screenshot), renders React Email, freezes subject + html on the queue, transitions to `pending`. Posts ONE summary Telegram pointing the admin at `/admin/clone-watch#approvals`. When `FF_SHOPFRONT_CLONE_NOTIFY_BRAND_AUTO_SEND=true`, dispatches via Resend on the same tick instead of waiting for admin click.
 - **Admin clicks Send** at `/admin/clone-watch#approvals` → `POST /api/admin/clone-watch/batches/[batchId]/send`. Pre-checks (FF + brake + RESEND_FROM_EMAIL), cross-validates recipient against `brand_contact_directory.brand` PK, re-checks STOP suppression, Resend send with `idempotencyKey: clone-watch-send:{batchId}`, transitions batch, records send (stamps `last_notified_at` + `submitted_to.brand_notification.status='sent'`).
 - **11:00 UTC** — urlscan re-scan cron (`shopfront-clone-urlscan-rescan`) catches up to 50 stale rows (60-day window). Catches the parked → activated transition.
-- **Every 30 min** — Netcraft takedown polling cron updates `submitted_to.netcraft.{state, takedown_at}`.
+- **10:00 UTC** — `shopfront-clone-netcraft-reconcile` (v217, gated `FF_CLONE_LIFECYCLE_RECONCILE`) reads the PER-URL truth from `GET /submission/{uuid}/urls` and advances each submitted clone's `lifecycle_state` by its own `url_state` (`malicious→taken_down` + witnessed `takedown_at`; `no threats`/`unavailable→declined`). This is the single Netcraft verdict source.
+- **11:00 UTC** — `shopfront-clone-netcraft-issue` (v215/v216, gated `FF_CLONE_NETCRAFT_ISSUE`) files a false-negative `report_issue` on branded `no threats` clones (dry-run until `NETCRAFT_ISSUE_DRY_RUN=false`).
+- **~~Every 30 min — Netcraft takedown poll~~ (RETIRED)** — the submission-level rollup poll (`shopfront-clone-poll-netcraft`) is **dark** (cron removed; it stamped rollup `malicious` onto all 50 URLs in a batch when 1 was malicious). Its role is replaced by the per-URL reconciler above; do NOT re-enable it. `submitted_to.netcraft.{state,takedown_at}` is now written by the reconciler.
 
 ### Outreach env vars
 
@@ -278,6 +280,36 @@ Shipped across PRs #424 / #425 / #431 / #432 / #433; hardened across #468 / #469
 | `URLSCAN_API_KEY`                  | urlscan.io free-tier API key. Powers the auto-scan + re-scan crons.                                                                                                                                                                                                                                                                                         | Vercel → Production (set 87d ago)         |
 | `RESEND_FROM_EMAIL`                | Sender for Layers 3+4 brand-notification emails. **Required** — both the prepare cron's auto-send path and the dashboard send route fail closed (`resend_from_email_unset`) when missing. Read via `readStringEnv` to defeat trailing-whitespace + DefinePlugin static-inlining (PR-A 2026-05-28). Recommended shape `"Ask Arthur <brendan@askarthur.au>"`. | Vercel → Production                       |
 | `SHOPFRONT_CLONE_OUTREACH_CAP_USD` | Aggregate cost-brake across all sub-features (submit / notify / digest / poll / urlscan + rescan). Defaults to `5`.                                                                                                                                                                                                                                         | Vercel → Production (optional)            |
+
+### Netcraft false-negative reporter + lifecycle reconciler (v215–v219)
+
+The per-URL flow (PRs #701/#702/#703, all default-OFF) that reads
+`GET /submission/{uuid}/urls` (keyless — no API key), drives the lifecycle, and
+files false-negative `report_issue` escalations. Plans:
+`docs/plans/clone-watch-netcraft-false-negative-escalation.md` +
+`docs/plans/clone-watch-netcraft-issue-pr2-fixes.md` +
+`docs/plans/clone-watch-brand-story-reporting.md`.
+
+| Flag / env / brake                    | Type        | Default                          | Purpose                                                                                                                                                                                                                                                                                               |
+| ------------------------------------- | ----------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `FF_CLONE_LIFECYCLE_RECONCILE`        | server flag | `false`                          | Gates `shopfront-clone-netcraft-reconcile` (cron `0 10 * * *`). Advances lifecycle from the per-URL verdict + feeds the takedown KPI + the weaponisation recheck. Sub-flag of `FF_SHOPFRONT_CLONE_OUTREACH`.                                                                                          |
+| `FF_CLONE_NETCRAFT_ISSUE`             | server flag | `false`                          | Gates `shopfront-clone-netcraft-issue` (cron `0 11 * * *`) — the false-negative `report_issue` reporter. Sub-flag of `FF_SHOPFRONT_CLONE_OUTREACH`.                                                                                                                                                   |
+| `NETCRAFT_ISSUE_DRY_RUN`              | server env  | dry-run unless literal `"false"` | Read as `readStringEnv(...) !== "false"` (an unset/whitespace value stays dry-run — a `readBoolEnv` default would deploy LIVE). Dry-run = ZERO posts + ZERO DB writes.                                                                                                                                |
+| `NETCRAFT_ISSUE_DAILY_CAP`            | server env  | `20`                             | Max submission-uuids the reporter files per day (reporter-standing bound). Guarded `parseInt`; `$20`→NaN→default.                                                                                                                                                                                     |
+| `feature_brakes.clone_netcraft_issue` | brake row   | absent (open)                    | Manual kill-switch AND auto-tripped by the reporter's autobrake on a permanent-4xx reject spike (≥3 or >50% of a run) → UPSERT `paused_until = now()+24h` + Telegram page. **Not** cost-cap auto-tripped (it's a $0 keyless feature). Clear by deleting the row / setting `paused_until` in the past. |
+
+**Go-live sequence** (all dark today):
+
+1. Verify `FF_AXIOM_ENABLED=true` (observability of rejects/filings).
+2. `FF_CLONE_LIFECYCLE_RECONCILE=true` → one run populates lifecycle + KPI for the
+   ~892-clone backlog. The first run stamps NO `takedown_at` (witnessed-transition
+   rule, v219), so the median-time-to-takedown KPI is not inflated by backfill.
+   Verify `taken_down`/`declined` counts go non-zero.
+3. `FF_SHOPFRONT_CLONE_RECHECK` + `FF_SHOPFRONT_CLONE_URLSCAN` (+ `URLSCAN_API_KEY`)
+   → the `declined → weaponised` loop that proves "no threat ≠ safe".
+4. Validate one real POST: `NETCRAFT_ISSUE_PROBE_CONFIRM=yes node apps/web/scripts/netcraft-issue-probe.mjs <fresh-uuid>` (settles the body contract; already run 2026-07-10 → 200).
+5. `NETCRAFT_ISSUE_DRY_RUN=false` → real escalations (single uuid first; cap 20/day; `no threats` only — `unavailable` deferred to a screenshot-backed follow-up).
+6. `FF_BRAND_STEWARDSHIP_REPORT=true` → the monthly email renders the "What Netcraft did with them" story.
 
 ### `brand_contact_directory` curation
 

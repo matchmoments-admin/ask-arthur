@@ -32,6 +32,13 @@ import {
  * bounded per run by p_uuid_limit + a 24h per-uuid cadence throttle. Daily cron.
  * Gated FF_CLONE_LIFECYCLE_RECONCILE (+ parent FF_SHOPFRONT_CLONE_OUTREACH).
  *
+ * TTD honesty (v219): apply_netcraft_reconcile only stamps takedown_at on a
+ * WITNESSED transition (the alert already has a reconciled_at), so the first-run
+ * backfill of already-actioned clones advances lifecycle to taken_down WITHOUT a
+ * takedown_at — they count as taken_down but are excluded from the
+ * time-to-takedown KPI (their real takedown time is unknowable). New clones,
+ * observed daily from submission, get an accurate (to one cadence) takedown_at.
+ *
  * See docs/plans/clone-watch-brand-story-reporting.md §3 Part A.
  */
 

@@ -1264,29 +1264,41 @@ export type Database = {
         Row: {
           brand: string
           clones: number
+          declined: number
+          escalated: number
           is_au: boolean
           likely_phishing: number
           parked: number
           period_month: string
           reported_to_netcraft: number
+          taken_down: number
+          weaponised: number
         }
         Insert: {
           brand: string
           clones?: number
+          declined?: number
+          escalated?: number
           is_au?: boolean
           likely_phishing?: number
           parked?: number
           period_month: string
           reported_to_netcraft?: number
+          taken_down?: number
+          weaponised?: number
         }
         Update: {
           brand?: string
           clones?: number
+          declined?: number
+          escalated?: number
           is_au?: boolean
           likely_phishing?: number
           parked?: number
           period_month?: string
           reported_to_netcraft?: number
+          taken_down?: number
+          weaponised?: number
         }
         Relationships: []
       }
@@ -1311,6 +1323,8 @@ export type Database = {
       clone_watch_report_summary: {
         Row: {
           brand_count: number
+          declined: number
+          escalated: number
           generated_at: string
           global_brands: Json
           likely_phishing: number
@@ -1318,16 +1332,21 @@ export type Database = {
           parked_for_sale: number
           period_month: string
           published_post_urn: string | null
+          re_taken_down: number
           reported_to_netcraft: number
           super_fund: Json | null
+          taken_down: number
           top_au_brands: Json
           top_registrars: Json
           total_domains: number
           unknown_registrar_count: number
           updated_at: string
+          weaponised: number
         }
         Insert: {
           brand_count?: number
+          declined?: number
+          escalated?: number
           generated_at?: string
           global_brands?: Json
           likely_phishing?: number
@@ -1335,16 +1354,21 @@ export type Database = {
           parked_for_sale?: number
           period_month: string
           published_post_urn?: string | null
+          re_taken_down?: number
           reported_to_netcraft?: number
           super_fund?: Json | null
+          taken_down?: number
           top_au_brands?: Json
           top_registrars?: Json
           total_domains?: number
           unknown_registrar_count?: number
           updated_at?: string
+          weaponised?: number
         }
         Update: {
           brand_count?: number
+          declined?: number
+          escalated?: number
           generated_at?: string
           global_brands?: Json
           likely_phishing?: number
@@ -1352,13 +1376,16 @@ export type Database = {
           parked_for_sale?: number
           period_month?: string
           published_post_urn?: string | null
+          re_taken_down?: number
           reported_to_netcraft?: number
           super_fund?: Json | null
+          taken_down?: number
           top_au_brands?: Json
           top_registrars?: Json
           total_domains?: number
           unknown_registrar_count?: number
           updated_at?: string
+          weaponised?: number
         }
         Relationships: []
       }
@@ -1428,6 +1455,68 @@ export type Database = {
           report_id?: number
         }
         Relationships: []
+      }
+      competitor_intel_observations: {
+        Row: {
+          brands: string[]
+          confidence: number | null
+          country_code: string | null
+          created_at: string
+          extracted_at: string
+          feed_item_id: number
+          id: number
+          model_version: string | null
+          novelty: string | null
+          prompt_version: string | null
+          scam_title: string
+          scam_type: string | null
+          source: string
+          summary: string
+          tactic: string | null
+        }
+        Insert: {
+          brands?: string[]
+          confidence?: number | null
+          country_code?: string | null
+          created_at?: string
+          extracted_at?: string
+          feed_item_id: number
+          id?: never
+          model_version?: string | null
+          novelty?: string | null
+          prompt_version?: string | null
+          scam_title: string
+          scam_type?: string | null
+          source: string
+          summary: string
+          tactic?: string | null
+        }
+        Update: {
+          brands?: string[]
+          confidence?: number | null
+          country_code?: string | null
+          created_at?: string
+          extracted_at?: string
+          feed_item_id?: number
+          id?: never
+          model_version?: string | null
+          novelty?: string | null
+          prompt_version?: string | null
+          scam_title?: string
+          scam_type?: string | null
+          source?: string
+          summary?: string
+          tactic?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "competitor_intel_observations_feed_item_id_fkey"
+            columns: ["feed_item_id"]
+            isOneToOne: false
+            referencedRelation: "feed_items"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       cost_telemetry: {
         Row: {
@@ -2392,6 +2481,7 @@ export type Database = {
           body_md: string | null
           category: string | null
           channel: string | null
+          competitor_extracted_at: string | null
           country_code: string | null
           created_at: string | null
           description: string | null
@@ -2422,6 +2512,7 @@ export type Database = {
           body_md?: string | null
           category?: string | null
           channel?: string | null
+          competitor_extracted_at?: string | null
           country_code?: string | null
           created_at?: string | null
           description?: string | null
@@ -2452,6 +2543,7 @@ export type Database = {
           body_md?: string | null
           category?: string | null
           channel?: string | null
+          competitor_extracted_at?: string | null
           country_code?: string | null
           created_at?: string | null
           description?: string | null
@@ -4390,6 +4482,48 @@ export type Database = {
           top_tactic_tags?: string[] | null
           updated_at?: string
           wow_delta_pct?: number | null
+        }
+        Relationships: []
+      }
+      reddit_intel_weekly_digest: {
+        Row: {
+          cohort_post_count: number
+          generated_at: string
+          model_version: string
+          novelty: Json
+          prompt_version: string
+          scam_of_the_week: Json | null
+          stories: Json
+          top_brands: Json
+          top_categories: Json
+          week_end: string
+          week_start: string
+        }
+        Insert: {
+          cohort_post_count?: number
+          generated_at?: string
+          model_version?: string
+          novelty?: Json
+          prompt_version?: string
+          scam_of_the_week?: Json | null
+          stories?: Json
+          top_brands?: Json
+          top_categories?: Json
+          week_end: string
+          week_start: string
+        }
+        Update: {
+          cohort_post_count?: number
+          generated_at?: string
+          model_version?: string
+          novelty?: Json
+          prompt_version?: string
+          scam_of_the_week?: Json | null
+          stories?: Json
+          top_brands?: Json
+          top_categories?: Json
+          week_end?: string
+          week_start?: string
         }
         Relationships: []
       }
@@ -7716,6 +7850,14 @@ export type Database = {
         }
         Returns: Json
       }
+      apply_netcraft_reconcile: {
+        Args: {
+          p_alert_ids: number[]
+          p_stamp_takedown?: boolean
+          p_to_state?: string
+        }
+        Returns: number
+      }
       archive_feed_items_batch: {
         Args: { p_batch_size?: number; p_default_days?: number }
         Returns: {
@@ -7902,6 +8044,10 @@ export type Database = {
             }
             Returns: Json
           }
+      bump_clone_alert_netcraft_issue_attempt: {
+        Args: { p_alert_id: number; p_error: string; p_status: number }
+        Returns: number
+      }
       check_breach_exposure: {
         Args: { p_identifier_hash: string; p_identifier_type: string }
         Returns: {
@@ -8010,6 +8156,7 @@ export type Database = {
           paid_remaining: number
         }[]
       }
+      count_todays_netcraft_issues: { Args: never; Returns: number }
       count_todays_takedown_submissions: { Args: never; Returns: number }
       create_organization: {
         Args: {
@@ -8263,6 +8410,17 @@ export type Database = {
           legitimate_domains: string[]
         }[]
       }
+      list_clone_alerts_for_netcraft_reconcile: {
+        Args: {
+          p_cadence_hours?: number
+          p_max_age_days?: number
+          p_uuid_limit?: number
+        }
+        Returns: {
+          alerts: Json
+          netcraft_uuid: string
+        }[]
+      }
       list_clone_alerts_for_recheck: {
         Args: { p_cadence_hours?: number; p_limit?: number }
         Returns: {
@@ -8295,6 +8453,13 @@ export type Database = {
           inferred_target_domain: string
           severity_tier: string
           signals: Json
+        }[]
+      }
+      list_clone_alerts_pending_netcraft_issue: {
+        Args: { p_max_age_days?: number; p_uuid_limit?: number }
+        Returns: {
+          alerts: Json
+          netcraft_uuid: string
         }[]
       }
       list_clone_alerts_pending_netcraft_poll: {
@@ -8675,6 +8840,10 @@ export type Database = {
           submitted_to: Json
           triage_status: string
         }[]
+      }
+      merge_clone_alert_submission_bulk: {
+        Args: { p_alert_ids: number[]; p_key: string; p_value: Json }
+        Returns: number
       }
       merge_entity_enrichment_data: {
         Args: { p_entity_id: number; p_key: string; p_value: Json }
