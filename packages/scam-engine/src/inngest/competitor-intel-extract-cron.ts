@@ -3,15 +3,31 @@
 // Cron-triggered (not event-triggered) because the producer is the Cloudflare
 // Email Routing Worker -> intel-inbound-email Edge Function, which inserts into
 // feed_items via PostgREST and has no Inngest client — same reason as
-// feed-items-embed. Every 6h finds competitor_intel feed_items that don't yet
+// feed-items-embed. Every 6h it finds competitor_intel feed_items that don't yet
 // have observations and runs the extraction (one Sonnet call per newsletter),
 // writing competitor_intel_observations (v212).
 //
-// Gated by FF_COMPETITOR_INTEL_EXTRACT (default OFF) and the shared
-// feature_brakes.reddit_intel kill-switch (checked inside
-// extractCompetitorObservations). Low volume (a handful of newsletters/week) so
-// a small per-run batch is plenty; a backlog simply drains over subsequent runs
-// (extraction is idempotent — already-extracted rows are skipped).
+// INNGEST PROFILE (deliberately cheap + jump-proof):
+//   - Cadence: `0 */6 * * *` = 4 runs/day. Flag-off runs return immediately.
+//   - One step per newsletter (step id = feed_item id — deterministic across
+//     replays, safe for Inngest), so each step is a SINGLE Sonnet call (~15s),
+//     never an 8-call 8-minute block that could trip the pg-stuck-query
+//     watchdog. Inngest checkpoints between newsletters.
+//   - Per-row failures are CAUGHT inside the step and never re-thrown, so a bad
+//     newsletter can't fail the function, force a full re-run, or make the
+//     invocation count jump. The row stays unextracted and the next 6h run
+//     retries it. Function-level retries=1 only covers a load-step DB blip.
+//   - Idempotent: extractCompetitorObservations skips rows that already have
+//     observations, so any replay/retry is a cheap no-op.
+//
+// OBSERVABILITY: fn lifecycle -> Axiom via withAxiomLogging (fn.error always
+// ships). Per-extraction cost + volume -> cost_telemetry
+// feature='competitor-intel-extract'. Per-row failures -> cost_telemetry
+// feature='reddit-intel-error' (queryable alongside the rest of the subsystem's
+// errors, same sink the weekly-email cron uses).
+//
+// Gated by FF_COMPETITOR_INTEL_EXTRACT (default OFF) + the shared
+// feature_brakes.reddit_intel kill-switch (checked inside the extractor).
 
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -21,21 +37,16 @@ import { inngest } from "./client";
 import { withAxiomLogging } from "./with-axiom-logging";
 import { extractCompetitorObservations } from "../reddit-intel/competitor-intel-extract";
 
-// How many newsletters to extract per run. Small — inflow is a few/week.
+// Max newsletters extracted per run. Small — inflow is a few/week; a larger
+// backlog simply drains over subsequent runs (idempotent).
 const BATCH_LIMIT = 8;
-// Only look back this far for candidates (avoids re-scanning ancient rows once
-// the table grows). Comfortably covers the weekly/biweekly cadences.
+// Only look back this far for candidates (bounds the scan as the table grows).
 const LOOKBACK_DAYS = 45;
 // Ceiling on candidate rows fetched before filtering out already-extracted ones.
 const CANDIDATE_SCAN = 200;
 
 export const competitorIntelExtractCron = inngest.createFunction(
-  {
-    id: "competitor-intel-extract",
-    // One retry — the underlying Sonnet call has its own timeout; a transient
-    // failure on one newsletter shouldn't wedge the batch.
-    retries: 1,
-  },
+  { id: "competitor-intel-extract", retries: 1 },
   { cron: "0 */6 * * *" },
   withAxiomLogging({ fnId: "competitor-intel-extract" }, async ({ step }) => {
     if (!featureFlags.competitorIntelExtract) {
@@ -48,7 +59,6 @@ export const competitorIntelExtractCron = inngest.createFunction(
 
       const since = new Date(Date.now() - LOOKBACK_DAYS * 86_400_000).toISOString();
 
-      // Recent competitor_intel newsletters.
       const { data: items, error: itemsErr } = await supabase
         .from("feed_items")
         .select("id")
@@ -61,7 +71,6 @@ export const competitorIntelExtractCron = inngest.createFunction(
       const ids = (items ?? []).map((r) => r.id as number);
       if (ids.length === 0) return [] as number[];
 
-      // Which of those already have observations?
       const { data: done, error: doneErr } = await supabase
         .from("competitor_intel_observations")
         .select("feed_item_id")
@@ -76,35 +85,46 @@ export const competitorIntelExtractCron = inngest.createFunction(
       return { skipped: true, reason: "no_unextracted_rows" };
     }
 
-    // Extract each in its own step so one bad newsletter can't fail the batch
-    // (and so Inngest checkpoints progress). Errors are logged, not thrown.
-    const results = await step.run("extract", async () => {
-      const out: Array<{ feedItemId: number; observations: number; skipped?: string; error?: string }> = [];
-      for (const id of candidates) {
+    // One checkpointed step per newsletter. Deterministic step id (the feed_item
+    // id) is replay-safe. Failures are caught here, recorded to the error sink,
+    // and swallowed so the batch + invocation count stay stable.
+    let totalObservations = 0;
+    let failures = 0;
+    for (const id of candidates) {
+      const outcome = await step.run(`extract-${id}`, async () => {
         try {
-          const r = await extractCompetitorObservations(id);
-          out.push(r);
+          const res = await extractCompetitorObservations(id);
+          return { observations: res.observations, error: false };
         } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
           logger.warn("competitor-intel-extract: row failed", {
             feedItemId: id,
-            error: err instanceof Error ? err.message : String(err),
+            error: message,
           });
-          out.push({ feedItemId: id, observations: 0, error: "extract_failed" });
+          const sb = createServiceClient();
+          if (sb) {
+            await sb.from("cost_telemetry").insert({
+              feature: "reddit-intel-error",
+              provider: "diagnostic",
+              operation: "competitor-intel-extract",
+              units: 0,
+              estimated_cost_usd: 0,
+              metadata: { feed_item_id: id, error_message: message.slice(0, 500) },
+            });
+          }
+          return { observations: 0, error: true };
         }
-      }
-      return out;
-    });
+      });
+      totalObservations += outcome.observations;
+      if (outcome.error) failures += 1;
+    }
 
-    const totalObservations = results.reduce((s, r) => s + r.observations, 0);
     logger.info("competitor-intel-extract: batch done", {
-      processed: results.length,
+      processed: candidates.length,
       totalObservations,
+      failures,
     });
 
-    return {
-      processed: results.length,
-      totalObservations,
-      results,
-    };
+    return { processed: candidates.length, totalObservations, failures };
   }),
 );
