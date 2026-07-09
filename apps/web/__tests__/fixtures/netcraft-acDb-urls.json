@@ -1,0 +1,195 @@
+{
+  "total_count": 38,
+  "urls": [
+    {
+      "hostname": "smigglethailandstore.com",
+      "url": "https://smigglethailandstore.com/",
+      "url_state": "malicious"
+    },
+    {
+      "hostname": "inistagram.ir",
+      "url": "https://inistagram.ir/",
+      "url_state": "unavailable"
+    },
+    {
+      "hostname": "targetr.co",
+      "url": "https://targetr.co/",
+      "url_state": "unavailable"
+    },
+    {
+      "hostname": "bondy.cn",
+      "url": "https://bondy.cn/",
+      "url_state": "unavailable"
+    },
+    {
+      "hostname": "googl.com.tw",
+      "url": "https://googl.com.tw/",
+      "url_state": "unavailable"
+    },
+    {
+      "hostname": "kmartus.online",
+      "url": "https://kmartus.online/",
+      "url_state": "unavailable"
+    },
+    {
+      "hostname": "goog2e.dev",
+      "url": "https://goog2e.dev/",
+      "url_state": "unavailable"
+    },
+    {
+      "hostname": "iga.uk.com",
+      "url": "https://iga.uk.com/",
+      "url_state": "unavailable"
+    },
+    {
+      "hostname": "kmartus.shop",
+      "url": "https://kmartus.shop/",
+      "url_state": "unavailable"
+    },
+    {
+      "hostname": "facibook.ir",
+      "url": "https://facibook.ir/",
+      "url_state": "unavailable"
+    },
+    {
+      "hostname": "pedex.fun",
+      "url": "https://pedex.fun/",
+      "url_state": "unavailable"
+    },
+    {
+      "hostname": "mcdonalds.jp",
+      "url": "https://mcdonalds.jp/",
+      "url_state": "unavailable"
+    },
+    {
+      "hostname": "googlr.me",
+      "url": "https://googlr.me/",
+      "url_state": "unavailable"
+    },
+    {
+      "hostname": "kaken.cn",
+      "url": "https://kaken.cn/",
+      "url_state": "unavailable"
+    },
+    {
+      "hostname": "reenergy.com.pl",
+      "url": "https://reenergy.com.pl/",
+      "url_state": "unavailable"
+    },
+    {
+      "hostname": "googlu.co",
+      "url": "https://googlu.co/",
+      "url_state": "no threats"
+    },
+    {
+      "hostname": "statestreetcollective.shop",
+      "url": "https://statestreetcollective.shop/",
+      "url_state": "no threats"
+    },
+    {
+      "hostname": "dodo.com.pk",
+      "url": "https://dodo.com.pk/",
+      "url_state": "no threats"
+    },
+    {
+      "hostname": "kmart.online",
+      "url": "https://kmart.online/",
+      "url_state": "no threats"
+    },
+    {
+      "hostname": "facebookk.xyz",
+      "url": "https://facebookk.xyz/",
+      "url_state": "no threats"
+    },
+    {
+      "hostname": "face-book.org",
+      "url": "https://face-book.org/",
+      "url_state": "no threats"
+    },
+    {
+      "hostname": "darsales.in",
+      "url": "https://darsales.in/",
+      "url_state": "no threats"
+    },
+    {
+      "hostname": "iamazon.ir",
+      "url": "https://iamazon.ir/",
+      "url_state": "no threats"
+    },
+    {
+      "hostname": "krakn.network",
+      "url": "https://krakn.network/",
+      "url_state": "no threats"
+    },
+    {
+      "hostname": "amiexpress.co.uk",
+      "url": "https://amiexpress.co.uk/",
+      "url_state": "no threats"
+    },
+    {
+      "hostname": "vanguardiaiberica.online",
+      "url": "https://vanguardiaiberica.online/",
+      "url_state": "no threats"
+    },
+    {
+      "hostname": "googleadsensewebsite.com",
+      "url": "https://googleadsensewebsite.com/",
+      "url_state": "no threats"
+    },
+    {
+      "hostname": "univerzalstore.com",
+      "url": "https://univerzalstore.com/",
+      "url_state": "no threats"
+    },
+    {
+      "hostname": "subway.health",
+      "url": "https://subway.health/",
+      "url_state": "no threats"
+    },
+    {
+      "hostname": "cfs.rip",
+      "url": "https://cfs.rip/",
+      "url_state": "no threats"
+    },
+    {
+      "hostname": "bankingstake.xyz",
+      "url": "https://bankingstake.xyz/",
+      "url_state": "no threats"
+    },
+    {
+      "hostname": "emazon.com.br",
+      "url": "https://emazon.com.br/",
+      "url_state": "no threats"
+    },
+    {
+      "hostname": "mydeal.vip",
+      "url": "https://mydeal.vip/",
+      "url_state": "no threats"
+    },
+    {
+      "hostname": "dodo-shop.eu",
+      "url": "https://dodo-shop.eu/",
+      "url_state": "no threats"
+    },
+    {
+      "hostname": "fachbook.pl",
+      "url": "https://fachbook.pl/",
+      "url_state": "no threats"
+    },
+    {
+      "hostname": "stake-playonline.com",
+      "url": "https://stake-playonline.com/",
+      "url_state": "no threats"
+    },
+    {
+      "hostname": "carttarget.store",
+      "url": "https://carttarget.store/",
+      "url_state": "no threats"
+    },
+    {
+      "hostname": "googla.eu",
+      "url": "https://googla.eu/",
+      "url_state": "no threats"
+    }
+  ]
+}

@@ -592,6 +592,16 @@ export const featureFlags = {
    *  blocklisting, so good-faith over-reporting of likely clones is safe. */
   shopfrontCloneNetcraftAuto: readBoolEnv("FF_SHOPFRONT_CLONE_NETCRAFT_AUTO"),
 
+  /** Netcraft false-negative auto-escalation. Gates the
+   *  shopfront-clone-netcraft-issue Inngest fn, which reads per-URL verdicts
+   *  from GET /submission/{uuid}/urls (keyless) and files a "report an issue"
+   *  (POST /submission/{uuid}/report_issue) on branded lookalikes Netcraft
+   *  graded "no threats" inside an otherwise-"malicious" bulk batch. Sub-flag of
+   *  FF_SHOPFRONT_CLONE_OUTREACH. Default OFF; even when ON the fn is DRY-RUN
+   *  unless NETCRAFT_ISSUE_DRY_RUN="false" (posts nothing / writes nothing in
+   *  dry-run). Server-side only. */
+  cloneNetcraftIssue: readBoolEnv("FF_CLONE_NETCRAFT_ISSUE"),
+
   /** Layer 3+4 — brand-direct notification. Server-side only. Gates the
    *  shopfront-clone-notify-brand Inngest fn. Default OFF until
    *  brand_contact_directory is seeded for the full watchlist and the

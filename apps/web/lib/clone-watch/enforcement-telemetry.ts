@@ -35,6 +35,7 @@ export type EnforcementEvent =
   | "reported" // submitted to a takedown channel (outbound)
   | "actioned" // a channel confirmed the takedown
   | "declined" // a channel declined (e.g. Netcraft "no threats")
+  | "issue_reported" // filed a false-negative issue on a Netcraft submission
   | "re_emerged" // a taken-down domain resolved again
   | "rejected"; // a report was rejected
 
