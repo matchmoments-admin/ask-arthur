@@ -105,6 +105,16 @@ export interface CloneWatchReportCard {
     reportedToNetcraft: number;
     likelyPhishing: number;
     parkedForSale: number;
+    /** Netcraft actioned (lifecycle taken_down) — populated by the PR3.1 reconciler. */
+    takenDown: number;
+    /** Netcraft declined (still live/parked) — the "unactioned lookalike" headline. */
+    declined: number;
+    /** We filed a report_issue to force a re-review. */
+    escalated: number;
+    /** Flipped to active phishing after Netcraft declined ("declined ≠ safe"). */
+    weaponised: number;
+    /** Escalated → then taken down ("we forced it through"). */
+    reTakenDown: number;
   };
   topAuBrands: RankedBrand[];
   globalBrands: RankedBrand[];
@@ -190,6 +200,16 @@ function sumClassification(
   return n;
 }
 
+/** Sum a numeric lifecycle metric across all brands. */
+function sumMetric(
+  byBrand: Map<string, CloneBrandMetrics>,
+  key: "takenDown" | "declined" | "escalated" | "weaponised" | "reTakenDown",
+): number {
+  let n = 0;
+  for (const m of byBrand.values()) n += m[key] ?? 0;
+  return n;
+}
+
 type ServiceClient = NonNullable<ReturnType<typeof createServiceClient>>;
 
 /**
@@ -206,7 +226,7 @@ async function fetchMonthByBrand(
   const { data, error } = await sb
     .from("shopfront_clone_alerts")
     .select(
-      "id, candidate_domain, inferred_target_domain, urlscan_classification, urlscan_evidence, attribution, submitted_to",
+      "id, candidate_domain, inferred_target_domain, urlscan_classification, urlscan_evidence, attribution, submitted_to, lifecycle_state, netcraft_declined_at, weaponised_at",
     )
     .eq("source", CLONE_SOURCE)
     .gte("first_seen_at", startIso)
@@ -237,6 +257,10 @@ export interface BrandTrendRow {
   reported_to_netcraft: number;
   likely_phishing: number;
   parked: number;
+  taken_down: number;
+  declined: number;
+  escalated: number;
+  weaponised: number;
 }
 export interface RegistrarTrendRow {
   registrar: string;
@@ -271,6 +295,10 @@ export async function getCloneWatchTrendRows(
       reported_to_netcraft: m.netcraftReported,
       likely_phishing: m.byClassification["likely_phishing"] ?? 0,
       parked: m.byClassification["parked_for_sale"] ?? 0,
+      taken_down: m.takenDown,
+      declined: m.declined,
+      escalated: m.escalated,
+      weaponised: m.weaponised,
     }))
     .sort((a, b) => b.clones - a.clones || a.brand.localeCompare(b.brand));
 
@@ -406,6 +434,11 @@ export async function getCloneWatchReportCard(
       reportedToNetcraft,
       likelyPhishing: sumClassification(byBrand, "likely_phishing"),
       parkedForSale: sumClassification(byBrand, "parked_for_sale"),
+      takenDown: sumMetric(byBrand, "takenDown"),
+      declined: sumMetric(byBrand, "declined"),
+      escalated: sumMetric(byBrand, "escalated"),
+      weaponised: sumMetric(byBrand, "weaponised"),
+      reTakenDown: sumMetric(byBrand, "reTakenDown"),
     },
     // Gov domains are excluded from BOTH public rankings (they're neither
     // consumer "brands" nor global); they still count toward total/brands.

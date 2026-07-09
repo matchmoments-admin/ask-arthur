@@ -8,7 +8,16 @@ const JUNE: CloneWatchReportCard = {
   periodLabel: "June 2026",
   total: 804,
   brands: 129,
-  kpis: { reportedToNetcraft: 628, likelyPhishing: 25, parkedForSale: 51 },
+  kpis: {
+    reportedToNetcraft: 628,
+    likelyPhishing: 25,
+    parkedForSale: 51,
+    takenDown: 0,
+    declined: 0,
+    escalated: 0,
+    weaponised: 0,
+    reTakenDown: 0,
+  },
   topAuBrands: [
     { brand: "target.com.au", clones: 43 },
     { brand: "hesta.com.au", clones: 35 },

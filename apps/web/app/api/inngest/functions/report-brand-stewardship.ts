@@ -240,6 +240,9 @@ export interface CloneAlertRow {
     hosting?: { ip?: string; asn?: string; country?: string };
   } | null;
   submitted_to: Record<string, unknown> | null;
+  lifecycle_state: string | null;
+  netcraft_declined_at: string | null;
+  weaponised_at: string | null;
 }
 
 export interface CloneDetail {
@@ -256,6 +259,16 @@ export interface CloneBrandMetrics {
   detected: number;
   /** Distinct clone domains we submitted to Netcraft (browser/blocklist). */
   netcraftReported: number;
+  /** Netcraft actioned it (lifecycle taken_down). */
+  takenDown: number;
+  /** Netcraft graded it non-malicious (lifecycle declined) — still live/parked. */
+  declined: number;
+  /** We filed a report_issue to force a re-review (netcraft_issue.issue_reported_at). */
+  escalated: number;
+  /** Flipped to active phishing (lifecycle weaponised) — "declined ≠ safe". */
+  weaponised: number;
+  /** Escalated AND now taken_down — the "we forced it through" win. */
+  reTakenDown: number;
   byClassification: Record<string, number>;
   /** Consumable analytics — counts across ALL deduped clones (not just the
    *  capped detail list), so the email's breakdown bars reflect the full set. */
@@ -331,6 +344,11 @@ export function aggregateClonesByDomain(
       m = {
         detected: 0,
         netcraftReported: 0,
+        takenDown: 0,
+        declined: 0,
+        escalated: 0,
+        weaponised: 0,
+        reTakenDown: 0,
         byClassification: {},
         byCountry: {},
         byRegistrar: {},
@@ -348,6 +366,24 @@ export function aggregateClonesByDomain(
     m.detected += 1;
     if (row.submitted_to && "netcraft" in row.submitted_to) {
       m.netcraftReported += 1;
+    }
+    // Lifecycle-transition counts (PR3.2) — the story the reconciler (PR3.1) now
+    // populates: taken_down / declined / escalated / weaponised / re-taken-down.
+    const escalated = Boolean(
+      (
+        row.submitted_to?.["netcraft_issue"] as
+          | { issue_reported_at?: unknown }
+          | undefined
+      )?.issue_reported_at,
+    );
+    if (escalated) m.escalated += 1;
+    if (row.lifecycle_state === "taken_down") {
+      m.takenDown += 1;
+      if (escalated) m.reTakenDown += 1;
+    } else if (row.lifecycle_state === "declined") {
+      m.declined += 1;
+    } else if (row.lifecycle_state === "weaponised") {
+      m.weaponised += 1;
     }
     m.alertIds.push(row.id);
     const cls = row.urlscan_classification ?? "unclassified";
@@ -470,7 +506,7 @@ export const reportBrandStewardship = inngest.createFunction(
       const { data, error } = await sb
         .from("shopfront_clone_alerts")
         .select(
-          "id, candidate_domain, inferred_target_domain, urlscan_classification, urlscan_evidence, attribution, submitted_to",
+          "id, candidate_domain, inferred_target_domain, urlscan_classification, urlscan_evidence, attribution, submitted_to, lifecycle_state, netcraft_declined_at, weaponised_at",
         )
         .eq("source", "nrd")
         .gte("first_seen_at", period.startIso)
@@ -663,6 +699,11 @@ export const reportBrandStewardship = inngest.createFunction(
           metrics.clones = {
             detected: e.clones.detected,
             netcraft_reported: e.clones.netcraftReported,
+            taken_down: e.clones.takenDown,
+            declined: e.clones.declined,
+            escalated: e.clones.escalated,
+            weaponised: e.clones.weaponised,
+            re_taken_down: e.clones.reTakenDown,
             by_classification: e.clones.byClassification,
             by_country: e.clones.byCountry,
             by_registrar: e.clones.byRegistrar,
@@ -725,6 +766,11 @@ export const reportBrandStewardship = inngest.createFunction(
               clones: {
                 detected: cm.detected,
                 netcraft_reported: cm.netcraftReported,
+                taken_down: cm.takenDown,
+                declined: cm.declined,
+                escalated: cm.escalated,
+                weaponised: cm.weaponised,
+                re_taken_down: cm.reTakenDown,
                 by_classification: cm.byClassification,
                 by_country: cm.byCountry,
                 by_registrar: cm.byRegistrar,
