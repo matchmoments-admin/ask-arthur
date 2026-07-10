@@ -265,10 +265,34 @@ export function classifyByUrlState(
  * is given and the state_counts histogram shows none of them, the /urls GET is
  * SKIPPED (noEscalatable=true) — the whole batch is actioned/unsettled.
  *
- * Throws on network/transport error (Inngest retries). A non-200 on either GET
- * is returned structured (ok:false); a 404 on the submission means archived.
+ * Never throws: a network/transport error, a timeout, OR a non-200 all return a
+ * structured `{ok:false, status}` so the caller soft-skips the uuid this run
+ * (the daily cadence retries it) — a THROW here would make Inngest retry the
+ * whole fetch step with backoff, and under Netcraft rate-limiting that stalls a
+ * batch past the finish budget. A 404 on the submission means archived.
  */
 export async function fetchNetcraftSubmissionUrls(
+  uuid: string,
+  opts?: { escalatableStates?: string[]; timeoutMs?: number },
+): Promise<NetcraftSubmissionUrls> {
+  try {
+    return await fetchNetcraftSubmissionUrlsInner(uuid, opts);
+  } catch {
+    // network error / timeout / JSON parse — soft-fail, retried next cadence.
+    return {
+      ok: false,
+      status: 0,
+      isArchived: false,
+      hasIssues: false,
+      urls: [],
+      totalCount: 0,
+      stateCounts: {},
+      noEscalatable: false,
+    };
+  }
+}
+
+async function fetchNetcraftSubmissionUrlsInner(
   uuid: string,
   opts?: { escalatableStates?: string[]; timeoutMs?: number },
 ): Promise<NetcraftSubmissionUrls> {

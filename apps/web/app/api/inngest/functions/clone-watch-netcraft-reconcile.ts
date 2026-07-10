@@ -43,7 +43,13 @@ import {
  * See docs/plans/clone-watch-brand-story-reporting.md §3 Part A.
  */
 
-const UUID_LIMIT = 60;
+// Bounded so a run reliably COMPLETES within the finish budget (and thus logs
+// its heartbeat + runs the outage-check). Live smoke (2026-07-10) showed 60 was
+// too many — Netcraft /urls latency under a burst meant ~2-3 uuids/min, so a
+// 60-uuid run hit the 5m budget and was cancelled mid-batch. 12 uuids × 2
+// keyless GETs completes with headroom; the 24h cadence throttle + singleton
+// grind the ~164 backlog down over a handful of daily runs, self-healing.
+const UUID_LIMIT = 12;
 const CADENCE_HOURS = 24;
 const MAX_AGE_DAYS = 30;
 
@@ -59,7 +65,9 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
     retries: 2,
     singleton: { mode: "skip" },
     concurrency: { limit: 1 },
-    timeouts: { finish: "5m" },
+    // 8m finish (matches the poll fn) — the slow part is keyless Netcraft HTTP,
+    // not a PG backend, so the 10m pg-stuck-query-watchdog is not at risk.
+    timeouts: { finish: "8m" },
   },
   [
     { cron: "0 10 * * *" },
