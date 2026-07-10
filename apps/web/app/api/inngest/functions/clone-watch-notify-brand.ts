@@ -46,7 +46,7 @@ export type DirectoryChannel =
   | "manual_review"
   | "none";
 
-interface DirectoryRow {
+export interface DirectoryRow {
   brand: string;
   legitimate_domain: string;
   channel_type: DirectoryChannel;

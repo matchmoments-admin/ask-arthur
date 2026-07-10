@@ -2,6 +2,7 @@ import type { ReactElement } from "react";
 import BrandStewardshipReport from "@/emails/BrandStewardshipReport";
 import BrandAbuseReport from "@/emails/BrandAbuseReport";
 import CloneWatchBrandAlert from "@/emails/CloneWatchBrandAlert";
+import WeaponisedCloneAlert from "@/emails/WeaponisedCloneAlert";
 import Welcome from "@/emails/Welcome";
 import WeeklyDigest from "@/emails/WeeklyDigest";
 import WeeklyIntelDigest from "@/emails/WeeklyIntelDigest";
@@ -71,6 +72,24 @@ export function buildPreviewElement(
           },
         ],
         reportRef: "CW-frostwickmart.shop",
+        copy,
+      });
+    case "weaponised_clone_alert":
+      return WeaponisedCloneAlert({
+        brandName: "Kmart",
+        legitimateDomain: "kmart.com.au",
+        candidateDomain: "frostwickmart.shop",
+        candidateUrl: "https://frostwickmart.shop/login",
+        weaponisedAt: "2026-07-09T22:14:00.000Z",
+        urlscanResultUrl: "https://urlscan.io/result/00000000-demo/",
+        urlscanScreenshotUrl: "https://urlscan.io/screenshots/00000000-demo.png",
+        registrar: "NameCheap, Inc.",
+        registrarAbuseEmail: "abuse@namecheap.com",
+        hostingIp: "203.0.113.7",
+        hostingCountry: "US",
+        hostingAsn: "AS13335",
+        netcraftDeclinedAt: "2026-06-01T00:00:00.000Z",
+        reportRef: "CW-weaponised-preview",
         copy,
       });
     case "welcome":

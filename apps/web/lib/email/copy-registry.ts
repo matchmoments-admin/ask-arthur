@@ -74,6 +74,14 @@ export const CLONE_WATCH_SLOTS = {
   },
 } satisfies Record<string, SlotDef>;
 
+export const WEAPONISED_CLONE_SLOTS = {
+  what_you_can_do: {
+    label: "What you can do now",
+    default:
+      "Time matters here — the site is live now. The fastest lever is usually an abuse report to the domain's registrar (contact above, when we could identify it), citing trademark impersonation and phishing content. Your trademark counsel can also pursue auDRP/UDRP if the domain warrants recovering. Reply to this email if you'd like the underlying evidence pack.",
+  },
+} satisfies Record<string, SlotDef>;
+
 export const EMAIL_TEMPLATES: Record<string, EmailTemplateDef> = {
   brand_stewardship: {
     key: "brand_stewardship",
@@ -94,6 +102,13 @@ export const EMAIL_TEMPLATES: Record<string, EmailTemplateDef> = {
     label: "Clone-Watch Brand Alert",
     vars: ["brandName", "legitimateDomain"],
     slots: CLONE_WATCH_SLOTS,
+    editable: true,
+  },
+  weaponised_clone_alert: {
+    key: "weaponised_clone_alert",
+    label: "Clone-Watch Weaponisation Alert (urgent)",
+    vars: ["brandName", "legitimateDomain"],
+    slots: WEAPONISED_CLONE_SLOTS,
     editable: true,
   },
   // Preview-only (no editable slots yet — mechanical follow-up via this registry).
