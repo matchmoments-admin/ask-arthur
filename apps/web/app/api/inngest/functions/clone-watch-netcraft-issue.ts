@@ -50,7 +50,16 @@ import {
  * Dedicated daily cap NETCRAFT_ISSUE_DAILY_CAP (default 20 uuids). `no threats`
  * only at go-live (unavailable → PR3). singleton + concurrency:1.
  *
- * See docs/plans/clone-watch-netcraft-issue-pr2-fixes.md.
+ * F4 EVIDENCE GATE (v221): the worklist RPC only returns alerts with
+ * urlscan_classification='likely_phishing' OR lifecycle_state='weaponised' —
+ * escalating parked/neutral clones was crying wolf (the reconciler cross-tab
+ * showed parked → 0% actioned) and burned reporter standing. Gated-out alerts
+ * stay pending-by-predicate and re-enter the moment they weaponise; the
+ * predicate re-asserts the gate in TS (deploy-skew fails closed) and the
+ * issue reason cites our urlscan result URL as evidence.
+ *
+ * See docs/plans/clone-watch-netcraft-issue-pr2-fixes.md +
+ * docs/plans/clone-watch-brand-value-features.md §F4.
  */
 
 const BRAKE = "clone_netcraft_issue";
@@ -222,6 +231,15 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
           allowUnavailable: dryRun,
         });
 
+        // F4 (v221): the TS gate mirror blocked would-be candidates — only
+        // possible under RPC/TS deploy skew. Unstamped → retried next run.
+        if (sel.gatedOut.length) {
+          logger.warn("netcraft-issue: evidence gate blocked candidates (RPC/TS skew?)", {
+            uuid,
+            gatedOut: sel.gatedOut.map((a) => a.id),
+          });
+        }
+
         if (sel.driftStates.length) {
           logger.warn("netcraft-issue: unknown url_state(s)", {
             uuid,
@@ -253,6 +271,7 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
                   urlCount: sel.candidates.length,
                   brands: [...new Set(sel.candidates.map((c) => c.brand))],
                   states: [...new Set(sel.candidates.map((c) => c.urlState))],
+                  gate: [...new Set(sel.candidates.map((c) => c.evidence))],
                   hasIssues: fetched.hasIssues,
                   payload: buildIssuePayload(sel.candidates),
                 },
