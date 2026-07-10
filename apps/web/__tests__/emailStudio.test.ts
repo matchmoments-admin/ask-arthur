@@ -42,15 +42,20 @@ describe("renderCopySlot", () => {
 });
 
 describe("EMAIL_TEMPLATES registry", () => {
-  it("marks the 3 brand-facing templates editable with slots", () => {
-    for (const key of ["brand_stewardship", "brand_abuse", "clone_watch_brand_alert"]) {
+  it("marks the 4 brand-facing templates editable with slots", () => {
+    for (const key of [
+      "brand_stewardship",
+      "brand_abuse",
+      "clone_watch_brand_alert",
+      "weaponised_clone_alert",
+    ]) {
       const t = EMAIL_TEMPLATES[key];
       expect(t.editable).toBe(true);
       expect(Object.keys(t.slots).length).toBeGreaterThan(0);
     }
   });
-  it("lists all 13 templates for the preview gallery", () => {
-    expect(Object.keys(EMAIL_TEMPLATES).length).toBe(13);
+  it("lists all 14 templates for the preview gallery", () => {
+    expect(Object.keys(EMAIL_TEMPLATES).length).toBe(14);
   });
 });
 

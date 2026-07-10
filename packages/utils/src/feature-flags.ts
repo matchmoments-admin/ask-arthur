@@ -617,6 +617,16 @@ export const featureFlags = {
    *  manual-approval gate has been calibrated. */
   shopfrontCloneNotifyBrand: readBoolEnv("FF_SHOPFRONT_CLONE_NOTIFY_BRAND"),
 
+  /** F1 — weaponisation early-warning brand alert. Gates the
+   *  clone-watch-notify-weaponised Inngest fn, which consumes
+   *  shopfront/clone.weaponised.v1 and stages an URGENT single-alert
+   *  'critical' batch (kind='weaponised', v220) for the four-eyes dashboard
+   *  send — bypassing the 24h brand cooldown at staging (the send still
+   *  stamps it). Always four-eyes, even when the routine AUTO_SEND flag is
+   *  ON. Sub-flag of FF_SHOPFRONT_CLONE_OUTREACH. Default OFF. Server-side
+   *  only. */
+  cloneWeaponisedAlert: readBoolEnv("FF_CLONE_WEAPONISED_ALERT"),
+
   /** Auto-triage the confident, still-live clone tail (clone-watch-auto-triage
    *  Inngest fn) — auto-confirms alerts that clear the strict bar (Haiku≥0.9 +
    *  confusable/levenshtein + urlscan likely_phishing) AND pass a liveness

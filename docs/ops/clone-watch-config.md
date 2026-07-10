@@ -290,13 +290,14 @@ files false-negative `report_issue` escalations. Plans:
 `docs/plans/clone-watch-netcraft-issue-pr2-fixes.md` +
 `docs/plans/clone-watch-brand-story-reporting.md`.
 
-| Flag / env / brake                    | Type        | Default                          | Purpose                                                                                                                                                                                                                                                                                               |
-| ------------------------------------- | ----------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `FF_CLONE_LIFECYCLE_RECONCILE`        | server flag | `false`                          | Gates `shopfront-clone-netcraft-reconcile` (cron `0 10 * * *`). Advances lifecycle from the per-URL verdict + feeds the takedown KPI + the weaponisation recheck. Sub-flag of `FF_SHOPFRONT_CLONE_OUTREACH`.                                                                                          |
-| `FF_CLONE_NETCRAFT_ISSUE`             | server flag | `false`                          | Gates `shopfront-clone-netcraft-issue` (cron `0 11 * * *`) — the false-negative `report_issue` reporter. Sub-flag of `FF_SHOPFRONT_CLONE_OUTREACH`.                                                                                                                                                   |
-| `NETCRAFT_ISSUE_DRY_RUN`              | server env  | dry-run unless literal `"false"` | Read as `readStringEnv(...) !== "false"` (an unset/whitespace value stays dry-run — a `readBoolEnv` default would deploy LIVE). Dry-run = ZERO posts + ZERO DB writes.                                                                                                                                |
-| `NETCRAFT_ISSUE_DAILY_CAP`            | server env  | `20`                             | Max submission-uuids the reporter files per day (reporter-standing bound). Guarded `parseInt`; `$20`→NaN→default.                                                                                                                                                                                     |
-| `feature_brakes.clone_netcraft_issue` | brake row   | absent (open)                    | Manual kill-switch AND auto-tripped by the reporter's autobrake on a permanent-4xx reject spike (≥3 or >50% of a run) → UPSERT `paused_until = now()+24h` + Telegram page. **Not** cost-cap auto-tripped (it's a $0 keyless feature). Clear by deleting the row / setting `paused_until` in the past. |
+| Flag / env / brake                    | Type        | Default                          | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------------------------- | ----------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `FF_CLONE_LIFECYCLE_RECONCILE`        | server flag | `false`                          | Gates `shopfront-clone-netcraft-reconcile` (cron `0 10 * * *`). Advances lifecycle from the per-URL verdict + feeds the takedown KPI + the weaponisation recheck. Sub-flag of `FF_SHOPFRONT_CLONE_OUTREACH`.                                                                                                                                                                                                                      |
+| `FF_CLONE_NETCRAFT_ISSUE`             | server flag | `false`                          | Gates `shopfront-clone-netcraft-issue` (cron `0 11 * * *`) — the false-negative `report_issue` reporter. Sub-flag of `FF_SHOPFRONT_CLONE_OUTREACH`.                                                                                                                                                                                                                                                                               |
+| `NETCRAFT_ISSUE_DRY_RUN`              | server env  | dry-run unless literal `"false"` | Read as `readStringEnv(...) !== "false"` (an unset/whitespace value stays dry-run — a `readBoolEnv` default would deploy LIVE). Dry-run = ZERO posts + ZERO DB writes.                                                                                                                                                                                                                                                            |
+| `NETCRAFT_ISSUE_DAILY_CAP`            | server env  | `20`                             | Max submission-uuids the reporter files per day (reporter-standing bound). Guarded `parseInt`; `$20`→NaN→default.                                                                                                                                                                                                                                                                                                                 |
+| `feature_brakes.clone_netcraft_issue` | brake row   | absent (open)                    | Manual kill-switch AND auto-tripped by the reporter's autobrake on a permanent-4xx reject spike (≥3 or >50% of a run) → UPSERT `paused_until = now()+24h` + Telegram page. **Not** cost-cap auto-tripped (it's a $0 keyless feature). Clear by deleting the row / setting `paused_until` in the past.                                                                                                                             |
+| `FF_CLONE_WEAPONISED_ALERT`           | server flag | `false`                          | F1 — gates `shopfront-clone-notify-weaponised` (event `shopfront/clone.weaponised.v1`, v220). Stages an URGENT single-alert `kind='weaponised'` batch for the four-eyes dashboard send the moment a monitored lookalike flips to `likely_phishing`. Bypasses the 24h brand cooldown at staging (the send still stamps it); ALWAYS four-eyes even when `…NOTIFY_BRAND_AUTO_SEND` is ON. Sub-flag of `FF_SHOPFRONT_CLONE_OUTREACH`. |
 
 **Go-live sequence** (all dark today):
 
@@ -310,6 +311,52 @@ files false-negative `report_issue` escalations. Plans:
 4. Validate one real POST: `NETCRAFT_ISSUE_PROBE_CONFIRM=yes node apps/web/scripts/netcraft-issue-probe.mjs <fresh-uuid>` (settles the body contract; already run 2026-07-10 → 200).
 5. `NETCRAFT_ISSUE_DRY_RUN=false` → real escalations (single uuid first; cap 20/day; `no threats` only — `unavailable` deferred to a screenshot-backed follow-up).
 6. `FF_BRAND_STEWARDSHIP_REPORT=true` → the monthly email renders the "What Netcraft did with them" story.
+
+### Weaponisation early-warning alert (F1, v220)
+
+`shopfront-clone-notify-weaponised` is the BRAND-facing consumer of
+`shopfront/clone.weaponised.v1` (the enforcement-plan consumer opens internal
+cases only). Flow: reload the alert row → resolve the contact via
+`brand_contact_directory` (`inferred_target_domain` → `legitimate_domain`,
+same seam as notify-brand) → STOP-suppression check →
+`enqueue_weaponised_clone_alert_notification` (ONE `kind='weaponised'`,
+`severity='critical'` queue row per alert, ever — v220 partial unique index;
+a clone already brand-notified at triage can still stage an urgent alert
+weeks later) → render `WeaponisedCloneAlert` + `assign_clone_alert_batch`
+(hard-coded four-eyes) → 🚨 Telegram page → admin sends from
+`/admin/clone-watch#approvals` via the unchanged send route. No-contact /
+manual-channel outcomes still 🚨-page the admin (a weaponisation must never
+pass silently). Dedup: Inngest `idempotency: alertId` (24h) +
+`submitted_to.weaponised_notification` stamp (forever) + the partial index
+(DB backstop). Honesty: template states "our scanner classified X as likely
+phishing" only; the vendor-decline line renders only when
+`netcraft_declined_at` is set; render tests assert no takedown/"confirmed"
+claims. Telemetry: `cost_telemetry` `operation='weaponised_enqueue'` +
+always-ship `logger.warn` on stage.
+
+### Enabling `FF_SHOPFRONT_CLONE_RECHECK` (runbook)
+
+The recheck loop (`shopfront-clone-lifecycle-recheck`, cron `0 */6 * * *`,
+batch 50/run → ≤200 unlisted urlscan submits/day) is the declined→weaponised
+detector — the enabler for F1 and the F4 evidence gate.
+
+1. **Quota check** (pre-flip): pull the prod key and confirm **unlisted**
+   headroom ≥200/day and ≥50/hour:
+   `KEY=$(vercel env pull /dev/stdout --environment=production | grep '^URLSCAN_API_KEY=' | cut -d= -f2)` then
+   `curl -s -H "API-Key: $KEY" https://urlscan.io/user/quotas/ | jq '.limits'`.
+   (~776 declined/monitoring backlog drains over ~4 days, then steady-state.)
+2. Preconditions: `FF_SHOPFRONT_CLONE_URLSCAN=true`;
+   `feature_brakes.shopfront_clone_recheck` absent or expired.
+3. `vercel env add FF_SHOPFRONT_CLONE_RECHECK production` → `true`; redeploy
+   (env changes need a fresh deployment).
+4. Verify first run (next 6h tick or fire
+   `shopfront/clone.lifecycle-recheck.manual-trigger.v1`): Inngest run green;
+   `SELECT count(*) FROM shopfront_clone_alerts WHERE last_rechecked_at > now() - interval '6 hours'` ≈ 50;
+   `cost_telemetry` urlscan volume up at $0.
+5. Watch for the first `weaponised.v1` → F1 🚨 Telegram page (if
+   `FF_CLONE_WEAPONISED_ALERT` is ON) + an enforcement case.
+6. **Rollback**: UPSERT `feature_brakes.shopfront_clone_recheck` with a future
+   `paused_until` (instant, no deploy), or remove the env var + redeploy.
 
 ### `brand_contact_directory` curation
 
