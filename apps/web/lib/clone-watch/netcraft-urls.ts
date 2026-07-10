@@ -97,6 +97,10 @@ export interface FalseNegativeCandidate {
   candidateDomain: string;
   brand: string;
   urlState: string;
+  /** Our urlscan result uuid — cited as evidence in the issue reason text. */
+  urlscanUuid: string | null;
+  /** Which side of the F4 evidence gate admitted this candidate. */
+  evidence: "likely_phishing" | "weaponised";
 }
 
 export interface PendingAlert {
@@ -105,6 +109,23 @@ export interface PendingAlert {
   candidate_domain: string;
   inferred_target_domain: string | null;
   target_brand_normalized: string | null;
+  /** v221 evidence fields — null on rows the RPC predates (deploy skew). */
+  urlscan_classification?: string | null;
+  lifecycle_state?: string | null;
+  urlscan_uuid?: string | null;
+}
+
+/** F4 evidence gate (v221): only urlscan-confirmed phishing or a witnessed
+ *  weaponisation may be escalated. The worklist RPC applies the same
+ *  predicate; this TS mirror exists for deploy-skew safety — a run against a
+ *  pre-v221 RPC (fields undefined) fails CLOSED and the alert is retried
+ *  next run, never filed low-confidence. */
+export function passesEvidenceGate(
+  alert: PendingAlert,
+): "likely_phishing" | "weaponised" | null {
+  if (alert.lifecycle_state === "weaponised") return "weaponised";
+  if (alert.urlscan_classification === "likely_phishing") return "likely_phishing";
+  return null;
 }
 
 /** A matched alert that must be drained (never re-fetched) with a reason. */
@@ -124,6 +145,9 @@ export interface SelectResult {
   notInUrls: PendingAlert[];
   /** url_state values seen outside KNOWN_STATES — logged as drift. */
   driftStates: string[];
+  /** Would-be candidates blocked by the TS evidence-gate mirror (v221) —
+   *  RPC/TS skew only. NOT stamped: they stay pending and retry next run. */
+  gatedOut: PendingAlert[];
 }
 
 /**
@@ -134,7 +158,10 @@ export interface SelectResult {
  * (allowUnavailable). Classification per matched host's state set S:
  *   - malicious in S           → terminal 'actioned'
  *   - suspicious/processing S   → transient (recheck; don't file or drop)
- *   - escalatable in S (no above) → candidate
+ *   - escalatable in S (no above) → candidate IF it passes the F4 evidence
+ *     gate (urlscan likely_phishing OR lifecycle weaponised, v221) — else
+ *     'gatedOut' (unstamped; retried next run; should be empty since the
+ *     worklist RPC applies the same predicate)
  *   - unavailable only, not allowed → terminal 'unavailable_deferred' (PR3)
  *   - only unknown/rejected     → terminal 'no_escalatable_state' (+ drift)
  */
@@ -160,6 +187,7 @@ export function selectFalseNegativeCandidates(
   const terminal: TerminalAlert[] = [];
   const transient: PendingAlert[] = [];
   const notInUrls: PendingAlert[] = [];
+  const gatedOut: PendingAlert[] = [];
 
   for (const alert of alerts) {
     const host = normHost(alert.candidate_domain || alert.candidate_url);
@@ -181,6 +209,13 @@ export function selectFalseNegativeCandidates(
       (S.has(NETCRAFT_URL_STATE.NO_THREATS) && NETCRAFT_URL_STATE.NO_THREATS) ||
       [...S].find((s) => escalatable.has(s));
     if (hit) {
+      // F4 evidence gate (v221) — mirrors the worklist RPC's predicate; a
+      // mismatch means deploy skew, so fail closed (no file, no stamp).
+      const evidence = passesEvidenceGate(alert);
+      if (!evidence) {
+        gatedOut.push(alert);
+        continue;
+      }
       candidates.push({
         alertId: alert.id,
         candidateUrl: alert.candidate_url,
@@ -190,6 +225,8 @@ export function selectFalseNegativeCandidates(
           alert.inferred_target_domain ||
           "an Australian brand",
         urlState: hit,
+        urlscanUuid: alert.urlscan_uuid ?? null,
+        evidence,
       });
       continue;
     }
@@ -202,7 +239,14 @@ export function selectFalseNegativeCandidates(
     });
   }
 
-  return { candidates, terminal, transient, notInUrls, driftStates: [...driftStates] };
+  return {
+    candidates,
+    terminal,
+    transient,
+    notInUrls,
+    driftStates: [...driftStates],
+    gatedOut,
+  };
 }
 
 export interface ReconcileAlert {

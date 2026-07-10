@@ -11,6 +11,13 @@ import { NETCRAFT_API_BASE, type FalseNegativeCandidate } from "./netcraft-urls"
  * The submission's per-URL false negatives (branded lookalikes Netcraft graded
  * "no threats" / "unavailable") are flagged as url_misclassifications so
  * Netcraft re-reviews just those, not the whole (already-malicious) batch.
+ *
+ * F4 (v221): every candidate now arrives evidence-gated (urlscan
+ * likely_phishing OR lifecycle weaponised) and the `reason` cites our urlscan
+ * result URL as evidence. The payload has NO screenshot/attachment field —
+ * `url_misclassifications` is exactly Array<{reason, url}> per the live SPA
+ * bundle (verified 2026-07-10). Confirm against Netcraft API docs + one
+ * manual POST before ever adding an attachment key.
  */
 
 export interface NetcraftIssuePayload {
@@ -46,12 +53,15 @@ export function buildIssuePayload(
     reason:
       `Branded lookalike of ${c.brand}; Netcraft graded this URL ` +
       `"${c.urlState}". Detected via Ask Arthur clone-watch (askarthur.au ` +
-      `AU brand watchlist).`,
+      `AU brand watchlist).` +
+      evidenceSentence(c),
     url: stripUrlPii(c.candidateUrl),
   }));
 
   const lines = candidates.map(
-    (c) => `• ${stripUrlPii(c.candidateUrl)} — impersonates ${c.brand} (${c.urlState})`,
+    (c) =>
+      `• ${stripUrlPii(c.candidateUrl)} — impersonates ${c.brand} (${c.urlState})` +
+      (c.urlscanUuid ? ` — urlscan: https://urlscan.io/result/${c.urlscanUuid}/` : ""),
   );
   let additional_info = `${ADDITIONAL_INFO_PREFIX}\n\n${lines.join("\n")}`;
   if (additional_info.length > ADDITIONAL_INFO_MAX) {
@@ -59,6 +69,32 @@ export function buildIssuePayload(
   }
 
   return { additional_info, url_misclassifications, filename_misclassifications: [] };
+}
+
+/** F4 evidence sentence for the per-URL reason. Cites our independent
+ *  urlscan verdict (result URL when we hold a uuid — absent on the
+ *  reputation-fallback weaponisation path) and, for weaponised clones, the
+ *  witnessed parked→live-phishing flip. Factual claims only. */
+function evidenceSentence(c: FalseNegativeCandidate): string {
+  const parts: string[] = [];
+  if (c.urlscanUuid) {
+    parts.push(
+      ` Our independent urlscan.io scan classified it as likely phishing: ` +
+        `https://urlscan.io/result/${c.urlscanUuid}/ .`,
+    );
+  } else {
+    parts.push(
+      ` Our independent reputation scan (Google Safe Browsing / VirusTotal) ` +
+        `classified it as likely phishing.`,
+    );
+  }
+  if (c.evidence === "weaponised") {
+    parts.push(
+      ` Re-scan observed it transition from parked/inactive to serving live ` +
+        `suspected-phishing content after your original grading.`,
+    );
+  }
+  return parts.join("");
 }
 
 export interface NetcraftIssueResult {

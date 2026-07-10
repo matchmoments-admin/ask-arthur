@@ -26,6 +26,12 @@ function alert(id: number, domain: string, brand = "Instagram"): PendingAlert {
     candidate_domain: domain,
     inferred_target_domain: "instagram.com",
     target_brand_normalized: brand,
+    // Post-v221 the worklist RPC only returns evidence-gated rows, so the
+    // baseline fixture passes the gate; the F4 describe block below covers
+    // the gated-out shapes.
+    urlscan_classification: "likely_phishing",
+    lifecycle_state: "declined",
+    urlscan_uuid: "11111111-2222-3333-4444-555555555555",
   };
 }
 
@@ -186,6 +192,9 @@ describe("smoke: real Netcraft submission acDb (state=malicious rollup)", () => 
       candidate_domain: domain,
       inferred_target_domain: "brand.com",
       target_brand_normalized: "Brand",
+      urlscan_classification: "likely_phishing",
+      lifecycle_state: "declined",
+      urlscan_uuid: "11111111-2222-3333-4444-555555555555",
     };
   }
 
@@ -216,6 +225,69 @@ describe("smoke: real Netcraft submission acDb (state=malicious rollup)", () => 
       allowUnavailable: true,
     });
     expect(r.candidates).toHaveLength(0);
+  });
+});
+
+describe("selectFalseNegativeCandidates — F4 evidence gate (v221)", () => {
+  const entries = [urlEntry("inistagram.ir", "no threats")];
+
+  it("blocks a neutral-classification declined clone (gatedOut, no stamp bucket)", () => {
+    const a = {
+      ...alert(1, "inistagram.ir"),
+      urlscan_classification: "neutral",
+      lifecycle_state: "declined",
+    };
+    const r = selectFalseNegativeCandidates([a], entries, { allowUnavailable: false });
+    expect(r.candidates).toHaveLength(0);
+    expect(r.gatedOut.map((g) => g.id)).toEqual([1]);
+    expect(r.terminal).toHaveLength(0); // never stamped — must retry when it weaponises
+  });
+
+  it("blocks when the evidence fields are missing entirely (pre-v221 RPC deploy skew → fail closed)", () => {
+    const a: PendingAlert = {
+      id: 1,
+      candidate_url: "https://inistagram.ir/",
+      candidate_domain: "inistagram.ir",
+      inferred_target_domain: "instagram.com",
+      target_brand_normalized: "Instagram",
+    };
+    const r = selectFalseNegativeCandidates([a], entries, { allowUnavailable: false });
+    expect(r.candidates).toHaveLength(0);
+    expect(r.gatedOut.map((g) => g.id)).toEqual([1]);
+  });
+
+  it("admits likely_phishing with evidence tag", () => {
+    const r = selectFalseNegativeCandidates([alert(1, "inistagram.ir")], entries, {
+      allowUnavailable: false,
+    });
+    expect(r.candidates).toHaveLength(1);
+    expect(r.candidates[0].evidence).toBe("likely_phishing");
+    expect(r.candidates[0].urlscanUuid).toBe("11111111-2222-3333-4444-555555555555");
+  });
+
+  it("admits a weaponised clone even with a null classification (reputation-fallback path)", () => {
+    const a = {
+      ...alert(1, "inistagram.ir"),
+      urlscan_classification: null,
+      lifecycle_state: "weaponised",
+      urlscan_uuid: null,
+    };
+    const r = selectFalseNegativeCandidates([a], entries, { allowUnavailable: false });
+    expect(r.candidates).toHaveLength(1);
+    expect(r.candidates[0].evidence).toBe("weaponised");
+    expect(r.candidates[0].urlscanUuid).toBeNull();
+  });
+
+  it("the gate never rescues actioned/unsettled routing (gate applies only to would-be candidates)", () => {
+    const a = { ...alert(1, "inistagram.ir"), lifecycle_state: "weaponised" };
+    const r = selectFalseNegativeCandidates(
+      [a],
+      [urlEntry("inistagram.ir", "malicious")],
+      { allowUnavailable: false },
+    );
+    expect(r.candidates).toHaveLength(0);
+    expect(r.terminal).toEqual([{ alert: a, reason: "actioned" }]);
+    expect(r.gatedOut).toHaveLength(0);
   });
 });
 
@@ -261,21 +333,63 @@ describe("classifyByUrlState — lifecycle reconcile (PR3.1)", () => {
 });
 
 describe("buildIssuePayload", () => {
+  const base = {
+    alertId: 1,
+    candidateUrl: "https://inistagram.ir/login?email=victim@x.com",
+    candidateDomain: "inistagram.ir",
+    brand: "Instagram",
+    urlState: "no threats",
+    urlscanUuid: "aaaa-bbbb-cccc",
+    evidence: "likely_phishing" as const,
+  };
+
   it("builds report_issue body: PII-stripped urls, sends filename array, bounded info", () => {
-    const payload = buildIssuePayload([
-      {
-        alertId: 1,
-        candidateUrl: "https://inistagram.ir/login?email=victim@x.com",
-        candidateDomain: "inistagram.ir",
-        brand: "Instagram",
-        urlState: "no threats",
-      },
-    ]);
+    const payload = buildIssuePayload([base]);
     expect(payload.url_misclassifications).toHaveLength(1);
     expect(payload.url_misclassifications[0].url).not.toContain("victim@x.com");
     expect(payload.url_misclassifications[0].reason).toContain("Instagram");
     expect(payload.filename_misclassifications).toEqual([]);
     expect(payload.additional_info.length).toBeGreaterThan(0);
     expect(payload.additional_info.length).toBeLessThanOrEqual(10_000);
+  });
+
+  it("has exactly the three verified payload keys — no screenshot field", () => {
+    const payload = buildIssuePayload([base]);
+    expect(Object.keys(payload).sort()).toEqual([
+      "additional_info",
+      "filename_misclassifications",
+      "url_misclassifications",
+    ]);
+    expect(Object.keys(payload.url_misclassifications[0]).sort()).toEqual([
+      "reason",
+      "url",
+    ]);
+  });
+
+  it("cites the urlscan result URL as evidence when a uuid is held (F4)", () => {
+    const payload = buildIssuePayload([base]);
+    expect(payload.url_misclassifications[0].reason).toContain(
+      "https://urlscan.io/result/aaaa-bbbb-cccc/",
+    );
+    expect(payload.additional_info).toContain(
+      "https://urlscan.io/result/aaaa-bbbb-cccc/",
+    );
+  });
+
+  it("falls back to the reputation-scan sentence when uuid is null", () => {
+    const payload = buildIssuePayload([{ ...base, urlscanUuid: null }]);
+    expect(payload.url_misclassifications[0].reason).not.toContain("urlscan.io/result");
+    expect(payload.url_misclassifications[0].reason).toContain("Safe Browsing");
+  });
+
+  it("adds the witnessed-weaponisation sentence for weaponised evidence", () => {
+    const weaponised = buildIssuePayload([{ ...base, evidence: "weaponised" as const }]);
+    expect(weaponised.url_misclassifications[0].reason).toContain(
+      "transition from parked/inactive",
+    );
+    const phishing = buildIssuePayload([base]);
+    expect(phishing.url_misclassifications[0].reason).not.toContain(
+      "transition from parked/inactive",
+    );
   });
 });
