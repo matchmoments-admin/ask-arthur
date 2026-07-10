@@ -5,6 +5,7 @@ import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { logCost } from "@/lib/cost-telemetry";
 import { logEnforcementEvent } from "@/lib/clone-watch/enforcement-telemetry";
+import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import {
   classifyByUrlState,
   fetchNetcraftSubmissionUrls,
@@ -159,6 +160,35 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
         counts.takenDown += cls.takenDown.length;
         counts.declined += cls.declined.length;
         counts.other += cls.other.length;
+      }
+
+      // Degraded-run awareness. Hard failures (RPC/DB) throw and are always-ship
+      // fn.error via withAxiomLogging. A Netcraft OUTAGE, though, only soft-fails
+      // (per-uuid fetch non-200 → counts.errors, no throw), so a run that updated
+      // no lifecycle because Netcraft was down would otherwise pass silently.
+      // Mirror the poll fn: if ≥50% of a non-trivial batch failed to fetch,
+      // always-ship an Axiom warning (logEnforcementEvent uses .warn) + page.
+      if (groups.length >= 5 && counts.errors / groups.length >= 0.5) {
+        await step.run("page-on-outage", async () => {
+          logEnforcementEvent("rejected", {
+            alertId: 0,
+            domain: "netcraft-reconcile",
+            channel: "netcraft",
+            runId,
+            extra: {
+              reason: "reconcile_outage",
+              errors: counts.errors,
+              uuids: groups.length,
+            },
+          });
+          await sendAdminTelegramMessage(
+            [
+              "⚠️ <b>Clone-watch — Netcraft reconcile degraded</b>",
+              `Fetch errors: <b>${counts.errors}/${groups.length}</b> uuids`,
+              "Likely a Netcraft outage / rate-limit. Lifecycle + takedown-KPI update was skipped for the failed batch; the cadence throttle retries them next run.",
+            ].join("\n"),
+          );
+        });
       }
 
       await step.run("log-cost", async () => {
