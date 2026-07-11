@@ -1,6 +1,7 @@
 import { Archivo, JetBrains_Mono } from "next/font/google";
 import { requireAdmin } from "@/lib/adminAuth";
 import {
+  buildOutcomesLine,
   getCloneWatchReportCard,
   type CloneWatchReportCard,
 } from "@/lib/clone-watch/report-card-data";
@@ -36,6 +37,10 @@ import { reportCardCss } from "./report-card-css";
  * NOT taken down; registrars shown ONLY in aggregate (no single-registrar
  * shaming); the MoM window is always stated, and a delta only shows once both
  * months are fully tracked (see FIRST_FULL_MONTH in report-card-data.ts).
+ * Vendor OUTCOMES (slide 06, since the v217+ reconciler): witnessed per-URL
+ * gradings only, cohort-framed ("of this month's detections"), email-block
+ * verbs — "actioned by Netcraft" (never "we took down"), "graded 'no threat'",
+ * "flipped to active phishing". Median time-to-takedown is never published.
  */
 
 const archivo = Archivo({ subsets: ["latin"], weight: ["400", "500", "600", "700", "800", "900"], display: "swap", variable: "--font-archivo" });
@@ -286,9 +291,14 @@ function SlideRegistrars({ data, page }: SlideProps) {
   );
 }
 
-/* ── 06 — what we did (reported / phishing / parked) ─────────────────────── */
+/* ── 06 — what we did (reported / phishing / parked + vendor outcomes) ───── */
 function SlideActed({ data, page }: SlideProps) {
   const period = data.periodLabel.toUpperCase();
+  // Vendor-outcome line (F5): witnessed per-URL gradings for THIS month's
+  // cohort, from the daily reconciler. Empty on all-zero months (pre-lifecycle
+  // history, quiet months) — the block hides and the slide renders exactly as
+  // the June 2026 edition did.
+  const outcomes = buildOutcomesLine(data.kpis);
   return (
     <section className="slide">
       <div className="hdr">
@@ -301,11 +311,23 @@ function SlideActed({ data, page }: SlideProps) {
         <div className="kpi"><div className="n">{data.kpis.likelyPhishing}</div><div className="l">flagged as likely phishing</div></div>
         <div className="kpi"><div className="n">{data.kpis.parkedForSale}</div><div className="l">parked / squatting domains</div></div>
       </div>
-      <div className="know" style={{ marginTop: 56 }}>
+      {outcomes && (
+        <div className="know" style={{ marginTop: 40 }}>
+          <div className="lab">WHAT HAPPENED NEXT</div>
+          <div className="txt">Of this month&apos;s detections: {outcomes}.</div>
+        </div>
+      )}
+      <div className="know" style={{ marginTop: outcomes ? 32 : 56 }}>
         <div className="lab">HOW WE KNOW</div>
         <div className="txt">We sweep newly-registered domains against ~50 major Australian brands daily, enrich with WHOIS + certificate data, and review by hand — each with a public evidence page on urlscan.io.</div>
       </div>
-      <div className="note">Reported to Netcraft for review is a takedown <b>request</b>, not a confirmed takedown.</div>
+      <div className="note">
+        {outcomes ? (
+          <>Reported to Netcraft is a takedown <b>request</b>. Outcome counts are the current per-URL status of this month&apos;s detections, observed from the vendor&apos;s own gradings.</>
+        ) : (
+          <>Reported to Netcraft for review is a takedown <b>request</b>, not a confirmed takedown.</>
+        )}
+      </div>
       <div className="foot rule2 bot">
         <div className="reg">Full URL-level evidence list available to affected brands on request.</div>
         <Pg n={page} />

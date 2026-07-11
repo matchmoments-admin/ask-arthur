@@ -210,6 +210,50 @@ function sumMetric(
   return n;
 }
 
+/** The lifecycle-outcome subset of the report-card KPIs. */
+export type CloneOutcomeKpis = Pick<
+  CloneWatchReportCard["kpis"],
+  "takenDown" | "declined" | "escalated" | "weaponised" | "reTakenDown"
+>;
+
+/** True when the month's cohort has any vendor outcome worth publishing —
+ *  the same guard the Brand Stewardship email block uses. All-zero months
+ *  (e.g. June 2026, pre-reconciler) render nothing. */
+export function hasOutcomes(kpis: CloneOutcomeKpis): boolean {
+  return kpis.takenDown + kpis.declined + kpis.weaponised > 0;
+}
+
+/**
+ * Compact one-line vendor-outcome summary for carousel slide 06 ("·"-joined,
+ * non-zero parts only). Verb discipline mirrors the vetted Brand Stewardship
+ * email block: "actioned by Netcraft" (never "we took down"), "graded 'no
+ * threat'" for declines, weaponised = flipped to active phishing after the
+ * decline. Counts are the CURRENT per-URL status of the month's cohort.
+ * Returns "" when the month has no outcomes (caller hides the block).
+ */
+export function buildOutcomesLine(kpis: CloneOutcomeKpis): string {
+  if (!hasOutcomes(kpis)) return "";
+  const parts: string[] = [];
+  if (kpis.takenDown > 0) {
+    parts.push(`${kpis.takenDown} actioned by Netcraft`);
+  }
+  if (kpis.declined > 0) {
+    parts.push(`${kpis.declined} graded “no threat” and left live`);
+  }
+  if (kpis.weaponised > 0) {
+    const reActioned =
+      kpis.reTakenDown > 0 ? ` (${kpis.reTakenDown} then actioned)` : "";
+    parts.push(
+      `${kpis.weaponised} later flipped to active phishing — our re-scans caught each flip and escalated it back with evidence${reActioned}`,
+    );
+  } else if (kpis.escalated > 0) {
+    parts.push(
+      `${kpis.escalated} escalated back with our scan evidence to force a re-review`,
+    );
+  }
+  return parts.join(" · ");
+}
+
 type ServiceClient = NonNullable<ReturnType<typeof createServiceClient>>;
 
 /**

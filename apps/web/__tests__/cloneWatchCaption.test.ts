@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
-import type { CloneWatchReportCard } from "@/lib/clone-watch/report-card-data";
-import { generateCloneWatchCaption } from "@/lib/clone-watch/clone-watch-caption";
+import {
+  buildOutcomesLine,
+  type CloneWatchReportCard,
+} from "@/lib/clone-watch/report-card-data";
+import {
+  buildOutcomesBlock,
+  generateCloneWatchCaption,
+} from "@/lib/clone-watch/clone-watch-caption";
 
 /** June 2026 shape: HESTA super fund, globals present, baseline (no MoM). */
 const JUNE: CloneWatchReportCard = {
@@ -156,5 +162,130 @@ describe("generateCloneWatchCaption", () => {
     const c = generateCloneWatchCaption(barelyUp);
     expect(c.body).toContain("That's essentially flat on June 2026 (1000 → 1001)");
     expect(c.body).not.toMatch(/up 0%|down 0%/);
+  });
+
+  it("all-zero lifecycle KPIs (June's real state): NO outcomes block, caption unchanged", () => {
+    const c = generateCloneWatchCaption(JUNE);
+    expect(c.body).not.toContain("takedown vendor");
+    expect(c.body).not.toContain("actioned");
+    expect(c.body).not.toContain("no threat");
+  });
+
+  it("lifecycle outcomes render the vendor-gap story with honest verbs", () => {
+    const withOutcomes: CloneWatchReportCard = {
+      ...JULY,
+      kpis: {
+        ...JULY.kpis,
+        reportedToNetcraft: 120,
+        takenDown: 3,
+        declined: 40,
+        escalated: 1,
+        weaponised: 2,
+        reTakenDown: 1,
+      },
+    };
+    const c = generateCloneWatchCaption(withOutcomes);
+    expect(c.body).toContain(
+      'Of the 120 we reported to a takedown vendor: 3 were actioned and 40 were graded "no threat" and left live.',
+    );
+    expect(c.body).toContain(
+      '2 of those "no threat" domains later flipped to active phishing. Our re-scans caught each flip and escalated the evidence straight back — 1 has since been actioned.',
+    );
+    // Honesty guardrails: their action, never ours; no confirmed-clone claims;
+    // still no URL in the body.
+    expect(c.body).not.toMatch(/we took down|we removed/i);
+    expect(c.body).not.toMatch(/confirmed clone/i);
+    expect(c.body).not.toContain("askarthur.au");
+    // Never publish a time-to-takedown figure.
+    expect(c.body).not.toMatch(/time.to.takedown|median/i);
+  });
+
+  it("partial zeros: no '0 were actioned' clause; no phishing sentence when weaponised=0", () => {
+    const declinedOnly = buildOutcomesBlock({
+      reportedToNetcraft: 100,
+      takenDown: 0,
+      declined: 25,
+      escalated: 0,
+      weaponised: 0,
+      reTakenDown: 0,
+    });
+    expect(declinedOnly).toBe(
+      'Of the 100 we reported to a takedown vendor: 25 were graded "no threat" and left live.',
+    );
+    expect(declinedOnly).not.toContain("0 were");
+    expect(declinedOnly).not.toContain("flipped");
+
+    const escalatedNoWeaponised = buildOutcomesBlock({
+      reportedToNetcraft: 100,
+      takenDown: 2,
+      declined: 10,
+      escalated: 3,
+      weaponised: 0,
+      reTakenDown: 0,
+    });
+    expect(escalatedNoWeaponised).toContain(
+      "We escalated 3 back to the vendor with our scan evidence to force a re-review.",
+    );
+
+    const singulars = buildOutcomesBlock({
+      reportedToNetcraft: 10,
+      takenDown: 1,
+      declined: 1,
+      escalated: 1,
+      weaponised: 1,
+      reTakenDown: 0,
+    });
+    expect(singulars).toContain("1 was actioned");
+    expect(singulars).toContain('1 was graded "no threat"');
+    expect(singulars).toContain('1 of those "no threat" domain later flipped');
+    expect(singulars).toContain("caught the flip");
+
+    expect(
+      buildOutcomesBlock({
+        reportedToNetcraft: 50,
+        takenDown: 0,
+        declined: 0,
+        escalated: 0,
+        weaponised: 0,
+        reTakenDown: 0,
+      }),
+    ).toBe("");
+  });
+});
+
+describe("buildOutcomesLine (slide 06)", () => {
+  it("joins non-zero outcomes with the ledger separator", () => {
+    const line = buildOutcomesLine({
+      takenDown: 3,
+      declined: 40,
+      escalated: 1,
+      weaponised: 2,
+      reTakenDown: 1,
+    });
+    expect(line).toBe(
+      "3 actioned by Netcraft · 40 graded “no threat” and left live · 2 later flipped to active phishing — our re-scans caught each flip and escalated it back with evidence (1 then actioned)",
+    );
+  });
+
+  it("omits zero parts and the re-actioned parenthetical when zero", () => {
+    const line = buildOutcomesLine({
+      takenDown: 0,
+      declined: 12,
+      escalated: 0,
+      weaponised: 1,
+      reTakenDown: 0,
+    });
+    expect(line).not.toContain("0 actioned");
+    expect(line).not.toContain("then actioned");
+    expect(line).toContain("12 graded");
+  });
+
+  it("escalated-only fallback when weaponised=0; empty on all-zero months", () => {
+    expect(
+      buildOutcomesLine({ takenDown: 2, declined: 5, escalated: 4, weaponised: 0, reTakenDown: 0 }),
+    ).toContain("4 escalated back with our scan evidence");
+    expect(
+      buildOutcomesLine({ takenDown: 0, declined: 0, escalated: 0, weaponised: 0, reTakenDown: 0 }),
+    ).toBe("");
   });
 });
