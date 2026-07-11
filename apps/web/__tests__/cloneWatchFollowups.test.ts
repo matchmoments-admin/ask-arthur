@@ -64,6 +64,7 @@ describe("buildInternalDigestHtml", () => {
         country: "SG",
         registrar: "NameSilo",
         abuse_email: "abuse@namesilo.com",
+        lifecycle_state: null, first_seen_at: null, screenshot_url: null, result_url: null, still_live_as_of: null,
       },
     ],
     alertIds: over.alertIds ?? [1],
@@ -93,7 +94,7 @@ describe("buildInternalDigestHtml", () => {
 
   it("escapes HTML in domain values", () => {
     const byBrand = new Map<string, CloneBrandMetrics>([
-      ["x.com", metrics({ domains: [{ domain: "a<script>.com", classification: null, ip: null, asn: null, country: null, registrar: null, abuse_email: null }] })],
+      ["x.com", metrics({ domains: [{ domain: "a<script>.com", classification: null, ip: null, asn: null, country: null, registrar: null, abuse_email: null, lifecycle_state: null, first_seen_at: null, screenshot_url: null, result_url: null, still_live_as_of: null }] })],
     ]);
     const html = buildInternalDigestHtml("June 2026", byBrand);
     expect(html).toContain("a&lt;script&gt;.com");
@@ -108,7 +109,7 @@ describe("buildInternalDigestHtml", () => {
           detected: 2,
           byRegistrar: { NameSilo: 2 },
           domains: [
-            { domain: "anz-a.click", classification: null, ip: null, asn: null, country: null, registrar: "NameSilo", abuse_email: "abuse@namesilo.com" },
+            { domain: "anz-a.click", classification: null, ip: null, asn: null, country: null, registrar: "NameSilo", abuse_email: "abuse@namesilo.com", lifecycle_state: null, first_seen_at: null, screenshot_url: null, result_url: null, still_live_as_of: null },
           ],
         }),
       ],
@@ -160,10 +161,10 @@ describe("buildRegistrarRollup", () => {
   it("sums per-brand registrar counts across brands, maps abuse emails, and counts Unknown", () => {
     const byBrand = new Map<string, CloneBrandMetrics>([
       ["a.com", m({ NameSilo: 2, Unknown: 1 }, [
-        { domain: "a1", classification: null, ip: null, asn: null, country: null, registrar: "NameSilo", abuse_email: "abuse@namesilo.com" },
+        { domain: "a1", classification: null, ip: null, asn: null, country: null, registrar: "NameSilo", abuse_email: "abuse@namesilo.com", lifecycle_state: null, first_seen_at: null, screenshot_url: null, result_url: null, still_live_as_of: null },
       ])],
       ["b.com", m({ NameSilo: 3, GoDaddy: 1 }, [
-        { domain: "b1", classification: null, ip: null, asn: null, country: null, registrar: "GoDaddy", abuse_email: "abuse@godaddy.com" },
+        { domain: "b1", classification: null, ip: null, asn: null, country: null, registrar: "GoDaddy", abuse_email: "abuse@godaddy.com", lifecycle_state: null, first_seen_at: null, screenshot_url: null, result_url: null, still_live_as_of: null },
       ])],
     ]);
     const { rows, unknownCount } = buildRegistrarRollup(byBrand);

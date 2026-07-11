@@ -164,3 +164,137 @@ describe("BrandAbuseReport email (refreshed chrome)", () => {
     expect(html).toContain("ABN 72 695 772 313");
   });
 });
+
+describe("F2 watch-list rendering", () => {
+  const base = {
+    brandName: "ANZ",
+    periodLabel: "July 2026",
+    detected: 0,
+    reportedByDestination: {},
+    reportsSent: 0,
+    reportRef: "BSR-anz-2026-07",
+  };
+
+  const watchList = {
+    detected: 3,
+    netcraftReported: 3,
+    takenDown: 1,
+    declined: 1,
+    weaponised: 1,
+    weaponisedAfterDecline: 1,
+    byClassification: {},
+    byCountry: {},
+    byRegistrar: {},
+    byAsn: {},
+    domains: [
+      {
+        domain: "anz-weap.click",
+        classification: "likely_phishing",
+        ip: "1.1.1.1",
+        asn: "AS1",
+        country: "US",
+        registrar: "NameSilo, LLC",
+        abuseEmail: "abuse@namesilo.com",
+        lifecycleState: "weaponised",
+        firstSeenAt: "2026-07-01T00:00:00Z",
+        screenshotUrl: "https://urlscan.io/screenshots/weap.png",
+        resultUrl: "https://urlscan.io/result/weap-uuid/",
+        stillLiveAsOf: "2026-07-10T00:00:00Z",
+      },
+      {
+        domain: "anz-decl.click",
+        classification: "neutral",
+        ip: "2.2.2.2",
+        asn: "AS2",
+        country: "SG",
+        registrar: "GoDaddy",
+        abuseEmail: null,
+        lifecycleState: "declined",
+        firstSeenAt: "2026-07-02T00:00:00Z",
+        screenshotUrl: "https://urlscan.io/screenshots/decl.png",
+        resultUrl: "https://urlscan.io/result/decl-uuid/",
+        stillLiveAsOf: "2026-07-05T00:00:00Z",
+      },
+      {
+        domain: "anz-taken.click",
+        classification: "neutral",
+        ip: null,
+        asn: null,
+        country: null,
+        registrar: null,
+        abuseEmail: null,
+        lifecycleState: "taken_down",
+        firstSeenAt: "2026-07-03T00:00:00Z",
+        screenshotUrl: null,
+        resultUrl: null,
+        stillLiveAsOf: null,
+      },
+    ],
+  };
+
+  it("renders badges, dates line, scan link; screenshot ONLY on the weaponised row", async () => {
+    const raw = await render(BrandStewardshipReport({ ...base, cloneDetections: watchList }));
+    const html = raw.replace(/<!-- -->/g, "");
+    expect(html).toContain("ACTIVE PHISHING");
+    expect(html).toContain("STILL LIVE — GRADED NO-THREAT");
+    expect(html).toContain("ACTIONED BY NETCRAFT");
+    expect(html).toContain("First seen 1 Jul 2026");
+    expect(html).toContain("still live as of 10 Jul 2026");
+    expect(html).toContain("https://urlscan.io/result/weap-uuid/");
+    // Screenshot: weaponised row embedded, declined row link-only.
+    expect(html).toContain("https://urlscan.io/screenshots/weap.png");
+    expect(html).not.toContain("https://urlscan.io/screenshots/decl.png");
+    // Honesty: never "removed"/"we took down".
+    expect(html.toLowerCase()).not.toContain("we took down");
+    expect(html.toLowerCase()).not.toContain("removed");
+  });
+
+  it("renders the why_still_up + what_you_can_do slots when unactioned rows exist, with override support", async () => {
+    const html = await render(BrandStewardshipReport({ ...base, cloneDetections: watchList }));
+    expect(html).toContain("evidence threshold"); // why_still_up default
+    expect(html).toContain("auDRP"); // what_you_can_do default
+    const overridden = await render(
+      BrandStewardshipReport({
+        ...base,
+        cloneDetections: watchList,
+        copy: { why_still_up: "Custom explainer for **{{brandName}}**." },
+      }),
+    );
+    expect(overridden).toContain("Custom explainer for");
+    expect(overridden).not.toContain("evidence threshold");
+  });
+
+  it("legacy ledger rows (no F2 fields) render exactly as before — no badge/dates/scan/img, no crash", async () => {
+    const html = await render(
+      BrandStewardshipReport({
+        ...base,
+        cloneDetections: {
+          detected: 1,
+          byClassification: {},
+          byCountry: {},
+          byRegistrar: {},
+          byAsn: {},
+          domains: [
+            {
+              domain: "anz-old.click",
+              classification: "neutral",
+              ip: "3.3.3.3",
+              asn: "AS3",
+              country: "AU",
+              registrar: "NameSilo, LLC",
+              abuseEmail: null,
+            },
+          ],
+        },
+      }),
+    );
+    expect(html).toContain("anz-old.click");
+    expect(html).not.toContain("First seen");
+    expect(html).not.toContain("View scan");
+    expect(html).not.toContain("ACTIVE PHISHING");
+    expect(html).not.toContain("urlscan.io/screenshots");
+    // No unactioned counts → the two new slots stay hidden.
+    expect(html).not.toContain("evidence threshold");
+    expect(html).not.toContain("auDRP");
+  });
+});

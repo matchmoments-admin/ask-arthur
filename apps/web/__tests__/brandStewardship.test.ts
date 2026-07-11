@@ -25,6 +25,94 @@ const cloneRow = (over: Partial<CloneAlertRow>): CloneAlertRow => ({
   lifecycle_state: over.lifecycle_state ?? null,
   netcraft_declined_at: over.netcraft_declined_at ?? null,
   weaponised_at: over.weaponised_at ?? null,
+  first_seen_at: over.first_seen_at ?? null,
+});
+
+describe("F2 watch-list fields (toCloneDetail via aggregateClonesByDomain)", () => {
+  it("populates lifecycle/first-seen/screenshot/result-url and derives still_live_as_of", () => {
+    const agg = aggregateClonesByDomain([
+      cloneRow({
+        id: 1,
+        candidate_domain: "weap.click",
+        lifecycle_state: "weaponised",
+        weaponised_at: "2026-07-10T12:00:00Z",
+        netcraft_declined_at: "2026-06-01T00:00:00Z",
+        first_seen_at: "2026-07-01T00:00:00Z",
+        urlscan_evidence: {
+          server: { ip: "1.1.1.1" },
+          screenshot_url: "https://urlscan.io/screenshots/x.png",
+          uuid: "abc-123",
+        },
+      }),
+      cloneRow({
+        id: 2,
+        candidate_domain: "decl.click",
+        lifecycle_state: "declined",
+        netcraft_declined_at: "2026-07-05T00:00:00Z",
+        first_seen_at: "2026-07-02T00:00:00Z",
+      }),
+      cloneRow({
+        id: 3,
+        candidate_domain: "mon.click",
+        lifecycle_state: "monitoring",
+        first_seen_at: "2026-07-03T00:00:00Z",
+      }),
+    ]);
+    const domains = agg.get("anz.com.au")!.domains;
+    const weap = domains.find((d) => d.domain === "weap.click")!;
+    // weaponised → still_live_as_of = weaponised_at (not the older decline)
+    expect(weap.still_live_as_of).toBe("2026-07-10T12:00:00Z");
+    expect(weap.lifecycle_state).toBe("weaponised");
+    expect(weap.first_seen_at).toBe("2026-07-01T00:00:00Z");
+    expect(weap.screenshot_url).toBe("https://urlscan.io/screenshots/x.png");
+    expect(weap.result_url).toBe("https://urlscan.io/result/abc-123/");
+    // declined → netcraft_declined_at
+    expect(domains.find((d) => d.domain === "decl.click")!.still_live_as_of).toBe(
+      "2026-07-05T00:00:00Z",
+    );
+    // monitoring → null (last_rechecked_at is NOT an honest observed-live stamp)
+    expect(domains.find((d) => d.domain === "mon.click")!.still_live_as_of).toBeNull();
+  });
+
+  it("orders still-live first: weaponised < declined < monitoring < detected < taken_down < dormant", () => {
+    const agg = aggregateClonesByDomain([
+      cloneRow({ id: 1, candidate_domain: "e-dormant.click", lifecycle_state: "dormant" }),
+      cloneRow({ id: 2, candidate_domain: "d-taken.click", lifecycle_state: "taken_down" }),
+      cloneRow({ id: 3, candidate_domain: "a-weap.click", lifecycle_state: "weaponised" }),
+      cloneRow({ id: 4, candidate_domain: "c-mon.click", lifecycle_state: "monitoring" }),
+      cloneRow({ id: 5, candidate_domain: "b-decl.click", lifecycle_state: "declined" }),
+      cloneRow({ id: 6, candidate_domain: "cc-detected.click", lifecycle_state: "detected" }),
+    ]);
+    expect(agg.get("anz.com.au")!.domains.map((d) => d.domain)).toEqual([
+      "a-weap.click",
+      "b-decl.click",
+      "c-mon.click",
+      "cc-detected.click",
+      "d-taken.click",
+      "e-dormant.click",
+    ]);
+  });
+
+  it("classification rank still breaks ties within a lifecycle bucket", () => {
+    const agg = aggregateClonesByDomain([
+      cloneRow({
+        id: 1,
+        candidate_domain: "z-neutral.click",
+        lifecycle_state: "declined",
+        urlscan_classification: "neutral",
+      }),
+      cloneRow({
+        id: 2,
+        candidate_domain: "a-phish.click",
+        lifecycle_state: "declined",
+        urlscan_classification: "likely_phishing",
+      }),
+    ]);
+    expect(agg.get("anz.com.au")!.domains.map((d) => d.domain)).toEqual([
+      "a-phish.click",
+      "z-neutral.click",
+    ]);
+  });
 });
 
 describe("aggregateClonesByDomain", () => {

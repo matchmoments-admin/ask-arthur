@@ -234,7 +234,13 @@ export interface CloneAlertRow {
   candidate_domain: string;
   inferred_target_domain: string | null;
   urlscan_classification: string | null;
-  urlscan_evidence: { server?: { ip?: string; asn?: string; country?: string } } | null;
+  urlscan_evidence: {
+    server?: { ip?: string; asn?: string; country?: string };
+    /** Present when the urlscan retrieval succeeded (see urlscan-classify.ts). */
+    screenshot_url?: string;
+    /** Submission uuid — the public result page is derived from it. */
+    uuid?: string;
+  } | null;
   attribution: {
     whois?: { registrar?: string; registrarAbuseEmail?: string };
     hosting?: { ip?: string; asn?: string; country?: string };
@@ -243,6 +249,7 @@ export interface CloneAlertRow {
   lifecycle_state: string | null;
   netcraft_declined_at: string | null;
   weaponised_at: string | null;
+  first_seen_at: string | null;
 }
 
 export interface CloneDetail {
@@ -253,6 +260,17 @@ export interface CloneDetail {
   country: string | null;
   registrar: string | null;
   abuse_email: string | null;
+  /** F2 watch-list fields — persist verbatim (snake_case) into the metrics
+   *  ledger; rows written before F2 simply lack the keys. */
+  lifecycle_state: string | null;
+  first_seen_at: string | null;
+  screenshot_url: string | null;
+  result_url: string | null;
+  /** Honest "observed live" timestamp: weaponised→weaponised_at,
+   *  declined→netcraft_declined_at (the vendor observed the live site when
+   *  grading), else null. last_rechecked_at is NOT used — it stamps when a
+   *  rescan is TRIGGERED, not when the site was seen live. */
+  still_live_as_of: string | null;
 }
 
 export interface CloneBrandMetrics {
@@ -303,13 +321,19 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function toCloneDetail(row: CloneAlertRow): CloneDetail {
+export function toCloneDetail(row: CloneAlertRow): CloneDetail {
   const server = row.urlscan_evidence?.server ?? {};
   // Fall back to the attribution dossier's hosting block when the live urlscan
   // render didn't capture server info (e.g. a clone enriched before its scan
   // completed). Belt-and-suspenders so a clone shows whatever hosting we have.
   const attrHosting = row.attribution?.hosting ?? {};
   const whois = row.attribution?.whois ?? {};
+  const stillLiveAsOf =
+    row.lifecycle_state === "weaponised"
+      ? (row.weaponised_at ?? null)
+      : row.lifecycle_state === "declined"
+        ? (row.netcraft_declined_at ?? null)
+        : null;
   return {
     domain: row.candidate_domain,
     classification: row.urlscan_classification ?? null,
@@ -318,6 +342,15 @@ function toCloneDetail(row: CloneAlertRow): CloneDetail {
     country: server.country ?? attrHosting.country ?? null,
     registrar: whois.registrar ?? null,
     abuse_email: whois.registrarAbuseEmail ?? null,
+    lifecycle_state: row.lifecycle_state ?? null,
+    first_seen_at: row.first_seen_at ?? null,
+    screenshot_url: row.urlscan_evidence?.screenshot_url ?? null,
+    // Public inspect-without-visiting page, derived from the scan uuid (same
+    // convention as urlscanEvidenceFromJsonb in notify-brand-prepare).
+    result_url: row.urlscan_evidence?.uuid
+      ? `https://urlscan.io/result/${row.urlscan_evidence.uuid}/`
+      : null,
+    still_live_as_of: stillLiveAsOf,
   };
 }
 
@@ -328,6 +361,17 @@ const CLONE_CLASS_RANK: Record<string, number> = {
   unresolved: 2,
   neutral: 3,
 };
+
+// F2 watch-list ordering: still-live rows lead the list — the unactioned
+// exposure IS the deliverable; actioned/dormant rows sink to the tail.
+const LIFECYCLE_LIVE_RANK: Record<string, number> = {
+  weaponised: 0,
+  declined: 1,
+  monitoring: 2,
+  taken_down: 4,
+  dormant: 5,
+};
+const LIFECYCLE_LIVE_RANK_DEFAULT = 3; // detected / null / unknown
 
 /**
  * Group clone-watch alerts by the impersonated brand's domain
@@ -402,9 +446,13 @@ export function aggregateClonesByDomain(
     m.domains.push(detail);
   }
 
-  // Sort + cap each brand's detail list (most actionable first).
+  // Sort + cap each brand's detail list. F2: still-live rows first (the
+  // watch-list is the deliverable), then most-actionable classification.
   for (const m of out.values()) {
     m.domains.sort((a, b) => {
+      const la = LIFECYCLE_LIVE_RANK[a.lifecycle_state ?? ""] ?? LIFECYCLE_LIVE_RANK_DEFAULT;
+      const lb = LIFECYCLE_LIVE_RANK[b.lifecycle_state ?? ""] ?? LIFECYCLE_LIVE_RANK_DEFAULT;
+      if (la !== lb) return la - lb;
       const ra = CLONE_CLASS_RANK[a.classification ?? ""] ?? 9;
       const rb = CLONE_CLASS_RANK[b.classification ?? ""] ?? 9;
       return ra !== rb ? ra - rb : a.domain.localeCompare(b.domain);
@@ -513,7 +561,7 @@ export const reportBrandStewardship = inngest.createFunction(
       const { data, error } = await sb
         .from("shopfront_clone_alerts")
         .select(
-          "id, candidate_domain, inferred_target_domain, urlscan_classification, urlscan_evidence, attribution, submitted_to, lifecycle_state, netcraft_declined_at, weaponised_at",
+          "id, candidate_domain, inferred_target_domain, urlscan_classification, urlscan_evidence, attribution, submitted_to, lifecycle_state, netcraft_declined_at, weaponised_at, first_seen_at",
         )
         .eq("source", "nrd")
         .gte("first_seen_at", period.startIso)
