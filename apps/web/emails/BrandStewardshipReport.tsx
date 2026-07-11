@@ -12,6 +12,7 @@ import {
 } from "@react-email/components";
 import { renderCopySlot } from "@/lib/email/resolve-copy";
 import { BRAND_STEWARDSHIP_SLOTS } from "@/lib/email/copy-registry";
+import { hasOutcomes } from "@/lib/clone-watch/outcome-copy";
 import {
   registrarAbuseUrl,
   hostAbuseUrl,
@@ -100,9 +101,14 @@ export interface CloneDetections {
   declined?: number;
   /** We filed a report_issue to force a re-review. */
   escalated?: number;
-  /** Flipped to active phishing after Netcraft declined. */
+  /** Currently serving active phishing (lifecycle weaponised). */
   weaponised?: number;
-  /** Escalated → then taken down. */
+  /** Weaponised AND previously Netcraft-declined — the only subset for which
+   *  the "graded no-threat, later flipped" claim is provable (see
+   *  lib/clone-watch/outcome-copy.ts honesty rules). Absent on report rows
+   *  persisted before this field existed. */
+  weaponisedAfterDecline?: number;
+  /** Escalated → then taken down. Subset of takenDown. */
   reTakenDown?: number;
   /** Per-classification counts for the headline. */
   byClassification?: Record<string, number>;
@@ -303,15 +309,20 @@ export default function BrandStewardshipReport({
                 </Text>
 
                 {/* Netcraft outcome — the honest lifecycle of what we reported.
-                    Verbs are precise: "actioned by Netcraft" (not "removed"),
-                    "graded no-threat" for declines, "we escalated" for our
-                    report_issue push-back, "flipped to active phishing" for
-                    weaponisation-after-decline. Only rendered when there's a
-                    Netcraft-reported subset with a known outcome. */}
-                {(cloneDetections.declined ?? 0) +
-                  (cloneDetections.takenDown ?? 0) +
-                  (cloneDetections.weaponised ?? 0) >
-                  0 && (
+                    Verbs + claim rules come from lib/clone-watch/outcome-copy.ts
+                    (single vocabulary module): "actioned by Netcraft" (not
+                    "removed"), "graded no-threat" for declines, "we escalated"
+                    for our report_issue push-back, and the "flipped after a
+                    no-threat grade" claim ONLY for weaponisedAfterDecline. */}
+                {hasOutcomes({
+                  takenDown: cloneDetections.takenDown ?? 0,
+                  declined: cloneDetections.declined ?? 0,
+                  escalated: cloneDetections.escalated ?? 0,
+                  weaponised: cloneDetections.weaponised ?? 0,
+                  weaponisedAfterDecline:
+                    cloneDetections.weaponisedAfterDecline ?? 0,
+                  reTakenDown: cloneDetections.reTakenDown ?? 0,
+                }) && (
                   <Section
                     style={{
                       margin: "0 0 14px 0",
@@ -354,9 +365,20 @@ export default function BrandStewardshipReport({
                     )}
                     {(cloneDetections.weaponised ?? 0) > 0 && (
                       <Text style={outcomeLine}>
-                        🔥 <strong>{cloneDetections.weaponised}</strong> later
-                        flipped to active phishing — confirming that
-                        &ldquo;no&nbsp;threat&rdquo; did not mean safe.
+                        🔥 <strong>{cloneDetections.weaponised}</strong> now
+                        serving active phishing
+                        {(cloneDetections.weaponisedAfterDecline ?? 0) > 0 && (
+                          <>
+                            {" "}
+                            — <strong>
+                              {cloneDetections.weaponisedAfterDecline}
+                            </strong>{" "}
+                            had earlier been graded &ldquo;no&nbsp;threat&rdquo;,
+                            confirming that &ldquo;no&nbsp;threat&rdquo; did not
+                            mean safe
+                          </>
+                        )}
+                        .
                       </Text>
                     )}
                   </Section>

@@ -24,6 +24,7 @@ interface StoredClones {
   declined?: number;
   escalated?: number;
   weaponised?: number;
+  weaponised_after_decline?: number;
   re_taken_down?: number;
   by_classification?: Record<string, number>;
   by_country?: Record<string, number>;
@@ -46,6 +47,9 @@ export function cloneDetectionsFromMetrics(
     declined: c.declined ?? 0,
     escalated: c.escalated ?? 0,
     weaponised: c.weaponised ?? 0,
+    // Absent on rows persisted before the field existed → 0 = the flip claim
+    // simply doesn't render (fail-honest).
+    weaponisedAfterDecline: c.weaponised_after_decline ?? 0,
     reTakenDown: c.re_taken_down ?? 0,
     byClassification: c.by_classification,
     byCountry: c.by_country,

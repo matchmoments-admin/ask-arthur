@@ -82,6 +82,19 @@ async function main() {
       // only exists under `next dev`; absent on the deployed app) so local
       // screenshots are clean.
       await page.evaluate(() => document.querySelectorAll("nextjs-portal").forEach((e) => e.remove()));
+      // Overflow guard: .slide is a fixed 1080×1350 box that CLIPS overflow, so
+      // a heavy month (e.g. a long outcomes line on slide 06) would silently
+      // lose the footer in the shipped PDF. Fail loud here — in the prepare
+      // job, before the approval gate — instead.
+      const contentHeight = await page.evaluate(() => {
+        const slide = document.querySelector(".rc-root.rc-solo .slide");
+        return slide ? slide.scrollHeight : 0;
+      });
+      if (contentHeight > HEIGHT) {
+        throw new Error(
+          `slide ${n} content overflows the ${HEIGHT}px frame (scrollHeight ${contentHeight}) — the PDF would clip; tighten the slide's copy/spacing`,
+        );
+      }
       const out = path.join(outDir, `slide-${n}.png`);
       await page.screenshot({ path: out as `${string}.png`, clip: { x: 0, y: 0, width: WIDTH, height: HEIGHT } });
       pngPaths.push(out);

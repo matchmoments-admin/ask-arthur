@@ -1,10 +1,10 @@
 import { Archivo, JetBrains_Mono } from "next/font/google";
 import { requireAdmin } from "@/lib/adminAuth";
 import {
-  buildOutcomesLine,
   getCloneWatchReportCard,
   type CloneWatchReportCard,
 } from "@/lib/clone-watch/report-card-data";
+import { buildOutcomesLine } from "@/lib/clone-watch/outcome-copy";
 import { prettyBrand } from "@/lib/clone-watch/brand-display";
 import { reportCardCss } from "./report-card-css";
 
@@ -37,10 +37,11 @@ import { reportCardCss } from "./report-card-css";
  * NOT taken down; registrars shown ONLY in aggregate (no single-registrar
  * shaming); the MoM window is always stated, and a delta only shows once both
  * months are fully tracked (see FIRST_FULL_MONTH in report-card-data.ts).
- * Vendor OUTCOMES (slide 06, since the v217+ reconciler): witnessed per-URL
- * gradings only, cohort-framed ("of this month's detections"), email-block
- * verbs — "actioned by Netcraft" (never "we took down"), "graded 'no threat'",
- * "flipped to active phishing". Median time-to-takedown is never published.
+ * Vendor OUTCOMES (slide 06, since the v217+ reconciler): the copy comes from
+ * lib/clone-watch/outcome-copy.ts — the single vocabulary module whose header
+ * states the honesty rules (exclusive lifecycle states, flip claims only for
+ * weaponisedAfterDecline, escalation only when escalated>0, never "we took
+ * down", never time-to-takedown).
  */
 
 const archivo = Archivo({ subsets: ["latin"], weight: ["400", "500", "600", "700", "800", "900"], display: "swap", variable: "--font-archivo" });

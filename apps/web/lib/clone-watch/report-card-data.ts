@@ -111,9 +111,13 @@ export interface CloneWatchReportCard {
     declined: number;
     /** We filed a report_issue to force a re-review. */
     escalated: number;
-    /** Flipped to active phishing after Netcraft declined ("declined ≠ safe"). */
+    /** Currently serving active phishing (lifecycle weaponised). */
     weaponised: number;
-    /** Escalated → then taken down ("we forced it through"). */
+    /** Weaponised AND previously Netcraft-declined — the only subset for which
+     *  the "graded no-threat, later flipped" story is provable (see
+     *  lib/clone-watch/outcome-copy.ts honesty rules). */
+    weaponisedAfterDecline: number;
+    /** Escalated → then taken down ("we forced it through"). Subset of takenDown. */
     reTakenDown: number;
   };
   topAuBrands: RankedBrand[];
@@ -203,55 +207,17 @@ function sumClassification(
 /** Sum a numeric lifecycle metric across all brands. */
 function sumMetric(
   byBrand: Map<string, CloneBrandMetrics>,
-  key: "takenDown" | "declined" | "escalated" | "weaponised" | "reTakenDown",
+  key:
+    | "takenDown"
+    | "declined"
+    | "escalated"
+    | "weaponised"
+    | "weaponisedAfterDecline"
+    | "reTakenDown",
 ): number {
   let n = 0;
   for (const m of byBrand.values()) n += m[key] ?? 0;
   return n;
-}
-
-/** The lifecycle-outcome subset of the report-card KPIs. */
-export type CloneOutcomeKpis = Pick<
-  CloneWatchReportCard["kpis"],
-  "takenDown" | "declined" | "escalated" | "weaponised" | "reTakenDown"
->;
-
-/** True when the month's cohort has any vendor outcome worth publishing —
- *  the same guard the Brand Stewardship email block uses. All-zero months
- *  (e.g. June 2026, pre-reconciler) render nothing. */
-export function hasOutcomes(kpis: CloneOutcomeKpis): boolean {
-  return kpis.takenDown + kpis.declined + kpis.weaponised > 0;
-}
-
-/**
- * Compact one-line vendor-outcome summary for carousel slide 06 ("·"-joined,
- * non-zero parts only). Verb discipline mirrors the vetted Brand Stewardship
- * email block: "actioned by Netcraft" (never "we took down"), "graded 'no
- * threat'" for declines, weaponised = flipped to active phishing after the
- * decline. Counts are the CURRENT per-URL status of the month's cohort.
- * Returns "" when the month has no outcomes (caller hides the block).
- */
-export function buildOutcomesLine(kpis: CloneOutcomeKpis): string {
-  if (!hasOutcomes(kpis)) return "";
-  const parts: string[] = [];
-  if (kpis.takenDown > 0) {
-    parts.push(`${kpis.takenDown} actioned by Netcraft`);
-  }
-  if (kpis.declined > 0) {
-    parts.push(`${kpis.declined} graded “no threat” and left live`);
-  }
-  if (kpis.weaponised > 0) {
-    const reActioned =
-      kpis.reTakenDown > 0 ? ` (${kpis.reTakenDown} then actioned)` : "";
-    parts.push(
-      `${kpis.weaponised} later flipped to active phishing — our re-scans caught each flip and escalated it back with evidence${reActioned}`,
-    );
-  } else if (kpis.escalated > 0) {
-    parts.push(
-      `${kpis.escalated} escalated back with our scan evidence to force a re-review`,
-    );
-  }
-  return parts.join(" · ");
 }
 
 type ServiceClient = NonNullable<ReturnType<typeof createServiceClient>>;
@@ -482,6 +448,7 @@ export async function getCloneWatchReportCard(
       declined: sumMetric(byBrand, "declined"),
       escalated: sumMetric(byBrand, "escalated"),
       weaponised: sumMetric(byBrand, "weaponised"),
+      weaponisedAfterDecline: sumMetric(byBrand, "weaponisedAfterDecline"),
       reTakenDown: sumMetric(byBrand, "reTakenDown"),
     },
     // Gov domains are excluded from BOTH public rankings (they're neither
