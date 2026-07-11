@@ -14,6 +14,12 @@ Workflow: [`.github/workflows/clone-watch-linkedin.yml`](../../.github/workflows
    generates the caption + first-comment from live data
    (`clone-watch:caption`) — numbers reconcile to the internal digest. Uploads
    the edition as an artifact and pings Telegram with the run link + caption.
+   Since the F5 upgrade, slide 06 + the caption carry the month-cohort **vendor
+   outcomes** (actioned / graded-no-threat-still-live / weaponised-after-decline
+   / escalated-with-evidence / re-actioned) — conditional blocks that render
+   only when the cohort has non-zero outcomes, with the Brand Stewardship email
+   block's verb discipline ("actioned by Netcraft", never "we took down"; no
+   time-to-takedown figures).
 2. **You approve** the `publish` job in the GitHub Actions UI (the Telegram ping
    links straight to it). Nothing publishes without this.
 3. **`publish` job** publishes the document post to the Ask Arthur company page

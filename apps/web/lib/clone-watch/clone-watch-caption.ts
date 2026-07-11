@@ -1,4 +1,8 @@
-import type { CloneWatchReportCard } from "@/lib/clone-watch/report-card-data";
+import {
+  hasOutcomes,
+  type CloneOutcomeKpis,
+  type CloneWatchReportCard,
+} from "@/lib/clone-watch/report-card-data";
 import { prettyBrand } from "@/lib/clone-watch/brand-display";
 
 /**
@@ -18,7 +22,9 @@ import { prettyBrand } from "@/lib/clone-watch/brand-display";
  * Voice + guardrails (linkedin-writing skill, client ask-arthur, Voice 2):
  * "lookalike / copycat / detected", never "confirmed clones"; Netcraft =
  * reported, not taken down; registrars in aggregate; link in the FIRST COMMENT,
- * never the body.
+ * never the body. Vendor OUTCOMES (F5, since the v217+ reconciler): witnessed
+ * per-URL gradings only, cohort-framed, email-block verbs — "actioned" (their
+ * action, never "we took down"); median time-to-takedown never published.
  */
 
 export interface CloneWatchCaption {
@@ -60,6 +66,48 @@ function joinAnd(parts: string[]): string {
  *  canonical name ("GMO Internet (Onamae)") doesn't collide with the "(count)". */
 function regShort(name: string): string {
   return name.replace(/\s*\([^)]*\)\s*$/, "").trim() || name;
+}
+
+/**
+ * Vendor-outcomes paragraph (F5, deterministic). Witnessed per-URL gradings
+ * for the month's cohort — verb discipline mirrors the Brand Stewardship
+ * email block: "actioned" (Netcraft's action, never "we took down"), "graded
+ * 'no threat' and left live", "flipped to active phishing". Renders "" on
+ * all-zero months (pre-lifecycle history, quiet months) so the caption is
+ * byte-identical to the pre-F5 shape. Numbers only from data; no URLs, no
+ * domain names. Exported for unit tests.
+ */
+export function buildOutcomesBlock(
+  kpis: CloneOutcomeKpis & { reportedToNetcraft: number },
+): string {
+  if (!hasOutcomes(kpis)) return "";
+  const leadParts: string[] = [];
+  if (kpis.takenDown > 0) {
+    leadParts.push(`${kpis.takenDown} ${kpis.takenDown === 1 ? "was" : "were"} actioned`);
+  }
+  if (kpis.declined > 0) {
+    leadParts.push(
+      `${kpis.declined} ${kpis.declined === 1 ? "was" : "were"} graded "no threat" and left live`,
+    );
+  }
+  const lead =
+    leadParts.length > 0
+      ? `Of the ${kpis.reportedToNetcraft} we reported to a takedown vendor: ${joinAnd(leadParts)}.`
+      : "";
+
+  let followUp = "";
+  if (kpis.weaponised > 0) {
+    const one = kpis.weaponised === 1;
+    const reActioned =
+      kpis.reTakenDown > 0
+        ? ` — ${kpis.reTakenDown} ${kpis.reTakenDown === 1 ? "has" : "have"} since been actioned`
+        : "";
+    followUp = `${kpis.weaponised} of those "no threat" ${one ? "domain" : "domains"} later flipped to active phishing. Our re-scans caught ${one ? "the flip" : "each flip"} and escalated the evidence straight back${reActioned}.`;
+  } else if (kpis.escalated > 0) {
+    followUp = `We escalated ${kpis.escalated} back to the vendor with our scan evidence to force a re-review${kpis.reTakenDown > 0 ? ` — ${kpis.reTakenDown} ${kpis.reTakenDown === 1 ? "has" : "have"} since been actioned` : ""}.`;
+  }
+
+  return [lead, followUp].filter(Boolean).join(" ");
 }
 
 const STATIC_LESSON =
@@ -167,11 +215,16 @@ export function generateCloneWatchCaption(
       : `That's ${dir} ${Math.abs(totalPct)}% on ${priorLabel} (${priorTotal} → ${card.total}). We publish this every month — the trend is the story.`;
   }
 
+  // ── Vendor outcomes (F5) — only once the month's cohort has witnessed
+  // gradings; all-zero months keep the pre-F5 caption shape exactly.
+  const outcomesBlock = buildOutcomesBlock(card.kpis);
+
   const body = [
     hook,
     method,
     findingsBlock,
     globalsLine,
+    outcomesBlock,
     STATIC_LESSON,
     scamwatchCta,
     seriesLine,
