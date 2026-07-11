@@ -31,6 +31,17 @@ async function main() {
   const card = await getCloneWatchReportCard(month);
   const caption = generateCloneWatchCaption(card, methodUrl);
 
+  // LinkedIn caps post commentary at ~3,000 chars. Fail HERE — in the prepare
+  // job, before the approval gate — rather than let the publish step red after
+  // founder approval + document upload (where a re-run risks a double-post).
+  // 2,900 leaves headroom for LinkedIn's own entity-escaping.
+  const CAPTION_MAX = 2_900;
+  if (caption.bodyWithHashtags.length > CAPTION_MAX) {
+    throw new Error(
+      `caption is ${caption.bodyWithHashtags.length} chars (> ${CAPTION_MAX} safety cap for LinkedIn's ~3000 limit) — trim the month's blocks before publish`,
+    );
+  }
+
   await fs.mkdir(outDir, { recursive: true });
   await fs.writeFile(path.join(outDir, "caption.txt"), `${caption.bodyWithHashtags}\n`);
   await fs.writeFile(path.join(outDir, "first-comment.txt"), `${caption.firstComment}\n`);

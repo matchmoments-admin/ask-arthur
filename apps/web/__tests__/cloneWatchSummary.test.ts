@@ -15,6 +15,7 @@ const CARD: CloneWatchReportCard = {
     declined: 0,
     escalated: 0,
     weaponised: 0,
+    weaponisedAfterDecline: 0,
     reTakenDown: 0,
   },
   topAuBrands: [{ brand: "target.com.au", clones: 43 }],

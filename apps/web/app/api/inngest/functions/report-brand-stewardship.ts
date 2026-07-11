@@ -267,6 +267,11 @@ export interface CloneBrandMetrics {
   escalated: number;
   /** Flipped to active phishing (lifecycle weaponised) — "declined ≠ safe". */
   weaponised: number;
+  /** Weaponised AND previously Netcraft-declined (netcraft_declined_at set) —
+   *  the only subset for which the "graded no-threat, later flipped" story is
+   *  provable. Most weaponised clones were phishing at FIRST scan (32/33 in
+   *  prod, 2026-07-11) and were never graded by the vendor at all. */
+  weaponisedAfterDecline: number;
   /** Escalated AND now taken_down — the "we forced it through" win. */
   reTakenDown: number;
   byClassification: Record<string, number>;
@@ -348,6 +353,7 @@ export function aggregateClonesByDomain(
         declined: 0,
         escalated: 0,
         weaponised: 0,
+        weaponisedAfterDecline: 0,
         reTakenDown: 0,
         byClassification: {},
         byCountry: {},
@@ -384,6 +390,7 @@ export function aggregateClonesByDomain(
       m.declined += 1;
     } else if (row.lifecycle_state === "weaponised") {
       m.weaponised += 1;
+      if (row.netcraft_declined_at) m.weaponisedAfterDecline += 1;
     }
     m.alertIds.push(row.id);
     const cls = row.urlscan_classification ?? "unclassified";
@@ -703,6 +710,7 @@ export const reportBrandStewardship = inngest.createFunction(
             declined: e.clones.declined,
             escalated: e.clones.escalated,
             weaponised: e.clones.weaponised,
+            weaponised_after_decline: e.clones.weaponisedAfterDecline,
             re_taken_down: e.clones.reTakenDown,
             by_classification: e.clones.byClassification,
             by_country: e.clones.byCountry,
@@ -770,6 +778,7 @@ export const reportBrandStewardship = inngest.createFunction(
                 declined: cm.declined,
                 escalated: cm.escalated,
                 weaponised: cm.weaponised,
+                weaponised_after_decline: cm.weaponisedAfterDecline,
                 re_taken_down: cm.reTakenDown,
                 by_classification: cm.byClassification,
                 by_country: cm.byCountry,
