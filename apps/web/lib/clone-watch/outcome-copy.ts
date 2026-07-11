@@ -48,6 +48,29 @@ export function hasOutcomes(kpis: CloneOutcomeKpis): boolean {
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
+/** Per-row lifecycle badge for the stewardship watch-list. Labels follow the
+ *  module's verb discipline — "actioned by Netcraft", never "removed"/"we
+ *  took down". Colors are hex so email clients render them inline. Returns
+ *  null for states with nothing honest to badge (detected/unknown). */
+export function lifecycleBadge(
+  state: string | null,
+): { label: string; color: string } | null {
+  switch (state) {
+    case "weaponised":
+      return { label: "ACTIVE PHISHING", color: "#dc2626" };
+    case "declined":
+      return { label: "STILL LIVE — GRADED NO-THREAT", color: "#d97706" };
+    case "monitoring":
+      return { label: "STILL LIVE — MONITORING", color: "#d97706" };
+    case "taken_down":
+      return { label: "ACTIONED BY NETCRAFT", color: "#16a34a" };
+    case "dormant":
+      return { label: "DORMANT", color: "#64748b" };
+    default:
+      return null;
+  }
+}
+
 /**
  * Compact one-line summary for carousel slide 06 ("·"-joined, non-zero parts
  * only). Returns "" when the month has no outcomes (caller hides the block).

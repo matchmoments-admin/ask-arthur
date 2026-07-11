@@ -15,6 +15,12 @@ interface StoredCloneDomain {
   country?: string | null;
   registrar?: string | null;
   abuse_email?: string | null;
+  // F2 watch-list fields — absent on ledger rows written before F2.
+  lifecycle_state?: string | null;
+  first_seen_at?: string | null;
+  screenshot_url?: string | null;
+  result_url?: string | null;
+  still_live_as_of?: string | null;
 }
 
 interface StoredClones {
@@ -63,6 +69,11 @@ export function cloneDetectionsFromMetrics(
       country: d.country ?? null,
       registrar: d.registrar ?? null,
       abuseEmail: d.abuse_email ?? null,
+      lifecycleState: d.lifecycle_state ?? null,
+      firstSeenAt: d.first_seen_at ?? null,
+      screenshotUrl: d.screenshot_url ?? null,
+      resultUrl: d.result_url ?? null,
+      stillLiveAsOf: d.still_live_as_of ?? null,
     })),
   };
 }

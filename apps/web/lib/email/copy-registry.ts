@@ -52,6 +52,16 @@ export const BRAND_STEWARDSHIP_SLOTS = {
     default:
       "If this summary helped your team, a quick review or shout-out helps a small Australian service reach more brands — and we'd love to explore protecting **{{brandName}}** more deeply together.",
   },
+  why_still_up: {
+    label: "Why are they still up?",
+    default:
+      'Netcraft — the takedown vendor we report to — actions domains that are serving live phishing content. Lookalikes that are parked or dormant at review time don\'t meet that evidence threshold, so they\'re graded "no threat" and stay registered — free to be weaponised at any time. That\'s why we keep re-checking every one of them for **{{brandName}}**.',
+  },
+  what_you_can_do: {
+    label: "What you can do",
+    default:
+      "For the still-live lookalikes above, the fastest lever is usually an abuse report to the domain's registrar (contact shown per domain where we could identify it), citing trademark impersonation. Your trademark counsel can also pursue auDRP/UDRP for domains worth recovering. Reply to this email if you'd like the underlying evidence pack.",
+  },
 } satisfies Record<string, SlotDef>;
 
 export const BRAND_ABUSE_SLOTS = {

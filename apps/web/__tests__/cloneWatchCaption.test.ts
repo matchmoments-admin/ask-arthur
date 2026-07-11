@@ -4,6 +4,7 @@ import {
   buildOutcomesBlock,
   buildOutcomesLine,
   hasOutcomes,
+  lifecycleBadge,
 } from "@/lib/clone-watch/outcome-copy";
 import { generateCloneWatchCaption } from "@/lib/clone-watch/clone-watch-caption";
 
@@ -322,5 +323,26 @@ describe("buildOutcomesLine (slide 06)", () => {
     expect(block).toContain("“no threat”");
     expect(line).not.toContain('"no threat"');
     expect(block).not.toContain('"no threat"');
+  });
+});
+
+describe("lifecycleBadge (watch-list vocabulary)", () => {
+  it("labels each state with the honest verbs — never 'removed'/'we took down'", () => {
+    expect(lifecycleBadge("weaponised")).toEqual({ label: "ACTIVE PHISHING", color: "#dc2626" });
+    expect(lifecycleBadge("declined")!.label).toBe("STILL LIVE — GRADED NO-THREAT");
+    expect(lifecycleBadge("monitoring")!.label).toBe("STILL LIVE — MONITORING");
+    expect(lifecycleBadge("taken_down")!.label).toBe("ACTIONED BY NETCRAFT");
+    expect(lifecycleBadge("dormant")!.label).toBe("DORMANT");
+    for (const s of ["weaponised", "declined", "monitoring", "taken_down", "dormant"]) {
+      const label = lifecycleBadge(s)!.label.toLowerCase();
+      expect(label).not.toContain("removed");
+      expect(label).not.toContain("we took");
+    }
+  });
+
+  it("returns null for detected/null/unknown (nothing honest to badge)", () => {
+    expect(lifecycleBadge("detected")).toBeNull();
+    expect(lifecycleBadge(null)).toBeNull();
+    expect(lifecycleBadge("reported")).toBeNull();
   });
 });

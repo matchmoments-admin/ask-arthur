@@ -9,10 +9,11 @@ import {
   Link,
   Hr,
   Heading,
+  Img,
 } from "@react-email/components";
 import { renderCopySlot } from "@/lib/email/resolve-copy";
 import { BRAND_STEWARDSHIP_SLOTS } from "@/lib/email/copy-registry";
-import { hasOutcomes } from "@/lib/clone-watch/outcome-copy";
+import { hasOutcomes, lifecycleBadge } from "@/lib/clone-watch/outcome-copy";
 import {
   registrarAbuseUrl,
   hostAbuseUrl,
@@ -88,6 +89,13 @@ export interface CloneDetectionRow {
   registrar: string | null;
   /** Registrar abuse contact the brand can email for takedown. */
   abuseEmail: string | null;
+  /** F2 watch-list fields — null on ledger rows written before F2 (the row
+   *  then renders exactly as it did pre-F2). */
+  lifecycleState?: string | null;
+  firstSeenAt?: string | null;
+  screenshotUrl?: string | null;
+  resultUrl?: string | null;
+  stillLiveAsOf?: string | null;
 }
 
 export interface CloneDetections {
@@ -416,6 +424,22 @@ export default function BrandStewardshipReport({
                   </Text>
                 )}
 
+                {/* "Why are they still up?" — the honest evidence-threshold
+                    explainer, rendered only when there IS unactioned exposure
+                    to explain. Editable slot; copy rules in outcome-copy.ts. */}
+                {(cloneDetections.declined ?? 0) + (cloneDetections.weaponised ?? 0) >
+                  0 && (
+                  <div
+                    style={{
+                      color: "#475569",
+                      fontSize: "13px",
+                      lineHeight: "1.6",
+                      margin: "0 0 10px 0",
+                    }}
+                    dangerouslySetInnerHTML={{ __html: slot("why_still_up") }}
+                  />
+                )}
+
                 {cloneDetections.domains.slice(0, EMAIL_CLONE_DISPLAY_CAP).map((c) => (
                   <Section
                     key={c.domain}
@@ -429,6 +453,18 @@ export default function BrandStewardshipReport({
                   >
                     <Text style={{ margin: "0 0 3px 0" }}>
                       <code style={codeInline}>{c.domain}</code>
+                      {lifecycleBadge(c.lifecycleState ?? null) && (
+                        <span
+                          style={{
+                            marginLeft: "8px",
+                            fontSize: "11px",
+                            fontWeight: 700,
+                            color: lifecycleBadge(c.lifecycleState ?? null)!.color,
+                          }}
+                        >
+                          {lifecycleBadge(c.lifecycleState ?? null)!.label}
+                        </span>
+                      )}
                       {c.classification && (
                         <span
                           style={{
@@ -443,6 +479,28 @@ export default function BrandStewardshipReport({
                         </span>
                       )}
                     </Text>
+                    {(c.firstSeenAt || c.stillLiveAsOf) && (
+                      <Text style={{ color: "#64748B", fontSize: "12px", lineHeight: "1.5", margin: 0 }}>
+                        {c.firstSeenAt && <>First seen {fmtDate(c.firstSeenAt)}</>}
+                        {c.firstSeenAt && c.stillLiveAsOf && " · "}
+                        {c.stillLiveAsOf && <>still live as of {fmtDate(c.stillLiveAsOf)}</>}
+                        {c.resultUrl && (
+                          <>
+                            {" · "}
+                            <Link href={c.resultUrl} style={{ color: "#0F766E" }}>
+                              View scan →
+                            </Link>
+                          </>
+                        )}
+                      </Text>
+                    )}
+                    {!c.firstSeenAt && !c.stillLiveAsOf && c.resultUrl && (
+                      <Text style={{ color: "#64748B", fontSize: "12px", lineHeight: "1.5", margin: 0 }}>
+                        <Link href={c.resultUrl} style={{ color: "#0F766E" }}>
+                          View scan →
+                        </Link>
+                      </Text>
+                    )}
                     <Text style={{ color: "#64748B", fontSize: "12px", lineHeight: "1.5", margin: 0 }}>
                       {hostingLine(c)}
                     </Text>
@@ -483,8 +541,42 @@ export default function BrandStewardshipReport({
                         )}
                       </Text>
                     )}
+                    {/* Screenshot embedded ONLY for active-phishing rows —
+                        the urgent visual evidence; everyone else gets the
+                        "View scan" link (email weight). */}
+                    {c.lifecycleState === "weaponised" && c.screenshotUrl && (
+                      <Img
+                        src={c.screenshotUrl}
+                        alt={`Screenshot of ${c.domain} via urlscan.io`}
+                        width="420"
+                        style={{
+                          maxWidth: "420px",
+                          width: "100%",
+                          height: "auto",
+                          border: "1px solid #E2E8F0",
+                          borderRadius: "4px",
+                          display: "block",
+                          margin: "8px 0 0 0",
+                        }}
+                      />
+                    )}
                   </Section>
                 ))}
+
+                {/* "What you can do" — registrar-abuse / auDRP guidance for the
+                    still-live rows. Editable slot; never a takedown promise. */}
+                {(cloneDetections.declined ?? 0) + (cloneDetections.weaponised ?? 0) >
+                  0 && (
+                  <div
+                    style={{
+                      color: "#475569",
+                      fontSize: "13px",
+                      lineHeight: "1.6",
+                      margin: "8px 0 0 0",
+                    }}
+                    dangerouslySetInnerHTML={{ __html: slot("what_you_can_do") }}
+                  />
+                )}
                 {cloneDetections.detected >
                   Math.min(cloneDetections.domains.length, EMAIL_CLONE_DISPLAY_CAP) && (
                   <Text style={{ color: "#94A3B8", fontSize: "12px", margin: "4px 0 0 0" }}>
@@ -733,6 +825,17 @@ const outcomeLine = {
 } as const;
 
 /** Accent colour per urlscan classification (left border + chip). */
+/** Short date ("11 Jul 2026") for the watch-list metadata line. Formatted
+ *  manually from UTC parts — toLocaleDateString's short-month output varies
+ *  by Node ICU build, which made renders non-deterministic across CI/prod.
+ *  Falls back to the raw string on an unparseable value (never throws). */
+const FMT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function fmtDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return `${d.getUTCDate()} ${FMT_MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+
 function classColor(classification: string | null): string {
   switch (classification) {
     case "likely_phishing":
