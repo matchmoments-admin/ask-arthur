@@ -75,7 +75,20 @@ export async function submitCloneCandidate(
     return { kind: "reputation_classified", reputationMalicious: true };
   }
 
-  // No reputation hit + submit failed → record the failure (bumps
+  // Quota exhaustion is NOT URL death — a 429 (rate_limited) must not bump
+  // urlscan_failure_streak, or three unlucky rate-limited windows would age a
+  // live, never-actually-scanned clone out of both the submit and retrieve
+  // gates (v224 ops-review finding: 24 rows were mis-flagged this way). Leave
+  // the row untouched so the next cadence retries it.
+  if (submission.status === 429) {
+    return {
+      kind: "submit_failed",
+      reputationMalicious: false,
+      error: submission.error,
+    };
+  }
+
+  // No reputation hit + genuine submit failure → record it (bumps
   // urlscan_failure_streak so it ages out of the gate after the cap).
   await sb.rpc("record_clone_alert_urlscan_submit", {
     p_alert_id: candidate.id,
