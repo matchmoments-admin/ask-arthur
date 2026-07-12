@@ -15,12 +15,9 @@ import { onwardAcmaEmailSpam } from "./functions/onward-acma";
 import { onwardOpenphish } from "./functions/onward-openphish";
 import { onwardApwg } from "./functions/onward-apwg";
 import { onwardAutoReport } from "./functions/onward-auto-report";
-import {
-  onwardScamwatch,
-  onwardReportCyber,
-  onwardIdcare,
-  onwardAskArthurFeed,
-} from "./functions/onward-skipped";
+// Deep-link / audit markers (Scamwatch / ReportCyber / IDCARE / Ask-Arthur-feed)
+// consolidated into one multi-trigger fn — 2026-07-12 fleet review.
+import { onwardMarkers } from "./functions/onward-skipped";
 // Clone-watch outreach — Layer 2 (Netcraft submission), Layer 3+4 (brand
 // notification), Layer 5 (weekly digest). Triggered by shopfront/clone.
 // triaged.v1 emitted from /api/admin/clone-watch/triage. Plan:
@@ -112,10 +109,7 @@ const appFunctions = [
   onwardOpenphish,
   onwardApwg,
   onwardAutoReport,
-  onwardScamwatch,
-  onwardReportCyber,
-  onwardIdcare,
-  onwardAskArthurFeed,
+  onwardMarkers,
   // Clone-watch outreach (v143)
   cloneWatchSubmitNetcraft,
   cloneWatchNetcraftAuto,
