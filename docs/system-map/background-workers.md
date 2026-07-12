@@ -88,11 +88,11 @@ Gated by `FF_ANALYZE_INNGEST_WEB`. When false, the legacy `waitUntil` path runs 
 
 ### Scam alerts & embed
 
-| Function                      | Trigger                  | Purpose                                   |
-| ----------------------------- | ------------------------ | ----------------------------------------- |
-| `scam-alert-push`             | `0 */3 * * *` (every 3h) | HIGH-confidence threat push notifications |
-| `scam-report-embed`           | `scam-report.stored.v1`  | Embed user reports for clustering         |
-| `scam-reports-backfill-embed` | manual                   | Historical backfill                       |
+| Function                      | Trigger                     | Purpose                                                                                                                                                                                                 |
+| ----------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scam-alert-push`             | `0 */3 * * *` (every 3h)    | HIGH-confidence threat push notifications                                                                                                                                                               |
+| `scam-report-embed`           | `scam-report.stored.v1`     | Embed user reports for clustering                                                                                                                                                                       |
+| `scam-reports-backfill-embed` | `30 5 * * *` + manual event | Steady-state verified_scams embed delta (scam_reports embed synchronously via `scam-report.stored.v1`; verified_scams had no sync path — 2026-07-12) + historical backfill. Brake: `scam_report_embed`. |
 
 ### News Intel (regulator narratives)
 
