@@ -55,6 +55,27 @@ const COSINE_THRESHOLD = 0.62;
 const MIN_MEMBERS_FOR_NAMING = 3;
 const NAMING_PROMPT_VERSION = "reddit-cluster-naming-v1@2026-05-01";
 
+// ── Anti-runaway guards (2026-07-12 fleet review — the mega-theme collapse) ─
+// Failure mode caught by the operational review: greedy assignment + an
+// unbounded online-mean centroid degenerates into ONE runaway attractor.
+// A theme's centroid is the mean of its members; as it absorbs hundreds of
+// heterogeneous posts that mean converges on the *global* embedding mean, which
+// nearly every new post scores >COSINE_THRESHOLD against — so one theme ate
+// 2263 posts (89% of the corpus) and no new themes formed for 70 days, while
+// the Sonnet naming call silently stopped firing (no cost signal → invisible).
+//
+// Two independent structural guards prevent recurrence:
+//   * CENTROID_FREEZE_AT — stop updating a theme's centroid past this many
+//     members. The centroid stays representative of the theme's cohesive core
+//     instead of drifting toward the global mean. This kills the *formation*
+//     of an attractor.
+//   * MAX_THEME_MEMBERS_FOR_JOIN — a theme this large is no longer a valid
+//     match target; a post that would have joined it re-seeds instead. This
+//     contains an *already-drifted* theme (e.g. the existing 2263-member blob)
+//     so it can't keep absorbing before the historical rebuild runs.
+const CENTROID_FREEZE_AT = 50;
+const MAX_THEME_MEMBERS_FOR_JOIN = 250;
+
 // ── Vector helpers ────────────────────────────────────────────────────────
 
 function parsePgVector(s: string | null): number[] | null {
@@ -190,6 +211,114 @@ interface ActiveTheme {
   memberCount: number;
 }
 
+export interface Assignment {
+  postId: string;
+  themeId: string;
+  similarity: number;
+  newCentroid: number[];
+  newMemberCount: number;
+  isNewTheme: boolean;
+  /** Model version that produced the post's embedding. Tagged onto the
+   *  centroid via centroid_embedding_model_version so a future model rollout
+   *  can detect mixed-model centroids and trigger re-embed. */
+  embeddingModelVersion: string | null;
+}
+
+export interface AssignOptions {
+  threshold?: number;
+  /** Themes at/above this member_count stop being valid match targets. */
+  joinCeiling?: number;
+  /** Centroid stops updating once a theme reaches this many members. */
+  freezeAt?: number;
+}
+
+/**
+ * Greedy nearest-centroid assignment of a cohort's posts to existing themes,
+ * pure and side-effect-free so it can be unit-tested against the collapse.
+ *
+ * Guards (see CENTROID_FREEZE_AT / MAX_THEME_MEMBERS_FOR_JOIN above):
+ *   1. A theme whose member_count ≥ joinCeiling is skipped as a match target,
+ *      so an over-large (already-drifted) theme cannot keep absorbing.
+ *   2. A matched theme's centroid is frozen once member_count ≥ freezeAt, so
+ *      the running mean cannot drift toward the global mean and become an
+ *      attractor.
+ *
+ * Does NOT mutate the caller's `themes` array (works on a shallow copy).
+ * Returns the assignments plus `oversizedThemeCount` (themes at/over the join
+ * ceiling encountered this run) as a health signal for the caller's alarm.
+ */
+export function assignPostsToThemes(
+  posts: NewPost[],
+  themes: ActiveTheme[],
+  opts: AssignOptions = {},
+): { assignments: Assignment[]; oversizedThemeCount: number } {
+  const threshold = opts.threshold ?? COSINE_THRESHOLD;
+  const joinCeiling = opts.joinCeiling ?? MAX_THEME_MEMBERS_FOR_JOIN;
+  const freezeAt = opts.freezeAt ?? CENTROID_FREEZE_AT;
+
+  const working: ActiveTheme[] = themes.map((t) => ({ ...t }));
+  const oversized = new Set<string>();
+  const assignments: Assignment[] = [];
+
+  for (const post of posts) {
+    let bestThemeIdx = -1;
+    let bestSim = threshold; // only similarities strictly above threshold count
+
+    for (let i = 0; i < working.length; i++) {
+      if (working[i].memberCount >= joinCeiling) {
+        oversized.add(working[i].id); // anti-runaway: not a valid target
+        continue;
+      }
+      const sim = cosineSimilarity(post.embedding, working[i].centroid);
+      if (sim > bestSim) {
+        bestSim = sim;
+        bestThemeIdx = i;
+      }
+    }
+
+    if (bestThemeIdx >= 0) {
+      const t = working[bestThemeIdx];
+      // Freeze the centroid past freezeAt so it stays representative of the
+      // theme's cohesive core rather than drifting toward the global mean.
+      const newCentroid =
+        t.memberCount >= freezeAt
+          ? t.centroid
+          : updateCentroid(t.centroid, t.memberCount, post.embedding);
+      const newMemberCount = t.memberCount + 1;
+      working[bestThemeIdx] = {
+        ...t,
+        centroid: newCentroid,
+        memberCount: newMemberCount,
+      };
+      assignments.push({
+        postId: post.id,
+        themeId: t.id,
+        similarity: bestSim,
+        newCentroid,
+        newMemberCount,
+        isNewTheme: false,
+        embeddingModelVersion: post.embeddingModelVersion,
+      });
+    } else {
+      // No match → seed a new theme with this post as the centroid. themeId is
+      // filled in during the persist step. (We intentionally do NOT push the
+      // seed into `working` for in-batch matching — see the #520 H5 note in the
+      // handler: a "<pending>" id could be written as a bogus FK target.)
+      assignments.push({
+        postId: post.id,
+        themeId: "",
+        similarity: 1.0,
+        newCentroid: post.embedding.slice(),
+        newMemberCount: 1,
+        isNewTheme: true,
+        embeddingModelVersion: post.embeddingModelVersion,
+      });
+    }
+  }
+
+  return { assignments, oversizedThemeCount: oversized.size };
+}
+
 export const redditIntelCluster = inngest.createFunction(
   {
     id: "reddit-intel-cluster",
@@ -270,75 +399,40 @@ export const redditIntelCluster = inngest.createFunction(
     }
 
     // ── Step 2: greedy assignment, in-memory ─────────────────────────────
-    // We mutate the in-memory `themes` array as we go (centroids and counts
-    // shift with each assignment). New themes get pushed to the same array
-    // so subsequent posts can match against them. This produces stable
-    // clusters even within a single batch.
+    // Pure, unit-tested (see reddit-intel-cluster.assign.test.ts). The
+    // anti-runaway guards (centroid freeze + join ceiling) live inside
+    // assignPostsToThemes so the collapse can be reproduced and prevented in a
+    // test without a DB.
+    const { assignments, oversizedThemeCount } = assignPostsToThemes(
+      posts,
+      themes,
+    );
 
-    const assignments: Array<{
-      postId: string;
-      themeId: string;
-      similarity: number;
-      newCentroid: number[];
-      newMemberCount: number;
-      isNewTheme: boolean;
-      /** Model version that produced the post's embedding. Tagged onto the
-       *  centroid via centroid_embedding_model_version so a future model
-       *  rollout can detect mixed-model centroids and trigger re-embed. */
-      embeddingModelVersion: string | null;
-    }> = [];
-
-    for (const post of posts) {
-      let bestThemeIdx = -1;
-      let bestSim = COSINE_THRESHOLD; // initialised to threshold so we only count matches
-
-      for (let i = 0; i < themes.length; i++) {
-        const sim = cosineSimilarity(post.embedding, themes[i].centroid);
-        if (sim > bestSim) {
-          bestSim = sim;
-          bestThemeIdx = i;
-        }
-      }
-
-      if (bestThemeIdx >= 0) {
-        const t = themes[bestThemeIdx];
-        const newCentroid = updateCentroid(t.centroid, t.memberCount, post.embedding);
-        const newMemberCount = t.memberCount + 1;
-        themes[bestThemeIdx] = { ...t, centroid: newCentroid, memberCount: newMemberCount };
-        assignments.push({
-          postId: post.id,
-          themeId: t.id,
-          similarity: bestSim,
-          newCentroid,
-          newMemberCount,
-          isNewTheme: false,
-          embeddingModelVersion: post.embeddingModelVersion,
-        });
-      } else {
-        // No match → seed a new theme with this post as the centroid.
-        // We'll generate a real UUID server-side; for now leave themeId
-        // empty and let the persist step assign it.
-        assignments.push({
-          postId: post.id,
-          themeId: "", // filled in during persist step below
-          similarity: 1.0,
-          newCentroid: post.embedding.slice(),
-          newMemberCount: 1,
-          isNewTheme: true,
-          embeddingModelVersion: post.embeddingModelVersion,
-        });
-        // NOTE (#520 H5): we deliberately do NOT push this seed into `themes`
-        // for in-batch matching. The previous attempt pushed a theme with
-        // id "<pending>", which a later same-batch post could cosine-match —
-        // and persist then wrote the literal string "<pending>" into
-        // reddit_post_intel.theme_id + the membership row (a non-existent FK
-        // target), corrupting the post's theme link. Not matching new themes
-        // within a single batch means two near-identical same-batch posts may
-        // seed two separate themes; that is benign (the ≥3-member naming
-        // threshold isn't reached by 2 posts anyway, and the next cohort's
-        // posts match whichever centroid is closer, so it self-heals).
-        // Proper in-batch dedup is deferred to a follow-up.
-      }
+    // Health alarm (always-ship .warn, bypasses INFO sampling): if a cohort of
+    // real size produced no new themes and every joined post landed in a SINGLE
+    // theme, that is the mega-theme-collapse signature — page instead of
+    // silently persisting (the 2026-07-12 fleet-review lesson). Also warn when
+    // any theme has grown past the join ceiling and is being contained.
+    const joinedThemeIds = new Set(
+      assignments.filter((a) => !a.isNewTheme).map((a) => a.themeId),
+    );
+    const newThemeSeeds = assignments.filter((a) => a.isNewTheme).length;
+    if (posts.length >= 10 && newThemeSeeds === 0 && joinedThemeIds.size <= 1) {
+      logger.warn("reddit-intel-cluster: single-attractor collapse signature", {
+        cohortDate: data.cohortDate,
+        postsConsidered: posts.length,
+        distinctJoinedThemes: joinedThemeIds.size,
+        newThemeSeeds,
+        hint: "all posts joined one theme and none re-seeded — check centroid drift / rebuild the runaway theme",
+      });
+    }
+    if (oversizedThemeCount > 0) {
+      logger.warn("reddit-intel-cluster: themes over member ceiling contained", {
+        cohortDate: data.cohortDate,
+        oversizedThemeCount,
+        ceiling: MAX_THEME_MEMBERS_FOR_JOIN,
+        hint: "an over-large theme was skipped as a match target — historical rebuild recommended",
+      });
     }
 
     // ── Step 3: persist new themes + assignments + centroid updates ──────
