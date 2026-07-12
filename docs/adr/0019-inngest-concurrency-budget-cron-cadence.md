@@ -82,13 +82,18 @@ Applied across the fleet in #552:
 - **concurrency limits** — explicit per-function caps (see the budget above)
   rather than relying on the implicit shared pool.
 
-### Deregistration of `meta-brp-report`
+### Deregistration → full removal of `meta-brp-report`
 
 `meta-brp-report` (Meta Brand Rights Protection deepfake reporter) was a stub
-that did no real work; it was **removed from the Inngest function registry**
-(`packages/scam-engine/src/inngest/functions.ts`) so it stops consuming a cron
-slot and step-runs. The source file, its `metaBrpReport` feature flag, and its
-`feature_brakes` row are retained for future re-registration.
+that did no real work; #552 **removed it from the Inngest function registry**
+(`packages/scam-engine/src/inngest/functions.ts`) so it stopped consuming a cron
+slot and step-runs. **Superseded 2026-07-13 (fleet review):** the stub file, its
+`metaBrpReporter` feature flag, and its doc/`feature_brakes` references were
+**fully deleted** — it never ran (unregistered, `deepfake_detections` empty
+all-time, Graph-API call commented out, footgun #519) and saved 0 step-runs, so
+keeping it as dead code only cost review-surface. Resurrect from git history if
+deepfake→Meta BRP reporting is ever built; the go-live checklist must couple the
+Graph-API call and the `reported_to_meta=true` UPDATE in one commit (#519).
 
 ## Reversal trigger
 

@@ -325,16 +325,6 @@ export const featureFlags = {
   scamsSearchB2bApi:
     process.env.NEXT_PUBLIC_FF_SCAMS_SEARCH_B2B_API === "true",
 
-  /** Meta Brand Rights Protection (BRP) deepfake reporter. Server-side only —
-   *  the function is dormant in prod (Meta Graph API call is still a stub)
-   *  but the cron fires on schedule. Flag exists so the cost brake + kill
-   *  switch are wired *before* the stub is replaced with a billed Meta call.
-   *  Server-side only — the Inngest cron is the only consumer. Default OFF:
-   *  leave off until META_BRP_ACCESS_TOKEN is granted, the Trusted Partner
-   *  application clears, and the cost-daily-check brake on
-   *  feature_brakes.meta_brp is in place. */
-  metaBrpReporter: readBoolEnv("FF_META_BRP_REPORTER"),
-
   /** Charity Legitimacy Check — consumer page (/charity-check) + main-checker
    *  deep-link CTA. Public flag so the UI can conditionally render entry
    *  points. Default OFF until the v0.1 data spine has run for ≥1 cycle

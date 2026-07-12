@@ -56,12 +56,11 @@ Gated by `FF_ANALYZE_INNGEST_WEB`. When false, the legacy `waitUntil` path runs 
 
 ### Enrichment pipeline (recurring)
 
-| Function                      | Cron           | Purpose                                                        |
-| ----------------------------- | -------------- | -------------------------------------------------------------- |
-| `pipeline-enrichment-fanout`  | `0 */6 * * *`  | URL WHOIS + SSL enrichment (20 domains/run, concurrency 1)     |
-| `pipeline-entity-enrichment`  | `0 */4 * * *`  | Entity enrichment (wallet / IP / email)                        |
-| `pipeline-ct-monitor`         | `0 */12 * * *` | Certificate Transparency monitoring for AU brand impersonation |
-| `pipeline-urlscan-enrichment` | `30 */4 * * *` | URLScan async enrichment                                       |
+| Function                      | Cron           | Purpose                                                                  |
+| ----------------------------- | -------------- | ------------------------------------------------------------------------ |
+| `pipeline-enrichment-fanout`  | `0 */12 * * *` | URL WHOIS + SSL enrichment (20 domains/run, concurrency 1, newest-first) |
+| `pipeline-entity-enrichment`  | `0 */8 * * *`  | Entity enrichment (wallet / IP / email)                                  |
+| `pipeline-urlscan-enrichment` | `30 */8 * * *` | URLScan async enrichment                                                 |
 
 ### Staleness checks (daily 03:00 UTC)
 
@@ -145,7 +144,9 @@ Gated by `FF_ANALYZE_INNGEST_WEB`. When false, the legacy `waitUntil` path runs 
 
 ### Metadata / external
 
-`meta-brp-report` (Meta Brand Rights Protection deepfake reporter) was **deregistered from the Inngest function registry in PR #552** — it no longer runs on any cron. The source file is kept for future re-registration, and its feature flag + `feature_brakes` row still exist as a stub. See `feature-flags.md` (`metaBrpReport`).
+`meta-brp-report` (Meta Brand Rights Protection deepfake reporter) was deregistered in PR #552 and **fully removed 2026-07-13** (fleet review): a pure stub that never ran (unregistered, `deepfake_detections` empty all-time, Graph-API call commented out, footgun #519), it saved 0 step-runs. The source file, its `metaBrpReporter` feature flag, and doc references are gone; resurrect from git history (`git revert`) if deepfake→Meta BRP reporting is ever built. Same PR retired `pipeline-ct-monitor` (below).
+
+`pipeline-ct-monitor` (CT-log brand-impersonation sweep) was **retired 2026-07-13** (fleet review): 0 attributable `scam_urls` rows all-time — crt.sh's JSON endpoint 502s the lightweight access pattern, and the Python `crtsh` scraper already provides CT coverage (~4,970 rows). The Inngest fn + its registration are removed; the pure keyword-config helper `getCtMonitorConfig` (+ tests) is retained in `@askarthur/shopfront-glue` for a future rebuild.
 
 ### Onward reporting (event-driven + producer/report crons)
 
@@ -323,7 +324,6 @@ every 4h pipeline-entity-enrichment, urlscan-enrichment (Inngest)
 every 6h pipeline-enrichment-fanout, risk-scorer (Inngest)
 every 6h bot-queue-sweep, cost-daily-check    (Vercel)
 every 6h competitor-intel-extract            (Inngest, FF_COMPETITOR_INTEL_EXTRACT)
-every 12h pipeline-ct-monitor                (Inngest)
 
 02:00 ensure-partitions                       (Vercel)
 02:30 feed-retention                          (Inngest)
