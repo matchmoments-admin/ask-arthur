@@ -45,7 +45,12 @@ export const urlscanEnrichment = inngest.createFunction(
         .select("id, normalized_value, enrichment_data")
         .eq("entity_type", "url")
         .eq("enrichment_status", "completed")
-        .gte("report_count", 3)
+        // report_count >= 2 (lowered from 3, 2026-07-12 fleet review) — kept in
+        // lockstep with entity-enrichment's gate. URL entities never reached
+        // report_count 3 (corpus max 2), so this stage had 0 paid calls
+        // all-time; >=2 lets it fire on twice-seen URLs that entity-enrichment
+        // has completed. Bounded by the urlScanIO flag + throttle.
+        .gte("report_count", 2)
         .order("report_count", { ascending: false })
         .limit(MAX_URLS_PER_RUN);
 
