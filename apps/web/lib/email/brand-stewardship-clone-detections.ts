@@ -21,6 +21,12 @@ interface StoredCloneDomain {
   screenshot_url?: string | null;
   result_url?: string | null;
   still_live_as_of?: string | null;
+  risk_score?: number | null;
+}
+
+interface StoredTopRisk {
+  domain: string;
+  risk_score: number;
 }
 
 interface StoredClones {
@@ -37,6 +43,8 @@ interface StoredClones {
   by_registrar?: Record<string, number>;
   by_asn?: Record<string, number>;
   domains?: StoredCloneDomain[];
+  /** F3 — the 5 highest-risk still-unactioned lookalikes (absent pre-F3). */
+  top_risk?: StoredTopRisk[];
 }
 
 export function cloneDetectionsFromMetrics(
@@ -75,5 +83,8 @@ export function cloneDetectionsFromMetrics(
       resultUrl: d.result_url ?? null,
       stillLiveAsOf: d.still_live_as_of ?? null,
     })),
+    topRisk: Array.isArray(c.top_risk)
+      ? c.top_risk.map((t) => ({ domain: t.domain, riskScore: t.risk_score }))
+      : undefined,
   };
 }

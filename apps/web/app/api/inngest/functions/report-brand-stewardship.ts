@@ -11,6 +11,7 @@ import { logger } from "@askarthur/utils/logger";
 import { loadAliasRecord } from "@/lib/brand-aliases";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
+import { computeWeaponisationRisk } from "@/lib/clone-watch/weaponisation-risk";
 
 /**
  * Monthly Brand Stewardship Report — aggregation + ledger (WS2-cap).
@@ -242,8 +243,17 @@ export interface CloneAlertRow {
     uuid?: string;
   } | null;
   attribution: {
-    whois?: { registrar?: string; registrarAbuseEmail?: string };
+    whois?: { registrar?: string; registrarAbuseEmail?: string; createdDate?: string };
     hosting?: { ip?: string; asn?: string; country?: string };
+    ip_rep?: { abuseConfidenceScore?: number };
+  } | null;
+  /** signals jsonb — weaponisation-risk input (F3). */
+  signals?: unknown;
+  /** 1:1 Haiku classification embed (PostgREST to-one via alert_id PK). */
+  clone_watch_classifications?: {
+    is_clone: boolean | null;
+    confidence: number | null;
+    attack_intent: string | null;
   } | null;
   submitted_to: Record<string, unknown> | null;
   lifecycle_state: string | null;
@@ -271,6 +281,10 @@ export interface CloneDetail {
    *  grading), else null. last_rechecked_at is NOT used — it stamps when a
    *  rescan is TRIGGERED, not when the site was seen live. */
   still_live_as_of: string | null;
+  /** F3 weaponisation-risk score (0-100) — a point-in-time ledger snapshot of
+   *  the ONE formula in lib/clone-watch/weaponisation-risk.ts (null when the
+   *  caller didn't compute risk, e.g. the LinkedIn report card path). */
+  risk_score: number | null;
 }
 
 export interface CloneBrandMetrics {
@@ -321,7 +335,10 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-export function toCloneDetail(row: CloneAlertRow): CloneDetail {
+export function toCloneDetail(
+  row: CloneAlertRow,
+  riskScore: number | null = null,
+): CloneDetail {
   const server = row.urlscan_evidence?.server ?? {};
   // Fall back to the attribution dossier's hosting block when the live urlscan
   // render didn't capture server info (e.g. a clone enriched before its scan
@@ -351,7 +368,25 @@ export function toCloneDetail(row: CloneAlertRow): CloneDetail {
       ? `https://urlscan.io/result/${row.urlscan_evidence.uuid}/`
       : null,
     still_live_as_of: stillLiveAsOf,
+    risk_score: riskScore,
   };
+}
+
+/** F3: the brand's highest-risk STILL-UNACTIONED lookalikes (declined/
+ *  monitoring — weaponised rows already headline). Pure; exported for tests. */
+export function topRiskUnactioned(
+  domains: CloneDetail[],
+  n = 5,
+): Array<{ domain: string; risk_score: number }> {
+  return domains
+    .filter(
+      (d) =>
+        (d.lifecycle_state === "declined" || d.lifecycle_state === "monitoring") &&
+        typeof d.risk_score === "number",
+    )
+    .sort((a, b) => (b.risk_score ?? 0) - (a.risk_score ?? 0) || a.domain.localeCompare(b.domain))
+    .slice(0, n)
+    .map((d) => ({ domain: d.domain, risk_score: d.risk_score as number }));
 }
 
 // Order detail rows so the most actionable (likely_phishing) surface first.
@@ -380,6 +415,7 @@ const LIFECYCLE_LIVE_RANK_DEFAULT = 3; // detected / null / unknown
  */
 export function aggregateClonesByDomain(
   rows: CloneAlertRow[],
+  riskByAlertId?: Record<number, number>,
 ): Map<string, CloneBrandMetrics> {
   const out = new Map<string, CloneBrandMetrics>();
   const seenDomain = new Map<string, Set<string>>();
@@ -439,7 +475,7 @@ export function aggregateClonesByDomain(
     m.alertIds.push(row.id);
     const cls = row.urlscan_classification ?? "unclassified";
     m.byClassification[cls] = (m.byClassification[cls] ?? 0) + 1;
-    const detail = toCloneDetail(row);
+    const detail = toCloneDetail(row, riskByAlertId?.[row.id] ?? null);
     bump(m.byCountry, detail.country);
     bump(m.byRegistrar, detail.registrar);
     bump(m.byAsn, detail.asn);
@@ -561,7 +597,7 @@ export const reportBrandStewardship = inngest.createFunction(
       const { data, error } = await sb
         .from("shopfront_clone_alerts")
         .select(
-          "id, candidate_domain, inferred_target_domain, urlscan_classification, urlscan_evidence, attribution, submitted_to, lifecycle_state, netcraft_declined_at, weaponised_at, first_seen_at",
+          "id, candidate_domain, inferred_target_domain, urlscan_classification, urlscan_evidence, attribution, submitted_to, lifecycle_state, netcraft_declined_at, weaponised_at, first_seen_at, signals, clone_watch_classifications(is_clone, confidence, attack_intent)",
         )
         .eq("source", "nrd")
         .gte("first_seen_at", period.startIso)
@@ -590,7 +626,47 @@ export const reportBrandStewardship = inngest.createFunction(
         (r) => !isFpBrand(r.inferred_target_domain),
       );
     });
-    const cloneAgg = aggregateClonesByDomain(cloneRows);
+    // F3: per-row weaponisation risk (the ONE formula — weaponisation-risk.ts)
+    // via a lightweight brand-category map (~300 rows). Inside step.run so the
+    // clock read is replay-stable.
+    const riskByAlertId = await step.run("compute-risk-scores", async () => {
+      const sb = createServiceClient();
+      const categories = new Map<string, string>();
+      if (sb) {
+        const { data } = await sb
+          .from("known_brands")
+          .select("brand_domain, brand_category")
+          .not("brand_domain", "is", null);
+        for (const r of (data ?? []) as Array<{
+          brand_domain: string | null;
+          brand_category: string | null;
+        }>) {
+          if (r.brand_domain && r.brand_category && !categories.has(r.brand_domain)) {
+            categories.set(r.brand_domain, r.brand_category);
+          }
+        }
+      }
+      const nowMs = Date.now();
+      const out: Record<number, number> = {};
+      for (const row of cloneRows) {
+        out[row.id] = computeWeaponisationRisk({
+          urlscanClassification: row.urlscan_classification,
+          signals: row.signals ?? null,
+          isClone: row.clone_watch_classifications?.is_clone ?? null,
+          confidence: row.clone_watch_classifications?.confidence ?? null,
+          attackIntent: row.clone_watch_classifications?.attack_intent ?? null,
+          brandCategory: row.inferred_target_domain
+            ? (categories.get(row.inferred_target_domain) ?? null)
+            : null,
+          whoisCreatedDate: row.attribution?.whois?.createdDate ?? null,
+          ipAbuseConfidenceScore:
+            row.attribution?.ip_rep?.abuseConfidenceScore ?? null,
+          nowMs,
+        }).score;
+      }
+      return out;
+    });
+    const cloneAgg = aggregateClonesByDomain(cloneRows, riskByAlertId);
 
     // Reddit community-report mentions for the period (data-prep only — the
     // brand-facing send stays gated on #371). Bounded window read; no paid API.
@@ -760,6 +836,7 @@ export const reportBrandStewardship = inngest.createFunction(
             weaponised: e.clones.weaponised,
             weaponised_after_decline: e.clones.weaponisedAfterDecline,
             re_taken_down: e.clones.reTakenDown,
+            top_risk: topRiskUnactioned(e.clones.domains),
             by_classification: e.clones.byClassification,
             by_country: e.clones.byCountry,
             by_registrar: e.clones.byRegistrar,
@@ -828,6 +905,7 @@ export const reportBrandStewardship = inngest.createFunction(
                 weaponised: cm.weaponised,
                 weaponised_after_decline: cm.weaponisedAfterDecline,
                 re_taken_down: cm.reTakenDown,
+                top_risk: topRiskUnactioned(cm.domains),
                 by_classification: cm.byClassification,
                 by_country: cm.byCountry,
                 by_registrar: cm.byRegistrar,
