@@ -19,9 +19,18 @@ import { deriveBrandKey } from "@/app/api/inngest/functions/report-brand-steward
  * they aren't re-probed every run.
  *
  * Reality check: only ~15% of these brands publish security.txt, so this is a
- * slow, ongoing trickle — but it's free, fully automatic, and picks up brands
- * that add one later (re-probe of 'none' rows after 90d) + any new watchlist
- * entry. The bulk of the gap is still manual curation (the v179 seed).
+ * slow, ongoing trickle — but it's free, fully automatic, and picks up any new
+ * watchlist entry. The bulk of the gap is still manual curation (the v179 seed).
+ *
+ * Coverage is currently ONE-SHOT per brand: a miss writes a contact_type='none'
+ * ledger row and that brand is thereafter treated as covered, so a brand that
+ * publishes security.txt *after* its first probe is not re-discovered. (The
+ * 2026-07-12 fleet review corrected an earlier header that wrongly claimed a
+ * "re-probe of 'none' rows after 90d" — the candidate gate excludes every
+ * known_brands row incl. 'none', and there is no probed_at column to base a
+ * 90d window on.) A real re-probe would need: (a) a `probed_at` column set on
+ * every probe, and (b) switching the miss-path upsert off `ignoreDuplicates`
+ * so a re-probe can refresh it — deferred; tracked in BACKLOG.md.
  *
  * Daily, capped to stay well under the 5-min Inngest budget (single fetch per
  * brand, 8s timeout, 15 brands/run).

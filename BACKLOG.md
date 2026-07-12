@@ -185,6 +185,14 @@ alongside the AskSilver-inspired simplification (v67 migration widens the
   and submissions), quarterly brand-contacts staleness cron, nightly SMTP probe
   on abuse inboxes, PIA document + public summary, admin triage queue for
   false-positive feedback, unsubscribe/encryption helper for `followup_email`.
+- **`known-brands-discover` security.txt re-probe of 'none' rows** — today
+  coverage is one-shot per brand: a miss writes a `contact_type='none'` ledger
+  row and the candidate gate then treats the brand as covered forever, so a brand
+  that publishes security.txt _after_ its first probe is never re-discovered
+  (2026-07-12 fleet review corrected a header that wrongly claimed a 90d re-probe
+  already existed). To implement: add a `probed_at` column set on every probe,
+  switch the miss-path upsert off `ignoreDuplicates`, and re-include `'none'`
+  rows with `probed_at < now() - 90d` in the candidate set.
 - **Extension + mobile parity** — thumbs widget + simplified card + destination
   picker on both `apps/extension/src/components/ResultDisplay.tsx` and
   `apps/mobile/components/AnalysisResult.tsx`. Neither surface has any feedback
