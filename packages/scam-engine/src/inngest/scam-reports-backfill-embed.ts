@@ -1,18 +1,29 @@
-// scam_reports + verified_scams embedding backfill.
+// scam_reports + verified_scams embedding backfill + verified_scams steady state.
 //
-// Manual trigger only — fires the SCAM_REPORTS_BACKFILL_EMBED_EVENT event,
-// each invocation embeds up to 5000 rows across both tables (whichever has
-// more NULL embeddings is processed first). Operator runs the event
-// repeatedly until both tables hit zero unembedded rows.
+// Two triggers:
+//   * daily cron — the STEADY-STATE embed path for verified_scams (see below).
+//   * SCAM_REPORTS_BACKFILL_EMBED_EVENT — the manual historical-tail backfill;
+//     each invocation embeds up to 5000 rows across both tables (whichever has
+//     more NULL embeddings first). Fire it repeatedly to drain a large tail.
 //
-// New rows landing after this PR ships are embedded synchronously by
-// scam-report-embed.ts (analyze pipeline). This function is for the
-// historical tail only — at current scale (23 scam_reports + ~few verified
-// scams) it's a one-shot pass costing well under $0.01.
+// Why a cron was added (2026-07-12 fleet review). scam_reports get a synchronous
+// embed on insert via scam-report-embed.ts (scam-report.stored.v1) — but that
+// consumer ONLY handles scam_reports; verified_scams have NO synchronous path,
+// and storeVerifiedScam emits no stored-event. The result was 39/64 (61%)
+// verified_scams sitting unembedded, silently degrading hybrid search over the
+// authoritative scam anchors. The original header wrongly implied both tables
+// embed synchronously. A daily cron is the lowest-risk fix: the fn already gates
+// on `embedding IS NULL` and updates idempotently, so it only embeds the day's
+// new verified_scams (and any scam_reports the sync path missed) and breaks as
+// soon as a batch comes back short — ~2 near-empty step.runs/day at steady state.
+// The old "a cron would race the synchronous path" worry is moot: for
+// scam_reports the shared `embedding IS NULL` gate + idempotent write makes an
+// overlap benign, and for verified_scams there is no other writer to race.
 //
-// We don't put this on a cron because the synchronous embed handles the
-// steady state. A daily cron would only race with the synchronous path
-// and complicate reasoning about which row got embedded by which job.
+// (A per-row stored-event consumer mirroring scam-report-embed would be more
+// "synchronous", but it needs a new event + wiring storeVerifiedScam + a new fn
+// registration; the cron reuses this already-correct batch logic. Tracked as a
+// follow-up if verified_scam volume ever makes daily latency matter.)
 
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
@@ -21,6 +32,7 @@ import { inngest } from "./client";
 import { withAxiomLogging } from "./with-axiom-logging";
 import { SCAM_REPORTS_BACKFILL_EMBED_EVENT } from "./events";
 import { embed, type EmbeddingDomain } from "../embeddings";
+import { isFeatureBraked } from "../cost-log";
 
 const BATCH_SIZE = 100;
 const MAX_BATCHES_PER_RUN = 50; // 5000 rows max per invocation
@@ -116,8 +128,24 @@ export const scamReportsBackfillEmbed = inngest.createFunction(
     retries: 2,
     concurrency: { limit: 1 },
   },
-  { event: SCAM_REPORTS_BACKFILL_EMBED_EVENT },
+  [
+    // Steady-state delta for verified_scams (+ any scam_reports the sync path
+    // missed). 05:30 UTC — after the 03–05 retention window, quiet slot.
+    { cron: "30 5 * * *" },
+    { event: SCAM_REPORTS_BACKFILL_EMBED_EVENT },
+  ],
   withAxiomLogging({ fnId: "scam-reports-backfill-embed" }, async ({ step }) => {
+    // Autonomous paid spend now (daily cron) → honour the same embedding brake
+    // that scam-report-embed uses, set by cost-daily-check when embed spend
+    // exceeds its cap. The manual backfill respects it too (operator can clear
+    // the brake to force a drain).
+    const braked = await step.run("check-embed-brake", () =>
+      isFeatureBraked("scam_report_embed"),
+    );
+    if (braked) {
+      return { paused: true, reason: "feature_brakes.scam_report_embed is set" };
+    }
+
     let scamReportsEmbedded = 0;
     let verifiedScamsEmbedded = 0;
     let totalTokens = 0;
