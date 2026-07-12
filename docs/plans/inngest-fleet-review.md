@@ -1,18 +1,20 @@
 # Inngest fleet operational review — 2026-07-12
 
-> **All 7 fix PRs (#717–#723) MERGED to `main` 2026-07-12.** The four items below
-> were deliberately NOT auto-changed — each is a founder decision. Plan follows.
+> **All 7 fix PRs (#717–#723) MERGED to `main` 2026-07-12.** Founder-approved
+> cleanups **A + B SHIPPED in #725 (merged 2026-07-13)** — `meta-brp-report`
+> deleted and `pipeline-ct-monitor` retired (kept `getCtMonitorConfig` as a
+> rebuild kit). Items **C + D remain founder decisions.** Plan below.
 
 ## Untouched items — decision plan
 
-### A. Delete `meta-brp-report` (the unregistered stub) — LOW effort, reversible
+### A. Delete `meta-brp-report` (the unregistered stub) — ✅ DONE (#725) — LOW effort, reversible
 
 - **Decision needed:** is deepfake→Meta Brand-Rights-Protection reporting on the roadmap in the next ~2 quarters?
 - **Evidence:** `deepfake_detections` = 0 rows all-time; fn unregistered since #552; `metaBrpReporter` flag OFF + token unset; the state-advancing UPDATE is commented out (footgun #519). It has never run once.
 - **Recommend:** **DELETE.** ADR-0019/#552 kept it "for future re-registration," but it saves 0 step-runs and carries a documented footgun; resurrection is one `git revert`. Keeping dead code costs review-surface each time someone audits the fleet.
 - **If approved:** `rm packages/scam-engine/src/inngest/meta-brp-report.ts`; drop `metaBrpReporter` from `feature-flags.ts`; update ADR-0019, `background-workers.md`, `inngest-brakes.md`, `feature-flags.md`, `cost-reduction.md`, `inngest-cron-hardening.md` to say "removed" not "kept as stub". No migration. ~30 min.
 
-### B. Retire `pipeline-ct-monitor` — LOW effort, small step-run saving
+### B. Retire `pipeline-ct-monitor` — ✅ DONE (#725) — LOW effort, small step-run saving
 
 - **Decision needed:** retire, or try to repair crt.sh access?
 - **Evidence:** 0 `crtsh_monitor` rows all-time; Python `crtsh` scraper already has ~4,970; crt.sh JSON 502s this access pattern (reproduced). Now logs loud (#720). ADR-0016's "distinct surface writing brand_impersonation_alerts" rationale is FALSE (it writes `scam_urls`, same as the Python scraper) — so the ADR reason to keep it doesn't hold.
