@@ -1,4 +1,4 @@
-// Entity enrichment — every 4h, finds entities with report_count >= 3 that need
+// Entity enrichment — every 8h, finds entities with report_count >= 2 that need
 // enrichment, and runs type-specific lookups combining local intelligence (DNS,
 // libphonenumber) with external checks (WHOIS, SSL, Safe Browsing, geolocation).
 // Tier 1 external APIs (AbuseIPDB, HIBP, crt.sh, Twilio) run inline via
@@ -301,9 +301,16 @@ export const entityEnrichmentFanOut = inngest.createFunction(
 
         const { data, error } = await supabase
           .from("scam_entities")
+          // report_count >= 2 (lowered from 3, 2026-07-12 fleet review): the
+          // >=3 gate was unreachable for URL/email entities (corpus max 2) and
+          // matched only ~4 entities total, so the intelligence-core enrichment
+          // stages sat data-starved. Lowering to 2 adds only a handful of
+          // entities (verified: +7 corpus-wide) and unblocks the URL path for
+          // urlscan-enrichment. Cost stays bounded by the entityEnrichment flag
+          // + per-run cap; raise back to 3 if a larger corpus makes 2 noisy.
           .select("id, entity_type, normalized_value")
           .in("enrichment_status", ["pending", "failed"])
-          .gte("report_count", 3)
+          .gte("report_count", 2)
           .order("report_count", { ascending: false })
           .limit(MAX_ENTITIES_PER_RUN);
 
