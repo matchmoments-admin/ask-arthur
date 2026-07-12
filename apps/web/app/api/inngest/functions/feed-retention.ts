@@ -10,6 +10,17 @@
 // share a Supabase client, and only fire once a day. Splitting them would
 // triple the Inngest function-count without any operational benefit.
 //
+// RETENTION-BUNDLING CONVENTION (resolved 2026-07-13, fleet review D1). Bundle
+// single-RPC nightly prunes into ONE fn ONLY when they belong to the SAME
+// feature and share failure semantics — as here (all feed_* tables). Keep them
+// SEPARATE when they differ in compliance/retry semantics: e.g.
+// telco-events-retention carries a forensic-compliance onFailure pager (#522)
+// that unrelated prunes must not dilute, and reddit-processed-posts /
+// archive-shadows retention are cross-feature. The step-run saving from merging
+// those (~60 invocations/mo, 0.12% of budget) does not justify coupling their
+// failure domains. This is the deliberate distinction between this fn (bundled)
+// and the standalone retention crons.
+//
 // Schedule: 02:30 UTC nightly (= 12:30 AEST). Off-peak for both AU + US,
 // well clear of the 02:00 UTC daily scraper tier (16:00 UTC, 02:00 AEST).
 
