@@ -262,8 +262,15 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
         // submission's SINGLE issue slot on a site that is already down
         // (Netcraft would just grade it "unavailable"). Dead sites revive —
         // dead candidates get a non-terminal recheck_after, never a slot.
+        // Probe ONLY when the result can matter: live mode (dry-run's widened
+        // unavailable states are the DNS-dead worst case — 8s timeouts that
+        // can blow the 5m finish budget at cap 20) and a filable uuid
+        // (has_issues → the slot is already spent; don't GET attacker infra
+        // for a decision that's a dead end either way).
+        const shouldProbe =
+          !dryRun && !fetched.hasIssues && sel.candidates.length > 0;
         const liveness = await step.run(`liveness-${uuid}`, async () => {
-          if (sel.candidates.length === 0) return {} as Record<string, boolean>;
+          if (!shouldProbe) return {} as Record<string, boolean>;
           const map = await probeLiveness(sel.candidates.map((c) => c.candidateUrl));
           return Object.fromEntries(map);
         });
@@ -288,17 +295,13 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
                   dryRun: true,
                   uuid,
                   urlCount: sel.candidates.length,
-                  liveCount: liveCandidates.length,
-                  deadCount: deadCandidates.length,
-                  deadDomains: deadCandidates.map((c) => c.candidateDomain),
                   brands: [...new Set(sel.candidates.map((c) => c.brand))],
                   states: [...new Set(sel.candidates.map((c) => c.urlState))],
                   gate: [...new Set(sel.candidates.map((c) => c.evidence))],
                   hasIssues: fetched.hasIssues,
-                  payload:
-                    liveCandidates.length > 0
-                      ? buildIssuePayload(liveCandidates)
-                      : null,
+                  // Dry-run doesn't probe (see shouldProbe) — the payload is
+                  // the ungated candidate set, as before F3.
+                  payload: buildIssuePayload(sel.candidates),
                 },
               });
             });
@@ -314,7 +317,7 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
         // All candidates dead at probe → don't spend the slot. Non-terminal
         // recheck_after (+72h): a revived site re-enters; permanent deadness
         // converges via the worklist's 30-day submitted_at window.
-        if (!fetched.hasIssues && sel.candidates.length > 0 && liveCandidates.length === 0) {
+        if (shouldProbe && liveCandidates.length === 0) {
           await step.run(`defer-dead-${uuid}`, async () => {
             const recheck = new Date(Date.now() + 72 * 3600 * 1000).toISOString();
             await bulkStamp(
@@ -368,16 +371,6 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
             await bulkStamp(
               sel.candidates.map((c) => c.alertId),
               { skipped: "submission_has_issue", at: now },
-            );
-          }
-          // F3: filing for the live subset consumes the submission's single
-          // issue slot, so the dead candidates can never be filed on this
-          // uuid — stamp them legibly (they were down; revival is covered by
-          // the recheck loop + re-emergence monitor).
-          if (willPost && deadCandidates.length) {
-            await bulkStamp(
-              deadCandidates.map((c) => c.alertId),
-              { skipped: "dead_at_probe", at: now },
             );
           }
         });
@@ -440,6 +433,16 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
             issue_url_state: NETCRAFT_URL_STATE.NO_THREATS,
             via: "auto",
           });
+          // The successful POST consumed this uuid's single issue slot, so
+          // the dead-at-probe candidates can never be filed here — stamp them
+          // legibly NOW (never before: a failed POST leaves them pending so a
+          // revived site can still be filed on a later run).
+          if (deadCandidates.length) {
+            await bulkStamp(
+              deadCandidates.map((c) => c.alertId),
+              { skipped: "dead_at_probe", at: new Date().toISOString() },
+            );
+          }
           logEnforcementEvent("issue_reported", {
             alertId: candidateIds[0],
             domain: liveCandidates[0].candidateDomain,

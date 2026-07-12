@@ -236,7 +236,7 @@ describe("F2 watch-list rendering", () => {
     const raw = await render(BrandStewardshipReport({ ...base, cloneDetections: watchList }));
     const html = raw.replace(/<!-- -->/g, "");
     expect(html).toContain("ACTIVE PHISHING");
-    expect(html).toContain("STILL LIVE — GRADED NO-THREAT");
+    expect(html).toContain("GRADED NO-THREAT — UNACTIONED");
     expect(html).toContain("ACTIONED BY NETCRAFT");
     expect(html).toContain("First seen 1 Jul 2026");
     expect(html).toContain("still live as of 10 Jul 2026");
@@ -296,5 +296,49 @@ describe("F2 watch-list rendering", () => {
     // No unactioned counts → the two new slots stay hidden.
     expect(html).not.toContain("evidence threshold");
     expect(html).not.toContain("auDRP");
+  });
+});
+
+describe("F2 slot gating (review fix)", () => {
+  it("monitoring-only brands still get the why/what guidance (no counts, rows only)", async () => {
+    const html = await render(
+      BrandStewardshipReport({
+        brandName: "ANZ",
+        periodLabel: "July 2026",
+        detected: 0,
+        reportedByDestination: {},
+        reportsSent: 0,
+        reportRef: "BSR-anz-2026-07",
+        cloneDetections: {
+          detected: 1,
+          declined: 0,
+          weaponised: 0,
+          byClassification: {},
+          byCountry: {},
+          byRegistrar: {},
+          byAsn: {},
+          domains: [
+            {
+              domain: "anz-mon.click",
+              classification: "neutral",
+              ip: null,
+              asn: null,
+              country: null,
+              registrar: null,
+              abuseEmail: null,
+              lifecycleState: "monitoring",
+              firstSeenAt: "2026-07-03T00:00:00Z",
+              screenshotUrl: null,
+              resultUrl: null,
+              stillLiveAsOf: null,
+            },
+          ],
+        },
+      }),
+    );
+    expect(html).toContain("UNDER MONITORING");
+    expect(html).toContain("evidence threshold"); // why_still_up renders
+    expect(html).toContain("auDRP"); // what_you_can_do renders
+    expect(html).toContain("unactioned lookalikes above"); // updated slot copy
   });
 });

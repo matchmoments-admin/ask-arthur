@@ -58,10 +58,14 @@ export function lifecycleBadge(
   switch (state) {
     case "weaponised":
       return { label: "ACTIVE PHISHING", color: "#dc2626" };
+    // No flat "STILL LIVE" claims — lifecycle_state is not a liveness probe
+    // (our own reporter finds declined domains dead at GET time). The dated
+    // "still live as of {vendor-observed date}" line carries the honest
+    // liveness statement; the badge states only what the data proves.
     case "declined":
-      return { label: "STILL LIVE — GRADED NO-THREAT", color: "#d97706" };
+      return { label: "GRADED NO-THREAT — UNACTIONED", color: "#d97706" };
     case "monitoring":
-      return { label: "STILL LIVE — MONITORING", color: "#d97706" };
+      return { label: "UNDER MONITORING", color: "#d97706" };
     case "taken_down":
       return { label: "ACTIONED BY NETCRAFT", color: "#16a34a" };
     case "dormant":
