@@ -5,7 +5,7 @@ import { assignPostsToThemes } from "../reddit-intel-cluster";
 // Build a unit vector in `dim` dimensions pointing mostly along axis `axis`
 // with a little spread, so cosine similarity is controllable in a test.
 function vec(dim: number, axis: number, jitter = 0): number[] {
-  const v = new Array(dim).fill(0).map((_, i) => (i === axis ? 1 : 0));
+  const v: number[] = new Array(dim).fill(0).map((_, i) => (i === axis ? 1 : 0));
   if (jitter) v[(axis + 1) % dim] = jitter;
   return v;
 }
