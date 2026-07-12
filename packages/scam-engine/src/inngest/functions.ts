@@ -67,6 +67,12 @@ import { shopSignalEnrich } from "./shop-signal-enrich";
 // FF_SHOPFRONT_CLONE_WATCH (default OFF).
 import { shopfrontNrdDailyIngest } from "./shopfront-nrd-daily-ingest";
 
+// On-demand URL enrichment (fleet-review D3): consumes analyze.completed.v1 and
+// enriches the specific scam_urls rows for URLs a user just checked, if still
+// pending — closes the residual gap the newest-first enrichment cron (#723)
+// can't reach. Zero analyze-path latency (async consumer).
+import { onDemandUrlEnrich } from "./on-demand-url-enrich";
+
 export const inngestFunctions = [
   stalenessCheck,
   stalenessCheckIPs,
@@ -105,4 +111,6 @@ export const inngestFunctions = [
   shopSignalEnrich,
   // Shopfront Clone-Watch: Layer 0 daily NRD sweep (S0E.2)
   shopfrontNrdDailyIngest,
+  // On-demand URL enrichment (fleet-review D3)
+  onDemandUrlEnrich,
 ];
