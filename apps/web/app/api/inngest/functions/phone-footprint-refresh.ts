@@ -38,6 +38,10 @@ import { dispatchAlert } from "@/lib/phone-footprint/alert-dispatch";
 export const REFRESH_MONITOR_EVENT = "phone-footprint/refresh.monitor.v1" as const;
 
 const CLAIM_BATCH_SIZE = 50;
+// A claim older than this with completed_at still NULL is treated as a dropped
+// emit and re-claimed (see the claim-due step). Comfortably longer than the
+// monitor's own runtime + retries so we never reclaim a still-in-flight refresh.
+const STALE_CLAIM_MS = 60 * 60 * 1000; // 1 hour
 // Every 6h (was hourly). Phone Footprint is dark in prod (FF_VONAGE_ENABLED +
 // the consumer flag both unset), so the hourly claimer was running a DB query
 // against an empty queue 24×/day for ~1,440 wasted Inngest executions/mo. A
@@ -122,12 +126,26 @@ export const phoneFootprintRefreshClaimer = inngest.createFunction(
       // No FOR UPDATE SKIP LOCKED via PostgREST so we tolerate small
       // races by using id-list update; concurrency:1 above means only
       // one claimer runs at a time.
+      //
+      // Stale-claim reclaim (2026-07-12 fleet review): a row is claimed by
+      // setting claimed_at, but only the monitor's markCompleted() sets
+      // completed_at — so if the emit-events step below fails past retries or
+      // the REFRESH_MONITOR_EVENT is dropped, a row stays claimed_at=set /
+      // completed_at=NULL and the `claimed_at IS NULL` gate would hide it
+      // forever (the v224 read-gate-vs-write-gate class). We therefore also
+      // re-select rows whose claim is older than STALE_CLAIM_MS and re-emit.
+      // Re-emit is safe: the monitor fn is idempotency-keyed on queueId, so a
+      // still-live original event dedups the re-fire.
+      const now = Date.now();
+      const staleClaimBefore = new Date(now - STALE_CLAIM_MS).toISOString();
       const { data: due } = await supa
         .from("phone_footprint_refresh_queue")
         .select("id, monitor_id")
-        .lt("scheduled_for", new Date().toISOString())
-        .is("claimed_at", null)
+        .lt("scheduled_for", new Date(now).toISOString())
         .is("completed_at", null)
+        // Value double-quoted: an ISO timestamp contains PostgREST-reserved
+        // chars (`:` and `.`) that would otherwise mis-split the or() operand.
+        .or(`claimed_at.is.null,claimed_at.lt."${staleClaimBefore}"`)
         .order("scheduled_for", { ascending: true })
         .limit(CLAIM_BATCH_SIZE);
 
