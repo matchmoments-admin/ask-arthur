@@ -14,10 +14,25 @@ import { withAxiomLogging } from "./with-axiom-logging";
 // source of truth — the AU brand watchlist in @askarthur/shopfront-glue — via
 // getCtMonitorConfig. The `core` tier reproduces the original hardcoded
 // 9-keyword list exactly; the `expanded` tier (research-driven concentrated AU
-// targets) only fires when FF_CT_MONITOR_EXPANDED is ON. See ADR-0016: this
-// CT monitor stays a distinct surface from clone-watch (writes
-// brand_impersonation_alerts, feeds the consumer extension), but both now read
-// the same watchlist so the keyword/legit-domain lists can't drift apart.
+// targets) only fires when FF_CT_MONITOR_EXPANDED is ON. Both tiers read the
+// same watchlist so the keyword/legit-domain lists can't drift apart.
+//
+// EFFECT (corrected 2026-07-12 fleet review): this fn upserts hits into
+// `scam_urls` via bulk_upsert_feed_url with feed_source='crtsh_monitor' — it
+// does NOT write `brand_impersonation_alerts` (an earlier header + the ADR-0016
+// note claimed it did; that was never true of this code).
+//
+// RETIRE CANDIDATE — the operational review found `crtsh_monitor` on **0
+// scam_urls rows all-time**, while the Python crt.sh scraper (feed_source
+// 'crtsh') has ~4,970. Two independent reasons it produces nothing: (1) it
+// duplicates that comprehensive Python scraper, and (2) crt.sh's JSON endpoint
+// 502s this lightweight access pattern (verified during the review), so
+// fetchCrtSh exhausts its retries and returns [] every run. The bulk_upsert RPC
+// DOES append the source on conflict, so the 0-row result is upstream (nothing
+// fetched), not a label bug. Recommend retiring in favour of the Python scraper
+// (removal is a founder call — this fn is referenced in ADR-0016). Until then
+// the all-empty case is now logged loud (see the zero-cert warn below) so the
+// inertness can't hide.
 
 function isLegitimate(domain: string, legitimateDomains: Set<string>): boolean {
   const d = domain.toLowerCase().replace(/\.$/, "");
@@ -90,21 +105,38 @@ export const ctMonitor = inngest.createFunction(
     // inter-keyword setTimeout is dropped: sequential step execution already
     // spaces the calls, and fetchCrtSh handles 5xx backoff internally.
     const perKeyword: Array<Array<{ url: string; brand: string }>> = [];
+    let totalRawCerts = 0;
     for (const { keyword } of keywords) {
-      const found = await step.run(`scan-ct-${keyword}`, async () => {
+      const { found, rawCount } = await step.run(`scan-ct-${keyword}`, async () => {
         const certs = await fetchCrtSh(keyword);
         const out: Array<{ url: string; brand: string }> = [];
         for (const cert of certs) {
           const cn = cert.common_name?.toLowerCase().trim();
           if (!cn || cn.startsWith("*") || isLegitimate(cn, legitSet)) continue;
           // Store the keyword as the brand label (unchanged from the original
-          // hardcoded behaviour) so downstream brand_impersonation_alerts
-          // consumers see byte-identical data for the `core` keywords.
+          // hardcoded behaviour) so downstream scam_urls consumers see
+          // byte-identical data for the `core` keywords.
           out.push({ url: `https://${cn}`, brand: keyword });
         }
-        return out;
+        return { found: out, rawCount: certs.length };
       });
       perKeyword.push(found);
+      totalRawCerts += rawCount;
+    }
+
+    // Loud inertness signal (2026-07-12 fleet review): if crt.sh returned ZERO
+    // raw certs across every keyword, the fn cannot possibly write anything —
+    // that is the "silently produces nothing" state (crt.sh 502ing this access
+    // pattern) which hid a 0-row-all-time fn. Always-ship .warn (bypasses INFO
+    // sampling) so it is queryable in Axiom and the retire/fix decision is
+    // driven by data, not silence. Distinct from "fetched certs but all were
+    // legit/known" — that is a healthy empty run and does NOT warn.
+    if (totalRawCerts === 0) {
+      logger.warn("pipeline-ct-monitor: crt.sh returned zero certs for all keywords", {
+        keywords: keywords.length,
+        expanded: featureFlags.ctMonitorExpanded,
+        hint: "crt.sh access is failing (502) — this fn is inert; it duplicates the Python crtsh scraper. See retire-candidate note in ct-monitor.ts.",
+      });
     }
 
     // Dedup across keywords in plain (deterministic) code, after the steps.
