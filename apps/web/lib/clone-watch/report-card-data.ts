@@ -236,7 +236,7 @@ async function fetchMonthByBrand(
   const { data, error } = await sb
     .from("shopfront_clone_alerts")
     .select(
-      "id, candidate_domain, inferred_target_domain, urlscan_classification, urlscan_evidence, attribution, submitted_to, lifecycle_state, netcraft_declined_at, weaponised_at",
+      "id, candidate_domain, inferred_target_domain, urlscan_classification, urlscan_evidence, attribution, submitted_to, lifecycle_state, netcraft_declined_at, weaponised_at, first_seen_at",
     )
     .eq("source", CLONE_SOURCE)
     .gte("first_seen_at", startIso)

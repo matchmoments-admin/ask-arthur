@@ -327,16 +327,18 @@ describe("buildOutcomesLine (slide 06)", () => {
 });
 
 describe("lifecycleBadge (watch-list vocabulary)", () => {
-  it("labels each state with the honest verbs — never 'removed'/'we took down'", () => {
+  it("labels each state with the honest verbs — never 'removed'/'we took down'/flat 'still live'", () => {
     expect(lifecycleBadge("weaponised")).toEqual({ label: "ACTIVE PHISHING", color: "#dc2626" });
-    expect(lifecycleBadge("declined")!.label).toBe("STILL LIVE — GRADED NO-THREAT");
-    expect(lifecycleBadge("monitoring")!.label).toBe("STILL LIVE — MONITORING");
+    expect(lifecycleBadge("declined")!.label).toBe("GRADED NO-THREAT — UNACTIONED");
+    expect(lifecycleBadge("monitoring")!.label).toBe("UNDER MONITORING");
     expect(lifecycleBadge("taken_down")!.label).toBe("ACTIONED BY NETCRAFT");
     expect(lifecycleBadge("dormant")!.label).toBe("DORMANT");
     for (const s of ["weaponised", "declined", "monitoring", "taken_down", "dormant"]) {
       const label = lifecycleBadge(s)!.label.toLowerCase();
       expect(label).not.toContain("removed");
       expect(label).not.toContain("we took");
+      // lifecycle_state is not a liveness probe — no flat "still live" claims.
+      expect(label).not.toContain("still live");
     }
   });
 

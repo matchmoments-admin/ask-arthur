@@ -12,6 +12,7 @@ import { loadAliasRecord } from "@/lib/brand-aliases";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
 import { computeWeaponisationRisk } from "@/lib/clone-watch/weaponisation-risk";
+import { urlscanEvidenceFromJsonb } from "./clone-watch-notify-brand-prepare";
 
 /**
  * Monthly Brand Stewardship Report — aggregation + ledger (WS2-cap).
@@ -361,12 +362,11 @@ export function toCloneDetail(
     abuse_email: whois.registrarAbuseEmail ?? null,
     lifecycle_state: row.lifecycle_state ?? null,
     first_seen_at: row.first_seen_at ?? null,
-    screenshot_url: row.urlscan_evidence?.screenshot_url ?? null,
-    // Public inspect-without-visiting page, derived from the scan uuid (same
-    // convention as urlscanEvidenceFromJsonb in notify-brand-prepare).
-    result_url: row.urlscan_evidence?.uuid
-      ? `https://urlscan.io/result/${row.urlscan_evidence.uuid}/`
-      : null,
+    // ONE decoder for the urlscan_evidence jsonb shape (uuid → result page,
+    // screenshot_url) — shared with the brand-alert prepare cron.
+    screenshot_url:
+      urlscanEvidenceFromJsonb(row.urlscan_evidence)?.screenshotUrl ?? null,
+    result_url: urlscanEvidenceFromJsonb(row.urlscan_evidence)?.resultUrl ?? null,
     still_live_as_of: stillLiveAsOf,
     risk_score: riskScore,
   };

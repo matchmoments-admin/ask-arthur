@@ -465,8 +465,7 @@ export default function BrandStewardshipReport({
                 {/* "Why are they still up?" — the honest evidence-threshold
                     explainer, rendered only when there IS unactioned exposure
                     to explain. Editable slot; copy rules in outcome-copy.ts. */}
-                {(cloneDetections.declined ?? 0) + (cloneDetections.weaponised ?? 0) >
-                  0 && (
+                {hasUnactionedRows(cloneDetections) && (
                   <div
                     style={{
                       color: "#475569",
@@ -478,7 +477,9 @@ export default function BrandStewardshipReport({
                   />
                 )}
 
-                {cloneDetections.domains.slice(0, EMAIL_CLONE_DISPLAY_CAP).map((c) => (
+                {cloneDetections.domains.slice(0, EMAIL_CLONE_DISPLAY_CAP).map((c) => {
+                  const badge = lifecycleBadge(c.lifecycleState ?? null);
+                  return (
                   <Section
                     key={c.domain}
                     style={{
@@ -491,16 +492,16 @@ export default function BrandStewardshipReport({
                   >
                     <Text style={{ margin: "0 0 3px 0" }}>
                       <code style={codeInline}>{c.domain}</code>
-                      {lifecycleBadge(c.lifecycleState ?? null) && (
+                      {badge && (
                         <span
                           style={{
                             marginLeft: "8px",
                             fontSize: "11px",
                             fontWeight: 700,
-                            color: lifecycleBadge(c.lifecycleState ?? null)!.color,
+                            color: badge.color,
                           }}
                         >
-                          {lifecycleBadge(c.lifecycleState ?? null)!.label}
+                          {badge.label}
                         </span>
                       )}
                       {c.classification && (
@@ -599,12 +600,12 @@ export default function BrandStewardshipReport({
                       />
                     )}
                   </Section>
-                ))}
+                  );
+                })}
 
                 {/* "What you can do" — registrar-abuse / auDRP guidance for the
                     still-live rows. Editable slot; never a takedown promise. */}
-                {(cloneDetections.declined ?? 0) + (cloneDetections.weaponised ?? 0) >
-                  0 && (
+                {hasUnactionedRows(cloneDetections) && (
                   <div
                     style={{
                       color: "#475569",
@@ -862,7 +863,6 @@ const outcomeLine = {
   margin: "0 0 4px 0",
 } as const;
 
-/** Accent colour per urlscan classification (left border + chip). */
 /** Short date ("11 Jul 2026") for the watch-list metadata line. Formatted
  *  manually from UTC parts — toLocaleDateString's short-month output varies
  *  by Node ICU build, which made renders non-deterministic across CI/prod.
@@ -874,6 +874,16 @@ function fmtDate(iso: string): string {
   return `${d.getUTCDate()} ${FMT_MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
 }
 
+/** True when the clone list contains any unactioned exposure worth the
+ *  why-still-up / what-you-can-do guidance: declined or weaponised counts
+ *  (also present on legacy ledger rows) OR monitoring rows (only knowable
+ *  from the per-row lifecycle field — CloneDetections carries no count). */
+function hasUnactionedRows(c: CloneDetections): boolean {
+  if ((c.declined ?? 0) + (c.weaponised ?? 0) > 0) return true;
+  return c.domains.some((d) => d.lifecycleState === "monitoring");
+}
+
+/** Accent colour per urlscan classification (left border + chip). */
 function classColor(classification: string | null): string {
   switch (classification) {
     case "likely_phishing":
