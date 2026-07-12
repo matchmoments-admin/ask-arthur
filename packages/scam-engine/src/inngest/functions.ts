@@ -5,17 +5,12 @@ import { stalenessCheck } from "./staleness";
 import { stalenessCheckIPs } from "./staleness-ips";
 import { stalenessCheckWallets } from "./staleness-wallets";
 import { enrichmentFanOut } from "./enrichment";
-import { ctMonitor } from "./ct-monitor";
 import { entityEnrichmentFanOut } from "./entity-enrichment";
 import { clusterBuilder } from "./cluster-builder";
 import { riskScorer } from "./risk-scorer";
 import { urlscanEnrichment } from "./urlscan-enrichment";
 import { scamAlertCron } from "./scam-alerts";
 import { syncVerifiedScamsToFeed, syncUserReportsToFeed } from "./feed-sync";
-// meta-brp-report intentionally NOT registered (PR-C): it's a pure stub —
-// FF_META_BRP_REPORTER is unset so it fired every 6h only to skip, and the
-// Graph API integration is still commented out. The file is kept so it can be
-// re-registered when the real Meta BRP integration ships.
 import { enrichVulnerability, enrichVulnerabilitiesCron } from "./enrich-vulnerability";
 import { matchB2bExposure } from "./match-b2b-exposure";
 
@@ -77,7 +72,6 @@ export const inngestFunctions = [
   stalenessCheckIPs,
   stalenessCheckWallets,
   enrichmentFanOut,
-  ctMonitor,
   entityEnrichmentFanOut,
   clusterBuilder,
   riskScorer,

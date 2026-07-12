@@ -165,9 +165,9 @@ The arrows show flow of work, not network calls. `[hot ⚠]` marks write-frequen
 │                          │         │   cost-{daily-     every 6h         │         │   ci (push+PR)       │
 │  ENRICHMENT              │         │     check, weekly- Sun 22:00        │         │   promptfoo (PR fil.)│
 │  • enrichment-fanout (6h)│         │     digest}                         │         │   claude-code-review │
-│  • entity-enrichment (4h)│         │   vuln-retention   03:00            │         │   deep-investigation │
-│  • ct-monitor (12h)      │         │   scam-reports-                     │         │   dr-pg-dump         │
-│  • urlscan-enrich (4h)   │         │     retention      03:30            │         │   deploy (manual)    │
+│  • entity-enrichment (8h)│         │   vuln-retention   03:00            │         │   deep-investigation │
+│  • urlscan-enrich (8h)   │         │   scam-reports-                     │         │   dr-pg-dump         │
+│                          │         │     retention      03:30            │         │   deploy (manual)    │
 │                          │         │   ensure-partitions 02:00           │         │                      │
 │  STALENESS (daily 03:00) │         │   reddit-intel-{                    │         │   23 Python scrapers │
 │  • staleness-{check,     │         │     trigger        08:00            │         │     in pipeline/     │

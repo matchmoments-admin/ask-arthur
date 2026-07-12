@@ -2,6 +2,16 @@
 
 **Status:** accepted (2026-05-24)
 
+> **Amendment (2026-07-13, fleet review):** the `pipeline-ct-monitor` Inngest fn
+> referenced throughout this ADR as the "existing CT monitor" surface has been
+> **retired**. Operational review found 0 attributable `scam_urls` rows all-time:
+> crt.sh's JSON endpoint 502s that lightweight access pattern, and the Python
+> `crtsh` scraper already provides CT-log coverage (~4,970 rows). The layering
+> decisions below stand; the "distinct CT surface" this ADR chose not to replace
+> simply no longer runs as an Inngest fn. Its pure keyword-config helper
+> `getCtMonitorConfig` (+ tests) is retained in `@askarthur/shopfront-glue` as a
+> rebuild kit should a working CT-monitor path be built later.
+
 Shopfront clone-detection layers its **data sources** in three phases
 that mirror ADR-0015's signal-model phases. **Phase A** consumes the
 existing scam corpus (`scam_reports` + `reddit_post_intel` + `feed_items`)
