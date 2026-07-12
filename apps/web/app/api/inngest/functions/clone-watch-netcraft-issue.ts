@@ -98,7 +98,11 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
     retries: 2,
     singleton: { mode: "skip" },
     concurrency: { limit: 1 },
-    timeouts: { finish: "5m" },
+    // 8m (was 5m): a cap-10 worklist does 2 Netcraft GETs + liveness probes +
+    // a POST + ~4-6 checkpointed steps per uuid; 5m had near-zero headroom and
+    // a mid-run cancellation skips the end-of-run autobrake + heartbeat (the
+    // reconciler's PR #706 lesson). Still under the 10m watchdog.
+    timeouts: { finish: "8m" },
   },
   [
     { cron: "0 11 * * *" },
@@ -248,12 +252,16 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
             driftStates: sel.driftStates,
           });
           if (!dryRun) {
-            logEnforcementEvent("rejected", {
-              alertId: group.alerts[0].id,
-              domain: group.alerts[0].candidate_domain,
-              channel: "netcraft",
-              runId,
-              extra: { reason: "url_state_drift", uuid, driftStates: sel.driftStates },
+            // Wrapped in step.run so an Inngest checkpoint replay of a later
+            // step doesn't re-fire this always-ship warn + audit row (v224).
+            await step.run(`drift-log-${uuid}`, () => {
+              logEnforcementEvent("rejected", {
+                alertId: group.alerts[0].id,
+                domain: group.alerts[0].candidate_domain,
+                channel: "netcraft",
+                runId,
+                extra: { reason: "url_state_drift", uuid, driftStates: sel.driftStates },
+              });
             });
           }
         }
@@ -392,6 +400,8 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
         if (!result.ok) {
           if (isTransientStatus(result.status)) {
             counts.transientErrors++;
+            // Bump + the always-ship reject warn in ONE step, so a later
+            // checkpoint replay can't re-fire the warn/audit row (v224).
             await step.run(`bump-${uuid}`, async () => {
               for (const id of candidateIds) {
                 await sb.rpc("bump_clone_alert_netcraft_issue_attempt", {
@@ -400,29 +410,29 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
                   p_error: result.body,
                 });
               }
-            });
-            logEnforcementEvent("rejected", {
-              alertId: candidateIds[0],
-              domain: liveCandidates[0].candidateDomain,
-              channel: "netcraft",
-              runId,
-              extra: { reason: "transient", uuid, status: result.status },
+              logEnforcementEvent("rejected", {
+                alertId: candidateIds[0],
+                domain: liveCandidates[0].candidateDomain,
+                channel: "netcraft",
+                runId,
+                extra: { reason: "transient", uuid, status: result.status },
+              });
             });
           } else {
             counts.permanentRejects++;
-            await step.run(`stamp-4xx-${uuid}`, () =>
-              bulkStamp(candidateIds, {
+            await step.run(`stamp-4xx-${uuid}`, async () => {
+              await bulkStamp(candidateIds, {
                 skipped: "post_4xx",
                 status: result.status,
                 at: new Date().toISOString(),
-              }),
-            );
-            logEnforcementEvent("rejected", {
-              alertId: candidateIds[0],
-              domain: liveCandidates[0].candidateDomain,
-              channel: "netcraft",
-              runId,
-              extra: { reason: "post_4xx", uuid, status: result.status, body: result.body },
+              });
+              logEnforcementEvent("rejected", {
+                alertId: candidateIds[0],
+                domain: liveCandidates[0].candidateDomain,
+                channel: "netcraft",
+                runId,
+                extra: { reason: "post_4xx", uuid, status: result.status, body: result.body },
+              });
             });
           }
           continue;

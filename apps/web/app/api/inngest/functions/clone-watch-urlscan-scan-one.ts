@@ -12,9 +12,12 @@ import { submitCloneCandidate } from "@/lib/clone-watch/urlscan-submit-one";
  * Clone-Watch urlscan — single-candidate SUBMIT (operator override).
  *
  * Triggered by `shopfront/clone.scan-requested.v1`, which the admin "scan this
- * alert" endpoint (/api/admin/clone-watch/scan) emits. Unlike the gated batch
- * cron, this deliberately bypasses the preclassifier gate — the operator chose
- * this specific alert, so we honour it. It only SUBMITS (reputation + urlscan
+ * alert" endpoint (/api/admin/clone-watch/scan) emits. OPERATOR-ONLY: since
+ * v224 the lifecycle-recheck loop submits its rescans INLINE (not via this
+ * event), so this path is now low-volume single-click scans and needs no
+ * throttle. Unlike the gated batch cron, this deliberately bypasses the
+ * preclassifier gate — the operator chose this specific alert, so we honour
+ * it. It only SUBMITS (reputation + urlscan
  * UUID); `clone-watch-urlscan-retrieve` picks up the result on its next tick.
  *
  * idempotency on event.id: the admin route stamps a unique id per click, so

@@ -1,12 +1,12 @@
 import { isFeatureBraked } from "@askarthur/scam-engine/cost-log";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
-import { CLONE_WATCH_SCAN_REQUESTED_EVENT } from "@askarthur/scam-engine/inngest/events";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { logCost } from "@/lib/cost-telemetry";
 import { computeWeaponisationRisk } from "@/lib/clone-watch/weaponisation-risk";
+import { submitCloneCandidate } from "@/lib/clone-watch/urlscan-submit-one";
 
 /**
  * Clone-Watch — lifecycle re-check loop (Wave 0 PR-B).
@@ -15,15 +15,20 @@ import { computeWeaponisationRisk } from "@/lib/clone-watch/weaponisation-risk";
  * on LIVE content, so a lookalike that is parked / cloaked / pre-weaponisation
  * at first scan comes back "no threats" (→ lifecycle 'declined') or benign
  * (→ 'monitoring'). Those domains very often weaponise LATER. This cron re-scans
- * the 'monitoring'/'declined' tail on a cadence: it re-emits the existing
- * urlscan scan-requested event (reason='rescan'), and when the re-scan verdict
- * flips to likely_phishing, clone-watch-urlscan-retrieve promotes the alert to
+ * the 'monitoring'/'declined' tail on a cadence: when the re-scan verdict flips
+ * to likely_phishing, clone-watch-urlscan-retrieve promotes the alert to
  * 'weaponised' and emits shopfront/clone.weaponised.v1 — the contradiction we
  * exploit ("we saw the phish, Netcraft didn't").
  *
- * Does NO paid work itself (it emits events; urlscan submit/retrieve — already
- * cost-logged + urlscan-flag-gated — do the scanning). Bounded by the per-run
- * candidate limit so it can never fan out an unbounded rescan storm.
+ * v224 (ops review): rescans are submitted INLINE here (one step.run per
+ * candidate, mirroring clone-watch-urlscan-submit), NOT fanned out as 50
+ * scan-requested events to scan-one — that fan-out was ~200 Inngest
+ * invocations/day of the operator-single-click path. The daily throttle keeps
+ * total rescans structurally bounded (the May-27 lesson); a manual-trigger
+ * cooldown prevents same-hour stacking (which breached urlscan's 100/hour
+ * unlisted cap). The retrieve stage picks up the fresh submissions (v224 also
+ * fixed retrieve to see re-submitted-since-last-scan rows, so classified rows
+ * that flip are finally detectable).
  *
  * Gated by FF_SHOPFRONT_CLONE_RECHECK (canary independently of Netcraft
  * submission) + a feature_brakes.shopfront_clone_recheck operator kill-switch.
@@ -96,12 +101,19 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
     name: "Clone-Watch: lifecycle re-check loop",
     retries: 1,
     concurrency: { limit: 1 },
-    // <5 min on a healthy DB (RECHECK_BATCH_LIMIT emits + marks); 5m cap keeps
-    // it under the pg-stuck-query-watchdog edge.
-    timeouts: { finish: "5m" },
+    // Structural daily ceiling on inline urlscan submits (4 crons × 50 = 200
+    // < 210), so a worklist regression / manual-trigger storm can't recreate
+    // the May-27 urlscan burst (v224).
+    throttle: { limit: 210, period: "1d" },
+    // 8m: up to 50 sequential urlscan submits (HTTP) per run + marks. Still
+    // well under the 10m pg-stuck-query-watchdog edge (the slow part is
+    // external HTTP, not PG).
+    timeouts: { finish: "8m" },
   },
   [
-    { cron: "0 */6 * * *" },
+    // Offset from urlscan-retrieve (0 */3) so a rescan submit and a retrieve
+    // tick don't race on the same row (v224).
+    { cron: "30 */6 * * *" },
     { event: "shopfront/clone.lifecycle-recheck.manual-trigger.v1" },
   ],
   withAxiomLogging(
@@ -127,6 +139,26 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
       const sb = createServiceClient();
       if (!sb) return { skipped: true, reason: "supabase_unavailable" };
 
+      // Cooldown: skip if a recheck ran in the last 50 min. The 6h-apart crons
+      // never trip this; it exists so rapid MANUAL triggers can't stack three
+      // 50-submit runs into one hour and breach urlscan's 100/hour unlisted cap
+      // (which happened 2026-07-12 00:00 UTC). The throttle is the structural
+      // backstop; this is the operator-ergonomics one.
+      const recentRun = await step.run("check-cooldown", async () => {
+        const { data } = await sb
+          .from("cost_telemetry")
+          .select("created_at")
+          .eq("feature", "shopfront_clone_recheck")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (!data?.created_at) return false;
+        return Date.now() - new Date(data.created_at).getTime() < 50 * 60 * 1000;
+      });
+      if (recentRun) {
+        return { skipped: true, reason: "cooldown_active" };
+      }
+
       const pool = await step.run("load-recheck-candidates", async () => {
         const { data } = await sb.rpc("list_clone_alerts_for_recheck", {
           p_limit: RECHECK_FETCH_LIMIT,
@@ -146,23 +178,31 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
         selectTopRiskCandidates(pool, RECHECK_BATCH_LIMIT, Date.now()),
       );
 
-      // Re-emit the existing urlscan scan-requested event (reason='rescan') for
-      // each candidate. Id-keyed on the last-rechecked timestamp so a replay of
-      // this step doesn't double-submit, but a genuine next-cadence run does.
-      await step.run("trigger-rescans", async () => {
-        await inngest.send(
-          candidates.map((c) => ({
-            name: CLONE_WATCH_SCAN_REQUESTED_EVENT,
-            id: `clone-recheck-${c.id}-${c.recheck_count}`,
-            data: {
-              alertId: c.id,
-              candidateUrl: c.candidate_url,
-              candidateDomain: c.candidate_domain,
-              reason: "rescan" as const,
-            },
-          })),
+      // Submit each rescan INLINE — one step.run per candidate for independent
+      // memoisation (a single failure doesn't replay the whole batch or
+      // re-submit already-submitted rows), mirroring clone-watch-urlscan-submit.
+      // Replaces the old 50-event fan-out to scan-one (~200 invocations/day).
+      let submitted = 0;
+      let submitFailed = 0;
+      let reputationHits = 0;
+      for (const c of candidates) {
+        const outcome = await step.run(`submit-${c.id}`, () =>
+          submitCloneCandidate({
+            id: c.id,
+            candidate_url: c.candidate_url,
+            candidate_domain: c.candidate_domain,
+          }),
         );
-      });
+        if (outcome.reputationMalicious) reputationHits++;
+        if (
+          outcome.kind === "submitted" ||
+          outcome.kind === "reputation_classified"
+        ) {
+          submitted++;
+        } else {
+          submitFailed++;
+        }
+      }
 
       // Mark each candidate rechecked (bump recheck_count + last_rechecked_at)
       // via the same guarded transition RPC, holding lifecycle_state unchanged
@@ -182,6 +222,11 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
         }
       });
 
+      // Two telemetry rows: the risk-score distribution (weight-tuning
+      // feedstock) under the recheck feature, AND the urlscan submit VOLUME
+      // under the urlscan feature — the recheck path is now the dominant
+      // urlscan caller and was previously invisible to the cost dashboard /
+      // volume ceilings (v224).
       await step.run("log-cost", async () => {
         const risks = candidates.map((c) => c.risk).sort((a, b) => a - b);
         logCost({
@@ -193,12 +238,13 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
           metadata: {
             rechecked: candidates.length,
             pool: pool.length,
+            submitted,
+            submit_failed: submitFailed,
             declined: candidates.filter((c) => c.lifecycle_state === "declined")
               .length,
             monitoring: candidates.filter(
               (c) => c.lifecycle_state === "monitoring",
             ).length,
-            // Score telemetry — the tuning feedstock for the v1 weights.
             top_score: risks[risks.length - 1] ?? null,
             median_score: risks[Math.floor(risks.length / 2)] ?? null,
             bands: {
@@ -209,14 +255,30 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
             },
           },
         });
+        logCost({
+          feature: "shopfront_clone_urlscan",
+          provider: "urlscan",
+          operation: "recheck_submit",
+          units: submitted,
+          unitCostUsd: 0, // free tier
+          metadata: { submitted, submit_failed: submitFailed, reputation_hits: reputationHits },
+        });
       });
 
       logger.info("clone-watch lifecycle re-check: complete", {
         rechecked: candidates.length,
         pool: pool.length,
+        submitted,
+        submitFailed,
       });
 
-      return { ok: true, rechecked: candidates.length, pool: pool.length };
+      return {
+        ok: true,
+        rechecked: candidates.length,
+        pool: pool.length,
+        submitted,
+        submitFailed,
+      };
     },
   ),
 );
