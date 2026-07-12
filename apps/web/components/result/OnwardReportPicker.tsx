@@ -44,13 +44,25 @@ export default function OnwardReportPicker({
   const [results, setResults] = useState<OnwardResultRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Loss / PII micro-question. `get_onward_destinations` only surfaces
+  // ReportCyber + IDCARE when financial loss or PII compromise is present, but
+  // nothing in the analyze pipeline produces those two signals — so we ask the
+  // user here (their answer is the source of truth). If a caller ever passes
+  // both signals explicitly, we skip the question and honour them.
+  const [loss, setLoss] = useState<boolean>(!!hasFinancialLoss);
+  const [pii, setPii] = useState<boolean>(!!hasPiiCompromise);
+  const [answered, setAnswered] = useState<boolean>(
+    hasFinancialLoss !== undefined && hasPiiCompromise !== undefined,
+  );
+
   useEffect(() => {
+    if (!answered) return; // wait for the micro-question before resolving destinations
     const params = new URLSearchParams({
       ...(scamType ? { scamType } : {}),
       ...(impersonatedBrand ? { impersonatedBrand } : {}),
       ...(channel ? { channel } : {}),
-      hasFinancialLoss: String(!!hasFinancialLoss),
-      hasPiiCompromise: String(!!hasPiiCompromise),
+      hasFinancialLoss: String(loss),
+      hasPiiCompromise: String(pii),
     });
     fetch(`/api/report/destinations?${params.toString()}`)
       .then((r) => r.json())
@@ -64,7 +76,7 @@ export default function OnwardReportPicker({
         setSelected(initial);
       })
       .catch((err) => setError(String(err)));
-  }, [scamType, impersonatedBrand, channel, hasFinancialLoss, hasPiiCompromise]);
+  }, [answered, loss, pii, scamType, impersonatedBrand, channel]);
 
   async function send() {
     if (!destinations) return;
@@ -103,6 +115,94 @@ export default function OnwardReportPicker({
 
   if (results) {
     return <OnwardReportSummary results={results} evidence={evidence} />;
+  }
+
+  // Step 1 — loss / PII micro-question. Determines whether ReportCyber + IDCARE
+  // (police / identity-theft destinations) are offered.
+  if (!answered) {
+    return (
+      <section className="mt-6 rounded-2xl border border-border-light bg-white p-5">
+        <div className="flex items-start justify-between gap-3 mb-2">
+          <h3 className="font-bold text-deep-navy text-base">
+            Before we route this — two quick questions
+          </h3>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close report picker"
+              className="text-gov-slate hover:text-deep-navy"
+            >
+              <X size={20} />
+            </button>
+          )}
+        </div>
+        <p className="text-sm text-gov-slate mt-1">
+          Your answers decide where this should go — money loss or stolen
+          personal details mean it should also reach ReportCyber and IDCARE.
+        </p>
+
+        <ul className="mt-4 space-y-2">
+          <li className="flex items-start gap-3 rounded-lg border border-border-light bg-white p-3">
+            <input
+              id="q-loss"
+              type="checkbox"
+              checked={loss}
+              onChange={(e) => setLoss(e.target.checked)}
+              className="mt-1"
+            />
+            <label htmlFor="q-loss" className="flex-1 cursor-pointer">
+              <span className="block font-semibold text-deep-navy text-sm">
+                Did you lose money to this scam?
+              </span>
+              <span className="block text-xs text-gov-slate mt-0.5">
+                Includes a payment, transfer, gift card, or crypto you can&apos;t
+                get back.
+              </span>
+            </label>
+          </li>
+          <li className="flex items-start gap-3 rounded-lg border border-border-light bg-white p-3">
+            <input
+              id="q-pii"
+              type="checkbox"
+              checked={pii}
+              onChange={(e) => setPii(e.target.checked)}
+              className="mt-1"
+            />
+            <label htmlFor="q-pii" className="flex-1 cursor-pointer">
+              <span className="block font-semibold text-deep-navy text-sm">
+                Did the scammer get your personal details?
+              </span>
+              <span className="block text-xs text-gov-slate mt-0.5">
+                ID documents, passwords, bank or card numbers, Medicare, or TFN.
+              </span>
+            </label>
+          </li>
+        </ul>
+
+        <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="min-h-[44px] rounded-full px-4 py-2 text-sm font-semibold text-gov-slate hover:bg-slate-100"
+            >
+              Cancel
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setAnswered(true)}
+            className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-full bg-deep-navy px-6 py-2 text-sm font-bold uppercase tracking-widest text-white hover:bg-navy"
+          >
+            Continue
+          </button>
+        </div>
+        <p className="mt-3 text-xs text-gov-slate">
+          Neither applies? Leave both unticked and continue.
+        </p>
+      </section>
+    );
   }
 
   if (!destinations) {
