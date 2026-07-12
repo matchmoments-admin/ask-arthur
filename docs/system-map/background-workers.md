@@ -45,12 +45,13 @@ All registered functions are wrapped in `withAxiomLogging` (#553 / #565); actual
 
 ### Analyze pipeline (fan-out on `analyze.completed.v1`)
 
-| Function                     | Trigger                                     | Purpose                                                                  |
-| ---------------------------- | ------------------------------------------- | ------------------------------------------------------------------------ |
-| `analyze-completed-report`   | `analyze.completed.v1`                      | Store `scam_reports` row + entity links via `create_scam_report` RPC     |
-| `analyze-completed-brand`    | `analyze.completed.v1`                      | Create `brand_impersonation_alerts` row when `impersonatedBrand` present |
-| `analyze-completed-cost`     | `analyze.completed.v1`                      | Log `cost_telemetry` row tagged by source + token counts                 |
-| `analyze-failure-subscriber` | `inngest/function.failed` (prefix-filtered) | Log analyze pipeline failures                                            |
+| Function                     | Trigger                                     | Purpose                                                                                                                                                                                                                             |
+| ---------------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `analyze-completed-report`   | `analyze.completed.v1`                      | Store `scam_reports` row + entity links via `create_scam_report` RPC                                                                                                                                                                |
+| `analyze-completed-brand`    | `analyze.completed.v1`                      | Create `brand_impersonation_alerts` row when `impersonatedBrand` present                                                                                                                                                            |
+| `analyze-completed-cost`     | `analyze.completed.v1`                      | Log `cost_telemetry` row tagged by source + token counts                                                                                                                                                                            |
+| `analyze-failure-subscriber` | `inngest/function.failed` (prefix-filtered) | Log analyze pipeline failures                                                                                                                                                                                                       |
+| `on-demand-url-enrich`       | `analyze.completed.v1`                      | D3: enrich the specific `scam_urls` rows for a checked URL if still pending (WHOIS/SSL) — closes the residual gap the newest-first enrichment cron can't reach. `dataPipeline`-gated, `requestId`-idempotent, zero analyze latency. |
 
 Gated by `FF_ANALYZE_INNGEST_WEB`. When false, the legacy `waitUntil` path runs inline in `/api/analyze`.
 
