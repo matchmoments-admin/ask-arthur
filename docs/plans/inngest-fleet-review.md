@@ -1,9 +1,11 @@
 # Inngest fleet operational review — 2026-07-12
 
-> **All 7 fix PRs (#717–#723) MERGED to `main` 2026-07-12.** Founder-approved
-> cleanups **A + B SHIPPED in #725 (merged 2026-07-13)** — `meta-brp-report`
-> deleted and `pipeline-ct-monitor` retired (kept `getCtMonitorConfig` as a
-> rebuild kit). Items **C + D remain founder decisions.** Plan below.
+> **All 7 fix PRs (#717–#723) MERGED 2026-07-12.** Cleanups **A + B shipped in
+> #725**. **C shipped in #727** (onward micro-question). **D2 shipped in #726**
+> (report_count 3→2). **D1 resolved in #728** (keep separate + documented
+> convention — the telco compliance pager is the decisive factor). **D3 is the
+> only remaining item — a documented, ready-to-build deferred optimisation**
+> (see D3 below). Everything else from this review is now in production.
 
 ## Untouched items — decision plan
 
@@ -21,19 +23,21 @@
 - **Recommend:** **RETIRE** in favour of the Python scraper. Saves ~18–36 wasted step-runs/day (9 keywords × up to 3 retries × 2 runs, all hammering a 502).
 - **If approved:** remove `ctMonitor` from `inngest/functions.ts`; `rm ct-monitor.ts`; **first check `getCtMonitorConfig` has no other consumer** in `@askarthur/shopfront-glue` before removing it; update ADR-0016 + `background-workers.md`. No migration. ~30 min.
 
-### C. Onward producer wiring (`hasFinancialLoss` / `hasPiiCompromise`) — MED effort, product-launch scope
+### C. Onward producer wiring (`hasFinancialLoss` / `hasPiiCompromise`) — ✅ DONE (#727)
 
-- **Decision needed:** launch onward reporting? (gated `NEXT_PUBLIC_FF_ONWARD_REPORTING`, currently pre-launch — `onward_report_log` 0 rows).
-- **Evidence:** `OnwardReportPicker` accepts + forwards both signals, but **no code path produces them** anywhere, and `ResultCard` doesn't pass them → ReportCyber + IDCARE (gated on financial-loss / PII in `get_onward_destinations`) can never surface. Deriving from `scamType` is wrong ("finance-shaped" ≠ "user lost money").
-- **Recommend:** part of the onward-reporting launch, not a standalone fix. MVP: add a 2-checkbox micro-question ("Did you lose money?" / "Did you share personal info?") as the picker's first step (reuse the Next Steps funnel's micro-question pattern), then it already forwards to `/api/report/destinations`. ~½ day. Tracked in `BACKLOG.md` (P1 onward-reporting).
+- **Was:** `get_onward_destinations` only surfaces ReportCyber + IDCARE when financial loss / PII is present, but **no code path produced those signals**, so they could never appear.
+- **Done:** `OnwardReportPicker` now self-collects them via a two-checkbox micro-question as its first step, feeding `/api/report/destinations`. No producer/ResultCard change needed. Prod HTTP smoke test confirmed loss+pii=true adds `[reportcyber, idcare]`. Behind the unlaunched onward flag — launch-ready wiring.
 
-### D. Design decisions (no code yet)
+### D. Design decisions
 
-1. **Retention-bundling convention** — `feed-retention` bundles 3 single-RPC prunes under one fn; the review rejected bundling `telco-events` + `reddit-processed-posts` + `archive-shadows` (+`cost-telemetry`) prunes on failure-domain grounds. **These conflict.** For retention specifically the coupling argument is weak (idempotent, sub-second, next-night self-heals). **Recommend** adopting "same-nature nightly single-RPC prunes MAY bundle (one `step.run` per RPC)"; folding the 3–4 retention crons into one saves 3 registrations + 3 invocations/day. Low value, do only when convenient.
-2. **`report_count >= 3` gate** — starves BOTH `pipeline-entity-enrichment` (STALE) and `pipeline-urlscan-enrichment` (0 paid calls all-time): max `report_count` in the corpus is 2, so neither paid stage can ever fire. **Recommend** deciding intent: if intelligence-core should be active now, lower to `>= 2` (cheap, light paid enrichment on twice-reported entities); if not, leave dark (correct once corpus grows) — but add the reachability note so it's not mistaken for a bug. Cost call.
-3. **On-demand enrichment** (the deeper enrichment-fanout fix #723 deferred) — instead of eagerly enriching 235k blocklist URLs, enrich a URL when a user actually checks it (hook the analyze path: if the checked URL is `scam_urls.enrichment_status='pending'`, enrich it inline/targeted). Makes WHOIS/SSL ready exactly for checked URLs; the eager fan-out becomes a low-priority filler. MED effort; #723's newest-first already mitigates the acute harm, so this is an optimisation, not urgent.
+1. **Retention-bundling convention — ✅ RESOLVED (#728).** Decided **keep separate + documented** (in `feed-retention.ts`, the bundling exemplar). The decisive factor found on full read: `telco-events-retention` carries a forensic-compliance `onFailure` **pager** (#522) that bundling would dilute; the ~60 invocations/mo saving does not justify coupling failure domains a verification pass already refuted. Bundle only same-feature + shared-failure-semantics prunes (feed-retention); keep cross-feature/compliance-distinct prunes separate.
+2. **`report_count >= 3` gate — ✅ DONE (#726).** Lowered both enrichment gates to `>= 2`. Verified negligible cost (+7 entities corpus-wide) — unblocks the data-starved intelligence-core stages. Bounded by flags + caps + throttle; reversible.
+3. **On-demand enrichment — DEFERRED (ready-to-build plan, recommend hold).** The narrow remaining case after #723 + D2.
+   - **Why mostly-covered:** #723 made `enrichment-fanout` newest-first, so freshly-ingested feed URLs enrich promptly; D2 lowered the entity gate to `>=2`, so **reported** URLs already enrich via `entity-enrichment` → `urlscan-enrichment`. The ONLY uncovered case is a user **checking** (not reporting) an **old** feed URL — and analyze does not currently write `scam_urls` on a check, so there is no existing signal linking "checked" → the `scam_urls` row.
+   - **Build plan when wanted:** in the analyze URL path, on a check, look up the URL in `scam_urls`; if `enrichment_status='pending'`, emit a fire-and-forget targeted-enrich event (async — NO added analyze latency) consumed by a small per-domain enrich fn (or extend `enrichment-fanout` to accept a single domain). ~½ day + 1 new fn.
+   - **Recommendation: HOLD.** It touches the latency-sensitive analyze hot path and adds fleet surface (against this review's own surface-reduction goal) for a narrow case the acute harm of which #723 already fixed. Build only if telemetry later shows users frequently checking stale-pending feed URLs.
 
-**Suggested sequencing:** A + B are quick, reversible cleanups (bundle into one "fleet dead-code retirement" PR on approval). C rides the onward-reporting launch. D-1/D-2 are one-line convention/threshold calls; D-3 is a scoped optimisation for later.
+**Status:** A, B, C, D1, D2 all shipped to production (#725–#728). D3 is the sole open item — a documented, deliberately-deferred optimisation.
 
 > **Fixes shipped (2026-07-12)** — one PR per item, each on a fresh branch off `main`:
 > | Finding | PR | Verification |
