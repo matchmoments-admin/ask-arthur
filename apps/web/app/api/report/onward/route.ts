@@ -151,6 +151,41 @@ export async function POST(req: NextRequest) {
   };
   const results: ResultRow[] = [];
 
+  // Fire a destination worker's event. On success the row stays 'queued' (the
+  // worker moves it to a terminal status); on failure we mark it 'failed' so it
+  // is (a) distinguishable from a successfully-queued-but-unprocessed row and
+  // (b) re-drivable on resubmit. Leaving a send-failed row 'queued' made it
+  // permanently stuck — no stage reads WHERE status='queued' to re-drive it
+  // (2026-07-12 fleet-review convergence gap: a re-submit path must move the
+  // row back across the predicate its consumer filters on).
+  const fireEvent = async (
+    logId: string,
+    sel: (typeof body.selected)[number],
+  ): Promise<"queued" | "failed"> => {
+    try {
+      await inngest.send({
+        name: `report.onward.${sel.destination}` as const,
+        data: {
+          log_id: logId,
+          scam_report_id: body.scam_report_id,
+          destination_key: sel.destination_key,
+          analysis_id: body.analysis_id ?? null,
+        },
+      });
+      return "queued";
+    } catch (err) {
+      logger.error("inngest.send for onward report failed", {
+        error: String(err),
+        destination: sel.destination,
+      });
+      await supabase
+        .from("onward_report_log")
+        .update({ status: "failed" })
+        .eq("id", logId);
+      return "failed";
+    }
+  };
+
   for (const sel of body.selected) {
     // Check for an existing log row (dedup). If one exists, return its status
     // — don't re-fire the Inngest event.
@@ -163,11 +198,27 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
 
     if (existing) {
+      // Re-drive a previously-FAILED send (the event never emitted) so a
+      // resubmit self-heals it — move the row back across the worker's event
+      // trigger. Terminal/in-flight statuses are returned as-is. A 'queued' row
+      // is deliberately NOT re-fired here: its event was already emitted, so
+      // re-firing could double an external send (a stale-'queued' sweeper that
+      // respects worker idempotency is tracked separately).
+      let status = existing.status;
+      if (existing.status === "failed") {
+        status = await fireEvent(existing.id, sel);
+        if (status === "queued") {
+          await supabase
+            .from("onward_report_log")
+            .update({ status: "queued" })
+            .eq("id", existing.id);
+        }
+      }
       results.push({
         destination: sel.destination,
         destination_key: sel.destination_key,
         display_name: brandDisplay(sel, report.impersonated_brand) ?? DISPLAY[sel.destination],
-        status: existing.status,
+        status,
       });
       continue;
     }
@@ -199,31 +250,15 @@ export async function POST(req: NextRequest) {
       continue;
     }
 
-    // Fire the Inngest event — name maps 1:1 to a registered worker.
-    try {
-      await inngest.send({
-        name: `report.onward.${sel.destination}` as const,
-        data: {
-          log_id: inserted.id,
-          scam_report_id: body.scam_report_id,
-          destination_key: sel.destination_key,
-          analysis_id: body.analysis_id ?? null,
-        },
-      });
-    } catch (err) {
-      logger.error("inngest.send for onward report failed", {
-        error: String(err),
-        destination: sel.destination,
-      });
-      // The log row remains 'queued' — the next manual replay or
-      // queue-sweeper can pick it up.
-    }
+    // Fire the Inngest event — name maps 1:1 to a registered worker. On a send
+    // failure fireEvent marks the row 'failed' (not left silently 'queued').
+    const status = await fireEvent(inserted.id, sel);
 
     results.push({
       destination: sel.destination,
       destination_key: sel.destination_key,
       display_name: brandDisplay(sel, report.impersonated_brand) ?? DISPLAY[sel.destination],
-      status: "queued",
+      status,
     });
   }
 
