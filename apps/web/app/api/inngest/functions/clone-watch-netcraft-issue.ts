@@ -8,6 +8,7 @@ import { logger } from "@askarthur/utils/logger";
 import { logCost } from "@/lib/cost-telemetry";
 import { logEnforcementEvent } from "@/lib/clone-watch/enforcement-telemetry";
 import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
+import { probeLiveness } from "@/lib/clone-watch/liveness";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import {
   buildIssuePayload,
@@ -169,6 +170,7 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
         permanentRejects: 0,
         drained: 0,
         livePosts: 0,
+        deadDeferred: 0,
       };
 
       const bulkStamp = async (ids: number[], value: Record<string, unknown>) => {
@@ -256,7 +258,24 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
           }
         }
 
-        // DRY-RUN: log the would-be payload, write NOTHING.
+        // F3 liveness pre-check: a $0 GET per candidate so we never spend the
+        // submission's SINGLE issue slot on a site that is already down
+        // (Netcraft would just grade it "unavailable"). Dead sites revive —
+        // dead candidates get a non-terminal recheck_after, never a slot.
+        const liveness = await step.run(`liveness-${uuid}`, async () => {
+          if (sel.candidates.length === 0) return {} as Record<string, boolean>;
+          const map = await probeLiveness(sel.candidates.map((c) => c.candidateUrl));
+          return Object.fromEntries(map);
+        });
+        const liveCandidates = sel.candidates.filter(
+          (c) => liveness[c.candidateUrl] === true,
+        );
+        const deadCandidates = sel.candidates.filter(
+          (c) => liveness[c.candidateUrl] !== true,
+        );
+
+        // DRY-RUN: log the would-be payload (live subset — what a live run
+        // WOULD file) + the liveness partition, write NOTHING.
         if (dryRun) {
           if (sel.candidates.length) {
             await step.run(`dryrun-log-${uuid}`, () => {
@@ -269,11 +288,17 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
                   dryRun: true,
                   uuid,
                   urlCount: sel.candidates.length,
+                  liveCount: liveCandidates.length,
+                  deadCount: deadCandidates.length,
+                  deadDomains: deadCandidates.map((c) => c.candidateDomain),
                   brands: [...new Set(sel.candidates.map((c) => c.brand))],
                   states: [...new Set(sel.candidates.map((c) => c.urlState))],
                   gate: [...new Set(sel.candidates.map((c) => c.evidence))],
                   hasIssues: fetched.hasIssues,
-                  payload: buildIssuePayload(sel.candidates),
+                  payload:
+                    liveCandidates.length > 0
+                      ? buildIssuePayload(liveCandidates)
+                      : null,
                 },
               });
             });
@@ -283,7 +308,33 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
         }
 
         // LIVE. has_issues → do not file a 2nd issue; drain candidates too.
-        const willPost = !fetched.hasIssues && sel.candidates.length > 0;
+        // Liveness: only file when at least one candidate is actually up.
+        const willPost = !fetched.hasIssues && liveCandidates.length > 0;
+
+        // All candidates dead at probe → don't spend the slot. Non-terminal
+        // recheck_after (+72h): a revived site re-enters; permanent deadness
+        // converges via the worklist's 30-day submitted_at window.
+        if (!fetched.hasIssues && sel.candidates.length > 0 && liveCandidates.length === 0) {
+          await step.run(`defer-dead-${uuid}`, async () => {
+            const recheck = new Date(Date.now() + 72 * 3600 * 1000).toISOString();
+            await bulkStamp(
+              sel.candidates.map((c) => c.alertId),
+              { recheck_after: recheck, at: new Date().toISOString() },
+            );
+            logEnforcementEvent("rejected", {
+              alertId: sel.candidates[0].alertId,
+              domain: sel.candidates[0].candidateDomain,
+              channel: "netcraft",
+              runId,
+              extra: {
+                reason: "dead_at_probe",
+                uuid,
+                deadDomains: deadCandidates.map((c) => c.candidateDomain),
+              },
+            });
+          });
+          counts.deadDeferred++;
+        }
 
         await step.run(`drain-${uuid}`, async () => {
           const now = new Date().toISOString();
@@ -319,6 +370,16 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
               { skipped: "submission_has_issue", at: now },
             );
           }
+          // F3: filing for the live subset consumes the submission's single
+          // issue slot, so the dead candidates can never be filed on this
+          // uuid — stamp them legibly (they were down; revival is covered by
+          // the recheck loop + re-emergence monitor).
+          if (willPost && deadCandidates.length) {
+            await bulkStamp(
+              deadCandidates.map((c) => c.alertId),
+              { skipped: "dead_at_probe", at: now },
+            );
+          }
         });
         counts.drained++;
 
@@ -327,9 +388,9 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
           continue;
         }
 
-        const candidateIds = sel.candidates.map((c) => c.alertId);
+        const candidateIds = liveCandidates.map((c) => c.alertId);
         const result = await step.run(`post-${uuid}`, () =>
-          postNetcraftIssue(uuid, buildIssuePayload(sel.candidates)),
+          postNetcraftIssue(uuid, buildIssuePayload(liveCandidates)),
         );
         counts.livePosts++;
 
@@ -347,7 +408,7 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
             });
             logEnforcementEvent("rejected", {
               alertId: candidateIds[0],
-              domain: sel.candidates[0].candidateDomain,
+              domain: liveCandidates[0].candidateDomain,
               channel: "netcraft",
               runId,
               extra: { reason: "transient", uuid, status: result.status },
@@ -363,7 +424,7 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
             );
             logEnforcementEvent("rejected", {
               alertId: candidateIds[0],
-              domain: sel.candidates[0].candidateDomain,
+              domain: liveCandidates[0].candidateDomain,
               channel: "netcraft",
               runId,
               extra: { reason: "post_4xx", uuid, status: result.status, body: result.body },
@@ -381,14 +442,15 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
           });
           logEnforcementEvent("issue_reported", {
             alertId: candidateIds[0],
-            domain: sel.candidates[0].candidateDomain,
+            domain: liveCandidates[0].candidateDomain,
             channel: "netcraft",
             runId,
             extra: {
               dryRun: false,
               uuid,
               urlCount: candidateIds.length,
-              brands: [...new Set(sel.candidates.map((c) => c.brand))],
+              deadDeferred: deadCandidates.length,
+              brands: [...new Set(liveCandidates.map((c) => c.brand))],
               status: result.status,
             },
           });

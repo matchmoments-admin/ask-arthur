@@ -69,7 +69,6 @@ const ELIGIBLE_SIGNALS = new Set(["confusable", "levenshtein"]);
 const FETCH_CANDIDATE_LIMIT = 50; // pre-filter pool
 const AUTO_TRIAGE_RUN_CAP = 15; // hard cap on auto-confirm+send per run
 const AUTO_PARK_RUN_CAP = 200; // hard cap on auto-park per run (clears the backlog tail)
-const LIVENESS_TIMEOUT_MS = 8000;
 const RECENT_WINDOW_DAYS = 14;
 
 export interface AlertRow {
@@ -88,16 +87,10 @@ export interface AlertRow {
   first_seen_at: string;
 }
 
-/** Primary signal_type of an alert's signals[] (the strongest/first signal). */
-export function primarySignalType(signals: unknown): string | null {
-  if (!Array.isArray(signals) || signals.length === 0) return null;
-  const s = signals[0];
-  if (s && typeof s === "object" && "signal_type" in s) {
-    const t = (s as { signal_type?: unknown }).signal_type;
-    return typeof t === "string" ? t : null;
-  }
-  return null;
-}
+// primarySignalType's canonical home is the weaponisation-risk module (F3) —
+// the same signal extraction feeds both the strict bar and the risk score.
+import { primarySignalType } from "@/lib/clone-watch/weaponisation-risk";
+export { primarySignalType };
 
 /** True when the alert clears the deterministic part of the strict bar. */
 export function passesStrictSignal(signals: unknown): boolean {
@@ -135,28 +128,10 @@ export function toSummaryItem(alert: AlertRow): CloneWatchRunSummaryItem {
   };
 }
 
-/**
- * Liveness probe: is the candidate URL still serving? "Live" = any HTTP
- * response < 500 within the timeout (a 401/403/404 still means the host is up;
- * a taken-down clone usually fails DNS/connection or 5xxs). Never throws.
- */
-export async function isCandidateLive(url: string): Promise<boolean> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), LIVENESS_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, {
-      method: "GET",
-      redirect: "follow",
-      signal: ctrl.signal,
-      headers: { "user-agent": "AskArthur-CloneWatch/1.0 (+https://askarthur.au)" },
-    });
-    return res.status < 500;
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timer);
-  }
-}
+// isCandidateLive's canonical home is lib/clone-watch/liveness.ts (F3) —
+// shared with the Netcraft issue reporter's pre-file probe.
+import { isCandidateLive } from "@/lib/clone-watch/liveness";
+export { isCandidateLive };
 
 export const cloneWatchAutoTriage = inngest.createFunction(
   {

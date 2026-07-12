@@ -127,6 +127,9 @@ export interface CloneDetections {
   byAsn?: Record<string, number>;
   /** Per-clone detail rows (already capped by the caller, ~25). */
   domains: CloneDetectionRow[];
+  /** F3 — the 5 highest-risk still-unactioned lookalikes by our deterministic
+   *  weaponisation-risk score. Absent on ledger rows written pre-F3. */
+  topRisk?: Array<{ domain: string; riskScore: number }>;
 }
 
 /**
@@ -422,6 +425,41 @@ export default function BrandStewardshipReport({
                       Share this breakdown with your team →
                     </Link>
                   </Text>
+                )}
+
+                {/* F3 — highest-risk unactioned lookalikes, by the ONE
+                    deterministic scorer (weaponisation-risk.ts). Factual copy:
+                    a prioritisation aid, never a prediction or takedown claim. */}
+                {(cloneDetections.topRisk?.length ?? 0) > 0 && (
+                  <Section
+                    style={{
+                      margin: "0 0 14px 0",
+                      padding: "12px 14px",
+                      background: "#fffbeb",
+                      borderRadius: "6px",
+                      borderLeft: "3px solid #d97706",
+                    }}
+                  >
+                    <Text style={{ ...labelStyle, margin: "0 0 6px 0" }}>
+                      Your highest-risk unactioned lookalikes
+                    </Text>
+                    {cloneDetections.topRisk!.map((t) => (
+                      <Text key={t.domain} style={outcomeLine}>
+                        <code style={codeInline}>{t.domain}</code>{" "}
+                        <span style={{ color: "#92400e", fontWeight: 700 }}>
+                          risk {t.riskScore}/100
+                        </span>
+                      </Text>
+                    ))}
+                    <Text
+                      style={{ color: "#94A3B8", fontSize: "11px", margin: "6px 0 0 0" }}
+                    >
+                      Ranked by our deterministic weaponisation-risk score
+                      (page content, clone confidence, brand sensitivity, domain
+                      age, hosting reputation) — where to focus first, not a
+                      prediction.
+                    </Text>
+                  </Section>
                 )}
 
                 {/* "Why are they still up?" — the honest evidence-threshold

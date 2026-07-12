@@ -6,6 +6,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { logCost } from "@/lib/cost-telemetry";
+import { computeWeaponisationRisk } from "@/lib/clone-watch/weaponisation-risk";
 
 /**
  * Clone-Watch — lifecycle re-check loop (Wave 0 PR-B).
@@ -29,6 +30,11 @@ import { logCost } from "@/lib/cost-telemetry";
  */
 
 const RECHECK_BATCH_LIMIT = 50; // × 4 runs/day = ≤200 rescans/day, bounded
+// F3: over-fetch the staleness-ordered pool, rank by weaponisation risk in TS
+// (ONE scorer — weaponisation-risk.ts), rescan the top 50. Unselected rows
+// keep their stale last_rechecked_at and rotate through on later runs
+// (staleness-ordered pool → no starvation; full ~800-row rotation ≈ 4 days).
+const RECHECK_FETCH_LIMIT = 200;
 const RECHECK_CADENCE_HOURS = 6; // don't re-scan the same domain more often
 const BRAKE = "shopfront_clone_recheck";
 
@@ -40,6 +46,48 @@ interface RecheckRow {
   urlscan_classification: string | null;
   recheck_count: number;
   last_rechecked_at: string | null;
+  // v222 risk-score inputs (all nullable — enrichment/classification partial).
+  signals: unknown;
+  attribution: {
+    whois?: { createdDate?: string };
+    ip_rep?: { abuseConfidenceScore?: number };
+  } | null;
+  clf_is_clone: boolean | null;
+  clf_confidence: number | null;
+  clf_attack_intent: string | null;
+  clf_clone_tactic: string | null;
+  brand_category: string | null;
+}
+
+/** Rank the fetched pool: risk desc, then staleness (asc, nulls first), then
+ *  id — deterministic. Exported for unit tests. */
+export function selectTopRiskCandidates(
+  rows: RecheckRow[],
+  limit: number,
+  nowMs: number,
+): Array<RecheckRow & { risk: number }> {
+  const scored = rows.map((r) => ({
+    ...r,
+    risk: computeWeaponisationRisk({
+      urlscanClassification: r.urlscan_classification,
+      signals: r.signals,
+      isClone: r.clf_is_clone,
+      confidence: r.clf_confidence,
+      attackIntent: r.clf_attack_intent,
+      brandCategory: r.brand_category,
+      whoisCreatedDate: r.attribution?.whois?.createdDate ?? null,
+      ipAbuseConfidenceScore: r.attribution?.ip_rep?.abuseConfidenceScore ?? null,
+      nowMs,
+    }).score,
+  }));
+  scored.sort((a, b) => {
+    if (a.risk !== b.risk) return b.risk - a.risk;
+    const ta = a.last_rechecked_at ? Date.parse(a.last_rechecked_at) : -Infinity;
+    const tb = b.last_rechecked_at ? Date.parse(b.last_rechecked_at) : -Infinity;
+    if (ta !== tb) return ta - tb;
+    return a.id - b.id;
+  });
+  return scored.slice(0, limit);
 }
 
 export const cloneWatchLifecycleRecheck = inngest.createFunction(
@@ -79,17 +127,24 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
       const sb = createServiceClient();
       if (!sb) return { skipped: true, reason: "supabase_unavailable" };
 
-      const candidates = await step.run("load-recheck-candidates", async () => {
+      const pool = await step.run("load-recheck-candidates", async () => {
         const { data } = await sb.rpc("list_clone_alerts_for_recheck", {
-          p_limit: RECHECK_BATCH_LIMIT,
+          p_limit: RECHECK_FETCH_LIMIT,
           p_cadence_hours: RECHECK_CADENCE_HOURS,
         });
         return (data as RecheckRow[] | null) ?? [];
       });
 
-      if (candidates.length === 0) {
+      if (pool.length === 0) {
         return { ok: true, rechecked: 0, reason: "nothing_due" };
       }
+
+      // F3: rank the pool by weaponisation risk and rescan the top slice first.
+      // Inside step.run so the ranking (which reads the clock for domain age)
+      // is replay-stable.
+      const candidates = await step.run("rank-by-risk", async () =>
+        selectTopRiskCandidates(pool, RECHECK_BATCH_LIMIT, Date.now()),
+      );
 
       // Re-emit the existing urlscan scan-requested event (reason='rescan') for
       // each candidate. Id-keyed on the last-rechecked timestamp so a replay of
@@ -128,6 +183,7 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
       });
 
       await step.run("log-cost", async () => {
+        const risks = candidates.map((c) => c.risk).sort((a, b) => a - b);
         logCost({
           feature: "shopfront_clone_recheck",
           provider: "internal",
@@ -136,20 +192,31 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
           unitCostUsd: 0,
           metadata: {
             rechecked: candidates.length,
+            pool: pool.length,
             declined: candidates.filter((c) => c.lifecycle_state === "declined")
               .length,
             monitoring: candidates.filter(
               (c) => c.lifecycle_state === "monitoring",
             ).length,
+            // Score telemetry — the tuning feedstock for the v1 weights.
+            top_score: risks[risks.length - 1] ?? null,
+            median_score: risks[Math.floor(risks.length / 2)] ?? null,
+            bands: {
+              critical: candidates.filter((c) => c.risk >= 70).length,
+              elevated: candidates.filter((c) => c.risk >= 40 && c.risk < 70)
+                .length,
+              low: candidates.filter((c) => c.risk < 40).length,
+            },
           },
         });
       });
 
       logger.info("clone-watch lifecycle re-check: complete", {
         rechecked: candidates.length,
+        pool: pool.length,
       });
 
-      return { ok: true, rechecked: candidates.length };
+      return { ok: true, rechecked: candidates.length, pool: pool.length };
     },
   ),
 );

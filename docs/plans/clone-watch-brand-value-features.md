@@ -1,12 +1,18 @@
 # Clone-Watch — Brand-value features ("the typosquat early-warning system")
 
-**Status:** In build (drafted 2026-07-10). **F1 shipped dark 2026-07-10** —
-`shopfront-clone-notify-weaponised` + `WeaponisedCloneAlert` + migration v220
-(`kind='weaponised'` queue lane), gated `FF_CLONE_WEAPONISED_ALERT` (default OFF).
-Recipient routing decision: the `brand_contact_directory` seam (four-eyes
-dashboard send) — `monitored_brands` is telemetry-tagged only, since prod has
-zero rows and no contact-email column; org-email routing is a follow-up.
-F4 evidence gate next; `NETCRAFT_ISSUE_DRY_RUN` stays dry-run until it lands.
+**Status: COMPLETE (all five features shipped, 2026-07-10 → 2026-07-12).**
+**F1** weaponisation alert (#707, v220, `FF_CLONE_WEAPONISED_ALERT=true` in prod
+2026-07-11; routes via the `brand_contact_directory` seam — `monitored_brands`
+is telemetry-tagged only, zero rows + no contact column; org-email routing is a
+follow-up). **F4** evidence gate (#708, v221) + reporter LIVE
+(`NETCRAFT_ISSUE_DRY_RUN=false`, cap 10/day; 12 filings, zero rejects, as of
+2026-07-12). **F5** vendor-gap story shipped via the LinkedIn report outcomes
+(#709/#710 + honest-arithmetic fixes; `weaponisedAfterDecline` metric). **F2**
+watch-list email (#711 — lifecycle badges, still-live-first ordering, honest
+timestamps, why-still-up/what-you-can-do slots). **F3** weaponisation-risk
+scorer + risk-ranked recheck + reporter liveness pre-check (v222; the ONE
+formula lives in `lib/clone-watch/weaponisation-risk.ts`). Recheck loop ON
+since 2026-07-10.
 **Origin:** the live-data research on 2026-07-10 (see below) reframed what the
 clone-watch product actually _is_ for brands. This plan turns that reframe into
 concrete, brand-useful features.

@@ -6,7 +6,9 @@ import {
   deriveBrandKey,
   matchKnownBrand,
   priorMonthStart,
+  topRiskUnactioned,
   type CloneAlertRow,
+  type CloneDetail,
 } from "@/app/api/inngest/functions/report-brand-stewardship";
 
 const cloneRow = (over: Partial<CloneAlertRow>): CloneAlertRow => ({
@@ -112,6 +114,58 @@ describe("F2 watch-list fields (toCloneDetail via aggregateClonesByDomain)", () 
       "a-phish.click",
       "z-neutral.click",
     ]);
+  });
+});
+
+describe("topRiskUnactioned (F3)", () => {
+  const detail = (over: Partial<CloneDetail>): CloneDetail => ({
+    domain: "x.click",
+    classification: null,
+    ip: null,
+    asn: null,
+    country: null,
+    registrar: null,
+    abuse_email: null,
+    lifecycle_state: "declined",
+    first_seen_at: null,
+    screenshot_url: null,
+    result_url: null,
+    still_live_as_of: null,
+    risk_score: null,
+    ...over,
+  });
+
+  it("ranks ONLY still-unactioned rows (declined/monitoring) by risk desc, top 5", () => {
+    const top = topRiskUnactioned([
+      detail({ domain: "weap.click", lifecycle_state: "weaponised", risk_score: 99 }),
+      detail({ domain: "taken.click", lifecycle_state: "taken_down", risk_score: 98 }),
+      detail({ domain: "a.click", risk_score: 60 }),
+      detail({ domain: "b.click", lifecycle_state: "monitoring", risk_score: 70 }),
+      detail({ domain: "c.click", risk_score: 10 }),
+      detail({ domain: "d.click", risk_score: 30 }),
+      detail({ domain: "e.click", risk_score: 20 }),
+      detail({ domain: "f.click", risk_score: 25 }),
+      detail({ domain: "no-score.click", risk_score: null }),
+    ]);
+    expect(top).toHaveLength(5);
+    expect(top.map((t) => t.domain)).toEqual([
+      "b.click",
+      "a.click",
+      "d.click",
+      "f.click",
+      "e.click",
+    ]);
+    // weaponised/taken_down excluded despite higher scores; null scores excluded.
+    expect(top.map((t) => t.domain)).not.toContain("weap.click");
+    expect(top.map((t) => t.domain)).not.toContain("taken.click");
+  });
+
+  it("aggregate passes risk through via the riskByAlertId lookup", () => {
+    const agg = aggregateClonesByDomain(
+      [cloneRow({ id: 7, candidate_domain: "risky.click", lifecycle_state: "declined" })],
+      { 7: 55 },
+    );
+    expect(agg.get("anz.com.au")!.domains[0].risk_score).toBe(55);
   });
 });
 
