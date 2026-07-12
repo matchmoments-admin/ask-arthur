@@ -181,6 +181,16 @@ alongside the AskSilver-inspired simplification (v67 migration widens the
   `NEXT_PUBLIC_FF_ONWARD_REPORTING` flag. Currently "Report this scam" POSTs
   `userSays: "user_reported"` to `/api/feedback` and opens the Scamwatch portal
   in a new tab — the picker replaces that with a structured handoff.
+  - **Producer wiring gap (2026-07-12 fleet review).** `OnwardReportPicker`
+    already accepts + forwards `hasFinancialLoss` / `hasPiiCompromise` to
+    `/api/report/destinations`, but `ResultCard` never passes them and **no code
+    path anywhere produces these two signals** — so ReportCyber + IDCARE
+    (gated on financial-loss / PII in `get_onward_destinations`) can never
+    surface. Deriving them from `scamType` would be wrong ("finance-shaped scam"
+    ≠ "user lost money"). Correct fix: source them from a user micro-question
+    (unify with the Next Steps funnel's `bestNextStep` micro-flow, which already
+    asks the user), then thread through `ResultCard` → picker. Do this when
+    launching onward reporting.
 - **P2 governance + self-service** — `/settings/my-data` (view + delete feedback
   and submissions), quarterly brand-contacts staleness cron, nightly SMTP probe
   on abuse inboxes, PIA document + public summary, admin triage queue for
