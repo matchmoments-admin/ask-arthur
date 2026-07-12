@@ -1,6 +1,20 @@
-// Enrichment fan-out — every 6h, fetches pending URLs, runs WHOIS+SSL per unique domain.
+// Enrichment fan-out — every 12h, fetches pending URLs, runs WHOIS+SSL per unique domain.
 // Capped at 20 domains per run with step.run() parallelism to avoid Edge Function timeouts.
 // Copies enrichment data across all same-domain URLs.
+//
+// Ordering (2026-07-12 fleet review): NEWEST-first. The pending-active queue is
+// ~235k rows, ALL source_type='feed' (blocklist imports — phishing_army,
+// phishtank, etc.), draining at ~20 domains × 2 runs/day = ~40 domains/day. It
+// will NOT fully drain, and that is fine: the point of WHOIS/SSL enrichment is
+// to have metadata ready when a user checks a *currently-circulating* URL, and
+// fresh feed entries are the ones most likely to be checked soon. The original
+// oldest-first order meant today's ingested threats waited behind a 2-month-old
+// backlog and were effectively never enriched — the exact "recent URLs never
+// reached" harm the review flagged. Newest-first (a reverse scan on the existing
+// idx_scam_urls_enrichment_queue partial index — no new index) enriches the
+// freshest threats promptly; the stale tail is deprioritised and is shed
+// naturally by the staleness cron (is_active→false drops rows from this queue).
+// The old header's "self-draining … no domains skipped" claim was false.
 
 import { inngest } from "./client";
 import { withAxiomLogging } from "./with-axiom-logging";
@@ -24,42 +38,63 @@ export const enrichmentFanOut = inngest.createFunction(
     // 5×20 WHOIS+SSL lookups on the same domains. Cron-safe because 30m < 6h.
     rateLimit: { limit: 1, period: "30m" },
   },
-  { cron: "0 */12 * * *" }, // Every 12h (was 6h). Pending-status domain queue is self-draining + capped per run (MAX_DOMAINS_PER_RUN) — wider cadence only adds WHOIS/SSL-freshness lag, no domains skipped.
+  { cron: "0 */12 * * *" }, // Every 12h (was 6h). Capped per run (MAX_DOMAINS_PER_RUN); the ~235k feed backlog exceeds throughput by orders of magnitude, so ordering (newest-first, see header) — not cadence — is what determines which URLs get enriched.
   withAxiomLogging({ fnId: "pipeline-enrichment-fanout" }, async ({ step }) => {
     if (!featureFlags.dataPipeline) {
       return { skipped: true, reason: "dataPipeline feature flag disabled" };
     }
 
-    // Step 1: Fetch pending URLs and extract unique domains
-    const pendingDomains = await step.run("fetch-pending-domains", async () => {
-      const supabase = createServiceClient();
-      if (!supabase) return [];
+    // Step 1: Fetch pending URLs (newest-first) and extract unique domains.
+    // Also read the total pending backlog so its size is observable (the queue
+    // vastly exceeds per-run throughput; surface it rather than let it hide).
+    const { domains: pendingDomains, backlog } = await step.run(
+      "fetch-pending-domains",
+      async () => {
+        const supabase = createServiceClient();
+        if (!supabase) return { domains: [], backlog: 0 };
 
-      const { data, error } = await supabase
-        .from("scam_urls")
-        .select("id, domain")
-        .eq("enrichment_status", "pending")
-        .eq("is_active", true)
-        .order("created_at", { ascending: true })
-        .limit(200); // Fetch more to find unique domains
+        const { data, error, count } = await supabase
+          .from("scam_urls")
+          .select("id, domain", { count: "exact" })
+          .eq("enrichment_status", "pending")
+          .eq("is_active", true)
+          .order("created_at", { ascending: false }) // newest-first (see header)
+          .limit(200); // Fetch more to find unique domains
 
-      if (error) {
-        logger.error("Failed to fetch pending URLs", { error: String(error) });
-        throw new Error(error.message);
-      }
+        if (error) {
+          logger.error("Failed to fetch pending URLs", { error: String(error) });
+          throw new Error(error.message);
+        }
 
-      // Deduplicate by domain, cap at MAX_DOMAINS_PER_RUN
-      const domainMap = new Map<string, number[]>();
-      for (const row of data || []) {
-        const ids = domainMap.get(row.domain) || [];
-        ids.push(row.id);
-        domainMap.set(row.domain, ids);
-      }
+        // Deduplicate by domain, cap at MAX_DOMAINS_PER_RUN
+        const domainMap = new Map<string, number[]>();
+        for (const row of data || []) {
+          const ids = domainMap.get(row.domain) || [];
+          ids.push(row.id);
+          domainMap.set(row.domain, ids);
+        }
 
-      return Array.from(domainMap.entries())
-        .slice(0, MAX_DOMAINS_PER_RUN)
-        .map(([domain, urlIds]) => ({ domain, urlIds }));
-    });
+        return {
+          domains: Array.from(domainMap.entries())
+            .slice(0, MAX_DOMAINS_PER_RUN)
+            .map(([domain, urlIds]) => ({ domain, urlIds })),
+          backlog: count ?? 0,
+        };
+      },
+    );
+
+    // Loud backlog gauge (always-ship .warn): per-run throughput is
+    // MAX_DOMAINS_PER_RUN × 2 runs/day, so a backlog beyond a few thousand can
+    // never fully drain. Newest-first means fresh threats are still enriched;
+    // this makes the ceiling visible so the enrich-what-users-check scoping
+    // decision is driven by data, not silence.
+    if (backlog > 5000) {
+      logger.warn("pipeline-enrichment-fanout: pending backlog far exceeds throughput", {
+        backlog,
+        perRunCap: MAX_DOMAINS_PER_RUN,
+        hint: "queue is ~all source_type='feed' (blocklist dumps); newest-first enriches fresh threats, stale tail sheds via staleness. Consider on-demand enrichment for checked URLs.",
+      });
+    }
 
     if (pendingDomains.length === 0) {
       return { enriched: 0, reason: "no pending domains" };
