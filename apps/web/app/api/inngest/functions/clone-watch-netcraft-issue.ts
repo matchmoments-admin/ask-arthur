@@ -281,8 +281,10 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
           (c) => liveness[c.candidateUrl] !== true,
         );
 
-        // DRY-RUN: log the would-be payload (live subset — what a live run
-        // WOULD file) + the liveness partition, write NOTHING.
+        // DRY-RUN: log the UNGATED candidate payload, write NOTHING. Dry-run
+        // never probes liveness (shouldProbe), so its urlCount/payload can
+        // OVERSTATE what a live run would file — a live run drops the
+        // dead-at-probe subset. Size go-live volume accordingly.
         if (dryRun) {
           if (sel.candidates.length) {
             await step.run(`dryrun-log-${uuid}`, () => {
