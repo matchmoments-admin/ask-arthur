@@ -342,24 +342,23 @@ First-touch is captured by `middleware.ts`, which sets the `aa_attribution` cook
 
 ### Cron routes (Vercel signature)
 
-| Route                               | Schedule       | Purpose                                |
-| ----------------------------------- | -------------- | -------------------------------------- |
-| `/api/cron/weekly-blog`             | `0 12 * * 1`   | Weekly blog digest (Mondays 12:00 UTC) |
-| `/api/cron/weekly-email`            | `0 14 * * 1`   | Weekly scam digest                     |
-| `/api/cron/nurture`                 | `0 23 * * *`   | B2B leads nurture sequence             |
-| `/api/cron/bot-queue-sweep`         | `0 */6 * * *`  | Bot queue safety-net                   |
-| `/api/cron/bot-queue-cleanup`       | `0 4 * * *`    | Purge old queue entries                |
-| `/api/cron/cost-daily-check`        | `0 */6 * * *`  | Check spend against feature brakes     |
-| `/api/cron/cost-weekly-digest`      | `0 22 * * 0`   | Weekly WoW cost digest                 |
-| `/api/cron/vuln-retention`          | `0 3 * * *`    | Prune vulnerability_detections >180d   |
-| `/api/cron/scam-reports-retention`  | `30 3 * * *`   | Archive + prune scam_reports           |
-| `/api/cron/ensure-partitions`       | `0 2 * * *`    | Create next-month partitions           |
-| `/api/cron/reddit-intel-trigger`    | `0 8 * * *`    | Fire reddit-intel-daily Inngest        |
-| `/api/cron/reddit-intel-retention`  | `30 4 * * *`   | Prune reddit_processed_posts           |
-| `/api/cron/feedback-digest`         | `0 9 * * *`    | Compile feedback triage queue          |
-| `/api/cron/health-digest`           | `0 22 * * *`   | Daily health metrics + errors          |
-| `/api/cron/pg-stuck-query-watchdog` | `*/5 * * * *`  | Stuck-query watchdog                   |
-| `/api/cron/scraper-brake-alert`     | `*/15 * * * *` | Feature-brake alerter                  |
+| Route                               | Schedule       | Purpose                              |
+| ----------------------------------- | -------------- | ------------------------------------ |
+| `/api/cron/weekly-email`            | `0 14 * * 1`   | Weekly scam digest                   |
+| `/api/cron/nurture`                 | `0 23 * * *`   | B2B leads nurture sequence           |
+| `/api/cron/bot-queue-sweep`         | `0 */6 * * *`  | Bot queue safety-net                 |
+| `/api/cron/bot-queue-cleanup`       | `0 4 * * *`    | Purge old queue entries              |
+| `/api/cron/cost-daily-check`        | `0 */6 * * *`  | Check spend against feature brakes   |
+| `/api/cron/cost-weekly-digest`      | `0 22 * * 0`   | Weekly WoW cost digest               |
+| `/api/cron/vuln-retention`          | `0 3 * * *`    | Prune vulnerability_detections >180d |
+| `/api/cron/scam-reports-retention`  | `30 3 * * *`   | Archive + prune scam_reports         |
+| `/api/cron/ensure-partitions`       | `0 2 * * *`    | Create next-month partitions         |
+| `/api/cron/reddit-intel-trigger`    | `0 8 * * *`    | Fire reddit-intel-daily Inngest      |
+| `/api/cron/reddit-intel-retention`  | `30 4 * * *`   | Prune reddit_processed_posts         |
+| `/api/cron/feedback-digest`         | `0 9 * * *`    | Compile feedback triage queue        |
+| `/api/cron/health-digest`           | `0 22 * * *`   | Daily health metrics + errors        |
+| `/api/cron/pg-stuck-query-watchdog` | `*/5 * * * *`  | Stuck-query watchdog                 |
+| `/api/cron/scraper-brake-alert`     | `*/15 * * * *` | Feature-brake alerter                |
 
 Full timetable, cron-route handlers, and Inngest cross-references in [background-workers.md](./background-workers.md).
 

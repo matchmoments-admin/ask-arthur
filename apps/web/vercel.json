@@ -6,10 +6,6 @@
       "schedule": "30 8 * * 1"
     },
     {
-      "path": "/api/cron/weekly-blog",
-      "schedule": "0 12 * * 1"
-    },
-    {
       "path": "/api/cron/weekly-email",
       "schedule": "0 14 * * 1"
     },

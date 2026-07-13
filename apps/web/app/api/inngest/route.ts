@@ -71,6 +71,8 @@ import { cloneWatchFpClusterDigest } from "./functions/clone-watch-fp-cluster-di
 import { cloneWatchHaikuPreclassify } from "./functions/clone-watch-haiku-preclassify";
 // WS2-cap — monthly Brand Stewardship Report aggregation + ledger.
 import { reportBrandStewardship } from "./functions/report-brand-stewardship";
+// Monthly intel-driven blog draft — mines all intel streams, drafts to Ghost.
+import { monthlyIntelBlog } from "./functions/monthly-intel-blog";
 // Brand-contact coverage follow-ups: security.txt discovery (long-tail contacts)
 // + internal all-clones digest to the operator (full picture incl. no-contact).
 import { knownBrandsDiscover } from "./functions/known-brands-discover";
@@ -145,6 +147,8 @@ const appFunctions = [
   cloneWatchReportSummary,
   // Brand Stewardship Report (WS2-cap)
   reportBrandStewardship,
+  // Monthly intel-driven blog draft (replaces the retired weekly-blog cron)
+  monthlyIntelBlog,
   // Platform housekeeping — moved from @askarthur/scam-engine (#588 finding 2).
   // Retention/rollup/push crons; IDs unchanged.
   feedbackTriageRefresh,
