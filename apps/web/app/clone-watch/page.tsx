@@ -13,9 +13,10 @@
 
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ShieldQuestion } from "lucide-react";
+import { ShieldQuestion, ShieldCheck, Mail } from "lucide-react";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
+import FeatureCard from "@/components/FeatureCard";
 import SampleReportForm from "@/components/SampleReportForm";
 import CloneListRequestForm from "@/components/CloneListRequestForm";
 import CloneWatchDomainList, {
@@ -311,7 +312,7 @@ export default async function CloneWatchPage() {
             Clone-watch · daily NRD sweep
           </span>
         </div>
-        <h1 className="mx-auto max-w-[17ch] text-4xl md:text-6xl font-extrabold leading-[1.03] tracking-tight text-deep-navy">
+        <h1 className="mx-auto max-w-[20ch] text-4xl md:text-5xl font-extrabold leading-[1.1] tracking-tight text-deep-navy">
           Newly-registered AU brand-pattern domains
         </h1>
         <p className="mx-auto mt-7 max-w-[60ch] text-lg text-gov-slate leading-relaxed">
@@ -327,29 +328,27 @@ export default async function CloneWatchPage() {
         <PublicImpactPanel impact={impact} takedown={takedown} />
       )}
 
-      {/* Monthly reports */}
+      {/* Monthly reports — inline (no card), teal eyebrow */}
       {editions.length > 0 && (
         <section aria-labelledby="editions-heading" className="mt-10">
-          <div className="flex flex-wrap items-center justify-between gap-5 rounded-2xl border border-slate-200 bg-slate-50 px-6 py-5">
-            <div>
-              <div
-                id="editions-heading"
-                className="mb-1.5 text-xs font-bold uppercase tracking-[0.13em] text-slate-500"
-              >
-                Monthly reports
-              </div>
-              {latest && (
-                <div className="text-base leading-relaxed text-gov-slate">
-                  Latest edition —{" "}
-                  <strong className="font-bold text-deep-navy">
-                    {editionLabel(latest.period_month)}
-                  </strong>
-                  : {latest.total_domains.toLocaleString()} lookalike domains
-                  across {latest.brand_count.toLocaleString()} brands.
-                </div>
-              )}
-            </div>
-            <div className="flex flex-wrap items-center gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-4">
+            {latest && (
+              <p className="text-base leading-relaxed text-gov-slate">
+                <span
+                  id="editions-heading"
+                  className="mr-3.5 text-xs font-bold uppercase tracking-[0.13em] text-action-teal"
+                >
+                  Monthly reports
+                </span>
+                Latest edition —{" "}
+                <strong className="font-bold text-deep-navy">
+                  {editionLabel(latest.period_month)}
+                </strong>
+                : {latest.total_domains.toLocaleString()} lookalike domains
+                across {latest.brand_count.toLocaleString()} brands.
+              </p>
+            )}
+            <div className="flex flex-wrap items-center gap-5">
               <Link
                 href="/clone-watch/method"
                 className="text-sm font-semibold text-deep-navy underline underline-offset-2"
@@ -367,7 +366,7 @@ export default async function CloneWatchPage() {
             </div>
           </div>
           {editions.length > 1 && (
-            <ul className="mt-3 flex flex-wrap gap-2">
+            <ul className="mt-4 flex flex-wrap gap-2">
               {editions.map((e) => (
                 <li key={e.period_month}>
                   <Link
@@ -383,50 +382,45 @@ export default async function CloneWatchPage() {
         </section>
       )}
 
-      {/* Explainer cards */}
-      <section className="mt-5 grid gap-4 md:grid-cols-2">
-        <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-7">
-          <h3 className="mb-3 text-[17px] font-bold text-amber-900">
-            What this list is
-          </h3>
-          <p className="text-[15px] leading-relaxed text-amber-900/90">
-            A daily lexical match against newly-registered domains. We claim only
-            that the domain string is <strong className="font-bold">characteristically similar</strong> to an
-            Australian brand name by a deterministic measurement — we do{" "}
-            <strong className="font-bold">not</strong> claim any listed domain is operated by a scammer or is
-            hosting fraudulent content.
-          </p>
-        </div>
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-7">
-          <h3 className="mb-3 text-[17px] font-bold text-deep-navy">
-            If your brand appears here
-          </h3>
-          <p className="mb-4 text-[15px] leading-relaxed text-gov-slate">
+      {/* Info cards — reuse the shared About feature-card shell */}
+      <section className="mt-8 space-y-3">
+        <FeatureCard
+          icon={ShieldCheck}
+          title="What this list is"
+          description={
+            <>
+              A daily lexical match against newly-registered domains. We claim
+              only that the domain string is{" "}
+              <strong className="font-semibold text-deep-navy">characteristically similar</strong> to an
+              Australian brand name by a deterministic measurement — we do{" "}
+              <strong className="font-semibold text-deep-navy">not</strong> claim any listed domain is
+              operated by a scammer or is hosting fraudulent content.
+            </>
+          }
+        />
+        <FeatureCard icon={Mail} title="If your brand appears here">
+          <p className="text-sm text-gov-slate mt-1 leading-relaxed">
             Verify your shop on Ask Arthur, or request removal from the reference
             list by emailing our team — we respond to every request.
           </p>
           <a
             href="mailto:hello@askarthur.au"
-            className="text-sm font-medium text-deep-navy underline underline-offset-2"
+            className="mt-3 inline-block text-sm font-medium text-action-teal underline underline-offset-2"
             style={{ fontFamily: MONO }}
           >
             hello@askarthur.au
           </a>
-        </div>
+        </FeatureCard>
+        <SampleReportForm />
       </section>
 
-      {/* Sample report CTA */}
-      <div className="mt-4">
-        <SampleReportForm />
-      </div>
-
       {featureFlags.cloneListRequest && (
-        <section className="mb-10">
+        <section className="mt-3">
           <CloneListRequestForm />
         </section>
       )}
 
-      {/* Interactive domain grid */}
+      {/* Interactive domain list */}
       <CloneWatchDomainList items={items} />
 
       {/* Methodology footnotes */}

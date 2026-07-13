@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { ShieldCheck, Search, ScanSearch, UserCheck, Rss, Database } from "lucide-react";
 import Footer from "@/components/Footer";
 import Nav from "@/components/Nav";
+import FeatureCard from "@/components/FeatureCard";
 import ChartsSection from "@/components/charts/ChartsSection";
 import WorldScamMapWithHighlights from "@/components/charts/WorldScamMapWithHighlights";
 import { getChartData, getWorldStats } from "@/lib/dashboard/public-stats";
@@ -148,21 +149,13 @@ export default async function AboutPage() {
 
           <div className="space-y-3">
             {tools.map(({ icon: Icon, name, href, desc }) => (
-              <a
+              <FeatureCard
                 key={name}
+                icon={Icon}
+                title={name}
+                description={desc}
                 href={href}
-                className="block p-4 bg-white border border-border-light rounded-xl hover:border-action-teal/40 hover:shadow-sm transition-all"
-              >
-                <div className="flex items-start gap-4">
-                  <Icon size={22} className="text-action-teal shrink-0 mt-1" />
-                  <div>
-                    <p className="font-semibold text-deep-navy">{name}</p>
-                    <p className="text-sm text-gov-slate mt-1 leading-relaxed">
-                      {desc}
-                    </p>
-                  </div>
-                </div>
-              </a>
+              />
             ))}
           </div>
         </section>

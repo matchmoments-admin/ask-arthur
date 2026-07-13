@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import FeatureCard from "@/components/FeatureCard";
 
 // Interactive "Today's sweep" grid for the clone-watch pillar page. The server
 // component fetches the operator-CONFIRMED alerts (RLS-gated, service-role) and
@@ -20,16 +21,17 @@ export type CloneDomainItem = {
 
 const MONO = "var(--font-plex-mono), ui-monospace, monospace";
 
-// Badge palette per signal type — restrained, mapped to conventional Tailwind
-// hues (typo=amber, brand-in-domain=blue, look-alike=violet, fallback=slate).
+// Per signal-type palette — a leading dot (`dot`) + a right-aligned type label
+// in a matching text colour (`fg`). Restrained, mapped to conventional hues
+// (typo=amber, brand-in-domain=blue, look-alike=violet, fallback=slate).
 const META: Record<
   CloneDomainItem["typeKey"],
-  { label: string; dot: string; bg: string; fg: string }
+  { label: string; dot: string; fg: string }
 > = {
-  t: { label: "1-char typo", dot: "#d97706", bg: "#fbf1dd", fg: "#8a5a12" },
-  b: { label: "Brand in domain", dot: "#3a6ea8", bg: "#e7eff8", fg: "#2b527d" },
-  l: { label: "Look-alike chars", dot: "#8257c4", bg: "#efe9fb", fg: "#5b3aa0" },
-  match: { label: "Pattern match", dot: "#94a3b8", bg: "#f1f3f7", fg: "#475569" },
+  t: { label: "1-char typo", dot: "#d97706", fg: "#8a5a12" },
+  b: { label: "Brand in domain", dot: "#3a6ea8", fg: "#2b527d" },
+  l: { label: "Look-alike chars", dot: "#8257c4", fg: "#5b3aa0" },
+  match: { label: "Pattern match", dot: "#94a3b8", fg: "#475569" },
 };
 
 // Filter pills shown (All + the three canonical signal types).
@@ -191,56 +193,63 @@ export default function CloneWatchDomainList({
                 <span className="flex-1 h-px bg-slate-200" />
               </div>
             )}
-            <div className="grid gap-3.5 [grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
+            <div className="flex flex-col gap-2.5">
               {g.items.map((d, i) => {
                 const m = META[d.typeKey];
                 return (
-                  <article
+                  <FeatureCard
                     key={`${d.domain}-${i}`}
-                    className="flex flex-col gap-2.5 rounded-2xl border border-slate-200 bg-white p-4 transition-shadow hover:border-slate-300 hover:shadow-[0_10px_26px_-18px_rgba(15,39,68,0.35)]"
-                  >
-                    <div className="flex items-center justify-between gap-3">
+                    align="center"
+                    leading={
                       <span
-                        className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-bold"
-                        style={{ background: m.bg, color: m.fg }}
-                      >
-                        <span className="h-1.5 w-1.5 rounded-full" style={{ background: m.dot }} />
-                        {m.label}
+                        className="block h-2.5 w-2.5 rounded-full"
+                        style={{ background: m.dot }}
+                        aria-hidden="true"
+                      />
+                    }
+                    title={
+                      <span className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+                        <span
+                          className="break-all text-[15px] font-semibold text-deep-navy"
+                          style={{ fontFamily: MONO }}
+                        >
+                          {d.domain}
+                        </span>
+                        {d.brand && (
+                          <>
+                            <span className="text-[13px] font-normal text-slate-400">
+                              resembles
+                            </span>
+                            <span
+                              className="break-all text-[13.5px] font-normal text-gov-slate"
+                              style={{ fontFamily: MONO }}
+                            >
+                              {d.brand}
+                            </span>
+                          </>
+                        )}
                       </span>
-                      {/* ISR-cached SSR value can lag the client's clock by up
-                          to the revalidate window; let the client value win
-                          without a hydration warning (cosmetic relative time). */}
-                      <span
-                        className="whitespace-nowrap text-xs font-medium text-slate-400"
-                        suppressHydrationWarning
-                      >
-                        {relativeAge(d.firstSeenAt)}
-                      </span>
-                    </div>
-                    <div
-                      className="break-all text-[15px] font-semibold leading-snug text-deep-navy"
-                      style={{ fontFamily: MONO }}
-                    >
-                      {d.domain}
-                    </div>
-                    {d.brand && (
-                      <div className="flex items-center gap-2 text-[13px] text-slate-500">
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true" className="shrink-0">
-                          <path
-                            d="M9 7 4 12l5 5M4 12h11a5 5 0 0 0 5-5V6"
-                            stroke="#b3bdc9"
-                            strokeWidth="1.8"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                        </svg>
-                        <span>resembles</span>
-                        <span className="break-all font-medium text-gov-slate" style={{ fontFamily: MONO }}>
-                          {d.brand}
+                    }
+                    trailing={
+                      <div className="flex items-center gap-4">
+                        <span
+                          className="hidden whitespace-nowrap text-xs font-semibold sm:inline"
+                          style={{ color: m.fg }}
+                        >
+                          {m.label}
+                        </span>
+                        {/* ISR-cached SSR value can lag the client's clock by up
+                            to the revalidate window; let the client value win
+                            without a hydration warning (cosmetic relative time). */}
+                        <span
+                          className="w-[52px] whitespace-nowrap text-right text-xs font-medium text-slate-400"
+                          suppressHydrationWarning
+                        >
+                          {relativeAge(d.firstSeenAt)}
                         </span>
                       </div>
-                    )}
-                  </article>
+                    }
+                  />
                 );
               })}
             </div>
