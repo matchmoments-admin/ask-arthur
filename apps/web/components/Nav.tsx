@@ -2,15 +2,7 @@ import Link from "next/link";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import MobileMenu from "./MobileMenu";
 
-export default async function Nav({
-  maxWidthClass = "max-w-[640px]",
-}: {
-  // Width of the inner container. Defaults to the standard marketing width so
-  // every existing page is unchanged; wider routes (e.g. the 960px clone-watch
-  // surface) pass their own so the header underline aligns with the content
-  // column instead of stopping short at 640px.
-  maxWidthClass?: string;
-} = {}) {
+export default async function Nav() {
   const links: { href: string; label: string }[] = [];
 
   if (featureFlags.siteAudit) {
@@ -29,7 +21,7 @@ export default async function Nav({
   return (
     <nav
       aria-label="Main navigation"
-      className={`relative w-full ${maxWidthClass} mx-auto px-5 py-4 flex items-center justify-between border-b border-gray-100`}
+      className="relative w-full max-w-[640px] mx-auto px-5 py-4 flex items-center justify-between border-b border-gray-100"
     >
       <Link
         href="/"

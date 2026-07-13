@@ -203,14 +203,14 @@ Not `rounded-2xl`, not `shadow-md`, not `hover:-translate-y-0.5`. The Persona Ch
 
 The following pages are allowed to deviate from the 640px rule. **Do not add more without a written justification in this table.**
 
-| Page                 | Allowed width   | Reason                                                                                                                                                                   |
-| -------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `/banking`           | `max-w-[960px]` | B2B landing page with side-by-side product/value-prop copy                                                                                                               |
-| `/telco`             | `max-w-[960px]` | B2B landing page                                                                                                                                                         |
-| `/digital-platforms` | `max-w-[960px]` | B2B landing page                                                                                                                                                         |
-| `/scam-map`          | `max-w-3xl`     | World choropleth needs horizontal room; shrinking makes the map unreadable                                                                                               |
-| `/clone-watch/*`     | `max-w-[960px]` | Data surface — searchable/filterable multi-column domain-card grid + wide dark impact panel need the room (shared `<Nav>` widened to match via its `maxWidthClass` prop) |
-| `/app/*`             | varies          | Dashboard — different surface, different rules (not a marketing page)                                                                                                    |
+| Page                 | Allowed width   | Reason                                                                                                                                                                           |
+| -------------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/banking`           | `max-w-[960px]` | B2B landing page with side-by-side product/value-prop copy                                                                                                                       |
+| `/telco`             | `max-w-[960px]` | B2B landing page                                                                                                                                                                 |
+| `/digital-platforms` | `max-w-[960px]` | B2B landing page                                                                                                                                                                 |
+| `/scam-map`          | `max-w-3xl`     | World choropleth needs horizontal room; shrinking makes the map unreadable                                                                                                       |
+| `/clone-watch/*`     | `max-w-[960px]` | Data surface — searchable/filterable domain-card list + wide dark impact panel need the room. Same pattern as `/banking`: 960px content column under the standard 640px `<Nav>`. |
+| `/app/*`             | varies          | Dashboard — different surface, different rules (not a marketing page)                                                                                                            |
 
 ## Component Patterns
 

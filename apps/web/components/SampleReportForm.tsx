@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { FileText } from "lucide-react";
+import FeatureCard from "@/components/FeatureCard";
 
 // "Email me a sample clone-watch report" — lets a prospective brand/partner
 // see exactly what an Ask Arthur clone-watch alert looks like, with the full
@@ -88,27 +90,21 @@ export default function SampleReportForm() {
 
   if (state === "done") {
     return (
-      <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-7 text-sm text-emerald-900">
-        <p className="font-semibold mb-1">Sample report on its way ✓</p>
-        <p>{msg} It shows the exact evidence pack a brand receives — clone domain, AI confidence, hosting attribution and takedown status.</p>
-      </div>
+      <FeatureCard
+        icon={FileText}
+        title="Sample report on its way ✓"
+        description={`${msg} It shows the exact evidence pack a brand receives — clone domain, AI confidence, hosting attribution and takedown status.`}
+      />
     );
   }
 
   return (
-    <div
-      className="rounded-2xl border border-slate-200 p-7"
-      style={{ backgroundImage: "linear-gradient(180deg,#f4f8fd,#eef3fa)" }}
+    <FeatureCard
+      icon={FileText}
+      title="See a sample report"
+      description="See exactly what an Ask Arthur clone-watch alert looks like — the clone domain, AI confidence, hosting attribution and takedown status. We only use your email to send this one sample."
     >
-      <p className="text-sm font-bold tracking-widest uppercase text-deep-navy mb-1">
-        See a sample report
-      </p>
-      <p className="text-sm text-gov-slate mb-4 leading-relaxed">
-        Want to see exactly what an Ask Arthur clone-watch alert looks like and
-        the evidence it carries? Enter your email and we&apos;ll send you a sample
-        report.
-      </p>
-      <form onSubmit={onSubmit} className="flex flex-col sm:flex-row gap-3">
+      <form onSubmit={onSubmit} className="mt-4 flex flex-col sm:flex-row gap-3">
         <input
           type="email"
           required
@@ -126,13 +122,10 @@ export default function SampleReportForm() {
         </button>
       </form>
       <div ref={widgetRef} className="mt-3" />
-      {state === "error" && (
-        <p className="mt-2 text-sm text-red-600">{msg}</p>
-      )}
-      <p className="mt-3 text-xs text-gov-slate">
-        We only use your email to send this one sample. Verified by Cloudflare
-        Turnstile.
+      {state === "error" && <p className="mt-2 text-sm text-red-600">{msg}</p>}
+      <p className="mt-3 text-xs text-slate-400">
+        Verified by Cloudflare Turnstile.
       </p>
-    </div>
+    </FeatureCard>
   );
 }
