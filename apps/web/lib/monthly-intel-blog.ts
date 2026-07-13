@@ -239,16 +239,44 @@ const IdeaSchema = z.object({
   targetKeyword: z.string().optional(),
 });
 
-const GenerationSchema = z.object({
-  ideas: z.array(IdeaSchema).min(5).max(12),
-  post: z.object({
-    title: z.string().min(5).max(120),
-    subtitle: z.string().max(200),
-    excerpt: z.string().min(10).max(300),
-    content: z.string().min(400),
-    tags: z.array(z.string()).max(8),
-    category: z.string(),
-  }),
+/**
+ * Accept either the structured value or a JSON-encoded string of it. Even
+ * with tool_choice-forced tool use, models sometimes stringify a large
+ * nested field (the 2026-06 rerun returned `post` as a JSON string — the
+ * whole run died on `expected object, received string`). The union is
+ * representable in the tool's JSON Schema (anyOf), and the string branch
+ * parses + re-validates against the real schema, so bad payloads still fail.
+ */
+function objectOrJsonString<T extends z.ZodType>(schema: T) {
+  return z.union([
+    schema,
+    z
+      .string()
+      .transform((s, ctx) => {
+        try {
+          return JSON.parse(s) as unknown;
+        } catch {
+          ctx.addIssue({ code: "custom", message: "not valid JSON" });
+          return z.NEVER;
+        }
+      })
+      .pipe(schema),
+  ]);
+}
+
+const PostSchema = z.object({
+  title: z.string().min(5).max(120),
+  subtitle: z.string().max(200),
+  excerpt: z.string().min(10).max(300),
+  content: z.string().min(400),
+  tags: z.array(z.string()).max(8),
+  category: z.string(),
+});
+
+// Exported for tests — validation runs inside callClaudeJson in production.
+export const monthlyGenerationSchema = z.object({
+  ideas: objectOrJsonString(z.array(IdeaSchema).min(5).max(12)),
+  post: objectOrJsonString(PostSchema),
 });
 
 export interface MonthlyGeneratedPost {
@@ -281,7 +309,7 @@ export async function generateMonthlyIntelPost(
       model: "SONNET_4_6",
       maxTokens: 8000,
       timeoutMs: 120_000,
-      schema: GenerationSchema,
+      schema: monthlyGenerationSchema,
       useToolUse: true,
       toolName: "submit_monthly_blog",
       requestId: `monthly-intel-blog-${facts.periodMonth}`,
@@ -307,7 +335,8 @@ FORMATTING RULES for the post content (markdown):
 - 900–1300 words. Start with a one-line **TL;DR:**. Use ## sections. Include one practical checklist section.
 - No calls-to-action, sign-offs or askarthur.au links — a standard CTA block is appended automatically.
 - category must be one of: scam-alerts, guides, news, weekly-roundup.
-- Respond ONLY by calling the submit_monthly_blog tool. "ideas" must be exactly 10 items, best first. Post title ≤90 chars; subtitle ≤180; excerpt ≤280.`,
+- Respond ONLY by calling the submit_monthly_blog tool. "ideas" must be exactly 10 items, best first. Post title ≤90 chars; subtitle ≤180; excerpt ≤280.
+- Tool input fields must be actual JSON structures — "post" is an object and "ideas" is an array, never JSON-encoded strings.`,
       user: `Facts for ${facts.periodMonth} (all counts code-derived from production data):
 
 ${JSON.stringify(facts, null, 1)}`,
