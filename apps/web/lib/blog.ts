@@ -196,6 +196,32 @@ export async function getExternalLinks(slug: string): Promise<ExternalLink[]> {
   }));
 }
 
+/**
+ * First-party view count for a post — total `pageview` events whose path is
+ * this post's URL. Backed by the owned analytics store (v190, gated by
+ * `FF_ANALYTICS_ATTRIBUTION`, ON in prod) that the `PageviewBeacon` client
+ * component feeds via /api/events. A partial index on
+ * `analytics_events(path) WHERE event_type = 'pageview'` (v229) keeps this a
+ * cheap index-only count.
+ *
+ * Runs at ISR regeneration (hourly), not per request. Returns `null` on any
+ * error or when the store is unreachable so the caller can simply omit the
+ * chip rather than render a misleading zero.
+ */
+export async function getPostViewCount(slug: string): Promise<number | null> {
+  const supabase = createServiceClient();
+  if (!supabase) return null;
+
+  const { count, error } = await supabase
+    .from("analytics_events")
+    .select("*", { count: "exact", head: true })
+    .eq("event_type", "pageview")
+    .eq("path", `/blog/${slug}`);
+
+  if (error || count == null) return null;
+  return count;
+}
+
 export async function getRelatedPosts(
   currentSlug: string,
   categorySlug: string | null,

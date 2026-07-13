@@ -3,14 +3,17 @@ import Link from "next/link";
 import Image from "next/image";
 import "highlight.js/styles/github.css";
 import sanitizeHtml from "sanitize-html";
+import { Eye } from "lucide-react";
 import {
   getPostBySlug,
   getAllSlugs,
   getRelatedPosts,
   getExternalLinks,
+  getPostViewCount,
 } from "@/lib/blog";
 import { renderMarkdown } from "@/lib/blogRenderer";
 import CopyLinkButton from "@/components/CopyLinkButton";
+import PageviewBeacon from "@/components/blog/PageviewBeacon";
 import MermaidDiagram from "@/components/blog/MermaidDiagram";
 import SubscribeForm from "@/components/SubscribeForm";
 import Pill from "@/components/Pill";
@@ -60,9 +63,10 @@ export default async function BlogPostPage({ params }: PageProps) {
   const post = await getPostBySlug(slug);
   if (!post) notFound();
 
-  const [related, externalLinks] = await Promise.all([
+  const [related, externalLinks, viewCount] = await Promise.all([
     getRelatedPosts(slug, post.categorySlug),
     getExternalLinks(slug),
+    getPostViewCount(slug),
   ]);
   // Ghost-mirrored posts arrive as pre-rendered HTML; legacy posts are
   // markdown. Sanitize either source uniformly so trust boundaries don't
@@ -155,6 +159,7 @@ export default async function BlogPostPage({ params }: PageProps) {
 
   return (
     <article>
+      <PageviewBeacon slug={slug} />
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
@@ -188,6 +193,16 @@ export default async function BlogPostPage({ params }: PageProps) {
 
       {/* Title block */}
       <header className="mb-10">
+        {/* Category — Medium-style eyebrow above the title */}
+        {post.categoryName && post.categorySlug && (
+          <Link
+            href={`/blog?category=${post.categorySlug}`}
+            className="inline-block text-xs font-semibold uppercase tracking-[0.08em] text-action-teal-text hover:text-action-teal transition-colors mb-3"
+          >
+            {post.categoryName}
+          </Link>
+        )}
+
         <h1 className="text-deep-navy text-[2.25rem] font-extrabold tracking-tight leading-[1.15] mb-3">
           {post.title}
         </h1>
@@ -198,63 +213,41 @@ export default async function BlogPostPage({ params }: PageProps) {
           </p>
         )}
 
-        {/* Metadata row — label + value pairs */}
-        <div className="flex flex-wrap items-start gap-x-8 gap-y-2 text-sm pt-5 border-t border-border-light">
-          {post.categoryName && (
-            <div>
-              <span className="text-slate-400 text-xs uppercase tracking-wider block mb-0.5">
-                Category
-              </span>
-              <Pill
-                label={post.categoryName}
-                slug={post.categorySlug}
-                href={`/blog?category=${post.categorySlug}`}
-              />
-            </div>
-          )}
+        {/* Byline + engagement row — author · date · reading time · views,
+            with the share action pinned to the right. */}
+        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-2 text-sm py-3.5 border-t border-b border-border-light">
+          <span className="text-deep-navy font-semibold">Ask Arthur</span>
+          <span className="text-slate-300" aria-hidden="true">·</span>
+          <time dateTime={post.publishedAt} className="text-slate-500">
+            {new Date(post.publishedAt).toLocaleDateString("en-AU", {
+              day: "numeric",
+              month: "long",
+              year: "numeric",
+            })}
+          </time>
+          <span className="text-slate-300" aria-hidden="true">·</span>
+          <span className="text-slate-500">{post.readingTimeMinutes} min read</span>
 
           {post.product && (
-            <div>
-              <span className="text-slate-400 text-xs uppercase tracking-wider block mb-0.5">
-                Product
-              </span>
-              <span className="text-deep-navy font-medium">
-                {post.product}
-              </span>
-            </div>
+            <>
+              <span className="text-slate-300" aria-hidden="true">·</span>
+              <span className="text-slate-500">{post.product}</span>
+            </>
           )}
 
-          <div>
-            <span className="text-slate-400 text-xs uppercase tracking-wider block mb-0.5">
-              Date
-            </span>
-            <time
-              dateTime={post.publishedAt}
-              className="text-deep-navy font-medium"
-            >
-              {new Date(post.publishedAt).toLocaleDateString("en-AU", {
-                day: "numeric",
-                month: "long",
-                year: "numeric",
-              })}
-            </time>
-          </div>
+          {viewCount != null && viewCount > 0 && (
+            <>
+              <span className="text-slate-300" aria-hidden="true">·</span>
+              <span className="text-slate-500 inline-flex items-center gap-1.5">
+                <Eye size={15} aria-hidden="true" />
+                {new Intl.NumberFormat("en-AU").format(viewCount)} views
+              </span>
+            </>
+          )}
 
-          <div>
-            <span className="text-slate-400 text-xs uppercase tracking-wider block mb-0.5">
-              Reading time
-            </span>
-            <span className="text-deep-navy font-medium">
-              {post.readingTimeMinutes} min
-            </span>
-          </div>
-
-          <div>
-            <span className="text-slate-400 text-xs uppercase tracking-wider block mb-0.5">
-              Share
-            </span>
+          <span className="ml-auto">
             <CopyLinkButton />
-          </div>
+          </span>
         </div>
       </header>
 

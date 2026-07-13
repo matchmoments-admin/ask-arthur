@@ -178,23 +178,23 @@ h3 {
 
 .blog-content {
   font-size: 1.0625rem; /* 17px */
-  line-height: 1.75;
+  line-height: 1.8;
   color: var(--color-gov-slate);
 }
 
 .blog-content > * + * {
-  margin-top: 1.5em;
+  margin-top: 1.65em;
 }
 
 /* Headings */
 .blog-content h2 {
-  font-size: 1.5rem;
+  font-size: 1.625rem;
   font-weight: 700;
   color: var(--color-deep-navy);
-  margin-top: 2.5em;
+  margin-top: 2.75em;
   margin-bottom: 0.5em;
-  letter-spacing: -0.01em;
-  line-height: 1.3;
+  letter-spacing: -0.018em;
+  line-height: 1.25;
 }
 
 .blog-content h3 {
@@ -223,16 +223,36 @@ h3 {
   text-decoration: underline;
 }
 
-/* Lists */
+/* Lists — Medium-style breathing room. The numbering / bullets are the
+   part readers notice, so they get deliberate spacing: a generous hang,
+   a real gap between items, and a marker that reads as its own column. */
 .blog-content ul,
 .blog-content ol {
-  padding-left: 1.25em;
+  padding-left: 1.75em;
 }
 .blog-content li {
-  margin-top: 0.375em;
+  margin-top: 0.6em;
+  padding-left: 0.35em;
+  line-height: 1.7;
 }
-.blog-content li::marker {
-  color: var(--color-slate-400);
+.blog-content li:first-child {
+  margin-top: 0;
+}
+.blog-content ol > li::marker {
+  color: var(--color-deep-navy);
+  font-weight: 700;
+}
+.blog-content ul > li::marker {
+  color: var(--color-action-teal);
+}
+/* Nested lists sit tighter than top-level ones. */
+.blog-content li > ul,
+.blog-content li > ol {
+  margin-top: 0.55em;
+}
+.blog-content li > ul > li,
+.blog-content li > ol > li {
+  margin-top: 0.35em;
 }
 
 /* Images — contained, soft corners */
@@ -353,11 +373,23 @@ h3 {
   background-image: url("/illustrations/callout-info.webp");
 }
 
-/* Horizontal rules */
+/* Horizontal rules — rendered as a centered three-dot section break
+   (the Medium "· · ·" divider) rather than a full-width line, so a `---`
+   in markdown reads as a deliberate pause between sections. */
 .blog-content hr {
   border: none;
-  border-top: 1px solid var(--color-border-light);
-  margin: 2.5em 0;
+  margin: 2.75em 0;
+  height: 1.25em;
+  text-align: center;
+}
+.blog-content hr::before {
+  content: "· · ·";
+  color: var(--color-slate-400);
+  font-size: 1.25rem;
+  letter-spacing: 0.6em;
+  /* letter-spacing adds trailing space after the last dot; nudge back to
+     keep the cluster optically centred. */
+  padding-left: 0.6em;
 }
 
 /* Tables */
