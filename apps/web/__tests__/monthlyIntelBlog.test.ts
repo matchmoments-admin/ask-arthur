@@ -55,9 +55,8 @@ function claudeResult(result: unknown) {
   };
 }
 
-const { generateMonthlyIntelPost, factsAreTooThin } = await import(
-  "@/lib/monthly-intel-blog"
-);
+const { generateMonthlyIntelPost, factsAreTooThin, monthlyGenerationSchema } =
+  await import("@/lib/monthly-intel-blog");
 const { ghostAdminToken } = await import("@/lib/ghost-admin");
 import type { MonthlyIntelFacts } from "@/lib/monthly-intel-blog";
 
@@ -179,6 +178,38 @@ describe("generateMonthlyIntelPost", () => {
         toolName: "submit_monthly_blog",
       })
     );
+  });
+});
+
+describe("monthlyGenerationSchema leniency", () => {
+  it("accepts post/ideas as proper structures", () => {
+    expect(monthlyGenerationSchema.safeParse(validGeneration).success).toBe(true);
+  });
+
+  it("accepts a JSON-stringified post (2026-06 rerun failure mode) and re-validates it", () => {
+    const parsed = monthlyGenerationSchema.parse({
+      ideas: validGeneration.ideas,
+      post: JSON.stringify(validGeneration.post),
+    });
+    expect(typeof parsed.post).toBe("object");
+    expect((parsed.post as { title: string }).title).toBe(validGeneration.post.title);
+  });
+
+  it("rejects a stringified post that fails the inner schema", () => {
+    const bad = { ...validGeneration.post, content: "too short" };
+    expect(
+      monthlyGenerationSchema.safeParse({
+        ideas: validGeneration.ideas,
+        post: JSON.stringify(bad),
+      }).success
+    ).toBe(false);
+  });
+
+  it("stays representable as a tool-use JSON Schema (what callClaudeJson does)", async () => {
+    const { z } = await import("zod");
+    const jsonSchema = z.toJSONSchema(monthlyGenerationSchema, { io: "input" });
+    expect(jsonSchema).toHaveProperty("properties.post");
+    expect(jsonSchema).toHaveProperty("properties.ideas");
   });
 });
 
