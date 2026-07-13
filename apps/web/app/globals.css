@@ -225,10 +225,20 @@ h3 {
 
 /* Lists — Medium-style breathing room. The numbering / bullets are the
    part readers notice, so they get deliberate spacing: a generous hang,
-   a real gap between items, and a marker that reads as its own column. */
+   a real gap between items, and a marker that reads as its own column.
+   Tailwind v4 Preflight resets `ul, ol` to `list-style: none`, so the marker
+   type MUST be restored here explicitly — without this, list items render as
+   a bare hanging indent with no bullet/number at all. */
 .blog-content ul,
 .blog-content ol {
-  padding-left: 1.75em;
+  padding-left: 1.5em;
+  list-style-position: outside;
+}
+.blog-content ul {
+  list-style-type: disc;
+}
+.blog-content ol {
+  list-style-type: decimal;
 }
 .blog-content li {
   margin-top: 0.6em;
@@ -245,7 +255,10 @@ h3 {
 .blog-content ul > li::marker {
   color: var(--color-action-teal);
 }
-/* Nested lists sit tighter than top-level ones. */
+/* Nested lists sit tighter than top-level ones, with a distinct marker. */
+.blog-content li > ul {
+  list-style-type: circle;
+}
 .blog-content li > ul,
 .blog-content li > ol {
   margin-top: 0.55em;
