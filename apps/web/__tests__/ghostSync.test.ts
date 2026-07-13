@@ -220,3 +220,35 @@ describe("callout restoration through the mirror", () => {
     expect(siteHtml).toContain('class="callout callout-warning"');
   });
 });
+
+describe("rewriteGhostDomainLinks", () => {
+  it("rewrites Ghost-domain hrefs to site-relative paths", async () => {
+    const { rewriteGhostDomainLinks } = await import("@/lib/ghost-sync");
+    const html =
+      '<a href="https://blog.askarthur.au/contact">Talk to our team</a>' +
+      '<a href="https://blog.askarthur.au/">Check now</a>' +
+      '<a href="https://blog.askarthur.au">bare</a>';
+    const out = rewriteGhostDomainLinks(html);
+    expect(out).toContain('href="/contact"');
+    expect(out).toBe(
+      '<a href="/contact">Talk to our team</a><a href="/">Check now</a><a href="/">bare</a>'
+    );
+  });
+
+  it("leaves Ghost-hosted /content/ assets and external links untouched", async () => {
+    const { rewriteGhostDomainLinks } = await import("@/lib/ghost-sync");
+    const html =
+      '<a href="https://blog.askarthur.au/content/files/report.pdf">pdf</a>' +
+      '<img src="https://blog.askarthur.au/content/images/hero.webp"/>' +
+      '<a href="https://www.scamwatch.gov.au/x">external</a>';
+    expect(rewriteGhostDomainLinks(html)).toBe(html);
+  });
+
+  it("is applied by mapGhostPostToRow", () => {
+    const row = mapGhostPostToRow(
+      { ...fixturePost, html: '<a href="https://blog.askarthur.au/contact">c</a>' },
+      "published"
+    );
+    expect(row.content_html).toContain('href="/contact"');
+  });
+});
