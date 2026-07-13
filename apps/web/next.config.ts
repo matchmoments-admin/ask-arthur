@@ -67,7 +67,8 @@ const securityHeaders = [
       "script-src 'self' 'unsafe-inline' https://plausible.io https://cdn.jsdelivr.net https://js.stripe.com https://widget.trustpilot.com https://challenges.cloudflare.com",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net",
       "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net",
-      "img-src 'self' data: blob: https://*.r2.cloudflarestorage.com https://*.stripe.com https://blog.askarthur.au https://*.trustpilot.com https://*.trustpilot.net https://urlscan.io",
+      // www.google.com is path-scoped to the s2 favicon service (blog "Further reading" cards)
+      "img-src 'self' data: blob: https://*.r2.cloudflarestorage.com https://*.stripe.com https://blog.askarthur.au https://*.trustpilot.com https://*.trustpilot.net https://urlscan.io https://www.google.com/s2/favicons",
       "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://plausible.io https://cdn.jsdelivr.net https://api.stripe.com https://widget.trustpilot.com https://challenges.cloudflare.com",
       "frame-src https://js.stripe.com https://hooks.stripe.com https://widget.trustpilot.com https://challenges.cloudflare.com",
       "frame-ancestors 'none'",

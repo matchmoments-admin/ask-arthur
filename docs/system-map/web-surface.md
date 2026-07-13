@@ -52,6 +52,7 @@ Every consumer page, authenticated page, admin page, and API route, grouped by d
 | `/blog/[slug]`            | Article detail (dynamic)            | —                        |
 | `/blog/category/[slug]`   | Articles by category                | —                        |
 | `/blog/search`            | Full-text search                    | —                        |
+| `/blog/editorial-policy`  | External-link curation policy       | —                        |
 | `/intel/regulator-alerts` | Scamwatch / ACSC / ASIC alerts feed | `redditIntelPublicPages` |
 | `/intel/themes/[slug]`    | Reddit scam-narrative cluster page  | `redditIntelPublicPages` |
 
