@@ -76,6 +76,29 @@ export type ParsedGhostEvent =
   | { kind: "ignore"; reason: string };
 
 /**
+ * Rewrite anchor hrefs that Ghost absolutised against its own domain back to
+ * site-relative paths. Ghost normalises relative internal links (e.g. the
+ * generated CTA block's "/" and "/contact") to https://blog.askarthur.au/...
+ * at render time, which lands readers on the Ghost domain instead of
+ * askarthur.au — the first Ghost-published post shipped a "Talk to our team"
+ * button pointing at blog.askarthur.au/contact (404).
+ *
+ * Only `href` attributes are rewritten, and Ghost-hosted assets under
+ * /content/ (images the mirror deliberately hotlinks from Ghost's CDN) are
+ * left alone. Relative hrefs preserve the internal-link/no-utm rule from
+ * blog-cta.ts, so first-touch attribution keeps working.
+ */
+export function rewriteGhostDomainLinks(html: string): string {
+  return html.replace(
+    /href="https?:\/\/blog\.askarthur\.au(\/[^"]*)?"/g,
+    (match, path: string | undefined) => {
+      if (path && path.startsWith("/content/")) return match;
+      return `href="${path || "/"}"`;
+    }
+  );
+}
+
+/**
  * Map a Ghost post to a blog_posts row. Pure function — no I/O. The status
  * is passed in rather than read from `post.status` so the caller can express
  * intent: a post.unpublished event ships current.status='draft', and we want
@@ -100,8 +123,11 @@ export function mapGhostPostToRow(
     // Ghost's editor strips classed callout markup but preserves literal
     // [!TIP]/[!WARNING]/[!DANGER] markers in blockquote text — restore them
     // to the styled callout divs here so the askarthur.au render matches
-    // markdown-native posts. No-op for HTML without markers.
-    content_html: post.html ? restoreCalloutMarkup(post.html) : null,
+    // markdown-native posts. Also un-absolutise internal links Ghost rewrote
+    // to its own domain. Both are no-ops for HTML without the patterns.
+    content_html: post.html
+      ? restoreCalloutMarkup(rewriteGhostDomainLinks(post.html))
+      : null,
     author: post.primary_author?.name ?? "Ask Arthur",
     tags: tagNames,
     // Only populate category_slug if Ghost's primary_tag has a slug AND it
