@@ -1,10 +1,36 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { scrubPII } from "@askarthur/scam-engine/sanitize";
 import { getCategories } from "@/lib/blog";
 import { requireAdmin, verifyAdminToken, COOKIE_NAME } from "@/lib/adminAuth";
 import { cookies } from "next/headers";
+
+// "Further reading" curation (blog_external_links, v227). Everything defaults
+// to nofollow per /blog/editorial-policy; origin records how the link arrived.
+const externalLinkSchema = z.object({
+  // blog_posts.id is bigint — arrives from the form as a numeric string
+  postId: z.coerce.number().int().positive(),
+  slug: z.string().min(1),
+  url: z.string().url().max(2048).startsWith("https://"),
+  title: z.string().min(1).max(300),
+  sourceName: z.string().min(1).max(120),
+  description: z.string().max(500).optional(),
+  rel: z.enum(["nofollow", "sponsored"]),
+  origin: z.enum(["editorial", "outreach", "partnership"]),
+});
+
+interface ExternalLinkRow {
+  id: string;
+  post_id: number;
+  url: string;
+  title: string;
+  source_name: string;
+  rel: string;
+  origin: string;
+  is_active: boolean;
+}
 
 export default async function AdminBlogPage() {
   await requireAdmin();
@@ -14,7 +40,7 @@ export default async function AdminBlogPage() {
     return <p className="p-8 text-gov-slate">Database not configured</p>;
   }
 
-  const [{ data: posts }, categories] = await Promise.all([
+  const [{ data: posts }, categories, { data: linkRows }] = await Promise.all([
     supabase
       .from("blog_posts")
       .select(
@@ -22,7 +48,19 @@ export default async function AdminBlogPage() {
       )
       .order("created_at", { ascending: false }),
     getCategories(),
+    supabase
+      .from("blog_external_links")
+      .select("id, post_id, url, title, source_name, rel, origin, is_active")
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: true }),
   ]);
+
+  const linksByPost = new Map<number, ExternalLinkRow[]>();
+  for (const row of (linkRows as ExternalLinkRow[] | null) || []) {
+    const list = linksByPost.get(row.post_id) || [];
+    list.push(row);
+    linksByPost.set(row.post_id, list);
+  }
 
   async function logout() {
     "use server";
@@ -81,6 +119,90 @@ export default async function AdminBlogPage() {
     await sb.from("blog_posts").update(updateData).eq("id", postId);
 
     revalidatePath("/blog");
+    revalidatePath("/admin/blog");
+  }
+
+  async function addExternalLink(formData: FormData) {
+    "use server";
+
+    const cookieStore = await cookies();
+    const token = cookieStore.get(COOKIE_NAME)?.value;
+    if (!token || !verifyAdminToken(token)) return;
+
+    const parsed = externalLinkSchema.safeParse({
+      postId: formData.get("postId"),
+      slug: formData.get("slug"),
+      url: formData.get("url"),
+      title: formData.get("title"),
+      sourceName: formData.get("source_name"),
+      description: (formData.get("description") as string) || undefined,
+      rel: formData.get("rel"),
+      origin: formData.get("origin"),
+    });
+    if (!parsed.success) return;
+
+    const sb = createServiceClient();
+    if (!sb) return;
+
+    await sb.from("blog_external_links").upsert(
+      {
+        post_id: parsed.data.postId,
+        url: parsed.data.url,
+        title: parsed.data.title,
+        source_name: parsed.data.sourceName,
+        description: parsed.data.description || null,
+        rel: parsed.data.rel,
+        origin: parsed.data.origin,
+        is_active: true,
+      },
+      { onConflict: "post_id,url" }
+    );
+
+    revalidatePath(`/blog/${parsed.data.slug}`);
+    revalidatePath("/admin/blog");
+  }
+
+  async function toggleExternalLink(formData: FormData) {
+    "use server";
+
+    const cookieStore = await cookies();
+    const token = cookieStore.get(COOKIE_NAME)?.value;
+    if (!token || !verifyAdminToken(token)) return;
+
+    const linkId = formData.get("linkId") as string;
+    const slug = formData.get("slug") as string;
+    const nextActive = formData.get("nextActive") === "true";
+    if (!linkId) return;
+
+    const sb = createServiceClient();
+    if (!sb) return;
+
+    await sb
+      .from("blog_external_links")
+      .update({ is_active: nextActive })
+      .eq("id", linkId);
+
+    if (slug) revalidatePath(`/blog/${slug}`);
+    revalidatePath("/admin/blog");
+  }
+
+  async function deleteExternalLink(formData: FormData) {
+    "use server";
+
+    const cookieStore = await cookies();
+    const token = cookieStore.get(COOKIE_NAME)?.value;
+    if (!token || !verifyAdminToken(token)) return;
+
+    const linkId = formData.get("linkId") as string;
+    const slug = formData.get("slug") as string;
+    if (!linkId) return;
+
+    const sb = createServiceClient();
+    if (!sb) return;
+
+    await sb.from("blog_external_links").delete().eq("id", linkId);
+
+    if (slug) revalidatePath(`/blog/${slug}`);
     revalidatePath("/admin/blog");
   }
 
@@ -205,6 +327,118 @@ export default async function AdminBlogPage() {
                   Save changes
                 </button>
               </form>
+
+              {/* Further reading — curated external links for this post */}
+              <details className="mt-4 pt-4 border-t border-border-light">
+                <summary className="text-sm font-medium text-gov-slate cursor-pointer select-none">
+                  External links ({(linksByPost.get(post.id) || []).length})
+                </summary>
+
+                <div className="mt-3 space-y-2">
+                  {(linksByPost.get(post.id) || []).map((link) => (
+                    <div
+                      key={link.id}
+                      className="flex items-center justify-between gap-3 text-sm border border-border-light rounded px-3 py-2"
+                    >
+                      <div className="min-w-0">
+                        <p
+                          className={`font-medium truncate ${link.is_active ? "text-deep-navy" : "text-slate-400 line-through"}`}
+                        >
+                          {link.title}
+                        </p>
+                        <p className="text-xs text-slate-400 truncate">
+                          {link.source_name} · {link.rel} · {link.origin} ·{" "}
+                          {link.url}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <form action={toggleExternalLink}>
+                          <input type="hidden" name="linkId" value={link.id} />
+                          <input type="hidden" name="slug" value={post.slug || ""} />
+                          <input
+                            type="hidden"
+                            name="nextActive"
+                            value={String(!link.is_active)}
+                          />
+                          <button
+                            type="submit"
+                            className="text-xs text-gov-slate hover:text-action-teal"
+                          >
+                            {link.is_active ? "Deactivate" : "Activate"}
+                          </button>
+                        </form>
+                        <form action={deleteExternalLink}>
+                          <input type="hidden" name="linkId" value={link.id} />
+                          <input type="hidden" name="slug" value={post.slug || ""} />
+                          <button
+                            type="submit"
+                            className="text-xs text-danger-text hover:underline"
+                          >
+                            Delete
+                          </button>
+                        </form>
+                      </div>
+                    </div>
+                  ))}
+
+                  <form action={addExternalLink} className="space-y-2 pt-2">
+                    <input type="hidden" name="postId" value={post.id} />
+                    <input type="hidden" name="slug" value={post.slug || ""} />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <input
+                        type="url"
+                        name="url"
+                        required
+                        placeholder="https://…"
+                        className="text-sm border border-border-light rounded px-2.5 py-1.5"
+                      />
+                      <input
+                        type="text"
+                        name="title"
+                        required
+                        placeholder="Article title"
+                        className="text-sm border border-border-light rounded px-2.5 py-1.5"
+                      />
+                      <input
+                        type="text"
+                        name="source_name"
+                        required
+                        placeholder="Source (e.g. Scamwatch)"
+                        className="text-sm border border-border-light rounded px-2.5 py-1.5"
+                      />
+                      <input
+                        type="text"
+                        name="description"
+                        placeholder="One-line description (optional)"
+                        className="text-sm border border-border-light rounded px-2.5 py-1.5"
+                      />
+                      <select
+                        name="rel"
+                        defaultValue="nofollow"
+                        className="text-sm border border-border-light rounded px-2.5 py-1.5 bg-white"
+                      >
+                        <option value="nofollow">nofollow (default)</option>
+                        <option value="sponsored">sponsored (paid only)</option>
+                      </select>
+                      <select
+                        name="origin"
+                        defaultValue="editorial"
+                        className="text-sm border border-border-light rounded px-2.5 py-1.5 bg-white"
+                      >
+                        <option value="editorial">editorial</option>
+                        <option value="outreach">outreach</option>
+                        <option value="partnership">partnership</option>
+                      </select>
+                    </div>
+                    <button
+                      type="submit"
+                      className="px-3 py-1.5 text-xs font-medium border border-deep-navy text-deep-navy rounded hover:bg-deep-navy hover:text-white transition-colors"
+                    >
+                      Add external link
+                    </button>
+                  </form>
+                </div>
+              </details>
             </div>
           );
         })}

@@ -32,6 +32,17 @@ export interface BlogCategory {
   description: string | null;
 }
 
+// Curated "Further reading" link on a post (blog_external_links, v227).
+// rel defaults to nofollow per the editorial policy; 'sponsored' is reserved
+// for any future paid placement.
+export interface ExternalLink {
+  url: string;
+  title: string;
+  sourceName: string;
+  description: string | null;
+  rel: "nofollow" | "sponsored";
+}
+
 interface BlogRow {
   slug: string;
   title: string;
@@ -161,6 +172,28 @@ export async function searchPosts(query: string): Promise<BlogPost[]> {
 
   if (error || !data) return [];
   return (data as unknown as BlogRow[]).map(rowToPost);
+}
+
+export async function getExternalLinks(slug: string): Promise<ExternalLink[]> {
+  const supabase = createServiceClient();
+  if (!supabase) return [];
+
+  const { data, error } = await supabase
+    .from("blog_external_links")
+    .select("url, title, source_name, description, rel, blog_posts!inner(slug)")
+    .eq("blog_posts.slug", slug)
+    .eq("is_active", true)
+    .order("sort_order", { ascending: true })
+    .order("created_at", { ascending: true });
+
+  if (error || !data) return [];
+  return data.map((row) => ({
+    url: row.url as string,
+    title: row.title as string,
+    sourceName: row.source_name as string,
+    description: (row.description as string | null) ?? null,
+    rel: row.rel === "sponsored" ? "sponsored" : "nofollow",
+  }));
 }
 
 export async function getRelatedPosts(

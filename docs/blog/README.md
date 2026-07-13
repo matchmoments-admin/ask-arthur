@@ -35,6 +35,27 @@ What happens:
    row into Supabase `blog_posts`. The post is then live at
    `https://askarthur.au/blog/<slug>`.
 
+## External "Further reading" links
+
+Published posts can carry curated external related-article links, rendered as
+a text-card "Further reading" section at the bottom of `/blog/<slug>`. These
+live in the Supabase `blog_external_links` table (v227), **not** in the
+markdown, and are managed per-post via `/admin/blog`.
+
+Curation policy (public version at `/blog/editorial-policy`):
+
+- Priority to government (.gov.au), regulators, non-profits (IDCARE),
+  academic and independent journalistic sources. Commercial content only on
+  editorial merit, case-by-case — never solely because of an outreach email.
+- Every link defaults to `rel="nofollow"` (we link for readers, not
+  rankings; outbound links are not a Google ranking factor in either
+  direction). `sponsored` is reserved for any future paid placement.
+- `origin` (`editorial` / `outreach` / `partnership`) records how the link
+  arrived — the audit trail for the policy.
+- Text cards + favicon only. No third-party thumbnails: hotlinking is
+  unreliable and legally grey in AU, and chumbox-style image grids read as
+  Taboola.
+
 ## Frontmatter (optional)
 
 Smart defaults:

@@ -128,6 +128,7 @@ Supabase Postgres (project `rquomhcgnodxzkhokwni`). 75+ tables across 12 domain 
 - `extension_subscriptions`, `extension_installs` — Extension license + per-install identity (ECDSA public key). v34–v61.
 - `blog_posts` — CMS posts. `search_vector` TSVECTOR GIN. v2.
 - `blog_categories` — Category taxonomy. v18.
+- `blog_external_links` — Curated "Further reading" links per post (nofollow by default; `origin` audits editorial vs outreach vs partnership). Service-role RLS, managed via `/admin/blog`. Policy: `/blog/editorial-policy`. v227.
 - `email_subscribers` — Newsletter signup. DENY_ALL RLS (v109).
 
 ### Clone-watch / Shopfront

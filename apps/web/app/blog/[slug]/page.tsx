@@ -3,7 +3,12 @@ import Link from "next/link";
 import Image from "next/image";
 import "highlight.js/styles/github.css";
 import sanitizeHtml from "sanitize-html";
-import { getPostBySlug, getAllSlugs, getRelatedPosts } from "@/lib/blog";
+import {
+  getPostBySlug,
+  getAllSlugs,
+  getRelatedPosts,
+  getExternalLinks,
+} from "@/lib/blog";
 import { renderMarkdown } from "@/lib/blogRenderer";
 import CopyLinkButton from "@/components/CopyLinkButton";
 import MermaidDiagram from "@/components/blog/MermaidDiagram";
@@ -55,7 +60,10 @@ export default async function BlogPostPage({ params }: PageProps) {
   const post = await getPostBySlug(slug);
   if (!post) notFound();
 
-  const related = await getRelatedPosts(slug, post.categorySlug);
+  const [related, externalLinks] = await Promise.all([
+    getRelatedPosts(slug, post.categorySlug),
+    getExternalLinks(slug),
+  ]);
   // Ghost-mirrored posts arrive as pre-rendered HTML; legacy posts are
   // markdown. Sanitize either source uniformly so trust boundaries don't
   // shift based on origin.
@@ -303,6 +311,69 @@ export default async function BlogPostPage({ params }: PageProps) {
               </Link>
             ))}
           </div>
+        </section>
+      )}
+
+      {/* Further reading — curated external links (blog_external_links).
+          Editorial policy: /blog/editorial-policy. Text cards only, no
+          third-party thumbnails; rel comes from the row (nofollow default). */}
+      {externalLinks.length > 0 && (
+        <section className="mt-16 pt-10 border-t border-border-light">
+          <h2 className="text-deep-navy text-xl font-bold mb-6">
+            Further reading
+          </h2>
+          <ul className="space-y-4">
+            {externalLinks.map((link) => {
+              const host = new URL(link.url).hostname;
+              return (
+                <li key={link.url}>
+                  <a
+                    href={link.url}
+                    target="_blank"
+                    rel={`noopener noreferrer ${link.rel}`}
+                    className="group flex items-start gap-3 border border-border-light rounded-lg p-4 hover:border-action-teal transition-colors"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element -- tiny external favicon, not worth the optimizer */}
+                    <img
+                      src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=32`}
+                      alt=""
+                      width={20}
+                      height={20}
+                      loading="lazy"
+                      className="mt-0.5 shrink-0 rounded-sm"
+                    />
+                    <span className="min-w-0">
+                      <span className="text-xs text-slate-400 block mb-0.5">
+                        {link.sourceName} — {host}
+                      </span>
+                      <span className="text-deep-navy font-bold text-base leading-snug group-hover:text-action-teal transition-colors">
+                        {link.title}
+                        <span aria-hidden="true" className="ml-1.5 text-slate-400 group-hover:text-action-teal">
+                          ↗
+                        </span>
+                      </span>
+                      {link.description && (
+                        <span className="text-sm text-slate-500 block mt-1">
+                          {link.description}
+                        </span>
+                      )}
+                    </span>
+                  </a>
+                </li>
+              );
+            })}
+          </ul>
+          <p className="text-xs text-slate-400 mt-4">
+            External links are editorially selected — Ask Arthur is not
+            responsible for third-party content. Read our{" "}
+            <Link
+              href="/blog/editorial-policy"
+              className="underline hover:text-action-teal"
+            >
+              editorial policy
+            </Link>
+            .
+          </p>
         </section>
       )}
 
