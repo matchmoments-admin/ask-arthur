@@ -35,6 +35,17 @@ What happens:
    row into Supabase `blog_posts`. The post is then live at
    `https://askarthur.au/blog/<slug>`.
 
+## Callouts survive Ghost
+
+`> [!TIP]` / `[!WARNING]` / `[!DANGER]` markers render as styled callout
+boxes on askarthur.au. For markdown-native posts the blog renderer handles
+this directly. For Ghost-authored or Ghost-edited posts (whose editor strips
+classed HTML), keep the literal `[!TYPE]` marker as the first text of a
+blockquote — the Ghost mirror (`ghost-sync.ts` → `restoreCalloutMarkup`)
+rebuilds the styled markup when the post syncs into `blog_posts`. This means
+you can type `[!WARNING]` in a Ghost blockquote and get the styled box on
+the public site.
+
 ## External "Further reading" links
 
 Published posts can carry curated external related-article links, rendered as

@@ -78,6 +78,11 @@ function facts(overrides: Partial<MonthlyIntelFacts> = {}): MonthlyIntelFacts {
       reportedOnward: 628,
       topBrands: [{ brand: "target.com.au", clones: 43, reported: 34 }],
       weaponisedDomains: [{ domain: "taget.one", target: "target.com.au", date: "2026-07-03" }],
+      lifecycle: [
+        { label: "detected", count: 523 },
+        { label: "declined", count: 802 },
+        { label: "weaponised", count: 37 },
+      ],
     },
     regulatorAlerts: [{ source: "scamwatch_alert", title: "Food delivery scams", date: "2026-06-12" }],
     consumerReports: { total: 20, categories: [], channels: [], brands: [] },
@@ -98,7 +103,7 @@ describe("factsAreTooThin", () => {
       factsAreTooThin(
         facts({
           reddit: { cohortSize: 0, categories: [], brands: [], tactics: [], noveltySignals: [] },
-          cloneWatch: { totalClones: 0, brandCount: 0, reportedOnward: 0, topBrands: [], weaponisedDomains: [] },
+          cloneWatch: { totalClones: 0, brandCount: 0, reportedOnward: 0, topBrands: [], weaponisedDomains: [], lifecycle: [] },
           regulatorAlerts: [],
         })
       )
@@ -145,6 +150,23 @@ describe("generateMonthlyIntelPost", () => {
     delete process.env.ANTHROPIC_API_KEY;
     expect(await generateMonthlyIntelPost(facts())).toBeNull();
     expect(mockCallClaudeJson).not.toHaveBeenCalled();
+  });
+
+  it("rejects drafts containing placeholder tokens like [NAME]", async () => {
+    const gen = structuredClone(validGeneration);
+    gen.post.content = "x".repeat(300) + " [NAME] is one of Australia's most popular platforms " + "y".repeat(200);
+    mockCallClaudeJson.mockResolvedValue(claudeResult(gen));
+
+    expect(await generateMonthlyIntelPost(facts())).toBeNull();
+  });
+
+  it("does not flag callout markers or ALL-CAPS markdown links as placeholders", async () => {
+    const gen = structuredClone(validGeneration);
+    gen.post.content =
+      "> [!WARNING] real warning\n\nSee [ACCC](https://www.accc.gov.au) guidance. " + "x".repeat(450);
+    mockCallClaudeJson.mockResolvedValue(claudeResult(gen));
+
+    expect(await generateMonthlyIntelPost(facts())).not.toBeNull();
   });
 
   it("forces tool-use JSON with the generation schema", async () => {

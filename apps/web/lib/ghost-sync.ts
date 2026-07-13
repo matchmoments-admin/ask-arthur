@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { logger } from "@askarthur/utils/logger";
+import { restoreCalloutMarkup } from "@/lib/blogRenderer";
 
 // One-way mirror from Ghost (blog.askarthur.au) → blog_posts in Supabase.
 // Ghost owns drafting + newsletter delivery (via Mailgun); safeverify owns
@@ -96,7 +97,11 @@ export function mapGhostPostToRow(
     title: post.title,
     excerpt: post.custom_excerpt ?? post.excerpt ?? "",
     content: post.plaintext ?? "",
-    content_html: post.html ?? null,
+    // Ghost's editor strips classed callout markup but preserves literal
+    // [!TIP]/[!WARNING]/[!DANGER] markers in blockquote text — restore them
+    // to the styled callout divs here so the askarthur.au render matches
+    // markdown-native posts. No-op for HTML without markers.
+    content_html: post.html ? restoreCalloutMarkup(post.html) : null,
     author: post.primary_author?.name ?? "Ask Arthur",
     tags: tagNames,
     // Only populate category_slug if Ghost's primary_tag has a slug AND it

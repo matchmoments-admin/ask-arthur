@@ -10,7 +10,7 @@ import {
   generateMonthlyIntelPost,
 } from "@/lib/monthly-intel-blog";
 import { createGhostDraft } from "@/lib/ghost-admin";
-import { renderMarkdown } from "@/lib/blogRenderer";
+import { renderMarkdownKeepCalloutMarkers } from "@/lib/blogRenderer";
 
 /**
  * Monthly Intel Blog — one data-driven draft post per month.
@@ -92,7 +92,10 @@ export const monthlyIntelBlog = inngest.createFunction(
     }
 
     const persisted = await step.run("persist-draft", async () => {
-      const html = await renderMarkdown(generated.content);
+      // Keep [!TIP]-style markers literal: Ghost strips classed callout
+      // markup, but the mirror (ghost-sync restoreCalloutMarkup) rebuilds
+      // the styled boxes from the literal markers at publish time.
+      const html = await renderMarkdownKeepCalloutMarkers(generated.content);
       const ghost = await createGhostDraft({
         title: generated.title,
         html,
