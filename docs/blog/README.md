@@ -56,6 +56,34 @@ snippet's style values are copied from `apps/web/app/globals.css`
 injection to match.** Icons hotload from
 `https://askarthur.au/illustrations/callout-*.webp`.
 
+## Formatting the blog CSS supports
+
+All post styling is centralised in **one** place — `apps/web/app/globals.css`
+`.blog-content` — and is applied to **every** post (markdown-native and
+Ghost-mirrored alike) via `app/blog/[slug]/page.tsx`. There is no per-post CSS.
+Author in plain markdown and let that shared stylesheet own the look:
+
+- **Lists** — `-` for bullets, `1.` for numbered. They render with proper
+  markers (teal discs / navy numbers / nested circles). Start each item with a
+  bold lead-in — `**Term** — explanation` — for scannability. Tailwind v4
+  Preflight strips list markers globally; `.blog-content` restores them, so
+  **never** hand-fake a list with dashes inside a paragraph.
+- **Section breaks** — a `---` horizontal rule renders as a centred `· · ·`
+  divider. Use it between major sections.
+- **Callouts** — `[!TIP]` / `[!WARNING]` / `[!DANGER]` / `[!NOTE]` (see below).
+- **Spacing** — do NOT hand-space with extra blank lines. The stylesheet owns
+  vertical rhythm via a flow-margin (`> * + *`) rule; adding a
+  `.blog-content p { margin: … }` rule would silently defeat it (its
+  specificity beats the flow rule — this exact bug cramped paragraphs under
+  lists, fixed 2026-07-14).
+
+The automated **monthly-intel-blog** generator encodes these same rules in its
+prompt (`apps/web/lib/monthly-intel-blog.ts` → FORMATTING RULES) and its
+`VALID_CATEGORIES` must match the live `blog_categories` slugs — keep the two in
+sync when categories change. The personal `~/.claude/skills/blog` skill is the
+known-broken flat-layout one (see the user global CLAUDE.md) and is not the
+source of truth for formatting.
+
 ## External "Further reading" links
 
 Published posts can carry curated external related-article links, rendered as

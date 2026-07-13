@@ -11,6 +11,10 @@ import { track } from "@/lib/track";
 // Fire-and-forget: `track()` no-ops on the server, never throws, and the write
 // path itself no-ops without the aa_attribution cookie. StrictMode double-
 // invokes effects in dev; that inflation is dev-only and irrelevant to prod.
+//
+// PATH CONTRACT: track() stores `window.location.pathname`, which on this page
+// is `blogPostPath(slug)` (= `/blog/<slug>`). getPostViewCount() reads back
+// with that exact string. Keep the two in lockstep — see lib/blogPath.ts.
 export default function PageviewBeacon({ slug }: { slug: string }) {
   useEffect(() => {
     track("pageview", { content_type: "blog_post", slug });

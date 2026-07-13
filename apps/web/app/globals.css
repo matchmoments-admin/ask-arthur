@@ -207,11 +207,15 @@ h3 {
   line-height: 1.4;
 }
 
-/* Paragraphs */
-.blog-content p {
-  margin-top: 0;
-  margin-bottom: 0;
-}
+/* Paragraphs — spacing is owned by the `> * + *` flow-margin rule above, NOT
+   per-element margins. Do NOT add `.blog-content p { margin: 0 }` back: its
+   specificity (0,1,1) beats the owl selector (0,1,0), which silently strips
+   the flow margin from every paragraph — the symptom is a paragraph sitting
+   flush against the element before it (e.g. cramped right under a list).
+   Tailwind Preflight already zeroes the default `<p>` margin, so no reset is
+   needed here; the owl rule then supplies the 1.65em rhythm uniformly.
+   Nested paragraphs (callouts, blockquotes, list items) get margin:0 from
+   their own more-specific rules. */
 
 /* Links */
 .blog-content a {

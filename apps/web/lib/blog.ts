@@ -1,5 +1,7 @@
+import { revalidatePath } from "next/cache";
 import { createServiceClient } from "@askarthur/supabase/server";
 import readingTime from "reading-time";
+import { blogPostPath } from "@/lib/blogPath";
 
 export interface BlogPost {
   slug: string;
@@ -212,14 +214,35 @@ export async function getPostViewCount(slug: string): Promise<number | null> {
   const supabase = createServiceClient();
   if (!supabase) return null;
 
+  // Filter on the SAME path string the beacon writes (window.location.pathname
+  // == blogPostPath(slug) on the post page). Keep both sides on blogPostPath so
+  // the join can't silently drift. See lib/blogPath.ts.
   const { count, error } = await supabase
     .from("analytics_events")
     .select("*", { count: "exact", head: true })
     .eq("event_type", "pageview")
-    .eq("path", `/blog/${slug}`);
+    .eq("path", blogPostPath(slug));
 
   if (error || count == null) return null;
   return count;
+}
+
+/**
+ * Bust the ISR cache for a blog post (and the index). `/blog/[slug]` is
+ * `revalidate = 3600`, so any change made OUTSIDE the render — a Ghost webhook
+ * sync, an admin edit, a category set via SQL — needs an explicit flush or it
+ * lingers for up to an hour.
+ *
+ * Single source of the flush target set so the Ghost webhook
+ * (app/api/blog/ghost-webhook) and the admin flush route
+ * (app/api/admin/blog/revalidate) can't drift. Pass a slug to also bust that
+ * post; omit it for index-only (list-level) changes.
+ *
+ * Must be called from a Server Action or Route Handler (Next constraint).
+ */
+export function revalidateBlogPost(slug?: string): void {
+  revalidatePath("/blog");
+  if (slug) revalidatePath(blogPostPath(slug));
 }
 
 export async function getRelatedPosts(
