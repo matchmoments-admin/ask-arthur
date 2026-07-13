@@ -1,9 +1,9 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { createServiceClient } from "@askarthur/supabase/server";
+import { callClaudeJson } from "@askarthur/scam-engine/anthropic";
 import { scrubPII } from "@askarthur/scam-engine/sanitize";
 import { logger } from "@askarthur/utils/logger";
-import { logCost, claudeSonnet46CostUsd } from "@/lib/cost-telemetry";
+import { logCost } from "@/lib/cost-telemetry";
 import { appendBlogCtaBlock } from "@/lib/blog-cta";
 
 /**
@@ -24,7 +24,6 @@ import { appendBlogCtaBlock } from "@/lib/blog-cta";
 
 const MIN_REDDIT_CONFIDENCE = 0.4;
 const REDDIT_FETCH_LIMIT = 3000;
-const MODEL = "claude-sonnet-4-6";
 
 interface LabelCount {
   label: string;
@@ -258,11 +257,22 @@ export async function generateMonthlyIntelPost(
 ): Promise<MonthlyGeneratedPost | null> {
   if (!process.env["ANTHROPIC_API_KEY"]) return null;
 
-  const client = new Anthropic();
-  const response = await client.messages.create({
-    model: MODEL,
-    max_tokens: 8000,
-    system: `You are the content strategist and writer for Ask Arthur, an Australian scam-detection platform (askarthur.au). You are given ONE month of the platform's own intelligence data, already aggregated in code.
+  // Tool-use-forced JSON via callClaudeJson — Anthropic guarantees the tool
+  // input is a schema-valid object, eliminating the invalid-raw-JSON failure
+  // the first canary hit (unescaped chars inside the long markdown `content`
+  // string), and the helper never uses assistant prefill (Sonnet 4.6 rejects
+  // it). Same wrapper weekly-synthesis uses in prod.
+  let call;
+  try {
+    call = await callClaudeJson({
+      model: "SONNET_4_6",
+      maxTokens: 8000,
+      timeoutMs: 120_000,
+      schema: GenerationSchema,
+      useToolUse: true,
+      toolName: "submit_monthly_blog",
+      requestId: `monthly-intel-blog-${facts.periodMonth}`,
+      system: `You are the content strategist and writer for Ask Arthur, an Australian scam-detection platform (askarthur.au). You are given ONE month of the platform's own intelligence data, already aggregated in code.
 
 TASK: (1) propose the 10 best blog-post ideas from this data, ranked by unique-data advantage × Australian relevance × gap vs existing coverage; (2) write idea #1 as a complete post.
 
@@ -276,54 +286,33 @@ FORMATTING RULES for the post content (markdown):
 - Use > [!WARNING], > [!TIP], > [!DANGER] blockquote callouts (they render as styled boxes).
 - 900–1300 words. Start with a one-line **TL;DR:**. Use ## sections. Include one practical checklist section.
 - No calls-to-action, sign-offs or askarthur.au links — a standard CTA block is appended automatically.
-- category must be one of: scam-alerts, guides, news, weekly-roundup.`,
-    messages: [
-      {
-        role: "user",
-        content: `Facts for ${facts.periodMonth} (all counts code-derived from production data):
+- category must be one of: scam-alerts, guides, news, weekly-roundup.
+- Respond ONLY by calling the submit_monthly_blog tool. "ideas" must be exactly 10 items, best first. Post title ≤90 chars; subtitle ≤180; excerpt ≤280.`,
+      user: `Facts for ${facts.periodMonth} (all counts code-derived from production data):
 
-${JSON.stringify(facts, null, 1)}
-
-Return ONLY valid JSON:
-{
-  "ideas": [{ "title": "...", "angle": "one sentence", "dataPoints": ["fact used"], "targetKeyword": "..." }, ... 10 items, best first],
-  "post": { "title": "≤90 chars, SEO", "subtitle": "≤180 chars", "excerpt": "≤280 chars", "content": "full markdown post for ideas[0]", "tags": ["..."], "category": "scam-alerts" }
-}`,
-      },
-      // NOTE: no assistant "{" prefill here — claude-sonnet-4-6 rejects
-      // assistant-message prefill (400: "conversation must end with a user
-      // message"), unlike the Haiku pattern this was adapted from. Verified
-      // by the first prod canary run 2026-07-13.
-    ],
-  });
-
-  const inputTokens = response.usage?.input_tokens ?? 0;
-  const outputTokens = response.usage?.output_tokens ?? 0;
-  logCost({
-    feature: "monthly_intel_blog",
-    provider: "anthropic",
-    operation: MODEL,
-    units: inputTokens + outputTokens,
-    estimatedCostUsd: claudeSonnet46CostUsd(inputTokens, outputTokens),
-    metadata: { input_tokens: inputTokens, output_tokens: outputTokens },
-  });
-
-  const text = response.content[0]?.type === "text" ? response.content[0].text : "";
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    logger.error("monthly-intel-blog: no JSON in model response");
-    return null;
-  }
-
-  let parsed: z.infer<typeof GenerationSchema>;
-  try {
-    parsed = GenerationSchema.parse(JSON.parse(jsonMatch[0]));
+${JSON.stringify(facts, null, 1)}`,
+    });
   } catch (err) {
     logger.error("monthly-intel-blog: generation failed validation", {
       error: String(err),
     });
     return null;
   }
+
+  logCost({
+    feature: "monthly_intel_blog",
+    provider: "anthropic",
+    operation: call.modelId,
+    units: call.usage.inputTokens + call.usage.outputTokens,
+    estimatedCostUsd: call.estimatedCostUsd,
+    metadata: {
+      input_tokens: call.usage.inputTokens,
+      output_tokens: call.usage.outputTokens,
+      cache_read_tokens: call.usage.cacheReadTokens,
+    },
+  });
+
+  const parsed = call.result;
 
   const title = scrubPII(parsed.post.title);
   const content = appendBlogCtaBlock(scrubPII(parsed.post.content));

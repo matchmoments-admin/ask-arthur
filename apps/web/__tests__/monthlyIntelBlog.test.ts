@@ -40,12 +40,20 @@ const validGeneration = {
   },
 };
 
-const mockCreate = vi.fn();
-vi.mock("@anthropic-ai/sdk", () => ({
-  default: class MockAnthropic {
-    messages = { create: mockCreate };
-  },
+const mockCallClaudeJson = vi.fn();
+vi.mock("@askarthur/scam-engine/anthropic", () => ({
+  callClaudeJson: (opts: unknown) => mockCallClaudeJson(opts),
 }));
+
+function claudeResult(result: unknown) {
+  return {
+    result,
+    usage: { inputTokens: 1000, outputTokens: 2000, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    cacheHit: false,
+    estimatedCostUsd: 0.07,
+    modelId: "claude-sonnet-4-6",
+  };
+}
 
 const { generateMonthlyIntelPost, factsAreTooThin } = await import(
   "@/lib/monthly-intel-blog"
@@ -105,14 +113,7 @@ describe("generateMonthlyIntelPost", () => {
   });
 
   it("returns a processed post + ideas for a valid model response", async () => {
-    // Sonnet 4.6 rejects assistant prefill, so the model returns full JSON
-    // (possibly wrapped in prose — the parser extracts the {...} block).
-    mockCreate.mockResolvedValue({
-      content: [
-        { type: "text", text: `Here is the JSON:\n${JSON.stringify(validGeneration)}` },
-      ],
-      usage: { input_tokens: 1000, output_tokens: 2000 },
-    });
+    mockCallClaudeJson.mockResolvedValue(claudeResult(validGeneration));
 
     const result = await generateMonthlyIntelPost(facts());
     expect(result).not.toBeNull();
@@ -126,20 +127,16 @@ describe("generateMonthlyIntelPost", () => {
   it("coerces an unknown category to scam-alerts", async () => {
     const gen = structuredClone(validGeneration);
     gen.post.category = "not-a-category";
-    mockCreate.mockResolvedValue({
-      content: [{ type: "text", text: JSON.stringify(gen) }],
-      usage: { input_tokens: 1, output_tokens: 1 },
-    });
+    mockCallClaudeJson.mockResolvedValue(claudeResult(gen));
 
     const result = await generateMonthlyIntelPost(facts());
     expect(result!.category).toBe("scam-alerts");
   });
 
-  it("returns null when the model response fails schema validation", async () => {
-    mockCreate.mockResolvedValue({
-      content: [{ type: "text", text: '"ideas": [], "post": {} }' }],
-      usage: { input_tokens: 1, output_tokens: 1 },
-    });
+  it("returns null when callClaudeJson throws (schema/API failure)", async () => {
+    mockCallClaudeJson.mockRejectedValue(
+      new Error("Claude JSON response failed schema validation")
+    );
 
     expect(await generateMonthlyIntelPost(facts())).toBeNull();
   });
@@ -147,7 +144,19 @@ describe("generateMonthlyIntelPost", () => {
   it("returns null without an API key", async () => {
     delete process.env.ANTHROPIC_API_KEY;
     expect(await generateMonthlyIntelPost(facts())).toBeNull();
-    expect(mockCreate).not.toHaveBeenCalled();
+    expect(mockCallClaudeJson).not.toHaveBeenCalled();
+  });
+
+  it("forces tool-use JSON with the generation schema", async () => {
+    mockCallClaudeJson.mockResolvedValue(claudeResult(validGeneration));
+    await generateMonthlyIntelPost(facts());
+    expect(mockCallClaudeJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: "SONNET_4_6",
+        useToolUse: true,
+        toolName: "submit_monthly_blog",
+      })
+    );
   });
 });
 
