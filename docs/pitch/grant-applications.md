@@ -1,6 +1,6 @@
 # Grant Applications — Ask Arthur
 
-*Drafted April 2026*
+_Drafted April 2026_
 
 Two complete applications: (1) R&D Tax Incentive (RDTI) FY24-25, and (2) Startmate Accelerator.
 
@@ -19,7 +19,7 @@ Two complete applications: (1) R&D Tax Incentive (RDTI) FY24-25, and (2) Startma
 
 ### 1. Core R&D Activities
 
-*(~650 words)*
+_(~650 words)_
 
 Ask Arthur conducts systematic, investigative, and experimental R&D activities to generate new knowledge in the application of AI to real-time scam detection at consumer scale. The following core activities involve technical uncertainty that could not be resolved by a competent professional using existing knowledge, information, or experience.
 
@@ -63,26 +63,26 @@ The technical uncertainty was whether regex-based PII scrubbing could achieve su
 
 **Eligible vs Ineligible Examples from Codebase:**
 
-| Codebase Component | Eligible? | Reason |
-|---|---|---|
-| `INJECTION_PATTERNS` (14 regex patterns in `claude.ts`) | YES | Experimental -- patterns iteratively developed against adversarial inputs |
-| `scrubPII()` ordered pipeline (`pipeline.ts`) | YES | Novel -- ordering sensitivity and Australian-specific formats required experimentation |
-| `compute_entity_risk_score` RPC (v27 migration) | YES | Novel algorithm -- signal weighting required experimentation |
-| `UnionFind` cluster builder (`cluster-builder.ts`) | YES | Applied research -- adapting graph algorithms to scam campaign detection |
-| `ct-monitor.ts` (Certificate Transparency monitoring) | YES | Novel application -- brand impersonation detection via CT logs |
-| `local-intel.ts` (DNS + libphonenumber enrichment) | YES | Experimental -- determining which free signals have predictive value |
-| Standard Next.js pages and UI components | NO | Routine software development |
-| Paddle billing integration | NO | Off-the-shelf integration, no technical uncertainty |
-| Plausible analytics setup | NO | Configuration of existing tool |
-| Blog system with categories | NO | Standard content management, no experimentation |
-| Vercel deployment configuration | NO | Routine DevOps |
-| Newsletter subscription (Resend) | NO | Standard API integration |
+| Codebase Component                                      | Eligible? | Reason                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `INJECTION_PATTERNS` (14 regex patterns in `claude.ts`) | YES       | Experimental -- patterns iteratively developed against adversarial inputs                                                                                                                                                                                                                                                                                     |
+| `scrubPII()` ordered pipeline (`pipeline.ts`)           | YES       | Novel -- ordering sensitivity and Australian-specific formats required experimentation                                                                                                                                                                                                                                                                        |
+| `compute_entity_risk_score` RPC (v27 migration)         | YES       | Novel algorithm -- signal weighting required experimentation                                                                                                                                                                                                                                                                                                  |
+| `UnionFind` cluster builder (`cluster-builder.ts`)      | YES       | Applied research -- adapting graph algorithms to scam campaign detection                                                                                                                                                                                                                                                                                      |
+| `ct-monitor.ts` (Certificate Transparency monitoring)   | YES       | Novel application -- brand impersonation detection via CT logs. **Note: the deterministic CT-log Inngest fn was retired 2026-07-13** (0 attributable rows -- crt.sh's JSON endpoint 502s the lightweight access pattern); the experimentation is eligible R&D but the fn no longer runs. CT coverage now comes from the Python `crtsh` scraper (~4,970 rows). |
+| `local-intel.ts` (DNS + libphonenumber enrichment)      | YES       | Experimental -- determining which free signals have predictive value                                                                                                                                                                                                                                                                                          |
+| Standard Next.js pages and UI components                | NO        | Routine software development                                                                                                                                                                                                                                                                                                                                  |
+| Paddle billing integration                              | NO        | Off-the-shelf integration, no technical uncertainty                                                                                                                                                                                                                                                                                                           |
+| Plausible analytics setup                               | NO        | Configuration of existing tool                                                                                                                                                                                                                                                                                                                                |
+| Blog system with categories                             | NO        | Standard content management, no experimentation                                                                                                                                                                                                                                                                                                               |
+| Vercel deployment configuration                         | NO        | Routine DevOps                                                                                                                                                                                                                                                                                                                                                |
+| Newsletter subscription (Resend)                        | NO        | Standard API integration                                                                                                                                                                                                                                                                                                                                      |
 
 ---
 
 ### 2. Supporting R&D Activities
 
-*(~350 words)*
+_(~350 words)_
 
 The following activities directly support the core R&D activities and would not have been conducted absent the core activities.
 
@@ -108,7 +108,7 @@ The shared `@askarthur/bot-core` package adapts the core analysis pipeline for 4
 
 ### 3. Technical Uncertainty
 
-*(~400 words)*
+_(~400 words)_
 
 The following technical uncertainties could not be resolved by a competent professional in advance of conducting the experimental activities. These are not commercial or implementation uncertainties.
 
@@ -132,7 +132,7 @@ It was not known whether regex-based scrubbing could reliably detect Australian-
 
 ### 4. New Knowledge Generated
 
-*(~300 words)*
+_(~300 words)_
 
 The R&D activities generated the following new knowledge that did not exist prior to the experiments:
 
@@ -152,7 +152,7 @@ We discovered that Australian-specific PII formats create ordering dependencies 
 
 ### 5. Experiment Methodology
 
-*(~350 words)*
+_(~350 words)_
 
 Each core R&D activity followed a hypothesis-driven experimental methodology:
 
@@ -199,16 +199,16 @@ Evidence of this methodology is recorded in Git commit history (descriptive comm
 
 ### 6. Estimated Eligible Expenditure
 
-*(~150 words)*
+_(~150 words)_
 
-| Category | Estimated FY24-25 Spend | Eligible % | Eligible Amount |
-|---|---|---|---|
-| Founder labour (R&D activities) | [INSERT -- e.g., $80,000 based on hours logged] | 70% (excludes routine dev) | [INSERT] |
-| Cloud infrastructure (Vercel, Supabase, Upstash, R2) | [INSERT -- e.g., $8,000] | 40% (R&D share only) | [INSERT] |
-| AI inference (Anthropic API) | [INSERT -- e.g., $3,000] | 80% (primarily R&D experimentation) | [INSERT] |
-| External APIs (AbuseIPDB, Twilio, URLScan, HIBP) | [INSERT -- e.g., $2,000] | 60% (R&D enrichment experiments) | [INSERT] |
-| **Total eligible expenditure** | | | **[INSERT]** |
-| **43.5% refundable offset** | | | **[INSERT]** |
+| Category                                             | Estimated FY24-25 Spend                         | Eligible %                          | Eligible Amount |
+| ---------------------------------------------------- | ----------------------------------------------- | ----------------------------------- | --------------- |
+| Founder labour (R&D activities)                      | [INSERT -- e.g., $80,000 based on hours logged] | 70% (excludes routine dev)          | [INSERT]        |
+| Cloud infrastructure (Vercel, Supabase, Upstash, R2) | [INSERT -- e.g., $8,000]                        | 40% (R&D share only)                | [INSERT]        |
+| AI inference (Anthropic API)                         | [INSERT -- e.g., $3,000]                        | 80% (primarily R&D experimentation) | [INSERT]        |
+| External APIs (AbuseIPDB, Twilio, URLScan, HIBP)     | [INSERT -- e.g., $2,000]                        | 60% (R&D enrichment experiments)    | [INSERT]        |
+| **Total eligible expenditure**                       |                                                 |                                     | **[INSERT]**    |
+| **43.5% refundable offset**                          |                                                 |                                     | **[INSERT]**    |
 
 [Estimate -- all figures require validation against actual financial records. Eligible percentages are initial estimates based on activity split; an R&D tax adviser should review before filing.]
 
@@ -226,7 +226,7 @@ Evidence of this methodology is recorded in Git commit history (descriptive comm
 
 ### 1. Founder-Market Fit
 
-*(~400 words)*
+_(~400 words)_
 
 I am a solo technical founder who has single-handedly built a production-grade, multi-platform scam detection platform across 11 development phases, 44 database migrations, 7 monorepo packages, and 6 user surfaces (web, extension, mobile, Telegram, WhatsApp, Slack, Messenger). This is not a prototype -- it is a production system with real API endpoints, real threat intelligence feeds, and real-time AI analysis. [Data -- codebase exists and is deployed]
 
@@ -256,21 +256,21 @@ I am a technical founder without enterprise sales experience. The product is bui
 
 ### 2. What You Have Built
 
-*(~450 words)*
+_(~450 words)_
 
 Ask Arthur is Australia's first community-sourced scam intelligence platform. Users submit suspicious content (text, URLs, images, QR codes) via 6 surfaces and receive an instant AI-powered verdict -- SAFE, SUSPICIOUS, or HIGH_RISK -- with red flags, explanation, and next steps. Every check enriches a PII-scrubbed threat database that powers a B2B Threat Intelligence API for regulated entities. [Data -- production system deployed at askarthur.au]
 
 **Consumer product (free):**
 
-| Surface | Technology | Status |
-|---|---|---|
-| Web app | Next.js 16, React 19, Turbopack | Production [Data] |
-| Chrome/Firefox extension | WXT framework | Production [Data] |
-| Mobile app (iOS + Android) | Expo 54, React Native | Production [Data] |
-| Telegram bot | Webhook-based | Production [Data] |
-| WhatsApp bot | Webhook-based | Production [Data] |
-| Slack bot | Slash commands | Production [Data] |
-| Messenger bot | Webhook-based | Production [Data] |
+| Surface                    | Technology                      | Status            |
+| -------------------------- | ------------------------------- | ----------------- |
+| Web app                    | Next.js 16, React 19, Turbopack | Production [Data] |
+| Chrome/Firefox extension   | WXT framework                   | Production [Data] |
+| Mobile app (iOS + Android) | Expo 54, React Native           | Production [Data] |
+| Telegram bot               | Webhook-based                   | Production [Data] |
+| WhatsApp bot               | Webhook-based                   | Production [Data] |
+| Slack bot                  | Slash commands                  | Production [Data] |
+| Messenger bot              | Webhook-based                   | Production [Data] |
 
 **B2B Threat Intelligence API (monetised):**
 
@@ -302,19 +302,19 @@ Beyond scam detection, multi-type security auditing covering websites (security 
 
 **Technology maturity (TRL assessment):**
 
-| Component | TRL | Evidence |
-|---|---|---|
-| Consumer analysis pipeline | TRL 7 (system prototype in operational environment) | Production-deployed, processing real submissions [Data] |
-| B2B Threat API | TRL 6 (system demonstrated in relevant environment) | Endpoints deployed, no paying customers yet [Data] |
-| Intelligence pipeline | TRL 7 | 16 feeds ingesting, enrichment running on schedule [Data] |
-| Security scanner | TRL 7 | All 4 scanner types production-deployed [Data] |
-| Enterprise compliance layer | TRL 4 (component validation in lab) | Export views built, no enterprise integration tested [Estimate] |
+| Component                   | TRL                                                 | Evidence                                                        |
+| --------------------------- | --------------------------------------------------- | --------------------------------------------------------------- |
+| Consumer analysis pipeline  | TRL 7 (system prototype in operational environment) | Production-deployed, processing real submissions [Data]         |
+| B2B Threat API              | TRL 6 (system demonstrated in relevant environment) | Endpoints deployed, no paying customers yet [Data]              |
+| Intelligence pipeline       | TRL 7                                               | 16 feeds ingesting, enrichment running on schedule [Data]       |
+| Security scanner            | TRL 7                                               | All 4 scanner types production-deployed [Data]                  |
+| Enterprise compliance layer | TRL 4 (component validation in lab)                 | Export views built, no enterprise integration tested [Estimate] |
 
 ---
 
 ### 3. Why Now
 
-*(~350 words)*
+_(~350 words)_
 
 Three forces converge to make this the right moment for Ask Arthur. Missing this window means missing the regulatory-driven market creation event.
 
@@ -342,7 +342,7 @@ Large language models make it trivial to generate grammatically perfect, context
 
 ### 4. What You Need from Startmate
 
-*(~350 words)*
+_(~350 words)_
 
 Ask Arthur's core problem is not technology -- the platform is built. The problem is commercial velocity. Startmate addresses the three specific gaps that are blocking revenue.
 
@@ -366,13 +366,13 @@ Target: Close pre-seed round within 3--6 months of programme completion.
 
 **Use of $120K investment:**
 
-| Category | Amount | Purpose |
-|---|---|---|
-| Enterprise pilot programme | $40K | Free/discounted POC infrastructure costs, travel for on-site demonstrations |
-| AFCX + GASA membership fees | $15K | Strategic ecosystem positioning for SPF compliance sales |
-| Conference presence | $15K | Fraud & Financial Crime Australia 2026, AISA Australian Cyber Conference |
-| Chrome Web Store + App Store submissions | $5K | Developer fees, compliance review |
-| Operating runway | $45K | 3--6 months lean operations (infrastructure + AI costs) |
+| Category                                 | Amount | Purpose                                                                     |
+| ---------------------------------------- | ------ | --------------------------------------------------------------------------- |
+| Enterprise pilot programme               | $40K   | Free/discounted POC infrastructure costs, travel for on-site demonstrations |
+| AFCX + GASA membership fees              | $15K   | Strategic ecosystem positioning for SPF compliance sales                    |
+| Conference presence                      | $15K   | Fraud & Financial Crime Australia 2026, AISA Australian Cyber Conference    |
+| Chrome Web Store + App Store submissions | $5K    | Developer fees, compliance review                                           |
+| Operating runway                         | $45K   | 3--6 months lean operations (infrastructure + AI costs)                     |
 
 **What success looks like at programme end:**
 
@@ -403,20 +403,20 @@ Target: Close pre-seed round within 3--6 months of programme completion.
 
 ### Word Count Summary
 
-| Section | Words |
-|---|---|
-| **RDTI: Core R&D Activities** | ~650 |
-| **RDTI: Supporting R&D Activities** | ~350 |
-| **RDTI: Technical Uncertainty** | ~400 |
-| **RDTI: New Knowledge Generated** | ~300 |
-| **RDTI: Experiment Methodology** | ~350 |
-| **RDTI: Estimated Expenditure** | ~150 |
-| **Startmate: Founder-Market Fit** | ~400 |
-| **Startmate: What You Have Built** | ~450 |
-| **Startmate: Why Now** | ~350 |
-| **Startmate: What You Need from Startmate** | ~350 |
-| **Appendix: Scoring Notes** | ~350 |
+| Section                                     | Words |
+| ------------------------------------------- | ----- |
+| **RDTI: Core R&D Activities**               | ~650  |
+| **RDTI: Supporting R&D Activities**         | ~350  |
+| **RDTI: Technical Uncertainty**             | ~400  |
+| **RDTI: New Knowledge Generated**           | ~300  |
+| **RDTI: Experiment Methodology**            | ~350  |
+| **RDTI: Estimated Expenditure**             | ~150  |
+| **Startmate: Founder-Market Fit**           | ~400  |
+| **Startmate: What You Have Built**          | ~450  |
+| **Startmate: Why Now**                      | ~350  |
+| **Startmate: What You Need from Startmate** | ~350  |
+| **Appendix: Scoring Notes**                 | ~350  |
 
 ---
 
-*Generated April 2026. All [Data] claims reference code, migrations, or public records in the Ask Arthur repository. All [Estimate] claims are projections requiring validation. All [Assumption] claims are strategic positioning that should be reviewed for defensibility.*
+_Generated April 2026. All [Data] claims reference code, migrations, or public records in the Ask Arthur repository. All [Estimate] claims are projections requiring validation. All [Assumption] claims are strategic positioning that should be reviewed for defensibility._
