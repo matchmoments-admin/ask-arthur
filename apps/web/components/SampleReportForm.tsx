@@ -88,7 +88,7 @@ export default function SampleReportForm() {
 
   if (state === "done") {
     return (
-      <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5 mb-10 text-sm text-emerald-900">
+      <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-7 text-sm text-emerald-900">
         <p className="font-semibold mb-1">Sample report on its way ✓</p>
         <p>{msg} It shows the exact evidence pack a brand receives — clone domain, AI confidence, hosting attribution and takedown status.</p>
       </div>
@@ -96,7 +96,10 @@ export default function SampleReportForm() {
   }
 
   return (
-    <div className="rounded-xl border border-deep-navy/15 bg-white p-5 mb-10">
+    <div
+      className="rounded-2xl border border-slate-200 p-7"
+      style={{ backgroundImage: "linear-gradient(180deg,#f4f8fd,#eef3fa)" }}
+    >
       <p className="text-sm font-bold tracking-widest uppercase text-deep-navy mb-1">
         See a sample report
       </p>

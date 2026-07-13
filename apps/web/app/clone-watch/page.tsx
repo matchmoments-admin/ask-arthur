@@ -1,23 +1,30 @@
-// Layer 0 clone-watch public page. Renders yesterday's top NRD hits with
-// factual-signal-only copy per docs/policy/draft-disclaimer-pack-v0.md
+// Layer 0 clone-watch public page. Renders the last 7 days of operator-CONFIRMED
+// NRD hits with factual-signal-only copy per docs/policy/draft-disclaimer-pack-v0.md
 // Surface 5 principles.
 //
 // `noindex` for the first 7 days while v0 copy is unvetted. Sitemap
 // excludes /clone-watch (see apps/web/app/sitemap.ts). Index-flip is a
-// follow-up PR after #371 lawyer-vetted v1 copy lands.
+// follow-up PR after #371 lawyer-vetted v1 copy lands — NOT this design change.
 //
 // Read path: service-role Supabase client (the table is service-role-only
 // per v140 RLS); page renders server-side, never via browser supabase-js.
+// The interactive domain grid is a client component that receives an
+// already-safe, pre-decoded array (see CloneWatchDomainList).
 
 import type { Metadata } from "next";
 import Link from "next/link";
-import { AlertTriangle, ShieldQuestion } from "lucide-react";
+import { ShieldQuestion } from "lucide-react";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import SampleReportForm from "@/components/SampleReportForm";
 import CloneListRequestForm from "@/components/CloneListRequestForm";
+import CloneWatchDomainList, {
+  type CloneDomainItem,
+} from "@/components/clone-watch/CloneWatchDomainList";
 
 export const revalidate = 3600; // 1 hour ISR
+
+const MONO = "var(--font-plex-mono), ui-monospace, monospace";
 
 export const metadata: Metadata = {
   title:
@@ -142,100 +149,133 @@ function firstSignal(signals: unknown): SignalEntry | null {
   return first as SignalEntry;
 }
 
-function signalLabel(sig: SignalEntry | null): string {
-  if (!sig?.signal_type) return "match";
-  switch (sig.signal_type) {
-    case "confusable":
-      return "look-alike characters";
-    case "substring":
-      return "brand name in domain";
+// Map the first signal's type to the client grid's typeKey via a fixed
+// whitelist — anything outside the curated vocabulary falls back to the
+// generic "match" badge so attacker-influenced JSONB can't surface raw enum
+// tokens inside the styled pill.
+function typeKeyFor(signals: unknown): CloneDomainItem["typeKey"] {
+  switch (firstSignal(signals)?.signal_type) {
     case "levenshtein":
-      return "1-char typo";
+      return "t";
+    case "substring":
+      return "b";
+    case "confusable":
+      return "l";
     default:
-      // Whitelist: anything outside the curated vocabulary falls back to
-      // the generic label so attacker-influenced JSONB can't surface raw
-      // enum tokens inside the styled pill.
       return "match";
   }
 }
 
-function relativeTime(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime();
-  const hours = Math.floor(ms / 3_600_000);
-  if (hours < 1) return "just now";
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
-
-function PublicImpactBlock({
+// Dark "impact instrument" panel — aggregate-only, never names a specific
+// candidate domain. Renders only when FF_SHOPFRONT_CLONE_OUTREACH=true AND
+// there's at least one candidate in the window (a "0 candidates" panel reads
+// as broken, not as quiet).
+function PublicImpactPanel({
   impact,
   takedown,
 }: {
   impact: PublicImpactSnapshot;
   takedown: PublicTakedownStats | null;
 }) {
-  // Aggregate-only — never names a specific candidate domain. Renders only
-  // when FF_SHOPFRONT_CLONE_OUTREACH=true AND there's at least one
-  // candidate in the window. Quiet weeks render no block (intentional —
-  // an "0 candidates" block reads as broken, not as quiet).
   const fmtMinutes = (m: number) =>
     m < 60 ? `${m} min` : `${(m / 60).toFixed(1)}h`;
-  const tiles: Array<{ label: string; value: string }> = [
+  const perDay = Math.round(impact.candidates_total / (impact.window_days || 30));
+  const pct =
+    impact.candidates_total > 0
+      ? Math.round((impact.netcraft_submits_total / impact.candidates_total) * 100)
+      : 0;
+
+  const tiles: Array<{ value: string; label: string; sub: string }> = [
     {
-      label: "Candidates surfaced",
       value: impact.candidates_total.toLocaleString(),
+      label: "Candidates surfaced",
+      sub: `≈ ${perDay.toLocaleString()} new matches / day`,
     },
-    { label: "Brands protected", value: impact.brands_protected.toLocaleString() },
     {
-      label: "Reported to Netcraft",
-      value: impact.netcraft_submits_total.toLocaleString(),
+      value: impact.brands_protected.toLocaleString(),
+      label: "Brands protected",
+      sub: "with a confirmed look-alike",
     },
-    // Show median-time-to-takedown when Netcraft has confirmed at least one;
-    // otherwise show brand-notification count (it's the next-most-impressive
-    // metric while takedown polling is still warming up).
+    {
+      value: impact.netcraft_submits_total.toLocaleString(),
+      label: "Reported to Netcraft",
+      sub: "forwarded to blocklists",
+    },
     takedown && takedown.takedowns_total > 0
       ? {
-          label: "Median time-to-takedown",
           value: fmtMinutes(takedown.median_minutes),
+          label: "Median time-to-takedown",
+          sub: "from report to removal",
         }
       : {
-          label: "Brand teams notified",
           value: impact.brand_notifications_total.toLocaleString(),
+          label: "Brand teams notified",
+          sub: "aggregate-only policy",
         },
   ];
+
   return (
     <section
       aria-labelledby="impact-heading"
-      className="rounded-xl border border-deep-navy/15 bg-deep-navy/[0.04] p-5 mb-8"
+      className="mt-11 rounded-3xl bg-deep-navy p-8 md:p-9 text-white shadow-[0_24px_60px_-34px_rgba(15,39,68,0.55)]"
+      style={{
+        backgroundImage:
+          "radial-gradient(120% 140% at 100% 0%, #17324f 0%, #001f3f 55%)",
+      }}
     >
-      <h2
-        id="impact-heading"
-        className="text-xs font-bold uppercase tracking-widest text-deep-navy mb-3"
-      >
-        Last {impact.window_days} days · clone-watch impact
-      </h2>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {tiles.map((t) => (
-          <div key={t.label}>
-            <p
-              className="text-2xl md:text-3xl font-extrabold text-deep-navy"
+      <div className="flex flex-wrap items-center justify-between gap-4 mb-7">
+        <h2
+          id="impact-heading"
+          className="text-xs font-bold uppercase tracking-widest text-slate-300"
+        >
+          Last {impact.window_days} days · clone-watch impact
+        </h2>
+        <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.07] px-3 py-1.5 text-xs font-semibold text-slate-200">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_0_3px_rgba(52,211,153,0.22)]" />
+          Updated daily
+        </span>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-8 md:gap-x-0 md:gap-y-0 md:divide-x md:divide-white/10">
+        {tiles.map((t, i) => (
+          <div key={t.label} className={i === 0 ? "md:pr-6" : "md:px-6"}>
+            <div
+              className="text-4xl md:text-5xl font-extrabold leading-none tracking-tight"
               style={{ fontVariantNumeric: "tabular-nums" }}
             >
               {t.value}
-            </p>
-            <p className="text-[11px] text-gov-slate mt-0.5 leading-snug">
-              {t.label}
-            </p>
+            </div>
+            <div className="mt-3 text-sm font-semibold text-slate-100">{t.label}</div>
+            <div className="mt-1 text-xs text-slate-400">{t.sub}</div>
           </div>
         ))}
       </div>
-      <p className="text-[11px] text-gov-slate mt-4 leading-relaxed">
-        Numbers are aggregate-only. We never publish which specific domains
-        we&apos;ve reported. Reports go to community blocklist aggregators
-        (so suspect domains get browser-blocked globally) and to the
-        affected brand&apos;s security team.
-      </p>
+
+      <div className="mt-8 pt-7 border-t border-white/10">
+        <div className="flex items-baseline justify-between gap-4 mb-3">
+          <span className="text-sm text-slate-300">
+            {impact.netcraft_submits_total.toLocaleString()} of{" "}
+            {impact.candidates_total.toLocaleString()} candidates forwarded to
+            community blocklists
+          </span>
+          <span className="text-sm font-bold">{pct}%</span>
+        </div>
+        <div className="h-2 rounded-full bg-white/10 overflow-hidden">
+          <div
+            className="h-full rounded-full"
+            style={{
+              width: `${pct}%`,
+              backgroundImage: "linear-gradient(90deg,#5aa2e6,#7fc3e8)",
+            }}
+          />
+        </div>
+        <p className="mt-5 text-xs leading-relaxed text-slate-400">
+          Numbers are aggregate-only. We never publish which specific domains
+          we&apos;ve reported. Reports go to community blocklist aggregators (so
+          suspect domains get browser-blocked globally) and to the affected
+          brand&apos;s security team.
+        </p>
+      </div>
     </section>
   );
 }
@@ -252,63 +292,133 @@ export default async function CloneWatchPage() {
   const takedown = impactBundle?.takedown ?? null;
   const latest = editions[0] ?? null;
 
+  const items: CloneDomainItem[] = alerts.map((a) => ({
+    domain: a.candidate_domain,
+    brand: a.inferred_target_domain,
+    typeKey: typeKeyFor(a.signals),
+    firstSeenAt: a.first_seen_at,
+  }));
+
   return (
     <>
-      <div className="flex items-center gap-2 mb-4">
-        <ShieldQuestion size={20} className="text-deep-navy" />
-        <span className="text-xs font-bold tracking-widest uppercase text-deep-navy">
-          Clone-watch · daily NRD sweep
-        </span>
-      </div>
-      <h1 className="text-deep-navy text-4xl md:text-5xl font-extrabold mb-4 leading-tight">
-        Newly-registered AU brand-pattern domains
-      </h1>
+      {/* Hero */}
+      <section className="text-center pt-4">
+        <div className="inline-flex items-center gap-2.5 mb-6">
+          <span className="inline-flex h-[26px] w-[26px] items-center justify-center rounded-lg bg-deep-navy">
+            <ShieldQuestion size={15} className="text-white" />
+          </span>
+          <span className="text-[13px] font-bold uppercase tracking-[0.13em] text-deep-navy">
+            Clone-watch · daily NRD sweep
+          </span>
+        </div>
+        <h1 className="mx-auto max-w-[17ch] text-4xl md:text-6xl font-extrabold leading-[1.03] tracking-tight text-deep-navy">
+          Newly-registered AU brand-pattern domains
+        </h1>
+        <p className="mx-auto mt-7 max-w-[60ch] text-lg text-gov-slate leading-relaxed">
+          Each entry below is a domain registered in the last 7 days whose
+          characters match the lexical pattern of an Australian brand on our
+          reference list. These are factual observations from a public-registry
+          sweep — <strong className="font-semibold text-deep-navy">not characterisations of the registrant or their intent.</strong>
+        </p>
+      </section>
 
-      <p className="text-lg text-gov-slate mb-6 leading-relaxed">
-        Each entry below is a domain registered in the last 7 days whose
-        characters match the lexical pattern of an Australian brand on
-        our reference list. These are factual observations from a
-        public-registry sweep — not characterisations of the registrant
-        or their intent.
-      </p>
-
+      {/* Dark impact instrument panel */}
       {impact && impact.candidates_total > 0 && (
-        <PublicImpactBlock impact={impact} takedown={takedown} />
+        <PublicImpactPanel impact={impact} takedown={takedown} />
       )}
 
+      {/* Monthly reports */}
       {editions.length > 0 && (
-        <section aria-labelledby="editions-heading" className="mb-10">
-          <h2
-            id="editions-heading"
-            className="text-xs font-bold uppercase tracking-widest text-deep-navy mb-3"
-          >
-            Monthly reports
-          </h2>
-          {latest && (
-            <p className="text-sm text-gov-slate mb-3 leading-relaxed">
-              Latest edition —{" "}
-              <Link href={`/clone-watch/${latest.period_month.slice(0, 7)}`} className="font-semibold text-deep-navy underline">
-                {editionLabel(latest.period_month)}
+        <section aria-labelledby="editions-heading" className="mt-10">
+          <div className="flex flex-wrap items-center justify-between gap-5 rounded-2xl border border-slate-200 bg-slate-50 px-6 py-5">
+            <div>
+              <div
+                id="editions-heading"
+                className="mb-1.5 text-xs font-bold uppercase tracking-[0.13em] text-slate-500"
+              >
+                Monthly reports
+              </div>
+              {latest && (
+                <div className="text-base leading-relaxed text-gov-slate">
+                  Latest edition —{" "}
+                  <strong className="font-bold text-deep-navy">
+                    {editionLabel(latest.period_month)}
+                  </strong>
+                  : {latest.total_domains.toLocaleString()} lookalike domains
+                  across {latest.brand_count.toLocaleString()} brands.
+                </div>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-4">
+              <Link
+                href="/clone-watch/method"
+                className="text-sm font-semibold text-deep-navy underline underline-offset-2"
+              >
+                How we measure this
               </Link>
-              : {latest.total_domains.toLocaleString()} lookalike domains across{" "}
-              {latest.brand_count.toLocaleString()} brands. See{" "}
-              <Link href="/clone-watch/method" className="underline">how we measure this</Link>.
-            </p>
-          )}
-          <ul className="flex flex-wrap gap-2">
-            {editions.map((e) => (
-              <li key={e.period_month}>
+              {latest && (
                 <Link
-                  href={`/clone-watch/${e.period_month.slice(0, 7)}`}
-                  className="inline-flex items-center rounded-full border border-deep-navy/25 px-3 py-1 text-xs font-medium text-deep-navy hover:bg-deep-navy/5"
+                  href={`/clone-watch/${latest.period_month.slice(0, 7)}`}
+                  className="inline-flex items-center gap-2 rounded-xl bg-deep-navy px-4 py-2.5 text-sm font-bold text-white hover:bg-deep-navy/90 transition-colors"
                 >
-                  {editionLabel(e.period_month)}
+                  {editionLabel(latest.period_month)} <span aria-hidden="true">→</span>
                 </Link>
-              </li>
-            ))}
-          </ul>
+              )}
+            </div>
+          </div>
+          {editions.length > 1 && (
+            <ul className="mt-3 flex flex-wrap gap-2">
+              {editions.map((e) => (
+                <li key={e.period_month}>
+                  <Link
+                    href={`/clone-watch/${e.period_month.slice(0, 7)}`}
+                    className="inline-flex items-center rounded-full border border-deep-navy/25 px-3 py-1 text-xs font-medium text-deep-navy hover:bg-deep-navy/5"
+                  >
+                    {editionLabel(e.period_month)}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
       )}
+
+      {/* Explainer cards */}
+      <section className="mt-5 grid gap-4 md:grid-cols-2">
+        <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-7">
+          <h3 className="mb-3 text-[17px] font-bold text-amber-900">
+            What this list is
+          </h3>
+          <p className="text-[15px] leading-relaxed text-amber-900/90">
+            A daily lexical match against newly-registered domains. We claim only
+            that the domain string is <strong className="font-bold">characteristically similar</strong> to an
+            Australian brand name by a deterministic measurement — we do{" "}
+            <strong className="font-bold">not</strong> claim any listed domain is operated by a scammer or is
+            hosting fraudulent content.
+          </p>
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-7">
+          <h3 className="mb-3 text-[17px] font-bold text-deep-navy">
+            If your brand appears here
+          </h3>
+          <p className="mb-4 text-[15px] leading-relaxed text-gov-slate">
+            Verify your shop on Ask Arthur, or request removal from the reference
+            list by emailing our team — we respond to every request.
+          </p>
+          <a
+            href="mailto:hello@askarthur.au"
+            className="text-sm font-medium text-deep-navy underline underline-offset-2"
+            style={{ fontFamily: MONO }}
+          >
+            hello@askarthur.au
+          </a>
+        </div>
+      </section>
+
+      {/* Sample report CTA */}
+      <div className="mt-4">
+        <SampleReportForm />
+      </div>
 
       {featureFlags.cloneListRequest && (
         <section className="mb-10">
@@ -316,112 +426,44 @@ export default async function CloneWatchPage() {
         </section>
       )}
 
-      <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 mb-10 text-sm leading-relaxed text-amber-900">
-        <div className="flex items-start gap-2">
-          <AlertTriangle
-            size={16}
-            className="mt-0.5 shrink-0 text-amber-700"
-          />
-          <div>
-            <p className="font-semibold mb-1">What this list is</p>
-            <p>
-              A daily lexical match against newly-registered domains. We
-              do <strong>not</strong> claim any listed domain is operated
-              by a scammer or is hosting fraudulent content. We claim
-              only that the domain string is characteristically similar
-              to an Australian brand name by a deterministic
-              measurement.
-            </p>
-            <p className="mt-3 font-semibold">If your brand appears here</p>
-            <p>
-              You can verify your shop on Ask Arthur or request removal
-              from the reference list by emailing{" "}
-              <a
-                href="mailto:hello@askarthur.au"
-                className="underline font-medium"
-              >
-                hello@askarthur.au
-              </a>
-              .
-            </p>
+      {/* Interactive domain grid */}
+      <CloneWatchDomainList items={items} />
+
+      {/* Methodology footnotes */}
+      <section className="mt-14 grid gap-7 border-t border-slate-200 pt-9 md:grid-cols-3">
+        <div>
+          <div className="mb-2.5 text-xs font-bold uppercase tracking-[0.11em] text-deep-navy">
+            Data source
           </div>
-        </div>
-      </div>
-
-      <SampleReportForm />
-
-      {alerts.length === 0 ? (
-        <div className="text-center py-16">
-          <p className="text-lg font-semibold text-deep-navy mb-2">
-            No registrations matched in the last 7 days
-          </p>
-          <p className="text-sm text-gov-slate">
-            New entries appear here within hours of each daily sweep
-            (08:30 UTC).
+          <p className="text-[13.5px] leading-relaxed text-slate-500">
+            Newly-registered domain (NRD) lists from whoisds.com (free public
+            tier), filtered against a reference list of approximately 50
+            Australian retail, bank, telco, and logistics brand names.
           </p>
         </div>
-      ) : (
-        <ul className="space-y-3">
-          {alerts.map((alert) => {
-            const sig = firstSignal(alert.signals);
-            return (
-              <li key={alert.id}>
-                <article className="rounded-lg border border-deep-navy/15 bg-white p-4">
-                  <div className="flex items-center gap-2 text-xs text-gov-slate mb-2">
-                    <span className="inline-flex items-center rounded-full border border-deep-navy/30 px-2 py-0.5 font-semibold text-deep-navy">
-                      {signalLabel(sig)}
-                    </span>
-                    <span>·</span>
-                    <span>{relativeTime(alert.first_seen_at)}</span>
-                  </div>
-                  <p className="text-base text-deep-navy">
-                    <span className="font-semibold break-all">
-                      {alert.candidate_domain}
-                    </span>
-                    {alert.inferred_target_domain && (
-                      <span className="text-gov-slate">
-                        {" "}
-                        resembles{" "}
-                        <span className="font-medium">
-                          {alert.inferred_target_domain}
-                        </span>
-                      </span>
-                    )}
-                  </p>
-                </article>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-
-      <div className="mt-12 pt-8 border-t border-deep-navy/10 text-xs leading-relaxed text-gov-slate">
-        <p className="mb-2">
-          <strong className="text-deep-navy">Data source:</strong>{" "}
-          Newly-registered domain (NRD) lists from whoisds.com (free
-          public tier), filtered against a reference list of
-          approximately 50 Australian retail, bank, telco, and
-          logistics brand names.
-        </p>
-        <p className="mb-2">
-          <strong className="text-deep-navy">What we have not done:</strong>{" "}
-          We have not contacted the registrant. We have not verified
-          whether the domain resolves, serves a website, or has any
-          content. We have not made any legal characterisation of the
-          domain or its registrant.
-        </p>
-        <p>
-          <strong className="text-deep-navy">Updates:</strong> The list
-          refreshes once per day. Entries fall off after 7 days. See{" "}
-          <a
-            href="/privacy"
-            className="underline"
-          >
-            our privacy policy
-          </a>{" "}
-          for how we handle this data.
-        </p>
-      </div>
+        <div>
+          <div className="mb-2.5 text-xs font-bold uppercase tracking-[0.11em] text-deep-navy">
+            What we have not done
+          </div>
+          <p className="text-[13.5px] leading-relaxed text-slate-500">
+            We have not contacted the registrant, verified whether the domain
+            resolves or serves content, or made any legal characterisation of
+            the domain or its registrant.
+          </p>
+        </div>
+        <div>
+          <div className="mb-2.5 text-xs font-bold uppercase tracking-[0.11em] text-deep-navy">
+            Updates
+          </div>
+          <p className="text-[13.5px] leading-relaxed text-slate-500">
+            The list refreshes once per day. Entries fall off after 7 days. See{" "}
+            <a href="/privacy" className="underline underline-offset-2">
+              our privacy policy
+            </a>{" "}
+            for how we handle this data.
+          </p>
+        </div>
+      </section>
     </>
   );
 }
