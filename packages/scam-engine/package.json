@@ -45,7 +45,6 @@
     "./inngest/reddit-intel-embed": "./src/inngest/reddit-intel-embed.ts",
     "./inngest/reddit-intel-cluster": "./src/inngest/reddit-intel-cluster.ts",
     "./ipqualityscore": "./src/ipqualityscore.ts",
-    "./inngest/meta-brp-report": "./src/inngest/meta-brp-report.ts",
     "./phone-footprint": "./src/phone-footprint/index.ts",
     "./abr-lookup": "./src/abr-lookup.ts",
     "./charity-intent": "./src/charity-intent.ts",

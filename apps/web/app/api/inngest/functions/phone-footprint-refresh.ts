@@ -134,8 +134,15 @@ export const phoneFootprintRefreshClaimer = inngest.createFunction(
       // completed_at=NULL and the `claimed_at IS NULL` gate would hide it
       // forever (the v224 read-gate-vs-write-gate class). We therefore also
       // re-select rows whose claim is older than STALE_CLAIM_MS and re-emit.
-      // Re-emit is safe: the monitor fn is idempotency-keyed on queueId, so a
-      // still-live original event dedups the re-fire.
+      // Re-emit crosses the dedup predicate: the monitor fn is idempotency-keyed
+      // on `queueId + claimedAt` (a claimKey that rotates each claim), NOT on
+      // queueId alone. A bare-queueId key would dedup the re-fire against the
+      // ORIGINAL run for the whole 24h idempotency window even when that run
+      // FAILED — leaving a failed monitor un-re-driven for ~24h (the v224
+      // read-gate-vs-write-gate class: a re-submit must move the row across the
+      // exact predicate its consumer filters on). Stamping a fresh claimedAt on
+      // each reclaim gives the re-fire a new key so it actually runs, while a
+      // duplicate emit of the SAME claim (same claimedAt) still dedups.
       const now = Date.now();
       const staleClaimBefore = new Date(now - STALE_CLAIM_MS).toISOString();
       const { data: due } = await supa
@@ -161,7 +168,9 @@ export const phoneFootprintRefreshClaimer = inngest.createFunction(
         logger.warn("refresh-claimer claim update failed", { error: String(error.message) });
         return [];
       }
-      return due;
+      // Stamp each claimed row with THIS claim's epoch so the monitor's
+      // idempotency key rotates per claim (see emit + idempotency below).
+      return due.map((d) => ({ ...d, claimedAt }));
     });
 
     if (claimed.length === 0) return { skipped: true, reason: "no due monitors" };
@@ -173,7 +182,9 @@ export const phoneFootprintRefreshClaimer = inngest.createFunction(
         claimed.map((c) =>
           inngest.send({
             name: REFRESH_MONITOR_EVENT,
-            data: { monitorId: c.monitor_id, queueId: c.id },
+            // claimKey rotates per claim so a reclaim after a failed run
+            // re-fires instead of being deduped for 24h (see claim-due above).
+            data: { monitorId: c.monitor_id, queueId: c.id, claimKey: `${c.id}-${c.claimedAt}` },
           }),
         ),
       );
@@ -191,7 +202,7 @@ export const phoneFootprintRefreshMonitor = inngest.createFunction(
   {
     id: "phone-footprint-refresh-monitor",
     name: "Phone Footprint: refresh one monitor",
-    idempotency: "event.data.queueId", // one refresh per claimed queue row
+    idempotency: "event.data.claimKey", // one refresh per CLAIM (queueId+claimedAt), so a reclaim after a failed run re-fires; a duplicate emit of the same claim still dedups
     retries: 2,
     // Capped at 3 (PR-B rebalance, down from 5): reserves ≥2 of Hobby's 5
     // concurrent slots for the latency-sensitive analyze fan-out so a refresh

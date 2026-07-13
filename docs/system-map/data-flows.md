@@ -424,12 +424,11 @@ Admin reviews at /admin/onward-reports
                        │
                        ▼
 Inngest fan-out (event-driven, no cron):
-  ├─ report-onward-scamwatch          → mark as 'delivered' (deep-link only)
+  ├─ report-onward-markers            → mark 'skipped'/'sent' (deep-link / audit markers for
+  │                                     scamwatch, reportcyber, idcare, ask-arthur-feed — one
+  │                                     multi-trigger fn, no external API call)
   ├─ report-onward-acma-email-spam    → POST to ACMA callback endpoint
-  ├─ report-onward-report-cyber       → POST to ReportCyber callback
-  ├─ report-onward-idcare             → POST to IDcare referral endpoint
-  ├─ onward-brand-abuse               → Brand-protection partner submission
-  └─ report-onward-ask-arthur-feed    → INSERT into internal regulator_alert_pushes
+  └─ onward-brand-abuse               → Brand-protection partner submission
        │
        │ on success/failure
        ▼

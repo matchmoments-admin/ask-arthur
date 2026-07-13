@@ -37,7 +37,8 @@ data corpus (two parallel tables for the same domain-of-discourse
 concept), and pays Hetzner hosting cost before Calidog's public
 endpoint has been measured.
 
-The existing `packages/scam-engine/src/inngest/ct-monitor.ts` is a
+The existing `packages/scam-engine/src/inngest/ct-monitor.ts` (retired
+2026-07-13 — see amendment above) is a
 DIFFERENT product surface. It targets AU government / bank / telco
 brand impersonation (keywords: `mygov`, `centrelink`, `ato.gov`,
 `auspost`, `commbank`, `nab`, `westpac`, `telstra`, `servicensw`)
@@ -75,7 +76,7 @@ to avoid.
 | B        | Adds Calidog public certstream WSS as a sibling data source. Aho-Corasick + dnstwist permutations precomputed on a new `shopfront_shop_permutations` table                                                                                                               | SAME `shopfront_clone_alerts` table (NOT a parallel `clone_findings` table)           | `packages/shopfront-glue/` (extended)                                                                                                                                                        |
 | C        | Adds whoisds NRD daily backstop. Self-hosted Hetzner certstream-server **only if** the Phase B Calidog stability spike fails OR an enterprise Layer 4 customer requires hard SLA                                                                                         | `shopfront_clone_alerts` + sibling `shopfront_clone_alerts_embeddings` (per ADR-0015) | A standalone `packages/domain-monitor/` is justified ONLY at this point — when Hetzner + NRD + Voyage embeddings make the surface independently complex enough for the deletion test to pass |
 
-**Existing CT monitor stays as-is.**
+**Existing CT monitor stays as-is.** (Since retired 2026-07-13 — see amendment above.)
 `packages/scam-engine/src/inngest/ct-monitor.ts` is a different product
 surface (AU govt / bank / telco brand impersonation, every 12h via
 crt.sh, writing to `brand_impersonation_alerts`). Clone-detection
@@ -148,7 +149,8 @@ lexical-pattern match triggers outbound merchant comms.
   triggers the Hetzner self-host work; success defers it. Either way,
   the cost surface is known before the merchant-facing alert SLA is
   promised.
-- **Existing CT monitor is protected from accidental refactor.** The
+- **Existing CT monitor is protected from accidental refactor.** (The fn was
+  later retired 2026-07-13 — see amendment above.) The
   ADR explicitly names `packages/scam-engine/src/inngest/ct-monitor.ts`
   - its keyword list + its target table so future agents reading this
     ADR don't try to "consolidate" the two surfaces. They serve different
@@ -266,7 +268,7 @@ is unaffected.
 
 ## Amendment 2026-05-29 — CT monitor keyword set now derives from the shared watchlist (still a distinct surface)
 
-The CT monitor (`ct-monitor.ts`) previously hardcoded its own 9 keywords
+The CT monitor (`ct-monitor.ts`; the Inngest fn was retired 2026-07-13 — see amendment above) previously hardcoded its own 9 keywords
 (`mygov`, `centrelink`, `ato.gov`, `auspost`, `commbank`, `nab`, `westpac`,
 `telstra`, `servicensw`) and its own legit-domain exclusion list. Those two
 lists had drifted from the ~150-brand `au-brand-watchlist.ts` that clone-watch
@@ -304,7 +306,7 @@ overlap both concerns) remains out of scope and a future ADR.
 - ADR-0012 — Threat Feed License enterprise SKU (the funding engine that gates Phase C)
 - ADR-0014 — Verified Directory primacy (the consumer surface clone-detection feeds)
 - Issue #376 — Phase A scanner (corpus-only)
-- `packages/scam-engine/src/inngest/ct-monitor.ts` — the EXISTING CT monitor (AU govt / bank / telco, every 12h via crt.sh) that this ADR explicitly does NOT replace
+- `packages/scam-engine/src/inngest/ct-monitor.ts` — the EXISTING CT monitor (AU govt / bank / telco, every 12h via crt.sh) that this ADR explicitly does NOT replace (Inngest fn retired 2026-07-13 — see amendment above)
 - `brand_impersonation_alerts` table — the existing 9-row table the existing CT monitor writes to
 - `supabase/migration-v140-shopfront-init.sql` — the migration that creates `shopfront_clone_alerts` (planned, not yet applied; ships in S0E.1)
 - CLAUDE.md → "Always do" → deletion test for new wrapper modules

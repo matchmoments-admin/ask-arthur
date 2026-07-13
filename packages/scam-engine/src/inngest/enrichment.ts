@@ -83,16 +83,21 @@ export const enrichmentFanOut = inngest.createFunction(
       },
     );
 
-    // Loud backlog gauge (always-ship .warn): per-run throughput is
-    // MAX_DOMAINS_PER_RUN × 2 runs/day, so a backlog beyond a few thousand can
-    // never fully drain. Newest-first means fresh threats are still enriched;
-    // this makes the ceiling visible so the enrich-what-users-check scoping
-    // decision is driven by data, not silence.
+    // Backlog gauge (INFO, not always-ship .warn). The backlog is structurally
+    // ~all source_type='feed' blocklist dumps and, by the newest-first design,
+    // NEVER drains below a few thousand — so `backlog > 5000` is a permanent,
+    // by-design condition, not an incident. An always-ship .warn firing on it
+    // every run would violate the CLAUDE.md rule reserving .warn for RARE
+    // high-value events (it burns the always-ship channel and buries a later
+    // genuinely-actionable enrichment fault under twice-daily noise — the exact
+    // alert-fatigue anti-pattern). INFO keeps the ceiling queryable in Axiom for
+    // the enrich-what-users-check scoping decision without paging on a
+    // permanent state. The raw backlog is also directly queryable from scam_urls.
     if (backlog > 5000) {
-      logger.warn("pipeline-enrichment-fanout: pending backlog far exceeds throughput", {
+      logger.info("pipeline-enrichment-fanout: pending backlog far exceeds throughput", {
         backlog,
         perRunCap: MAX_DOMAINS_PER_RUN,
-        hint: "queue is ~all source_type='feed' (blocklist dumps); newest-first enriches fresh threats, stale tail sheds via staleness. Consider on-demand enrichment for checked URLs.",
+        hint: "queue is ~all source_type='feed' (blocklist dumps); newest-first enriches fresh threats, stale tail sheds via staleness. Permanent by design — on-demand enrichment (D3) covers user-checked URLs.",
       });
     }
 
