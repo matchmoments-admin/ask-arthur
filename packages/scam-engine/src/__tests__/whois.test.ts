@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { lookupWhois } from "../whois";
+import { logCost } from "../cost-log";
+
+// Telemetry is fire-and-forget; mock it so we can assert on the billable-call
+// signal without touching Supabase.
+vi.mock("../cost-log", () => ({ logCost: vi.fn() }));
 
 // Real whoisjson.com response shape (verified live 2026-06-08): `registrar` is
 // an OBJECT with name + abuse email, nameservers are under `nameserver`.
@@ -20,6 +25,7 @@ const WHOISJSON_SHAPE = {
 describe("lookupWhois — whoisjson object shape", () => {
   beforeEach(() => {
     process.env.WHOIS_API_KEY = "test-key";
+    vi.mocked(logCost).mockClear();
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ({
@@ -57,5 +63,33 @@ describe("lookupWhois — whoisjson object shape", () => {
     const r = await lookupWhois("x.com");
     expect(r.registrar).toBeNull();
     expect(r.registrarAbuseEmail).toBeNull();
+  });
+
+  it("logs one billable cost row (whois/whoisjson, $0) per successful lookup", async () => {
+    await lookupWhois("stakebank.org");
+    expect(logCost).toHaveBeenCalledTimes(1);
+    expect(logCost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        feature: "whois",
+        provider: "whoisjson",
+        units: 1,
+        estimatedCostUsd: 0,
+      }),
+    );
+  });
+
+  it("does NOT log cost when the API key is missing (no upstream call)", async () => {
+    delete process.env.WHOIS_API_KEY;
+    await lookupWhois("x.com");
+    expect(logCost).not.toHaveBeenCalled();
+  });
+
+  it("does NOT log cost on a non-200 response (quota not consumed)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, status: 429, json: async () => ({}) })),
+    );
+    await lookupWhois("ratelimited.example");
+    expect(logCost).not.toHaveBeenCalled();
   });
 });

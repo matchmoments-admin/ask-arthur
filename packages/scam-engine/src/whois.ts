@@ -2,6 +2,7 @@
 // Domain-level lookup — cached in scam_urls DB to avoid redundant calls.
 
 import { logger } from "@askarthur/utils/logger";
+import { logCost } from "./cost-log";
 
 export interface WhoisResult {
   registrar: string | null;
@@ -54,6 +55,22 @@ export async function lookupWhois(domain: string): Promise<WhoisResult> {
       logger.warn("WHOIS lookup failed", { status: res.status, domain });
       return EMPTY_RESULT;
     }
+
+    // Volume telemetry against whoisjson's 1,000/month free cap. We count only
+    // successful (200) lookups — non-200 responses return early above and aren't
+    // logged, so this measures *served* lookups (the useful volume signal)
+    // rather than every attempt. Free tier → estimatedCostUsd 0; the row exists
+    // so /admin/costs + the weekly digest surface WHOIS volume as the D2/D3
+    // chain, entity-enrichment, and persona-check all drive it. This is the
+    // fleet-review "no cost signal → invisible" lesson applied to a free API.
+    // Fire-and-forget (void) — telemetry never adds latency to or breaks the lookup.
+    void logCost({
+      feature: "whois",
+      provider: "whoisjson",
+      operation: "domain-lookup",
+      units: 1,
+      estimatedCostUsd: 0,
+    });
 
     const data = await res.json();
 

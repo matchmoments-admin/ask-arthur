@@ -324,6 +324,15 @@ export const redditIntelCluster = inngest.createFunction(
     id: "reddit-intel-cluster",
     name: "Reddit Intel: Greedy theme clustering + naming",
     retries: 3,
+    // Greedy assignment is STATEFUL and order-dependent — each run reads the
+    // theme table, assigns in-memory, then writes centroids/member_counts back.
+    // Two overlapping runs would read the same pre-write theme state and race
+    // (double-seeding themes, clobbering centroids). Normal operation fires one
+    // cohort/day so overlap never happens; this ceiling makes a *replay* — the
+    // historical rebuild (docs/ops/reddit-intel-theme-rebuild.md) firing many
+    // cohort events — serialize correctly instead of racing. Cluster runs are
+    // infrequent, so limit:1 costs nothing in the steady state.
+    concurrency: { limit: 1 },
   },
   { event: REDDIT_INTEL_EMBEDDED_EVENT },
   withAxiomLogging({ fnId: "reddit-intel-cluster" }, async ({ event, step }) => {

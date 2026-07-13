@@ -36,28 +36,52 @@ end-to-end. ct-monitor / meta-brp fully gone. reddit runaway contained.
 
 ## Open follow-ups (for the next work)
 
-1. **P1 reddit historical rebuild (deferred DATA op).** #717 stops the 2263-member
-   theme absorbing new posts, but those 2263 posts stay mislabeled. Rebuild =
-   reset their `theme_id` + re-cluster with the guards. Destructive/long → run in
-   a maintenance window with an operator watching (per `supabase/CLAUDE.md` #5).
-   Also confirm over the next ~3 daily cohorts that NEW themes start forming
-   (watch the `single-attractor collapse signature` Axiom warn stays silent).
+> **2026-07-13 follow-up session progress** — items 3 + 4 CLOSED, item 1 now
+> has a ready-to-run runbook, plus a WHOIS telemetry gap fixed. Status inline below.
 
-2. **Onward reporting launch (product decision).** C (#727) + #722 + #718 make the
-   onward flow launch-ready, but the whole feature is gated `NEXT_PUBLIC_FF_ONWARD_REPORTING`
-   (OFF) — `onward_report_log` is still empty. Launching (flip the flag +
-   surface the picker in `ResultCard`) is the BACKLOG "P1 onward-reporting" item.
+1. **P1 reddit historical rebuild (deferred DATA op) — RUNBOOK READY, execution
+   still deferred.** #717 stops the 2263-member theme absorbing new posts, but
+   those 2263 posts stay mislabeled. The full maintenance-window procedure is now
+   written and its read-only queries smoke-tested against prod:
+   **[`docs/ops/reddit-intel-theme-rebuild.md`](../ops/reddit-intel-theme-rebuild.md)**
+   (snapshot → single-statement reset via FK cascades → serial oldest-first cohort
+   replay through the guarded clusterer → inline naming → verify → rollback). The
+   clusterer also got a `concurrency: { limit: 1 }` ceiling so the replay can't
+   race the theme table. Execution stays deferred to a maintenance window with an
+   operator watching (per `supabase/CLAUDE.md` #5). Still confirm over the next ~3
+   daily cohorts that NEW themes form (the `single-attractor collapse signature`
+   Axiom warn stays silent).
 
-3. **D2 chain validation.** The 6 entities now in the worklist will be enriched by
-   `pipeline-entity-enrichment` (8h cron); the URL one then flows to
-   `pipeline-urlscan-enrichment`. Confirm over the next crons that urlscan-enrichment
-   logs its first-ever `cost_telemetry` rows (it had 0 all-time).
+2. **Onward reporting launch (product decision — UNCHANGED).** C (#727) + #722 +
+   #718 make the onward flow launch-ready, but the whole feature is gated
+   `NEXT_PUBLIC_FF_ONWARD_REPORTING` (OFF) — `onward_report_log` is still empty.
+   Launching (flip the flag + surface the picker in `ResultCard`) is the BACKLOG
+   "P1 onward-reporting" item. Not an engineering task — left for the product call.
 
-4. **Doc hygiene (minor).** `background-workers.md` header still says "Inngest
-   functions (38)" — stale after this session's add (D3) + removals (ct-monitor,
-   onward ×3). Pre-existing `rls_enabled_no_policy` INFO advisors
-   (analytics_events, scam_entities, scam_reports, …) remain on the documented
-   DB-hygiene backlog — not introduced here.
+3. **D2 chain validation — ✅ VALIDATED (2026-07-13).** The chain fired end-to-end:
+   `cost_telemetry` for `urlscan-enrichment` went **0 → 1** and `twilio-lookup`
+   logged a row **the same day**, i.e. the entity→urlscan path ran and paid APIs
+   billed. The 6 pending entities drained (now 0 pending, `completed` 11 → 17).
+   Note: `entity-enrichment` shows 0 cost rows all-time and that is **expected** —
+   `pipeline-entity-enrichment` never calls `logCost` directly; each paid helper
+   (twilio/ipqs/abuseipdb/ct/safebrowsing) logs under its **own** feature tag.
+
+4. **Doc hygiene — ✅ DONE (2026-07-13).** `background-workers.md` header fixed
+   `38 → 75` and corrected to explain the count is the sum of two registered
+   arrays (`inngestFunctions` 29 + `appFunctions` 46), not one file. The
+   pre-existing `rls_enabled_no_policy` INFO advisors (analytics_events,
+   scam_entities, scam_reports, …) remain on the documented DB-hygiene backlog —
+   not introduced here.
+
+5. **WHOIS free-quota telemetry — ✅ SHIPPED (2026-07-13, newly found).** WHOIS
+   (`whoisjson.com`, **1,000/month free cap**) is driven by the D2/D3 chain,
+   entity-enrichment, and the user-facing persona-check route but logged nothing —
+   the cap's consumption was invisible (the same "no cost signal → invisible"
+   failure mode as the reddit naming call). `lookupWhois` now emits a
+   `feature='whois'` `cost_telemetry` row (units 1, $0) per successful billable
+   response. **SSL + HIBP still uninstrumented** — SSL is a free TLS handshake
+   (no quota, telemetry would be noise); HIBP is paid but flag-gated and not
+   currently firing. Both logged to BACKLOG for a decision, not shipped here.
 
 ## Deliberately not done
 
