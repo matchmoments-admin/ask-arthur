@@ -584,7 +584,10 @@ arrival  (LinkedIn / blog / organic / direct)
        (clean short URLs carry no UTM query, so middleware skips them)
 
 user takes a real action → named event
-  │  CLIENT : track() → POST /api/events   (scan_started, feed_view — client-safe only)
+  │  CLIENT : track() → POST /api/events   (scan_started, feed_view, pageview — client-safe only)
+  │           blog posts are the FIRST/only pageview emitter (PageviewBeacon); the post page
+  │           renders a first-party view count via getPostViewCount(slug) = count(*) on
+  │           analytics_events WHERE event_type='pageview' AND path='/blog/<slug>' (v229 index), at ISR regen
   │  SERVER : emitAnalyzeComplete → scan_completed ; /api/leads → contact_submit ;
   │           /api/feedback (user_reported) → scam_report_submitted ; /go → link_click
   ▼

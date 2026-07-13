@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { revalidatePath } from "next/cache";
+import { revalidateBlogPost } from "@/lib/blog";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import {
@@ -60,15 +60,14 @@ export async function POST(req: NextRequest) {
   try {
     if (event.kind === "delete") {
       await deleteGhostPost(supabase, event.ghost_post_id);
-      revalidatePath("/blog");
+      revalidateBlogPost();
       return NextResponse.json({ ok: true, action: "delete" });
     }
     await syncGhostPost(supabase, event.post, event.status);
     // Bust the ISR cache immediately — /blog/[slug] has revalidate=3600, and
     // a pre-publish request can cache a "Post Not Found" render for the full
     // hour (bit us on the first Ghost-published post, 2026-07-13).
-    revalidatePath("/blog");
-    revalidatePath(`/blog/${event.post.slug}`);
+    revalidateBlogPost(event.post.slug);
     return NextResponse.json({
       ok: true,
       action: "upsert",

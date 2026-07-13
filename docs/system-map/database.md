@@ -346,7 +346,7 @@ Audit waves:
 
 ---
 
-## Migration timeline (v2 → v214)
+## Migration timeline (v2 → v229)
 
 Approximate domain bundling:
 
@@ -372,6 +372,7 @@ Approximate domain bundling:
 | v157–v172 | Clone-watch preclassify selectors + public revoke sweep (v157–v160); entity enrichment merge / risk-score batch / cluster commit (v161–v163); retention chunking + timeout caps (v164); onward OpenPhish/APWG enum + Brand Stewardship reports + Email Studio copy slots (v165–v167); blog slug unique + clone-watch urlscan failure-streak (v168–v169); `report_scam_entity` public RPC (v170); restore `get_world_scam_stats` (v171, #562); anon-RLS tighten — drop anon Public-read on `scam_entities`/`scam_reports`/`report_entity_links` (v172, #566, **HELD — not yet applied to prod**). |
 | v173–v191 | Vulnerability mentions (v173); canonical brand-alias layer (v174–v176); clone-alert attribution + urlscan async (v177–v178); known-brands contact seed (v179); brand-stewardship share-token / unsubscribes / outreach-done (v181–v183); Netcraft auto-candidates + daily cap (v184–v185); clone-watch report summary (v189); **first-party analytics** — `visitors` + `analytics_events` + 6 attribution views (v190, #666), `content_post_funnel` per-post view (v191, #667).                                                                                                                  |
 | v192–v207 | Shop Signal reviews + brand-convergence Seam + analytics/attribution refinements (see BACKLOG / memory for the per-migration detail).                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| v215–v229 | **Clone-watch brand-value + blog surface.** Clone-watch F1–F5 stack (v215–v226, see `docs/plans/clone-watch-brand-value-features.md`); blog `blog_external_links` (v227), Ghost-mirror partial-index fix (v228), and `idx_analytics_events_pageview_path` — a partial btree `analytics_events(path) WHERE event_type='pageview'` backing the on-page blog view count `getPostViewCount()` (v229, PR #748). This index reads as "unused" in advisors until blog traffic + hourly ISR regen exercise it.                                                                                           |
 | v208–v214 | **Weekly Intel + Arthur's Watch stack.** Dynamic weekly-digest synthesis store `reddit_intel_weekly_digest` (v208, PR #699); then Arthur's Watch competitor-newsletter intelligence — `feed_items.source` class extension (v209), `competitor_intel` category constraint (v210), remove dormant `inbound_twis` (v211), `competitor_intel_observations` per-scam extraction table (v212), +6 inbound sources (5 competitor + `wa_scamnet` regulator, v213), `feed_items.competitor_extracted_at` attempt marker (v214). See ADR-0021 + `docs/plans/arthurs-watch-newsletter.md`.                  |
 
 ---

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireAdmin } from "@/lib/adminAuth";
+import { revalidateBlogPost } from "@/lib/blog";
 import { logger } from "@askarthur/utils/logger";
 
 // Node runtime: requireAdmin() reads cookies + verifies an HMAC with
@@ -51,12 +51,8 @@ export async function POST(req: Request) {
     );
   }
 
-  const revalidated = ["/blog"];
-  revalidatePath("/blog");
-  if (parsed.slug) {
-    revalidatePath(`/blog/${parsed.slug}`);
-    revalidated.push(`/blog/${parsed.slug}`);
-  }
+  revalidateBlogPost(parsed.slug);
+  const revalidated = parsed.slug ? ["/blog", `/blog/${parsed.slug}`] : ["/blog"];
 
   logger.info("admin_blog_revalidate", { paths: revalidated });
   return NextResponse.json({ ok: true, revalidated });

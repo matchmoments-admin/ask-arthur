@@ -291,7 +291,19 @@ export interface MonthlyGeneratedPost {
   ideas: z.infer<typeof IdeaSchema>[];
 }
 
-const VALID_CATEGORIES = ["scam-alerts", "guides", "news", "weekly-roundup"];
+// Must stay in sync with the live `blog_categories` table slugs — an unknown
+// value would write an orphaned category_slug that never joins, so the post
+// renders with no category eyebrow. "news"/"weekly-roundup" were never real
+// categories (fixed 2026-07-14). Falls back to "scam-alerts" below.
+const VALID_CATEGORIES = [
+  "scam-alerts",
+  "guides",
+  "intelligence",
+  "product",
+  "security",
+  "compliance",
+  "real-stories",
+];
 
 export async function generateMonthlyIntelPost(
   facts: MonthlyIntelFacts
@@ -331,10 +343,12 @@ HONESTY RULES for our own detection data (non-negotiable — we show our working
 - Verifiability: when the post uses clone-watch data, tell readers the live aggregate numbers are publicly visible at https://askarthur.au/clone-watch — this is the one permitted askarthur.au link (the CTA block is still appended automatically; add nothing else).
 
 FORMATTING RULES for the post content (markdown):
-- Use > [!WARNING], > [!TIP], > [!DANGER] blockquote callouts (they render as styled boxes).
+- Use > [!WARNING], > [!TIP], > [!DANGER], > [!NOTE] blockquote callouts (they render as styled boxes).
 - 900–1300 words. Start with a one-line **TL;DR:**. Use ## sections. Include one practical checklist section.
+- Enumerations render with proper markers: use "- " for bullet lists and "1." for numbered lists. Start each item with a bold lead-in ("**Term** — explanation") for scannability.
+- Separate major sections with a "---" horizontal rule; it renders as a centred "· · ·" divider. Do NOT hand-space with blank lines — the blog CSS owns vertical rhythm.
 - No calls-to-action, sign-offs or askarthur.au links — a standard CTA block is appended automatically.
-- category must be one of: scam-alerts, guides, news, weekly-roundup.
+- category must be one of the live blog_categories slugs: scam-alerts, guides, intelligence, product, security, compliance, real-stories.
 - Respond ONLY by calling the submit_monthly_blog tool. "ideas" must be exactly 10 items, best first. Post title ≤90 chars; subtitle ≤180; excerpt ≤280.
 - Tool input fields must be actual JSON structures — "post" is an object and "ideas" is an array, never JSON-encoded strings.`,
       user: `Facts for ${facts.periodMonth} (all counts code-derived from production data):
