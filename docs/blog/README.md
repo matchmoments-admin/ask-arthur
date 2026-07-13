@@ -46,6 +46,16 @@ rebuilds the styled markup when the post syncs into `blog_posts`. This means
 you can type `[!WARNING]` in a Ghost blockquote and get the styled box on
 the public site.
 
+The **Ghost-hosted surface** (blog.askarthur.au previews + newsletter
+click-throughs) gets the same look via Ghost admin → Settings → Code
+injection → Site header: a small CSS+JS snippet that upgrades
+`[!TYPE]`-marker blockquotes client-side (pasted 2026-07-13; integration
+API keys can't write settings, so it's maintained by hand in Ghost). The
+snippet's style values are copied from `apps/web/app/globals.css`
+`.blog-content .callout` — **if those styles change, update the Ghost
+injection to match.** Icons hotload from
+`https://askarthur.au/illustrations/callout-*.webp`.
+
 ## External "Further reading" links
 
 Published posts can carry curated external related-article links, rendered as
