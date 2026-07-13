@@ -175,3 +175,48 @@ describe("verifyGhostSignature", () => {
     expect(verifyGhostSignature(body, header, "")).toBe(false);
   });
 });
+
+describe("callout restoration through the mirror", () => {
+  it("restoreCalloutMarkup converts [!TIP] blockquotes to classed callouts", async () => {
+    const { restoreCalloutMarkup } = await import("@/lib/blogRenderer");
+    const html =
+      "<p>Intro.</p><blockquote><p>[!TIP] Check the domain first.</p></blockquote><blockquote><p>Plain quote stays.</p></blockquote>";
+    const out = restoreCalloutMarkup(html);
+    expect(out).toContain('class="callout callout-tip"');
+    expect(out).toContain("Check the domain first.");
+    expect(out).not.toContain("[!TIP]");
+    expect(out).toContain("<blockquote><p>Plain quote stays.</p></blockquote>");
+  });
+
+  it("leaves unknown callout types as plain blockquotes", async () => {
+    const { restoreCalloutMarkup } = await import("@/lib/blogRenderer");
+    const html = "<blockquote><p>[!BANANA] not a thing</p></blockquote>";
+    expect(restoreCalloutMarkup(html)).toBe(html);
+  });
+
+  it("mapGhostPostToRow restores callouts in content_html", () => {
+    const row = mapGhostPostToRow(
+      {
+        ...fixturePost,
+        html: "<blockquote><p>[!DANGER] Hotlinked kit ahead.</p></blockquote>",
+      },
+      "published"
+    );
+    expect(row.content_html).toContain('class="callout callout-danger"');
+    expect(row.content_html).not.toContain("[!DANGER]");
+  });
+
+  it("renderMarkdownKeepCalloutMarkers keeps literal markers in blockquotes", async () => {
+    const { renderMarkdownKeepCalloutMarkers, renderMarkdown } = await import(
+      "@/lib/blogRenderer"
+    );
+    const md = "> [!WARNING] Fake stores ahead.\n\nBody text.";
+    const ghostHtml = await renderMarkdownKeepCalloutMarkers(md);
+    expect(ghostHtml).toContain("[!WARNING]");
+    expect(ghostHtml).toContain("<blockquote>");
+    expect(ghostHtml).not.toContain("callout-warning");
+    // and the default renderer still produces the styled version
+    const siteHtml = await renderMarkdown(md);
+    expect(siteHtml).toContain('class="callout callout-warning"');
+  });
+});

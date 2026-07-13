@@ -52,6 +52,10 @@ export interface MonthlyIntelFacts {
     reportedOnward: number;
     topBrands: Array<{ brand: string; clones: number; reported: number }>;
     weaponisedDomains: Array<{ domain: string; target: string | null; date: string }>;
+    /** Month's detections by lifecycle_state — the honest detected→reported
+     *  funnel (detected / monitoring / weaponised / reported / declined /
+     *  taken_down) so the model can explain count gaps instead of glossing. */
+    lifecycle: LabelCount[];
   };
   regulatorAlerts: Array<{ source: string; title: string; date: string }>;
   consumerReports: {
@@ -90,7 +94,7 @@ export async function collectMonthlyIntelFacts(
 
   const periodMonth = startIso.slice(0, 7);
 
-  const [reddit, competitor, cloneStats, weaponised, regulator, consumer, coverage] =
+  const [reddit, competitor, cloneStats, weaponised, lifecycle, regulator, consumer, coverage] =
     await Promise.all([
       sb
         .from("reddit_post_intel")
@@ -118,6 +122,12 @@ export async function collectMonthlyIntelFacts(
         .lt("weaponised_at", endIso)
         .order("weaponised_at", { ascending: false })
         .limit(25),
+      sb
+        .from("shopfront_clone_alerts")
+        .select("lifecycle_state")
+        .gte("created_at", startIso)
+        .lt("created_at", endIso)
+        .limit(5000),
       sb
         .from("feed_items")
         .select("source, title, published_at, created_at")
@@ -191,6 +201,9 @@ export async function collectMonthlyIntelFacts(
         target: (w.inferred_target_domain as string | null) ?? null,
         date: String(w.weaponised_at).slice(0, 10),
       })),
+      lifecycle: tally(
+        (lifecycle.data ?? []).map((r) => r.lifecycle_state as string | null)
+      ),
     },
     regulatorAlerts: (regulator.data ?? []).map((f) => ({
       source: f.source as string,
@@ -278,9 +291,16 @@ TASK: (1) propose the 10 best blog-post ideas from this data, ranked by unique-d
 
 GROUNDING RULES (non-negotiable):
 - Every number, count, domain and brand you mention MUST appear verbatim in the provided facts JSON. Do not invent statistics, victims, quotes or examples.
+- NEVER emit placeholder tokens like [NAME], [BRAND], [X] — always write the actual name from the facts. A placeholder is a hard failure.
 - Competitor observations describe what OTHER outlets reported — you may reference the scam pattern in your own words, but never quote or attribute their text (it is unpublishable intelligence).
 - Do not duplicate a topic in the existing-coverage list; complementary follow-ups are fine but say what's new.
 - Australian English, general audience, practical advice.
+
+HONESTY RULES for our own detection data (non-negotiable — we show our working):
+- Detection counts are a FLOOR, not a total: write "our monitoring detected N", never "there are N". Our clone-watch scans newly registered domains against ~130 monitored brands; clones we don't detect exist.
+- When you cite a detected count next to a smaller reported count, EXPLAIN the gap using the provided lifecycle facts. The funnel vocabulary: "detected" = lexical brand match on a new domain (many sit parked, not yet malicious); "monitoring" = we recheck it for changes; "weaponised" = it started serving live content; "reported" = submitted to takedown services with evidence; "declined" = the takedown service declined to act until the site turns visibly malicious (we keep watching); "taken_down" = confirmed gone. Not-yet-malicious parked domains and evidence requirements are the usual reasons a detection isn't reported the same day.
+- Never claim or imply a takedown that isn't in the facts.
+- Verifiability: when the post uses clone-watch data, tell readers the live aggregate numbers are publicly visible at https://askarthur.au/clone-watch — this is the one permitted askarthur.au link (the CTA block is still appended automatically; add nothing else).
 
 FORMATTING RULES for the post content (markdown):
 - Use > [!WARNING], > [!TIP], > [!DANGER] blockquote callouts (they render as styled boxes).
@@ -313,6 +333,26 @@ ${JSON.stringify(facts, null, 1)}`,
   });
 
   const parsed = call.result;
+
+  // Placeholder guard — the first June draft shipped a literal "[NAME]" where
+  // a brand belonged. Schema validation can't express this cleanly for the
+  // tool-use JSON Schema, so enforce it here: any bracketed ALL-CAPS token in
+  // user-facing fields fails the run loudly (Telegram warning at the caller).
+  // (?!\() — don't flag ALL-CAPS markdown link text like "[ACCC](https://…)".
+  // [!WARNING]-style callout markers never match ("!" fails the [A-Z] start).
+  const PLACEHOLDER = /\[[A-Z][A-Z_ ]{0,24}\](?!\()/;
+  const userFacing = [
+    parsed.post.title,
+    parsed.post.subtitle,
+    parsed.post.excerpt,
+    parsed.post.content,
+  ].join("\n");
+  if (PLACEHOLDER.test(userFacing)) {
+    logger.error("monthly-intel-blog: draft contains placeholder token", {
+      match: userFacing.match(PLACEHOLDER)?.[0],
+    });
+    return null;
+  }
 
   const title = scrubPII(parsed.post.title);
   const content = appendBlogCtaBlock(scrubPII(parsed.post.content));

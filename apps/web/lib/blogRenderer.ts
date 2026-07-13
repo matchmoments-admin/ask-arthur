@@ -170,3 +170,51 @@ const marked = new Marked(
 export async function renderMarkdown(content: string): Promise<string> {
   return (await marked.parse(content)) as string;
 }
+
+/**
+ * Render markdown but keep `[!TIP]`-style callout markers as literal text in
+ * plain <blockquote>s instead of converting them to classed callout divs.
+ *
+ * Used when sending HTML to Ghost: Ghost's html→lexical importer converts
+ * blockquotes to native quote cards and strips class attributes, so classed
+ * callout markup does not survive the round-trip — but literal marker text
+ * does. `restoreCalloutMarkup()` converts the markers back into the classed
+ * markup when the published post is mirrored into blog_posts.
+ *
+ * Implementation: a sentinel swap around the callout matcher — `[!TIP]` is
+ * temporarily rewritten so the blockquote renderer's `[!TYPE]` detection
+ * falls through, then restored in the output HTML.
+ */
+export async function renderMarkdownKeepCalloutMarkers(
+  content: string
+): Promise<string> {
+  const SENTINEL = "⁉"; // ⁉ — never occurs in our content
+  const defanged = content.replace(/\[!(\w+)\]/g, `[${SENTINEL}$1]`);
+  const html = (await marked.parse(defanged)) as string;
+  return html.replace(new RegExp(`\\[${SENTINEL}(\\w+)\\]`, "g"), "[!$1]");
+}
+
+/**
+ * Convert `<blockquote>` blocks whose first text starts with a literal
+ * `[!TYPE]` marker back into the classed callout markup emitted by the
+ * blockquote renderer above (same structure, so existing blog-content CSS
+ * applies). Applied by the Ghost mirror (ghost-sync) so callouts survive
+ * Ghost's class-stripping html→lexical round-trip — this also means a
+ * founder can type `[!WARNING]` in a Ghost blockquote and get the styled
+ * box on askarthur.au.
+ *
+ * Unknown types are left as plain blockquotes with the marker intact.
+ */
+export function restoreCalloutMarkup(html: string): string {
+  return html.replace(
+    /<blockquote>([\s\S]*?)<\/blockquote>/g,
+    (whole, inner: string) => {
+      const match = inner.match(/^\s*(?:<p>)?\s*\[!(\w+)\]\s*/);
+      if (!match) return whole;
+      const config = CALLOUT_CONFIG[match[1].toUpperCase()];
+      if (!config) return whole;
+      const cleaned = inner.replace(/\[!\w+\]\s*/, "");
+      return `<div class="callout ${config.cls}"><div class="callout-title">${config.icon}<span>${config.label}</span></div><div class="callout-body">${cleaned}</div></div>`;
+    }
+  );
+}
