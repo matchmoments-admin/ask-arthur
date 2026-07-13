@@ -430,6 +430,13 @@ export const featureFlags = {
    *  prepared rows have been eyeballed via the admin dashboard. */
   brandStewardshipReport: readBoolEnv("FF_BRAND_STEWARDSHIP_REPORT"),
 
+  /** Monthly Intel Blog — one data-driven draft post per month (2nd of month),
+   *  mined from Reddit intel + competitor observations + clone-watch +
+   *  regulator feeds. Draft lands in Ghost (blog_posts fallback) for human
+   *  review; never auto-publishes. Replaces the retired weekly-blog cron.
+   *  Server-side only. Default OFF. */
+  monthlyIntelBlog: readBoolEnv("FF_MONTHLY_INTEL_BLOG"),
+
   /** Admin clone-summary digest — extends the existing clone-watch internal
    *  digest into a Scamwatch-submission aid: ALL clone URLs per brand + a
    *  "registrars that provided them" rollup (with abuse emails) + a bounded

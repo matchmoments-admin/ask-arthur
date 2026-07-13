@@ -154,10 +154,10 @@ The arrows show flow of work, not network calls. `[hot ⚠]` marks write-frequen
         │                                              │                                          │
         ▼                                              ▼                                          ▼
 ┌──────────────────────────┐         ┌─────────────────────────────────────┐         ┌──────────────────────┐
-│   INNGEST (35 functions) │         │   VERCEL CRONS (16)                 │         │   GH ACTIONS (8)     │
+│   INNGEST (36 functions) │         │   VERCEL CRONS (15)                 │         │   GH ACTIONS (8)     │
 │  packages/scam-engine/   │         │   apps/web/app/api/cron/            │         │   .github/workflows/ │
 │   inngest/               │         │                                     │         │                      │
-│                          │         │   weekly-blog      0 12 * * 1       │         │   scrape-feeds       │
+│                          │         │   (weekly-blog retired 2026-07)     │         │   scrape-feeds       │
 │  ANALYZE FAN-OUT         │         │   weekly-email     0 14 * * 1       │         │     (3/6/12/24h)     │
 │  • analyze-completed-    │         │   nurture          0 23 * * *       │         │     ENABLE_SCRAPER   │
 │    {report,brand,cost}   │         │   bot-queue-{sweep, every 6h        │         │   scrape-vulns       │

@@ -162,3 +162,14 @@ export function claudeHaikuCostUsd(
     outputTokens * PRICING.CLAUDE_HAIKU_4_5_OUTPUT_USD_PER_TOKEN
   );
 }
+
+/** Claude Sonnet 4.6 cost (same no-cache-accounting caveat as Haiku above). */
+export function claudeSonnet46CostUsd(
+  inputTokens: number,
+  outputTokens: number,
+): number {
+  return (
+    inputTokens * PRICING.CLAUDE_SONNET_4_6_INPUT_USD_PER_TOKEN +
+    outputTokens * PRICING.CLAUDE_SONNET_4_6_OUTPUT_USD_PER_TOKEN
+  );
+}
