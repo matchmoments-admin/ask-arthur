@@ -35,9 +35,14 @@ Defined in `apps/web/vercel.json`. All routes verify the Vercel cron signature.
 
 ---
 
-## Inngest functions (38)
+## Inngest functions (75)
 
-Defined in `packages/scam-engine/src/inngest/functions.ts`. All have idempotency keys based on `event.data.requestId` (24h dedup); cron functions use Inngest's native cron dedup.
+Registered in `apps/web/app/api/inngest/route.ts` via `serve({ functions: [...inngestFunctions, ...appFunctions] })`, so the count is the sum of **two** arrays — don't count from one file:
+
+- **29** in `packages/scam-engine/src/inngest/functions.ts` (`inngestFunctions`) — enrichment, embeddings, reddit-intel, retention that predates the apps/web split.
+- **46** in `apps/web/app/api/inngest/route.ts` (`appFunctions`) — phone-footprint, onward-reporting, clone-watch, brand-stewardship, and the housekeeping crons moved here in #588.
+
+To re-derive after adding/removing a function, count non-comment entries in both arrays (last verified 2026-07-13 after the fleet-review adds/removals: +D3 `onDemandUrlEnrich`, −`ctMonitor`, −`metaBrpEnrich`). All have idempotency keys based on `event.data.requestId` (24h dedup); cron functions use Inngest's native cron dedup.
 
 **Production-only cron guard.** `withAxiomLogging` skips any `inngest/scheduled.timer` (cron) tick on a non-production deployment, so only the prod deployment runs scheduled work. Inngest provisions a separate branch environment per Vercel preview, and previews inherit the prod secrets (admin Telegram chat id, Supabase service key) — without the guard, every open preview fired all crons into the prod admin chat and against the prod DB (the cause of the duplicate "Known-brands discovery" / "Reddit brands discover" Telegram bursts). Event and manual triggers still run in preview for testing; set `INNGEST_ALLOW_NONPROD_CRONS=true` on a deployment to force a cron to run off-prod. The check is `isProductionDeployment()` (`@askarthur/utils/env`, `VERCEL_ENV === "production"`).
 
