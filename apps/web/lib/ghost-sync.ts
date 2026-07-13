@@ -234,10 +234,14 @@ export async function syncGhostPost(
     .upsert(row, { onConflict: "ghost_post_id" });
 
   if (error) {
+    // Supabase errors are plain objects — String(error) logs "[object
+    // Object]", which hid the 42P10 partial-index failure for two months.
     logger.error("Ghost mirror upsert failed", {
       ghost_post_id: row.ghost_post_id,
       slug: row.slug,
-      error: String(error),
+      error: error.message,
+      code: error.code,
+      details: error.details,
     });
     throw error;
   }
