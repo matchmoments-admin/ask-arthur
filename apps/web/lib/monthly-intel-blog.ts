@@ -290,7 +290,10 @@ Return ONLY valid JSON:
   "post": { "title": "≤90 chars, SEO", "subtitle": "≤180 chars", "excerpt": "≤280 chars", "content": "full markdown post for ideas[0]", "tags": ["..."], "category": "scam-alerts" }
 }`,
       },
-      { role: "assistant", content: [{ type: "text", text: "{" }] },
+      // NOTE: no assistant "{" prefill here — claude-sonnet-4-6 rejects
+      // assistant-message prefill (400: "conversation must end with a user
+      // message"), unlike the Haiku pattern this was adapted from. Verified
+      // by the first prod canary run 2026-07-13.
     ],
   });
 
@@ -306,7 +309,7 @@ Return ONLY valid JSON:
   });
 
   const text = response.content[0]?.type === "text" ? response.content[0].text : "";
-  const jsonMatch = ("{" + text).match(/\{[\s\S]*\}/);
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
     logger.error("monthly-intel-blog: no JSON in model response");
     return null;

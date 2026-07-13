@@ -105,9 +105,12 @@ describe("generateMonthlyIntelPost", () => {
   });
 
   it("returns a processed post + ideas for a valid model response", async () => {
-    // The prompt prefills "{" as the assistant turn, so the mock returns the rest.
+    // Sonnet 4.6 rejects assistant prefill, so the model returns full JSON
+    // (possibly wrapped in prose — the parser extracts the {...} block).
     mockCreate.mockResolvedValue({
-      content: [{ type: "text", text: JSON.stringify(validGeneration).slice(1) }],
+      content: [
+        { type: "text", text: `Here is the JSON:\n${JSON.stringify(validGeneration)}` },
+      ],
       usage: { input_tokens: 1000, output_tokens: 2000 },
     });
 
@@ -124,7 +127,7 @@ describe("generateMonthlyIntelPost", () => {
     const gen = structuredClone(validGeneration);
     gen.post.category = "not-a-category";
     mockCreate.mockResolvedValue({
-      content: [{ type: "text", text: JSON.stringify(gen).slice(1) }],
+      content: [{ type: "text", text: JSON.stringify(gen) }],
       usage: { input_tokens: 1, output_tokens: 1 },
     });
 
