@@ -232,8 +232,12 @@ export default function CloneWatchDomainList({
                     }
                     trailing={
                       <div className="flex items-center gap-4">
+                        {/* Visually shown only on wider viewports, but kept in
+                            the a11y tree at all sizes (sr-only on mobile) so the
+                            signal type is never conveyed by the dot's colour
+                            alone — WCAG 1.4.1. */}
                         <span
-                          className="hidden whitespace-nowrap text-xs font-semibold sm:inline"
+                          className="whitespace-nowrap text-xs font-semibold sr-only sm:not-sr-only"
                           style={{ color: m.fg }}
                         >
                           {m.label}
