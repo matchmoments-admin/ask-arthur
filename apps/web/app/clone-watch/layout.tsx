@@ -20,13 +20,13 @@ export default function CloneWatchLayout({
 }) {
   return (
     <div className={`min-h-screen flex flex-col ${plexMono.variable}`}>
-      {/* Standard shared Nav (640px) — identical to every other page, matching
-          the banking/telco pattern of a 960px content column under the standard
-          navbar. Content width is the sanctioned 960px B2B width. */}
+      {/* Standard shared Nav + 640px content column — identical to every other
+          marketing page (the whole surface is single-column, so it needs no
+          extra width). */}
       <Nav />
       <main
         id="main-content"
-        className="flex-1 w-full max-w-[960px] mx-auto px-5 pt-16 pb-16"
+        className="flex-1 w-full max-w-[640px] mx-auto px-5 pt-16 pb-16"
       >
         {children}
       </main>

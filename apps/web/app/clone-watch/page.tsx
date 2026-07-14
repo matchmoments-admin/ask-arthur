@@ -25,8 +25,6 @@ import CloneWatchDomainList, {
 
 export const revalidate = 3600; // 1 hour ISR
 
-const MONO = "var(--font-plex-mono), ui-monospace, monospace";
-
 export const metadata: Metadata = {
   title:
     "Clone-watch — newly-registered AU brand-pattern domains | Ask Arthur",
@@ -237,9 +235,9 @@ function PublicImpactPanel({
         </span>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-8 md:gap-x-0 md:gap-y-0 md:divide-x md:divide-white/10">
-        {tiles.map((t, i) => (
-          <div key={t.label} className={i === 0 ? "md:pr-6" : "md:px-6"}>
+      <div className="grid grid-cols-2 gap-x-8 gap-y-8">
+        {tiles.map((t) => (
+          <div key={t.label}>
             <div
               className="text-4xl md:text-5xl font-extrabold leading-none tracking-tight"
               style={{ fontVariantNumeric: "tabular-nums" }}
@@ -387,6 +385,7 @@ export default async function CloneWatchPage() {
         <FeatureCard
           icon={ShieldCheck}
           title="What this list is"
+          titleAs="h3"
           description={
             <>
               A daily lexical match against newly-registered domains. We claim
@@ -398,18 +397,17 @@ export default async function CloneWatchPage() {
             </>
           }
         />
-        <FeatureCard icon={Mail} title="If your brand appears here">
+        <FeatureCard icon={Mail} title="If your brand appears here" titleAs="h3">
           <p className="text-sm text-gov-slate mt-1 leading-relaxed">
             Verify your shop on Ask Arthur, or request removal from the reference
-            list by emailing our team — we respond to every request.
+            list — we respond to every request.
           </p>
-          <a
-            href="mailto:hello@askarthur.au"
-            className="mt-3 inline-block text-sm font-medium text-action-teal underline underline-offset-2"
-            style={{ fontFamily: MONO }}
+          <Link
+            href="/contact"
+            className="mt-3 inline-block text-sm font-semibold text-action-teal underline underline-offset-2"
           >
-            hello@askarthur.au
-          </a>
+            Contact our team →
+          </Link>
         </FeatureCard>
         <SampleReportForm />
       </section>

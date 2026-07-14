@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import type { ElementType, ReactNode } from "react";
 
 // Shared feature card — the icon-left / title / description shell first used
 // inline on the About page ("A suite of tools, one idea"). Extracted so About,
@@ -17,9 +17,14 @@ import type { ReactNode } from "react";
 interface FeatureCardProps {
   /** Lucide icon rendered in the site's action-teal at 22px. Ignored if `leading` is set. */
   icon?: LucideIcon;
+  /** Colour class for the icon. Defaults to the site's action-teal. */
+  iconClassName?: string;
   /** Custom leading node (e.g. a coloured status dot) — overrides `icon`. */
   leading?: ReactNode;
   title: ReactNode;
+  /** Element the title renders as. Defaults to `div`; use `h3` for content cards
+   *  that deserve a heading in the document outline. */
+  titleAs?: "div" | "h2" | "h3" | "h4";
   description?: ReactNode;
   /** When set, the whole card is a link (used by About's tool cards). */
   href?: string;
@@ -35,8 +40,10 @@ const SHELL =
 
 export default function FeatureCard({
   icon: Icon,
+  iconClassName = "text-action-teal",
   leading,
   title,
+  titleAs: TitleTag = "div",
   description,
   href,
   trailing,
@@ -44,6 +51,7 @@ export default function FeatureCard({
   className = "",
   children,
 }: FeatureCardProps) {
+  const Title = TitleTag as ElementType;
   const inner = (
     <div className={`flex gap-4 ${align === "center" ? "items-center" : "items-start"}`}>
       {leading ? (
@@ -51,12 +59,12 @@ export default function FeatureCard({
       ) : Icon ? (
         <Icon
           size={22}
-          className={`text-action-teal shrink-0 ${align === "start" ? "mt-1" : ""}`}
+          className={`${iconClassName} shrink-0 ${align === "start" ? "mt-1" : ""}`}
         />
       ) : null}
 
       <div className="min-w-0 flex-1">
-        <div className="font-semibold text-deep-navy">{title}</div>
+        <Title className="font-semibold text-deep-navy">{title}</Title>
         {description ? (
           <p className="text-sm text-gov-slate mt-1 leading-relaxed">{description}</p>
         ) : null}

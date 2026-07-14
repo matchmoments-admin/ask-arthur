@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { FileText } from "lucide-react";
+import { FileText, CheckCircle2 } from "lucide-react";
 import FeatureCard from "@/components/FeatureCard";
 
 // "Email me a sample clone-watch report" — lets a prospective brand/partner
@@ -91,8 +91,10 @@ export default function SampleReportForm() {
   if (state === "done") {
     return (
       <FeatureCard
-        icon={FileText}
-        title="Sample report on its way ✓"
+        icon={CheckCircle2}
+        iconClassName="text-emerald-600"
+        title="Sample report on its way"
+        titleAs="h3"
         description={`${msg} It shows the exact evidence pack a brand receives — clone domain, AI confidence, hosting attribution and takedown status.`}
       />
     );
@@ -102,6 +104,7 @@ export default function SampleReportForm() {
     <FeatureCard
       icon={FileText}
       title="See a sample report"
+      titleAs="h3"
       description="See exactly what an Ask Arthur clone-watch alert looks like — the clone domain, AI confidence, hosting attribution and takedown status. We only use your email to send this one sample."
     >
       <form onSubmit={onSubmit} className="mt-4 flex flex-col sm:flex-row gap-3">
