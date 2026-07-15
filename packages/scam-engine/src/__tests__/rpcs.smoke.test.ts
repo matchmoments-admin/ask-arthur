@@ -122,6 +122,30 @@ describe.skipIf(!hasEnv)("SQL RPC smoke tests", () => {
     expect(error).toBeNull();
     expect(Array.isArray(data)).toBe(true);
   });
+
+  // Vendor-gap duration KPIs (v231). LANGUAGE sql aggregate over jsonb
+  // timestamp casts — a broken cast/predicate fails here on the first call.
+  // Always returns exactly one row (LEFT JOIN ON TRUE), even on empty data.
+  it("clone_watch_vendor_gap_stats executes without error", async () => {
+    const supabase = getClient();
+    const { data, error } = await supabase.rpc("clone_watch_vendor_gap_stats", {
+      p_days: 90,
+    });
+    expect(error).toBeNull();
+    const rows = Array.isArray(data) ? data : [data];
+    expect(rows).toHaveLength(1);
+    expect(typeof rows[0]?.decline_to_weaponise_n).toBe("number");
+  });
+
+  // Unactioned-lookalike age snapshot (v231).
+  it("clone_watch_unactioned_age_stats executes without error", async () => {
+    const supabase = getClient();
+    const { data, error } = await supabase.rpc("clone_watch_unactioned_age_stats");
+    expect(error).toBeNull();
+    const rows = Array.isArray(data) ? data : [data];
+    expect(rows).toHaveLength(1);
+    expect(typeof rows[0]?.n).toBe("number");
+  });
 });
 
 describe.skipIf(hasEnv)("SQL RPC smoke tests — env not configured", () => {

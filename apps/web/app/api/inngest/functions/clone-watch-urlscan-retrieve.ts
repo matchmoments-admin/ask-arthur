@@ -188,6 +188,17 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
     // Wave 1 enforcement consumes it). Batched, id-keyed for idempotency.
     if (weaponisedEvents.length > 0) {
       await step.run("emit-weaponised", async () => {
+        // Rare high-value event: always-ship warn (bypasses the 10% INFO
+        // sampling) so every weaponisation transition is visible in Axiom.
+        for (const d of weaponisedEvents) {
+          logger.warn("clone-watch: classification transition — newly weaponised", {
+            alertId: d.alertId,
+            candidateDomain: d.candidateDomain,
+            candidateUrl: d.candidateUrl,
+            via: d.via,
+            classification: "likely_phishing",
+          });
+        }
         await inngest.send(
           weaponisedEvents.map((d) => ({
             name: CLONE_WATCH_WEAPONISED_EVENT,

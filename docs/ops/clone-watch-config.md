@@ -290,6 +290,15 @@ files false-negative `report_issue` escalations. Plans:
 `docs/plans/clone-watch-netcraft-issue-pr2-fixes.md` +
 `docs/plans/clone-watch-brand-story-reporting.md`.
 
+> **Re-report path clarification (2026-07-16).** The v199 migration comments
+> describe declined alerts being "re-submitted as a FRESH submission" on a
+> weaponisation transition — that path was never wired (the only
+> `report/urls` trigger is the manual triage route, and its dedup gate skips
+> any alert already carrying `submitted_to.netcraft`). The actual — and
+> deliberate — weaponised re-report mechanism is this `report_issue` reporter:
+> the v221 evidence gate re-admits a declined clone to the worklist the moment
+> it weaponises. Do not build a fresh-submission duplicate.
+
 | Flag / env / brake                    | Type        | Default                          | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | ------------------------------------- | ----------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `FF_CLONE_LIFECYCLE_RECONCILE`        | server flag | `false`                          | Gates `shopfront-clone-netcraft-reconcile` (cron `0 10 * * *`). Advances lifecycle from the per-URL verdict + feeds the takedown KPI + the weaponisation recheck. Sub-flag of `FF_SHOPFRONT_CLONE_OUTREACH`.                                                                                                                                                                                                                                                             |

@@ -305,6 +305,56 @@ export type Database = {
         }
         Relationships: []
       }
+      blog_external_links: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          is_active: boolean
+          origin: string
+          post_id: number
+          rel: string
+          sort_order: number
+          source_name: string
+          title: string
+          url: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          origin?: string
+          post_id: number
+          rel?: string
+          sort_order?: number
+          source_name: string
+          title: string
+          url: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          origin?: string
+          post_id?: number
+          rel?: string
+          sort_order?: number
+          source_name?: string
+          title?: string
+          url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "blog_external_links_post_id_fkey"
+            columns: ["post_id"]
+            isOneToOne: false
+            referencedRelation: "blog_posts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       blog_posts: {
         Row: {
           author: string
@@ -1088,6 +1138,7 @@ export type Database = {
           email_subject: string | null
           enqueued_at: string
           id: number
+          kind: string
           prepared_at: string | null
           processed_at: string | null
           provider_message_id: string | null
@@ -1112,6 +1163,7 @@ export type Database = {
           email_subject?: string | null
           enqueued_at?: string
           id?: number
+          kind?: string
           prepared_at?: string | null
           processed_at?: string | null
           provider_message_id?: string | null
@@ -1136,6 +1188,7 @@ export type Database = {
           email_subject?: string | null
           enqueued_at?: string
           id?: number
+          kind?: string
           prepared_at?: string | null
           processed_at?: string | null
           provider_message_id?: string | null
@@ -1305,18 +1358,24 @@ export type Database = {
       clone_watch_monthly_registrar_stats: {
         Row: {
           clones: number
+          median_days_to_weaponise: number | null
           period_month: string
           registrar: string
+          weaponised: number
         }
         Insert: {
           clones?: number
+          median_days_to_weaponise?: number | null
           period_month: string
           registrar: string
+          weaponised?: number
         }
         Update: {
           clones?: number
+          median_days_to_weaponise?: number | null
           period_month?: string
           registrar?: string
+          weaponised?: number
         }
         Relationships: []
       }
@@ -1324,6 +1383,7 @@ export type Database = {
         Row: {
           brand_count: number
           declined: number
+          duration_kpis: Json | null
           escalated: number
           generated_at: string
           global_brands: Json
@@ -1346,6 +1406,7 @@ export type Database = {
         Insert: {
           brand_count?: number
           declined?: number
+          duration_kpis?: Json | null
           escalated?: number
           generated_at?: string
           global_brands?: Json
@@ -1368,6 +1429,7 @@ export type Database = {
         Update: {
           brand_count?: number
           declined?: number
+          duration_kpis?: Json | null
           escalated?: number
           generated_at?: string
           global_brands?: Json
@@ -1388,6 +1450,56 @@ export type Database = {
           weaponised?: number
         }
         Relationships: []
+      }
+      clone_watch_scan_transitions: {
+        Row: {
+          alert_id: number
+          created_at: string
+          id: number
+          lifecycle_state_at_scan: string | null
+          new_classification: string
+          new_evidence: Json | null
+          prior_classification: string | null
+          prior_evidence: Json | null
+          scanned_at: string
+          urlscan_submitted_at: string | null
+          urlscan_uuid: string | null
+        }
+        Insert: {
+          alert_id: number
+          created_at?: string
+          id?: never
+          lifecycle_state_at_scan?: string | null
+          new_classification: string
+          new_evidence?: Json | null
+          prior_classification?: string | null
+          prior_evidence?: Json | null
+          scanned_at?: string
+          urlscan_submitted_at?: string | null
+          urlscan_uuid?: string | null
+        }
+        Update: {
+          alert_id?: number
+          created_at?: string
+          id?: never
+          lifecycle_state_at_scan?: string | null
+          new_classification?: string
+          new_evidence?: Json | null
+          prior_classification?: string | null
+          prior_evidence?: Json | null
+          scanned_at?: string
+          urlscan_submitted_at?: string | null
+          urlscan_uuid?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "clone_watch_scan_transitions_alert_id_fkey"
+            columns: ["alert_id"]
+            isOneToOne: false
+            referencedRelation: "shopfront_clone_alerts"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       cluster_members: {
         Row: {
@@ -8118,6 +8230,31 @@ export type Database = {
           window_days: number
         }[]
       }
+      clone_watch_unactioned_age_stats: {
+        Args: never
+        Returns: {
+          computed_at: string
+          median_days: number
+          n: number
+          oldest_days: number
+          p90_days: number
+        }[]
+      }
+      clone_watch_vendor_gap_stats: {
+        Args: { p_days?: number }
+        Returns: {
+          computed_at: string
+          decline_to_weaponise_median_hours: number
+          decline_to_weaponise_n: number
+          full_loop_median_hours: number
+          full_loop_n: number
+          refile_to_takedown_median_hours: number
+          refile_to_takedown_n: number
+          weaponise_to_refile_median_hours: number
+          weaponise_to_refile_n: number
+          window_days: number
+        }[]
+      }
       clone_watch_weekly_metrics: {
         Args: { p_days?: number }
         Returns: {
@@ -8210,6 +8347,20 @@ export type Database = {
           p_severity_tier: string
         }
         Returns: number
+      }
+      enqueue_weaponised_clone_alert_notification: {
+        Args: {
+          p_alert_id: number
+          p_brand: string
+          p_candidate_domain: string
+          p_candidate_url: string
+          p_channel_type: string
+          p_recipient: string
+        }
+        Returns: {
+          inserted: boolean
+          queue_id: number
+        }[]
       }
       ensure_monthly_partition: {
         Args: { p_month: string; p_parent: string }
@@ -8424,12 +8575,19 @@ export type Database = {
       list_clone_alerts_for_recheck: {
         Args: { p_cadence_hours?: number; p_limit?: number }
         Returns: {
+          attribution: Json
+          brand_category: string
           candidate_domain: string
           candidate_url: string
+          clf_attack_intent: string
+          clf_clone_tactic: string
+          clf_confidence: number
+          clf_is_clone: boolean
           id: number
           last_rechecked_at: string
           lifecycle_state: string
           recheck_count: number
+          signals: Json
           urlscan_classification: string
         }[]
       }
