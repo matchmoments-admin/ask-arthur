@@ -7,6 +7,13 @@ import {
   type CloneBrandMetrics,
 } from "@/app/api/inngest/functions/report-brand-stewardship";
 import { buildRegistrarRollup } from "@/app/api/inngest/functions/clone-watch-internal-digest";
+import {
+  computeDurationKpis,
+  registrarWeaponisation,
+  tldWeaponisation,
+  type DurationKpis,
+  type RegistrarWeaponisationRow,
+} from "@/lib/clone-watch/duration-kpis";
 import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
 import { rollupRegistrars } from "@/lib/clone-watch/registrar-canonical";
 
@@ -137,6 +144,15 @@ export interface CloneWatchReportCard {
    *  powers the "super fund" spotlight slide. null when no watchlisted fund
    *  appears this month (the slide falls back to the evergreen "why it works"). */
   superFund: SuperFundSpotlight | null;
+  /** The vendor-gap clock over THIS month's first_seen_at cohort. Cohort
+   *  medians — expected to differ from the rolling-event-window
+   *  clone_watch_vendor_gap_stats RPC that feeds the public panel. */
+  durations: DurationKpis;
+  /** Which registrars' clones weaponise, and how fast (canonicalised;
+   *  explicit Unknown bucket rendered for honesty). */
+  registrarWeaponisation: RegistrarWeaponisationRow[];
+  /** Per-TLD weaponisation counts (card-render only, not persisted). */
+  tldWeaponisation: Array<{ tld: string; weaponised: number }>;
 }
 
 function monthWindow(month?: string): {
@@ -232,7 +248,7 @@ async function fetchMonthByBrand(
   startIso: string,
   endIso: string,
   periodMonth: string,
-): Promise<Map<string, CloneBrandMetrics>> {
+): Promise<{ byBrand: Map<string, CloneBrandMetrics>; rows: CloneAlertRow[] }> {
   const { data, error } = await sb
     .from("shopfront_clone_alerts")
     .select(
@@ -257,7 +273,7 @@ async function fetchMonthByBrand(
     });
   }
   const rows = raw.filter((r) => !isFpBrand(r.inferred_target_domain));
-  return aggregateClonesByDomain(rows);
+  return { byBrand: aggregateClonesByDomain(rows), rows };
 }
 
 export interface BrandTrendRow {
@@ -275,6 +291,10 @@ export interface BrandTrendRow {
 export interface RegistrarTrendRow {
   registrar: string;
   clones: number;
+  /** Clones of this registrar that weaponised this month (v231 column). */
+  weaponised: number;
+  /** Median days first_seen_at → weaponised_at; null when weaponised = 0. */
+  median_days_to_weaponise: number | null;
 }
 export interface CloneWatchTrendRows {
   periodMonth: string; // "YYYY-MM-01"
@@ -295,7 +315,12 @@ export async function getCloneWatchTrendRows(
   const sb = createServiceClient();
   if (!sb) throw new Error("service client unavailable");
 
-  const byBrand = await fetchMonthByBrand(sb, startIso, endIso, periodMonth);
+  const { byBrand, rows } = await fetchMonthByBrand(
+    sb,
+    startIso,
+    endIso,
+    periodMonth,
+  );
 
   const brandRows: BrandTrendRow[] = [...byBrand.entries()]
     .map(([brand, m]) => ({
@@ -314,9 +339,21 @@ export async function getCloneWatchTrendRows(
 
   // Full canonicalised registrar list (not sliced) + drop the Unknown bucket —
   // its count already lives in clone_watch_report_summary.unknown_registrar_count.
+  // The weaponisation cut joins on the SAME canonical name, so the two can't
+  // split a vendor across spellings; its Unknown bucket is likewise dropped
+  // here (rendered on the internal card only).
+  const weaponisationByRegistrar = new Map(
+    registrarWeaponisation(rows).map((w) => [w.registrar, w]),
+  );
   const { rows: rawRegistrars } = buildRegistrarRollup(byBrand);
   const registrarRows: RegistrarTrendRow[] = rollupRegistrars(rawRegistrars).map(
-    (r) => ({ registrar: r.registrar, clones: r.clones }),
+    (r) => ({
+      registrar: r.registrar,
+      clones: r.clones,
+      weaponised: weaponisationByRegistrar.get(r.registrar)?.weaponised ?? 0,
+      median_days_to_weaponise:
+        weaponisationByRegistrar.get(r.registrar)?.medianDaysToWeaponise ?? null,
+    }),
   );
 
   return { periodMonth, brandRows, registrarRows };
@@ -369,7 +406,12 @@ export async function getCloneWatchReportCard(
   const sb = createServiceClient();
   if (!sb) throw new Error("service client unavailable");
 
-  const byBrand = await fetchMonthByBrand(sb, startIso, endIso, periodMonth);
+  const { byBrand, rows } = await fetchMonthByBrand(
+    sb,
+    startIso,
+    endIso,
+    periodMonth,
+  );
 
   // Reporting KPIs from the shared aggregate (deduped by candidate_domain).
   let total = 0;
@@ -381,7 +423,7 @@ export async function getCloneWatchReportCard(
 
   // Live month-on-month delta: a second reconciled fetch over the prior window.
   const prevWin = priorWindow(startIso);
-  const priorByBrand = await fetchMonthByBrand(
+  const { byBrand: priorByBrand } = await fetchMonthByBrand(
     sb,
     prevWin.startIso,
     prevWin.endIso,
@@ -461,5 +503,10 @@ export async function getCloneWatchReportCard(
     unknownRegistrarCount: unknownCount,
     mom,
     superFund,
+    // The vendor-gap clock + weaponisation cuts, computed over the SAME
+    // FP-filtered cohort rows the aggregate came from (one fetch, no drift).
+    durations: computeDurationKpis(rows),
+    registrarWeaponisation: registrarWeaponisation(rows),
+    tldWeaponisation: tldWeaponisation(rows),
   };
 }

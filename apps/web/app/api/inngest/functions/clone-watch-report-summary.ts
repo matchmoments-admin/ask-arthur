@@ -91,7 +91,16 @@ export const cloneWatchReportSummary = inngest.createFunction(
         };
       });
 
-      logger.info("clone-watch-report-summary: snapshot written", { ...result, ...trend });
+      logger.info("clone-watch-report-summary: snapshot written", {
+        ...result,
+        ...trend,
+        // Vendor-gap clock medians for the month cohort (null = leg empty).
+        declineToWeaponiseMedianH: card.durations.declineToWeaponise.medianHours,
+        weaponiseToRefileMedianH: card.durations.weaponiseToRefile.medianHours,
+        refileToTakedownMedianH: card.durations.refileToTakedown.medianHours,
+        fullLoopMedianH: card.durations.fullLoop.medianHours,
+        excludedNegativeN: card.durations.excludedNegativeN,
+      });
       return { ok: true, ...result, ...trend };
     },
   ),

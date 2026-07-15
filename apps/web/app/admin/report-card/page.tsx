@@ -1,9 +1,11 @@
 import { Archivo, JetBrains_Mono } from "next/font/google";
+import { createServiceClient } from "@askarthur/supabase/server";
 import { requireAdmin } from "@/lib/adminAuth";
 import {
   getCloneWatchReportCard,
   type CloneWatchReportCard,
 } from "@/lib/clone-watch/report-card-data";
+import type { DurationLeg } from "@/lib/clone-watch/duration-kpis";
 import { buildOutcomesLine } from "@/lib/clone-watch/outcome-copy";
 import { prettyBrand } from "@/lib/clone-watch/brand-display";
 import { reportCardCss } from "./report-card-css";
@@ -87,13 +89,188 @@ export default async function ReportCardPage({
     (n) => only == null || n === only,
   );
 
+  // Ops appendix (vendor-gap clock / unactioned age / weaponisation cuts /
+  // detection lag) renders ONLY in the stacked preview — never in the
+  // Puppeteer ?slide=N export path, so the LinkedIn carousel is unchanged.
+  const ops = only == null ? await fetchOpsStats() : null;
+
   return (
     <div className={`${archivo.variable} ${jbMono.variable} rc-root${only ? " rc-solo" : ""}`}>
       <style dangerouslySetInnerHTML={{ __html: reportCardCss }} />
       {slides.map((n) => (
         <Slide key={n} n={n} data={data} />
       ))}
+      {ops && <OpsAppendix data={data} ops={ops} />}
     </div>
+  );
+}
+
+/* ── ops appendix (internal only; below the stacked preview) ─────────────── */
+
+interface OpsStats {
+  age: {
+    n: number;
+    median_days: number | null;
+    p90_days: number | null;
+    oldest_days: number | null;
+  } | null;
+  /** Median hours scanned_at − urlscan_submitted_at over weaponising
+   *  transitions (the flip-catch lag), + sample size. */
+  detectionLag: { n: number; medianHours: number | null };
+  /** created_at of the earliest transition row — "collecting since". */
+  collectingSince: string | null;
+}
+
+async function fetchOpsStats(): Promise<OpsStats | null> {
+  const sb = createServiceClient();
+  if (!sb) return null;
+
+  const [ageRes, lagRes, firstRes] = await Promise.all([
+    sb.rpc("clone_watch_unactioned_age_stats"),
+    sb
+      .from("clone_watch_scan_transitions")
+      .select("scanned_at, urlscan_submitted_at")
+      .eq("new_classification", "likely_phishing")
+      .limit(1000),
+    sb
+      .from("clone_watch_scan_transitions")
+      .select("created_at")
+      .order("created_at", { ascending: true })
+      .limit(1),
+  ]);
+
+  const age = Array.isArray(ageRes.data) ? (ageRes.data[0] ?? null) : null;
+
+  const lags = (lagRes.data ?? [])
+    .map((r) =>
+      r.urlscan_submitted_at && r.scanned_at
+        ? (Date.parse(r.scanned_at) - Date.parse(r.urlscan_submitted_at)) / 3_600_000
+        : null,
+    )
+    .filter((h): h is number => h != null && h >= 0)
+    .sort((a, b) => a - b);
+  const mid = (lags.length - 1) / 2;
+  const medianHours =
+    lags.length === 0
+      ? null
+      : Math.round((lags[Math.floor(mid)] + lags[Math.ceil(mid)]) / 2);
+
+  return {
+    age,
+    detectionLag: { n: lags.length, medianHours },
+    collectingSince: firstRes.data?.[0]?.created_at ?? null,
+  };
+}
+
+/** Same publication floor as the public /clone-watch strip: a median only
+ *  renders at n ≥ 5, so this appendix previews exactly what publishes. */
+const MEDIAN_FLOOR = 5;
+
+function legCell(leg: DurationLeg): string {
+  if (leg.n === 0) return "no completed pairs yet";
+  if (leg.n < MEDIAN_FLOOR || leg.medianHours == null) {
+    return `n=${leg.n} — median withheld (sample < ${MEDIAN_FLOOR})`;
+  }
+  return `n=${leg.n} · median ${leg.medianHours}h`;
+}
+
+function OpsAppendix({ data, ops }: { data: CloneWatchReportCard; ops: OpsStats }) {
+  const d = data.durations;
+  const box: React.CSSProperties = {
+    border: "1px solid #333",
+    padding: "20px 24px",
+    marginBottom: 20,
+  };
+  const lab: React.CSSProperties = {
+    fontFamily: "var(--font-jbmono)",
+    fontSize: 12,
+    letterSpacing: "0.14em",
+    opacity: 0.6,
+    marginBottom: 10,
+  };
+  const line: React.CSSProperties = { margin: "4px 0", fontSize: 15 };
+  return (
+    <section
+      style={{
+        maxWidth: 1080,
+        margin: "40px auto 80px",
+        padding: "0 24px",
+        fontFamily: "var(--font-archivo)",
+      }}
+    >
+      <h2 style={{ fontSize: 22, marginBottom: 6 }}>
+        Ops appendix — {data.periodLabel} cohort (not exported to LinkedIn)
+      </h2>
+      <p style={{ fontSize: 13, opacity: 0.65, marginBottom: 24 }}>
+        Cohort-windowed on first_seen_at, so these differ (correctly) from the
+        rolling 90-day figures on the public /clone-watch panel. Weaponisation
+        timestamps are quantised by the 6h recheck + 3h retrieve crons.
+      </p>
+
+      <div style={box}>
+        <div style={lab}>THE VENDOR-GAP CLOCK</div>
+        <p style={line}>Netcraft decline → weaponised: {legCell(d.declineToWeaponise)}</p>
+        <p style={line}>Weaponised → we re-filed: {legCell(d.weaponiseToRefile)}</p>
+        <p style={line}>Re-filed → witnessed takedown: {legCell(d.refileToTakedown)}</p>
+        <p style={line}>First report → witnessed takedown (full loop): {legCell(d.fullLoop)}</p>
+        {d.excludedNegativeN > 0 && (
+          <p style={{ ...line, opacity: 0.65 }}>
+            {d.excludedNegativeN} pair{d.excludedNegativeN === 1 ? "" : "s"} excluded
+            (decline re-stamped after weaponisation — last-touch pathology).
+          </p>
+        )}
+      </div>
+
+      <div style={box}>
+        <div style={lab}>UNACTIONED ATTACK SURFACE — LIVE, AS OF RENDER</div>
+        {ops.age && ops.age.n > 0 ? (
+          <p style={line}>
+            {ops.age.n} still-declined, still-rendering lookalikes · median age{" "}
+            {ops.age.median_days}d · p90 {ops.age.p90_days}d · oldest {ops.age.oldest_days}d
+          </p>
+        ) : (
+          <p style={line}>No still-declined live lookalikes right now.</p>
+        )}
+      </div>
+
+      <div style={box}>
+        <div style={lab}>DETECTION LAG (WEAPONISATION FLIPS CAUGHT)</div>
+        <p style={line}>
+          {ops.detectionLag.n === 0
+            ? "No weaponising transitions archived yet"
+            : `n=${ops.detectionLag.n} · median ${ops.detectionLag.medianHours}h from rescan submit to verdict`}
+          {ops.collectingSince
+            ? ` — collecting since ${ops.collectingSince.slice(0, 10)} (v230)`
+            : " — collecting from v230 deploy"}
+          .
+        </p>
+      </div>
+
+      <div style={box}>
+        <div style={lab}>WHO WEAPONISES — REGISTRAR / TLD CUT (COHORT)</div>
+        {data.registrarWeaponisation.length === 0 ? (
+          <p style={line}>No weaponised clones in this cohort.</p>
+        ) : (
+          <>
+            {data.registrarWeaponisation.slice(0, 6).map((r) => (
+              <p style={line} key={r.registrar}>
+                {r.registrar}: {r.weaponised} weaponised
+                {r.medianDaysToWeaponise != null
+                  ? ` · median ${r.medianDaysToWeaponise}d from registration`
+                  : ""}
+              </p>
+            ))}
+            <p style={{ ...line, marginTop: 10 }}>
+              TLDs:{" "}
+              {data.tldWeaponisation
+                .slice(0, 6)
+                .map((t) => `.${t.tld} (${t.weaponised})`)
+                .join(" · ")}
+            </p>
+          </>
+        )}
+      </div>
+    </section>
   );
 }
 
