@@ -16,6 +16,10 @@ import Link from "next/link";
 import { ShieldQuestion, ShieldCheck, Mail } from "lucide-react";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
+import {
+  formatMedianHours,
+  MEDIAN_FLOOR,
+} from "@/lib/clone-watch/duration-kpis";
 import FeatureCard from "@/components/FeatureCard";
 import SampleReportForm from "@/components/SampleReportForm";
 import CloneListRequestForm from "@/components/CloneListRequestForm";
@@ -185,15 +189,6 @@ function typeKeyFor(signals: unknown): CloneDomainItem["typeKey"] {
   }
 }
 
-// A published median needs a defensible sample: counts always render, but a
-// leg's median only renders at n >= this floor (below it, we say so instead
-// of printing a small-sample number as if it were a stable statistic).
-const PUBLIC_MEDIAN_FLOOR = 5;
-
-function fmtHours(h: number): string {
-  return h < 48 ? `${h}h` : `${(h / 24).toFixed(1)} days`;
-}
-
 // The vendor-gap clock: how long a "no threats found" grading holds before a
 // clone weaponises, and how fast the re-report loop closes. Aggregate-only;
 // omitted entirely when no leg has data (all-zero reads as broken).
@@ -231,13 +226,13 @@ function VendorGapStrip({ vendorGap }: { vendorGap: PublicVendorGapStats }) {
                 className="shrink-0 text-xl font-extrabold tracking-tight"
                 style={{ fontVariantNumeric: "tabular-nums" }}
               >
-                {l.n >= PUBLIC_MEDIAN_FLOOR && l.median != null
-                  ? `median ${fmtHours(l.median)}`
+                {l.n >= MEDIAN_FLOOR && l.median != null
+                  ? `median ${formatMedianHours(l.median)}`
                   : `${l.n} ${l.n === 1 ? "domain" : "domains"}`}
               </span>
               <span className="text-xs leading-relaxed text-slate-400">
                 {l.label}
-                {l.n >= PUBLIC_MEDIAN_FLOOR && l.median != null
+                {l.n >= MEDIAN_FLOOR && l.median != null
                   ? ` (n=${l.n})`
                   : " — median withheld, sample too small"}
               </span>
