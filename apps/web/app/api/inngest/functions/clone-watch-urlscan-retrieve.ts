@@ -128,7 +128,10 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
         // Render ready → full classification (reputation merged in).
         if (result) {
           const classification = classifyScan(result, reputation.isMalicious);
-          await sb.rpc("persist_clone_alert_urlscan", {
+          // Check the persist error like applyVerdict does: a swallowed persist
+          // failure would let lifecycle advance on an un-persisted
+          // classification (v230 folds the transition archive into this txn).
+          const persisted = await sb.rpc("persist_clone_alert_urlscan", {
             p_alert_id: row.id,
             p_urlscan_uuid: row.urlscan_uuid,
             p_urlscan_evidence: serialiseRetrievedEvidence(
@@ -140,6 +143,11 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
             p_classification: classification,
             p_set_triage_status: suggestTriageTransition(classification),
           });
+          if (persisted.error) {
+            throw new Error(
+              `persist_clone_alert_urlscan failed for alert ${row.id}: ${persisted.error.message}`,
+            );
+          }
           const weaponised = await applyVerdict(row, classification);
           return { kind: "classified" as const, classification, weaponised };
         }
@@ -147,7 +155,7 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
         // Render not ready. If reputation is decisive, classify now and stop
         // waiting; otherwise persist NULL (bumps failure_streak → ages out).
         if (reputation.isMalicious) {
-          await sb.rpc("persist_clone_alert_urlscan", {
+          const persisted = await sb.rpc("persist_clone_alert_urlscan", {
             p_alert_id: row.id,
             p_urlscan_uuid: row.urlscan_uuid,
             p_urlscan_evidence: serialiseRetrievalPending(
@@ -158,11 +166,16 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
             p_classification: "likely_phishing",
             p_set_triage_status: null, // operator confirms TP (ultrareview F5)
           });
+          if (persisted.error) {
+            throw new Error(
+              `persist_clone_alert_urlscan failed for alert ${row.id}: ${persisted.error.message}`,
+            );
+          }
           const weaponised = await applyVerdict(row, "likely_phishing");
           return { kind: "reputation_fallback" as const, weaponised };
         }
 
-        await sb.rpc("persist_clone_alert_urlscan", {
+        const persisted = await sb.rpc("persist_clone_alert_urlscan", {
           p_alert_id: row.id,
           p_urlscan_uuid: row.urlscan_uuid,
           p_urlscan_evidence: serialiseRetrievalPending(
@@ -173,6 +186,11 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
           p_classification: null, // failure_streak++; retried next tick
           p_set_triage_status: null,
         });
+        if (persisted.error) {
+          throw new Error(
+            `persist_clone_alert_urlscan failed for alert ${row.id}: ${persisted.error.message}`,
+          );
+        }
         return { kind: "still_pending" as const, weaponised: null };
       });
 
