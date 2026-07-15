@@ -39,6 +39,9 @@ export function summaryRow(
     top_registrars: card.topRegistrars,
     super_fund: card.superFund,
     mom: card.mom,
+    // Cohort-windowed vendor-gap clock (v231 jsonb; includes excludedNegativeN
+    // + asOf). Expected to differ from the rolling-window public RPC.
+    duration_kpis: card.durations,
     updated_at: new Date().toISOString(),
   };
   if (publishedPostUrn) row.published_post_urn = publishedPostUrn;

@@ -53,6 +53,17 @@ const JUNE: CloneWatchReportCard = {
     brandsDelta: 129,
   },
   superFund: { brand: "hesta.com.au", clones: 35, auRank: 2 },
+  durations: {
+    declineToWeaponise: { n: 0, medianHours: null },
+    weaponiseToRefile: { n: 0, medianHours: null },
+    refileToTakedown: { n: 0, medianHours: null },
+    fullLoop: { n: 0, medianHours: null },
+    excludedNegativeN: 0,
+    anomalousInversionsN: 0,
+    asOf: "2026-07-01T00:00:00.000Z",
+  },
+  registrarWeaponisation: [],
+  tldWeaponisation: [],
 };
 
 /** July-style shape: no super fund, MoM available. */

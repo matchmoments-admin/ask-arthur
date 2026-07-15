@@ -32,6 +32,19 @@ const CARD: CloneWatchReportCard = {
     brandsDelta: 129,
   },
   superFund: { brand: "hesta.com.au", clones: 35, auRank: 2 },
+  durations: {
+    declineToWeaponise: { n: 1, medianHours: 30 },
+    weaponiseToRefile: { n: 1, medianHours: 13 },
+    refileToTakedown: { n: 0, medianHours: null },
+    fullLoop: { n: 0, medianHours: null },
+    excludedNegativeN: 2,
+    anomalousInversionsN: 0,
+    asOf: "2026-07-01T00:00:00.000Z",
+  },
+  registrarWeaponisation: [
+    { registrar: "NameCheap", weaponised: 2, medianDaysToWeaponise: 3 },
+  ],
+  tldWeaponisation: [{ tld: "shop", weaponised: 2 }],
 };
 
 describe("summaryRow", () => {
