@@ -17,8 +17,13 @@
  *    capped/gated; weaponised>0 with escalated=0 is a normal state).
  *  - Verbs: "actioned by Netcraft" / "actioned" (their action — never "we
  *    took down"); "graded “no threat” and left live"; "serving active
- *    phishing". Never publish time-to-takedown. Typographic quotes (“ ”) in
- *    BOTH surfaces so slide and caption match.
+ *    phishing". Never publish time-to-takedown *in the carousel/caption* —
+ *    that rule targets the v145-era stat whose backfill was unwitnessed.
+ *    The /clone-watch vendor-gap strip and impact tile DO publish takedown
+ *    durations legitimately: those draw only on witnessed-transition
+ *    takedown_at stamps (v219 rule), which is the construction that made
+ *    the original ban necessary in the first place. Typographic quotes
+ *    (“ ”) in BOTH surfaces so slide and caption match.
  *  - Numbers only from data; no URLs; no domain names.
  *
  * Zero imports by design: importable from server components, the caption CLI,

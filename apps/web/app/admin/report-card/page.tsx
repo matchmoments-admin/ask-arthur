@@ -239,14 +239,18 @@ function OpsAppendix({ data, ops }: { data: CloneWatchReportCard; ops: OpsStats 
       </div>
 
       <div style={box}>
-        <div style={lab}>UNACTIONED ATTACK SURFACE — LIVE, AS OF RENDER</div>
+        {/* No flat liveness claims: lifecycle_state is not a liveness probe
+            (the F2 still_live_as_of rule) — the predicate only proves the
+            LAST scan rendered; the site may have died since. */}
+        <div style={lab}>UNACTIONED ATTACK SURFACE — DECLINED, PER LAST SCAN</div>
         {ops.age && ops.age.n > 0 ? (
           <p style={line}>
-            {ops.age.n} still-declined, still-rendering lookalikes · median age{" "}
-            {ops.age.median_days}d · p90 {ops.age.p90_days}d · oldest {ops.age.oldest_days}d
+            {ops.age.n} declined lookalikes whose last scan rendered (liveness
+            not re-checked) · median age {ops.age.median_days}d · p90{" "}
+            {ops.age.p90_days}d · oldest {ops.age.oldest_days}d
           </p>
         ) : (
-          <p style={line}>No still-declined live lookalikes right now.</p>
+          <p style={line}>No declined lookalikes with a rendering last scan.</p>
         )}
       </div>
 

@@ -197,12 +197,15 @@ function VendorGapStrip({ vendorGap }: { vendorGap: PublicVendorGapStats }) {
     {
       n: vendorGap.decline_to_weaponise_n,
       median: vendorGap.decline_to_weaponise_median_hours,
-      label: "from a vendor “no threats found” grading to our scanner observing live phishing on the same domain",
+      // "classified", not "observed": weaponised_at can come from a Safe
+      // Browsing / VirusTotal reputation hit without a rendered scan (the
+      // reputation-fallback path) — the F1 email uses the same honest verb.
+      label: "from a vendor “no threats found” grading to the same domain being classified as live phishing",
     },
     {
       n: vendorGap.weaponise_to_refile_n,
       median: vendorGap.weaponise_to_refile_median_hours,
-      label: "from observing live phishing to re-filing the domain with fresh evidence",
+      label: "from the live-phishing classification to re-filing the domain with fresh evidence",
     },
     {
       n: vendorGap.refile_to_takedown_n,
@@ -240,10 +243,11 @@ function VendorGapStrip({ vendorGap }: { vendorGap: PublicVendorGapStats }) {
           ))}
       </div>
       <p className="mt-4 text-xs leading-relaxed text-slate-400">
-        Weaponisation timestamps are quantised to a 6-hour recheck cadence;
-        takedown timings count only transitions we witnessed in the
-        vendor&apos;s own per-URL gradings. Aggregate-only — no specific
-        domains are published.
+        Phishing classifications come from urlscan.io renders or Safe
+        Browsing / VirusTotal reputation; their timestamps are quantised by
+        our 6-hour recheck and 3-hour retrieve cycles. Takedown timings count
+        only transitions we witnessed in the vendor&apos;s own per-URL
+        gradings. Aggregate-only — no specific domains are published.
       </p>
     </div>
   );
