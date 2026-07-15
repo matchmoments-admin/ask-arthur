@@ -153,8 +153,8 @@ Supabase Postgres (project `rquomhcgnodxzkhokwni`). 75+ tables across 12 domain 
   - `clone_watch_brand_breakdown(p_days INT) → TABLE` — per-brand history for admin table. v144.
   - `clone_watch_public_impact(p_days INT) → TABLE` — aggregate counts for `/clone-watch` public page. **Anon GRANT** (output is aggregate-only). v144 + revised in v147 (brands_protected semantic fix).
   - `clone_watch_takedown_stats(p_days INT) → TABLE` — median + P90 time-to-takedown. **Anon GRANT**. v145. (Anon grant revoked in v160; read server-side via service client.)
-  - `clone_watch_vendor_gap_stats(p_days INT DEFAULT 90) → TABLE` — the "vendor-gap clock": per-leg `(n, median_hours)` for decline→weaponise, weaponise→re-file (`report_issue`), re-file→takedown, full submit→takedown loop. Aggregate-only; service-role only (v160 posture); rendered server-side on `/clone-watch`. Medians NULL when a leg is empty; strict non-negative guards handle the last-touch `netcraft_declined_at` pathology. v231.
-  - `clone_watch_unactioned_age_stats() → TABLE` — age distribution (median/p90/oldest days since `first_seen_at`) of the still-`declined`, still-rendering NRD tail. Live snapshot, service-role only. v231.
+  - `clone_watch_vendor_gap_stats(p_days INT DEFAULT 90) → TABLE` — the "vendor-gap clock": per-leg `(n, median_hours)` for decline→weaponise, weaponise→re-file (`report_issue`), re-file→takedown, full submit→takedown loop. Aggregate-only; service-role only (v160 posture); rendered server-side on `/clone-watch`. Medians NULL when a leg is empty; strict non-negative guards handle the last-touch `netcraft_declined_at` pathology. v231; `search_path=''` hardening v232.
+  - `clone_watch_unactioned_age_stats() → TABLE` — age distribution (median/p90/oldest days since `first_seen_at`) of the still-`declined`, still-rendering NRD tail. Live snapshot, service-role only. v231; `search_path=''` hardening v232.
 
   _URLscan:_
   - `list_clone_alerts_pending_urlscan(p_limit INT) → TABLE` — selector for urlscan initial-scan fan-out. v148.

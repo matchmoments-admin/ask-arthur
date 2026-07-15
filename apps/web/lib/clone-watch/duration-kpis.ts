@@ -35,11 +35,33 @@ export interface DurationKpis {
   weaponiseToRefile: DurationLeg;
   refileToTakedown: DurationLeg;
   fullLoop: DurationLeg;
-  /** Pairs where both endpoints exist but ordering is inverted (the last-touch
-   *  netcraft_declined_at pathology) — excluded from medians, surfaced here. */
+  /** decline→weaponise pairs dropped because the LAST-touch
+   *  netcraft_declined_at was re-stamped at/after weaponised_at — the one
+   *  inversion that is an EXPECTED data pathology. Only that leg counts here. */
   excludedNegativeN: number;
+  /** Inverted pairs dropped from the OTHER three legs (e.g. a takedown
+   *  witnessed by the 10:00 reconciler before the 11:00 filer stamped the
+   *  re-file). Not expected; anything >0 is worth a look, so it is counted
+   *  separately rather than folded into the decline-pathology number. */
+  anomalousInversionsN: number;
   /** ISO timestamp the KPIs were computed (stamped into duration_kpis jsonb). */
   asOf: string;
+}
+
+/** A published median needs a defensible sample: counts always render, but a
+ *  leg's median only renders at n >= this floor. ONE home — both the public
+ *  /clone-watch strip and the admin report-card appendix import it, so the
+ *  appendix always previews exactly what the public page publishes. */
+export const MEDIAN_FLOOR = 5;
+
+/** Render an integer median-hours value honestly: a median that rounded to 0
+ *  reads "<1h" (never a fake "0h"), short spans read as hours, long spans as
+ *  days. Shared by the public strip and the admin appendix so the same
+ *  statistic never renders two ways. */
+export function formatMedianHours(hours: number): string {
+  if (hours < 1) return "<1h";
+  if (hours < 48) return `${hours}h`;
+  return `${(hours / 24).toFixed(1)} days`;
 }
 
 export interface RegistrarWeaponisationRow {
@@ -79,8 +101,10 @@ function netcraftTimes(row: CloneAlertRow): {
   };
 }
 
-/** percentile_cont(0.5)-compatible median (linear interpolation), rounded. */
-function medianOf(values: number[]): number | null {
+/** percentile_cont(0.5)-compatible median (linear interpolation), rounded.
+ *  Exported as THE median for every clone-watch duration surface — the admin
+ *  appendix's detection-lag path must use this, not an inline copy. */
+export function medianOf(values: number[]): number | null {
   if (values.length === 0) return null;
   const sorted = [...values].sort((a, b) => a - b);
   const mid = (sorted.length - 1) / 2;
@@ -111,21 +135,27 @@ export function computeDurationKpis(
   const refileToTakedown: number[] = [];
   const fullLoop: number[] = [];
   let excludedNegativeN = 0;
+  let anomalousInversionsN = 0;
 
-  // A pair with both endpoints present either counts or is excluded-negative;
-  // a strict guard (< / <=) drops equal-or-inverted decline pairs because a
-  // decline re-stamped at/after weaponisation proves nothing about the gap.
+  // A pair with both endpoints present either counts or is excluded; a strict
+  // guard (< / <=) drops equal-or-inverted pairs because they prove nothing
+  // about the gap. Exclusions land in TWO counters: the decline→weaponise leg
+  // feeds excludedNegativeN (the EXPECTED last-touch pathology the UI copy
+  // names), every other leg feeds anomalousInversionsN — folding them together
+  // mislabeled and inflated the pathology count.
   const leg = (
     startMs: number | null,
     endMs: number | null,
     sink: number[],
-    allowEqual: boolean,
+    opts: { allowEqual: boolean; expectedPathology?: boolean },
   ): void => {
     if (startMs == null || endMs == null) return;
-    if (allowEqual ? startMs <= endMs : startMs < endMs) {
+    if (opts.allowEqual ? startMs <= endMs : startMs < endMs) {
       sink.push((endMs - startMs) / HOUR_MS);
-    } else {
+    } else if (opts.expectedPathology) {
       excludedNegativeN += 1;
+    } else {
+      anomalousInversionsN += 1;
     }
   };
 
@@ -134,10 +164,13 @@ export function computeDurationKpis(
     const weaponisedAt = ts(row.weaponised_at);
     const { submittedAt, takedownAt, refiledAt } = netcraftTimes(row);
 
-    leg(declinedAt, weaponisedAt, declineToWeaponise, false);
-    leg(weaponisedAt, refiledAt, weaponiseToRefile, true);
-    leg(refiledAt, takedownAt, refileToTakedown, true);
-    leg(submittedAt, takedownAt, fullLoop, true);
+    leg(declinedAt, weaponisedAt, declineToWeaponise, {
+      allowEqual: false,
+      expectedPathology: true,
+    });
+    leg(weaponisedAt, refiledAt, weaponiseToRefile, { allowEqual: true });
+    leg(refiledAt, takedownAt, refileToTakedown, { allowEqual: true });
+    leg(submittedAt, takedownAt, fullLoop, { allowEqual: true });
   }
 
   const toLeg = (durations: number[]): DurationLeg => ({
@@ -151,6 +184,7 @@ export function computeDurationKpis(
     refileToTakedown: toLeg(refileToTakedown),
     fullLoop: toLeg(fullLoop),
     excludedNegativeN,
+    anomalousInversionsN,
     asOf: now.toISOString(),
   };
 }

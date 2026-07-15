@@ -38,6 +38,7 @@ const CARD: CloneWatchReportCard = {
     refileToTakedown: { n: 0, medianHours: null },
     fullLoop: { n: 0, medianHours: null },
     excludedNegativeN: 2,
+    anomalousInversionsN: 0,
     asOf: "2026-07-01T00:00:00.000Z",
   },
   registrarWeaponisation: [

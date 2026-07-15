@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   computeDurationKpis,
+  formatMedianHours,
+  medianOf,
   registrarWeaponisation,
   tldOf,
   tldWeaponisation,
@@ -67,6 +69,23 @@ describe("computeDurationKpis", () => {
     ]);
     expect(kpis.declineToWeaponise).toEqual({ n: 1, medianHours: 12 });
     expect(kpis.excludedNegativeN).toBe(1);
+    expect(kpis.anomalousInversionsN).toBe(0);
+  });
+
+  it("counts inversions on non-decline legs as anomalous, not decline pathology", () => {
+    const kpis = computeDurationKpis([
+      // takedown witnessed BEFORE the re-file stamp (10:00 reconciler vs
+      // 11:00 filer) — an anomaly on two legs, zero decline pathology.
+      row({
+        candidate_domain: "odd.shop",
+        submitted_to: {
+          netcraft: { submitted_at: T0_PLUS_72H, takedown_at: T0_PLUS_24H },
+          netcraft_issue: { issue_reported_at: T0_PLUS_48H },
+        },
+      }),
+    ]);
+    expect(kpis.excludedNegativeN).toBe(0);
+    expect(kpis.anomalousInversionsN).toBe(2); // refile→takedown + full loop
   });
 
   it("ignores skip-stamped netcraft_issue keys without issue_reported_at", () => {
@@ -116,6 +135,23 @@ describe("computeDurationKpis", () => {
   it("stamps asOf from the provided clock", () => {
     const now = new Date("2026-07-16T09:00:00Z");
     expect(computeDurationKpis([], now).asOf).toBe(now.toISOString());
+  });
+});
+
+describe("medianOf / formatMedianHours", () => {
+  it("medianOf interpolates like percentile_cont and returns null on empty", () => {
+    expect(medianOf([])).toBeNull();
+    expect(medianOf([7])).toBe(7);
+    expect(medianOf([2, 4])).toBe(3);
+    expect(medianOf([1, 2, 100])).toBe(2);
+  });
+
+  it("formatMedianHours never renders a fake 0h", () => {
+    expect(formatMedianHours(0)).toBe("<1h");
+    expect(formatMedianHours(1)).toBe("1h");
+    expect(formatMedianHours(33)).toBe("33h");
+    expect(formatMedianHours(48)).toBe("2.0 days");
+    expect(formatMedianHours(323)).toBe("13.5 days");
   });
 });
 

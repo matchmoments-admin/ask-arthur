@@ -59,6 +59,7 @@ const JUNE: CloneWatchReportCard = {
     refileToTakedown: { n: 0, medianHours: null },
     fullLoop: { n: 0, medianHours: null },
     excludedNegativeN: 0,
+    anomalousInversionsN: 0,
     asOf: "2026-07-01T00:00:00.000Z",
   },
   registrarWeaponisation: [],

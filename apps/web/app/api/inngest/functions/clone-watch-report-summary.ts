@@ -100,6 +100,7 @@ export const cloneWatchReportSummary = inngest.createFunction(
         refileToTakedownMedianH: card.durations.refileToTakedown.medianHours,
         fullLoopMedianH: card.durations.fullLoop.medianHours,
         excludedNegativeN: card.durations.excludedNegativeN,
+        anomalousInversionsN: card.durations.anomalousInversionsN,
       });
       return { ok: true, ...result, ...trend };
     },

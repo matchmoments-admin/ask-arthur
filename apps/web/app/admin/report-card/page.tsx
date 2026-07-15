@@ -5,7 +5,13 @@ import {
   getCloneWatchReportCard,
   type CloneWatchReportCard,
 } from "@/lib/clone-watch/report-card-data";
-import type { DurationLeg } from "@/lib/clone-watch/duration-kpis";
+import {
+  formatMedianHours,
+  medianOf,
+  MEDIAN_FLOOR,
+  type DurationLeg,
+} from "@/lib/clone-watch/duration-kpis";
+import { logger } from "@askarthur/utils/logger";
 import { buildOutcomesLine } from "@/lib/clone-watch/outcome-copy";
 import { prettyBrand } from "@/lib/clone-watch/brand-display";
 import { reportCardCss } from "./report-card-css";
@@ -107,6 +113,8 @@ export default async function ReportCardPage({
 
 /* ── ops appendix (internal only; below the stacked preview) ─────────────── */
 
+const LAG_SAMPLE_LIMIT = 1000;
+
 interface OpsStats {
   age: {
     n: number;
@@ -115,8 +123,9 @@ interface OpsStats {
     oldest_days: number | null;
   } | null;
   /** Median hours scanned_at − urlscan_submitted_at over weaponising
-   *  transitions (the flip-catch lag), + sample size. */
-  detectionLag: { n: number; medianHours: number | null };
+   *  transitions (the flip-catch lag), + sample size. `capped` = the query
+   *  hit LAG_SAMPLE_LIMIT, so the median covers the most recent rows only. */
+  detectionLag: { n: number; medianHours: number | null; capped: boolean };
   /** created_at of the earliest transition row — "collecting since". */
   collectingSince: string | null;
 }
@@ -131,7 +140,11 @@ async function fetchOpsStats(): Promise<OpsStats | null> {
       .from("clone_watch_scan_transitions")
       .select("scanned_at, urlscan_submitted_at")
       .eq("new_classification", "likely_phishing")
-      .limit(1000),
+      // Newest-first so a capped sample measures CURRENT latency, not the
+      // system's first weeks. The cap is never silent: `capped` labels the
+      // UI and we warn (the fetchMonthByBrand LIMIT-warn precedent).
+      .order("scanned_at", { ascending: false })
+      .limit(LAG_SAMPLE_LIMIT),
     sb
       .from("clone_watch_scan_transitions")
       .select("created_at")
@@ -141,37 +154,34 @@ async function fetchOpsStats(): Promise<OpsStats | null> {
 
   const age = Array.isArray(ageRes.data) ? (ageRes.data[0] ?? null) : null;
 
-  const lags = (lagRes.data ?? [])
+  const rows = lagRes.data ?? [];
+  const capped = rows.length === LAG_SAMPLE_LIMIT;
+  if (capped) {
+    logger.warn("report-card ops: detection-lag fetch hit LIMIT", {
+      limit: LAG_SAMPLE_LIMIT,
+    });
+  }
+  const lags = rows
     .map((r) =>
       r.urlscan_submitted_at && r.scanned_at
         ? (Date.parse(r.scanned_at) - Date.parse(r.urlscan_submitted_at)) / 3_600_000
         : null,
     )
-    .filter((h): h is number => h != null && h >= 0)
-    .sort((a, b) => a - b);
-  const mid = (lags.length - 1) / 2;
-  const medianHours =
-    lags.length === 0
-      ? null
-      : Math.round((lags[Math.floor(mid)] + lags[Math.ceil(mid)]) / 2);
+    .filter((h): h is number => h != null && Number.isFinite(h) && h >= 0);
 
   return {
     age,
-    detectionLag: { n: lags.length, medianHours },
+    detectionLag: { n: lags.length, medianHours: medianOf(lags), capped },
     collectingSince: firstRes.data?.[0]?.created_at ?? null,
   };
 }
-
-/** Same publication floor as the public /clone-watch strip: a median only
- *  renders at n ≥ 5, so this appendix previews exactly what publishes. */
-const MEDIAN_FLOOR = 5;
 
 function legCell(leg: DurationLeg): string {
   if (leg.n === 0) return "no completed pairs yet";
   if (leg.n < MEDIAN_FLOOR || leg.medianHours == null) {
     return `n=${leg.n} — median withheld (sample < ${MEDIAN_FLOOR})`;
   }
-  return `n=${leg.n} · median ${leg.medianHours}h`;
+  return `n=${leg.n} · median ${formatMedianHours(leg.medianHours)}`;
 }
 
 function OpsAppendix({ data, ops }: { data: CloneWatchReportCard; ops: OpsStats }) {
@@ -219,6 +229,13 @@ function OpsAppendix({ data, ops }: { data: CloneWatchReportCard; ops: OpsStats 
             (decline re-stamped after weaponisation — last-touch pathology).
           </p>
         )}
+        {d.anomalousInversionsN > 0 && (
+          <p style={{ ...line, opacity: 0.65 }}>
+            {d.anomalousInversionsN} anomalous ordering
+            {d.anomalousInversionsN === 1 ? "" : "s"} excluded on other legs —
+            unexpected, worth a look.
+          </p>
+        )}
       </div>
 
       <div style={box}>
@@ -236,9 +253,9 @@ function OpsAppendix({ data, ops }: { data: CloneWatchReportCard; ops: OpsStats 
       <div style={box}>
         <div style={lab}>DETECTION LAG (WEAPONISATION FLIPS CAUGHT)</div>
         <p style={line}>
-          {ops.detectionLag.n === 0
+          {ops.detectionLag.n === 0 || ops.detectionLag.medianHours == null
             ? "No weaponising transitions archived yet"
-            : `n=${ops.detectionLag.n} · median ${ops.detectionLag.medianHours}h from rescan submit to verdict`}
+            : `n=${ops.detectionLag.n}${ops.detectionLag.capped ? ` (most recent ${ops.detectionLag.n} only — sample capped)` : ""} · median ${formatMedianHours(ops.detectionLag.medianHours)} from rescan submit to verdict`}
           {ops.collectingSince
             ? ` — collecting since ${ops.collectingSince.slice(0, 10)} (v230)`
             : " — collecting from v230 deploy"}
