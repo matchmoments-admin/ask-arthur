@@ -94,15 +94,31 @@ interface PublicTakedownStats {
   median_minutes: number;
 }
 
+interface PublicVendorGapStats {
+  window_days: number;
+  decline_to_weaponise_n: number;
+  decline_to_weaponise_median_hours: number | null;
+  weaponise_to_refile_n: number;
+  weaponise_to_refile_median_hours: number | null;
+  refile_to_takedown_n: number;
+  refile_to_takedown_median_hours: number | null;
+  full_loop_n: number;
+  full_loop_median_hours: number | null;
+}
+
 async function getPublicImpact(): Promise<{
   impact: PublicImpactSnapshot;
   takedown: PublicTakedownStats | null;
+  vendorGap: PublicVendorGapStats | null;
 } | null> {
   const supabase = createServiceClient();
   if (!supabase) return null;
-  const [impactRes, takedownRes] = await Promise.all([
+  // Vendor-gap window is 90 days (not 30): re-file loops are rare enough that
+  // a 30-day window would sit under the n>=5 median floor most months.
+  const [impactRes, takedownRes, vendorGapRes] = await Promise.all([
     supabase.rpc("clone_watch_public_impact", { p_days: 30 }),
     supabase.rpc("clone_watch_takedown_stats", { p_days: 30 }),
+    supabase.rpc("clone_watch_vendor_gap_stats", { p_days: 90 }),
   ]);
   if (!Array.isArray(impactRes.data) || impactRes.data.length === 0) return null;
   const impact = impactRes.data[0] as PublicImpactSnapshot;
@@ -110,7 +126,11 @@ async function getPublicImpact(): Promise<{
     Array.isArray(takedownRes.data) && takedownRes.data[0]
       ? (takedownRes.data[0] as PublicTakedownStats)
       : null;
-  return { impact, takedown };
+  const vendorGap =
+    Array.isArray(vendorGapRes.data) && vendorGapRes.data[0]
+      ? (vendorGapRes.data[0] as PublicVendorGapStats)
+      : null;
+  return { impact, takedown, vendorGap };
 }
 
 interface EditionRow {
@@ -165,6 +185,75 @@ function typeKeyFor(signals: unknown): CloneDomainItem["typeKey"] {
   }
 }
 
+// A published median needs a defensible sample: counts always render, but a
+// leg's median only renders at n >= this floor (below it, we say so instead
+// of printing a small-sample number as if it were a stable statistic).
+const PUBLIC_MEDIAN_FLOOR = 5;
+
+function fmtHours(h: number): string {
+  return h < 48 ? `${h}h` : `${(h / 24).toFixed(1)} days`;
+}
+
+// The vendor-gap clock: how long a "no threats found" grading holds before a
+// clone weaponises, and how fast the re-report loop closes. Aggregate-only;
+// omitted entirely when no leg has data (all-zero reads as broken).
+function VendorGapStrip({ vendorGap }: { vendorGap: PublicVendorGapStats }) {
+  const legs: Array<{ n: number; median: number | null; label: string }> = [
+    {
+      n: vendorGap.decline_to_weaponise_n,
+      median: vendorGap.decline_to_weaponise_median_hours,
+      label: "from a vendor “no threats found” grading to our scanner observing live phishing on the same domain",
+    },
+    {
+      n: vendorGap.weaponise_to_refile_n,
+      median: vendorGap.weaponise_to_refile_median_hours,
+      label: "from observing live phishing to re-filing the domain with fresh evidence",
+    },
+    {
+      n: vendorGap.refile_to_takedown_n,
+      median: vendorGap.refile_to_takedown_median_hours,
+      label: "from the evidence re-filing to a witnessed takedown",
+    },
+  ];
+  if (legs.every((l) => l.n === 0)) return null;
+
+  return (
+    <div className="mt-8 pt-7 border-t border-white/10">
+      <h3 className="text-xs font-bold uppercase tracking-widest text-slate-300 mb-4">
+        Last {vendorGap.window_days} days · the vendor-gap clock
+      </h3>
+      <div className="space-y-3">
+        {legs
+          .filter((l) => l.n > 0)
+          .map((l) => (
+            <div key={l.label} className="flex items-baseline gap-3">
+              <span
+                className="shrink-0 text-xl font-extrabold tracking-tight"
+                style={{ fontVariantNumeric: "tabular-nums" }}
+              >
+                {l.n >= PUBLIC_MEDIAN_FLOOR && l.median != null
+                  ? `median ${fmtHours(l.median)}`
+                  : `${l.n} ${l.n === 1 ? "domain" : "domains"}`}
+              </span>
+              <span className="text-xs leading-relaxed text-slate-400">
+                {l.label}
+                {l.n >= PUBLIC_MEDIAN_FLOOR && l.median != null
+                  ? ` (n=${l.n})`
+                  : " — median withheld, sample too small"}
+              </span>
+            </div>
+          ))}
+      </div>
+      <p className="mt-4 text-xs leading-relaxed text-slate-400">
+        Weaponisation timestamps are quantised to a 6-hour recheck cadence;
+        takedown timings count only transitions we witnessed in the
+        vendor&apos;s own per-URL gradings. Aggregate-only — no specific
+        domains are published.
+      </p>
+    </div>
+  );
+}
+
 // Dark "impact instrument" panel — aggregate-only, never names a specific
 // candidate domain. Renders only when FF_SHOPFRONT_CLONE_OUTREACH=true AND
 // there's at least one candidate in the window (a "0 candidates" panel reads
@@ -172,9 +261,11 @@ function typeKeyFor(signals: unknown): CloneDomainItem["typeKey"] {
 function PublicImpactPanel({
   impact,
   takedown,
+  vendorGap,
 }: {
   impact: PublicImpactSnapshot;
   takedown: PublicTakedownStats | null;
+  vendorGap: PublicVendorGapStats | null;
 }) {
   const fmtMinutes = (m: number) =>
     m < 60 ? `${m} min` : `${(m / 60).toFixed(1)}h`;
@@ -275,6 +366,8 @@ function PublicImpactPanel({
           brand&apos;s security team.
         </p>
       </div>
+
+      {vendorGap && <VendorGapStrip vendorGap={vendorGap} />}
     </section>
   );
 }
@@ -289,6 +382,7 @@ export default async function CloneWatchPage() {
   ]);
   const impact = impactBundle?.impact ?? null;
   const takedown = impactBundle?.takedown ?? null;
+  const vendorGap = impactBundle?.vendorGap ?? null;
   const latest = editions[0] ?? null;
 
   const items: CloneDomainItem[] = alerts.map((a) => ({
@@ -323,7 +417,7 @@ export default async function CloneWatchPage() {
 
       {/* Dark impact instrument panel */}
       {impact && impact.candidates_total > 0 && (
-        <PublicImpactPanel impact={impact} takedown={takedown} />
+        <PublicImpactPanel impact={impact} takedown={takedown} vendorGap={vendorGap} />
       )}
 
       {/* Monthly reports — inline (no card), teal eyebrow */}
