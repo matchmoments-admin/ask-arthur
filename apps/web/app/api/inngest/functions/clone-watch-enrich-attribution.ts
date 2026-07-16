@@ -8,6 +8,7 @@ import {
   enrichCloneAttribution,
   type HostingInfo,
 } from "@/lib/clone-watch/enrich-attribution";
+import { computeCampaignKey } from "@/lib/clone-watch/campaign-fingerprint";
 
 /**
  * Clone-watch attribution enricher (Phase 2). Builds the per-clone dossier —
@@ -34,6 +35,9 @@ const BRAKE = "shopfront_clone_outreach";
 // brake-capped + bounded by this cap.
 const ENRICH_RUN_CAP = 60;
 const RECENT_WINDOW_DAYS = 35; // covers a full prior calendar month for the report
+// Bounded per-run campaign_key backfill of already-enriched rows (converges to
+// zero over a few days; the "insufficient" sentinel keeps it self-draining).
+const BACKFILL_CAP = 500;
 
 interface PendingAlert {
   id: number;
@@ -107,9 +111,19 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
         );
         const sb = createServiceClient();
         if (!sb) return false;
+        // Stamp the campaign key in the SAME write (zero extra writes). Sentinel
+        // "insufficient" for a too-weak fingerprint so the row still crosses the
+        // backfill predicate below and is never re-selected.
+        const update: { attribution: typeof dossier; campaign_key?: string } = {
+          attribution: dossier,
+        };
+        if (featureFlags.cloneCampaigns) {
+          update.campaign_key =
+            campaignKeyFromDossier(dossier) ?? "insufficient";
+        }
         const { error } = await sb
           .from("shopfront_clone_alerts")
-          .update({ attribution: dossier })
+          .update(update)
           .eq("id", alert.id);
         if (error) {
           logger.error("clone-watch enrich: update failed", {
@@ -123,10 +137,61 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
       if (ok) enriched += 1;
     }
 
+    // Converging backfill: stamp campaign_key on already-enriched rows that
+    // predate this feature. Bounded per run; the "insufficient" sentinel means
+    // weak-attribution rows also cross the predicate, so it drains to zero over
+    // a few days. One batched step (no per-row fan-out).
+    let backfilled = 0;
+    if (featureFlags.cloneCampaigns) {
+      backfilled = await step.run("backfill-campaign-keys", async () => {
+        const sb = createServiceClient();
+        if (!sb) return 0;
+        const { data } = await sb
+          .from("shopfront_clone_alerts")
+          .select("id, attribution")
+          .not("attribution", "is", null)
+          .is("campaign_key", null)
+          .limit(BACKFILL_CAP);
+        const rows = (data ?? []) as Array<{
+          id: number;
+          attribution: DossierShape | null;
+        }>;
+        let n = 0;
+        for (const r of rows) {
+          const key = campaignKeyFromDossier(r.attribution) ?? "insufficient";
+          const { error } = await sb
+            .from("shopfront_clone_alerts")
+            .update({ campaign_key: key })
+            .eq("id", r.id);
+          if (!error) n += 1;
+        }
+        return n;
+      });
+    }
+
     logger.info("clone-watch enrich: complete", {
       candidates: pending.length,
       enriched,
+      backfilled,
     });
-    return { ok: true, candidates: pending.length, enriched };
+    return { ok: true, candidates: pending.length, enriched, backfilled };
   }),
 );
+
+/** Derive the campaign-fingerprint inputs from a stored/fresh attribution
+ *  dossier. Tolerant of partial dossiers (returns null → caller stamps the
+ *  "insufficient" sentinel). */
+type DossierShape = {
+  whois?: { registrar?: string | null; nameServers?: string[] | null } | null;
+  ct?: { issuer?: string | null } | null;
+  hosting?: { asn?: string | null } | null;
+};
+function campaignKeyFromDossier(d: DossierShape | null): string | null {
+  if (!d) return null;
+  return computeCampaignKey({
+    registrar: d.whois?.registrar ?? null,
+    nameServers: d.whois?.nameServers ?? null,
+    asn: d.hosting?.asn ?? null,
+    ctIssuer: d.ct?.issuer ?? null,
+  });
+}

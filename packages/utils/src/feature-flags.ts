@@ -686,6 +686,12 @@ export const featureFlags = {
    *  Default OFF. Server-side only; free/unmetered (auDA RDAP + ABR). */
   cloneWatchAuRegistrant: readBoolEnv("FF_CLONE_WATCH_AU_REGISTRANT"),
 
+  /** Campaign fingerprinting — stamp shopfront_clone_alerts.campaign_key (a
+   *  coarse actor key over registrar + NS roots + ASN + cert issuer) so we can
+   *  surface "N of your lookalikes are one coordinated campaign". $0, own data.
+   *  Default OFF. Server-side only. */
+  cloneCampaigns: readBoolEnv("FF_CLONE_CAMPAIGNS"),
+
   /** Feed CONFIRMED clones (domain + hosting IP) into the unified scam_entities
    *  index so the consumer reputation lookup / scam-map / B2B feeds see them.
    *  BLAST-RADIUS: scam_entities powers consumer-facing reputation — only
