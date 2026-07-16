@@ -67,6 +67,26 @@ describe("buildAuRegistrantBlock", () => {
     expect(b.abnStatus).toBe("no-abn");
   });
 
+  it("PII guard: sole trader with an ABN → legalName still dropped (ABR entity type)", () => {
+    const b = buildAuRegistrantBlock(
+      { registrantName: "John Smith", abn: "51824753556", entityType: "Registered Business" },
+      { ...ABR_ACTIVE, abn: "51824753556", entityType: "Individual/Sole Trader", entityName: "SMITH, JOHN" },
+      AT,
+    )!;
+    expect(b.legalName).toBeNull(); // personal name never stored
+    expect(b.abn).toBe("51824753556"); // non-PII fields retained
+    expect(b.abnStatus).toBe("active");
+  });
+
+  it("PII guard: sole trader flagged by auDA eligibility type → legalName dropped", () => {
+    const b = buildAuRegistrantBlock(
+      { registrantName: "John Smith", abn: "51824753556", entityType: "Sole Trader" },
+      { ...ABR_ACTIVE, abn: "51824753556", entityType: "Australian Private Company", entityName: "SMITH, JOHN" },
+      AT,
+    )!;
+    expect(b.legalName).toBeNull();
+  });
+
   it("no .au data → null block", () => {
     expect(buildAuRegistrantBlock(null, null, AT)).toBeNull();
   });

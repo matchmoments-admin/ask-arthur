@@ -60,14 +60,10 @@ export function buildAuRegistrantBlock(
 ): AuRegistrantBlock | null {
   if (!raw) return null;
 
-  // PII guard: keep the disclosed legal name only alongside a business
-  // identifier (ABN/ACN). Without one it could be a sole trader's personal
-  // name — drop it.
-  const legalName = raw.abn ? raw.registrantName : null;
-
   let abnStatus: AuRegistrantBlock["abnStatus"];
   let entityName: string | null = null;
   let nameMatchesAbn: boolean | null = null;
+  let abrEntityType: string | null = null;
 
   if (!raw.abn) {
     abnStatus = "no-abn";
@@ -80,6 +76,7 @@ export function buildAuRegistrantBlock(
     const s = abr.status?.toLowerCase();
     abnStatus = s === "active" ? "active" : s === "cancelled" ? "cancelled" : "active";
     entityName = abr.entityName ?? null;
+    abrEntityType = abr.entityType ?? null;
 
     if (raw.registrantName && (abr.entityName || abr.businessNames?.length)) {
       const want = normaliseEntity(raw.registrantName);
@@ -91,6 +88,18 @@ export function buildAuRegistrantBlock(
       );
     }
   }
+
+  // PII guard: the disclosed legal name is stored ONLY for a non-individual
+  // business entity. An ABN is NOT sufficient — a sole trader's ABN is
+  // registered to the natural person, so "has ABN" alone would store a personal
+  // name (a CLAUDE.md never-store-PII violation). Drop legalName whenever the
+  // auDA eligibility type OR the ABR entity type reads individual/sole-trader.
+  const isIndividual = (t: string | null | undefined) =>
+    !!t && /sole\s?trader|individual/i.test(t);
+  const legalName =
+    raw.abn && !isIndividual(raw.entityType) && !isIndividual(abrEntityType)
+      ? raw.registrantName
+      : null;
 
   return {
     legalName,

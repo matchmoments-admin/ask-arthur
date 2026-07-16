@@ -30,6 +30,9 @@ import {
 const SUBMIT_BATCH_LIMIT = 30;
 const MIN_CONFIDENCE = 0.7;
 const MAX_FAILURE_STREAK = 3;
+// Break the batch loop before the finish budget so worst-case submit latency
+// can't force a full-batch re-POST to urlscan; leftovers drain next tick.
+const SUBMIT_WALL_CLOCK_MS = 200_000;
 
 export const cloneWatchUrlscanSubmit = inngest.createFunction(
   {
@@ -75,12 +78,17 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
     // records urlscan_submitted_at and the retrieve worklist de-dupes on it),
     // so a batch-step retry re-submits harmlessly and losing per-row
     // memoisation is safe. Each row is wrapped in try/catch so one failure
-    // doesn't abort the rest; a failed row is retried next tick.
+    // doesn't abort the rest; a failed row is retried next tick. A wall-clock
+    // guard breaks before the finish budget so worst-case submit latency can't
+    // force a full-batch replay (which would re-POST to urlscan) — leftovers
+    // drain next tick (submit is urlscan_submitted_at-idempotent).
+    const submitStartMs = Date.now();
     const batch = await step.run("submit-batch", async () => {
       let submitted = 0;
       let submitFailed = 0;
       let reputationHits = 0;
       for (const row of candidates) {
+        if (Date.now() - submitStartMs > SUBMIT_WALL_CLOCK_MS) break;
         try {
           const outcome = await submitCloneCandidate(row);
           if (outcome.reputationMalicious) reputationHits++;
