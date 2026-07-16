@@ -115,10 +115,14 @@ def parse_domain_whois(text: str) -> dict[str, Any]:
          r"^\s*Registrant Contact Name:\s*(.+)$"],
         text,
     )
+    # Only anchored, registrant-scoped forms — the character class is intra-line
+    # ([\d ], NOT [\d\s]) so it can't greedily swallow a following numeric line,
+    # and we drop the bare `\bABN` fallback that would misattribute a registrar's
+    # own ABN (in an abuse-contact/footer line) as the registrant's.
     abn = _first_match(
-        [r"Registrant ID:\s*ABN\s*([\d\s]{11,})",
-         r"\bABN[:\s]+([\d\s]{11,})",
-         r"\bACN[:\s]+([\d\s]{9,})"],
+        [r"Registrant ID:\s*ABN\s*([\d ]{11,})",
+         r"^\s*Registrant[^\n]*\bABN[:\s]+([\d ]{11,})",
+         r"Registrant ID:\s*ACN\s*([\d ]{9,})"],
         text,
     )
     if abn:

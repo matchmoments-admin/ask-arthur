@@ -8,13 +8,34 @@ import type { UrlscanSearchHit } from "@askarthur/scam-engine/urlscan-search";
  */
 export interface KitSiblingsBlock {
   pivot: "ip";
-  pivot_value: string;
+  /** null when there was no hosting IP to pivot on (see reason). */
+  pivot_value: string | null;
   siblings: Array<{ domain: string; last_seen: string | null }>;
   result_count: number;
+  /** Present when no pivot was performed, e.g. "no_ip". */
+  reason?: string;
   searched_at: string;
 }
 
 const MAX_SIBLINGS = 20;
+
+/**
+ * Sentinel block for an alert that qualified for a pivot but had no hosting IP
+ * (e.g. a reputation-only likely_phishing classification stores no server.ip).
+ * Writing it moves the row across the `kit_siblings IS NULL` worklist predicate
+ * so it isn't re-selected forever (the op-review "cross the predicate you filter
+ * on" rule) — the row simply can't be pivoted, and that's recorded.
+ */
+export function noIpKitSiblings(now: Date = new Date()): KitSiblingsBlock {
+  return {
+    pivot: "ip",
+    pivot_value: null,
+    siblings: [],
+    result_count: 0,
+    reason: "no_ip",
+    searched_at: now.toISOString(),
+  };
+}
 
 /**
  * Shape a urlscan search result set into the stored block. ALWAYS returns a

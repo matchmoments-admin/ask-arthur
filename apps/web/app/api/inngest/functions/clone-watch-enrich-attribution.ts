@@ -10,7 +10,7 @@ import {
 } from "@/lib/clone-watch/enrich-attribution";
 import { computeCampaignKey } from "@/lib/clone-watch/campaign-fingerprint";
 import { searchURLScan } from "@askarthur/scam-engine/urlscan-search";
-import { shapeKitSiblings } from "@/lib/clone-watch/kit-pivot";
+import { shapeKitSiblings, noIpKitSiblings } from "@/lib/clone-watch/kit-pivot";
 
 /**
  * Clone-watch attribution enricher (Phase 2). Builds the per-clone dossier —
@@ -164,6 +164,9 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
           .not("attribution", "is", null)
           .is("attribution->kit_siblings", null)
           .gte("first_seen_at", since)
+          // Newest first so a backlog of un-pivotable (no-IP) rows can't
+          // monopolise the cap and starve fresh rows that DO have an IP.
+          .order("first_seen_at", { ascending: false })
           .limit(KIT_PIVOT_RUN_CAP);
         const rows = (data ?? []) as Array<{
           id: number;
@@ -174,7 +177,22 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
         let n = 0;
         for (const r of rows) {
           const ip = r.urlscan_evidence?.server?.ip ?? null;
-          if (!ip) continue; // no pivot without an IP; leave for a later scan
+          if (!ip) {
+            // No IP to pivot on — write a sentinel so the row crosses the
+            // kit_siblings-IS-NULL predicate and isn't re-selected forever
+            // (op-review rule). Costs no urlscan search.
+            const { error } = await sb
+              .from("shopfront_clone_alerts")
+              .update({
+                attribution: {
+                  ...(r.attribution ?? {}),
+                  kit_siblings: noIpKitSiblings(),
+                },
+              })
+              .eq("id", r.id);
+            if (!error) n += 1;
+            continue;
+          }
           const outcome = await searchURLScan(`page.ip:"${ip}"`, 50);
           if (!outcome.ok) {
             if (outcome.error === "rate_limited") break; // quota — stop the run
