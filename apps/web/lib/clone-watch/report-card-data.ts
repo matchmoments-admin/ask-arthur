@@ -8,6 +8,10 @@ import {
 } from "@/app/api/inngest/functions/report-brand-stewardship";
 import { buildRegistrarRollup } from "@/app/api/inngest/functions/clone-watch-internal-digest";
 import {
+  summariseCampaigns,
+  type CampaignSummary,
+} from "@/lib/clone-watch/campaign-summary";
+import {
   computeDurationKpis,
   registrarWeaponisation,
   tldWeaponisation,
@@ -153,6 +157,10 @@ export interface CloneWatchReportCard {
   registrarWeaponisation: RegistrarWeaponisationRow[];
   /** Per-TLD weaponisation counts (card-render only, not persisted). */
   tldWeaponisation: Array<{ tld: string; weaponised: number }>;
+  /** Coordinated campaigns (>=2 lookalikes sharing an actor fingerprint, v235)
+   *  over this month's cohort — the "one actor, N of your domains" story.
+   *  Empty until FF_CLONE_CAMPAIGNS has stamped campaign_key on the cohort. */
+  campaigns: CampaignSummary;
 }
 
 function monthWindow(month?: string): {
@@ -252,7 +260,7 @@ async function fetchMonthByBrand(
   const { data, error } = await sb
     .from("shopfront_clone_alerts")
     .select(
-      "id, candidate_domain, inferred_target_domain, urlscan_classification, urlscan_evidence, attribution, submitted_to, lifecycle_state, netcraft_declined_at, weaponised_at, first_seen_at",
+      "id, candidate_domain, inferred_target_domain, urlscan_classification, urlscan_evidence, attribution, campaign_key, submitted_to, lifecycle_state, netcraft_declined_at, weaponised_at, first_seen_at",
     )
     .eq("source", CLONE_SOURCE)
     .gte("first_seen_at", startIso)
@@ -508,5 +516,8 @@ export async function getCloneWatchReportCard(
     durations: computeDurationKpis(rows),
     registrarWeaponisation: registrarWeaponisation(rows),
     tldWeaponisation: tldWeaponisation(rows),
+    // Coordinated-campaign clustering over the same cohort (single fetch, no
+    // drift). Empty until campaign_key is populated (FF_CLONE_CAMPAIGNS).
+    campaigns: summariseCampaigns(rows),
   };
 }

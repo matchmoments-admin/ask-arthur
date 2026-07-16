@@ -64,6 +64,7 @@ const JUNE: CloneWatchReportCard = {
   },
   registrarWeaponisation: [],
   tldWeaponisation: [],
+  campaigns: { campaignCount: 0, clusteredDomains: 0, largestCampaign: 0, top: [] },
 };
 
 /** July-style shape: no super fund, MoM available. */
