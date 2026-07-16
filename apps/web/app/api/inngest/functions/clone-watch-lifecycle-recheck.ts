@@ -56,6 +56,7 @@ interface RecheckRow {
   attribution: {
     whois?: { createdDate?: string };
     ip_rep?: { abuseConfidenceScore?: number };
+    au_registrant?: { abnStatus?: string; nameMatchesAbn?: boolean | null };
   } | null;
   clf_is_clone: boolean | null;
   clf_confidence: number | null;
@@ -82,6 +83,8 @@ export function selectTopRiskCandidates(
       brandCategory: r.brand_category,
       whoisCreatedDate: r.attribution?.whois?.createdDate ?? null,
       ipAbuseConfidenceScore: r.attribution?.ip_rep?.abuseConfidenceScore ?? null,
+      auAbnStatus: r.attribution?.au_registrant?.abnStatus ?? null,
+      auNameMatches: r.attribution?.au_registrant?.nameMatchesAbn ?? null,
       nowMs,
     }).score,
   }));

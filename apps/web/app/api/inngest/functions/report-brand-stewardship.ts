@@ -247,6 +247,7 @@ export interface CloneAlertRow {
     whois?: { registrar?: string; registrarAbuseEmail?: string; createdDate?: string };
     hosting?: { ip?: string; asn?: string; country?: string };
     ip_rep?: { abuseConfidenceScore?: number };
+    au_registrant?: { abnStatus?: string; nameMatchesAbn?: boolean | null };
   } | null;
   /** signals jsonb — weaponisation-risk input (F3). */
   signals?: unknown;
@@ -661,6 +662,8 @@ export const reportBrandStewardship = inngest.createFunction(
           whoisCreatedDate: row.attribution?.whois?.createdDate ?? null,
           ipAbuseConfidenceScore:
             row.attribution?.ip_rep?.abuseConfidenceScore ?? null,
+          auAbnStatus: row.attribution?.au_registrant?.abnStatus ?? null,
+          auNameMatches: row.attribution?.au_registrant?.nameMatchesAbn ?? null,
           nowMs,
         }).score;
       }

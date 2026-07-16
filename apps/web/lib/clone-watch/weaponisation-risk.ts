@@ -37,6 +37,13 @@ export interface WeaponisationRiskInput {
   whoisCreatedDate: string | null;
   /** attribution.ip_rep.abuseConfidenceScore 0..100 (AbuseIPDB) */
   ipAbuseConfidenceScore: number | null;
+  /** attribution.au_registrant.abnStatus (.au only). Only "cancelled" /
+   *  "not-found" score — "lookup-failed"/"no-abn"/null are neutral (ADR-0009:
+   *  a failed lookup is NOT evidence the ABN is bad). */
+  auAbnStatus?: string | null;
+  /** attribution.au_registrant.nameMatchesAbn — false ⇒ registrant name doesn't
+   *  match the ABR entity (a spoofed/borrowed ABN). null/true are neutral. */
+  auNameMatches?: boolean | null;
   /** Injectable clock for deterministic tests; defaults to Date.now(). */
   nowMs?: number;
 }
@@ -111,6 +118,15 @@ const AGE_POINTS_ESTABLISHED = 0;
 const IP_REP_HIGH_POINTS = 14; // abuseConfidenceScore ≥ 75
 const IP_REP_MID_POINTS = 7; // ≥ 25
 
+/** .au registrant ABN verdict. A cancelled/unregistered ABN on a .au lookalike
+ *  is a strong deception signal; a name mismatch (borrowed ABN) is milder.
+ *  Only these two states score — lookup-failed / no-abn / absent → 0, so
+ *  flag-OFF and non-.au domains are score-identical (the score stays clamped
+ *  at 100, so the effective ceiling is unchanged). */
+const AU_ABN_CANCELLED_POINTS = 10;
+const AU_ABN_NOT_FOUND_POINTS = 8;
+const AU_NAME_MISMATCH_POINTS = 4;
+
 const CLONE_CONFIDENCE_MAX_POINTS = 20;
 
 const BAND_CRITICAL = 70;
@@ -156,6 +172,10 @@ export function computeWeaponisationRisk(
     if (rep >= 75) raw += IP_REP_HIGH_POINTS;
     else if (rep >= 25) raw += IP_REP_MID_POINTS;
   }
+
+  if (i.auAbnStatus === "cancelled") raw += AU_ABN_CANCELLED_POINTS;
+  else if (i.auAbnStatus === "not-found") raw += AU_ABN_NOT_FOUND_POINTS;
+  if (i.auNameMatches === false) raw += AU_NAME_MISMATCH_POINTS;
 
   const score = Math.min(100, Math.max(0, Math.round(raw)));
   const band =

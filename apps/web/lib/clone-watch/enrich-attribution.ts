@@ -8,7 +8,13 @@ import {
   type AbuseIPDBResult,
 } from "@askarthur/scam-engine/abuseipdb";
 import { geolocateIP, type GeoResult } from "@askarthur/scam-engine/geolocate";
+import { lookupAuRegistrant } from "@askarthur/scam-engine/rdap-au";
+import { lookupABN } from "@askarthur/scam-engine/abr-lookup";
 import { featureFlags } from "@askarthur/utils/feature-flags";
+import {
+  buildAuRegistrantBlock,
+  type AuRegistrantBlock,
+} from "./au-registrant";
 
 /**
  * Attribution dossier for a confirmed clone — what brands / police need for a
@@ -50,6 +56,9 @@ export interface CloneAttribution {
     usageType: string | null;
   } | null;
   hosting: { ip: string | null; country: string | null; asn: string | null };
+  /** .au registrant identity + ABR verdict (only for .au domains, when the
+   *  FF_CLONE_WATCH_AU_REGISTRANT flag is on and auDA disclosed something). */
+  au_registrant?: AuRegistrantBlock | null;
   enriched_at: string;
 }
 
@@ -74,9 +83,11 @@ export function shapeAttribution(args: {
   ipRep: AbuseIPDBResult | null;
   geo: GeoResult | null;
   hosting: HostingInfo;
+  auRegistrant?: AuRegistrantBlock | null;
   enrichedAt: string;
 }): CloneAttribution {
-  const { domain, whois, ct, ipRep, geo, hosting, enrichedAt } = args;
+  const { domain, whois, ct, ipRep, geo, hosting, auRegistrant, enrichedAt } =
+    args;
 
   const ctSection = ct
     ? {
@@ -118,6 +129,7 @@ export function shapeAttribution(args: {
       country: hosting.country ?? geo?.countryCode ?? null,
       asn: hosting.asn,
     },
+    au_registrant: auRegistrant ?? null,
     enriched_at: enrichedAt,
   };
 }
@@ -132,7 +144,7 @@ export async function enrichCloneAttribution(
   hosting: HostingInfo,
   now: Date = new Date(),
 ): Promise<CloneAttribution> {
-  const [whois, ct, ipRep, geo] = await Promise.all([
+  const [whois, ct, ipRep, geo, auRaw] = await Promise.all([
     lookupDomainRegistration(domain).catch(() => null),
     featureFlags.ctLookup ? lookupCT(domain).catch(() => null) : null,
     hosting.ip && featureFlags.abuseIPDB
@@ -141,7 +153,20 @@ export async function enrichCloneAttribution(
     hosting.ip && !hosting.country
       ? geolocateIP(hosting.ip).catch(() => null)
       : null,
+    // .au registrant identity (auDA RDAP) — only for .au domains, gated by its
+    // own flag. lookupAuRegistrant self-skips non-.au domains.
+    featureFlags.cloneWatchAuRegistrant
+      ? lookupAuRegistrant(domain).catch(() => null)
+      : null,
   ]);
+
+  // Cross-check the disclosed ABN against the ABR register (a cancelled /
+  // not-found / name-mismatched ABN on a .au lookalike is a strong signal).
+  // Second call because it depends on auRaw.abn; skipped when there's no ABN.
+  const abr = auRaw?.abn
+    ? await lookupABN(auRaw.abn).catch(() => null)
+    : null;
+  const auRegistrant = buildAuRegistrantBlock(auRaw, abr, now);
 
   return shapeAttribution({
     domain,
@@ -150,6 +175,7 @@ export async function enrichCloneAttribution(
     ipRep,
     geo,
     hosting,
+    auRegistrant,
     enrichedAt: now.toISOString(),
   });
 }

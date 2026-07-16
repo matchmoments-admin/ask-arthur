@@ -42,6 +42,19 @@ describe("computeWeaponisationRisk", () => {
     expect(score("unresolved")).toBeGreaterThan(score("parked_for_sale"));
   });
 
+  it("au ABN signals: cancelled/not-found add points; lookup-failed/no-abn are neutral", () => {
+    const base = computeWeaponisationRisk(NULLS).score;
+    expect(computeWeaponisationRisk({ ...NULLS, auAbnStatus: "cancelled" }).score).toBe(base + 10);
+    expect(computeWeaponisationRisk({ ...NULLS, auAbnStatus: "not-found" }).score).toBe(base + 8);
+    // ADR-0009: a failed lookup is NOT evidence the ABN is bad — neutral.
+    expect(computeWeaponisationRisk({ ...NULLS, auAbnStatus: "lookup-failed" }).score).toBe(base);
+    expect(computeWeaponisationRisk({ ...NULLS, auAbnStatus: "no-abn" }).score).toBe(base);
+    expect(computeWeaponisationRisk({ ...NULLS, auAbnStatus: "active" }).score).toBe(base);
+    // Name mismatch (borrowed ABN) is a milder add; true/null are neutral.
+    expect(computeWeaponisationRisk({ ...NULLS, auNameMatches: false }).score).toBe(base + 4);
+    expect(computeWeaponisationRisk({ ...NULLS, auNameMatches: true }).score).toBe(base);
+  });
+
   it("each weight contributes exactly its points", () => {
     const base = computeWeaponisationRisk(NULLS).score;
     expect(

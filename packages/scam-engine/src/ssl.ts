@@ -47,9 +47,15 @@ export function checkSSL(domain: string): Promise<SSLResult> {
               (validTo.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
             );
 
+            // Node's tls DN fields are typed `string | string[]` (a field can
+            // repeat) — flatten to a single string before joining.
+            const dnField = (v: string | string[] | undefined): string | null =>
+              Array.isArray(v) ? v.join(", ") : (v ?? null);
             const issuerParts: string[] = [];
-            if (cert.issuer?.O) issuerParts.push(cert.issuer.O);
-            if (cert.issuer?.CN) issuerParts.push(cert.issuer.CN);
+            const issuerO = dnField(cert.issuer?.O);
+            const issuerCN = dnField(cert.issuer?.CN);
+            if (issuerO) issuerParts.push(issuerO);
+            if (issuerCN) issuerParts.push(issuerCN);
             const issuer = issuerParts.length > 0 ? issuerParts.join(" - ") : null;
 
             const valid = socket.authorized && daysRemaining > 0;
