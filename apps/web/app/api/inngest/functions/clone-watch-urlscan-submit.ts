@@ -69,23 +69,40 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
       return { ok: true, submitted: 0, reason: "no_gated_candidates" };
     }
 
-    let submitted = 0;
-    let submitFailed = 0;
-    let reputationHits = 0;
-
-    for (const row of candidates) {
-      // One step per candidate: independent memoisation so a single failure
-      // doesn't replay the whole batch (and re-submit already-submitted rows).
-      const outcome = await step.run(`submit-${row.id}`, () =>
-        submitCloneCandidate(row),
-      );
-      if (outcome.reputationMalicious) reputationHits++;
-      if (outcome.kind === "submitted" || outcome.kind === "reputation_classified") {
-        submitted++;
-      } else {
-        submitFailed++;
+    // Submit the whole batch inside ONE step instead of one step per candidate.
+    // Inngest bills per step execution; a single batch step cuts a 30-candidate
+    // run from ~30 executions to ~1. urlscan submit is idempotent (the helper
+    // records urlscan_submitted_at and the retrieve worklist de-dupes on it),
+    // so a batch-step retry re-submits harmlessly and losing per-row
+    // memoisation is safe. Each row is wrapped in try/catch so one failure
+    // doesn't abort the rest; a failed row is retried next tick.
+    const batch = await step.run("submit-batch", async () => {
+      let submitted = 0;
+      let submitFailed = 0;
+      let reputationHits = 0;
+      for (const row of candidates) {
+        try {
+          const outcome = await submitCloneCandidate(row);
+          if (outcome.reputationMalicious) reputationHits++;
+          if (
+            outcome.kind === "submitted" ||
+            outcome.kind === "reputation_classified"
+          ) {
+            submitted++;
+          } else {
+            submitFailed++;
+          }
+        } catch (err) {
+          submitFailed++;
+          logger.error("clone-watch urlscan submit: row failed", {
+            alertId: row.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
-    }
+      return { submitted, submitFailed, reputationHits };
+    });
+    const { submitted, submitFailed, reputationHits } = batch;
 
     await step.run("log-cost", async () => {
       logCost({

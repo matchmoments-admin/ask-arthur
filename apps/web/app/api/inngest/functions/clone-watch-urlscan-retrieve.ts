@@ -82,17 +82,12 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
       return { ok: true, retrieved: 0, reason: "nothing_pending" };
     }
 
-    let classified = 0;
-    let stillPending = 0;
-    let reputationFallback = 0;
-    const weaponisedEvents: CloneWatchWeaponisedData[] = [];
-
     // Drive the v199 enforcement lifecycle from the urlscan verdict via the
     // edge-guarded v200 RPC (never downgrades reported/terminal states).
     // Returns the weaponised.v1 payload iff the alert NEWLY weaponised, so the
     // caller can emit exactly one event per transition — the result is carried
-    // in the step's RETURN value (not a closure side-effect) so it survives
-    // Inngest step-memoisation on replay.
+    // in the batch step's RETURN value (not a closure side-effect) so it
+    // survives Inngest step-memoisation on replay.
     const applyVerdict = async (
       row: RetrieveRow,
       classification: string,
@@ -119,42 +114,81 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
       };
     };
 
-    for (const row of pending) {
-      const outcome = await step.run(`retrieve-${row.id}`, async () => {
-        const reputation = reputationFromEvidence(row.urlscan_evidence);
-        const result = await retrieveURLScan(row.urlscan_uuid);
-        const nowIso = new Date().toISOString();
+    // Retrieve + classify the whole batch inside ONE step instead of one step
+    // per row. Inngest bills per step execution, so a 40-row batch was ~40
+    // executions × 8 runs/day for this fn alone; collapsing to a single step
+    // cuts that ~20×. Safe because every write is an idempotent, edge-guarded
+    // RPC — a batch-step retry re-runs already-processed rows without double-
+    // advancing lifecycle or re-emitting weaponised events (apply_verdict only
+    // reports newly_weaponised on the real transition; retrieve is a GET). Each
+    // row is wrapped in try/catch so one failure doesn't abort the rest; a
+    // failed row is left un-advanced (stays in the worklist) and retried next
+    // tick. Weaponised payloads are RETURNED so the actual event send stays
+    // outside step.run (below), preserving send-once-on-replay semantics.
+    const batch = await step.run("retrieve-batch", async () => {
+      let classified = 0;
+      let stillPending = 0;
+      let reputationFallback = 0;
+      const weaponised: CloneWatchWeaponisedData[] = [];
 
-        // Render ready → full classification (reputation merged in).
-        if (result) {
-          const classification = classifyScan(result, reputation.isMalicious);
-          // Check the persist error like applyVerdict does: a swallowed persist
-          // failure would let lifecycle advance on an un-persisted
-          // classification (v230 folds the transition archive into this txn).
-          const persisted = await sb.rpc("persist_clone_alert_urlscan", {
-            p_alert_id: row.id,
-            p_urlscan_uuid: row.urlscan_uuid,
-            p_urlscan_evidence: serialiseRetrievedEvidence(
-              row.urlscan_uuid,
-              result,
-              reputation,
-              nowIso,
-            ),
-            p_classification: classification,
-            p_set_triage_status: suggestTriageTransition(classification),
-          });
-          if (persisted.error) {
-            throw new Error(
-              `persist_clone_alert_urlscan failed for alert ${row.id}: ${persisted.error.message}`,
-            );
+      for (const row of pending) {
+        try {
+          const reputation = reputationFromEvidence(row.urlscan_evidence);
+          const result = await retrieveURLScan(row.urlscan_uuid);
+          const nowIso = new Date().toISOString();
+
+          // Render ready → full classification (reputation merged in).
+          if (result) {
+            const classification = classifyScan(result, reputation.isMalicious);
+            const persisted = await sb.rpc("persist_clone_alert_urlscan", {
+              p_alert_id: row.id,
+              p_urlscan_uuid: row.urlscan_uuid,
+              p_urlscan_evidence: serialiseRetrievedEvidence(
+                row.urlscan_uuid,
+                result,
+                reputation,
+                nowIso,
+              ),
+              p_classification: classification,
+              p_set_triage_status: suggestTriageTransition(classification),
+            });
+            if (persisted.error) {
+              throw new Error(
+                `persist_clone_alert_urlscan failed for alert ${row.id}: ${persisted.error.message}`,
+              );
+            }
+            const w = await applyVerdict(row, classification);
+            classified++;
+            if (w) weaponised.push(w);
+            continue;
           }
-          const weaponised = await applyVerdict(row, classification);
-          return { kind: "classified" as const, classification, weaponised };
-        }
 
-        // Render not ready. If reputation is decisive, classify now and stop
-        // waiting; otherwise persist NULL (bumps failure_streak → ages out).
-        if (reputation.isMalicious) {
+          // Render not ready. If reputation is decisive, classify now and stop
+          // waiting; otherwise persist NULL (bumps failure_streak → ages out).
+          if (reputation.isMalicious) {
+            const persisted = await sb.rpc("persist_clone_alert_urlscan", {
+              p_alert_id: row.id,
+              p_urlscan_uuid: row.urlscan_uuid,
+              p_urlscan_evidence: serialiseRetrievalPending(
+                row.urlscan_uuid,
+                reputation,
+                nowIso,
+              ),
+              p_classification: "likely_phishing",
+              p_set_triage_status: null, // operator confirms TP (ultrareview F5)
+            });
+            if (persisted.error) {
+              throw new Error(
+                `persist_clone_alert_urlscan failed for alert ${row.id}: ${persisted.error.message}`,
+              );
+            }
+            const w = await applyVerdict(row, "likely_phishing");
+            classified++;
+            reputationFallback++;
+            if (w) weaponised.push(w);
+            continue;
+          }
+
           const persisted = await sb.rpc("persist_clone_alert_urlscan", {
             p_alert_id: row.id,
             p_urlscan_uuid: row.urlscan_uuid,
@@ -163,44 +197,28 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
               reputation,
               nowIso,
             ),
-            p_classification: "likely_phishing",
-            p_set_triage_status: null, // operator confirms TP (ultrareview F5)
+            p_classification: null, // failure_streak++; retried next tick
+            p_set_triage_status: null,
           });
           if (persisted.error) {
             throw new Error(
               `persist_clone_alert_urlscan failed for alert ${row.id}: ${persisted.error.message}`,
             );
           }
-          const weaponised = await applyVerdict(row, "likely_phishing");
-          return { kind: "reputation_fallback" as const, weaponised };
+          stillPending++;
+        } catch (err) {
+          logger.error("clone-watch urlscan retrieve: row failed", {
+            alertId: row.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
         }
+      }
 
-        const persisted = await sb.rpc("persist_clone_alert_urlscan", {
-          p_alert_id: row.id,
-          p_urlscan_uuid: row.urlscan_uuid,
-          p_urlscan_evidence: serialiseRetrievalPending(
-            row.urlscan_uuid,
-            reputation,
-            nowIso,
-          ),
-          p_classification: null, // failure_streak++; retried next tick
-          p_set_triage_status: null,
-        });
-        if (persisted.error) {
-          throw new Error(
-            `persist_clone_alert_urlscan failed for alert ${row.id}: ${persisted.error.message}`,
-          );
-        }
-        return { kind: "still_pending" as const, weaponised: null };
-      });
+      return { classified, stillPending, reputationFallback, weaponised };
+    });
 
-      if (outcome.kind === "classified") classified++;
-      else if (outcome.kind === "reputation_fallback") {
-        classified++;
-        reputationFallback++;
-      } else stillPending++;
-      if (outcome.weaponised) weaponisedEvents.push(outcome.weaponised);
-    }
+    const { classified, stillPending, reputationFallback } = batch;
+    const weaponisedEvents = batch.weaponised;
 
     // Emit one weaponised.v1 per newly-weaponised alert (the escalation seam;
     // Wave 1 enforcement consumes it). Batched, id-keyed for idempotency.
