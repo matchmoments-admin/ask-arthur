@@ -82,6 +82,15 @@ standard; SOC 2 / NIST 800-63B aligned.
 
 ## 2. Configure R2 DR bucket + enable daily pg_dump cron (P3)
 
+> ⚠️ **Currently producing ZERO logical backups.** `dr-pg-dump.yml` is
+> scheduled daily but `ENABLE_DR_DUMP` is unset, so every run skips.
+> Confirmed 2026-07-17 (the workflow's last 5 scheduled runs all show
+> `skipped`). The only backup layer today is Supabase's own PITR window —
+> there is no independent, account-compromise-resistant cold copy until
+> this is completed. Reclassifying the urgency here is a business call
+> (P3 assumes PITR is sufficient); flagged so it's a conscious decision,
+> not an oversight.
+
 **Why:** the cold-tier DR layer. PRs #173 shipped the GitHub Actions
 workflow that does `pg_dump → gzip → R2 → SHA-verify` nightly, but it's
 gated on `vars.ENABLE_DR_DUMP == 'true'` so it doesn't fail nightly

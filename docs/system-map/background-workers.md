@@ -77,10 +77,10 @@ Gated by `FF_ANALYZE_INNGEST_WEB`. When false, the legacy `waitUntil` path runs 
 
 ### Vulnerability enrichment
 
-| Function                          | Trigger                              | Purpose                                                                                          |
-| --------------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------ |
-| `enrich-vulnerability-au-context` | `vulnerability.created.v1` (per-CVE) | Haiku enrichment: `banks_affected`, `gov_affected`, Essential Eight relevance. Cost-brake gated. |
-| `enrich-vulnerabilities-cron`     | `0 * * * *` (hourly)                 | Batch enrichment of unprocessed vulnerabilities                                                  |
+| Function                          | Trigger                                  | Purpose                                                                                                                                                                                                   |
+| --------------------------------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enrich-vulnerability-au-context` | `vulnerability.created.v1` (per-CVE)     | Haiku enrichment: `banks_affected`, `gov_affected`, Essential Eight relevance. Cost-brake gated.                                                                                                          |
+| `enrich-vulnerabilities-cron`     | manual-trigger event only (cron removed) | Batch enrichment of unprocessed vulnerabilities. **The hourly cron was removed** — enrichment now runs per-CVE off `vulnerability.created`; the batch fn is manual-trigger only (0 scheduled executions). |
 
 ### Reddit Intel pipeline
 
@@ -92,22 +92,22 @@ Gated by `FF_ANALYZE_INNGEST_WEB`. When false, the legacy `waitUntil` path runs 
 
 ### Scam alerts & embed
 
-| Function                      | Trigger                     | Purpose                                                                                                                                                                                                 |
-| ----------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `scam-alert-push`             | `0 */3 * * *` (every 3h)    | HIGH-confidence threat push notifications                                                                                                                                                               |
-| `scam-report-embed`           | `scam-report.stored.v1`     | Embed user reports for clustering                                                                                                                                                                       |
-| `scam-reports-backfill-embed` | `30 5 * * *` + manual event | Steady-state verified_scams embed delta (scam_reports embed synchronously via `scam-report.stored.v1`; verified_scams had no sync path — 2026-07-12) + historical backfill. Brake: `scam_report_embed`. |
+| Function                      | Trigger                                  | Purpose                                                                                                                                                                                                                                              |
+| ----------------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scam-alert-push`             | manual-trigger event only (cron removed) | HIGH-confidence threat push notifications. **The 3h cron was removed** — `pushAlerts` is dark in prod, so the schedule only burned executions to early-return. Re-add `{ cron: "0 */6 * * *" }` when push is enabled (0 scheduled executions today). |
+| `scam-report-embed`           | `scam-report.stored.v1`                  | Embed user reports for clustering                                                                                                                                                                                                                    |
+| `scam-reports-backfill-embed` | `30 5 * * *` + manual event              | Steady-state verified_scams embed delta (scam_reports embed synchronously via `scam-report.stored.v1`; verified_scams had no sync path — 2026-07-12) + historical backfill. Brake: `scam_report_embed`.                                              |
 
 ### News Intel (regulator narratives)
 
-| Function                   | Trigger                          | Purpose                                                                                                                                                                                                                                                                                                                                                   |
-| -------------------------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `feed-items-embed`         | `0 * * * *` (hourly)             | Embed Scamwatch / ACSC / ASIC narratives via Voyage                                                                                                                                                                                                                                                                                                       |
-| `competitor-intel-extract` | `0 */6 * * *` (every 6h)         | Arthur's Watch Phase 2 — split competitor newsletters into per-scam observations (`competitor_intel_observations`, v212). Flag-gated `FF_COMPETITOR_INTEL_EXTRACT` (default OFF); marks `feed_items.competitor_extracted_at`; logs `cost_telemetry` `feature='competitor-intel-extract'` + shares `feature_brakes.reddit_intel` / `REDDIT_INTEL_CAP_USD`. |
-| `feed-retention`           | `30 2 * * *` (nightly 02:30 UTC) | Archive `feed_items` >365d + prune `feed_ingestion_log` (90d) + prune `feed_http_cache` (30d)                                                                                                                                                                                                                                                             |
-| `feed-sync-verified-scams` | `0 7 * * 0` (Sun 07:00 UTC)      | Sync `verified_scams` → `feed_items`                                                                                                                                                                                                                                                                                                                      |
-| `feed-sync-user-reports`   | `0 7 * * 0` (Sun 07:00 UTC)      | Sync `scam_reports` → `feed_items`                                                                                                                                                                                                                                                                                                                        |
-| `regulator-alert-push`     | `0 * * * *` (hourly)             | Push new ASIC / Scamwatch / ACSC alerts to opted-in users (LOOKBACK_MINUTES 75 covers the wider cadence)                                                                                                                                                                                                                                                  |
+| Function                   | Trigger                                  | Purpose                                                                                                                                                                                                                                                                                                                                                   |
+| -------------------------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `feed-items-embed`         | `0 * * * *` (hourly)                     | Embed Scamwatch / ACSC / ASIC narratives via Voyage                                                                                                                                                                                                                                                                                                       |
+| `competitor-intel-extract` | `0 */6 * * *` (every 6h)                 | Arthur's Watch Phase 2 — split competitor newsletters into per-scam observations (`competitor_intel_observations`, v212). Flag-gated `FF_COMPETITOR_INTEL_EXTRACT` (default OFF); marks `feed_items.competitor_extracted_at`; logs `cost_telemetry` `feature='competitor-intel-extract'` + shares `feature_brakes.reddit_intel` / `REDDIT_INTEL_CAP_USD`. |
+| `feed-retention`           | `30 2 * * *` (nightly 02:30 UTC)         | Archive `feed_items` >365d + prune `feed_ingestion_log` (90d) + prune `feed_http_cache` (30d)                                                                                                                                                                                                                                                             |
+| `feed-sync-verified-scams` | `0 7 * * 0` (Sun 07:00 UTC)              | Sync `verified_scams` → `feed_items`                                                                                                                                                                                                                                                                                                                      |
+| `feed-sync-user-reports`   | `0 7 * * 0` (Sun 07:00 UTC)              | Sync `scam_reports` → `feed_items`                                                                                                                                                                                                                                                                                                                        |
+| `regulator-alert-push`     | manual-trigger event only (cron removed) | Push new ASIC / Scamwatch / ACSC alerts to opted-in users. **The hourly cron was removed** — `pushAlerts` is dark in prod, so the schedule only burned executions to early-return (0 scheduled executions today). Re-add a cron when push is enabled.                                                                                                     |
 
 ### Charity Check
 
@@ -320,14 +320,16 @@ Redeploy procedure when the Worker source changes: from `apps/cloudflare-email-w
 */5    pg-stuck-query-watchdog              (every 5 min)
 */15   scraper-brake-alert                   (every 15 min)
 */30   feedback-triage-refresh               (every 30 min, Inngest; change-guarded — most ticks skip the REFRESH)
-hourly feed-items-embed                      (Inngest)
-hourly regulator-alert-push                  (Inngest)
-hourly enrich-vulnerabilities-cron           (Inngest)
 hourly phone-footprint-refresh-claimer       (Inngest, TZ=Australia/Sydney)
-every 3h scam-alert-push                     (Inngest)
 every 3h report-onward-auto-report           (Inngest, at :25)
+every 4h feed-items-embed                     (Inngest)
 every 4h pipeline-entity-enrichment, urlscan-enrichment (Inngest)
-every 6h pipeline-enrichment-fanout, risk-scorer (Inngest)
+every 12h pipeline-enrichment-fanout, risk-scorer (Inngest)
+
+Event-only — NO schedule (cron removed; 0 scheduled executions until re-enabled):
+       scam-alert-push, regulator-alert-push, enrich-vulnerabilities-cron,
+       shopfront-clone-poll-netcraft. pushAlerts / Netcraft submission are dark
+       in prod, so the old schedules only burned executions on early-return.
 every 6h bot-queue-sweep, cost-daily-check    (Vercel)
 every 6h competitor-intel-extract            (Inngest, FF_COMPETITOR_INTEL_EXTRACT)
 
