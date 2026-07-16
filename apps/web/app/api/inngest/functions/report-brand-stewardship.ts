@@ -249,6 +249,8 @@ export interface CloneAlertRow {
     ip_rep?: { abuseConfidenceScore?: number };
     au_registrant?: { abnStatus?: string; nameMatchesAbn?: boolean | null };
   } | null;
+  /** Coarse actor fingerprint (v235) — clones sharing a key are one campaign. */
+  campaign_key?: string | null;
   /** signals jsonb — weaponisation-risk input (F3). */
   signals?: unknown;
   /** 1:1 Haiku classification embed (PostgREST to-one via alert_id PK). */

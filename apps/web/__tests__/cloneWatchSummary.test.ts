@@ -45,6 +45,7 @@ const CARD: CloneWatchReportCard = {
     { registrar: "NameCheap", weaponised: 2, medianDaysToWeaponise: 3 },
   ],
   tldWeaponisation: [{ tld: "shop", weaponised: 2 }],
+  campaigns: { campaignCount: 0, clusteredDomains: 0, largestCampaign: 0, top: [] },
 };
 
 describe("summaryRow", () => {

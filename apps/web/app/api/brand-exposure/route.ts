@@ -66,11 +66,35 @@ export async function POST(req: NextRequest) {
   const row = Array.isArray(data) ? data[0] : null;
   const count = row?.detected_count ?? 0;
 
+  // Coordinated-campaign teaser (v235): "X of these lookalikes trace to Y
+  // coordinated actors." Scrape-proof — counts only, never domain names.
+  // Gated FF_CLONE_CAMPAIGNS + graceful (empty) when campaign_key isn't stamped.
+  let campaigns: { count: number; largest: number } | null = null;
+  if (featureFlags.cloneCampaigns) {
+    const { data: campData } = await supabase.rpc("clone_campaigns_for_brand", {
+      p_brand_normalized: brandNormalize(entry.brand),
+      p_since: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString(),
+      p_until: new Date().toISOString(),
+    });
+    const camps = (campData ?? []) as Array<{ domain_count?: number }>;
+    if (camps.length > 0) {
+      campaigns = {
+        count: camps.length,
+        largest: Math.max(...camps.map((c) => c.domain_count ?? 0)),
+      };
+    }
+  }
+
   // Funnel telemetry — measure exposure checks so leads attribute back to Clone
   // Watch. Server-emitted, metadata only (no PII); fire-and-forget.
   void logEvent({
     eventType: "brand_exposure_checked",
-    eventProps: { brand: entry.brand, monitored: true, count },
+    eventProps: {
+      brand: entry.brand,
+      monitored: true,
+      count,
+      campaignCount: campaigns?.count ?? 0,
+    },
     path: "/brand-exposure",
   });
 
@@ -80,5 +104,6 @@ export async function POST(req: NextRequest) {
     count,
     earliest: row?.earliest ?? null,
     examples: row?.examples ?? [],
+    campaigns,
   });
 }
