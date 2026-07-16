@@ -43,7 +43,7 @@ export async function GET(req: Request) {
   try {
     const { data: eligible, error: eligibleError } = await supabase
       .from("vulnerability_detections")
-      .select("id, vuln_id")
+      .select("id, vulnerability_id")
       .lt("detected_at", cutoff)
       .limit(10_000);
 
@@ -53,7 +53,7 @@ export async function GET(req: Request) {
 
     const eligibleIds = (eligible ?? []).map((r) => r.id as number);
     const eligibleVulnIds = Array.from(
-      new Set((eligible ?? []).map((r) => r.vuln_id as number)),
+      new Set((eligible ?? []).map((r) => r.vulnerability_id as number)),
     );
 
     if (eligibleIds.length === 0) {
@@ -85,7 +85,7 @@ export async function GET(req: Request) {
     }
 
     const toDelete = (eligible ?? [])
-      .filter((r) => !preserveVulnIds.has(r.vuln_id as number))
+      .filter((r) => !preserveVulnIds.has(r.vulnerability_id as number))
       .map((r) => r.id as number);
 
     if (toDelete.length === 0) {

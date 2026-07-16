@@ -29,17 +29,49 @@ export const stalenessCheckIPs = inngest.createFunction(
         return { skipped: true };
       }
 
-      const { data, error } = await supabase.rpc("mark_stale_ips", {
-        p_stale_days: 7,
-      });
+      // mark_stale_ips is now a bounded batch (v234) — a single unbounded
+      // UPDATE of ~9.7K rows against the GIN-indexed scam_ips table was
+      // blowing the pooler statement timeout. Loop until a short batch signals
+      // the stale set has drained; each RPC call is its own transaction, so a
+      // slow chunk can't poison the run. MAX_BATCHES caps worst-case work well
+      // under the 4m Inngest finish budget.
+      const BATCH_LIMIT = 5000;
+      const MAX_BATCHES = 20;
+      let totalDeactivated = 0;
+      let batches = 0;
 
-      if (error) {
-        logger.error("IP staleness check failed", { error: String(error) });
-        throw new Error(`IP staleness RPC failed: ${error.message}`);
+      for (; batches < MAX_BATCHES; batches++) {
+        const { data, error } = await supabase.rpc("mark_stale_ips", {
+          p_stale_days: 7,
+          p_limit: BATCH_LIMIT,
+        });
+
+        if (error) {
+          // Log the structured fields, not String(error) — a PostgrestError
+          // stringifies to "[object Object]", which masked the real cause for
+          // weeks. message/code/details/hint are the diagnostic surface.
+          logger.error("IP staleness check failed", {
+            message: error.message,
+            code: error.code,
+            details: error.details,
+            hint: error.hint,
+            batches,
+            totalDeactivated,
+          });
+          throw new Error(`IP staleness RPC failed: ${error.message}`);
+        }
+
+        const deactivated = (data as { deactivated_count?: number } | null)
+          ?.deactivated_count ?? 0;
+        totalDeactivated += deactivated;
+        if (deactivated < BATCH_LIMIT) break; // drained
       }
 
-      logger.info("IP staleness check complete", { result: data });
-      return data;
+      logger.info("IP staleness check complete", {
+        totalDeactivated,
+        batches: batches + 1,
+      });
+      return { deactivated_count: totalDeactivated, batches: batches + 1 };
     });
 
     return result;
