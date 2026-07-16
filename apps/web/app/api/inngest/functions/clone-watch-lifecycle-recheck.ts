@@ -178,31 +178,46 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
         selectTopRiskCandidates(pool, RECHECK_BATCH_LIMIT, Date.now()),
       );
 
-      // Submit each rescan INLINE — one step.run per candidate for independent
-      // memoisation (a single failure doesn't replay the whole batch or
-      // re-submit already-submitted rows), mirroring clone-watch-urlscan-submit.
-      // Replaces the old 50-event fan-out to scan-one (~200 invocations/day).
-      let submitted = 0;
-      let submitFailed = 0;
-      let reputationHits = 0;
-      for (const c of candidates) {
-        const outcome = await step.run(`submit-${c.id}`, () =>
-          submitCloneCandidate({
-            id: c.id,
-            candidate_url: c.candidate_url,
-            candidate_domain: c.candidate_domain,
-          }),
-        );
-        if (outcome.reputationMalicious) reputationHits++;
-        if (
-          outcome.kind === "submitted" ||
-          outcome.kind === "reputation_classified"
-        ) {
-          submitted++;
-        } else {
-          submitFailed++;
+      // Submit every rescan inside ONE step instead of one step per candidate.
+      // Inngest bills per step execution, so a 50-candidate batch was ~50
+      // executions × 4 runs/day; a single batch step cuts that ~25×. urlscan
+      // submit is idempotent (the submit-one helper records
+      // urlscan_submitted_at, so a batch-step retry re-submits harmlessly and
+      // the retrieve worklist de-dupes on it), so losing per-row memoisation is
+      // safe. Each candidate is wrapped in try/catch so one failure doesn't
+      // abort the rest; a failed row simply isn't marked submitted and is
+      // retried next tick. Replaces the old 50-event fan-out to scan-one.
+      const submitBatch = await step.run("submit-batch", async () => {
+        let submitted = 0;
+        let submitFailed = 0;
+        let reputationHits = 0;
+        for (const c of candidates) {
+          try {
+            const outcome = await submitCloneCandidate({
+              id: c.id,
+              candidate_url: c.candidate_url,
+              candidate_domain: c.candidate_domain,
+            });
+            if (outcome.reputationMalicious) reputationHits++;
+            if (
+              outcome.kind === "submitted" ||
+              outcome.kind === "reputation_classified"
+            ) {
+              submitted++;
+            } else {
+              submitFailed++;
+            }
+          } catch (err) {
+            submitFailed++;
+            logger.error("clone-watch recheck: submit failed", {
+              alertId: c.id,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
         }
-      }
+        return { submitted, submitFailed, reputationHits };
+      });
+      const { submitted, submitFailed, reputationHits } = submitBatch;
 
       // Mark each candidate rechecked (bump recheck_count + last_rechecked_at)
       // via the same guarded transition RPC, holding lifecycle_state unchanged
