@@ -670,6 +670,14 @@ export const featureFlags = {
    *  shopfront_clone_alerts.attribution (v177). Default OFF. Server-side only. */
   cloneWatchAttribution: readBoolEnv("FF_CLONE_WATCH_ATTRIBUTION"),
 
+  /** RDAP-first domain-registration lookup (lookupDomainRegistration). When ON,
+   *  clone-watch attribution resolves registrar/created/nameservers/statuses via
+   *  free unmetered RDAP first, falling back to the near-exhausted whoisjson free
+   *  tier only when RDAP is empty. Adds EPP statuses (clientHold/serverHold =
+   *  registrar-suspended), registrar IANA id, and a structured abuse contact.
+   *  Default OFF — no-op (whoisjson only) until canaried. Server-side only. */
+  rdapLookup: readBoolEnv("FF_RDAP_LOOKUP"),
+
   /** Feed CONFIRMED clones (domain + hosting IP) into the unified scam_entities
    *  index so the consumer reputation lookup / scam-map / B2B feeds see them.
    *  BLAST-RADIUS: scam_entities powers consumer-facing reputation — only

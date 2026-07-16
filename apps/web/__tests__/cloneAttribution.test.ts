@@ -16,6 +16,10 @@ describe("shapeAttribution", () => {
         nameServers: ["ns1.x.com", "ns2.x.com"],
         isPrivate: true,
         raw: null,
+        statuses: ["client hold"],
+        registrarIanaId: "1068",
+        abuseContact: { email: "abuse@namecheap.com", phone: null },
+        source: "rdap",
       },
       ct: {
         certificateCount: 3,
@@ -41,7 +45,15 @@ describe("shapeAttribution", () => {
       enrichedAt: AT,
     });
 
-    expect(d.whois).toMatchObject({ registrar: "NameCheap", registrarAbuseEmail: "abuse@namecheap.com", registrantCountry: "RU", createdDate: "2026-06-01" });
+    expect(d.whois).toMatchObject({
+      registrar: "NameCheap",
+      registrarAbuseEmail: "abuse@namecheap.com",
+      registrantCountry: "RU",
+      createdDate: "2026-06-01",
+      statuses: ["client hold"],
+      registrarIanaId: "1068",
+      source: "rdap",
+    });
     expect(d.ip_rep).toMatchObject({ abuseConfidenceScore: 88, isp: "Evil Hosting" });
     expect(d.hosting).toEqual({ ip: "203.0.113.7", country: "RU", asn: "AS12345" });
     expect(d.ct?.issuer).toBe("Let's Encrypt");
