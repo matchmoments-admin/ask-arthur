@@ -41,6 +41,9 @@ const RECHECK_BATCH_LIMIT = 50; // × 4 runs/day = ≤200 rescans/day, bounded
 // (staleness-ordered pool → no starvation; full ~800-row rotation ≈ 4 days).
 const RECHECK_FETCH_LIMIT = 200;
 const RECHECK_CADENCE_HOURS = 6; // don't re-scan the same domain more often
+// Break the submit loop before the 8m finish budget so worst-case urlscan
+// latency can't force a full-batch re-POST; leftovers rotate next run.
+const RECHECK_SUBMIT_WALL_CLOCK_MS = 400_000;
 const BRAKE = "shopfront_clone_recheck";
 
 interface RecheckRow {
@@ -189,12 +192,18 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
       // the retrieve worklist de-dupes on it), so losing per-row memoisation is
       // safe. Each candidate is wrapped in try/catch so one failure doesn't
       // abort the rest; a failed row simply isn't marked submitted and is
-      // retried next tick. Replaces the old 50-event fan-out to scan-one.
+      // retried next tick. Replaces the old 50-event fan-out to scan-one. A
+      // wall-clock guard breaks before the 8m finish budget so worst-case submit
+      // latency (50 × urlscan POST) can't force a full-batch re-POST — leftovers
+      // stay unmarked and rotate through on the next run.
+      const recheckSubmitStartMs = Date.now();
       const submitBatch = await step.run("submit-batch", async () => {
         let submitted = 0;
         let submitFailed = 0;
         let reputationHits = 0;
         for (const c of candidates) {
+          if (Date.now() - recheckSubmitStartMs > RECHECK_SUBMIT_WALL_CLOCK_MS)
+            break;
           try {
             const outcome = await submitCloneCandidate({
               id: c.id,

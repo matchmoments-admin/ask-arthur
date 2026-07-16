@@ -38,6 +38,11 @@ import {
 const RETRIEVE_BATCH_LIMIT = 40;
 const MIN_AGE_MINUTES = 10; // give urlscan time to finish before first poll
 const MAX_FAILURE_STREAK = 3;
+// Break the batch loop before the 5m Inngest finish budget so worst-case
+// external latency can't force a full-batch replay (leftovers drain next tick).
+const BATCH_WALL_CLOCK_MS = 200_000;
+// Bounded weaponised-emit worklist per run (durable, self-draining).
+const WEAPONISED_EMIT_CAP = 100;
 
 interface RetrieveRow {
   id: number;
@@ -83,16 +88,17 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
     }
 
     // Drive the v199 enforcement lifecycle from the urlscan verdict via the
-    // edge-guarded v200 RPC (never downgrades reported/terminal states).
-    // Returns the weaponised.v1 payload iff the alert NEWLY weaponised, so the
-    // caller can emit exactly one event per transition — the result is carried
-    // in the batch step's RETURN value (not a closure side-effect) so it
-    // survives Inngest step-memoisation on replay.
+    // edge-guarded v200 RPC (never downgrades reported/terminal states). The RPC
+    // stamps weaponised_at on the real transition; the weaponised.v1 emission is
+    // now driven from that persisted state (weaponised_at NOT NULL AND
+    // weaponised_notified_at NULL, v236) rather than an in-memory array — so a
+    // batch step interrupted after a transition but before emit doesn't silently
+    // drop the event (the drop the array approach caused; #762 regression).
     const applyVerdict = async (
       row: RetrieveRow,
       classification: string,
-    ): Promise<CloneWatchWeaponisedData | null> => {
-      const { data, error } = await sb.rpc("apply_clone_urlscan_verdict", {
+    ): Promise<void> => {
+      const { error } = await sb.rpc("apply_clone_urlscan_verdict", {
         p_alert_id: row.id,
         p_classification: classification,
       });
@@ -101,17 +107,6 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
           `apply_clone_urlscan_verdict failed for alert ${row.id}: ${error.message}`,
         );
       }
-      const verdict = data as {
-        newly_weaponised?: boolean;
-        prior?: string;
-      } | null;
-      if (!verdict?.newly_weaponised) return null;
-      return {
-        alertId: row.id,
-        candidateDomain: row.candidate_domain,
-        candidateUrl: row.candidate_url,
-        via: verdict.prior === "detected" ? "initial" : "recheck",
-      };
     };
 
     // Retrieve + classify the whole batch inside ONE step instead of one step
@@ -123,15 +118,19 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
     // reports newly_weaponised on the real transition; retrieve is a GET). Each
     // row is wrapped in try/catch so one failure doesn't abort the rest; a
     // failed row is left un-advanced (stays in the worklist) and retried next
-    // tick. Weaponised payloads are RETURNED so the actual event send stays
-    // outside step.run (below), preserving send-once-on-replay semantics.
+    // tick. Weaponisation is emitted from persisted state (durable emit step
+    // below), not an array, so an interrupted batch can't drop the event.
+    // A wall-clock guard breaks the loop before the 5m finish budget so
+    // worst-case external latency (40 rows × urlscan GET) can't force a
+    // full-batch replay — leftovers drain next tick (worklist is idempotent).
+    const batchStartMs = Date.now();
     const batch = await step.run("retrieve-batch", async () => {
       let classified = 0;
       let stillPending = 0;
       let reputationFallback = 0;
-      const weaponised: CloneWatchWeaponisedData[] = [];
 
       for (const row of pending) {
+        if (Date.now() - batchStartMs > BATCH_WALL_CLOCK_MS) break;
         try {
           const reputation = reputationFromEvidence(row.urlscan_evidence);
           const result = await retrieveURLScan(row.urlscan_uuid);
@@ -157,9 +156,8 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
                 `persist_clone_alert_urlscan failed for alert ${row.id}: ${persisted.error.message}`,
               );
             }
-            const w = await applyVerdict(row, classification);
+            await applyVerdict(row, classification);
             classified++;
-            if (w) weaponised.push(w);
             continue;
           }
 
@@ -182,10 +180,9 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
                 `persist_clone_alert_urlscan failed for alert ${row.id}: ${persisted.error.message}`,
               );
             }
-            const w = await applyVerdict(row, "likely_phishing");
+            await applyVerdict(row, "likely_phishing");
             classified++;
             reputationFallback++;
-            if (w) weaponised.push(w);
             continue;
           }
 
@@ -214,36 +211,75 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
         }
       }
 
-      return { classified, stillPending, reputationFallback, weaponised };
+      return { classified, stillPending, reputationFallback };
     });
 
     const { classified, stillPending, reputationFallback } = batch;
-    const weaponisedEvents = batch.weaponised;
 
-    // Emit one weaponised.v1 per newly-weaponised alert (the escalation seam;
-    // Wave 1 enforcement consumes it). Batched, id-keyed for idempotency.
-    if (weaponisedEvents.length > 0) {
-      await step.run("emit-weaponised", async () => {
-        // Rare high-value event: always-ship warn (bypasses the 10% INFO
-        // sampling) so every weaponisation transition is visible in Axiom.
-        for (const d of weaponisedEvents) {
-          logger.warn("clone-watch: classification transition — newly weaponised", {
-            alertId: d.alertId,
-            candidateDomain: d.candidateDomain,
-            candidateUrl: d.candidateUrl,
-            via: d.via,
-            classification: "likely_phishing",
-          });
-        }
-        await inngest.send(
-          weaponisedEvents.map((d) => ({
-            name: CLONE_WATCH_WEAPONISED_EVENT,
-            id: `clone-weaponised-${d.alertId}-${d.via}`,
-            data: d,
-          })),
-        );
+    // Durable weaponised.v1 emission (the escalation seam — notify-weaponised +
+    // enforcement-plan consume it). Driven from PERSISTED state, not the batch's
+    // in-memory result: any alert that is weaponised but not yet notified —
+    // including this run's transitions AND any a prior interrupted run missed —
+    // is picked up here. send + stamp happen in one step: on retry the re-query
+    // returns the still-unstamped rows, the send dedupes on the id key, and the
+    // stamp is the completion marker → idempotent, no double-send, no drop.
+    await step.run("emit-weaponised", async () => {
+      const { data, error } = await sb
+        .from("shopfront_clone_alerts")
+        .select("id, candidate_domain, candidate_url, recheck_count")
+        .not("weaponised_at", "is", null)
+        .is("weaponised_notified_at", null)
+        .limit(WEAPONISED_EMIT_CAP);
+      if (error) {
+        throw new Error(`weaponised emit select failed: ${error.message}`);
+      }
+      const rows = (data ?? []) as Array<{
+        id: number;
+        candidate_domain: string;
+        candidate_url: string;
+        recheck_count: number | null;
+      }>;
+      if (rows.length === 0) return { emitted: 0 };
+
+      const events = rows.map((r) => {
+        // via: a clone weaponised on its first scan has recheck_count 0;
+        // one caught on a re-scan has recheck_count > 0.
+        const via = (r.recheck_count ?? 0) > 0 ? "recheck" : "initial";
+        const d: CloneWatchWeaponisedData = {
+          alertId: r.id,
+          candidateDomain: r.candidate_domain,
+          candidateUrl: r.candidate_url,
+          via,
+        };
+        // Rare high-value event: always-ship warn (bypasses INFO sampling).
+        logger.warn("clone-watch: classification transition — newly weaponised", {
+          alertId: d.alertId,
+          candidateDomain: d.candidateDomain,
+          candidateUrl: d.candidateUrl,
+          via: d.via,
+          classification: "likely_phishing",
+        });
+        return {
+          name: CLONE_WATCH_WEAPONISED_EVENT,
+          id: `clone-weaponised-${d.alertId}-${d.via}`,
+          data: d,
+        };
       });
-    }
+      await inngest.send(events);
+      // Completion marker — set AFTER the send so a mid-step interrupt re-emits
+      // (deduped) rather than dropping.
+      const { error: stampError } = await sb
+        .from("shopfront_clone_alerts")
+        .update({ weaponised_notified_at: new Date().toISOString() })
+        .in(
+          "id",
+          rows.map((r) => r.id),
+        );
+      if (stampError) {
+        throw new Error(`weaponised notified stamp failed: ${stampError.message}`);
+      }
+      return { emitted: rows.length };
+    });
 
     await step.run("log-cost", async () => {
       logCost({
