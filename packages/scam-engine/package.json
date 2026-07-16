@@ -15,6 +15,7 @@
     "./ssrf-dispatcher": "./src/ssrf-dispatcher.ts",
     "./whois": "./src/whois.ts",
     "./rdap": "./src/rdap.ts",
+    "./rdap-au": "./src/rdap-au.ts",
     "./domain-registration": "./src/domain-registration.ts",
     "./ssl": "./src/ssl.ts",
     "./url-normalize": "./src/url-normalize.ts",

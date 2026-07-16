@@ -678,6 +678,14 @@ export const featureFlags = {
    *  Default OFF — no-op (whoisjson only) until canaried. Server-side only. */
   rdapLookup: readBoolEnv("FF_RDAP_LOOKUP"),
 
+  /** .au registrant identity + ABN cross-check for clone-watch attribution.
+   *  For .au lookalikes, fetch the auDA-disclosed registrant legal name + ABN
+   *  (RDAP) and verify the ABN against the ABR register — a cancelled /
+   *  not-found / name-mismatched ABN on a lookalike is a weaponisation signal.
+   *  Stored in attribution.au_registrant. Independent of FF_RDAP_LOOKUP.
+   *  Default OFF. Server-side only; free/unmetered (auDA RDAP + ABR). */
+  cloneWatchAuRegistrant: readBoolEnv("FF_CLONE_WATCH_AU_REGISTRANT"),
+
   /** Feed CONFIRMED clones (domain + hosting IP) into the unified scam_entities
    *  index so the consumer reputation lookup / scam-map / B2B feeds see them.
    *  BLAST-RADIUS: scam_entities powers consumer-facing reputation — only

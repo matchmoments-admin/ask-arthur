@@ -38,11 +38,15 @@ interface RdapEntity {
   entities?: RdapEntity[];
 }
 
-interface RdapDomain {
+export interface RdapDomain {
   status?: string[];
   events?: Array<{ eventAction?: string; eventDate?: string }>;
   nameservers?: Array<{ ldhName?: string }>;
   entities?: RdapEntity[];
+  /** auDA extension: .au discloses registrant name + ABN here (not in an
+   *  entity), e.g. [{name:"registrant name",value:"Telstra Corporation Ltd"},
+   *  {name:"registrant id",value:"ABN 33051775556"}, ...]. */
+  auData_eligibility?: Array<{ name?: string; value?: string }>;
 }
 
 /**
@@ -152,11 +156,13 @@ export function parseRdapResponse(json: RdapDomain, domain: string): RdapResult 
 }
 
 /**
- * Look up RDAP for a domain. Returns null when the domain is unregistered,
- * the TLD has no RDAP server, or the request fails — the caller falls back to
- * whoisjson. Free/unmetered; logged at estimatedCostUsd 0 for volume visibility.
+ * Low-level RDAP fetch → raw JSON (or null on 404/error). Shared by lookupRdap
+ * and the .au registrant lookup so the fetch + SSRF-safe dispatch + cost log
+ * live in one place. rdap.org 302-redirects to the TLD's registry server.
  */
-export async function lookupRdap(domain: string): Promise<RdapResult | null> {
+export async function fetchRdapDomain(
+  domain: string,
+): Promise<RdapDomain | null> {
   try {
     const res = await fetch(
       `https://rdap.org/domain/${encodeURIComponent(domain)}`,
@@ -185,8 +191,7 @@ export async function lookupRdap(domain: string): Promise<RdapResult | null> {
       estimatedCostUsd: 0,
     });
 
-    const json = (await res.json()) as RdapDomain;
-    return parseRdapResponse(json, domain);
+    return (await res.json()) as RdapDomain;
   } catch (err) {
     logger.warn("RDAP lookup error", {
       error: err instanceof Error ? err.message : String(err),
@@ -194,4 +199,15 @@ export async function lookupRdap(domain: string): Promise<RdapResult | null> {
     });
     return null;
   }
+}
+
+/**
+ * Look up RDAP for a domain. Returns null when the domain is unregistered,
+ * the TLD has no RDAP server, or the request fails — the caller falls back to
+ * whoisjson. Free/unmetered; logged at estimatedCostUsd 0 for volume visibility.
+ */
+export async function lookupRdap(domain: string): Promise<RdapResult | null> {
+  const json = await fetchRdapDomain(domain);
+  if (!json) return null;
+  return parseRdapResponse(json, domain);
 }
