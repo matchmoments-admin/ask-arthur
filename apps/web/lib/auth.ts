@@ -30,6 +30,25 @@ export class AuthUnavailableError extends Error {
 
 const AUTH_TIMEOUT_MS = 5000;
 
+// Race an auth call against a timeout, ALWAYS clearing the timer once the race
+// settles. Promise.race resolves with the winner but never cancels the loser —
+// an un-cleared setTimeout keeps firing after the request returns and, on Fluid
+// Compute (persistent instance), leaks a live timer per call. Returns the
+// resolved value, or the literal "timeout" sentinel when the budget wins.
+async function raceAuthTimeout<T>(p: Promise<T>): Promise<T | "timeout"> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      p,
+      new Promise<"timeout">((resolve) => {
+        timer = setTimeout(() => resolve("timeout"), AUTH_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /**
  * Get the current authenticated user, or null if not logged in.
  * Uses supabase.auth.getUser() (server-side JWT validation, not spoofable).
@@ -47,12 +66,7 @@ export const getUser = cache(async (): Promise<AuthUser | null> => {
   const supabase = await createAuthServerClient();
   if (!supabase) return null;
 
-  const result = await Promise.race([
-    supabase.auth.getUser(),
-    new Promise<"timeout">((resolve) =>
-      setTimeout(() => resolve("timeout"), AUTH_TIMEOUT_MS),
-    ),
-  ]);
+  const result = await raceAuthTimeout(supabase.auth.getUser());
 
   if (result === "timeout") {
     logger.error(
@@ -99,12 +113,7 @@ export const getUser = cache(async (): Promise<AuthUser | null> => {
 export async function getSupabaseUserOrThrow(
   authClient: SupabaseClient,
 ): Promise<SupabaseUser | null> {
-  const result = await Promise.race([
-    authClient.auth.getUser(),
-    new Promise<"timeout">((resolve) =>
-      setTimeout(() => resolve("timeout"), AUTH_TIMEOUT_MS),
-    ),
-  ]);
+  const result = await raceAuthTimeout(authClient.auth.getUser());
 
   if (result === "timeout") {
     logger.error(
