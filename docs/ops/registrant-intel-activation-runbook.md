@@ -1,10 +1,14 @@
 # Registrant-Intelligence — staged flag-activation runbook (handoff)
 
 Activate the 2026-07-17 registrant-intelligence features **one flag at a time**,
-verifying each on real prod data before the next. All four are dark behind
+verifying each on real prod data before the next. All are dark behind
 default-OFF server flags; all are $0 (free-tier). Migrations v234–v237 are
 already applied. This is a multi-day process — each flag needs a real enricher
 run (or a manual invoke) to produce data.
+
+**Three of the four flags are activatable. Step 2 (`FF_CLONE_WATCH_AU_REGISTRANT`)
+is BLOCKED on sourcing** — measured 2026-07-17, zero `.au` clone alerts have ever
+existed, so the flag is a no-op. See Step 2 for the evidence. Execute 1 → 3 → 4.
 
 Owner: pick up here, execute top-to-bottom, tick the checklist. Don't flip more
 than one flag per verification cycle.
@@ -17,8 +21,16 @@ than one flag per verification cycle.
   `clone-watch-enrich-attribution` cron runs daily at **13:30 UTC** and calls
   whoisjson ~32×/day (last call 13:33 UTC). So the four new flags will take
   effect on the next daily run once flipped; no master-gate blocker.
-- The 4 new flags are OFF: `FF_RDAP_LOOKUP`, `FF_CLONE_WATCH_AU_REGISTRANT`,
-  `FF_CLONE_CAMPAIGNS`, `FF_CLONE_WATCH_KIT_PIVOTS`.
+- The 4 new flags started OFF (absent from the Vercel prod env entirely):
+  `FF_RDAP_LOOKUP`, `FF_CLONE_WATCH_AU_REGISTRANT`, `FF_CLONE_CAMPAIGNS`,
+  `FF_CLONE_WATCH_KIT_PIVOTS`. **`FF_RDAP_LOOKUP` was set to `true` + redeployed
+  on 2026-07-17 (Step 1 in progress).**
+- Data available to verify against (2026-07-17): 1,085 enriched alerts awaiting
+  campaign backfill (Step 3, ~3 runs at 500/run); 42 `likely_phishing` alerts in
+  the 35-day window (Step 4); **0 `.au` alerts, ever (Step 2 blocked)**.
+- The Vercel CLI in the repo is authenticated against the `ask-arthur` prod
+  project, so `vercel env add` + `vercel redeploy <prod-url>` can do the flips —
+  the Inngest "Invoke" click is the only genuinely manual part.
 - whoisjson is at ~226 calls / 7 days — approaching its 1,000/mo free cap, so
   `FF_RDAP_LOOKUP` (first below) also relieves quota pressure.
 
@@ -26,11 +38,24 @@ than one flag per verification cycle.
 
 These are bare `FF_*` (server-only) env vars, read at runtime via `readBoolEnv`.
 
-1. Set on Vercel prod: `vercel env add FF_<NAME> production` → value `true`
-   (or Vercel dashboard → Settings → Environment Variables → Production).
+1. Set on Vercel prod: `printf 'true' | vercel env add FF_<NAME> production`
+   (or Vercel dashboard → Settings → Environment Variables → Production). Use
+   `printf`, not `echo` — no trailing newline. (`readBoolEnv` trims anyway, but
+   don't rely on it.) Confirm with `vercel env ls production | grep FF_<NAME>`.
 2. **Redeploy** — env vars are injected at deploy; a running deployment won't
-   see a new/changed var until a fresh deploy. Trigger a prod redeploy (empty
-   commit to `main`, or Vercel "Redeploy").
+   see a new/changed var until a fresh deploy.
+
+   **Gotcha (hit 2026-07-17): `vercel redeploy <url>` hangs and creates no
+   deployment** on CLI 55.0.0, with or without `--non-interactive --no-wait`.
+   It produces no output and no new deployment ever appears in `vercel ls`. Use
+   one of these instead:
+   - **Merge a PR to `main`** (the normal ship workflow) — the resulting prod
+     deploy picks up the new env var. Cleanest: pair the flag flip with the
+     docs/runbook commit that records it.
+   - Vercel dashboard → Deployments → ⋯ → **Redeploy**.
+   - An empty commit to `main` is NOT an option — `.claude/hooks/git-commit-guard.sh`
+     blocks committing on `main`, by design.
+
 3. Confirm the var is live: it should show in the next function invocation's env.
 
 **Rollback (any flag):** set the var to `false` (or remove it) + redeploy. All
@@ -105,46 +130,43 @@ on `statuses`.
 
 ---
 
-## STEP 2 — `FF_CLONE_WATCH_AU_REGISTRANT` (.au registrant + ABN)
+## STEP 2 — `FF_CLONE_WATCH_AU_REGISTRANT` — **BLOCKED ON SOURCING, DO NOT FLIP**
 
-**What it does:** for `.au` clone alerts, fetch the auDA-disclosed registrant
-legal name + ABN (RDAP) and cross-check the ABN vs the ABR register; a
-cancelled/not-found/mismatched ABN feeds the weaponisation-risk score. Stored in
-`attribution.au_registrant`. Independent of `FF_RDAP_LOOKUP`. **Needs
-`ABN_LOOKUP_GUID` set** (it already is — charity-check uses it).
+**Status (measured 2026-07-17): this flag is a no-op. There is no `.au` data for
+it to act on, and none has ever existed.** Flipping it would ship an
+unverifiable flag. Skip this step and go to Step 3.
 
-**Live-data pre-check (already done):** `telstra.com.au` → `auData_eligibility`
-carries `registrant name` + `ABN 33051775556`; the parser extracts + checksum-
-validates it.
-
-Flip → redeploy → run enricher → verify (need a real `.au` clone in the window):
+**The evidence.** `shopfront_clone_alerts` holds 1,526 rows, every one of them
+`source = 'nrd'` (the whoisds newly-registered-domains feed). `.au` domains among
+them: **zero, all time** — not "none in the 35-day window":
 
 ```sql
-SELECT id, candidate_domain,
-       attribution->'au_registrant'->>'abnStatus'  AS abn_status,
-       attribution->'au_registrant'->>'nameMatchesAbn' AS name_match,
-       (attribution->'au_registrant' ? 'legalName') AS has_legalname
-FROM public.shopfront_clone_alerts
-WHERE candidate_domain LIKE '%.au'
-  AND attribution ? 'au_registrant'
-  AND first_seen_at > now() - interval '35 days'
-ORDER BY id DESC LIMIT 20;
+SELECT count(*) FILTER (WHERE candidate_domain LIKE '%.au') AS au_all_time,
+       count(*) AS total
+FROM public.shopfront_clone_alerts;   -- → au_all_time = 0, total = 1526 (2026-07-17)
 ```
 
-**PASS:** `.au` alerts get an `au_registrant` block; `abnStatus` ∈
-active/cancelled/not-found/lookup-failed/no-abn; spot-check one ABN against
-abr.business.gov.au. **PII CHECK:** `has_legalname` must be FALSE for any
-individual/sole-trader (the v236 gate) — if a personal name appears for a
-sole trader, roll back and file a bug.
+The feed's TLD mix is new-gTLD only — `.shop` (261), `.online` (191), `.com`
+(175), `.xyz` (99), `.store` (71). The whoisds free tier carries no `.au` zone,
+so the clone-watch lane structurally cannot produce an `.au` candidate.
 
-```sql
-SELECT provider, count(*) FROM public.cost_telemetry
-WHERE provider='auda-rdap' AND created_at > now() - interval '2 days' GROUP BY provider;
-```
+**This is a sourcing gap, not a code defect.** The RDAP `.au` parser is verified
+against live registry data (`telstra.com.au` → `auData_eligibility` carries the
+registrant name + ABN 33051775556, extracted and checksum-validated), and the
+v236 sole-trader PII gate is in place. The code is correct and dark; it simply
+has no input. Tracked as a sourcing issue — an `.au` candidate lane (auDA zone
+access, or the CT-log firehose already scoped as Phase B in ADR-0016) has to land
+first.
 
-- [ ] Flipped + redeployed
-- [ ] A real `.au` alert got `au_registrant` with a sane `abnStatus`
-- [ ] PII gate holds (no sole-trader `legalName`); advisors clean
+**Re-entry criteria.** When `au_all_time > 0`, restore the original verification:
+flip → redeploy → run enricher → check that `.au` alerts get an `au_registrant`
+block with `abnStatus` ∈ active/cancelled/not-found/lookup-failed/no-abn,
+spot-check one ABN against abr.business.gov.au, confirm `provider='auda-rdap'`
+cost rows appear, and — the gate that matters — assert
+`(attribution->'au_registrant' ? 'legalName')` is FALSE for any
+individual/sole-trader. `ABN_LOOKUP_GUID` is already set (charity-check uses it).
+
+- [ ] BLOCKED — do not flip until an `.au` candidate source exists
 
 ---
 
