@@ -9,6 +9,8 @@ import {
   type HostingInfo,
 } from "@/lib/clone-watch/enrich-attribution";
 import { computeCampaignKey } from "@/lib/clone-watch/campaign-fingerprint";
+import { searchURLScan } from "@askarthur/scam-engine/urlscan-search";
+import { shapeKitSiblings } from "@/lib/clone-watch/kit-pivot";
 
 /**
  * Clone-watch attribution enricher (Phase 2). Builds the per-clone dossier —
@@ -38,6 +40,9 @@ const RECENT_WINDOW_DAYS = 35; // covers a full prior calendar month for the rep
 // Bounded per-run campaign_key backfill of already-enriched rows (converges to
 // zero over a few days; the "insufficient" sentinel keeps it self-draining).
 const BACKFILL_CAP = 500;
+// urlscan Search API is rate-limited (free tier), so pivot at most this many
+// confirmed-phishing clones per run.
+const KIT_PIVOT_RUN_CAP = 10;
 
 interface PendingAlert {
   id: number;
@@ -137,6 +142,61 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
       if (ok) enriched += 1;
     }
 
+    // Kit pivots: for confirmed likely_phishing clones, search urlscan for
+    // other sites on the same hosting IP (a phishing kit deployed repeatedly)
+    // and store attribution.kit_siblings. One batched step (no fan-out). Op-
+    // review rule: EVERY completed search writes a block — even zero siblings —
+    // so the row crosses the `kit_siblings IS NULL` predicate and is never
+    // re-searched; a 429 (quota) writes nothing and aborts the batch, leaving
+    // rows eligible tomorrow.
+    let kitPivoted = 0;
+    if (featureFlags.cloneWatchKitPivots && process.env.URLSCAN_API_KEY) {
+      kitPivoted = await step.run("kit-pivots", async () => {
+        const sb = createServiceClient();
+        if (!sb) return 0;
+        const since = new Date(
+          Date.now() - RECENT_WINDOW_DAYS * 24 * 60 * 60 * 1000,
+        ).toISOString();
+        const { data } = await sb
+          .from("shopfront_clone_alerts")
+          .select("id, candidate_domain, urlscan_evidence, attribution")
+          .eq("urlscan_classification", "likely_phishing")
+          .not("attribution", "is", null)
+          .is("attribution->kit_siblings", null)
+          .gte("first_seen_at", since)
+          .limit(KIT_PIVOT_RUN_CAP);
+        const rows = (data ?? []) as Array<{
+          id: number;
+          candidate_domain: string;
+          urlscan_evidence: { server?: { ip?: string | null } } | null;
+          attribution: Record<string, unknown> | null;
+        }>;
+        let n = 0;
+        for (const r of rows) {
+          const ip = r.urlscan_evidence?.server?.ip ?? null;
+          if (!ip) continue; // no pivot without an IP; leave for a later scan
+          const outcome = await searchURLScan(`page.ip:"${ip}"`, 50);
+          if (!outcome.ok) {
+            if (outcome.error === "rate_limited") break; // quota — stop the run
+            continue; // transient — leave the row, retry next tick
+          }
+          const block = shapeKitSiblings(
+            r.candidate_domain,
+            ip,
+            outcome.results,
+          );
+          const { error } = await sb
+            .from("shopfront_clone_alerts")
+            .update({
+              attribution: { ...(r.attribution ?? {}), kit_siblings: block },
+            })
+            .eq("id", r.id);
+          if (!error) n += 1;
+        }
+        return n;
+      });
+    }
+
     // Converging backfill: stamp campaign_key on already-enriched rows that
     // predate this feature. Bounded per run; the "insufficient" sentinel means
     // weak-attribution rows also cross the predicate, so it drains to zero over
@@ -173,8 +233,9 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
       candidates: pending.length,
       enriched,
       backfilled,
+      kitPivoted,
     });
-    return { ok: true, candidates: pending.length, enriched, backfilled };
+    return { ok: true, candidates: pending.length, enriched, backfilled, kitPivoted };
   }),
 );
 
