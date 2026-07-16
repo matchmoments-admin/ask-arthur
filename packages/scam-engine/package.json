@@ -16,6 +16,7 @@
     "./whois": "./src/whois.ts",
     "./rdap": "./src/rdap.ts",
     "./rdap-au": "./src/rdap-au.ts",
+    "./urlscan-search": "./src/urlscan-search.ts",
     "./domain-registration": "./src/domain-registration.ts",
     "./ssl": "./src/ssl.ts",
     "./url-normalize": "./src/url-normalize.ts",

@@ -692,6 +692,13 @@ export const featureFlags = {
    *  Default OFF. Server-side only. */
   cloneCampaigns: readBoolEnv("FF_CLONE_CAMPAIGNS"),
 
+  /** urlscan kit pivots — for confirmed likely_phishing clones, search urlscan
+   *  for OTHER sites on the same hosting IP (a phishing kit deployed many
+   *  times) and store them as attribution.kit_siblings, feeding campaign
+   *  clustering. Rate-limited free tier → capped per run. Default OFF.
+   *  Server-side only. */
+  cloneWatchKitPivots: readBoolEnv("FF_CLONE_WATCH_KIT_PIVOTS"),
+
   /** Feed CONFIRMED clones (domain + hosting IP) into the unified scam_entities
    *  index so the consumer reputation lookup / scam-map / B2B feeds see them.
    *  BLAST-RADIUS: scam_entities powers consumer-facing reputation — only
