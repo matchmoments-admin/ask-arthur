@@ -1,4 +1,7 @@
-import { lookupWhois, type WhoisResult } from "@askarthur/scam-engine/whois";
+import {
+  lookupDomainRegistration,
+  type DomainRegistration,
+} from "@askarthur/scam-engine/domain-registration";
 import { lookupCT, type CTLookupResult } from "@askarthur/scam-engine/ct-lookup";
 import {
   checkAbuseIPDB,
@@ -26,6 +29,13 @@ export interface CloneAttribution {
     registrantCountry: string | null;
     createdDate: string | null;
     nameServers: string[];
+    /** EPP status codes (RDAP). clientHold/serverHold ⇒ registrar-suspended —
+     *  direct takedown evidence. Empty when sourced from whoisjson. */
+    statuses: string[];
+    /** Registrar IANA id (RDAP) — stable registrar key for campaign grouping. */
+    registrarIanaId: string | null;
+    /** Where the record came from: rdap | whoisjson | none. */
+    source: string;
   } | null;
   ct: {
     siblings: string[];
@@ -59,7 +69,7 @@ export interface HostingInfo {
  */
 export function shapeAttribution(args: {
   domain: string;
-  whois: WhoisResult | null;
+  whois: DomainRegistration | null;
   ct: CTLookupResult | null;
   ipRep: AbuseIPDBResult | null;
   geo: GeoResult | null;
@@ -88,6 +98,9 @@ export function shapeAttribution(args: {
           registrantCountry: whois.registrantCountry,
           createdDate: whois.createdDate,
           nameServers: whois.nameServers ?? [],
+          statuses: whois.statuses ?? [],
+          registrarIanaId: whois.registrarIanaId ?? null,
+          source: whois.source ?? "whoisjson",
         }
       : null,
     ct: ctSection,
@@ -120,7 +133,7 @@ export async function enrichCloneAttribution(
   now: Date = new Date(),
 ): Promise<CloneAttribution> {
   const [whois, ct, ipRep, geo] = await Promise.all([
-    lookupWhois(domain).catch(() => null),
+    lookupDomainRegistration(domain).catch(() => null),
     featureFlags.ctLookup ? lookupCT(domain).catch(() => null) : null,
     hosting.ip && featureFlags.abuseIPDB
       ? checkAbuseIPDB(hosting.ip).catch(() => null)

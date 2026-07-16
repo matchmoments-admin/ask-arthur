@@ -14,6 +14,8 @@
     "./safebrowsing": "./src/safebrowsing.ts",
     "./ssrf-dispatcher": "./src/ssrf-dispatcher.ts",
     "./whois": "./src/whois.ts",
+    "./rdap": "./src/rdap.ts",
+    "./domain-registration": "./src/domain-registration.ts",
     "./ssl": "./src/ssl.ts",
     "./url-normalize": "./src/url-normalize.ts",
     "./phone-normalize": "./src/phone-normalize.ts",
