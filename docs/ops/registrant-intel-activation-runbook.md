@@ -23,14 +23,16 @@ than one flag per verification cycle.
   effect on the next daily run once flipped; no master-gate blocker.
 - The 4 new flags started OFF (absent from the Vercel prod env entirely):
   `FF_RDAP_LOOKUP`, `FF_CLONE_WATCH_AU_REGISTRANT`, `FF_CLONE_CAMPAIGNS`,
-  `FF_CLONE_WATCH_KIT_PIVOTS`. **`FF_RDAP_LOOKUP` was set to `true` + redeployed
-  on 2026-07-17 (Step 1 in progress).**
+  `FF_CLONE_WATCH_KIT_PIVOTS`. **`FF_RDAP_LOOKUP` was set to `true` in the prod
+  env on 2026-07-17; it goes live when this PR's merge deploys `main`** (Step 1).
 - Data available to verify against (2026-07-17): 1,085 enriched alerts awaiting
   campaign backfill (Step 3, ~3 runs at 500/run); 42 `likely_phishing` alerts in
   the 35-day window (Step 4); **0 `.au` alerts, ever (Step 2 blocked)**.
 - The Vercel CLI in the repo is authenticated against the `ask-arthur` prod
-  project, so `vercel env add` + `vercel redeploy <prod-url>` can do the flips —
-  the Inngest "Invoke" click is the only genuinely manual part.
+  project, so `vercel env add` can do the flips without operator involvement.
+  `vercel redeploy` does NOT work (see the gotcha below) — the redeploy has to
+  come from a `main` merge or the dashboard. The Inngest "Invoke" click is also
+  manual.
 - whoisjson is at ~226 calls / 7 days — approaching its 1,000/mo free cap, so
   `FF_RDAP_LOOKUP` (first below) also relieves quota pressure.
 
@@ -154,8 +156,8 @@ so the clone-watch lane structurally cannot produce an `.au` candidate.
 against live registry data (`telstra.com.au` → `auData_eligibility` carries the
 registrant name + ABN 33051775556, extracted and checksum-validated), and the
 v236 sole-trader PII gate is in place. The code is correct and dark; it simply
-has no input. Tracked as a sourcing issue — an `.au` candidate lane (auDA zone
-access, or the CT-log firehose already scoped as Phase B in ADR-0016) has to land
+has no input. Tracked in **#772** — an `.au` candidate lane (auDA zone access, or
+the CT-log firehose already scoped as Phase B in ADR-0016 / #383) has to land
 first.
 
 **Re-entry criteria.** When `au_all_time > 0`, restore the original verification:
