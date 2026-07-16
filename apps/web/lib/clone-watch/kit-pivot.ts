@@ -3,8 +3,13 @@ import type { UrlscanSearchHit } from "@askarthur/scam-engine/urlscan-search";
 /**
  * attribution.kit_siblings — other sites urlscan has seen on the SAME hosting
  * IP as a confirmed phishing clone. A phishing kit is typically deployed many
- * times on one host, so siblings are strong "same actor" evidence and feed the
- * campaign-fingerprint clustering.
+ * times on one host, so siblings are strong "same actor" evidence.
+ *
+ * NOTE: kit_siblings is currently STORED evidence only — computeCampaignKey
+ * derives its key from registrar + NS roots + ASN + cert issuer and does NOT
+ * yet consume kit_siblings. Folding shared-IP/sibling overlap into campaign
+ * grouping (so two clones from the same kit but different registrar cluster
+ * together) is a tracked follow-up.
  */
 export interface KitSiblingsBlock {
   pivot: "ip";
