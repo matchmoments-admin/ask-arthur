@@ -12,6 +12,8 @@ Safety:
   - No credential brute-forcing (nikto info-gathering mode only)
 """
 
+from __future__ import annotations
+
 import json
 import os
 import re
@@ -66,6 +68,77 @@ def run_command(cmd: list[str], timeout: int = 120) -> tuple[str, int]:
         return f"Command timed out after {timeout}s", -1
     except FileNotFoundError:
         return f"Tool not found: {cmd[0]}", -1
+
+
+def _first_match(patterns: list[str], text: str) -> str | None:
+    """Return the first regex capture-group hit across `patterns`, or None."""
+    for pat in patterns:
+        m = re.search(pat, text, re.IGNORECASE | re.MULTILINE)
+        if m:
+            val = m.group(1).strip()
+            if val:
+                return val
+    return None
+
+
+def parse_domain_whois(text: str) -> dict[str, Any]:
+    """Extract structured fields from raw `whois <domain>` output.
+
+    Registry formats vary widely by TLD, so each field tries several common
+    label spellings. The native CLI is free, unmetered and — unlike the
+    whoisjson API — returns data for .au domains (auDA discloses the registrant
+    legal name + ABN over port-43), which is the whole reason this lane exists.
+    """
+    registrar = _first_match(
+        [r"^\s*Registrar:\s*(.+)$", r"^\s*Registrar Name:\s*(.+)$",
+         r"^\s*Sponsoring Registrar:\s*(.+)$", r"^\s*registrar:\s*(.+)$"],
+        text,
+    )
+    created = _first_match(
+        [r"^\s*Creation Date:\s*(.+)$", r"^\s*Created(?:\s*On)?:\s*(.+)$",
+         r"^\s*Registered On:\s*(.+)$", r"^\s*Registration Time:\s*(.+)$",
+         r"^\s*created:\s*(.+)$"],
+        text,
+    )
+    # Name servers — collect every occurrence.
+    name_servers = sorted({
+        m.group(1).strip().lower()
+        for m in re.finditer(
+            r"^\s*(?:Name Server|Nameserver|nserver):\s*(\S+)",
+            text, re.IGNORECASE | re.MULTILINE,
+        )
+        if m.group(1).strip()
+    })
+    # .au (and some ccTLDs) disclose the registrant legal entity + ABN/ACN.
+    registrant = _first_match(
+        [r"^\s*Registrant:\s*(.+)$", r"^\s*Registrant Name:\s*(.+)$",
+         r"^\s*Registrant Contact Name:\s*(.+)$"],
+        text,
+    )
+    abn = _first_match(
+        [r"Registrant ID:\s*ABN\s*([\d\s]{11,})",
+         r"\bABN[:\s]+([\d\s]{11,})",
+         r"\bACN[:\s]+([\d\s]{9,})"],
+        text,
+    )
+    if abn:
+        abn = re.sub(r"\s+", "", abn)
+
+    lowered = text.lower()
+    is_private = any(
+        kw in lowered
+        for kw in ("redacted for privacy", "privacy protect", "whois privacy",
+                   "data protected", "redacted for gdpr", "contact privacy")
+    )
+
+    return {
+        "registrar": registrar,
+        "createdDate": created,
+        "nameServers": name_servers,
+        "registrant": registrant,
+        "abn": abn,
+        "isPrivate": is_private,
+    }
 
 
 def investigate_ip(ip: str) -> dict[str, Any]:
@@ -245,6 +318,25 @@ def investigate_domain(domain: str) -> dict[str, Any]:
         if self_signed:
             signals.append("self_signed_cert")
             investigation_score += 8
+
+    # whois — registrar / creation date / nameservers, and (for .au) the
+    # registrant legal name + ABN. Free + unmetered on the runner and, unlike
+    # the whoisjson API, works for .au. Complements the clone-watch attribution
+    # dossier's per-domain WHOIS with a bulk lane for HIGH/CRITICAL entities.
+    whois_out, whois_rc = run_command(["whois", domain], timeout=30)
+    if whois_rc == 0 and whois_out.strip():
+        parsed = parse_domain_whois(whois_out)
+        tools["whois"] = {
+            "command": f"whois {domain}",
+            **parsed,
+            "raw": truncate(whois_out),
+        }
+        if parsed["abn"]:
+            # A disclosed ABN is a strong attribution lead (.au registrant).
+            signals.append("au_registrant_abn")
+            investigation_score += 5
+        if parsed["isPrivate"]:
+            signals.append("whois_privacy_protected")
 
     return {
         "tools": tools,
