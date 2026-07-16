@@ -47,6 +47,10 @@ export interface RdapDomain {
    *  entity), e.g. [{name:"registrant name",value:"Telstra Corporation Ltd"},
    *  {name:"registrant id",value:"ABN 33051775556"}, ...]. */
   auData_eligibility?: Array<{ name?: string; value?: string }>;
+  // RDAP responses carry many more fields than we model (objectClassName,
+  // handle, links, notices, secureDNS, …). Tolerate them so real responses +
+  // fixtures type-check without enumerating the whole RFC 9083 schema.
+  [key: string]: unknown;
 }
 
 /**
