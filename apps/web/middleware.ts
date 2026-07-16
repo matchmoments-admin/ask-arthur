@@ -65,20 +65,33 @@ function maybeSetAttribution(req: NextRequest, res: NextResponse): void {
 // Race a promise against a timeout. Returns null on timeout. Used to keep a
 // degraded Supabase Auth from taking the whole site down via a hung
 // middleware invocation (incident 2026-05-09).
-async function withTimeout<T>(
+//
+// The timer MUST be cleared once the race settles. `Promise.race` resolves with
+// the winner but does NOT cancel the loser: without clearTimeout the timer
+// always fires at t+ms and logs a fictional "timed out" — even when `p`
+// resolved in ~40ms — AND the orphan timer survives the response on Fluid
+// Compute (runtime: nodejs), where the instance persists. That produced ~5,300
+// bogus middleware errors/7d (1:1 with request volume, incl. anonymous traffic
+// that never touches the network). Log the timeout only when it genuinely wins.
+export async function withTimeout<T>(
   p: Promise<T>,
   ms: number,
   label: string,
 ): Promise<T | null> {
-  return await Promise.race([
-    p,
-    new Promise<null>((resolve) =>
-      setTimeout(() => {
-        logger.error(`${label} timed out after ${ms}ms`);
-        resolve(null);
-      }, ms),
-    ),
-  ]);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      p,
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => {
+          logger.error(`${label} timed out after ${ms}ms`);
+          resolve(null);
+        }, ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export async function middleware(req: NextRequest) {
