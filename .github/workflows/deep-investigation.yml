@@ -34,7 +34,12 @@ jobs:
     timeout-minutes: 90
     defaults:
       run:
-        working-directory: pipeline/investigation
+        # Run from pipeline/ so `python -m investigation` resolves the package
+        # (investigate.py uses a relative import `from .investigate import ...`,
+        # which fails when invoked from INSIDE pipeline/investigation/). Every
+        # scheduled run had died here with "No module named investigation"
+        # since the workflow was created (Feb 2026) — whois never actually ran.
+        working-directory: pipeline
 
     steps:
       - uses: actions/checkout@v4
@@ -48,7 +53,8 @@ jobs:
           cache-dependency-path: pipeline/investigation/requirements.txt
 
       - name: Install Python dependencies
-        run: pip install -r requirements.txt
+        # working-directory is pipeline/, so point at the package's requirements.
+        run: pip install -r investigation/requirements.txt
 
       - name: Install investigation tools
         run: |

@@ -84,3 +84,7 @@ jobs:
       - name: Run pipeline tests
         working-directory: pipeline/scrapers
         run: python -m pytest tests/ -v
+
+      - name: Run investigation parser tests
+        working-directory: pipeline
+        run: python -m pytest investigation/ -v
