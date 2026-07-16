@@ -30,11 +30,15 @@ export const stalenessCheckIPs = inngest.createFunction(
       }
 
       // mark_stale_ips is now a bounded batch (v234) — a single unbounded
-      // UPDATE of ~9.7K rows against the GIN-indexed scam_ips table was
-      // blowing the pooler statement timeout. Loop until a short batch signals
-      // the stale set has drained; each RPC call is its own transaction, so a
-      // slow chunk can't poison the run. MAX_BATCHES caps worst-case work well
-      // under the 4m Inngest finish budget.
+      // UPDATE of ~9.7K rows against the GIN-indexed scam_ips table was blowing
+      // the pooler statement timeout. Loop until a short batch signals the stale
+      // set has drained; each RPC call is its own transaction, so a slow chunk
+      // can't poison the run. In steady state this is ~2 batches (the backlog is
+      // already drained), and the loop exits on the first short batch. Worst
+      // case (a huge stale spike) is bounded by MAX_BATCHES × the RPC's 90s
+      // statement_timeout ≈ 30 min — well OVER the 4m finish budget, so a spike
+      // that big would be cancelled + retried; MAX_BATCHES is a runaway backstop,
+      // not a within-budget guarantee. Kept high so a real backlog still drains.
       const BATCH_LIMIT = 5000;
       const MAX_BATCHES = 20;
       let totalDeactivated = 0;

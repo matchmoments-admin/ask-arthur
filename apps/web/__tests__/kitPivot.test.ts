@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { shapeKitSiblings } from "@/lib/clone-watch/kit-pivot";
+import { shapeKitSiblings, noIpKitSiblings } from "@/lib/clone-watch/kit-pivot";
 
 const AT = new Date("2026-07-17T00:00:00.000Z");
 
@@ -28,6 +28,15 @@ describe("shapeKitSiblings", () => {
     expect(b.result_count).toBe(0);
     // A block is written so the row leaves the kit_siblings-IS-NULL worklist.
     expect(b.pivot_value).toBe("203.0.113.7");
+  });
+
+  it("noIpKitSiblings: a sentinel block so a no-IP row crosses the worklist predicate", () => {
+    const b = noIpKitSiblings(AT);
+    expect(b.pivot_value).toBeNull();
+    expect(b.reason).toBe("no_ip");
+    expect(b.siblings).toEqual([]);
+    expect(b.result_count).toBe(0);
+    expect(b.searched_at).toBe(AT.toISOString());
   });
 
   it("caps siblings at 20", () => {

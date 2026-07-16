@@ -87,4 +87,8 @@ jobs:
 
       - name: Run investigation parser tests
         working-directory: pipeline
-        run: python -m pytest investigation/ -v
+        # Install the package's own deps (incl. pytest) rather than relying on
+        # the scrapers job incidentally pulling pytest into the same runner.
+        run: |
+          pip install -r investigation/requirements.txt
+          python -m pytest investigation/ -v

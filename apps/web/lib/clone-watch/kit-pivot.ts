@@ -3,18 +3,44 @@ import type { UrlscanSearchHit } from "@askarthur/scam-engine/urlscan-search";
 /**
  * attribution.kit_siblings — other sites urlscan has seen on the SAME hosting
  * IP as a confirmed phishing clone. A phishing kit is typically deployed many
- * times on one host, so siblings are strong "same actor" evidence and feed the
- * campaign-fingerprint clustering.
+ * times on one host, so siblings are strong "same actor" evidence.
+ *
+ * NOTE: kit_siblings is currently STORED evidence only — computeCampaignKey
+ * derives its key from registrar + NS roots + ASN + cert issuer and does NOT
+ * yet consume kit_siblings. Folding shared-IP/sibling overlap into campaign
+ * grouping (so two clones from the same kit but different registrar cluster
+ * together) is a tracked follow-up.
  */
 export interface KitSiblingsBlock {
   pivot: "ip";
-  pivot_value: string;
+  /** null when there was no hosting IP to pivot on (see reason). */
+  pivot_value: string | null;
   siblings: Array<{ domain: string; last_seen: string | null }>;
   result_count: number;
+  /** Present when no pivot was performed, e.g. "no_ip". */
+  reason?: string;
   searched_at: string;
 }
 
 const MAX_SIBLINGS = 20;
+
+/**
+ * Sentinel block for an alert that qualified for a pivot but had no hosting IP
+ * (e.g. a reputation-only likely_phishing classification stores no server.ip).
+ * Writing it moves the row across the `kit_siblings IS NULL` worklist predicate
+ * so it isn't re-selected forever (the op-review "cross the predicate you filter
+ * on" rule) — the row simply can't be pivoted, and that's recorded.
+ */
+export function noIpKitSiblings(now: Date = new Date()): KitSiblingsBlock {
+  return {
+    pivot: "ip",
+    pivot_value: null,
+    siblings: [],
+    result_count: 0,
+    reason: "no_ip",
+    searched_at: now.toISOString(),
+  };
+}
 
 /**
  * Shape a urlscan search result set into the stored block. ALWAYS returns a

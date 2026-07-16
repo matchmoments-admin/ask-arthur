@@ -1,7 +1,8 @@
 // urlscan.io Search API — pivot from a confirmed phishing clone to OTHER sites
 // on the same infrastructure (a phishing kit is usually deployed many times on
-// one host/IP). Feeds the campaign-fingerprint clustering: siblings on the same
-// IP are strong evidence of one actor.
+// one host/IP). Siblings on the same IP are strong evidence of one actor —
+// stored as attribution.kit_siblings evidence today; folding them into the
+// campaign-fingerprint grouping is a tracked follow-up (see kit-pivot.ts).
 //
 // The free-tier Search API is rate-limited, so callers cap searches/run and
 // MUST distinguish a 429 (quota — stop, leave rows untouched to retry) from a
