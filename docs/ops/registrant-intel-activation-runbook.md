@@ -54,7 +54,9 @@ vercel env add FF_X production   →   merge a PR with [build] in the message
 - The Vercel CLI in the repo is authenticated against the `ask-arthur` prod
   project, so `vercel env add` can do the flips without operator involvement.
   The redeploy must come from a `[build]`-marked merge (see the trap below).
-  The Inngest "Invoke" click is genuinely manual — the enricher is cron-only.
+  The enricher now has a manual trigger (#775), so a run can be fired via the
+  Inngest event API without the dashboard — but a trigger change needs an app
+  re-sync first (see below).
 - **Vercel incident 2026-07-17 (context, not a standing issue):** a
   "GitHub-linked deployments" incident (23:09 UTC → recovering 00:07 UTC) left
   builds stuck in `Initializing` for 20+ min. If deploys hang and nothing else
