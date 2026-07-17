@@ -57,7 +57,7 @@ Inventory of every Inngest function and its safety brakes. Maintained as a check
 | `shopfront-clone-notify-weaponised`       | event `shopfront/clone.weaponised.v1`                | 2             | —                               | —      | `event.data.alertId`     | `cloneWeaponisedAlert`      | ✓           | `shopfront_clone_outreach`          |
 | `shopfront-clone-enforcement-plan`        | event `shopfront/clone.weaponised.v1`                | 3             | —                               | —      | —                        | `cloneEnforcement`          | ✓           | `clone_enforcement`                 |
 | `shopfront-clone-notify-brand-prepare`    | cron `30 9` + manual                                 | 1 (singleton) | —                               | —      | —                        | `shopfrontCloneNotifyBrand` | ✓           | `shopfront_clone_outreach`          |
-| `clone-watch-enrich-attribution`          | cron `30 13` daily                                   | —             | —                               | 60/run | —                        | `cloneWatchAttribution`     | ✓           | `shopfront_clone_outreach`          |
+| `clone-watch-enrich-attribution`          | cron `30 13` daily + manual                          | 1             | self-draining worklist (no c/d) | 6/d    | —                        | `cloneWatchAttribution`     | ✓           | `shopfront_clone_outreach`          |
 | `report-brand-stewardship`                | cron `0 9 1 * *` + manual                            | —             | —                               | —      | —                        | `brandStewardshipReport`    | —           | —                                   |
 
 ## Outstanding gaps (P1 tickets)
