@@ -127,6 +127,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       linked: true,
       tier: existing?.tier ?? "free",
+      // Safe to return: the caller just proved control of this install via
+      // the single-use token, and needs the id for the Pro checkout call.
+      installId,
     });
   } catch (err) {
     logger.error("extension link error", { error: String(err) });

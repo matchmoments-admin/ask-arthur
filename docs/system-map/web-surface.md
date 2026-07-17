@@ -187,6 +187,7 @@ Every consumer page, authenticated page, admin page, and API route, grouped by d
 | `/api/extension/subscription`                 | POST   | Subscription tier lookup                                                 |
 | `/api/extension/link-token`                   | POST   | Mint single-use account-link token (`FF_EXTENSION_BILLING`)              |
 | `/api/extension/link`                         | POST   | Consume link token, associate install↔user (session-authed)              |
+| `/api/extension/checkout`                     | POST   | Extension Pro Stripe checkout (session-authed, linked installs only)     |
 
 ### Security audits (open, max 30–60s)
 
