@@ -143,6 +143,35 @@ describe("cost-daily-check hive_ai brake", () => {
     expect(sendAdminTelegramMessage).not.toHaveBeenCalled();
   });
 
+  it("engages the extension_image_check brake independently of hive_ai", async () => {
+    const { supabase, brakeUpserts } = makeSupabaseMock({
+      totalCostUsd: 6.5,
+      summaryRows: [
+        // Vision spend over its $5 cap; Hive spend well under its own.
+        {
+          feature: "extension_image_check",
+          provider: "anthropic",
+          event_count: 900,
+          total_cost_usd: 6.0,
+        },
+        { feature: "hive_ai", provider: "hive", event_count: 150, total_cost_usd: 0.5 },
+      ],
+    });
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never);
+
+    const res = await GET(makeReq());
+    const body = await res.json();
+
+    const visionBrake = brakeUpserts.find((b) => b.feature === "extension_image_check");
+    expect(visionBrake).toBeDefined();
+    expect(visionBrake!.set_threshold_usd).toBe(5);
+    expect(brakeUpserts.find((b) => b.feature === "hive_ai")).toBeUndefined();
+    expect(body.extensionImageCheckBrakeSet).toBe(true);
+    expect(body.hiveAiBrakeSet).toBe(false);
+    const [msg] = vi.mocked(sendAdminTelegramMessage).mock.calls[0];
+    expect(msg).toContain("extension_image_check brake engaged");
+  });
+
   it("respects a HIVE_AI_CAP_USD env override", async () => {
     process.env.HIVE_AI_CAP_USD = "10";
     const { supabase, brakeUpserts } = makeSupabaseMock({

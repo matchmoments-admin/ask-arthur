@@ -61,6 +61,14 @@ export async function GET(req: Request) {
     // brake can engage (invariant below). Consumers gate on
     // isFeatureBraked("hive_ai") before calling checkHiveAI.
     HIVE_AI_CAP_USD: readNumberEnv("HIVE_AI_CAP_USD", 5),
+    // Extension image-check Claude-vision context pass (image-check v2 —
+    // vision launches ON, so its Haiku spend needs its own ceiling separate
+    // from hive_ai: braking the vision garnish must not dark the Hive
+    // verdict, and vice versa. ~$0.002-0.01/check → $5/day ≈ 500-2,500
+    // checks. analyze-image gates ONLY the Claude call on
+    // isFeatureBraked("extension_image_check") — the free byte fetch keeps
+    // running so C2PA/sha256 still work while braked.
+    EXTENSION_IMAGE_CHECK_CAP_USD: readNumberEnv("EXTENSION_IMAGE_CHECK_CAP_USD", 5),
   };
   const thresholdUsd = envReads.DAILY_COST_THRESHOLD_USD.value;
 
@@ -305,6 +313,14 @@ export async function GET(req: Request) {
     .filter((t) => t.feature === "hive_ai")
     .reduce((sum, t) => sum + t.cost, 0);
 
+  // Extension image-check vision pass (Claude Haiku, feature tag
+  // extension_image_check) — separate ceiling from the hive_ai vendor brake.
+  const extensionImageCheckThresholdUsd =
+    envReads.EXTENSION_IMAGE_CHECK_CAP_USD.value;
+  const extensionImageCheckCost = top
+    .filter((t) => t.feature === "extension_image_check")
+    .reduce((sum, t) => sum + t.cost, 0);
+
   let brakeSet = false;
   let redditBrakeSet = false;
   let phoneFootprintBrakeSet = false;
@@ -317,6 +333,7 @@ export async function GET(req: Request) {
   let scamReportEmbedBrakeSet = false;
   let botAnalyzeBrakeSet = false;
   let hiveAiBrakeSet = false;
+  let extensionImageCheckBrakeSet = false;
   if (vulnEnrichCost > vulnEnrichThresholdUsd) {
     const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     const { error: brakeError } = await supabase
@@ -684,6 +701,36 @@ export async function GET(req: Request) {
     }
   }
 
+  if (extensionImageCheckCost > extensionImageCheckThresholdUsd) {
+    const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const { error: brakeError } = await supabase
+      .from("feature_brakes")
+      .upsert(
+        {
+          feature: "extension_image_check",
+          paused_until: pausedUntil,
+          reason: `Daily spend $${extensionImageCheckCost.toFixed(2)} exceeded $${extensionImageCheckThresholdUsd} cap`,
+          set_by: "cost-daily-check",
+          set_cost_usd: extensionImageCheckCost,
+          set_threshold_usd: extensionImageCheckThresholdUsd,
+          set_at: new Date().toISOString(),
+        },
+        { onConflict: "feature" },
+      );
+    if (brakeError) {
+      logger.error("failed to set extension_image_check brake", {
+        error: brakeError.message,
+      });
+    } else {
+      extensionImageCheckBrakeSet = true;
+      logger.warn("extension_image_check brake engaged", {
+        costUsd: extensionImageCheckCost,
+        thresholdUsd: extensionImageCheckThresholdUsd,
+        pausedUntil,
+      });
+    }
+  }
+
   // Below the global Telegram threshold: brakes were still evaluated above
   // (the M-brake fix), but no digest is sent. Report any brakes that engaged.
   if (!aboveThreshold) {
@@ -707,6 +754,7 @@ export async function GET(req: Request) {
         scam_report_embed: scamReportEmbedBrakeSet,
         bot_analyze: botAnalyzeBrakeSet,
         hive_ai: hiveAiBrakeSet,
+        extension_image_check: extensionImageCheckBrakeSet,
       },
     });
   }
@@ -801,6 +849,12 @@ export async function GET(req: Request) {
       `🛑 <b>hive_ai brake engaged</b> — paused for 24h (spend $${hiveAiCost.toFixed(2)} > $${hiveAiThresholdUsd} cap). Extension image scans skip Hive until reset.`,
     );
   }
+  if (extensionImageCheckBrakeSet) {
+    lines.push(
+      "",
+      `🛑 <b>extension_image_check brake engaged</b> — paused for 24h (spend $${extensionImageCheckCost.toFixed(2)} > $${extensionImageCheckThresholdUsd} cap). Image checks keep the Hive verdict; the vision context pass pauses.`,
+    );
+  }
   lines.push("", `Full breakdown: https://askarthur.au/admin/costs`);
 
   await sendAdminTelegramMessage(lines.join("\n"));
@@ -835,5 +889,7 @@ export async function GET(req: Request) {
     botAnalyzeCost,
     hiveAiBrakeSet,
     hiveAiCost,
+    extensionImageCheckBrakeSet,
+    extensionImageCheckCost,
   });
 }
