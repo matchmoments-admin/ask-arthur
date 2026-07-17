@@ -1,8 +1,7 @@
 # Image-Check v2 — Evidence & Explainability
 
-**Status:** in progress. Follows the extension-monetisation wave (#782–#789); everything
-rides the existing `NEXT_PUBLIC_FF_IMAGE_CHECK` / `WXT_IMAGE_CHECK` double gate and stays
-dark until Phase B activation.
+**Status:** CODE COMPLETE 2026-07-17 — PRs #790–#794 merged + the v1-feed PR; migration v239 applied. All
+surfaces dark until Phase B activation (runbook below; vision launches ON).
 
 ## Why
 
@@ -26,14 +25,14 @@ the NSW-police-pilot direction (ReportCyber/eSafety routing constants already li
 
 ## PR sequence
 
-| PR  | Branch                                 | Scope                                                                                                         | Status    |
-| --- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------- | --------- |
-| 1   | `feat/image-check-generator-breakdown` | Hive raw class retention (cache prefix → v2), top-3 `generatorBreakdown` in response + card, Google Lens link | in review |
-| 2   | `feat/image-check-vision-cost-brake`   | `EXTENSION_IMAGE_CHECK_CAP_USD` ($5) 13th brake; vision Claude call gated on `isFeatureBraked`                | pending   |
-| 3   | `feat/image-check-c2pa-detect`         | Dependency-free `detectC2PA` (JPEG APP11/JUMBF, PNG caBX, WebP C2PA); `fetchImageBytes` w/ sha256             | pending   |
-| 4   | `feat/image-check-evidence-records`    | ADR-0022 + migration v239 `image_check_records` (+archive); `FF_IMAGE_CHECK_RECORDS`; `checkRef` in response  | pending   |
-| 5   | `feat/image-check-evidence-report`     | Public `/image-check/[ref]` page + one-page evidence PDF (react-pdf, sync-in-route)                           | pending   |
-| 6   | `feat/v1-image-checks-api`             | `GET /api/v1/image-checks` (guardV1) B2B/LE feed + openapi + docs sweep                                       | pending   |
+| PR  | Branch                                 | Scope                                                                                                         | Status      |
+| --- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ----------- |
+| 1   | `feat/image-check-generator-breakdown` | Hive raw class retention (cache prefix → v2), top-3 `generatorBreakdown` in response + card, Google Lens link | MERGED #790 |
+| 2   | `feat/image-check-vision-cost-brake`   | `EXTENSION_IMAGE_CHECK_CAP_USD` ($5) 13th brake; vision Claude call gated on `isFeatureBraked`                | MERGED #791 |
+| 3   | `feat/image-check-c2pa-detect`         | Dependency-free `detectC2PA` (JPEG APP11/JUMBF, PNG caBX, WebP C2PA); `fetchImageBytes` w/ sha256             | MERGED #792 |
+| 4   | `feat/image-check-evidence-records`    | ADR-0022 + migration v239 `image_check_records` (+archive); `FF_IMAGE_CHECK_RECORDS`; `checkRef` in response  | MERGED #793 |
+| 5   | `feat/image-check-evidence-report`     | Public `/image-check/[ref]` page + one-page evidence PDF (react-pdf, sync-in-route)                           | MERGED #794 |
+| 6   | `feat/v1-image-checks-api`             | `GET /api/v1/image-checks` (guardV1) B2B/LE feed + openapi + docs sweep                                       | this PR     |
 
 ## Flags & env introduced
 
