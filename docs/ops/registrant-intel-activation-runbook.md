@@ -67,11 +67,32 @@ vercel env add FF_X production   →   merge a PR with [build] in the message
 
 These are bare `FF_*` (server-only) env vars, read at runtime via `readBoolEnv`.
 
-1. Set on Vercel prod: `printf 'true' | vercel env add FF_<NAME> production`
-   (or Vercel dashboard → Settings → Environment Variables → Production). Use
-   `printf`, not `echo` — no trailing newline. (`readBoolEnv` trims anyway, but
-   don't rely on it.) Confirm with `vercel env ls production | grep FF_<NAME>`.
-2. **Redeploy — and you MUST put `[build]` in the commit message.** Env vars are
+1. Set on Vercel prod — **use `--value`, never a stdin pipe:**
+
+   ```bash
+   vercel env add FF_<NAME> production --value true --no-sensitive --force --yes
+   ```
+
+   - **Piping into `vercel env add` does not work** on CLI 55.0.0. Both
+     `printf 'true' |` and `echo true |` create the variable with an **empty
+     value**. `vercel env ls` then shows the var present and looks fine, while
+     `readBoolEnv("")` is `false` — i.e. the flag reads as OFF while appearing set.
+   - `--no-sensitive` matters for a **flag**: sensitive vars cannot be read back
+     (`vercel env pull` returns them empty), so you can never verify what you
+     stored. Flags aren't secrets — store them readable. (`FF_CLONE_WATCH_ATTRIBUTION`
+     is non-sensitive, which is why it's verifiable.)
+   - `--force` overwrites an existing value (otherwise the add is a no-op).
+
+2. **Verify the VALUE, not the var's existence** — `vercel env ls` only proves a
+   var exists:
+
+   ```bash
+   vercel env pull /tmp/.env.check --environment=production --yes
+   grep -E '^FF_' /tmp/.env.check     # must show FF_<NAME>="true", not ""
+   rm -f /tmp/.env.check
+   ```
+
+3. **Redeploy — and you MUST put `[build]` in the commit message.** Env vars are
    injected at deploy; a running deployment won't see a new/changed var until a
    fresh deploy.
 
@@ -107,7 +128,7 @@ These are bare `FF_*` (server-only) env vars, read at runtime via `readBoolEnv`.
    vercel ls ask-arthur | head -6   # newest prod row must be Ready AND newer than your flip
    ```
 
-3. Confirm the var is live: it should show in the next function invocation's env.
+4. Confirm the var is live: it should show in the next function invocation's env.
 
 **Rollback (any flag):** set the var to `false` (or remove it) + redeploy. All
 data written is additive JSONB / a nullable column — nothing to clean up; the
@@ -115,13 +136,51 @@ feature simply stops writing new values. No migration reversal needed.
 
 ## How to trigger the code path (don't just wait a day)
 
-- The **enricher is cron-only (13:30 UTC), no manual-trigger event.** To run it
-  on demand: Inngest dashboard → function `clone-watch-enrich-attribution` →
-  **Invoke** (empty payload). Or wait for the 13:30 UTC daily tick.
-- The upstream urlscan stages DO have manual triggers (rarely needed here):
+The enricher now has a manual trigger (added in #775 — it was the only
+clone-watch stage without one). Fire it directly:
+
+```bash
+KEY=$(vercel env pull /tmp/.e --environment=production --yes >/dev/null 2>&1; \
+      grep '^INNGEST_EVENT_KEY=' /tmp/.e | cut -d= -f2- | tr -d '"'; rm -f /tmp/.e)
+curl -s -X POST "https://inn.gs/e/$KEY" -H "Content-Type: application/json" \
+  -d '{"name":"shopfront/clone.enrich-attribution.manual-trigger.v1","data":{}}'
+```
+
+**A new/changed Inngest TRIGGER needs an app re-sync, or the event goes nowhere.**
+Inngest keeps its own copy of the function definitions; a Vercel deploy does not
+always refresh it. The event API returns `{"status":200}` regardless — it accepts
+the event, finds no function registered for that name, and silently runs nothing.
+Force the re-sync after deploying a trigger change:
+
+```bash
+curl -s -X PUT https://askarthur.au/api/inngest
+# {"message":"Successfully registered","modified":true}  ← "modified":true means it WAS stale
+```
+
+Or: Inngest dashboard → function → **Invoke** (empty payload), or wait for 13:30 UTC.
+
+- The upstream urlscan stages also have manual triggers:
   `shopfront/clone.urlscan-submit.manual-trigger.v1`,
   `shopfront/clone.urlscan-retrieve.manual-trigger.v1`,
   `shopfront/clone.lifecycle-recheck.manual-trigger.v1`.
+
+### What each flag can actually be verified against (measured 2026-07-17)
+
+Triggering a run proves nothing if the relevant worklist is empty. Check first:
+
+| Flag                           | Worklist query                                                                                           | 2026-07-17                       |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------- | -------------------------------- |
+| `FF_CLONE_CAMPAIGNS`           | `attribution IS NOT NULL AND campaign_key IS NULL`                                                       | **1,085** — verifiable now       |
+| `FF_CLONE_WATCH_KIT_PIVOTS`    | `urlscan_classification='likely_phishing' AND attribution->'kit_siblings' IS NULL`                       | **42** — verifiable now          |
+| `FF_RDAP_LOOKUP`               | `source='nrd' AND urlscan_scanned_at IS NOT NULL AND attribution IS NULL AND first_seen_at >= now()-35d` | **0** — NOT verifiable on demand |
+| `FF_CLONE_WATCH_AU_REGISTRANT` | any `.au` alert                                                                                          | **0** — blocked (#772)           |
+
+**`FF_RDAP_LOOKUP` cannot be verified by triggering.** The enricher only does
+WHOIS for rows where `attribution IS NULL`, and every eligible row is already
+enriched. New work appears only after the daily NRD ingest (~08:30 UTC) lands new
+alerts AND urlscan scans them (`urlscan_scanned_at` gates the worklist). So RDAP
+verifies on the next natural cycle — the 441 currently-unenriched rows are all
+`urlscan_scanned_at IS NULL` and will never enter the worklist until scanned.
 
 ## Pre-flip checklist — run BEFORE every flag (CLAUDE.md rule)
 
