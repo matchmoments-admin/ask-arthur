@@ -4,7 +4,17 @@ title: "[P2] Negotiate Hive AI pricing contract + set PRICING.HIVE_AI_USD_PER_IM
 labels: severity:p2, ready-for-human, domain:deepfake, commercial
 action_type: commercial → code
 estimated_time: contract dependent · 15 min code after
+status: "RESOLVED (code) 2026-07-17 — commercial contract still open"
 ---
+
+> **RESOLVED (code side) 2026-07-17** — `feat/hive-cost-wiring` (extension-monetisation PR 1).
+> `PRICING.HIVE_AI_USD_PER_IMAGE` set to $0.003 (published self-serve rate; update on
+> contract signing). Note the live telemetry tag is **`feature='hive_ai'`, `provider='hive'`**
+> (already in prod since the original instrumentation), not the `facebook-ads-detection` /
+> `hive-ai` names suggested below. The brake is wired into the `cost-daily-check` cron
+> (`HIVE_AI_CAP_USD`, default $5/day) — not `scraper-brake-alert` — and `analyze-ad` now gates
+> `checkHiveAI` on `isFeatureBraked("hive_ai")`. Remaining action is **commercial only**:
+> confirm the contracted per-image rate and adjust the constant if it differs.
 
 ## Summary
 
