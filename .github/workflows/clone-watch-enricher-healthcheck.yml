@@ -1,0 +1,155 @@
+name: Clone Watch — enricher health check (daily)
+
+# Post-run visibility for `clone-watch-enrich-attribution` (Inngest cron, 13:30
+# UTC). Runs ~17 min after it and reports what the run actually DID — worklists,
+# not exit codes.
+#
+# WHY THIS EXISTS (born from #777, 2026-07-17). The enricher early-returned when
+# its *enrichment* worklist was empty, before the kit-pivot and campaign-backfill
+# stages — which have their own independent worklists. In the enricher's steady
+# state (caught up on enrichment — the NORMAL condition) both stages were
+# silently inert: 1,085 rows waiting for a campaign key, 42 for a kit pivot,
+# while every run returned ok:true. Nothing went red. The only tell was a
+# worklist that never drained — which nobody was looking at.
+#
+# It also closes out the FF_RDAP_LOOKUP verification, which could not be done at
+# activation (2026-07-17) because its worklist was legitimately empty: every
+# eligible row was already enriched. The first run that enriches rows should show
+# whois.source='rdap'.
+#
+# WHAT IT DELIBERATELY DOES NOT ALERT ON, and why:
+#   * "backfill still has rows pending" — NORMAL while it drains at
+#     BACKFILL_CAP (500)/run. Alerting would cry wolf every day until it
+#     converges, which just trains everyone to ignore the alert.
+#   * "the backfill/kit stage did not run" — no reliable stateless signal
+#     exists. The backfill is pure SQL (no cost_telemetry), and `updated_at`
+#     CANNOT be used: shopfront_clone_alerts has NO triggers (verified
+#     2026-07-17), so updated_at is only set when a writer sets it explicitly —
+#     the backfill and kit-pivot writers don't, leaving it stale.
+#     Instead the numbers are reported daily: `campaign backfill left` and
+#     `kit-pivot worklist` MUST fall day over day until they hit 0. If either is
+#     flat across consecutive messages, that IS the #777 signature — go look at
+#     the enricher's stage gating.
+#
+# The one alert here is the RDAP one, because it IS reliably detectable:
+# attribution.enriched_at gives an exact "enriched on this run" window.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "47 13 * * *" # 13:47 UTC — ~17 min after the 13:30 enricher tick
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify required secrets
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+        run: |
+          missing=()
+          [[ -z "${SUPABASE_DB_URL:-}" ]] && missing+=(SUPABASE_DB_URL)
+          [[ -z "${TELEGRAM_BOT_TOKEN:-}" ]] && missing+=(TELEGRAM_BOT_TOKEN)
+          [[ -z "${TELEGRAM_ADMIN_CHAT_ID:-}" ]] && missing+=(TELEGRAM_ADMIN_CHAT_ID)
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "Missing secrets: ${missing[*]}"; exit 1
+          fi
+
+      - name: Query enricher outcome
+        id: q
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+          # One row, tab-separated. attribution.enriched_at is set by
+          # shapeAttribution on every enrich, so the 3h window is exact.
+          SQL="
+          SELECT
+            (SELECT count(*) FROM public.shopfront_clone_alerts
+              WHERE source='nrd' AND urlscan_scanned_at IS NOT NULL
+                AND attribution IS NULL AND first_seen_at >= now() - interval '35 days'),
+            (SELECT count(*) FROM public.shopfront_clone_alerts
+              WHERE (attribution->>'enriched_at')::timestamptz > now() - interval '3 hours'),
+            (SELECT count(*) FROM public.shopfront_clone_alerts
+              WHERE (attribution->>'enriched_at')::timestamptz > now() - interval '3 hours'
+                AND attribution->'whois'->>'source' = 'rdap'),
+            (SELECT count(*) FROM public.shopfront_clone_alerts
+              WHERE (attribution->>'enriched_at')::timestamptz > now() - interval '3 hours'
+                AND attribution->'whois'->>'source' = 'whoisjson'),
+            (SELECT count(*) FROM public.shopfront_clone_alerts
+              WHERE attribution IS NOT NULL AND campaign_key IS NULL),
+            (SELECT count(*) FROM public.shopfront_clone_alerts
+              WHERE urlscan_classification='likely_phishing' AND attribution IS NOT NULL
+                AND attribution->'kit_siblings' IS NULL
+                AND first_seen_at > now() - interval '35 days'),
+            (SELECT count(*) FROM public.shopfront_clone_alerts
+              WHERE jsonb_array_length(COALESCE(attribution->'whois'->'statuses','[]'::jsonb)) > 0);
+          "
+          OUT=$(psql "$SUPABASE_DB_URL" -X -A -t -F $'\t' -v ON_ERROR_STOP=1 -c "$SQL")
+          IFS=$'\t' read -r WORKLIST ENRICHED RDAP WHOISJSON BACKFILL KITWORK STATUSES <<< "$OUT"
+          for v in WORKLIST ENRICHED RDAP WHOISJSON BACKFILL KITWORK STATUSES; do
+            echo "$v=${!v}" >> "$GITHUB_OUTPUT"
+          done
+          {
+            echo "### Clone-watch enricher — post-run state"
+            echo ""
+            echo "| Signal | Value |"
+            echo "| --- | --- |"
+            echo "| enrich worklist (pending) | $WORKLIST |"
+            echo "| enriched in last 3h | $ENRICHED |"
+            echo "| via RDAP | $RDAP |"
+            echo "| via whoisjson | $WHOISJSON |"
+            echo "| campaign backfill remaining | $BACKFILL |"
+            echo "| kit-pivot worklist | $KITWORK |"
+            echo "| rows with whois.statuses | $STATUSES |"
+            echo ""
+            echo "Backfill + kit-pivot worklists must FALL day over day. Flat = #777 signature."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Evaluate + notify
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+          WORKLIST: ${{ steps.q.outputs.WORKLIST }}
+          ENRICHED: ${{ steps.q.outputs.ENRICHED }}
+          RDAP: ${{ steps.q.outputs.RDAP }}
+          WHOISJSON: ${{ steps.q.outputs.WHOISJSON }}
+          BACKFILL: ${{ steps.q.outputs.BACKFILL }}
+          KITWORK: ${{ steps.q.outputs.KITWORK }}
+          STATUSES: ${{ steps.q.outputs.STATUSES }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          WARN=""
+
+          # The only reliably-detectable anomaly. RDAP is ON; if a run enriched
+          # rows but NONE resolved via RDAP, the RDAP path is silently failing
+          # over to whoisjson. Nothing looks broken — a verdict still comes back —
+          # but statuses/abuseContact never populate and the whoisjson free cap
+          # (1000/mo) keeps draining, which is exactly what RDAP was to relieve.
+          if [ "${ENRICHED:-0}" -gt 0 ] && [ "${RDAP:-0}" -eq 0 ]; then
+            WARN=$'\n'"RDAP resolved 0 of ${ENRICHED} enriched rows — silently falling back to whoisjson. Check rdap.org reachability."
+          fi
+
+          if [ -n "$WARN" ]; then
+            HEAD="[!] <b>Clone-watch enricher — check</b>"
+          else
+            HEAD="<b>Clone-watch enricher</b>"
+          fi
+
+          # printf-built (a heredoc at column 0 would break the YAML block scalar).
+          TEXT=$(printf '%s\n\nenrich worklist: <b>%s</b>\nenriched (3h): <b>%s</b> — rdap <b>%s</b> / whoisjson <b>%s</b>\ncampaign backfill left: <b>%s</b>\nkit-pivot worklist: <b>%s</b>\nrows with whois.statuses: <b>%s</b>\n%s\n\n<a href="%s">run</a>' \
+            "$HEAD" "$WORKLIST" "$ENRICHED" "$RDAP" "$WHOISJSON" "$BACKFILL" "$KITWORK" "$STATUSES" "$WARN" "$RUN_URL")
+
+          curl -sS -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+            -d "chat_id=${TELEGRAM_ADMIN_CHAT_ID}" \
+            -d "parse_mode=HTML" \
+            -d "disable_web_page_preview=true" \
+            --data-urlencode "text=${TEXT}" \
+            > /dev/null
+          echo "notified (warn=${WARN:-none})"
