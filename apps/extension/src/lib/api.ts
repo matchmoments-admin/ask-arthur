@@ -3,6 +3,7 @@ import type {
   ExtensionURLCheckResponse,
   ExtensionAnalyzeRequest,
   ExtensionAnalyzeResponse,
+  ExtensionImageCheckResponse,
 } from "@askarthur/types";
 import { getInstallId } from "./storage";
 import { signRequest } from "./sign";
@@ -238,6 +239,19 @@ export async function mintLinkToken(): Promise<{
   return request<{ token: string; expiresInSeconds: number }>("/link-token", {
     method: "POST",
     body: JSON.stringify({}),
+  });
+}
+
+// Right-click "Check this image" (extension-monetisation PR 4). URL-only —
+// the extension never reads pixel data; the server (and Hive) fetch the
+// public URL themselves. Response carries confidences, never a verdict.
+export async function analyzeImage(
+  imageUrl: string,
+  pageUrl: string | null,
+): Promise<{ data: ExtensionImageCheckResponse; remaining: number | null }> {
+  return request<ExtensionImageCheckResponse>("/analyze-image", {
+    method: "POST",
+    body: JSON.stringify({ imageUrl, pageUrl }),
   });
 }
 
