@@ -92,7 +92,13 @@ pnpm --filter @askarthur/web seed:image-check
 ```
 
 Open the printed `/image-check/IC-…` page, download the PDF, and confirm the
-ReportCyber / eSafety links. Then the B2B feed (create a key at `/app/keys`):
+ReportCyber / eSafety links.
+
+> **Expected quirk:** an unknown/malformed ref renders the not-found page but
+> with HTTP **200**, not 404 — `notFound()` fires after streaming starts, so
+> the status is already sent. Pre-existing and app-wide (`/charity-check` and
+> `/scam-feed` do the same); the _body_ is identical in every not-found case,
+> so nothing leaks. The PDF route does return a real 404. Then the B2B feed (create a key at `/app/keys`):
 
 ```bash
 curl -H "Authorization: Bearer ak_live_…" localhost:3000/api/v1/image-checks | jq

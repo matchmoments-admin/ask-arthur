@@ -56,8 +56,17 @@ NULL`) and ad-shaped; generalising it would weaken its existing B2B
 
 - The public evidence page (`/image-check/[ref]`) and PDF are keyed on the
   unguessable ref alone — ~60 bits against a corpus of at most thousands of
-  rows makes enumeration impractical; the page 404s identically for missing
-  refs and flag-off.
+  rows makes enumeration impractical. Missing refs, malformed refs, and
+  flag-off all render the identical not-found page, so a probe learns
+  nothing about which refs exist.
+  **Verified 2026-07-17 against a running server:** the _page_ returns HTTP
+  **200** with that not-found body, not 404 — `notFound()` fires after
+  streaming has begun, so the status is already flushed. This is
+  pre-existing and app-wide (`/charity-check`, `/scam-feed`, `/extension/link`
+  behave the same), not specific to this feature, and it does not weaken the
+  property above (the body is what an attacker sees, and it is identical).
+  The PDF route returns a real 404 because it sets the status explicitly.
+  Tracked in BACKLOG → soft-404 on flag-gated pages.
 - `/api/v1/image-checks` (B2B/LE feed) must never expose `install_id_hash`
   or raw `hive_result`.
 - If byte retention is ever added, it supersedes this ADR and requires a
