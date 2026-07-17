@@ -1,0 +1,39 @@
+<!--
+  Sanitised Facebook sponsored feed unit using the fragmented-span obfuscation
+  (Facebook's primary anti-adblock technique), captured 2026-07. "Sponsored"
+  is split across sibling spans under a[href="#"] > span[aria-labelledby],
+  interleaved with decoy fragments that are hidden via inline styles. Only the
+  visible fragments reconstruct to "Sponsored". Exercises detection method 5.
+  NOTE: none of methods 1-4 apply here by construction (no aria-label, no
+  /ads/about link) so a hit proves the reconstruction path specifically.
+  Refresh cadence + capture playbook: docs/ops/extension-fixture-refresh.md
+-->
+<div data-pagelet="FeedUnit_7" role="article">
+  <div class="header">
+    <h4>
+      <a role="link" href="https://www.facebook.com/mega-gadget-deals">Mega Gadget Deals</a>
+    </h4>
+    <a href="#">
+      <span aria-labelledby="jsc_c_decoy_label">
+        <span>
+          <span>Spo</span>
+          <span style="display:none">xyz</span>
+          <span>nso</span>
+          <span style="opacity:0">abc</span>
+          <span>red</span>
+          <span style="font-size:0">qq</span>
+        </span>
+      </span>
+    </a>
+  </div>
+  <div class="body">
+    <div dir="auto">
+      Massive warehouse clearance — 90% off smartwatches. Today only while stocks last!
+    </div>
+  </div>
+  <div class="cta">
+    <a href="https://mega-gadget-clearance.example.shop/sale">
+      <img src="https://scontent.xx.fbcdn.net/v/t45.1600-4/ad_creative_0002.jpg" width="480" height="480" alt="" />
+    </a>
+  </div>
+</div>

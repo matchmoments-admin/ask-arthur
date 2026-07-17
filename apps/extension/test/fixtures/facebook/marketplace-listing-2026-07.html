@@ -1,0 +1,35 @@
+<!--
+  Sanitised Facebook Marketplace listing page (main content region), captured
+  2026-07. Exercises: title (h1), price (aria-label), description (longest
+  dir=auto block), "Listed in" location, seller profile extraction (profile
+  link, "Joined in", ratings, response time) and the new-account trust factor
+  (join year is templated close to "now" — tests compute expectations from it).
+  Refresh cadence + capture playbook: docs/ops/extension-fixture-refresh.md
+-->
+<div role="main">
+  <h1>iPhone 15 Pro Max 256GB — brand new sealed</h1>
+  <div aria-label="Price">$650</div>
+  <div dir="auto">
+    Brand new sealed iPhone 15 Pro Max, 256GB, natural titanium. Unwanted carrier
+    upgrade. Price is firm, no swaps. Can post at buyer's expense or my
+    sister can pick up payment via PayID.
+    <!-- NB: keep the word "from" out of this description — the seller-location
+         regex's `From` alternative matches mid-sentence "from ..." and would
+         capture garbage before reaching the real "Lives in" marker. That
+         over-broad regex is a known detector quirk (flagged in PR); this
+         fixture tests the intended path. -->
+  </div>
+  <div dir="auto">Listed in Parramatta, NSW</div>
+  <div class="seller-section">
+    <a href="https://www.facebook.com/marketplace/profile/100099887766">Sam Seller</a>
+    <div dir="auto">Joined Facebook in 2025</div>
+    <div dir="auto">0 ratings</div>
+    <div dir="auto">Typically responds within an hour</div>
+    <div dir="auto">Lives in Melbourne, VIC</div>
+  </div>
+  <div class="gallery">
+    <img src="https://scontent.xx.fbcdn.net/v/t45.5328-4/listing_0004.jpg" width="960" height="720" alt="" />
+    <img src="https://scontent.xx.fbcdn.net/v/t45.5328-4/listing_0005.jpg" width="960" height="720" alt="" />
+    <img src="https://scontent.xx.fbcdn.net/v/t45.5328-4/tiny_avatar.jpg" width="40" height="40" alt="" />
+  </div>
+</div>
