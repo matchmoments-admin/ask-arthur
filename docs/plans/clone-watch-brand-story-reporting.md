@@ -202,6 +202,25 @@ Minimal set to prove the narrative: `FF_CLONE_LIFECYCLE_RECONCILE` + `FF_SHOPFRO
   teaser fields, `CONTEXT.md` term. Honest verbs; screenshot evidence.
 - **PR3.4 (optional) — B2B `/api/v1/clone-report`** per-brand arc from precomputed stats.
 
+## 6b. SPF evidence appendix (monthly report add-on, 2026-07-18)
+
+The monthly report gains a one-page **SPF Evidence Summary** appendix mapping the
+month's detections / weaponisations / takedowns to draft SPF Common Code obligation
+language (Prevent — "monitor for brand impersonation"; Detect — ASI handling;
+Disrupt — documented takedown steps), plus the vendor-gap KPI (decline→weaponise
+median ~33h). The report content is assembled from code
+(`clone-watch-report-summary` cron + `report-card-data.ts` + the
+`clone-watch-report-export`/`caption` scripts), so the appendix lives as a fill-in
+template, not generator code:
+**[assets/spf-evidence-appendix-template.md](./assets/spf-evidence-appendix-template.md)**.
+
+Non-negotiables baked into the template: (1) framing — "evidence of Ask Arthur's
+detections and actions — not an assessment of any entity's SPF compliance"; (2) all
+clause references cite "exposure draft, 28 May 2026 — re-verify at finalisation"
+until the final instruments are registered (expected H2 2026; codes commence
+≥31 March 2027); (3) KPI numbers restate from the current month's precomputed stats,
+never a stale figure.
+
 ## 7. Open questions
 
 1. **Reconciler placement:** evolve `clone-watch-netcraft-issue` into the single per-URL

@@ -1,9 +1,9 @@
-If you have been reading the _Scams Prevention Framework Act_ commentary and you keep seeing the figure "A$52.7 million" for a Tier 1 maximum penalty, here is what is actually going on under that number — and why the number itself is going to change on 1 July 2026, the same day the Act commences.
+If you have been reading the _Scams Prevention Framework Act_ commentary and you keep seeing the figure "A$52.7 million" for a Tier 1 maximum penalty, here is what is actually going on under that number — and why the number itself is going to change on 1 July 2026, right in the middle of the SPF's staged commencement. (The Act itself commenced on 21 February 2025; the obligations stage through 2026–27 — SPF Rules from 1 September 2026, sector codes from 31 March 2027.)
 
 > **Key takeaways**
 >
 > - Tier 1 SPF maximum is the _greater_ of three numbers: 159,745 penalty units (A$52.7M today), 3× benefit derived, or 30% of adjusted turnover.
-> - The penalty unit value indexes on 1 July 2026 — the same day SPF commences. Every compliance document quoting "A$52.7M" goes stale on 2 July.
+> - The penalty unit value indexes on 1 July 2026 — mid-way through the SPF's staged commencement (Rules 1 September 2026, sector codes 31 March 2027). Every compliance document quoting "A$52.7M" goes stale on 2 July.
 > - For TPG, Optus, Aussie Broadband, the 30% of turnover option is the relevant ceiling — and runs into hundreds of millions for a year-long contravention.
 > - The "reasonable steps" defence requires an evidence trail that exists _before_ the contravention. It cannot be reconstructed.
 
@@ -23,7 +23,7 @@ That is where the A$52.7 million figure comes from. It is correct on the day thi
 
 Section 4AA(3) of the _Crimes Act_ provides that on 1 July 2026 — and on every third 1 July after that — the dollar value of a penalty unit is automatically indexed by reference to CPI. The indexation factor is calculated against the March quarter immediately before the indexation day, with a known formula and a published indexation factor.
 
-Here is the implication that is not in any vendor's compliance deck. The SPF Act commences on 1 July 2026. The penalty unit indexation occurs on 1 July 2026. So the _first_ SPF contravention is exposed to a higher Tier 1 ceiling than the A$52.7 million figure that has been quoted in every legal explainer for the past twelve months. The exact post-indexation figure depends on what the All Groups CPI does in the March 2026 quarter. If CPI runs at, say, 3% for the indexation reference period, the penalty unit moves from A$330 to approximately A$340, and the Tier 1 ceiling becomes A$54.3 million. If CPI runs hotter, the ceiling moves higher.
+Here is the implication that is not in any vendor's compliance deck. The SPF Act commenced on 21 February 2025, but its obligations stage through 2026–27: the SPF Rules commence 1 September 2026 and the sector codes commence 31 March 2027. The penalty unit indexation occurs on 1 July 2026 — before any sector code has commenced. So the _first_ code-era SPF contravention is exposed to a higher Tier 1 ceiling than the A$52.7 million figure that has been quoted in every legal explainer for the past twelve months. The exact post-indexation figure depends on what the All Groups CPI does in the March 2026 quarter. If CPI runs at, say, 3% for the indexation reference period, the penalty unit moves from A$330 to approximately A$340, and the Tier 1 ceiling becomes A$54.3 million. If CPI runs hotter, the ceiling moves higher.
 
 This is the kind of detail that matters for two reasons. First, your legal team is going to need to update every internal compliance document on 1 July, because the headline figure is going to change. Second, the _floor_ of the maximum penalty — A$52.7 million — is itself only one of three options. The 30% of adjusted turnover number can be larger by orders of magnitude.
 
@@ -87,7 +87,7 @@ If you want to talk through how AskArthur's Threat API maps to the _reasonable s
 ## FAQ
 
 **What's a "penalty unit" and why do they matter?**
-Australian Commonwealth penalties are denominated in penalty units, not dollars. The current value is A$330 (set 7 November 2024 under section 4AA of the _Crimes Act 1914_). Penalty units index every three years on 1 July; the next indexation is 1 July 2026 — the same day SPF commences.
+Australian Commonwealth penalties are denominated in penalty units, not dollars. The current value is A$330 (set 7 November 2024 under section 4AA of the _Crimes Act 1914_). Penalty units index every three years on 1 July; the next indexation is 1 July 2026 — landing between the SPF Rules commencement (1 September 2026) and the sector-code commencement (31 March 2027). The SPF Act itself has been law since 21 February 2025.
 
 **How is "30% of adjusted turnover" calculated?**
 The legislative definition is "adjusted turnover during the contravention period". The "contravention period" is what gets argued in court. For a continuing breach (e.g. a systemic failure to detect scams over 12 months), the period is potentially the full 12 months of revenue, multiplied by 0.30. That's the number that should go to the board.

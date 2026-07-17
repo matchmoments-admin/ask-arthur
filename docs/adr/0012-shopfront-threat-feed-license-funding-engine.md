@@ -1,6 +1,37 @@
 # Shopfront — Ask Arthur Network Threat Feed License is the funding engine
 
-**Status:** accepted (2026-05-23)
+**Status:** accepted (2026-05-23) — see dated status update below for corrected SPF timing
+
+## Status update 2026-07-18 — SPF timing corrected (T8 research)
+
+The SPF staging assumed below ("sold direct to SPF-designated sectors …
+from 1 July 2026") was written before the designation instrument and the
+Stage 1 rules/codes package existed. The actual staging (verified
+2026-07-17, sources in the T8 SPF-alignment research note):
+
+- **Sector designation** (banks, telcos, digital platforms) is law —
+  made 22 May 2026, **effective 23 May 2026**.
+- **SPF Rules commence 1 September 2026** (Parts 2 & 7 — compliance
+  statements and record-keeping — delayed to 31 March 2027). AFCA
+  membership is mandatory for designated entities from 1 September 2026.
+- **Sector codes commence no earlier than 31 March 2027** — this, plus
+  record-keeping and the opening of AFCA's SPF complaint jurisdiction
+  (authorised as SPF EDR from 1 July 2026; complaints for matters
+  occurring on or after 31 March 2027), is the first hard compliance
+  wall.
+- **ASI-reporting (Report principle) rules** were carved out of the
+  Stage 1 drafts — separate consultation 2026–27, compliance by
+  end-2027.
+
+Consequence for this ADR: there was never a "regulated from 1 July
+2026" forcing function. The buying window is **H2 2026 → Q1 2027**
+(compliance programs funded post-designation, vendor selection ahead of
+the 31 March 2027 code commencement), and the SKU's regulatory hook is
+the draft Common Code's "monitor for brand impersonation" (Prevent) and
+ASI-handling (Detect) obligations — exposure-draft stage as of 28 May
+2026, consultation closed 25 June 2026, final instruments expected
+H2 2026. The decision itself (enterprise feed SKU funds the free tier)
+stands; only the dates and the urgency model are corrected.
 
 The Shopfront free tier (Verified badge + clone-detection alerts +
 Verified Directory) is funded by a separate enterprise SKU — **"Ask
