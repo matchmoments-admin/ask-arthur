@@ -13,7 +13,9 @@
     "report-card:export": "tsx scripts/clone-watch-report-export.ts",
     "clone-watch:caption": "tsx scripts/clone-watch-caption.ts",
     "clone-watch:publish": "tsx scripts/clone-watch-publish.ts",
-    "linkedin:test": "tsx scripts/linkedin-post-test.ts"
+    "linkedin:test": "tsx scripts/linkedin-post-test.ts",
+    "ext:dev": "tsx scripts/extension-dev-client.ts",
+    "seed:image-check": "tsx scripts/seed-image-check-record.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",

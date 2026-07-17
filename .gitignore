@@ -72,3 +72,6 @@ apps/extension/dist/
 
 # Supabase CLI ephemeral state (created by `supabase gen types`, etc.)
 **/supabase/.temp/
+
+# local extension dev-client identity (holds a dev signing private key)
+.dev-extension-identity.json

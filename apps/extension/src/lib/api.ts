@@ -9,7 +9,11 @@ import { getInstallId } from "./storage";
 import { signRequest } from "./sign";
 import { ensureRegistered } from "./register";
 
-const API_BASE = "https://askarthur.au/api/extension";
+declare const __WEB_APP_BASE__: string;
+
+// Derived from the single build-time base (wxt.config.ts) so a dev build
+// points at localhost / a Vercel preview without touching call sites.
+const API_BASE = `${__WEB_APP_BASE__}/api/extension`;
 
 // Kick off registration once per service-worker lifetime. Requests made before
 // registration completes will 401 ("Unknown install id") and the caller

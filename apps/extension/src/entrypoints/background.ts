@@ -10,8 +10,9 @@ import { classifyImageSrc, describeConfidence, formatGeneratorName } from "@/lib
 import { renderImageCheckCard } from "@/lib/image-check-card";
 import type { ExtensionMessage, MessageResponse } from "@/lib/types";
 
-const WEB_APP_BASE = "https://askarthur.au";
+const WEB_APP_BASE = __WEB_APP_BASE__;
 
+declare const __WEB_APP_BASE__: string;
 declare const __URL_GUARD_ENABLED__: boolean;
 declare const __EXTENSION_SECURITY_ENABLED__: boolean;
 declare const __FACEBOOK_ADS_ENABLED__: boolean;

@@ -11,6 +11,8 @@
 // with the same imageUrl updates the existing card in place — that's how
 // pending → result/error transitions work across two executeScript calls.
 
+declare const __WEB_APP_BASE__: string;
+
 export interface ImageCheckCardPayload {
   state: "pending" | "result" | "error";
   imageUrl: string;
@@ -146,7 +148,12 @@ export function renderImageCheckCard(payload: {
     if (payload.evidenceRef) {
       lines.push(`<div class="muted">Evidence ref: ${esc(payload.evidenceRef)}</div>`);
     }
-    if (payload.evidenceUrl && /^https:\/\/askarthur\.au\//.test(payload.evidenceUrl)) {
+    // The define is inlined as a literal at build time, so the serialized
+    // function still carries it (no outside reference at runtime).
+    if (
+      payload.evidenceUrl &&
+      payload.evidenceUrl.startsWith(`${__WEB_APP_BASE__}/image-check/`)
+    ) {
       lines.push(
         `<a class="lens" href="${esc(payload.evidenceUrl)}" target="_blank" rel="noopener noreferrer">View evidence report</a>`,
       );
