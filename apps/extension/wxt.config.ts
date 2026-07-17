@@ -14,6 +14,12 @@ const shopGuardEnabled = process.env.WXT_SHOP_GUARD === "true";
 // that mints a link token and opens askarthur.au/extension/link. Pairs with
 // the server flag NEXT_PUBLIC_FF_EXTENSION_BILLING (routes 503 when off).
 const extensionBillingEnabled = process.env.WXT_EXTENSION_BILLING === "true";
+// Extension-monetisation PR 4 — right-click "Check this image". Adds the
+// image context-menu item + in-page result card. Needs `scripting` (one-shot
+// executeScript on the user's right-click gesture; activeTab grants the tab
+// access) — same no-<all_urls> approach as Shop Guard. Pairs with the server
+// flag NEXT_PUBLIC_FF_IMAGE_CHECK (route 503s when off).
+const imageCheckEnabled = process.env.WXT_IMAGE_CHECK === "true";
 const turnstileBridgeUrl =
   process.env.WXT_TURNSTILE_BRIDGE_URL ??
   "https://askarthur.au/extension-turnstile";
@@ -45,7 +51,7 @@ export default defineConfig({
     name: "Ask Arthur — Scam Detector",
     description:
       "Check URLs and suspicious messages for scams with AI-powered analysis. Free, no account required.",
-    version: "1.0.1",
+    version: "1.1.0",
     permissions: [
       "activeTab",
       "contextMenus",
@@ -53,7 +59,7 @@ export default defineConfig({
       "offscreen",
       ...(urlGuardEnabled ? ["webNavigation" as const] : []),
       ...(extensionSecurityEnabled ? ["alarms" as const] : []),
-      ...(shopGuardEnabled ? ["scripting" as const] : []),
+      ...(shopGuardEnabled || imageCheckEnabled ? ["scripting" as const] : []),
     ],
     optional_permissions: [
       ...(extensionSecurityEnabled ? ["management" as const] : []),
@@ -88,6 +94,7 @@ export default defineConfig({
       __FACEBOOK_ADS_ENABLED__: facebookAdsEnabled,
       __SHOP_GUARD_ENABLED__: shopGuardEnabled,
       __EXTENSION_BILLING_ENABLED__: extensionBillingEnabled,
+      __IMAGE_CHECK_ENABLED__: imageCheckEnabled,
     },
   }),
 });

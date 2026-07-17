@@ -1,11 +1,13 @@
 import { setInstallId, getInstallId, setContextMenuText } from "@/lib/storage";
 import { ensureRegistered } from "@/lib/register";
-import { checkURL, analyzeText, analyzeShop, analyzeExtensionsCRX, fetchThreatDBUpdate, checkAdCommunityFlags, flagAd, analyzeAd, mintLinkToken, ExtensionApiError } from "@/lib/api";
+import { checkURL, analyzeText, analyzeShop, analyzeExtensionsCRX, fetchThreatDBUpdate, checkAdCommunityFlags, flagAd, analyzeAd, mintLinkToken, analyzeImage, ExtensionApiError } from "@/lib/api";
 import { getCachedScanReport, setCachedScanReport } from "@/lib/extension-scan-cache";
 import { scanInstalledExtensions, buildSecurityReport } from "@/lib/extension-scanner";
 import { setupThreatDBRefresh, getThreatDB } from "@/lib/threat-db";
 import { urlCache } from "@/lib/url-cache";
 import { detectPhoneInSelection } from "@/lib/phone-detect";
+import { classifyImageSrc, describeConfidence } from "@/lib/image-check-routing";
+import { renderImageCheckCard } from "@/lib/image-check-card";
 import type { ExtensionMessage, MessageResponse } from "@/lib/types";
 
 const WEB_APP_BASE = "https://askarthur.au";
@@ -13,6 +15,7 @@ const WEB_APP_BASE = "https://askarthur.au";
 declare const __URL_GUARD_ENABLED__: boolean;
 declare const __EXTENSION_SECURITY_ENABLED__: boolean;
 declare const __FACEBOOK_ADS_ENABLED__: boolean;
+declare const __IMAGE_CHECK_ENABLED__: boolean;
 
 export default defineBackground(() => {
   // --- onInstalled: generate UUID + create context menu ---
@@ -27,6 +30,14 @@ export default defineBackground(() => {
       title: "Check with Ask Arthur",
       contexts: ["selection"],
     });
+
+    if (typeof __IMAGE_CHECK_ENABLED__ !== "undefined" && __IMAGE_CHECK_ENABLED__) {
+      chrome.contextMenus.create({
+        id: "askarthur-check-image",
+        title: "Check this image with Ask Arthur",
+        contexts: ["image"],
+      });
+    }
 
     chrome.storage.local.set({ showSafeIndicator: false });
 
@@ -53,7 +64,14 @@ export default defineBackground(() => {
   // If the selection looks like a phone number, route to the Phone
   // Footprint web app (richer UX than the popup, full report). Otherwise
   // fall through to the existing text-analysis flow via the popup.
-  chrome.contextMenus.onClicked.addListener(async (info) => {
+  chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+    if (info.menuItemId === "askarthur-check-image") {
+      if (typeof __IMAGE_CHECK_ENABLED__ !== "undefined" && __IMAGE_CHECK_ENABLED__) {
+        await handleImageCheck(info, tab);
+      }
+      return;
+    }
+
     if (info.menuItemId !== "askarthur-check" || !info.selectionText) return;
 
     const phoneE164 = detectPhoneInSelection(info.selectionText);
@@ -186,6 +204,87 @@ function updateBadge(
     setTimeout(() => {
       chrome.action.setBadgeText({ tabId, text: "" });
     }, 30000);
+  }
+}
+
+// --- Right-click "Check this image" (extension-monetisation PR 4) ---
+// renderImageCheckCard is SERIALIZED into the page by executeScript (so it
+// must stay self-contained — see its header comment); state transitions are
+// two injections that target the same per-image card host. activeTab (from
+// the right-click gesture) + `scripting` cover the injection — no host
+// permissions.
+async function handleImageCheck(
+  info: chrome.contextMenus.OnClickData,
+  tab?: chrome.tabs.Tab
+): Promise<void> {
+  const srcUrl = info.srcUrl;
+  const tabId = tab?.id;
+  if (!srcUrl || tabId === undefined) return;
+
+  const inject = async (
+    payload: Parameters<typeof renderImageCheckCard>[0]
+  ): Promise<void> => {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: renderImageCheckCard,
+      args: [payload],
+    });
+  };
+
+  // data:/blob: images have no fetchable URL — friendly copy, no API call.
+  if (classifyImageSrc(srcUrl) === "unsupported") {
+    await inject({
+      state: "error",
+      imageUrl: srcUrl,
+      errorMessage:
+        "We can't check this image directly — try saving it and checking at askarthur.au.",
+    }).catch(() => {});
+    return;
+  }
+
+  try {
+    await inject({ state: "pending", imageUrl: srcUrl });
+  } catch {
+    // Injection blocked (browser-internal pages, CSP-sandboxed frames).
+    // Fall back to the popup text-check flow with the image URL — it at
+    // least runs URL reputation on the image's host.
+    await setContextMenuText(srcUrl);
+    chrome.action.openPopup?.().catch(() => {});
+    return;
+  }
+
+  try {
+    const { data } = await analyzeImage(srcUrl, tab?.url ?? null);
+    if (!data.checked) {
+      await inject({
+        state: "error",
+        imageUrl: srcUrl,
+        errorMessage: "Image scanning is briefly unavailable. Try again later.",
+      });
+      return;
+    }
+    await inject({
+      state: "result",
+      imageUrl: srcUrl,
+      aiLine: data.aiGenerated
+        ? describeConfidence("ai", data.aiGenerated.confidence)
+        : undefined,
+      deepfakeLine: data.deepfake
+        ? describeConfidence("deepfake", data.deepfake.confidence)
+        : undefined,
+      generatorSource: data.generatorSource,
+      checksRemaining: data.imageChecksRemaining,
+      disclaimer: data.disclaimer,
+    });
+  } catch (err) {
+    // 429 (image cap) and 422 messages from the server are user-appropriate.
+    const message =
+      err instanceof ExtensionApiError
+        ? err.message
+        : "Something went wrong checking this image.";
+    await inject({ state: "error", imageUrl: srcUrl, errorMessage: message }).catch(
+      () => {}
+    );
   }
 }
 
