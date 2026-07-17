@@ -1,6 +1,7 @@
 import type { MessageResponse } from "./types";
 
 declare const __EXTENSION_BILLING_ENABLED__: boolean;
+declare const __WEB_APP_BASE__: string;
 
 /**
  * Open the right upgrade surface for this build. With billing enabled, mint
@@ -21,7 +22,7 @@ export async function openUpgradePage(ref: string): Promise<void> {
       })) as MessageResponse<{ token: string }>;
       if (res.success && res.data?.token) {
         await chrome.tabs.create({
-          url: `https://askarthur.au/extension/link?token=${encodeURIComponent(res.data.token)}&ref=${encodeURIComponent(ref)}`,
+          url: `${__WEB_APP_BASE__}/extension/link?token=${encodeURIComponent(res.data.token)}&ref=${encodeURIComponent(ref)}`,
         });
         return;
       }
@@ -31,6 +32,6 @@ export async function openUpgradePage(ref: string): Promise<void> {
   }
 
   await chrome.tabs.create({
-    url: `https://askarthur.au/pricing?ref=${encodeURIComponent(ref)}`,
+    url: `${__WEB_APP_BASE__}/pricing?ref=${encodeURIComponent(ref)}`,
   });
 }

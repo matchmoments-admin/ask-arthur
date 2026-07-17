@@ -5,8 +5,9 @@ import { checkSubscription } from "@/lib/subscription";
 import { openUpgradePage } from "@/lib/upgrade";
 
 declare const __EXTENSION_BILLING_ENABLED__: boolean;
+declare const __WEB_APP_BASE__: string;
 
-const API_ORIGIN = "https://askarthur.au";
+const API_ORIGIN = __WEB_APP_BASE__;
 
 /** Real tier from /api/extension/subscription (1h client cache in
  *  lib/subscription.ts) — replaces the hardcoded "Free" this row shipped
@@ -48,7 +49,7 @@ function LinkAccountRow() {
       })) as MessageResponse<{ token: string }>;
       if (res.success && res.data?.token) {
         await chrome.tabs.create({
-          url: `https://askarthur.au/extension/link?token=${encodeURIComponent(res.data.token)}`,
+          url: `${__WEB_APP_BASE__}/extension/link?token=${encodeURIComponent(res.data.token)}`,
         });
       } else {
         setError(res.error ?? "Couldn't start linking — try again.");

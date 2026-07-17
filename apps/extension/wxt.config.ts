@@ -20,9 +20,32 @@ const extensionBillingEnabled = process.env.WXT_EXTENSION_BILLING === "true";
 // access) — same no-<all_urls> approach as Shop Guard. Pairs with the server
 // flag NEXT_PUBLIC_FF_IMAGE_CHECK (route 503s when off).
 const imageCheckEnabled = process.env.WXT_IMAGE_CHECK === "true";
+
+// --- Target web app -----------------------------------------------------
+// EVERY outbound URL in the extension derives from this one base (API calls,
+// the Turnstile bridge, /extension/link, /image-check/[ref], /pricing) so
+// pointing a build at a local dev server or a Vercel preview is a single
+// knob. Default is prod, so a normal build is byte-identical to before.
+//
+// Setting WXT_WEB_APP_BASE (e.g. http://localhost:3000) additionally:
+//   - grants host permission for that origin (the manifest otherwise only
+//     allows askarthur.au, so a dev build literally cannot reach localhost);
+//   - suffixes the manifest name with "(dev)" and prints a build banner, so
+//     a dev build mis-uploaded to the store is obvious in chrome://extensions.
+const PROD_WEB_APP_BASE = "https://askarthur.au";
+const webAppBase = (process.env.WXT_WEB_APP_BASE ?? PROD_WEB_APP_BASE).replace(
+  /\/+$/,
+  "",
+);
+const isDevBase = webAppBase !== PROD_WEB_APP_BASE;
 const turnstileBridgeUrl =
-  process.env.WXT_TURNSTILE_BRIDGE_URL ??
-  "https://askarthur.au/extension-turnstile";
+  process.env.WXT_TURNSTILE_BRIDGE_URL ?? `${webAppBase}/extension-turnstile`;
+
+if (isDevBase) {
+  console.warn(
+    `\n⚠️  WXT_WEB_APP_BASE=${webAppBase} — DEV BUILD. Not for the Chrome Web Store.\n`,
+  );
+}
 
 // WXT 0.20.x: `filterEntrypoints` is an INCLUSION list of entrypoint names
 // (file stem without `.content` suffix). Anything not listed is skipped.
@@ -48,7 +71,9 @@ export default defineConfig({
   outDir: "dist",
   filterEntrypoints: includedEntrypoints,
   manifest: {
-    name: "Ask Arthur — Scam Detector",
+    name: isDevBase
+      ? "Ask Arthur — Scam Detector (dev)"
+      : "Ask Arthur — Scam Detector",
     description:
       "Check URLs and suspicious messages for scams with AI-powered analysis. Free, no account required.",
     version: "1.1.0",
@@ -65,7 +90,9 @@ export default defineConfig({
       ...(extensionSecurityEnabled ? ["management" as const] : []),
     ],
     host_permissions: [
-      "https://askarthur.au/api/extension/*",
+      // Only ever fetch our own API — the dev base swaps this wholesale
+      // rather than adding an extra origin to a prod build.
+      `${webAppBase}/api/extension/*`,
       ...(urlGuardEnabled ? ["<all_urls>" as const] : []),
       ...(facebookAdsEnabled ? [
         "https://www.facebook.com/*" as const,
@@ -88,6 +115,7 @@ export default defineConfig({
   },
   vite: () => ({
     define: {
+      __WEB_APP_BASE__: JSON.stringify(webAppBase),
       __TURNSTILE_BRIDGE_URL__: JSON.stringify(turnstileBridgeUrl),
       __URL_GUARD_ENABLED__: urlGuardEnabled,
       __EXTENSION_SECURITY_ENABLED__: extensionSecurityEnabled,
