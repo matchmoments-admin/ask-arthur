@@ -41,6 +41,11 @@ export interface ExtensionImageCheckResponse {
    *  verdict classes ai_generated/not_ai_generated/deepfake). Null when the
    *  detector didn't return a class list (e.g. pre-v2 cached results). */
   generatorBreakdown: Array<{ class: string; score: number }> | null;
+  /** C2PA / Content Credentials PRESENCE (structural container sniff, no
+   *  cryptographic validation — copy must say "issuer unverified"). Null
+   *  when the image bytes weren't available to inspect (unknown), which is
+   *  different from {present: false}. */
+  contentCredentials: { present: boolean; format?: string } | null;
   /** Present only when the server-side Claude-vision context pass is enabled
    *  (FF_IMAGE_CHECK_VISION). */
   context?: {

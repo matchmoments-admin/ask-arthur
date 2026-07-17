@@ -112,6 +112,16 @@ describe("renderImageCheckCard", () => {
     expect(lens!.rel).toContain("noopener");
   });
 
+  it("renders the Content Credentials line only when provided", () => {
+    renderImageCheckCard({
+      state: "result",
+      imageUrl: IMG,
+      aiLine: "97% likely AI-generated",
+      contentCredentialsLine: "Content Credentials present (issuer unverified)",
+    });
+    expect(card()!.shadowRoot!.innerHTML).toContain("issuer unverified");
+  });
+
   it("refuses a non-Lens lensUrl (injection guard on the anchor)", () => {
     renderImageCheckCard({
       state: "result",

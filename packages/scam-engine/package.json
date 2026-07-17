@@ -31,6 +31,7 @@
     "./html-sanitize": "./src/html-sanitize.ts",
     "./report-store": "./src/report-store.ts",
     "./image-validate": "./src/image-validate.ts",
+    "./c2pa-detect": "./src/c2pa-detect.ts",
     "./ssrf-guard": "./src/ssrf-guard.ts",
     "./brand-alerts": "./src/brand-alerts.ts",
     "./social-post": "./src/social-post.ts",

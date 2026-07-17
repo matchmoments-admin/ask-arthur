@@ -16,6 +16,11 @@ vi.mock("@askarthur/scam-engine/cost-log", () => ({
 vi.mock("@askarthur/scam-engine/ssrf-dispatcher", () => ({
   ssrfSafeDispatcher: {},
 }));
+// The detector itself is unit-tested in scam-engine with byte fixtures;
+// here we only assert the route's threading/unknown-vs-absent semantics.
+vi.mock("@askarthur/scam-engine/c2pa-detect", () => ({
+  detectC2PA: vi.fn(() => ({ present: true, format: "jpeg" })),
+}));
 vi.mock("@askarthur/supabase/server", () => ({
   createServiceClient: vi.fn(() => null),
 }));
@@ -250,6 +255,46 @@ describe("analyze-image route", () => {
     expect(analyzeWithClaude).toHaveBeenCalled();
     expect(json.context?.summary).toContain("investment platform");
     vi.unstubAllGlobals();
+  });
+
+  it("C2PA presence is reported from fetched bytes — even while the vision brake is on", async () => {
+    (featureFlags as { imageCheckVision: boolean }).imageCheckVision = true;
+    vi.mocked(isFeatureBraked).mockImplementation(
+      async (feature: string) => feature === "extension_image_check",
+    );
+    const jpegBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        headers: { get: () => String(jpegBytes.length) },
+        arrayBuffer: async () => jpegBytes.buffer,
+      })),
+    );
+
+    const res = await POST(makeReq(GOOD_BODY));
+    const json = await res.json();
+    expect(json.contentCredentials).toEqual({ present: true, format: "jpeg" });
+    expect(json.context).toBeNull(); // vision braked — Claude untouched
+    vi.unstubAllGlobals();
+  });
+
+  it("C2PA is null (unknown) when the byte fetch fails — never fabricated", async () => {
+    (featureFlags as { imageCheckVision: boolean }).imageCheckVision = true;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, headers: { get: () => "0" } })),
+    );
+    const res = await POST(makeReq(GOOD_BODY));
+    const json = await res.json();
+    expect(json.contentCredentials).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it("C2PA is null when the vision flag is off (no byte fetch at all)", async () => {
+    const res = await POST(makeReq(GOOD_BODY));
+    const json = await res.json();
+    expect(json.contentCredentials).toBeNull();
   });
 
   it("reports checked:false (scan_unavailable) when Hive returns null", async () => {

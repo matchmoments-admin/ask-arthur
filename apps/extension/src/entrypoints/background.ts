@@ -281,6 +281,9 @@ async function handleImageCheck(
       generatorLines: generatorLines.length > 0 ? generatorLines : undefined,
       contextLine: data.context?.summary || undefined,
       lensUrl: `https://lens.google.com/uploadbyurl?url=${encodeURIComponent(srcUrl)}`,
+      contentCredentialsLine: data.contentCredentials?.present
+        ? "Content Credentials present (issuer unverified)"
+        : undefined,
       checksRemaining: data.imageChecksRemaining,
       disclaimer: data.disclaimer,
     });
