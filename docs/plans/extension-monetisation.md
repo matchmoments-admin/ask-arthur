@@ -1,6 +1,6 @@
 # Extension Monetisation & Image-Check — Plan
 
-**Status:** in progress — PR 1 (Hive cost wiring) shipping first. All new surfaces default-OFF.
+**Status:** CODE COMPLETE 2026-07-17 — all 8 PRs merged (#782–#789), migration v238 applied. Every surface still dark; activation is operator-driven (runbook below + `docs/ops/pending-manual-setup.md`).
 **Owner docs:** ops config pages land per-PR (`docs/ops/extension-image-check-config.md`, `docs/ops/extension-billing-config.md`).
 
 ## Why
@@ -34,16 +34,16 @@ image" (byte-upload is a follow-up).
 
 ## PR sequence
 
-| PR  | Branch                              | Scope                                                                                                                                                              | Status    |
-| --- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------- |
-| 1   | `feat/hive-cost-wiring`             | `PRICING.HIVE_AI_USD_PER_IMAGE` ($0.003 working rate), real unit cost in analyze-ad, `isFeatureBraked("hive_ai")` gate, `HIVE_AI_CAP_USD` ($5) in cost-daily-check | in review |
-| 2   | `feat/extension-test-infra`         | vitest+jsdom in apps/extension, Facebook HTML fixtures, ad-detector + marketplace tests                                                                            | pending   |
-| 3   | `feat/extension-analyze-image-api`  | `/api/extension/analyze-image` (flag `NEXT_PUBLIC_FF_IMAGE_CHECK`, sub-flag `FF_IMAGE_CHECK_VISION`), SSRF-guarded, tiered caps via `imageChecksPerDay`            | pending   |
-| 4   | `feat/extension-image-check-ui`     | context menu (`contexts:["image"]`), in-page shadow-DOM result card, popup fallback, `WXT_IMAGE_CHECK`, manifest 1.1.0                                             | pending   |
-| 5   | `feat/extension-account-link`       | migration v238 (stripe cols + user_id + RLS on extension_subscriptions), signed link-token flow, `/extension/link` page, `NEXT_PUBLIC_FF_EXTENSION_BILLING`        | pending   |
-| 6   | `feat/extension-stripe-checkout`    | `extensionSkus.ts`, `/api/extension/checkout`, webhook `extension_pro` branch with ownership gates, plan card                                                      | pending   |
-| 7   | `feat/extension-tier-limits`        | tier-aware rate limits in `_lib/auth.ts`, MoreTab real tier, 429 CTA → `/extension/link`                                                                           | pending   |
-| 8   | `chore/extension-monetisation-docs` | system-map sweep, ROADMAP/BACKLOG, runbook into pending-manual-setup                                                                                               | pending   |
+| PR  | Branch                              | Scope                                                                                                                                                              | Status      |
+| --- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------- |
+| 1   | `feat/hive-cost-wiring`             | `PRICING.HIVE_AI_USD_PER_IMAGE` ($0.003 working rate), real unit cost in analyze-ad, `isFeatureBraked("hive_ai")` gate, `HIVE_AI_CAP_USD` ($5) in cost-daily-check | MERGED #782 |
+| 2   | `feat/extension-test-infra`         | vitest+jsdom in apps/extension, Facebook HTML fixtures, ad-detector + marketplace tests                                                                            | MERGED #783 |
+| 3   | `feat/extension-analyze-image-api`  | `/api/extension/analyze-image` (flag `NEXT_PUBLIC_FF_IMAGE_CHECK`, sub-flag `FF_IMAGE_CHECK_VISION`), SSRF-guarded, tiered caps via `imageChecksPerDay`            | MERGED #784 |
+| 4   | `feat/extension-image-check-ui`     | context menu (`contexts:["image"]`), in-page shadow-DOM result card, popup fallback, `WXT_IMAGE_CHECK`, manifest 1.1.0                                             | MERGED #786 |
+| 5   | `feat/extension-account-link`       | migration v238 (stripe cols + user_id + RLS on extension_subscriptions), signed link-token flow, `/extension/link` page, `NEXT_PUBLIC_FF_EXTENSION_BILLING`        | MERGED #785 |
+| 6   | `feat/extension-stripe-checkout`    | `extensionSkus.ts`, `/api/extension/checkout`, webhook `extension_pro` branch with ownership gates, plan card                                                      | MERGED #787 |
+| 7   | `feat/extension-tier-limits`        | tier-aware rate limits in `_lib/auth.ts`, MoreTab real tier, 429 CTA → `/extension/link`                                                                           | MERGED #788 |
+| 8   | `chore/extension-monetisation-docs` | system-map sweep, ROADMAP/BACKLOG, runbook into pending-manual-setup                                                                                               | this PR     |
 
 Full design detail (routes, schemas, attack analysis for the link flow, test matrices)
 was reviewed at planning time; per-PR specifics live in each PR description.

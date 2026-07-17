@@ -11,6 +11,28 @@ shipped code path is fully active.
 
 ---
 
+## -1. Extension monetisation activation (3 phases, 2026-07-17)
+
+All 8 PRs of [docs/plans/extension-monetisation.md](../plans/extension-monetisation.md)
+are merged and DARK. Activation is phased and operator-driven — the full
+runbook lives in the plan doc's "Activation runbook" section; summary:
+
+- **Phase A (Hive / Facebook ads):** confirm the Hive pricing contract
+  (adjust `PRICING.HIVE_AI_USD_PER_IMAGE` if ≠ $0.003), confirm
+  `HIVE_API_KEY` in Vercel, flip `NEXT_PUBLIC_FF_FACEBOOK_ADS`.
+- **Phase B (right-click image check):** `NEXT_PUBLIC_FF_IMAGE_CHECK=true`;
+  build v1.1.0 with `WXT_IMAGE_CHECK=true`; upload to the unlisted CWS
+  listing. Smoke test: [extension-image-check-config.md](./extension-image-check-config.md).
+- **Phase C (Extension Pro billing):** create the Stripe product
+  (A$4.99/mo, A$49/yr) → price IDs into
+  `NEXT_PUBLIC_STRIPE_EXTENSION_PRO_MONTHLY/_ANNUAL`; flip
+  `NEXT_PUBLIC_FF_EXTENSION_BILLING`; rebuild with
+  `WXT_EXTENSION_BILLING=true`. Test-mode e2e per
+  [extension-billing-config.md](./extension-billing-config.md).
+
+Before each consumer-flag flip: re-run advisors + the Disk-IO-budget query
+per the CLAUDE.md convention.
+
 ## 0. Add `AXIOM_QUERY_TOKEN` to Vercel prod (activates the Axiom fleet watchdog)
 
 **Why:** the `/api/cron/axiom-fleet-watch` cron (every 15 min) polls the

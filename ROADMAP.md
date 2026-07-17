@@ -70,19 +70,19 @@ Building a comprehensive threat database.
 
 ### Data Pipeline ✅
 
-| Feature                                           | Status  |
-| ------------------------------------------------- | ------- |
-| Python scraper framework with shared utilities    | ✅ Done |
-| 16 threat feed integrations (see ARCHITECTURE.md) | ✅ Done |
-| URL normalization (Python + TypeScript parity)    | ✅ Done |
-| GitHub Actions scheduled scraping                 | ✅ Done |
-| Feed timestamp tracking                           | ✅ Done |
-| IP address and crypto wallet intelligence         | ✅ Done |
+| Feature                                                | Status  |
+| ------------------------------------------------------ | ------- |
+| Python scraper framework with shared utilities         | ✅ Done |
+| 16 threat feed integrations (see ARCHITECTURE.md)      | ✅ Done |
+| URL normalization (Python + TypeScript parity)         | ✅ Done |
+| GitHub Actions scheduled scraping                      | ✅ Done |
+| Feed timestamp tracking                                | ✅ Done |
+| IP address and crypto wallet intelligence              | ✅ Done |
 | AU regulator narrative feeds (Scamwatch / ACSC / ASIC) | ✅ Done |
-| Tiered cron schedule (3h / 6h / 12h / daily)      | ✅ Done |
-| ETag / If-Modified-Since cache for RSS sources    | ✅ Done |
-| Voyage embedding for narrative `feed_items`       | ✅ Done |
-| Nightly retention housekeeping (archive + prune)  | ✅ Done |
+| Tiered cron schedule (3h / 6h / 12h / daily)           | ✅ Done |
+| ETag / If-Modified-Since cache for RSS sources         | ✅ Done |
+| Voyage embedding for narrative `feed_items`            | ✅ Done |
+| Nightly retention housekeeping (archive + prune)       | ✅ Done |
 
 ### Inngest Background Processing ✅
 
@@ -307,8 +307,8 @@ Chrome extension content script for Marketplace listing analysis and Messenger P
 | Chat warning banner injection (shadow DOM)                                       | ✅ Code shipped, flag-gated off                                                                                                               |
 | Background API analysis via `/api/extension/analyze-ad`                          | ✅ Code shipped, server-side `NEXT_PUBLIC_FF_FACEBOOK_ADS` gate added (returns 503 when flag is off — defence against extracted-secret abuse) |
 | SPA navigation resilience (MutationObserver + URL heartbeat)                     | ✅ Code shipped, flag-gated off                                                                                                               |
-| Hive AI cost instrumentation (`logCost` on every sync-task call)                 | ✅ Done, `unitCostUsd: 0` placeholder pending pricing contract                                                                                |
-| Hive AI pricing contract + `PRICING.HIVE_AI_USD_PER_IMAGE` constant              | 🚧 Planned — negotiate with Hive commercial, update `apps/web/lib/cost-telemetry.ts` + `analyze-ad/route.ts:155`                              |
+| Hive AI cost instrumentation (`logCost` on every sync-task call)                 | ✅ Done — real `PRICING.HIVE_AI_USD_PER_IMAGE` ($0.003 working rate) + `hive_ai` brake since #782 (2026-07-17)                                |
+| Hive AI pricing contract + `PRICING.HIVE_AI_USD_PER_IMAGE` constant              | 🚧 Constant set to $0.003 working rate (#782); commercial contract still open — adjust the constant on signing if the rate differs            |
 | Selector regression tests for `ad-detector.ts`                                   | 🚧 Planned — Facebook restructures feed DOM ~monthly; capture 5–10 real feed HTML fixtures + write assertions against `detectSponsoredPost()` |
 | Per-install hourly cap on `/api/extension/analyze-ad` (60/hour)                  | 🚧 Planned — defence-in-depth atop the existing 50/day bucket, bounds MutationObserver runaway                                                |
 

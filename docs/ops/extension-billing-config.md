@@ -24,6 +24,23 @@ land with PR 7.
   immediately — `get_extension_tier` requires `status='active'`);
   subscription deleted → tier `free`, keyed on `stripe_subscription_id`.
 
+## Tier-aware rate limits (PR 7)
+
+- `validateExtensionRequest` resolves the tier once per request (Redis cache
+  `askarthur:ext:tier:{sha256(installId)}`, 5-min TTL, fail-open **free**)
+  and returns it in `ExtensionAuthResult` for routes to consume.
+- Free limiters are byte-for-byte unchanged (10/min `askarthur:ext:burst`,
+  50/day `askarthur:ext:daily`) — guarded by a regression test. Pro installs
+  use `askarthur:ext:burst:pro` (30/min) + `askarthur:ext:daily:pro`
+  (500/day); the fresh prefixes mean a mid-day upgrade gets full pro buckets
+  immediately. Email-scan limits stay flat (20/min, 200/day) on any tier.
+- Popup: MoreTab shows the real tier (`checkSubscription`, 1h cache); the
+  upgrade CTAs (MoreTab row + CheckTab 429 card) mint a link token and open
+  `/extension/link` when the billing build flag is on, else fall back to
+  `/pricing`. `/api/extension/subscription` now returns the tier's `limits`.
+- After a checkout, pro limits apply within ≤5 min (tier cache TTL); the
+  popup label updates within ≤1 h (client cache) or on next popup open.
+
 ## Stripe product setup (operator)
 
 1. Dashboard → Products → "Ask Arthur Extension Pro": recurring prices
