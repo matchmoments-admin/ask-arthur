@@ -4,7 +4,9 @@
 > applied to prod (source class + `competitor_intel` category constraint); v211
 > removed the dormant `inbound_twis`; **v213 added 6 more sources** (5 competitor:
 > `choice_au`, `nts_scams`, `cyber_safe_center`, `fraud_hq`, `get_safe_online`; +1
-> publishable AU regulator: `wa_scamnet`); v214 added the
+> AU regulator: `wa_scamnet` — **ingest-only since #807/v240**, WA Crown
+> copyright bars commercial reproduction, so it now quarantines like
+> competitor_intel despite its regulator tier); v214 added the
 > `feed_items.competitor_extracted_at` attempt-marker column. Edge Function
 > `intel-inbound-email` redeployed (competitor gate + 45k body-store); Worker
 > `askarthur-intel-inbound-email` redeployed; **10 CF email-routing rules** created
@@ -88,7 +90,7 @@ Subaddressing is on, so if a form rejects the `+ingest` part, drop it and use
 | **Cyber Safe Center** (INT)                    | `cyber_safe_center+ingest@askarthur-inbound.com` | https://cybersafecenter.beehiiv.com/subscribe                                               | **v213.** competitor_intel. Global consumer scam/phishing weekly (Beehiiv).                                                  |
 | **Fraud HQ** (INT)                             | `fraud_hq+ingest@askarthur-inbound.com`          | https://fraudhq.beehiiv.com/subscribe                                                       | **v213.** competitor_intel. Global consumer-framed fraud intel (Beehiiv).                                                    |
 | **Get Safe Online — PROTECT!** (UK)            | `get_safe_online+ingest@askarthur-inbound.com`   | https://www.getsafeonline.org/subscribe-to-our-newsletter/                                  | **v213.** competitor_intel. UK online-safety charity editorial. (Verify cadence on subscribe.)                               |
-| **WA ScamNet** (AU)                            | `wa_scamnet+ingest@askarthur-inbound.com`        | https://www.scamnet.wa.gov.au/scamnet/Scam_prevention-Scam_Alert_Me.htm                     | **v213. The one publishable regulator here — `tier_1_regulator`, NOT competitor_intel.** Consumer Protection WA (state gov). |
+| **WA ScamNet** (AU)                            | `wa_scamnet+ingest@askarthur-inbound.com`        | https://www.scamnet.wa.gov.au/scamnet/Scam_prevention-Scam_Alert_Me.htm                     | **v213; INGEST-ONLY since #807/v240** — `tier_1_regulator` provenance but quarantined via `competitor_intel` category: WA Crown copyright bars commercial reproduction without written permission (unlike CC-BY Scamwatch/ACSC). Publishable again only if Consumer Protection WA grants it in writing. |
 
 **Bonus already-ingested / optional:**
 
@@ -116,8 +118,11 @@ WHERE source IN ('inbound_which_scams','inbound_aarp_fraud','inbound_mse','inbou
 ORDER BY created_at DESC LIMIT 20;
 ```
 
-(All 9 competitor slugs — `wa_scamnet` is deliberately excluded here: it's a
-`tier_1_regulator`, publishable, and lands `category` NULL, not `competitor_intel`.)
+(All 9 competitor slugs. `wa_scamnet` originally landed `category` NULL as a
+publishable `tier_1_regulator`, but since #807/v240 it ALSO stamps
+`category='competitor_intel'` — WA Crown copyright bars commercial reproduction
+without written permission, so it rides the ADR-0021 quarantine rail while
+keeping its regulator tier. Add it to this query's slug list when verifying.)
 
 Expect `category='competitor_intel'`, `published=false`, `embedded=true` within
 one embed cycle (~4h). Then re-run `mcp__supabase__get_advisors` after v209/v213.

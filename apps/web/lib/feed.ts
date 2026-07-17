@@ -69,7 +69,10 @@ export const SOURCE_CONFIG: Record<
   inbound_cyber_safe_center: { label: "Cyber Safe Center", icon: "Mail" },
   inbound_fraud_hq: { label: "Fraud HQ", icon: "Mail" },
   inbound_get_safe_online: { label: "Get Safe Online", icon: "Mail" },
-  // WA ScamNet (v213) — AU state regulator, publishable (not competitor_intel).
+  // WA ScamNet (v213) — AU state regulator. Ingest-only since #807 (WA
+  // Crown-copyright bars commercial reproduction): items land quarantined as
+  // category='competitor_intel', so this label never renders on the public
+  // feed — kept for admin surfaces only.
   inbound_wa_scamnet: { label: "WA ScamNet", icon: "Shield", isRegulator: true },
 };
 
