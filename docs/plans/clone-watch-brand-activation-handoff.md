@@ -80,6 +80,11 @@ In dependency order — this is the missing piece, concretely:
    a brand checks itself, sees the masked "1 coordinated campaign, 5 fakes"
    teaser, and self-identifies as a prospect (`brand_exposure_checked` event
    already fires). **Zero new code.** Costs nothing. Start here.
+   **DONE 2026-07-18** (#801): `FF_BRAND_EXPOSURE=true` set in all three Vercel
+   envs (`--no-sensitive`, value verified via `env pull`); pre-flight clean —
+   security advisors INFO-only (known RLS-no-policy set), Disk-IO top-15 all
+   feed-upsert background load. This commit carries the `[build]` marker that
+   deploys the flip.
 2. **Wire `BRAND_PLANS` → Stripe.** The enum values (`brand_monitor` etc.)
    already exist in `packages/types/src/billing.ts`; the _prices_ live only in the
    plan doc. Add the price const + Stripe products + a checkout path (deliberately
