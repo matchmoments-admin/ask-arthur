@@ -32,6 +32,7 @@
     "./report-store": "./src/report-store.ts",
     "./image-validate": "./src/image-validate.ts",
     "./c2pa-detect": "./src/c2pa-detect.ts",
+    "./image-check-pdf": "./src/image-check/pdf/render.ts",
     "./ssrf-guard": "./src/ssrf-guard.ts",
     "./brand-alerts": "./src/brand-alerts.ts",
     "./social-post": "./src/social-post.ts",

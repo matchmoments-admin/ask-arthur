@@ -285,6 +285,9 @@ async function handleImageCheck(
         ? "Content Credentials present (issuer unverified)"
         : undefined,
       evidenceRef: data.checkRef ?? undefined,
+      evidenceUrl: data.checkRef
+        ? `${WEB_APP_BASE}/image-check/${encodeURIComponent(data.checkRef)}`
+        : undefined,
       checksRemaining: data.imageChecksRemaining,
       disclaimer: data.disclaimer,
     });
