@@ -14,11 +14,31 @@
 # root, so the regex matching against repo-root paths still works.
 #
 # To disable: remove the "ignoreCommand" line from apps/web/vercel.json.
+#
+# ESCAPE HATCH — put "[build]" anywhere in the commit message to force a
+# build regardless of which files changed.
+#
+# Why this exists (incident 2026-07-17): env-var changes need a deploy but
+# change NO files. Flipping a server feature flag (FF_*) is exactly that —
+# `vercel env add` + redeploy. The natural way to record the flip is a docs
+# commit, which is 100% allowlisted, so this script skips the build and the
+# new env var never reaches production. The runbook that says "set the flag,
+# then merge the docs commit" can therefore never deploy itself, and the
+# deployment lands in state CANCELED, which reads like success at a glance.
+# Pair any flag flip with "[build]" in the commit message.
 
 set -e
 
 PREV_SHA="${VERCEL_GIT_PREVIOUS_SHA:-HEAD^1}"
 DIFF=$(git diff --name-only "$PREV_SHA" HEAD 2>/dev/null || echo "")
+
+# Explicit override. Read via git rather than VERCEL_GIT_COMMIT_MESSAGE so it
+# also works for CLI deploys, where that var isn't set.
+COMMIT_MSG=$(git log -1 --pretty=%B HEAD 2>/dev/null || echo "")
+if [[ "$COMMIT_MSG" == *"[build]"* ]]; then
+  echo "Building — commit message contains the [build] override"
+  exit 1
+fi
 
 # Safety net: if we can't compute a diff (force push, shallow clone,
 # first deploy on this branch), always build.
