@@ -226,7 +226,8 @@ components:
             properties:
               type:
                 type: string
-                enum: [phone, email, url, domain, ip, crypto_wallet, bank_account]
+                enum:
+                  [phone, email, url, domain, ip, crypto_wallet, bank_account]
               value:
                 type: string
 
@@ -468,6 +469,47 @@ components:
           type: string
 
 paths:
+  /image-checks:
+    get:
+      summary: List flagged image-check evidence records
+      description: >
+        Metadata-only evidence records for right-click image checks that
+        flagged as likely AI-generated or deepfake (ADR-0022). Includes the
+        quotable check reference, detector confidences, generator
+        attribution, Content-Credentials presence, and the image SHA-256 for
+        corroboration. Never includes image bytes or install identifiers.
+      operationId: listImageChecks
+      tags: [Deepfakes]
+      parameters:
+        - name: period
+          in: query
+          schema:
+            type: string
+            example: 30d
+          description: Lookback window, e.g. 7d (1–90 days, default 30).
+        - name: min_confidence
+          in: query
+          schema:
+            type: number
+            minimum: 0
+            maximum: 1
+          description: Keep records where EITHER the AI-generation or deepfake confidence meets this bar.
+        - name: generator
+          in: query
+          schema:
+            type: string
+            example: midjourney
+          description: Filter by attributed generator (substring match).
+        - name: has_celebrity
+          in: query
+          schema:
+            type: boolean
+          description: Only records with a monitored-person impersonation match.
+      responses:
+        "200":
+          description: Evidence records with query metadata.
+        "401":
+          description: Missing or invalid API key.
   /threats/trending:
     get:
       summary: Get trending threats

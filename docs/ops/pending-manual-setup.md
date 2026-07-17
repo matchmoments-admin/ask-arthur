@@ -20,9 +20,14 @@ runbook lives in the plan doc's "Activation runbook" section; summary:
 - **Phase A (Hive / Facebook ads):** confirm the Hive pricing contract
   (adjust `PRICING.HIVE_AI_USD_PER_IMAGE` if ≠ $0.003), confirm
   `HIVE_API_KEY` in Vercel, flip `NEXT_PUBLIC_FF_FACEBOOK_ADS`.
-- **Phase B (right-click image check):** `NEXT_PUBLIC_FF_IMAGE_CHECK=true`;
+- **Phase B (right-click image check — image-check v2 shape):** flip
+  `NEXT_PUBLIC_FF_IMAGE_CHECK=true` **and** `FF_IMAGE_CHECK_VISION=true`
+  together (vision is launch-default; both vendors braked at $5/day each);
   build v1.1.0 with `WXT_IMAGE_CHECK=true`; upload to the unlisted CWS
-  listing. Smoke test: [extension-image-check-config.md](./extension-image-check-config.md).
+  listing. Then, separately and after v239 verification,
+  `FF_IMAGE_CHECK_RECORDS=true` activates evidence records + the
+  `/image-check/[ref]` page/PDF + `/api/v1/image-checks`. Smoke test:
+  [extension-image-check-config.md](./extension-image-check-config.md).
 - **Phase C (Extension Pro billing):** create the Stripe product
   (A$4.99/mo, A$49/yr) → price IDs into
   `NEXT_PUBLIC_STRIPE_EXTENSION_PRO_MONTHLY/_ANNUAL`; flip

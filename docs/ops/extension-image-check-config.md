@@ -6,14 +6,15 @@ Right-click "Check this image" (extension-monetisation W1). Server route:
 
 ## Flags & env
 
-| Name                            | Where                               | Default | Meaning                                                                                                                                                                                                                |
-| ------------------------------- | ----------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NEXT_PUBLIC_FF_IMAGE_CHECK`    | Vercel                              | OFF     | Route gate. When off the route 503s even for validly-signed requests (double-gate, same rationale as `NEXT_PUBLIC_FF_FACEBOOK_ADS`).                                                                                   |
-| `WXT_IMAGE_CHECK`               | extension build                     | OFF     | Bundles the context-menu item + result card and adds the `scripting` permission. Both flags must be on for the feature to exist.                                                                                       |
-| `FF_IMAGE_CHECK_VISION`         | Vercel (server-only, `readBoolEnv`) | OFF     | Claude Haiku vision context pass per check (what's depicted, impersonated brand → celebrity match → `deepfake_detections`). Adds Claude spend + a server-side image-byte fetch. v1 launches with this OFF (Hive-only). |
-| `HIVE_API_KEY`                  | Vercel                              | —       | Without it `checkHiveAI` returns null and responses are `checked:false, reason:"scan_unavailable"`.                                                                                                                    |
-| `HIVE_AI_CAP_USD`               | Vercel                              | `5`     | Shared daily vendor brake (`feature_brakes.hive_ai`, set by cost-daily-check). Covers BOTH analyze-ad and image-check Hive calls.                                                                                      |
-| `EXTENSION_IMAGE_CHECK_CAP_USD` | Vercel                              | `5`     | Daily cap on the Claude-vision context pass (`feature_brakes.extension_image_check`). Braking pauses ONLY the Claude call — the Hive verdict and the free byte fetch (C2PA/sha256, image-check v2) keep running.       |
+| Name                            | Where                               | Default | Meaning                                                                                                                                                                                                                                              |
+| ------------------------------- | ----------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NEXT_PUBLIC_FF_IMAGE_CHECK`    | Vercel                              | OFF     | Route gate. When off the route 503s even for validly-signed requests (double-gate, same rationale as `NEXT_PUBLIC_FF_FACEBOOK_ADS`).                                                                                                                 |
+| `WXT_IMAGE_CHECK`               | extension build                     | OFF     | Bundles the context-menu item + result card and adds the `scripting` permission. Both flags must be on for the feature to exist.                                                                                                                     |
+| `FF_IMAGE_CHECK_VISION`         | Vercel (server-only, `readBoolEnv`) | OFF     | Claude Haiku vision context pass per check (what's depicted, impersonated brand → celebrity match → `deepfake_detections`). Adds Claude spend + a server-side image-byte fetch. image-check v2: **launches ON** (see the plan's activation runbook). |
+| `HIVE_API_KEY`                  | Vercel                              | —       | Without it `checkHiveAI` returns null and responses are `checked:false, reason:"scan_unavailable"`.                                                                                                                                                  |
+| `HIVE_AI_CAP_USD`               | Vercel                              | `5`     | Shared daily vendor brake (`feature_brakes.hive_ai`, set by cost-daily-check). Covers BOTH analyze-ad and image-check Hive calls.                                                                                                                    |
+| `FF_IMAGE_CHECK_RECORDS`        | Vercel (server-only, `readBoolEnv`) | OFF     | Persist FLAGGED checks as metadata-only evidence records (ADR-0022) + return `checkRef` + serve `/image-check/[ref]` page & PDF + populate `/api/v1/image-checks`. Independent of the route flag.                                                    |
+| `EXTENSION_IMAGE_CHECK_CAP_USD` | Vercel                              | `5`     | Daily cap on the Claude-vision context pass (`feature_brakes.extension_image_check`). Braking pauses ONLY the Claude call — the Hive verdict and the free byte fetch (C2PA/sha256, image-check v2) keep running.                                     |
 
 ## Caps & cost
 
@@ -58,3 +59,9 @@ the scan didn't run, which is different from low confidence.
    (free tier), and a `cost_telemetry` row tagged
    `hive_ai / surface=image_check` with non-zero cost.
 4. Fourth call the same UTC day → 429 `image_limit_reached` with upgrade copy.
+5. With `FF_IMAGE_CHECK_VISION=true`: response also carries `context.summary`,
+   `generatorBreakdown`, and `contentCredentials` (non-null when bytes fetched).
+6. With `FF_IMAGE_CHECK_RECORDS=true` and a FLAGGED image: response carries
+   `checkRef`; `image_check_records` has the row (hashed install id, no byte
+   columns); `/image-check/{ref}` renders; the PDF downloads; the record
+   appears in `/api/v1/image-checks` (API key required).
