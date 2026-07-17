@@ -1,8 +1,39 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Shield, User, Info, HelpCircle, ExternalLink, ChevronRight, Link2 } from "lucide-react";
 import type { MessageResponse } from "@/lib/types";
+import { checkSubscription } from "@/lib/subscription";
+import { openUpgradePage } from "@/lib/upgrade";
 
 declare const __EXTENSION_BILLING_ENABLED__: boolean;
+
+const API_ORIGIN = "https://askarthur.au";
+
+/** Real tier from /api/extension/subscription (1h client cache in
+ *  lib/subscription.ts) — replaces the hardcoded "Free" this row shipped
+ *  with. Renders "Free" until resolved; never blocks the tab. */
+function useTier(): "free" | "pro" {
+  const [tier, setTier] = useState<"free" | "pro">("free");
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = (await chrome.runtime.sendMessage({
+          type: "GET_STATUS",
+        })) as MessageResponse<{ installId: string | null }>;
+        const installId = res.success ? res.data?.installId : null;
+        if (!installId) return;
+        const sub = await checkSubscription(installId, API_ORIGIN);
+        if (!cancelled) setTier(sub.tier);
+      } catch {
+        // Stay on "free" — cosmetic only.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return tier;
+}
 
 function LinkAccountRow() {
   const [busy, setBusy] = useState(false);
@@ -50,6 +81,7 @@ function LinkAccountRow() {
 }
 
 export function MoreTab() {
+  const tier = useTier();
   return (
     <div className="p-4 space-y-4">
       {/* Protection section */}
@@ -79,19 +111,24 @@ export function MoreTab() {
         <SettingRow
           label="Plan"
           trailing={
-            <span className="text-[11px] font-medium text-text-secondary">Free</span>
+            <span
+              className={`text-[11px] font-medium ${tier === "pro" ? "text-safe bg-safe-bg px-2 py-0.5 rounded-full" : "text-text-secondary"}`}
+            >
+              {tier === "pro" ? "Pro" : "Free"}
+            </span>
           }
         />
         {__EXTENSION_BILLING_ENABLED__ && <LinkAccountRow />}
-        <a
-          href="https://askarthur.au/extension/upgrade"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center justify-between py-2 min-h-[44px]"
-        >
-          <span className="text-[13px] text-primary font-medium">Upgrade to Pro</span>
-          <ChevronRight size={16} className="text-text-muted" />
-        </a>
+        {tier !== "pro" && (
+          <button
+            type="button"
+            onClick={() => openUpgradePage("extension_more")}
+            className="flex w-full items-center justify-between px-3 py-2 min-h-[44px] hover:bg-surface transition-colors duration-150"
+          >
+            <span className="text-[13px] text-primary font-medium">Upgrade to Pro</span>
+            <ChevronRight size={16} className="text-text-muted" />
+          </button>
+        )}
       </Section>
 
       {/* About section */}

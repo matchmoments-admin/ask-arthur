@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import type { AnalysisResult, ExtensionURLCheckResponse } from "@askarthur/types";
 import type { MessageResponse } from "@/lib/types";
 import { getContextMenuText, setContextMenuText } from "@/lib/storage";
+import { openUpgradePage } from "@/lib/upgrade";
 import { ResultDisplay } from "@/components/ResultDisplay";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { ErrorState } from "@/components/ErrorState";
@@ -307,14 +308,13 @@ export function CheckTab() {
           <p className="text-[11px] text-text-secondary">
             Upgrade to Ask Arthur Pro for unlimited protection
           </p>
-          <a
-            href="https://askarthur.au/pricing?ref=extension_limit"
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
+            type="button"
+            onClick={() => openUpgradePage("extension_limit")}
             className="inline-block w-full py-2.5 bg-primary text-white font-semibold rounded-[8px] text-[13px] hover:bg-primary-hover transition-colors duration-150"
           >
             Upgrade to Pro
-          </a>
+          </button>
         </div>
       )}
 

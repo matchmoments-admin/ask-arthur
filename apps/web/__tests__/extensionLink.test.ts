@@ -111,6 +111,7 @@ beforeEach(() => {
     installId: "install-a",
     remaining: 42,
     requestId: null,
+    tier: "free",
   });
   vi.mocked(getUser).mockResolvedValue({ id: "user-1", email: "u@example.com" } as never);
 });

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
+import { EXTENSION_TIER_LIMITS } from "@askarthur/types/billing";
 import { validateExtensionRequest } from "../_lib/auth";
 
 export async function GET(req: NextRequest) {
@@ -17,7 +18,7 @@ export async function GET(req: NextRequest) {
 
   const supabase = createServiceClient();
   if (!supabase) {
-    return NextResponse.json({ tier: "free", status: "active" });
+    return NextResponse.json({ tier: "free", status: "active", limits: EXTENSION_TIER_LIMITS.free });
   }
 
   try {
@@ -27,15 +28,19 @@ export async function GET(req: NextRequest) {
 
     if (error) {
       logger.error("Failed to check extension tier", { error });
-      return NextResponse.json({ tier: "free", status: "active" });
+      return NextResponse.json({ tier: "free", status: "active", limits: EXTENSION_TIER_LIMITS.free });
     }
 
+    const tier = data === "pro" ? "pro" : "free";
     return NextResponse.json({
-      tier: data ?? "free",
+      tier,
       status: "active",
+      // Popup renders quota context (checks/day, image checks/day) without
+      // hardcoding tier shapes client-side.
+      limits: EXTENSION_TIER_LIMITS[tier],
     });
   } catch (err) {
     logger.error("Extension subscription check error", { error: err });
-    return NextResponse.json({ tier: "free", status: "active" });
+    return NextResponse.json({ tier: "free", status: "active", limits: EXTENSION_TIER_LIMITS.free });
   }
 }

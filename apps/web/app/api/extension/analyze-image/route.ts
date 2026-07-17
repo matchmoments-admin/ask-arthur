@@ -132,21 +132,10 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 4. Tiered daily image cap. Tier comes from the subscription RPC;
-    // fail-open to free on any error (a paying user degraded to 3/day beats
-    // a free user granted 30/day or a hard failure).
+    // 4. Tiered daily image cap. Tier is resolved once in
+    // validateExtensionRequest (Redis-cached, fail-open free).
     const supabase = createServiceClient();
-    let tier: "free" | "pro" = "free";
-    if (supabase) {
-      try {
-        const { data } = await supabase.rpc("get_extension_tier", {
-          p_install_id: auth.installId,
-        });
-        if (data === "pro") tier = "pro";
-      } catch {
-        tier = "free";
-      }
-    }
+    const tier = auth.tier;
     const cap = EXTENSION_TIER_LIMITS[tier].imageChecksPerDay;
     const imageLimit = await checkImageCheckRateLimit(auth.installId, cap);
     if (!imageLimit.allowed) {
