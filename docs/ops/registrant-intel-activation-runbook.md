@@ -1,17 +1,27 @@
 # Registrant-Intelligence — staged flag-activation runbook (handoff)
 
-Activate the 2026-07-17 registrant-intelligence features **one flag at a time**,
-verifying each on real prod data before the next. All are dark behind
-default-OFF server flags; all are $0 (free-tier). Migrations v234–v237 are
-already applied. This is a multi-day process — each flag needs a real enricher
-run (or a manual invoke) to produce data.
+Activate the 2026-07-17 registrant-intelligence features and prove each one on
+real prod data. All are $0 (free-tier). Migrations v234–v237 are already applied.
 
-**Three of the four flags are activatable. Step 2 (`FF_CLONE_WATCH_AU_REGISTRANT`)
-is BLOCKED on sourcing** — measured 2026-07-17, zero `.au` clone alerts have ever
-existed, so the flag is a no-op. See Step 2 for the evidence. Execute 1 → 3 → 4.
+**Status 2026-07-17: all four flags are SET to `true` in the prod env.** They go
+live on the first deployment that actually builds — see "THE TRAP" below, which
+is the thing that will bite you. Verification then happens on one enricher run
+(13:30 UTC, or a manual Inngest invoke).
 
-Owner: pick up here, execute top-to-bottom, tick the checklist. Don't flip more
-than one flag per verification cycle.
+The steps below are the **verification** procedure, one section per feature. They
+are no longer a one-flag-per-day gate — see "Why all four at once" in the ground
+state. Execute the verification for 1, 3 and 4; **Step 2 is inert** (flag on, but
+zero `.au` input has ever existed — #772), so there is nothing to verify there
+until an `.au` source lands.
+
+Order of operations that actually works:
+
+```
+vercel env add FF_X production   →   merge a PR with [build] in the message
+                                 →   confirm deploy reaches Ready (NOT Canceled)
+                                 →   invoke the enricher
+                                 →   run the verification SQL below
+```
 
 ---
 
@@ -43,9 +53,13 @@ than one flag per verification cycle.
   the 35-day window (Step 4); **0 `.au` alerts, ever (Step 2 blocked)**.
 - The Vercel CLI in the repo is authenticated against the `ask-arthur` prod
   project, so `vercel env add` can do the flips without operator involvement.
-  `vercel redeploy` does NOT work (see the gotcha below) — the redeploy has to
-  come from a `main` merge or the dashboard. The Inngest "Invoke" click is also
-  manual.
+  The redeploy must come from a `[build]`-marked merge (see the trap below).
+  The Inngest "Invoke" click is genuinely manual — the enricher is cron-only.
+- **Vercel incident 2026-07-17 (context, not a standing issue):** a
+  "GitHub-linked deployments" incident (23:09 UTC → recovering 00:07 UTC) left
+  builds stuck in `Initializing` for 20+ min. If deploys hang and nothing else
+  explains it, check <https://www.vercel-status.com/> before debugging config.
+  CLI deploys were unaffected during that incident.
 - whoisjson is at ~226 calls / 7 days — approaching its 1,000/mo free cap, so
   `FF_RDAP_LOOKUP` (first below) also relieves quota pressure.
 
