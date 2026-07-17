@@ -1999,6 +1999,132 @@ export type Database = {
         }
         Relationships: []
       }
+      cost_telemetry_partitioned_y2026m07: {
+        Row: {
+          created_at: string
+          estimated_cost_usd: number
+          feature: string
+          id: number
+          metadata: Json
+          operation: string
+          provider: string
+          request_id: string | null
+          unit_cost_usd: number | null
+          units: number | null
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          estimated_cost_usd: number
+          feature: string
+          id?: never
+          metadata?: Json
+          operation: string
+          provider: string
+          request_id?: string | null
+          unit_cost_usd?: number | null
+          units?: number | null
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          estimated_cost_usd?: number
+          feature?: string
+          id?: never
+          metadata?: Json
+          operation?: string
+          provider?: string
+          request_id?: string | null
+          unit_cost_usd?: number | null
+          units?: number | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      cost_telemetry_partitioned_y2026m08: {
+        Row: {
+          created_at: string
+          estimated_cost_usd: number
+          feature: string
+          id: number
+          metadata: Json
+          operation: string
+          provider: string
+          request_id: string | null
+          unit_cost_usd: number | null
+          units: number | null
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          estimated_cost_usd: number
+          feature: string
+          id?: never
+          metadata?: Json
+          operation: string
+          provider: string
+          request_id?: string | null
+          unit_cost_usd?: number | null
+          units?: number | null
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          estimated_cost_usd?: number
+          feature?: string
+          id?: never
+          metadata?: Json
+          operation?: string
+          provider?: string
+          request_id?: string | null
+          unit_cost_usd?: number | null
+          units?: number | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      cost_telemetry_partitioned_y2026m09: {
+        Row: {
+          created_at: string
+          estimated_cost_usd: number
+          feature: string
+          id: number
+          metadata: Json
+          operation: string
+          provider: string
+          request_id: string | null
+          unit_cost_usd: number | null
+          units: number | null
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          estimated_cost_usd: number
+          feature: string
+          id?: never
+          metadata?: Json
+          operation: string
+          provider: string
+          request_id?: string | null
+          unit_cost_usd?: number | null
+          units?: number | null
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          estimated_cost_usd?: number
+          feature?: string
+          id?: never
+          metadata?: Json
+          operation?: string
+          provider?: string
+          request_id?: string | null
+          unit_cost_usd?: number | null
+          units?: number | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       deepfake_detections: {
         Row: {
           ad_text_excerpt: string | null
@@ -2331,37 +2457,55 @@ export type Database = {
       }
       extension_subscriptions: {
         Row: {
+          billing_provider: string
           created_at: string
           current_period_end: string | null
           id: number
           install_id: string
+          linked_at: string | null
           paddle_customer_id: string | null
           paddle_subscription_id: string | null
           status: string
+          stripe_customer_id: string | null
+          stripe_price_id: string | null
+          stripe_subscription_id: string | null
           tier: string
           updated_at: string
+          user_id: string | null
         }
         Insert: {
+          billing_provider?: string
           created_at?: string
           current_period_end?: string | null
           id?: never
           install_id: string
+          linked_at?: string | null
           paddle_customer_id?: string | null
           paddle_subscription_id?: string | null
           status?: string
+          stripe_customer_id?: string | null
+          stripe_price_id?: string | null
+          stripe_subscription_id?: string | null
           tier?: string
           updated_at?: string
+          user_id?: string | null
         }
         Update: {
+          billing_provider?: string
           created_at?: string
           current_period_end?: string | null
           id?: never
           install_id?: string
+          linked_at?: string | null
           paddle_customer_id?: string | null
           paddle_subscription_id?: string | null
           status?: string
+          stripe_customer_id?: string | null
+          stripe_price_id?: string | null
+          stripe_subscription_id?: string | null
           tier?: string
           updated_at?: string
+          user_id?: string | null
         }
         Relationships: [
           {
@@ -3030,6 +3174,132 @@ export type Database = {
         Relationships: []
       }
       feed_items_partitioned_y2026m06: {
+        Row: {
+          category: string | null
+          country: string | null
+          created_at: string
+          description: string | null
+          feed_name: string
+          id: number
+          metadata: Json
+          published: boolean
+          published_at: string | null
+          title: string | null
+          url: string | null
+        }
+        Insert: {
+          category?: string | null
+          country?: string | null
+          created_at?: string
+          description?: string | null
+          feed_name: string
+          id?: never
+          metadata?: Json
+          published?: boolean
+          published_at?: string | null
+          title?: string | null
+          url?: string | null
+        }
+        Update: {
+          category?: string | null
+          country?: string | null
+          created_at?: string
+          description?: string | null
+          feed_name?: string
+          id?: never
+          metadata?: Json
+          published?: boolean
+          published_at?: string | null
+          title?: string | null
+          url?: string | null
+        }
+        Relationships: []
+      }
+      feed_items_partitioned_y2026m07: {
+        Row: {
+          category: string | null
+          country: string | null
+          created_at: string
+          description: string | null
+          feed_name: string
+          id: number
+          metadata: Json
+          published: boolean
+          published_at: string | null
+          title: string | null
+          url: string | null
+        }
+        Insert: {
+          category?: string | null
+          country?: string | null
+          created_at?: string
+          description?: string | null
+          feed_name: string
+          id?: never
+          metadata?: Json
+          published?: boolean
+          published_at?: string | null
+          title?: string | null
+          url?: string | null
+        }
+        Update: {
+          category?: string | null
+          country?: string | null
+          created_at?: string
+          description?: string | null
+          feed_name?: string
+          id?: never
+          metadata?: Json
+          published?: boolean
+          published_at?: string | null
+          title?: string | null
+          url?: string | null
+        }
+        Relationships: []
+      }
+      feed_items_partitioned_y2026m08: {
+        Row: {
+          category: string | null
+          country: string | null
+          created_at: string
+          description: string | null
+          feed_name: string
+          id: number
+          metadata: Json
+          published: boolean
+          published_at: string | null
+          title: string | null
+          url: string | null
+        }
+        Insert: {
+          category?: string | null
+          country?: string | null
+          created_at?: string
+          description?: string | null
+          feed_name: string
+          id?: never
+          metadata?: Json
+          published?: boolean
+          published_at?: string | null
+          title?: string | null
+          url?: string | null
+        }
+        Update: {
+          category?: string | null
+          country?: string | null
+          created_at?: string
+          description?: string | null
+          feed_name?: string
+          id?: never
+          metadata?: Json
+          published?: boolean
+          published_at?: string | null
+          title?: string | null
+          url?: string | null
+        }
+        Relationships: []
+      }
+      feed_items_partitioned_y2026m09: {
         Row: {
           category: string | null
           country: string | null
@@ -5775,6 +6045,186 @@ export type Database = {
         }
         Relationships: []
       }
+      scam_reports_partitioned_y2026m07: {
+        Row: {
+          analysis_result: Json
+          channel: string | null
+          cluster_id: number | null
+          confidence_score: number
+          country_code: string | null
+          created_at: string
+          delivery_method: string | null
+          id: number
+          impersonated_brand: string | null
+          input_mode: string | null
+          region: string | null
+          reporter_hash: string
+          scam_type: string | null
+          scrubbed_content: string | null
+          source: string
+          verdict: string
+          verified_scam_id: number | null
+        }
+        Insert: {
+          analysis_result?: Json
+          channel?: string | null
+          cluster_id?: number | null
+          confidence_score: number
+          country_code?: string | null
+          created_at?: string
+          delivery_method?: string | null
+          id?: never
+          impersonated_brand?: string | null
+          input_mode?: string | null
+          region?: string | null
+          reporter_hash: string
+          scam_type?: string | null
+          scrubbed_content?: string | null
+          source: string
+          verdict: string
+          verified_scam_id?: number | null
+        }
+        Update: {
+          analysis_result?: Json
+          channel?: string | null
+          cluster_id?: number | null
+          confidence_score?: number
+          country_code?: string | null
+          created_at?: string
+          delivery_method?: string | null
+          id?: never
+          impersonated_brand?: string | null
+          input_mode?: string | null
+          region?: string | null
+          reporter_hash?: string
+          scam_type?: string | null
+          scrubbed_content?: string | null
+          source?: string
+          verdict?: string
+          verified_scam_id?: number | null
+        }
+        Relationships: []
+      }
+      scam_reports_partitioned_y2026m08: {
+        Row: {
+          analysis_result: Json
+          channel: string | null
+          cluster_id: number | null
+          confidence_score: number
+          country_code: string | null
+          created_at: string
+          delivery_method: string | null
+          id: number
+          impersonated_brand: string | null
+          input_mode: string | null
+          region: string | null
+          reporter_hash: string
+          scam_type: string | null
+          scrubbed_content: string | null
+          source: string
+          verdict: string
+          verified_scam_id: number | null
+        }
+        Insert: {
+          analysis_result?: Json
+          channel?: string | null
+          cluster_id?: number | null
+          confidence_score: number
+          country_code?: string | null
+          created_at?: string
+          delivery_method?: string | null
+          id?: never
+          impersonated_brand?: string | null
+          input_mode?: string | null
+          region?: string | null
+          reporter_hash: string
+          scam_type?: string | null
+          scrubbed_content?: string | null
+          source: string
+          verdict: string
+          verified_scam_id?: number | null
+        }
+        Update: {
+          analysis_result?: Json
+          channel?: string | null
+          cluster_id?: number | null
+          confidence_score?: number
+          country_code?: string | null
+          created_at?: string
+          delivery_method?: string | null
+          id?: never
+          impersonated_brand?: string | null
+          input_mode?: string | null
+          region?: string | null
+          reporter_hash?: string
+          scam_type?: string | null
+          scrubbed_content?: string | null
+          source?: string
+          verdict?: string
+          verified_scam_id?: number | null
+        }
+        Relationships: []
+      }
+      scam_reports_partitioned_y2026m09: {
+        Row: {
+          analysis_result: Json
+          channel: string | null
+          cluster_id: number | null
+          confidence_score: number
+          country_code: string | null
+          created_at: string
+          delivery_method: string | null
+          id: number
+          impersonated_brand: string | null
+          input_mode: string | null
+          region: string | null
+          reporter_hash: string
+          scam_type: string | null
+          scrubbed_content: string | null
+          source: string
+          verdict: string
+          verified_scam_id: number | null
+        }
+        Insert: {
+          analysis_result?: Json
+          channel?: string | null
+          cluster_id?: number | null
+          confidence_score: number
+          country_code?: string | null
+          created_at?: string
+          delivery_method?: string | null
+          id?: never
+          impersonated_brand?: string | null
+          input_mode?: string | null
+          region?: string | null
+          reporter_hash: string
+          scam_type?: string | null
+          scrubbed_content?: string | null
+          source: string
+          verdict: string
+          verified_scam_id?: number | null
+        }
+        Update: {
+          analysis_result?: Json
+          channel?: string | null
+          cluster_id?: number | null
+          confidence_score?: number
+          country_code?: string | null
+          created_at?: string
+          delivery_method?: string | null
+          id?: never
+          impersonated_brand?: string | null
+          input_mode?: string | null
+          region?: string | null
+          reporter_hash?: string
+          scam_type?: string | null
+          scrubbed_content?: string | null
+          source?: string
+          verdict?: string
+          verified_scam_id?: number | null
+        }
+        Relationships: []
+      }
       scam_urls: {
         Row: {
           brand_impersonated: string | null
@@ -6079,6 +6529,7 @@ export type Database = {
         Row: {
           alert_state: string
           attribution: Json | null
+          campaign_key: string | null
           candidate_domain: string
           candidate_url: string
           created_at: string
@@ -6113,10 +6564,12 @@ export type Database = {
           urlscan_submitted_at: string | null
           urlscan_uuid: string | null
           weaponised_at: string | null
+          weaponised_notified_at: string | null
         }
         Insert: {
           alert_state?: string
           attribution?: Json | null
+          campaign_key?: string | null
           candidate_domain: string
           candidate_url: string
           created_at?: string
@@ -6151,10 +6604,12 @@ export type Database = {
           urlscan_submitted_at?: string | null
           urlscan_uuid?: string | null
           weaponised_at?: string | null
+          weaponised_notified_at?: string | null
         }
         Update: {
           alert_state?: string
           attribution?: Json | null
+          campaign_key?: string | null
           candidate_domain?: string
           candidate_url?: string
           created_at?: string
@@ -6189,6 +6644,7 @@ export type Database = {
           urlscan_submitted_at?: string | null
           urlscan_uuid?: string | null
           weaponised_at?: string | null
+          weaponised_notified_at?: string | null
         }
         Relationships: [
           {
@@ -8181,6 +8637,17 @@ export type Database = {
         Args: { p_email: string }
         Returns: boolean
       }
+      clone_campaigns_for_brand: {
+        Args: { p_brand_normalized: string; p_since: string; p_until: string }
+        Returns: {
+          campaign_key: string
+          domain_count: number
+          first_seen: string
+          last_seen: string
+          registrar: string
+          weaponised_count: number
+        }[]
+      }
       clone_watch_brand_breakdown: {
         Args: { p_days?: number }
         Returns: {
@@ -8827,7 +9294,10 @@ export type Database = {
         Args: { p_stale_days?: number }
         Returns: Json
       }
-      mark_stale_ips: { Args: { p_stale_days?: number }; Returns: Json }
+      mark_stale_ips: {
+        Args: { p_limit?: number; p_stale_days?: number }
+        Returns: Json
+      }
       mark_stale_urls: { Args: { p_stale_days?: number }; Returns: Json }
       mark_takedown_reemergence_checked: {
         Args: { p_case_id: number; p_reemerged: boolean }

@@ -10,6 +10,10 @@ const siteAuditEnabled = process.env.WXT_SITE_AUDIT === "true";
 // Store sensitive-permission re-review path. Plan:
 // docs/plans/shop-guard-v2.md §5.
 const shopGuardEnabled = process.env.WXT_SHOP_GUARD === "true";
+// Extension-monetisation PR 5 — surfaces the "Link account" row (More tab)
+// that mints a link token and opens askarthur.au/extension/link. Pairs with
+// the server flag NEXT_PUBLIC_FF_EXTENSION_BILLING (routes 503 when off).
+const extensionBillingEnabled = process.env.WXT_EXTENSION_BILLING === "true";
 const turnstileBridgeUrl =
   process.env.WXT_TURNSTILE_BRIDGE_URL ??
   "https://askarthur.au/extension-turnstile";
@@ -83,6 +87,7 @@ export default defineConfig({
       __EXTENSION_SECURITY_ENABLED__: extensionSecurityEnabled,
       __FACEBOOK_ADS_ENABLED__: facebookAdsEnabled,
       __SHOP_GUARD_ENABLED__: shopGuardEnabled,
+      __EXTENSION_BILLING_ENABLED__: extensionBillingEnabled,
     },
   }),
 });

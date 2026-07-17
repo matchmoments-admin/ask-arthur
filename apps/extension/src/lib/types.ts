@@ -91,6 +91,13 @@ export interface AnalyzeShopMessage {
   url: string;
 }
 
+// Account linking (extension-monetisation PR 5) — popup asks the background
+// to mint a single-use link token, then opens /extension/link?token=… in a
+// new tab. Signing lives in the background so the popup never touches keys.
+export interface MintLinkTokenMessage {
+  type: "MINT_LINK_TOKEN";
+}
+
 export type ExtensionMessage =
   | CheckURLMessage
   | CheckTextMessage
@@ -102,7 +109,8 @@ export type ExtensionMessage =
   | AnalyzeAdMessage
   | FlagAdMessage
   | AnalyzeMarketplaceMessage
-  | AnalyzeShopMessage;
+  | AnalyzeShopMessage
+  | MintLinkTokenMessage;
 
 export interface MessageResponse<T = unknown> {
   success: boolean;

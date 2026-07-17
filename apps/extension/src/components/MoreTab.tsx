@@ -1,4 +1,53 @@
-import { Shield, User, Info, HelpCircle, ExternalLink, ChevronRight } from "lucide-react";
+import { useState } from "react";
+import { Shield, User, Info, HelpCircle, ExternalLink, ChevronRight, Link2 } from "lucide-react";
+import type { MessageResponse } from "@/lib/types";
+
+declare const __EXTENSION_BILLING_ENABLED__: boolean;
+
+function LinkAccountRow() {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onLink() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = (await chrome.runtime.sendMessage({
+        type: "MINT_LINK_TOKEN",
+      })) as MessageResponse<{ token: string }>;
+      if (res.success && res.data?.token) {
+        await chrome.tabs.create({
+          url: `https://askarthur.au/extension/link?token=${encodeURIComponent(res.data.token)}`,
+        });
+      } else {
+        setError(res.error ?? "Couldn't start linking — try again.");
+      }
+    } catch {
+      setError("Couldn't start linking — try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onLink}
+      disabled={busy}
+      className="flex w-full items-center justify-between px-3 py-2 min-h-[44px] hover:bg-surface transition-colors duration-150 disabled:opacity-60"
+    >
+      <span className="flex items-center gap-2 text-[13px] text-text-primary">
+        <Link2 size={14} className="text-text-muted" />
+        {busy ? "Opening…" : "Link account"}
+      </span>
+      {error ? (
+        <span className="text-[11px] text-risk">{error}</span>
+      ) : (
+        <ChevronRight size={16} className="text-text-muted" />
+      )}
+    </button>
+  );
+}
 
 export function MoreTab() {
   return (
@@ -33,6 +82,7 @@ export function MoreTab() {
             <span className="text-[11px] font-medium text-text-secondary">Free</span>
           }
         />
+        {__EXTENSION_BILLING_ENABLED__ && <LinkAccountRow />}
         <a
           href="https://askarthur.au/extension/upgrade"
           target="_blank"
