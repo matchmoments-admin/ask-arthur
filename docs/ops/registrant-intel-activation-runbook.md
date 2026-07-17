@@ -21,10 +21,23 @@ than one flag per verification cycle.
   `clone-watch-enrich-attribution` cron runs daily at **13:30 UTC** and calls
   whoisjson ~32×/day (last call 13:33 UTC). So the four new flags will take
   effect on the next daily run once flipped; no master-gate blocker.
-- The 4 new flags started OFF (absent from the Vercel prod env entirely):
+- **All 4 flags are now set to `true` in the Vercel prod env (2026-07-17):**
   `FF_RDAP_LOOKUP`, `FF_CLONE_WATCH_AU_REGISTRANT`, `FF_CLONE_CAMPAIGNS`,
-  `FF_CLONE_WATCH_KIT_PIVOTS`. **`FF_RDAP_LOOKUP` was set to `true` in the prod
-  env on 2026-07-17; it goes live when this PR's merge deploys `main`** (Step 1).
+  `FF_CLONE_WATCH_KIT_PIVOTS`. They go live on the first deployment that
+  actually **builds** (see the trap below) and are verified on the next
+  enricher run.
+- **Why all four at once, not one per day** (superseding this runbook's original
+  staging): all four are $0 free-tier, every write is additive (a JSONB key or a
+  nullable column), every rollback is "set `false` + redeploy", and all four are
+  unit-tested. The usual argument for staging — _if it breaks you won't know
+  which flag_ — doesn't hold: they write to three disjoint places
+  (`attribution.whois.source`, `campaign_key`, `attribution.kit_siblings`), so
+  attributing a failure is trivial. The one thing genuinely worth watching is the
+  campaign backfill's IO (1,085 rows at 500/run) — that's an observation, not a
+  reason to wait days.
+- **urlscan search quota gate (Step 4) — CLEARED 2026-07-17:** `search` shows
+  day 1000 limit / 0 used, minute 120 / 0. The feature caps at 10/run ≈ **1% of
+  the daily allowance**.
 - Data available to verify against (2026-07-17): 1,085 enriched alerts awaiting
   campaign backfill (Step 3, ~3 runs at 500/run); 42 `likely_phishing` alerts in
   the 35-day window (Step 4); **0 `.au` alerts, ever (Step 2 blocked)**.
@@ -44,19 +57,41 @@ These are bare `FF_*` (server-only) env vars, read at runtime via `readBoolEnv`.
    (or Vercel dashboard → Settings → Environment Variables → Production). Use
    `printf`, not `echo` — no trailing newline. (`readBoolEnv` trims anyway, but
    don't rely on it.) Confirm with `vercel env ls production | grep FF_<NAME>`.
-2. **Redeploy** — env vars are injected at deploy; a running deployment won't
-   see a new/changed var until a fresh deploy.
+2. **Redeploy — and you MUST put `[build]` in the commit message.** Env vars are
+   injected at deploy; a running deployment won't see a new/changed var until a
+   fresh deploy.
 
-   **Gotcha (hit 2026-07-17): `vercel redeploy <url>` hangs and creates no
-   deployment** on CLI 55.0.0, with or without `--non-interactive --no-wait`.
-   It produces no output and no new deployment ever appears in `vercel ls`. Use
-   one of these instead:
-   - **Merge a PR to `main`** (the normal ship workflow) — the resulting prod
-     deploy picks up the new env var. Cleanest: pair the flag flip with the
-     docs/runbook commit that records it.
-   - Vercel dashboard → Deployments → ⋯ → **Redeploy**.
+   **THE TRAP (cost us a whole cycle on 2026-07-17).** An env-only change touches
+   NO files. `apps/web/vercel-ignored-build-step.sh` skips the build whenever every
+   changed file matches its allowlist — and `docs/` + `*.md` are allowlisted. So
+   the obvious move, "flip the flag and merge the docs commit recording it",
+   **skips its own build and the flag never goes live.** The runbook cannot
+   deploy itself.
+
+   **It fails silently.** The deployment lands in state `CANCELED`, which sits
+   next to a merged PR looking like success. `vercel ls --prod` still shows a
+   Ready production deployment (the OLD one). No check goes red. The only tell is
+   `vercel ls` showing `CANCELED` and the prod `Ready` deploy predating your flip.
+
+   Working options, in order of preference:
+   - **Merge a PR whose commit message contains `[build]`** (PR #774 added this
+     override to the ignore script). Forces a build regardless of changed files.
+     This is the one to use for a flag flip.
+   - Merge a PR that touches real code (`apps/web/`, `packages/`) — builds
+     normally.
+   - Vercel dashboard → Deployments → ⋯ → **Redeploy**. (On 2026-07-17 this
+     wedged in `Initializing` for 18+ min without ever starting a build — treat
+     it as unreliable.)
+   - **`vercel redeploy <url>` does NOT work** on CLI 55.0.0 — it hangs and
+     creates no deployment at all, with or without `--non-interactive --no-wait`.
    - An empty commit to `main` is NOT an option — `.claude/hooks/git-commit-guard.sh`
      blocks committing on `main`, by design.
+
+   **Always confirm the deploy reached `Ready`, not `CANCELED`:**
+
+   ```bash
+   vercel ls ask-arthur | head -6   # newest prod row must be Ready AND newer than your flip
+   ```
 
 3. Confirm the var is live: it should show in the next function invocation's env.
 
