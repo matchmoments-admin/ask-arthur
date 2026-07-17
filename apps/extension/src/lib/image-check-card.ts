@@ -25,6 +25,9 @@ export interface ImageCheckCardPayload {
   contextLine?: string;
   /** Google Lens reverse-image link (precomputed by the background). */
   lensUrl?: string;
+  /** Pre-formatted Content Credentials line ("Content Credentials present
+   *  (issuer unverified)") — only set when a manifest was detected. */
+  contentCredentialsLine?: string;
   checksRemaining?: number | null;
   disclaimer?: string;
   /** error state (incl. friendly unsupported/limit copy) */
@@ -40,6 +43,7 @@ export function renderImageCheckCard(payload: {
   generatorLines?: string[];
   contextLine?: string;
   lensUrl?: string;
+  contentCredentialsLine?: string;
   checksRemaining?: number | null;
   disclaimer?: string;
   errorMessage?: string;
@@ -124,6 +128,9 @@ export function renderImageCheckCard(payload: {
     }
     if (payload.contextLine) {
       lines.push(`<div class="line">💬 ${esc(payload.contextLine)}</div>`);
+    }
+    if (payload.contentCredentialsLine) {
+      lines.push(`<div class="line">📜 ${esc(payload.contentCredentialsLine)}</div>`);
     }
     if (payload.lensUrl && /^https:\/\/lens\.google\.com\//.test(payload.lensUrl)) {
       lines.push(

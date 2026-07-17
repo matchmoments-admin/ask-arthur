@@ -5,6 +5,7 @@ import { analyzeWithClaude } from "@askarthur/scam-engine/claude";
 import { assertSafeURL } from "@askarthur/scam-engine/ssrf-guard";
 import { ssrfSafeDispatcher } from "@askarthur/scam-engine/ssrf-dispatcher";
 import { validateImageMagicBytes } from "@askarthur/scam-engine/image-validate";
+import { detectC2PA } from "@askarthur/scam-engine/c2pa-detect";
 import { isFeatureBraked } from "@askarthur/scam-engine/cost-log";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
@@ -52,14 +53,23 @@ function generatorBreakdown(
 const VISION_FETCH_TIMEOUT_MS = 5_000;
 const VISION_MAX_BYTES = 5_000_000;
 
+interface FetchedImage {
+  buffer: Buffer;
+  base64: string;
+  sha256: string;
+}
+
 /**
- * Fetch image bytes for the Claude-vision context pass. DNS-rebinding-safe
- * via ssrfSafeDispatcher (assertSafeURL has already vetted the hostname, the
- * dispatcher re-checks the resolved IP), capped at 5MB, magic-byte validated.
- * Returns null on any failure — the vision pass is best-effort garnish on
- * top of the Hive verdict, never a reason to fail the check.
+ * Fetch image bytes for the byte-derived signals: the Claude-vision context
+ * pass, C2PA presence detection, and the evidence-record SHA-256.
+ * DNS-rebinding-safe via ssrfSafeDispatcher (assertSafeURL has already
+ * vetted the hostname, the dispatcher re-checks the resolved IP), capped at
+ * 5MB, magic-byte validated. Returns null on any failure — byte-derived
+ * signals are best-effort on top of the Hive verdict, never a reason to
+ * fail the check. Bytes live only for the request; they are never stored
+ * (ADR-0022 / ADR-0010).
  */
-async function fetchImageBase64(imageUrl: string): Promise<string | null> {
+async function fetchImageBytes(imageUrl: string): Promise<FetchedImage | null> {
   try {
     const res = await fetch(imageUrl, {
       signal: AbortSignal.timeout(VISION_FETCH_TIMEOUT_MS),
@@ -71,13 +81,19 @@ async function fetchImageBase64(imageUrl: string): Promise<string | null> {
     const declared = parseInt(res.headers.get("content-length") ?? "0", 10);
     if (declared > VISION_MAX_BYTES) return null;
 
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length === 0 || buf.length > VISION_MAX_BYTES) return null;
+    const buffer = Buffer.from(await res.arrayBuffer());
+    if (buffer.length === 0 || buffer.length > VISION_MAX_BYTES) return null;
 
-    const base64 = buf.toString("base64");
+    const base64 = buffer.toString("base64");
     const { valid } = validateImageMagicBytes(base64);
     if (!valid) return null;
-    return base64;
+
+    const hashBuf = await crypto.subtle.digest("SHA-256", buffer);
+    const sha256 = Array.from(new Uint8Array(hashBuf))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+
+    return { buffer, base64, sha256 };
   } catch {
     return null;
   }
@@ -206,6 +222,7 @@ export async function POST(req: NextRequest) {
         deepfake: null,
         generatorSource: null,
         generatorBreakdown: null,
+        contentCredentials: null,
         imageChecksRemaining: imageLimit.remaining,
         disclaimer: DISCLAIMER,
       };
@@ -222,12 +239,17 @@ export async function POST(req: NextRequest) {
     // byte-derived signals (C2PA presence, sha256 — image-check v2 PR 3+)
     // keep working. A brake stops spend, not the free fetch.
     let context: ExtensionImageCheckResponse["context"] = null;
+    let contentCredentials: ExtensionImageCheckResponse["contentCredentials"] = null;
     if (featureFlags.imageCheckVision) {
-      const base64 = await fetchImageBase64(imageUrl);
+      const bytes = await fetchImageBytes(imageUrl);
+      // C2PA presence is a structural sniff over the fetched bytes — free,
+      // deterministic, runs even while the vision brake is engaged. null
+      // (bytes unavailable) means "unknown", never fabricated.
+      contentCredentials = bytes ? detectC2PA(bytes.buffer) : null;
       const visionBraked = await isFeatureBraked("extension_image_check");
-      if (base64 && !visionBraked) {
+      if (bytes && !visionBraked) {
         try {
-          const analysis = await analyzeWithClaude(undefined, [base64]);
+          const analysis = await analyzeWithClaude(undefined, [bytes.base64]);
           if (analysis.usage) {
             logCost({
               feature: "extension_image_check",
@@ -296,6 +318,7 @@ export async function POST(req: NextRequest) {
       deepfake: signal(hive.isDeepfake, hive.deepfakeConfidence),
       generatorSource: hive.generatorSource,
       generatorBreakdown: generatorBreakdown(hive.classes),
+      contentCredentials,
       context,
       imageChecksRemaining: imageLimit.remaining,
       disclaimer: DISCLAIMER,
