@@ -128,10 +128,16 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
       return (data ?? []) as PendingAlert[];
     });
 
-    if (pending.length === 0) {
-      return { ok: true, enriched: 0 };
-    }
-
+    // NO early return on an empty `pending`. This run has THREE independent
+    // stages — enrich (worklist: attribution IS NULL), kit-pivots (worklist:
+    // likely_phishing AND kit_siblings IS NULL) and the campaign backfill
+    // (worklist: attribution IS NOT NULL AND campaign_key IS NULL). Returning
+    // here when only the FIRST worklist is empty made the other two unreachable
+    // in the enricher's steady state — once it catches up on enrichment (the
+    // normal condition), the backfill and kit-pivots silently stopped running
+    // forever. Measured 2026-07-17: enrich worklist 0, while 1,085 rows awaited
+    // campaign_key and 42 awaited a kit pivot. The empty loop below is a no-op,
+    // so each stage now gates on its OWN worklist and nothing else.
     let enriched = 0;
     for (const alert of pending) {
       const ok = await step.run(`enrich-${alert.id}`, async () => {
