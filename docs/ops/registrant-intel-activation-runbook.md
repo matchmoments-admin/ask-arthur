@@ -86,21 +86,30 @@ vercel env add FF_X production   →   merge a PR with [build] in the message
 
 These are bare `FF_*` (server-only) env vars, read at runtime via `readBoolEnv`.
 
-1. Set on Vercel prod — **use `--value`, never a stdin pipe:**
+1. Set on Vercel prod:
 
    ```bash
    vercel env add FF_<NAME> production --value true --no-sensitive --force --yes
    ```
 
-   - **Piping into `vercel env add` does not work** on CLI 55.0.0. Both
-     `printf 'true' |` and `echo true |` create the variable with an **empty
-     value**. `vercel env ls` then shows the var present and looks fine, while
-     `readBoolEnv("")` is `false` — i.e. the flag reads as OFF while appearing set.
-   - `--no-sensitive` matters for a **flag**: sensitive vars cannot be read back
-     (`vercel env pull` returns them empty), so you can never verify what you
-     stored. Flags aren't secrets — store them readable. (`FF_CLONE_WATCH_ATTRIBUTION`
-     is non-sensitive, which is why it's verifiable.)
+   - **`--no-sensitive` is the one that matters.** A **sensitive** env var cannot
+     be read back — `vercel env pull` returns it as `FF_X=""` — so you can never
+     verify what you actually stored, and an empty read is indistinguishable from
+     a genuinely empty value. New vars may default to Sensitive. A feature flag
+     is not a secret; store it readable. (`FF_CLONE_WATCH_ATTRIBUTION` is
+     non-sensitive, which is why it's verifiable.)
    - `--force` overwrites an existing value (otherwise the add is a no-op).
+   - `--value` is simply the non-interactive form.
+
+   **Correction (2026-07-17):** an earlier revision of this runbook claimed that
+   piping (`printf 'true' |` / `echo true |`) into `vercel env add` stores an
+   EMPTY value. **That is false** — both forms were tested directly on CLI 55.0.0
+   and both store `"true"` correctly. The empty reads that prompted the claim were
+   entirely the sensitive-var read-back artifact above. The claim is corrected
+   here rather than deleted, because the _misdiagnosis_ is the reusable lesson: an
+   unreadable var and an empty var look identical, so it is very easy to invent a
+   bug that isn't there. Verify with `--no-sensitive` before concluding anything
+   about a value.
 
 2. **Verify the VALUE, not the var's existence** — `vercel env ls` only proves a
    var exists:
