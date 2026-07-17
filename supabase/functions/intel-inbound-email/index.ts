@@ -62,8 +62,8 @@ const InboundEmailPayload = z.object({
     "inbound_mse",
     "inbound_frankonfraud",
     // v213 source expansion — competitor_intel (choice_au, nts_scams,
-    // cyber_safe_center, fraud_hq, get_safe_online) + publishable AU regulator
-    // (wa_scamnet).
+    // cyber_safe_center, fraud_hq, get_safe_online) + AU regulator
+    // (wa_scamnet — ingest-only since #807, WA Crown-copyright constraint).
     "inbound_choice_au",
     "inbound_nts_scams",
     "inbound_cyber_safe_center",
@@ -103,12 +103,19 @@ const COMPETITOR_INTEL_SOURCES: ReadonlySet<string> = new Set([
   "inbound_mse",
   "inbound_frankonfraud",
   // v213 — CHOICE, NTS, Cyber Safe Center, Fraud HQ, Get Safe Online.
-  // (wa_scamnet is NOT here — it's a publishable AU state regulator.)
   "inbound_choice_au",
   "inbound_nts_scams",
   "inbound_cyber_safe_center",
   "inbound_fraud_hq",
   "inbound_get_safe_online",
+  // #807 (2026-07-18) — wa_scamnet moved here from publishable. WA ScamNet's
+  // copyright expressly bars commercial reproduction without written
+  // permission (scamnet.wa.gov.au/scamnet/Copyright.htm) — no CC licence,
+  // unlike Scamwatch/ACSC. Ingest-only until Consumer Protection WA grants
+  // written permission; then remove from this set to restore publishing.
+  // Provenance tier stays tier_1_regulator (it IS a regulator — the quarantine
+  // is a licensing constraint, not a trust judgement).
+  "inbound_wa_scamnet",
 ]);
 const COMPETITOR_INTEL_CATEGORY = "competitor_intel";
 
@@ -201,7 +208,7 @@ function provenanceTierFor(source: string): string {
     case "inbound_acma":
     case "inbound_ftc":
     case "inbound_ato": // v129: AU Tax Office scam alerts — regulator
-    case "inbound_wa_scamnet": // v213: Consumer Protection WA — state regulator, publishable
+    case "inbound_wa_scamnet": // v213: Consumer Protection WA — regulator; ingest-only since #807 (copyright)
       return "tier_1_regulator";
     // Industry / CERTs / victim support
     case "inbound_auscert":

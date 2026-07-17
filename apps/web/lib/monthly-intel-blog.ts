@@ -135,7 +135,8 @@ export async function collectMonthlyIntelFacts(
           "scamwatch_alert",
           "acsc",
           "inbound_scamwatch",
-          "inbound_wa_scamnet",
+          // inbound_wa_scamnet removed (#807): WA ScamNet copyright bars
+          // commercial reproduction — ingest-only, never blog-published.
           "inbound_acma",
           "inbound_ato",
         ])
