@@ -32,6 +32,7 @@ vi.mock("@/app/api/extension/_lib/auth", () => ({
     installId: "test-install",
     remaining: 42,
     requestId: null,
+    tier: "free",
   })),
 }));
 vi.mock("@/app/api/extension/_lib/image-rate-limit", () => ({
@@ -45,8 +46,8 @@ vi.mock("@/lib/cost-telemetry", async (importOriginal) => {
 import { POST } from "@/app/api/extension/analyze-image/route";
 import { checkHiveAI } from "@askarthur/scam-engine/hive-ai";
 import { isFeatureBraked } from "@askarthur/scam-engine/cost-log";
-import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
+import { validateExtensionRequest } from "@/app/api/extension/_lib/auth";
 import { checkImageCheckRateLimit } from "@/app/api/extension/_lib/image-rate-limit";
 import { logCost, PRICING } from "@/lib/cost-telemetry";
 
@@ -118,10 +119,14 @@ describe("analyze-image route", () => {
     expect(checkImageCheckRateLimit).toHaveBeenCalledWith("test-install", 3);
   });
 
-  it("uses the pro cap when the tier RPC returns pro", async () => {
-    vi.mocked(createServiceClient).mockReturnValue({
-      rpc: vi.fn(async () => ({ data: "pro", error: null })),
-    } as never);
+  it("uses the pro cap when auth resolves a pro tier", async () => {
+    vi.mocked(validateExtensionRequest).mockResolvedValueOnce({
+      valid: true,
+      installId: "test-install",
+      remaining: 42,
+      requestId: null,
+      tier: "pro",
+    });
     await POST(makeReq(GOOD_BODY));
     expect(checkImageCheckRateLimit).toHaveBeenCalledWith("test-install", 30);
   });
