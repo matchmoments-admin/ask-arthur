@@ -6,7 +6,7 @@ import { scanInstalledExtensions, buildSecurityReport } from "@/lib/extension-sc
 import { setupThreatDBRefresh, getThreatDB } from "@/lib/threat-db";
 import { urlCache } from "@/lib/url-cache";
 import { detectPhoneInSelection } from "@/lib/phone-detect";
-import { classifyImageSrc, describeConfidence } from "@/lib/image-check-routing";
+import { classifyImageSrc, describeConfidence, formatGeneratorName } from "@/lib/image-check-routing";
 import { renderImageCheckCard } from "@/lib/image-check-card";
 import type { ExtensionMessage, MessageResponse } from "@/lib/types";
 
@@ -263,6 +263,11 @@ async function handleImageCheck(
       });
       return;
     }
+    // Precompute every display string here — the card is a serialized
+    // function and can't format or import anything itself.
+    const generatorLines = (data.generatorBreakdown ?? []).map(
+      (g) => `${formatGeneratorName(g.class)} — ${Math.round(g.score * 100)}%`,
+    );
     await inject({
       state: "result",
       imageUrl: srcUrl,
@@ -273,6 +278,9 @@ async function handleImageCheck(
         ? describeConfidence("deepfake", data.deepfake.confidence)
         : undefined,
       generatorSource: data.generatorSource,
+      generatorLines: generatorLines.length > 0 ? generatorLines : undefined,
+      contextLine: data.context?.summary || undefined,
+      lensUrl: `https://lens.google.com/uploadbyurl?url=${encodeURIComponent(srcUrl)}`,
       checksRemaining: data.imageChecksRemaining,
       disclaimer: data.disclaimer,
     });

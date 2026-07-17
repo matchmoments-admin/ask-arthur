@@ -33,6 +33,22 @@ function signal(likely: boolean, confidence: number) {
   return { likely, confidence };
 }
 
+// Verdict classes are surfaced as their own signals; everything else in
+// Hive's class list is generator attribution (midjourney, dalle, flux, …).
+const VERDICT_CLASSES = new Set(["ai_generated", "not_ai_generated", "deepfake"]);
+const BREAKDOWN_TOP_N = 3;
+
+function generatorBreakdown(
+  classes: Array<{ class: string; score: number }> | undefined,
+): Array<{ class: string; score: number }> | null {
+  if (!classes || classes.length === 0) return null;
+  const generators = classes
+    .filter((c) => !VERDICT_CLASSES.has(c.class) && c.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, BREAKDOWN_TOP_N);
+  return generators.length > 0 ? generators : null;
+}
+
 const VISION_FETCH_TIMEOUT_MS = 5_000;
 const VISION_MAX_BYTES = 5_000_000;
 
@@ -189,6 +205,7 @@ export async function POST(req: NextRequest) {
         aiGenerated: null,
         deepfake: null,
         generatorSource: null,
+        generatorBreakdown: null,
         imageChecksRemaining: imageLimit.remaining,
         disclaimer: DISCLAIMER,
       };
@@ -273,6 +290,7 @@ export async function POST(req: NextRequest) {
       aiGenerated: signal(hive.isAiGenerated, hive.aiConfidence),
       deepfake: signal(hive.isDeepfake, hive.deepfakeConfidence),
       generatorSource: hive.generatorSource,
+      generatorBreakdown: generatorBreakdown(hive.classes),
       context,
       imageChecksRemaining: imageLimit.remaining,
       disclaimer: DISCLAIMER,

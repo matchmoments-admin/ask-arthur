@@ -77,6 +77,15 @@ beforeEach(() => {
     isDeepfake: false,
     deepfakeConfidence: 0.12,
     generatorSource: "midjourney",
+    classes: [
+      { class: "ai_generated", score: 0.97 },
+      { class: "not_ai_generated", score: 0.03 },
+      { class: "deepfake", score: 0.12 },
+      { class: "midjourney", score: 0.62 },
+      { class: "dalle", score: 0.21 },
+      { class: "flux", score: 0.08 },
+      { class: "stablediffusion", score: 0.05 },
+    ],
   });
 });
 
@@ -147,6 +156,12 @@ describe("analyze-image route", () => {
     expect(json.aiGenerated).toEqual({ likely: true, confidence: 0.97 });
     expect(json.deepfake).toEqual({ likely: false, confidence: 0.12 });
     expect(json.generatorSource).toBe("midjourney");
+    // Top-3 generator attribution, verdict classes excluded.
+    expect(json.generatorBreakdown).toEqual([
+      { class: "midjourney", score: 0.62 },
+      { class: "dalle", score: 0.21 },
+      { class: "flux", score: 0.08 },
+    ]);
     expect(json.context).toBeNull();
     expect(json.imageChecksRemaining).toBe(2);
     expect(json.disclaimer).toContain("probabilistic");
@@ -159,6 +174,20 @@ describe("analyze-image route", () => {
     expect(hiveCost).toBeDefined();
     expect(hiveCost!.unitCostUsd).toBe(PRICING.HIVE_AI_USD_PER_IMAGE);
     expect(hiveCost!.metadata?.surface).toBe("image_check");
+  });
+
+  it("returns generatorBreakdown: null for pre-v2 cached results (no classes field)", async () => {
+    vi.mocked(checkHiveAI).mockResolvedValue({
+      isAiGenerated: true,
+      aiConfidence: 0.95,
+      isDeepfake: false,
+      deepfakeConfidence: 0.1,
+      generatorSource: "dalle",
+    });
+    const res = await POST(makeReq(GOOD_BODY));
+    const json = await res.json();
+    expect(json.generatorBreakdown).toBeNull();
+    expect(json.generatorSource).toBe("dalle");
   });
 
   it("reports checked:false (scan_unavailable) when Hive returns null", async () => {

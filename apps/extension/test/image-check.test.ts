@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { classifyImageSrc, describeConfidence } from "@/lib/image-check-routing";
+import {
+  classifyImageSrc,
+  describeConfidence,
+  formatGeneratorName,
+} from "@/lib/image-check-routing";
 import { renderImageCheckCard } from "@/lib/image-check-card";
 
 describe("classifyImageSrc", () => {
@@ -29,6 +33,18 @@ describe("describeConfidence (honesty guardrail)", () => {
     expect(describeConfidence("ai", 0.12)).toBe(
       "12% — no strong signs it's AI-generated",
     );
+  });
+});
+
+describe("formatGeneratorName", () => {
+  it.each([
+    ["midjourney", "Midjourney"],
+    ["dalle", "DALL·E"],
+    ["stablediffusion", "Stable Diffusion"],
+    ["gan", "GAN (face generator)"],
+    ["somenewmodel", "Somenewmodel"], // unknown slug degrades gracefully
+  ])("%s → %s", (slug, name) => {
+    expect(formatGeneratorName(slug)).toBe(name);
   });
 });
 
@@ -71,6 +87,39 @@ describe("renderImageCheckCard", () => {
     expect(html).toContain("midjourney");
     expect(html).toContain("2 image checks left today");
     expect(html).not.toContain("Checking this image");
+  });
+
+  it("renders generator breakdown lines (replacing the single source line), context, and a Lens link", () => {
+    renderImageCheckCard({
+      state: "result",
+      imageUrl: IMG,
+      aiLine: "97% likely AI-generated",
+      generatorSource: "midjourney",
+      generatorLines: ["Midjourney — 62%", "DALL·E — 21%", "Flux — 8%"],
+      contextLine: "Appears to show a public figure endorsing an investment platform.",
+      lensUrl: `https://lens.google.com/uploadbyurl?url=${encodeURIComponent(IMG)}`,
+      disclaimer: "AI-detection classifiers are probabilistic.",
+    });
+    const html = card()!.shadowRoot!.innerHTML;
+    expect(html).toContain("Midjourney — 62%");
+    expect(html).toContain("DALL·E — 21%");
+    // breakdown replaces the single generatorSource line
+    expect(html).not.toContain("Likely generator:");
+    expect(html).toContain("endorsing an investment platform");
+    const lens = card()!.shadowRoot!.querySelector<HTMLAnchorElement>("a.lens");
+    expect(lens).not.toBeNull();
+    expect(lens!.href).toContain("lens.google.com/uploadbyurl");
+    expect(lens!.rel).toContain("noopener");
+  });
+
+  it("refuses a non-Lens lensUrl (injection guard on the anchor)", () => {
+    renderImageCheckCard({
+      state: "result",
+      imageUrl: IMG,
+      aiLine: "97% likely AI-generated",
+      lensUrl: "https://evil.example.com/phish",
+    });
+    expect(card()!.shadowRoot!.querySelector("a.lens")).toBeNull();
   });
 
   it("keeps separate cards for separate images", () => {

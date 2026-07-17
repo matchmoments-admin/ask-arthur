@@ -37,6 +37,10 @@ export interface ExtensionImageCheckResponse {
   aiGenerated: ImageCheckSignal | null;
   deepfake: ImageCheckSignal | null;
   generatorSource: string | null;
+  /** Top generator-attribution classes with raw scores (excludes the
+   *  verdict classes ai_generated/not_ai_generated/deepfake). Null when the
+   *  detector didn't return a class list (e.g. pre-v2 cached results). */
+  generatorBreakdown: Array<{ class: string; score: number }> | null;
   /** Present only when the server-side Claude-vision context pass is enabled
    *  (FF_IMAGE_CHECK_VISION). */
   context?: {
