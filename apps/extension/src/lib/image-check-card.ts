@@ -30,6 +30,8 @@ export interface ImageCheckCardPayload {
   contentCredentialsLine?: string;
   /** Evidence-record reference (IC-…) — shown when the check was persisted. */
   evidenceRef?: string;
+  /** Link to the public evidence page (precomputed by the background). */
+  evidenceUrl?: string;
   checksRemaining?: number | null;
   disclaimer?: string;
   /** error state (incl. friendly unsupported/limit copy) */
@@ -47,6 +49,7 @@ export function renderImageCheckCard(payload: {
   lensUrl?: string;
   contentCredentialsLine?: string;
   evidenceRef?: string;
+  evidenceUrl?: string;
   checksRemaining?: number | null;
   disclaimer?: string;
   errorMessage?: string;
@@ -142,6 +145,11 @@ export function renderImageCheckCard(payload: {
     }
     if (payload.evidenceRef) {
       lines.push(`<div class="muted">Evidence ref: ${esc(payload.evidenceRef)}</div>`);
+    }
+    if (payload.evidenceUrl && /^https:\/\/askarthur\.au\//.test(payload.evidenceUrl)) {
+      lines.push(
+        `<a class="lens" href="${esc(payload.evidenceUrl)}" target="_blank" rel="noopener noreferrer">View evidence report</a>`,
+      );
     }
     if (payload.disclaimer) {
       lines.push(`<div class="muted">${esc(payload.disclaimer)}</div>`);

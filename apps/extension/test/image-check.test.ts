@@ -112,6 +112,33 @@ describe("renderImageCheckCard", () => {
     expect(lens!.rel).toContain("noopener");
   });
 
+  it("renders evidence ref + report link (askarthur.au only)", () => {
+    renderImageCheckCard({
+      state: "result",
+      imageUrl: IMG,
+      aiLine: "97% likely AI-generated",
+      evidenceRef: "IC-0123456789AB",
+      evidenceUrl: "https://askarthur.au/image-check/IC-0123456789AB",
+    });
+    const html = card()!.shadowRoot!.innerHTML;
+    expect(html).toContain("Evidence ref: IC-0123456789AB");
+    const links = [...card()!.shadowRoot!.querySelectorAll<HTMLAnchorElement>("a")];
+    const evidence = links.find((a) => a.textContent === "View evidence report");
+    expect(evidence).toBeDefined();
+    expect(evidence!.href).toContain("askarthur.au/image-check/");
+  });
+
+  it("refuses a non-askarthur evidenceUrl (injection guard)", () => {
+    renderImageCheckCard({
+      state: "result",
+      imageUrl: IMG,
+      aiLine: "97% likely AI-generated",
+      evidenceUrl: "https://evil.example.com/image-check/IC-X",
+    });
+    const links = [...card()!.shadowRoot!.querySelectorAll<HTMLAnchorElement>("a")];
+    expect(links.find((a) => a.textContent === "View evidence report")).toBeUndefined();
+  });
+
   it("renders the Content Credentials line only when provided", () => {
     renderImageCheckCard({
       state: "result",
