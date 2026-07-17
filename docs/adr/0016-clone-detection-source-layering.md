@@ -1,6 +1,45 @@
 # Clone-detection data source layering — corpus first, CT firehose second, NRD + Hetzner conditional
 
-**Status:** accepted (2026-05-24)
+**Status:** accepted (2026-05-24) — **Phase B mechanism INVALIDATED 2026-07-17, see amendment below**
+
+> **Amendment (2026-07-17): PHASE B'S MECHANISM NO LONGER EXISTS.** This ADR
+> chose "a Calidog public certstream WSS subscription" as Phase B. That endpoint
+> is dead. Measured directly on 2026-07-17: `wss://certstream.calidog.io/`
+> **accepts the connection and then delivers zero frames in 170 seconds** — not
+> even a heartbeat, counted at the raw-frame level before any parsing. A firehose
+> that should push thousands of certs/minute sends nothing.
+>
+> The fallback most people reach for first — crt.sh — was re-tested the same day
+> and fails on every access pattern: the JSON endpoint 502s ~40% of attempts and
+> times out (>60s) on the broad `%brand%` query shape this would need; the public
+> PG endpoint (`crt.sh:5432`, reachable) returns **0 rows** for
+> `plainto_tsquery @@ identities()`, times out at 60s on `LIKE '%brand%'` (full
+> scan), cancels long queries (`conflict with recovery` — it's a hot standby),
+> and drops the SSL connection under repeated use. This independently reproduces
+> the 2026-07-13 retirement rationale below; do not re-litigate it.
+>
+> The existing Python `crtsh` scraper is NOT a substitute: it works only because
+> it queries **narrow, full-domain** keywords (`%commbank.com.au%`), which finds
+> `commbank.com.au.evil.xyz` but structurally **cannot** find
+> `commbank-secure.com.au`. Widening it to `%commbank%` is exactly the query
+> shape that 502s/times out.
+>
+> **Consequence:** any real CT surface now requires either a self-hosted
+> certstream-server following the CT logs itself (this ADR's Phase C, with its
+> cost decision), direct `get-entries` polling of Google/Cloudflare CT logs (the
+> same workload, self-written), or a paid CT search API (breaks the lane's
+> A$0/mo posture). A Cloudflare Durable Object does **not** rescue this: a DO is
+> attractive as a _client_ of someone else's firehose, but following CT logs
+> directly is a sustained high-volume workload and a poor fit for per-CPU-ms
+> billing.
+>
+> **The `.au` sourcing gap (#772) is the live consequence** — the whoisds NRD
+> feed carries no `.au` zone (0 `.au` alerts in 1,526 rows, all-time), so
+> `FF_CLONE_WATCH_AU_REGISTRANT` is live-but-inert with no input. Phase B was the
+> intended fix and it is not available. The `.au` yield from CT also remains
+> **unmeasured** — every cheap way to measure it is the thing that's broken.
+> Recommendation on #772: leave blocked; justify any Phase C spend with demand
+> for the ABN cross-check, not with the code already existing.
 
 > **Amendment (2026-07-13, fleet review):** the `pipeline-ct-monitor` Inngest fn
 > referenced throughout this ADR as the "existing CT monitor" surface has been
