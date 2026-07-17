@@ -1,0 +1,34 @@
+<!--
+  Sanitised Facebook sponsored feed unit, captured 2026-07 (structure only —
+  all names, URLs, ids, and copy replaced). Exercises:
+  - detection method 1 (a[aria-label='Sponsored'])
+  - detection method 3 (/ads/about link)
+  - advertiser-name extraction (first non-Sponsored header link)
+  - ad-text extraction ([dir="auto"] concatenation)
+  - landing-URL extraction via l.facebook.com?u= redirect decode
+  - image extraction (fbcdn img with width/height >= 100)
+  Refresh cadence + capture playbook: docs/ops/extension-fixture-refresh.md
+-->
+<div data-pagelet="FeedUnit_0" role="article">
+  <div class="header">
+    <h4>
+      <a role="link" href="https://www.facebook.com/totally-real-finance">Totally Real Finance</a>
+    </h4>
+    <a aria-label="Sponsored" href="https://www.facebook.com/ads/about/?entry_product=ad_preferences">
+      <span>Sponsored</span>
+    </a>
+  </div>
+  <div class="body">
+    <div dir="auto">
+      Aussie mum discovers a shocking investment loophole the banks don't want you to know about.
+      Start with just $250 today.
+    </div>
+    <div dir="auto">Limited places available — register before midnight.</div>
+  </div>
+  <div class="cta">
+    <a href="https://l.facebook.com/l.php?u=https%3A%2F%2Fdodgy-invest.example.com%2Flanding%3Futm%3Dfb&amp;h=AT0xyz">
+      <img src="https://scontent.xx.fbcdn.net/v/t45.1600-4/ad_creative_0001.jpg" width="500" height="300" alt="" />
+      <span dir="auto">Register your interest now</span>
+    </a>
+  </div>
+</div>

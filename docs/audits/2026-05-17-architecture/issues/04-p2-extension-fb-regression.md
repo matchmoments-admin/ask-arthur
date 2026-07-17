@@ -4,7 +4,21 @@ title: "[P2] Capture Facebook-feed HTML fixtures + regression tests for analyze-
 labels: severity:p2, ready-for-agent, domain:extension, testing
 action_type: code
 estimated_time: ~1 day
+status: "RESOLVED 2026-07-17"
 ---
+
+> **RESOLVED 2026-07-17** — `feat/extension-test-infra` (extension-monetisation PR 2).
+> vitest + jsdom stood up in `apps/extension` (first test infra in the package);
+> sanitised fixtures at `apps/extension/test/fixtures/facebook/` (plain sponsored,
+> fragmented-span sponsored, organic negative, marketplace listing) with 23 tests over
+> `detectSponsoredPost` (incl. the fragmented-span reconstruction + hidden-decoy
+> filtering), `extractAdContent`, seller/listing extraction, `computeTrustScore`, and
+> `detectPayIDScamPatterns`. CI picks up the new `test` script via turbo automatically.
+> Refresh cadence + capture/sanitise playbook: `docs/ops/extension-fixture-refresh.md`.
+> Reels/Stories sponsored variants deferred until those surfaces are actually scanned
+> (the content script only walks `div[role="feed"]` units today). Found along the way:
+> `extractSellerProfile`'s location regex has a bare `From` alternative that matches
+> mid-sentence "from …" in descriptions — tracked in the playbook, not yet fixed.
 
 ## Summary
 
