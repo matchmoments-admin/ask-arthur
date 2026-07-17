@@ -3,10 +3,27 @@
 Activate the 2026-07-17 registrant-intelligence features and prove each one on
 real prod data. All are $0 (free-tier). Migrations v234–v237 are already applied.
 
-**Status 2026-07-17: all four flags are SET to `true` in the prod env.** They go
-live on the first deployment that actually builds — see "THE TRAP" below, which
-is the thing that will bite you. Verification then happens on one enricher run
-(13:30 UTC, or a manual Inngest invoke).
+**Status 2026-07-17 01:05 UTC — ALL FOUR FLAGS LIVE IN PROD AND VERIFIED
+(except RDAP, which has no work yet; see below).**
+
+| Flag                           | Live | Verified on prod data                                                                                                                                                                                |
+| ------------------------------ | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `FF_CLONE_CAMPAIGNS`           | ✅   | **YES** — backfill 1085 → 585 in one run (cap 500 exactly); 410 real keys + 90 `insufficient`. Real campaigns emerged: **28 domains / 18 brands** in the largest cluster.                            |
+| `FF_CLONE_WATCH_KIT_PIVOTS`    | ✅   | **YES** — 10 rows pivoted (= cap), **86 sibling deployments** found from **7** urlscan searches; 3 rows took the `no_ip` sentinel (no search spent). Worklist drained 42 → 32.                       |
+| `FF_RDAP_LOOKUP`               | ✅   | **PENDING** — worklist is genuinely 0 (every eligible row already enriched). Verifies on the next natural cycle: NRD ingest ~08:30 UTC → urlscan → enricher. Not a bug; there is nothing to look up. |
+| `FF_CLONE_WATCH_AU_REGISTRANT` | ✅   | **INERT** — zero `.au` input has ever existed (#772).                                                                                                                                                |
+
+**A real bug was found and fixed doing this (#777):** the enricher early-returned
+when its _enrichment_ worklist was empty, before the kit-pivot and campaign-backfill
+stages — which have their own, independent worklists. In the enricher's steady
+state (caught up on enrichment — the NORMAL condition) both stages were silently
+inert. 1,085 rows had been waiting for a campaign key and 42 for a kit pivot. The
+`BACKFILL_CAP` comment's claim that the backfill "converges over a few days" was
+false until #777. Three manual triggers returned `ok: true` and wrote nothing —
+that is what this bug class looks like.
+
+Remaining to drain (self-draining, no action needed — the daily cron handles it):
+backfill 585 (2 more runs), kit pivots 32 (4 more runs at 10/run).
 
 The steps below are the **verification** procedure, one section per feature. They
 are no longer a one-flag-per-day gate — see "Why all four at once" in the ground
