@@ -214,13 +214,18 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 7. Optional Claude-vision context pass (server-only sub-flag; dark for
-    // the Hive-only v1). Adds "what is this image" context + celebrity
-    // matching into deepfake_detections, exactly like analyze-ad's phase 6.
+    // 7. Optional Claude-vision context pass (server-only sub-flag). Adds
+    // "what is this image" context + celebrity matching into
+    // deepfake_detections, exactly like analyze-ad's phase 6.
+    // The extension_image_check brake (cost-daily-check) gates ONLY the
+    // Claude call: bytes are still fetched while braked so the free
+    // byte-derived signals (C2PA presence, sha256 — image-check v2 PR 3+)
+    // keep working. A brake stops spend, not the free fetch.
     let context: ExtensionImageCheckResponse["context"] = null;
     if (featureFlags.imageCheckVision) {
       const base64 = await fetchImageBase64(imageUrl);
-      if (base64) {
+      const visionBraked = await isFeatureBraked("extension_image_check");
+      if (base64 && !visionBraked) {
         try {
           const analysis = await analyzeWithClaude(undefined, [base64]);
           if (analysis.usage) {

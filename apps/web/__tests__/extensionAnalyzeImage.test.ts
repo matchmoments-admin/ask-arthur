@@ -45,6 +45,7 @@ vi.mock("@/lib/cost-telemetry", async (importOriginal) => {
 
 import { POST } from "@/app/api/extension/analyze-image/route";
 import { checkHiveAI } from "@askarthur/scam-engine/hive-ai";
+import { analyzeWithClaude } from "@askarthur/scam-engine/claude";
 import { isFeatureBraked } from "@askarthur/scam-engine/cost-log";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { validateExtensionRequest } from "@/app/api/extension/_lib/auth";
@@ -188,6 +189,67 @@ describe("analyze-image route", () => {
     const json = await res.json();
     expect(json.generatorBreakdown).toBeNull();
     expect(json.generatorSource).toBe("dalle");
+  });
+
+  it("vision brake pauses ONLY the Claude call — Hive verdict intact, context null", async () => {
+    (featureFlags as { imageCheckVision: boolean }).imageCheckVision = true;
+    // hive_ai unbraked, extension_image_check braked.
+    vi.mocked(isFeatureBraked).mockImplementation(
+      async (feature: string) => feature === "extension_image_check",
+    );
+    // Real JPEG magic bytes so the (unmocked) magic-byte validator passes.
+    const jpegBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        headers: { get: () => String(jpegBytes.length) },
+        arrayBuffer: async () => jpegBytes.buffer,
+      })),
+    );
+
+    const res = await POST(makeReq(GOOD_BODY));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.checked).toBe(true);
+    expect(json.aiGenerated?.confidence).toBeCloseTo(0.97);
+    expect(json.context).toBeNull();
+    expect(analyzeWithClaude).not.toHaveBeenCalled();
+    const anthropicCost = vi
+      .mocked(logCost)
+      .mock.calls.map(([ev]) => ev)
+      .find((ev) => ev.provider === "anthropic");
+    expect(anthropicCost).toBeUndefined();
+    vi.unstubAllGlobals();
+  });
+
+  it("vision runs when unbraked: Claude called, context returned", async () => {
+    (featureFlags as { imageCheckVision: boolean }).imageCheckVision = true;
+    vi.mocked(isFeatureBraked).mockResolvedValue(false);
+    vi.mocked(analyzeWithClaude).mockResolvedValue({
+      verdict: "SUSPICIOUS",
+      confidence: 0.8,
+      summary: "Appears to show a public figure endorsing an investment platform.",
+      redFlags: [],
+      nextSteps: [],
+      impersonatedBrand: null,
+      usage: { inputTokens: 900, outputTokens: 120 },
+    } as never);
+    const jpegBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        headers: { get: () => String(jpegBytes.length) },
+        arrayBuffer: async () => jpegBytes.buffer,
+      })),
+    );
+
+    const res = await POST(makeReq(GOOD_BODY));
+    const json = await res.json();
+    expect(analyzeWithClaude).toHaveBeenCalled();
+    expect(json.context?.summary).toContain("investment platform");
+    vi.unstubAllGlobals();
   });
 
   it("reports checked:false (scan_unavailable) when Hive returns null", async () => {
