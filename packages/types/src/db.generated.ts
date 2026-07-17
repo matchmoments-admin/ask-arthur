@@ -3536,6 +3536,120 @@ export type Database = {
         }
         Relationships: []
       }
+      image_check_records: {
+        Row: {
+          ai_confidence: number | null
+          check_ref: string
+          checked_at: string
+          content_credentials: Json | null
+          deepfake_confidence: number | null
+          generator_breakdown: Json | null
+          generator_source: string | null
+          hive_result: Json | null
+          id: string
+          image_sha256: string | null
+          image_url: string | null
+          impersonated_brand: string | null
+          impersonated_celebrity: string | null
+          install_id_hash: string
+          page_url: string | null
+          vision_summary: string | null
+        }
+        Insert: {
+          ai_confidence?: number | null
+          check_ref: string
+          checked_at?: string
+          content_credentials?: Json | null
+          deepfake_confidence?: number | null
+          generator_breakdown?: Json | null
+          generator_source?: string | null
+          hive_result?: Json | null
+          id?: string
+          image_sha256?: string | null
+          image_url?: string | null
+          impersonated_brand?: string | null
+          impersonated_celebrity?: string | null
+          install_id_hash: string
+          page_url?: string | null
+          vision_summary?: string | null
+        }
+        Update: {
+          ai_confidence?: number | null
+          check_ref?: string
+          checked_at?: string
+          content_credentials?: Json | null
+          deepfake_confidence?: number | null
+          generator_breakdown?: Json | null
+          generator_source?: string | null
+          hive_result?: Json | null
+          id?: string
+          image_sha256?: string | null
+          image_url?: string | null
+          impersonated_brand?: string | null
+          impersonated_celebrity?: string | null
+          install_id_hash?: string
+          page_url?: string | null
+          vision_summary?: string | null
+        }
+        Relationships: []
+      }
+      image_check_records_archive: {
+        Row: {
+          ai_confidence: number | null
+          check_ref: string
+          checked_at: string
+          content_credentials: Json | null
+          deepfake_confidence: number | null
+          generator_breakdown: Json | null
+          generator_source: string | null
+          hive_result: Json | null
+          id: string
+          image_sha256: string | null
+          image_url: string | null
+          impersonated_brand: string | null
+          impersonated_celebrity: string | null
+          install_id_hash: string
+          page_url: string | null
+          vision_summary: string | null
+        }
+        Insert: {
+          ai_confidence?: number | null
+          check_ref: string
+          checked_at?: string
+          content_credentials?: Json | null
+          deepfake_confidence?: number | null
+          generator_breakdown?: Json | null
+          generator_source?: string | null
+          hive_result?: Json | null
+          id?: string
+          image_sha256?: string | null
+          image_url?: string | null
+          impersonated_brand?: string | null
+          impersonated_celebrity?: string | null
+          install_id_hash: string
+          page_url?: string | null
+          vision_summary?: string | null
+        }
+        Update: {
+          ai_confidence?: number | null
+          check_ref?: string
+          checked_at?: string
+          content_credentials?: Json | null
+          deepfake_confidence?: number | null
+          generator_breakdown?: Json | null
+          generator_source?: string | null
+          hive_result?: Json | null
+          id?: string
+          image_sha256?: string | null
+          image_url?: string | null
+          impersonated_brand?: string | null
+          impersonated_celebrity?: string | null
+          install_id_hash?: string
+          page_url?: string | null
+          vision_summary?: string | null
+        }
+        Relationships: []
+      }
       infra_cost_daily: {
         Row: {
           date: string

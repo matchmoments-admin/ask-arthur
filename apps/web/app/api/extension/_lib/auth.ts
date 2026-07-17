@@ -18,6 +18,10 @@ export type ExtensionAuthResult =
        *  Routes with tier-dependent behaviour (analyze-image cap) consume
        *  this instead of re-querying get_extension_tier. */
       tier: ExtensionTier;
+      /** sha256(installId) hex — the only install identifier that may be
+       *  persisted in evidence records (ADR-0022). Same hash the limiters
+       *  key on; computed once here so consumers never re-derive it. */
+      installIdHash: string;
     }
   | { valid: false; error: string; status: number; retryAfter?: string };
 
@@ -171,20 +175,28 @@ export async function validateExtensionRequest(
   }
   const installId = sig.installId;
 
-  // Rate limit on hashed installation ID
-  if (!process.env.UPSTASH_REDIS_REST_URL) {
-    if (process.env.NODE_ENV === "production") {
-      logger.error("UPSTASH_REDIS_REST_URL not set in production — blocking");
-      return { valid: false, error: "Service unavailable", status: 503 };
-    }
-    return { valid: true, installId, remaining: 99, requestId, tier: "free" };
-  }
-
+  // Hashed install id — limiter key AND the only persistable install
+  // identifier (ADR-0022). Computed once, exposed on the result.
   const data = new TextEncoder().encode(installId);
   const hashBuf = await crypto.subtle.digest("SHA-256", data);
   const identifier = Array.from(new Uint8Array(hashBuf))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
+
+  if (!process.env.UPSTASH_REDIS_REST_URL) {
+    if (process.env.NODE_ENV === "production") {
+      logger.error("UPSTASH_REDIS_REST_URL not set in production — blocking");
+      return { valid: false, error: "Service unavailable", status: 503 };
+    }
+    return {
+      valid: true,
+      installId,
+      remaining: 99,
+      requestId,
+      tier: "free",
+      installIdHash: identifier,
+    };
+  }
 
   const scanSource = req.headers.get("x-scan-source");
   const isEmailScan = scanSource === "email";
@@ -238,5 +250,6 @@ export async function validateExtensionRequest(
     remaining: Math.min(burst.remaining, daily.remaining),
     requestId,
     tier,
+    installIdHash: identifier,
   };
 }

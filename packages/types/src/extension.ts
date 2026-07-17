@@ -53,6 +53,10 @@ export interface ExtensionImageCheckResponse {
     impersonatedBrand: string | null;
     impersonatedCelebrity: string | null;
   } | null;
+  /** Evidence-record reference (IC-XXXXXXXXXXXX) — set only when the check
+   *  FLAGGED and FF_IMAGE_CHECK_RECORDS persisted a metadata record
+   *  (ADR-0022). Quotable in reports to ReportCyber/eSafety. */
+  checkRef?: string | null;
   /** Image checks remaining today for this install's tier. */
   imageChecksRemaining: number;
   disclaimer: string;

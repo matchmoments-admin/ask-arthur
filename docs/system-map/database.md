@@ -89,6 +89,7 @@ Supabase Postgres (project `rquomhcgnodxzkhokwni`). 75+ tables across 12 domain 
 ### Deepfake / Media
 
 - `deepfake_detections` — Media analysis results (file, hash, deepfake_confidence, predicted_labels). v54.
+- `image_check_records` — Metadata-only evidence records for FLAGGED right-click image checks (check_ref, install_id_hash, scores, generator_breakdown, content_credentials, image_sha256 — never bytes; ADR-0022). v239.
 - `media_analyses` — Image / video forensics (media_type, format, dimensions, exif_data, phash_vector). JSONB versioning v117.
 
 ### Brand & Ads
@@ -196,6 +197,7 @@ All have `BRIN(created_at)` for cheap range queries.
 | ------------------------------------ | ---------------------------- | ------------------------------ | ------------------------------------- |
 | `flagged_ads_archive`                | `flagged_ads`                | >180d                          | v118 `archive_secondary_tables_batch` |
 | `deepfake_detections_archive`        | `deepfake_detections`        | >180d                          | v118                                  |
+| `image_check_records_archive`        | `image_check_records`        | >365d                          | v239                                  |
 | `media_analyses_archive`             | `media_analyses`             | >180d                          | v118                                  |
 | `scan_results_archive`               | `scan_results`               | >180d                          | v118                                  |
 | `verdict_feedback_archive`           | `verdict_feedback`           | >180d                          | v118                                  |

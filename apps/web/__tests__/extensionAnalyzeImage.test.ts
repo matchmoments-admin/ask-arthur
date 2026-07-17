@@ -21,14 +21,26 @@ vi.mock("@askarthur/scam-engine/ssrf-dispatcher", () => ({
 vi.mock("@askarthur/scam-engine/c2pa-detect", () => ({
   detectC2PA: vi.fn(() => ({ present: true, format: "jpeg" })),
 }));
+const recordInserts = vi.hoisted(() => ({ rows: [] as Array<Record<string, unknown>> }));
 vi.mock("@askarthur/supabase/server", () => ({
-  createServiceClient: vi.fn(() => null),
+  createServiceClient: vi.fn(() => ({
+    from: vi.fn((table: string) => ({
+      insert: vi.fn(async (row: Record<string, unknown>) => {
+        if (table === "image_check_records") recordInserts.rows.push(row);
+        return { error: null };
+      }),
+      select: vi.fn().mockReturnThis(),
+      or: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockReturnThis(),
+      single: vi.fn(async () => ({ data: null, error: null })),
+    })),
+  })),
 }));
 vi.mock("@askarthur/utils/logger", () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
 }));
 vi.mock("@askarthur/utils/feature-flags", () => ({
-  featureFlags: { imageCheck: true, imageCheckVision: false },
+  featureFlags: { imageCheck: true, imageCheckVision: false, imageCheckRecords: false },
 }));
 vi.mock("@vercel/functions", () => ({ waitUntil: vi.fn() }));
 vi.mock("@/app/api/extension/_lib/auth", () => ({
@@ -38,6 +50,7 @@ vi.mock("@/app/api/extension/_lib/auth", () => ({
     remaining: 42,
     requestId: null,
     tier: "free",
+    installIdHash: "hash-of-test-install",
   })),
 }));
 vi.mock("@/app/api/extension/_lib/image-rate-limit", () => ({
@@ -73,8 +86,10 @@ const GOOD_BODY = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  recordInserts.rows.length = 0;
   (featureFlags as { imageCheck: boolean }).imageCheck = true;
   (featureFlags as { imageCheckVision: boolean }).imageCheckVision = false;
+  (featureFlags as { imageCheckRecords: boolean }).imageCheckRecords = false;
   vi.mocked(isFeatureBraked).mockResolvedValue(false);
   vi.mocked(checkImageCheckRateLimit).mockResolvedValue({ allowed: true, remaining: 2 });
   vi.mocked(checkHiveAI).mockResolvedValue({
@@ -141,6 +156,7 @@ describe("analyze-image route", () => {
       remaining: 42,
       requestId: null,
       tier: "pro",
+      installIdHash: "hash-of-test-install",
     });
     await POST(makeReq(GOOD_BODY));
     expect(checkImageCheckRateLimit).toHaveBeenCalledWith("test-install", 30);
@@ -295,6 +311,49 @@ describe("analyze-image route", () => {
     const res = await POST(makeReq(GOOD_BODY));
     const json = await res.json();
     expect(json.contentCredentials).toBeNull();
+  });
+
+  it("persists a metadata-only evidence record for FLAGGED checks and returns checkRef", async () => {
+    (featureFlags as { imageCheckRecords: boolean }).imageCheckRecords = true;
+    const res = await POST(makeReq(GOOD_BODY)); // default mock: aiGenerated likely
+    const json = await res.json();
+    expect(json.checkRef).toMatch(/^IC-[0-9A-HJKMNP-TV-Z]{12}$/);
+    await new Promise((r) => setTimeout(r, 0)); // flush fire-and-forget insert
+    expect(recordInserts.rows).toHaveLength(1);
+    const row = recordInserts.rows[0];
+    expect(row.check_ref).toBe(json.checkRef);
+    // ADR-0022: install id only as hash, never raw; never bytes.
+    expect(row.install_id_hash).toBe("hash-of-test-install");
+    expect(Object.values(row)).not.toContain("test-install"); // raw id never persisted
+    expect(row).not.toHaveProperty("image_bytes");
+    expect(row).not.toHaveProperty("base64");
+    expect(row.image_url).toBe(GOOD_BODY.imageUrl);
+    expect(row.ai_confidence).toBeCloseTo(0.97);
+  });
+
+  it("clean checks stay ephemeral — no record, no ref, even with the flag on", async () => {
+    (featureFlags as { imageCheckRecords: boolean }).imageCheckRecords = true;
+    vi.mocked(checkHiveAI).mockResolvedValue({
+      isAiGenerated: false,
+      aiConfidence: 0.05,
+      isDeepfake: false,
+      deepfakeConfidence: 0.02,
+      generatorSource: null,
+      classes: [],
+    });
+    const res = await POST(makeReq(GOOD_BODY));
+    const json = await res.json();
+    expect(json.checkRef).toBeNull();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(recordInserts.rows).toHaveLength(0);
+  });
+
+  it("no record when FF_IMAGE_CHECK_RECORDS is off, even for flagged checks", async () => {
+    const res = await POST(makeReq(GOOD_BODY));
+    const json = await res.json();
+    expect(json.checkRef).toBeNull();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(recordInserts.rows).toHaveLength(0);
   });
 
   it("reports checked:false (scan_unavailable) when Hive returns null", async () => {
