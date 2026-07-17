@@ -14,15 +14,18 @@
  *   pnpm --filter @askarthur/web seed:image-check
  *   pnpm --filter @askarthur/web seed:image-check --clean   # remove seeded rows
  */
-import "dotenv/config";
+import { loadEnv, requireEnv } from "./_load-env";
 import { createClient } from "@supabase/supabase-js";
 import { generateCheckRef } from "../lib/check-ref";
 
-const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+loadEnv();
+requireEnv("SUPABASE_SERVICE_ROLE_KEY");
 
-if (!supabaseUrl || !supabaseKey) {
-  console.error("Missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY in apps/web/.env.local");
+const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+
+if (!supabaseUrl) {
+  console.error("Missing SUPABASE_URL / NEXT_PUBLIC_SUPABASE_URL");
   process.exit(1);
 }
 

@@ -22,10 +22,12 @@
  * (gitignored) so repeat runs reuse one registered install — the same way a
  * real browser profile would. Delete that file to simulate a fresh install.
  */
-import "dotenv/config";
+import { loadEnv } from "./_load-env";
 import { webcrypto } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+
+loadEnv();
 
 const BASE = (process.env.EXT_DEV_BASE ?? "http://localhost:3000").replace(/\/+$/, "");
 const IDENTITY_FILE = path.resolve(process.cwd(), ".dev-extension-identity.json");
