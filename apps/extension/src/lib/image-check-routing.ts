@@ -13,6 +13,33 @@ export function classifyImageSrc(srcUrl: string): ImageSrcClass {
   return /^https?:\/\//i.test(srcUrl) ? "ok" : "unsupported";
 }
 
+/** Hive's generator class slugs → display names. Unknown slugs fall back to
+ *  a capitalised form so new Hive classes degrade gracefully. */
+const GENERATOR_NAMES: Record<string, string> = {
+  midjourney: "Midjourney",
+  dalle: "DALL·E",
+  stablediffusion: "Stable Diffusion",
+  sdxl: "SDXL",
+  flux: "Flux",
+  bingimagecreator: "Bing Image Creator",
+  adobefirefly: "Adobe Firefly",
+  firefly: "Adobe Firefly",
+  imagen: "Google Imagen",
+  ideogram: "Ideogram",
+  recraft: "Recraft",
+  kandinsky: "Kandinsky",
+  gan: "GAN (face generator)",
+  hive: "Hive",
+  sora: "Sora",
+  other_image_generators: "Other AI generator",
+};
+
+export function formatGeneratorName(slug: string): string {
+  const known = GENERATOR_NAMES[slug.toLowerCase()];
+  if (known) return known;
+  return slug.charAt(0).toUpperCase() + slug.slice(1);
+}
+
 /** Confidence → user copy. The honesty guardrail lives here: percentages and
  *  hedged wording only, never a binary FAKE/REAL. */
 export function describeConfidence(kind: "ai" | "deepfake", confidence: number): string {

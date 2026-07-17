@@ -1,16 +1,28 @@
 import { Redis } from "@upstash/redis";
 import { logger } from "@askarthur/utils/logger";
 
+export interface HiveClassScore {
+  class: string;
+  score: number;
+}
+
 export interface HiveAIResult {
   isAiGenerated: boolean;
   aiConfidence: number;
   isDeepfake: boolean;
   deepfakeConfidence: number;
   generatorSource: string | null;
+  /** Full raw class list from Hive (verdict classes + per-generator
+   *  attribution scores). Optional: entries cached before this field
+   *  existed won't carry it — readers must tolerate undefined. */
+  classes?: HiveClassScore[];
 }
 
 const CACHE_TTL_SECONDS = 86_400; // 24 hours
-const CACHE_PREFIX = "askarthur:hive";
+// v2: cache entries gained the `classes` field. Old-shape entries under the
+// v1 prefix age out via TTL; bumping the prefix means new code never reads
+// them (and still-deployed old code never reads new-shape entries).
+const CACHE_PREFIX = "askarthur:hive:v2";
 const HIVE_API_URL = "https://api.thehive.ai/api/v2/task/sync";
 const FETCH_TIMEOUT_MS = 5_000;
 const AI_GENERATED_THRESHOLD = 0.9;
@@ -99,6 +111,7 @@ export async function checkHiveAI(imageUrl: string): Promise<HiveAIResult | null
     let deepfakeConfidence = 0;
     let generatorSource: string | null = null;
     let highestSourceScore = 0;
+    const allClasses: HiveClassScore[] = [];
 
     for (const item of output) {
       const classes = item?.classes;
@@ -107,6 +120,9 @@ export async function checkHiveAI(imageUrl: string): Promise<HiveAIResult | null
       for (const cls of classes) {
         const className = cls?.class;
         const score = typeof cls?.score === "number" ? cls.score : 0;
+        if (typeof className !== "string") continue;
+
+        allClasses.push({ class: className, score });
 
         if (className === "ai_generated") {
           aiConfidence = Math.max(aiConfidence, score);
@@ -128,6 +144,7 @@ export async function checkHiveAI(imageUrl: string): Promise<HiveAIResult | null
       isDeepfake: deepfakeConfidence >= DEEPFAKE_THRESHOLD,
       deepfakeConfidence,
       generatorSource,
+      classes: allClasses,
     };
 
     // Cache result

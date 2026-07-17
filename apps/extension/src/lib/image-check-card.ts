@@ -18,6 +18,13 @@ export interface ImageCheckCardPayload {
   aiLine?: string;
   deepfakeLine?: string;
   generatorSource?: string | null;
+  /** Pre-formatted "Midjourney — 62%" lines (top generators). When present,
+   *  replaces the single generatorSource line. */
+  generatorLines?: string[];
+  /** Pre-formatted vision-context sentence (what the image appears to show). */
+  contextLine?: string;
+  /** Google Lens reverse-image link (precomputed by the background). */
+  lensUrl?: string;
   checksRemaining?: number | null;
   disclaimer?: string;
   /** error state (incl. friendly unsupported/limit copy) */
@@ -30,6 +37,9 @@ export function renderImageCheckCard(payload: {
   aiLine?: string;
   deepfakeLine?: string;
   generatorSource?: string | null;
+  generatorLines?: string[];
+  contextLine?: string;
+  lensUrl?: string;
   checksRemaining?: number | null;
   disclaimer?: string;
   errorMessage?: string;
@@ -89,9 +99,11 @@ export function renderImageCheckCard(payload: {
       .brand { font-weight:600; font-size:12px; letter-spacing:.02em; color:#fbbf24; }
       .close { cursor:pointer; background:none; border:none; color:#a8a29e; font-size:14px; line-height:1; padding:2px 4px; }
       .line { margin:4px 0; }
+      .sub { margin:2px 0 2px 22px; font-size:12px; color:#d6d3d1; }
       .muted { color:#a8a29e; font-size:11px; margin-top:8px; }
       .spin { color:#d6d3d1; }
       .err { color:#fca5a5; }
+      .lens { display:inline-block; margin-top:8px; font-size:12px; color:#93c5fd; text-decoration:underline; cursor:pointer; }
     </style>`;
 
   let body = "";
@@ -103,8 +115,20 @@ export function renderImageCheckCard(payload: {
     const lines: string[] = [];
     if (payload.aiLine) lines.push(`<div class="line">🖼️ ${esc(payload.aiLine)}</div>`);
     if (payload.deepfakeLine) lines.push(`<div class="line">🎭 ${esc(payload.deepfakeLine)}</div>`);
-    if (payload.generatorSource) {
+    if (payload.generatorLines && payload.generatorLines.length > 0) {
+      for (const gl of payload.generatorLines) {
+        lines.push(`<div class="sub">${esc(gl)}</div>`);
+      }
+    } else if (payload.generatorSource) {
       lines.push(`<div class="line">Likely generator: ${esc(payload.generatorSource)}</div>`);
+    }
+    if (payload.contextLine) {
+      lines.push(`<div class="line">💬 ${esc(payload.contextLine)}</div>`);
+    }
+    if (payload.lensUrl && /^https:\/\/lens\.google\.com\//.test(payload.lensUrl)) {
+      lines.push(
+        `<a class="lens" href="${esc(payload.lensUrl)}" target="_blank" rel="noopener noreferrer">Search this image on Google Lens</a>`,
+      );
     }
     if (payload.disclaimer) {
       lines.push(`<div class="muted">${esc(payload.disclaimer)}</div>`);
