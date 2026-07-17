@@ -2,8 +2,37 @@
 
 Install↔account linking + Extension Pro (Stripe, A$4.99/mo, A$49/yr).
 Plan: `docs/plans/extension-monetisation.md` (PRs 5–7). This page covers the
-link flow (PR 5); the checkout/webhook rows land with PR 6 and tier-aware
-rate limits with PR 7.
+link flow (PR 5) and Stripe checkout/webhook (PR 6); tier-aware rate limits
+land with PR 7.
+
+## Checkout & provisioning (PR 6)
+
+- `/extension/link` shows the Pro plan card once linked; buttons POST
+  `{installId, interval}` to **`/api/extension/checkout`** (session-authed,
+  verifies the install is linked to THIS user, 403 otherwise) →
+  `stripe.checkout.sessions.create` with `metadata` + subscription metadata
+  `{install_id, user_id, plan:"extension_pro"}`.
+- The **webhook** (`/api/stripe/webhook`) dispatches on
+  `isExtensionProPrice(priceId)` (`apps/web/lib/extensionSkus.ts`) BEFORE the
+  B2B api_key path. Double ownership gate before provisioning: the Stripe
+  customer's owning user (`user_profiles.stripe_customer_id`) must equal
+  `metadata.user_id`, AND that user must be the install's linked user in
+  `extension_subscriptions`. Mismatch → refuse + log, 200 (no Stripe retry).
+- Lifecycle: subscription created/updated → tier `pro` + mapped status
+  (`trialing→active`, `past_due/unpaid/incomplete→past_due`, else
+  `canceled`); `invoice.payment_failed` → `past_due` (pro drops off
+  immediately — `get_extension_tier` requires `status='active'`);
+  subscription deleted → tier `free`, keyed on `stripe_subscription_id`.
+
+## Stripe product setup (operator)
+
+1. Dashboard → Products → "Ask Arthur Extension Pro": recurring prices
+   A$4.99/month + A$49/year (AUD, tax behaviour inclusive — checkout enables
+   `automatic_tax`).
+2. Paste price IDs into Vercel: `NEXT_PUBLIC_STRIPE_EXTENSION_PRO_MONTHLY`,
+   `NEXT_PUBLIC_STRIPE_EXTENSION_PRO_ANNUAL` (also in turbo.json globalEnv).
+3. No new webhook endpoint — the existing one already receives the needed
+   events; the new branch dispatches by price ID.
 
 ## Flags & env
 

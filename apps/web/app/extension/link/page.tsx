@@ -14,13 +14,13 @@ export const metadata = {
 export default async function ExtensionLinkPage({
   searchParams,
 }: {
-  searchParams: Promise<{ token?: string }>;
+  searchParams: Promise<{ token?: string; success?: string }>;
 }) {
   if (!featureFlags.extensionBilling) {
     notFound();
   }
 
-  const { token } = await searchParams;
+  const { token, success } = await searchParams;
 
   let user;
   try {
@@ -48,7 +48,11 @@ export default async function ExtensionLinkPage({
           Connecting the Ask Arthur extension to your account keeps your plan
           and limits in sync across devices.
         </p>
-        <LinkClient token={token ?? null} userEmail={user.email ?? ""} />
+        <LinkClient
+          token={token ?? null}
+          userEmail={user.email ?? ""}
+          checkoutSuccess={success === "1"}
+        />
       </div>
     </main>
   );

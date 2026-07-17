@@ -6,6 +6,10 @@ import {
   resolvePhoneFootprintEntitlement,
   isPhoneFootprintPrice,
 } from "@/lib/phoneFootprintSkus";
+import {
+  isExtensionProPrice,
+  mapStripeStatusToExtensionStatus,
+} from "@/lib/extensionSkus";
 
 export const runtime = "nodejs";
 
@@ -197,6 +201,13 @@ async function upsertSubscription(
     return;
   }
 
+  // Extension Pro branch: keyed on install_id, writes extension_subscriptions
+  // (read by get_extension_tier), never touches api_keys.tier.
+  if (isExtensionProPrice(priceId)) {
+    await upsertExtensionSubscription(sub, supabase, priceId);
+    return;
+  }
+
   const apiKeyId = metadata?.api_key_id
     ? parseInt(metadata.api_key_id, 10)
     : null;
@@ -374,12 +385,124 @@ async function upsertPhoneFootprintSubscription(
   });
 }
 
+// ---------------------------------------------------------------------------
+// Extension Pro — extension_subscriptions path (extension-monetisation PR 6)
+// ---------------------------------------------------------------------------
+// Metadata expected (set server-side by /api/extension/checkout):
+//   install_id — the extension install being upgraded
+//   user_id    — the purchasing user
+// Double ownership gate before any tier write:
+//   1. metadata.user_id must equal the Stripe customer's owning user
+//      (user_profiles.stripe_customer_id, server-set during checkout);
+//   2. the install must already be LINKED to that same user
+//      (extension_subscriptions.user_id from the /extension/link flow).
+// Either mismatch → refuse + log, return 200 (retries won't fix metadata).
+// This is what stops a tampered install_id from gifting or stealing pro.
+async function upsertExtensionSubscription(
+  sub: Record<string, unknown>,
+  supabase: SupabaseService,
+  priceId: string,
+) {
+  const metadata = sub.metadata as Record<string, string> | undefined;
+  const installId = metadata?.install_id;
+  const userId = metadata?.user_id;
+
+  if (!installId || !userId) {
+    logger.warn("Extension Pro subscription missing install_id/user_id metadata", {
+      subscriptionId: sub.id,
+    });
+    return;
+  }
+
+  const customerOwnerId = await getUserIdFromStripeCustomer(
+    supabase,
+    sub.customer as string,
+  );
+  const { data: linkedRow, error: linkErr } = await supabase
+    .from("extension_subscriptions")
+    .select("user_id")
+    .eq("install_id", installId)
+    .maybeSingle();
+  if (linkErr) {
+    logger.error("Extension Pro link lookup failed", { error: linkErr });
+    throw linkErr;
+  }
+
+  if (
+    !customerOwnerId ||
+    customerOwnerId !== userId ||
+    !linkedRow?.user_id ||
+    linkedRow.user_id !== userId
+  ) {
+    logger.error("Extension Pro ownership mismatch — refusing tier sync", {
+      subscriptionId: sub.id,
+      installIdPrefix: installId.slice(0, 8),
+      customerOwnerId,
+      metadataUserId: userId,
+      linkedUserId: linkedRow?.user_id ?? null,
+    });
+    return;
+  }
+
+  const status = mapStripeStatusToExtensionStatus(sub.status as string);
+  const currentPeriodEnd = sub.current_period_end as number | undefined;
+
+  const { error } = await supabase.from("extension_subscriptions").upsert(
+    {
+      install_id: installId,
+      user_id: userId,
+      tier: "pro",
+      status,
+      billing_provider: "stripe",
+      stripe_subscription_id: sub.id as string,
+      stripe_customer_id: sub.customer as string,
+      stripe_price_id: priceId,
+      current_period_end: currentPeriodEnd
+        ? new Date(currentPeriodEnd * 1000).toISOString()
+        : null,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "install_id" },
+  );
+  if (error) {
+    logger.error("Failed to upsert extension subscription", { error });
+    throw error;
+  }
+
+  logger.info("Extension Pro subscription synced", {
+    subscriptionId: sub.id,
+    status,
+  });
+}
+
 async function handleSubscriptionDeleted(
   sub: Record<string, unknown>,
   supabase: SupabaseService
 ) {
   const items = sub.items as { data: Array<{ price: { id: string } }> };
   const priceId = items?.data?.[0]?.price?.id ?? "";
+
+  // Extension Pro branch: downgrade to free. Keyed on stripe_subscription_id
+  // (not metadata), so a tampered metadata can't downgrade someone else.
+  if (isExtensionProPrice(priceId)) {
+    const { error } = await supabase
+      .from("extension_subscriptions")
+      .update({
+        tier: "free",
+        status: "canceled",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("stripe_subscription_id", sub.id as string);
+    if (error) {
+      logger.error("Failed to cancel extension subscription", {
+        error,
+        subscriptionId: sub.id,
+      });
+      throw error;
+    }
+    logger.info("Extension Pro subscription canceled", { subscriptionId: sub.id });
+    return;
+  }
 
   // Phone Footprint branch: flip entitlement to canceled. Don't mutate
   // the B2B subscriptions table since this row was never written there.
@@ -471,6 +594,20 @@ async function handleInvoicePaid(
     logger.error("Failed to update subscription after invoice.paid", { error });
     throw error;
   }
+
+  // Extension rows share the same lifecycle events but live in their own
+  // table; matching on stripe_subscription_id makes this a no-op for
+  // non-extension subscriptions.
+  const { error: extError } = await supabase
+    .from("extension_subscriptions")
+    .update({ status: "active", updated_at: new Date().toISOString() })
+    .eq("stripe_subscription_id", subscriptionId);
+  if (extError) {
+    logger.error("Failed to update extension subscription after invoice.paid", {
+      error: extError,
+    });
+    throw extError;
+  }
 }
 
 async function handleInvoicePaymentFailed(
@@ -493,6 +630,20 @@ async function handleInvoicePaymentFailed(
       error,
     });
     throw error;
+  }
+
+  // past_due on an extension row means get_extension_tier stops returning
+  // pro (it requires status='active') — payment failure degrades to free
+  // limits without deleting the link.
+  const { error: extError } = await supabase
+    .from("extension_subscriptions")
+    .update({ status: "past_due", updated_at: new Date().toISOString() })
+    .eq("stripe_subscription_id", subscriptionId);
+  if (extError) {
+    logger.error("Failed to update extension subscription after payment failure", {
+      error: extError,
+    });
+    throw extError;
   }
 }
 
