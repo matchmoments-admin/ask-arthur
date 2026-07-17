@@ -9,8 +9,9 @@ import { mergeVerdict, type DeepfakeSignal } from "@askarthur/core-analysis";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
+import { isFeatureBraked } from "@askarthur/scam-engine/cost-log";
 import { validateExtensionRequest } from "../_lib/auth";
-import { logCost, claudeHaikuCostUsd } from "@/lib/cost-telemetry";
+import { logCost, claudeHaikuCostUsd, PRICING } from "@/lib/cost-telemetry";
 
 function isFacebookCDN(url: string): boolean {
   try {
@@ -152,22 +153,23 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Phase 2: Hive AI only if text verdict is not SAFE and image is available
+    // Phase 2: Hive AI only if text verdict is not SAFE, image is available,
+    // and the hive_ai daily cost brake (cost-daily-check cron) hasn't fired.
     let hive: Awaited<ReturnType<typeof checkHiveAI>> | null = null;
-    if (analysis?.verdict !== "SAFE" && safeImageUrl && imageAllowed) {
+    if (
+      analysis?.verdict !== "SAFE" &&
+      safeImageUrl &&
+      imageAllowed &&
+      !(await isFeatureBraked("hive_ai"))
+    ) {
       try {
         hive = await checkHiveAI(safeImageUrl);
-        // Cost telemetry — Hive AI image scan. unitCostUsd=0 is a deliberate
-        // placeholder: Hive's per-image rate is not documented in the repo
-        // and must be set once the pricing contract is signed (see Tier 3
-        // feature-flag-flip playbook). The row still captures that a scan
-        // happened, tagged by installId + result shape.
         logCost({
           feature: "hive_ai",
           provider: "hive",
           operation: "sync-task",
           units: 1,
-          unitCostUsd: 0,
+          unitCostUsd: PRICING.HIVE_AI_USD_PER_IMAGE,
           metadata: {
             has_result: hive !== null,
             is_ai_generated: hive?.isAiGenerated ?? false,

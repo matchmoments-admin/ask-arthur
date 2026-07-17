@@ -55,6 +55,12 @@ export async function GET(req: Request) {
     // safety path — pausing it denies victims a scam-check, so the cap is
     // a runaway-cost backstop, not a routine throttle.
     BOT_ANALYZE_CAP_USD: readNumberEnv("BOT_ANALYZE_CAP_USD", 10),
+    // Hive AI image classification (extension analyze-ad + image-check).
+    // $5/day ≈ 1,600 images at the $0.003 working rate — a runaway backstop,
+    // not a routine throttle. Default sits above the $2 global gate so the
+    // brake can engage (invariant below). Consumers gate on
+    // isFeatureBraked("hive_ai") before calling checkHiveAI.
+    HIVE_AI_CAP_USD: readNumberEnv("HIVE_AI_CAP_USD", 5),
   };
   const thresholdUsd = envReads.DAILY_COST_THRESHOLD_USD.value;
 
@@ -291,6 +297,14 @@ export async function GET(req: Request) {
     .filter((t) => t.feature === "bot_analyze")
     .reduce((sum, t) => sum + t.cost, 0);
 
+  // Hive AI image scans — single `hive_ai` tag shared by every checkHiveAI
+  // call site (extension analyze-ad today; extension image-check next), so
+  // one brake covers the vendor regardless of which surface drove the spend.
+  const hiveAiThresholdUsd = envReads.HIVE_AI_CAP_USD.value;
+  const hiveAiCost = top
+    .filter((t) => t.feature === "hive_ai")
+    .reduce((sum, t) => sum + t.cost, 0);
+
   let brakeSet = false;
   let redditBrakeSet = false;
   let phoneFootprintBrakeSet = false;
@@ -302,6 +316,7 @@ export async function GET(req: Request) {
   let newsIntelEmbedBrakeSet = false;
   let scamReportEmbedBrakeSet = false;
   let botAnalyzeBrakeSet = false;
+  let hiveAiBrakeSet = false;
   if (vulnEnrichCost > vulnEnrichThresholdUsd) {
     const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     const { error: brakeError } = await supabase
@@ -639,6 +654,36 @@ export async function GET(req: Request) {
     }
   }
 
+  if (hiveAiCost > hiveAiThresholdUsd) {
+    const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const { error: brakeError } = await supabase
+      .from("feature_brakes")
+      .upsert(
+        {
+          feature: "hive_ai",
+          paused_until: pausedUntil,
+          reason: `Daily spend $${hiveAiCost.toFixed(2)} exceeded $${hiveAiThresholdUsd} cap`,
+          set_by: "cost-daily-check",
+          set_cost_usd: hiveAiCost,
+          set_threshold_usd: hiveAiThresholdUsd,
+          set_at: new Date().toISOString(),
+        },
+        { onConflict: "feature" },
+      );
+    if (brakeError) {
+      logger.error("failed to set hive_ai brake", {
+        error: brakeError.message,
+      });
+    } else {
+      hiveAiBrakeSet = true;
+      logger.warn("hive_ai brake engaged", {
+        costUsd: hiveAiCost,
+        thresholdUsd: hiveAiThresholdUsd,
+        pausedUntil,
+      });
+    }
+  }
+
   // Below the global Telegram threshold: brakes were still evaluated above
   // (the M-brake fix), but no digest is sent. Report any brakes that engaged.
   if (!aboveThreshold) {
@@ -661,6 +706,7 @@ export async function GET(req: Request) {
         news_intel_embed: newsIntelEmbedBrakeSet,
         scam_report_embed: scamReportEmbedBrakeSet,
         bot_analyze: botAnalyzeBrakeSet,
+        hive_ai: hiveAiBrakeSet,
       },
     });
   }
@@ -749,6 +795,12 @@ export async function GET(req: Request) {
       `🛑 <b>bot_analyze brake engaged</b> — paused for 24h (spend $${botAnalyzeCost.toFixed(2)} > $${botAnalyzeThresholdUsd} cap). Bots reply "try again shortly" until reset.`,
     );
   }
+  if (hiveAiBrakeSet) {
+    lines.push(
+      "",
+      `🛑 <b>hive_ai brake engaged</b> — paused for 24h (spend $${hiveAiCost.toFixed(2)} > $${hiveAiThresholdUsd} cap). Extension image scans skip Hive until reset.`,
+    );
+  }
   lines.push("", `Full breakdown: https://askarthur.au/admin/costs`);
 
   await sendAdminTelegramMessage(lines.join("\n"));
@@ -781,5 +833,7 @@ export async function GET(req: Request) {
     scamReportEmbedCost,
     botAnalyzeBrakeSet,
     botAnalyzeCost,
+    hiveAiBrakeSet,
+    hiveAiCost,
   });
 }

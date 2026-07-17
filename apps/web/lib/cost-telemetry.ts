@@ -99,7 +99,13 @@ export const PRICING = {
   // Google Safe Browsing is free up to very high limits.
   // Reality Defender free tier = 50/month, paid rates not public — log units
   // without a unit_cost when we actually start calling it.
-  // Hive AI pricing is undocumented internally — require explicit per-call cost.
+
+  // Hive AI image classification (AI-generated + deepfake): working number at
+  // the published self-serve rate. Contract pending — update on signing if the
+  // negotiated per-image price differs. Consumed by /api/extension/analyze-ad
+  // and the extension image-check route; the HIVE_AI_CAP_USD daily brake in
+  // cost-daily-check assumes this constant is real, so never zero it out.
+  HIVE_AI_USD_PER_IMAGE: 0.003,
 } as const;
 
 /**
