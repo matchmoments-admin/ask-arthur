@@ -160,13 +160,29 @@ export const TIER_LIMITS = {
 export interface ExtensionTierLimit {
   dailyChecks: number;
   burstPerMinute: number;
+  /** Right-click "Check this image" Hive scans per install per day. The only
+   *  per-unit-cost extension feature, so the free cap is deliberately small
+   *  (taster) and the pro cap is the paid headroom. */
+  imageChecksPerDay: number;
   urlGuard: boolean;
   emailScanning: boolean;
 }
 
 export const EXTENSION_TIER_LIMITS: Record<"free" | "pro", ExtensionTierLimit> = {
-  free: { dailyChecks: 50, burstPerMinute: 10, urlGuard: false, emailScanning: false },
-  pro: { dailyChecks: 500, burstPerMinute: 30, urlGuard: true, emailScanning: true },
+  free: {
+    dailyChecks: 50,
+    burstPerMinute: 10,
+    imageChecksPerDay: 3,
+    urlGuard: false,
+    emailScanning: false,
+  },
+  pro: {
+    dailyChecks: 500,
+    burstPerMinute: 30,
+    imageChecksPerDay: 30,
+    urlGuard: true,
+    emailScanning: true,
+  },
 } as const;
 
 // ---------------------------------------------------------------------------

@@ -92,6 +92,20 @@ export const featureFlags = {
    *  endpoint is probed directly with a valid install-id signature. */
   facebookAds: process.env.NEXT_PUBLIC_FF_FACEBOOK_ADS === "true",
 
+  /** Extension: right-click "Check this image" AI-generation/deepfake scan.
+   *  Must match the client-side build-time flag WXT_IMAGE_CHECK. Same
+   *  double-gate rationale as facebookAds above: when off,
+   *  /api/extension/analyze-image returns 503 even for validly-signed
+   *  requests, keeping Hive spend at zero while the feature is dark. */
+  imageCheck: process.env.NEXT_PUBLIC_FF_IMAGE_CHECK === "true",
+
+  /** Extension image check: optional Claude Haiku vision context pass
+   *  (what the image depicts, impersonated brand/celebrity → feeds
+   *  deepfake_detections). Server-only sub-flag of imageCheck — v1 launches
+   *  Hive-only with this OFF; flipping it adds per-check Claude vision spend
+   *  and the server-side image-byte fetch. */
+  imageCheckVision: readBoolEnv("FF_IMAGE_CHECK_VISION"),
+
   /** Mobile: scam alert push notifications */
   pushAlerts: process.env.NEXT_PUBLIC_FF_PUSH_ALERTS === "true",
 
