@@ -37,13 +37,13 @@ Every consumer page, authenticated page, admin page, and API route, grouped by d
 
 ### Vertical landing pages
 
-| Route                    | Purpose                             |
-| ------------------------ | ----------------------------------- |
-| `/banking`               | Banking-security use case           |
-| `/telco`                 | Telco / carrier use case            |
-| `/digital-platforms`     | Social-platform moderation use case |
-| `/compliance-calculator` | Regulatory burden estimator         |
-| `/spf-assessment`        | Free SPF/DMARC/DKIM health check    |
+| Route                    | Purpose                                                                                                              |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `/banking`               | Banking-security use case                                                                                            |
+| `/telco`                 | Telco / carrier use case                                                                                             |
+| `/digital-platforms`     | Social-platform moderation use case                                                                                  |
+| `/compliance-calculator` | Regulatory burden estimator                                                                                          |
+| `/spf-assessment`        | Scams Prevention Framework readiness wizard (6-principle self-assessment lead magnet — NOT an email-SPF/DMARC check) |
 
 ### Blog + intelligence
 

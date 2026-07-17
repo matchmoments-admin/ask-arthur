@@ -272,7 +272,14 @@ demand** — do not hardcode prices before a lead-volume signal.
 ## Wave 4 — Enterprise threat-intel feed + SPF evidence _(needs brand-convergence canary + legal)_
 
 Where the A$150–400K ACVs live; strongest regulatory tailwind (SPF Act 2025,
-penalties to A$50M/contravention, sector codes finalising 2026/27).
+penalties to A$52.7M+/contravention). Actual SPF staging (corrected 2026-07-18 per
+the T8 SPF-alignment research): designation effective **23 May 2026**; **SPF Rules
+commence 1 September 2026** (Parts 2 & 7 — compliance statements + record-keeping —
+delayed to 31 March 2027); **sector codes commence no earlier than 31 March 2027**
+(the compliance wall, and when AFCA's SPF complaint jurisdiction opens — AFCA
+authorised as SPF EDR 1 July 2026, membership mandatory 1 September 2026);
+ASI-reporting (Report principle) rules consulted 2026–27, compliance by end-2027.
+The buying window is H2 2026 → Q1 2027, not "from 1 July 2026".
 
 **Migration `v202`:** `feed_indicators_mv` (materialized UNION projection — the
 **only** thing user-facing feed code reads; `REFRESH … CONCURRENTLY` via cron; keyset

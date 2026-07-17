@@ -143,11 +143,13 @@ export function AssessmentWizard() {
       {/* Header */}
       <div className="text-center mb-10">
         <h1 className="text-3xl font-extrabold text-deep-navy tracking-tight mb-2">
-          SPF Compliance Readiness Assessment
+          SPF Readiness Assessment
         </h1>
         <p className="text-gov-slate text-sm">
-          Assess your organisation&apos;s preparedness for the Scams Prevention
-          Framework Act 2025 across all 6 SPF principles.
+          The Scams Prevention Framework sector codes, record-keeping
+          obligations and AFCA&apos;s scam complaint jurisdiction all commence
+          on 31 March 2027. Assess where your organisation stands across the
+          6 SPF principles — before the codes, and the complaints, arrive.
         </p>
       </div>
 

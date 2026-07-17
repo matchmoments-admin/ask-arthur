@@ -1,6 +1,8 @@
 # Treasury SPF Subordinate-Rules Submission — Outline
 
-**Submission target:** Any open Treasury, ACCC, or ACMA consultation on SPF subordinate rules between now and end of 2026. The Treasury industry-codes consultation closed 5 January 2026, but follow-on subordinate-rules drafting is active through 2026 and ACMA's mandatory industry standard (post the 27 March 2026 TCP Code rejection) will have its own consultation window.
+**Submission target (updated 2026-07-18):** The **Report-principle / ASI-reporting rules consultation** Treasury has flagged for **late 2026** (rules developed 2026–27, compliance by end-2027) — the recommendations below (machine-readable verdict layer, machine-readable evidence trails) are purpose-built for it. Secondary target: any comment window on the **final Stage 1 instruments** (final SPF Rules + Common/sector codes, expected H2 2026). Also still live: ACMA's mandatory industry standard (post the 27 March 2026 TCP Code rejection) consultation window.
+
+> **Missed window, on the record:** Treasury's Stage 1 codes/rules consultation (draft Common Code, sector codes, SPF Rules, IDR position paper — released 28 May 2026) closed **25 June 2026 without an Ask Arthur submission**, despite this template sitting ready. Say so plainly if asked; the corrective action is targeting the Report-principle consultation above, which is the better fit for these recommendations anyway.
 
 **Strategic posture:** This submission is not a sales pitch. It is a constructive, technical contribution from a small Australian-built provider. The submission should read as if written by a sovereign-tech advocate, not a vendor. The benefit to AskArthur is that every Treasury / ACCC / ACMA submission becomes a permanent search-indexed credibility artefact; the secondary benefit is that AskArthur's positioning _becomes_ the regulatory floor.
 
@@ -81,7 +83,7 @@ We recommend a Schedule 2 of currently excluded sectors with a phased designatio
 
 ### 4. Machine-readable evidence trails (~350 words)
 
-AFCA's role as the SPF EDR scheme begins 1 September 2026, with complaints accepted from 1 January 2027. AFCA's new Chief Scams Officer, Dr David Lacey, has signalled that determinations will consider _all parties_ involved in a scam.
+AFCA was authorised as the single SPF EDR scheme from 1 July 2026; designated entities (including telcos and digital platforms — a first) must be AFCA members from 1 September 2026, and AFCA can consider SPF complaints for matters occurring on or after 31 March 2027. AFCA's inaugural Chief Scams Officer, Dr David Lacey (ex-IDCARE), has signalled that determinations will consider _all parties_ involved in a scam.
 
 A multi-party EDR scheme requires evidence at machine-readable scale. If a single complaint involves a bank, a telco, and a digital platform, AFCA must be able to ingest the verdict-layer evidence from all three parties without manual extraction. The current framework does not specify the format.
 
@@ -117,8 +119,8 @@ brendan@askarthur.au | askarthur.au
 
 ## Implementation notes for Brendan
 
-- **Submit to every open consultation, not just one.** The Treasury industry-codes window closed 5 January 2026 but ACMA's mandatory industry standard (post 27 March rejection) will have its own consultation window in mid-to-late 2026. ACCC will run consultations on subordinate rules. Submit to all of them. Each becomes a permanent search-indexed credibility artefact.
+- **Submit to every open consultation, not just one.** The Treasury industry-codes window closed 5 January 2026, and the Stage 1 codes/rules window (28 May – 25 June 2026) closed without a submission. Next dated targets: the Report-principle / ASI-reporting rules consultation (late 2026 — the priority), comments on the final Stage 1 instruments (H2 2026), and ACMA's mandatory industry standard window. Submit to all of them. Each becomes a permanent search-indexed credibility artefact.
 - **Use the same six-recommendation structure across submissions.** Adapt the framing to each consultation's specific scope, but keep the recommendations consistent. This builds AskArthur's regulatory-thought-leadership profile coherently.
 - **Cross-reference each submission in the LinkedIn series.** Post 4 (buyer not builder) is the natural place to mention the submission. "I have made a public submission to Treasury arguing that the SPF subordinate rules should specify a machine-readable verdict-layer architecture..."
 - **Send a courtesy copy to Charlotte Davidson at IDCARE.** Not for endorsement — just so Davidson knows AskArthur is participating constructively in the policy process. Strengthens the partnership conversation.
-- **Send a courtesy copy to AFCA's Chief Scams Officer David Lacey.** He is, after all, the person who will operationalise much of what is in the submission. A one-line cover note ("FYI — submitted this to Treasury today, given AFCA's role in the EDR scheme it may be of interest") is appropriate.
+- **Send a courtesy copy to Dr David Lacey, AFCA Chief Scams Officer (ex-IDCARE).** He now runs the scheme the submission describes — AFCA is the authorised SPF EDR (from 1 July 2026), operating the world's first multi-party scam EDR when complaint jurisdiction opens 31 March 2027 — and will operationalise much of what is in the submission. A one-line cover note ("FYI — submitted this to Treasury today, given AFCA's role in the EDR scheme it may be of interest") is appropriate.
