@@ -56,8 +56,38 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
     name: "Clone-watch: attribution dossier enricher",
     timeouts: { finish: "5m" },
     retries: 2,
+    // --- manual-trigger guards (CLAUDE.md: "any cron that also has a
+    // manual-trigger must have a throttle AND a same-window cooldown, or
+    // stacked manual fires breach per-hour API caps"). ---
+    //
+    // Deliberately NO explicit cooldown step here, unlike the sibling
+    // lifecycle-recheck (50m). The rule exists because stacked manual fires
+    // re-burst the same work; that applies to recheck because its worklist is a
+    // ROTATING POOL — the same rows are eligible again on the next run, so N
+    // stacked fires = N × 50 urlscan submits (the 2026-07-12 100/hour breach).
+    //
+    // This enricher's worklist is SELF-DRAINING: it selects only rows where
+    // attribution IS NULL, and the first thing each run does is fill that in. A
+    // second run minutes later finds ~nothing and is a no-op. Stacking fires
+    // cannot re-burst work that no longer exists. concurrency 1 additionally
+    // serialises any stack, so two fires can't race the same worklist.
+    concurrency: { limit: 1 },
+    // Structural daily ceiling on starts (the backstop the rule actually asks
+    // for). Worst case sits well under every quota: ENRICH_RUN_CAP (60) whois
+    // lookups only ever apply to unenriched rows (NRD supplies ~30/day), and
+    // KIT_PIVOT_RUN_CAP (10) × 6 = 60 urlscan searches against a 1000/day
+    // search quota (6%).
+    throttle: { limit: 6, period: "1d" },
   },
-  { cron: "30 13 * * *" }, // daily, just after auto-triage (13:00 UTC)
+  [
+    { cron: "30 13 * * *" }, // daily, just after auto-triage (13:00 UTC)
+    // Verification/on-demand trigger. The enricher was the only clone-watch
+    // stage without one (siblings: urlscan-submit, urlscan-retrieve,
+    // lifecycle-recheck, enforcement-execute all have manual triggers), which
+    // made every flag activation wait up to 24h for the next cron tick to
+    // produce any evidence at all. Payload is ignored.
+    { event: "shopfront/clone.enrich-attribution.manual-trigger.v1" },
+  ],
   withAxiomLogging({ fnId: "clone-watch-enrich-attribution" }, async ({ step }) => {
     if (!featureFlags.cloneWatchAttribution) {
       return { skipped: true, reason: "FF_CLONE_WATCH_ATTRIBUTION disabled" };
