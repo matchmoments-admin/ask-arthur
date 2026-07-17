@@ -28,6 +28,8 @@ export interface ImageCheckCardPayload {
   /** Pre-formatted Content Credentials line ("Content Credentials present
    *  (issuer unverified)") — only set when a manifest was detected. */
   contentCredentialsLine?: string;
+  /** Evidence-record reference (IC-…) — shown when the check was persisted. */
+  evidenceRef?: string;
   checksRemaining?: number | null;
   disclaimer?: string;
   /** error state (incl. friendly unsupported/limit copy) */
@@ -44,6 +46,7 @@ export function renderImageCheckCard(payload: {
   contextLine?: string;
   lensUrl?: string;
   contentCredentialsLine?: string;
+  evidenceRef?: string;
   checksRemaining?: number | null;
   disclaimer?: string;
   errorMessage?: string;
@@ -136,6 +139,9 @@ export function renderImageCheckCard(payload: {
       lines.push(
         `<a class="lens" href="${esc(payload.lensUrl)}" target="_blank" rel="noopener noreferrer">Search this image on Google Lens</a>`,
       );
+    }
+    if (payload.evidenceRef) {
+      lines.push(`<div class="muted">Evidence ref: ${esc(payload.evidenceRef)}</div>`);
     }
     if (payload.disclaimer) {
       lines.push(`<div class="muted">${esc(payload.disclaimer)}</div>`);

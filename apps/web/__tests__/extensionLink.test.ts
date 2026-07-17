@@ -112,6 +112,7 @@ beforeEach(() => {
     remaining: 42,
     requestId: null,
     tier: "free",
+    installIdHash: "hash-of-install-a",
   });
   vi.mocked(getUser).mockResolvedValue({ id: "user-1", email: "u@example.com" } as never);
 });

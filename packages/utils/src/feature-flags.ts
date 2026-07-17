@@ -106,6 +106,13 @@ export const featureFlags = {
    *  and the server-side image-byte fetch. */
   imageCheckVision: readBoolEnv("FF_IMAGE_CHECK_VISION"),
 
+  /** Extension image check: persist evidence records (metadata-only,
+   *  flagged-only, never bytes — ADR-0022) to image_check_records and
+   *  return a checkRef. Server-only, independent of the route flag so
+   *  persistence can be switched off without darkening the check. Also
+   *  gates the /image-check/[ref] evidence page + PDF. */
+  imageCheckRecords: readBoolEnv("FF_IMAGE_CHECK_RECORDS"),
+
   /** Extension billing: install↔account link flow (/extension/link +
    *  /api/extension/link-token + /api/extension/link) and, from PR 6, the
    *  Extension Pro Stripe checkout + webhook provisioning. Pairs with the

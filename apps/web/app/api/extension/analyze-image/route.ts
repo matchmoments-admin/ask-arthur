@@ -18,6 +18,7 @@ import {
 import { validateExtensionRequest } from "../_lib/auth";
 import { checkImageCheckRateLimit } from "../_lib/image-rate-limit";
 import { logCost, claudeHaikuCostUsd, PRICING } from "@/lib/cost-telemetry";
+import { generateCheckRef } from "@/lib/check-ref";
 
 // Right-click "Check this image" — user-driven AI-generation/deepfake scan of
 // an arbitrary image URL. Unlike analyze-ad (Facebook-CDN allowlist, ad-text
@@ -240,12 +241,14 @@ export async function POST(req: NextRequest) {
     // keep working. A brake stops spend, not the free fetch.
     let context: ExtensionImageCheckResponse["context"] = null;
     let contentCredentials: ExtensionImageCheckResponse["contentCredentials"] = null;
+    let imageSha256: string | null = null;
     if (featureFlags.imageCheckVision) {
       const bytes = await fetchImageBytes(imageUrl);
       // C2PA presence is a structural sniff over the fetched bytes — free,
       // deterministic, runs even while the vision brake is engaged. null
       // (bytes unavailable) means "unknown", never fabricated.
       contentCredentials = bytes ? detectC2PA(bytes.buffer) : null;
+      imageSha256 = bytes?.sha256 ?? null;
       const visionBraked = await isFeatureBraked("extension_image_check");
       if (bytes && !visionBraked) {
         try {
@@ -312,6 +315,48 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // 8. Evidence record (ADR-0022: metadata only, FLAGGED checks only,
+    // never bytes, install id only as its hash). Fire-and-forget — a
+    // persistence failure must never fail the user's check; they just
+    // don't get a ref. Clean checks stay fully ephemeral.
+    let checkRef: string | null = null;
+    if (
+      featureFlags.imageCheckRecords &&
+      (hive.isAiGenerated || hive.isDeepfake) &&
+      supabase
+    ) {
+      checkRef = generateCheckRef();
+      const record = {
+        check_ref: checkRef,
+        install_id_hash: auth.installIdHash,
+        image_url: imageUrl,
+        page_url: pageUrl ?? null,
+        image_sha256: imageSha256,
+        ai_confidence: hive.aiConfidence,
+        deepfake_confidence: hive.deepfakeConfidence,
+        generator_source: hive.generatorSource,
+        generator_breakdown: generatorBreakdown(hive.classes),
+        content_credentials: contentCredentials,
+        vision_summary: context?.summary ?? null,
+        impersonated_brand: context?.impersonatedBrand ?? null,
+        impersonated_celebrity: context?.impersonatedCelebrity ?? null,
+        hive_result: hive,
+      };
+      waitUntil(
+        (async () => {
+          const { error: recordErr } = await supabase
+            .from("image_check_records")
+            .insert(record);
+          if (recordErr) {
+            logger.error("Failed to store image check record", {
+              error: recordErr.message,
+              check_ref: checkRef,
+            });
+          }
+        })(),
+      );
+    }
+
     const response: ExtensionImageCheckResponse = {
       checked: true,
       aiGenerated: signal(hive.isAiGenerated, hive.aiConfidence),
@@ -320,6 +365,7 @@ export async function POST(req: NextRequest) {
       generatorBreakdown: generatorBreakdown(hive.classes),
       contentCredentials,
       context,
+      checkRef,
       imageChecksRemaining: imageLimit.remaining,
       disclaimer: DISCLAIMER,
     };

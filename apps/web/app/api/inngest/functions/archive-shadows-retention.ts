@@ -39,7 +39,7 @@ export const archiveShadowsRetention = inngest.createFunction(
   {
     id: "archive-shadows-retention",
     timeouts: { finish: "4m" },
-    name: "Archive shadows: nightly housekeeping (6 tables)",
+    name: "Archive shadows: nightly housekeeping (7 tables)",
     retries: 2,
   },
   { cron: "0 5 * * *" },
@@ -51,6 +51,7 @@ export const archiveShadowsRetention = inngest.createFunction(
       scan_results: 0,
       verdict_feedback: 0,
       brand_impersonation_alerts: 0,
+      image_check_records: 0, // v239 (image-check v2 PR 4, 365d)
     };
 
     for (let iter = 0; iter < LOOP_GUARD; iter++) {

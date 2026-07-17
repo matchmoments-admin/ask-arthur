@@ -284,6 +284,7 @@ async function handleImageCheck(
       contentCredentialsLine: data.contentCredentials?.present
         ? "Content Credentials present (issuer unverified)"
         : undefined,
+      evidenceRef: data.checkRef ?? undefined,
       checksRemaining: data.imageChecksRemaining,
       disclaimer: data.disclaimer,
     });

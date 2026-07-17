@@ -58,13 +58,14 @@ All feature flags live in `packages/utils/src/feature-flags.ts`. Default is **OF
 
 ## Extension features
 
-| Flag               | Default | Purpose                                                                                                                                                      |
-| ------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `urlGuard`         | OFF     | Real-time URL checking on navigation                                                                                                                         |
-| `facebookAds`      | OFF     | Facebook ad scanning (paired with `WXT_FACEBOOK_ADS` build-time flag)                                                                                        |
-| `imageCheck`       | OFF     | Right-click "Check this image" Hive scan (paired with `WXT_IMAGE_CHECK`; ops: [extension-image-check-config](../ops/extension-image-check-config.md))        |
-| `imageCheckVision` | OFF     | Server-only sub-flag: Claude-vision context pass on image checks (`FF_IMAGE_CHECK_VISION`)                                                                   |
-| `extensionBilling` | OFF     | Install↔account link flow + Extension Pro billing (paired with `WXT_EXTENSION_BILLING`; ops: [extension-billing-config](../ops/extension-billing-config.md)) |
+| Flag                | Default | Purpose                                                                                                                                                      |
+| ------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `urlGuard`          | OFF     | Real-time URL checking on navigation                                                                                                                         |
+| `facebookAds`       | OFF     | Facebook ad scanning (paired with `WXT_FACEBOOK_ADS` build-time flag)                                                                                        |
+| `imageCheck`        | OFF     | Right-click "Check this image" Hive scan (paired with `WXT_IMAGE_CHECK`; ops: [extension-image-check-config](../ops/extension-image-check-config.md))        |
+| `imageCheckVision`  | OFF     | Server-only sub-flag: Claude-vision context pass on image checks (`FF_IMAGE_CHECK_VISION`)                                                                   |
+| `imageCheckRecords` | OFF     | Server-only: persist flagged image checks as metadata-only evidence records (`FF_IMAGE_CHECK_RECORDS`, ADR-0022) + the `/image-check/[ref]` evidence page    |
+| `extensionBilling`  | OFF     | Install↔account link flow + Extension Pro billing (paired with `WXT_EXTENSION_BILLING`; ops: [extension-billing-config](../ops/extension-billing-config.md)) |
 
 ## Mobile features
 
