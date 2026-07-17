@@ -1,20 +1,29 @@
-// RDAP (RFC 9083) domain lookup — free, unmetered registry data via the
-// rdap.org bootstrap redirector. Complements whoisjson (near-exhausted 1,000/mo
-// free tier) as the PRIMARY registration source for clone-watch attribution,
-// and adds fields whoisjson doesn't surface:
+// RDAP (RFC 9083) domain lookup — free, unmetered registry data. The PRIMARY
+// registration source for clone-watch attribution (complements whoisjson, whose
+// 1,000/mo free tier is near-exhausted), and adds fields whoisjson doesn't
+// surface:
 //   - domain `statuses` (EPP status codes) — clientHold/serverHold means the
 //     registrar has already SUSPENDED the domain, direct takedown evidence.
 //   - registrar IANA ID — a stable registrar identifier for campaign grouping.
 //   - a structured registrar abuse contact (email + phone).
 //
-// rdap.org 302-redirects to the authoritative registry RDAP server (chosen from
-// IANA's bootstrap by TLD). The redirect target is registry-operated infra, not
-// attacker-controlled, but we still dial through ssrfSafeDispatcher so a
-// compromised/hostile redirect can't reach internal IPs.
+// Primary path queries the authoritative registry RDAP server DIRECTLY, resolved
+// from IANA's cached bootstrap by TLD (see rdap-bootstrap.ts) — the shared
+// rdap.org redirector rate-limits our per-run burst and was silently dropping
+// ~75% of RDAP-capable lookups to a timeout (measured prod 2026-07-18). rdap.org
+// remains the fallback. Registry servers are registry-operated infra chosen from
+// the IANA bootstrap (never attacker-derived); every fetch dials through
+// ssrfSafeDispatcher so a compromised/hostile response can't reach internal IPs.
 
 import { logger } from "@askarthur/utils/logger";
 import { logCost } from "./cost-log";
 import { ssrfSafeDispatcher } from "./ssrf-dispatcher";
+import { assertSafeURL } from "./ssrf-guard";
+import {
+  getRdapBootstrap,
+  resolveRegistryBase,
+  buildRegistryDomainUrl,
+} from "./rdap-bootstrap";
 
 export interface RdapResult {
   registrar: string | null;
@@ -160,29 +169,29 @@ export function parseRdapResponse(json: RdapDomain, domain: string): RdapResult 
 }
 
 /**
- * Low-level RDAP fetch → raw JSON (or null on 404/error). Shared by lookupRdap
- * and the .au registrant lookup so the fetch + SSRF-safe dispatch + cost log
- * live in one place. rdap.org 302-redirects to the TLD's registry server.
+ * One RDAP GET → raw JSON (or null on 404/error). `via` tags the cost row so
+ * telemetry shows which path served each success (registry-direct vs the
+ * rdap.org fallback). The registry server (and rdap.org's 302 target) is dialed
+ * through ssrfSafeDispatcher so a hostile response can't reach internal IPs.
  */
-export async function fetchRdapDomain(
+async function rdapGet(
+  url: string,
   domain: string,
+  via: "registry" | "rdap.org",
 ): Promise<RdapDomain | null> {
   try {
-    const res = await fetch(
-      `https://rdap.org/domain/${encodeURIComponent(domain)}`,
-      {
-        headers: { accept: "application/rdap+json" },
-        signal: AbortSignal.timeout(8000),
-        // undici's `dispatcher` isn't in the DOM fetch types — spread it in the
-        // same way as fetchShopPage / redirect-resolver.
-        ...({ dispatcher: ssrfSafeDispatcher } as Record<string, unknown>),
-      },
-    );
+    const res = await fetch(url, {
+      headers: { accept: "application/rdap+json" },
+      signal: AbortSignal.timeout(8000),
+      // undici's `dispatcher` isn't in the DOM fetch types — spread it in the
+      // same way as fetchShopPage / redirect-resolver.
+      ...({ dispatcher: ssrfSafeDispatcher } as Record<string, unknown>),
+    });
 
     if (!res.ok) {
       // 404 = unregistered / unsupported TLD (common, not an error).
       if (res.status !== 404) {
-        logger.warn("RDAP lookup non-200", { status: res.status, domain });
+        logger.warn("RDAP lookup non-200", { status: res.status, domain, via });
       }
       return null;
     }
@@ -193,6 +202,7 @@ export async function fetchRdapDomain(
       operation: "domain-lookup",
       units: 1,
       estimatedCostUsd: 0,
+      metadata: { via },
     });
 
     return (await res.json()) as RdapDomain;
@@ -200,9 +210,54 @@ export async function fetchRdapDomain(
     logger.warn("RDAP lookup error", {
       error: err instanceof Error ? err.message : String(err),
       domain,
+      via,
     });
     return null;
   }
+}
+
+/**
+ * Low-level RDAP fetch → raw JSON (or null on 404/error). Shared by lookupRdap
+ * and the .au registrant lookup so the fetch + SSRF-safe dispatch + cost log
+ * live in one place.
+ *
+ * Fast path: resolve the TLD's registry RDAP server from IANA's cached bootstrap
+ * and query it DIRECTLY (registry servers don't rate-limit our burst the way the
+ * shared rdap.org redirector does — see rdap-bootstrap.ts). Fallback: rdap.org,
+ * which is exactly the prior behaviour, so the worst case is unchanged. The
+ * registry base comes only from the IANA bootstrap (never attacker-derived), and
+ * every fetch keeps ssrfSafeDispatcher; the constructed registry URL is also
+ * assertSafeURL-checked.
+ */
+export async function fetchRdapDomain(
+  domain: string,
+): Promise<RdapDomain | null> {
+  const bootstrap = await getRdapBootstrap();
+  if (bootstrap) {
+    const base = resolveRegistryBase(domain, bootstrap);
+    if (base) {
+      try {
+        const url = buildRegistryDomainUrl(base, domain);
+        assertSafeURL(url); // throws → skip direct path, fall through to rdap.org
+        const result = await rdapGet(url, domain, "registry");
+        if (result !== null) return result;
+        // Registry returned null (404 or transient error): fall through to
+        // rdap.org, which 404s too on a genuinely-unregistered domain (→ null →
+        // whoisjson). One extra request only on the rare registry miss.
+      } catch (err) {
+        logger.warn("RDAP registry path skipped", {
+          error: err instanceof Error ? err.message : String(err),
+          domain,
+        });
+      }
+    }
+  }
+
+  return rdapGet(
+    `https://rdap.org/domain/${encodeURIComponent(domain)}`,
+    domain,
+    "rdap.org",
+  );
 }
 
 /**
