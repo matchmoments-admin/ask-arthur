@@ -170,20 +170,21 @@ Every consumer page, authenticated page, admin page, and API route, grouped by d
 
 ### Extension integration (open, ECDSA-signed install requests)
 
-| Route                                         | Method | Purpose                                      |
-| --------------------------------------------- | ------ | -------------------------------------------- |
-| `/api/extension/register`                     | POST   | Register install (Turnstile-gated; one-shot) |
-| `/api/extension/heartbeat`                    | POST   | Keep-alive + threat-DB version sync          |
-| `/api/extension/analyze`                      | POST   | Full analysis from extension                 |
-| `/api/extension/analyze-ad`                   | POST   | Facebook ad scan (text + landing + image)    |
-| `/api/extension/check-ad`                     | POST   | Batch ad-safety lookup                       |
-| `/api/extension/flag-ad`                      | POST   | Community ad flag                            |
-| `/api/extension/url-check`                    | POST   | Real-time URL reputation (navigation guard)  |
-| `/api/extension/report-email`                 | POST   | Email header analysis                        |
-| `/api/extension/site-audit`                   | POST   | Website security-header audit                |
-| `/api/extension/extension-security/analyze`   | POST   | Extension code / manifest scan               |
-| `/api/extension/extension-security/threat-db` | GET    | Malware-signature DB (extension fetch)       |
-| `/api/extension/subscription`                 | POST   | Subscription tier lookup                     |
+| Route                                         | Method | Purpose                                                                  |
+| --------------------------------------------- | ------ | ------------------------------------------------------------------------ |
+| `/api/extension/register`                     | POST   | Register install (Turnstile-gated; one-shot)                             |
+| `/api/extension/heartbeat`                    | POST   | Keep-alive + threat-DB version sync                                      |
+| `/api/extension/analyze`                      | POST   | Full analysis from extension                                             |
+| `/api/extension/analyze-ad`                   | POST   | Facebook ad scan (text + landing + image)                                |
+| `/api/extension/analyze-image`                | POST   | Right-click image AI/deepfake check (`FF_IMAGE_CHECK`, tiered daily cap) |
+| `/api/extension/check-ad`                     | POST   | Batch ad-safety lookup                                                   |
+| `/api/extension/flag-ad`                      | POST   | Community ad flag                                                        |
+| `/api/extension/url-check`                    | POST   | Real-time URL reputation (navigation guard)                              |
+| `/api/extension/report-email`                 | POST   | Email header analysis                                                    |
+| `/api/extension/site-audit`                   | POST   | Website security-header audit                                            |
+| `/api/extension/extension-security/analyze`   | POST   | Extension code / manifest scan                                           |
+| `/api/extension/extension-security/threat-db` | GET    | Malware-signature DB (extension fetch)                                   |
+| `/api/extension/subscription`                 | POST   | Subscription tier lookup                                                 |
 
 ### Security audits (open, max 30–60s)
 
