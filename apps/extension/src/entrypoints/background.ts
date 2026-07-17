@@ -1,6 +1,6 @@
 import { setInstallId, getInstallId, setContextMenuText } from "@/lib/storage";
 import { ensureRegistered } from "@/lib/register";
-import { checkURL, analyzeText, analyzeShop, analyzeExtensionsCRX, fetchThreatDBUpdate, checkAdCommunityFlags, flagAd, analyzeAd, ExtensionApiError } from "@/lib/api";
+import { checkURL, analyzeText, analyzeShop, analyzeExtensionsCRX, fetchThreatDBUpdate, checkAdCommunityFlags, flagAd, analyzeAd, mintLinkToken, ExtensionApiError } from "@/lib/api";
 import { getCachedScanReport, setCachedScanReport } from "@/lib/extension-scan-cache";
 import { scanInstalledExtensions, buildSecurityReport } from "@/lib/extension-scanner";
 import { setupThreatDBRefresh, getThreatDB } from "@/lib/threat-db";
@@ -259,6 +259,10 @@ async function handleMessage(
       return { success: true, data };
     }
 
+    case "MINT_LINK_TOKEN": {
+      const { data } = await mintLinkToken();
+      return { success: true, data };
+    }
     case "FLAG_AD": {
       const { advertiserName, landingUrl, adTextHash } = message;
       await flagAd(advertiserName, landingUrl, adTextHash);

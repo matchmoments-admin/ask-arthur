@@ -227,4 +227,18 @@ export async function analyzeAd(payload: {
   });
 }
 
+// Account linking (extension-monetisation PR 5) — mint a 10-minute
+// single-use token that /extension/link consumes to associate this install
+// with the logged-in web account. Signed request, so only this install's
+// key-holder can mint a token for its install_id.
+export async function mintLinkToken(): Promise<{
+  data: { token: string; expiresInSeconds: number };
+  remaining: number | null;
+}> {
+  return request<{ token: string; expiresInSeconds: number }>("/link-token", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
 export { ExtensionApiError };

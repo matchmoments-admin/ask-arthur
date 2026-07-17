@@ -106,6 +106,13 @@ export const featureFlags = {
    *  and the server-side image-byte fetch. */
   imageCheckVision: readBoolEnv("FF_IMAGE_CHECK_VISION"),
 
+  /** Extension billing: install↔account link flow (/extension/link +
+   *  /api/extension/link-token + /api/extension/link) and, from PR 6, the
+   *  Extension Pro Stripe checkout + webhook provisioning. Pairs with the
+   *  WXT_EXTENSION_BILLING build flag that surfaces the "Link account" row
+   *  in the popup. */
+  extensionBilling: process.env.NEXT_PUBLIC_FF_EXTENSION_BILLING === "true",
+
   /** Mobile: scam alert push notifications */
   pushAlerts: process.env.NEXT_PUBLIC_FF_PUSH_ALERTS === "true",
 

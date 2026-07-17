@@ -185,6 +185,8 @@ Every consumer page, authenticated page, admin page, and API route, grouped by d
 | `/api/extension/extension-security/analyze`   | POST   | Extension code / manifest scan                                           |
 | `/api/extension/extension-security/threat-db` | GET    | Malware-signature DB (extension fetch)                                   |
 | `/api/extension/subscription`                 | POST   | Subscription tier lookup                                                 |
+| `/api/extension/link-token`                   | POST   | Mint single-use account-link token (`FF_EXTENSION_BILLING`)              |
+| `/api/extension/link`                         | POST   | Consume link token, associate install↔user (session-authed)              |
 
 ### Security audits (open, max 30–60s)
 
