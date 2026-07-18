@@ -19,11 +19,13 @@ export interface HiveAIResult {
 }
 
 const CACHE_TTL_SECONDS = 86_400; // 24 hours
-// v2: cache entries gained the `classes` field. Old-shape entries under the
-// v1 prefix age out via TTL; bumping the prefix means new code never reads
-// them (and still-deployed old code never reads new-shape entries).
-const CACHE_PREFIX = "askarthur:hive:v2";
-const HIVE_API_URL = "https://api.thehive.ai/api/v2/task/sync";
+// v3: migrated to Hive's V3 API (see checkHiveAI docstring). The response
+// parsing changed shape (score field `value`, flat `output[0].classes`), so
+// the prefix is bumped from v2 → v3: v2-shape entries age out via TTL and new
+// code never reads them (and still-deployed v2 code never reads v3 entries).
+const CACHE_PREFIX = "askarthur:hive:v3";
+const HIVE_API_URL =
+  "https://api.thehive.ai/api/v3/hive/ai-generated-and-deepfake-content-detection";
 const FETCH_TIMEOUT_MS = 5_000;
 const AI_GENERATED_THRESHOLD = 0.9;
 const DEEPFAKE_THRESHOLD = 0.9;
@@ -54,6 +56,19 @@ async function sha256(input: string): Promise<string> {
 /**
  * Check an image URL against Hive AI for AI-generated content and deepfake detection.
  * Returns null if HIVE_API_KEY is not configured or on any error.
+ *
+ * Uses Hive's V3 API:
+ *   POST https://api.thehive.ai/api/v3/hive/ai-generated-and-deepfake-content-detection
+ *   Authorization: Bearer <HIVE_API_KEY>   (V2 used `Token`)
+ *   Content-Type: application/json
+ *   body: { "input": [ { "media_url": "<imageUrl>" } ] }   (V2 used multipart FormData)
+ *
+ * Response is FLAT (V2 nested it under data.status[0].response.output):
+ *   { task_id, model, output: [ { classes: [ { class, value }, ... ] } ] }
+ * Score field is `value` (V2 used `score`). The generation head is
+ * `ai_generated` / `not_ai_generated` and sums to 1; there is a `deepfake`
+ * class; the remaining classes are generator attribution (midjourney, dalle,
+ * flux, stablediffusion, sora, …). Thresholds unchanged (ai/deepfake ≥ 0.9).
  */
 export async function checkHiveAI(imageUrl: string): Promise<HiveAIResult | null> {
   const apiKey = process.env.HIVE_API_KEY;
@@ -75,19 +90,18 @@ export async function checkHiveAI(imageUrl: string): Promise<HiveAIResult | null
       }
     }
 
-    // Build FormData with the image URL
-    const formData = new FormData();
-    formData.append("url", imageUrl);
-
+    // V3 request body is JSON with a `media_url` field (V2 used multipart
+    // FormData with a `url` field).
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
     const res = await fetch(HIVE_API_URL, {
       method: "POST",
       headers: {
-        Authorization: `Token ${apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
       },
-      body: formData,
+      body: JSON.stringify({ input: [{ media_url: imageUrl }] }),
       signal: controller.signal,
     });
 
@@ -100,9 +114,10 @@ export async function checkHiveAI(imageUrl: string): Promise<HiveAIResult | null
 
     const json = await res.json();
 
-    // Parse response: data.status[0].response.output
-    const output = json?.data?.status?.[0]?.response?.output;
-    if (!Array.isArray(output)) {
+    // Parse V3's flat response: output[0].classes (V2 nested it under
+    // data.status[0].response.output). Score field is `value` (V2: `score`).
+    const classes = json?.output?.[0]?.classes;
+    if (!Array.isArray(classes)) {
       logger.warn("Hive AI unexpected response shape", { imageUrl: imageUrl.slice(0, 80) });
       return null;
     }
@@ -113,28 +128,25 @@ export async function checkHiveAI(imageUrl: string): Promise<HiveAIResult | null
     let highestSourceScore = 0;
     const allClasses: HiveClassScore[] = [];
 
-    for (const item of output) {
-      const classes = item?.classes;
-      if (!Array.isArray(classes)) continue;
+    for (const cls of classes) {
+      const className = cls?.class;
+      // V3 uses `value`; map it into our internal `score` field so downstream
+      // consumers of HiveClassScore.score (generatorBreakdown) stay compatible.
+      const score = typeof cls?.value === "number" ? cls.value : 0;
+      if (typeof className !== "string") continue;
 
-      for (const cls of classes) {
-        const className = cls?.class;
-        const score = typeof cls?.score === "number" ? cls.score : 0;
-        if (typeof className !== "string") continue;
+      allClasses.push({ class: className, score });
 
-        allClasses.push({ class: className, score });
-
-        if (className === "ai_generated") {
-          aiConfidence = Math.max(aiConfidence, score);
-        } else if (className === "deepfake") {
-          deepfakeConfidence = Math.max(deepfakeConfidence, score);
-        } else if (className === "not_ai_generated") {
-          // skip
-        } else if (score > highestSourceScore) {
-          // Track generator source as the highest-scoring non-standard class
-          highestSourceScore = score;
-          generatorSource = className;
-        }
+      if (className === "ai_generated") {
+        aiConfidence = Math.max(aiConfidence, score);
+      } else if (className === "deepfake") {
+        deepfakeConfidence = Math.max(deepfakeConfidence, score);
+      } else if (className === "not_ai_generated") {
+        // skip — verdict complement, not a generator
+      } else if (score > highestSourceScore) {
+        // Track generator source as the highest-scoring attribution class
+        highestSourceScore = score;
+        generatorSource = className;
       }
     }
 

@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-// checkHiveAI v2: full class-list retention + versioned cache prefix.
-// First dedicated test for this module — fixtures model Hive's
-// data.status[0].response.output[].classes shape.
+// checkHiveAI v3: migrated to Hive's V3 API (Bearer auth, JSON body,
+// flat output[0].classes with a `value` score field). Full class-list
+// retention + versioned cache prefix are preserved from v2.
 
 const redisMock = vi.hoisted(() => ({
   store: new Map<string, unknown>(),
@@ -20,28 +20,23 @@ vi.mock("@askarthur/utils/logger", () => ({
 
 import { checkHiveAI } from "../hive-ai";
 
+// V3 response shape: flat `output[0].classes`, score field is `value`.
 const HIVE_FIXTURE = {
-  data: {
-    status: [
-      {
-        response: {
-          output: [
-            {
-              classes: [
-                { class: "ai_generated", score: 0.97 },
-                { class: "not_ai_generated", score: 0.03 },
-                { class: "deepfake", score: 0.12 },
-                { class: "midjourney", score: 0.62 },
-                { class: "dalle", score: 0.21 },
-                { class: "flux", score: 0.08 },
-                { class: "stablediffusion", score: 0.05 },
-              ],
-            },
-          ],
-        },
-      },
-    ],
-  },
+  task_id: "task-abc",
+  model: "ai-generated-and-deepfake-content-detection",
+  output: [
+    {
+      classes: [
+        { class: "ai_generated", value: 0.97 },
+        { class: "not_ai_generated", value: 0.03 },
+        { class: "deepfake", value: 0.12 },
+        { class: "midjourney", value: 0.62 },
+        { class: "dalle", value: 0.21 },
+        { class: "flux", value: 0.08 },
+        { class: "stablediffusion", value: 0.05 },
+      ],
+    },
+  ],
 };
 
 function stubFetch(json: unknown) {
@@ -85,12 +80,12 @@ describe("checkHiveAI", () => {
     expect(result!.classes).toContainEqual({ class: "flux", score: 0.08 });
   });
 
-  it("caches under the v2 prefix (old-shape v1 entries are never read)", async () => {
+  it("caches under the v3 prefix (old-shape v2 entries are never read)", async () => {
     stubFetch(HIVE_FIXTURE);
     await checkHiveAI("https://img.example.com/a.jpg");
     const keys = [...redisMock.store.keys()];
     expect(keys).toHaveLength(1);
-    expect(keys[0]).toMatch(/^askarthur:hive:v2:/);
+    expect(keys[0]).toMatch(/^askarthur:hive:v3:/);
   });
 
   it("tolerates a cached result without the classes field (defensive read)", async () => {
@@ -120,7 +115,8 @@ describe("checkHiveAI", () => {
   });
 
   it("returns null on a malformed response shape", async () => {
-    stubFetch({ data: { status: [{ response: {} }] } });
+    // V3 flat shape missing output[0].classes.
+    stubFetch({ task_id: "task-x", output: [{}] });
     expect(await checkHiveAI("https://img.example.com/c.jpg")).toBeNull();
   });
 });
