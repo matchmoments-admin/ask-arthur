@@ -23,10 +23,27 @@ change is needed to go live — only Meta-side config + the env vars below.
 
 ## 0. Prerequisites (once per Meta app)
 
-1. **Meta app** created (done — you created it and are assigning permissions).
-2. **Meta Business verification** completed for the Business that owns the app
-   (Business Settings → Security Center). Required before Advanced Access.
-3. Production domain reachable: `https://askarthur.au` (webhooks must be HTTPS
+App = **"Just Ask Arthur"** (status: Unpublished as of 2026-07-19).
+
+1. **Meta app** created (done).
+2. **Trim use cases to what we ship.** The dashboard currently lists Threads,
+   "Manage everything on your Page", WhatsApp, Instagram, "Engage with customers
+   on Messenger", and Ads Agentic. App Review scope = the sum of your use
+   cases, so **remove everything except**:
+   - **Connect with customers through WhatsApp** (the WhatsApp bot)
+   - **Engage with customers on Messenger from Meta** (the Messenger bot)
+   - Keep the **Page** connection only insofar as Messenger needs a linked Page.
+   - Instagram: keep ONLY if you're building the IG DM bot now (not built yet —
+     see the handoff doc); otherwise remove it to shrink review.
+   - Threads / Ads Agentic / Facebook Login for Business are **not used by the
+     bots** — remove to avoid extra review burden.
+3. **Meta Business verification** completed for the Business that owns the app
+   (Business Settings → Security Center).
+4. **Become a Tech Provider + access verification.** The dashboard's "Become a
+   Tech Provider" step is **required to submit to App Review** and request the
+   messaging permissions for public (non-tester) use. Complete this before §1.4
+   / §2.4 app review.
+5. Production domain reachable: `https://askarthur.au` (webhooks must be HTTPS
    with a valid cert — Vercel prod already is).
 
 ---
@@ -91,6 +108,15 @@ Run BEFORE and AFTER app review — pre-review works for app admins/testers.
    paste-ready evidence). Confirm a row landed:
    `select * from onward_report_log order by created_at desc limit 3;`
 4. Confirm cost telemetry: `select * from cost_telemetry where feature='bot_analyze' order by created_at desc limit 3;` (Messenger shares the WhatsApp path, so cost + rate-limit + PII-scrub parity is automatic).
+
+---
+
+## 4. Publish
+
+The app is **Unpublished**. Once both use cases pass App Review and the smoke
+test is green, use the dashboard **Publish** step (Dashboard → "Check that all
+requirements are met, then publish your app") to switch the app to Live. Until
+then only app admins/testers/roles can message the bots.
 
 ---
 
