@@ -6,6 +6,7 @@ import { analyzeWithClaude } from "@askarthur/scam-engine/claude";
 import { extractURLs, checkURLReputation } from "@askarthur/scam-engine/safebrowsing";
 import { checkHiveAI } from "@askarthur/scam-engine/hive-ai";
 import { mergeVerdict, type DeepfakeSignal } from "@askarthur/core-analysis";
+import { brandNormalize } from "@askarthur/shopfront-glue";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -267,6 +268,12 @@ export async function POST(req: NextRequest) {
     if (verdict !== "SAFE") {
       const supabase = createServiceClient();
       if (supabase) {
+        // Always tag the impersonated brand (v243) — not just when it matched a
+        // monitored celebrity. impersonated_celebrity stays celebrity-only (it
+        // drives deepfake_detections); impersonated_brand carries EVERY brand
+        // (banks, super funds, retailers) so the Scam-Ad Observatory has
+        // brand-tagged telemetry to farm the day the feature goes live.
+        const impersonatedBrand = analysis?.impersonatedBrand?.trim() || null;
         waitUntil(
           (async () => {
             const { error: upsertErr } = await supabase
@@ -281,6 +288,8 @@ export async function POST(req: NextRequest) {
                   deepfake_detected: deepfakeDetected,
                   hive_result: hive,
                   impersonated_celebrity: impersonatedCelebrity,
+                  impersonated_brand: impersonatedBrand,
+                  impersonated_brand_key: brandNormalize(impersonatedBrand),
                 },
                 { onConflict: "ad_text_hash" }
               );
