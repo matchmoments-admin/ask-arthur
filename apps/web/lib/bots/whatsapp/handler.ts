@@ -1,4 +1,4 @@
-import { analyzeForBot } from "@askarthur/bot-core/analyze";
+import { analyzeForBotDetailed } from "@askarthur/bot-core/analyze";
 import { toWhatsAppMessage } from "@askarthur/bot-core/format-whatsapp";
 import { checkBotRateLimit } from "@askarthur/bot-core/rate-limit";
 import { logger } from "@askarthur/utils/logger";
@@ -6,6 +6,19 @@ import { sendTextMessage, sendInteractiveButtons } from "./api";
 import { downloadWhatsAppMedia } from "./media";
 import { isReplay } from "../replay-dedup";
 import { getBotRedis } from "../redis";
+import {
+  stashBotReport,
+  buildReportStash,
+  reportBotScam,
+} from "../onward-report";
+
+// Fallback shown when there's nothing to report against (the stash expired or
+// attribution was off) — the pre-onward static guidance.
+const REPORT_FALLBACK =
+  "Report this scam:\n\n" +
+  "• Scamwatch: scamwatch.gov.au/report-a-scam\n" +
+  "• ReportCyber: cyber.gov.au/report-and-recover/report\n" +
+  "• Contact your bank immediately if you've shared financial details";
 
 const DISCLOSURE_MESSAGE =
   "Welcome to Ask Arthur \u2014 Australia's scam detection service. " +
@@ -92,13 +105,8 @@ async function processMessage(message: WhatsAppMessage): Promise<void> {
   if (message.type === "interactive" && message.interactive?.button_reply) {
     const buttonId = message.interactive.button_reply.id;
     if (buttonId === "action:report") {
-      await sendTextMessage(
-        from,
-        "Report this scam:\n\n" +
-        "\u2022 Scamwatch: scamwatch.gov.au/report-a-scam\n" +
-        "\u2022 ReportCyber: cyber.gov.au/report-and-recover/report\n" +
-        "\u2022 Contact your bank immediately if you've shared financial details"
-      );
+      const reply = await reportBotScam("whatsapp", from);
+      await sendTextMessage(from, reply ?? REPORT_FALLBACK);
     } else if (buttonId === "action:check") {
       await sendTextMessage(from, "Send me another message to check \u{1f50d}");
     } else if (buttonId === "action:about") {
@@ -151,11 +159,12 @@ async function processImageMessage(
       return;
     }
 
-    const result = await analyzeForBot(caption ?? "Analyse this image for scam indicators", undefined, [base64], {
-      source: "bot_whatsapp",
-      userId: from,
-      inputMode: "image",
-    });
+    const { result, scamReportId } = await analyzeForBotDetailed(
+      caption ?? "Analyse this image for scam indicators",
+      undefined,
+      [base64],
+      { source: "bot_whatsapp", userId: from, inputMode: "image" },
+    );
     const formatted = toWhatsAppMessage(result);
 
     const buttons: Array<{ id: string; title: string }> = [];
@@ -166,6 +175,9 @@ async function processImageMessage(
     buttons.push({ id: "action:about", title: "About" });
 
     await sendInteractiveButtons(from, formatted, buttons);
+    if (scamReportId) {
+      await stashBotReport("whatsapp", from, buildReportStash(scamReportId, result));
+    }
   } catch (err) {
     logger.error("WhatsApp image analysis failed", { error: String(err) });
     await sendTextMessage(from, "Sorry, I couldn't analyse that image right now. Please try again in a moment.");
@@ -181,7 +193,7 @@ async function processAnalysis(from: string, text: string): Promise<void> {
   }
 
   try {
-    const result = await analyzeForBot(text, undefined, undefined, {
+    const { result, scamReportId } = await analyzeForBotDetailed(text, undefined, undefined, {
       source: "bot_whatsapp",
       userId: from,
       inputMode: "text",
@@ -197,6 +209,9 @@ async function processAnalysis(from: string, text: string): Promise<void> {
     buttons.push({ id: "action:about", title: "About" });
 
     await sendInteractiveButtons(from, formatted, buttons);
+    if (scamReportId) {
+      await stashBotReport("whatsapp", from, buildReportStash(scamReportId, result));
+    }
   } catch (err) {
     logger.error("WhatsApp analysis failed", { error: String(err) });
     await sendTextMessage(from, "Sorry, I couldn't analyse that message right now. Please try again in a moment.");

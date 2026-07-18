@@ -1,4 +1,4 @@
-import { analyzeForBot } from "@askarthur/bot-core/analyze";
+import { analyzeForBotDetailed } from "@askarthur/bot-core/analyze";
 import { toMessengerMessage } from "@askarthur/bot-core/format-messenger";
 import { checkBotRateLimit } from "@askarthur/bot-core/rate-limit";
 import { logger } from "@askarthur/utils/logger";
@@ -7,6 +7,19 @@ import { sendTextMessage, sendQuickReplies, type MessengerQuickReply } from "./a
 import { downloadMessengerAttachment } from "./media";
 import { isReplay } from "../replay-dedup";
 import { getBotRedis } from "../redis";
+import {
+  stashBotReport,
+  buildReportStash,
+  reportBotScam,
+} from "../onward-report";
+
+// Fallback when there's nothing to report against (stash expired / attribution
+// off) — the pre-onward static guidance.
+const REPORT_FALLBACK =
+  "Report this scam:\n\n" +
+  "• Scamwatch: scamwatch.gov.au/report-a-scam\n" +
+  "• ReportCyber: cyber.gov.au/report-and-recover/report\n" +
+  "• Contact your bank immediately if you've shared financial details";
 
 const DISCLOSURE_MESSAGE =
   "Welcome to Ask Arthur — Australia's scam detection service. " +
@@ -168,13 +181,16 @@ async function processImageMessage(
       return;
     }
 
-    const result = await analyzeForBot(
+    const { result, scamReportId } = await analyzeForBotDetailed(
       "Analyse this image for scam indicators",
       undefined,
       [base64],
       { source: "bot_messenger", userId: senderId, inputMode: "image" },
     );
     await sendResult(senderId, result);
+    if (scamReportId) {
+      await stashBotReport("messenger", senderId, buildReportStash(scamReportId, result));
+    }
   } catch (err) {
     logger.error("Messenger image analysis failed", { error: String(err) });
     await sendTextMessage(
@@ -195,12 +211,15 @@ async function processAnalysis(senderId: string, text: string): Promise<void> {
   }
 
   try {
-    const result = await analyzeForBot(text, undefined, undefined, {
+    const { result, scamReportId } = await analyzeForBotDetailed(text, undefined, undefined, {
       source: "bot_messenger",
       userId: senderId,
       inputMode: "text",
     });
     await sendResult(senderId, result);
+    if (scamReportId) {
+      await stashBotReport("messenger", senderId, buildReportStash(scamReportId, result));
+    }
   } catch (err) {
     logger.error("Messenger analysis failed", { error: String(err) });
     await sendTextMessage(
@@ -245,13 +264,8 @@ async function sendResult(
 
 async function handleAction(senderId: string, payload: string): Promise<void> {
   if (payload === "action:report") {
-    await sendTextMessage(
-      senderId,
-      "Report this scam:\n\n" +
-        "• Scamwatch: scamwatch.gov.au/report-a-scam\n" +
-        "• ReportCyber: cyber.gov.au/report-and-recover/report\n" +
-        "• Contact your bank immediately if you've shared financial details",
-    );
+    const reply = await reportBotScam("messenger", senderId);
+    await sendTextMessage(senderId, reply ?? REPORT_FALLBACK);
   } else if (payload === "action:check") {
     await sendTextMessage(
       senderId,

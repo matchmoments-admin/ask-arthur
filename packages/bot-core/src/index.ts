@@ -1,5 +1,10 @@
 export type { Platform, BotMessage, BotResponse } from "./types";
-export { analyzeForBot, BotAnalysisPausedError } from "./analyze";
+export {
+  analyzeForBot,
+  analyzeForBotDetailed,
+  BotAnalysisPausedError,
+  type BotAnalysis,
+} from "./analyze";
 export type { BotReportContext } from "./analyze";
 export { toTelegramHTML } from "./format-telegram";
 export { toWhatsAppMessage } from "./format-whatsapp";
