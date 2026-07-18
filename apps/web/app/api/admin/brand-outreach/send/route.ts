@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { Resend } from "resend";
+import { render } from "@react-email/components";
 import { requireAdmin } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { readStringEnv } from "@askarthur/utils/env";
@@ -8,10 +9,10 @@ import { logger } from "@askarthur/utils/logger";
 import { logCost, PRICING } from "@/lib/cost-telemetry";
 import { signUnsubscribeUrl } from "@/lib/unsubscribe";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
-import {
-  buildOutreachEmail,
-  outreachIdempotencyKey,
-} from "@/lib/email/brand-outreach";
+import { renderCopySlot } from "@/lib/email/resolve-copy";
+import { outreachIdempotencyKey } from "@/lib/email/brand-outreach";
+import { getBrandCloneSample } from "@/lib/email/brand-outreach-pilot";
+import BrandOutreachPilot from "@/emails/BrandOutreachPilot";
 
 export const dynamic = "force-dynamic";
 
@@ -119,11 +120,6 @@ export async function POST(req: NextRequest) {
   // verbatim (it's a personal email — no marketing prefix).
   const subject = isShadow ? `[TEST → ${body.brandName}] ${body.subject}` : body.subject;
 
-  const { html, text } = buildOutreachEmail({
-    brandName: body.brandName,
-    bodyMarkdown: body.bodyMarkdown_or_html,
-  });
-
   // Signed one-click unsubscribe (RFC 8058) + a mailto STOP fallback. Bound to
   // the ACTUAL recipient so a shadow test unsubscribes the founder, not the
   // brand. The stable idempotencyKey (recipient+subject+day) means a
@@ -133,6 +129,33 @@ export async function POST(req: NextRequest) {
     `STOP — ${body.brandName}`,
   )}`;
   const idempotencyKey = outreachIdempotencyKey(recipient, subject);
+
+  // Pull the real clone-detection sample so the pilot email PROVES the value:
+  // a styled table of the lookalikes we detected + reported for this brand in
+  // the last 30 days. Keyed by the worklist brandKey (== the brand's legit
+  // domain == inferred_target_domain). Best-effort — a null sample (no brandKey,
+  // no service client, or a query error) simply drops the sample section; the
+  // pitch + signature still send.
+  const sampleClient = createServiceClient();
+  const cloneSample = sampleClient
+    ? await getBrandCloneSample(sampleClient, body.brandKey)
+    : null;
+
+  // Render the styled React Email template (multipart html + plain-text twin).
+  // The founder's prose (offer + {{hook}}) is sanitised markdown → HTML via the
+  // same renderer Email Studio uses, then handed to the template as the opening
+  // body; the clone sample + signature are the template's own chrome.
+  const bodyHtml = renderCopySlot(body.bodyMarkdown_or_html, {
+    brandName: body.brandName,
+  });
+  const el = BrandOutreachPilot({
+    brandName: body.brandName,
+    bodyHtml,
+    cloneSample: cloneSample ?? undefined,
+    stopUrl: unsubscribeUrl,
+  });
+  const html = await render(el);
+  const text = await render(el, { plainText: true });
 
   let messageId: string | null = null;
   try {
