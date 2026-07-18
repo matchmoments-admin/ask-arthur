@@ -30,6 +30,23 @@ const FETCH_TIMEOUT_MS = 5_000;
 const AI_GENERATED_THRESHOLD = 0.9;
 const DEEPFAKE_THRESHOLD = 0.9;
 
+// V3's `classes` array mixes three heads: the image generation head
+// (ai_generated / not_ai_generated), the deepfake class, the generator-source
+// head (midjourney / stablediffusion / sora / other_image_generators / …), AND
+// an audio head (ai_generated_audio / not_ai_generated_audio) that is present
+// even for image-only inputs. When picking the generator source we must skip
+// everything that is NOT a generator — otherwise not_ai_generated_audio (≈1.0
+// on a real photo) or the verdict/sentinel classes get mis-reported as the
+// "generator". Anything ending in `_audio`, plus these explicit non-generators,
+// is excluded.
+const NON_GENERATOR_CLASSES = new Set([
+  "ai_generated",
+  "not_ai_generated",
+  "deepfake",
+  "none",
+  "inconclusive",
+]);
+
 let _redis: Redis | null = null;
 
 function getRedis(): Redis | null {
@@ -141,21 +158,27 @@ export async function checkHiveAI(imageUrl: string): Promise<HiveAIResult | null
         aiConfidence = Math.max(aiConfidence, score);
       } else if (className === "deepfake") {
         deepfakeConfidence = Math.max(deepfakeConfidence, score);
-      } else if (className === "not_ai_generated") {
-        // skip — verdict complement, not a generator
-      } else if (score > highestSourceScore) {
-        // Track generator source as the highest-scoring attribution class
+      } else if (
+        !NON_GENERATOR_CLASSES.has(className) &&
+        !className.endsWith("_audio") &&
+        score > highestSourceScore
+      ) {
+        // Highest-scoring genuine generator-attribution class (audio + verdict
+        // + sentinel classes excluded above).
         highestSourceScore = score;
         generatorSource = className;
       }
     }
 
+    const isAiGenerated = aiConfidence >= AI_GENERATED_THRESHOLD;
     const result: HiveAIResult = {
-      isAiGenerated: aiConfidence >= AI_GENERATED_THRESHOLD,
+      isAiGenerated,
       aiConfidence,
       isDeepfake: deepfakeConfidence >= DEEPFAKE_THRESHOLD,
       deepfakeConfidence,
-      generatorSource,
+      // Generator attribution is only meaningful for an AI-generated image; a
+      // real photo has no generator, so don't surface a spurious top class.
+      generatorSource: isAiGenerated ? generatorSource : null,
       classes: allClasses,
     };
 
