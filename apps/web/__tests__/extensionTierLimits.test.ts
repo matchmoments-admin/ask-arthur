@@ -57,7 +57,11 @@ vi.mock("@/app/api/extension/_lib/signature", () => ({
   verifyExtensionSignature: vi.fn(async () => ({ ok: true, installId: "install-a" })),
 }));
 
+const logCostMock = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/cost-telemetry", () => ({ logCost: logCostMock }));
+
 import { validateExtensionRequest } from "@/app/api/extension/_lib/auth";
+import { logger } from "@askarthur/utils/logger";
 
 function makeReq(headers: Record<string, string> = {}) {
   return new NextRequest("http://localhost/api/extension/analyze", {
@@ -145,5 +149,39 @@ describe("tier-aware extension rate limits", () => {
     expect(emailBurst).toBeDefined();
     expect(emailBurst!.limiterArg).toEqual({ tokens: 20, window: "1 m" });
     expect(emailBurst!.limit.mock.calls.length).toBe(before + 1);
+  });
+
+  it("instruments a free-tier daily-limit 429 (always-ship warn + $0 cost row)", async () => {
+    // Ensure the free daily limiter singleton exists, then make its NEXT call
+    // report exhaustion (burst still succeeds — it's checked first).
+    await validateExtensionRequest(makeReq());
+    const daily = limiterByPrefix("askarthur:ext:daily");
+    expect(daily).toBeDefined();
+    daily!.limit.mockResolvedValueOnce({
+      success: false,
+      remaining: 0,
+      reset: Date.now() + 60_000,
+    });
+
+    logCostMock.mockClear();
+    vi.mocked(logger.warn).mockClear();
+
+    const result = await validateExtensionRequest(makeReq());
+    expect(result.valid).toBe(false);
+    if (result.valid) return;
+    expect(result.status).toBe(429);
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      "extension daily limit hit",
+      expect.objectContaining({ tier: "free", dailyLimit: 50, isEmailScan: false }),
+    );
+    expect(logCostMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        feature: "extension_daily_limit",
+        provider: "internal",
+        estimatedCostUsd: 0,
+        metadata: expect.objectContaining({ tier: "free", daily_limit: 50 }),
+      }),
+    );
   });
 });

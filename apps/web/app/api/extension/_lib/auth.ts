@@ -4,6 +4,7 @@ import { Redis } from "@upstash/redis";
 import { logger } from "@askarthur/utils/logger";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { EXTENSION_TIER_LIMITS } from "@askarthur/types/billing";
+import { logCost } from "@/lib/cost-telemetry";
 import { verifyExtensionSignature } from "./signature";
 
 export type ExtensionTier = "free" | "pro";
@@ -234,6 +235,31 @@ export async function validateExtensionRequest(
   const daily = await dailyLimiter.limit(identifier);
   if (!daily.success) {
     const retryAfter = String(Math.ceil((daily.reset - Date.now()) / 1000));
+    // A free-tier install hitting its daily ceiling is the ONLY leading
+    // indicator of Extension-Pro demand — and it was invisible (Upstash-only,
+    // 48h TTL). Instrument it: an always-ship warn (bypasses the 10% INFO
+    // sampling) + a $0 cost_telemetry row so the volume shows on /admin/costs.
+    // Both are fire-and-forget — zero added latency on the 429 path.
+    logger.warn("extension daily limit hit", {
+      tier,
+      dailyLimit,
+      isEmailScan,
+      installIdHash: identifier,
+    });
+    logCost({
+      feature: "extension_daily_limit",
+      provider: "internal",
+      operation: isEmailScan ? "email" : "check",
+      units: 1,
+      estimatedCostUsd: 0,
+      metadata: {
+        tier,
+        daily_limit: dailyLimit,
+        is_email_scan: isEmailScan,
+        install_id_hash: identifier,
+      },
+      requestId,
+    });
     return {
       valid: false,
       error: isPro
