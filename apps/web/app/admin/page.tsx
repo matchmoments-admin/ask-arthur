@@ -233,6 +233,14 @@ async function getTiles(svc: ReturnType<typeof createServiceClient>): Promise<Ti
       metric: String(blogDraftsRes.count ?? 0),
       metricLabel: "Drafts",
     },
+    {
+      href: "/admin/brand-outreach",
+      title: "Brand reach-out",
+      purpose: "One-off founder pilot email to a single brand contact",
+      metric: "compose",
+      metricLabel: "Four-eyes send",
+      secondary: "Manual outreach — send yourself a test first",
+    },
   ];
 }
 

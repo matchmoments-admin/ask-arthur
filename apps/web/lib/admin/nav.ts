@@ -20,6 +20,7 @@ import {
   Send,
   FileText,
   Mail,
+  Megaphone,
   ListChecks,
   BarChart3,
 } from "lucide-react";
@@ -58,6 +59,7 @@ export const ADMIN_NAV_SECTIONS: AdminNavSection[] = [
       { id: "phone", name: "Phone footprint", href: "/admin/phone-footprint", icon: Phone },
       { id: "onward", name: "Onward reports", href: "/admin/onward-reports", icon: Send },
       { id: "email-studio", name: "Email Studio", href: "/admin/email-studio", icon: Mail },
+      { id: "brand-outreach", name: "Brand reach-out", href: "/admin/brand-outreach", icon: Megaphone },
       { id: "blog", name: "Blog", href: "/admin/blog", icon: FileText },
     ],
   },
