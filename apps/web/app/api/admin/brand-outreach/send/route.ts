@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { Resend } from "resend";
 import { requireAdmin } from "@/lib/adminAuth";
+import { createServiceClient } from "@askarthur/supabase/server";
 import { readStringEnv } from "@askarthur/utils/env";
 import { logger } from "@askarthur/utils/logger";
 import { logCost, PRICING } from "@/lib/cost-telemetry";
@@ -22,10 +23,49 @@ const UNSUBSCRIBE_BASE = "https://askarthur.au/unsubscribe";
 const Body = z.object({
   to: z.string().email(),
   brandName: z.string().trim().min(1).max(120),
+  // Optional stable brand key (the worklist's brand_key = the brand's legit
+  // domain). Recorded on the outreach-log row so "next brand" knows this brand
+  // was contacted. Absent for ad-hoc sends not driven by the worklist.
+  brandKey: z.string().trim().min(1).max(200).optional(),
   subject: z.string().trim().min(1).max(200),
   bodyMarkdown_or_html: z.string().trim().min(1).max(20_000),
   testMode: z.boolean().optional(),
 });
+
+/**
+ * Best-effort insert into the brand_outreach_log ledger. Never throws — the
+ * email has already been sent (or failed) by the time this runs, so a ledger
+ * hiccup must not change the caller's outcome. It only affects the worklist's
+ * already-contacted memory, which is self-healing on the next send.
+ */
+async function recordOutreach(row: {
+  brandKey?: string;
+  brandName: string;
+  recipient: string;
+  subject: string;
+  mode: "real" | "shadow";
+  status: "sent" | "failed";
+  providerMessageId?: string | null;
+}): Promise<void> {
+  try {
+    const sb = createServiceClient();
+    if (!sb) return;
+    const { error } = await sb.from("brand_outreach_log").insert({
+      brand_key: row.brandKey ?? null,
+      brand_name: row.brandName,
+      recipient: row.recipient,
+      subject: row.subject,
+      mode: row.mode,
+      status: row.status,
+      provider_message_id: row.providerMessageId ?? null,
+    });
+    if (error) {
+      logger.warn("brand-outreach: log insert failed", { error: String(error) });
+    }
+  } catch (err) {
+    logger.warn("brand-outreach: log insert threw", { error: String(err) });
+  }
+}
 
 /**
  * POST /api/admin/brand-outreach/send — send ONE founder-composed cold
@@ -137,8 +177,30 @@ export async function POST(req: NextRequest) {
         error: String(tgErr),
       });
     }
+    // Record the failed attempt so the ledger reflects reality (does not count
+    // as "contacted" for the worklist — only status='sent' rows do).
+    await recordOutreach({
+      brandKey: body.brandKey,
+      brandName: body.brandName,
+      recipient,
+      subject,
+      mode: isShadow ? "shadow" : "real",
+      status: "failed",
+    });
     return NextResponse.json({ error: "send_failed", detail: reason }, { status: 502 });
   }
+
+  // Ledger the successful send — this is what the "Next brand to email"
+  // worklist reads to know this brand has been contacted.
+  await recordOutreach({
+    brandKey: body.brandKey,
+    brandName: body.brandName,
+    recipient,
+    subject,
+    mode: isShadow ? "shadow" : "real",
+    status: "sent",
+    providerMessageId: messageId,
+  });
 
   logCost({
     feature: "brand_outreach",

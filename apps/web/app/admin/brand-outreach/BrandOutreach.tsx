@@ -1,6 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import {
+  type WorklistRow,
+  signalSummary,
+  buildComposerBody,
+  bucketWorklist,
+} from "@/lib/email/brand-outreach-worklist";
 
 interface Props {
   /** Pilot starter body (with a {{hook}} placeholder) from the shared lib. */
@@ -16,7 +22,8 @@ interface SendResult {
 }
 
 /**
- * Compose + send one founder-to-brand pilot email.
+ * Compose + send one founder-to-brand pilot email, driven by a live
+ * "Next brand to email" worklist.
  *
  * SAFETY: the primary (prominent) action is "Send test to myself" — the
  * testMode path that routes to the founder's own inbox and never touches the
@@ -27,10 +34,36 @@ interface SendResult {
 export default function BrandOutreach({ pilotTemplate }: Props) {
   const [to, setTo] = useState("");
   const [brandName, setBrandName] = useState("");
+  // Stable brand key (worklist domain) — recorded on the send so the worklist
+  // knows this brand was contacted. Cleared if the operator hand-edits the
+  // recipient (the send is then no longer tied to that worklist brand).
+  const [brandKey, setBrandKey] = useState<string | null>(null);
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+
+  const [rows, setRows] = useState<WorklistRow[] | null>(null);
+  const [worklistError, setWorklistError] = useState<string | null>(null);
+
+  const loadWorklist = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/brand-outreach/worklist");
+      const json = await res.json();
+      if (res.ok && json.ok) {
+        setRows(json.rows as WorklistRow[]);
+        setWorklistError(null);
+      } else {
+        setWorklistError(json.error ?? `HTTP ${res.status}`);
+      }
+    } catch {
+      setWorklistError("request_failed");
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadWorklist();
+  }, [loadWorklist]);
 
   const loadTemplate = () => {
     setBody(pilotTemplate);
@@ -43,6 +76,16 @@ export default function BrandOutreach({ pilotTemplate }: Props) {
     }
   };
 
+  const loadFromWorklist = (row: WorklistRow) => {
+    setTo(row.contact_recipient ?? "");
+    setBrandName(row.brand_name);
+    setBrandKey(row.brand_key);
+    setSubject(`${row.brand_name} × Ask Arthur — clone-watch pilot`);
+    setBody(buildComposerBody(row));
+    setStatus(`Loaded ${row.brand_name} — replace {{hook}} and review before sending.`);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
   const send = async (testMode: boolean) => {
     setBusy(true);
     setStatus(null);
@@ -53,6 +96,7 @@ export default function BrandOutreach({ pilotTemplate }: Props) {
         body: JSON.stringify({
           to,
           brandName,
+          brandKey: brandKey ?? undefined,
           subject,
           bodyMarkdown_or_html: body,
           testMode,
@@ -65,6 +109,7 @@ export default function BrandOutreach({ pilotTemplate }: Props) {
             ? `Sent to ${json.recipient} ✓`
             : `Test sent to ${json.recipient} (your inbox) ✓`,
         );
+        if (json.mode === "real") void loadWorklist(); // refresh contacted flags
       } else {
         setStatus(`Error: ${json.error ?? res.status}${json.detail ? ` — ${json.detail}` : ""}`);
       }
@@ -88,19 +133,21 @@ export default function BrandOutreach({ pilotTemplate }: Props) {
 
   const canSend = Boolean(to && brandName && subject && body) && !busy;
 
+  const buckets = rows ? bucketWorklist(rows) : null;
+
   return (
     <div className="mx-auto max-w-3xl px-4 py-6 lg:px-6 lg:py-8">
       <header className="mb-5">
         <h1 className="text-lg font-semibold">Brand reach-out</h1>
         <p className="mt-1 max-w-prose text-xs text-slate-500">
-          Compose and send ONE personal pilot email to a single brand contact
-          (the clone-watch shortlist — P&amp;N Bank, Airwallex, Reece, …). You
-          write the body; Ask Arthur wraps it in a plain signature + legal
+          Compose and send ONE personal pilot email to a single brand contact.
+          You write the body; Ask Arthur wraps it in a plain signature + legal
           footer. This is the manual four-eyes path — distinct from the
           automated stewardship report send. Always send yourself a test first.
         </p>
       </header>
 
+      {/* ── Compose form ── */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <label htmlFor="bo-to" className="mb-1 block text-sm font-medium">
@@ -110,7 +157,10 @@ export default function BrandOutreach({ pilotTemplate }: Props) {
             id="bo-to"
             type="email"
             value={to}
-            onChange={(e) => setTo(e.target.value)}
+            onChange={(e) => {
+              setTo(e.target.value);
+              setBrandKey(null); // hand-edited → no longer a worklist-tracked brand
+            }}
             placeholder="security@brand.com.au"
             className="w-full rounded border border-slate-300 p-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
           />
@@ -196,6 +246,125 @@ export default function BrandOutreach({ pilotTemplate }: Props) {
           {status}
         </p>
       </div>
+
+      {/* ── Next brand to email ── */}
+      <section className="mt-10 border-t border-slate-200 pt-6">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-semibold">Next brand to email</h2>
+          <button
+            type="button"
+            onClick={() => void loadWorklist()}
+            className="text-[11px] text-slate-400 hover:text-slate-600"
+          >
+            refresh
+          </button>
+        </div>
+        <p className="mb-3 text-[11px] text-slate-400">
+          Ranked live from clone-watch signals (weaponised → live → in-campaign)
+          among brands with a resolvable security contact. &quot;Load into
+          composer&quot; fills the recipient, brand, and a generated pitch.
+        </p>
+
+        {worklistError && (
+          <p className="text-xs text-amber-600">
+            Couldn&apos;t load the worklist ({worklistError}). The RPC may not be
+            applied yet.
+          </p>
+        )}
+        {!rows && !worklistError && (
+          <p className="text-xs text-slate-400">Loading…</p>
+        )}
+
+        {buckets && (
+          <>
+            {buckets.eligible.length === 0 ? (
+              <p className="text-xs text-slate-500">
+                No eligible brands right now (every candidate is recently
+                contacted or parked as enterprise).
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {buckets.eligible.map((row) => (
+                  <WorklistItem key={row.brand_key} row={row} onLoad={loadFromWorklist} />
+                ))}
+              </ul>
+            )}
+
+            {buckets.contacted.length > 0 && (
+              <details className="mt-4">
+                <summary className="cursor-pointer text-xs text-slate-500">
+                  Already contacted (last 30d) — {buckets.contacted.length}
+                </summary>
+                <ul className="mt-2 space-y-2">
+                  {buckets.contacted.map((row) => (
+                    <WorklistItem key={row.brand_key} row={row} onLoad={loadFromWorklist} muted />
+                  ))}
+                </ul>
+              </details>
+            )}
+
+            {buckets.enterprise.length > 0 && (
+              <details className="mt-3">
+                <summary className="cursor-pointer text-xs text-slate-500">
+                  Enterprise — parked ({buckets.enterprise.length}) · founder-led-light rule
+                </summary>
+                <ul className="mt-2 space-y-2">
+                  {buckets.enterprise.map((row) => (
+                    <WorklistItem key={row.brand_key} row={row} onLoad={loadFromWorklist} muted />
+                  ))}
+                </ul>
+              </details>
+            )}
+          </>
+        )}
+      </section>
     </div>
+  );
+}
+
+function WorklistItem({
+  row,
+  onLoad,
+  muted,
+}: {
+  row: WorklistRow;
+  onLoad: (row: WorklistRow) => void;
+  muted?: boolean;
+}) {
+  return (
+    <li
+      className={`flex items-start justify-between gap-3 rounded border p-3 ${
+        muted ? "border-slate-100 bg-slate-50" : "border-slate-200"
+      }`}
+    >
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium">{row.brand_name}</span>
+          {row.likely_enterprise && (
+            <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700">
+              enterprise
+            </span>
+          )}
+          {row.contacted_recently && (
+            <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-600">
+              contacted
+            </span>
+          )}
+        </div>
+        <p className="mt-0.5 truncate text-xs text-slate-500">{signalSummary(row)}</p>
+        {row.contact_recipient && (
+          <p className="truncate text-[11px] text-slate-400">
+            {row.contact_recipient} · {row.contact_channel}
+          </p>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={() => onLoad(row)}
+        className="shrink-0 rounded border border-teal-600 px-2.5 py-1 text-xs text-teal-700 hover:bg-teal-50"
+      >
+        Load into composer
+      </button>
+    </li>
   );
 }

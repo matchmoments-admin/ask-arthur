@@ -64,6 +64,12 @@ vi.mock("@/lib/unsubscribe", () => ({
     `${base}?email=${encodeURIComponent(email)}&token=stub`,
 }));
 
+// Service client — capture inserts into brand_outreach_log.
+const insertMock = vi.fn().mockResolvedValue({ error: null });
+vi.mock("@askarthur/supabase/server", () => ({
+  createServiceClient: () => ({ from: () => ({ insert: insertMock }) }),
+}));
+
 // ── Helpers ──
 
 function makeRequest(payload: Record<string, unknown>) {
@@ -93,6 +99,7 @@ beforeEach(() => {
   resendSendMock.mockReset().mockResolvedValue({ data: { id: "msg_1" }, error: null });
   logCostMock.mockReset();
   telegramMock.mockReset().mockResolvedValue(undefined);
+  insertMock.mockReset().mockResolvedValue({ error: null });
   loggerMock.error.mockReset();
   delete process.env.BRAND_OUTREACH_SHADOW_RECIPIENT;
 });
@@ -209,6 +216,32 @@ describe("POST /api/admin/brand-outreach/send", () => {
     expect(logCostMock).toHaveBeenCalledWith(
       expect.objectContaining({
         metadata: expect.objectContaining({ mode: "real" }),
+      }),
+    );
+    // Ledgers a 'sent' row (brand_key null here — no worklist brandKey supplied).
+    expect(insertMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        brand_key: null,
+        brand_name: "P&N Bank",
+        status: "sent",
+        mode: "real",
+        provider_message_id: "msg_1",
+      }),
+    );
+  });
+
+  it("passes the optional brandKey through and records a 'failed' row on reject", async () => {
+    resendSendMock.mockResolvedValueOnce({ data: null, error: { message: "bounced" } });
+    const { POST } = await loadRoute();
+    const res = await POST(
+      makeRequest({ ...validPayload, brandKey: "reece.com.au" }),
+    );
+    expect(res.status).toBe(502);
+    expect(insertMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        brand_key: "reece.com.au",
+        status: "failed",
+        mode: "real",
       }),
     );
   });
