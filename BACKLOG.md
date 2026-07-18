@@ -262,9 +262,29 @@ alongside the AskSilver-inspired simplification (v67 migration widens the
 
 ## Messenger (Facebook)
 
-- [ ] Full platform (deferred — Meta approval process is lengthy)
-- [ ] Same feature set as WhatsApp bot
+- [x] **Bot code-complete** — webhook + handler + api + media + formatter all
+      ship (`apps/web/lib/bots/messenger/*`); forward text/screenshot → verdict
+      → real onward "Report scam" (via the routing brain, bots-onward PR). Dark
+      only for lack of Meta config. **Activation runbook:
+      [docs/ops/meta-bots-config.md](docs/ops/meta-bots-config.md)** (Meta
+      Business verification + `pages_messaging` app review + `MESSENGER_*` env +
+      webhook subscribe). Feasibility + boundaries:
+      [ADR-0023](docs/adr/0023-meta-platform-boundaries.md).
+- [ ] Go live (founder: complete the runbook — Meta dashboard + Vercel env)
 - [ ] Instagram DM integration
+
+### Meta platform — scoped/blocked (see ADR-0023)
+
+- [ ] **Report scams TO Meta** — brand-gated BRP IP-Reporting only (own
+      registered trademark). Build when a pilot brand authorises us; plan:
+      [docs/plans/meta-brp-report-to-meta.md](docs/plans/meta-brp-report-to-meta.md).
+- [ ] **`meta_report` onward destination** — deferred (thin consumer today;
+      revisit when a Facebook-scam web/extension flow wires into onward reporting).
+- ❌ **Ingest Facebook Marketplace listings/conversations** — BLOCKED by Meta
+  (personal-profile chats never reach a Page app; listings are academic-only
+  Content Library; scraping violates ToS). Do not re-scope. The only
+  Marketplace path is user-forwarded to the bot, or the extension's
+  client-side detection.
 
 ## Browser Extension
 
