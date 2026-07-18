@@ -34,6 +34,33 @@ const HIVE_FIXTURE = {
         { class: "dalle", value: 0.21 },
         { class: "flux", value: 0.08 },
         { class: "stablediffusion", value: 0.05 },
+        // Audio head — present even for image-only inputs. These must NOT be
+        // treated as a generator source, even though not_ai_generated_audio
+        // (0.99) outscores the real generator (midjourney 0.62).
+        { class: "not_ai_generated_audio", value: 0.99 },
+        { class: "ai_generated_audio", value: 0.01 },
+      ],
+    },
+  ],
+};
+
+// A real photo: generation head says not-AI; the audio + sentinel classes
+// score high; no genuine generator scores meaningfully. generatorSource must
+// be null (the live 2026-07-18 bug: it reported "not_ai_generated_audio").
+const REAL_PHOTO_FIXTURE = {
+  task_id: "task-real",
+  model: "ai-generated-and-deepfake-content-detection",
+  output: [
+    {
+      classes: [
+        { class: "not_ai_generated", value: 0.9999 },
+        { class: "ai_generated", value: 0.0001 },
+        { class: "deepfake", value: 0.0001 },
+        { class: "not_ai_generated_audio", value: 0.9998 },
+        { class: "ai_generated_audio", value: 0.0002 },
+        { class: "none", value: 0.9997 },
+        { class: "midjourney", value: 0.0000001 },
+        { class: "stablediffusion", value: 0.0000002 },
       ],
     },
   ],
@@ -75,9 +102,25 @@ describe("checkHiveAI", () => {
     expect(result!.isAiGenerated).toBe(true); // 0.97 >= 0.9
     expect(result!.aiConfidence).toBeCloseTo(0.97);
     expect(result!.isDeepfake).toBe(false); // 0.12 < 0.9
-    expect(result!.generatorSource).toBe("midjourney"); // top non-verdict class
-    expect(result!.classes).toHaveLength(7);
+    // midjourney (0.62) wins — the audio classes are excluded even though
+    // not_ai_generated_audio (0.99) scores higher.
+    expect(result!.generatorSource).toBe("midjourney");
+    expect(result!.classes).toHaveLength(9);
     expect(result!.classes).toContainEqual({ class: "flux", score: 0.08 });
+  });
+
+  it("returns null generatorSource for a real photo (no spurious generator/audio class)", async () => {
+    stubFetch(REAL_PHOTO_FIXTURE);
+    const result = await checkHiveAI("https://img.example.com/real.jpg");
+    expect(result).not.toBeNull();
+    expect(result!.isAiGenerated).toBe(false); // 0.0001 < 0.9
+    expect(result!.isDeepfake).toBe(false);
+    // The bug: this used to be "not_ai_generated_audio". A real photo has no
+    // generator, so it must be null on both counts (audio excluded AND the
+    // not-AI gate).
+    expect(result!.generatorSource).toBeNull();
+    // Full class list still retained for the breakdown UI.
+    expect(result!.classes).toHaveLength(8);
   });
 
   it("caches under the v3 prefix (old-shape v2 entries are never read)", async () => {
