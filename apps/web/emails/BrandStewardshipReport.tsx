@@ -13,7 +13,12 @@ import {
 } from "@react-email/components";
 import { renderCopySlot } from "@/lib/email/resolve-copy";
 import { BRAND_STEWARDSHIP_SLOTS } from "@/lib/email/copy-registry";
-import { hasOutcomes, lifecycleBadge } from "@/lib/clone-watch/outcome-copy";
+import {
+  hasOutcomes,
+  lifecycleBadge,
+  classColor,
+  classLabel,
+} from "@/lib/clone-watch/outcome-copy";
 import {
   registrarAbuseUrl,
   hostAbuseUrl,
@@ -881,34 +886,6 @@ function fmtDate(iso: string): string {
 function hasUnactionedRows(c: CloneDetections): boolean {
   if ((c.declined ?? 0) + (c.weaponised ?? 0) > 0) return true;
   return c.domains.some((d) => d.lifecycleState === "monitoring");
-}
-
-/** Accent colour per urlscan classification (left border + chip). */
-function classColor(classification: string | null): string {
-  switch (classification) {
-    case "likely_phishing":
-      return "#DC2626"; // red
-    case "parked_for_sale":
-      return "#D97706"; // amber
-    default:
-      return "#64748B"; // slate (neutral / unknown)
-  }
-}
-
-/** Human label for a urlscan classification chip. */
-function classLabel(classification: string | null): string {
-  switch (classification) {
-    case "likely_phishing":
-      return "Likely phishing";
-    case "parked_for_sale":
-      return "Parked for sale";
-    case "neutral":
-      return "Resolves";
-    case "unresolved":
-      return "Unresolved";
-    default:
-      return classification ?? "";
-  }
 }
 
 /** "Hosted: <ip> · <ASN> · <country>" with graceful fallback. */

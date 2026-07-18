@@ -13,6 +13,10 @@ interface Props {
   pilotTemplate: string;
 }
 
+// Below this many recently-reported lookalikes, the data-backed sample in the
+// pilot email is too thin to make a convincing pitch — warn (don't block).
+const THIN_DATA_THRESHOLD = 3;
+
 interface SendResult {
   ok?: boolean;
   mode?: "shadow" | "real";
@@ -38,6 +42,9 @@ export default function BrandOutreach({ pilotTemplate }: Props) {
   // knows this brand was contacted. Cleared if the operator hand-edits the
   // recipient (the send is then no longer tied to that worklist brand).
   const [brandKey, setBrandKey] = useState<string | null>(null);
+  // Recently-reported clone count for the loaded worklist brand — drives the
+  // thin-data warning. Null when the send isn't tied to a worklist brand.
+  const [reportedCount, setReportedCount] = useState<number | null>(null);
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState(false);
@@ -80,6 +87,7 @@ export default function BrandOutreach({ pilotTemplate }: Props) {
     setTo(row.contact_recipient ?? "");
     setBrandName(row.brand_name);
     setBrandKey(row.brand_key);
+    setReportedCount(row.reported_count_30d);
     setSubject(`${row.brand_name} × Ask Arthur — clone-watch pilot`);
     setBody(buildComposerBody(row));
     setStatus(`Loaded ${row.brand_name} — replace {{hook}} and review before sending.`);
@@ -160,6 +168,7 @@ export default function BrandOutreach({ pilotTemplate }: Props) {
             onChange={(e) => {
               setTo(e.target.value);
               setBrandKey(null); // hand-edited → no longer a worklist-tracked brand
+              setReportedCount(null); // …so the thin-data warning no longer applies
             }}
             placeholder="security@brand.com.au"
             className="w-full rounded border border-slate-300 p-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
@@ -220,6 +229,16 @@ export default function BrandOutreach({ pilotTemplate }: Props) {
           automatically — don&apos;t add your own.
         </p>
       </div>
+
+      {brandKey && reportedCount !== null && reportedCount < THIN_DATA_THRESHOLD && (
+        <p className="mt-4 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          ⚠ Thin data: we&apos;ve only reported{" "}
+          <strong>{reportedCount}</strong> lookalike
+          {reportedCount === 1 ? "" : "s"} for {brandName || "this brand"} in the last 30 days.
+          The pilot email leads with that evidence — consider waiting for a stronger data story
+          before pitching this one.
+        </p>
+      )}
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
         <button
@@ -348,6 +367,11 @@ function WorklistItem({
           {row.contacted_recently && (
             <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-600">
               contacted
+            </span>
+          )}
+          {row.reported_count_30d < THIN_DATA_THRESHOLD && (
+            <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-amber-700">
+              thin data
             </span>
           )}
         </div>

@@ -80,6 +80,37 @@ export function lifecycleBadge(
   }
 }
 
+/** Accent colour per urlscan classification (left border + chip). Shared by
+ *  every brand-facing email that renders a clone row so the colour language is
+ *  identical across the stewardship report and the pilot-outreach email. */
+export function classColor(classification: string | null): string {
+  switch (classification) {
+    case "likely_phishing":
+      return "#DC2626"; // red
+    case "parked_for_sale":
+      return "#D97706"; // amber
+    default:
+      return "#64748B"; // slate (neutral / unknown)
+  }
+}
+
+/** Human label for a urlscan classification chip. Falls back to the raw value
+ *  so an unseen classification still renders something honest. */
+export function classLabel(classification: string | null): string {
+  switch (classification) {
+    case "likely_phishing":
+      return "Likely phishing";
+    case "parked_for_sale":
+      return "Parked for sale";
+    case "neutral":
+      return "Resolves";
+    case "unresolved":
+      return "Unresolved";
+    default:
+      return classification ?? "";
+  }
+}
+
 /**
  * Compact one-line summary for carousel slide 06 ("·"-joined, non-zero parts
  * only). Returns "" when the month has no outcomes (caller hides the block).

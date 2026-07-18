@@ -9,9 +9,13 @@ import { logCost, PRICING } from "@/lib/cost-telemetry";
 import { signUnsubscribeUrl } from "@/lib/unsubscribe";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import {
-  buildOutreachEmail,
+  renderOutreachEmail,
   outreachIdempotencyKey,
 } from "@/lib/email/brand-outreach";
+import {
+  fetchOutreachCloneSample,
+  type OutreachCloneSample,
+} from "@/lib/email/brand-outreach-clones";
 
 export const dynamic = "force-dynamic";
 
@@ -119,9 +123,22 @@ export async function POST(req: NextRequest) {
   // verbatim (it's a personal email — no marketing prefix).
   const subject = isShadow ? `[TEST → ${body.brandName}] ${body.subject}` : body.subject;
 
-  const { html, text } = buildOutreachEmail({
+  // Live proof: when the send is tied to a worklist brand (brandKey == the
+  // brand's legit domain), attach a compact sample of the lookalikes we've
+  // detected + reported for them in the last 30 days. Best-effort — a data
+  // hiccup must never block the send, so the fetch resolves to an empty sample.
+  let cloneSample: OutreachCloneSample | null = null;
+  if (body.brandKey) {
+    cloneSample = await fetchOutreachCloneSample(
+      createServiceClient(),
+      body.brandKey.trim().toLowerCase(),
+    );
+  }
+
+  const { html, text } = await renderOutreachEmail({
     brandName: body.brandName,
     bodyMarkdown: body.bodyMarkdown_or_html,
+    cloneSample,
   });
 
   // Signed one-click unsubscribe (RFC 8058) + a mailto STOP fallback. Bound to

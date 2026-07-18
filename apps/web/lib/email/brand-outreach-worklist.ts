@@ -12,6 +12,9 @@ export interface WorklistRow {
   weaponised_count: number;
   live_unactioned_count: number;
   total_clones: number;
+  /** Lookalikes for this brand we reported to a takedown vendor in the last 30
+   *  days. The composer warns below ~3 — too thin a data story to pitch on. */
+  reported_count_30d: number;
   in_campaign: boolean;
   campaign_domain_count: number | null;
   latest_weaponised_at: string | null;

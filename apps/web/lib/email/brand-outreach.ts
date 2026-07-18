@@ -1,26 +1,35 @@
 import crypto from "crypto";
+import { render } from "@react-email/components";
 import { renderCopySlot } from "./resolve-copy";
+import BrandOutreachPilot, {
+  ASK_ARTHUR_ABN,
+  ASK_ARTHUR_SENDER_NAME,
+  ASK_ARTHUR_SENDER_ROLE,
+  ASK_ARTHUR_SITE,
+} from "@/emails/BrandOutreachPilot";
+import { classLabel } from "@/lib/clone-watch/outcome-copy";
+import type { OutreachCloneSample } from "./brand-outreach-clones";
 
 // Brand reach-out / pilot outreach — the founder-composed, four-eyes cold email.
 //
-// This is deliberately NOT a marketing template: it renders as a plain,
-// personal founder-to-brand note (no hero image, no big CTA button). The
-// founder writes the body; this module only wraps it in a minimal, honest
-// Ask Arthur signature so the email carries the legal-entity footer and a
-// STOP path, and produces the text/plain twin a cold B2B email needs to
-// avoid a spam-score hit.
+// The founder writes the body; this module renders it inside the styled
+// BrandOutreachPilot template (navy header card + ABN footer, matching the
+// Brand Stewardship report) and, when we hold data for the brand, attaches a
+// compact live sample of the lookalike domains we've detected + reported for
+// them in the last 30 days as proof.
 //
-// The body is treated as light markdown and passed through the same
-// sanitising renderer the Email Studio uses (`renderCopySlot`): raw pasted
-// HTML is escaped to inert text, only http(s)/mailto links survive, and only
-// an allowlisted set of tags is kept. That keeps this admin-authored,
-// externally-sent field from being an injection surface.
+// The body is treated as light markdown and passed through the same sanitising
+// renderer the Email Studio uses (`renderCopySlot`): raw pasted HTML is escaped
+// to inert text, only http(s)/mailto links survive, and only an allowlisted set
+// of tags is kept. That keeps this admin-authored, externally-sent field from
+// being an injection surface.
 
-/** Legal-entity footer facts — single source of truth for the outreach signature. */
-export const ASK_ARTHUR_ABN = "72 695 772 313";
-export const ASK_ARTHUR_SENDER_NAME = "Brendan";
-export const ASK_ARTHUR_SENDER_ROLE = "Founder, Ask Arthur";
-export const ASK_ARTHUR_SITE = "https://askarthur.au";
+export {
+  ASK_ARTHUR_ABN,
+  ASK_ARTHUR_SENDER_NAME,
+  ASK_ARTHUR_SENDER_ROLE,
+  ASK_ARTHUR_SITE,
+};
 
 /**
  * Starter body for the clone-watch pilot offer. The brand-specific hook is
@@ -46,59 +55,82 @@ Best,
 Brendan`;
 
 /**
- * Escape text for safe inclusion in HTML. Kept local so the module has no
- * dependency on the (non-exported) escapeHtml in resolve-copy.
+ * Build the text/plain twin of the outreach email. The founder's raw markdown
+ * reads fine as plain text and guarantees a text/plain part exists (a cold B2B
+ * email without one takes a spam-score hit). When a clone sample is present, a
+ * short plain-text summary of it is appended so the text twin carries the same
+ * proof the HTML shows.
  */
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-/**
- * Build the multipart (html + text) bodies for a founder outreach email.
- *
- * The `bodyMarkdown` is the founder's own prose (light markdown). The HTML
- * twin runs it through `renderCopySlot` (sanitising markdown → email HTML);
- * the text twin ships the raw markdown, which reads fine as plain text and
- * guarantees a text/plain part exists.
- */
-export function buildOutreachEmail(args: {
+export function buildOutreachText(args: {
   brandName: string;
   bodyMarkdown: string;
-}): { html: string; text: string } {
-  const { brandName, bodyMarkdown } = args;
+  cloneSample?: OutreachCloneSample | null;
+}): string {
+  const { brandName, bodyMarkdown, cloneSample } = args;
 
-  const bodyHtml = renderCopySlot(bodyMarkdown, { brandName });
+  let dataBlock = "";
+  if (cloneSample && cloneSample.total > 0 && cloneSample.rows.length > 0) {
+    const lead =
+      `In the last 30 days we detected ${cloneSample.total} lookalike ` +
+      `domain${cloneSample.total === 1 ? "" : "s"} impersonating ${brandName}` +
+      (cloneSample.reported > 0
+        ? ` and reported ${cloneSample.reported} of them to a takedown vendor on your behalf.`
+        : ".");
+    const rows = cloneSample.rows.map((c) => {
+      const tag = c.classification ? ` (${classLabel(c.classification)})` : "";
+      return `- ${c.domain}${tag}`;
+    });
+    const more =
+      cloneSample.total > cloneSample.rows.length
+        ? [`(+ ${cloneSample.total - cloneSample.rows.length} more available on request)`]
+        : [];
+    dataBlock = [
+      ``,
+      `A sample of what we've already caught for ${brandName}:`,
+      lead,
+      ...rows,
+      ...more,
+    ].join("\n");
+  }
 
-  const html = `<!doctype html><html><body style="margin:0;padding:0;background:#ffffff;">
-  <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6;color:#1f2937;max-width:560px;margin:0 auto;padding:24px 20px;">
-    <div>${bodyHtml}</div>
-    <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0 16px;" />
-    <p style="margin:0 0 4px;font-size:14px;color:#1f2937;">
-      ${escapeHtml(ASK_ARTHUR_SENDER_NAME)}<br />
-      ${escapeHtml(ASK_ARTHUR_SENDER_ROLE)}<br />
-      <a href="${ASK_ARTHUR_SITE}" style="color:#0d9488;text-decoration:none;">askarthur.au</a>
-    </p>
-    <p style="margin:12px 0 0;font-size:12px;color:#94a3b8;line-height:1.5;">
-      Ask Arthur &middot; ABN ${ASK_ARTHUR_ABN} &middot; Sydney, Australia<br />
-      Sent to ${escapeHtml(brandName)} as a one-off business enquiry. Reply STOP and I won't contact you again.
-    </p>
-  </div>
-</body></html>`;
-
-  const text = `${bodyMarkdown.trim()}
+  return `${bodyMarkdown.trim()}
 
 --
 ${ASK_ARTHUR_SENDER_NAME}
 ${ASK_ARTHUR_SENDER_ROLE}
 ${ASK_ARTHUR_SITE}
+${dataBlock}
 
 Ask Arthur · ABN ${ASK_ARTHUR_ABN} · Sydney, Australia
 Sent to ${brandName} as a one-off business enquiry. Reply STOP and I won't contact you again.`;
+}
+
+/**
+ * Render the multipart (html + text) bodies for a founder outreach email.
+ *
+ * The `bodyMarkdown` is the founder's own prose (light markdown). The HTML twin
+ * sanitises it via `renderCopySlot` and renders it inside the styled
+ * BrandOutreachPilot template; the text twin ships the raw markdown plus a
+ * plain-text clone summary. Async because React Email's `render` is async.
+ */
+export async function renderOutreachEmail(args: {
+  brandName: string;
+  bodyMarkdown: string;
+  cloneSample?: OutreachCloneSample | null;
+  stopUrl?: string;
+}): Promise<{ html: string; text: string }> {
+  const { brandName, bodyMarkdown, cloneSample, stopUrl } = args;
+
+  const bodyHtml = renderCopySlot(bodyMarkdown, { brandName });
+
+  const el = BrandOutreachPilot({
+    brandName,
+    bodyHtml,
+    cloneSample: cloneSample ?? null,
+    stopUrl,
+  });
+  const html = await render(el);
+  const text = buildOutreachText({ brandName, bodyMarkdown, cloneSample });
 
   return { html, text };
 }

@@ -18,6 +18,7 @@ function makeRow(over: Partial<WorklistRow> = {}): WorklistRow {
     weaponised_count: 0,
     live_unactioned_count: 0,
     total_clones: 1,
+    reported_count_30d: 0,
     in_campaign: false,
     campaign_domain_count: null,
     latest_weaponised_at: null,
