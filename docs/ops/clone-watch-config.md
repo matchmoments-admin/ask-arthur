@@ -467,6 +467,51 @@ Sun 10:00 UTC — `shopfront-clone-weekly-digest` Telegram-pages admin with KPI 
 
 ---
 
+## 8b. Brand Monitor billing (Wave 3 — Brand activation 2/4)
+
+Self-serve Stripe checkout for the two paid Brand Monitor plans. Code shipped
+dark: the route is live behind `FF_BRAND_EXPOSURE` (ON in prod) but returns
+`price_not_configured` until the price-ID env vars below exist.
+
+**Plans** (prices fixed by `BRAND_PLANS` in `packages/types/src/billing.ts`):
+
+| Plan                 | A$/mo (GST-incl.) | Env var (Stripe price ID)                                                                     |
+| -------------------- | ----------------- | --------------------------------------------------------------------------------------------- |
+| `brand_monitor`      | 1,950             | `NEXT_PUBLIC_STRIPE_BRAND_MONITOR_MONTHLY`                                                    |
+| `brand_monitor_plus` | 2,950             | `NEXT_PUBLIC_STRIPE_BRAND_MONITOR_PLUS_MONTHLY`                                               |
+| `brand_pilot`        | 300 (manual)      | — no Stripe product; provisioned manually (`billing_provider='manual'`, Brand activation 3/4) |
+| `brand_enterprise`   | custom            | — contact sales, no self-serve SKU                                                            |
+
+**Surfaces:**
+
+- `POST /api/brand/checkout` — session-authed; body `{ orgId, plan }`; requires
+  an active `org_members` row with `billing:manage` (owner/admin). Creates a
+  Stripe subscription checkout session (`automatic_tax` on, AUD).
+- Stripe webhook (`/api/stripe/webhook`) — dispatches the two price IDs into an
+  org-keyed branch (`apps/web/lib/brandSkus.ts`): writes
+  `organizations.settings.brand_billing` (plan, status, Stripe linkage) and
+  syncs `monitored_brands.plan` (v207). Never touches `api_keys.tier` —
+  brand plans are a separate SKU axis from `TIER_LIMITS`. Cancellation clears
+  only rows carrying the cancelled plan, so a manual `brand_pilot` row
+  survives a Stripe cancellation.
+
+**Founder activation checklist (Stripe Dashboard, ~15 min):**
+
+1. Products → Add product ×2: "Brand Monitor" (recurring monthly **A$1,950**)
+   and "Brand Monitor+" (recurring monthly **A$2,950**). Currency **AUD**;
+   price tax behaviour **inclusive** (GST-inclusive, matching Extension Pro);
+   confirm Stripe Tax is active so `automatic_tax` resolves AU GST.
+2. Copy the two `price_...` IDs → Vercel env vars
+   `NEXT_PUBLIC_STRIPE_BRAND_MONITOR_MONTHLY` /
+   `NEXT_PUBLIC_STRIPE_BRAND_MONITOR_PLUS_MONTHLY` (all three envs; they are
+   `NEXT_PUBLIC_*`, so a **redeploy is required** for build-time inlining).
+3. Test mode e2e: create the same products in test mode, paste test price IDs
+   into a preview env, run a `4000 0003 6000 0006` (AU) card checkout, confirm
+   the webhook writes `organizations.settings.brand_billing` and
+   `monitored_brands.plan`.
+4. No new webhook events needed — the existing `/api/stripe/webhook` endpoint +
+   `STRIPE_WEBHOOK_SECRET` already receive `customer.subscription.*`.
+
 ## 9. Related
 
 - [docs/plans/clone-watch-mvp.md](../plans/clone-watch-mvp.md) — the MVP build plan + matcher evolution log
