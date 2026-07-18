@@ -10,6 +10,12 @@ import {
   isExtensionProPrice,
   mapStripeStatusToExtensionStatus,
 } from "@/lib/extensionSkus";
+import {
+  isBrandMonitorPrice,
+  brandPlanForPrice,
+  mapStripeStatusToBrandBillingStatus,
+} from "@/lib/brandSkus";
+import { hasPermission, type OrgRole } from "@askarthur/types";
 
 export const runtime = "nodejs";
 
@@ -205,6 +211,15 @@ async function upsertSubscription(
   // (read by get_extension_tier), never touches api_keys.tier.
   if (isExtensionProPrice(priceId)) {
     await upsertExtensionSubscription(sub, supabase, priceId);
+    return;
+  }
+
+  // Brand Monitor branch: keyed on org_id, writes the org's brand-billing
+  // record (organizations.settings.brand_billing) + syncs monitored_brands.plan.
+  // Brand plans are a separate SKU axis from TIER_LIMITS (see brandSkus.ts) —
+  // this branch must never fall through to the api_keys.tier path below.
+  if (isBrandMonitorPrice(priceId)) {
+    await upsertBrandSubscription(sub, supabase, priceId);
     return;
   }
 
@@ -475,6 +490,179 @@ async function upsertExtensionSubscription(
   });
 }
 
+// ---------------------------------------------------------------------------
+// Brand Monitor — org-keyed brand-billing path (Brand activation 2/4)
+// ---------------------------------------------------------------------------
+// Metadata expected (set server-side by /api/brand/checkout):
+//   org_id  — the organization buying Brand Monitor
+//   user_id — the purchasing user (must hold billing:manage in that org)
+// Double ownership gate before any write (mirrors the Extension Pro branch):
+//   1. metadata.user_id must equal the Stripe customer's owning user
+//      (user_profiles.stripe_customer_id, server-set during checkout);
+//   2. that user must be an ACTIVE org_members row of metadata.org_id with
+//      billing:manage — the same check /api/brand/checkout ran.
+// Either mismatch → refuse + log, return 200 (retries won't fix metadata).
+//
+// WRITE TARGET — a deliberate deviation from the "row in subscriptions" plan:
+// subscriptions.api_key_id is NOT NULL (v30) and brand customers are org-,
+// not api-key-, anchored, so a brand row cannot live there without a schema
+// change (out of scope for this code-only PR). Instead the billing record is
+// kept org-keyed in organizations.settings.brand_billing (jsonb, cold table)
+// — plan, status, Stripe linkage — and monitored_brands.plan (v207, the column
+// the Wave 3 dashboard/watchlist reads) is synced from it. If/when a follow-up
+// migration relaxes subscriptions.api_key_id, this handler is the single place
+// to add the ledger row.
+//
+// invoice.paid / invoice.payment_failed are NOT handled for brand subs: status
+// transitions arrive via customer.subscription.updated (Stripe emits it on
+// dunning transitions), and monitoring entitlement only changes on activation
+// or deletion — past_due keeps monitoring alive through the dunning window.
+interface BrandBillingRecord {
+  plan: string;
+  status: string;
+  stripe_subscription_id: string;
+  stripe_customer_id: string;
+  stripe_price_id: string;
+  current_period_end: string | null;
+  canceled_at?: string | null;
+  updated_at: string;
+}
+
+async function isActiveBrandBillingManager(
+  supabase: SupabaseService,
+  orgId: string,
+  userId: string,
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("org_members")
+    .select("role")
+    .eq("org_id", orgId)
+    .eq("user_id", userId)
+    .eq("status", "active")
+    .maybeSingle();
+  if (error) {
+    logger.error("Brand billing org-membership lookup failed", { error, orgId });
+    throw error;
+  }
+  if (!data?.role) return false;
+  return hasPermission(data.role as OrgRole, "billing:manage");
+}
+
+async function upsertBrandSubscription(
+  sub: Record<string, unknown>,
+  supabase: SupabaseService,
+  priceId: string,
+) {
+  const plan = brandPlanForPrice(priceId);
+  if (!plan) return; // Defensive — caller already gated
+
+  const metadata = sub.metadata as Record<string, string> | undefined;
+  const orgId = metadata?.org_id;
+  const userId = metadata?.user_id;
+
+  if (!orgId || !userId) {
+    logger.warn("Brand Monitor subscription missing org_id/user_id metadata", {
+      subscriptionId: sub.id,
+    });
+    return;
+  }
+
+  const [customerOwnerId, isBillingManager] = await Promise.all([
+    getUserIdFromStripeCustomer(supabase, sub.customer as string),
+    isActiveBrandBillingManager(supabase, orgId, userId),
+  ]);
+  if (!customerOwnerId || customerOwnerId !== userId || !isBillingManager) {
+    logger.error("Brand Monitor ownership mismatch — refusing plan sync", {
+      subscriptionId: sub.id,
+      orgId,
+      metadataUserId: userId,
+      customerOwnerId,
+      isBillingManager,
+    });
+    // 200 (not 500) — retries won't fix tampered/incomplete metadata.
+    return;
+  }
+
+  const { data: org, error: orgErr } = await supabase
+    .from("organizations")
+    .select("settings")
+    .eq("id", orgId)
+    .maybeSingle();
+  if (orgErr) {
+    logger.error("Brand Monitor org lookup failed", { error: orgErr, orgId });
+    throw orgErr;
+  }
+  if (!org) {
+    logger.error("Brand Monitor subscription references unknown org", {
+      subscriptionId: sub.id,
+      orgId,
+    });
+    return;
+  }
+
+  const status = mapStripeStatusToBrandBillingStatus(sub.status as string);
+  const currentPeriodEnd = sub.current_period_end as number | undefined;
+  const record: BrandBillingRecord = {
+    plan,
+    status,
+    stripe_subscription_id: sub.id as string,
+    stripe_customer_id: sub.customer as string,
+    stripe_price_id: priceId,
+    current_period_end: currentPeriodEnd
+      ? new Date(currentPeriodEnd * 1000).toISOString()
+      : null,
+    updated_at: new Date().toISOString(),
+  };
+
+  const settings = (org.settings as Record<string, unknown> | null) ?? {};
+  const { error: setErr } = await supabase
+    .from("organizations")
+    .update({
+      settings: { ...settings, brand_billing: record },
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", orgId);
+  if (setErr) {
+    logger.error("Failed to write org brand_billing record", {
+      error: setErr,
+      orgId,
+    });
+    throw setErr;
+  }
+
+  // Sync the plan onto the org's registered brands (the column the Wave 3
+  // dashboard + dynamic watchlist read). Only SET on active — past_due keeps
+  // the previous plan through dunning; clearing happens on deletion below.
+  if (status === "active") {
+    const { data: branded, error: mbErr } = await supabase
+      .from("monitored_brands")
+      .update({ plan, updated_at: new Date().toISOString() })
+      .eq("org_id", orgId)
+      .eq("is_active", true)
+      .select("id");
+    if (mbErr) {
+      logger.error("Failed to sync monitored_brands.plan", { error: mbErr, orgId });
+      throw mbErr;
+    }
+    if (!branded || branded.length === 0) {
+      // Paid before registering a brand (or pilot row inactive) — the
+      // brand_billing record above is authoritative; the registration flow /
+      // admin console applies the plan when the monitored_brands row lands.
+      logger.warn("Brand Monitor paid but org has no active monitored_brands rows", {
+        orgId,
+        plan,
+      });
+    }
+  }
+
+  logger.info("Brand Monitor subscription synced", {
+    subscriptionId: sub.id,
+    orgId,
+    plan,
+    status,
+  });
+}
+
 async function handleSubscriptionDeleted(
   sub: Record<string, unknown>,
   supabase: SupabaseService
@@ -501,6 +689,92 @@ async function handleSubscriptionDeleted(
       throw error;
     }
     logger.info("Extension Pro subscription canceled", { subscriptionId: sub.id });
+    return;
+  }
+
+  // Brand Monitor branch: mark the org's brand_billing record canceled and
+  // clear monitored_brands.plan. The stored stripe_subscription_id acts as
+  // the tamper-safe key (the brand analogue of the extension branch keying
+  // on its stripe_subscription_id column): a deletion event whose sub.id
+  // doesn't match the record the provisioning write stored is refused, so
+  // forged metadata can't cancel another org's plan.
+  if (isBrandMonitorPrice(priceId)) {
+    const plan = brandPlanForPrice(priceId);
+    const metadata = sub.metadata as Record<string, string> | undefined;
+    const orgId = metadata?.org_id;
+    if (!plan || !orgId) {
+      logger.warn("Brand Monitor deletion missing org_id metadata", {
+        subscriptionId: sub.id,
+      });
+      return;
+    }
+
+    const { data: org, error: orgErr } = await supabase
+      .from("organizations")
+      .select("settings")
+      .eq("id", orgId)
+      .maybeSingle();
+    if (orgErr) {
+      logger.error("Brand Monitor deletion org lookup failed", { error: orgErr, orgId });
+      throw orgErr;
+    }
+    const settings = (org?.settings as Record<string, unknown> | null) ?? {};
+    const billing = settings.brand_billing as
+      | { stripe_subscription_id?: string }
+      | undefined;
+    if (!billing || billing.stripe_subscription_id !== (sub.id as string)) {
+      logger.error("Brand Monitor deletion subscription mismatch — refusing", {
+        subscriptionId: sub.id,
+        orgId,
+        storedSubscriptionId: billing?.stripe_subscription_id ?? null,
+      });
+      return;
+    }
+
+    const { error: setErr } = await supabase
+      .from("organizations")
+      .update({
+        settings: {
+          ...settings,
+          brand_billing: {
+            ...billing,
+            status: "canceled",
+            canceled_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+        },
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", orgId);
+    if (setErr) {
+      logger.error("Failed to cancel org brand_billing record", {
+        error: setErr,
+        orgId,
+      });
+      throw setErr;
+    }
+
+    // Only clear rows carrying THIS plan — a manually-provisioned
+    // brand_pilot row (billing_provider='manual') must survive a Stripe
+    // cancellation untouched.
+    const { error: mbErr } = await supabase
+      .from("monitored_brands")
+      .update({ plan: null, updated_at: new Date().toISOString() })
+      .eq("org_id", orgId)
+      .eq("plan", plan);
+    if (mbErr) {
+      logger.error("Failed to clear monitored_brands.plan on cancellation", {
+        error: mbErr,
+        orgId,
+      });
+      throw mbErr;
+    }
+
+    logger.info("Brand Monitor subscription canceled", {
+      subscriptionId: sub.id,
+      orgId,
+      plan,
+    });
     return;
   }
 
