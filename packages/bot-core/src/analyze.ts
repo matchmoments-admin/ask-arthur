@@ -57,12 +57,37 @@ export class BotAnalysisPausedError extends Error {
  * canonical "URL flagged by X and Y: <url>" / "manipulation patterns"
  * strings shared across all surfaces.
  */
+/**
+ * Result of {@link analyzeForBotDetailed}: the analysis plus the id of the
+ * `scam_reports` row it persisted (null when no report context was passed or
+ * the intelligence-core flag is off). Handlers stash `scamReportId` so a later
+ * "Report scam" tap can drive the real onward-reporting pipeline against it.
+ */
+export interface BotAnalysis {
+  result: AnalysisResult;
+  scamReportId: number | null;
+}
+
+/**
+ * Back-compatible wrapper: run the bot analysis and return only the
+ * `AnalysisResult`. Existing callers that don't need the persisted report id
+ * (inbound-scan, slack shortcuts, the queue processor) keep this signature.
+ */
 export async function analyzeForBot(
   text: string,
   region?: string,
   images?: string[],
   report?: BotReportContext,
 ): Promise<AnalysisResult> {
+  return (await analyzeForBotDetailed(text, region, images, report)).result;
+}
+
+export async function analyzeForBotDetailed(
+  text: string,
+  region?: string,
+  images?: string[],
+  report?: BotReportContext,
+): Promise<BotAnalysis> {
   // Circuit-breaker: if today's bot AI spend tripped its cap, stop here.
   // Throwing lets handlers send a graceful fallback instead of silently
   // burning more budget. Best-effort check — a DB error fails open.
@@ -110,13 +135,19 @@ export async function analyzeForBot(
   // on intelligenceCore to match the web path (which only writes scam_reports
   // when that flag is on — keeps bots and web consistent). Runs on cache hits
   // too: every forward is a real submission worth counting in the funnel.
-  // Fire-and-forget — storeScamReport scrubs PII and never throws; we still
-  // guard the hashIdentifier await so an attribution failure can't break the
-  // user's reply.
+  //
+  // AWAITED (was fire-and-forget): we need the persisted row id so a later
+  // "Report scam" tap can drive the onward-reporting pipeline against a real
+  // scam_report_id. Awaiting is also more correct — bots run outside Vercel's
+  // waitUntil envelope, so a `void`-ed insert could be killed when the handler
+  // returns. storeScamReport scrubs PII and never throws (returns null on
+  // error); the hashIdentifier await is still guarded so an attribution
+  // failure can't break the user's reply.
+  let scamReportId: number | null = null;
   if (report && featureFlags.intelligenceCore) {
     try {
       const reporterHash = await hashIdentifier(report.userId, `bot:${report.source}`);
-      void storeScamReport({
+      scamReportId = await storeScamReport({
         reporterHash,
         source: report.source,
         inputMode: report.inputMode,
@@ -143,5 +174,5 @@ export async function analyzeForBot(
     }
   }
 
-  return out.result;
+  return { result: out.result, scamReportId };
 }

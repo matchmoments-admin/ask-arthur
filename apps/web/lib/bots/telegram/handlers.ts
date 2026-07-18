@@ -1,9 +1,27 @@
 import type { Bot, Context } from "grammy";
-import { analyzeForBot } from "@askarthur/bot-core/analyze";
+import { analyzeForBotDetailed } from "@askarthur/bot-core/analyze";
 import { toTelegramHTML } from "@askarthur/bot-core/format-telegram";
 import { checkBotRateLimit } from "@askarthur/bot-core/rate-limit";
 import { logger } from "@askarthur/utils/logger";
 import { buildResultKeyboard, buildCheckPromptKeyboard } from "./keyboards";
+import {
+  stashBotReport,
+  buildReportStash,
+  reportBotScam,
+} from "../onward-report";
+
+/** Stable per-user id for the report stash (tapping user, else chat). */
+function telegramUserId(ctx: Context): string {
+  return String(ctx.from?.id ?? ctx.chat?.id ?? "unknown");
+}
+
+// Fallback when there's nothing to report against (stash expired / attribution
+// off) — the pre-onward static guidance (HTML, matching this handler).
+const REPORT_FALLBACK_HTML =
+  "\u{1f4cb} <b>Report this scam:</b>\n\n" +
+  '• <a href="https://www.scamwatch.gov.au/report-a-scam">Scamwatch</a> — ACCC\'s scam reporting tool\n' +
+  '• <a href="https://www.cyber.gov.au/report-and-recover/report">ReportCyber</a> — for cybercrime\n' +
+  "• Contact your bank immediately if you've shared financial details";
 
 const WELCOME_MESSAGE = `\u{1f6e1}\ufe0f <b>Welcome to Ask Arthur!</b>
 
@@ -62,9 +80,10 @@ async function analyzeAndReply(ctx: Context, text: string): Promise<void> {
   await ctx.replyWithChatAction("typing");
 
   try {
-    const result = await analyzeForBot(text, undefined, undefined, {
+    const userId = telegramUserId(ctx);
+    const { result, scamReportId } = await analyzeForBotDetailed(text, undefined, undefined, {
       source: "bot_telegram",
-      userId: String(ctx.from?.id ?? ctx.chat?.id ?? "unknown"),
+      userId,
       inputMode: "text",
     });
     const formatted = toTelegramHTML(result);
@@ -75,6 +94,9 @@ async function analyzeAndReply(ctx: Context, text: string): Promise<void> {
       reply_markup: keyboard,
       link_preview_options: { is_disabled: true },
     });
+    if (scamReportId) {
+      await stashBotReport("telegram", userId, buildReportStash(scamReportId, result));
+    }
   } catch (err) {
     logger.error("Telegram analysis failed", { error: String(err) });
     await ctx.reply("Sorry, I couldn't analyse that message right now. Please try again in a moment.");
@@ -119,13 +141,17 @@ export function registerHandlers(bot: Bot): void {
   // Callback queries (inline keyboard buttons)
   bot.callbackQuery("action:report", async (ctx) => {
     await ctx.answerCallbackQuery();
-    await ctx.reply(
-      '\u{1f4cb} <b>Report this scam:</b>\n\n' +
-      '\u2022 <a href="https://www.scamwatch.gov.au/report-a-scam">Scamwatch</a> \u2014 ACCC\'s scam reporting tool\n' +
-      '\u2022 <a href="https://www.cyber.gov.au/report-and-recover/report">ReportCyber</a> \u2014 for cybercrime\n' +
-      '\u2022 Contact your bank immediately if you\'ve shared financial details',
-      { parse_mode: "HTML", link_preview_options: { is_disabled: true } }
-    );
+    const reply = await reportBotScam("telegram", telegramUserId(ctx));
+    if (reply) {
+      // Plain text (no parse_mode) \u2014 the evidence block contains characters that
+      // would break Telegram's HTML parser.
+      await ctx.reply(reply, { link_preview_options: { is_disabled: true } });
+    } else {
+      await ctx.reply(REPORT_FALLBACK_HTML, {
+        parse_mode: "HTML",
+        link_preview_options: { is_disabled: true },
+      });
+    }
   });
 
   bot.callbackQuery("action:check_another", async (ctx) => {
