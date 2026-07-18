@@ -7,6 +7,8 @@ import {
   buildComposerBody,
   bucketWorklist,
 } from "@/lib/email/brand-outreach-worklist";
+import type { BrandCloneSample } from "@/emails/BrandOutreachPilot";
+import { lifecycleBadge } from "@/lib/clone-watch/outcome-copy";
 
 interface Props {
   /** Pilot starter body (with a {{hook}} placeholder) from the shared lib. */
@@ -46,6 +48,34 @@ export default function BrandOutreach({ pilotTemplate }: Props) {
   const [rows, setRows] = useState<WorklistRow[] | null>(null);
   const [worklistError, setWorklistError] = useState<string | null>(null);
 
+  // Clone sample that WILL be embedded in the pilot email — previewed here so
+  // the founder sees the evidence before sending, and so the "enough data to
+  // pitch" warning can fire (founder's rule: only pitch brands we have lots of
+  // data on).
+  const [cloneSample, setCloneSample] = useState<BrandCloneSample | null>(null);
+  const [sampleState, setSampleState] = useState<
+    "idle" | "loading" | "error"
+  >("idle");
+
+  const loadCloneSample = useCallback(async (key: string) => {
+    setSampleState("loading");
+    setCloneSample(null);
+    try {
+      const res = await fetch(
+        `/api/admin/brand-outreach/clone-sample?brandKey=${encodeURIComponent(key)}`,
+      );
+      const json = await res.json();
+      if (res.ok && json.ok) {
+        setCloneSample((json.sample as BrandCloneSample | null) ?? null);
+        setSampleState("idle");
+      } else {
+        setSampleState("error");
+      }
+    } catch {
+      setSampleState("error");
+    }
+  }, []);
+
   const loadWorklist = useCallback(async () => {
     try {
       const res = await fetch("/api/admin/brand-outreach/worklist");
@@ -83,6 +113,7 @@ export default function BrandOutreach({ pilotTemplate }: Props) {
     setSubject(`${row.brand_name} × Ask Arthur — clone-watch pilot`);
     setBody(buildComposerBody(row));
     setStatus(`Loaded ${row.brand_name} — replace {{hook}} and review before sending.`);
+    void loadCloneSample(row.brand_key);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -160,6 +191,8 @@ export default function BrandOutreach({ pilotTemplate }: Props) {
             onChange={(e) => {
               setTo(e.target.value);
               setBrandKey(null); // hand-edited → no longer a worklist-tracked brand
+              setCloneSample(null); // sample was tied to the worklist brand
+              setSampleState("idle");
             }}
             placeholder="security@brand.com.au"
             className="w-full rounded border border-slate-300 p-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
@@ -246,6 +279,111 @@ export default function BrandOutreach({ pilotTemplate }: Props) {
           {status}
         </p>
       </div>
+
+      {/* ── Clone sample preview (what the email will include) ── */}
+      {brandKey && (
+        <section className="mt-8 rounded-lg border border-slate-200 bg-slate-50/60 p-4">
+          <h2 className="text-sm font-semibold">
+            Evidence the email will include
+          </h2>
+          <p className="mt-0.5 text-[11px] text-slate-400">
+            A live sample of the clones we&apos;ve detected + reported for{" "}
+            {brandName || "this brand"} in the last 30 days — this is embedded,
+            styled, in the pilot email.
+          </p>
+
+          {sampleState === "loading" && (
+            <p className="mt-3 text-xs text-slate-400">Loading sample…</p>
+          )}
+          {sampleState === "error" && (
+            <p className="mt-3 text-xs text-amber-600">
+              Couldn&apos;t load the clone sample. You can still send, but the
+              email won&apos;t carry evidence.
+            </p>
+          )}
+
+          {sampleState === "idle" && cloneSample && (
+            <div className="mt-3">
+              {/* Founder's rule: warn (don't block) on thin data. */}
+              {cloneSample.insufficientData ? (
+                <div className="mb-3 rounded border border-amber-300 bg-amber-50 p-3">
+                  <p className="text-xs font-semibold text-amber-800">
+                    ⚠ Insufficient recent data — not a strong outreach target
+                  </p>
+                  <p className="mt-1 text-[11px] leading-relaxed text-amber-700">
+                    Only <strong>{cloneSample.reportedCount}</strong> reported
+                    clone
+                    {cloneSample.reportedCount === 1 ? "" : "s"} for{" "}
+                    {brandName || "this brand"} in the last{" "}
+                    {cloneSample.windowDays} days ({cloneSample.totalCount}{" "}
+                    detected total). We only want to pitch brands we have lots of
+                    data on — consider a stronger candidate from the worklist.
+                    You can still send if you have a reason to.
+                  </p>
+                </div>
+              ) : (
+                <div className="mb-3 rounded border border-emerald-200 bg-emerald-50 p-3">
+                  <p className="text-xs font-medium text-emerald-800">
+                    ✓ Strong evidence: {cloneSample.reportedCount} reported ·{" "}
+                    {cloneSample.totalCount} detected
+                    {cloneSample.weaponisedCount > 0 && (
+                      <> · {cloneSample.weaponisedCount} active phishing</>
+                    )}
+                    {cloneSample.takenDownCount > 0 && (
+                      <> · {cloneSample.takenDownCount} taken down</>
+                    )}
+                  </p>
+                </div>
+              )}
+
+              {cloneSample.rows.length > 0 ? (
+                <ul className="space-y-1.5">
+                  {cloneSample.rows.map((r) => {
+                    const badge = lifecycleBadge(r.lifecycleState);
+                    return (
+                      <li
+                        key={r.domain}
+                        className="rounded border border-slate-200 bg-white px-3 py-2"
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <code className="text-xs text-slate-800">
+                            {r.domain}
+                          </code>
+                          {badge && (
+                            <span
+                              className="text-[10px] font-bold"
+                              style={{ color: badge.color }}
+                            >
+                              {badge.label}
+                            </span>
+                          )}
+                          {r.reportedToNetcraft && (
+                            <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-500">
+                              reported
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-0.5 text-[11px] text-slate-400">
+                          {r.detectedAt
+                            ? `Detected ${new Date(r.detectedAt).toLocaleDateString("en-AU")}`
+                            : "Detected recently"}
+                          {r.host ? ` · ${r.host}` : ""}
+                          {r.registrar ? ` · ${r.registrar}` : ""}
+                        </p>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <p className="text-xs text-slate-500">
+                  No clone detections for this brand in the last 30 days — nothing
+                  to show as evidence.
+                </p>
+              )}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* ── Next brand to email ── */}
       <section className="mt-10 border-t border-slate-200 pt-6">

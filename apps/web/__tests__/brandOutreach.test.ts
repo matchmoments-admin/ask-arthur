@@ -64,10 +64,26 @@ vi.mock("@/lib/unsubscribe", () => ({
     `${base}?email=${encodeURIComponent(email)}&token=stub`,
 }));
 
-// Service client — capture inserts into brand_outreach_log.
+// Service client — capture inserts into brand_outreach_log AND serve the clone
+// sample the pilot send now embeds. One builder handles both surfaces: the
+// insert path (brand_outreach_log) and the select-chain (shopfront_clone_alerts
+// → getBrandCloneSample). `cloneSampleRows` is per-test mutable.
 const insertMock = vi.fn().mockResolvedValue({ error: null });
+let cloneSampleRows: unknown[] = [];
+function makeQueryBuilder(): Record<string, unknown> {
+  const b: Record<string, unknown> = {
+    insert: insertMock,
+    select: () => b,
+    eq: () => b,
+    gte: () => b,
+    or: () => b,
+    order: () => b,
+    limit: () => Promise.resolve({ data: cloneSampleRows, error: null }),
+  };
+  return b;
+}
 vi.mock("@askarthur/supabase/server", () => ({
-  createServiceClient: () => ({ from: () => ({ insert: insertMock }) }),
+  createServiceClient: () => ({ from: () => makeQueryBuilder() }),
 }));
 
 // ── Helpers ──
@@ -101,6 +117,7 @@ beforeEach(() => {
   telegramMock.mockReset().mockResolvedValue(undefined);
   insertMock.mockReset().mockResolvedValue({ error: null });
   loggerMock.error.mockReset();
+  cloneSampleRows = [];
   delete process.env.BRAND_OUTREACH_SHADOW_RECIPIENT;
 });
 
@@ -184,7 +201,7 @@ describe("POST /api/admin/brand-outreach/send", () => {
     // subject is prefixed so a self-test is distinguishable in the inbox
     expect(payload.subject).toContain("[TEST → P&N Bank]");
     // multipart: both html and text present
-    expect(payload.html).toContain("ABN 72 695 772 313");
+    expect(payload.html).toContain("72 695 772 313");
     expect(typeof payload.text).toBe("string");
     expect(payload.text.length).toBeGreaterThan(0);
     // List-Unsubscribe (signed URL + mailto STOP) + stable idempotency key
@@ -276,6 +293,48 @@ describe("POST /api/admin/brand-outreach/send", () => {
       String(c[0]).includes("FAILED"),
     );
     expect(alerted).toBe(true);
+  });
+
+  it("embeds the real clone sample (styled + honest) in the pilot email", async () => {
+    cloneSampleRows = [
+      {
+        candidate_domain: "reece-login.click",
+        inferred_target_domain: "reece.com.au",
+        urlscan_classification: "likely_phishing",
+        urlscan_evidence: { server: { ip: "1.2.3.4", asn: "AS132203", country: "US" } },
+        urlscan_uuid: "uuid-1",
+        attribution: { whois: { registrar: "NameSilo, LLC" } },
+        submitted_to: { netcraft: { submitted_at: "2026-07-11T00:00:00Z" } },
+        lifecycle_state: "weaponised",
+        first_seen_at: "2026-07-10T00:00:00Z",
+      },
+    ];
+    const { POST } = await loadRoute();
+    const res = await POST(
+      makeRequest({ ...validPayload, brandKey: "reece.com.au", testMode: true }),
+    );
+    expect(res.status).toBe(200);
+
+    const [payload] = resendSendMock.mock.calls[0];
+    // the styled evidence section + the real clone domain
+    expect(payload.html).toContain("A sample of the clones");
+    expect(payload.html).toContain("reece-login.click");
+    // honesty framing survives the send path
+    expect(payload.html).toContain("not an assessment of your organisation");
+    expect(payload.html.toLowerCase()).not.toContain("criminal");
+    // the plain-text twin carries the evidence too (cold B2B needs text/plain)
+    expect(payload.text).toContain("reece-login.click");
+  });
+
+  it("sends the pilot email without a sample section when no brandKey is supplied", async () => {
+    cloneSampleRows = [{ candidate_domain: "should-not-appear.click" }];
+    const { POST } = await loadRoute();
+    const res = await POST(makeRequest({ ...validPayload, testMode: true }));
+    expect(res.status).toBe(200);
+    const [payload] = resendSendMock.mock.calls[0];
+    // no brandKey → getBrandCloneSample short-circuits (no DB read), no sample
+    expect(payload.html).not.toContain("A sample of the clones");
+    expect(payload.html).toContain("72 695 772 313");
   });
 
   it("503s when RESEND env is unset", async () => {
