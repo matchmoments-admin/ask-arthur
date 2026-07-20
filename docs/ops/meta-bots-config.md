@@ -120,6 +120,27 @@ then only app admins/testers/roles can message the bots.
 
 ---
 
+## Marketplace mode (`FF_BOT_MARKETPLACE_MODE`)
+
+The bots' primary use case is Facebook Marketplace checks. When
+`FF_BOT_MARKETPLACE_MODE=true` (server-side, Vercel Production), every bot
+analysis gets a Marketplace-tuned prompt block (extra patterns: Google-Voice/OTP
+"send me the code", deposit-before-viewing) and, on a non-SAFE Messenger verdict,
+a **"Check their profile"** quick-reply. Tapping it asks the user for a
+screenshot of the seller's profile; the next image is analysed **together with**
+the original message so Claude vision can read "Joined <year>" / reviews /
+friends and weight a recently-created account as a corroborating signal.
+
+**Why a screenshot and not an API:** Meta exposes no account-age or profile field
+for a third-party Marketplace counterparty (see [ADR-0023](../adr/0023-meta-platform-boundaries.md)).
+The "new account" signal can only come from what the user can already see. A
+browser-extension auto-read of the join date (no screenshot) is the Phase 2
+follow-up.
+
+Default OFF — flip on in Vercel after a preview smoke test. No new paid API
+(reuses the `bot_analyze` brake). The "Report scam" onward flow still depends on
+`NEXT_PUBLIC_FF_INTELLIGENCE_CORE=true` (otherwise it falls back to static text).
+
 ## Telemetry / safety parity (already wired — no action)
 
 Both bots go through the shared `analyzeForBotDetailed` path, so they inherit:

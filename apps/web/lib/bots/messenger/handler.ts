@@ -2,8 +2,14 @@ import { analyzeForBotDetailed } from "@askarthur/bot-core/analyze";
 import { toMessengerMessage } from "@askarthur/bot-core/format-messenger";
 import { checkBotRateLimit } from "@askarthur/bot-core/rate-limit";
 import { logger } from "@askarthur/utils/logger";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 import type { AnalysisResult } from "@askarthur/types";
-import { sendTextMessage, sendQuickReplies, type MessengerQuickReply } from "./api";
+import {
+  sendTextMessage,
+  sendQuickReplies,
+  sendTypingOn,
+  type MessengerQuickReply,
+} from "./api";
 import { downloadMessengerAttachment } from "./media";
 import { isReplay } from "../replay-dedup";
 import { getBotRedis } from "../redis";
@@ -52,6 +58,35 @@ async function sendDisclosureIfNew(senderId: string): Promise<boolean> {
   await redis.set(key, "1", { ex: 30 * 24 * 60 * 60 });
   await sendTextMessage(senderId, DISCLOSURE_MESSAGE);
   return true;
+}
+
+// Multi-turn "send their profile" state for the Marketplace deeper-check flow.
+// After a non-SAFE Marketplace verdict on a text message we stash that text
+// under a short-TTL key; the next profile screenshot the user sends is analysed
+// TOGETHER with it (message + profile → one verdict). This is how the "new
+// account" signal is obtained — Meta exposes no account age via API (ADR-0023),
+// so it can only come from a screenshot the user chooses to send. Fail-open: no
+// Redis just means the screenshot is analysed on its own.
+const PENDING_TTL_SECONDS = 15 * 60;
+
+async function stashPendingMarketplace(
+  senderId: string,
+  text: string,
+): Promise<void> {
+  const redis = getBotRedis();
+  if (!redis) return;
+  const hash = await hashUserId(senderId);
+  await redis.set(`messenger:pending:${hash}`, text, { ex: PENDING_TTL_SECONDS });
+}
+
+async function takePendingMarketplace(senderId: string): Promise<string | null> {
+  const redis = getBotRedis();
+  if (!redis) return null;
+  const hash = await hashUserId(senderId);
+  // getdel: read-and-clear atomically so the pending text drives exactly one
+  // follow-up screenshot.
+  const text = await redis.getdel<string>(`messenger:pending:${hash}`);
+  return typeof text === "string" && text.length > 0 ? text : null;
 }
 
 interface MessengerAttachment {
@@ -129,15 +164,31 @@ async function processEvent(
   // AI disclosure on first interaction
   await sendDisclosureIfNew(senderId);
 
-  // Image attachment (forwarded screenshot / Marketplace listing photo)
   const imageUrl = message?.attachments?.find((a) => a.type === "image")?.payload
     ?.url;
+  const text = message?.text?.trim();
+
+  // Image path — a forwarded screenshot / Marketplace listing / profile photo.
   if (imageUrl) {
-    await processImageMessage(senderId, imageUrl);
+    // Multi-turn: if the user was just told to "send their profile" after a
+    // Marketplace verdict, analyse that earlier message + this screenshot
+    // together. An image caption also counts as context.
+    const pendingText = await takePendingMarketplace(senderId);
+    await processImageMessage(senderId, imageUrl, pendingText ?? text);
     return;
   }
 
-  // Non-image attachment (video, file, location, shared content) — not supported
+  // Text path — analyse whenever text is present, EVEN if a link-preview
+  // "fallback" attachment rode along. Messenger attaches one to any message
+  // containing a URL, so checking text BEFORE bailing on attachments is the fix
+  // for the bug where "AusPost … http://…" was rejected without analysis.
+  if (text) {
+    await processAnalysis(senderId, text);
+    return;
+  }
+
+  // No usable text and no image: a genuinely unsupported attachment (video,
+  // file, location, sticker) or an empty message.
   if (message?.attachments && message.attachments.length > 0) {
     await sendTextMessage(
       senderId,
@@ -145,22 +196,16 @@ async function processEvent(
     );
     return;
   }
-
-  const text = message?.text;
-  if (!text || !text.trim()) {
-    await sendTextMessage(
-      senderId,
-      "Send me a suspicious message or screenshot and I'll check it for scam indicators.",
-    );
-    return;
-  }
-
-  await processAnalysis(senderId, text);
+  await sendTextMessage(
+    senderId,
+    "Send me a suspicious message or screenshot and I'll check it for scam indicators.",
+  );
 }
 
 async function processImageMessage(
   senderId: string,
   url: string,
+  combinedText?: string,
 ): Promise<void> {
   const rateLimit = await checkBotRateLimit("messenger", senderId);
   if (!rateLimit.allowed) {
@@ -172,6 +217,7 @@ async function processImageMessage(
   }
 
   try {
+    await sendTypingOn(senderId);
     const base64 = await downloadMessengerAttachment(url);
     if (!base64) {
       await sendTextMessage(
@@ -181,8 +227,14 @@ async function processImageMessage(
       return;
     }
 
+    // When we have earlier message text (the Marketplace "send their profile"
+    // flow) or an image caption, pass BOTH text + image so Claude reasons over
+    // the conversation AND the profile screenshot in one verdict.
+    const prompt = combinedText?.trim()
+      ? combinedText
+      : "Analyse this image for scam indicators";
     const { result, scamReportId } = await analyzeForBotDetailed(
-      "Analyse this image for scam indicators",
+      prompt,
       undefined,
       [base64],
       { source: "bot_messenger", userId: senderId, inputMode: "image" },
@@ -211,12 +263,25 @@ async function processAnalysis(senderId: string, text: string): Promise<void> {
   }
 
   try {
+    await sendTypingOn(senderId);
     const { result, scamReportId } = await analyzeForBotDetailed(text, undefined, undefined, {
       source: "bot_messenger",
       userId: senderId,
       inputMode: "text",
     });
-    await sendResult(senderId, result);
+
+    // Marketplace deeper-check: on a non-SAFE verdict, offer to also read the
+    // other party's profile (the only way to get the "new account" signal —
+    // Meta exposes no account age via API). Stash the message so the next
+    // screenshot is analysed together with it.
+    const offerProfile =
+      featureFlags.botMarketplaceMode &&
+      (result.verdict === "HIGH_RISK" || result.verdict === "SUSPICIOUS");
+    if (offerProfile) {
+      await stashPendingMarketplace(senderId, text);
+    }
+
+    await sendResult(senderId, result, offerProfile);
     if (scamReportId) {
       await stashBotReport("messenger", senderId, buildReportStash(scamReportId, result));
     }
@@ -236,6 +301,7 @@ async function processAnalysis(senderId: string, text: string): Promise<void> {
 async function sendResult(
   senderId: string,
   result: AnalysisResult,
+  offerProfile = false,
 ): Promise<void> {
   const formatted = toMessengerMessage(result);
   const chunks = (formatted.length > 2000
@@ -255,6 +321,9 @@ async function sendResult(
   const replies: MessengerQuickReply[] = [];
   if (result.verdict === "HIGH_RISK" || result.verdict === "SUSPICIOUS") {
     replies.push({ title: "Report scam", payload: "action:report" });
+    if (offerProfile) {
+      replies.push({ title: "Check their profile", payload: "action:profile" });
+    }
   }
   replies.push({ title: "Check another", payload: "action:check" });
   replies.push({ title: "About", payload: "action:about" });
@@ -270,6 +339,13 @@ async function handleAction(senderId: string, payload: string): Promise<void> {
     await sendTextMessage(
       senderId,
       "Send me another message or screenshot to check \u{1f50d}",
+    );
+  } else if (payload === "action:profile") {
+    // The message text was stashed when we offered this; the next screenshot
+    // the user sends is analysed together with it (see processEvent image path).
+    await sendTextMessage(
+      senderId,
+      "\u{1f4f8} Send me a screenshot of their Facebook or Marketplace profile — I'll check when the account was created, their reviews and friend count, and factor that into the verdict. (New accounts selling high-value items are a common scam sign.)",
     );
   } else if (payload === "action:about") {
     await sendTextMessage(senderId, DISCLOSURE_MESSAGE);
