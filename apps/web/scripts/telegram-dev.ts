@@ -5,7 +5,7 @@
  * Requires TELEGRAM_BOT_TOKEN in .env.local
  */
 
-import "dotenv/config";
+import "./_load-env-config";
 import { bot } from "../lib/bots/telegram/bot";
 
 bot.start({

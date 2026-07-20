@@ -18,7 +18,7 @@
  * Requires ADMIN_SECRET (same value as the deployed app) to mint the admin
  * cookie — the page is requireAdmin()-gated.
  */
-import "dotenv/config";
+import "./_load-env-config";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";

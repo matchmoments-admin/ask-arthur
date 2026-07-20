@@ -19,7 +19,7 @@
  *   - INNGEST_EVENT_KEY in .env.local — for sending events to prod Inngest.
  */
 
-import "dotenv/config";
+import "./_load-env-config";
 
 import { createServiceClient } from "@askarthur/supabase/server";
 import { inngest } from "@askarthur/scam-engine/inngest/client";

@@ -62,7 +62,7 @@ Every consumer page, authenticated page, admin page, and API route, grouped by d
 | Route             | Purpose                         | Flag       |
 | ----------------- | ------------------------------- | ---------- |
 | `/scam-feed`      | Public scam-trend dashboard     | `scamFeed` |
-| `/scam-map`       | Geo-heatmap of scam reports     | `scamFeed` |
+| `/scam-map`       | Geo-heatmap of scam reports     | —          |
 | `/spf-compliance` | SPF/DMARC/DKIM compliance guide | —          |
 
 ### Trust & transparency
