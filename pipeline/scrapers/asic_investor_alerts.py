@@ -19,8 +19,10 @@ from typing import Any
 
 from common.backoff import enforce_backoff_or_skip
 from common.db import (
+    bulk_upsert_asic_alerts,
     bulk_upsert_narrative_feed_items,
     bulk_upsert_urls,
+    deactivate_stale_asic_alerts,
     get_db,
     log_ingestion,
 )
@@ -78,6 +80,44 @@ def _flatten_urls(record: dict) -> list[str]:
             if " " not in val and "." in val and "://" not in val:
                 _add(val)
     return found
+
+
+def _alias_list(record: dict) -> list[str]:
+    """Pull alias/other-name strings out of a record (list or delimited string)."""
+    val = record.get("aliases")
+    if isinstance(val, list):
+        return [str(v).strip() for v in val if str(v).strip()]
+    if isinstance(val, str):
+        return [p.strip() for p in re.split(r"[,\n;]+", val) if p.strip()]
+    return []
+
+
+def _alert_type(record: dict) -> str | None:
+    """Best-effort classification label from the (undocumented) record shape."""
+    for key in ("type", "alert_type", "alertType", "category", "warning_type"):
+        v = record.get(key)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return None
+
+
+def _build_alert(record: dict, domains: list[str], snapshot_date: str) -> dict | None:
+    """Shape one ASIC record into an asic_investor_alerts upsert row.
+
+    Returns None when the record has no entity name (nothing to key on).
+    """
+    entity_name = (record.get("name") or "").strip()
+    if not entity_name:
+        return None
+    return {
+        "entity_name": entity_name,
+        "aliases": _alias_list(record),
+        "domains": domains,
+        "alert_type": _alert_type(record),
+        "asic_url": SOURCE_PAGE,
+        "snapshot_date": snapshot_date,
+        "raw": record,
+    }
 
 
 def _build_synthetic_summary(records: list[dict]) -> dict | None:
@@ -138,6 +178,8 @@ def scrape() -> str:
     records: list[dict] = []
     all_urls: list[dict] = []
     feed_items: list[dict] = []
+    alerts: list[dict] = []
+    snapshot_date = time.strftime("%Y-%m-%d", time.gmtime())
 
     try:
         resp = conditional_get(FEED_NAME, JSON_URL, timeout=60)
@@ -149,6 +191,7 @@ def scrape() -> str:
             logger.info(f"ASIC: parsed {len(records)} entity records")
 
             for r in records:
+                record_domains: list[str] = []
                 for raw_url in _flatten_urls(r):
                     norm = normalize_url(raw_url)
                     if norm is None:
@@ -160,6 +203,12 @@ def scrape() -> str:
                         "feed_reference_url": SOURCE_PAGE,
                         "country_code": "AU",
                     })
+                    if norm.domain and norm.domain not in record_domains:
+                        record_domains.append(norm.domain)
+
+                alert = _build_alert(r, record_domains, snapshot_date)
+                if alert:
+                    alerts.append(alert)
 
             summary = _build_synthetic_summary(records)
             if summary:
@@ -175,6 +224,15 @@ def scrape() -> str:
             if all_urls
             else {"new": 0, "updated": 0, "skipped": 0}
         )
+        alert_stats = (
+            bulk_upsert_asic_alerts(conn, alerts, FEED_NAME)
+            if alerts
+            else {"new": 0, "updated": 0, "skipped": 0}
+        )
+        # Prune (soft-delist) only on a real snapshot — never on a 304 or a
+        # failed fetch, which would otherwise deactivate the whole register.
+        if alerts and status == "success":
+            deactivate_stale_asic_alerts(conn, snapshot_date)
         feed_stats = (
             bulk_upsert_narrative_feed_items(conn, feed_items, FEED_NAME)
             if feed_items
@@ -195,7 +253,9 @@ def scrape() -> str:
         )
     logger.info(
         f"ASIC complete: {len(records)} records, urls new={url_stats['new']} "
-        f"updated={url_stats['updated']}, summary new={feed_stats['new']} in {duration_ms}ms"
+        f"updated={url_stats['updated']}, entities new={alert_stats['new']} "
+        f"updated={alert_stats['updated']}, summary new={feed_stats['new']} "
+        f"in {duration_ms}ms"
     )
 
     return status

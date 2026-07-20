@@ -905,3 +905,95 @@ def log_ingestion(
     )
     conn.commit()
     cursor.close()
+
+
+def bulk_upsert_asic_alerts(
+    conn,
+    alerts: list[dict],
+    feed_name: str,
+) -> dict:
+    """Upsert ASIC Investor Alert entities via the bulk_upsert_asic_alert() RPC.
+
+    One row per regulator-flagged entity (name + aliases + domains). Each row is
+    upserted through a per-row SAVEPOINT so one malformed record can't poison the
+    batch (regulator data is small + clean, so per-row cost is negligible).
+
+    Each item in `alerts` should have:
+        - entity_name: str (required; skipped if it normalizes to empty)
+        - aliases: list[str]        (optional)
+        - domains: list[str]        (optional; registrable domains, normalized)
+        - alert_type: str | None    (optional)
+        - asic_url: str | None      (optional)
+        - snapshot_date: str        ('YYYY-MM-DD')
+        - raw: dict | None          (optional; stored as jsonb)
+
+    Returns stats: {new, updated, skipped}.
+    """
+    stats = {"new": 0, "updated": 0, "skipped": 0}
+    cursor = conn.cursor()
+    for item in alerts:
+        entity_name = (item.get("entity_name") or "").strip()
+        if not entity_name:
+            stats["skipped"] += 1
+            continue
+        raw = item.get("raw")
+        params = (
+            entity_name,
+            item.get("aliases") or None,
+            item.get("domains") or None,
+            item.get("alert_type"),
+            item.get("asic_url"),
+            item.get("snapshot_date"),
+            json.dumps(raw) if raw is not None else None,
+        )
+        try:
+            cursor.execute("SAVEPOINT asic_sp")
+            cursor.execute(
+                "SELECT public.bulk_upsert_asic_alert(%s, %s, %s, %s, %s, %s::date, %s::jsonb)",
+                params,
+            )
+            row = cursor.fetchone()
+            cursor.execute("RELEASE SAVEPOINT asic_sp")
+            data = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+            if data.get("skipped"):
+                stats["skipped"] += 1
+            elif data.get("is_new"):
+                stats["new"] += 1
+            else:
+                stats["updated"] += 1
+        except Exception as e:
+            cursor.execute("ROLLBACK TO SAVEPOINT asic_sp")
+            stats["skipped"] += 1
+            logger.error(
+                f"Failed to upsert ASIC alert: {entity_name}",
+                extra={"metadata": {"error": str(e), "feed": feed_name}},
+            )
+    conn.commit()
+    cursor.close()
+    logger.info(
+        f"ASIC alerts upsert: new={stats['new']} updated={stats['updated']} "
+        f"skipped={stats['skipped']}",
+        extra={"metadata": {"feed": feed_name}},
+    )
+    return stats
+
+
+def deactivate_stale_asic_alerts(conn, snapshot_date: str) -> int:
+    """Flag ASIC alert rows not present in the latest snapshot as inactive.
+
+    Delegates to the deactivate_stale_asic_alerts(date) RPC — one small UPDATE
+    (the registry is a few hundred to low-thousands of rows, not a hot table).
+    Returns the number of rows deactivated.
+    """
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT public.deactivate_stale_asic_alerts(%s::date)", (snapshot_date,)
+    )
+    count = cursor.fetchone()[0] or 0
+    conn.commit()
+    cursor.close()
+    logger.info(
+        f"ASIC alerts deactivated (stale): {count}",
+        extra={"metadata": {"count": count}},
+    )
+    return count
