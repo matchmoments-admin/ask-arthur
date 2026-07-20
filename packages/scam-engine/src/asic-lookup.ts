@@ -37,6 +37,21 @@ interface AsicLookupRow {
   is_active: boolean;
 }
 
+// Surface a systemic lookup failure to the health-digest Telegram page (it
+// pages on cost_telemetry rows whose feature matches '%error%'). $0 — a DB read,
+// not paid spend; the row is an error signal, not cost.
+function logAsicError(message: string): void {
+  logger.warn("checkAsicListed: query failed", { error: message });
+  logCost({
+    feature: "asic-lookup-error",
+    provider: "supabase",
+    operation: "lookup_asic_investor_alert",
+    units: 1,
+    estimatedCostUsd: 0,
+    metadata: { error: message },
+  });
+}
+
 /**
  * Look up whether `query` mentions an ASIC-listed entity/domain.
  *
@@ -53,20 +68,23 @@ export async function checkAsicListed(
   const sb = createServiceClient();
   if (!sb) return null;
 
-  const { data, error } = await sb.rpc("lookup_asic_investor_alert", {
-    p_query: q,
-  });
+  let data: unknown;
+  let error: { message: string } | null = null;
+  try {
+    ({ data, error } = await sb.rpc("lookup_asic_investor_alert", {
+      p_query: q,
+    }));
+  } catch (err) {
+    // supabase-js normally resolves-with-error, but a promise REJECTION
+    // (network failure / misconfigured client) must not propagate: this sits
+    // on the analyze hot path and a throw would 500 the whole scan for a
+    // decorative citation. Degrade to no-citation.
+    logAsicError(String(err));
+    return null;
+  }
 
   if (error) {
-    logger.warn("checkAsicListed: query failed", { error: error.message });
-    logCost({
-      feature: "asic-lookup-error",
-      provider: "supabase",
-      operation: "lookup_asic_investor_alert",
-      units: 1,
-      estimatedCostUsd: 0,
-      metadata: { error: error.message },
-    });
+    logAsicError(error.message);
     return null;
   }
 

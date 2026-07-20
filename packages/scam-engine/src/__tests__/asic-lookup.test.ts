@@ -78,10 +78,16 @@ describe("checkAsicListed", () => {
     expect(await checkAsicListed("nothing here")).toBeNull();
   });
 
-  it("never throws on an RPC error — yields null", async () => {
+  it("never throws on an RPC error field — yields null", async () => {
     rpcMock.mockResolvedValue({ data: null, error: { message: "boom" } });
     const { checkAsicListed } = await importFresh();
     expect(await checkAsicListed("x")).toBeNull();
+  });
+
+  it("never throws when the RPC promise REJECTS — yields null", async () => {
+    rpcMock.mockRejectedValue(new Error("network down"));
+    const { checkAsicListed } = await importFresh();
+    await expect(checkAsicListed("https://tagmarkets.com")).resolves.toBeNull();
   });
 });
 
@@ -120,6 +126,16 @@ describe("applyAsicCitation", () => {
     const { applyAsicCitation } = await importFresh();
     const result = baseResult();
     expect(await applyAsicCitation(result, "clean text")).toBeNull();
+    expect((result as { redFlags: string[] }).redFlags).toEqual(["existing flag"]);
+  });
+
+  it("never throws + leaves redFlags unchanged when the RPC rejects", async () => {
+    rpcMock.mockRejectedValue(new Error("network down"));
+    const { applyAsicCitation } = await importFresh();
+    const result = baseResult();
+    await expect(
+      applyAsicCitation(result, "https://tagmarkets.com"),
+    ).resolves.toBeNull();
     expect((result as { redFlags: string[] }).redFlags).toEqual(["existing flag"]);
   });
 });
