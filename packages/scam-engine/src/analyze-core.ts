@@ -48,6 +48,7 @@ import type {
   ReferrerSource,
 } from "@askarthur/types";
 import { applyShopSignal } from "./shop-signal";
+import { applyAsicCitation } from "./asic-lookup";
 import { getRelevantThemes, renderThemesForPrompt } from "./retrieval/themes";
 
 export type AnalyzeSurface = AnalyzeCacheSurface;
@@ -267,6 +268,17 @@ export async function runAnalysisCore(
   // the surrounding plumbing. Pass the post-redirect URL list (urlsToCheck).
   // Plan: docs/plans/shop-guard-v2.md §3.
   applyShopSignal(result, text, urlsToCheck, referrerSource);
+
+  // ASIC Investor Alert citation (PR-A2) — flag-gated (FF_ASIC_LOOKUP), default
+  // OFF. If the submission mentions a domain on ASIC's regulator Investor Alert
+  // List, append a red flag. Shared with the web route via applyAsicCitation
+  // (single source of truth); this call covers the extension + bot surfaces.
+  // Never throws; one DB read only when the flag is on and there is content.
+  await applyAsicCitation(
+    result,
+    [text, ...urlsToCheck].filter(Boolean).join(" "),
+    { requestId },
+  );
 
   // 6. Background fan-out.
   const tasks: Promise<unknown>[] = [];

@@ -19,6 +19,7 @@ import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { ANALYZE_COMPLETED_EVENT } from "@askarthur/scam-engine/inngest/events";
 import { detectCharityIntent, type CharityIntent } from "@askarthur/scam-engine/charity-intent";
 import { applyShopSignal } from "@askarthur/scam-engine/shop-signal";
+import { applyAsicCitation } from "@askarthur/scam-engine/asic-lookup";
 import { WebAnalyzeInputSchema, type RedirectChain } from "@askarthur/types";
 import { storeVerifiedScam, incrementStats } from "@askarthur/scam-engine/pipeline";
 import { storeScamReport, buildEntities } from "@askarthur/scam-engine/report-store";
@@ -371,6 +372,30 @@ export async function POST(req: NextRequest) {
         void logEvent({
           eventType: "clone_citation_shown",
           eventProps: { impersonated: clone.impersonatedDomain },
+          path: "/api/analyze",
+          requestId,
+        });
+      }
+    }
+
+    // 6a-asic. ASIC Investor Alert citation (PR-A2) — flag-gated (FF_ASIC_LOOKUP),
+    // default OFF. If the submission mentions a domain on ASIC's regulator
+    // Investor Alert List, add a red flag. Shared helper (applyAsicCitation)
+    // also runs in runAnalysisCore so the extension + bots get the same signal;
+    // the web route open-codes its pipeline so it calls the helper here. Never
+    // throws. First-party analytics mirrors the clone-citation observability.
+    if (featureFlags.asicLookup) {
+      const asicHit = await applyAsicCitation(
+        aiResult,
+        [text, ...allUrls].filter(Boolean).join(" "),
+        { requestId },
+      );
+      if (asicHit) {
+        // applyAsicCitation already emits the Axiom log; add first-party
+        // analytics (volume in analytics_events) — match type only, no content.
+        void logEvent({
+          eventType: "asic_citation_shown",
+          eventProps: { matchType: asicHit.matchType },
           path: "/api/analyze",
           requestId,
         });
