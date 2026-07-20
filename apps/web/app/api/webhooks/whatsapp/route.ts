@@ -1,3 +1,4 @@
+import { waitUntil } from "@vercel/functions";
 import {
   verifyWhatsAppSignature,
   safeStrEqual,
@@ -48,11 +49,20 @@ export async function POST(req: Request) {
     return new Response("Bad Request", { status: 400 });
   }
 
-  // Process in background — return 200 immediately (fire-and-forget; the route
-  // runs on the Node runtime, see the runtime pin at the top of this file).
-  const processPromise = handleWhatsAppWebhook(payload as Parameters<typeof handleWhatsAppWebhook>[0]);
-  processPromise.catch((err) =>
-    logger.error("WhatsApp webhook processing failed", { error: String(err) })
+  // Return 200 immediately (WhatsApp retries on any slow/non-2xx response), but
+  // the analysis + reply take ~9s of Claude latency. waitUntil keeps the
+  // function alive until that background work finishes — without it, Vercel
+  // freezes the function once the response is sent and the analysis is
+  // suspended mid-call, so the user never gets a reply. (Same fix as the
+  // Messenger route.)
+  waitUntil(
+    handleWhatsAppWebhook(
+      payload as Parameters<typeof handleWhatsAppWebhook>[0],
+    ).catch((err) =>
+      logger.error("WhatsApp webhook processing failed", {
+        error: String(err),
+      }),
+    ),
   );
 
   return new Response("OK", { status: 200 });
