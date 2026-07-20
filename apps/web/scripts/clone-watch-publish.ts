@@ -17,7 +17,7 @@
  * Prints machine-readable `RESULT=<published|skipped>` and `URL=<feed-url>` for
  * the workflow to branch on. Requires LINKEDIN_* + SUPABASE_* env.
  */
-import "dotenv/config";
+import "./_load-env-config";
 import fs from "node:fs";
 import { createServiceClient } from "@askarthur/supabase/server";
 import {

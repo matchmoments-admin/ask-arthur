@@ -16,7 +16,7 @@
  *
  * Reads LINKEDIN_* from apps/web/.env.local (dotenv).
  */
-import "dotenv/config";
+import "./_load-env-config";
 import fs from "node:fs";
 import {
   resolveAccessToken,

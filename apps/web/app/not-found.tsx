@@ -1,6 +1,19 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { SearchX } from "lucide-react";
 import Footer from "@/components/Footer";
+
+// The root layout defaults every page to `robots: index:true`. This boundary
+// renders whenever `notFound()` is thrown — and in Next's streaming model a
+// `notFound()` thrown AFTER an await (unknown /blog/[slug], /intel/themes/
+// [slug], /report/[domain], etc.) is served with HTTP 200, not 404, once the
+// shell has flushed. A 200 "not found" body is a soft-404 Google can index.
+// Overriding robots to noindex here neutralises that for every not-found
+// render at once — present and future pages — regardless of HTTP status.
+export const metadata: Metadata = {
+  title: "Page Not Found",
+  robots: { index: false, follow: false },
+};
 
 export default function NotFound() {
   return (

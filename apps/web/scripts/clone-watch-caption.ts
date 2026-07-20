@@ -12,7 +12,7 @@
  * Optional --method-url adds the "How we count these → …" line to the first
  * comment once the /clone-watch/method page is live.
  */
-import "dotenv/config";
+import "./_load-env-config";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { getCloneWatchReportCard } from "../lib/clone-watch/report-card-data";
