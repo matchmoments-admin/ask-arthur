@@ -962,7 +962,10 @@ def bulk_upsert_asic_alerts(
             else:
                 stats["updated"] += 1
         except Exception as e:
+            # ROLLBACK TO keeps the savepoint defined; RELEASE it so repeated
+            # errors don't stack same-named savepoints on the txn.
             cursor.execute("ROLLBACK TO SAVEPOINT asic_sp")
+            cursor.execute("RELEASE SAVEPOINT asic_sp")
             stats["skipped"] += 1
             logger.error(
                 f"Failed to upsert ASIC alert: {entity_name}",

@@ -101,6 +101,16 @@ def _alert_type(record: dict) -> str | None:
     return None
 
 
+def _should_prune(alerts: list[dict], status: str) -> bool:
+    """Only prune (soft-delist) on a real, non-empty snapshot.
+
+    Guards the register against being wiped on a 304 (alerts empty), a failed
+    fetch (status != 'success'), or a valid-but-empty [] JSON (alerts empty).
+    A count-floor check (in scrape()) additionally guards a truncated 200.
+    """
+    return bool(alerts) and status == "success"
+
+
 def _build_alert(record: dict, domains: list[str], snapshot_date: str) -> dict | None:
     """Shape one ASIC record into an asic_investor_alerts upsert row.
 
@@ -229,10 +239,25 @@ def scrape() -> str:
             if alerts
             else {"new": 0, "updated": 0, "skipped": 0}
         )
-        # Prune (soft-delist) only on a real snapshot — never on a 304 or a
-        # failed fetch, which would otherwise deactivate the whole register.
-        if alerts and status == "success":
-            deactivate_stale_asic_alerts(conn, snapshot_date)
+        # Prune (soft-delist) only on a real snapshot — never on a 304 / failed
+        # fetch / empty payload (guarded by _should_prune), and never when
+        # today's snapshot is suspiciously small vs the active set (guards a
+        # truncated 200 response, and rows whose individual upsert failed and
+        # kept a stale snapshot_date). Both delistings self-heal next run.
+        if _should_prune(alerts, status):
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT count(*) FROM public.asic_investor_alerts WHERE is_active"
+                )
+                active_count = cur.fetchone()[0] or 0
+            if active_count == 0 or len(alerts) >= active_count * 0.5:
+                deactivate_stale_asic_alerts(conn, snapshot_date)
+            else:
+                logger.warning(
+                    f"ASIC prune skipped: {len(alerts)} entities < 50% of "
+                    f"{active_count} active — possible partial response",
+                    extra={"metadata": {"feed": FEED_NAME}},
+                )
         feed_stats = (
             bulk_upsert_narrative_feed_items(conn, feed_items, FEED_NAME)
             if feed_items

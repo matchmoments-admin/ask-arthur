@@ -14,6 +14,7 @@ from asic_investor_alerts import (
     _build_alert,
     _flatten_urls,
     _records_from_payload,
+    _should_prune,
 )
 from common.normalize import normalize_url
 
@@ -126,3 +127,19 @@ def test_build_alert_no_urls_yields_empty_domains():
     assert alert is not None
     assert alert["domains"] == []
     assert alert["aliases"] == []
+
+
+# --- prune guard (register-wipe protection) ----------------------------------
+
+def test_should_prune_true_on_real_snapshot():
+    assert _should_prune([{"entity_name": "X"}], "success") is True
+
+
+def test_should_prune_false_on_empty_alerts():
+    # 304 Not Modified or a valid-but-empty [] payload → never wipe the register.
+    assert _should_prune([], "success") is False
+
+
+def test_should_prune_false_on_error_status():
+    assert _should_prune([{"entity_name": "X"}], "error") is False
+    assert _should_prune([{"entity_name": "X"}], "skipped") is False
