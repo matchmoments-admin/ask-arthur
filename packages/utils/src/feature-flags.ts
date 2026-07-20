@@ -113,6 +113,13 @@ export const featureFlags = {
    *  gates the /image-check/[ref] evidence page + PDF. */
   imageCheckRecords: readBoolEnv("FF_IMAGE_CHECK_RECORDS"),
 
+  /** ASIC Investor Alert lookup (PR-A2): surface an "ASIC-listed" red flag
+   *  when an analyze submission mentions a domain on ASIC's regulator
+   *  Investor Alert List. Server-only (analyze route + runAnalysisCore →
+   *  extension + bots); default OFF. Safe to flip on once the daily
+   *  asic_investor scrape has populated asic_investor_alerts. */
+  asicLookup: readBoolEnv("FF_ASIC_LOOKUP"),
+
   /** Extension billing: install↔account link flow (/extension/link +
    *  /api/extension/link-token + /api/extension/link) and, from PR 6, the
    *  Extension Pro Stripe checkout + webhook provisioning. Pairs with the
