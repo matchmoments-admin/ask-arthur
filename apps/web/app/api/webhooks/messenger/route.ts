@@ -1,3 +1,4 @@
+import { waitUntil } from "@vercel/functions";
 import { logger } from "@askarthur/utils/logger";
 import { handleMessengerWebhook } from "@/lib/bots/messenger/handler";
 import {
@@ -48,12 +49,21 @@ export async function POST(req: Request) {
     return new Response("Bad Request", { status: 400 });
   }
 
-  // Process in background — return 200 immediately
-  const processPromise = handleMessengerWebhook(
-    payload as Parameters<typeof handleMessengerWebhook>[0],
-  );
-  processPromise.catch((err) =>
-    logger.error("Messenger webhook processing failed", { error: String(err) }),
+  // Return 200 immediately (Meta retries on any slow/non-2xx response), but the
+  // analysis + reply take ~9s of Claude latency. waitUntil keeps the function
+  // alive until that background work finishes — WITHOUT it, Vercel freezes the
+  // function once the response is sent and the fire-and-forget promise is
+  // suspended mid-Claude-call, so the user gets no reply (or a "couldn't
+  // analyse" if it happened to throw fast). Telegram avoids this by awaiting;
+  // Meta needs the fast 200, so waitUntil is the right tool.
+  waitUntil(
+    handleMessengerWebhook(
+      payload as Parameters<typeof handleMessengerWebhook>[0],
+    ).catch((err) =>
+      logger.error("Messenger webhook processing failed", {
+        error: String(err),
+      }),
+    ),
   );
 
   return new Response("EVENT_RECEIVED", { status: 200 });
