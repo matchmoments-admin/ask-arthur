@@ -797,6 +797,19 @@ export const featureFlags = {
    *  flag so the endpoint can't go live implicitly. */
   cloneListRequest: readBoolEnv("FF_CLONE_LIST_REQUEST"),
 
+  /** Bot Marketplace mode — appends a Facebook-Marketplace-tuned analysis
+   *  block to the bot Claude prompt (extra scam patterns: Google-Voice/OTP
+   *  "send me the code", deposit-before-viewing; and, when a profile
+   *  screenshot is present, extract "Joined <year>" / reviews / friends and
+   *  weight a recently-created account as a corroborating signal). Also gates
+   *  the Messenger multi-turn "send their profile" deeper-check flow. Server-
+   *  side only — the bot analyze path is the only consumer; no new paid API
+   *  (reuses the bot_analyze brake). Default OFF until preview smoke-test.
+   *  Meta cannot expose a seller's account age via API (ADR-0023) — the age
+   *  signal comes only from a user-supplied profile screenshot read by Claude
+   *  vision. */
+  botMarketplaceMode: readBoolEnv("FF_BOT_MARKETPLACE_MODE"),
+
   /** First-party analytics + inbound first-touch attribution. When ON, the
    *  middleware sets the write-once `aa_attribution` cookie (anonymous_id +
    *  first-touch UTMs/referrer) and the logEvent() writer + /api/events route

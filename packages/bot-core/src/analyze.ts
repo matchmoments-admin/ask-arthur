@@ -101,6 +101,11 @@ export async function analyzeForBotDetailed(
     region: region ?? null,
     images,
     ragThemesEnabled: featureFlags.ragThemes,
+    // The bot's primary use case is Facebook Marketplace checks, so when the
+    // flag is on every bot analysis gets the Marketplace-context block. It's
+    // additive/harmless for non-marketplace content, and the profile-screenshot
+    // reasoning only activates when an image is present.
+    marketplace: featureFlags.botMarketplaceMode,
     backgroundMode: "fire-and-forget",
   });
 

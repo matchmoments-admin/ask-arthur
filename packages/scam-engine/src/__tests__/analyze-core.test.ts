@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("../claude", () => ({
   analyzeWithClaude: vi.fn(),
   detectInjectionAttempt: vi.fn(),
+  MARKETPLACE_PROMPT_BLOCK: "MARKETPLACE_BLOCK",
 }));
 vi.mock("../safebrowsing", () => ({
   extractURLs: vi.fn(),
@@ -234,7 +235,21 @@ describe("runAnalysisCore — full pipeline (cache miss)", () => {
       "image",
       undefined,
       undefined, // themesPromptBlock — ragThemesEnabled not set here
+      undefined, // marketplacePromptBlock — marketplace not set here
     );
+  });
+
+  it("appends the marketplace block as the 6th analyzeWithClaude arg when marketplace is set", async () => {
+    mockAnalyze.mockResolvedValue(safeAi);
+
+    await runAnalysisCore({
+      text: "still available? I'll send a courier",
+      surface: "bot",
+      marketplace: true,
+    });
+
+    const call = mockAnalyze.mock.calls.at(-1)!;
+    expect(call[5]).toBe("MARKETPLACE_BLOCK");
   });
 
   it("runs redirect resolution and feeds final URLs into reputation", async () => {

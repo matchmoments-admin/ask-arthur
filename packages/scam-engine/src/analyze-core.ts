@@ -29,6 +29,7 @@
 import {
   analyzeWithClaude,
   detectInjectionAttempt,
+  MARKETPLACE_PROMPT_BLOCK,
   type Verdict,
 } from "./claude";
 import { extractURLs, checkURLReputation } from "./safebrowsing";
@@ -97,6 +98,14 @@ export interface AnalyzeCoreInput {
    * failure degrades to no themes, never an analyze error.
    */
   ragThemesEnabled?: boolean;
+  /**
+   * When true, append the Marketplace-context block (MARKETPLACE_PROMPT_BLOCK)
+   * as a second system block. Set by the bot surface under
+   * FF_BOT_MARKETPLACE_MODE. Additive + harmless for non-marketplace content;
+   * the profile-screenshot instructions only fire when an image is present.
+   * Not part of the cache key — a Stage-1 hit serves the base verdict.
+   */
+  marketplace?: boolean;
 }
 
 export interface AnalyzeCoreOutput {
@@ -145,6 +154,7 @@ export async function runAnalysisCore(
     requestId,
     referrerSource,
     ragThemesEnabled = false,
+    marketplace = false,
   } = input;
 
   // Vision vs text mode — derived from image presence. Hoisted above the cache
@@ -217,6 +227,7 @@ export async function runAnalysisCore(
       aiMode,
       redirectChains.length > 0 ? redirectChains : undefined,
       themesPromptBlock || undefined,
+      marketplace ? MARKETPLACE_PROMPT_BLOCK : undefined,
     ),
     urlsToCheck.length > 0
       ? checkURLReputation(urlsToCheck)
