@@ -168,3 +168,7 @@ None of Q1–Q5 block **PR-A1, PR-A2, PR-B1 (dark), PR-B2, PR-C1 (generic)** —
 - **Latency budget** on `analyze-checkout` is the point — lexical + one DB lookup + cached WHOIS only; never APIVoid/Claude inline.
 - **Don't let PR-B1 become a second clone-watch.** Clone-watch = proactive NRD sweep; guardrail = reactive at-checkout. Shared: `lexicalMatch` + watchlist + scoring. Nothing else.
 - **Verdict-logging:** reuse `verdict_feedback` if possible; avoid adding another policy-less table to the advisor backlog.
+
+## Activation log
+
+- **2026-07-21 — `FF_ASIC_LOOKUP` flipped ON in prod.** Registry populated (4,181 ASIC entities via the corrected scraper, #840), lookup precision-hardened (v245, #841 — name-substring FPs removed, domain match hostname-bounded), all verified in prod before the flip. This `[build]` deploy activates the red-flag citation across web/extension/bots.
