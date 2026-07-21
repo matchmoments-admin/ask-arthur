@@ -41,6 +41,60 @@ BACKOFF_THRESHOLD = 3
 # multi-line text. We split on commas/newlines/whitespace then validate.
 URL_TOKEN = re.compile(r"https?://[^\s,;]+", re.IGNORECASE)
 
+# Shared / non-attributable hosts. A domain here belongs to a platform, mailbox
+# provider or link shortener — an ASIC entity listing its Facebook page or a
+# gmail contact does NOT make that platform the entity's site. Storing these as
+# an entity "domain" caused false, regulator-attributed "ASIC has flagged X"
+# citations on ANY analyze submission that merely mentioned a mainstream social /
+# email / messaging link (see the 2026-07-21 incident). We drop them from both
+# scam_urls and the entity domains array. Keep in sync with the lookup-side
+# defence in migration v246.
+SHARED_PLATFORM_DOMAINS = frozenset(
+    {
+        # social / messaging
+        "t.me", "telegram.me", "telegram.org", "tg.me", "facebook.com", "fb.com",
+        "fb.me", "m.facebook.com", "messenger.com", "wa.me", "whatsapp.com",
+        "chat.whatsapp.com", "instagram.com", "youtube.com", "youtu.be", "x.com",
+        "twitter.com", "linkedin.com", "medium.com", "tiktok.com", "reddit.com",
+        "pinterest.com", "snapchat.com", "threads.net", "tumblr.com", "vk.com",
+        "weibo.com", "discord.com", "discord.gg", "signal.me", "line.me",
+        "viber.com", "wechat.com", "skype.com", "quora.com",
+        # email providers
+        "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com",
+        "msn.com", "yahoo.com", "ymail.com", "aol.com", "protonmail.com",
+        "proton.me", "icloud.com", "me.com", "mac.com", "mail.com", "gmx.com",
+        "gmx.net", "yandex.com", "yandex.ru", "zoho.com", "tutanota.com",
+        "fastmail.com", "mail.ru", "qq.com", "163.com", "126.com",
+        # link shorteners / link-in-bio
+        "bit.ly", "tinyurl.com", "t.co", "goo.gl", "ow.ly", "buff.ly",
+        "rebrand.ly", "cutt.ly", "is.gd", "shorturl.at", "rb.gy", "lnkd.in",
+        "tiny.cc", "linktr.ee", "beacons.ai", "taplink.cc", "bio.link",
+        "campsite.bio",
+        # site builders / generic hosting / doc-share
+        "wixsite.com", "wix.com", "weebly.com", "web.app", "run.app",
+        "firebaseapp.com", "appspot.com", "blogspot.com", "wordpress.com",
+        "wordpress.org", "github.io", "gitlab.io", "netlify.app", "vercel.app",
+        "glitch.me", "godaddysites.com", "square.site", "squarespace.com",
+        "sites.google.com", "forms.gle", "docs.google.com", "drive.google.com",
+        "canva.site", "notion.site", "webflow.io", "herokuapp.com",
+        "onrender.com", "pages.dev", "workers.dev", "replit.app", "repl.co",
+        "typeform.com", "jotform.com", "mailchi.mp", "substack.com", "carrd.co",
+        # big platforms unlikely to BE the scam's registrable domain
+        "google.com", "googleusercontent.com", "gstatic.com", "apple.com",
+        "microsoft.com", "amazonaws.com", "s3.amazonaws.com",
+        "storage.googleapis.com", "ipfs.io", "archive.org", "cloudflare.com",
+        "example.com",
+    }
+)
+
+
+def _is_shared_or_junk(domain: str | None) -> bool:
+    """A domain not attributable to a single entity — a shared platform, or a
+    junk token (no dot, e.g. 'https'/'www')."""
+    if not domain or "." not in domain:
+        return True
+    return domain in SHARED_PLATFORM_DOMAINS
+
 
 def _flatten_urls(record: dict) -> list[str]:
     """Pull every plausible URL/website out of a record's text fields."""
@@ -61,7 +115,11 @@ def _flatten_urls(record: dict) -> list[str]:
         seen.add(c)
         found.append(c)
 
-    for key in ("websites", "otherInformationSocialAccount"):
+    # ONLY the entity's own site(s). `otherInformationSocialAccount` holds
+    # social-outreach handles (facebook/telegram/etc.) — those are the scammer's
+    # contact channel on a SHARED platform, never the entity's registrable
+    # domain, so harvesting them poisoned the registry. See SHARED_PLATFORM_DOMAINS.
+    for key in ("websites",):
         val = record.get(key)
         if val is None:
             continue
@@ -212,6 +270,11 @@ def scrape() -> str:
                 for raw_url in _flatten_urls(r):
                     norm = normalize_url(raw_url)
                     if norm is None:
+                        continue
+                    # Shared platforms + junk tokens are not attributable to one
+                    # entity — drop from BOTH scam_urls and the entity domains so
+                    # they can never produce a false "ASIC has flagged X" citation.
+                    if _is_shared_or_junk(norm.domain):
                         continue
                     all_urls.append({
                         "url": raw_url,

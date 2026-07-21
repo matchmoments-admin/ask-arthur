@@ -15,6 +15,7 @@ from asic_investor_alerts import (
     _alias_list,
     _build_alert,
     _flatten_urls,
+    _is_shared_or_junk,
     _records_from_payload,
     _should_prune,
 )
@@ -33,11 +34,12 @@ ASIC_RECORD = {
 
 
 def _domains_for(record: dict) -> list[str]:
-    """Mirror the scraper's per-record domain derivation."""
+    """Mirror the scraper's per-record domain derivation (incl. the shared/junk
+    filter applied in scrape())."""
     domains: list[str] = []
     for raw_url in _flatten_urls(record):
         norm = normalize_url(raw_url)
-        if norm is None or not norm.domain:
+        if norm is None or _is_shared_or_junk(norm.domain):
             continue
         if norm.domain not in domains:
             domains.append(norm.domain)
@@ -86,6 +88,38 @@ def test_flatten_urls_from_bare_domain():
 
 def test_domains_derivation_normalizes_to_registrable():
     assert _domains_for(ASIC_RECORD) == ["tagmarkets.com"]
+
+
+# --- shared-platform / junk deny-list (register-poisoning guard) -------------
+
+def test_is_shared_or_junk():
+    for bad in ["facebook.com", "gmail.com", "t.me", "wa.me", "youtube.com",
+                "x.com", "instagram.com", "bit.ly", "linktr.ee", "wixsite.com",
+                "https", "www", "", None]:
+        assert _is_shared_or_junk(bad) is True, bad
+    for good in ["tagmarkets.com", "cfdstocks.com", "fx-gam.com", "10brokers.com"]:
+        assert _is_shared_or_junk(good) is False, good
+
+
+def test_flatten_urls_ignores_social_account_field():
+    # Social handles are on shared platforms and must NOT become entity domains.
+    record = {
+        "nameMandatory": "X",
+        "websites": ["https://realscam.com"],
+        "otherInformationSocialAccount": ["https://t.me/scamgroup", "https://facebook.com/scam"],
+    }
+    urls = _flatten_urls(record)
+    assert "https://realscam.com" in urls
+    assert not any("t.me" in u or "facebook.com" in u for u in urls)
+
+
+def test_domains_exclude_shared_platforms():
+    # A record whose "websites" mixes its real domain with a facebook page:
+    record = {
+        "nameMandatory": "Scam Co",
+        "websites": ["https://realscam.com", "https://facebook.com/scamco"],
+    }
+    assert _domains_for(record) == ["realscam.com"]
 
 
 # --- alias / alert_type ------------------------------------------------------
