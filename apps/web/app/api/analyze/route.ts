@@ -192,7 +192,15 @@ export async function POST(req: NextRequest) {
     const cacheEligible =
       (!!text || images.length > 0) && (images.length === 0 || imageCacheEnabled);
     if (cacheEligible) {
-      const cached = await getCachedAnalysis({ text, surface: "web", images, mode: cacheMode });
+      const cached = await getCachedAnalysis({
+        text,
+        surface: "web",
+        images,
+        mode: cacheMode,
+        // asicLookup mutates redFlags post-analysis; key on it so flipping the
+        // flag off re-keys the cache instead of serving stale ASIC citations.
+        outputAffectingFlags: { asicLookup: featureFlags.asicLookup },
+      });
       if (cached) {
         const geo = geolocateFromHeaders(req.headers);
         waitUntil(incrementStats(cached.verdict, geo.region));
@@ -442,7 +450,16 @@ export async function POST(req: NextRequest) {
     // matches the read above.
     if (cacheEligible) {
       waitUntil(
-        setCachedAnalysis({ text, surface: "web", images, mode: cacheMode }, aiResult),
+        setCachedAnalysis(
+          {
+            text,
+            surface: "web",
+            images,
+            mode: cacheMode,
+            outputAffectingFlags: { asicLookup: featureFlags.asicLookup },
+          },
+          aiResult,
+        ),
       );
     }
 

@@ -42,6 +42,7 @@ import {
 } from "./analysis-cache";
 import { mergeVerdict } from "@askarthur/core-analysis";
 import { logger } from "@askarthur/utils/logger";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 import type {
   AnalysisResult,
   RedirectChain,
@@ -169,7 +170,15 @@ export async function runAnalysisCore(
   // collided and replayed each other's verdict (and bot/extension image scans
   // shared keys). Pass `images` + `mode` so the key is content-addressable.
   if (!skipCacheRead) {
-    const cached = await getCachedAnalysis({ text, surface, images, mode: aiMode });
+    const cached = await getCachedAnalysis({
+      text,
+      surface,
+      images,
+      mode: aiMode,
+      // asicLookup mutates redFlags post-analysis; key on it so flipping the
+      // flag off re-keys the cache instead of serving stale ASIC citations.
+      outputAffectingFlags: { asicLookup: featureFlags.asicLookup },
+    });
     if (cached) {
       const cachedTasks: Promise<unknown>[] =
         backgroundMode === "skip"
@@ -305,7 +314,18 @@ export async function runAnalysisCore(
     );
     if (!skipCacheWrite) {
       // Match the read key — include images + mode (see cache-read bugfix note).
-      tasks.push(setCachedAnalysis({ text, surface, images, mode: aiMode }, result));
+      tasks.push(
+        setCachedAnalysis(
+          {
+            text,
+            surface,
+            images,
+            mode: aiMode,
+            outputAffectingFlags: { asicLookup: featureFlags.asicLookup },
+          },
+          result,
+        ),
+      );
     }
   }
 
