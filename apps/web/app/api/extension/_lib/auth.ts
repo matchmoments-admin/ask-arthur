@@ -40,6 +40,8 @@ let _proDailyLimiter: Ratelimit | null = null;
 // Email scans: 20/min burst, 200/day (auto-scanning uses more quota)
 let _emailBurstLimiter: Ratelimit | null = null;
 let _emailDailyLimiter: Ratelimit | null = null;
+let _checkoutBurstLimiter: Ratelimit | null = null;
+let _checkoutDailyLimiter: Ratelimit | null = null;
 
 function getRedis() {
   return new Redis({
@@ -162,6 +164,31 @@ function getEmailDailyLimiter() {
   return _emailDailyLimiter;
 }
 
+// Checkout Guardrail scans (PR-B1) auto-fire on checkout pages, so — like email
+// scans — they get their OWN bucket sized for auto-scan volume, and never eat
+// the user's manual 50/day allowance. Client sends `x-scan-source: checkout`.
+function getCheckoutBurstLimiter() {
+  if (!_checkoutBurstLimiter) {
+    _checkoutBurstLimiter = new Ratelimit({
+      redis: getRedis(),
+      limiter: Ratelimit.slidingWindow(30, "1 m"),
+      prefix: "askarthur:ext:checkout:burst",
+    });
+  }
+  return _checkoutBurstLimiter;
+}
+
+function getCheckoutDailyLimiter() {
+  if (!_checkoutDailyLimiter) {
+    _checkoutDailyLimiter = new Ratelimit({
+      redis: getRedis(),
+      limiter: Ratelimit.slidingWindow(300, "24 h"),
+      prefix: "askarthur:ext:checkout:daily",
+    });
+  }
+  return _checkoutDailyLimiter;
+}
+
 export async function validateExtensionRequest(
   req: NextRequest
 ): Promise<ExtensionAuthResult> {
@@ -201,25 +228,33 @@ export async function validateExtensionRequest(
 
   const scanSource = req.headers.get("x-scan-source");
   const isEmailScan = scanSource === "email";
+  const isCheckoutScan = scanSource === "checkout";
 
   const tier = await resolveTier(identifier, installId);
   const isPro = tier === "pro";
 
-  // Email scans keep their own flat limits (20/min, 200/day) regardless of
-  // tier — that budget was sized for auto-scanning volume, not plan value.
+  // Email + checkout scans keep their own flat limits regardless of tier — those
+  // budgets are sized for auto-scanning volume, not plan value, and stay off the
+  // manual bucket so an auto-scan can't trip a spurious manual "daily limit" 429.
   const burstLimiter = isEmailScan
     ? getEmailBurstLimiter()
-    : isPro
-      ? getProBurstLimiter()
-      : getBurstLimiter();
+    : isCheckoutScan
+      ? getCheckoutBurstLimiter()
+      : isPro
+        ? getProBurstLimiter()
+        : getBurstLimiter();
   const dailyLimiter = isEmailScan
     ? getEmailDailyLimiter()
-    : isPro
-      ? getProDailyLimiter()
-      : getDailyLimiter();
+    : isCheckoutScan
+      ? getCheckoutDailyLimiter()
+      : isPro
+        ? getProDailyLimiter()
+        : getDailyLimiter();
   const dailyLimit = isEmailScan
     ? 200
-    : EXTENSION_TIER_LIMITS[tier].dailyChecks;
+    : isCheckoutScan
+      ? 300
+      : EXTENSION_TIER_LIMITS[tier].dailyChecks;
 
   const burst = await burstLimiter.limit(identifier);
   if (!burst.success) {

@@ -120,6 +120,14 @@ export const featureFlags = {
    *  asic_investor scrape has populated asic_investor_alerts. */
   asicLookup: readBoolEnv("FF_ASIC_LOOKUP"),
 
+  /** Checkout Guardrail (PR-B1): the /api/extension/analyze-checkout route
+   *  that scores a checkout-page domain (lexical lookalike of a watchlist
+   *  brand + scam_urls + domain age) so the extension can warn BEFORE card
+   *  submission. Twin of the WXT_CHECKOUT_GUARD extension build flag (mirrors
+   *  the urlGuard / facebookAds convention). Default OFF; widening the
+   *  extension's host permissions needs a Chrome Web Store re-review. */
+  checkoutGuard: process.env.NEXT_PUBLIC_FF_CHECKOUT_GUARD === "true",
+
   /** Extension billing: install↔account link flow (/extension/link +
    *  /api/extension/link-token + /api/extension/link) and, from PR 6, the
    *  Extension Pro Stripe checkout + webhook provisioning. Pairs with the
