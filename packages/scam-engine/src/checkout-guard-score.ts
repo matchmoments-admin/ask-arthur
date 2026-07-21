@@ -17,8 +17,9 @@ export interface CheckoutGuardSignals {
   lexical: { brand: string; signalType: SignalType } | null;
   /** The checkout domain is a known entry in scam_urls. */
   scamUrl: { threatLevel: "LOW" | "MEDIUM" | "HIGH" } | null;
-  /** Registration-age band of the checkout domain. */
-  domainAgeBand: DomainAgeBand;
+  /** Registration-age band of the checkout domain, or null when age was not
+   *  assessed (the route skips live WHOIS on clean / .au domains — see route). */
+  domainAgeBand: DomainAgeBand | null;
   /** The page visually displays a watchlist brand whose official domains do
    *  NOT include this domain (brand-asset-vs-domain mismatch). */
   brandOnPageMismatch: boolean;
@@ -67,24 +68,30 @@ export function scoreCheckoutGuard(
   const reasons: string[] = [];
 
   if (signals.lexical) {
-    raw += LEXICAL_POINTS[signals.lexical.signalType];
+    // `?? 0` guards against an unexpected signal_type poisoning `raw` with NaN,
+    // which would silently collapse every verdict to SAFE.
+    raw += LEXICAL_POINTS[signals.lexical.signalType] ?? 0;
     reasons.push(
       `This web address closely resembles ${signals.lexical.brand} but is not an official ${signals.lexical.brand} domain.`,
     );
   }
 
   if (signals.scamUrl) {
-    raw += SCAM_URL_POINTS[signals.scamUrl.threatLevel];
+    raw += SCAM_URL_POINTS[signals.scamUrl.threatLevel] ?? 0;
     reasons.push(
       `This domain is on Ask Arthur's threat list (${signals.scamUrl.threatLevel.toLowerCase()} confidence).`,
     );
   }
 
-  raw += DOMAIN_AGE_POINTS[signals.domainAgeBand];
-  if (signals.domainAgeBand === "fresh") {
-    reasons.push("The domain was registered very recently (under 30 days ago).");
-  } else if (signals.domainAgeBand === "recent") {
-    reasons.push("The domain was registered recently (under 90 days ago).");
+  if (signals.domainAgeBand) {
+    raw += DOMAIN_AGE_POINTS[signals.domainAgeBand] ?? 0;
+    if (signals.domainAgeBand === "fresh") {
+      reasons.push(
+        "The domain was registered very recently (under 30 days ago).",
+      );
+    } else if (signals.domainAgeBand === "recent") {
+      reasons.push("The domain was registered recently (under 90 days ago).");
+    }
   }
 
   if (signals.brandOnPageMismatch) {

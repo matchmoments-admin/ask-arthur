@@ -15,6 +15,7 @@ import {
 } from "@askarthur/shopfront-glue";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
+import type { DomainAgeBand } from "@askarthur/types";
 import { logCost } from "@/lib/cost-telemetry";
 import { validateExtensionRequest } from "../_lib/auth";
 
@@ -34,7 +35,9 @@ const CheckoutSchema = z.object({
 
 export async function POST(req: NextRequest) {
   try {
-    // 1. Auth + per-install rate limit (inherits the extension buckets).
+    // 1. Auth + per-install rate limit. The content script (PR-B1b) MUST send
+    //    `x-scan-source: checkout` so auto-fired checkout scans use the dedicated
+    //    checkout bucket (30/min, 300/day) and never eat the manual 50/day.
     const auth = await validateExtensionRequest(req);
     if (!auth.valid) {
       return NextResponse.json(
@@ -92,16 +95,26 @@ export async function POST(req: NextRequest) {
         .order("report_count", { ascending: false })
         .limit(1)
         .maybeSingle();
-      if (data?.confidence_level) {
-        scamUrl = {
-          threatLevel: data.confidence_level as "LOW" | "MEDIUM" | "HIGH",
-        };
+      // Validate the column value rather than blind-casting — an unexpected
+      // string would otherwise NaN-poison the scorer into a silent SAFE.
+      const level = String(data?.confidence_level ?? "").toUpperCase();
+      if (level === "LOW" || level === "MEDIUM" || level === "HIGH") {
+        scamUrl = { threatLevel: level };
       }
     }
 
-    // 4c. Domain registration age (cache-first; never throws).
-    const { createdDate } = await getDomainCreatedDate(domain);
-    const ageBand = domainAgeBand(domainAgeDays(createdDate));
+    // 4c. Domain registration age — assessed ONLY when the domain already looks
+    //     suspicious (a lookalike or a threat-list hit) and is non-.au. A clean
+    //     checkout needs no age signal (nothing else would fire), so we never
+    //     spend the whoisjson quota (1k/mo; its cache write-back is UPDATE-only,
+    //     so a first-seen legit domain never caches) on every checkout page load.
+    //     .au registration dates are always withheld anyway, so skip those too.
+    let ageBand: DomainAgeBand | null = null;
+    const alreadySuspicious = lexical !== null || scamUrl !== null;
+    if (alreadySuspicious && !domain.endsWith(".au")) {
+      const { createdDate } = await getDomainCreatedDate(domain);
+      ageBand = domainAgeBand(domainAgeDays(createdDate));
+    }
 
     // 4d. Brand-asset-vs-domain mismatch — the page claims a watchlist brand
     //     whose official domains don't include this domain.

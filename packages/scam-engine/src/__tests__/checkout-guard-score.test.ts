@@ -74,6 +74,56 @@ describe("scoreCheckoutGuard", () => {
     expect(r.reasons[0]).toContain("recently");
   });
 
+  it("a one-edit typosquat (levenshtein) scores its band", () => {
+    const r = scoreCheckoutGuard(
+      signals({ lexical: { brand: "Aesop", signalType: "levenshtein" } }),
+    );
+    expect(r.score).toBe(40);
+    expect(r.verdict).toBe("SUSPICIOUS");
+  });
+
+  it("LOW / MEDIUM scam_urls hits score below / at their bands", () => {
+    expect(scoreCheckoutGuard(signals({ scamUrl: { threatLevel: "LOW" } })).verdict).toBe("SAFE"); // 15
+    expect(scoreCheckoutGuard(signals({ scamUrl: { threatLevel: "MEDIUM" } })).verdict).toBe("SUSPICIOUS"); // 35
+  });
+
+  it("the dominant AU case — confusable lookalike + unassessed age — is SUSPICIOUS", () => {
+    const r = scoreCheckoutGuard(
+      signals({
+        lexical: { brand: "The Ordinary", signalType: "confusable" },
+        domainAgeBand: null, // .au / clean → WHOIS skipped by the route
+      }),
+    );
+    expect(r.score).toBe(45);
+    expect(r.verdict).toBe("SUSPICIOUS");
+  });
+
+  it("threshold boundaries: exactly 25 → SUSPICIOUS, exactly 60 → HIGH_RISK", () => {
+    // fresh(25) alone hits the SUSPICIOUS floor exactly.
+    expect(scoreCheckoutGuard(signals({ domainAgeBand: "fresh" })).verdict).toBe("SUSPICIOUS");
+    // HIGH scam_urls(60) alone hits the HIGH_RISK floor exactly.
+    expect(scoreCheckoutGuard(signals({ scamUrl: { threatLevel: "HIGH" } })).verdict).toBe("HIGH_RISK");
+  });
+
+  it("null age band contributes nothing (no points, no reason)", () => {
+    const r = scoreCheckoutGuard(signals({ domainAgeBand: null }));
+    expect(r).toEqual({ score: 0, verdict: "SAFE", reasons: [] });
+  });
+
+  it("an unexpected signal type can't NaN-poison the score into a silent SAFE", () => {
+    const r = scoreCheckoutGuard(
+      signals({
+        // cast past the type to simulate a corrupt value reaching the scorer
+        lexical: { brand: "X", signalType: "bogus" as never },
+        scamUrl: { threatLevel: "HIGH" },
+      }),
+    );
+    // bogus lexical → 0, HIGH scam_urls → 60; must NOT become NaN → SAFE
+    expect(Number.isNaN(r.score)).toBe(false);
+    expect(r.score).toBe(60);
+    expect(r.verdict).toBe("HIGH_RISK");
+  });
+
   it("score is capped at 100", () => {
     const r = scoreCheckoutGuard(
       signals({
