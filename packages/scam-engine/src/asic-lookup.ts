@@ -1,6 +1,7 @@
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
+import { getLogger } from "@askarthur/utils/axiom-logger";
 import type { AnalysisResult } from "@askarthur/types";
 import { logCost } from "./cost-log";
 
@@ -108,7 +109,7 @@ export async function checkAsicListed(
 export async function applyAsicCitation(
   result: AnalysisResult,
   query: string,
-  opts?: { requestId?: string },
+  opts?: { requestId?: string; source?: string },
 ): Promise<AsicCitation | null> {
   if (!featureFlags.asicLookup) return null;
 
@@ -121,10 +122,17 @@ export async function applyAsicCitation(
       `unlicensed or impersonating entity. Do not invest, deposit funds, or ` +
       `pay any "fee" to withdraw.`,
   ];
-  logger.info("analyze.asic_citation", {
-    entity: hit.entityName,
-    matchType: hit.matchType,
+  // A real user hitting a regulator-flagged scam is a rare, high-value event —
+  // ship it ALWAYS via the Axiom wrapper's warn (bypasses the 10% info sample),
+  // tagged by source. No-op when FF_AXIOM_ENABLED is off.
+  const axiom = getLogger({
+    source: opts?.source ?? "api/analyze",
     requestId: opts?.requestId,
   });
+  axiom.warn("asic_citation", {
+    entity: hit.entityName,
+    matchType: hit.matchType,
+  });
+  void axiom.flush().catch(() => {});
   return hit;
 }

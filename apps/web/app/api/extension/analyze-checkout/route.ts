@@ -15,6 +15,7 @@ import {
 } from "@askarthur/shopfront-glue";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
+import { getLogger } from "@askarthur/utils/axiom-logger";
 import type { DomainAgeBand } from "@askarthur/types";
 import { logCost } from "@/lib/cost-telemetry";
 import { validateExtensionRequest } from "../_lib/auth";
@@ -163,6 +164,25 @@ export async function POST(req: NextRequest) {
         age_band: ageBand,
       },
     });
+
+    // A checkout page that scored a warning is a rare, high-value event — ship
+    // it ALWAYS via the Axiom warn (bypasses the 10% info sample). Domain only,
+    // never the scanned page content. No-op when FF_AXIOM_ENABLED is off.
+    if (scored.verdict !== "SAFE") {
+      const axiom = getLogger({
+        source: "api/extension",
+        requestId: req.headers.get("x-request-id") ?? undefined,
+      });
+      axiom.warn("checkout_guard_verdict", {
+        verdict: scored.verdict,
+        score: scored.score,
+        domain,
+        has_lexical: !!lexical,
+        scam_url_listed: scamUrlListed,
+        age_band: ageBand,
+      });
+      void axiom.flush().catch(() => {});
+    }
 
     return NextResponse.json(
       {

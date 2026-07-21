@@ -15,6 +15,15 @@ vi.mock("@askarthur/utils/feature-flags", () => ({ featureFlags: flags }));
 vi.mock("@askarthur/utils/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
+vi.mock("@askarthur/utils/axiom-logger", () => ({
+  getLogger: () => ({
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    flush: async () => {},
+  }),
+}));
 vi.mock("../cost-log", () => ({ logCost: vi.fn() }));
 
 async function importFresh() {
