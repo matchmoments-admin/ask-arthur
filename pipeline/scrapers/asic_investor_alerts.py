@@ -61,7 +61,7 @@ def _flatten_urls(record: dict) -> list[str]:
         seen.add(c)
         found.append(c)
 
-    for key in ("website", "websites", "url", "urls", "aliases", "name", "details"):
+    for key in ("websites", "otherInformationSocialAccount"):
         val = record.get(key)
         if val is None:
             continue
@@ -83,8 +83,13 @@ def _flatten_urls(record: dict) -> list[str]:
 
 
 def _alias_list(record: dict) -> list[str]:
-    """Pull alias/other-name strings out of a record (list or delimited string)."""
-    val = record.get("aliases")
+    """Pull alias/other-name strings out of a record (list or delimited string).
+
+    ASIC's Moneysmart JSON carries these under `otherInformationAliases`
+    (verified against the live feed 2026-07-21) — a list of company/trading-name
+    strings. Fall back to a delimited string form defensively.
+    """
+    val = record.get("otherInformationAliases")
     if isinstance(val, list):
         return [str(v).strip() for v in val if str(v).strip()]
     if isinstance(val, str):
@@ -93,12 +98,12 @@ def _alias_list(record: dict) -> list[str]:
 
 
 def _alert_type(record: dict) -> str | None:
-    """Best-effort classification label from the (undocumented) record shape."""
-    for key in ("type", "alert_type", "alertType", "category", "warning_type"):
-        v = record.get(key)
-        if isinstance(v, str) and v.strip():
-            return v.strip()
-    return None
+    """ASIC's classification (e.g. 'Unlicensed', 'Imposter', 'Unlicensed (Legacy)').
+
+    Lives under `investorAlertCategoryMandatory` in the live feed.
+    """
+    v = record.get("investorAlertCategoryMandatory")
+    return v.strip() if isinstance(v, str) and v.strip() else None
 
 
 def _should_prune(alerts: list[dict], status: str) -> bool:
@@ -115,8 +120,10 @@ def _build_alert(record: dict, domains: list[str], snapshot_date: str) -> dict |
     """Shape one ASIC record into an asic_investor_alerts upsert row.
 
     Returns None when the record has no entity name (nothing to key on).
+    ASIC's entity name lives under `nameMandatory` (verified against the live
+    feed 2026-07-21 — all 4,212 records carry it).
     """
-    entity_name = (record.get("name") or "").strip()
+    entity_name = (record.get("nameMandatory") or "").strip()
     if not entity_name:
         return None
     return {
@@ -209,7 +216,7 @@ def scrape() -> str:
                     all_urls.append({
                         "url": raw_url,
                         "scam_type": "investment_fraud",
-                        "brand": (r.get("name") or "").strip() or None,
+                        "brand": (r.get("nameMandatory") or "").strip() or None,
                         "feed_reference_url": SOURCE_PAGE,
                         "country_code": "AU",
                     })

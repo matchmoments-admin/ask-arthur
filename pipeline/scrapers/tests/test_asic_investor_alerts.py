@@ -1,9 +1,11 @@
 """PR-A1 — ASIC Investor Alert List scraper tests.
 
-Unit-level: the ASIC JSON shape is undocumented, so pin the parsing +
-entity-shaping contract against fixtures of every payload shape we tolerate.
-The DB wiring (bulk_upsert_asic_alert RPC → asic_investor_alerts) is exercised
-in prod smoke after the migration applies; this test pins the pure transforms.
+Fixtures use the REAL Moneysmart JSON field names (verified against the live
+feed 2026-07-21: `nameMandatory`, `investorAlertCategoryMandatory`, `websites`,
+`otherInformationAliases`) — an earlier version keyed off guessed names (`name`
+/`type`/`aliases`) and silently produced zero entities in prod, which these
+fixtures now guard against. The DB wiring (bulk_upsert_asic_alert RPC →
+asic_investor_alerts) is exercised in prod smoke; this pins the pure transforms.
 """
 from __future__ import annotations
 
@@ -17,6 +19,17 @@ from asic_investor_alerts import (
     _should_prune,
 )
 from common.normalize import normalize_url
+
+# A realistic ASIC record, trimmed to the fields the scraper reads.
+ASIC_RECORD = {
+    "uniqueIdentifier": 42,
+    "nameMandatory": "Tag Markets Pty Ltd",
+    "investorAlertCategoryMandatory": "Imposter",
+    "websites": ["https://www.tagmarkets.com/join"],
+    "otherInformationAliases": ["TagMarkets", "T.M. Financials"],
+    "otherInformationSocialAccount": None,
+    "dateUpdated": "2026-03-04",
+}
 
 
 def _domains_for(record: dict) -> list[str]:
@@ -34,19 +47,23 @@ def _domains_for(record: dict) -> list[str]:
 # --- payload shape tolerance -------------------------------------------------
 
 def test_records_from_payload_bare_list():
-    assert _records_from_payload([{"name": "A"}, {"name": "B"}]) == [
-        {"name": "A"},
-        {"name": "B"},
+    assert _records_from_payload([{"nameMandatory": "A"}, {"nameMandatory": "B"}]) == [
+        {"nameMandatory": "A"},
+        {"nameMandatory": "B"},
     ]
 
 
 def test_records_from_payload_wrapped_keys():
     for key in ("records", "data", "items", "entities"):
-        assert _records_from_payload({key: [{"name": "X"}]}) == [{"name": "X"}]
+        assert _records_from_payload({key: [{"nameMandatory": "X"}]}) == [
+            {"nameMandatory": "X"}
+        ]
 
 
 def test_records_from_payload_filters_non_dicts():
-    assert _records_from_payload([{"name": "A"}, "junk", 5, None]) == [{"name": "A"}]
+    assert _records_from_payload([{"nameMandatory": "A"}, "junk", 5, None]) == [
+        {"nameMandatory": "A"}
+    ]
 
 
 def test_records_from_payload_unknown_shape_is_empty():
@@ -56,74 +73,58 @@ def test_records_from_payload_unknown_shape_is_empty():
 
 # --- URL / domain extraction -------------------------------------------------
 
-def test_flatten_urls_from_website_field():
-    urls = _flatten_urls({"name": "Tag Markets", "website": "https://tagmarkets.com"})
+def test_flatten_urls_from_websites_field():
+    urls = _flatten_urls({"nameMandatory": "X", "websites": ["https://tagmarkets.com"]})
     assert "https://tagmarkets.com" in urls
 
 
 def test_flatten_urls_from_bare_domain():
-    urls = _flatten_urls({"name": "Sonic AI", "websites": ["sonic-ai.top"]})
-    assert any("sonic-ai.top" in u for u in urls)
+    # ASIC often stores a scheme-less host, e.g. "www.cfdstocks.com/"
+    urls = _flatten_urls({"nameMandatory": "X", "websites": ["www.cfdstocks.com/"]})
+    assert any("cfdstocks.com" in u for u in urls)
 
 
 def test_domains_derivation_normalizes_to_registrable():
-    record = {"name": "Tag Markets", "website": "https://www.tagmarkets.com/join"}
-    assert _domains_for(record) == ["tagmarkets.com"]
+    assert _domains_for(ASIC_RECORD) == ["tagmarkets.com"]
 
 
 # --- alias / alert_type ------------------------------------------------------
 
-def test_alias_list_from_list():
-    assert _alias_list({"aliases": ["TagMarkets", " Tag Markets ", ""]}) == [
-        "TagMarkets",
-        "Tag Markets",
-    ]
-
-
-def test_alias_list_from_delimited_string():
-    assert _alias_list({"aliases": "TagMarkets, Tag Markets\nT.M. Financials"}) == [
-        "TagMarkets",
-        "Tag Markets",
-        "T.M. Financials",
-    ]
+def test_alias_list_from_real_field():
+    assert _alias_list(ASIC_RECORD) == ["TagMarkets", "T.M. Financials"]
 
 
 def test_alias_list_absent():
-    assert _alias_list({"name": "X"}) == []
+    assert _alias_list({"nameMandatory": "X"}) == []
 
 
-def test_alert_type_prefers_first_present_key():
-    assert _alert_type({"category": "imposter"}) == "imposter"
-    assert _alert_type({"type": "unlicensed", "category": "x"}) == "unlicensed"
-    assert _alert_type({"name": "X"}) is None
+def test_alert_type_reads_investor_alert_category():
+    assert _alert_type(ASIC_RECORD) == "Imposter"
+    assert _alert_type({"investorAlertCategoryMandatory": "Unlicensed (Legacy)"}) == "Unlicensed (Legacy)"
+    assert _alert_type({"nameMandatory": "X"}) is None
 
 
-# --- full record shaping -----------------------------------------------------
+# --- full record shaping (the bug this class of test now guards) -------------
 
-def test_build_alert_full_record():
-    record = {
-        "name": "Tag Markets Pty Ltd",
-        "aliases": ["TagMarkets"],
-        "website": "https://tagmarkets.com",
-        "type": "imposter",
-    }
-    alert = _build_alert(record, _domains_for(record), "2026-07-21")
+def test_build_alert_full_real_record():
+    alert = _build_alert(ASIC_RECORD, _domains_for(ASIC_RECORD), "2026-07-21")
     assert alert is not None
     assert alert["entity_name"] == "Tag Markets Pty Ltd"
-    assert alert["aliases"] == ["TagMarkets"]
+    assert alert["aliases"] == ["TagMarkets", "T.M. Financials"]
     assert alert["domains"] == ["tagmarkets.com"]
-    assert alert["alert_type"] == "imposter"
+    assert alert["alert_type"] == "Imposter"
     assert alert["asic_url"] == asic.SOURCE_PAGE
     assert alert["snapshot_date"] == "2026-07-21"
-    assert alert["raw"] == record
+    assert alert["raw"] == ASIC_RECORD
 
 
 def test_build_alert_without_name_is_dropped():
-    assert _build_alert({"website": "https://x.com"}, ["x.com"], "2026-07-21") is None
+    # A record missing nameMandatory has nothing to key on.
+    assert _build_alert({"websites": ["https://x.com"]}, ["x.com"], "2026-07-21") is None
 
 
 def test_build_alert_no_urls_yields_empty_domains():
-    alert = _build_alert({"name": "No Site Ltd"}, [], "2026-07-21")
+    alert = _build_alert({"nameMandatory": "No Site Ltd"}, [], "2026-07-21")
     assert alert is not None
     assert alert["domains"] == []
     assert alert["aliases"] == []
@@ -136,7 +137,6 @@ def test_should_prune_true_on_real_snapshot():
 
 
 def test_should_prune_false_on_empty_alerts():
-    # 304 Not Modified or a valid-but-empty [] payload → never wipe the register.
     assert _should_prune([], "success") is False
 
 
