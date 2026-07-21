@@ -286,7 +286,15 @@ export async function runAnalysisCore(
   await applyAsicCitation(
     result,
     [text, ...urlsToCheck].filter(Boolean).join(" "),
-    { requestId },
+    {
+      requestId,
+      source:
+        surface === "extension"
+          ? "api/extension"
+          : surface === "bot"
+            ? "api/webhooks"
+            : "api/analyze",
+    },
   );
 
   // 6. Background fan-out.

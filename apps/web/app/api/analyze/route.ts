@@ -396,7 +396,7 @@ export async function POST(req: NextRequest) {
       const asicHit = await applyAsicCitation(
         aiResult,
         [text, ...allUrls].filter(Boolean).join(" "),
-        { requestId },
+        { requestId, source: "api/analyze" },
       );
       if (asicHit) {
         // applyAsicCitation already emits the Axiom log; add first-party
