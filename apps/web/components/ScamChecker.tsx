@@ -607,6 +607,24 @@ export default function ScamChecker() {
             className="w-full px-4 py-3 text-lg text-deep-navy border-0 focus:outline-none focus:ring-0 bg-transparent resize-y min-h-[100px] disabled:opacity-60 placeholder:text-slate-400"
           />
 
+          {/* Breadth hint — one box takes any of these; we auto-detect links,
+              shops and social posts. Text mode only. */}
+          {inputMode === "text" && (
+            <div className="px-4 pb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-400">
+              <span>Paste anything:</span>
+              {["message", "email", "website link", "online shop", "TikTok link"].map(
+                (chip) => (
+                  <span
+                    key={chip}
+                    className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-slate-500"
+                  >
+                    {chip}
+                  </span>
+                ),
+              )}
+            </div>
+          )}
+
           {/* Bottom toolbar */}
           <div className="flex items-center justify-between px-3 pb-3">
             <div className="flex items-center gap-1">
