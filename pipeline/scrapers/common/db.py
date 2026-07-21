@@ -914,9 +914,12 @@ def bulk_upsert_asic_alerts(
 ) -> dict:
     """Upsert ASIC Investor Alert entities via the bulk_upsert_asic_alert() RPC.
 
-    One row per regulator-flagged entity (name + aliases + domains). Each row is
-    upserted through a per-row SAVEPOINT so one malformed record can't poison the
-    batch (regulator data is small + clean, so per-row cost is negligible).
+    One row per regulator-flagged entity (name + aliases + domains). Batched via
+    execute_values (one round-trip per BATCH_SIZE, mirroring bulk_upsert_urls) —
+    the earlier per-row SAVEPOINT loop meant ~3 round-trips × 4,200 rows in a
+    single ~15-min transaction, long enough to trip the pg-stuck-query-watchdog.
+    On a batch failure we fall back to row-by-row so one bad record can't drop
+    the whole batch.
 
     Each item in `alerts` should have:
         - entity_name: str (required; skipped if it normalizes to empty)
@@ -930,51 +933,87 @@ def bulk_upsert_asic_alerts(
     Returns stats: {new, updated, skipped}.
     """
     stats = {"new": 0, "updated": 0, "skipped": 0}
+    total = len(alerts)
+    total_batches = (total + BATCH_SIZE - 1) // BATCH_SIZE
     cursor = conn.cursor()
-    for item in alerts:
-        entity_name = (item.get("entity_name") or "").strip()
-        if not entity_name:
+
+    def _tally(result_value) -> None:
+        data = result_value if isinstance(result_value, dict) else json.loads(result_value)
+        if data.get("skipped"):
             stats["skipped"] += 1
-            continue
-        raw = item.get("raw")
-        params = (
-            entity_name,
-            item.get("aliases") or None,
-            item.get("domains") or None,
-            item.get("alert_type"),
-            item.get("asic_url"),
-            item.get("snapshot_date"),
-            json.dumps(raw) if raw is not None else None,
-        )
-        try:
-            cursor.execute("SAVEPOINT asic_sp")
-            cursor.execute(
-                "SELECT public.bulk_upsert_asic_alert(%s, %s, %s, %s, %s, %s::date, %s::jsonb)",
-                params,
-            )
-            row = cursor.fetchone()
-            cursor.execute("RELEASE SAVEPOINT asic_sp")
-            data = row[0] if isinstance(row[0], dict) else json.loads(row[0])
-            if data.get("skipped"):
+        elif data.get("is_new"):
+            stats["new"] += 1
+        else:
+            stats["updated"] += 1
+
+    for batch_num, i in enumerate(range(0, total, BATCH_SIZE), start=1):
+        batch = alerts[i : i + BATCH_SIZE]
+        rows = []
+        for item in batch:
+            entity_name = (item.get("entity_name") or "").strip()
+            if not entity_name:
                 stats["skipped"] += 1
-            elif data.get("is_new"):
-                stats["new"] += 1
-            else:
-                stats["updated"] += 1
-        except Exception as e:
-            # ROLLBACK TO keeps the savepoint defined; RELEASE it so repeated
-            # errors don't stack same-named savepoints on the txn.
-            cursor.execute("ROLLBACK TO SAVEPOINT asic_sp")
-            cursor.execute("RELEASE SAVEPOINT asic_sp")
-            stats["skipped"] += 1
-            logger.error(
-                f"Failed to upsert ASIC alert: {entity_name}",
-                extra={"metadata": {"error": str(e), "feed": feed_name}},
-            )
-    conn.commit()
+                continue
+            raw = item.get("raw")
+            rows.append((
+                entity_name,
+                item.get("aliases") or None,
+                item.get("domains") or None,
+                item.get("alert_type"),
+                item.get("asic_url"),
+                item.get("snapshot_date"),
+                json.dumps(raw) if raw is not None else None,
+            ))
+
+        if rows:
+            try:
+                results = psycopg2.extras.execute_values(
+                    cursor,
+                    """
+                    SELECT public.bulk_upsert_asic_alert(
+                        t.c1, t.c2::text[], t.c3::text[], t.c4, t.c5,
+                        t.c6::date, t.c7::jsonb
+                    )
+                    FROM (VALUES %s) AS t(c1, c2, c3, c4, c5, c6, c7)
+                    """,
+                    rows,
+                    fetch=True,
+                )
+                for row in results:
+                    _tally(row[0])
+            except Exception as e:
+                conn.rollback()
+                logger.warning(
+                    f"ASIC alert batch {batch_num} failed, falling back to row-by-row: {e}",
+                    extra={"metadata": {"feed": feed_name}},
+                )
+                for r in rows:
+                    try:
+                        cursor.execute(
+                            "SELECT public.bulk_upsert_asic_alert(%s, %s, %s, %s, %s, %s::date, %s::jsonb)",
+                            r,
+                        )
+                        res = cursor.fetchone()
+                        if res:
+                            _tally(res[0])
+                    except Exception as e2:
+                        stats["skipped"] += 1
+                        logger.error(
+                            f"Failed to upsert ASIC alert: {r[0]}",
+                            extra={"metadata": {"error": str(e2), "feed": feed_name}},
+                        )
+                        conn.rollback()
+
+        conn.commit()
+        logger.info(
+            f"ASIC alert batch {batch_num}/{total_batches} committed "
+            f"(new={stats['new']} updated={stats['updated']} skipped={stats['skipped']})",
+            extra={"metadata": {"feed": feed_name, "batch": batch_num}},
+        )
+
     cursor.close()
     logger.info(
-        f"ASIC alerts upsert: new={stats['new']} updated={stats['updated']} "
+        f"ASIC alerts upsert complete: new={stats['new']} updated={stats['updated']} "
         f"skipped={stats['skipped']}",
         extra={"metadata": {"feed": feed_name}},
     )
