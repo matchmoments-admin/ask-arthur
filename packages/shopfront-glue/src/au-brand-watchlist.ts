@@ -69,6 +69,26 @@ export const AU_BRAND_WATCHLIST: BrandEntry[] = [
   { brand: "Chemist Warehouse", legitimate_domains: ["chemistwarehouse.com.au"] },
   { brand: "Priceline", legitimate_domains: ["priceline.com.au"] },
 
+  // Beauty / skincare (DTC) — high-traffic AU targets for lookalike storefronts
+  // reached via Google Shopping ads (checkout-guardrail + NRD clone-watch).
+  // Brand-agnostic seed: skincare DTC is the first cohort here, not a special
+  // case. Distinctive brand tokens only (generic short-forms fold into the full
+  // brand, e.g. "Go-To Skincare"→"gotoskincare", so the substring/Levenshtein
+  // dictionary-word FP class stays suppressed). legitimate_domains lists only
+  // confirmed official domains — an INCOMPLETE list here would false-positive on
+  // the brand's own site, so err toward the canonical domain(s) only.
+  { brand: "The Ordinary", legitimate_domains: ["theordinary.com"] },
+  { brand: "Deciem", legitimate_domains: ["deciem.com"] },
+  { brand: "NIOD", legitimate_domains: ["niod.com"] },
+  { brand: "Naturium", legitimate_domains: ["naturium.com"] },
+  { brand: "Mecca", legitimate_domains: ["mecca.com.au"] },
+  { brand: "Adore Beauty", legitimate_domains: ["adorebeauty.com.au"] },
+  { brand: "Sephora", legitimate_domains: ["sephora.com.au", "sephora.com"] },
+  { brand: "Aesop", legitimate_domains: ["aesop.com"] },
+  { brand: "Frank Body", legitimate_domains: ["frankbody.com"] },
+  { brand: "Go-To Skincare", legitimate_domains: ["gotoskincare.com"] },
+  { brand: "MCoBeauty", legitimate_domains: ["mcobeauty.com"] },
+
   // Logistics + post (overlap with ct-monitor.ts auspost keyword — handled by
   // cross-surface dedupe in shopfront-nrd-daily-ingest step 4).
   {
