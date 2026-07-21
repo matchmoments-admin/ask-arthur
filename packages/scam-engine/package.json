@@ -6,6 +6,8 @@
     ".": "./src/index.ts",
     "./anthropic": "./src/anthropic.ts",
     "./asic-lookup": "./src/asic-lookup.ts",
+    "./checkout-guard-score": "./src/checkout-guard-score.ts",
+    "./whois-cached": "./src/whois-cached.ts",
     "./cost-log": "./src/cost-log.ts",
     "./embeddings": "./src/embeddings.ts",
     "./rerank": "./src/rerank.ts",
