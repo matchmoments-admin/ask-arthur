@@ -989,20 +989,27 @@ def bulk_upsert_asic_alerts(
                 )
                 for r in rows:
                     try:
+                        cursor.execute("SAVEPOINT asic_fb")
                         cursor.execute(
                             "SELECT public.bulk_upsert_asic_alert(%s, %s, %s, %s, %s, %s::date, %s::jsonb)",
                             r,
                         )
                         res = cursor.fetchone()
+                        cursor.execute("RELEASE SAVEPOINT asic_fb")
                         if res:
                             _tally(res[0])
                     except Exception as e2:
+                        # Per-row savepoint: a single bad row must not discard the
+                        # rows already applied earlier in this fallback pass (a
+                        # connection-level rollback here would, and would leave
+                        # their stats over-counted).
+                        cursor.execute("ROLLBACK TO SAVEPOINT asic_fb")
+                        cursor.execute("RELEASE SAVEPOINT asic_fb")
                         stats["skipped"] += 1
                         logger.error(
                             f"Failed to upsert ASIC alert: {r[0]}",
                             extra={"metadata": {"error": str(e2), "feed": feed_name}},
                         )
-                        conn.rollback()
 
         conn.commit()
         logger.info(
