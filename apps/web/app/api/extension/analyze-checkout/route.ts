@@ -83,19 +83,31 @@ export async function POST(req: NextRequest) {
       ? { brand: match.brand, signalType: match.signal_type }
       : null;
 
-    // 4b. Known scam domain — is there ANY active scam_urls row on this domain?
-    //     scam_urls.confidence_level is 'low' for ~all rows (bulk-feed default),
-    //     so presence is the signal, not the (meaningless) confidence tier.
+    // 4b. Known scam URL — match the checkout page's FULL HOST (domain +
+    //     subdomain), NOT the registrable domain. ~23% of active scam_urls rows
+    //     live on shared hosts (myshopify.com, web.app, wixsite.com, square.site,
+    //     …) or on legit brands (google.com, adobe.com, anz.co.nz) whose
+    //     SUBDOMAINS host phishing — because normalizeURL collapses those to the
+    //     bare registrable domain, a domain-level match would false-positive
+    //     HIGH_RISK on a legit Shopify/Square/Wix checkout or a real bank page.
+    //     A host-level match warns only on the actual scam host. www is folded
+    //     to the bare host so 'www.x.com' and 'x.com' still match; typosquats of
+    //     watchlist brands are covered by the lexical arm regardless.
+    //     confidence_level is ignored — it is 'low' for ~all rows (bulk-feed
+    //     default), so presence (not the meaningless tier) is the signal.
     let scamUrlListed = false;
     const supabase = createServiceClient();
     if (supabase) {
-      const { data } = await supabase
+      const wantSub = norm.subdomain === "www" ? null : norm.subdomain;
+      let q = supabase
         .from("scam_urls")
         .select("id")
         .eq("domain", domain)
-        .eq("is_active", true)
-        .limit(1)
-        .maybeSingle();
+        .eq("is_active", true);
+      q = wantSub
+        ? q.eq("subdomain", wantSub)
+        : q.or("subdomain.is.null,subdomain.eq.,subdomain.eq.www");
+      const { data } = await q.limit(1).maybeSingle();
       scamUrlListed = !!data;
     }
 

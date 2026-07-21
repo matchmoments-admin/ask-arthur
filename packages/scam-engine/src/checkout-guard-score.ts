@@ -43,11 +43,15 @@ const LEXICAL_POINTS: Record<SignalType, number> = {
   levenshtein: 40, // one-edit typosquat
 };
 
-// A confirmed active scam-URL threat-list match on the very domain the user is
-// about to enter card details into is a strong, standalone signal — enough to
-// clear HIGH_RISK on its own. Card-entry stakes justify over-warning here; a
-// legitimate retailer is not in the active scam_urls threat list.
-const SCAM_URL_LISTED_POINTS = 60;
+// A scam_urls host match is a real but NOT fully-trustworthy signal: the table
+// is bulk threat-feed data and contains legit brands (google.com, github.com,
+// dropbox.com …) with bare-host path-phishing entries, so a match alone must not
+// assert HIGH_RISK ("reported as a scam") — that would false-accuse a legit
+// billing page. Scored as a CORROBORATING signal (clears SUSPICIOUS on its own;
+// combined with a lexical lookalike / brand mismatch / fresh domain it reaches
+// HIGH_RISK). Fixes the prior bug (confidence was always 'low' → 15 → SAFE) and
+// pairs with the route's host-level (not registrable-domain) match.
+const SCAM_URL_LISTED_POINTS = 35;
 
 // Fresh registration is a strong composite signal. `unknown` is never treated
 // as safe (auDA withholds .au registration dates from every free source — see

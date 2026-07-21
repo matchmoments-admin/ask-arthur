@@ -43,12 +43,6 @@ describe("scoreCheckoutGuard", () => {
     expect(r.reasons).toHaveLength(2);
   });
 
-  it("a known-active scam domain alone clears HIGH_RISK", () => {
-    const r = scoreCheckoutGuard(signals({ scamUrlListed: true }));
-    expect(r.score).toBe(60);
-    expect(r.verdict).toBe("HIGH_RISK");
-  });
-
   it("substring lookalike + brand-on-page mismatch is SUSPICIOUS", () => {
     const r = scoreCheckoutGuard(
       signals({
@@ -82,14 +76,23 @@ describe("scoreCheckoutGuard", () => {
     expect(r.verdict).toBe("SUSPICIOUS");
   });
 
-  it("an active scam_urls listing is HIGH_RISK on its own — never SAFE (regression)", () => {
-    // Regression for the "threat-list arm is inert" finding: scam_urls
-    // confidence is always 'low', so the old tiered scoring left a KNOWN scam
-    // domain at 15pts → SAFE. Presence must now clear HIGH_RISK.
+  it("an active scam_urls listing is a corroborating signal: SUSPICIOUS alone, never SAFE (regression)", () => {
+    // Regression for the "threat-list arm is inert" finding (was 15 → SAFE) AND
+    // the FP finding (scam_urls has legit brands with bare-host phishing, so a
+    // match alone must not assert HIGH_RISK "reported as a scam"). Alone →
+    // SUSPICIOUS; with a lexical lookalike → HIGH_RISK.
     const listed = scoreCheckoutGuard(signals({ scamUrlListed: true }));
-    expect(listed.score).toBe(60);
-    expect(listed.verdict).toBe("HIGH_RISK");
+    expect(listed.score).toBe(35);
+    expect(listed.verdict).toBe("SUSPICIOUS");
     expect(listed.reasons[0]).toContain("threat list");
+    // corroborated by a confusable lookalike (35 + 45 = 80) → HIGH_RISK
+    const corroborated = scoreCheckoutGuard(
+      signals({
+        scamUrlListed: true,
+        lexical: { brand: "The Ordinary", signalType: "confusable" },
+      }),
+    );
+    expect(corroborated.verdict).toBe("HIGH_RISK");
     // not listed → contributes nothing
     expect(scoreCheckoutGuard(signals({ scamUrlListed: false })).score).toBe(0);
   });
@@ -108,8 +111,10 @@ describe("scoreCheckoutGuard", () => {
   it("threshold boundaries: exactly 25 → SUSPICIOUS, exactly 60 → HIGH_RISK", () => {
     // fresh(25) alone hits the SUSPICIOUS floor exactly.
     expect(scoreCheckoutGuard(signals({ domainAgeBand: "fresh" })).verdict).toBe("SUSPICIOUS");
-    // HIGH scam_urls(60) alone hits the HIGH_RISK floor exactly.
-    expect(scoreCheckoutGuard(signals({ scamUrlListed: true })).verdict).toBe("HIGH_RISK");
+    // scam_urls(35) + fresh(25) = 60 hits the HIGH_RISK floor exactly.
+    expect(
+      scoreCheckoutGuard(signals({ scamUrlListed: true, domainAgeBand: "fresh" })).verdict,
+    ).toBe("HIGH_RISK");
   });
 
   it("null age band contributes nothing (no points, no reason)", () => {
@@ -125,10 +130,10 @@ describe("scoreCheckoutGuard", () => {
         scamUrlListed: true,
       }),
     );
-    // bogus lexical → 0, HIGH scam_urls → 60; must NOT become NaN → SAFE
+    // bogus lexical → 0, scam_urls listed → 35; must NOT become NaN → SAFE
     expect(Number.isNaN(r.score)).toBe(false);
-    expect(r.score).toBe(60);
-    expect(r.verdict).toBe("HIGH_RISK");
+    expect(r.score).toBe(35);
+    expect(r.verdict).toBe("SUSPICIOUS");
   });
 
   it("score is capped at 100", () => {
@@ -140,7 +145,7 @@ describe("scoreCheckoutGuard", () => {
         brandOnPageMismatch: true,
       }),
     );
-    // 45 + 60 + 25 + 20 = 150 → capped
+    // 45 + 35 + 25 + 20 = 125 → capped
     expect(r.score).toBe(100);
     expect(r.verdict).toBe("HIGH_RISK");
   });
