@@ -83,24 +83,32 @@ export async function POST(req: NextRequest) {
       ? { brand: match.brand, signalType: match.signal_type }
       : null;
 
-    // 4b. Known scam domain — any active scam_urls row on this domain.
-    let scamUrl: { threatLevel: "LOW" | "MEDIUM" | "HIGH" } | null = null;
+    // 4b. Known scam URL — match the checkout page's FULL HOST (domain +
+    //     subdomain), NOT the registrable domain. ~23% of active scam_urls rows
+    //     live on shared hosts (myshopify.com, web.app, wixsite.com, square.site,
+    //     …) or on legit brands (google.com, adobe.com, anz.co.nz) whose
+    //     SUBDOMAINS host phishing — because normalizeURL collapses those to the
+    //     bare registrable domain, a domain-level match would false-positive
+    //     HIGH_RISK on a legit Shopify/Square/Wix checkout or a real bank page.
+    //     A host-level match warns only on the actual scam host. www is folded
+    //     to the bare host so 'www.x.com' and 'x.com' still match; typosquats of
+    //     watchlist brands are covered by the lexical arm regardless.
+    //     confidence_level is ignored — it is 'low' for ~all rows (bulk-feed
+    //     default), so presence (not the meaningless tier) is the signal.
+    let scamUrlListed = false;
     const supabase = createServiceClient();
     if (supabase) {
-      const { data } = await supabase
+      const wantSub = norm.subdomain === "www" ? null : norm.subdomain;
+      let q = supabase
         .from("scam_urls")
-        .select("confidence_level")
+        .select("id")
         .eq("domain", domain)
-        .eq("is_active", true)
-        .order("report_count", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      // Validate the column value rather than blind-casting — an unexpected
-      // string would otherwise NaN-poison the scorer into a silent SAFE.
-      const level = String(data?.confidence_level ?? "").toUpperCase();
-      if (level === "LOW" || level === "MEDIUM" || level === "HIGH") {
-        scamUrl = { threatLevel: level };
-      }
+        .eq("is_active", true);
+      q = wantSub
+        ? q.eq("subdomain", wantSub)
+        : q.or("subdomain.is.null,subdomain.eq.,subdomain.eq.www");
+      const { data } = await q.limit(1).maybeSingle();
+      scamUrlListed = !!data;
     }
 
     // 4c. Domain registration age — assessed ONLY when the domain already looks
@@ -110,7 +118,7 @@ export async function POST(req: NextRequest) {
     //     so a first-seen legit domain never caches) on every checkout page load.
     //     .au registration dates are always withheld anyway, so skip those too.
     let ageBand: DomainAgeBand | null = null;
-    const alreadySuspicious = lexical !== null || scamUrl !== null;
+    const alreadySuspicious = lexical !== null || scamUrlListed;
     if (alreadySuspicious && !domain.endsWith(".au")) {
       const { createdDate } = await getDomainCreatedDate(domain);
       ageBand = domainAgeBand(domainAgeDays(createdDate));
@@ -136,7 +144,7 @@ export async function POST(req: NextRequest) {
     // 5. Score.
     const scored = scoreCheckoutGuard({
       lexical,
-      scamUrl,
+      scamUrlListed,
       domainAgeBand: ageBand,
       brandOnPageMismatch,
     });

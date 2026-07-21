@@ -9,7 +9,7 @@ function signals(
 ): CheckoutGuardSignals {
   return {
     lexical: null,
-    scamUrl: null,
+    scamUrlListed: false,
     domainAgeBand: "established",
     brandOnPageMismatch: false,
     ...overrides,
@@ -41,12 +41,6 @@ describe("scoreCheckoutGuard", () => {
     expect(r.score).toBe(70); // 45 + 25
     expect(r.verdict).toBe("HIGH_RISK");
     expect(r.reasons).toHaveLength(2);
-  });
-
-  it("a known-active scam domain alone clears HIGH_RISK", () => {
-    const r = scoreCheckoutGuard(signals({ scamUrl: { threatLevel: "HIGH" } }));
-    expect(r.score).toBe(60);
-    expect(r.verdict).toBe("HIGH_RISK");
   });
 
   it("substring lookalike + brand-on-page mismatch is SUSPICIOUS", () => {
@@ -82,9 +76,25 @@ describe("scoreCheckoutGuard", () => {
     expect(r.verdict).toBe("SUSPICIOUS");
   });
 
-  it("LOW / MEDIUM scam_urls hits score below / at their bands", () => {
-    expect(scoreCheckoutGuard(signals({ scamUrl: { threatLevel: "LOW" } })).verdict).toBe("SAFE"); // 15
-    expect(scoreCheckoutGuard(signals({ scamUrl: { threatLevel: "MEDIUM" } })).verdict).toBe("SUSPICIOUS"); // 35
+  it("an active scam_urls listing is a corroborating signal: SUSPICIOUS alone, never SAFE (regression)", () => {
+    // Regression for the "threat-list arm is inert" finding (was 15 → SAFE) AND
+    // the FP finding (scam_urls has legit brands with bare-host phishing, so a
+    // match alone must not assert HIGH_RISK "reported as a scam"). Alone →
+    // SUSPICIOUS; with a lexical lookalike → HIGH_RISK.
+    const listed = scoreCheckoutGuard(signals({ scamUrlListed: true }));
+    expect(listed.score).toBe(35);
+    expect(listed.verdict).toBe("SUSPICIOUS");
+    expect(listed.reasons[0]).toContain("threat list");
+    // corroborated by a confusable lookalike (35 + 45 = 80) → HIGH_RISK
+    const corroborated = scoreCheckoutGuard(
+      signals({
+        scamUrlListed: true,
+        lexical: { brand: "The Ordinary", signalType: "confusable" },
+      }),
+    );
+    expect(corroborated.verdict).toBe("HIGH_RISK");
+    // not listed → contributes nothing
+    expect(scoreCheckoutGuard(signals({ scamUrlListed: false })).score).toBe(0);
   });
 
   it("the dominant AU case — confusable lookalike + unassessed age — is SUSPICIOUS", () => {
@@ -101,8 +111,10 @@ describe("scoreCheckoutGuard", () => {
   it("threshold boundaries: exactly 25 → SUSPICIOUS, exactly 60 → HIGH_RISK", () => {
     // fresh(25) alone hits the SUSPICIOUS floor exactly.
     expect(scoreCheckoutGuard(signals({ domainAgeBand: "fresh" })).verdict).toBe("SUSPICIOUS");
-    // HIGH scam_urls(60) alone hits the HIGH_RISK floor exactly.
-    expect(scoreCheckoutGuard(signals({ scamUrl: { threatLevel: "HIGH" } })).verdict).toBe("HIGH_RISK");
+    // scam_urls(35) + fresh(25) = 60 hits the HIGH_RISK floor exactly.
+    expect(
+      scoreCheckoutGuard(signals({ scamUrlListed: true, domainAgeBand: "fresh" })).verdict,
+    ).toBe("HIGH_RISK");
   });
 
   it("null age band contributes nothing (no points, no reason)", () => {
@@ -115,25 +127,25 @@ describe("scoreCheckoutGuard", () => {
       signals({
         // cast past the type to simulate a corrupt value reaching the scorer
         lexical: { brand: "X", signalType: "bogus" as never },
-        scamUrl: { threatLevel: "HIGH" },
+        scamUrlListed: true,
       }),
     );
-    // bogus lexical → 0, HIGH scam_urls → 60; must NOT become NaN → SAFE
+    // bogus lexical → 0, scam_urls listed → 35; must NOT become NaN → SAFE
     expect(Number.isNaN(r.score)).toBe(false);
-    expect(r.score).toBe(60);
-    expect(r.verdict).toBe("HIGH_RISK");
+    expect(r.score).toBe(35);
+    expect(r.verdict).toBe("SUSPICIOUS");
   });
 
   it("score is capped at 100", () => {
     const r = scoreCheckoutGuard(
       signals({
         lexical: { brand: "Mecca", signalType: "confusable" },
-        scamUrl: { threatLevel: "HIGH" },
+        scamUrlListed: true,
         domainAgeBand: "fresh",
         brandOnPageMismatch: true,
       }),
     );
-    // 45 + 60 + 25 + 20 = 150 → capped
+    // 45 + 35 + 25 + 20 = 125 → capped
     expect(r.score).toBe(100);
     expect(r.verdict).toBe("HIGH_RISK");
   });
