@@ -83,24 +83,20 @@ export async function POST(req: NextRequest) {
       ? { brand: match.brand, signalType: match.signal_type }
       : null;
 
-    // 4b. Known scam domain — any active scam_urls row on this domain.
-    let scamUrl: { threatLevel: "LOW" | "MEDIUM" | "HIGH" } | null = null;
+    // 4b. Known scam domain — is there ANY active scam_urls row on this domain?
+    //     scam_urls.confidence_level is 'low' for ~all rows (bulk-feed default),
+    //     so presence is the signal, not the (meaningless) confidence tier.
+    let scamUrlListed = false;
     const supabase = createServiceClient();
     if (supabase) {
       const { data } = await supabase
         .from("scam_urls")
-        .select("confidence_level")
+        .select("id")
         .eq("domain", domain)
         .eq("is_active", true)
-        .order("report_count", { ascending: false })
         .limit(1)
         .maybeSingle();
-      // Validate the column value rather than blind-casting — an unexpected
-      // string would otherwise NaN-poison the scorer into a silent SAFE.
-      const level = String(data?.confidence_level ?? "").toUpperCase();
-      if (level === "LOW" || level === "MEDIUM" || level === "HIGH") {
-        scamUrl = { threatLevel: level };
-      }
+      scamUrlListed = !!data;
     }
 
     // 4c. Domain registration age — assessed ONLY when the domain already looks
@@ -110,7 +106,7 @@ export async function POST(req: NextRequest) {
     //     so a first-seen legit domain never caches) on every checkout page load.
     //     .au registration dates are always withheld anyway, so skip those too.
     let ageBand: DomainAgeBand | null = null;
-    const alreadySuspicious = lexical !== null || scamUrl !== null;
+    const alreadySuspicious = lexical !== null || scamUrlListed;
     if (alreadySuspicious && !domain.endsWith(".au")) {
       const { createdDate } = await getDomainCreatedDate(domain);
       ageBand = domainAgeBand(domainAgeDays(createdDate));
@@ -136,7 +132,7 @@ export async function POST(req: NextRequest) {
     // 5. Score.
     const scored = scoreCheckoutGuard({
       lexical,
-      scamUrl,
+      scamUrlListed,
       domainAgeBand: ageBand,
       brandOnPageMismatch,
     });

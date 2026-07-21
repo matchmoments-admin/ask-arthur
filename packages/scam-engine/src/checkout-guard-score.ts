@@ -15,8 +15,12 @@ export interface CheckoutGuardSignals {
   /** Domain is a lexical lookalike of a watchlist brand (and NOT one of that
    *  brand's official domains — lexicalMatch already excludes self-clones). */
   lexical: { brand: string; signalType: SignalType } | null;
-  /** The checkout domain is a known entry in scam_urls. */
-  scamUrl: { threatLevel: "LOW" | "MEDIUM" | "HIGH" } | null;
+  /** The checkout domain has an ACTIVE entry in the scam_urls threat list.
+   *  scam_urls.confidence_level is 'low' for ~all 393k rows (the default for
+   *  bulk threat-feed ingest), so we score PRESENCE, not the meaningless
+   *  confidence tier — the old tiered scoring left a known scam domain at 15pts
+   *  → SAFE (the "threat-list arm is inert" review finding). */
+  scamUrlListed: boolean;
   /** Registration-age band of the checkout domain, or null when age was not
    *  assessed (the route skips live WHOIS on clean / .au domains — see route). */
   domainAgeBand: DomainAgeBand | null;
@@ -39,12 +43,11 @@ const LEXICAL_POINTS: Record<SignalType, number> = {
   levenshtein: 40, // one-edit typosquat
 };
 
-// A known-active scam domain alone is enough to clear the HIGH_RISK bar (60).
-const SCAM_URL_POINTS: Record<"LOW" | "MEDIUM" | "HIGH", number> = {
-  LOW: 15,
-  MEDIUM: 35,
-  HIGH: 60,
-};
+// A confirmed active scam-URL threat-list match on the very domain the user is
+// about to enter card details into is a strong, standalone signal — enough to
+// clear HIGH_RISK on its own. Card-entry stakes justify over-warning here; a
+// legitimate retailer is not in the active scam_urls threat list.
+const SCAM_URL_LISTED_POINTS = 60;
 
 // Fresh registration is a strong composite signal. `unknown` is never treated
 // as safe (auDA withholds .au registration dates from every free source — see
@@ -76,10 +79,10 @@ export function scoreCheckoutGuard(
     );
   }
 
-  if (signals.scamUrl) {
-    raw += SCAM_URL_POINTS[signals.scamUrl.threatLevel] ?? 0;
+  if (signals.scamUrlListed) {
+    raw += SCAM_URL_LISTED_POINTS;
     reasons.push(
-      `This domain is on Ask Arthur's threat list (${signals.scamUrl.threatLevel.toLowerCase()} confidence).`,
+      "This web address is on Ask Arthur's scam-URL threat list — it has been reported as a scam.",
     );
   }
 

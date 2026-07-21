@@ -9,7 +9,7 @@ function signals(
 ): CheckoutGuardSignals {
   return {
     lexical: null,
-    scamUrl: null,
+    scamUrlListed: false,
     domainAgeBand: "established",
     brandOnPageMismatch: false,
     ...overrides,
@@ -44,7 +44,7 @@ describe("scoreCheckoutGuard", () => {
   });
 
   it("a known-active scam domain alone clears HIGH_RISK", () => {
-    const r = scoreCheckoutGuard(signals({ scamUrl: { threatLevel: "HIGH" } }));
+    const r = scoreCheckoutGuard(signals({ scamUrlListed: true }));
     expect(r.score).toBe(60);
     expect(r.verdict).toBe("HIGH_RISK");
   });
@@ -82,9 +82,16 @@ describe("scoreCheckoutGuard", () => {
     expect(r.verdict).toBe("SUSPICIOUS");
   });
 
-  it("LOW / MEDIUM scam_urls hits score below / at their bands", () => {
-    expect(scoreCheckoutGuard(signals({ scamUrl: { threatLevel: "LOW" } })).verdict).toBe("SAFE"); // 15
-    expect(scoreCheckoutGuard(signals({ scamUrl: { threatLevel: "MEDIUM" } })).verdict).toBe("SUSPICIOUS"); // 35
+  it("an active scam_urls listing is HIGH_RISK on its own — never SAFE (regression)", () => {
+    // Regression for the "threat-list arm is inert" finding: scam_urls
+    // confidence is always 'low', so the old tiered scoring left a KNOWN scam
+    // domain at 15pts → SAFE. Presence must now clear HIGH_RISK.
+    const listed = scoreCheckoutGuard(signals({ scamUrlListed: true }));
+    expect(listed.score).toBe(60);
+    expect(listed.verdict).toBe("HIGH_RISK");
+    expect(listed.reasons[0]).toContain("threat list");
+    // not listed → contributes nothing
+    expect(scoreCheckoutGuard(signals({ scamUrlListed: false })).score).toBe(0);
   });
 
   it("the dominant AU case — confusable lookalike + unassessed age — is SUSPICIOUS", () => {
@@ -102,7 +109,7 @@ describe("scoreCheckoutGuard", () => {
     // fresh(25) alone hits the SUSPICIOUS floor exactly.
     expect(scoreCheckoutGuard(signals({ domainAgeBand: "fresh" })).verdict).toBe("SUSPICIOUS");
     // HIGH scam_urls(60) alone hits the HIGH_RISK floor exactly.
-    expect(scoreCheckoutGuard(signals({ scamUrl: { threatLevel: "HIGH" } })).verdict).toBe("HIGH_RISK");
+    expect(scoreCheckoutGuard(signals({ scamUrlListed: true })).verdict).toBe("HIGH_RISK");
   });
 
   it("null age band contributes nothing (no points, no reason)", () => {
@@ -115,7 +122,7 @@ describe("scoreCheckoutGuard", () => {
       signals({
         // cast past the type to simulate a corrupt value reaching the scorer
         lexical: { brand: "X", signalType: "bogus" as never },
-        scamUrl: { threatLevel: "HIGH" },
+        scamUrlListed: true,
       }),
     );
     // bogus lexical → 0, HIGH scam_urls → 60; must NOT become NaN → SAFE
@@ -128,7 +135,7 @@ describe("scoreCheckoutGuard", () => {
     const r = scoreCheckoutGuard(
       signals({
         lexical: { brand: "Mecca", signalType: "confusable" },
-        scamUrl: { threatLevel: "HIGH" },
+        scamUrlListed: true,
         domainAgeBand: "fresh",
         brandOnPageMismatch: true,
       }),
