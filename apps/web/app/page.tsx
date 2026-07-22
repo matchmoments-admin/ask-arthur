@@ -75,7 +75,7 @@ export default function Home() {
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
         <h1 className="text-deep-navy text-4xl md:text-5xl font-extrabold mb-10 leading-tight text-center">
-          Suspicious message, email, image? Just ask Arthur
+          Suspicious message, email or image? Just Ask Arthur
         </h1>
 
         <Suspense>
