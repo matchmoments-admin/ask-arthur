@@ -74,12 +74,9 @@ export default function Home() {
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
-        <h1 className="text-deep-navy text-4xl md:text-5xl font-extrabold mb-4 leading-tight text-center">
-          Got a suspicious message, email, or image?
+        <h1 className="text-deep-navy text-4xl md:text-5xl font-extrabold mb-10 leading-tight text-center">
+          Suspicious message, email, image? Just ask Arthur
         </h1>
-        <p className="text-lg text-gov-slate mb-10 leading-relaxed text-center">
-          Paste it here. Arthur will review it and report back to you.
-        </p>
 
         <Suspense>
           <ScamChecker />
