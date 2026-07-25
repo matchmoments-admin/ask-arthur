@@ -1,9 +1,12 @@
+import { isFeatureBraked } from "@askarthur/scam-engine/cost-log";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { logCost } from "@/lib/cost-telemetry";
+import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
+import { probeLivenessDetailed } from "@/lib/clone-watch/liveness";
 
 /**
  * Clone-Watch — Netcraft AUTO-report producer (PR3).
@@ -51,6 +54,68 @@ const NETCRAFT_REPORT_ENDPOINT = "https://report.netcraft.com/api/v3/report/urls
 const NETCRAFT_TEST_ENDPOINT = "https://report.netcraft.com/api/v3/test/report/urls";
 const DAILY_CAP = 50; // max clones auto-submitted to Netcraft per 24h
 const MIN_CONFIDENCE = 0.7;
+
+// ── Weaponised RE-submission lane (v250) ────────────────────────────────────
+const RESUBMIT_BRAKE = "clone_netcraft_resubmit";
+const RESUBMIT_DEFAULT_CAP = 10;
+const RESUBMIT_MIN_AGE_DAYS = 30; // matches the issue reporter's window
+const RESUBMIT_COOLDOWN_DAYS = 14;
+const RESUBMIT_MAX_PER_ALERT = 3;
+
+function resubmitCap(): number {
+  const raw = Number.parseInt(process.env.NETCRAFT_RESUBMIT_DAILY_CAP ?? "", 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : RESUBMIT_DEFAULT_CAP;
+}
+
+/** Row shape returned by list_clone_alerts_pending_netcraft_resubmit. */
+export interface NetcraftResubmitCandidate {
+  id: number;
+  candidate_url: string;
+  candidate_domain: string;
+  inferred_target_domain: string | null;
+  urlscan_uuid: string | null;
+  weaponised_at: string | null;
+}
+
+/**
+ * Pure builder for the RE-submission body. Distinct reason text from the
+ * auto-report lane: this batch is not "please classify these lookalikes", it is
+ * "we watched these turn into live phishing and you have no open record of
+ * them" — which is the whole justification for re-approaching Netcraft on a URL
+ * they may have seen before. Cites the urlscan evidence so a human reviewer can
+ * verify rather than take our word.
+ */
+export function buildNetcraftResubmitBody(
+  candidates: NetcraftResubmitCandidate[],
+  reporterEmail: string,
+): NetcraftBulkBody {
+  const seen = new Set<string>();
+  const urls: Array<{ url: string; country: string }> = [];
+  for (const c of candidates) {
+    if (!c.candidate_url || seen.has(c.candidate_url)) continue;
+    seen.add(c.candidate_url);
+    urls.push({ url: c.candidate_url, country: "AU" });
+  }
+  const evidence = candidates
+    .filter((c) => c.urlscan_uuid)
+    .slice(0, 10)
+    .map(
+      (c) =>
+        `${c.candidate_domain} (impersonating ${c.inferred_target_domain ?? "an Australian brand"}): https://urlscan.io/result/${c.urlscan_uuid}/`,
+    );
+  return {
+    email: reporterEmail,
+    reason:
+      "Confirmed phishing on Australian-brand lookalike domains, detected by " +
+      "Ask Arthur clone-watch (askarthur.au). Each of these was monitored from " +
+      "registration and has since been observed serving suspected " +
+      "credential-harvest or payment-fraud content by our own urlscan.io scan. " +
+      "They are being reported fresh because no current Netcraft submission " +
+      "covers them. Scan evidence:\n" +
+      (evidence.length ? evidence.join("\n") : "(scan references unavailable)"),
+    urls,
+  };
+}
 
 /** Row shape returned by list_clone_alerts_pending_netcraft_auto. */
 export interface NetcraftAutoCandidate {
@@ -101,7 +166,10 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
     name: "Clone-Watch: Netcraft auto-report producer (bulk, gated)",
     retries: 1,
     singleton: { mode: "skip" },
-    timeouts: { finish: "4m" },
+    // 6m (was 4m): the v250 resubmit lane adds a liveness sweep + a second
+    // bulk POST. Still under the 10m pg-stuck-query-watchdog edge, and the slow
+    // part is external HTTP rather than a PG backend.
+    timeouts: { finish: "6m" },
   },
   [
     { cron: "30 9 * * *" },
@@ -115,6 +183,18 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
       // prove the path works while the feature is still dark.
       const isTest = (event?.data as { test?: unknown } | undefined)?.test === true;
 
+      const sb = createServiceClient();
+      if (!sb) return { skipped: true, reason: "supabase_unavailable" };
+
+      // The two lanes are independently gated and independently braked, so the
+      // auto lane's guards can no longer return from the whole function —
+      // FF_SHOPFRONT_CLONE_NETCRAFT_AUTO being off must not silence the
+      // resubmit lane. Both share the one bulk-POST shape below.
+      const autoResult = await runAutoLane();
+      const resubmitResult = await runResubmitLane();
+      return { ...autoResult, resubmit: resubmitResult };
+
+      async function runAutoLane() {
       if (!isTest && !featureFlags.shopfrontCloneNetcraftAuto) {
         return { skipped: true, reason: "FF_SHOPFRONT_CLONE_NETCRAFT_AUTO disabled" };
       }
@@ -126,7 +206,6 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
         return { skipped: true, reason: "netcraft_submit_or_outreach_disabled" };
       }
 
-      const sb = createServiceClient();
       if (!sb) return { skipped: true, reason: "supabase_unavailable" };
 
       const candidates = await step.run("load-candidates", async () => {
@@ -273,6 +352,207 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
       });
 
       return { ok: true, candidates: candidates.length, submitted: marked, netcraftUuid: result.uuid };
+      }
+
+      /**
+       * v250 — weaponised RE-submission lane.
+       *
+       * 23 of 54 weaponised clones have no Netcraft submission the F4 issue
+       * reporter can escalate against: 3 were never submitted, 20 have aged
+       * past the reporter's 30-day window (report_issue 404s once Netcraft
+       * archives a submission). They are simply dropped today. A fresh report
+       * is also the stronger move — it carries our urlscan phishing evidence,
+       * where report_issue only argues against a verdict already recorded.
+       *
+       * Reporter standing is the real risk, so the bounds are deliberately
+       * conservative and layered: weaponised-only, liveness-confirmed,
+       * never-successfully-escalated, a 14-day per-alert cooldown, a hard
+       * 3-resubmit ceiling per alert, a 24h global budget folded into the
+       * worklist's LIMIT (so re-firing the manual trigger cannot exceed the
+       * day's allowance), the FP-brand denylist, and its own kill-switch pair
+       * (FF_CLONE_NETCRAFT_RESUBMIT + feature_brakes.clone_netcraft_resubmit).
+       */
+      async function runResubmitLane() {
+        if (isTest) return { skipped: true, reason: "test_mode" };
+        if (!featureFlags.cloneNetcraftResubmit) {
+          return { skipped: true, reason: "FF_CLONE_NETCRAFT_RESUBMIT disabled" };
+        }
+        if (
+          !featureFlags.shopfrontCloneSubmitNetcraft ||
+          !featureFlags.shopfrontCloneOutreach
+        ) {
+          return { skipped: true, reason: "netcraft_submit_or_outreach_disabled" };
+        }
+        if (!sb) return { skipped: true, reason: "supabase_unavailable" };
+
+        const braked = await step.run("resubmit-check-brake", () =>
+          isFeatureBraked(RESUBMIT_BRAKE),
+        );
+        if (braked) {
+          return { skipped: true, reason: `feature_brakes.${RESUBMIT_BRAKE} engaged` };
+        }
+
+        const pending = await step.run("resubmit-load-candidates", async () => {
+          const { data, error } = await sb.rpc(
+            "list_clone_alerts_pending_netcraft_resubmit",
+            {
+              p_limit: resubmitCap(),
+              p_min_age_days: RESUBMIT_MIN_AGE_DAYS,
+              p_cooldown_days: RESUBMIT_COOLDOWN_DAYS,
+              p_max_resubmits: RESUBMIT_MAX_PER_ALERT,
+            },
+          );
+          if (error) {
+            logger.error("netcraft-resubmit: candidate fetch failed", {
+              error: error.message,
+            });
+            return [] as NetcraftResubmitCandidate[];
+          }
+          // The RPC has no brand column to filter on, so the v176 FP-brand
+          // denylist is applied here exactly as the issue reporter does it —
+          // reporting a generic-dictionary-word "brand" match would flag
+          // legitimate sites and burn the standing this lane depends on.
+          return ((data as NetcraftResubmitCandidate[] | null) ?? []).filter(
+            (c) => !isFpBrand(c.inferred_target_domain ?? ""),
+          );
+        });
+
+        if (pending.length === 0) {
+          return { ok: true, candidates: 0, submitted: 0, reason: "none_pending_or_cap" };
+        }
+
+        // Liveness gate, same three-valued rule as the issue reporter (v248):
+        // only a PROVED-dead host is dropped. A TLS failure or a refused
+        // connect is not death — it is usually a phishing kit blocking our
+        // egress — and treating it as such is what starved the reporter.
+        const liveness = await step.run("resubmit-liveness", async () => {
+          const map = await probeLivenessDetailed(pending.map((c) => c.candidate_url));
+          return Object.fromEntries(map);
+        });
+        const live = pending.filter(
+          (c) => liveness[c.candidate_url]?.live !== false,
+        );
+        const dead = pending.length - live.length;
+
+        if (live.length === 0) {
+          logger.info("netcraft-resubmit: all candidates proved dead, nothing to file", {
+            candidates: pending.length,
+          });
+          return { ok: true, candidates: pending.length, submitted: 0, dead, reason: "all_dead" };
+        }
+
+        const result = await step.run("resubmit-submit-bulk", async () => {
+          const body = buildNetcraftResubmitBody(
+            live,
+            process.env.NETCRAFT_REPORTER_EMAIL ?? "brendan@askarthur.au",
+          );
+          const apiKey = process.env.NETCRAFT_REPORT_API_KEY;
+          const res = await fetch(NETCRAFT_REPORT_ENDPOINT, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+            },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(30_000),
+          });
+          const text = await res.text();
+          let parsed: Record<string, unknown> = {};
+          try {
+            parsed = JSON.parse(text);
+          } catch {
+            parsed = { raw: text };
+          }
+          return {
+            ok: res.ok,
+            status: res.status,
+            uuid: typeof parsed.uuid === "string" ? parsed.uuid : null,
+            state: typeof parsed.state === "string" ? parsed.state : null,
+            errText: res.ok ? null : text.slice(0, 200),
+            urlCount: body.urls.length,
+          };
+        });
+
+        // Soft-fail like the auto lane: a transient Netcraft non-2xx is a $0
+        // diagnostic, not an Inngest fn error (which would page the fleet
+        // watch). Unmarked rows are retried next run.
+        if (!result.ok || !result.uuid) {
+          await step.run("resubmit-log-failure", async () => {
+            logCost({
+              feature: "shopfront-clone-netcraft-resubmit-error",
+              provider: "netcraft",
+              operation: "resubmit_bulk",
+              units: result.urlCount,
+              unitCostUsd: 0,
+              metadata: { status: result.status, error: result.errText },
+            });
+          });
+          logger.warn("netcraft-resubmit: bulk submit failed (retry next run)", {
+            status: result.status,
+            urlCount: result.urlCount,
+          });
+          return {
+            ok: false,
+            candidates: pending.length,
+            submitted: 0,
+            dead,
+            status: result.status,
+          };
+        }
+
+        const marked = await step.run("resubmit-persist", async () => {
+          const { data, error } = await sb.rpc(
+            "record_clone_alert_netcraft_resubmit",
+            {
+              p_alert_ids: live.map((c) => c.id),
+              p_uuid: result.uuid,
+              p_state: result.state,
+            },
+          );
+          if (error) {
+            throw new Error(
+              `record_clone_alert_netcraft_resubmit failed (${live.length}): ${error.message}`,
+            );
+          }
+          return typeof data === "number" ? data : 0;
+        });
+
+        await step.run("resubmit-log-cost", async () => {
+          logCost({
+            feature: "shopfront_clone_netcraft_resubmit",
+            provider: "netcraft",
+            operation: "resubmit_bulk",
+            units: marked,
+            unitCostUsd: 0, // keyless intake
+            metadata: {
+              candidates: pending.length,
+              live: live.length,
+              dead,
+              marked,
+              netcraft_uuid: result.uuid,
+              brands: [
+                ...new Set(live.map((c) => c.inferred_target_domain ?? "unknown")),
+              ],
+            },
+          });
+        });
+
+        logger.info("netcraft-resubmit: complete", {
+          candidates: pending.length,
+          live: live.length,
+          dead,
+          marked,
+          netcraftUuid: result.uuid,
+        });
+
+        return {
+          ok: true,
+          candidates: pending.length,
+          submitted: marked,
+          dead,
+          netcraftUuid: result.uuid,
+        };
+      }
     },
   ),
 );

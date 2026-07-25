@@ -363,7 +363,7 @@ unactioned" block; per-row `risk_score` snapshots into the report ledger).
 v1 weights are hand-set priors — revisit once weaponisation outcomes
 accumulate.
 
-### Reporter liveness pre-check (F3)
+### Reporter liveness pre-check (F3, three-valued since v248)
 
 Before filing, the issue reporter GETs each candidate URL
 (`lib/clone-watch/liveness.ts`, shared with auto-triage). All-dead uuid →
@@ -371,8 +371,86 @@ non-terminal `netcraft_issue.recheck_after` (+72h; revived sites re-enter,
 permanent deadness converges via the 30-day `submitted_at` window) — the
 one-per-submission issue slot is never spent on a dead site. Partial-live →
 files the live subset; dead candidates stamp `skipped: 'dead_at_probe'`
-(they forfeit that uuid's slot — honest: they were down; revival is covered
-by the recheck loop). Dry-run logs `liveCount/deadCount/deadDomains`.
+(they forfeit that uuid's slot — the POST already consumed it). Dry-run logs
+`liveCount/deadCount/deadDomains`.
+
+**Verdict semantics (v248).** The probe returns `true` / `false` / `null`, and
+**only NXDOMAIN is `false`**. Callers apply their own policy: the issue reporter
+files on `live !== false`; auto-triage keeps the conservative bar via
+`isCandidateLive()` (`live === true`).
+
+| observation                                        | verdict | reason              |
+| -------------------------------------------------- | ------- | ------------------- |
+| HTTP < 500                                         | `true`  | `http`              |
+| HTTP ≥ 500                                         | `null`  | `http`              |
+| TLS failure, `http://` fallback answers < 500      | `true`  | `tls_http_fallback` |
+| TLS failure, fallback also fails                   | `null`  | `tls`               |
+| Connection refused / reset (DNS resolved by proof) | `null`  | `refused`           |
+| Timeout, name still resolves                       | `null`  | `timeout`           |
+| **No A record and no NS record**                   | `false` | `nxdomain`          |
+
+Why: the pre-v248 probe collapsed every `fetch` rejection into "dead" and
+starved the reporter — 13 of 19 batches in the 10 days to 2026-07-26 drained on
+`dead_at_probe`, producing one filing. `targetshopp.cc` (weaponised, urlscan
+`likely_phishing`) was drained as dead while serving, purely because its cert
+has a hostname mismatch. From Vercel's egress a refused connect is
+indistinguishable from a phishing kit blocking us, so DNS is the only honest
+deadness test we control. The `reason` is recorded on every drain stamp —
+diagnosing the original incident needed a live re-probe because the old boolean
+threw it away.
+
+### `unavailable` is a deferral, not a verdict (v248)
+
+Netcraft grades on a single fetch at submission time, so a lookalike that was
+parked, cloaked or not yet stood up reads `unavailable`. Prod:
+`id-apple-kc.shop` was submitted 09:30, graded `unavailable` at 10:00, and was
+serving phishing by 12:01 the same day.
+
+- **Never terminal.** `defer_clone_alert_netcraft_issue` sets `recheck_after`
+  and bumps `netcraft_issue.rounds.<reason>`, converting to a terminal
+  `skipped: '<reason>_exhausted'` past 5 rounds. Before v248 it stamped
+  `skipped: 'unavailable_deferred'`, which the v221 worklist predicate excludes
+  forever — 19 weaponised alerts, more than had ever been filed, were locked
+  out. The v248 migration released all 25 such rows.
+- **Escalatable on weaponised evidence.** When our own scan witnessed
+  weaponisation and Netcraft's says `unavailable`, that disagreement _is_ the
+  false negative — so it becomes a filable candidate. `likely_phishing` alone
+  still defers, keeping the blast radius tight.
+
+### Weaponised re-submission lane (v250, dark)
+
+23 of 54 weaponised clones have no Netcraft submission the issue reporter can
+escalate against — 3 never submitted, 20 aged past the reporter's 30-day window
+(`report_issue` 404s once Netcraft archives a submission). A second lane inside
+`shopfront-clone-netcraft-auto` files a **fresh** report for them, carrying the
+urlscan evidence.
+
+| Key                                      | Kind        | Default | Notes                                                                                                                                                                                        |
+| ---------------------------------------- | ----------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `FF_CLONE_NETCRAFT_RESUBMIT`             | server flag | `false` | Gates the lane. Independent of `FF_CLONE_NETCRAFT_ISSUE` so the outbound path can be killed on its own. Still requires `FF_SHOPFRONT_CLONE_SUBMIT_NETCRAFT` + `FF_SHOPFRONT_CLONE_OUTREACH`. |
+| `NETCRAFT_RESUBMIT_DAILY_CAP`            | server env  | `10`    | Bare number — `parseInt("$10")` is `NaN` and falls back to the default.                                                                                                                      |
+| `feature_brakes.clone_netcraft_resubmit` | DB row      | absent  | Operator kill-switch, separate from `clone_netcraft_issue`.                                                                                                                                  |
+
+Reporter standing is the risk this lane carries, so the bounds are layered:
+weaponised-only, liveness-confirmed (`live !== false`), **never successfully
+escalated** (rows with `netcraft_issue.issue_reported_at` are excluded so the
+`refileToTakedown` KPI cannot conflate two mechanisms), a 14-day per-alert
+cooldown, a hard 3-resubmit ceiling per alert, a 24h global budget folded into
+the worklist's `LIMIT` (re-firing the manual trigger cannot exceed the day's
+allowance), and the v176 FP-brand denylist.
+
+`record_clone_alert_netcraft_resubmit` keeps `submitted_to.netcraft` as the ONE
+current submission — the superseded one is pushed onto `netcraft.prior[]` —
+carries `reconciled_at` forward (v219's witnessed rule would otherwise read the
+next pass as backfill and drop a real timed takedown), and clears a stale
+_unfiled_ `netcraft_issue` stamp so the new uuid is escalatable if Netcraft
+declines it too.
+
+**Go-live:** validate against the test endpoint first —
+`shopfront/clone.netcraft-auto.producer.manual-trigger.v1` with `{"test": true}`
+(validation only, no report, no email, nothing persisted), inspect the payload,
+then flip the flag. Watch `cost_telemetry WHERE feature='shopfront_clone_netcraft_resubmit'`
+and its `-error` twin.
 
 ### Enabling `FF_SHOPFRONT_CLONE_RECHECK` (runbook)
 
