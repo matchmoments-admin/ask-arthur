@@ -65,15 +65,24 @@ AS $function$
     FROM public.shopfront_clone_alerts sca
     WHERE (sca.submitted_to -> 'netcraft' ->> 'resubmitted_at')::timestamptz
             > pg_catalog.now() - pg_catalog.make_interval(hours => 24)
-  )
+  ),
+  -- The 24h budget has to bound the result set via a window rank, not LIMIT:
+  -- `LIMIT` may not reference a column from the query (42P10), only constants
+  -- and parameters.
+  elig AS (
   SELECT
     sca.id,
     sca.candidate_url,
     sca.candidate_domain,
     sca.inferred_target_domain,
     sca.urlscan_uuid,
-    sca.weaponised_at
-  FROM public.shopfront_clone_alerts sca, used
+    sca.weaponised_at,
+    -- Freshest attacks first: a clone that weaponised today is still live and
+    -- still taking victims; a 60-day-old one probably is not.
+    row_number() OVER (
+      ORDER BY sca.weaponised_at DESC NULLS LAST, sca.id ASC
+    ) AS rn
+  FROM public.shopfront_clone_alerts sca
   WHERE sca.lifecycle_state = 'weaponised'
     AND sca.candidate_url IS NOT NULL
     -- No usable submission: never submitted, malformed, or aged out of the
@@ -95,10 +104,17 @@ AS $function$
     )
     AND COALESCE((sca.submitted_to -> 'netcraft' ->> 'resubmit_count')::int, 0)
           < GREATEST(1, p_max_resubmits)
-  -- Freshest attacks first: a clone that weaponised today is still live and
-  -- still taking victims; a 60-day-old one probably is not.
-  ORDER BY sca.weaponised_at DESC NULLS LAST, sca.id ASC
-  LIMIT GREATEST(0, LEAST(p_limit, p_limit - used.n));
+  )
+  SELECT
+    e.id,
+    e.candidate_url,
+    e.candidate_domain,
+    e.inferred_target_domain,
+    e.urlscan_uuid,
+    e.weaponised_at
+  FROM elig e
+  WHERE e.rn <= GREATEST(0, LEAST(p_limit, p_limit - (SELECT used.n FROM used)))
+  ORDER BY e.rn;
 $function$;
 
 REVOKE EXECUTE ON FUNCTION public.list_clone_alerts_pending_netcraft_resubmit(integer, integer, integer, integer)
