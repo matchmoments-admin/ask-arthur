@@ -642,6 +642,17 @@ export const featureFlags = {
    *  dry-run). Server-side only. */
   cloneNetcraftIssue: readBoolEnv("FF_CLONE_NETCRAFT_ISSUE"),
 
+  /** Weaponised-clone RE-submission lane (v250). Gates the second candidate
+   *  source inside shopfront-clone-netcraft-auto: weaponised clones with NO
+   *  usable Netcraft submission — never submitted, or submitted so long ago
+   *  that report_issue 404s on the archived uuid — for which the F4 reporter
+   *  has no path at all (23 of 54 weaponised alerts as at 2026-07-26). Files a
+   *  FRESH report carrying our urlscan phishing evidence. Separate from
+   *  cloneNetcraftIssue so the outbound lane can be killed independently;
+   *  additionally bounded by NETCRAFT_RESUBMIT_DAILY_CAP and
+   *  feature_brakes.clone_netcraft_resubmit. Default OFF. Server-side only. */
+  cloneNetcraftResubmit: readBoolEnv("FF_CLONE_NETCRAFT_RESUBMIT"),
+
   /** Netcraft per-URL lifecycle reconciler. Gates the
    *  shopfront-clone-netcraft-reconcile Inngest fn, which reads per-URL verdicts
    *  from GET /submission/{uuid}/urls and advances each auto-submitted clone's
