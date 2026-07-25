@@ -72,10 +72,67 @@ describe("computeDurationKpis", () => {
       },
     });
 
-    it("drops refileToTakedown and fullLoop — the takedown is unattributable", () => {
+    it("drops refileToTakedown — the re-file was against the superseded submission", () => {
       const kpis = computeDurationKpis([resubmittedRow]);
       expect(kpis.refileToTakedown).toEqual({ n: 0, medianHours: null });
-      expect(kpis.fullLoop).toEqual({ n: 0, medianHours: null });
+    });
+
+    // fullLoop is labelled "First report → witnessed takedown", so it must
+    // anchor on prior[0] rather than the current (re-)submission — otherwise a
+    // resubmitted row silently reports last-report→takedown under a
+    // first-report label, and we lose the most interesting data point we have
+    // (the end-to-end gap where the first report was ignored).
+    it("re-anchors fullLoop on the FIRST submission recorded in prior[]", () => {
+      const kpis = computeDurationKpis([
+        row({
+          candidate_domain: "brand-login.shop",
+          submitted_to: {
+            netcraft: {
+              prior: [{ submitted_at: T0 }],
+              submitted_at: T0_PLUS_48H, // the resubmission
+              takedown_at: T0_PLUS_72H,
+              resubmit_count: 1,
+            },
+          },
+        }),
+      ]);
+      // T0 → T0+72h, not T0+48h → T0+72h.
+      expect(kpis.fullLoop).toEqual({ n: 1, medianHours: 72 });
+    });
+
+    it("takes the earliest entry when prior[] holds several submissions", () => {
+      const kpis = computeDurationKpis([
+        row({
+          candidate_domain: "brand-login.shop",
+          submitted_to: {
+            netcraft: {
+              prior: [{ submitted_at: T0_PLUS_24H }, { submitted_at: T0 }],
+              submitted_at: T0_PLUS_48H,
+              takedown_at: T0_PLUS_72H,
+              resubmit_count: 2,
+            },
+          },
+        }),
+      ]);
+      expect(kpis.fullLoop).toEqual({ n: 1, medianHours: 72 });
+    });
+
+    it("ignores a malformed prior[] rather than throwing", () => {
+      const kpis = computeDurationKpis([
+        row({
+          candidate_domain: "brand-login.shop",
+          submitted_to: {
+            netcraft: {
+              prior: [null, { submitted_at: "not-a-date" }, "junk"],
+              submitted_at: T0,
+              takedown_at: T0_PLUS_24H,
+              resubmit_count: 1,
+            },
+          },
+        }),
+      ]);
+      // Falls back to the current submission rather than dropping the row.
+      expect(kpis.fullLoop).toEqual({ n: 1, medianHours: 24 });
     });
 
     it("keeps the legs that never touch takedown_at", () => {

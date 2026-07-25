@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   isCandidateLive,
-  probeLiveness,
   probeLivenessDetailed,
   probeLivenessVerdict,
 } from "@/lib/clone-watch/liveness";
@@ -151,25 +150,26 @@ describe("isCandidateLive", () => {
   });
 });
 
-describe("probeLiveness", () => {
-  it("probes each unique URL once and maps url → live", async () => {
+describe("probeLivenessDetailed", () => {
+  it("probes each unique URL once", async () => {
     const seen: string[] = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
         seen.push(String(url));
         return new Response("", {
-          status: String(url).includes("dead") ? 503 : 200,
+          status: String(url).includes("err") ? 503 : 200,
         });
       }),
     );
-    const map = await probeLiveness([
+    const map = await probeLivenessDetailed([
       "https://a.example/",
-      "https://dead.example/",
+      "https://err.example/",
       "https://a.example/", // duplicate — probed once
     ]);
-    expect(map.get("https://a.example/")).toBe(true);
-    expect(map.get("https://dead.example/")).toBe(false);
+    expect(map.get("https://a.example/")?.live).toBe(true);
+    // 5xx is reachable-but-not-serving: inconclusive, never dead.
+    expect(map.get("https://err.example/")?.live).toBeNull();
     expect(seen.filter((u) => u === "https://a.example/")).toHaveLength(1);
   });
 
@@ -187,12 +187,10 @@ describe("probeLiveness", () => {
       }),
     );
     const urls = Array.from({ length: 10 }, (_, i) => `https://u${i}.example/`);
-    await probeLiveness(urls, 2);
+    await probeLivenessDetailed(urls, 2);
     expect(peak).toBeLessThanOrEqual(2);
   });
-});
 
-describe("probeLivenessDetailed", () => {
   it("carries the reason through so drain stamps stay diagnosable", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 200 })));
     const map = await probeLivenessDetailed(["https://a.example/"]);

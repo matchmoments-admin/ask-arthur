@@ -90,24 +90,39 @@ function netcraftTimes(row: CloneAlertRow): {
   resubmitted: boolean;
 } {
   const netcraft = row.submitted_to?.["netcraft"] as
-    | { submitted_at?: unknown; takedown_at?: unknown; resubmit_count?: unknown }
+    | {
+        submitted_at?: unknown;
+        takedown_at?: unknown;
+        resubmit_count?: unknown;
+        prior?: unknown;
+      }
     | undefined;
   const issue = row.submitted_to?.["netcraft_issue"] as
     | { issue_reported_at?: unknown }
     | undefined;
   const resubmitCount =
     typeof netcraft?.resubmit_count === "number" ? netcraft.resubmit_count : 0;
+
+  // `netcraft` holds the CURRENT submission; superseded ones are appended to
+  // netcraft.prior[] oldest-first (v250). The fullLoop leg is labelled "First
+  // report → witnessed takedown", so it must anchor on the EARLIEST submission
+  // we ever made, not the latest — otherwise a resubmitted row would quietly
+  // report last-report→takedown under a first-report label.
+  const prior = Array.isArray(netcraft?.prior) ? netcraft.prior : [];
+  const firstPriorSubmittedAt = prior
+    .map((p) => ts((p as { submitted_at?: unknown } | null)?.submitted_at))
+    .filter((t): t is number => t !== null)
+    .sort((a, b) => a - b)[0];
+
   return {
-    submittedAt: ts(netcraft?.submitted_at),
+    submittedAt: firstPriorSubmittedAt ?? ts(netcraft?.submitted_at),
     takedownAt: ts(netcraft?.takedown_at),
     refiledAt: ts(issue?.issue_reported_at),
-    // v251: submitted_to.netcraft is the CURRENT submission, so on a
-    // resubmitted row `takedown_at` belongs to a different submission than the
-    // one `issue_reported_at` was filed against. Attributing that takedown to
-    // the original push-back would inflate the published median with a gap the
-    // issue filing did not cause. Enforcement decides who gets reported; this
-    // flag keeps the measurement honest about it, rather than the measurement
-    // deciding who gets reported.
+    // The refile leg, unlike fullLoop, cannot be rescued by reaching into
+    // prior[]: `issue_reported_at` was filed against the SUPERSEDED submission
+    // while `takedown_at` belongs to the current one, so the gap between them
+    // spans an entire resubmission cycle the push-back did not cause. There is
+    // no honest pairing, so the leg is dropped for these rows.
     resubmitted: resubmitCount > 0,
   };
 }
@@ -181,15 +196,14 @@ export function computeDurationKpis(
       expectedPathology: true,
     });
     leg(weaponisedAt, refiledAt, weaponiseToRefile, { allowEqual: true });
-    // Both legs that END at takedown_at are unattributable once the row has
-    // been resubmitted — the takedown belongs to the newer submission, not to
-    // the issue filing (refileToTakedown) or the original submission
-    // (fullLoop). Dropped silently rather than counted as an inversion: this
-    // is a known, deliberate exclusion, not a data pathology.
+    // Dropped silently rather than counted as an inversion: a deliberate
+    // exclusion, not a data pathology. See netcraftTimes for why fullLoop
+    // survives a resubmission (it re-anchors on the first submission) and
+    // refileToTakedown cannot.
     if (!resubmitted) {
       leg(refiledAt, takedownAt, refileToTakedown, { allowEqual: true });
-      leg(submittedAt, takedownAt, fullLoop, { allowEqual: true });
     }
+    leg(submittedAt, takedownAt, fullLoop, { allowEqual: true });
   }
 
   const toLeg = (durations: number[]): DurationLeg => ({

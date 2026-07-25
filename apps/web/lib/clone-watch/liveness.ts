@@ -86,7 +86,7 @@ function isTlsError(code: string): boolean {
 /** True when the domain has neither an A nor an NS record — the only signal
  *  that honestly means "gone". Inconclusive resolver errors read as `null`,
  *  matching clone-watch-reemergence-monitor.ts's domainResolves(). */
-export async function domainIsGone(hostname: string): Promise<boolean | null> {
+async function domainIsGone(hostname: string): Promise<boolean | null> {
   if (!hostname) return null;
   const r = new Resolver({ timeout: DNS_TIMEOUT_MS, tries: 1 });
   try {
@@ -235,16 +235,14 @@ async function probeMap<T>(
 
 /**
  * Probe a batch of URLs with bounded concurrency; duplicates are probed once.
- * Returns url → live. Never throws (per-URL failures read as dead).
+ * Returns url → verdict. Never throws.
+ *
+ * The boolean-map variant this replaced (`probeLiveness`) lost its last caller
+ * when the issue reporter moved to verdicts, and a batch helper that discards
+ * the reason is the exact shape that made the July false-dead incident
+ * undiagnosable. Callers wanting the conservative view compose
+ * `isCandidateLive` themselves, or read `.live === true` off the verdict.
  */
-export async function probeLiveness(
-  urls: string[],
-  concurrency = 4,
-): Promise<Map<string, boolean>> {
-  return probeMap(urls, concurrency, isCandidateLive);
-}
-
-/** Reasoned variant of probeLiveness — url → verdict. */
 export async function probeLivenessDetailed(
   urls: string[],
   concurrency = 4,

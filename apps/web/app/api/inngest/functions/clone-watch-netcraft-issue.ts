@@ -460,7 +460,11 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
           counts.deadDeferred++;
         }
 
-        await step.run(`drain-${uuid}`, async () => {
+        // Counters are incremented from the step's RETURN VALUE, never inside
+        // the callback: a memoised step does not re-run its callback on replay,
+        // so a mutation in there is lost and the telemetry silently reads 0.
+        // Every other counter in this function already follows that rule.
+        const drainCounts = await step.run(`drain-${uuid}`, async () => {
           const now = new Date().toISOString();
           for (const reason of ["actioned", "no_escalatable_state"] as const) {
             const ids = sel.terminal
@@ -475,7 +479,6 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
             .filter((d) => d.reason === "unavailable")
             .map((d) => d.alert.id);
           await bulkDefer(unavailableIds, "unavailable", UNAVAILABLE_RECHECK_MS);
-          counts.unavailableDeferred += unavailableIds.length;
           if (sel.transient.length) {
             await bulkDefer(
               sel.transient.map((a) => a.id),
@@ -498,8 +501,10 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
               { skipped: "submission_has_issue", at: now },
             );
           }
+          return { unavailableDeferred: unavailableIds.length };
         });
         counts.drained++;
+        counts.unavailableDeferred += drainCounts.unavailableDeferred;
 
         if (!willPost) {
           if (fetched.hasIssues) counts.hasIssues++;
