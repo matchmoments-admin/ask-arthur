@@ -87,17 +87,28 @@ function netcraftTimes(row: CloneAlertRow): {
   submittedAt: number | null;
   takedownAt: number | null;
   refiledAt: number | null;
+  resubmitted: boolean;
 } {
   const netcraft = row.submitted_to?.["netcraft"] as
-    | { submitted_at?: unknown; takedown_at?: unknown }
+    | { submitted_at?: unknown; takedown_at?: unknown; resubmit_count?: unknown }
     | undefined;
   const issue = row.submitted_to?.["netcraft_issue"] as
     | { issue_reported_at?: unknown }
     | undefined;
+  const resubmitCount =
+    typeof netcraft?.resubmit_count === "number" ? netcraft.resubmit_count : 0;
   return {
     submittedAt: ts(netcraft?.submitted_at),
     takedownAt: ts(netcraft?.takedown_at),
     refiledAt: ts(issue?.issue_reported_at),
+    // v251: submitted_to.netcraft is the CURRENT submission, so on a
+    // resubmitted row `takedown_at` belongs to a different submission than the
+    // one `issue_reported_at` was filed against. Attributing that takedown to
+    // the original push-back would inflate the published median with a gap the
+    // issue filing did not cause. Enforcement decides who gets reported; this
+    // flag keeps the measurement honest about it, rather than the measurement
+    // deciding who gets reported.
+    resubmitted: resubmitCount > 0,
   };
 }
 
@@ -162,15 +173,23 @@ export function computeDurationKpis(
   for (const row of dedupeByCandidate(rows)) {
     const declinedAt = ts(row.netcraft_declined_at);
     const weaponisedAt = ts(row.weaponised_at);
-    const { submittedAt, takedownAt, refiledAt } = netcraftTimes(row);
+    const { submittedAt, takedownAt, refiledAt, resubmitted } =
+      netcraftTimes(row);
 
     leg(declinedAt, weaponisedAt, declineToWeaponise, {
       allowEqual: false,
       expectedPathology: true,
     });
     leg(weaponisedAt, refiledAt, weaponiseToRefile, { allowEqual: true });
-    leg(refiledAt, takedownAt, refileToTakedown, { allowEqual: true });
-    leg(submittedAt, takedownAt, fullLoop, { allowEqual: true });
+    // Both legs that END at takedown_at are unattributable once the row has
+    // been resubmitted — the takedown belongs to the newer submission, not to
+    // the issue filing (refileToTakedown) or the original submission
+    // (fullLoop). Dropped silently rather than counted as an inversion: this
+    // is a known, deliberate exclusion, not a data pathology.
+    if (!resubmitted) {
+      leg(refiledAt, takedownAt, refileToTakedown, { allowEqual: true });
+      leg(submittedAt, takedownAt, fullLoop, { allowEqual: true });
+    }
   }
 
   const toLeg = (durations: number[]): DurationLeg => ({
