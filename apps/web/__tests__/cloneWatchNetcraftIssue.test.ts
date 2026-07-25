@@ -161,12 +161,36 @@ describe("selectFalseNegativeCandidates — drain buckets (PR2)", () => {
     },
   );
 
-  it("routes 'unavailable' to terminal 'unavailable_deferred' at go-live (not allowed)", () => {
+  // v248 — `unavailable` used to be TERMINAL, and the worklist RPC excludes any
+  // row carrying a `skipped` key, so 19 weaponised alerts (more than had ever
+  // been filed) were dropped forever. It is now a bounded deferral.
+  it("routes 'unavailable' on likely_phishing evidence to a bounded deferral, never terminal", () => {
     const r = selectFalseNegativeCandidates(alerts, [urlEntry("inistagram.ir", "unavailable")], {
       allowUnavailable: false,
     });
     expect(r.candidates).toHaveLength(0);
-    expect(r.terminal).toEqual([{ alert: alerts[0], reason: "unavailable_deferred" }]);
+    expect(r.terminal).toHaveLength(0);
+    expect(r.deferred).toEqual([{ alert: alerts[0], reason: "unavailable" }]);
+  });
+
+  // Netcraft grades on one fetch at submission time, so `unavailable` is often
+  // just "not stood up yet" — id-apple-kc.shop read unavailable at 10:00 and was
+  // serving phishing by 12:01. When OUR scan witnessed weaponisation, that
+  // disagreement is precisely the false negative the reporter exists to file.
+  it("escalates 'unavailable' when the alert carries witnessed-weaponisation evidence", () => {
+    const weaponised = [{ ...alert(1, "inistagram.ir"), lifecycle_state: "weaponised" }];
+    const r = selectFalseNegativeCandidates(
+      weaponised,
+      [urlEntry("inistagram.ir", "unavailable")],
+      { allowUnavailable: false },
+    );
+    expect(r.deferred).toHaveLength(0);
+    expect(r.candidates).toHaveLength(1);
+    expect(r.candidates[0]).toMatchObject({
+      alertId: 1,
+      urlState: "unavailable",
+      evidence: "weaponised",
+    });
   });
 
   it("routes an unknown-only host to terminal 'no_escalatable_state' + drift", () => {
@@ -174,6 +198,7 @@ describe("selectFalseNegativeCandidates — drain buckets (PR2)", () => {
       allowUnavailable: true,
     });
     expect(r.terminal).toEqual([{ alert: alerts[0], reason: "no_escalatable_state" }]);
+    expect(r.deferred).toHaveLength(0);
     expect(r.driftStates).toContain("quarantined");
   });
 });

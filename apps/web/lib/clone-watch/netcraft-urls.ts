@@ -131,7 +131,14 @@ export function passesEvidenceGate(
 /** A matched alert that must be drained (never re-fetched) with a reason. */
 export interface TerminalAlert {
   alert: PendingAlert;
-  reason: "actioned" | "unavailable_deferred" | "no_escalatable_state";
+  reason: "actioned" | "no_escalatable_state";
+}
+
+/** A matched alert that is NOT done — re-enters after a cooling-off window,
+ *  bounded by a round counter so it still converges (v248). */
+export interface DeferredAlert {
+  alert: PendingAlert;
+  reason: "unavailable";
 }
 
 export interface SelectResult {
@@ -139,6 +146,8 @@ export interface SelectResult {
   candidates: FalseNegativeCandidate[];
   /** Matched but done — stamp terminal so they drain. */
   terminal: TerminalAlert[];
+  /** Matched but not settled enough to file OR to drop — bounded re-entry. */
+  deferred: DeferredAlert[];
   /** Matched but still moving (suspicious/processing) — recheck later. */
   transient: PendingAlert[];
   /** Host never appeared in /urls (may be incomplete ingest — guard the drain). */
@@ -162,8 +171,22 @@ export interface SelectResult {
  *     gate (urlscan likely_phishing OR lifecycle weaponised, v221) — else
  *     'gatedOut' (unstamped; retried next run; should be empty since the
  *     worklist RPC applies the same predicate)
- *   - unavailable only, not allowed → terminal 'unavailable_deferred' (PR3)
+ *   - unavailable + WEAPONISED evidence → candidate (v248, see below)
+ *   - unavailable otherwise    → deferred 'unavailable' (bounded re-entry)
  *   - only unknown/rejected     → terminal 'no_escalatable_state' (+ drift)
+ *
+ * v248 — `unavailable` is a timing artifact, not a verdict. Netcraft grades on
+ * a single fetch at submission time, so a lookalike that was parked, cloaked or
+ * simply not yet stood up reads `unavailable`. Prod bears this out:
+ * `id-apple-kc.shop` was submitted 09:30, graded `unavailable` at 10:00, and
+ * was serving phishing by 12:01 the same day. Two consequences:
+ *   1. It must never be TERMINAL. It was, and 19 weaponised alerts — more than
+ *      we had ever filed — were permanently locked out of the worklist, because
+ *      the RPC predicate excludes any row carrying a `skipped` key.
+ *   2. When OUR scan witnessed weaponisation and Netcraft's says `unavailable`,
+ *      that disagreement IS the false negative the reporter exists to file. So
+ *      `unavailable` is escalatable — but only on `weaponised` evidence, never
+ *      on `likely_phishing` alone, to keep the blast radius tight.
  */
 export function selectFalseNegativeCandidates(
   alerts: PendingAlert[],
@@ -185,6 +208,7 @@ export function selectFalseNegativeCandidates(
 
   const candidates: FalseNegativeCandidate[] = [];
   const terminal: TerminalAlert[] = [];
+  const deferred: DeferredAlert[] = [];
   const transient: PendingAlert[] = [];
   const notInUrls: PendingAlert[] = [];
   const gatedOut: PendingAlert[] = [];
@@ -205,13 +229,22 @@ export function selectFalseNegativeCandidates(
       transient.push(alert);
       continue;
     }
-    const hit =
+    // F4 evidence gate (v221) — mirrors the worklist RPC's predicate; a
+    // mismatch means deploy skew, so fail closed (no file, no stamp).
+    const evidence = passesEvidenceGate(alert);
+    const escalatableHit =
       (S.has(NETCRAFT_URL_STATE.NO_THREATS) && NETCRAFT_URL_STATE.NO_THREATS) ||
       [...S].find((s) => escalatable.has(s));
+    // v248: our witnessed weaponisation vs their `unavailable` is a filable
+    // disagreement. Weaponised evidence only — `likely_phishing` still defers.
+    const weaponisedUnavailable =
+      !escalatableHit &&
+      evidence === "weaponised" &&
+      S.has(NETCRAFT_URL_STATE.UNAVAILABLE)
+        ? NETCRAFT_URL_STATE.UNAVAILABLE
+        : undefined;
+    const hit = escalatableHit || weaponisedUnavailable;
     if (hit) {
-      // F4 evidence gate (v221) — mirrors the worklist RPC's predicate; a
-      // mismatch means deploy skew, so fail closed (no file, no stamp).
-      const evidence = passesEvidenceGate(alert);
       if (!evidence) {
         gatedOut.push(alert);
         continue;
@@ -230,18 +263,20 @@ export function selectFalseNegativeCandidates(
       });
       continue;
     }
-    // No escalatable state and not allowed: unavailable → defer to PR3, else no-op.
-    terminal.push({
-      alert,
-      reason: S.has(NETCRAFT_URL_STATE.UNAVAILABLE)
-        ? "unavailable_deferred"
-        : "no_escalatable_state",
-    });
+    // Unavailable without weaponised evidence: cool off and re-enter (bounded
+    // by the RPC's round counter), never drop. Anything else here is a state we
+    // can act on neither way — that one IS terminal.
+    if (S.has(NETCRAFT_URL_STATE.UNAVAILABLE)) {
+      deferred.push({ alert, reason: "unavailable" });
+      continue;
+    }
+    terminal.push({ alert, reason: "no_escalatable_state" });
   }
 
   return {
     candidates,
     terminal,
+    deferred,
     transient,
     notInUrls,
     driftStates: [...driftStates],
