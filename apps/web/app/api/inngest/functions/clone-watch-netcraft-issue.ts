@@ -8,7 +8,10 @@ import { logger } from "@askarthur/utils/logger";
 import { logCost } from "@/lib/cost-telemetry";
 import { logEnforcementEvent } from "@/lib/clone-watch/enforcement-telemetry";
 import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
-import { probeLiveness } from "@/lib/clone-watch/liveness";
+import {
+  probeLivenessDetailed,
+  type LivenessVerdict,
+} from "@/lib/clone-watch/liveness";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import {
   buildIssuePayload,
@@ -51,6 +54,17 @@ import {
  * Dedicated daily cap NETCRAFT_ISSUE_DAILY_CAP (default 20 uuids). `no threats`
  * only at go-live (unavailable → PR3). singleton + concurrency:1.
  *
+ * v248 — TWO defects that between them lost 69% of weaponised clones:
+ *  - LIVENESS was collapsing every fetch rejection into "dead", so a live phish
+ *    with a mismatched TLS cert (`targetshopp.cc`) drained as dead_at_probe.
+ *    The probe is now three-valued and only NXDOMAIN counts as dead; this
+ *    reporter files on `live !== false`, keeping F3's real intent (don't spend
+ *    the one-per-submission slot on a corpse) without dropping live ones.
+ *  - `unavailable` was TERMINAL, permanently locking 19 weaponised alerts out
+ *    of the worklist. It is now a bounded deferral
+ *    (defer_clone_alert_netcraft_issue), and it is ESCALATABLE when our own
+ *    scan witnessed weaponisation — that disagreement is the false negative.
+ *
  * F4 EVIDENCE GATE (v221): the worklist RPC only returns alerts with
  * urlscan_classification='likely_phishing' OR lifecycle_state='weaponised' —
  * escalating parked/neutral clones was crying wolf (the reconciler cross-tab
@@ -66,6 +80,13 @@ import {
 const BRAKE = "clone_netcraft_issue";
 const DEFAULT_DAILY_CAP = 20;
 const MAX_AGE_DAYS = 30;
+// Bounded re-entry (v248): a deferred alert gets this many cooling-off rounds
+// before the RPC converts it to a terminal skip. 5 × 24h ≈ the 30-day worklist
+// window's useful life, so nothing loops forever and nothing is dropped early.
+const DEFER_MAX_ROUNDS = 5;
+const DEAD_RECHECK_MS = 72 * 3600 * 1000;
+const UNAVAILABLE_RECHECK_MS = 24 * 3600 * 1000;
+const TRANSIENT_RECHECK_MS = 24 * 3600 * 1000;
 // Autobrake: trip on this many permanent 4xx rejects in a run, OR >50% of live
 // POSTs rejected. Transient (5xx/429/timeout) never trips it (Netcraft outage,
 // not our fault).
@@ -127,10 +148,16 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
 
       const dryRun = isDryRun();
       const cap = dailyCap();
-      // Escalatable states drive both the /urls pre-filter and the predicate.
-      const escalatableStates = dryRun
-        ? [NETCRAFT_URL_STATE.NO_THREATS, NETCRAFT_URL_STATE.UNAVAILABLE]
-        : [NETCRAFT_URL_STATE.NO_THREATS];
+      // Escalatable states drive the /urls pre-filter (an efficiency skip when
+      // a batch has nothing actionable). UNAVAILABLE is included in BOTH modes
+      // as of v248: live mode now escalates `unavailable` on weaponised
+      // evidence, so a pre-filter that omitted it would skip the /urls GET and
+      // drain an all-unavailable batch as noEscalatable — the read-gate would
+      // silently undo the new rule before selectFalseNegativeCandidates saw it.
+      const escalatableStates = [
+        NETCRAFT_URL_STATE.NO_THREATS,
+        NETCRAFT_URL_STATE.UNAVAILABLE,
+      ];
 
       const plan = await step.run("load-pending", async () => {
         const { data: usedRaw } = await sb.rpc("count_todays_netcraft_issues");
@@ -175,6 +202,7 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
         drained: 0,
         livePosts: 0,
         deadDeferred: 0,
+        unavailableDeferred: 0,
       };
 
       const bulkStamp = async (ids: number[], value: Record<string, unknown>) => {
@@ -187,6 +215,27 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
         if (error) {
           throw new Error(
             `merge_clone_alert_submission_bulk failed (${ids.length} alerts): ${error.message}`,
+          );
+        }
+      };
+
+      // v248 non-terminal deferral. Bumps rounds.<reason> and converges to a
+      // terminal skip past DEFER_MAX_ROUNDS, so the worklist still drains.
+      const bulkDefer = async (
+        ids: number[],
+        reason: string,
+        recheckAfterMs: number,
+      ) => {
+        if (ids.length === 0) return;
+        const { error } = await sb.rpc("defer_clone_alert_netcraft_issue", {
+          p_alert_ids: ids,
+          p_reason: reason,
+          p_recheck_after: new Date(Date.now() + recheckAfterMs).toISOString(),
+          p_max_rounds: DEFER_MAX_ROUNDS,
+        });
+        if (error) {
+          throw new Error(
+            `defer_clone_alert_netcraft_issue(${reason}) failed (${ids.length} alerts): ${error.message}`,
           );
         }
       };
@@ -278,16 +327,27 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
         const shouldProbe =
           !dryRun && !fetched.hasIssues && sel.candidates.length > 0;
         const liveness = await step.run(`liveness-${uuid}`, async () => {
-          if (!shouldProbe) return {} as Record<string, boolean>;
-          const map = await probeLiveness(sel.candidates.map((c) => c.candidateUrl));
+          if (!shouldProbe) return {} as Record<string, LivenessVerdict>;
+          const map = await probeLivenessDetailed(
+            sel.candidates.map((c) => c.candidateUrl),
+          );
           return Object.fromEntries(map);
         });
-        const liveCandidates = sel.candidates.filter(
-          (c) => liveness[c.candidateUrl] === true,
-        );
-        const deadCandidates = sel.candidates.filter(
-          (c) => liveness[c.candidateUrl] !== true,
-        );
+        // v248: file unless the host is PROVED gone. `live === null` covers a
+        // TLS failure, a timeout and a refused connect — from Vercel's egress
+        // those are indistinguishable from a phishing kit blocking us, and the
+        // old code read every one of them as death. Only NXDOMAIN defers.
+        const isProvedDead = (c: { candidateUrl: string }) =>
+          shouldProbe && liveness[c.candidateUrl]?.live === false;
+        const liveCandidates = sel.candidates.filter((c) => !isProvedDead(c));
+        const deadCandidates = sel.candidates.filter(isProvedDead);
+        const livenessReasons = [
+          ...new Set(
+            sel.candidates
+              .map((c) => liveness[c.candidateUrl]?.reason)
+              .filter(Boolean),
+          ),
+        ];
 
         // DRY-RUN: log the UNGATED candidate payload, write NOTHING. Dry-run
         // never probes liveness (shouldProbe), so its urlCount/payload can
@@ -329,10 +389,10 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
         // converges via the worklist's 30-day submitted_at window.
         if (shouldProbe && liveCandidates.length === 0) {
           await step.run(`defer-dead-${uuid}`, async () => {
-            const recheck = new Date(Date.now() + 72 * 3600 * 1000).toISOString();
-            await bulkStamp(
+            await bulkDefer(
               sel.candidates.map((c) => c.alertId),
-              { recheck_after: recheck, at: new Date().toISOString() },
+              "dead_at_probe",
+              DEAD_RECHECK_MS,
             );
             logEnforcementEvent("rejected", {
               alertId: sel.candidates[0].alertId,
@@ -342,6 +402,10 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
               extra: {
                 reason: "dead_at_probe",
                 uuid,
+                // The probe reason is the diagnostic the old boolean threw
+                // away — without it, the 13 batches lost to false-dead in July
+                // needed a live re-probe to explain.
+                livenessReasons,
                 deadDomains: deadCandidates.map((c) => c.candidateDomain),
               },
             });
@@ -351,21 +415,25 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
 
         await step.run(`drain-${uuid}`, async () => {
           const now = new Date().toISOString();
-          for (const reason of [
-            "actioned",
-            "unavailable_deferred",
-            "no_escalatable_state",
-          ] as const) {
+          for (const reason of ["actioned", "no_escalatable_state"] as const) {
             const ids = sel.terminal
               .filter((t) => t.reason === reason)
               .map((t) => t.alert.id);
             await bulkStamp(ids, { skipped: reason, at: now });
           }
+          // v248: `unavailable` without weaponised evidence cools off and
+          // re-enters instead of draining forever. Bounded by the RPC's round
+          // counter, so it still converges.
+          const unavailableIds = sel.deferred
+            .filter((d) => d.reason === "unavailable")
+            .map((d) => d.alert.id);
+          await bulkDefer(unavailableIds, "unavailable", UNAVAILABLE_RECHECK_MS);
+          counts.unavailableDeferred += unavailableIds.length;
           if (sel.transient.length) {
-            const recheck = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
-            await bulkStamp(
+            await bulkDefer(
               sel.transient.map((a) => a.id),
-              { recheck_after: recheck, at: now },
+              "transient_state",
+              TRANSIENT_RECHECK_MS,
             );
           }
           // FIX-8: only drain not-in-urls when the page is COMPLETE (else an
