@@ -1,5 +1,6 @@
 import { isFeatureBraked } from "@askarthur/scam-engine/cost-log";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
+import { CLONE_WATCH_WEAPONISED_EVENT } from "@askarthur/scam-engine/inngest/events";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { readStringEnv } from "@askarthur/utils/env";
@@ -84,6 +85,14 @@ const MAX_AGE_DAYS = 30;
 // before the RPC converts it to a terminal skip. 5 × 24h ≈ the 30-day worklist
 // window's useful life, so nothing loops forever and nothing is dropped early.
 const DEFER_MAX_ROUNDS = 5;
+// Fast-lane cooldown: collapses a weaponisation burst into one run.
+// 10 min, not 30: a skipped trigger is DROPPED, not queued, so the window is
+// also the worst-case latency a burst can add. The alert stays in the worklist
+// and the next trigger (another weaponisation, or the daily cron) picks it up —
+// so the failure mode degrades to today's behaviour, never worse. singleton
+// +concurrency:1 already stop CONCURRENT runs; this stops rapid sequential ones
+// from spending the day's Netcraft GET budget re-reading the same uuids.
+const COOLDOWN_MS = 10 * 60 * 1000;
 const DEAD_RECHECK_MS = 72 * 3600 * 1000;
 const UNAVAILABLE_RECHECK_MS = 24 * 3600 * 1000;
 const TRANSIENT_RECHECK_MS = 24 * 3600 * 1000;
@@ -128,6 +137,21 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
   [
     { cron: "0 11 * * *" },
     { event: "shopfront/clone.netcraft-issue.manual-trigger.v1" },
+    // FAST LANE (v249-era, no migration): the daily cron WAS the latency. Steady
+    // -state weaponised_at → issue_reported_at measured a 23h median (n=5) —
+    // essentially the cron floor, since a clone that weaponises at 12:01 UTC
+    // waits until 11:00 the next day by construction. Attackers rotate inside
+    // that window; three of the sites we eventually filed on were already dead.
+    //
+    // shopfront/clone.weaponised.v1 already exists with two consumers
+    // (notify-weaponised, enforcement-plan), so this extends that Seam rather
+    // than adding a parallel trigger path. The payload is ignored — the run
+    // processes the whole worklist exactly as the manual trigger does.
+    //
+    // Volume is structurally unchanged: singleton skip + concurrency 1 +
+    // count_todays_netcraft_issues against NETCRAFT_ISSUE_DAILY_CAP. At ~1.6
+    // weaponisations/day the extra invocations are noise.
+    { event: CLONE_WATCH_WEAPONISED_EVENT },
   ],
   withAxiomLogging(
     { fnId: "shopfront-clone-netcraft-issue" },
@@ -145,6 +169,29 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
 
       const sb = createServiceClient();
       if (!sb) return { skipped: true, reason: "supabase_unavailable" };
+
+      // Cooldown. CLAUDE.md requires a throttle AND a same-window cooldown on
+      // any cron that also has a manual/event trigger — the 2026-07-12 incident
+      // where stacked manual fires breached urlscan's per-hour cap. The daily
+      // cron never trips this; it exists so a burst of weaponisations (or an
+      // operator leaning on the manual trigger) can't run the reporter back to
+      // back and spend the day's Netcraft GET budget re-reading the same uuids.
+      // Mirrors clone-watch-lifecycle-recheck's check-cooldown. The daily cap is
+      // the structural backstop; this is the ergonomics one.
+      const recentRun = await step.run("check-cooldown", async () => {
+        const { data } = await sb
+          .from("cost_telemetry")
+          .select("created_at")
+          .eq("feature", "shopfront_clone_netcraft_issue")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (!data?.created_at) return false;
+        return Date.now() - new Date(data.created_at).getTime() < COOLDOWN_MS;
+      });
+      if (recentRun) {
+        return { skipped: true, reason: "cooldown_active" };
+      }
 
       const dryRun = isDryRun();
       const cap = dailyCap();
