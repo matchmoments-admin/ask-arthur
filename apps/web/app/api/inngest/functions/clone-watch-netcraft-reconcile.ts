@@ -26,8 +26,17 @@ import {
  *   malicious                 → taken_down (+ stamps takedown_at → feeds the KPI)
  *   no threats / unavailable  → declined   (→ feeds the 6h weaponisation recheck)
  *   suspicious / processing / no-match → unchanged (just stamp reconciled_at)
- * It NEVER downgrades weaponised/taken_down/dormant (the worklist RPC excludes
- * them). This is the single Netcraft verdict source — the rollup poll stays dark.
+ * It NEVER downgrades weaponised/taken_down/dormant. This is the single Netcraft
+ * verdict source — the rollup poll stays dark.
+ *
+ * v249 — this is also the ONLY place the escalation outcome can be observed.
+ * `weaponised` rows now enter the worklist: until they did, nothing could ever
+ * advance an alert past weaponisation, so `re_taken_down` (escalated AND
+ * taken_down) was structurally unsatisfiable and the refileToTakedown duration
+ * leg was permanently n=0 — 17 filed issues with no measurable result. The
+ * no-downgrade rule that used to be implied by the worklist filter now lives in
+ * apply_netcraft_reconcile itself, with a mirror in classifyByUrlState: for a
+ * weaponised row, only `malicious` moves it, and it moves forward.
  *
  * No outbound, no reporter-standing cost → uncapped (unlike the issue reporter);
  * bounded per run by p_uuid_limit + a 24h per-uuid cadence throttle. Daily cron.

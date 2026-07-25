@@ -355,6 +355,56 @@ describe("classifyByUrlState — lifecycle reconcile (PR3.1)", () => {
     const r = classifyByUrlState([ra(9, "gone.com")], [urlEntry("other.com", "malicious")]);
     expect(r.other).toEqual([9]);
   });
+
+  // v249 — weaponised rows joined the reconcile worklist so the escalation
+  // outcome can be witnessed at all. Admitting them is only safe because
+  // nothing walks them backwards.
+  describe("no-downgrade rule for weaponised/taken_down/dormant", () => {
+    const staged = (id: number, domain: string, lifecycle_state: string) => ({
+      id,
+      candidate_domain: domain,
+      lifecycle_state,
+    });
+
+    it.each(["weaponised", "taken_down", "dormant"])(
+      "keeps a %s alert out of 'declined' when Netcraft still says no threats",
+      (state) => {
+        const r = classifyByUrlState(
+          [staged(1, "a.com", state)],
+          [urlEntry("a.com", "no threats")],
+        );
+        expect(r.declined).toEqual([]);
+        expect(r.other).toEqual([1]);
+      },
+    );
+
+    it("keeps a weaponised alert out of 'declined' on unavailable too", () => {
+      const r = classifyByUrlState(
+        [staged(1, "a.com", "weaponised")],
+        [urlEntry("a.com", "unavailable")],
+      );
+      expect(r.declined).toEqual([]);
+      expect(r.other).toEqual([1]);
+    });
+
+    // The one transition that must still fire — this is the whole reason
+    // weaponised rows were admitted to the worklist.
+    it("still advances a weaponised alert to taken_down on malicious", () => {
+      const r = classifyByUrlState(
+        [staged(1, "a.com", "weaponised")],
+        [urlEntry("a.com", "malicious")],
+      );
+      expect(r.takenDown).toEqual([1]);
+    });
+
+    it("leaves non-protected states on the existing decline path", () => {
+      const r = classifyByUrlState(
+        [staged(1, "a.com", "declined"), staged(2, "b.com", "monitoring")],
+        [urlEntry("a.com", "no threats"), urlEntry("b.com", "unavailable")],
+      );
+      expect(r.declined.sort()).toEqual([1, 2]);
+    });
+  });
 });
 
 describe("buildIssuePayload", () => {

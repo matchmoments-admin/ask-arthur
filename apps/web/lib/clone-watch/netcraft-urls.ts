@@ -287,7 +287,17 @@ export function selectFalseNegativeCandidates(
 export interface ReconcileAlert {
   id: number;
   candidate_domain: string;
+  /** v249 — the worklist RPC already returns this; used to refuse a downgrade
+   *  now that `weaponised` rows are reconciled. Absent on older payloads. */
+  lifecycle_state?: string | null;
 }
+
+/** States a reconcile pass must never walk BACK from. `weaponised` entered the
+ *  worklist in v249 so the escalation→takedown outcome can be witnessed; a
+ *  Netcraft `no threats` on such a row is the false negative we already filed
+ *  an issue about, not evidence to demote it to `declined`. Only `malicious`
+ *  moves these rows, and only forward, to `taken_down`. */
+const NO_DOWNGRADE_STATES = new Set(["weaponised", "taken_down", "dormant"]);
 
 export interface ReconcileClassification {
   /** Netcraft actioned (malicious) → lifecycle taken_down (+ stamp takedown_at). */
@@ -327,6 +337,12 @@ export function classifyByUrlState(
     }
     if (S.has(NETCRAFT_URL_STATE.MALICIOUS)) takenDown.push(alert.id);
     else if (S.has(NETCRAFT_URL_STATE.SUSPICIOUS) || S.has(NETCRAFT_URL_STATE.PROCESSING))
+      other.push(alert.id);
+    // Anything short of `malicious` leaves a weaponised/taken_down/dormant row
+    // exactly where it is — reconciled_at is stamped, lifecycle is not touched.
+    // apply_netcraft_reconcile enforces the same rule server-side (v249); this
+    // mirror keeps the intent legible at the call site and holds under skew.
+    else if (NO_DOWNGRADE_STATES.has(alert.lifecycle_state ?? ""))
       other.push(alert.id);
     else if (
       S.has(NETCRAFT_URL_STATE.NO_THREATS) ||

@@ -56,7 +56,7 @@ AS $function$
   WITH cur AS (
     SELECT
       sca.id,
-      pg_catalog.coalesce(sca.submitted_to -> 'netcraft_issue', '{}'::jsonb) AS ni
+      COALESCE(sca.submitted_to -> 'netcraft_issue', '{}'::jsonb) AS ni
     FROM public.shopfront_clone_alerts sca
     WHERE sca.id = ANY(p_alert_ids)
   ),
@@ -64,7 +64,7 @@ AS $function$
     SELECT
       cur.id,
       cur.ni,
-      pg_catalog.coalesce((cur.ni -> 'rounds' ->> p_reason)::int, 0) + 1 AS rounds
+      COALESCE((cur.ni -> 'rounds' ->> p_reason)::int, 0) + 1 AS rounds
     FROM cur
   ),
   built AS (
@@ -75,7 +75,7 @@ AS $function$
       || pg_catalog.jsonb_build_object(
            'rounds',
            pg_catalog.jsonb_set(
-             pg_catalog.coalesce(nxt.ni -> 'rounds', '{}'::jsonb),
+             COALESCE(nxt.ni -> 'rounds', '{}'::jsonb),
              ARRAY[p_reason],
              pg_catalog.to_jsonb(nxt.rounds),
              true
@@ -83,12 +83,12 @@ AS $function$
            'at', pg_catalog.to_jsonb(pg_catalog.now()::text)
          )
       || CASE
-           WHEN nxt.rounds > pg_catalog.greatest(1, p_max_rounds)
+           WHEN nxt.rounds > GREATEST(1, p_max_rounds)
              THEN pg_catalog.jsonb_build_object('skipped', p_reason || '_exhausted')
            ELSE pg_catalog.jsonb_build_object(
                   'recheck_after',
                   pg_catalog.to_jsonb(
-                    pg_catalog.coalesce(p_recheck_after, pg_catalog.now() + interval '24 hours')::text
+                    COALESCE(p_recheck_after, pg_catalog.now() + interval '24 hours')::text
                   )
                 )
          END AS ni
@@ -97,7 +97,7 @@ AS $function$
   upd AS (
     UPDATE public.shopfront_clone_alerts sca
     SET submitted_to = pg_catalog.jsonb_set(
-          pg_catalog.coalesce(sca.submitted_to, '{}'::jsonb),
+          COALESCE(sca.submitted_to, '{}'::jsonb),
           ARRAY['netcraft_issue'],
           built.ni,
           true
@@ -107,7 +107,7 @@ AS $function$
     WHERE sca.id = built.id
     RETURNING 1
   )
-  SELECT pg_catalog.coalesce(count(*), 0)::int FROM upd;
+  SELECT COALESCE(count(*), 0)::int FROM upd;
 $function$;
 
 REVOKE EXECUTE ON FUNCTION public.defer_clone_alert_netcraft_issue(bigint[], text, timestamptz, integer)
