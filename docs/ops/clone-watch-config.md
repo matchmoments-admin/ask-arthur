@@ -462,11 +462,56 @@ next pass as backfill and drop a real timed takedown), and clears a stale
 _unfiled_ `netcraft_issue` stamp so the new uuid is escalatable if Netcraft
 declines it too.
 
-**Go-live:** validate against the test endpoint first —
-`shopfront/clone.netcraft-auto.producer.manual-trigger.v1` with `{"test": true}`
-(validation only, no report, no email, nothing persisted), inspect the payload,
-then flip the flag. Watch `cost_telemetry WHERE feature='shopfront_clone_netcraft_resubmit'`
-and its `-error` twin.
+**Status: LIVE.** `FF_CLONE_NETCRAFT_RESUBMIT=true` in Production since
+2026-07-26 (Vercel env + redeploy `ask-arthur-8sqt853x4`). First live run is the
+09:30 UTC `shopfront-clone-netcraft-auto` cron; the lane was capped at the
+default 10 URLs/day for it.
+
+> ⚠ **`{"test": true}` does NOT exercise this lane.** `runResubmitLane` returns
+> `{skipped: true, reason: "test_mode"}` before it reaches the flag check
+> (`clone-watch-netcraft-auto.ts`), so the validation-only endpoint covers the
+> AUTO lane's payload and nothing else. An earlier version of this runbook said
+> to validate here first — that check does nothing for the resubmit lane, and
+> the resubmit payload is the novel one (a multi-line `reason` carrying up to 10
+> urlscan URLs, versus the auto lane's single short paragraph). Two consequences
+> worth knowing:
+>
+> - Netcraft's limit on the `reason` field is **unverified**. A rejection
+>   soft-fails ($0 diagnostic under
+>   `shopfront-clone-netcraft-resubmit-error`, rows left unmarked, retried next
+>   run) — nothing breaks, but the submission is wasted.
+> - There is no non-destructive way to confirm the flag reached the runtime;
+>   the first real run is the first signal. Backlog item: make test mode build
+>   and POST the resubmit body to `NETCRAFT_TEST_ENDPOINT` so this lane gets the
+>   same free dry run the auto lane has.
+
+**What to watch after the first run**
+
+```sql
+-- lane outcome (candidates / live / dead / marked / brands / netcraft_uuid)
+select created_at, metadata from cost_telemetry
+where feature in ('shopfront_clone_netcraft_resubmit',
+                  'shopfront-clone-netcraft-resubmit-error')
+order by created_at desc limit 5;
+
+-- rows that actually moved
+select candidate_domain, inferred_target_domain,
+       submitted_to->'netcraft'->>'uuid'           as new_uuid,
+       submitted_to->'netcraft'->>'resubmit_count' as n,
+       jsonb_array_length(submitted_to->'netcraft'->'prior') as prior_kept
+from shopfront_clone_alerts
+where (submitted_to->'netcraft'->>'resubmitted_at')::timestamptz
+        > now() - interval '24 hours';
+```
+
+A run that logs `shopfront_clone_netcraft_resubmit` with `marked > 0` is a clean
+pass. `reason: "FF_CLONE_NETCRAFT_RESUBMIT disabled"` in the fn return means the
+env var did not reach the runtime — redeploy rather than re-adding the var.
+
+**Kill switch:** `insert into feature_brakes (feature, paused_until, reason,
+set_by) values ('clone_netcraft_resubmit', now() + interval '24 hours',
+'<why>', '<who>') on conflict (feature) do update set …` — stops this lane
+only, leaving the issue reporter and the auto lane untouched.
 
 ### Enabling `FF_SHOPFRONT_CLONE_RECHECK` (runbook)
 
