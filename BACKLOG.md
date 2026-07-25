@@ -532,6 +532,48 @@ Related to Phase 13 in `ROADMAP.md`. Items that need action before (or as) we hi
 - [ ] **Resend domain verification at domain level** — not per-mailbox. After the email consolidation to `brendan@askarthur.au`, any transactional email (welcome, org invite, weekly blog alerts) will bounce if DKIM/SPF is only verified for `alerts@` or `noreply@`. Test with a welcome email to yourself post-deploy
 - [ ] **Chrome Web Store v1.1.0 upload** (supersedes the v1.0.1 item — manifest bumped by extension-monetisation PR 4/#786) — build per the activation runbook in [docs/plans/extension-monetisation.md](./docs/plans/extension-monetisation.md): `WXT_IMAGE_CHECK=true` (+ `WXT_EXTENSION_BILLING=true` and/or `WXT_FACEBOOK_ADS=true` per phase) → `pnpm --filter @askarthur/extension zip` → upload to the existing unlisted listing. New `scripting` permission and/or Facebook host permissions may trigger a 1–3 day re-review. Pair each build flag with its server flag (`NEXT_PUBLIC_FF_IMAGE_CHECK` / `NEXT_PUBLIC_FF_EXTENSION_BILLING` / `NEXT_PUBLIC_FF_FACEBOOK_ADS`)
 
+## Clone-Watch — Netcraft escalation follow-ups
+
+Deferred out of the 2026-07-26 weaponised-escalation repair (#852–#858,
+migrations v248–v251). Context: [`docs/plans/clone-watch-brand-value-features.md`](./docs/plans/clone-watch-brand-value-features.md)
+§"F3/F4 — what the first three weeks in production actually taught us".
+
+- **`.rpc()` is untyped across the whole app** _(latent, pre-existing, biggest
+  of these)_. `createServiceClient()` calls `createClient(url, key)` **without
+  the `Database` generic** (`packages/supabase/src/server.ts:11`), so Supabase's
+  RPC name and argument checking is inert — a call to a wholly fictional RPC
+  with fictional args typechecks clean (verified 2026-07-26). Meanwhile
+  `packages/types/src/db.generated.ts` carries full `Functions` definitions for
+  all 70+ RPCs, so the safety net people reasonably assume exists is simply not
+  wired up. Consequence: any RPC rename, dropped argument or typo ships silently
+  and fails at call time in prod — the exact class the `rpcs.smoke.test.ts`
+  suite exists to catch after the fact. Adding `<Database>` is one line but will
+  surface a backlog of pre-existing mismatches, so it needs its own PR and a
+  real look at the fallout. **Until it lands, regenerating `db.generated.ts`
+  after a migration buys nothing for RPCs** — worth knowing before treating the
+  regen step as a safety measure.
+- **`{"test": true}` does not exercise the resubmit lane.** `runResubmitLane`
+  returns on `isTest` before the flag check, so Netcraft's validation-only
+  endpoint covers the auto lane's payload and nothing else. The resubmit
+  `reason` is the novel shape (multi-line, up to 10 urlscan URLs) and its length
+  limit is unverified. Make test mode build and POST the resubmit body to
+  `NETCRAFT_TEST_ENDPOINT`. Also removes the current blind spot where a flag
+  flip on this lane cannot be verified without a real submission.
+- **A registrar-driven takedown is never detected.** If a weaponised clone is
+  killed by its registrar rather than by Netcraft, Netcraft's `url_state` stays
+  `no threats` forever, so the reconciler never advances it and it sits
+  `weaponised` indefinitely — inflating the weaponised count and starving the
+  takedown KPIs. Fixing it means putting the weaponised tail into the urlscan
+  recheck pool, roughly doubling that pool's cost for what is currently a
+  measurement nicety. Deliberate non-goal in the v249 work; revisit if the
+  weaponised backlog grows or the KPI matters commercially.
+- **A resubmitted alert cannot be escalated again.** A row carrying
+  `netcraft_issue.issue_reported_at` keeps it through a resubmission, so the
+  v221 worklist excludes it and the _new_ submission can never receive a
+  `report_issue` even if Netcraft declines it too. That is a third bite at the
+  same domain and the reporter-standing risk was judged not worth it — recorded
+  so the decision is visible rather than looking like an oversight.
+
 ## Database Hygiene & SPF Readiness
 
 Started as the deferred items from the 2026-04-23 advisor audit. Heavily

@@ -142,6 +142,49 @@ standing-risk into a precision tool.
   until this gate lands** (today it would file low-confidence reports on parked
   clones).
 
+#### F3/F4 — what the first three weeks in production actually taught us (2026-07-26)
+
+F3 and F4 both shipped working and both quietly under-delivered. Of 54 alerts
+that reached `weaponised`, only 17 (31%) were ever re-reported, and just ONE
+filing landed in the ten days to 2026-07-26. Four causes, fixed in #852–#857
+(migrations v248–v251):
+
+1. **The F3 liveness pre-check was false-dead.** `liveness.ts` collapsed every
+   `fetch` rejection into `false`, so NXDOMAIN, an expired/mismatched TLS cert,
+   a timeout and a refused connect were indistinguishable. `targetshopp.cc` — a
+   weaponised, urlscan-confirmed Target lookalike — was drained `dead_at_probe`
+   while serving, purely because its cert has a hostname mismatch. 13 of 19
+   batches died this way. The probe is now three-valued and **only NXDOMAIN
+   counts as dead**; from Vercel's egress a refused connect is indistinguishable
+   from a phishing kit blocking us, so DNS is the only honest test we control.
+2. **`unavailable` was treated as a verdict.** It is a timing artifact —
+   Netcraft grades on one fetch at submission time, and `id-apple-kc.shop` read
+   `unavailable` at 10:00 and was serving phishing by 12:01 the same day. Worse,
+   the drain was TERMINAL and the worklist excludes any `skipped` key, so 19
+   weaponised alerts — more than had ever been filed — were locked out forever.
+   Now a bounded deferral, and **escalatable on witnessed-weaponisation
+   evidence**: our scan disagreeing with theirs IS the false negative.
+3. **F4's outcome was unmeasurable by construction.** Both the reconcile and
+   recheck worklists excluded `weaponised`, and the reconciler is the only thing
+   that stamps `takedown_at` — so `re_taken_down` could never be non-zero and
+   `refileToTakedown` was permanently n=0. The KPI code was already written and
+   wired; it was starved, not missing.
+4. **23 of 54 had no submission to escalate against** (3 never submitted, 20
+   archived past the reporter's 30-day window), so `report_issue` was impossible
+   and the submitter dedupes on the existing key. Addressed by the v250/v251
+   re-submission lane.
+
+Three transferable lessons:
+
+- **Never let a metric decide who gets reported.** v250 excluded already-escalated
+  clones to keep a median clean; six live phishing domains lost their only path.
+  Bend the metric (v251 re-anchors `fullLoop` on `netcraft.prior[0]`), not the
+  enforcement.
+- **A re-submit path must move the row back across the exact predicate its
+  consuming stage filters on** — the v224 lesson, re-learned twice here.
+- **Correctness review cannot catch any of these.** Each stage was individually
+  right. Only telemetry over days showed the loop was inert.
+
 ### F5 — (optional, marketing) The vendor-gap data story
 
 The "we flagged N, the takedown vendor declined X%, Y% later weaponised" narrative
