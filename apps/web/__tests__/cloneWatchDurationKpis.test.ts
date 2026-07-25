@@ -53,6 +53,62 @@ describe("computeDurationKpis", () => {
     expect(kpis.excludedNegativeN).toBe(0);
   });
 
+  // v251 — a resubmitted row's takedown belongs to the NEWER submission, not to
+  // the issue filing or the original submission. Both takedown-terminated legs
+  // must drop it, or the published median absorbs a gap the push-back never
+  // caused. The legs that don't touch takedown_at are unaffected.
+  describe("resubmitted rows (netcraft.resubmit_count > 0)", () => {
+    const resubmittedRow = row({
+      candidate_domain: "brand-login.shop",
+      netcraft_declined_at: T0,
+      weaponised_at: T0_PLUS_24H,
+      submitted_to: {
+        netcraft: {
+          submitted_at: T0,
+          takedown_at: T0_PLUS_72H,
+          resubmit_count: 1,
+        },
+        netcraft_issue: { issue_reported_at: T0_PLUS_48H },
+      },
+    });
+
+    it("drops refileToTakedown and fullLoop — the takedown is unattributable", () => {
+      const kpis = computeDurationKpis([resubmittedRow]);
+      expect(kpis.refileToTakedown).toEqual({ n: 0, medianHours: null });
+      expect(kpis.fullLoop).toEqual({ n: 0, medianHours: null });
+    });
+
+    it("keeps the legs that never touch takedown_at", () => {
+      const kpis = computeDurationKpis([resubmittedRow]);
+      expect(kpis.declineToWeaponise).toEqual({ n: 1, medianHours: 24 });
+      expect(kpis.weaponiseToRefile).toEqual({ n: 1, medianHours: 24 });
+    });
+
+    it("counts the exclusion as neither a pathology nor an inversion", () => {
+      const kpis = computeDurationKpis([resubmittedRow]);
+      expect(kpis.excludedNegativeN).toBe(0);
+      expect(kpis.anomalousInversionsN).toBe(0);
+    });
+
+    it("leaves a resubmit_count of 0 (or absent) on the normal path", () => {
+      const zero = computeDurationKpis([
+        row({
+          candidate_domain: "other.shop",
+          submitted_to: {
+            netcraft: {
+              submitted_at: T0,
+              takedown_at: T0_PLUS_72H,
+              resubmit_count: 0,
+            },
+            netcraft_issue: { issue_reported_at: T0_PLUS_48H },
+          },
+        }),
+      ]);
+      expect(zero.refileToTakedown).toEqual({ n: 1, medianHours: 24 });
+      expect(zero.fullLoop).toEqual({ n: 1, medianHours: 72 });
+    });
+  });
+
   it("excludes inverted decline→weaponise pairs (last-touch pathology) and counts them", () => {
     const kpis = computeDurationKpis([
       // declined re-stamped AFTER weaponisation — must not produce a negative leg

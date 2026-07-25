@@ -432,12 +432,28 @@ urlscan evidence.
 | `feature_brakes.clone_netcraft_resubmit` | DB row      | absent  | Operator kill-switch, separate from `clone_netcraft_issue`.                                                                                                                                  |
 
 Reporter standing is the risk this lane carries, so the bounds are layered:
-weaponised-only, liveness-confirmed (`live !== false`), **never successfully
-escalated** (rows with `netcraft_issue.issue_reported_at` are excluded so the
-`refileToTakedown` KPI cannot conflate two mechanisms), a 14-day per-alert
-cooldown, a hard 3-resubmit ceiling per alert, a 24h global budget folded into
-the worklist's `LIMIT` (re-firing the manual trigger cannot exceed the day's
-allowance), and the v176 FP-brand denylist.
+weaponised-only, liveness-confirmed (`live !== false`), **no recorded
+takedown**, a 14-day per-alert cooldown, a hard 3-resubmit ceiling per alert, a
+24h global budget bounding the worklist (re-firing the manual trigger cannot
+exceed the day's allowance), and the v176 FP-brand denylist.
+
+**v251 — a prior escalation does NOT disqualify a row.** v250 excluded alerts
+carrying `netcraft_issue.issue_reported_at` to keep the `refileToTakedown`
+median unambiguous. That was measurement deciding who gets reported, which is
+backwards. The 6 rows it excluded (airwallex, revolut ×2, bonds ×2, whatsapp)
+were all urlscan `likely_phishing`, all reported in July, **none actioned by
+Netcraft**, and 5 of 6 still resolved — with their submission archived, a fresh
+report was their only remaining path. The KPI is protected properly instead:
+`duration-kpis.ts` drops **both** takedown-terminated legs (`refileToTakedown`,
+`fullLoop`) for any row with `netcraft.resubmit_count > 0`, because on a
+resubmitted row the takedown belongs to a different submission than the one the
+issue was filed against. The exclusion is silent — it is deliberate, not a data
+pathology, so it feeds neither `excludedNegativeN` nor `anomalousInversionsN`.
+
+Still out of scope: weaponised clones whose submission is **inside** the 30-day
+window. Those are visible to the reconciler and, if unfiled, to the issue
+reporter; resubmitting a URL that sits in an active submission is the case most
+likely to read as duplicate spam.
 
 `record_clone_alert_netcraft_resubmit` keeps `submitted_to.netcraft` as the ONE
 current submission — the superseded one is pushed onto `netcraft.prior[]` —
