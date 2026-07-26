@@ -434,8 +434,46 @@ urlscan evidence.
 Reporter standing is the risk this lane carries, so the bounds are layered:
 weaponised-only, liveness-confirmed (`live !== false`), **no recorded
 takedown**, a 14-day per-alert cooldown, a hard 3-resubmit ceiling per alert, a
-24h global budget bounding the worklist (re-firing the manual trigger cannot
-exceed the day's allowance), and the v176 FP-brand denylist.
+24h global budget (re-firing the manual trigger cannot exceed the day's
+allowance), and the v176 FP-brand denylist.
+
+**v252 — proved-dead rows are deferred, not dropped.** Liveness can only be
+established in the caller, so v250/v251 rank-limited the worklist to the daily
+cap and then filtered dead rows out of the batch in TypeScript — without
+stamping them. A dead row therefore returned at the head of the ordering the
+next day, and every day after. Measured 2026-07-26, hours before the first live
+run: 9 of the 23 eligible alerts were NXDOMAIN, which projected to
+6 → 3 → 2 → 1 submissions per day, converging on 9 of 10 daily slots spent on
+domains that no longer exist — with the lane returning `ok: true` throughout.
+The same failure class as the v224 recheck incident.
+
+Two changes fix it, both in `list_clone_alerts_pending_netcraft_resubmit`
+(v252) and its caller:
+
+- **Deferral.** `defer_clone_alert_netcraft_resubmit` stamps
+  `submitted_to.netcraft_resubmit` with `recheck_after` (+7 days) and
+  `rounds.dead_at_probe`, going terminal (`skipped: "dead_at_probe_exhausted"`)
+  after 5 rounds — ~35 days continuously NXDOMAIN. The worklist excludes both.
+  Same shape as the issue reporter's v248 deferral, under its own key so the
+  two cannot collide. A revived host re-enters automatically until it
+  exhausts; after that, clearing it is an operator action:
+
+  ```sql
+  update shopfront_clone_alerts
+  set submitted_to = submitted_to #- '{netcraft_resubmit,skipped}'
+  where candidate_domain = '<domain>';
+  ```
+
+- **Over-fetch.** The worklist now returns up to `p_probe_limit` rows (the
+  caller passes 3× the cap) and reports the 24h allowance as a
+  `budget_remaining` column rather than bounding the row count with it. The
+  caller probes everything returned and submits the first `budget_remaining`
+  **live** rows. Without this, a batch containing dead rows can never fill the
+  day's cap even once the deferral is draining them.
+
+Per-run telemetry carries `dead`, `deferred`, `budget` and a `dead_reasons`
+array (domain + probe verdict), so a deadness call is diagnosable later without
+a live re-probe — by which time the answer has changed.
 
 **v251 — a prior escalation does NOT disqualify a row.** v250 excluded alerts
 carrying `netcraft_issue.issue_reported_at` to keep the `refileToTakedown`

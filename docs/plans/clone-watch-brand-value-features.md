@@ -174,7 +174,19 @@ filing landed in the ten days to 2026-07-26. Four causes, fixed in #852–#857
    and the submitter dedupes on the existing key. Addressed by the v250/v251
    re-submission lane.
 
-Three transferable lessons:
+5. **The new resubmit lane would have starved itself on dead rows** — caught
+   pre-fire, hours before its first live run, and fixed in #861 (v252). The
+   worklist rank-limits to the daily cap _before_ liveness is knowable; the
+   probe runs in the caller afterwards and dead rows were filtered out of the
+   batch without being stamped, so each one returned at the head of the
+   ordering the next day and every day after. 9 of the 23 eligible alerts were
+   NXDOMAIN on the morning of the run, projecting 6 → 3 → 2 → 1 submissions/day
+   toward a steady state of 9 of 10 daily slots spent on domains that no longer
+   exist — with `ok: true` returned throughout. Now: a bounded 7-day
+   `dead_at_probe` deferral (the v248 shape, own key), plus an over-fetch so a
+   dead-heavy batch can still fill the day's budget with live rows.
+
+Four transferable lessons:
 
 - **Never let a metric decide who gets reported.** v250 excluded already-escalated
   clones to keep a median clean; six live phishing domains lost their only path.
@@ -182,8 +194,15 @@ Three transferable lessons:
   enforcement.
 - **A re-submit path must move the row back across the exact predicate its
   consuming stage filters on** — the v224 lesson, re-learned twice here.
+- **A row the consumer skips is a row the worklist must lose.** Cause 5 is the
+  same rule read from the other end: filtering in the caller is not the same as
+  advancing the row, and an unstamped skip re-presents forever. Whenever a
+  worklist is bounded _before_ a gate the caller applies, the gate's rejects
+  need somewhere to go.
 - **Correctness review cannot catch any of these.** Each stage was individually
-  right. Only telemetry over days showed the loop was inert.
+  right. Only telemetry over days showed the loop was inert — except cause 5,
+  which an operational read of the worklist-vs-probe interaction caught before
+  the first run, which is the cheaper place to find it.
 
 ### F5 — (optional, marketing) The vendor-gap data story
 
