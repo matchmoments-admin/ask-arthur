@@ -66,6 +66,14 @@ const RESUBMIT_DEFAULT_CAP = 10;
 const RESUBMIT_MIN_AGE_DAYS = 30; // matches the issue reporter's window
 const RESUBMIT_COOLDOWN_DAYS = 14;
 const RESUBMIT_MAX_PER_ALERT = 3;
+// Liveness is only knowable in the caller, so the worklist hands back more rows
+// than the day's budget and we submit the first `budget_remaining` LIVE ones.
+// Without the over-fetch a batch containing dead rows can never fill the cap.
+const RESUBMIT_PROBE_MULTIPLIER = 3;
+// Proved-dead rows are deferred, not dropped: 5 rounds at 7 days each, then a
+// terminal skip (~35 days continuously NXDOMAIN). v248's shape.
+const RESUBMIT_DEAD_RECHECK_MS = 7 * 24 * 60 * 60 * 1000;
+const RESUBMIT_DEAD_MAX_ROUNDS = 5;
 
 function resubmitCap(): number {
   const raw = Number.parseInt(process.env.NETCRAFT_RESUBMIT_DAILY_CAP ?? "", 10);
@@ -80,6 +88,8 @@ export interface NetcraftResubmitCandidate {
   inferred_target_domain: string | null;
   urlscan_uuid: string | null;
   weaponised_at: string | null;
+  /** 24h submission allowance left, identical on every row (v252). */
+  budget_remaining?: number | null;
 }
 
 /**
@@ -250,6 +260,13 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
       // auto lane's guards can no longer return from the whole function —
       // FF_SHOPFRONT_CLONE_NETCRAFT_AUTO being off must not silence the
       // resubmit lane. Both share the one bulk-POST shape below.
+      //
+      // SEQUENTIAL ON PURPOSE — do not turn this into a Promise.all. A
+      // weaponised alert that was never submitted qualifies for BOTH
+      // worklists; the auto lane stamps netcraft.submitted_at before the
+      // resubmit worklist is loaded, which is the only thing stopping the same
+      // URL being POSTed twice in one run. Overlap measured 0 on 2026-07-26,
+      // but only because of this ordering.
       const autoResult = await runAutoLane();
       const resubmitResult = await runResubmitLane();
       return { ...autoResult, resubmit: resubmitResult };
@@ -401,10 +418,17 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
        * Reporter standing is the real risk, so the bounds are deliberately
        * conservative and layered: weaponised-only, liveness-confirmed,
        * never-successfully-escalated, a 14-day per-alert cooldown, a hard
-       * 3-resubmit ceiling per alert, a 24h global budget folded into the
-       * worklist's LIMIT (so re-firing the manual trigger cannot exceed the
-       * day's allowance), the FP-brand denylist, and its own kill-switch pair
-       * (FF_CLONE_NETCRAFT_RESUBMIT + feature_brakes.clone_netcraft_resubmit).
+       * 3-resubmit ceiling per alert, a 24h global budget (so re-firing the
+       * manual trigger cannot exceed the day's allowance), the FP-brand
+       * denylist, and its own kill-switch pair (FF_CLONE_NETCRAFT_RESUBMIT +
+       * feature_brakes.clone_netcraft_resubmit).
+       *
+       * v252 — the worklist over-fetches (probe limit) and the 24h budget
+       * arrives as `budget_remaining` rather than bounding the row count,
+       * because liveness is only knowable here. Proved-dead rows are DEFERRED
+       * (7 days, 5 rounds, then terminal), never merely filtered: an unstamped
+       * dead row returns at the head of the ordering every single day and
+       * silently eats the daily cap.
        */
       async function runResubmitLane() {
         // Test mode bypasses the gates exactly as the auto lane does, so the
@@ -445,6 +469,7 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
               p_min_age_days: RESUBMIT_MIN_AGE_DAYS,
               p_cooldown_days: RESUBMIT_COOLDOWN_DAYS,
               p_max_resubmits: RESUBMIT_MAX_PER_ALERT,
+              p_probe_limit: resubmitCap() * RESUBMIT_PROBE_MULTIPLIER,
             },
           );
           if (error) {
@@ -474,10 +499,60 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
           const map = await probeLivenessDetailed(pending.map((c) => c.candidate_url));
           return Object.fromEntries(map);
         });
-        const live = pending.filter(
+        const liveAll = pending.filter(
           (c) => liveness[c.candidate_url]?.live !== false,
         );
-        const dead = pending.length - live.length;
+        const deadRows = pending.filter(
+          (c) => liveness[c.candidate_url]?.live === false,
+        );
+        const dead = deadRows.length;
+
+        // v252 — defer the dead ones, do NOT merely skip them. The worklist
+        // rank-limits before liveness is knowable, so an unstamped dead row
+        // returns at the head of the ordering tomorrow and every day after:
+        // 9 of the 23 eligible were NXDOMAIN on 2026-07-26, which projected to
+        // 9 of 10 daily slots permanently spent on domains that no longer
+        // exist, with the lane still returning ok:true. Bounded and
+        // non-terminal for 5 rounds — a revived host re-enters.
+        //
+        // This runs BEFORE the submit and before every early return below, so
+        // the all-dead day still makes progress. Nothing is deferred under
+        // test.
+        const deferred =
+          isTest || deadRows.length === 0
+            ? 0
+            : await step.run("resubmit-defer-dead", async () => {
+                const { data, error } = await sb.rpc(
+                  "defer_clone_alert_netcraft_resubmit",
+                  {
+                    p_alert_ids: deadRows.map((c) => c.id),
+                    p_reason: "dead_at_probe",
+                    p_recheck_after: new Date(
+                      Date.now() + RESUBMIT_DEAD_RECHECK_MS,
+                    ).toISOString(),
+                    p_max_rounds: RESUBMIT_DEAD_MAX_ROUNDS,
+                  },
+                );
+                if (error) {
+                  // Non-fatal: the batch's live rows are still worth filing.
+                  // Loud, though — a silent failure here IS the starvation.
+                  logger.warn("netcraft-resubmit: dead-row deferral failed", {
+                    error: error.message,
+                    alertIds: deadRows.map((c) => c.id),
+                  });
+                  return 0;
+                }
+                return typeof data === "number" ? data : 0;
+              });
+
+        // The 24h budget bounds SUBMISSIONS; the over-fetch above only widened
+        // what we probe. Defaults to the cap when the column is absent (an old
+        // deployment reading the new RPC, or vice versa).
+        const budget = Math.max(
+          0,
+          pending[0]?.budget_remaining ?? resubmitCap(),
+        );
+        const live = liveAll.slice(0, budget);
 
         // Nothing to file — but under test the point is to validate the payload
         // SHAPE, and an all-dead batch on the day of the run must not silently
@@ -485,8 +560,16 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
         if (live.length === 0 && !isTest) {
           logger.info("netcraft-resubmit: all candidates proved dead, nothing to file", {
             candidates: pending.length,
+            deferred,
           });
-          return { ok: true, candidates: pending.length, submitted: 0, dead, reason: "all_dead" };
+          return {
+            ok: true,
+            candidates: pending.length,
+            submitted: 0,
+            dead,
+            deferred,
+            reason: "all_dead",
+          };
         }
         const batch = live.length > 0 ? live : pending;
 
@@ -547,6 +630,7 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
             candidates: pending.length,
             submitted: 0,
             dead,
+            deferred,
             status: result.status,
           };
         }
@@ -561,6 +645,24 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
             },
           );
           if (error) {
+            // The POST already succeeded, so these URLs ARE reported but carry
+            // no resubmitted_at — no cooldown applies and the next run reports
+            // them again. Emit the uuid and the ids as a $0 diagnostic before
+            // rethrowing, or the only record of what Netcraft holds dies with
+            // the exception.
+            logCost({
+              feature: "shopfront-clone-netcraft-resubmit-error",
+              provider: "netcraft",
+              operation: "resubmit_persist",
+              units: live.length,
+              unitCostUsd: 0,
+              metadata: {
+                error: error.message,
+                netcraft_uuid: result.uuid,
+                alert_ids: live.map((c) => c.id),
+                unmarked: true,
+              },
+            });
             throw new Error(
               `record_clone_alert_netcraft_resubmit failed (${live.length}): ${error.message}`,
             );
@@ -579,11 +681,20 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
               candidates: pending.length,
               live: live.length,
               dead,
+              deferred,
+              budget,
               marked,
               netcraft_uuid: result.uuid,
               brands: [
                 ...new Set(live.map((c) => c.inferred_target_domain ?? "unknown")),
               ],
+              // The probe verdict is the diagnostic a bare count throws away —
+              // without it, a dead verdict needs a live re-probe to explain,
+              // and by then the answer has changed (the v248 lesson).
+              dead_reasons: deadRows.map((c) => ({
+                domain: c.candidate_domain,
+                reason: liveness[c.candidate_url]?.reason ?? "unknown",
+              })),
             },
           });
         });
@@ -592,6 +703,8 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
           candidates: pending.length,
           live: live.length,
           dead,
+          deferred,
+          budget,
           marked,
           netcraftUuid: result.uuid,
         });
@@ -601,6 +714,7 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
           candidates: pending.length,
           submitted: marked,
           dead,
+          deferred,
           netcraftUuid: result.uuid,
         };
       }
