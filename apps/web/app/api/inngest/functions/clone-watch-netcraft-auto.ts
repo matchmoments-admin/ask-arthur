@@ -42,6 +42,11 @@ import { probeLivenessDetailed } from "@/lib/clone-watch/liveness";
  * the exact payload against Netcraft's TEST endpoint (validates only — NO
  * report is created, NO confirmation emails). Nothing is persisted. This is the
  * sanctioned way to prove the path works without touching the live submit API.
+ * It covers BOTH lanes: the resubmit lane used to return on `isTest` before its
+ * own flag check, so a validation run exercised the proven auto-lane payload
+ * and none of the novel one. Under test both lanes bypass their FF gates, and
+ * the resubmit lane still builds its body from the real worklist — an all-dead
+ * batch falls through to validation rather than short-circuiting.
  *
  * Triple-gated: FF_SHOPFRONT_CLONE_NETCRAFT_AUTO (this producer) +
  * FF_SHOPFRONT_CLONE_SUBMIT_NETCRAFT + FF_SHOPFRONT_CLONE_OUTREACH. Default OFF.
@@ -131,6 +136,61 @@ export interface NetcraftBulkBody {
   email: string;
   reason: string;
   urls: Array<{ url: string; country: string }>;
+}
+
+export interface NetcraftBulkResult {
+  ok: boolean;
+  status: number;
+  uuid: string | null;
+  state: string | null;
+  errText: string | null;
+  raw: Record<string, unknown>;
+  urlCount: number;
+}
+
+/**
+ * The one place either lane talks to Netcraft's bulk intake.
+ *
+ * `test: true` targets the validation-only endpoint — it checks the payload,
+ * creates NO report and sends NO confirmation email. Both lanes route through
+ * here so "which endpoint does test mode hit" is a single decision with a
+ * single test, rather than a duplicated ternary per lane. Never throws: the
+ * callers soft-fail a non-2xx into a $0 diagnostic, because an Inngest fn error
+ * pages the Axiom fleet watch.
+ */
+export async function postNetcraftBulk(
+  body: NetcraftBulkBody,
+  opts: { test: boolean },
+): Promise<NetcraftBulkResult> {
+  const apiKey = process.env.NETCRAFT_REPORT_API_KEY;
+  const res = await fetch(
+    opts.test ? NETCRAFT_TEST_ENDPOINT : NETCRAFT_REPORT_ENDPOINT,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30_000),
+    },
+  );
+  const text = await res.text();
+  let parsed: Record<string, unknown> = {};
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    parsed = { raw: text };
+  }
+  return {
+    ok: res.ok,
+    status: res.status,
+    uuid: typeof parsed.uuid === "string" ? parsed.uuid : null,
+    state: typeof parsed.state === "string" ? parsed.state : null,
+    errText: res.ok ? null : text.slice(0, 200),
+    raw: parsed,
+    urlCount: body.urls.length,
+  };
 }
 
 /**
@@ -229,41 +289,15 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
 
       // ONE bulk request for the whole (≤50) batch — no per-request flood.
       // Test mode hits the validation-only endpoint (no report, no email).
-      const result = await step.run("submit-netcraft-bulk", async () => {
-        const body = buildNetcraftBulkBody(
-          candidates,
-          process.env.NETCRAFT_REPORTER_EMAIL ?? "brendan@askarthur.au",
-        );
-        const apiKey = process.env.NETCRAFT_REPORT_API_KEY;
-        const res = await fetch(
-          isTest ? NETCRAFT_TEST_ENDPOINT : NETCRAFT_REPORT_ENDPOINT,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-            },
-            body: JSON.stringify(body),
-            signal: AbortSignal.timeout(30_000),
-          },
-        );
-        const text = await res.text();
-        let parsed: Record<string, unknown> = {};
-        try {
-          parsed = JSON.parse(text);
-        } catch {
-          parsed = { raw: text };
-        }
-        return {
-          ok: res.ok,
-          status: res.status,
-          uuid: typeof parsed.uuid === "string" ? parsed.uuid : null,
-          state: typeof parsed.state === "string" ? parsed.state : null,
-          errText: res.ok ? null : text.slice(0, 200),
-          raw: parsed,
-          urlCount: body.urls.length,
-        };
-      });
+      const result = await step.run("submit-netcraft-bulk", () =>
+        postNetcraftBulk(
+          buildNetcraftBulkBody(
+            candidates,
+            process.env.NETCRAFT_REPORTER_EMAIL ?? "brendan@askarthur.au",
+          ),
+          { test: isTest },
+        ),
+      );
 
       // Test mode: report the validation outcome, persist NOTHING.
       if (isTest) {
@@ -373,21 +407,32 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
        * (FF_CLONE_NETCRAFT_RESUBMIT + feature_brakes.clone_netcraft_resubmit).
        */
       async function runResubmitLane() {
-        if (isTest) return { skipped: true, reason: "test_mode" };
-        if (!featureFlags.cloneNetcraftResubmit) {
+        // Test mode bypasses the gates exactly as the auto lane does, so the
+        // validation-only endpoint can exercise this lane while it is dark.
+        // It used to return HERE, ahead of everything — which meant
+        // `{ test: true }` validated the auto lane's payload and silently
+        // covered none of this one, the only novel payload of the two.
+        if (!isTest && !featureFlags.cloneNetcraftResubmit) {
           return { skipped: true, reason: "FF_CLONE_NETCRAFT_RESUBMIT disabled" };
         }
         if (
-          !featureFlags.shopfrontCloneSubmitNetcraft ||
-          !featureFlags.shopfrontCloneOutreach
+          !isTest &&
+          (!featureFlags.shopfrontCloneSubmitNetcraft ||
+            !featureFlags.shopfrontCloneOutreach)
         ) {
           return { skipped: true, reason: "netcraft_submit_or_outreach_disabled" };
         }
         if (!sb) return { skipped: true, reason: "supabase_unavailable" };
 
-        const braked = await step.run("resubmit-check-brake", () =>
-          isFeatureBraked(RESUBMIT_BRAKE),
-        );
+        // The brake is an operator kill-switch on SUBMITTING. Test mode files
+        // nothing, so it is not gated on it — but the check is skipped rather
+        // than ignored, to keep the braked state out of a validation run's
+        // step history.
+        const braked = isTest
+          ? false
+          : await step.run("resubmit-check-brake", () =>
+              isFeatureBraked(RESUBMIT_BRAKE),
+            );
         if (braked) {
           return { skipped: true, reason: `feature_brakes.${RESUBMIT_BRAKE} engaged` };
         }
@@ -434,44 +479,50 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
         );
         const dead = pending.length - live.length;
 
-        if (live.length === 0) {
+        // Nothing to file — but under test the point is to validate the payload
+        // SHAPE, and an all-dead batch on the day of the run must not silently
+        // skip that. Fall through with the pending rows instead.
+        if (live.length === 0 && !isTest) {
           logger.info("netcraft-resubmit: all candidates proved dead, nothing to file", {
             candidates: pending.length,
           });
           return { ok: true, candidates: pending.length, submitted: 0, dead, reason: "all_dead" };
         }
+        const batch = live.length > 0 ? live : pending;
 
-        const result = await step.run("resubmit-submit-bulk", async () => {
-          const body = buildNetcraftResubmitBody(
-            live,
-            process.env.NETCRAFT_REPORTER_EMAIL ?? "brendan@askarthur.au",
-          );
-          const apiKey = process.env.NETCRAFT_REPORT_API_KEY;
-          const res = await fetch(NETCRAFT_REPORT_ENDPOINT, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-            },
-            body: JSON.stringify(body),
-            signal: AbortSignal.timeout(30_000),
+        const result = await step.run("resubmit-submit-bulk", () =>
+          postNetcraftBulk(
+            buildNetcraftResubmitBody(
+              batch,
+              process.env.NETCRAFT_REPORTER_EMAIL ?? "brendan@askarthur.au",
+            ),
+            { test: isTest },
+          ),
+        );
+
+        // Validation only: report the outcome, persist NOTHING, log no cost.
+        // This is the pre-flight the live lane never had — the resubmit reason
+        // is a multi-line block carrying up to 10 urlscan URLs, where the
+        // proven auto-lane reason is one short paragraph, and Netcraft's limit
+        // on that field is unverified.
+        if (isTest) {
+          logger.info("netcraft-resubmit: TEST-endpoint validation", {
+            ok: result.ok,
+            status: result.status,
+            urlCount: result.urlCount,
+            response: result.raw,
           });
-          const text = await res.text();
-          let parsed: Record<string, unknown> = {};
-          try {
-            parsed = JSON.parse(text);
-          } catch {
-            parsed = { raw: text };
-          }
           return {
-            ok: res.ok,
-            status: res.status,
-            uuid: typeof parsed.uuid === "string" ? parsed.uuid : null,
-            state: typeof parsed.state === "string" ? parsed.state : null,
-            errText: res.ok ? null : text.slice(0, 200),
-            urlCount: body.urls.length,
+            ok: result.ok,
+            test: true,
+            validated: result.ok,
+            status: result.status,
+            candidates: pending.length,
+            urlCount: result.urlCount,
+            dead,
+            response: result.raw,
           };
-        });
+        }
 
         // Soft-fail like the auto lane: a transient Netcraft non-2xx is a $0
         // diagnostic, not an Inngest fn error (which would page the fleet

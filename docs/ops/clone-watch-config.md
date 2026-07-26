@@ -467,23 +467,31 @@ declines it too.
 09:30 UTC `shopfront-clone-netcraft-auto` cron; the lane was capped at the
 default 10 URLs/day for it.
 
-> ⚠ **`{"test": true}` does NOT exercise this lane.** `runResubmitLane` returns
-> `{skipped: true, reason: "test_mode"}` before it reaches the flag check
-> (`clone-watch-netcraft-auto.ts`), so the validation-only endpoint covers the
-> AUTO lane's payload and nothing else. An earlier version of this runbook said
-> to validate here first — that check does nothing for the resubmit lane, and
-> the resubmit payload is the novel one (a multi-line `reason` carrying up to 10
-> urlscan URLs, versus the auto lane's single short paragraph). Two consequences
-> worth knowing:
+> **`{"test": true}` now exercises this lane too** (2026-07-26). It used to
+> return `{skipped: true, reason: "test_mode"}` before reaching the flag check,
+> so the validation-only endpoint covered the AUTO lane's payload and nothing
+> else — and the resubmit payload is the novel one (a multi-line `reason`
+> carrying up to 10 urlscan URLs, versus the auto lane's single short
+> paragraph). Under test both lanes bypass their FF gates, the resubmit body is
+> built from the REAL worklist, and an all-dead batch falls through to
+> validation instead of short-circuiting. Nothing is persisted and no cost row
+> is written.
 >
-> - Netcraft's limit on the `reason` field is **unverified**. A rejection
->   soft-fails ($0 diagnostic under
->   `shopfront-clone-netcraft-resubmit-error`, rows left unmarked, retried next
->   run) — nothing breaks, but the submission is wasted.
-> - There is no non-destructive way to confirm the flag reached the runtime;
->   the first real run is the first signal. Backlog item: make test mode build
->   and POST the resubmit body to `NETCRAFT_TEST_ENDPOINT` so this lane gets the
->   same free dry run the auto lane has.
+> ```bash
+> # dry run — validates the payload, creates no report, sends no email
+> inngest event send shopfront/clone.netcraft-auto.producer.manual-trigger.v1 \
+>   --data '{"test": true}'
+> ```
+>
+> Read `resubmit.validated` / `resubmit.status` / `resubmit.response` off the
+> run. A non-2xx here is the answer to the open question — Netcraft's limit on
+> the `reason` field. In a real run a rejection soft-fails ($0 diagnostic under
+> `shopfront-clone-netcraft-resubmit-error`, rows left unmarked, retried next
+> run): nothing breaks, but the submission is wasted.
+>
+> Note this still does NOT confirm the flag reached the runtime — test mode
+> bypasses the flag by design. `reason: "FF_CLONE_NETCRAFT_RESUBMIT disabled"`
+> on a REAL run means redeploy, not re-add.
 
 **What to watch after the first run**
 
