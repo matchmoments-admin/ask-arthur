@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildNetcraftBulkBody,
   buildNetcraftResubmitBody,
+  postNetcraftBulk,
   type NetcraftAutoCandidate,
   type NetcraftResubmitCandidate,
 } from "@/app/api/inngest/functions/clone-watch-netcraft-auto";
@@ -139,5 +140,66 @@ describe("buildNetcraftResubmitBody", () => {
       "brendan@askarthur.au",
     );
     expect(body.urls).toEqual([{ url: "https://dup.test/", country: "AU" }]);
+  });
+});
+
+/**
+ * Both lanes POST through one helper, so "which endpoint does test mode hit"
+ * is one decision with one test. Before this, each lane carried its own copy of
+ * the ternary — and the resubmit lane's copy was unreachable, because the lane
+ * returned on `isTest` several guards earlier.
+ */
+describe("postNetcraftBulk", () => {
+  const BODY = {
+    email: "brendan@askarthur.au",
+    reason: "r",
+    urls: [{ url: "https://a.test/", country: "AU" }],
+  };
+
+  function mockFetch(res: { status: number; body: string }) {
+    const spy = vi.fn().mockResolvedValue({
+      ok: res.status >= 200 && res.status < 300,
+      status: res.status,
+      text: () => Promise.resolve(res.body),
+    });
+    vi.stubGlobal("fetch", spy);
+    return spy;
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("routes test mode to the validation-only endpoint, never the live intake", async () => {
+    const spy = mockFetch({ status: 200, body: '{"state":"validated"}' });
+    await postNetcraftBulk(BODY, { test: true });
+    const url = spy.mock.calls[0]?.[0] as string;
+    expect(url).toBe("https://report.netcraft.com/api/v3/test/report/urls");
+    expect(url).toContain("/test/");
+  });
+
+  it("routes a real run to the live intake", async () => {
+    const spy = mockFetch({ status: 200, body: '{"uuid":"u-1","state":"processing"}' });
+    const result = await postNetcraftBulk(BODY, { test: false });
+    expect(spy.mock.calls[0]?.[0]).toBe(
+      "https://report.netcraft.com/api/v3/report/urls",
+    );
+    expect(result).toMatchObject({ ok: true, uuid: "u-1", state: "processing", urlCount: 1 });
+  });
+
+  it("surfaces a non-2xx as data rather than throwing (soft-fail contract)", async () => {
+    mockFetch({ status: 429, body: "rate limited" });
+    const result = await postNetcraftBulk(BODY, { test: false });
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe(429);
+    expect(result.errText).toBe("rate limited");
+    expect(result.uuid).toBeNull();
+  });
+
+  it("does not throw on an unparseable body", async () => {
+    mockFetch({ status: 200, body: "<html>maintenance</html>" });
+    const result = await postNetcraftBulk(BODY, { test: false });
+    expect(result.uuid).toBeNull();
+    expect(result.raw).toEqual({ raw: "<html>maintenance</html>" });
   });
 });

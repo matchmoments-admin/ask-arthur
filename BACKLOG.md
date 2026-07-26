@@ -552,13 +552,6 @@ migrations v248–v251). Context: [`docs/plans/clone-watch-brand-value-features.
   real look at the fallout. **Until it lands, regenerating `db.generated.ts`
   after a migration buys nothing for RPCs** — worth knowing before treating the
   regen step as a safety measure.
-- **`{"test": true}` does not exercise the resubmit lane.** `runResubmitLane`
-  returns on `isTest` before the flag check, so Netcraft's validation-only
-  endpoint covers the auto lane's payload and nothing else. The resubmit
-  `reason` is the novel shape (multi-line, up to 10 urlscan URLs) and its length
-  limit is unverified. Make test mode build and POST the resubmit body to
-  `NETCRAFT_TEST_ENDPOINT`. Also removes the current blind spot where a flag
-  flip on this lane cannot be verified without a real submission.
 - **A registrar-driven takedown is never detected.** If a weaponised clone is
   killed by its registrar rather than by Netcraft, Netcraft's `url_state` stays
   `no threats` forever, so the reconciler never advances it and it sits
