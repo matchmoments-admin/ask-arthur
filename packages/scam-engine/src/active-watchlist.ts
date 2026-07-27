@@ -27,38 +27,108 @@ import { logger } from "@askarthur/utils/logger";
  * all return exactly the static list, so the matcher's behaviour is unchanged
  * rather than empty. An overlay that fails to load must never be able to
  * silently shrink the watchlist.
+ *
+ * CACHING — why the fetch and not the result
+ * ------------------------------------------
+ * Consolidating the read put this function on a hot path. `analyze-checkout`
+ * calls it per request, and that route's header states its design premise
+ * outright: "LOW-LATENCY by design: no APIVoid / Claude on the hot path". With
+ * FF_BRAND_DYNAMIC_WATCHLIST off it returns before touching Supabase, so the
+ * cost is zero today — but turning the flag on would add a DB round trip to
+ * every checkout scan carrying a brand. That is the kind of quiet latency
+ * regression a flag flip is not supposed to include.
+ *
+ * So the OVERLAY ROWS are cached, not the merged watchlist. Caching the merged
+ * result would mean keying on `staticList`, and a caller passing a custom list
+ * could be served another caller's merge. Merging is pure and cheap (a copy of
+ * ~212 entries and a Set build), so it re-runs per call and the parameter stays
+ * honest.
+ *
+ * Three properties that matter more than the hit rate:
+ *   - Only SUCCESSFUL reads are cached. A transient RPC error must not pin the
+ *     static list for the whole TTL — the next call retries.
+ *   - Single-flight: concurrent callers share one in-flight query rather than
+ *     stampeding the RPC when an instance warms up.
+ *   - Explicitly invalidatable, so an admin promotion is live immediately
+ *     instead of up to a TTL later.
  */
+
+/** How long a successful overlay read stays fresh. monitored_brands is a cold
+ *  table (a row changes on signup/edit/promotion only), so this trades at most
+ *  a minute of staleness for removing a per-request query. Promotions call
+ *  invalidateActiveWatchlistCache() and are therefore not subject to it. */
+const OVERLAY_TTL_MS = 60_000;
+
+interface OverlayCache {
+  fetchedAt: number;
+  rows: DynamicBrandEntry[];
+}
+
+let cache: OverlayCache | null = null;
+/** In-flight read, shared by concurrent callers (single-flight). */
+let inFlight: Promise<DynamicBrandEntry[] | null> | null = null;
+
+/**
+ * Drop the cached overlay so the next read hits the database.
+ *
+ * Call after ANY write to monitored_brands — promotion, demotion, a customer
+ * registering a brand. Without it the matcher and the admin UI disagree for up
+ * to a TTL, and "I promoted it and nothing happened" is exactly the confusion
+ * this whole workstream exists to remove. Also used by tests to isolate cases.
+ */
+export function invalidateActiveWatchlistCache(): void {
+  cache = null;
+  inFlight = null;
+}
+
+/** Read the overlay rows, cached. Returns null when the read FAILED (as
+ *  distinct from succeeding with zero rows) so the caller can tell a genuine
+ *  empty overlay from a degraded one. */
+async function loadOverlayRows(now: number): Promise<DynamicBrandEntry[] | null> {
+  if (cache && now - cache.fetchedAt < OVERLAY_TTL_MS) return cache.rows;
+  if (inFlight) return inFlight;
+
+  inFlight = (async (): Promise<DynamicBrandEntry[] | null> => {
+    const sb = createServiceClient();
+    if (!sb) return null;
+
+    const { data, error } = await sb.rpc("list_active_monitored_brands");
+    if (error) {
+      logger.error("active-watchlist: overlay load failed, using static list", {
+        error: error.message,
+      });
+      // Deliberately NOT cached — a blip must not pin the static list for the
+      // full TTL while the overlay is healthy again.
+      return null;
+    }
+
+    const rows = (data as DynamicBrandEntry[] | null) ?? [];
+    cache = { fetchedAt: now, rows };
+    return rows;
+  })().finally(() => {
+    inFlight = null;
+  });
+
+  return inFlight;
+}
 
 /** Full result, including rejected overlay rows. Use when you want to report
  *  on what was dropped. */
 export async function getActiveWatchlistDetailed(
   staticList: readonly BrandEntry[] = AU_BRAND_WATCHLIST,
 ): Promise<ActiveWatchlist> {
-  const empty: ActiveWatchlist = {
+  const staticOnly: ActiveWatchlist = {
     entries: [...staticList],
     rejected: [],
     dynamicCount: 0,
   };
 
-  if (!featureFlags.brandDynamicWatchlist) return empty;
+  if (!featureFlags.brandDynamicWatchlist) return staticOnly;
 
-  const sb = createServiceClient();
-  if (!sb) return empty;
+  const rows = await loadOverlayRows(Date.now());
+  if (rows === null || rows.length === 0) return staticOnly;
 
-  const { data, error } = await sb.rpc("list_active_monitored_brands");
-  if (error) {
-    // Degrade to the static list rather than throwing: a clone sweep that runs
-    // against ~212 curated brands is far better than one that doesn't run.
-    logger.error("active-watchlist: overlay load failed, using static list", {
-      error: error.message,
-    });
-    return empty;
-  }
-
-  const dynamic = (data as DynamicBrandEntry[] | null) ?? [];
-  if (dynamic.length === 0) return empty;
-
-  const merged = mergeDynamicWatchlist(dynamic, staticList);
+  const merged = mergeDynamicWatchlist(rows, staticList);
 
   // A registered brand that silently fails to be monitored is worse than one
   // that was never registered — the operator believes it is covered. Warn

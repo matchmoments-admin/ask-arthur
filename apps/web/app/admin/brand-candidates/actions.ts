@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
+import { invalidateActiveWatchlistCache } from "@askarthur/scam-engine/active-watchlist";
 import { logger } from "@askarthur/utils/logger";
 
 /**
@@ -135,6 +136,11 @@ export async function promoteCandidate(
     brand: name,
     domains,
   });
+  // The overlay read is cached (60s TTL) to keep it off the checkout hot path.
+  // Drop it here so the brand is live in the matcher immediately — "I promoted
+  // it and nothing happened" is precisely the confusion this workstream exists
+  // to remove.
+  invalidateActiveWatchlistCache();
   revalidatePath("/admin/brand-candidates");
   return { ok: true, changed: 1 };
 }
@@ -165,6 +171,9 @@ export async function demoteCandidate(
   }
 
   logger.warn("brand-candidates: promotion reverted", { brand: key });
+  // Same reason as promote, and more urgent: an undo that takes up to a minute
+  // to stop the matcher is not an undo.
+  invalidateActiveWatchlistCache();
   revalidatePath("/admin/brand-candidates");
   return { ok: true, changed: typeof data === "number" ? data : 0 };
 }

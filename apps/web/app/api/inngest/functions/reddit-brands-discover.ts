@@ -57,8 +57,22 @@ import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
  */
 
 const WINDOW_DAYS = 30;
-// A brand named in >= this many Reddit posts in the window is worth recording.
-const MENTION_THRESHOLD = 3;
+// Per-source recording thresholds. These are deliberately NOT one shared
+// number: the two sources are not the same unit of evidence.
+//
+//   Reddit  — a mention in r/Scams or r/phishing. Third-party, global, and
+//             ~93% non-AU (v254). Three of them is a weak-ish signal.
+//   Reported — someone used an Australian scam-checker and named the brand
+//             they were being impersonated by. First-party, AU-native, no
+//             geographic inference. Two of those is a STRONGER signal than
+//             three Reddit posts, and there will always be far fewer of them.
+//
+// Sharing one threshold at 3 also made meetsPromotionBar()'s `scam >= 2`
+// branch DEAD CODE: a brand with exactly two reports never entered the
+// candidate table, so the bar it was tested against could never be reached.
+// The bar was documented as 2 and behaved as 3.
+const REDDIT_MENTION_THRESHOLD = 3;
+const SCAM_REPORT_THRESHOLD = 2;
 // Cap how many candidates the Telegram digest lists (the table holds them all).
 const DIGEST_CAP = 25;
 // How many global-only (zero AU evidence) brands to name in the summary line.
@@ -332,7 +346,7 @@ export const redditBrandsDiscover = inngest.createFunction(
       ).toISOString();
       const { data, error } = await sb.rpc("aggregate_reddit_brands_with_au", {
         p_since: since,
-        p_min_count: MENTION_THRESHOLD,
+        p_min_count: REDDIT_MENTION_THRESHOLD,
       });
       if (error) {
         logger.error("reddit-brands-discover: mention query failed", {
@@ -393,7 +407,7 @@ export const redditBrandsDiscover = inngest.createFunction(
       ).toISOString();
       const { data, error } = await sb.rpc("aggregate_scam_report_brands", {
         p_since: since,
-        p_min_count: MENTION_THRESHOLD,
+        p_min_count: SCAM_REPORT_THRESHOLD,
       });
       if (error) {
         logger.error("reddit-brands-discover: scam-brand aggregate failed", {
@@ -618,7 +632,8 @@ export const redditBrandsDiscover = inngest.createFunction(
         const header =
           auEvidenced.length > 0
             ? `<b>${auEvidenced.length}</b> new brand(s) impersonated WITH Australian evidence ` +
-              `(Reddit + reported scams, last ${WINDOW_DAYS}d, ≥${MENTION_THRESHOLD} mentions) — ` +
+              `(last ${WINDOW_DAYS}d: ≥${REDDIT_MENTION_THRESHOLD} Reddit mentions or ` +
+              `≥${SCAM_REPORT_THRESHOLD} reported to Arthur) — ` +
               `not yet on the clone-watch list:`
             : `No new AU-evidenced brands this week.`;
 

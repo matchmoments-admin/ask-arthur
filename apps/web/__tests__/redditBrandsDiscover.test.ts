@@ -338,3 +338,35 @@ describe("planPromotions — the domain is never guessed", () => {
     expect(planPromotions([], trusted)).toEqual({ promote: [], needsDomain: [] });
   });
 });
+
+describe("per-source thresholds — the promotion bar must be reachable", () => {
+  const cand = (over: Partial<MergedCandidate>): MergedCandidate => ({
+    brandNormalized: "x",
+    rawBrand: "X",
+    reddit: 0,
+    scam: 0,
+    total: 0,
+    au: 0,
+    ...over,
+  });
+
+  it("clears the bar on exactly two reports — the case a shared threshold made unreachable", () => {
+    // Both sources used to be aggregated at >= 3, so a brand with exactly two
+    // reports never entered the candidate table and this branch was dead code:
+    // the bar was documented as 2 and behaved as 3. The scam source now
+    // aggregates at >= 2, matching what meetsPromotionBar actually tests.
+    expect(meetsPromotionBar(cand({ scam: 2, au: 2, total: 2 }))).toBe(true);
+  });
+
+  it("still refuses a single report", () => {
+    expect(meetsPromotionBar(cand({ scam: 1, au: 1, total: 1 }))).toBe(false);
+  });
+
+  it("keeps the Reddit bar strictly higher than the reported-scam bar", () => {
+    // Two AU-hinted Reddit posts qualify, but only because the brand also
+    // cleared the Reddit source's own >= 3 total-mention floor. Two Reddit
+    // mentions in total never reach the candidate table at all.
+    expect(meetsPromotionBar(cand({ reddit: 3, au: 2, total: 3 }))).toBe(true);
+    expect(meetsPromotionBar(cand({ reddit: 2, au: 1, total: 2 }))).toBe(false);
+  });
+});
