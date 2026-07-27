@@ -35,6 +35,61 @@ each PR.
 | -------------------------- | ------ | ------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
 | `FF_SHOPFRONT_CLONE_WATCH` | server | `false` | ✅     | Master switch on the `shopfront-nrd-daily-ingest` Inngest function. When `false`, the function short-circuits before downloading the NRD zip and emits no telemetry. When `true`, the daily 08:30 UTC run downloads, parses, matches, and inserts into `shopfront_clone_alerts`. | After PR #398 ship + post-merge smoke. Currently ON in prod since 2026-05-24 (flag flip + 1st run). |
 
+### Watchlist-overlay + candidate-source flags (activated 2026-07-28)
+
+| Flag (env var)               | Type   | Status | Gates                                                                                                                                                                                                          |
+| ---------------------------- | ------ | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `FF_BRAND_DYNAMIC_WATCHLIST` | server | ✅ ON  | Merges the `monitored_brands` overlay into the watchlist via the single `getActiveWatchlist()` seam (v256, #866). Fails safe: flag off / no client / RPC error / zero rows all return exactly the static list. |
+| `FF_SCAM_BRANDS_SOURCE`      | server | ✅ ON  | Adds `scam_reports.impersonated_brand` as a second candidate source to the weekly `reddit-brands-discover` run, aggregated at **≥ 2** (Reddit stays ≥ 3).                                                      |
+| `FF_BRAND_AUTO_PROMOTE`      | server | ❌ OFF | Unattended promotion onto the live matcher. **Deliberately left off** — see "when to flip" below.                                                                                                              |
+
+**Why these two were flipped together while both were no-ops.**
+`monitored_brands` had 0 rows and the 30-day `scam_reports` window held
+4 rows (Australia Post ×2, ANZ ×1, ATO ×1 — Australia Post already
+watched), so neither flag changed behaviour on the day it was flipped.
+That was the point: an empty overlay is the safest possible moment to
+exercise the plumbing. `FF_BRAND_DYNAMIC_WATCHLIST` shipped dark in v207
+and sat off for months, and in that time accumulated two latent bugs (an
+empty-`legitimate_domains` merge that would have reported a brand's own
+site as a clone of itself, and the static-vs-overlay read divergence that
+would have re-announced every promoted brand weekly, forever). Neither
+was caught by a test, because nothing exercised the path. Dark flags rot.
+
+**Prerequisites that shipped first (#868)** — do not flip these back on a
+revert without re-reading it:
+
+- Per-source thresholds. While both sources shared `MENTION_THRESHOLD = 3`,
+  `meetsPromotionBar()`'s `scam >= 2` branch was unreachable dead code.
+- The overlay read is cached (60s TTL, single-flight, errors NOT cached,
+  explicitly invalidated by promote/demote). Without it, turning
+  `FF_BRAND_DYNAMIC_WATCHLIST` on adds a DB round trip to every
+  `analyze-checkout` request — a route whose header states it is
+  "LOW-LATENCY by design".
+
+**When to flip `FF_BRAND_AUTO_PROMOTE` ON.** Not on a date — on evidence.
+Two conditions, both required:
+
+1. A Monday digest has proposed a brand you would have promoted yourself,
+   twice. Until that happens, automation has nothing to automate.
+2. One promotion has been done by hand through `/admin/brand-candidates`,
+   which exercises the same `promote_watchlist_candidate` RPC with real
+   data while a human is watching.
+
+It fires only for candidates clearing the evidence bar (`scam >= 2` or
+AU-hinted Reddit `>= 2`) **and** having a domain in `known_brands`. It
+never guesses a domain — `legitimate_domains` is the matcher's exclusion
+list, so a squatter-held `<brand>.com.au` recorded as legitimate is
+exactly the domain that would stop being reported.
+
+**Reverting.** `vercel env rm FF_BRAND_DYNAMIC_WATCHLIST production` (or
+set `false`) + a deploy carrying `[build]`. The matcher falls back to the
+static ~212-brand list; no data migration needed. Any already-promoted
+brands stay in `monitored_brands` but become invisible to the matcher —
+use `demote_watchlist_candidate()` or the admin Undo button if you want
+them back in the review queue as well.
+
+---
+
 The page surface (`apps/web/app/clone-watch/page.tsx`) reads from the
 table directly and does NOT consult the flag — flipping the flag back to
 `false` stops new rows from landing but the page continues to render the
