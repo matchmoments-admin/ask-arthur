@@ -311,6 +311,13 @@ export const featureFlags = {
    *  runs exactly as before when OFF. No new cron; read-only windowed aggregate
    *  over scam_reports → no cost brake needed. */
   scamBrandsSource: readBoolEnv("FF_SCAM_BRANDS_SOURCE"),
+  /** Auto-promotion of watchlist candidates into the monitored_brands overlay
+   *  (v257). Fires only for candidates that clear meetsPromotionBar() AND have
+   *  a domain in a trusted store — the domain is never guessed, because
+   *  legitimate_domains is the matcher's EXCLUSION list and a wrong entry
+   *  creates a permanent blind spot. OFF until the AU-evidence counts from
+   *  v254 have a few weeks of real data behind them. */
+  brandAutoPromote: readBoolEnv("FF_BRAND_AUTO_PROMOTE"),
 
   /** Reddit Intel Wave 2 — dashboard widgets (RedditIntelPanel, theme cards,
    *  brand watchlist, theme-velocity drill-down). Independent of the ingest

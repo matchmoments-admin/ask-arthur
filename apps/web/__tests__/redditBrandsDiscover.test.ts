@@ -3,8 +3,11 @@ import {
   aggregateBrandMentions,
   buildWatchedKeySet,
   hasAuEvidence,
+  meetsPromotionBar,
   mergeCandidateSources,
+  planPromotions,
   CANDIDATE_DENYLIST,
+  type MergedCandidate,
 } from "@/app/api/inngest/functions/reddit-brands-discover";
 import { brandNormalize } from "@askarthur/shopfront-glue";
 
@@ -230,5 +233,108 @@ describe("CANDIDATE_DENYLIST", () => {
     for (const keep of ["Australia Post", "CommBank", "Telstra", "NAB"]) {
       expect(CANDIDATE_DENYLIST.has(brandNormalize(keep))).toBe(false);
     }
+  });
+});
+
+describe("meetsPromotionBar — what may be promoted unattended", () => {
+  const cand = (over: Partial<MergedCandidate>): MergedCandidate => ({
+    brandNormalized: "x",
+    rawBrand: "X",
+    reddit: 0,
+    scam: 0,
+    total: 0,
+    au: 0,
+    ...over,
+  });
+
+  it("promotes on two AU-native reports — no geographic inference involved", () => {
+    // Two Australians independently told Arthur this brand was impersonated.
+    expect(meetsPromotionBar(cand({ scam: 2, au: 2, total: 2 }))).toBe(true);
+  });
+
+  it("promotes on two AU-hinted Reddit posts", () => {
+    expect(meetsPromotionBar(cand({ reddit: 9, au: 2, total: 9 }))).toBe(true);
+  });
+
+  it("does NOT promote on a single AU mention", () => {
+    // One AU hint is enough to SHOW a human (evidence is scarce). It is not
+    // enough to act unattended, because the hint is inferred, not stated.
+    expect(meetsPromotionBar(cand({ reddit: 3, au: 1, total: 3 }))).toBe(false);
+  });
+
+  it("does NOT promote on global volume alone, however large", () => {
+    expect(meetsPromotionBar(cand({ reddit: 500, au: 0, total: 500 }))).toBe(false);
+  });
+});
+
+describe("planPromotions — the domain is never guessed", () => {
+  const cand = (
+    key: string,
+    raw: string,
+    over: Partial<MergedCandidate> = {},
+  ): MergedCandidate => ({
+    brandNormalized: key,
+    rawBrand: raw,
+    reddit: 0,
+    scam: 0,
+    total: 0,
+    au: 0,
+    ...over,
+  });
+
+  const trusted = new Map([
+    ["gumtree", { domain: "gumtree.com.au", source: "known_brands" }],
+  ]);
+
+  it("promotes only when the evidence bar AND a trusted domain are both met", () => {
+    const r = planPromotions(
+      [cand("gumtree", "Gumtree", { scam: 2, au: 2, total: 2 })],
+      trusted,
+    );
+    expect(r.promote).toEqual([
+      {
+        brandNormalized: "gumtree",
+        brandName: "Gumtree",
+        domains: ["gumtree.com.au"],
+        domainSource: "known_brands",
+        au: 2,
+        scam: 2,
+        total: 2,
+      },
+    ]);
+    expect(r.needsDomain).toEqual([]);
+  });
+
+  it("refuses to promote a qualifying brand with no trusted domain", () => {
+    // The critical safety property. Guessing "<brand>.com.au" would be easy
+    // and actively harmful: legitimate_domains is the matcher's EXCLUSION
+    // list, so recording a squatter-held domain as legitimate is exactly how
+    // you stop reporting the clone you were trying to catch.
+    const c = cand("newbrand", "New Brand", { scam: 3, au: 3, total: 3 });
+    const r = planPromotions([c], trusted);
+    expect(r.promote).toEqual([]);
+    expect(r.needsDomain).toEqual([c]);
+  });
+
+  it("ignores candidates below the bar even when a domain is known", () => {
+    const r = planPromotions(
+      [cand("gumtree", "Gumtree", { reddit: 50, au: 1, total: 50 })],
+      trusted,
+    );
+    expect(r.promote).toEqual([]);
+    expect(r.needsDomain).toEqual([]); // below the bar → not "ready", just not eligible
+  });
+
+  it("treats a blank domain string as no domain", () => {
+    const r = planPromotions(
+      [cand("blankco", "Blank Co", { scam: 2, total: 2, au: 2 })],
+      new Map([["blankco", { domain: "", source: "known_brands" }]]),
+    );
+    expect(r.promote).toEqual([]);
+    expect(r.needsDomain).toHaveLength(1);
+  });
+
+  it("returns nothing for an empty candidate list", () => {
+    expect(planPromotions([], trusted)).toEqual({ promote: [], needsDomain: [] });
   });
 });

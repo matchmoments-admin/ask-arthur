@@ -74,3 +74,97 @@ export async function setCandidateStatus(
   revalidatePath("/admin/brand-candidates");
   return { ok: true, changed };
 }
+
+/**
+ * Promote a candidate onto the live matcher watchlist.
+ *
+ * The domain is REQUIRED and is typed by a human. It is deliberately not
+ * inferred from the brand name: `legitimate_domains` is the matcher's
+ * EXCLUSION list, so a wrong entry does not cause a missed alert — it creates
+ * a permanent blind spot, because a squatter-held `<brand>.com.au` recorded as
+ * legitimate is exactly the domain we would stop reporting.
+ *
+ * One RPC, one transaction: monitored_brands and the candidate's status move
+ * together. Split apart, a failure between them leaves a brand that is
+ * monitored AND re-announced weekly as unwatched.
+ */
+export async function promoteCandidate(
+  brandNormalized: string,
+  brandName: string,
+  domainsRaw: string,
+  aliasesRaw?: string,
+): Promise<ActionResult> {
+  await requireAdmin();
+
+  const key = brandNormalized.trim();
+  const name = brandName.trim();
+  if (!key || !name) return { ok: false, error: "missing_brand" };
+
+  const domains = domainsRaw
+    .split(/[\s,]+/)
+    .map((d) => d.trim())
+    .filter(Boolean);
+  if (domains.length === 0) return { ok: false, error: "domain_required" };
+
+  const aliases = (aliasesRaw ?? "")
+    .split(",")
+    .map((a) => a.trim())
+    .filter(Boolean);
+
+  const supabase = createServiceClient();
+  if (!supabase) return { ok: false, error: "supabase_unavailable" };
+
+  const { error } = await supabase.rpc("promote_watchlist_candidate", {
+    p_brand_normalized: key,
+    p_brand_name: name,
+    p_domains: domains,
+    p_aliases: aliases,
+    p_note: `Promoted from the admin queue (${domains.join(", ")}).`,
+    p_source: "admin",
+  });
+
+  if (error) {
+    logger.error("brand-candidates: promotion failed", {
+      brand: key,
+      error: error.message,
+    });
+    return { ok: false, error: error.message };
+  }
+
+  logger.warn("brand-candidates: brand promoted to the live watchlist", {
+    brand: name,
+    domains,
+  });
+  revalidatePath("/admin/brand-candidates");
+  return { ok: true, changed: 1 };
+}
+
+/** Reverse a promotion — deactivates the overlay row and returns the candidate
+ *  to pending. Exists so the response to a bad promotion is a click, not
+ *  hand-written SQL. */
+export async function demoteCandidate(
+  brandNormalized: string,
+): Promise<ActionResult> {
+  await requireAdmin();
+  const key = brandNormalized.trim();
+  if (!key) return { ok: false, error: "missing_brand" };
+
+  const supabase = createServiceClient();
+  if (!supabase) return { ok: false, error: "supabase_unavailable" };
+
+  const { data, error } = await supabase.rpc("demote_watchlist_candidate", {
+    p_brand_normalized: key,
+    p_note: "Promotion reverted from the admin queue.",
+  });
+  if (error) {
+    logger.error("brand-candidates: demotion failed", {
+      brand: key,
+      error: error.message,
+    });
+    return { ok: false, error: error.message };
+  }
+
+  logger.warn("brand-candidates: promotion reverted", { brand: key });
+  revalidatePath("/admin/brand-candidates");
+  return { ok: true, changed: typeof data === "number" ? data : 0 };
+}

@@ -1,7 +1,12 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { setCandidateStatus, type CandidateStatus } from "./actions";
+import {
+  demoteCandidate,
+  promoteCandidate,
+  setCandidateStatus,
+  type CandidateStatus,
+} from "./actions";
 
 const BTN: React.CSSProperties = {
   fontSize: 12,
@@ -21,9 +26,11 @@ const BTN: React.CSSProperties = {
  */
 export function CandidateActions({
   brandNormalized,
+  brandName,
   status,
 }: {
   brandNormalized: string;
+  brandName: string;
   status: string;
 }) {
   const [pending, startTransition] = useTransition();
@@ -44,9 +51,64 @@ export function CandidateActions({
     });
   };
 
+  const promote = () => {
+    setError(null);
+    // The domain is typed, never inferred. legitimate_domains is the matcher's
+    // EXCLUSION list: a squatter-held <brand>.com.au recorded as legitimate is
+    // exactly the domain we would then stop reporting as a clone.
+    const domains = window.prompt(
+      `Official domain(s) for ${brandName}, comma-separated.\n\n` +
+        `This is the matcher's EXCLUSION list — it is what stops the brand's ` +
+        `own site being reported as a clone of itself. Get it right or leave ` +
+        `it unpromoted.`,
+      "",
+    );
+    if (domains === null) return; // cancelled
+    if (!domains.trim()) {
+      setError("a domain is required");
+      return;
+    }
+    startTransition(async () => {
+      const res = await promoteCandidate(brandNormalized, brandName, domains);
+      if (!res.ok) {
+        setError(res.error ?? "failed");
+        return;
+      }
+      setDone("promoted");
+    });
+  };
+
+  const undo = () => {
+    setError(null);
+    startTransition(async () => {
+      const res = await demoteCandidate(brandNormalized);
+      if (!res.ok) {
+        setError(res.error ?? "failed");
+        return;
+      }
+      setDone("pending");
+    });
+  };
+
   const current = done ?? status;
 
-  if (current === "dismissed" || current === "reviewed" || current === "promoted") {
+  // A promoted brand is live in the matcher, so the undo has to be right here
+  // rather than in a runbook.
+  if (current === "promoted") {
+    return (
+      <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+        <span style={{ fontSize: 12, color: "var(--color-ink-2)", fontWeight: 600 }}>
+          promoted
+        </span>
+        <button type="button" style={BTN} disabled={pending} onClick={undo}>
+          Undo
+        </button>
+        {error && <span style={{ fontSize: 12, color: "#b91c1c" }}>{error}</span>}
+      </span>
+    );
+  }
+
+  if (current === "dismissed" || current === "reviewed") {
     return (
       <span style={{ fontSize: 12, color: "var(--color-muted)" }}>
         {current}
@@ -59,10 +121,19 @@ export function CandidateActions({
     <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
       <button
         type="button"
+        style={{ ...BTN, fontWeight: 600 }}
+        disabled={pending}
+        onClick={promote}
+        title="Add to the live matcher watchlist — requires the official domain(s)"
+      >
+        Promote
+      </button>
+      <button
+        type="button"
         style={BTN}
         disabled={pending}
         onClick={() => act("reviewed", "Marked worth monitoring from the admin queue.")}
-        title="Worth monitoring — keeps it in the queue as decided, pending domain resolution"
+        title="Worth monitoring, but not promoting yet"
       >
         Worth monitoring
       </button>
