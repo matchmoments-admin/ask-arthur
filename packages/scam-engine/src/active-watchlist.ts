@@ -49,8 +49,19 @@ import { logger } from "@askarthur/utils/logger";
  *     static list for the whole TTL — the next call retries.
  *   - Single-flight: concurrent callers share one in-flight query rather than
  *     stampeding the RPC when an instance warms up.
- *   - Explicitly invalidatable, so an admin promotion is live immediately
- *     instead of up to a TTL later.
+ *   - Explicitly invalidatable, so the instance that handled a promotion
+ *     serves fresh data on its next read.
+ *
+ * SCOPE LIMIT, stated because it is easy to overstate: this is an IN-PROCESS
+ * cache, so invalidateActiveWatchlistCache() only clears the cache of the
+ * serverless instance that runs it. Other instances, other regions, and the
+ * Inngest runtime keep their own copy until their own TTL expires. A promotion
+ * is therefore visible everywhere within OVERLAY_TTL_MS, not instantly. That
+ * is an accepted trade: making it global would need a shared store read on
+ * every call, which is the per-request round trip the cache exists to remove.
+ * If sub-TTL global consistency is ever required, the shape to reach for is a
+ * cheap version token (Redis INCR on write, read-through compare) — not
+ * dropping the cache.
  */
 
 /** How long a successful overlay read stays fresh. monitored_brands is a cold
@@ -69,12 +80,13 @@ let cache: OverlayCache | null = null;
 let inFlight: Promise<DynamicBrandEntry[] | null> | null = null;
 
 /**
- * Drop the cached overlay so the next read hits the database.
+ * Drop this process's cached overlay so its next read hits the database.
  *
  * Call after ANY write to monitored_brands — promotion, demotion, a customer
- * registering a brand. Without it the matcher and the admin UI disagree for up
- * to a TTL, and "I promoted it and nothing happened" is exactly the confusion
- * this whole workstream exists to remove. Also used by tests to isolate cases.
+ * registering a brand. It narrows the window in which the admin UI and the
+ * matcher disagree, but does NOT eliminate it: see the SCOPE LIMIT note above.
+ * Other instances converge within OVERLAY_TTL_MS. Also used by tests to
+ * isolate cases.
  */
 export function invalidateActiveWatchlistCache(): void {
   cache = null;
