@@ -81,6 +81,43 @@ never guesses a domain — `legitimate_domains` is the matcher's exclusion
 list, so a squatter-held `<brand>.com.au` recorded as legitimate is
 exactly the domain that would stop being reported.
 
+**TRAP — `vercel env add` defaults to SENSITIVE, and a sensitive flag is
+falsy at runtime.** This bit the 2026-07-28 activation and cost a wasted
+deploy. `vercel env add FF_X production` creates the variable as
+_sensitive_ (write-only). `vercel env pull --environment=production` then
+shows:
+
+```
+FF_BRAND_DYNAMIC_WATCHLIST=""     <- sensitive: unusable
+FF_SHOPFRONT_CLONE_WATCH="true"   <- non-sensitive: works
+```
+
+`vercel env ls` labels BOTH "Encrypted", so the listing cannot tell you
+which kind you created — the only reliable check is `env pull` and
+comparing against a flag you know works. Always create feature flags with:
+
+```bash
+printf 'true' | vercel env add FF_X production --no-sensitive --force
+```
+
+**How to prove a flag is actually live, rather than assuming.** Hitting a
+route that exercises the path is NOT sufficient: `getActiveWatchlist()`
+fails safe, so a falsy flag and a healthy overlay produce the same 200
+response. Check whether the database call actually happened:
+
+```sql
+select calls, left(query, 90) as q
+from extensions.pg_stat_statements
+where query ilike '%list_active_monitored_brands%'
+order by calls desc limit 5;
+```
+
+A PostgREST-originated call appears as a `WITH pgrst_source AS (...)`
+wrapper. If the only rows are your own psql/MCP queries, the app never
+called it and the flag is off — which is exactly how the sensitive-var
+problem was caught. The same technique generalises to any flag whose only
+observable effect is a query.
+
 **Reverting.** `vercel env rm FF_BRAND_DYNAMIC_WATCHLIST production` (or
 set `false`) + a deploy carrying `[build]`. The matcher falls back to the
 static ~212-brand list; no data migration needed. Any already-promoted
