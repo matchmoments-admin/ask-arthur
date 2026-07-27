@@ -110,7 +110,7 @@ export async function POST(req: NextRequest) {
   // UNMONITORED brand: still a captured lead (real demand signal), but no list.
   // This is what closes the cross-brand exfiltration — only a resolved brand's
   // OWN legitimate domains ever reach the query (exact IN, no wildcards).
-  const entry = resolveWatchlistBrand(d.brand);
+  const entry = await resolveWatchlistBrand(d.brand);
   const monitored = entry !== null;
   const company = d.company || d.email.split("@")[1] || "(unknown)";
 

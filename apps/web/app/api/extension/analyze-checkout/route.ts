@@ -8,11 +8,8 @@ import {
   domainAgeBand,
 } from "@askarthur/scam-engine/whois-cached";
 import { scoreCheckoutGuard } from "@askarthur/scam-engine/checkout-guard-score";
-import {
-  lexicalMatch,
-  brandNormalize,
-  AU_BRAND_WATCHLIST,
-} from "@askarthur/shopfront-glue";
+import { lexicalMatch, brandNormalize } from "@askarthur/shopfront-glue";
+import { getActiveWatchlist } from "@askarthur/scam-engine/active-watchlist";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { getLogger } from "@askarthur/utils/axiom-logger";
@@ -131,7 +128,11 @@ export async function POST(req: NextRequest) {
     if (parsed.data.brandOnPage) {
       const claimed = brandNormalize(parsed.data.brandOnPage);
       if (claimed) {
-        const entry = AU_BRAND_WATCHLIST.find(
+        // Active watchlist, not the static array: a registered overlay brand
+        // has legitimate_domains too, and checking the claim against the
+        // static list only would silently skip the mismatch signal for it.
+        const activeWatchlist = await getActiveWatchlist();
+        const entry = activeWatchlist.find(
           (e) =>
             brandNormalize(e.brand) === claimed ||
             (e.aliases ?? []).some((a) => brandNormalize(a) === claimed),

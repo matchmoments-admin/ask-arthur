@@ -15,3 +15,12 @@ export {
 } from "./lexical-match";
 export { brandNormalize } from "./brand-normalize";
 export { buildBrandResolver, type BrandAliasRecord } from "./brand-resolver";
+export {
+  mergeDynamicWatchlist,
+  buildWatchedKeySet,
+  resolveBrandInWatchlist,
+  type ActiveWatchlist,
+  type DynamicBrandEntry,
+  type WatchlistRejection,
+  type WatchlistRejectReason,
+} from "./active-watchlist";

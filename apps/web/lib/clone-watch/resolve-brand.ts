@@ -1,14 +1,6 @@
-import { AU_BRAND_WATCHLIST, brandNormalize } from "@askarthur/shopfront-glue";
+import { getActiveWatchlist } from "@askarthur/scam-engine/active-watchlist";
+import { resolveBrandInWatchlist } from "@askarthur/shopfront-glue";
 import type { BrandEntry } from "@askarthur/shopfront-glue/au-brand-watchlist";
-
-function normDomain(s: string): string {
-  return s
-    .toLowerCase()
-    .trim()
-    .replace(/^https?:\/\//, "")
-    .replace(/^www\./, "")
-    .replace(/\/.*$/, "");
-}
 
 /**
  * Resolve a user-supplied brand name or domain to a watch-list entry by EXACT
@@ -17,15 +9,20 @@ function normDomain(s: string): string {
  * that arbitrary input (e.g. "%%", "a%") can never widen the downstream
  * clone-list query. Returns null for anything not on the watch-list, which the
  * caller treats as an "unmonitored brand" (still a captured lead, but no CSV).
+ *
+ * The matching logic itself now lives in `resolveBrandInWatchlist`
+ * (@askarthur/shopfront-glue) so it can run against ANY watchlist. This module
+ * supplies the ACTIVE one — static AU brands plus verified overlay brands —
+ * because resolving against the static array alone told a registered customer
+ * their own brand was unmonitored.
  */
-export function resolveWatchlistBrand(input: string): BrandEntry | null {
-  const d = normDomain(input);
-  const n = brandNormalize(input);
-  if (!d && !n) return null;
-  for (const e of AU_BRAND_WATCHLIST) {
-    if (e.legitimate_domains.some((dom) => normDomain(dom) === d)) return e;
-    if (brandNormalize(e.brand) === n) return e;
-    if (e.aliases?.some((a) => brandNormalize(a) === n)) return e;
-  }
-  return null;
+export async function resolveWatchlistBrand(
+  input: string,
+): Promise<BrandEntry | null> {
+  const watchlist = await getActiveWatchlist();
+  return resolveBrandInWatchlist(input, watchlist);
 }
+
+// Re-exported so tests and pure callers can resolve against an explicit list
+// without touching the database.
+export { resolveBrandInWatchlist };
