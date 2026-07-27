@@ -215,6 +215,84 @@ export function hasAuEvidence(m: MergedCandidate): boolean {
   return m.au > 0;
 }
 
+/**
+ * Does this candidate clear the bar for AUTOMATIC promotion?
+ *
+ * A much higher bar than `hasAuEvidence`, which only decides whether a human
+ * is shown the brand. This decides whether the system adds a brand to the live
+ * matcher with no human in the loop, so the two sources are weighted by how
+ * much inference stands behind them:
+ *
+ *   - `scam >= 2` — two Australians independently told Arthur this brand was
+ *     impersonated. Zero geographic inference: they are users of an AU
+ *     consumer scam-checker. This is our own demand signal.
+ *   - `au >= 2` — two Reddit posts the classifier tagged AU. One AU-hinted
+ *     post is enough to show a human (evidence is scarce); it is not enough to
+ *     act unattended, because the hint is inferred, not stated.
+ *
+ * Both are deliberately small absolute numbers. At current volume that means
+ * auto-promotion fires rarely — which is the correct behaviour, not a defect
+ * to tune away. It scales with Arthur's own traffic rather than with r/Scams
+ * traffic. Exported for testing.
+ */
+export function meetsPromotionBar(m: MergedCandidate): boolean {
+  return m.scam >= 2 || m.au >= 2;
+}
+
+/** A promotion the run is prepared to make: evidence bar cleared AND a
+ *  trustworthy domain found. Both halves are required. */
+export interface PromotionPlan {
+  brandNormalized: string;
+  brandName: string;
+  domains: string[];
+  /** Where the domain came from — recorded so a bad promotion is traceable to
+   *  its source rather than to "the cron did it". */
+  domainSource: string;
+  au: number;
+  scam: number;
+  total: number;
+}
+
+/**
+ * Pair candidates that clear the evidence bar with a domain from a TRUSTED
+ * store, and report the ones we cannot promote and why.
+ *
+ * THE DOMAIN IS NEVER GUESSED. It would be easy to try `<brand>.com.au` and
+ * accept whatever resolves — and actively harmful. legitimate_domains is the
+ * matcher's EXCLUSION list, so a wrong entry does not cause a missed alert, it
+ * creates a permanent blind spot: if a squatter holds `<brand>.com.au` and we
+ * record it as legitimate, that is precisely the domain we stop reporting.
+ * A brand with no trustworthy domain is therefore NOT auto-promoted; it is
+ * surfaced as "ready, needs a domain" for a human to complete in one click.
+ *
+ * Pure + unit-tested. Exported for testing.
+ */
+export function planPromotions(
+  candidates: readonly MergedCandidate[],
+  domainsByKey: ReadonlyMap<string, { domain: string; source: string }>,
+): { promote: PromotionPlan[]; needsDomain: MergedCandidate[] } {
+  const promote: PromotionPlan[] = [];
+  const needsDomain: MergedCandidate[] = [];
+  for (const c of candidates) {
+    if (!meetsPromotionBar(c)) continue;
+    const known = domainsByKey.get(c.brandNormalized);
+    if (!known?.domain) {
+      needsDomain.push(c);
+      continue;
+    }
+    promote.push({
+      brandNormalized: c.brandNormalized,
+      brandName: c.rawBrand,
+      domains: [known.domain],
+      domainSource: known.source,
+      au: c.au,
+      scam: c.scam,
+      total: c.total,
+    });
+  }
+  return { promote, needsDomain };
+}
+
 export const redditBrandsDiscover = inngest.createFunction(
   {
     id: "reddit-brands-discover",
@@ -414,6 +492,86 @@ export const redditBrandsDiscover = inngest.createFunction(
       return n;
     });
 
+    // 4b. AUTO-PROMOTION (FF_BRAND_AUTO_PROMOTE, default OFF).
+    //
+    //     Only candidates that clear meetsPromotionBar() AND have a domain in
+    //     a trusted store are promoted unattended. The domain comes from
+    //     known_brands (human-seeded in v179, plus RFC 9116 security.txt
+    //     discoveries) — never from guessing `<brand>.com.au`, because
+    //     legitimate_domains is the matcher's EXCLUSION list and a wrong entry
+    //     creates a permanent blind spot rather than a missed alert.
+    //
+    //     Runs against ALL fresh candidates, not just net-new ones: a brand
+    //     that was surfaced weeks ago and has since accumulated AU evidence is
+    //     exactly the case auto-promotion exists for.
+    const allFresh = mergeCandidateSources(fresh, scamFresh);
+    const autoPromote = featureFlags.brandAutoPromote;
+
+    const trustedDomains = await step.run("load-trusted-domains", async () => {
+      const eligible = allFresh.filter(meetsPromotionBar);
+      if (!autoPromote || eligible.length === 0) {
+        return [] as Array<[string, { domain: string; source: string }]>;
+      }
+      const sb = createServiceClient();
+      if (!sb) return [] as Array<[string, { domain: string; source: string }]>;
+      const { data, error } = await sb
+        .from("known_brands")
+        .select("brand_key, brand_domain")
+        .in(
+          "brand_key",
+          eligible.map((c) => c.brandNormalized),
+        );
+      if (error) {
+        logger.warn("reddit-brands-discover: trusted-domain load failed", {
+          error: error.message,
+        });
+        return [] as Array<[string, { domain: string; source: string }]>;
+      }
+      return (data ?? [])
+        .filter((r) => (r.brand_domain as string | null)?.trim())
+        .map(
+          (r) =>
+            [
+              r.brand_key as string,
+              { domain: (r.brand_domain as string).trim(), source: "known_brands" },
+            ] as [string, { domain: string; source: string }],
+        );
+    });
+
+    const { promote, needsDomain } = autoPromote
+      ? planPromotions(allFresh, new Map(trustedDomains))
+      : { promote: [] as PromotionPlan[], needsDomain: [] as MergedCandidate[] };
+
+    const promoted = await step.run("auto-promote", async () => {
+      if (promote.length === 0) return [] as string[];
+      const sb = createServiceClient();
+      if (!sb) return [] as string[];
+      const done: string[] = [];
+      for (const p of promote) {
+        // One transaction per brand: the RPC writes monitored_brands AND moves
+        // the candidate to 'promoted' together. Split apart, a failure between
+        // them leaves a brand that is monitored and simultaneously
+        // re-announced as unwatched every week.
+        const { error } = await sb.rpc("promote_watchlist_candidate", {
+          p_brand_normalized: p.brandNormalized,
+          p_brand_name: p.brandName,
+          p_domains: p.domains,
+          p_aliases: [],
+          p_note: `Auto-promoted: AU ${p.au}, reported ${p.scam}, total ${p.total}. Domain from ${p.domainSource}.`,
+          p_source: "auto",
+        });
+        if (error) {
+          logger.error("reddit-brands-discover: auto-promotion failed", {
+            brand: p.brandName,
+            error: error.message,
+          });
+          continue;
+        }
+        done.push(p.brandName);
+      }
+      return done;
+    });
+
     // 5. Telegram digest. Two changes from the original weekly ping:
     //
     //    (a) The ACTIONABLE list is AU-evidenced candidates only. Announcing
@@ -432,7 +590,12 @@ export const redditBrandsDiscover = inngest.createFunction(
       .filter((m) => !hasAuEvidence(m))
       .sort((a, b) => b.total - a.total);
 
-    if (auEvidenced.length > 0 || globalOnly.length > 0) {
+    if (
+      auEvidenced.length > 0 ||
+      globalOnly.length > 0 ||
+      promoted.length > 0 ||
+      needsDomain.length > 0
+    ) {
       await step.run("telegram", async () => {
         const top = auEvidenced.slice(0, DIGEST_CAP);
         const lines = top.map((m) => {
@@ -475,6 +638,39 @@ export const redditBrandsDiscover = inngest.createFunction(
               ]
             : [];
 
+        // Auto-promotions are reported even though nobody asked for them:
+        // an unattended write to the live matcher that shows up only in logs
+        // is how you find out about it from a customer.
+        const promotedLines =
+          promoted.length > 0
+            ? [
+                ``,
+                `<b>Auto-promoted to the watchlist (${promoted.length}):</b>`,
+                ...promote
+                  .filter((p) => promoted.includes(p.brandName))
+                  .map(
+                    (p) =>
+                      `• <b>${p.brandName}</b> → ${p.domains.join(", ")} ` +
+                      `(AU ${p.au}, reported ${p.scam}; domain from ${p.domainSource})`,
+                  ),
+                `<i>Undo any of these from the review queue.</i>`,
+              ]
+            : [];
+
+        // The other half of the honest report: brands that DID clear the
+        // evidence bar but had no trustworthy domain, so the system declined
+        // to guess. These are one click from promotion, not dead ends.
+        const needsDomainLines =
+          needsDomain.length > 0
+            ? [
+                ``,
+                `<b>Ready to promote — need a confirmed domain (${needsDomain.length}):</b>`,
+                ...needsDomain
+                  .slice(0, DIGEST_CAP)
+                  .map((m) => `• ${m.rawBrand} (AU ${m.au}, reported ${m.scam})`),
+              ]
+            : [];
+
         await sendAdminTelegramMessage(
           [
             `<b>Brands discover</b>`,
@@ -482,6 +678,8 @@ export const redditBrandsDiscover = inngest.createFunction(
             ...lines,
             ...more,
             ...globalLine,
+            ...promotedLines,
+            ...needsDomainLines,
             ``,
             `Review queue: https://askarthur.au/admin/brand-candidates`,
           ].join("\n"),
@@ -496,6 +694,9 @@ export const redditBrandsDiscover = inngest.createFunction(
       newlySurfaced: newlySurfaced.length,
       auEvidenced: auEvidenced.length,
       globalOnly: globalOnly.length,
+      autoPromote,
+      promoted: promoted.length,
+      needsDomain: needsDomain.length,
       upserted,
     });
     return {
@@ -506,6 +707,9 @@ export const redditBrandsDiscover = inngest.createFunction(
       newlySurfaced: newlySurfaced.length,
       auEvidenced: auEvidenced.length,
       globalOnly: globalOnly.length,
+      autoPromote,
+      promoted: promoted.length,
+      needsDomain: needsDomain.length,
       upserted,
     };
   }),

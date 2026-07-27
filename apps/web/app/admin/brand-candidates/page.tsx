@@ -90,10 +90,14 @@ export default async function BrandCandidatesPage() {
         a fact about r/Scams traffic, not about Australian exposure.
       </p>
       <p style={{ color: "var(--color-muted)", fontSize: 12, marginBottom: 20 }}>
-        <b>Worth monitoring</b> records the decision; it does not yet add the
-        brand to the live matcher. Promotion needs confirmed legitimate domains
-        first — the matcher uses that list to exclude the brand&rsquo;s own site,
-        so a brand promoted without it would be reported as a clone of itself.
+        <b>Promote</b> adds the brand to the live matcher immediately and asks
+        for its official domain(s) first. That list is the matcher&rsquo;s{" "}
+        <b>exclusion</b> list: it is what stops the brand&rsquo;s own site being
+        reported as a clone of itself, so a wrong entry does not cause a missed
+        alert — it creates a permanent blind spot on that domain. The domain is
+        never inferred from the brand name for exactly this reason.{" "}
+        <b>Worth monitoring</b> records the decision without promoting. Every
+        promotion can be undone from this page.
       </p>
 
       {[
@@ -176,9 +180,10 @@ export default async function BrandCandidatesPage() {
                         {new Date(r.last_seen_at).toLocaleDateString("en-AU")}
                       </td>
                       <td style={CELL}>
-                        {r.status === "pending" ? (
+                        {r.status === "pending" || r.status === "promoted" ? (
                           <CandidateActions
                             brandNormalized={r.brand_normalized}
+                            brandName={r.raw_brand}
                             status={r.status}
                           />
                         ) : (
