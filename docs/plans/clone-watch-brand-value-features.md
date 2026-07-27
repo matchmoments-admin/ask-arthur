@@ -186,7 +186,17 @@ filing landed in the ten days to 2026-07-26. Four causes, fixed in #852–#857
    `dead_at_probe` deferral (the v248 shape, own key), plus an over-fetch so a
    dead-heavy batch can still fill the day's budget with live rows.
 
-Four transferable lessons:
+6. **And the lane would then have fired every other day** — found on day 2
+   while verifying cause 5's fix, and fixed in #862 (v253). The 24h submission
+   budget was a rolling window anchored on the previous run's completion, while
+   the cron fires at a fixed 09:30 UTC. Day 1 stamped its rows at `09:30:52`;
+   day 2's run at `09:30:00` saw them 52 seconds inside its own window, read
+   `budget_remaining = 0`, and would have submitted nothing. 10 URLs per two
+   days against a documented cap of 10/day. Pre-existing since v250 and carried
+   unchanged through v251 and v252 — a single run is indistinguishable either
+   way, so only the second consecutive day exposed it. Now per UTC day.
+
+Five transferable lessons:
 
 - **Never let a metric decide who gets reported.** v250 excluded already-escalated
   clones to keep a median clean; six live phishing domains lost their only path.
@@ -199,10 +209,18 @@ Four transferable lessons:
   advancing the row, and an unstamped skip re-presents forever. Whenever a
   worklist is bounded _before_ a gate the caller applies, the gate's rejects
   need somewhere to go.
+- **A periodic job must not bound itself on a rolling window it writes into.**
+  Cause 6: fixed-time cron + `now() - 24h` means each run lands just inside its
+  predecessor's window and cancels itself. Anchor the budget to the same period
+  the schedule uses (a calendar day for a daily cron), or the cadence and the
+  bound fight each other forever.
 - **Correctness review cannot catch any of these.** Each stage was individually
   right. Only telemetry over days showed the loop was inert — except cause 5,
   which an operational read of the worklist-vs-probe interaction caught before
-  the first run, which is the cheaper place to find it.
+  the first run, which is the cheaper place to find it. Cause 6 is the
+  counter-example that keeps the lesson honest: it was invisible until a second
+  consecutive day of real runs existed, and no amount of pre-flight reading
+  would have surfaced it.
 
 ### F5 — (optional, marketing) The vendor-gap data story
 

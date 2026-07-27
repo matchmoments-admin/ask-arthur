@@ -434,8 +434,19 @@ urlscan evidence.
 Reporter standing is the risk this lane carries, so the bounds are layered:
 weaponised-only, liveness-confirmed (`live !== false`), **no recorded
 takedown**, a 14-day per-alert cooldown, a hard 3-resubmit ceiling per alert, a
-24h global budget (re-firing the manual trigger cannot exceed the day's
+per-UTC-day global budget (re-firing the manual trigger cannot exceed the day's
 allowance), and the v176 FP-brand denylist.
+
+**v253 — the budget is per UTC day, not a rolling 24h window.** It was rolling
+until day 2 of the lane's life. The cron fires at a fixed 09:30 UTC and day 1's
+rows were stamped `09:30:52`, so day 2's run at `09:30:00` saw them 52 seconds
+_inside_ its own 24h window: `used = 10`, `budget_remaining = 0`, zero rows,
+no-op. Day 3 would see 48h-old stamps and work. Net: 10 URLs every two days
+against a documented cap of 10/day, with `reason: "none_pending_or_cap"` on the
+idle days reading like an empty worklist rather than a starved one. **A
+fixed-time cron can never clear a rolling window its own previous run just
+wrote into.** The anti-flood property is unchanged — a manual re-fire later the
+same day still counts the day's submissions and is still blocked.
 
 **v252 — proved-dead rows are deferred, not dropped.** Liveness can only be
 established in the caller, so v250/v251 rank-limited the worklist to the daily
