@@ -77,6 +77,16 @@ export default async function BrandRegisterPage() {
         clone-watch. Priority = scam×3 + clone×2 + reddit×1 (an ordering hint,
         not a clone severity).
       </p>
+      <p style={{ fontSize: 13, marginBottom: 20 }}>
+        {/* The `Curation` column below is read-only; this is where a candidate
+            actually gets decided. Without this link the status shown here has
+            no reachable writer, which is how the queue reached 51 untouched
+            rows. */}
+        <a href="/admin/brand-candidates">→ Watchlist candidate review queue</a>{" "}
+        <span style={{ color: "var(--color-muted)" }}>
+          (the Curation column here is read-only)
+        </span>
+      </p>
 
       <div style={{ overflowX: "auto", border: "1px solid var(--color-line-soft)", borderRadius: 8 }}>
         <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 760 }}>

@@ -199,6 +199,14 @@ describe("CANDIDATE_DENYLIST", () => {
     }
   });
 
+  it("matches the label the classifier emits, not the one a human would write", () => {
+    // "X (Twitter)" normalises to "xtwitter", which neither the "X" entry
+    // ("x") nor the "Twitter" entry ("twitter") covers. It sat pending in the
+    // queue for a month because of that gap.
+    expect(brandNormalize("X (Twitter)")).toBe("xtwitter");
+    expect(CANDIDATE_DENYLIST.has(brandNormalize("X (Twitter)"))).toBe(true);
+  });
+
   it("no longer hand-maintains a US-brand blocklist", () => {
     // These were denylisted by hand until v254. They are now handled by AU
     // evidence instead — the list was a worse version of a column we already

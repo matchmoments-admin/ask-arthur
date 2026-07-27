@@ -81,6 +81,12 @@ const CANDIDATE_DENYLIST_RAW: readonly string[] = [
   "Reddit", "Discord", "LinkedIn", "Facebook", "Facebook Marketplace", "Meta",
   "Instagram", "TikTok", "Telegram", "WhatsApp", "Steam", "Shop", "X", "Twitter",
   "YouTube", "Snapchat",
+  // "X (Twitter)" is how the classifier actually labels it, and it normalises
+  // to "xtwitter" — which neither "X" ("x") nor "Twitter" ("twitter") matches.
+  // It sat pending in the queue for a month because of that. A denylist entry
+  // has to match the label the upstream classifier emits, not the label a
+  // human would write.
+  "X (Twitter)",
 ];
 // Exported for testing. Holds brandNormalize() keys, not raw labels.
 export const CANDIDATE_DENYLIST = new Set(
@@ -480,7 +486,7 @@ export const redditBrandsDiscover = inngest.createFunction(
             ...more,
             ...globalLine,
             ``,
-            `Review queue: https://askarthur.au/admin/brand-register`,
+            `Review queue: https://askarthur.au/admin/brand-candidates`,
           ].join("\n"),
         );
       });
