@@ -1,11 +1,11 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import {
-  AU_BRAND_WATCHLIST,
   brandNormalize,
   buildBrandResolver,
   type BrandAliasRecord,
 } from "@askarthur/shopfront-glue";
+import { getActiveWatchlist } from "@askarthur/scam-engine/active-watchlist";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -262,8 +262,15 @@ export const brandRegisterRefresh = inngest.createFunction(
       return out;
     });
 
+    // Active watchlist, not the static array — otherwise the register's
+    // `on_au_watchlist` column says "not watched" for a brand the matcher is
+    // actively sweeping, and the admin queue inherits that lie.
+    const activeWatchlist = await step.run("load-active-watchlist", async () =>
+      getActiveWatchlist(),
+    );
+
     const rows = rollupBrandRegister({
-      watchlistBrands: AU_BRAND_WATCHLIST.map((b) => b.brand),
+      watchlistBrands: activeWatchlist.map((b) => b.brand),
       scam,
       reddit,
       cloneByNormalized: new Map(cloneEntries),

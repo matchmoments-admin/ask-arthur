@@ -28,13 +28,13 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import {
-  AU_BRAND_WATCHLIST,
   brandNormalize,
   canonicaliseCandidateUrl,
   lexicalMatch,
   urlHash,
 } from "@askarthur/shopfront-glue";
 import type { BrandEntry } from "@askarthur/shopfront-glue/au-brand-watchlist";
+import { getActiveWatchlist } from "../active-watchlist";
 import { ssrfSafeDispatcher } from "../ssrf-dispatcher";
 
 const ZIP_DOWNLOAD_TIMEOUT_MS = 60_000;
@@ -308,41 +308,18 @@ async function parseNrdZip(zipBuffer: Uint8Array): Promise<string[]> {
 
 // ── Matching ──────────────────────────────────────────────────────────────
 
-/**
- * The active watchlist = the static AU brand list, plus (when
- * FF_BRAND_DYNAMIC_WATCHLIST is on) the verified, active customer/pilot brands
- * from monitored_brands (v207). Merged in-memory and deduped by normalized
- * brand — NO index is added to the hot shopfront_clone_alerts table (the dynamic
- * read is one bounded query per daily run). With the flag off or zero verified
- * brands, this returns exactly the static list, so the matcher is unchanged.
- */
-async function buildActiveWatchlist(): Promise<BrandEntry[]> {
-  if (!featureFlags.brandDynamicWatchlist) return AU_BRAND_WATCHLIST;
-  const sb = createServiceClient();
-  if (!sb) return AU_BRAND_WATCHLIST;
-  const { data } = await sb.rpc("list_active_monitored_brands");
-  const dynamic = (data as
-    | { brand: string; legitimate_domains: string[]; aliases: string[] }[]
-    | null) ?? [];
-  if (dynamic.length === 0) return AU_BRAND_WATCHLIST;
-
-  const seen = new Set(AU_BRAND_WATCHLIST.map((e) => brandNormalize(e.brand)));
-  const merged: BrandEntry[] = [...AU_BRAND_WATCHLIST];
-  for (const d of dynamic) {
-    const key = brandNormalize(d.brand);
-    if (seen.has(key)) continue; // static list wins; no duplicate brand entries
-    seen.add(key);
-    merged.push({
-      brand: d.brand,
-      legitimate_domains: d.legitimate_domains ?? [],
-      aliases: d.aliases ?? [],
-    });
-  }
-  return merged;
-}
+// The static-plus-overlay merge used to live here as a private
+// buildActiveWatchlist(). It moved to getActiveWatchlist()
+// (@askarthur/scam-engine/active-watchlist) because being private to THIS
+// function was the bug: only the NRD matcher saw the merged list, while the
+// discovery cron, resolve-brand, analyze-checkout and brand-register all read
+// the static array and were blind to any registered brand. The old local copy
+// also merged rows with `legitimate_domains ?? []` — an empty exclusion list,
+// which makes the matcher report a brand's own website as a clone of itself.
+// The shared merge rejects those instead.
 
 async function matchDomains(domains: string[]): Promise<MatchHit[]> {
-  const watchlist = await buildActiveWatchlist();
+  const watchlist = await getActiveWatchlist();
   const hits: MatchHit[] = [];
   for (const domain of domains) {
     const result = lexicalMatch(domain, watchlist);

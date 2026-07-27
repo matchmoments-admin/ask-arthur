@@ -1,11 +1,12 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import {
-  AU_BRAND_WATCHLIST,
   brandNormalize,
   buildBrandResolver,
+  buildWatchedKeySet,
   type BrandAliasRecord,
 } from "@askarthur/shopfront-glue";
+import { getActiveWatchlist } from "@askarthur/scam-engine/active-watchlist";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -137,22 +138,10 @@ export function aggregateBrandMentions(
   return agg;
 }
 
-/** Build the set of normalized keys already covered by the watchlist —
- *  canonical brand names AND their aliases. Exported for testing. */
-export function buildWatchedKeySet(
-  watchlist: ReadonlyArray<{ brand: string; aliases?: string[] }>,
-): Set<string> {
-  const set = new Set<string>();
-  for (const entry of watchlist) {
-    const b = brandNormalize(entry.brand);
-    if (b) set.add(b);
-    for (const alias of entry.aliases ?? []) {
-      const a = brandNormalize(alias);
-      if (a) set.add(a);
-    }
-  }
-  return set;
-}
+// buildWatchedKeySet moved to @askarthur/shopfront-glue so the "already
+// watched?" predicate has exactly one implementation, and is re-exported here
+// so existing importers (and tests) keep working.
+export { buildWatchedKeySet };
 
 /** One-row-per-canonical-brand view carrying per-source counts + the summed
  *  total (the digest shows the breakdown; the DB stores the total). */
@@ -292,7 +281,15 @@ export const redditBrandsDiscover = inngest.createFunction(
     //    the resolved canonical so a known-but-differently-spelled brand
     //    doesn't surface). What remains = unwatched, actively-impersonated.
     //    The SAME filter applies to every source (Reddit + reported-scams).
-    const watched = buildWatchedKeySet(AU_BRAND_WATCHLIST);
+    // THE fix for the re-announce loop: this gate must see the ACTIVE
+    // watchlist (static + verified overlay brands), not the compile-time
+    // array. Fed the static array while promotion writes to the overlay, a
+    // promoted brand stays permanently "unwatched" here and gets re-surfaced
+    // as a brand-new candidate every single week.
+    const activeWatchlist = await step.run("load-active-watchlist", async () =>
+      getActiveWatchlist(),
+    );
+    const watched = buildWatchedKeySet(activeWatchlist);
     const isFreshCandidate = (c: CandidateAgg): boolean => {
       if (CANDIDATE_DENYLIST.has(c.brandNormalized)) return false;
       if (watched.has(c.brandNormalized)) return false;

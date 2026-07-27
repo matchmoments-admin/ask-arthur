@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
   }
 
   // EXACT resolution — the anti-scrape gate. "%%"/"a%"/unknown → not monitored.
-  const entry = resolveWatchlistBrand(parsed.data.brand);
+  const entry = await resolveWatchlistBrand(parsed.data.brand);
   if (!entry) {
     return NextResponse.json({ monitored: false, count: 0, examples: [] });
   }
