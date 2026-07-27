@@ -5,6 +5,7 @@ import {
   hasAuEvidence,
   meetsPromotionBar,
   mergeCandidateSources,
+  partitionForDigest,
   planPromotions,
   CANDIDATE_DENYLIST,
   type MergedCandidate,
@@ -368,5 +369,79 @@ describe("per-source thresholds — the promotion bar must be reachable", () => 
     // mentions in total never reach the candidate table at all.
     expect(meetsPromotionBar(cand({ reddit: 3, au: 2, total: 3 }))).toBe(true);
     expect(meetsPromotionBar(cand({ reddit: 2, au: 1, total: 2 }))).toBe(false);
+  });
+});
+
+describe("partitionForDigest — a brand can't be both unwatched and just-promoted", () => {
+  const cand = (
+    key: string,
+    raw: string,
+    over: Partial<MergedCandidate> = {},
+  ): MergedCandidate => ({
+    brandNormalized: key,
+    rawBrand: raw,
+    reddit: 0,
+    scam: 0,
+    total: 0,
+    au: 0,
+    ...over,
+  });
+
+  const surfaced = [
+    cand("gumtree", "Gumtree", { scam: 2, au: 2, total: 2 }),
+    cand("vinted", "Vinted", { reddit: 4, au: 1, total: 4 }),
+    cand("walmart", "Walmart", { reddit: 17, au: 0, total: 17 }),
+  ];
+
+  it("drops auto-promoted brands from the unwatched lists", () => {
+    // newlySurfaced is computed BEFORE promotion runs, so without the filter
+    // Gumtree would be reported as "not yet on the clone-watch list" in the
+    // same message that reports it was just added to the watchlist.
+    const r = partitionForDigest(surfaced, new Set(["gumtree"]));
+    expect(r.auEvidenced.map((m) => m.rawBrand)).toEqual(["Vinted"]);
+    expect(r.globalOnly.map((m) => m.rawBrand)).toEqual(["Walmart"]);
+  });
+
+  it("keeps everything when nothing was promoted", () => {
+    const r = partitionForDigest(surfaced, new Set());
+    expect(r.auEvidenced.map((m) => m.rawBrand)).toEqual(["Gumtree", "Vinted"]);
+    expect(r.globalOnly.map((m) => m.rawBrand)).toEqual(["Walmart"]);
+  });
+
+  it("splits on AU evidence, not on volume", () => {
+    const r = partitionForDigest(surfaced, new Set());
+    // Walmart has the largest total by far and still belongs in global-only.
+    expect(r.globalOnly.map((m) => m.rawBrand)).toEqual(["Walmart"]);
+    expect(r.auEvidenced.every((m) => m.au > 0)).toBe(true);
+  });
+
+  it("ranks AU-evidenced by AU count, falling back to total", () => {
+    const r = partitionForDigest(
+      [
+        cand("a", "A", { au: 1, total: 99 }),
+        cand("b", "B", { au: 3, total: 3 }),
+        cand("c", "C", { au: 1, total: 5 }),
+      ],
+      new Set(),
+    );
+    expect(r.auEvidenced.map((m) => m.rawBrand)).toEqual(["B", "A", "C"]);
+  });
+
+  it("matches on the canonical key, not the display label", () => {
+    // Two raw spellings share one canonical key; promoting via the key must
+    // suppress whichever label the digest happened to pick.
+    const r = partitionForDigest(
+      [cand("gumtree", "gumtree.com.au", { scam: 2, au: 2, total: 2 })],
+      new Set(["gumtree"]),
+    );
+    expect(r.auEvidenced).toEqual([]);
+    expect(r.globalOnly).toEqual([]);
+  });
+
+  it("does not mutate its input", () => {
+    const input = [...surfaced];
+    const before = JSON.stringify(input);
+    partitionForDigest(input, new Set(["gumtree"]));
+    expect(JSON.stringify(input)).toBe(before);
   });
 });

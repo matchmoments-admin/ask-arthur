@@ -137,9 +137,9 @@ export async function promoteCandidate(
     domains,
   });
   // The overlay read is cached (60s TTL) to keep it off the checkout hot path.
-  // Drop it here so the brand is live in the matcher immediately — "I promoted
-  // it and nothing happened" is precisely the confusion this workstream exists
-  // to remove.
+  // This clears THIS instance's copy; other serverless instances converge
+  // within the TTL. So a promotion is live everywhere inside 60s, not
+  // instantly — see the scope note in @askarthur/scam-engine/active-watchlist.
   invalidateActiveWatchlistCache();
   revalidatePath("/admin/brand-candidates");
   return { ok: true, changed: 1 };
@@ -171,8 +171,8 @@ export async function demoteCandidate(
   }
 
   logger.warn("brand-candidates: promotion reverted", { brand: key });
-  // Same reason as promote, and more urgent: an undo that takes up to a minute
-  // to stop the matcher is not an undo.
+  // Same reason as promote. Note the honest bound: other instances stop
+  // matching the brand within the 60s TTL, not on this click.
   invalidateActiveWatchlistCache();
   revalidatePath("/admin/brand-candidates");
   return { ok: true, changed: typeof data === "number" ? data : 0 };

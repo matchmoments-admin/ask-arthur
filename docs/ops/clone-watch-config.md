@@ -61,10 +61,15 @@ revert without re-reading it:
 - Per-source thresholds. While both sources shared `MENTION_THRESHOLD = 3`,
   `meetsPromotionBar()`'s `scam >= 2` branch was unreachable dead code.
 - The overlay read is cached (60s TTL, single-flight, errors NOT cached,
-  explicitly invalidated by promote/demote). Without it, turning
+  invalidated by promote/demote). Without it, turning
   `FF_BRAND_DYNAMIC_WATCHLIST` on adds a DB round trip to every
   `analyze-checkout` request — a route whose header states it is
   "LOW-LATENCY by design".
+  **The cache is IN-PROCESS, so invalidation is per-instance.** A promotion is
+  live on the instance that handled the click, and everywhere else within 60s.
+  If an operator promotes a brand and a clone alert for it doesn't appear on the
+  very next sweep, check the sweep started <60s after the promotion before
+  treating it as a bug.
 
 **When to flip `FF_BRAND_AUTO_PROMOTE` ON.** Not on a date — on evidence.
 Two conditions, both required:

@@ -253,6 +253,37 @@ export function meetsPromotionBar(m: MergedCandidate): boolean {
   return m.scam >= 2 || m.au >= 2;
 }
 
+/**
+ * Split the net-new candidates into the two lists the digest reports, having
+ * first removed anything already auto-promoted this run.
+ *
+ * The exclusion is the load-bearing part. `newlySurfaced` is computed BEFORE
+ * promotion runs, so without it one message would list a brand under "not yet
+ * on the clone-watch list" AND under "auto-promoted to the watchlist" — two
+ * contradictory claims about the same brand. An operator only needs to see
+ * that once to stop trusting the digest.
+ *
+ * Keyed on brandNormalized rather than the display label, because two raw
+ * spellings can share a canonical key. Pure + unit-tested. Exported for
+ * testing.
+ */
+export function partitionForDigest(
+  newlySurfaced: readonly MergedCandidate[],
+  promotedKeys: ReadonlySet<string>,
+): { auEvidenced: MergedCandidate[]; globalOnly: MergedCandidate[] } {
+  const stillUnwatched = newlySurfaced.filter(
+    (m) => !promotedKeys.has(m.brandNormalized),
+  );
+  return {
+    auEvidenced: stillUnwatched
+      .filter(hasAuEvidence)
+      .sort((a, b) => b.au - a.au || b.total - a.total),
+    globalOnly: stillUnwatched
+      .filter((m) => !hasAuEvidence(m))
+      .sort((a, b) => b.total - a.total),
+  };
+}
+
 /** A promotion the run is prepared to make: evidence bar cleared AND a
  *  trustworthy domain found. Both halves are required. */
 export interface PromotionPlan {
@@ -597,12 +628,18 @@ export const redditBrandsDiscover = inngest.createFunction(
     //        line naming the biggest few, because silently dropping candidates
     //        is how a discovery feature quietly stops discovering. Everything
     //        is still written to reddit_watchlist_candidates either way.
-    const auEvidenced = newlySurfaced
-      .filter(hasAuEvidence)
-      .sort((a, b) => b.au - a.au || b.total - a.total);
-    const globalOnly = newlySurfaced
-      .filter((m) => !hasAuEvidence(m))
-      .sort((a, b) => b.total - a.total);
+    //    (c) Anything auto-promoted in step 4b is removed first — see
+    //        partitionForDigest(). A brand cannot be both "not yet on the
+    //        watchlist" and "just added to the watchlist" in one message.
+    const promotedKeys = new Set(
+      promote
+        .filter((p) => promoted.includes(p.brandName))
+        .map((p) => p.brandNormalized),
+    );
+    const { auEvidenced, globalOnly } = partitionForDigest(
+      newlySurfaced,
+      promotedKeys,
+    );
 
     if (
       auEvidenced.length > 0 ||
