@@ -146,6 +146,112 @@ describe.skipIf(!hasEnv)("SQL RPC smoke tests", () => {
     expect(rows).toHaveLength(1);
     expect(typeof rows[0]?.n).toBe("number");
   });
+
+  // ── Watchlist curation + brand overlay (v254–v257) ────────────────────
+  //
+  // These matter more than most for this gate: createServiceClient() omits
+  // the <Database> generic, so supabase.rpc() is UNTYPED app-wide. A renamed
+  // argument or a dropped overload typechecks perfectly clean and fails at
+  // runtime as PGRST202 — inside a weekly cron, where nobody sees it for
+  // seven days. A live call per signature is the only real protection.
+
+  it("aggregate_reddit_brands_with_au executes without error", async () => {
+    const supabase = getClient();
+    const { data, error } = await supabase.rpc("aggregate_reddit_brands_with_au", {
+      p_since: new Date(Date.now() - 30 * 86_400_000).toISOString(),
+      p_min_count: 3,
+    });
+    expect(error).toBeNull();
+    expect(Array.isArray(data)).toBe(true);
+    for (const row of (data ?? []) as Array<Record<string, unknown>>) {
+      // The invariant the v254 aggregate exists to provide.
+      expect(Number(row.au_count)).toBeLessThanOrEqual(Number(row.mention_count));
+    }
+  });
+
+  it("aggregate_scam_report_brands executes without error", async () => {
+    const supabase = getClient();
+    const { data, error } = await supabase.rpc("aggregate_scam_report_brands", {
+      p_since: new Date(Date.now() - 30 * 86_400_000).toISOString(),
+      p_min_count: 2,
+    });
+    expect(error).toBeNull();
+    expect(Array.isArray(data)).toBe(true);
+  });
+
+  it("list_active_monitored_brands executes and never yields a domainless brand", async () => {
+    const supabase = getClient();
+    const { data, error } = await supabase.rpc("list_active_monitored_brands");
+    expect(error).toBeNull();
+    expect(Array.isArray(data)).toBe(true);
+    for (const row of (data ?? []) as Array<{ legitimate_domains?: string[] }>) {
+      // legitimate_domains is the matcher's EXCLUSION list. An empty one makes
+      // the brand's own site match as a clone of itself, which is why v256
+      // guards it in BOTH a CHECK and this RPC's predicate.
+      expect((row.legitimate_domains ?? []).length).toBeGreaterThan(0);
+    }
+  });
+
+  // The three mutating RPCs below are exercised with arguments that provably
+  // change nothing, so this file keeps its "safe to point at prod" contract:
+  //   - a brand key that cannot exist -> the UPDATE matches 0 rows
+  //   - an empty domain list -> promote RAISES before reaching its INSERT
+  // What is being tested is that the SIGNATURE resolves. A wrong argument list
+  // returns PGRST202 ("function not found"), which is exactly what these
+  // assertions distinguish from a healthy call.
+  const ABSENT_KEY = "rpcsmokeabsentbrand";
+
+  it("set_watchlist_candidate_status resolves and no-ops on an absent brand", async () => {
+    const supabase = getClient();
+    const { data, error } = await supabase.rpc("set_watchlist_candidate_status", {
+      p_brand_normalized: ABSENT_KEY,
+      p_status: "dismissed",
+      p_note: "rpc smoke test — matches nothing",
+    });
+    expect(error).toBeNull();
+    expect(Number(data)).toBe(0); // 0 rows changed = nothing was mutated
+  });
+
+  it("demote_watchlist_candidate resolves and no-ops on an absent brand", async () => {
+    const supabase = getClient();
+    const { data, error } = await supabase.rpc("demote_watchlist_candidate", {
+      p_brand_normalized: ABSENT_KEY,
+      p_note: "rpc smoke test — matches nothing",
+    });
+    expect(error).toBeNull();
+    expect(Number(data)).toBe(0);
+  });
+
+  it("promote_watchlist_candidate rejects an empty domain list before inserting", async () => {
+    const supabase = getClient();
+    const { error } = await supabase.rpc("promote_watchlist_candidate", {
+      p_brand_normalized: ABSENT_KEY,
+      p_brand_name: "RPC Smoke Test",
+      p_domains: [],
+      p_aliases: [],
+      p_note: "rpc smoke test — must not insert",
+      p_source: "smoke",
+    });
+    // MUST error — an empty exclusion list is refused by design.
+    expect(error).not.toBeNull();
+    // …but not because the function is missing. PGRST202 here would mean the
+    // argument list drifted from the SQL signature, which is the whole point
+    // of this file.
+    expect(error?.code).not.toBe("PGRST202");
+    expect(String(error?.message ?? "")).toMatch(/domain/i);
+  });
+
+  it("the promote guard did not leave a row behind", async () => {
+    // Proves the previous test's claim rather than assuming it: the RAISE
+    // happens before the INSERT, so no monitored_brands row should exist.
+    const supabase = getClient();
+    const { data, error } = await supabase
+      .from("monitored_brands")
+      .select("id")
+      .eq("brand_normalized", ABSENT_KEY);
+    expect(error).toBeNull();
+    expect(data ?? []).toHaveLength(0);
+  });
 });
 
 describe.skipIf(hasEnv)("SQL RPC smoke tests — env not configured", () => {
