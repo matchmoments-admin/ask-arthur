@@ -1,5 +1,15 @@
 # Ask Arthur -- Enterprise Sales Materials
 
+> ⚠️ **DATA-RESIDENCY CLAIM IN THIS DOCUMENT IS INCORRECT — verified 2026-07-30.**
+> Any statement here that Ask Arthur is "Australian-hosted", has "sovereign data
+> residency" or "zero US data dependency" does not match the live
+> infrastructure. The Supabase database is `ap-southeast-1` (**Singapore**) and
+> Vercel server functions execute in `iad1` (**Washington DC, USA**); only the
+> CDN edge is Sydney. See `docs/compliance/data-residency-statement.md`.
+> **The narrative below has deliberately NOT been rewritten** — if any version
+> of this document has already been sent to an investor, customer or grant body,
+> that needs a decision from the founder, not a silent edit.
+
 Generated April 2026. All claims labelled: [Data] = verifiable from legislation/public docs, [Estimate] = projected timelines/ROI, [Assumption] = prospect status or intent.
 
 ---
@@ -29,14 +39,14 @@ brendan@askarthur.au | askarthur.au
 
 ## 2. Bank Compliance Map -- SPF Obligations
 
-| SPF Principle | Banking Obligation [Data] | Ask Arthur Capability [Data] | API Endpoint | Notes |
-|---------------|--------------------------|------------------------------|-------------|-------|
-| **Prevent** | Consumer warnings about scam risks; Confirmation of Payee | Consumer scam checker (7 surfaces) provides real-time warnings; entity lookup enables payee verification against known scam accounts | `GET /entities/lookup` (type=bank_account) | Payee check requires bank to pass BSB/account to API for known-scam match |
-| **Detect** | Internal scam detection mechanisms; consume external Actionable Scam Intelligence (ASI) | 16 threat feeds + 5 external enrichment APIs; trending threats by region; entity risk scoring (0-100) with risk factors breakdown | `GET /threats/trending`, `GET /threats/stats`, `GET /entities/lookup` | Region filter supports state-level detection (e.g. `?region=VIC`) |
-| **Report** | Report ASI to ACCC within 24 hours; share intelligence cross-sector | Government-ready export views (4 views); provider reporting infrastructure; structured data aligned to Scamwatch categories | Export RPCs: `get_threat_intel_export` | Data structured for NASC/Scamwatch ingestion [Data] |
-| **Disrupt** | Block scam accounts; freeze mule accounts; payment recall | Entity intelligence with risk scores enables blocking decisions; batch lookup screens multiple entities per request (up to 500 at Enterprise tier) | `POST /entities/batch` | Bank makes blocking decision; Ask Arthur provides intelligence input |
-| **Respond** | Internal dispute resolution; 30-day compliance statements; AFCA complaints (from Jan 2027) | Audit trail via scan results, entity intelligence, and timestamped report history | `GET /entities/{id}` | Full entity detail with verdict distribution and cluster membership |
-| **Govern** | Governance policies; annual senior officer certification | API usage dashboard with per-endpoint breakdowns; structured evidence for compliance certification | `GET /usage` | Usage stats provide auditable evidence of ASI consumption |
+| SPF Principle | Banking Obligation [Data]                                                                  | Ask Arthur Capability [Data]                                                                                                                       | API Endpoint                                                          | Notes                                                                     |
+| ------------- | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| **Prevent**   | Consumer warnings about scam risks; Confirmation of Payee                                  | Consumer scam checker (7 surfaces) provides real-time warnings; entity lookup enables payee verification against known scam accounts               | `GET /entities/lookup` (type=bank_account)                            | Payee check requires bank to pass BSB/account to API for known-scam match |
+| **Detect**    | Internal scam detection mechanisms; consume external Actionable Scam Intelligence (ASI)    | 16 threat feeds + 5 external enrichment APIs; trending threats by region; entity risk scoring (0-100) with risk factors breakdown                  | `GET /threats/trending`, `GET /threats/stats`, `GET /entities/lookup` | Region filter supports state-level detection (e.g. `?region=VIC`)         |
+| **Report**    | Report ASI to ACCC within 24 hours; share intelligence cross-sector                        | Government-ready export views (4 views); provider reporting infrastructure; structured data aligned to Scamwatch categories                        | Export RPCs: `get_threat_intel_export`                                | Data structured for NASC/Scamwatch ingestion [Data]                       |
+| **Disrupt**   | Block scam accounts; freeze mule accounts; payment recall                                  | Entity intelligence with risk scores enables blocking decisions; batch lookup screens multiple entities per request (up to 500 at Enterprise tier) | `POST /entities/batch`                                                | Bank makes blocking decision; Ask Arthur provides intelligence input      |
+| **Respond**   | Internal dispute resolution; 30-day compliance statements; AFCA complaints (from Jan 2027) | Audit trail via scan results, entity intelligence, and timestamped report history                                                                  | `GET /entities/{id}`                                                  | Full entity detail with verdict distribution and cluster membership       |
+| **Govern**    | Governance policies; annual senior officer certification                                   | API usage dashboard with per-endpoint breakdowns; structured evidence for compliance certification                                                 | `GET /usage`                                                          | Usage stats provide auditable evidence of ASI consumption                 |
 
 ---
 
@@ -65,14 +75,14 @@ brendan@askarthur.au | askarthur.au
 
 ## 4. Telco Compliance Map -- SPF Obligations
 
-| SPF Principle | Telco Obligation [Data] | Ask Arthur Capability [Data] | API Endpoint | Notes |
-|---------------|------------------------|------------------------------|-------------|-------|
-| **Prevent** | Verify sender IDs via Australian Sender ID Registry; warn consumers | Consumer scam checker across 7 surfaces; phone intelligence with carrier, line type, VoIP detection via Twilio Lookup | `GET /entities/lookup` (type=phone) | Complements Sender ID Registry with content-level scam detection |
-| **Detect** | Monitor calls/texts for scam indicators; detect scam content patterns | Trending scam types by period and region; entity risk scoring (phone, URL, email, IP); 16 threat feeds with automated ingestion | `GET /threats/trending`, `POST /entities/batch` | Batch lookup screens phone numbers and URLs extracted from SMS at scale |
-| **Report** | Report ASI to ACCC within 24 hours; share intelligence cross-sector | Government export views (4 views); provider reporting RPCs; Scamwatch-aligned categories | Export RPCs: `get_threat_intel_export`, `submit_provider_report` | Structured for NASC reporting requirements [Data] |
-| **Disrupt** | Block confirmed scam numbers; take down scam content | Phone and URL entity intelligence with risk levels (LOW/MEDIUM/HIGH/CRITICAL); cluster detection identifies coordinated campaigns | `GET /entities/{id}`, `GET /clusters`, `GET /clusters/{id}` | Cluster data reveals multi-entity scam campaigns sharing infrastructure |
-| **Respond** | Internal dispute resolution; compliance documentation | Timestamped entity history; verdict distribution per entity; usage audit trail | `GET /entities/{id}`, `GET /usage` | Provides evidence trail for dispute resolution |
-| **Govern** | Governance policies; annual certification | API usage dashboard; structured compliance evidence | `GET /usage` | Per-endpoint usage tracking for audit purposes |
+| SPF Principle | Telco Obligation [Data]                                               | Ask Arthur Capability [Data]                                                                                                      | API Endpoint                                                     | Notes                                                                   |
+| ------------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| **Prevent**   | Verify sender IDs via Australian Sender ID Registry; warn consumers   | Consumer scam checker across 7 surfaces; phone intelligence with carrier, line type, VoIP detection via Twilio Lookup             | `GET /entities/lookup` (type=phone)                              | Complements Sender ID Registry with content-level scam detection        |
+| **Detect**    | Monitor calls/texts for scam indicators; detect scam content patterns | Trending scam types by period and region; entity risk scoring (phone, URL, email, IP); 16 threat feeds with automated ingestion   | `GET /threats/trending`, `POST /entities/batch`                  | Batch lookup screens phone numbers and URLs extracted from SMS at scale |
+| **Report**    | Report ASI to ACCC within 24 hours; share intelligence cross-sector   | Government export views (4 views); provider reporting RPCs; Scamwatch-aligned categories                                          | Export RPCs: `get_threat_intel_export`, `submit_provider_report` | Structured for NASC reporting requirements [Data]                       |
+| **Disrupt**   | Block confirmed scam numbers; take down scam content                  | Phone and URL entity intelligence with risk levels (LOW/MEDIUM/HIGH/CRITICAL); cluster detection identifies coordinated campaigns | `GET /entities/{id}`, `GET /clusters`, `GET /clusters/{id}`      | Cluster data reveals multi-entity scam campaigns sharing infrastructure |
+| **Respond**   | Internal dispute resolution; compliance documentation                 | Timestamped entity history; verdict distribution per entity; usage audit trail                                                    | `GET /entities/{id}`, `GET /usage`                               | Provides evidence trail for dispute resolution                          |
+| **Govern**    | Governance policies; annual certification                             | API usage dashboard; structured compliance evidence                                                                               | `GET /usage`                                                     | Per-endpoint usage tracking for audit purposes                          |
 
 ---
 
@@ -97,12 +107,12 @@ Ask Arthur is a community-sourced scam intelligence platform. Consumers submit s
 
 **Compliance Mapping**
 
-| SPF Principle | Ask Arthur Capability |
-|---------------|----------------------|
-| Detect | 6 API endpoints with trending threats, entity risk scores, batch lookups [Data] |
-| Report | 4 government export views; provider reporting RPCs; Scamwatch-aligned categories [Data] |
-| Disrupt | Entity intelligence with risk scoring enables blocking decisions; cluster detection identifies coordinated campaigns [Data] |
-| Govern | Usage dashboards and audit trails provide certification evidence [Data] |
+| SPF Principle | Ask Arthur Capability                                                                                                       |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Detect        | 6 API endpoints with trending threats, entity risk scores, batch lookups [Data]                                             |
+| Report        | 4 government export views; provider reporting RPCs; Scamwatch-aligned categories [Data]                                     |
+| Disrupt       | Entity intelligence with risk scoring enables blocking decisions; cluster detection identifies coordinated campaigns [Data] |
+| Govern        | Usage dashboards and audit trails provide certification evidence [Data]                                                     |
 
 **Sovereign Capability**
 
@@ -186,49 +196,49 @@ brendan@askarthur.au
 
 ### Cost of Non-Compliance
 
-| Risk | Potential Cost | Source |
-|------|---------------|--------|
-| Tier 1 penalty (Prevent/Detect/Disrupt/Respond breach) | Up to A$52.7M or 30% of adjusted turnover [Data] | SPF Act 2025 |
-| Private right of action (consumer lawsuits) | Uncapped; class-action risk from July 2026 [Data] | SPF Act 2025 |
-| AFCA complaints | Volume-dependent; operational cost + remediation from Jan 2027 [Data] | SPF Act 2025 |
-| Reputational damage | Unquantifiable but material for community-focused ADIs [Assumption] | Industry standard |
-| **Total exposure** | **A$10M-$52.7M+ per serious breach** [Estimate] | |
+| Risk                                                   | Potential Cost                                                        | Source            |
+| ------------------------------------------------------ | --------------------------------------------------------------------- | ----------------- |
+| Tier 1 penalty (Prevent/Detect/Disrupt/Respond breach) | Up to A$52.7M or 30% of adjusted turnover [Data]                      | SPF Act 2025      |
+| Private right of action (consumer lawsuits)            | Uncapped; class-action risk from July 2026 [Data]                     | SPF Act 2025      |
+| AFCA complaints                                        | Volume-dependent; operational cost + remediation from Jan 2027 [Data] | SPF Act 2025      |
+| Reputational damage                                    | Unquantifiable but material for community-focused ADIs [Assumption]   | Industry standard |
+| **Total exposure**                                     | **A$10M-$52.7M+ per serious breach** [Estimate]                       |                   |
 
 ### Cost of Ask Arthur
 
-| Item | Cost | Notes |
-|------|------|-------|
-| Proof-of-concept pilot (4 weeks) | $0 | Free evaluation period [Data] |
-| Pro API tier (100 calls/day) | $2,000/month ($24K/year) [Data] | Suitable for initial integration |
-| Enterprise API tier (5,000 calls/day) | $5,000-$15,000/month ($60K-$180K/year) [Data] | Full-scale production use |
-| Integration effort | 1-2 days engineering time [Estimate] | Bearer token auth, RESTful JSON, OpenAPI spec provided |
-| **Year 1 total (Enterprise)** | **$60K-$180K** [Data/Estimate] | |
+| Item                                  | Cost                                          | Notes                                                  |
+| ------------------------------------- | --------------------------------------------- | ------------------------------------------------------ |
+| Proof-of-concept pilot (4 weeks)      | $0                                            | Free evaluation period [Data]                          |
+| Pro API tier (100 calls/day)          | $2,000/month ($24K/year) [Data]               | Suitable for initial integration                       |
+| Enterprise API tier (5,000 calls/day) | $5,000-$15,000/month ($60K-$180K/year) [Data] | Full-scale production use                              |
+| Integration effort                    | 1-2 days engineering time [Estimate]          | Bearer token auth, RESTful JSON, OpenAPI spec provided |
+| **Year 1 total (Enterprise)**         | **$60K-$180K** [Data/Estimate]                |                                                        |
 
 ### Cost of Alternatives
 
-| Alternative | Estimated Annual Cost | Limitations |
-|------------|----------------------|-------------|
-| BioCatch Trust network | $100K-$500K+ [Estimate] | Banking-only; no cross-sector intelligence; no consumer interface |
-| NICE Actimize | $100K-$1M+ [Estimate] | 6-12 month deployment; no Australian-specific focus; transaction-focused not content-focused |
-| Build in-house | $500K-$2M+ [Estimate] | Requires hiring ML engineers, threat analysts; 12-18 month build; no community data flywheel |
-| Do nothing | $0 upfront | A$52.7M+ penalty exposure; class-action risk; AFCA complaint volume [Data] |
+| Alternative            | Estimated Annual Cost   | Limitations                                                                                  |
+| ---------------------- | ----------------------- | -------------------------------------------------------------------------------------------- |
+| BioCatch Trust network | $100K-$500K+ [Estimate] | Banking-only; no cross-sector intelligence; no consumer interface                            |
+| NICE Actimize          | $100K-$1M+ [Estimate]   | 6-12 month deployment; no Australian-specific focus; transaction-focused not content-focused |
+| Build in-house         | $500K-$2M+ [Estimate]   | Requires hiring ML engineers, threat analysts; 12-18 month build; no community data flywheel |
+| Do nothing             | $0 upfront              | A$52.7M+ penalty exposure; class-action risk; AFCA complaint volume [Data]                   |
 
 ### ROI Calculation (Mid-Tier ADI)
 
-| Metric | Value |
-|--------|-------|
-| Ask Arthur Enterprise cost | $60K-$180K/year [Data] |
-| Penalty exposure avoided | $10M-$52.7M+ [Data] |
-| Cost vs. in-house build | 90-97% savings [Estimate] |
-| Cost vs. incumbent vendors | 60-90% savings [Estimate] |
-| Integration time | Days, not months [Estimate] |
-| Compliance evidence generated | Usage dashboards, audit trails, export views [Data] |
-| **Effective ROI** | **55:1 to 877:1 (penalty avoided / annual cost)** [Estimate] |
+| Metric                        | Value                                                        |
+| ----------------------------- | ------------------------------------------------------------ |
+| Ask Arthur Enterprise cost    | $60K-$180K/year [Data]                                       |
+| Penalty exposure avoided      | $10M-$52.7M+ [Data]                                          |
+| Cost vs. in-house build       | 90-97% savings [Estimate]                                    |
+| Cost vs. incumbent vendors    | 60-90% savings [Estimate]                                    |
+| Integration time              | Days, not months [Estimate]                                  |
+| Compliance evidence generated | Usage dashboards, audit trails, export views [Data]          |
+| **Effective ROI**             | **55:1 to 877:1 (penalty avoided / annual cost)** [Estimate] |
 
 Note: ROI calculation uses penalty avoidance as the value metric. Actual ROI depends on breach probability, which varies by institution. The calculation illustrates the asymmetry between compliance cost and non-compliance exposure. These are estimates provided for discussion purposes, not guaranteed outcomes.
 
 ---
 
-*Ask Arthur -- pre-revenue, production-ready API. Honest about our stage, serious about the problem.*
+_Ask Arthur -- pre-revenue, production-ready API. Honest about our stage, serious about the problem._
 
 askarthur.au | brendan@askarthur.au

@@ -20,21 +20,35 @@ export default function PrivacyPage() {
 
         <div className="rounded-xl border border-border-light bg-slate-50 p-4 mb-8 text-sm text-gov-slate">
           <p className="leading-relaxed">
-            <strong className="text-deep-navy">For procurement and vendor due-diligence:</strong>{" "}
+            <strong className="text-deep-navy">
+              For procurement and vendor due-diligence:
+            </strong>{" "}
             our{" "}
-            <a href="/legal/ask-arthur-security-overview-v1.pdf" className="text-action-teal font-medium hover:underline">
+            <a
+              href="/legal/ask-arthur-security-overview-v1.pdf"
+              className="text-action-teal font-medium hover:underline"
+            >
               Security Overview
             </a>
             ,{" "}
-            <a href="/legal/ask-arthur-dpa-template-v1.pdf" className="text-action-teal font-medium hover:underline">
+            <a
+              href="/legal/ask-arthur-dpa-template-v1.pdf"
+              className="text-action-teal font-medium hover:underline"
+            >
               DPA template
             </a>
             , and{" "}
-            <a href="/legal/ask-arthur-sub-processors-v1.csv" className="text-action-teal font-medium hover:underline">
+            <a
+              href="/legal/ask-arthur-sub-processors-v1.csv"
+              className="text-action-teal font-medium hover:underline"
+            >
               sub-processor list
             </a>{" "}
             are available alongside this policy. See{" "}
-            <a href="/trust" className="text-action-teal font-medium hover:underline">
+            <a
+              href="/trust"
+              className="text-action-teal font-medium hover:underline"
+            >
               /trust
             </a>{" "}
             for the full pack.
@@ -51,9 +65,17 @@ export default function PrivacyPage() {
             </p>
             <ul className="list-disc list-inside text-gov-slate text-base leading-relaxed space-y-2">
               <li>
-                <strong>Submitted text and images</strong> — processed by our AI
-                for scam analysis, then immediately discarded. We do not retain
-                the content you submit.
+                <strong>Submitted images</strong> — processed by our AI for scam
+                analysis, then discarded. We do not store the images you upload.
+              </li>
+              <li>
+                <strong>Submitted text</strong> — analysed, then a{" "}
+                <strong>redacted copy is kept</strong> so the scam can be
+                counted, matched against future reports and turned into threat
+                intelligence that protects other people. Before storage we strip
+                email addresses, phone numbers and other identifying details.
+                The redacted copy is deleted after <strong>90 days</strong>, or{" "}
+                <strong>180 days</strong> where the verdict was HIGH_RISK.
               </li>
               <li>
                 <strong>IP address</strong> — hashed for rate limiting purposes
@@ -63,11 +85,11 @@ export default function PrivacyPage() {
                 <strong>Analytics</strong> — we use Plausible Analytics, a
                 privacy-first analytics tool that collects no personal data and
                 uses no cookies. We also keep a first-party record of anonymous
-                usage events (such as when a check is run or a page is viewed) to
-                understand how the service is used and which channels bring people
-                to us. These records hold no scanned content and no personal
-                information — only the type of action, an anonymous identifier,
-                and, where present, the campaign that referred you.
+                usage events (such as when a check is run or a page is viewed)
+                to understand how the service is used and which channels bring
+                people to us. These records hold no scanned content and no
+                personal information — only the type of action, an anonymous
+                identifier, and, where present, the campaign that referred you.
               </li>
               <li>
                 <strong>Email address</strong> — only if you voluntarily
@@ -82,13 +104,17 @@ export default function PrivacyPage() {
             </h2>
             <p className="text-gov-slate text-base leading-relaxed mb-3">
               Your submitted content is sent to our AI (Anthropic Claude API)
-              for scam analysis. The analysis result is returned to you
-              immediately, and your original content is discarded.
+              for scam analysis, and the result is returned to you immediately.
+              Uploaded images are then discarded. Submitted text is retained as
+              a redacted copy for the period set out in section 1, because a
+              scam report is only useful to the next person if we can keep it
+              long enough to compare against what comes next.
             </p>
             <p className="text-gov-slate text-base leading-relaxed">
               Aggregated, PII-scrubbed scam patterns (e.g. verdict counts by
-              region) may be retained for research and to improve the service.
-              These records contain no personal information.
+              region) are retained beyond that window for research and to
+              improve the service. These aggregates contain no personal
+              information.
             </p>
           </section>
 
@@ -98,31 +124,115 @@ export default function PrivacyPage() {
             </h2>
             <p className="text-gov-slate text-base leading-relaxed mb-3">
               Ask Arthur is operated by Young Milton Pty Ltd, an Australian
-              company. To provide this service, your data may be processed by
-              the following overseas providers:
+              company. Our infrastructure and the checks we run on your
+              submission are hosted outside Australia. This section sets out
+              where, and who receives what.
+            </p>
+
+            <p className="text-gov-slate text-base leading-relaxed mb-2 font-semibold">
+              Where your data is stored and processed
+            </p>
+            <ul className="list-disc list-inside text-gov-slate text-base leading-relaxed space-y-2 mb-4">
+              <li>
+                <strong>Database — Singapore.</strong> Scam reports, subscriber
+                emails and aggregated statistics are stored in a Supabase
+                PostgreSQL instance in the <code>ap-southeast-1</code>{" "}
+                (Singapore) region.
+              </li>
+              <li>
+                <strong>Application processing — United States.</strong> Our
+                server functions execute in Vercel&apos;s <code>iad1</code>{" "}
+                (Washington DC) region. Pages and static assets are served from
+                Vercel&apos;s Sydney edge, but the code that reads your
+                submission runs in the United States.
+              </li>
+              <li>
+                <strong>Cache and rate limiting — Singapore.</strong> Upstash
+                Redis, <code>ap-southeast-1</code>.
+              </li>
+              <li>
+                <strong>Content delivery and bot protection — global.</strong>{" "}
+                Cloudflare.
+              </li>
+            </ul>
+
+            <p className="text-gov-slate text-base leading-relaxed mb-2 font-semibold">
+              Who else receives your submission, and what they get
+            </p>
+            <p className="text-gov-slate text-base leading-relaxed mb-3">
+              To reach a verdict we check your submission against external
+              threat-intelligence and analysis services. Each receives only the
+              part of your submission relevant to its check:
             </p>
             <ul className="list-disc list-inside text-gov-slate text-base leading-relaxed space-y-2">
               <li>
-                <strong>Anthropic</strong> (United States) — AI analysis of
-                submitted content
+                <strong>Anthropic</strong> (United States) — your submission,
+                for AI analysis. Text is PII-scrubbed before it is sent. Images
+                are sent as supplied, because redaction cannot be applied to an
+                image — so avoid uploading screenshots containing your own
+                personal details.
               </li>
               <li>
-                <strong>Supabase</strong> (United States) — database
-                infrastructure for aggregated statistics and subscriber emails
+                <strong>Google Safe Browsing</strong> (United States) — the full
+                URLs found in your submission, to check reputation.
               </li>
               <li>
-                <strong>Cloudflare</strong> (United States / global) — content
-                delivery and security
+                <strong>urlscan.io</strong> (Germany) — URLs, submitted for
+                sandboxed page scanning.
               </li>
               <li>
-                <strong>Vercel</strong> (United States) — application hosting
+                <strong>AbuseIPDB</strong> (United States) — IP addresses found
+                in your submission.
+              </li>
+              <li>
+                <strong>Voyage AI</strong> (United States) — PII-scrubbed text,
+                converted to numeric embeddings so similar scams can be matched.
+              </li>
+              <li>
+                <strong>WhoisJSON</strong>, <strong>RDAP registries</strong> and{" "}
+                <strong>crt.sh</strong> (various, overseas) — domain names only,
+                for registration and certificate lookups.
+              </li>
+              <li>
+                <strong>Netcraft</strong> (United Kingdom) — URLs we assess as
+                likely phishing, reported so the site can be taken down.
+              </li>
+              <li>
+                <strong>Twilio</strong> (United States) — phone numbers found in
+                your submission, for line-type and carrier lookup.
+              </li>
+              <li>
+                <strong>Resend</strong> (United States) — your email address and
+                message content, when we send you email.
+              </li>
+              <li>
+                <strong>Stripe</strong> (United States) — billing details, for
+                paid plans only. We never see or store your card number.
+              </li>
+              <li>
+                <strong>Inngest</strong> (United States) — a PII-scrubbed copy
+                of your submission, used to queue background processing.
               </li>
             </ul>
             <p className="text-gov-slate text-base leading-relaxed mt-3">
+              Depending on which optional features are enabled, we may also use{" "}
+              <strong>Hive AI</strong> (image checks),{" "}
+              <strong>VirusTotal</strong>, <strong>IPQualityScore</strong> and{" "}
+              <strong>Have I Been Pwned</strong> (breach checks). Additional
+              providers appear in this list before they receive any data.
+            </p>
+            <p className="text-gov-slate text-base leading-relaxed mt-3">
+              Before your submission is stored, we remove email addresses, phone
+              numbers and other identifying details — so the copy we retain, and
+              the copy our background queue receives, is redacted. The
+              reputation checks above necessarily see the URL, IP or phone
+              number being checked, because that is the thing being checked.
+            </p>
+            <p className="text-gov-slate text-base leading-relaxed mt-3">
               We take reasonable steps to ensure these providers handle your
-              information in line with the Australian Privacy Principles
-              (APP 8) and equivalent overseas-transfer standards under UK GDPR,
-              EU GDPR, Canadian PIPEDA, and Brazilian LGPD.
+              information in line with the Australian Privacy Principles (APP 8)
+              and equivalent overseas-transfer standards under UK GDPR, EU GDPR,
+              Canadian PIPEDA, and Brazilian LGPD.
             </p>
           </section>
 
@@ -160,9 +270,9 @@ export default function PrivacyPage() {
               </li>
               <li>
                 <strong>management</strong> (optional, opt-in) — requested only
-                when you open the Extension Security Scanner tab. Reads the
-                list of installed extension IDs so they can be audited for
-                known risks. No extension content or user data is transmitted.
+                when you open the Extension Security Scanner tab. Reads the list
+                of installed extension IDs so they can be audited for known
+                risks. No extension content or user data is transmitted.
               </li>
               <li>
                 <strong>Facebook host permissions</strong>
@@ -170,11 +280,11 @@ export default function PrivacyPage() {
                 <code className="text-sm">
                   www.facebook.com, m.facebook.com, web.facebook.com
                 </code>
-                {") "}
-                — used by the Facebook Ads scanner to inspect sponsored posts
-                for scam signals. Posts are reduced to structural fingerprints
-                before being sent to our API. Personal posts, direct messages,
-                and general browsing history are never read or transmitted.
+                {") "}— used by the Facebook Ads scanner to inspect sponsored
+                posts for scam signals. Posts are reduced to structural
+                fingerprints before being sent to our API. Personal posts,
+                direct messages, and general browsing history are never read or
+                transmitted.
               </li>
             </ul>
 
@@ -214,17 +324,17 @@ export default function PrivacyPage() {
             <p className="text-gov-slate text-base leading-relaxed mb-3">
               <strong>Authentication model.</strong> Each install generates an
               ECDSA P-256 keypair on first run. The private key is
-              non-extractable and stored in the browser&apos;s local IndexedDB
-              — it never leaves your device. All API requests are signed with
-              the private key and verified server-side using the stored public
-              key, with a short-lived nonce to prevent replay attacks.
+              non-extractable and stored in the browser&apos;s local IndexedDB —
+              it never leaves your device. All API requests are signed with the
+              private key and verified server-side using the stored public key,
+              with a short-lived nonce to prevent replay attacks.
             </p>
 
             <p className="text-gov-slate text-base leading-relaxed">
               <strong>Retention.</strong> Requests to the extension API are
               processed identically to web-app submissions — the analysed
-              content is discarded after analysis; only aggregated,
-              PII-scrubbed statistics are retained.
+              content is discarded after analysis; only aggregated, PII-scrubbed
+              statistics are retained.
             </p>
           </section>
 
@@ -239,19 +349,19 @@ export default function PrivacyPage() {
             <p className="text-gov-slate text-base leading-relaxed mb-3">
               Ask Arthur Shield is a forthcoming Shopify app for Australian
               merchants that adds fraud-prevention and chargeback-defence
-              services to their checkout. This section describes the buyer
-              data handling commitments that apply when a merchant installs
-              the app. The app is currently in development and is not yet
-              available on the Shopify App Store.
+              services to their checkout. This section describes the buyer data
+              handling commitments that apply when a merchant installs the app.
+              The app is currently in development and is not yet available on
+              the Shopify App Store.
             </p>
 
             <p className="text-gov-slate text-base leading-relaxed mb-2 font-semibold">
               What we process:
             </p>
             <p className="text-gov-slate text-base leading-relaxed mb-3">
-              When an Australian merchant installs Ask Arthur Shield, we
-              process buyer email, phone, billing address, shipping address,
-              and order metadata (line items, browser IP, user-agent).
+              When an Australian merchant installs Ask Arthur Shield, we process
+              buyer email, phone, billing address, shipping address, and order
+              metadata (line items, browser IP, user-agent).
             </p>
 
             <p className="text-gov-slate text-base leading-relaxed mb-2 font-semibold">
@@ -268,10 +378,12 @@ export default function PrivacyPage() {
               Where:
             </p>
             <p className="text-gov-slate text-base leading-relaxed mb-3">
-              Stored in Australia (Supabase Sydney region, separate from our
-              main analysis pipeline), encrypted at rest with pgsodium,
-              accessed by service-role only. Encryption keys live in Supabase
-              Vault; access is service-role only and is logged for audit.
+              Stored in our Supabase PostgreSQL instance in the{" "}
+              <code>ap-southeast-1</code> (Singapore) region, in tables separate
+              from our main analysis pipeline, encrypted at rest with pgsodium
+              and accessed by service-role only. Encryption keys live in
+              Supabase Vault; access is service-role only and is logged for
+              audit. See section 3 for where processing occurs.
             </p>
 
             <p className="text-gov-slate text-base leading-relaxed mb-2 font-semibold">
@@ -279,8 +391,8 @@ export default function PrivacyPage() {
             </p>
             <p className="text-gov-slate text-base leading-relaxed mb-3">
               120 days from order date (matching the standard chargeback
-              window). After 120 days, all personally-identifying buyer data
-              is purged automatically.
+              window). After 120 days, all personally-identifying buyer data is
+              purged automatically.
             </p>
 
             <p className="text-gov-slate text-base leading-relaxed mb-2 font-semibold">
@@ -289,9 +401,8 @@ export default function PrivacyPage() {
             <p className="text-gov-slate text-base leading-relaxed mb-3">
               Nobody. The data is processed solely for the installing
               merchant&apos;s fraud-prevention surface. We do not sell, market
-              against, or otherwise commercialise customer PII. Aggregate
-              signal counters (not identifiable) may be retained for corpus
-              enrichment.
+              against, or otherwise commercialise customer PII. Aggregate signal
+              counters (not identifiable) may be retained for corpus enrichment.
             </p>
 
             <p className="text-gov-slate text-base leading-relaxed mb-2 font-semibold">
@@ -314,13 +425,10 @@ export default function PrivacyPage() {
               Our data processor relationship with Shopify merchants:
             </p>
             <p className="text-gov-slate text-base leading-relaxed">
-              When the Shopify app processes buyer PII, the merchant is the
-              data controller and Ask Arthur is the data processor. Our data
+              When the Shopify app processes buyer PII, the merchant is the data
+              controller and Ask Arthur is the data processor. Our data
               processing agreement (DPA) with merchants is available at{" "}
-              <a
-                href="/trust/dpa"
-                className="text-action-teal hover:underline"
-              >
+              <a href="/trust/dpa" className="text-action-teal hover:underline">
                 /trust/dpa
               </a>
               .
@@ -339,9 +447,9 @@ export default function PrivacyPage() {
               When you rate a check with thumbs-up or thumbs-down, we store:
               your rating, any reason chips you selected, any optional comment,
               and a hashed identifier derived from your IP address and browser.
-              We do <strong>not</strong> store your original submission alongside
-              the rating — only a short content hash so we can link the rating
-              to the verdict you saw.
+              We do <strong>not</strong> store your original submission
+              alongside the rating — only a short content hash so we can link
+              the rating to the verdict you saw.
             </p>
             <p className="text-gov-slate text-base leading-relaxed mb-3">
               If you tick{" "}
@@ -351,13 +459,13 @@ export default function PrivacyPage() {
               </strong>
               , we retain a PII-redacted copy of the check for up to 24 months
               to improve the classifier. This checkbox is opt-in and defaults
-              off. Under the Australian Privacy Act 1988 (Cth) — and
-              equivalent reasoning under UK GDPR, EU GDPR, and Canadian PIPEDA
-              — hashing is not anonymisation where re-identification is
-              reasonably possible, so we treat training-consent records as
-              personal information: we redact names, emails, phone numbers,
-              bank details and similar identifiers before retention, and you
-              may request deletion at any time by emailing{" "}
+              off. Under the Australian Privacy Act 1988 (Cth) — and equivalent
+              reasoning under UK GDPR, EU GDPR, and Canadian PIPEDA — hashing is
+              not anonymisation where re-identification is reasonably possible,
+              so we treat training-consent records as personal information: we
+              redact names, emails, phone numbers, bank details and similar
+              identifiers before retention, and you may request deletion at any
+              time by emailing{" "}
               <a
                 href="mailto:brendan@askarthur.au"
                 className="text-action-teal hover:underline"
@@ -393,9 +501,9 @@ export default function PrivacyPage() {
               8. Cookies &amp; Tracking
             </h2>
             <p className="text-gov-slate text-base leading-relaxed">
-              We use Plausible Analytics, a privacy-first analytics platform that
-              does not use cookies, does not collect personal data, and is fully
-              compliant with GDPR, CCPA, and PECR.
+              We use Plausible Analytics, a privacy-first analytics platform
+              that does not use cookies, does not collect personal data, and is
+              fully compliant with GDPR, CCPA, and PECR.
             </p>
             <p className="text-gov-slate text-base leading-relaxed mt-3">
               We do set one first-party cookie,{" "}
@@ -407,9 +515,9 @@ export default function PrivacyPage() {
               of our posts and articles are useful, without tracking you across
               other websites. It contains no personal information and no scanned
               content, is set only on our own domain, and expires after 90 days.
-              Because it is strictly first-party and cookieless analytics is used
-              for page metrics, no consent banner is required for Australian
-              visitors under the Privacy Act 1988 (Cth).
+              Because it is strictly first-party and cookieless analytics is
+              used for page metrics, no consent banner is required for
+              Australian visitors under the Privacy Act 1988 (Cth).
             </p>
           </section>
 
@@ -420,9 +528,9 @@ export default function PrivacyPage() {
             <p className="text-gov-slate text-base leading-relaxed mb-3">
               You have the right to access, correct, and request deletion of
               personal information we hold about you. This applies under the
-              Australian Privacy Act 1988 (Cth) and equivalent regimes
-              including UK GDPR, EU GDPR, Canadian PIPEDA, and Brazilian LGPD,
-              depending on your jurisdiction.
+              Australian Privacy Act 1988 (Cth) and equivalent regimes including
+              UK GDPR, EU GDPR, Canadian PIPEDA, and Brazilian LGPD, depending
+              on your jurisdiction.
             </p>
             <ul className="list-disc list-inside text-gov-slate text-base leading-relaxed space-y-2">
               <li>
@@ -435,7 +543,8 @@ export default function PrivacyPage() {
                 jurisdiction:
                 <ul className="mt-1 ml-5 list-disc list-inside">
                   <li>
-                    Australia — Office of the Australian Information Commissioner (
+                    Australia — Office of the Australian Information
+                    Commissioner (
                     <a
                       href="https://www.oaic.gov.au"
                       target="_blank"
@@ -506,9 +615,7 @@ export default function PrivacyPage() {
           </section>
 
           <section>
-            <p className="text-sm text-slate-400">
-              Last updated: May 2026
-            </p>
+            <p className="text-sm text-slate-400">Last updated: May 2026</p>
           </section>
         </div>
       </main>

@@ -1,5 +1,15 @@
 # Australia's Economic Accelerator (AEA) — Seed Grant Application Narrative
 
+> ⚠️ **DATA-RESIDENCY CLAIM IN THIS DOCUMENT IS INCORRECT — verified 2026-07-30.**
+> Any statement here that Ask Arthur is "Australian-hosted", has "sovereign data
+> residency" or "zero US data dependency" does not match the live
+> infrastructure. The Supabase database is `ap-southeast-1` (**Singapore**) and
+> Vercel server functions execute in `iad1` (**Washington DC, USA**); only the
+> CDN edge is Sydney. See `docs/compliance/data-residency-statement.md`.
+> **The narrative below has deliberately NOT been rewritten** — if any version
+> of this document has already been sent to an investor, customer or grant body,
+> that needs a decision from the founder, not a silent edit.
+
 **Important context (from verification):** Apate.ai was previously cited as an AEA grant precedent. **This is incorrect.** Apate.ai's A$2.5M raise was VC seed funding from OIF Ventures and Investible (August 2025), not an AEA grant. Apate is a Macquarie University spin-out, which means it is a _founder-spinout precedent_, not an _AEA precedent_. The AskArthur AEA narrative should rely on the academic-partnership criterion plus regulatory tailwind, not on Apate as comparator.
 
 **Strategic posture:** AEA Seed is for university-research-to-commercialisation projects with a named university partner. AskArthur is currently a sole-director Pty Ltd with no formal academic partnership. The AEA application requires AskArthur to _first_ secure a partnership with a named Australian university research group, then apply jointly. The natural partner is **A/Prof Jerry Parwada at UNSW Business School** — finance / financial regulation focus, an existing IDCARE research collaborator, and now an IDCARE board director.
