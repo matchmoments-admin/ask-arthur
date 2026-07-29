@@ -470,6 +470,7 @@ export default function ResultCard({
           onCheckAnother={onCheckAnother}
           onReport={showReport ? handleReport : undefined}
           showReport={showReport}
+          reportPending={resolving}
         />
       )}
     </div>

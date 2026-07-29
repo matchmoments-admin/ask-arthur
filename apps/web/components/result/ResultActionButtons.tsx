@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, Flag } from "lucide-react";
+import { ArrowRight, Flag, Loader2 } from "lucide-react";
 
 interface Props {
   onCheckAnother: () => void;
@@ -11,12 +11,18 @@ interface Props {
   /** If true, show the "Report this scam" secondary button. Hidden for SAFE
    *  verdicts or when there's no report surface to route to. */
   showReport?: boolean;
+  /** True while ResultCard is exchanging the analysis ref for the persisted
+   *  report id. That round-trip can take a couple of seconds because it waits
+   *  on the durable write, and without visible feedback the button reads as
+   *  broken and gets clicked again. */
+  reportPending?: boolean;
 }
 
 export default function ResultActionButtons({
   onCheckAnother,
   onReport,
   showReport = true,
+  reportPending = false,
 }: Props) {
   return (
     <div className="mt-8">
@@ -25,10 +31,21 @@ export default function ResultActionButtons({
           <button
             type="button"
             onClick={onReport}
-            className="inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-full border-2 border-danger-text bg-white px-5 py-3 text-base font-bold text-danger-text hover:bg-danger-bg"
+            disabled={reportPending}
+            aria-busy={reportPending}
+            className="inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-full border-2 border-danger-text bg-white px-5 py-3 text-base font-bold text-danger-text hover:bg-danger-bg disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:bg-white"
           >
-            <Flag size={18} aria-hidden="true" />
-            Report this scam
+            {reportPending ? (
+              <>
+                <Loader2 size={18} aria-hidden="true" className="animate-spin" />
+                Preparing your report…
+              </>
+            ) : (
+              <>
+                <Flag size={18} aria-hidden="true" />
+                Report this scam
+              </>
+            )}
           </button>
         )}
         <button
