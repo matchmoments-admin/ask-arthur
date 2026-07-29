@@ -33,6 +33,12 @@ interface ResultCardProps {
   contentHash?: string;
   analysisId?: string;
   scamReportId?: number;
+  /** Capability handle from /api/analyze (`analysisRef`). Present on the web
+   *  checker, where the scam_reports row is written asynchronously and so has
+   *  no numeric id at render time. Callers that already hold a persisted id
+   *  (none today) may pass `scamReportId` instead; either one enables the
+   *  report CTA. */
+  analysisRef?: string;
   /** v0.2e charity-intent CTA. When the analyze route detected
    *  charity-shaped input (keyword or 11-digit ABN), this object surfaces
    *  whatever was extractable so we can deep-link the user into the
@@ -142,6 +148,7 @@ export default function ResultCard({
   contentHash,
   analysisId,
   scamReportId,
+  analysisRef,
   charityIntent,
   shopSignal,
   commerceUrl,
@@ -153,10 +160,66 @@ export default function ResultCard({
   const Icon = config.icon;
   // Picker is only useful when we have a scam_reports row to attach the
   // onward log entries to; otherwise the picker has nothing to forward.
-  const showReport = verdict !== "SAFE" && typeof scamReportId === "number";
+  // The report CTA needs SOME handle on the scam_reports row. Historically it
+  // required a numeric `scamReportId`, which the web checker never had — the
+  // row is written asynchronously — so this was permanently false and
+  // onward_report_log stayed empty for the platform's entire history. An
+  // `analysisRef` is now an equally valid handle; it is exchanged for the id
+  // on click, by which time the durable write has landed.
+  // Gated on `analysisRef` specifically: it is both the handle used to resolve
+  // the id and the capability the onward route authorises on, so a caller
+  // holding only a numeric id could not complete a submission anyway.
+  const showReport = verdict !== "SAFE" && typeof analysisRef === "string";
   const [showPicker, setShowPicker] = useState(false);
+  // Resolved lazily from `analysisRef`; seeded when a caller passed an id.
+  const [resolvedReportId, setResolvedReportId] = useState<number | null>(
+    typeof scamReportId === "number" ? scamReportId : null,
+  );
+  const [resolving, setResolving] = useState(false);
+  const [resolveFailed, setResolveFailed] = useState(false);
+
+  /**
+   * Exchange the analysis ref for the persisted report id.
+   *
+   * A 404 means the durable write has not landed yet, which is normal within
+   * the first moment after a verdict — so retry a few times with a short
+   * backoff rather than telling the user something went wrong.
+   */
+  async function resolveReportId(ref: string): Promise<number | null> {
+    const delaysMs = [0, 600, 1200, 2000];
+    for (const delay of delaysMs) {
+      if (delay > 0) await new Promise((r) => setTimeout(r, delay));
+      try {
+        const res = await fetch(`/api/report/by-ref/${encodeURIComponent(ref)}`);
+        if (res.ok) {
+          const data = (await res.json()) as { scamReportId?: number };
+          if (typeof data.scamReportId === "number") return data.scamReportId;
+        }
+        // Anything other than "not yet written" will not fix itself.
+        if (res.status !== 404) return null;
+      } catch {
+        // Network blip — the next attempt covers it.
+      }
+    }
+    return null;
+  }
 
   async function handleReport() {
+    if (resolving) return; // the exchange can take a moment; ignore re-clicks
+    setResolveFailed(false);
+
+    // Resolve the report id first, so the feedback row below can carry it.
+    // Linking feedback to its analysis is what makes accuracy measurable: at
+    // the time of writing, all 22 verdict_feedback rows in production had a
+    // NULL scam_report_id, so nothing could learn from them.
+    let reportId = resolvedReportId;
+    if (reportId == null && analysisRef) {
+      setResolving(true);
+      reportId = await resolveReportId(analysisRef);
+      setResolving(false);
+      if (reportId != null) setResolvedReportId(reportId);
+    }
+
     // Audit: write a 'user_reported' verdict_feedback row regardless of
     // which destinations the user later picks. This preserves the existing
     // analytics signal (how many users hit the report button).
@@ -168,7 +231,7 @@ export default function ResultCard({
           verdictGiven: verdict,
           userSays: "user_reported",
           analysisId,
-          scamReportId,
+          scamReportId: reportId ?? undefined,
           contentHash,
           locale:
             typeof navigator !== "undefined"
@@ -179,13 +242,23 @@ export default function ResultCard({
     } catch {
       // Best-effort — matches ResultFeedback's fire-and-forget pattern.
     }
+
+    if (reportId == null) {
+      // The row genuinely never appeared. Say so rather than opening a picker
+      // that cannot submit; NextStepsCard above still gives the user a real
+      // next action, so they are not stranded.
+      setResolveFailed(true);
+      return;
+    }
     setShowPicker(true);
   }
 
   // Build the evidence context once and reuse for the picker + summary.
   const evidence: EvidenceContext = {
-    reportRef: scamReportId
-      ? `ASK-${String(scamReportId).padStart(6, "0")}`
+    // Uses the RESOLVED id — the evidence bundle sent to regulators and brands
+    // must carry the real reference, not "ASK-pending".
+    reportRef: resolvedReportId
+      ? `ASK-${String(resolvedReportId).padStart(6, "0")}`
       : "ASK-pending",
     scamType: scamType ?? null,
     impersonatedBrand: impersonatedBrand ?? null,
@@ -365,15 +438,16 @@ export default function ResultCard({
       <ResultFeedback
         verdictGiven={verdict}
         analysisId={analysisId}
-        scamReportId={scamReportId}
+        scamReportId={resolvedReportId ?? undefined}
         contentHash={contentHash}
       />
 
       {/* Onward report picker — opens inline when user clicks "Report this scam".
           The picker swaps to OnwardReportSummary after the user submits. */}
-      {showPicker && scamReportId && (
+      {showPicker && resolvedReportId != null && analysisRef && (
         <OnwardReportPicker
-          scamReportId={scamReportId}
+          scamReportId={resolvedReportId}
+          analysisRef={analysisRef}
           analysisId={analysisId}
           scamType={scamType}
           impersonatedBrand={impersonatedBrand}
@@ -381,6 +455,13 @@ export default function ResultCard({
           evidence={evidence}
           onClose={() => setShowPicker(false)}
         />
+      )}
+
+      {resolveFailed && (
+        <p className="mt-3 text-sm text-slate-600" role="status">
+          We couldn&apos;t attach your report just yet. Your check was still
+          recorded — please use the recommended next step above.
+        </p>
       )}
 
       {/* Two-button footer */}

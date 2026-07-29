@@ -11,6 +11,8 @@ import OnwardReportSummary from "./OnwardReportSummary";
 
 interface Props {
   scamReportId: number;
+  /** Capability handle from /api/analyze; the onward route authorises on it. */
+  analysisRef: string;
   analysisId?: string;
   scamType?: string;
   impersonatedBrand?: string;
@@ -29,6 +31,7 @@ interface Props {
  */
 export default function OnwardReportPicker({
   scamReportId,
+  analysisRef,
   analysisId,
   scamType,
   impersonatedBrand,
@@ -98,7 +101,9 @@ export default function OnwardReportPicker({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          scam_report_id: scamReportId,
+          // The server resolves the report from this ref and ignores any
+          // client-supplied id — see the ownership note on the route.
+          analysis_ref: analysisRef,
           analysis_id: analysisId,
           selected: picks,
         }),

@@ -762,6 +762,10 @@ export default function ScamChecker() {
             }
             bestNextStep={result.bestNextStep}
             stateCode={result.stateCode}
+            // Enables the "Report this scam" CTA. Without this one prop the
+            // whole onward-reporting apparatus is unreachable from the surface
+            // that produces the overwhelming majority of reports.
+            analysisRef={result.analysisRef}
             onCheckAnother={handleReset}
           />
       )}

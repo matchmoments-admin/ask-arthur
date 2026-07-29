@@ -8,7 +8,11 @@ import {
 } from "@/lib/onward/submit";
 
 const Body = z.object({
-  scam_report_id: z.number().int().positive(),
+  /**
+   * The capability handle from /api/analyze (`analysisRef`), persisted as
+   * scam_reports.idempotency_key. REQUIRED — see the ownership note on POST.
+   */
+  analysis_ref: z.string().min(1).max(128),
   analysis_id: z.string().max(128).optional(),
   selected: z
     .array(
@@ -29,6 +33,21 @@ const Body = z.object({
  * destination Inngest workers. The dedup unique index on (scam_report_id,
  * destination, destination_key) makes replay safe. The bot "Report scam" flow
  * calls submitOnwardReports directly, so both surfaces share one pipeline.
+ *
+ * OWNERSHIP (2026-07-29): this route used to accept a raw
+ * `scam_report_id: number` from the client with no check that the caller had
+ * anything to do with that report. Report ids are sequential integers, so
+ * anyone could have filed regulator and brand reports against any report in
+ * the table by counting from 1. It was unexploited only because the UI that
+ * calls it could never render (see /api/report/by-ref), which means wiring
+ * that UI up is exactly what would have made it reachable — so it is fixed in
+ * the same change.
+ *
+ * The caller now presents `analysis_ref` — the ULID handed back by
+ * /api/analyze, carrying 80 bits of randomness — and the server resolves it to
+ * the id. Holding the ref is the authorisation: it is issued only to whoever
+ * submitted the analysis. No numeric id is accepted from the client at all,
+ * so there is nothing left to enumerate.
  */
 export async function POST(req: NextRequest) {
   // Rate limit (mirrors scam-contacts/report): this route fans out to external
@@ -60,8 +79,24 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Service unavailable" }, { status: 503 });
   }
 
+  // Resolve the capability handle to the report it owns. A miss is either a
+  // forged ref or a durable write that has not landed yet; both are a 404, and
+  // neither distinguishes "wrong ref" from "not ready" to the caller.
+  const { data: report, error: lookupError } = await supabase
+    .from("scam_reports")
+    .select("id")
+    .eq("idempotency_key", body.analysis_ref)
+    .maybeSingle();
+
+  if (lookupError) {
+    return NextResponse.json({ error: "lookup_failed" }, { status: 500 });
+  }
+  if (!report) {
+    return NextResponse.json({ error: "report_not_found" }, { status: 404 });
+  }
+
   const outcome = await submitOnwardReports(supabase, {
-    scamReportId: body.scam_report_id,
+    scamReportId: report.id,
     analysisId: body.analysis_id,
     selected: body.selected,
   });

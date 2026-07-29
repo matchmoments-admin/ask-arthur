@@ -775,6 +775,17 @@ export async function POST(req: NextRequest) {
         urlsChecked: urlResults.length,
         maliciousURLs: maliciousURLs.length,
         countryCode,
+        // The handle that lets the client reach its own scam_reports row.
+        // Persistence is asynchronous (Inngest, or the legacy waitUntil path),
+        // so the numeric id does not exist yet at response time — that is
+        // precisely why ResultCard's report CTA, which gated on a numeric
+        // `scamReportId`, could never render and onward_report_log stayed at
+        // zero rows for the platform's entire history. The client exchanges
+        // this ref for the id via GET /api/report/by-ref/[ref] once the write
+        // lands. It is also the capability token for POST /api/report/onward:
+        // a ULID (80 bits of entropy) is a far better authorisation handle
+        // than the sequential integer that endpoint used to accept.
+        analysisRef: requestId,
         ...(aiResult.scamType && { scamType: aiResult.scamType }),
         ...(aiResult.impersonatedBrand && { impersonatedBrand: aiResult.impersonatedBrand }),
         ...(aiResult.channel && { channel: aiResult.channel }),
