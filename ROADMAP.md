@@ -2,6 +2,19 @@
 
 Phased build plan for Ask Arthur with current status tracking. See `BACKLOG.md` for deferred feature ideas by platform.
 
+> **How to read "✅ Done" (clarified 2026-07-29).** It means **the code is built and merged** — it does _not_ mean the feature is live, flagged on, or in use by anyone. Those are different questions and this document cannot answer them, because it is written by hand and never re-derived.
+>
+> An enterprise review on 2026-07-29 checked several ✅ rows against production and found the gap is real and routinely large:
+>
+> | Marked ✅ Done   | What production says                                                       |
+> | ---------------- | -------------------------------------------------------------------------- |
+> | Mobile App       | `device_push_tokens` has never held a row                                  |
+> | WhatsApp bot     | zero `scam_reports` with `source='bot_whatsapp'`; Meta rejected the number |
+> | Onward reporting | `onward_report_log` had **0 rows lifetime** until 2026-07-29               |
+> | Verdict feedback | 22 rows, **0** linked to the analysis they judge                           |
+>
+> More broadly: **127 of 128 feature flags default OFF, and 95 of ~159 production tables have never held a row.** Building behind a flag and moving on is the dominant pattern here, so treat ✅ as "built", and **check prod before believing anything is live.** The fastest check is usually `select count(*)` on the feature's own table.
+
 ---
 
 ## Phase 1 — Core Platform ✅

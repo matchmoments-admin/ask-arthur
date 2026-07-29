@@ -33,10 +33,13 @@ const CheckoutSchema = z.object({
 
 export async function POST(req: NextRequest) {
   try {
-    // 1. Auth + per-install rate limit. The content script (PR-B1b) MUST send
-    //    `x-scan-source: checkout` so auto-fired checkout scans use the dedicated
-    //    checkout bucket (30/min, 300/day) and never eat the manual 50/day.
-    const auth = await validateExtensionRequest(req);
+    // 1. Auth + per-install rate limit. Auto-fired checkout scans draw on the
+    //    dedicated checkout bucket (30/min, 300/day) and never eat the manual
+    //    50/day. The source is declared HERE rather than sent by the content
+    //    script: it used to be read from a client `x-scan-source` header, which
+    //    the ECDSA canonical string does not sign, so any caller could claim
+    //    this budget from any endpoint. The route is the ground truth.
+    const auth = await validateExtensionRequest(req, { source: "checkout" });
     if (!auth.valid) {
       return NextResponse.json(
         { error: auth.error },

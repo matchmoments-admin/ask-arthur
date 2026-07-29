@@ -15,6 +15,12 @@ export interface AnalysisResponse {
   redFlags: string[];
   nextSteps: string[];
   countryCode?: string | null;
+  /** The request ULID, echoed as `X-Request-Id` and persisted as
+   *  `scam_reports.idempotency_key`. The client exchanges it for the numeric
+   *  report id via GET /api/report/by-ref/[ref] and presents it as the
+   *  capability when filing onward reports. Optional so older cached
+   *  responses still typecheck. */
+  analysisRef?: string;
   scammerContacts?: ScammerContacts;
   scammerUrls?: ScammerUrl[];
   inputMode?: string;

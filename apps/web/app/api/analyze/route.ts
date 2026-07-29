@@ -17,6 +17,7 @@ import { resolveRedirects, extractFinalUrls } from "@askarthur/scam-engine/redir
 import { geolocateFromHeaders } from "@askarthur/scam-engine/geolocate";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { ANALYZE_COMPLETED_EVENT } from "@askarthur/scam-engine/inngest/events";
+import { scrubPII } from "@askarthur/scam-engine/sanitize";
 import { detectCharityIntent, type CharityIntent } from "@askarthur/scam-engine/charity-intent";
 import { applyShopSignal } from "@askarthur/scam-engine/shop-signal";
 import { applyAsicCitation } from "@askarthur/scam-engine/asic-lookup";
@@ -695,7 +696,17 @@ export async function POST(req: NextRequest) {
               inputMode: (mode ?? (images.length > 0 ? "image" : "text")) as "text" | "image" | "qrcode",
               region,
               countryCode,
-              text,
+              // PRIVACY (2026-07-29): scrubbed HERE, at the boundary, not just
+              // downstream. `analyze.completed.v1` leaves our infrastructure —
+              // it is persisted in Inngest's third-party event store — so the
+              // raw submission was leaving the platform even though the
+              // database stayed clean, which is why a DB-side privacy audit
+              // found nothing. The event contract (inngest/events.ts) has
+              // always documented this field as "pre-scrubbed for PII"; this
+              // makes that true. `storeScamReport` still scrubs on the write
+              // path, and `scrubPII` is idempotent, so the DB result is
+              // byte-identical to before.
+              text: text ? scrubPII(text) : text,
               imageCount: images.length,
               scammerContacts,
               urlResults: urlResults.length > 0 ? urlResults : undefined,
@@ -764,6 +775,17 @@ export async function POST(req: NextRequest) {
         urlsChecked: urlResults.length,
         maliciousURLs: maliciousURLs.length,
         countryCode,
+        // The handle that lets the client reach its own scam_reports row.
+        // Persistence is asynchronous (Inngest, or the legacy waitUntil path),
+        // so the numeric id does not exist yet at response time — that is
+        // precisely why ResultCard's report CTA, which gated on a numeric
+        // `scamReportId`, could never render and onward_report_log stayed at
+        // zero rows for the platform's entire history. The client exchanges
+        // this ref for the id via GET /api/report/by-ref/[ref] once the write
+        // lands. It is also the capability token for POST /api/report/onward:
+        // a ULID (80 bits of entropy) is a far better authorisation handle
+        // than the sequential integer that endpoint used to accept.
+        analysisRef: requestId,
         ...(aiResult.scamType && { scamType: aiResult.scamType }),
         ...(aiResult.impersonatedBrand && { impersonatedBrand: aiResult.impersonatedBrand }),
         ...(aiResult.channel && { channel: aiResult.channel }),

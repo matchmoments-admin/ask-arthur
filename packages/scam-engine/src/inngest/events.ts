@@ -19,6 +19,17 @@ import {
 // separately in Phase 2b (R2-staged). Text IS included but pre-scrubbed
 // for PII; treat the event as untrusted-by-default downstream anyway.
 //
+// PRIVACY — why `text` MUST be scrubbed by the EMITTER, not the consumer:
+// this event is persisted in Inngest's event store, which is outside our
+// infrastructure and outside the Australian Privacy Act posture documented in
+// SECURITY.md. Between 2026-05 and 2026-07-29 this comment said "pre-scrubbed"
+// while `apps/web/app/api/analyze/route.ts` sent the raw submission; the DB
+// stayed clean because `storeScamReport` scrubs on the write path, so the leak
+// was invisible to any database-side audit. Scrubbing downstream is NOT
+// sufficient — by then the raw text has already left. Any new emitter of this
+// event must call `scrubPII` on `text` at the send site. `scrubPII` is
+// idempotent, so scrubbing again downstream costs nothing.
+//
 // Idempotency layers on this event:
 //   1. `id: requestId` — Inngest dedups events with the same id in a 24h
 //      window; same requestId → single event ingestion.

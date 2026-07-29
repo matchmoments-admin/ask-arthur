@@ -143,12 +143,38 @@ describe("tier-aware extension rate limits", () => {
   it("email scans keep flat email limits even for pro installs", async () => {
     rpcMock.fn.mockResolvedValue({ data: "pro", error: null });
     const before = limiterByPrefix("askarthur:ext:email:burst")?.limit.mock.calls.length ?? 0;
-    const result = await validateExtensionRequest(makeReq({ "x-scan-source": "email" }));
+    const result = await validateExtensionRequest(makeReq(), { source: "email" });
     expect(result.valid).toBe(true);
     const emailBurst = limiterByPrefix("askarthur:ext:email:burst");
     expect(emailBurst).toBeDefined();
     expect(emailBurst!.limiterArg).toEqual({ tokens: 20, window: "1 m" });
     expect(emailBurst!.limit.mock.calls.length).toBe(before + 1);
+  });
+
+  // Regression: the scan source used to come from a client `x-scan-source`
+  // header that the ECDSA canonical string does not sign, so a free install
+  // could claim the email (200/day) and checkout (300/day) budgets from any
+  // endpoint — 550/day against a 50/day tier. The header must now be inert.
+  it("ignores a client-supplied x-scan-source header and bills the manual bucket", async () => {
+    const emailBefore =
+      limiterByPrefix("askarthur:ext:email:daily")?.limit.mock.calls.length ?? 0;
+    const checkoutBefore =
+      limiterByPrefix("askarthur:ext:checkout:daily")?.limit.mock.calls.length ?? 0;
+
+    await validateExtensionRequest(makeReq({ "x-scan-source": "email" }));
+    await validateExtensionRequest(makeReq({ "x-scan-source": "checkout" }));
+
+    const manualDaily = limiterByPrefix("askarthur:ext:daily");
+    expect(manualDaily).toBeDefined();
+    expect(manualDaily!.limiterArg).toEqual({ tokens: 50, window: "24 h" });
+
+    // Neither privileged bucket was touched by the forged header.
+    expect(limiterByPrefix("askarthur:ext:email:daily")?.limit.mock.calls.length ?? 0).toBe(
+      emailBefore
+    );
+    expect(limiterByPrefix("askarthur:ext:checkout:daily")?.limit.mock.calls.length ?? 0).toBe(
+      checkoutBefore
+    );
   });
 
   it("instruments a free-tier daily-limit 429 (always-ship warn + $0 cost row)", async () => {
