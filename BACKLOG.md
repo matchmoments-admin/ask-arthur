@@ -2,79 +2,137 @@
 
 Deferred features organized by platform. Items here are validated ideas that didn't make MVP but are worth building.
 
-The "Audit Remediation Roadmap" below is the prioritized cross-cutting work
-queue derived from the 2026-04-28 per-feature flow audit; everything beneath
-it stays organized by platform/area.
+**Start with "Enterprise Review Remediation (2026-07-29)" below — that is the live
+cross-cutting queue.** The 2026-04-28 roadmap beneath it is closed out (verified
+2026-07-30, kept as a record); the 2026-05-05 round-2 list is intentional
+deferrals. Everything below those stays organized by platform/area.
+
+Two rules for this file, learned the hard way:
+
+1. **Verify before filing, and verify before deleting.** Items sat here for
+   months after shipping, while four issues presented as open work had in fact
+   been closed `NOT_PLANNED`. When closing something out, record the
+   `file:line` or the query that proves it — see the 2026-04-28 section.
+2. **A dropped security item is an accepted risk, not a resolved one.** Keep it
+   visible with the condition that would make it urgent again (e.g. #417's
+   fleet ownership gate: fine at 0 users, exploitable at the first paying fleet
+   customer).
+
+---
+
+## Enterprise Review Remediation (2026-07-29) — OPEN QUEUE
+
+An 18-agent review (8 dimensions, adversarially verified: 85 findings survived,
+17 refuted) graded the platform **engineering B+, product D**. Its dominant
+finding was systemic: **documentation and comments assert controls that do not
+exist**, and every P0/P1 was found by querying production, not by reading code —
+three prior reviews had passed over all of them.
+
+**Shipped in PR #874** (do not re-file): the unauthenticated `/api/dashboard/threat-feed`
+PII leak; anon-key read of 413K `scam_urls` + 723K `scam_ips` (migration v259);
+unauthenticated SSRF in `/api/persona-check` + a completely dead IPv6 blocklist;
+extension rate-limit tier chosen by an unsigned client header; raw user text sent
+to Inngest's third-party event store; the structurally-dead consumer reporting
+loop (`onward_report_log` had 0 rows lifetime) plus the sequential-id IDOR that
+wiring it up would have exposed.
+
+### P1 — next
+
+- **Alerting is one silent, unauditable Telegram chat.** `sendAdminMessage` returns `void` and swallows errors across 27 callers, and `feature_brakes` has **zero rows** — no brake has ever engaged. Two brakes (`charity_check`, `shopfront_clone_watch`) are write-only: the cron writes the row and announces "paused for 24h" while the feature keeps spending. Until this is auditable you cannot distinguish "nothing has gone wrong" from "nothing is being reported". Fix: return a boolean, add an `admin_alert_log` table, add a weekly synthetic canary.
+- **Feed upsert burns ~78% of the database's dirty-page IO rewriting unchanged rows.** `bulk_upsert_feed_url` does an unconditional `DO UPDATE` on 74.6M upserts (HOT ratio 0.43%). Fix: conditional `DO UPDATE ... WHERE`. Two traps: a WHERE-suppressed update returns no row, so `RETURNING id, (xmax=0)` yields NULL — add a fallback SELECT; and do **not** pair this with "drop the index so HOT works", because `idx_scam_urls_staleness` also covers a rewritten column and is genuinely used (368 scans).
+- **Stale-feed detector is blind.** `health-digest` reads only the most recent 500 log rows (~6.7 days, covering 15 of 20 feeds) and logged "all clear" on 2026-07-28 while `acnc_register` was **2,062 hours** stale. Its mute list silences the five highest-volume producers. Fix: per-feed `max(created_at)` aggregate against a static registry; split `KNOWN_DORMANT_FEEDS` honestly. Same bug at `admin-health.ts:97-111`.
+- **`shopfront-clone-poll-netcraft` has no cron registered** — it has polled **0 of 1,293** submissions and `last_polled_at` has never been written. The enforcement product's outcome data does not exist.
+- **Scraper backoff breaker is permanently latched.** It writes a fresh heartbeat on every skip and measures cooldown from the newest row, so `acsc` has skipped **1,080 consecutive runs across 84 days** and can never self-heal. Fix: measure from streak start; add a hard probe ceiling.
+- **`SLACK_WEBHOOK_URL` is a plaintext GitHub _variable_ on a public repo** (`scrape-feeds.yml:261`). Rotate, move to `gh secret`, switch `vars.` → `secrets.`. 30 minutes.
+- **Nothing gates a merge to `main`.** The ruleset has **zero required status checks**, so CI, the Vercel preview and the Python tests are all advisory. Branch protection returns 404.
+- **The prompt-regression eval has never executed.** `promptfoo.yml` exits 0 when the secret is missing, and no `ANTHROPIC_API_KEY_EVAL` secret exists — so every run reports green.
+
+### P2 — this quarter
+
+- **`UNCERTAIN` verdict is rejected by the `scam_reports_verdict_check` constraint** even though `claude.ts:275-292` can produce it. Migration to add it to the constraint + `increment_check_stats`.
+- **Cache hit skips all persistence** — no `scam_reports` row for a cached verdict, so the report CTA correctly cannot render there. Emitting `analyze.completed.v1` with `cacheHit:true` fixes it (`analyze-cost` already skips on that flag) but `analyze-report` has no guard and would start persisting cached checks — a deliberate semantics decision.
+- **`verified_scam_id` is never linked** — 41 of 54 HIGH_RISK reports orphaned.
+- **Extension analyze writes no reports/entities/alerts** — prod has no `source='extension'` row at all.
+- **Three brake gaps found while fixing the brakes matrix**: `acnc-charity-backfill-embed` spends with no brake; `shop-signal-enrich` calls a paid API with no `logCost`; `competitor-intel-extract` has neither, despite CLAUDE.md documenting a shared `reddit_intel` brake. Also: prod carries `twilio-lookup` **and** `twilio_lookup` as distinct feature tags, so an exact-match brake filter undercounts that vendor by 29%.
+- **No off-platform backup.** `dr-pg-dump.yml` has been `skipped` on all five scheduled runs and the DR drill log is empty — there is no tested restore path and no real RPO/RTO number.
+- **Blanket anon/authenticated DML grants on ~120 tables** — `has_table_privilege('anon', …)` is true for INSERT/UPDATE/DELETE on 18 of 21 sampled. RLS is what's holding the line; revoke starting with the PII-bearing set.
+- **`rpcs.smoke.test.ts` covers 13 of 124 RPCs and self-skips in CI** (`describe.skipIf(!hasEnv)`). It is the _only_ gate between a PL/pgSQL runtime error and production, because `createServiceClient` omits the `<Database>` generic. `db.generated.ts` is 10,130 lines, has zero consumers, and is 33 functions stale.
+- **No CI check that migration files match the prod ledger** — six migrations are live in prod with no SQL file in the repo (v123–v126, v242, v247), and version numbers have been reused (v100/v10/v11).
+- **Retention drops 9 columns.** `archive_scam_reports_batch` inserts 17 of 26 columns then deletes unconditionally; `analysis_result_v` is the load-bearing loss (the jsonb is archived, its schema-version marker is not). Separately `archive_secondary_tables_batch` still does positional `SELECT *` across 7 tables in one transaction — currently aligned, but the next `ADD COLUMN` aborts all seven.
+
+### Product — the finding that outranks all of the above
+
+124 checks in 5.5 months, **2 registered users**, 3 leads (two share the founder's
+surname), `organizations` = 1 row (his own). Meanwhile 138 of 276 commits since
+2026-06-01 went to clone-watch, lifetime consumer AI spend is **$0.31**, and
+**127 of 128 feature flags default OFF** with 95 of ~159 prod tables never
+having held a row.
+
+The supply side is genuinely differentiated — 1,994 clone alerts, 70 confirmed
+phishing sites, 58 observed takedowns, a 33h median from "no threats found" to
+live phishing that nobody else publishes. Nothing connects it to a buyer, and
+until PR #874 nothing connected a user's report back into it.
+
+Demand levers **already built and unpromoted** (build nothing, just ship):
+
+- `/clone-watch` has served `noindex, nofollow` for **66 days** into a stated 7-day window — the flagship organic-acquisition asset, delisted.
+- The inbound email forwarder (`/api/inbound-scan`) is Zod-validated, rate-limited 20/h, kill-switched and replies with a rendered verdict email — and has **no public entry point**. Promoting it is a copy-and-DNS change. SMS (20 reports) and social (13) are the top two channels; phone, with 15 tables built for it, is 6.
+- `/brand-exposure` serves 200 on prod with a working form and has **1 lifetime use**.
+
+Mothball Phone Footprint rather than extending it. Full findings + lead synthesis: session `0eb7c300`, workflow `wa0e96kn9`.
 
 ---
 
 ## Investor Readiness — Sprint Shipped + Deferred (2026-05-25)
 
-The 2026-05-25 audit (investor-readiness review) drove a one-day sprint that shipped four P0 security fixes + DB hygiene (PR #413, merged 2026-05-24) and a Claude Code harness pass (PR #414). Three followups and the SOC 2 path were explicitly deferred:
+The 2026-05-25 investor-readiness audit drove a one-day sprint that shipped four
+P0 security fixes + DB hygiene (PR #413) and a Claude Code harness pass (#414).
 
-- **[#415](https://github.com/matchmoments-admin/ask-arthur/issues/415) — Deferred: SOC 2 Type I + Vanta/Sprinto kickoff.** Year 1 cost A$30–60K (platform A$5–15K + audit A$15–25K + pentest A$10–20K). Park until a named bank prospect requires it OR ARR justifies the burn. Full plan: `docs/pitch/certification-roadmap.md`.
-- **[#416](https://github.com/matchmoments-admin/ask-arthur/issues/416) — Followup: Real device attestation.** `/api/mobile/attest` returns hard 501 today. Wire real Google Play Integrity + Apple App Attest verifiers when any mobile surface needs them. Currently nothing consumes a device token.
-- **[#417](https://github.com/matchmoments-admin/ask-arthur/issues/417) — Followup: Phone Footprint fleet/org SKU ownership gate.** Consumer-SKU gate shipped; fleet path still trusts metadata `org_id`. Needed before any paying fleet customer signs up. Two design options (mapping table vs admin-membership check) listed in the issue.
-- **[#418](https://github.com/matchmoments-admin/ask-arthur/issues/418) — Followup: Unit tests for the four hardened routes.** No tests existed pre-#413; retrofitting is `ready-for-agent`.
+**Status corrected 2026-07-30.** All four follow-ups below were closed
+`NOT_PLANNED` on 2026-07-05 — **dropped, not delivered.** They are kept here
+because a closed-as-wontfix security issue is an _accepted risk_, and an
+accepted risk that nobody can find again is just an unknown one.
 
-What shipped is locked in: `mcp__supabase__get_advisors security` returns 0 lints; prod home + `/api/analyze` + `/charity-check` + `/clone-watch` smoke tests green post-deploy (2026-05-24).
+- **#415 SOC 2 Type I + Vanta/Sprinto** — `wontfix`. Year 1 A$30–60K. Correctly parked until a named bank prospect requires it or ARR justifies it. Plan: `docs/pitch/certification-roadmap.md`.
+- **#416 Real device attestation** — dropped. `/api/mobile/attest` returns an unconditional 501, so there is no bypass; nothing consumes a device token, and `device_push_tokens` has never held a row. Safe to leave dropped while mobile has no live surface.
+- **#417 Phone Footprint fleet/org SKU ownership gate** — ⚠️ **the one to remember.** `severity:p2`, `domain:auth`. The consumer-SKU gate shipped, but the fleet path still trusts a caller-supplied `org_id`. Dropping it is defensible _today_ only because Phone Footprint has never been used (`phone_footprints` and `phone_lookups` are both 0 rows, `organizations` holds 1 row — the founder's own). **This must be re-opened before the first paying fleet customer signs up**, or that customer can read another org's data. Two design options are in the issue.
+- **#418 Unit tests for the four hardened routes** — dropped. The routes are still untested; #413's fixes are verified only by the code review that shipped them.
+
+What shipped is locked in: `get_advisors security` returns 0 ERRORs/WARNs (re-confirmed 2026-07-29); prod smoke tests green post-deploy 2026-05-24.
 
 ---
 
-## Audit Remediation Roadmap (2026-04-28 flow audit)
+## Audit Remediation Roadmap (2026-04-28 flow audit) — CLOSED 2026-07-30
 
-The 2026-04-28 per-feature flow audit (~100 findings across 41 features)
-produced this prioritized work queue. Full plan with verification matrix:
-`~/.claude/plans/smooth-seeking-lerdorf.md`.
+The 2026-04-28 per-feature flow audit (~100 findings across 41 features) drove a
+five-tier work queue. **Verified against the current codebase on 2026-07-30; all
+five P0s and the bulk of P1–P3 are shipped, so the queue has been removed rather
+than left to rot.** Kept as a record because the audit itself is contemporaneous
+R&D documentation; the original plan is at `~/.claude/plans/smooth-seeking-lerdorf.md`.
 
-**Tier 0** (branch-check hook scope fix + `.sfdx` ignore) shipped as PR #41
-(squash commit `e04fe51`). Items below are P0 → P4 by blast radius.
+Verified closed (file:line checked, not assumed):
 
-### P0 — Critical security (Tier 1; 5 separate PRs)
+| Item                                            | Evidence                                                                                                             |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| P0.1 mobile attestation hard-disable            | `api/mobile/attest/route.ts:24` — unconditional 501, flag-independent                                                |
+| P0.2 Stripe webhook ownership cross-check       | `api/stripe/webhook/route.ts:148-188` — resolves owner via `user_profiles.stripe_customer_id` + `api_keys.user_id`   |
+| P0.3 org invite email binding                   | `api/org/invite/accept/route.ts:86-95` — case-insensitive match → 403, invited email not echoed                      |
+| P0.4 Slack `response_url` SSRF guard            | `lib/bots/slack/handler.ts:4` + a single-host `hooks.slack.com` allowlist                                            |
+| P0.5 audit doc corrections                      | doc-only, folded into the system map                                                                                 |
+| P1.6 HIBP client consolidation                  | `api/breach-check/route.ts` now calls the engine's `checkHIBP`                                                       |
+| P2.10 verdict-merge extraction                  | landed as `packages/core-analysis/src/verdict.ts` (not scam-engine as planned), with property + variant test suites  |
+| P2.12 rate-limit fail-policy + cache versioning | `packages/utils/src/rate-limit.ts:117` fails closed in prod; cache prefix is `askarthur:analysis:p${PROMPT_VERSION}` |
+| CI hygiene — `autofix` failing every PR         | the workflow no longer exists                                                                                        |
 
-1. **Mobile device attestation hard-disable** — `apps/web/app/api/mobile/attest/route.ts:30-42` issues a server-signed `deviceToken` for _any_ input because both verifiers are TODOs. Flag is default-off, but flag-flip = auth bypass. Replace iOS/Android branches with `501 device_attestation_not_implemented`, make the 501 unconditional (ignores the FF), add a guard test. Track Apple `data.appattest.apple.com/v1/attestKey` + Google Play Integrity v1 verifiers as a separate "Device attestation hardening" backlog item.
-2. **Stripe webhook ownership cross-check** — `apps/web/app/api/stripe/webhook/route.ts:138-209` feeds `metadata.api_key_id` into `syncTier` without proving the customer owns that key. `SELECT user_id FROM api_keys WHERE id = $1`, compare with `metadata.user_id` (and `auth.users.id` mapped from `stripe_customer_id` if a mapping table exists), reject mismatches with error log + no tier mutation. Same gate in `handleSubscriptionDeleted`. **Open decision:** verify whether a `user_stripe_customers` table exists before opening the PR; if not, add it via migration in the same PR.
-3. **Org invite email binding** — `apps/web/app/api/org/invite/accept/route.ts:37-75` accepts an invitation if the caller is signed in and possesses the token, never compares `invitation.email` to `user.email`. Leaked token + any account = stolen role. Add case-insensitive email match → 403 on mismatch (don't leak invited email back). Bonus: 10/hour per-user invite-accept rate-limit (`R:askarthur:invite-accept:{userId}`).
-4. **Slack `response_url` outbound SSRF guard** — Slack signature verifies inbound, but the response_url string is then fetched without a hostname allow-list. Wrap the outbound `fetch` (likely `apps/web/lib/bots/slack/sender.ts`) with `hostname === 'hooks.slack.com'` or `assertSafeURL`. Defense-in-depth — current threat requires `SLACK_SIGNING_SECRET` leak.
-5. **Audit doc corrections** — record §35 image proxy and §13 Messenger verifier as **resolved** (both already implemented; audit was wrong on these — see `proxy-image/route.ts:3-7` and `webhooks/messenger/route.ts:53-69`). Add a "Remediation status" column for cross-cutting findings so future readers can diff against this audit. Doc-only.
+Obsolete rather than done:
 
-### P1 — Reliability hardening (Tier 2; 4 PRs)
+- **P4 §9 extension status whitelist-vs-blacklist** — moot. `extension_installs` uses a boolean `revoked` column (`_lib/signature.ts:64,73`), which has no third state to leak through.
 
-6. **HIBP client consolidation** — `packages/scam-engine/src/hibp.ts:checkHIBP` gains a `{ truncate?: boolean }` option (default `true`); the raw fetch in `apps/web/app/api/breach-check/route.ts` is replaced with the engine call. Route gets the existing 24h cache + 5s `AbortSignal.timeout` for free. Widen `HIBPResult` with optional `breaches: Array<{name, title, breachDate, dataClasses}>` populated only when `truncate=false`.
-7. **Coalesce hot writes on `last_used_at` / `last_seen_at`** — `apiAuth.ts:175-178` (api_keys) and `extension/_lib/signature.ts:189` (extension_installs) update on every request. Wrap each with a Redis SETNX gate (`askarthur:touch:apikey:$id`, `ex 3600 nx`) so the UPDATE fires at most once per hour per key/install. Eliminates a row-contention hotspot at scale.
-8. **ip-api timeout + Twilio async** — `geolocateIP` gains a 2s `AbortSignal.timeout` + Redis circuit breaker (5 consecutive failures → 60s cool). `/api/analyze` Twilio path moves out of the sync request via Inngest event `analyze.phone-intel.requested`; consumer updates `scam_reports.phone_intelligence` JSONB. Gated on `FF_ANALYZE_PHONE_INTEL_ASYNC` (canary pattern matching `FF_ANALYZE_INNGEST_WEB`). **Open decision:** confirm UX is acceptable (verdict response no longer carries phone-intel synchronously), or take the smaller 1.5s in-line timeout instead.
-9. **`mark_stale_*` batched updates + bot queue retry alerting** — three RPCs (`mark_stale_urls`/`_ips`/`_wallets`) rewritten to loop in 5,000-row batches with COMMIT between, bounding WAL per batch. `bot_message_queue`'s `markFailed` path (in `packages/bot-core/src/queue.ts`) fires a throttled (1/hour/platform) Telegram admin alert when `retries+1 >= max_retries`. Reuse `sendAdminTelegramMessage` from `apps/web/lib/cost-telemetry.ts`.
+**Still open from this audit** — the only items that survived verification:
 
-### P2 — Architectural consolidation (Tier 3; 3 PRs)
-
-10. **Verdict-merge module extraction** — new `packages/scam-engine/src/verdict.ts` exports `mergeVerdict(analysis, urlResults, injection)` and `isElevated(verdict)`. Migrate four call-sites: `apps/web/app/api/analyze/route.ts`, `apps/web/app/api/extension/analyze/route.ts`, `packages/bot-core/src/analyze.ts:30-46`, `apps/web/lib/mediaAnalysis.ts`. Lock the rules with a 10-test (verdict × URL × injection) matrix; verify byte-identical output via golden-file tests on recorded analyze inputs.
-11. **Deepfake direction decision (open)** — overlaps with existing **"Deepfake detection wiring into `runMediaAnalysis`"** in the [Web App](#web-app) section. Today: `apps/web/lib/deepfakeDetection.ts:detectDeepfake` is exported but never imported in source; `FF:deepfakeDetection` is a no-op flag (and a foot-gun if anyone flips it expecting it to do something). Three options: **park-with-guardrail** (recommended; banner comment + warn on FF-on, no code wiring), **delete** (drop file + flag, defer to BACKLOG), or **wire it up** (integrate behind FF with `/tmp` quota guard, RD quota probe, Resemble fallback). Decide before P2 starts.
-12. **Rate-limit fail-policy + cache versioning + positional indexing fix** — single rule documented in `packages/utils/src/rate-limit.ts`: fail-closed in prod for paths touching a paid downstream (AI calls, Twilio, RD); fail-open for read-only/telemetry. `checkImageUploadRateLimit` flips from fail-open to fail-closed (paid Claude vision). Cache key in `apps/web/lib/analysis-cache.ts` includes `PROMPT_VERSION` from `packages/scam-engine/src/claude.ts` (today: silent cross-prompt cache poisoning). Entity-enrichment `Promise.allSettled` indexing in `entity-enrichment.ts:242` switches from positional (`results[2]?.status`) to a keyed `Record<string, PromiseSettledResult>`.
-
-### P3 — Documentation reconciliation (Tier 4; 1 PR)
-
-13. **ARCHITECTURE.md / BACKLOG.md / CLAUDE.md doc sweep** — partial overlap with existing **"Reconcile feed cadence docs"** under [Database Hygiene → Non-schema advisor TODOs](#non-schema-advisor-todos). Specifics: remove all Paddle references (v59 migrated to Stripe); correct feed-sync to weekly Sunday 07:00 UTC (not 15-min); update Inngest function count to actual (13: staleness×3, enrichment, ct-monitor, entity-enrichment, urlscan, cluster-builder, risk-scorer, scam-alerts, feed-sync×2, meta-brp); update table count to current migration tip; add legacy admin-token EOL date (e.g. 2026-05-28) in `apps/web/lib/adminAuth.ts` top-comment + ops runbook.
-
-### P4 — Lower-priority cleanups (Tier 5; backlog candidates, no PRs scheduled)
-
-- **§7 architectural** — collapse synchronous WHOIS/SSL writes in `/api/scam-urls/report` to use the same `enrichment_status='pending'` CAS path the Inngest fan-out uses, eliminating the race
-- **§27 reliability** — invitation resend throttle (per-(org, email) per hour) on top of the P0.3 accept-rate-limit
-- **§9 security** — replace `extension_installs.status != 'revoked'` (blacklist) with `status = 'active'` (whitelist); a future status value would otherwise implicitly pass
-- **§15 reliability** — `mark_stale_*` runs at 03:00 UTC; pick a WAL-aware time slot
-- **§3 security** — extension `/api/extension/analyze` route doesn't store `verified_scams`; product call on whether extension HIGH_RISK should contribute to the threat DB (currently silent)
-- **§1 security** — `scrubPII` before caching (low risk; cached SUSPICIOUS entry may echo user PII back to a SHA-collision caller — practically the same caller, but defense-in-depth)
-- **§1 reliability** — base64 image size check happens _after_ decode; reorder so the 4 MB cap applies to base64 length (~5.6 MB threshold) before allocation
-- **§38 reliability** — most threat-feed scrapers are manual-dispatch only in `.github/workflows/scrape-feeds.yml`; ARCHITECTURE.md narrative implies daily-fresh threat intel, but only the Reddit scraper is on cron. Add per-feed schedules
-
-### CI hygiene (separate, not part of any tier)
-
-- **`autofix` CI failing on every PR** — pre-existing across #35/#39/#40/#41 (this PR will hit it too). The autofix-ci action runs a formatter that wants to reformat ~80 files across `packages/scam-engine/`, `packages/site-audit/`, `packages/types/`, `packages/utils/` but its own safety rule forbids touching `.github/`, so the run errors out without writing fixes. One-shot fix: run the formatter locally (`pnpm turbo lint --fix` or per-package equivalents), commit the diff, restore green check on subsequent PRs
-
-### Open decisions (block the corresponding tier)
-
-1. **Deepfake direction** (blocks P2.11) — park / delete / wire. Park is the recommended least-regret option (preserves the work, removes the foot-gun).
-2. **Stripe customer-mapping table existence** (blocks P0.2) — verify whether a `user_stripe_customers` (or similar) mapping table is already in `supabase/`. Run `mcp__supabase__list_tables` filtered for `stripe`/`customer`, or `ls supabase/ | grep -i customer`. If absent, the migration is part of the same PR.
-3. **Async Twilio UX call** (blocks P1.8) — moving Twilio off the sync path means the verdict response no longer carries `phoneIntelligence`; UI either polls or shows a "checking phone…" pill. Confirm UX, or take the smaller 1.5s in-line timeout instead.
+- **P1.7 coalesce hot writes on `last_used_at` / `last_seen_at`.** Confirmed still unguarded: no `askarthur:touch:*` SETNX gate in `lib/apiAuth.ts` or `extension/_lib/signature.ts`, so both UPDATE on every request. A row-contention hotspot at scale, harmless at current volume. Wrap each in a Redis SETNX gate (`ex 3600 nx`) so the write fires at most hourly per key/install.
+- **P1.8 open decision — async Twilio UX.** Moving Twilio off the synchronous path means the verdict response no longer carries `phoneIntelligence`; the UI must poll or show a "checking phone…" pill. Decide that, or take the smaller 1.5s in-line timeout. Note this is now low-priority: Phone Footprint has never written a row (`phone_footprints` / `phone_lookups` both 0), and phone is the thinnest reported channel (6 of 81 reports).
+- **P4 leftovers** worth keeping: `scrubPII` before caching (defence-in-depth); base64 size check happening _after_ decode rather than before allocation; per-feed cron schedules in `scrape-feeds.yml` (most scrapers are still manual-dispatch only, while ARCHITECTURE.md implies daily-fresh intel — the 2026-07-29 review confirmed stale feeds are a live problem).
 
 ---
 
