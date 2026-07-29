@@ -115,7 +115,7 @@ import { verifyAdminToken } from "@/lib/adminAuth";
 - Columns: `snake_case` (`created_at`, `confidence_score`, `brand_impersonated`)
 - RPC functions: `snake_case` verb prefix (`increment_check_stats`, `mark_stale_urls`)
 - Views: `snake_case` descriptive (`threat_intel_entities`, `financial_impact_summary`)
-- Migrations: 44 files (`supabase/migration.sql` through `migration-v44-scam-feed.sql`)
+- Migrations: `supabase/migration-v<N>-<slug>.sql`, monotonically increasing `N`. Check the highest existing `N` before claiming the next one, and check any unmerged branches too — `v258` was taken by an open branch while `main` topped out at `v257`. No count is given here on purpose: this line read "44 files" while the directory held 257.
 
 ### Python scrapers — layout
 

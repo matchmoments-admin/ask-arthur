@@ -79,10 +79,10 @@ Only fall back to `pnpm turbo build` (no filter) when verifying cross-package im
 
 ## Where things live
 
-| Looking for                     | Where                                                                                  |
-| ------------------------------- | -------------------------------------------------------------------------------------- |
-| All routes (web + API)          | [`docs/system-map/web-surface.md`](../../docs/system-map/web-surface.md)               |
-| Feature flag inventory          | [`docs/system-map/feature-flags.md`](../../docs/system-map/feature-flags.md)           |
-| The 6 canonical data flows      | [`docs/system-map/data-flows.md`](../../docs/system-map/data-flows.md)                 |
-| Inngest functions + Vercel cron | [`docs/system-map/background-workers.md`](../../docs/system-map/background-workers.md) |
-| DB schema (121 tables, 71 RPCs) | [`docs/system-map/database.md`](../../docs/system-map/database.md)                     |
+| Looking for                     | Where                                                                                                                                                                                                             |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| All routes (web + API)          | [`docs/system-map/web-surface.md`](../../docs/system-map/web-surface.md)                                                                                                                                          |
+| Feature flag inventory          | [`docs/system-map/feature-flags.md`](../../docs/system-map/feature-flags.md)                                                                                                                                      |
+| The 6 canonical data flows      | [`docs/system-map/data-flows.md`](../../docs/system-map/data-flows.md)                                                                                                                                            |
+| Inngest functions + Vercel cron | [`docs/system-map/background-workers.md`](../../docs/system-map/background-workers.md)                                                                                                                            |
+| DB schema                       | [`docs/system-map/database.md`](../../docs/system-map/database.md) — no table/RPC count here on purpose: it read "121 tables, 71 RPCs" for months while prod had 159 and 177. Query prod when the number matters. |

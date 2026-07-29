@@ -75,3 +75,17 @@ apps/extension/dist/
 
 # local extension dev-client identity (holds a dev signing private key)
 .dev-extension-identity.json
+
+# Codex harness config. Mirrors .claude/hooks (byte-identical at time of
+# writing) but ALSO holds live MCP server credentials in plaintext —
+# .codex/config.toml currently contains a Gemini API key. This repo is public,
+# so the directory is ignored to make committing it structurally impossible
+# rather than a matter of remembering. Verified never present in git history.
+.codex/
+
+# Session scratch space — working notes, generated drafts, throwaway scripts.
+scratchpad/
+
+# Generated marketing copy staged for manual posting (LinkedIn report card).
+# Output, not source; regenerated on demand.
+apps/web/report-card-out/
