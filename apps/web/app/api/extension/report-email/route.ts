@@ -25,8 +25,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Feature not enabled" }, { status: 404 });
     }
 
-    // 1. Auth + rate limit (extension auth, not IP-based)
-    const auth = await validateExtensionRequest(req);
+    // 1. Auth + rate limit (extension auth, not IP-based). Email scans have
+    //    their own budget (200/day) sized for auto-scan volume; the source is
+    //    declared server-side here — see the note in _lib/auth.ts on why it is
+    //    no longer taken from a client header.
+    const auth = await validateExtensionRequest(req, { source: "email" });
     if (!auth.valid) {
       return NextResponse.json(
         { error: auth.error },

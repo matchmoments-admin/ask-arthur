@@ -4,6 +4,7 @@ import { logCost, claudeHaikuCostUsd } from "@/lib/cost-telemetry";
 import { checkRateLimit } from "@askarthur/utils/rate-limit";
 import { scrubPII } from "@askarthur/scam-engine/sanitize";
 import { assertSafeURL } from "@askarthur/scam-engine/ssrf-guard";
+import { ssrfSafeDispatcher } from "@askarthur/scam-engine/ssrf-dispatcher";
 import { stripEmailHtml } from "@askarthur/scam-engine/html-sanitize";
 import { sanitizeUnicode, escapeXml } from "@askarthur/scam-engine/claude";
 import { analyzeEmail } from "@askarthur/scam-engine/local-intel";
@@ -104,6 +105,18 @@ async function fetchPageText(url: string): Promise<{ url: string; text: string |
   }
 
   try {
+    // SECURITY (2026-07-29): `assertSafeURL` above is a *syntactic* check on the
+    // hostname only. On its own it was bypassable two ways on this route — the
+    // route is unauthenticated, so both were reachable by anyone:
+    //   1. A public hostname whose A-record points at a private IP.
+    //   2. `redirect: "follow"` — the pre-flight check validated only the first
+    //      URL, and any 302 to http://169.254.169.254/ was then followed blind.
+    // `ssrfSafeDispatcher` closes both: it hooks undici's per-connection DNS
+    // lookup and rejects any host resolving into a private/loopback/metadata
+    // range. undici follows redirects on the same dispatcher, so every hop is
+    // validated at the IP layer — strictly stronger than re-running the
+    // syntactic check per hop. Redirect-following is deliberately retained;
+    // legitimate pages routinely redirect (http→https, canonical slash).
     const res = await fetch(url, {
       headers: {
         "User-Agent": "AskArthur/1.0 (scam-detection; +https://askarthur.au)",
@@ -111,6 +124,7 @@ async function fetchPageText(url: string): Promise<{ url: string; text: string |
       },
       redirect: "follow",
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      ...({ dispatcher: ssrfSafeDispatcher } as Record<string, unknown>),
     });
 
     if (!res.ok) {

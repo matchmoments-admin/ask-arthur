@@ -1,19 +1,18 @@
 // SSRF protection — validates URLs before any outbound fetch.
 // Blocks private IP ranges, cloud metadata endpoints, and non-HTTP schemes.
+//
+// IP classification is delegated to `./private-ip`, the single source of truth
+// shared with `ssrf-dispatcher` and `safebrowsing.isPrivateURL`.
+//
+// SECURITY (2026-07-29): this module previously carried its OWN copy of the
+// range list, and that copy was dead for every IPv6 form. `URL.hostname`
+// returns IPv6 literals *bracketed* (`[::1]`, `[::ffff:169.254.169.254]`), so
+// the unbracketed `/^::1$/` and `/^fe80:/` patterns could never match, and the
+// IPv4-mapped metadata address passed straight through. `isPrivateIP` strips
+// the brackets and decodes IPv4-mapped forms, so delegating to it both fixes
+// the bypass and removes the drift risk that caused it.
 
-const BLOCKED_RANGES = [
-  /^127\./,
-  /^10\./,
-  /^192\.168\./,
-  /^172\.(1[6-9]|2\d|3[01])\./,
-  /^169\.254\./, // AWS/GCP metadata
-  /^100\.64\./,  // CGNAT
-  /^0\./,        // Current network
-  /^::1$/,       // IPv6 loopback
-  /^fc00:/i,     // IPv6 private
-  /^fe80:/i,     // IPv6 link-local
-  /^fd/i,        // IPv6 unique local
-];
+import { isPrivateIP } from "./private-ip";
 
 const BLOCKED_HOSTS = new Set([
   "localhost",
@@ -47,11 +46,10 @@ export function assertSafeURL(rawUrl: string): void {
     throw new Error(`Blocked host: ${hostname}`);
   }
 
-  // Block IP-based URLs that resolve to private ranges
-  for (const re of BLOCKED_RANGES) {
-    if (re.test(hostname)) {
-      throw new Error(`Blocked IP range: ${hostname}`);
-    }
+  // Block IP-literal URLs in private / loopback / metadata ranges. Handles
+  // bracketed IPv6 and IPv4-mapped IPv6 — see the header note.
+  if (isPrivateIP(hostname)) {
+    throw new Error(`Blocked IP range: ${hostname}`);
   }
 
   // Block alternative IP notations (decimal, hex, octal)

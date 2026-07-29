@@ -189,8 +189,16 @@ function getCheckoutDailyLimiter() {
   return _checkoutDailyLimiter;
 }
 
+/**
+ * Which rate-limit budget a request draws from. This is SERVER-side ground
+ * truth — derived from the route the caller actually reached, never from
+ * anything the client sends.
+ */
+export type ExtensionScanSource = "manual" | "email" | "checkout";
+
 export async function validateExtensionRequest(
-  req: NextRequest
+  req: NextRequest,
+  opts: { source?: ExtensionScanSource } = {}
 ): Promise<ExtensionAuthResult> {
   const requestId = req.headers.get("x-request-id");
   if (requestId) {
@@ -226,7 +234,23 @@ export async function validateExtensionRequest(
     };
   }
 
-  const scanSource = req.headers.get("x-scan-source");
+  // SECURITY (2026-07-29): this was `req.headers.get("x-scan-source")` — a
+  // client-controlled string that selected BOTH the limiter and the ceiling.
+  // The ECDSA canonical string (see signature.ts) covers method, path,
+  // timestamp, nonce and body hash but NO headers, so forging it cost nothing:
+  // one registered install could draw the manual (50) + email (200) +
+  // checkout (300) budgets from a single endpoint — 550/day against a 50/day
+  // free tier, above even the A$4.99 Pro ceiling. It also silently poisoned the
+  // extension_daily_limit telemetry below, which the comment there calls the
+  // only leading indicator of Extension-Pro demand: an abuser never tripped the
+  // manual bucket, so the signal read as "no demand".
+  //
+  // The route the caller reached is the only trustworthy source of this fact,
+  // so each route now declares it. Note the buckets still compose additively
+  // ACROSS routes by design (a checkout scan is not a manual check); if a
+  // single aggregate ceiling is wanted later, add one counter that every
+  // branch below also decrements.
+  const scanSource: ExtensionScanSource = opts.source ?? "manual";
   const isEmailScan = scanSource === "email";
   const isCheckoutScan = scanSource === "checkout";
 
