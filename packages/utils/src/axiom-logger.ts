@@ -33,6 +33,23 @@ function samplePct(): number {
   return process.env.NODE_ENV === "production" ? 10 : 100;
 }
 
+/**
+ * The INFO/DEBUG retention percentage currently in force (0–100).
+ *
+ * Exported because anything that COUNTS info-level events in Axiom and compares
+ * the result against a threshold has to know it is reading a sample, not the
+ * population. `warn` and `error` bypass sampling entirely, so counts of those
+ * need no correction — only info/debug do.
+ *
+ * The bug this exists to prevent: `axiom-fleet-watch`'s runaway detector counted
+ * `fn.start` (info level, so 10% sampled in production) and compared it against
+ * a threshold of 300 expressed in real invocations — making it fire only at
+ * ~3,000 actual starts, an order of magnitude past the burst it was written for.
+ */
+export function axiomInfoSamplePct(): number {
+  return samplePct();
+}
+
 // FNV-1a 32-bit hash → deterministic 0..99 bucket from requestId.
 // Same requestId always lands in the same bucket, so every log line for
 // a given request is either kept or dropped together.
