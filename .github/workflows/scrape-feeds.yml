@@ -226,50 +226,36 @@ jobs:
       # update SOURCE_URL in pipeline/scrapers/cryptoscamdb.py to a working
       # mirror, then restore this step + the choice option above.
 
-      # crt.sh — KEPT DAILY, deliberately, despite producing 0 new rows for 55
-      # days. It was moved to manual-only on 2026-07-30 and that was REVERTED the
-      # same day when the consequence was measured. Do not retire it again
-      # without doing the durability work described below.
+      # crt.sh — RETIRED from the schedule 2026-07-30, on the second attempt.
       #
-      # Why retiring it loses real functionality: this scraper's `last_seen_in_feed`
-      # touch is the only thing keeping its findings ACTIVE. `mark_stale_urls`
-      # (migration-v11, run daily 03:00 UTC by pipeline-staleness-check) sets
-      # is_active=FALSE on any URL not seen in a feed for 7 days, and exempts only
-      # URLs with unique_reporter_count >= 3 or confidence_level in
-      # ('high','confirmed'). Measured in prod 2026-07-30 for the crtsh set:
+      # It discovers nothing: 29/29 runs succeeded and fetched 31,584
+      # certificates, but records_new was 0 on every one, and threat_intel_urls
+      # confirms it independently — max(first_reported_at) 2026-06-05, i.e. 55
+      # days without a new row. At 13.6 min/run it was the slowest step here,
+      # 284 of 3,067 step-minutes over 29 days (~US$1.77/mo) for zero output.
       #
-      #   4,970 URLs total, 1,726 currently active
-      #       0 also present in another feed  → nothing else refreshes them
-      #       0 exempt from the staleness sweep
-      #   1,726 would go is_active=FALSE within 7 days of retiring this step
+      # The FIRST attempt to retire it was reverted the same day, because its
+      # daily last_seen_in_feed touch was load-bearing: mark_stale_urls would
+      # have deactivated 1,726 crtsh-only URLs within 7 days, and is_active=TRUE
+      # gates /api/scam-urls/lookup, /api/v1/threats/domains and
+      # /api/v1/threats/urls/trending — so AU brand lookalikes (mygov,
+      # centrelink, ato.gov, auspost, commbank, nab, anz, westpac, telstra, nbn,
+      # optus, woolworths, coles) would have silently dropped out of the
+      # blocklist the extension and B2B API read.
       #
-      # And is_active=TRUE is the gate on /api/scam-urls/lookup:86,
-      # /api/v1/threats/domains:33 and /api/v1/threats/urls/trending:33 — so those
-      # 1,726 would silently drop out of the blocklist the extension and the B2B
-      # API read. They are AU brand lookalikes (mygov, centrelink, ato.gov,
-      # medicare, auspost, commbank, nab, anz, westpac, telstra, nbn, optus,
-      # woolworths, coles — see AU_BRAND_KEYWORDS in pipeline/scrapers/crtsh.py),
-      # i.e. the product's core signal, not incidental IOC volume.
+      # migration-v262 fixes that properly: feed_sources.staleness_exempt marks
+      # crtsh as carrying a HISTORICAL signal ("a lookalike certificate was
+      # issued" does not stop being true), so mark_stale_urls no longer expires
+      # rows whose only source is crtsh. Verified on prod before retiring —
+      # exempt_feeds=['crtsh'], 1,726 rows protected, 252,886 unaffected, 0 crtsh
+      # rows still sweepable. Only now is the scraper genuinely redundant.
       #
-      # So the 284 step-min/29d (~US$1.77/mo) is not buying new rows — it is
-      # buying a keep-alive for 1,726 existing ones. That is an accidental
-      # architecture and worth fixing, but the fix is a schema decision, not a
-      # workflow edit: a CT-log finding ("a lookalike certificate existed") is a
-      # historical fact that should not expire on a 7-day feed-freshness clock,
-      # whereas urlhaus/openphish list currently-live threats where the clock is
-      # correct. Exempting crtsh from mark_stale_urls needs a migration AND a
-      # product call on whether an unvalidated lookalike cert should stay flagged
-      # indefinitely. Tracked in docs/plans/ops-audit-gha-inngest-2026-07-30.md.
-      #
-      # ADR-0016's 2026-07-17 amendment found the CT mechanism dead for DISCOVERY
-      # and that still holds — this step discovers nothing. It is retained purely
-      # for retention of prior discoveries. Note crt.sh is ALSO used at runtime by
-      # packages/scam-engine/src/ct-lookup.ts, which is a separate live path and
-      # unaffected either way.
-      - name: crt.sh [0 new rows since 2026-06-05 — retained as staleness keep-alive, see comment]
-        if: |
-          github.event.inputs.feed == 'all' || github.event.inputs.feed == 'crtsh'
-          || (github.event_name == 'schedule' && github.event.schedule == '0 16 * * *')
+      # ADR-0016's 2026-07-17 amendment already found the CT mechanism dead for
+      # discovery; this closes the retention half. crt.sh is ALSO used at runtime
+      # by packages/scam-engine/src/ct-lookup.ts — a separate live path,
+      # unaffected. Kept dispatchable via `-f feed=crtsh` for re-probing.
+      - name: crt.sh [retired — 0 new rows since 2026-06-05; findings preserved by v262 exemption]
+        if: github.event.inputs.feed == 'crtsh'
         run: python -m crtsh || echo "crtsh" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
       # ACNC Charity Register mirror — gated independently of ENABLE_SCRAPER.
