@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   aggregateBrandMentions,
+  buildDigestMessage,
   buildWatchedKeySet,
   hasAuEvidence,
   meetsPromotionBar,
@@ -8,6 +9,7 @@ import {
   partitionForDigest,
   planPromotions,
   CANDIDATE_DENYLIST,
+  type DigestInput,
   type MergedCandidate,
 } from "@/app/api/inngest/functions/reddit-brands-discover";
 import { brandNormalize } from "@askarthur/shopfront-glue";
@@ -443,5 +445,139 @@ describe("partitionForDigest — a brand can't be both unwatched and just-promot
     const before = JSON.stringify(input);
     partitionForDigest(input, new Set(["gumtree"]));
     expect(JSON.stringify(input)).toBe(before);
+  });
+});
+
+describe("buildDigestMessage — the digest cannot lie about the run", () => {
+  const merged = (over: Partial<MergedCandidate> = {}): MergedCandidate => ({
+    brandNormalized: "acme",
+    rawBrand: "Acme",
+    reddit: 3,
+    scam: 0,
+    total: 3,
+    au: 0,
+    ...over,
+  });
+
+  const input = (over: Partial<DigestInput> = {}): DigestInput => ({
+    auEvidenced: [],
+    globalOnly: [],
+    promote: [],
+    promoted: [],
+    needsDomain: [],
+    candidatesExamined: 45,
+    scamExamined: 1,
+    upserted: 12,
+    upsertAttempted: 12,
+    degraded: [],
+    hasAlias: () => false,
+    ...over,
+  });
+
+  // ---- Invariant 1: proof of life is UNCONDITIONAL -------------------------
+
+  it("prints the Examined heartbeat when every list is empty", () => {
+    expect(buildDigestMessage(input())).toContain("Examined <b>45</b> Reddit brand(s)");
+  });
+
+  it("STILL prints the heartbeat when a global-only brand is present", () => {
+    // The regression that motivated the extraction. The old code gated the
+    // heartbeat on all four lists being empty, and prod had exactly one
+    // net-new global-only brand ("Google Play" x3), so the next real run would
+    // have lost its proof of life entirely.
+    const msg = buildDigestMessage(
+      input({ globalOnly: [merged({ rawBrand: "Google Play", total: 3 })] }),
+    );
+    expect(msg).toContain("Examined <b>45</b> Reddit brand(s)");
+    expect(msg).toContain("Google Play ×3");
+  });
+
+  it("still prints the heartbeat when there is a full actionable list", () => {
+    const msg = buildDigestMessage(
+      input({ auEvidenced: [merged({ rawBrand: "Acme", au: 2, total: 4 })] }),
+    );
+    expect(msg).toContain("Examined <b>45</b> Reddit brand(s)");
+    expect(msg).toContain("<b>AU 2</b>/4");
+  });
+
+  it("reports recorded N/M so a partial write is visible", () => {
+    expect(buildDigestMessage(input({ upserted: 3, upsertAttempted: 46 }))).toContain(
+      "recorded 3/46",
+    );
+  });
+
+  // ---- Invariant 2: a degraded run never reads as a quiet one --------------
+
+  it("claims the healthy steady state only when nothing failed", () => {
+    expect(buildDigestMessage(input())).toContain("healthy steady state");
+  });
+
+  it("withholds the steady-state claim when a step failed", () => {
+    // The worst pre-existing behaviour: an errored aggregate returned [], so
+    // the digest read "Examined 0 Reddit brand(s)... This is the healthy steady
+    // state" — a dead RPC asserting health.
+    const msg = buildDigestMessage(
+      input({ candidatesExamined: 0, degraded: ["reddit_aggregate_failed"] }),
+    );
+    expect(msg).not.toContain("healthy steady state");
+    expect(msg).toContain("DEGRADED THIS RUN");
+    expect(msg).toContain("reddit_aggregate_failed");
+  });
+
+  it("leads with the degradation warning, before the header", () => {
+    // Position matters: an operator skimming a phone notification sees the
+    // first lines only.
+    const msg = buildDigestMessage(input({ degraded: ["upserts_partial"] }));
+    const lines = msg.split("\n");
+    expect(lines[0]).toContain("Brands discover");
+    expect(lines[1]).toContain("DEGRADED THIS RUN");
+    expect(msg.indexOf("DEGRADED")).toBeLessThan(msg.indexOf("No new AU-evidenced"));
+  });
+
+  it("names every degradation reason, not just the first", () => {
+    const msg = buildDigestMessage(
+      input({ degraded: ["scam_aggregate_failed", "upserts_partial"] }),
+    );
+    expect(msg).toContain("scam_aggregate_failed");
+    expect(msg).toContain("upserts_partial");
+  });
+
+  // ---- Existing sections still render -------------------------------------
+
+  it("reports auto-promotions with their domain source", () => {
+    const msg = buildDigestMessage(
+      input({
+        promote: [
+          {
+            brandNormalized: "acme",
+            brandName: "Acme",
+            domains: ["acme.com.au"],
+            domainSource: "known_brands",
+            au: 2,
+            scam: 2,
+            total: 4,
+          },
+        ],
+        promoted: ["Acme"],
+      }),
+    );
+    expect(msg).toContain("Auto-promoted to the watchlist (1)");
+    expect(msg).toContain("acme.com.au");
+    expect(msg).toContain("domain from known_brands");
+  });
+
+  it("lists brands that cleared the bar but had no trustworthy domain", () => {
+    const msg = buildDigestMessage(
+      input({ needsDomain: [merged({ rawBrand: "Acme", scam: 2, au: 2, total: 2 })] }),
+    );
+    expect(msg).toContain("need a confirmed domain (1)");
+    expect(msg).toContain("• Acme (AU 2, reported 2)");
+  });
+
+  it("tags known aliases in the actionable list", () => {
+    const msg = buildDigestMessage(
+      input({ auEvidenced: [merged({ au: 1 })], hasAlias: () => true }),
+    );
+    expect(msg).toContain("(known alias)");
   });
 });
