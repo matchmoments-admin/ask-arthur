@@ -125,7 +125,9 @@ const PROD_ALIASES: Record<string, string> = {
   apple: "Apple",
   australiapost: "Australia Post",
   citibank: "Citibank",
-  ebay: "eBay",
+  // NOTE: `ebay` deliberately does NOT appear here — it lives in the v261 block
+  // below, pointing at "eBay Australia". Its pre-v261 value WAS `"eBay"`, which
+  // is precisely the self-referential row that bridged nothing.
   facebook: "Facebook",
   fedex: "FedEx",
   google: "Google",
@@ -147,6 +149,26 @@ const PROD_ALIASES: Record<string, string> = {
   metafacebook: "Facebook",
   appleincicloud: "Apple",
   mygovaustraliangovernment: "myGov",
+  // v261 — the SUFFIXED-LABEL leak, the mirror image of the v260 block above.
+  // There the classifier's label was longer than the watchlist's; here the
+  // watchlist's is longer. "eBay Australia" normalises to `ebayaustralia` but
+  // the classifier only ever emits `ebay`, so a brand we already monitor was
+  // sitting at the TOP of the review queue with AU evidence. Note these point
+  // at the exact watchlist LABEL — the pre-v261 rows were self-referential
+  // (`ebay -> "eBay"`), which satisfies "an alias exists" while bridging
+  // nothing.
+  ebay: "eBay Australia",
+  netflix: "Netflix (AU)",
+  binance: "Binance Australia",
+  spotify: "Spotify (AU)",
+  disney: "Disney+ (AU)",
+  foxtel: "Foxtel / Kayo",
+  kayo: "Foxtel / Kayo",
+  ing: "ING Australia",
+  linkt: "Linkt (Transurban)",
+  opal: "Opal (Transport for NSW)",
+  translink: "Translink (Queensland)",
+  myki: "myki (Public Transport Victoria)",
 };
 
 /** Live output of aggregate_scam_report_brands(30d, 2) on 2026-07-30. */
@@ -283,6 +305,41 @@ describe("PROD REPLAY — what Monday's digest will contain", () => {
       const canonical = resolveCanonical(raw);
       expect(canonical).toBeTruthy();
       expect(watched.has(brandNormalize(canonical)!)).toBe(true);
+    }
+  });
+
+  it("v261: eBay is recognised as already watched, through the whole real gate", () => {
+    // The bug an operator actually hit: eBay was the TOP row of
+    // /admin/brand-candidates with AU evidence — the obvious brand to promote —
+    // while already being monitored as "eBay Australia". Promoting it would have
+    // created a second overlapping entry for a covered brand.
+    //
+    // Note the direct check does NOT catch it: `ebay` is genuinely absent from
+    // buildWatchedKeySet, because the watchlist label normalises to
+    // `ebayaustralia`. Only the alias second-chance closes it, which is exactly
+    // why the pre-v261 self-referential row (`ebay -> "eBay"`) bridged nothing.
+    const watched = buildWatchedKeySet(AU_BRAND_WATCHLIST);
+    expect(watched.has("ebay")).toBe(false);
+    expect(watched.has("ebayaustralia")).toBe(true);
+
+    const resolveCanonical = buildBrandResolver(PROD_ALIASES);
+    const canonical = resolveCanonical("eBay");
+    expect(canonical).toBe("eBay Australia");
+    expect(watched.has(brandNormalize(canonical)!)).toBe(true);
+
+    // …and therefore it never reaches the queue.
+    expect(r.allFresh.find((m) => m.brandNormalized === "ebay")).toBeUndefined();
+  });
+
+  it("v261 bridges are not self-referential", () => {
+    // The failure mode that made this leak invisible for so long: an alias row
+    // existed for `ebay`, so any audit asking "is there an alias?" said yes —
+    // but it pointed at "eBay", which normalises straight back to the unwatched
+    // key. A bridge to yourself is not a bridge.
+    for (const key of ["ebay", "netflix", "binance", "spotify", "disney", "ing"]) {
+      const target = PROD_ALIASES[key];
+      expect(target, `${key} has no v261 bridge`).toBeTruthy();
+      expect(brandNormalize(target), `${key} bridges to itself`).not.toBe(key);
     }
   });
 

@@ -213,7 +213,34 @@ three were invisible to every prior review.
    See the general note now in [docs/inngest-brakes.md](../inngest-brakes.md) —
    three other low-frequency crons still have this.
 
-7. **The already-watched gate leaks on classifier free-text labels.** It is exact
+7. **The same leak, mirrored — and this one had an operator about to act on
+   it.** Opening `/admin/brand-candidates` after the smoke run showed **eBay at
+   the top with AU evidence**, looking like the obvious promote. It is already
+   monitored, as `eBay Australia`: the watchlist label normalises to
+   `ebayaustralia`, the classifier only ever emits `ebay`. Where bug 7 had the
+   classifier's label longer than the watchlist's, here the watchlist's is
+   longer — same gate, opposite direction.
+
+   Not one odd label: **16 of 291 entries** have an unwatched plain form
+   (`Netflix (AU)`, `Spotify (AU)`, `Binance Australia`, `Foxtel / Kayo`,
+   `ING Australia`, `Linkt (Transurban)`, `Opal (Transport for NSW)`,
+   `Translink (Queensland)`, `myki (…)`, `Disney+ (AU)`…). **Fixed** by v261;
+   `virgin` (ambiguous — Virgin Australia vs Virgin Money) and the generic stems
+   (`bank`, `ip`, `services`) are deliberately left unbridged.
+
+   Two things worth carrying forward. First, three of these keys **already had
+   alias rows** — and they were self-referential (`ebay → "eBay"`), so any audit
+   asking "is there an alias?" got a yes while nothing was bridged; a bridge to
+   yourself is not a bridge, which is also why v261 has to be an UPSERT and not
+   `ON CONFLICT DO NOTHING`. Second, the fix is deliberately NOT an `aliases`
+   entry on the watchlist object: those are live **matcher tokens** and the
+   field's own contract demands ≥5 chars, while five of the plain forms are
+   shorter (`ebay`, `kayo`, `myki`, `opal`, `ing`) — `ing` as a matcher token
+   would hit any confusable-bearing domain containing "ing". The guard is
+   `packages/shopfront-glue/src/__tests__/watchlist-label-variants.test.ts`,
+   which walks all 291 entries and was verified to fail when a bridge is removed.
+
+8. **The already-watched gate leaks on classifier free-text labels.** It is exact
    set membership on `brandNormalize`, but the classifier emits free text.
    `anzbank`→ANZ and `commonwealthbank`→CBA were rescued by `brand_aliases`;
    `australiantaxofficeato` ("Australian Tax Office (ATO)") and `googleaustralia`
@@ -367,6 +394,39 @@ A real app call carries a `pgrst_source` wrapper. Only your own MCP queries
 means the flag is off.
 
 ---
+
+## 6b. NEXT PIECE OF WORK — the matcher gap v261 exposed but did not fix
+
+Recorded separately because it is probably worth more than the queue hygiene that
+found it, and because bundling it into v261 would have been wrong.
+
+For the twelve brands v261 bridged, the **matcher** still only hunts lookalikes of
+the suffixed label. It is looking for typosquats of `ebayaustralia`, `netflixau`,
+`binanceaustralia`. **Nobody registers those.** Real clones are
+`ebay-au-login.com`, `netflix-billing.shop`, `binance-verify.top`. So for this set
+the matcher is close to inert, and has been since those entries were added.
+
+The fix is to add the plain trading names as watchlist `aliases` (which ARE
+matcher tokens). It was deliberately excluded from v261 for two reasons:
+
+1. **It is a live behaviour change**, not a data correction. The baseline is
+   30–70 hits/day (first overlay-enabled sweep 2026-07-29: 70,000 scanned / 30
+   hits). Adding ~12 shorter, more generic tokens will move that, and the move
+   needs measuring before it is trusted — a jump in hits is indistinguishable
+   from a jump in false positives without looking.
+2. **Five of the tokens are under 5 chars** (`ebay`, `kayo`, `myki`, `opal`,
+   `ing`), which the `aliases` field's own contract forbids. Short tokens are
+   mostly guarded — no Levenshtein below 5, substring needs an exact
+   hyphen-segment match plus scam context — **but the confusable path has no
+   length guard** (`lexical-match.ts`), so `ing` would match any
+   confusable-bearing domain containing "ing" at score 0.9. That guard gap
+   should probably be closed first, and is arguably a latent bug in its own
+   right for any short alias.
+
+Suggested shape: add a length guard to the confusable path, then add the ≥5-char
+plain forms (`netflix`, `spotify`, `binance`, `foxtel`, `linkt`, `disney`,
+`translink`) in one PR and measure a full sweep against the baseline before
+deciding on the four-character ones.
 
 ## 7. Known limitations (accepted, documented, not bugs)
 
