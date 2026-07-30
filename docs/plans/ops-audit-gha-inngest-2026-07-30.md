@@ -10,6 +10,71 @@
 
 ---
 
+## 0. Status — updated 2026-07-30 after verification
+
+Verification against prod caught one defect in the remediation itself, and two
+live consumer bugs the audit had not found. Recorded here so a cold reader knows
+which parts of §2–§4 are already closed.
+
+**Shipped (PRs open, all CI green unless noted):**
+
+| PR   | Covers                                           | Notes                                                         |
+| ---- | ------------------------------------------------ | ------------------------------------------------------------- |
+| #879 | §2.5 §2.6 §2.8 §3 (GHA lane) + §2.1 watchdog     | Includes the crt.sh revert-then-retire sequence below         |
+| #880 | §2.4 backoff latch                               | Verified against prod: acsc streak = 1,928h vs a 24h cooldown |
+| #881 | §2.2 + §5 Check 1–2 (`alert_delivery_log`, v260) | Applied to prod                                               |
+| #883 | §2.3 health-digest (v261)                        | Stacked on #881 — merge that first                            |
+| #882 | NEW — see below                                  | Two live consumer surfaces                                    |
+
+**Migrations applied to prod: v260, v261, v262.** Advisors re-run after each; the
+only new entries are expected `rls_enabled_no_policy` INFOs (service-role-only by
+design, matching 30+ existing operational tables). No new ERRORs or WARNs.
+
+**The remediation defect worth reading.** Retiring crt.sh — which the audit
+recommended on the evidence of 0 new rows in 55 days — would have silently
+removed **1,726 AU brand-lookalike domains** from the blocklist.
+`mark_stale_urls` deactivates on `last_seen_in_feed`, and crt.sh's daily touch
+was the only thing keeping its findings active; `is_active = TRUE` gates
+`/api/scam-urls/lookup`, `/api/v1/threats/domains` and
+`/api/v1/threats/urls/trending`. **Discovery volume and retention are separate
+jobs, and a dead-for-discovery feed can still be doing the second one.** Reverted,
+then fixed properly by v262 (`feed_sources.staleness_exempt`), then retired.
+
+Before retiring or slowing ANY feed, run this first:
+
+```sql
+select s feed, count(*) active_sole_source, max(last_seen_in_feed)
+  from scam_urls, unnest(feed_sources) s
+ where is_active and array_length(feed_sources,1)=1 group by 1 order by 2 desc;
+-- and the same over scam_ips
+```
+
+Swept 2026-07-30: `phishing_army` 157,660 · `ipsum` 148,847 · `phishtank` 62,019
+· `urlhaus` 19,239 · `asic_investor` 4,018 · `openphish` 3,945 · `crtsh` 1,726 ·
+`spamhaus` 1,655 · `abuseipdb` 1,192 · `reddit` 16. ~400k active rows verified
+safe. `phishing_database` and `feodo` are sole source for **zero** active rows,
+which is what makes those two retirements genuinely free.
+
+**Two live bugs the audit missed, both found by curling prod (#882):**
+
+1. `gateOrNotFound()` on a statically prerendered route is evaluated at **build**
+   time and baked into HTML. 6 of 8 gated routes had no `dynamic` export, and
+   `/charity-check` served HTTP 200 while both its API routes returned 503 off
+   the _same_ flag — a public search box where every query failed.
+2. The `/scam-feed` "ACSC" filter matched `source='acsc'`, which has **zero rows
+   lifetime**. Restored to `inbound_acsc`, where ACSC content actually arrives.
+
+**Still open from §4:** PR6 (required status checks), PR7 (brake canary drill),
+PR9 (upsert recency guard), PR11–PR15. Revised GHA saving: **~US$13.50/mo**
+config-only, with crt.sh's US$1.77 now genuinely removed rather than relabelled.
+
+**Founder actions that block the rest:** rotate the Slack webhook; add
+`ANTHROPIC_API_KEY_EVAL`; create the R2 bucket + four `R2_DR_*` secrets +
+`ENABLE_DR_DUMP=true`. Until those land, promptfoo, the vulnerability workflow
+and the new DR watchdog go **red by design** — they were failing all along.
+
+---
+
 ## 1. Do this first, before reading the rest
 
 **A live Slack webhook has been world-readable for 132 days.** It is stored as a repo **variable**, not a secret, so Actions does not mask it: `gh variable list` prints the full URL, and the `notify-failure` step's env dump writes it verbatim into the logs of a **public repo** (`gh repo view` → `"visibility": "PUBLIC"`, verified 2026-07-30). Run 29949808190 contains the literal line at 2026-07-22T19:13:29 followed by `ok` — a Slack 2xx under `curl -sf`, so **the webhook is live**. Exposed since 2026-03-20; present in 11 `notify-failure` logs in July alone.
