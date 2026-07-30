@@ -58,18 +58,31 @@ the 30-day window rolls, while reading as though they were invariants.
 
 ## 3. NOT PROVEN — the honest gaps
 
-### 3a. The cron has never run with this code (the big one)
+### 3a. ~~The cron has never run with this code~~ — RESOLVED 2026-07-30
 
-`reddit-brands-discover` is weekly, Monday 07:00 UTC. It last wrote on
-**2026-07-27 07:01**, hours _before_ v254 deployed. So:
+**Superseded.** After #884 deployed, the manual trigger was fired
+(`reddit-brands/discover.manual-trigger.v1`, event `01KYRZ6T42CSFGAWM1A3MHSMC5`)
+and the run completed. Measured immediately after:
 
-- `au_mention_count` is **0 on all 51 candidates**
-- the admin queue ranks everything at AU 0
-- `FF_SCAM_BRANDS_SOURCE` has never contributed a row
+| Check                              | Before     | After the run                            |
+| ---------------------------------- | ---------- | ---------------------------------------- |
+| `max(last_seen_at)`                | 2026-07-27 | **2026-07-30 07:36:06**                  |
+| rows with `au_mention_count>0`     | **0**      | **3** (eBay 1, Vinted 1, Capital One 1)  |
+| rows touched                       | —          | 23 (= the replay's predicted `allFresh`) |
+| NEW rows created                   | —          | **0** — nothing net-new, as predicted    |
+| `au_mention_count > mention_count` | 0          | 0                                        |
+| jsonb `au_counts` sum drift        | 0          | 0                                        |
+| promoted                           | 0          | 0 (nothing clears the bar — §3b-i)       |
 
-**Next run: Monday 2026-08-03 07:00 UTC.** The founder chose the scheduled run
-over firing the manual trigger, deliberately — the unattended path is the
-honest test.
+**The v260 alias is proven end-to-end**, not just in tests: `googleplay` was in
+the live aggregate at ≥3 mentions, not denylisted, not in the queue, and
+`googleplay ≠ google` — so without the alias it would have been inserted as row
+**52**. The table stayed at 51 and `brand_normalized='googleplay'` returns 0 rows.
+Exactly one brand suppressed, correctly.
+
+Still worth watching on **Monday 2026-08-03 07:00 UTC**: that is the first
+UNATTENDED run, and it exercises the cron trigger rather than the event trigger.
+The machinery is now proven; the schedule is not.
 
 ### 3b. What Monday will actually produce — measured, not guessed
 
@@ -267,6 +280,28 @@ bypasses the 10% INFO sample and **must** be present for every run — unlike
 every count plus `degraded` / `degradedReasons`, so this is the fastest way to
 answer "did Monday's run happen, and what did it see?" without touching the DB.
 
+```
+['ask-arthur']
+| where ['fields.fn'] == 'reddit-brands-discover' and message == 'reddit-brands-discover.summary'
+| project _time, ['fields.candidates'], ['fields.upserted'], ['fields.upsertAttempted'],
+          ['fields.newlySurfaced'], ['fields.auEvidenced'], ['fields.globalOnly'],
+          ['fields.promoted'], ['fields.needsDomain'], ['fields.degraded'], ['fields.degradedReasons']
+| sort by _time desc
+```
+
+> **Why this line exists, measured rather than argued.** Immediately after the
+> 2026-07-30 smoke run, `/api/cron/axiom-fleet-watch` over a 20-minute window that
+> **contained that successful run** reported `inngestStarts: 0`,
+> `inngestStartsSampled: 0`, `infoSamplePct: 10`. The run definitely happened —
+> the DB writes are timestamped 07:36:06 — yet INFO-level lifecycle events show
+> nothing. That is the sampling blindness in one observation. `inngestErrors: 0`
+> over the same window also confirms the run did not throw.
+>
+> Note `AXIOM_QUERY_TOKEN` is a **Sensitive** Vercel var: it works in prod but
+> `vercel env pull` returns `""` for it, so ad-hoc APL from a laptop needs the
+> token from the Axiom UI. This is the same trap as the flag-flip note in §6 —
+> reading back empty does not mean unset.
+
 **Step 4 — invariants still hold** (all must be 0):
 
 ```sql
@@ -274,6 +309,20 @@ select count(*) filter (where au_mention_count > mention_count) as violations,
        count(*) filter (where au_mention_count <>
          coalesce((select sum(v::int) from jsonb_each_text(au_counts) e(k,v)),0)) as au_sum_drift
 from public.reddit_watchlist_candidates;
+```
+
+**Step 4b — read the digest text.** Not verified by the 2026-07-30 smoke run:
+the message goes to the founder's admin Telegram chat, which the agent cannot
+read. The run completed without error and the replay harness renders the exact
+text it produces (`pnpm --filter @askarthur/web test redditBrandsDiscoverProdReplay`
+prints it), but **an actual human still needs to confirm one arrived.** Expected
+shape, header + heartbeat only:
+
+```
+Brands discover
+No new AU-evidenced brands this week.
+Examined 45 Reddit brand(s) over 30d (≥3 mentions) and 1 reported-scam brand(s) (≥2); recorded 23/23.
+Nothing new: every candidate is already watched, already in the queue, or a platform name. This is the healthy steady state.
 ```
 
 **Step 5 — exercise the queue once, by hand.** Open
