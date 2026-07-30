@@ -60,6 +60,15 @@ function formatDate(iso: string | null | undefined): string {
   });
 }
 
+// Feature gates must be evaluated per REQUEST, not per build. Without this a
+// statically prerendered route bakes the flag's build-time value into HTML: the
+// page keeps serving 200 after the flag is turned off, and stays 404 after it is
+// turned on until something triggers a rebuild. That is not hypothetical —
+// /charity-check served 200 while both of its API routes returned 503
+// feature_disabled, so every search a user ran failed. Enforced by
+// __tests__/featureGateRuntime.test.ts.
+export const dynamic = "force-dynamic";
+
 export default async function ThemePage({ params }: PageProps) {
   gateOrNotFound("redditIntelPublicPages");
 

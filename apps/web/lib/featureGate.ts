@@ -11,6 +11,25 @@
 // Out of scope: the `app/app/layout.tsx` tenancy check — it's
 // `featureFlags.multiTenancy && !org`, which combines a flag with org state.
 // Not a pure route gate.
+//
+// ⚠ CALLERS MUST OPT OUT OF STATIC PRERENDERING:
+//
+//     export const dynamic = "force-dynamic";
+//
+// These helpers run inside a Server Component, so on a statically prerendered
+// route they are evaluated ONCE at build time and the verdict is baked into
+// HTML. The page then keeps serving 200 after the flag is turned off, and keeps
+// 404ing after it is turned on, until something triggers a rebuild — and Vercel
+// env changes frequently do not trigger one.
+//
+// Measured 2026-07-30: 6 of 8 gated routes were missing the export, and
+// /charity-check was serving HTTP 200 while both of its API routes returned 503
+// feature_disabled off the SAME flag. Every search a user ran on that page
+// failed. The difference was purely build-time vs request-time evaluation.
+//
+// Enforced by apps/web/__tests__/featureGateRuntime.test.ts — that test fails
+// the build if a gated route is statically prerendered, so this comment is a
+// pointer to the check rather than a promise on its own.
 
 import "server-only";
 

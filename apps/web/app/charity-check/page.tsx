@@ -11,6 +11,15 @@ export const metadata: Metadata = {
     "Before you tap your card or sign anything, take 20 seconds. Type the charity name or ABN and Arthur will check it against the ACNC register, the ATO's deductible-gift list, and Australia's fundraising regulator.",
 };
 
+// Feature gates must be evaluated per REQUEST, not per build. Without this a
+// statically prerendered route bakes the flag's build-time value into HTML: the
+// page keeps serving 200 after the flag is turned off, and stays 404 after it is
+// turned on until something triggers a rebuild. That is not hypothetical —
+// /charity-check served 200 while both of its API routes returned 503
+// feature_disabled, so every search a user ran failed. Enforced by
+// __tests__/featureGateRuntime.test.ts.
+export const dynamic = "force-dynamic";
+
 export default function CharityCheckPage() {
   // Server-side gate. Returns 404 when NEXT_PUBLIC_FF_CHARITY_CHECK is OFF
   // so we can ship the route + components without exposing them in prod.
