@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireCronAuth } from "@/lib/cron-auth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
-import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
+import { alertAndRecord, recordAlertDelivery } from "@/lib/alerting/deliveryLog";
 import { readNumberEnv, type NumberEnvResult } from "@/lib/env-coerce";
 
 export const runtime = "nodejs";
@@ -734,6 +734,29 @@ export async function GET(req: Request) {
   // Below the global Telegram threshold: brakes were still evaluated above
   // (the M-brake fix), but no digest is sent. Report any brakes that engaged.
   if (!aboveThreshold) {
+    // Record the firing. NOTE: a brake can engage on this path without any
+    // Telegram going out, because this return sits BEFORE the message is built
+    // — SHOPFRONT_CLONE_WATCH_CAP_USD defaults to $1, structurally below the $2
+    // global gate, so it can only ever engage silently. Fixing that is the
+    // brake-drill PR; recording it here at least makes the silent engage
+    // visible, via condition_met.
+    const anyBrakeSet =
+      brakeSet ||
+      redditBrakeSet ||
+      phoneFootprintBrakeSet ||
+      extensionImageCheckBrakeSet;
+    await recordAlertDelivery({
+      alerter: "cost-daily-check",
+      conditionMet: anyBrakeSet,
+      outcome: anyBrakeSet ? "muted" : "no_alert_needed",
+      channel: "none",
+      metadata: {
+        belowThreshold: true,
+        totalCostUsd,
+        thresholdUsd,
+        silentBrakeEngage: anyBrakeSet,
+      },
+    });
     return NextResponse.json({
       belowThreshold: true,
       totalCostUsd,
@@ -857,7 +880,11 @@ export async function GET(req: Request) {
   }
   lines.push("", `Full breakdown: https://askarthur.au/admin/costs`);
 
-  await sendAdminTelegramMessage(lines.join("\n"));
+  await alertAndRecord({
+    alerter: "cost-daily-check",
+    text: lines.join("\n"),
+    metadata: { totalCostUsd, thresholdUsd, eventCount },
+  });
 
   return NextResponse.json({
     alerted: true,

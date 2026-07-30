@@ -3,7 +3,7 @@ import { requireCronAuth } from "@/lib/cron-auth";
 import { readBoolEnv } from "@askarthur/utils/env";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
-import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
+import { alertAndRecord, recordNoAlertNeeded } from "@/lib/alerting/deliveryLog";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -56,6 +56,10 @@ export async function GET(req: Request) {
 
   const stuck = (data ?? []) as StuckBackend[];
   if (stuck.length === 0) {
+    // The overwhelmingly common case, ~2,016 times a week. These rows are the
+    // point: without them there is no way to tell a healthy watchdog from one
+    // that stopped firing, and this watchdog writes nothing else to the DB.
+    await recordNoAlertNeeded("pg-stuck-query-watchdog", { stuck: 0 });
     return NextResponse.json({ ok: true, stuck: 0 });
   }
 
@@ -66,10 +70,12 @@ export async function GET(req: Request) {
     return `• <code>PID ${row.pid}</code> — ${mins}min — ${app}\n  <code>${escapeHtml(preview)}</code>`;
   });
 
-  await sendAdminTelegramMessage(
-    `<b>⚠️ Postgres stuck queries (≥${ALERT_MINUTES}min)</b>\n\n${lines.join("\n\n")}`,
-    { parseMode: "HTML" },
-  );
+  await alertAndRecord({
+    alerter: "pg-stuck-query-watchdog",
+    text: `<b>⚠️ Postgres stuck queries (≥${ALERT_MINUTES}min)</b>\n\n${lines.join("\n\n")}`,
+    parseMode: "HTML",
+    metadata: { stuck: stuck.length, pids: stuck.map((s) => s.pid) },
+  });
 
   const autoTerminate = readBoolEnv("PG_WATCHDOG_AUTO_TERMINATE");
   const terminated: number[] = [];

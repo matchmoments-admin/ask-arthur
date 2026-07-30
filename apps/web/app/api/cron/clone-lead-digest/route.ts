@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { requireCronAuth } from "@/lib/cron-auth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
-import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
+import { alertAndRecord, recordNoAlertNeeded } from "@/lib/alerting/deliveryLog";
 
 // Weekly digest of open Clone Watch lead-magnet leads. clone-list-request
 // does NOT fire the real-time founder pings that /api/leads does, so this is
@@ -54,7 +54,10 @@ export async function GET(req: NextRequest) {
   const totalOpen = openRes.count ?? rows.length;
 
   // Quiet week → no digest (an empty "0 leads" ping reads as broken/noise).
+  // Still record the firing: a missing row must mean "the cron did not run",
+  // not "there was nothing to report". See lib/alerting/deliveryLog.ts.
   if (rows.length === 0) {
+    await recordNoAlertNeeded("clone-lead-digest", { totalOpen });
     return NextResponse.json({ ok: true, count: 0, totalOpen });
   }
 
@@ -69,10 +72,16 @@ export async function GET(req: NextRequest) {
     lines.join("\n") +
     `\n\nWork them from your inbox — reply to book a call. ⚠️ = a brand we don't monitor yet (watch-list gap).`;
 
-  try {
-    await sendAdminTelegramMessage(body);
-  } catch (e) {
-    logger.warn("clone-lead-digest: telegram send failed", { error: String(e) });
+  const delivery = await alertAndRecord({
+    alerter: "clone-lead-digest",
+    text: body,
+    metadata: { newThisWeek: rows.length, totalOpen },
+  });
+  if (!delivery.ok) {
+    logger.warn("clone-lead-digest: telegram send failed", {
+      reason: delivery.reason,
+      error: delivery.error,
+    });
   }
 
   if (process.env.SLACK_WEBHOOK_LEADS_URL) {

@@ -3,7 +3,7 @@ import { requireCronAuth } from "@/lib/cron-auth";
 import { readBoolEnv } from "@askarthur/utils/env";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
-import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
+import { alertAndRecord, recordNoAlertNeeded } from "@/lib/alerting/deliveryLog";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -66,6 +66,9 @@ export async function GET(req: Request) {
 
   const disagreements = falsePos + falseNeg + userReported;
   if (disagreements === 0) {
+    // Healthy day. Record it anyway — this row is what distinguishes "no
+    // disagreements today" from "this cron stopped running a month ago".
+    await recordNoAlertNeeded("feedback-digest", { total, correct, disagreements: 0 });
     return NextResponse.json({
       silent: true,
       total,
@@ -104,13 +107,32 @@ export async function GET(req: Request) {
   // incident or while the new brief is being trusted.
   const legacyTelegramEnabled = readBoolEnv("FF_LEGACY_DIGEST_TELEGRAM");
 
-  if (legacyTelegramEnabled) {
-    await sendAdminTelegramMessage(lines.join("\n"));
-  } else {
+  // `enabled: false` records outcome='muted' rather than skipping the row.
+  // That distinction matters: FF_LEGACY_DIGEST_TELEGRAM is absent from prod env,
+  // so this alerter has been dark, delegating to an out-of-repo Claude Code
+  // Routine that nothing here can audit. 'muted' makes that visible in the same
+  // liveness query as everything else instead of looking like a healthy alerter.
+  const delivery = await alertAndRecord({
+    alerter: "feedback-digest",
+    text: lines.join("\n"),
+    enabled: legacyTelegramEnabled,
+    metadata: {
+      disagreements,
+      fnOnSafeCount: fnOnSafe.length,
+      mutedBy: legacyTelegramEnabled ? null : "FF_LEGACY_DIGEST_TELEGRAM",
+    },
+  });
+
+  if (!legacyTelegramEnabled) {
     logger.info(
       "feedback-digest: telegram muted (FF_LEGACY_DIGEST_TELEGRAM off); rolled into morning brief",
       { disagreements, fnOnSafeCount: fnOnSafe.length },
     );
+  } else if (!delivery.ok) {
+    logger.warn("feedback-digest: telegram send failed", {
+      reason: delivery.reason,
+      error: delivery.error,
+    });
   }
 
   return NextResponse.json({

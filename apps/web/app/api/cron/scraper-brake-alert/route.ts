@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireCronAuth } from "@/lib/cron-auth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
-import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
+import { alertAndRecord, recordNoAlertNeeded } from "@/lib/alerting/deliveryLog";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -58,6 +58,7 @@ export async function GET(req: Request) {
 
   const recentRows = (recent ?? []) as LogRow[];
   if (recentRows.length === 0) {
+    await recordNoAlertNeeded("scraper-brake-alert", { scanned: 0 });
     return NextResponse.json({ ok: true, alerted: 0 });
   }
 
@@ -93,6 +94,14 @@ export async function GET(req: Request) {
   }
 
   if (transitions.length === 0) {
+    // No NEW activation. Note this is also the state a permanently-latched feed
+    // sits in forever: the last pageable transition was 2026-06-28, ~2,976
+    // firings before this row was added. Recording the quiet firing is what
+    // makes that distinguishable from the cron having died.
+    await recordNoAlertNeeded("scraper-brake-alert", {
+      scanned: recentRows.length,
+      feedsInBackoff: [...seen],
+    });
     return NextResponse.json({ ok: true, alerted: 0, scanned: recentRows.length });
   }
 
@@ -101,12 +110,14 @@ export async function GET(req: Request) {
     return `• <code>${escapeHtml(row.feed_name)}</code> — ${escapeHtml(reason)}`;
   });
 
-  await sendAdminTelegramMessage(
-    `<b>🚧 Scraper circuit breaker tripped</b>\n\n${lines.join(
+  await alertAndRecord({
+    alerter: "scraper-brake-alert",
+    text: `<b>🚧 Scraper circuit breaker tripped</b>\n\n${lines.join(
       "\n",
     )}\n\nThe affected scrapers will skip every cron firing for 24h. Manual probe: <code>gh workflow run scrape-feeds.yml -f feed=&lt;name&gt;</code>`,
-    { parseMode: "HTML" },
-  );
+    parseMode: "HTML",
+    metadata: { feeds: transitions.map((r) => r.feed_name) },
+  });
 
   logger.warn(
     `scraper-brake-alert: paged on ${transitions.length} new activation(s)`,
