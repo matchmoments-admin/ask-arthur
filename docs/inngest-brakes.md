@@ -62,7 +62,7 @@ Inventory of every Inngest function and its safety brakes. Maintained as a check
 | `shopfront-clone-notify-brand-prepare`                                                                                       | cron `30 9` + manual                                            | 1 (singleton) | —                                                                                                                                                   | —      | —                        | `shopfrontCloneNotifyBrand`                      | ✓           | `shopfront_clone_outreach`          |
 | `clone-watch-enrich-attribution`                                                                                             | cron `30 13` daily + manual                                     | 1             | self-draining worklist (no c/d)                                                                                                                     | 6/d    | —                        | `cloneWatchAttribution`                          | ✓           | `shopfront_clone_outreach`          |
 | `report-brand-stewardship`                                                                                                   | cron `0 9 1 * *` + manual                                       | —             | —                                                                                                                                                   | —      | —                        | `brandStewardshipReport`                         | —           | —                                   |
-| `reddit-brands-discover`                                                                                                     | cron `0 7 * * 1` + manual                                       | 1             | 2/1h²                                                                                                                                               | —      | —                        | `redditBrandsDiscover`                           | — (free)³   | — (free)³                           |
+| `reddit-brands-discover`                                                                                                     | cron `0 7 * * 1` + manual                                       | 1             | —                                                                                                                                                   | 2/1h²  | —                        | `redditBrandsDiscover`                           | — (free)³   | — (free)³                           |
 | **Embeddings / enrichment** (added 2026-07-29 — these were absent from this matrix entirely; see the drift guard note below) |                                                                 |               |                                                                                                                                                     |        |                          |                                                  |             |                                     |
 | `scam-report-embed`                                                                                                          | event `scam.report.stored.v1`                                   | 3             | —                                                                                                                                                   | —      | `event.data.reportId`    | —                                                | ✓           | ✓                                   |
 | `scam-reports-backfill-embed`                                                                                                | cron `30 5` + event                                             | 1 (singleton) | —                                                                                                                                                   | —      | —                        | —                                                | ✓           | ✓                                   |
@@ -83,11 +83,20 @@ default 50, counted across ALL submission paths via `count_todays_takedown_submi
   burst if APWG/OpenPhish enforce sub-daily caps. Currently mitigated by being dark
   (`FF_CLONE_ENFORCE_AUTO_BLOCKLIST` off). See the gap note below.
 
-² `reddit-brands-discover` needs one run a week; `rateLimit: { limit: 2, period: "1h" }`
+² `reddit-brands-discover` needs one run a week; `throttle: { limit: 2, period: "1h" }`
 exists purely to defend the manual-trigger event. `concurrency: 1` SERIALISES stacked
 fires but does not cap them — Inngest queues each one — so before this, N manual fires
 meant N Telegram digests and N full re-upserts. Two per hour leaves room for one
 deliberate operator re-run.
+
+**Throttle, not rateLimit — and the difference is load-bearing on any cron that
+also takes a manual trigger.** `rateLimit` DISCARDS events over the limit;
+`throttle` QUEUES them. Had this been a `rateLimit`, two manual fires shortly
+before Monday 07:00 would have silently swallowed the SCHEDULED tick and the
+week's digest would simply never have arrived — the same silent-loss class the
+function's own heartbeat exists to make visible. Worth checking on the other
+cron+manual rows in this table: the **Rate** column is the wrong home for a
+manual-trigger defence on a scheduled function.
 
 ³ Genuinely free, not an unfilled cell: the function makes no paid-API call at all.
 It is two aggregate RPCs, one overlay RPC, a read of `reddit_watchlist_candidates`,

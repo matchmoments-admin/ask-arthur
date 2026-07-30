@@ -541,7 +541,17 @@ export const redditBrandsDiscover = inngest.createFunction(
     // Telegram digests and N full re-upserts. The cron needs one run a week; the
     // allowance of two an hour exists so an operator can deliberately re-run
     // once (e.g. verifying a fix) without being able to storm the admin chat.
-    rateLimit: { limit: 2, period: "1h" },
+    //
+    // THROTTLE, NOT rateLimit — the distinction matters here and is easy to get
+    // wrong. `rateLimit` DISCARDS events over the limit; `throttle` QUEUES them.
+    // On a function that is BOTH a cron and a manual trigger, discarding means
+    // two manual fires shortly before Monday 07:00 would silently swallow the
+    // SCHEDULED tick, and the week's digest would simply never arrive — the
+    // exact silent-loss failure this file's heartbeat exists to make visible.
+    // Throttling delays that tick instead. Matches the cron+manual siblings
+    // (clone-watch-lifecycle-recheck, clone-watch-enrich-attribution) and the
+    // CLAUDE.md rule, which specifies a throttle for this shape.
+    throttle: { limit: 2, period: "1h" },
   },
   [
     { cron: "0 7 * * 1" }, // weekly, Monday 07:00 UTC
