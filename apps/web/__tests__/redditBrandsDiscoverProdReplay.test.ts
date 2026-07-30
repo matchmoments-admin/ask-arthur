@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   aggregateBrandMentions,
+  buildDigestMessage,
   hasAuEvidence,
   meetsPromotionBar,
   mergeCandidateSources,
@@ -369,6 +370,33 @@ describe("PROD REPLAY — what Monday's digest will contain", () => {
     console.log("  actionable :", r.auEvidenced.map(fmt).join(", ") || "(none)");
     console.log("  global-only:", r.globalOnly.map(fmt).join(", ") || "(none)");
     expect(true).toBe(true);
+  });
+
+  it("prints the ACTUAL Telegram message this data produces", () => {
+    // The population above is the input; this is the artefact an operator
+    // actually reads on a Monday morning. Printing it is how the suppressed
+    // heartbeat would have been caught by eye rather than by reasoning about
+    // `nothingAtAll` — the digest population looked fine, the MESSAGE was
+    // missing its most important line.
+    const msg = buildDigestMessage({
+      auEvidenced: r.auEvidenced,
+      globalOnly: r.globalOnly,
+      promote: r.promote,
+      promoted: r.promote.map((p) => p.brandName),
+      needsDomain: r.needsDomain,
+      candidatesExamined: PROD_REDDIT.length,
+      scamExamined: PROD_SCAM.length,
+      upserted: r.allFresh.length,
+      upsertAttempted: r.allFresh.length,
+      degraded: [],
+      hasAlias: (raw) => Boolean(PROD_ALIASES[brandNormalize(raw) ?? ""]),
+    });
+    console.log("\n--- digest as it will be sent ---\n" + msg + "\n---\n");
+
+    // The one thing that must be true of EVERY message, whatever the window
+    // happens to contain: it proves the run actually looked.
+    expect(msg).toContain("Examined");
+    expect(msg).toContain("Review queue:");
   });
 });
 
