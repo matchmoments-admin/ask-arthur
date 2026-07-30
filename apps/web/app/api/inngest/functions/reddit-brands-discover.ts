@@ -559,28 +559,41 @@ export const redditBrandsDiscover = inngest.createFunction(
       }
       const sb = createServiceClient();
       if (!sb) return [] as Array<[string, { domain: string; source: string }]>;
+      // Key on brandNormalize(brand_name), NOT on known_brands.brand_key.
+      //
+      // Those are two different conventions and they only coincide by accident:
+      // brand_key is written by deriveBrandKey(), which replaces runs of
+      // non-alphanumerics with "_" ("Australia Post" -> "australia_post"),
+      // while candidates are keyed by brandNormalize(), which STRIPS them
+      // ("australiapost"). Measured 2026-07-30: 140 of 307 known_brands rows
+      // have brand_key <> brand_normalize(brand_name) — 46% of the domain
+      // store, and precisely the multi-word AU brands that matter most
+      // (Australia Post, Commonwealth Bank, JB Hi-Fi, Chemist Warehouse).
+      // Matching on brand_key silently resolved NO domain for any of them, so
+      // they could never be auto-promoted and the digest told the operator a
+      // domain was needed for brands whose domain we already hold.
+      //
+      // Deriving the key from brand_name through the SAME normaliser the
+      // candidates use makes a convention drift structurally impossible. Costs
+      // a full read of a 307-row cold table once a week.
       const { data, error } = await sb
         .from("known_brands")
-        .select("brand_key, brand_domain")
-        .in(
-          "brand_key",
-          eligible.map((c) => c.brandNormalized),
-        );
+        .select("brand_name, brand_domain");
       if (error) {
         logger.warn("reddit-brands-discover: trusted-domain load failed", {
           error: error.message,
         });
         return [] as Array<[string, { domain: string; source: string }]>;
       }
-      return (data ?? [])
-        .filter((r) => (r.brand_domain as string | null)?.trim())
-        .map(
-          (r) =>
-            [
-              r.brand_key as string,
-              { domain: (r.brand_domain as string).trim(), source: "known_brands" },
-            ] as [string, { domain: string; source: string }],
-        );
+      const wanted = new Set(eligible.map((c) => c.brandNormalized));
+      const out: Array<[string, { domain: string; source: string }]> = [];
+      for (const r of data ?? []) {
+        const key = brandNormalize(r.brand_name as string | null);
+        const domain = (r.brand_domain as string | null)?.trim();
+        if (!key || !domain || !wanted.has(key)) continue;
+        out.push([key, { domain, source: "known_brands" }]);
+      }
+      return out;
     });
 
     const { promote, needsDomain } = autoPromote
@@ -641,12 +654,17 @@ export const redditBrandsDiscover = inngest.createFunction(
       promotedKeys,
     );
 
-    if (
-      auEvidenced.length > 0 ||
-      globalOnly.length > 0 ||
-      promoted.length > 0 ||
-      needsDomain.length > 0
-    ) {
+    // ALWAYS send — a weekly job that goes silent when healthy is
+    // indistinguishable from a weekly job that has broken, and this one WILL
+    // be silent in its steady state: measured 2026-07-30 against real prod
+    // data, every AU-evidenced brand in the window was already watched,
+    // denylisted, or already in the queue, so all four lists were empty and
+    // the old condition sent nothing at all. Seven days of silence that could
+    // equally mean "nothing new" or "the cron is dead" is not an acceptable
+    // signal for the one job whose entire purpose is to tell you what is new.
+    // Same reasoning as the cost digest's unconditional send: a quiet week is
+    // information too, but only if it arrives.
+    {
       await step.run("telegram", async () => {
         const top = auEvidenced.slice(0, DIGEST_CAP);
         const lines = top.map((m) => {
@@ -666,6 +684,12 @@ export const redditBrandsDiscover = inngest.createFunction(
             ? [`…and ${auEvidenced.length - DIGEST_CAP} more AU-evidenced.`]
             : [];
 
+        const nothingAtAll =
+          auEvidenced.length === 0 &&
+          globalOnly.length === 0 &&
+          promoted.length === 0 &&
+          needsDomain.length === 0;
+
         const header =
           auEvidenced.length > 0
             ? `<b>${auEvidenced.length}</b> new brand(s) impersonated WITH Australian evidence ` +
@@ -673,6 +697,19 @@ export const redditBrandsDiscover = inngest.createFunction(
               `≥${SCAM_REPORT_THRESHOLD} reported to Arthur) — ` +
               `not yet on the clone-watch list:`
             : `No new AU-evidenced brands this week.`;
+
+        // Proof of life. Every number here answers "did it actually look?", so
+        // a silent week is distinguishable from a dead cron at a glance.
+        const heartbeat = nothingAtAll
+          ? [
+              `Examined <b>${candidates.length}</b> Reddit brand(s) over ${WINDOW_DAYS}d ` +
+                `(≥${REDDIT_MENTION_THRESHOLD} mentions) and ` +
+                `<b>${scamCandidatesRaw.length}</b> reported-scam brand(s) ` +
+                `(≥${SCAM_REPORT_THRESHOLD}).`,
+              `Nothing new: every candidate is already watched, already in the ` +
+                `queue, or a platform name. <i>This is the healthy steady state.</i>`,
+            ]
+          : [];
 
         // One line, not N — the global tail is context, not a worklist.
         const globalLine =
@@ -727,6 +764,7 @@ export const redditBrandsDiscover = inngest.createFunction(
           [
             `<b>Brands discover</b>`,
             header,
+            ...heartbeat,
             ...lines,
             ...more,
             ...globalLine,
