@@ -534,6 +534,15 @@ describe("buildDigestMessage — the digest cannot lie about the run", () => {
     expect(msg.indexOf("DEGRADED")).toBeLessThan(msg.indexOf("No new AU-evidenced"));
   });
 
+  it("does not repeat one root cause six times", () => {
+    // A missing service client fails all six fallible steps. The handler
+    // collects reasons in a Set for exactly this reason: "no_db_client,
+    // no_db_client, no_db_client, ..." in a Telegram message buries the signal
+    // the line exists to carry. This pins the rendering side of that contract.
+    const msg = buildDigestMessage(input({ degraded: ["no_db_client"] }));
+    expect(msg.match(/no_db_client/g)).toHaveLength(1);
+  });
+
   it("names every degradation reason, not just the first", () => {
     const msg = buildDigestMessage(
       input({ degraded: ["scam_aggregate_failed", "upserts_partial"] }),

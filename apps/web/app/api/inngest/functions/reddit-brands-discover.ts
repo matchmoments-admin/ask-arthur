@@ -77,10 +77,10 @@ import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
  * unreported, an errored `aggregate_reddit_brands_with_au` produced a digest
  * saying "Examined 0 Reddit brand(s)… Nothing new… This is the healthy steady
  * state" — a dead RPC asserting health, which is strictly worse than the silence
- * the heartbeat was added to fix. Each fallible step therefore returns
- * { rows, failed } and the handler accumulates `degraded[]`. The digest leads
- * with a warning when it is non-empty, and the "healthy steady state" wording is
- * printed ONLY when it is empty.
+ * the heartbeat was added to fix. Each of the SIX fallible steps therefore
+ * returns { rows, failed } and the handler collects the reasons. The digest
+ * leads with a warning when any are present, and the "healthy steady state"
+ * wording is printed ONLY when there are none.
  */
 
 const WINDOW_DAYS = 30;
@@ -552,11 +552,19 @@ export const redditBrandsDiscover = inngest.createFunction(
       return { skipped: true, reason: "flag_off" };
     }
 
-    // Every fallible step that can return a well-formed EMPTY result appends
+    // Every fallible step that can return a well-formed EMPTY result records
     // here. Non-empty means the run's numbers understate reality, so the digest
     // must not describe them as a steady state and the Axiom summary must be
     // findable by `degraded == true`.
-    const degraded: string[] = [];
+    //
+    // A Set, not an array: one root cause (a missing service client) fails
+    // SIX steps, and "no_db_client, no_db_client, no_db_client, …" in a
+    // Telegram message obscures the very thing the line exists to communicate.
+    // Insertion order is preserved, so the first failure still reads first.
+    const degradedSet = new Set<string>();
+    const markDegraded = (reason: string | null | undefined) => {
+      if (reason) degradedSet.add(reason);
+    };
 
     // 1. Bulk-load the v174 alias layer once (read-side resolver — NOT a
     //    per-row RPC). Plain Record so it survives Inngest step serialisation.
@@ -605,7 +613,7 @@ export const redditBrandsDiscover = inngest.createFunction(
       };
     });
     const candidates = candidatesStep.rows;
-    if (candidatesStep.failed) degraded.push(candidatesStep.failed);
+    markDegraded(candidatesStep.failed);
 
     // 3. Drop (a) denylisted noise (platform names + non-AU brands), then
     //    (b) brands already watched (by canonical key OR alias, and also by
@@ -677,7 +685,7 @@ export const redditBrandsDiscover = inngest.createFunction(
       return { rows: mapped, failed: null as string | null };
     });
     const scamCandidatesRaw = scamStep.rows;
-    if (scamStep.failed) degraded.push(scamStep.failed);
+    markDegraded(scamStep.failed);
     const scamFresh = scamCandidatesRaw.filter(isFreshCandidate);
 
     // 3c. Which fresh candidates (from EITHER source) have we NOT surfaced
@@ -712,7 +720,7 @@ export const redditBrandsDiscover = inngest.createFunction(
       }
       return { rows: keys, failed: null as string | null };
     });
-    if (knownStep.failed) degraded.push(knownStep.failed);
+    markDegraded(knownStep.failed);
     const knownCandidates = new Set(knownStep.rows);
 
     // Merge the two sources into one per-brand view for the digest, then keep
@@ -777,7 +785,7 @@ export const redditBrandsDiscover = inngest.createFunction(
       };
     });
     const upserted = upsertStep.ok;
-    if (upsertStep.failed) degraded.push(upsertStep.failed);
+    markDegraded(upsertStep.failed);
 
     // 4b. AUTO-PROMOTION (FF_BRAND_AUTO_PROMOTE, default OFF).
     //
@@ -845,7 +853,7 @@ export const redditBrandsDiscover = inngest.createFunction(
       }
       return { rows: out, failed: null as string | null };
     });
-    if (domainsStep.failed) degraded.push(domainsStep.failed);
+    markDegraded(domainsStep.failed);
 
     const { promote, needsDomain } = autoPromote
       ? planPromotions(allFresh, new Map(domainsStep.rows))
@@ -892,7 +900,7 @@ export const redditBrandsDiscover = inngest.createFunction(
       };
     });
     const promoted = promotedStep.rows;
-    if (promotedStep.failed) degraded.push(promotedStep.failed);
+    markDegraded(promotedStep.failed);
 
     // 5. Telegram digest. Two changes from the original weekly ping:
     //
@@ -928,6 +936,8 @@ export const redditBrandsDiscover = inngest.createFunction(
     // signal for the one job whose entire purpose is to tell you what is new.
     // Same reasoning as the cost digest's unconditional send: a quiet week is
     // information too, but only if it arrives.
+    const degraded = [...degradedSet];
+
     await step.run("telegram", async () => {
       await sendAdminTelegramMessage(
         buildDigestMessage({
