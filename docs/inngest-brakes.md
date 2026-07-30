@@ -5,8 +5,11 @@ Inventory of every Inngest function and its safety brakes. Maintained as a check
 **Brake glossary**
 
 - **Conc.** — `concurrency: { limit: N }`. Caps in-flight runs.
-- **Rate** — `rateLimit: { limit, period }`. Caps invocations per period (defends against manual-trigger storms even on cron functions).
-- **Throt.** — `throttle: { limit, period }`. Caps work _inside_ runs (e.g. external-API submission count).
+- **Rate** — `rateLimit: { limit, period }`. Caps invocations per period by **DISCARDING** events over the limit. Right for event-driven functions where a dropped duplicate is harmless. **Wrong for a cron**: a manual-trigger burst can consume the budget and make Inngest silently drop the SCHEDULED tick, so the run just never happens.
+- **Throt.** — `throttle: { limit, period }`. Caps runs per period by **QUEUEING** events over the limit rather than dropping them. This is the correct defence for a cron that also takes a manual trigger — excess fires are delayed, never lost. Also used to cap work _inside_ runs (e.g. external-API submission count).
+
+> **Choosing between them (this glossary previously got it wrong, and the error propagated into a PR):** ask what should happen to the event you are over budget on. If losing it is acceptable, `rateLimit`. If it must still run, just later — which is always true of a scheduled tick — `throttle`.
+
 - **Idem.** — `idempotency` key. Inngest dedups events with the same key.
 - **Kill** — feature flag or env var that early-returns the function. Durable kill-switch.
 - **Cost** — function writes to `cost_telemetry` for paid-API calls.
@@ -94,9 +97,17 @@ also takes a manual trigger.** `rateLimit` DISCARDS events over the limit;
 `throttle` QUEUES them. Had this been a `rateLimit`, two manual fires shortly
 before Monday 07:00 would have silently swallowed the SCHEDULED tick and the
 week's digest would simply never have arrived — the same silent-loss class the
-function's own heartbeat exists to make visible. Worth checking on the other
-cron+manual rows in this table: the **Rate** column is the wrong home for a
-manual-trigger defence on a scheduled function.
+function's own heartbeat exists to make visible.
+
+**Three cron functions still carry this shape** (audited 2026-07-30):
+`pipeline-entity-enrichment` (cron `0 */8`, `rateLimit` 1/10m),
+`pipeline-urlscan-enrichment` (cron `30 */8`, `rateLimit` 1/10m) and
+`pipeline-enrichment-fanout` (cron `0 */12`, `rateLimit` 1/30m). In each, a manual
+fire within 10–30 minutes before the scheduled tick makes Inngest drop that tick.
+Severity is LOW rather than none — all three drain a persistent worklist, so the
+skipped work is picked up 8–12 hours later rather than lost — which is why they
+are recorded here rather than changed. A function whose output is a one-shot
+NOTIFICATION has no such recovery, and must use `throttle`.
 
 ³ Genuinely free, not an unfilled cell: the function makes no paid-API call at all.
 It is two aggregate RPCs, one overlay RPC, a read of `reddit_watchlist_candidates`,
