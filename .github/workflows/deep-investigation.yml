@@ -69,3 +69,44 @@ jobs:
             --type "${{ github.event.inputs.entity_type || 'all' }}" \
             --risk-threshold "${{ github.event.inputs.risk_threshold || 'HIGH' }}" \
             --limit 50
+
+  # ---------------------------------------------------------------------
+  # Notify on failure — added 2026-07-30.
+  #
+  # This workflow had NO notify job of any kind, unlike both scraper
+  # workflows. The consequence, measured: 20 consecutive scheduled runs
+  # failed from 2026-03-01 to 2026-07-12 — 138 days, the entire lifetime of
+  # the import bug documented in the `working-directory` comment above — and
+  # reached no channel. It was found by manual review, not by an alert.
+  #
+  # This is the clearest evidence in the repo that a red run does not reach a
+  # human unless the workflow explicitly pages. Any new scheduled workflow
+  # needs one of these.
+  # ---------------------------------------------------------------------
+  notify-failure:
+    needs: investigate
+    if: failure() || cancelled()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Telegram notification
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+          TRIGGER: ${{ github.event_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -uo pipefail
+          if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_ADMIN_CHAT_ID:-}" ]; then
+            echo "::error::TELEGRAM_* secrets not set — this failure reached nobody"
+            exit 1
+          fi
+          TEXT=$(printf '🔍 Deep investigation scan failed\nTrigger: %s\nRun: %s' "$TRIGGER" "$RUN_URL")
+          if ! curl -sf -X POST \
+              "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+              --data-urlencode "chat_id=${TELEGRAM_ADMIN_CHAT_ID}" \
+              --data-urlencode "text=${TEXT}" \
+              -o /dev/null; then
+            echo "::error::Telegram send failed — the investigation failure was not delivered"
+            exit 1
+          fi
+          echo "Telegram notification delivered."

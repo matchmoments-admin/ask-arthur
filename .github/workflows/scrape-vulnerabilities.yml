@@ -2,6 +2,18 @@ name: Scrape Vulnerability Feeds
 
 # Weekly vulnerability intelligence scrapers (Phase 14).
 # Sprint 1: CISA KEV. Sprint 2: NVD, GHSA, OSV, CERT AU.
+#
+# A green run here means "every expected feed logged success", NOT "the process
+# exited 0". Those are different claims, and for 14 weeks only the second was
+# being made: each scraper catches its own exceptions, writes status='error' to
+# vulnerability_ingestion_log, and returns normally, so `notify-failure` (gated
+# on `failure()`) could never fire. Measured 2026-07-30 — 16/16 runs green while
+# nvd_recent, github_advisory and cert_au_vulns had each failed 15 of 15 runs
+# since 2026-04-21, ingesting nothing.
+#
+# The `Fail if any feed errored` step below closes that gap by reading the log
+# table. Mirrors the scraper_failures.txt gate in scrape-feeds.yml, which solves
+# the same problem for a pipeline where the failure does reach the shell.
 
 on:
   schedule:
@@ -47,6 +59,12 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # Watermark for the post-run gate. Recorded AFTER install so a slow pip
+      # step can't widen the window, and BEFORE the first scraper so every row
+      # this run writes falls inside it.
+      - name: Record run start
+        run: echo "RUN_START=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
       - name: Scrape CISA KEV
         if: github.event.inputs.feed == 'all' || github.event.inputs.feed == 'cisa_kev' || github.event_name == 'schedule'
         env:
@@ -76,38 +94,89 @@ jobs:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: python -m vulnerabilities.osv_feed
 
-      # CERT AU vuln scraper imports scrape_vulnerabilities() from cert_au.py;
-      # the original URL-based scrape() runs separately in scrape-feeds.yml.
-      - name: Scrape CERT AU vulnerability advisories
-        if: github.event.inputs.feed == 'all' || github.event.inputs.feed == 'cert_au_vulns' || github.event_name == 'schedule'
+      # CERT AU vuln scraper imports scrape_vulnerabilities() from cert_au.py.
+      #
+      # DISABLED on the schedule (and from feed=='all') 2026-07-30: 15 of 15
+      # runs failed since 2026-04-21, every one a 60s read timeout to
+      # www.cyber.gov.au. This is the same egress block that killed the ACSC
+      # scraper — cyber.gov.au drops GitHub Actions datacenter IPs at the edge
+      # regardless of User-Agent (proven 2026-05-11, see
+      # health-digest/route.ts:33-39), so it is not recoverable from a runner.
+      # Kept manual-only so `-f feed=cert_au_vulns` still works for re-probing
+      # from a dispatch; flip the condition back if egress ever changes.
+      #
+      # NOTE: cert_au.py's *other* entry point, scrape(), is referenced by
+      # acsc_alerts.py:10 in the present tense but is invoked by NO workflow —
+      # feed_ingestion_log has 0 rows for either of its feed names across its
+      # full history. Wiring it up or deleting it is tracked separately.
+      - name: Scrape CERT AU vulnerability advisories [manual-only — cyber.gov.au blocks CI IPs]
+        if: github.event.inputs.feed == 'cert_au_vulns'
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: python -c "from cert_au import scrape_vulnerabilities; scrape_vulnerabilities()"
 
+      # ------------------------------------------------------------------
+      # The gate. Reads vulnerability_ingestion_log for rows this run wrote
+      # and exits 1 if any expected feed logged a non-success — or logged
+      # nothing at all, which is how a feed that dies before log_ingestion()
+      # stays invisible to every query that groups by what is present.
+      #
+      # `if: always()` so it still runs when an earlier step hard-failed.
+      # cert_au_vulns is absent from every --expect list because its step no
+      # longer runs on a schedule; adding a feed here without a working step
+      # would make the gate permanently red.
+      # ------------------------------------------------------------------
+      - name: Fail if any feed errored
+        if: always()
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event.inputs.feed }}" = "all" ]; then
+            EXPECT="cisa_kev,nvd_recent,github_advisory,osv_feed"
+          else
+            EXPECT="${{ github.event.inputs.feed }}"
+          fi
+          echo "Checking feeds since $RUN_START: $EXPECT"
+          python -m vulnerabilities.check_run --since "$RUN_START" --expect "$EXPECT"
+
   # -----------------------------------------------------------------------
-  # Notify on failure — posts to Slack incoming webhook
+  # Notify on failure — Telegram, the same channel the 8 cron alerters use.
+  #
+  # Was a Slack incoming webhook read from `vars.SLACK_WEBHOOK_URL`. Moved
+  # 2026-07-30: a repo *variable* is not masked in logs, so on a public repo the
+  # webhook URL was printed verbatim into every notify-failure run — exposed
+  # from 2026-03-20 and still live when found. TELEGRAM_* are secrets, so they
+  # are masked, and consolidating here means one channel to watch instead of
+  # two. `cancelled()` is included because a 60-min timeout skips the gate step
+  # and would otherwise page nobody.
   # -----------------------------------------------------------------------
   notify-failure:
     needs: scrape
-    if: failure()
+    if: failure() || cancelled()
     runs-on: ubuntu-latest
     steps:
-      - name: Send Slack notification
-        if: vars.SLACK_WEBHOOK_URL != ''
+      - name: Send Telegram notification
         env:
-          SLACK_WEBHOOK_URL: ${{ vars.SLACK_WEBHOOK_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+          TRIGGER: ${{ github.event_name }} (${{ github.event.schedule || github.event.inputs.feed || 'manual' }})
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          curl -sf -X POST "$SLACK_WEBHOOK_URL" \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"text\": \":rotating_light: *Vulnerability scraper failed* — <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View logs>\",
-              \"blocks\": [
-                {
-                  \"type\": \"section\",
-                  \"text\": {
-                    \"type\": \"mrkdwn\",
-                    \"text\": \":rotating_light: *Vulnerability Feed Scraper Failed*\n\n*Trigger:* ${{ github.event_name }} (${{ github.event.schedule || github.event.inputs.feed || 'manual' }})\n*Run:* <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View logs>\"
-                  }
-                }
-              ]
-            }"
+          set -uo pipefail
+          if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_ADMIN_CHAT_ID:-}" ]; then
+            echo "::error::TELEGRAM_BOT_TOKEN / TELEGRAM_ADMIN_CHAT_ID not set — this failure reached nobody"
+            exit 1
+          fi
+          TEXT=$(printf '🚨 Vulnerability feed scraper failed\nTrigger: %s\nRun: %s' "$TRIGGER" "$RUN_URL")
+          # Fail the step if Telegram rejects the send. An alerter whose own
+          # failure is silent is the defect this workflow already had once.
+          if ! curl -sf -X POST \
+              "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+              --data-urlencode "chat_id=${TELEGRAM_ADMIN_CHAT_ID}" \
+              --data-urlencode "text=${TEXT}" \
+              -o /dev/null; then
+            echo "::error::Telegram send failed — the scraper failure was not delivered"
+            exit 1
+          fi
+          echo "Telegram notification delivered."

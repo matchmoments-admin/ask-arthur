@@ -35,12 +35,20 @@ GRAPHQL_URL = "https://api.github.com/graphql"
 LOOKBACK_DAYS = 7
 ECOSYSTEMS = ["NPM", "PIP", "MAVEN", "GO"]
 PAGE_SIZE = 100  # GraphQL max
+MAX_PAGES = 25  # 2,500 advisories — generous for a 7-day window across all ecosystems
 USER_AGENT = "AskArthur-VulnIntel/1.0 (+https://askarthur.au)"
 
+# NOTE: `securityAdvisories` does NOT accept an `ecosystem` argument — that
+# filter exists only on `securityVulnerabilities`. Passing it made every run
+# fail with `argumentNotAccepted`, which the scraper logged as status='error'
+# and then exited 0, so the workflow stayed green: 15 of 15 runs failed between
+# 2026-04-21 and 2026-07-26 with zero rows ingested and no alert. We now fetch
+# the single advisory stream and filter to ECOSYSTEMS client-side against each
+# advisory's own package list. Bounded by LOOKBACK_DAYS, so the extra rows
+# discarded are cheap relative to a weekly cron.
 QUERY = """
-query($ecosystem: SecurityAdvisoryEcosystem!, $since: DateTime!, $first: Int!, $after: String) {
+query($since: DateTime!, $first: Int!, $after: String) {
   securityAdvisories(
-    ecosystem: $ecosystem,
     updatedSince: $since,
     orderBy: { field: UPDATED_AT, direction: DESC },
     first: $first,
@@ -105,14 +113,37 @@ def _pick_cve(identifiers: list[dict]) -> str | None:
     return None
 
 
-def _fetch_page(ecosystem: str, since_iso: str, after: str | None, token: str) -> dict:
+def _advisory_ecosystems(node: dict) -> list[str]:
+    """Ecosystem codes (upper-case) named by this advisory's affected packages."""
+    vulns = (node.get("vulnerabilities") or {}).get("nodes") or []
+    return sorted({
+        (v.get("package") or {}).get("ecosystem", "").upper()
+        for v in vulns
+        if (v.get("package") or {}).get("ecosystem")
+    })
+
+
+def _primary_ecosystem(node: dict) -> str | None:
+    """The first ECOSYSTEMS entry this advisory touches, or None if it touches none.
+
+    Returning None is how an advisory outside our four target ecosystems gets
+    dropped — the API no longer filters server-side (see the QUERY note).
+    ECOSYSTEMS order is the tie-break when an advisory spans several.
+    """
+    present = set(_advisory_ecosystems(node))
+    for eco in ECOSYSTEMS:
+        if eco in present:
+            return eco
+    return None
+
+
+def _fetch_page(since_iso: str, after: str | None, token: str) -> dict:
     headers = {
         "Authorization": f"Bearer {token}",
         "User-Agent": USER_AGENT,
         "Content-Type": "application/json",
     }
     variables = {
-        "ecosystem": ecosystem,
         "since": since_iso,
         "first": PAGE_SIZE,
         "after": after,
@@ -218,28 +249,47 @@ def scrape() -> None:
     since_iso = since.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     try:
-        for ecosystem in ECOSYSTEMS:
-            logger.info(f"Fetching GHSA advisories for {ecosystem} since {since_iso}")
-            after: str | None = None
-            pages = 0
-            while True:
-                pages += 1
-                result = _fetch_page(ecosystem, since_iso, after, token)
-                nodes = result.get("nodes") or []
-                for node in nodes:
-                    parsed = _parse_node(node, ecosystem)
-                    if parsed:
-                        records.append(parsed)
+        logger.info(f"Fetching GHSA advisories since {since_iso}")
+        after: str | None = None
+        pages = 0
+        scanned = 0
+        skipped_ecosystem = 0
+        while True:
+            pages += 1
+            result = _fetch_page(since_iso, after, token)
+            nodes = result.get("nodes") or []
+            scanned += len(nodes)
+            for node in nodes:
+                ecosystem = _primary_ecosystem(node)
+                if ecosystem is None:
+                    skipped_ecosystem += 1
+                    continue
+                parsed = _parse_node(node, ecosystem)
+                if parsed:
+                    records.append(parsed)
 
-                page_info = result.get("pageInfo") or {}
-                if not page_info.get("hasNextPage") or pages >= 10:
-                    break
-                after = page_info.get("endCursor")
-                time.sleep(0.5)  # be polite to the GraphQL endpoint
+            page_info = result.get("pageInfo") or {}
+            if not page_info.get("hasNextPage"):
+                break
+            if pages >= MAX_PAGES:
+                logger.warning(
+                    "hit MAX_PAGES=%s with more advisories available — "
+                    "raise MAX_PAGES or shorten LOOKBACK_DAYS",
+                    MAX_PAGES,
+                )
+                break
+            after = page_info.get("endCursor")
+            time.sleep(0.5)  # be polite to the GraphQL endpoint
 
-            logger.info(f"  {ecosystem}: {pages} page(s) scanned")
-
-        logger.info(f"Parsed {len(records)} GHSA advisories across {len(ECOSYSTEMS)} ecosystems")
+        logger.info(
+            "Scanned %s advisories over %s page(s): kept %s in %s, "
+            "dropped %s outside those ecosystems",
+            scanned,
+            pages,
+            len(records),
+            ",".join(ECOSYSTEMS),
+            skipped_ecosystem,
+        )
 
         if records:
             cve_ids = [r["identifier"] for r in records if r["identifier_type"] == "cve"]
