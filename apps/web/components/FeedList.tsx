@@ -17,7 +17,13 @@ type FeedListProps = {
 const SOURCE_FILTERS = [
   { value: "", label: "All" },
   { value: "scamwatch_alert", label: "Scamwatch" },
-  { value: "acsc", label: "ACSC" },
+  // `inbound_acsc`, not `acsc`. /api/feed does `query.eq("source", source)` —
+  // an exact match — and feed_items has ZERO rows with source='acsc' lifetime,
+  // so this filter returned an empty list forever on a live, unflagged page.
+  // ACSC content does reach the feed, via the inbound-email pipeline under
+  // `inbound_acsc`; the direct acsc_alerts scraper has been blocked at
+  // cyber.gov.au's edge since 2026-05-10. Verified 2026-07-30.
+  { value: "inbound_acsc", label: "ACSC" },
   { value: "asic_investor", label: "ASIC" },
   { value: "reddit", label: "Reddit" },
   { value: "user_report", label: "Reported" },
