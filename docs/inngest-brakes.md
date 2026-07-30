@@ -5,12 +5,17 @@ Inventory of every Inngest function and its safety brakes. Maintained as a check
 **Brake glossary**
 
 - **Conc.** — `concurrency: { limit: N }`. Caps in-flight runs.
-- **Rate** — `rateLimit: { limit, period }`. Caps invocations per period (defends against manual-trigger storms even on cron functions).
-- **Throt.** — `throttle: { limit, period }`. Caps work _inside_ runs (e.g. external-API submission count).
+- **Rate** — `rateLimit: { limit, period }`. Caps invocations per period by **DISCARDING** events over the limit. Right for event-driven functions where a dropped duplicate is harmless. **Wrong for a cron**: a manual-trigger burst can consume the budget and make Inngest silently drop the SCHEDULED tick, so the run just never happens.
+- **Throt.** — `throttle: { limit, period }`. Caps runs per period by **QUEUEING** events over the limit rather than dropping them. This is the correct defence for a cron that also takes a manual trigger — excess fires are delayed, never lost. Also used to cap work _inside_ runs (e.g. external-API submission count).
+
 - **Idem.** — `idempotency` key. Inngest dedups events with the same key.
 - **Kill** — feature flag or env var that early-returns the function. Durable kill-switch.
 - **Cost** — function writes to `cost_telemetry` for paid-API calls.
 - **Brake** — function checks `feature_brakes.<feature>.paused_until` and early-returns if set.
+
+> **Rate vs Throt. — this glossary previously got it wrong, and the error propagated into a PR.** Ask what should happen to the event you are over budget on. If losing it is acceptable, `rateLimit`. If it must still run, just later — which is **always** true of a scheduled tick — `throttle`.
+>
+> Inngest's own wording, so this is checkable rather than folklore: rate limiting means _"events that exceed the rate limit are skipped and do not trigger functions to start"_ and is _"not the right approach if you need to process every single event"_ ([docs](https://www.inngest.com/docs/guides/rate-limiting)); throttling means _"new function runs over the throttling limit will be enqueued for the future"_ ([docs](https://www.inngest.com/docs/guides/throttling)). The docs characterise rate limiting as **lossy**.
 
 | Function id                                                                                                                  | Trigger                                                         | Conc.         | Rate                                                                                                                                                | Throt. | Idem.                    | Kill (flag)                                      | Cost        | Brake                               |
 | ---------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ------------------------ | ------------------------------------------------ | ----------- | ----------------------------------- |
@@ -62,6 +67,7 @@ Inventory of every Inngest function and its safety brakes. Maintained as a check
 | `shopfront-clone-notify-brand-prepare`                                                                                       | cron `30 9` + manual                                            | 1 (singleton) | —                                                                                                                                                   | —      | —                        | `shopfrontCloneNotifyBrand`                      | ✓           | `shopfront_clone_outreach`          |
 | `clone-watch-enrich-attribution`                                                                                             | cron `30 13` daily + manual                                     | 1             | self-draining worklist (no c/d)                                                                                                                     | 6/d    | —                        | `cloneWatchAttribution`                          | ✓           | `shopfront_clone_outreach`          |
 | `report-brand-stewardship`                                                                                                   | cron `0 9 1 * *` + manual                                       | —             | —                                                                                                                                                   | —      | —                        | `brandStewardshipReport`                         | —           | —                                   |
+| `reddit-brands-discover`                                                                                                     | cron `0 7 * * 1` + manual                                       | 1             | —                                                                                                                                                   | 2/1h²  | —                        | `redditBrandsDiscover`                           | — (free)³   | — (free)³                           |
 | **Embeddings / enrichment** (added 2026-07-29 — these were absent from this matrix entirely; see the drift guard note below) |                                                                 |               |                                                                                                                                                     |        |                          |                                                  |             |                                     |
 | `scam-report-embed`                                                                                                          | event `scam.report.stored.v1`                                   | 3             | —                                                                                                                                                   | —      | `event.data.reportId`    | —                                                | ✓           | ✓                                   |
 | `scam-reports-backfill-embed`                                                                                                | cron `30 5` + event                                             | 1 (singleton) | —                                                                                                                                                   | —      | —                        | —                                                | ✓           | ✓                                   |
@@ -82,11 +88,43 @@ default 50, counted across ALL submission paths via `count_todays_takedown_submi
   burst if APWG/OpenPhish enforce sub-daily caps. Currently mitigated by being dark
   (`FF_CLONE_ENFORCE_AUTO_BLOCKLIST` off). See the gap note below.
 
+² `reddit-brands-discover` needs one run a week; `throttle: { limit: 2, period: "1h" }`
+exists purely to defend the manual-trigger event. `concurrency: 1` SERIALISES stacked
+fires but does not cap them — Inngest queues each one — so before this, N manual fires
+meant N Telegram digests and N full re-upserts. Two per hour leaves room for one
+deliberate operator re-run.
+
+**Throttle, not rateLimit — and the difference is load-bearing on any cron that
+also takes a manual trigger.** `rateLimit` DISCARDS events over the limit;
+`throttle` QUEUES them. Had this been a `rateLimit`, two manual fires shortly
+before Monday 07:00 would have silently swallowed the SCHEDULED tick and the
+week's digest would simply never have arrived — the same silent-loss class the
+function's own heartbeat exists to make visible.
+
+**Three cron functions still carry this shape** (audited 2026-07-30):
+`pipeline-entity-enrichment` (cron `0 */8`, `rateLimit` 1/10m),
+`pipeline-urlscan-enrichment` (cron `30 */8`, `rateLimit` 1/10m) and
+`pipeline-enrichment-fanout` (cron `0 */12`, `rateLimit` 1/30m). In each, a manual
+fire within 10–30 minutes before the scheduled tick makes Inngest drop that tick.
+Severity is LOW rather than none — all three drain a persistent worklist, so the
+skipped work is picked up 8–12 hours later rather than lost — which is why they
+are recorded here rather than changed. A function whose output is a one-shot
+NOTIFICATION has no such recovery, and must use `throttle`.
+
+³ Genuinely free, not an unfilled cell: the function makes no paid-API call at all.
+It is two aggregate RPCs, one overlay RPC, a read of `reddit_watchlist_candidates`,
+~46 `upsert_watchlist_candidate` calls and one Telegram send, weekly. There is no
+spend to meter and nothing for a `feature_brakes` row to pause — `redditBrandsDiscover`
+is the kill switch. Recorded explicitly so a future audit does not read the dashes as
+missing brakes.
+
 ## Outstanding gaps (P1 tickets)
 
 - **`axiom-fleet-watch` runaway detector was measuring a sample against a population threshold** — FIXED 2026-07-30. `fn.start` is emitted at INFO level (`with-axiom-logging.ts:91`) and `getLogger` keeps only ~10% of info lines in production (per-request sampling, deterministic on a hash of `requestId`; `AXIOM_SAMPLE_PCT`, default 10 in prod / 100 elsewhere). The detector compared that raw sample against `AXIOM_FLEET_RUNAWAY_THRESHOLD=300` — a figure that reads as real invocations — so it needed **~3,000 actual starts** to fire, an order of magnitude past the 2026-05-27..29 burst it was built for. Confirmed live: the cron reported `inngestStarts: 0` for a 20-minute window in which Vercel logged 22 `/api/inngest` invocations. The count is now scaled by `100 / AXIOM_SAMPLE_PCT` and the response surfaces `inngestStarts` (estimate), `inngestStartsSampled` (raw) and `infoSamplePct`. **`fn.error` and middleware 5xx use `log.error`, bypass sampling, and are deliberately NOT scaled** — scaling those would page on every transient blip.
   - **General rule this implies:** any monitor that counts INFO/DEBUG events in Axiom and compares against a threshold must either scale by the sample rate or express its threshold in sampled units. Use `axiomInfoSamplePct()` from `@askarthur/utils/axiom-logger`.
 
+- **Low-frequency crons are effectively invisible in Axiom.** `withAxiomLogging` emits `fn.start` / `fn.complete` at INFO, and prod samples INFO to 10%, with the keep/drop decision taken once per run (deterministic on `runId`). For a DAILY function that is a nuisance; for a weekly or monthly one it means most runs leave **no Axiom trace at all** — a weekly cron is observable ~5 times in 52 runs, and `report-brand-stewardship` (`0 9 1 * *`) roughly once a year. "Did Monday's run happen?" is therefore not answerable from Axiom for `reddit-brands-discover` (fixed 2026-07-30), `report-brand-stewardship`, `shopfront-clone-fp-cluster-digest` or `feed-sync-verified-scams`. Note `logger.info` from `@askarthur/utils/logger` does NOT close this gap — it is `console.log` with no Axiom transport, so those lines never arrive at any sample rate.
+  - **The fix pattern**, now live in `reddit-brands-discover.ts`: emit one `warn`-level `"<fn-id>.summary"` event per run carrying the run's counts plus a `degraded` flag. WARN bypasses sampling, so every run lands, and one event per run is nothing against the 400 GB/mo budget. Same shape as `competitor-intel-extract-cron.ts:135`. Apply to the three remaining functions above.
 - **`acnc-charity-backfill-embed` — spends with no brake.** It calls `logCost()` for Voyage embeddings but has no `feature_brakes` check, so nothing can pause it if the spend runs away. Added to the matrix 2026-07-29.
 - **`shop-signal-enrich` — paid calls with no `logCost()`.** It has a brake and three kill-flags but writes no cost telemetry, so its APIVoid spend is invisible on `/admin/costs` and to the weekly digest. This is the "quota vendors log $0" class: the dollar-denominated brake system cannot see the failure mode that will actually bite.
 - **`competitor-intel-extract` — neither.** No `logCost()`, no brake check in the function body, despite CLAUDE.md documenting it as sharing `feature_brakes.reddit_intel` / `REDDIT_INTEL_CAP_USD`. Either the sharing happens somewhere this grep did not reach, or the documented brake does not exist — worth confirming before the flag goes on in more environments.

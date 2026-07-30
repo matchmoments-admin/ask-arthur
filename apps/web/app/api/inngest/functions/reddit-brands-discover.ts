@@ -8,6 +8,7 @@ import {
 } from "@askarthur/shopfront-glue";
 import { getActiveWatchlist } from "@askarthur/scam-engine/active-watchlist";
 import { createServiceClient } from "@askarthur/supabase/server";
+import { getLogger } from "@askarthur/utils/axiom-logger";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { loadAliasRecord } from "@/lib/brand-aliases";
@@ -54,6 +55,32 @@ import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
  *
  * No paid API (pure SQL read + in-process brandNormalize), so no cost brake —
  * runtime cost is effectively $0. Weekly cadence; pulls a bounded window.
+ *
+ * OBSERVABILITY — why a WEEKLY cron needs more than withAxiomLogging
+ * -----------------------------------------------------------------
+ * The HOF emits `fn.start` / `fn.complete` at Axiom INFO, and prod samples INFO
+ * to 10% (AXIOM_SAMPLE_PCT unset -> 10). For a function that runs 52 times a
+ * year that is ~5 observable runs — so "did Monday's run happen?" was not
+ * answerable from Axiom at all. Worse, the per-run numbers went only to
+ * `logger.info`, which is console.log with NO Axiom transport (see
+ * packages/utils/src/logger.ts), so they never arrived at any sample rate. The
+ * only always-ship signal was `fn.error`.
+ *
+ * So this function additionally emits ONE `warn`-level Axiom event per run —
+ * `reddit-brands-discover.summary` — carrying every count plus the degradation
+ * list. WARN bypasses sampling, so every run lands; one event a week is nothing
+ * against the 400 GB/mo budget. Same shape as competitor-intel-extract-cron.
+ *
+ * DEGRADATION MUST NOT READ AS HEALTH
+ * -----------------------------------
+ * Four steps here can fail and still return a well-formed empty result. Left
+ * unreported, an errored `aggregate_reddit_brands_with_au` produced a digest
+ * saying "Examined 0 Reddit brand(s)… Nothing new… This is the healthy steady
+ * state" — a dead RPC asserting health, which is strictly worse than the silence
+ * the heartbeat was added to fix. Each of the SIX fallible steps therefore
+ * returns { rows, failed } and the handler collects the reasons. The digest
+ * leads with a warning when any are present, and the "healthy steady state"
+ * wording is printed ONLY when there are none.
  */
 
 const WINDOW_DAYS = 30;
@@ -338,6 +365,170 @@ export function planPromotions(
   return { promote, needsDomain };
 }
 
+/** Everything the digest needs to describe a run. Counts rather than the raw
+ *  step results, because the message is a report ABOUT the run, not a second
+ *  computation over its inputs. */
+export interface DigestInput {
+  auEvidenced: readonly MergedCandidate[];
+  globalOnly: readonly MergedCandidate[];
+  promote: readonly PromotionPlan[];
+  promoted: readonly string[];
+  needsDomain: readonly MergedCandidate[];
+  /** Reddit brands examined (pre-filter) — proof the run actually looked. */
+  candidatesExamined: number;
+  /** Reported-scam brands examined (pre-filter). */
+  scamExamined: number;
+  upserted: number;
+  upsertAttempted: number;
+  /** Non-empty means the counts above UNDERSTATE reality. */
+  degraded: readonly string[];
+  /** True when the brand has a known alias — renders a "(known alias)" tag. */
+  hasAlias: (rawBrand: string) => boolean;
+}
+
+/**
+ * Build the Telegram digest.
+ *
+ * Extracted as a pure function for the same reason `partitionForDigest` was in
+ * #878: inside a `step.run` closure this logic is unreachable to tests, and it
+ * is precisely where the reporting bugs have lived. Two invariants it now owes,
+ * both of which were violated by the version this replaces:
+ *
+ *   1. THE HEARTBEAT IS UNCONDITIONAL. It used to print only when all four
+ *      lists were empty, so a single global-only brand suppressed the numbers
+ *      that answer "did it actually look?". Measured 2026-07-30, that brand
+ *      existed ("Google Play" ×3), so the very next run would have lost its
+ *      proof of life. Proof of life cannot be conditional on the absence of
+ *      content — that is the same bug as the silence it was added to fix.
+ *
+ *   2. A DEGRADED RUN NEVER READS AS A QUIET ONE. The "healthy steady state"
+ *      wording is withheld whenever any step failed, and the failure leads the
+ *      message. Otherwise an errored aggregate produced "Examined 0 Reddit
+ *      brand(s)… This is the healthy steady state" — a dead RPC asserting
+ *      health, which is worse than saying nothing.
+ *
+ * Exported for testing.
+ */
+export function buildDigestMessage(d: DigestInput): string {
+  const top = d.auEvidenced.slice(0, DIGEST_CAP);
+  const lines = top.map((m) => {
+    const parts: string[] = [];
+    if (m.reddit > 0) parts.push(`Reddit ×${m.reddit}`);
+    if (m.scam > 0) parts.push(`reported ×${m.scam}`);
+    const aliasTag = d.hasAlias(m.rawBrand) ? " (known alias)" : "";
+    // Always show the AU/global split so a 1-of-28 brand can't be mistaken for
+    // a strong signal.
+    return (
+      `• <b>${m.rawBrand}</b> — ${parts.join(", ")} · ` +
+      `<b>AU ${m.au}</b>/${m.total}${aliasTag}`
+    );
+  });
+  const more =
+    d.auEvidenced.length > DIGEST_CAP
+      ? [`…and ${d.auEvidenced.length - DIGEST_CAP} more AU-evidenced.`]
+      : [];
+
+  const nothingActionable =
+    d.auEvidenced.length === 0 &&
+    d.globalOnly.length === 0 &&
+    d.promoted.length === 0 &&
+    d.needsDomain.length === 0;
+
+  const header =
+    d.auEvidenced.length > 0
+      ? `<b>${d.auEvidenced.length}</b> new brand(s) impersonated WITH Australian evidence ` +
+        `(last ${WINDOW_DAYS}d: ≥${REDDIT_MENTION_THRESHOLD} Reddit mentions or ` +
+        `≥${SCAM_REPORT_THRESHOLD} reported to Arthur) — ` +
+        `not yet on the clone-watch list:`
+      : `No new AU-evidenced brands this week.`;
+
+  const degradedLines =
+    d.degraded.length > 0
+      ? [
+          `⚠️ <b>DEGRADED THIS RUN</b> — the counts below UNDERSTATE reality: ` +
+            `${d.degraded.join(", ")}.`,
+          `<i>Do not read this as a quiet week.</i>`,
+        ]
+      : [];
+
+  const heartbeat = [
+    `Examined <b>${d.candidatesExamined}</b> Reddit brand(s) over ${WINDOW_DAYS}d ` +
+      `(≥${REDDIT_MENTION_THRESHOLD} mentions) and ` +
+      `<b>${d.scamExamined}</b> reported-scam brand(s) ` +
+      `(≥${SCAM_REPORT_THRESHOLD}); ` +
+      `recorded ${d.upserted}/${d.upsertAttempted}.`,
+    ...(nothingActionable && d.degraded.length === 0
+      ? [
+          `Nothing new: every candidate is already watched, already in the ` +
+            `queue, or a platform name. <i>This is the healthy steady state.</i>`,
+        ]
+      : []),
+  ];
+
+  // One line, not N — the global tail is context, not a worklist.
+  const globalLine =
+    d.globalOnly.length > 0
+      ? [
+          ``,
+          `<i>Plus ${d.globalOnly.length} new global-only candidate(s) with no AU ` +
+            `evidence — recorded, not actioned: ` +
+            d.globalOnly
+              .slice(0, GLOBAL_ONLY_PREVIEW)
+              .map((m) => `${m.rawBrand} ×${m.total}`)
+              .join(", ") +
+            (d.globalOnly.length > GLOBAL_ONLY_PREVIEW ? ", …" : "") +
+            `</i>`,
+        ]
+      : [];
+
+  // Auto-promotions are reported even though nobody asked for them: an
+  // unattended write to the live matcher that shows up only in logs is how you
+  // find out about it from a customer.
+  const promotedLines =
+    d.promoted.length > 0
+      ? [
+          ``,
+          `<b>Auto-promoted to the watchlist (${d.promoted.length}):</b>`,
+          ...d.promote
+            .filter((p) => d.promoted.includes(p.brandName))
+            .map(
+              (p) =>
+                `• <b>${p.brandName}</b> → ${p.domains.join(", ")} ` +
+                `(AU ${p.au}, reported ${p.scam}; domain from ${p.domainSource})`,
+            ),
+          `<i>Undo any of these from the review queue.</i>`,
+        ]
+      : [];
+
+  // The other half of the honest report: brands that DID clear the evidence bar
+  // but had no trustworthy domain, so the system declined to guess. These are
+  // one click from promotion, not dead ends.
+  const needsDomainLines =
+    d.needsDomain.length > 0
+      ? [
+          ``,
+          `<b>Ready to promote — need a confirmed domain (${d.needsDomain.length}):</b>`,
+          ...d.needsDomain
+            .slice(0, DIGEST_CAP)
+            .map((m) => `• ${m.rawBrand} (AU ${m.au}, reported ${m.scam})`),
+        ]
+      : [];
+
+  return [
+    `<b>Brands discover</b>`,
+    ...degradedLines,
+    header,
+    ...heartbeat,
+    ...lines,
+    ...more,
+    ...globalLine,
+    ...promotedLines,
+    ...needsDomainLines,
+    ``,
+    `Review queue: https://askarthur.au/admin/brand-candidates`,
+  ].join("\n");
+}
+
 export const redditBrandsDiscover = inngest.createFunction(
   {
     id: "reddit-brands-discover",
@@ -345,15 +536,45 @@ export const redditBrandsDiscover = inngest.createFunction(
     timeouts: { finish: "5m" },
     retries: 1,
     concurrency: { limit: 1 },
+    // concurrency alone SERIALISES stacked manual fires, it does not cap them —
+    // Inngest queues them and runs each in turn, so N fires still meant N
+    // Telegram digests and N full re-upserts. The cron needs one run a week; the
+    // allowance of two an hour exists so an operator can deliberately re-run
+    // once (e.g. verifying a fix) without being able to storm the admin chat.
+    //
+    // THROTTLE, NOT rateLimit — the distinction matters here and is easy to get
+    // wrong. `rateLimit` DISCARDS events over the limit; `throttle` QUEUES them.
+    // On a function that is BOTH a cron and a manual trigger, discarding means
+    // two manual fires shortly before Monday 07:00 would silently swallow the
+    // SCHEDULED tick, and the week's digest would simply never arrive — the
+    // exact silent-loss failure this file's heartbeat exists to make visible.
+    // Throttling delays that tick instead. Matches the cron+manual siblings
+    // (clone-watch-lifecycle-recheck, clone-watch-enrich-attribution) and the
+    // CLAUDE.md rule, which specifies a throttle for this shape.
+    throttle: { limit: 2, period: "1h" },
   },
   [
     { cron: "0 7 * * 1" }, // weekly, Monday 07:00 UTC
     { event: "reddit-brands/discover.manual-trigger.v1" },
   ],
-  withAxiomLogging({ fnId: "reddit-brands-discover" }, async ({ step }) => {
+  withAxiomLogging({ fnId: "reddit-brands-discover" }, async ({ step, runId }) => {
     if (!featureFlags.redditBrandsDiscover) {
       return { skipped: true, reason: "flag_off" };
     }
+
+    // Every fallible step that can return a well-formed EMPTY result records
+    // here. Non-empty means the run's numbers understate reality, so the digest
+    // must not describe them as a steady state and the Axiom summary must be
+    // findable by `degraded == true`.
+    //
+    // A Set, not an array: one root cause (a missing service client) fails
+    // SIX steps, and "no_db_client, no_db_client, no_db_client, …" in a
+    // Telegram message obscures the very thing the line exists to communicate.
+    // Insertion order is preserved, so the first failure still reads first.
+    const degradedSet = new Set<string>();
+    const markDegraded = (reason: string | null | undefined) => {
+      if (reason) degradedSet.add(reason);
+    };
 
     // 1. Bulk-load the v174 alias layer once (read-side resolver — NOT a
     //    per-row RPC). Plain Record so it survives Inngest step serialisation.
@@ -369,9 +590,9 @@ export const redditBrandsDiscover = inngest.createFunction(
     //    rather than every brands_impersonated array in the window; the
     //    grouping key is public.brand_normalize(), the SQL twin of the
     //    brandNormalize() used everywhere on this side.
-    const candidates = await step.run("aggregate-mentions", async () => {
+    const candidatesStep = await step.run("aggregate-mentions", async () => {
       const sb = createServiceClient();
-      if (!sb) return [] as CandidateAgg[];
+      if (!sb) return { rows: [] as CandidateAgg[], failed: "no_db_client" };
       const since = new Date(
         Date.now() - WINDOW_DAYS * 24 * 3600 * 1000,
       ).toISOString();
@@ -383,7 +604,7 @@ export const redditBrandsDiscover = inngest.createFunction(
         logger.error("reddit-brands-discover: mention query failed", {
           error: error.message,
         });
-        return [] as CandidateAgg[];
+        return { rows: [] as CandidateAgg[], failed: "reddit_aggregate_failed" };
       }
       const rows = (data ?? []) as Array<{
         brand_normalized: string;
@@ -391,13 +612,18 @@ export const redditBrandsDiscover = inngest.createFunction(
         mention_count: number;
         au_count: number;
       }>;
-      return rows.map((r) => ({
-        brandNormalized: r.brand_normalized,
-        rawBrand: r.raw_brand,
-        mentionCount: r.mention_count,
-        auCount: r.au_count,
-      }));
+      return {
+        rows: rows.map((r) => ({
+          brandNormalized: r.brand_normalized,
+          rawBrand: r.raw_brand,
+          mentionCount: r.mention_count,
+          auCount: r.au_count,
+        })),
+        failed: null as string | null,
+      };
     });
+    const candidates = candidatesStep.rows;
+    markDegraded(candidatesStep.failed);
 
     // 3. Drop (a) denylisted noise (platform names + non-AU brands), then
     //    (b) brands already watched (by canonical key OR alias, and also by
@@ -429,10 +655,14 @@ export const redditBrandsDiscover = inngest.createFunction(
     //     aggregated rows ship). Same 30-day window + threshold + fresh-filter
     //     as Reddit. When FF_SCAM_BRANDS_SOURCE is OFF the step returns nothing
     //     and the Reddit path is unchanged.
-    const scamCandidatesRaw = await step.run("aggregate-scam-brands", async () => {
-      if (!featureFlags.scamBrandsSource) return [] as CandidateAgg[];
+    const scamStep = await step.run("aggregate-scam-brands", async () => {
+      // Flag OFF is a DELIBERATE empty, not a degradation — do not report it as
+      // one, or the digest cries wolf for the entire life of the flag.
+      if (!featureFlags.scamBrandsSource) {
+        return { rows: [] as CandidateAgg[], failed: null as string | null };
+      }
       const sb = createServiceClient();
-      if (!sb) return [] as CandidateAgg[];
+      if (!sb) return { rows: [] as CandidateAgg[], failed: "no_db_client" };
       const since = new Date(
         Date.now() - WINDOW_DAYS * 24 * 3600 * 1000,
       ).toISOString();
@@ -444,14 +674,14 @@ export const redditBrandsDiscover = inngest.createFunction(
         logger.error("reddit-brands-discover: scam-brand aggregate failed", {
           error: error.message,
         });
-        return [] as CandidateAgg[];
+        return { rows: [] as CandidateAgg[], failed: "scam_aggregate_failed" };
       }
       const rows = (data ?? []) as Array<{
         brand_normalized: string;
         raw_brand: string;
         mention_count: number;
       }>;
-      return rows.map((r) => ({
+      const mapped = rows.map((r) => ({
         brandNormalized: r.brand_normalized,
         rawBrand: r.raw_brand,
         mentionCount: r.mention_count,
@@ -462,47 +692,68 @@ export const redditBrandsDiscover = inngest.createFunction(
         // much smaller volume.
         auCount: r.mention_count,
       }));
+      return { rows: mapped, failed: null as string | null };
     });
+    const scamCandidatesRaw = scamStep.rows;
+    markDegraded(scamStep.failed);
     const scamFresh = scamCandidatesRaw.filter(isFreshCandidate);
 
     // 3c. Which fresh candidates (from EITHER source) have we NOT surfaced
     //     before? The digest fires only on genuinely new brands — the table
     //     already holds the standing list, so re-announcing it weekly is noise.
-    const knownCandidateKeys = await step.run("load-existing-candidates", async () => {
+    const knownStep = await step.run("load-existing-candidates", async () => {
       const sb = createServiceClient();
-      if (!sb) return [] as string[];
+      if (!sb) return { rows: [] as string[], failed: "no_db_client" };
       const keys: string[] = [];
       for (let from = 0; ; from += 1000) {
+        // ORDER BY is load-bearing, not cosmetic: Postgres gives no stable row
+        // order across separate queries, so an unordered .range() walk can skip
+        // or repeat rows once the table exceeds one page. A SKIPPED key here
+        // reads as "this brand is net-new" and re-announces a brand already in
+        // the queue — the exact failure this step exists to prevent.
         const { data, error } = await sb
           .from("reddit_watchlist_candidates")
           .select("brand_normalized")
+          .order("brand_normalized", { ascending: true })
           .range(from, from + 999);
         if (error) {
           logger.warn("reddit-brands-discover: existing-candidate load failed", {
             error: error.message,
           });
-          break;
+          // Fail CLOSED. A partial key set is worse than none: every key we
+          // failed to read looks net-new, so a transient error would announce
+          // the whole standing queue as fresh discoveries.
+          return { rows: [] as string[], failed: "existing_candidates_partial" };
         }
         for (const r of data ?? []) keys.push(r.brand_normalized as string);
         if ((data?.length ?? 0) < 1000) break;
       }
-      return keys;
+      return { rows: keys, failed: null as string | null };
     });
-    const knownCandidates = new Set(knownCandidateKeys);
+    markDegraded(knownStep.failed);
+    const knownCandidates = new Set(knownStep.rows);
 
     // Merge the two sources into one per-brand view for the digest, then keep
     // only the genuinely net-new brands (the DB stores the summed count).
-    const newlySurfaced = mergeCandidateSources(fresh, scamFresh).filter(
-      (m) => !knownCandidates.has(m.brandNormalized),
-    );
+    //
+    // When the existing-candidate read failed we cannot tell net-new from
+    // standing, so we announce NOTHING as new rather than everything. The
+    // upserts below still run — the table stays current; only the digest's
+    // "new" claim is withheld, and the degraded line says why.
+    const newlySurfaced = knownStep.failed
+      ? []
+      : mergeCandidateSources(fresh, scamFresh).filter(
+          (m) => !knownCandidates.has(m.brandNormalized),
+        );
 
     // 4. Upsert every fresh candidate from both sources (status-preserving RPC —
     //    never resets a dismissed candidate to pending). Each source writes its
     //    own count and the RPC recomputes the total; only the net-new brands
     //    drive the digest below.
-    const upserted = await step.run("upsert-candidates", async () => {
+    const upsertStep = await step.run("upsert-candidates", async () => {
+      const attempted = fresh.length + scamFresh.length;
       const sb = createServiceClient();
-      if (!sb) return 0;
+      if (!sb) return { ok: 0, attempted, failed: "no_db_client" };
       let n = 0;
       const upsertOne = async (
         c: CandidateAgg,
@@ -534,8 +785,17 @@ export const redditBrandsDiscover = inngest.createFunction(
       };
       for (const c of fresh) await upsertOne(c, "reddit");
       for (const c of scamFresh) await upsertOne(c, "scam_reports");
-      return n;
+      // A partial write was previously invisible: `n` counted successes and
+      // nothing compared it to the attempt count, so 3-of-46 and 46-of-46 both
+      // returned a plausible-looking number.
+      return {
+        ok: n,
+        attempted,
+        failed: n < attempted ? "upserts_partial" : (null as string | null),
+      };
     });
+    const upserted = upsertStep.ok;
+    markDegraded(upsertStep.failed);
 
     // 4b. AUTO-PROMOTION (FF_BRAND_AUTO_PROMOTE, default OFF).
     //
@@ -552,13 +812,17 @@ export const redditBrandsDiscover = inngest.createFunction(
     const allFresh = mergeCandidateSources(fresh, scamFresh);
     const autoPromote = featureFlags.brandAutoPromote;
 
-    const trustedDomains = await step.run("load-trusted-domains", async () => {
+    const domainsStep = await step.run("load-trusted-domains", async () => {
+      type Pair = [string, { domain: string; source: string }];
       const eligible = allFresh.filter(meetsPromotionBar);
+      // Neither of these is a degradation: the flag being off is a decision, and
+      // "nothing clears the promotion bar" is the expected steady state at
+      // current volume (see the AU-evidence note above).
       if (!autoPromote || eligible.length === 0) {
-        return [] as Array<[string, { domain: string; source: string }]>;
+        return { rows: [] as Pair[], failed: null as string | null };
       }
       const sb = createServiceClient();
-      if (!sb) return [] as Array<[string, { domain: string; source: string }]>;
+      if (!sb) return { rows: [] as Pair[], failed: "no_db_client" };
       // Key on brandNormalize(brand_name), NOT on known_brands.brand_key.
       //
       // Those are two different conventions and they only coincide by accident:
@@ -583,27 +847,34 @@ export const redditBrandsDiscover = inngest.createFunction(
         logger.warn("reddit-brands-discover: trusted-domain load failed", {
           error: error.message,
         });
-        return [] as Array<[string, { domain: string; source: string }]>;
+        // This one matters: a failed read makes every eligible brand look like
+        // it "needs a confirmed domain", so the operator is asked to supply
+        // domains we already hold. Exactly the misreport #878 fixed, via a
+        // different route.
+        return { rows: [] as Pair[], failed: "trusted_domains_failed" };
       }
       const wanted = new Set(eligible.map((c) => c.brandNormalized));
-      const out: Array<[string, { domain: string; source: string }]> = [];
+      const out: Pair[] = [];
       for (const r of data ?? []) {
         const key = brandNormalize(r.brand_name as string | null);
         const domain = (r.brand_domain as string | null)?.trim();
         if (!key || !domain || !wanted.has(key)) continue;
         out.push([key, { domain, source: "known_brands" }]);
       }
-      return out;
+      return { rows: out, failed: null as string | null };
     });
+    markDegraded(domainsStep.failed);
 
     const { promote, needsDomain } = autoPromote
-      ? planPromotions(allFresh, new Map(trustedDomains))
+      ? planPromotions(allFresh, new Map(domainsStep.rows))
       : { promote: [] as PromotionPlan[], needsDomain: [] as MergedCandidate[] };
 
-    const promoted = await step.run("auto-promote", async () => {
-      if (promote.length === 0) return [] as string[];
+    const promotedStep = await step.run("auto-promote", async () => {
+      if (promote.length === 0) {
+        return { rows: [] as string[], failed: null as string | null };
+      }
       const sb = createServiceClient();
-      if (!sb) return [] as string[];
+      if (!sb) return { rows: [] as string[], failed: "no_db_client" };
       const done: string[] = [];
       for (const p of promote) {
         // One transaction per brand: the RPC writes monitored_brands AND moves
@@ -627,8 +898,19 @@ export const redditBrandsDiscover = inngest.createFunction(
         }
         done.push(p.brandName);
       }
-      return done;
+      // A brand that cleared the bar, had a domain, and STILL was not promoted
+      // is the most consequential silent failure in this function: it will be
+      // re-planned every week and never announced as a problem.
+      return {
+        rows: done,
+        failed:
+          done.length < promote.length
+            ? "promotions_partial"
+            : (null as string | null),
+      };
     });
+    const promoted = promotedStep.rows;
+    markDegraded(promotedStep.failed);
 
     // 5. Telegram digest. Two changes from the original weekly ping:
     //
@@ -664,133 +946,27 @@ export const redditBrandsDiscover = inngest.createFunction(
     // signal for the one job whose entire purpose is to tell you what is new.
     // Same reasoning as the cost digest's unconditional send: a quiet week is
     // information too, but only if it arrives.
-    {
-      await step.run("telegram", async () => {
-        const top = auEvidenced.slice(0, DIGEST_CAP);
-        const lines = top.map((m) => {
-          const parts: string[] = [];
-          if (m.reddit > 0) parts.push(`Reddit ×${m.reddit}`);
-          if (m.scam > 0) parts.push(`reported ×${m.scam}`);
-          const aliasTag = resolveCanonical(m.rawBrand) ? " (known alias)" : "";
-          // Always show the AU/global split so a 1-of-28 brand can't be
-          // mistaken for a strong signal.
-          return (
-            `• <b>${m.rawBrand}</b> — ${parts.join(", ")} · ` +
-            `<b>AU ${m.au}</b>/${m.total}${aliasTag}`
-          );
-        });
-        const more =
-          auEvidenced.length > DIGEST_CAP
-            ? [`…and ${auEvidenced.length - DIGEST_CAP} more AU-evidenced.`]
-            : [];
+    const degraded = [...degradedSet];
 
-        const nothingAtAll =
-          auEvidenced.length === 0 &&
-          globalOnly.length === 0 &&
-          promoted.length === 0 &&
-          needsDomain.length === 0;
-
-        const header =
-          auEvidenced.length > 0
-            ? `<b>${auEvidenced.length}</b> new brand(s) impersonated WITH Australian evidence ` +
-              `(last ${WINDOW_DAYS}d: ≥${REDDIT_MENTION_THRESHOLD} Reddit mentions or ` +
-              `≥${SCAM_REPORT_THRESHOLD} reported to Arthur) — ` +
-              `not yet on the clone-watch list:`
-            : `No new AU-evidenced brands this week.`;
-
-        // Proof of life. Every number here answers "did it actually look?", so
-        // a silent week is distinguishable from a dead cron at a glance.
-        const heartbeat = nothingAtAll
-          ? [
-              `Examined <b>${candidates.length}</b> Reddit brand(s) over ${WINDOW_DAYS}d ` +
-                `(≥${REDDIT_MENTION_THRESHOLD} mentions) and ` +
-                `<b>${scamCandidatesRaw.length}</b> reported-scam brand(s) ` +
-                `(≥${SCAM_REPORT_THRESHOLD}).`,
-              `Nothing new: every candidate is already watched, already in the ` +
-                `queue, or a platform name. <i>This is the healthy steady state.</i>`,
-            ]
-          : [];
-
-        // One line, not N — the global tail is context, not a worklist.
-        const globalLine =
-          globalOnly.length > 0
-            ? [
-                ``,
-                `<i>Plus ${globalOnly.length} new global-only candidate(s) with no AU ` +
-                  `evidence — recorded, not actioned: ` +
-                  globalOnly
-                    .slice(0, GLOBAL_ONLY_PREVIEW)
-                    .map((m) => `${m.rawBrand} ×${m.total}`)
-                    .join(", ") +
-                  (globalOnly.length > GLOBAL_ONLY_PREVIEW ? ", …" : "") +
-                  `</i>`,
-              ]
-            : [];
-
-        // Auto-promotions are reported even though nobody asked for them:
-        // an unattended write to the live matcher that shows up only in logs
-        // is how you find out about it from a customer.
-        const promotedLines =
-          promoted.length > 0
-            ? [
-                ``,
-                `<b>Auto-promoted to the watchlist (${promoted.length}):</b>`,
-                ...promote
-                  .filter((p) => promoted.includes(p.brandName))
-                  .map(
-                    (p) =>
-                      `• <b>${p.brandName}</b> → ${p.domains.join(", ")} ` +
-                      `(AU ${p.au}, reported ${p.scam}; domain from ${p.domainSource})`,
-                  ),
-                `<i>Undo any of these from the review queue.</i>`,
-              ]
-            : [];
-
-        // The other half of the honest report: brands that DID clear the
-        // evidence bar but had no trustworthy domain, so the system declined
-        // to guess. These are one click from promotion, not dead ends.
-        const needsDomainLines =
-          needsDomain.length > 0
-            ? [
-                ``,
-                `<b>Ready to promote — need a confirmed domain (${needsDomain.length}):</b>`,
-                ...needsDomain
-                  .slice(0, DIGEST_CAP)
-                  .map((m) => `• ${m.rawBrand} (AU ${m.au}, reported ${m.scam})`),
-              ]
-            : [];
-
-        await sendAdminTelegramMessage(
-          [
-            `<b>Brands discover</b>`,
-            header,
-            ...heartbeat,
-            ...lines,
-            ...more,
-            ...globalLine,
-            ...promotedLines,
-            ...needsDomainLines,
-            ``,
-            `Review queue: https://askarthur.au/admin/brand-candidates`,
-          ].join("\n"),
-        );
-      });
-    }
-
-    logger.info("reddit-brands-discover: complete", {
-      candidates: candidates.length,
-      fresh: fresh.length,
-      scamFresh: scamFresh.length,
-      newlySurfaced: newlySurfaced.length,
-      auEvidenced: auEvidenced.length,
-      globalOnly: globalOnly.length,
-      autoPromote,
-      promoted: promoted.length,
-      needsDomain: needsDomain.length,
-      upserted,
+    await step.run("telegram", async () => {
+      await sendAdminTelegramMessage(
+        buildDigestMessage({
+          auEvidenced,
+          globalOnly,
+          promote,
+          promoted,
+          needsDomain,
+          candidatesExamined: candidates.length,
+          scamExamined: scamCandidatesRaw.length,
+          upserted,
+          upsertAttempted: upsertStep.attempted,
+          degraded,
+          hasAlias: (raw) => resolveCanonical(raw) !== null,
+        }),
+      );
     });
-    return {
-      ok: true,
+
+    const summary = {
       candidates: candidates.length,
       fresh: fresh.length,
       scamFresh: scamFresh.length,
@@ -801,6 +977,25 @@ export const redditBrandsDiscover = inngest.createFunction(
       promoted: promoted.length,
       needsDomain: needsDomain.length,
       upserted,
+      upsertAttempted: upsertStep.attempted,
+      degraded: degraded.length > 0,
+      degradedReasons: degraded,
     };
+
+    // ONE always-ship Axiom event per run. `warn` deliberately, not `info`:
+    // info is sampled to 10% in prod, and at 52 runs a year that left ~5
+    // observable runs — so "did Monday's run happen, and what did it see?" was
+    // unanswerable from Axiom. `logger.info` below cannot fill the gap either;
+    // it is console-only (no Axiom transport). One event a week is free.
+    const alog = getLogger({
+      source: "inngest",
+      requestId: runId,
+      fn: "reddit-brands-discover",
+    });
+    alog.warn("reddit-brands-discover.summary", summary);
+    void alog.flush();
+
+    logger.info("reddit-brands-discover: complete", summary);
+    return { ok: true, ...summary };
   }),
 );

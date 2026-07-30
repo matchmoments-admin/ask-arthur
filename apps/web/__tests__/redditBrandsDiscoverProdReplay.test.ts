@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   aggregateBrandMentions,
+  buildDigestMessage,
   hasAuEvidence,
   meetsPromotionBar,
   mergeCandidateSources,
@@ -8,7 +9,12 @@ import {
   planPromotions,
   CANDIDATE_DENYLIST,
 } from "@/app/api/inngest/functions/reddit-brands-discover";
-import { AU_BRAND_WATCHLIST, brandNormalize, buildWatchedKeySet } from "@askarthur/shopfront-glue";
+import {
+  AU_BRAND_WATCHLIST,
+  brandNormalize,
+  buildBrandResolver,
+  buildWatchedKeySet,
+} from "@askarthur/shopfront-glue";
 
 /**
  * PRODUCTION REPLAY — what will the Monday digest actually say?
@@ -88,11 +94,60 @@ const PROD_REDDIT: RedditRow[] = [
   { brand_normalized: "ticketmaster", raw_brand: "Ticketmaster", mention_count: 4, au_count: 0 },
   { brand_normalized: "americanexpress", raw_brand: "American Express", mention_count: 3, au_count: 0 },
   { brand_normalized: "meta", raw_brand: "Meta", mention_count: 3, au_count: 0 },
+  { brand_normalized: "googleplay", raw_brand: "Google Play", mention_count: 3, au_count: 0 },
+  { brand_normalized: "gmail", raw_brand: "Gmail", mention_count: 3, au_count: 0 },
   { brand_normalized: "nextdoor", raw_brand: "Nextdoor", mention_count: 3, au_count: 0 },
+  { brand_normalized: "adobe", raw_brand: "Adobe", mention_count: 3, au_count: 0 },
+  { brand_normalized: "telegram", raw_brand: "Telegram", mention_count: 3, au_count: 0 },
   { brand_normalized: "chime", raw_brand: "Chime", mention_count: 3, au_count: 0 },
+  { brand_normalized: "tinder", raw_brand: "Tinder", mention_count: 3, au_count: 0 },
   { brand_normalized: "usps", raw_brand: "USPS", mention_count: 3, au_count: 0 },
+  { brand_normalized: "zillow", raw_brand: "Zillow", mention_count: 3, au_count: 0 },
   { brand_normalized: "chase", raw_brand: "Chase", mention_count: 3, au_count: 0 },
+  { brand_normalized: "whatnot", raw_brand: "Whatnot", mention_count: 3, au_count: 0 },
 ];
+
+/**
+ * The v174 alias layer, as the cron loads it (loadAliasRecord -> a plain
+ * Record). Only the entries touching brands in this window; the live table has
+ * 311 rows.
+ *
+ * The bottom block is v260. The already-watched gate is EXACT set membership on
+ * brandNormalize(), but the upstream classifier emits free text, so a label like
+ * "Australian Tax Office (ATO)" normalises to `australiantaxofficeato` and does
+ * NOT equal the watchlist's `australiantaxationoffice`. Without an alias the
+ * gate leaks and an already-watched brand is proposed as a new candidate. This
+ * is the same shape as #878's brand_key bug — two key conventions that coincide
+ * only by accident — one layer up.
+ */
+const PROD_ALIASES: Record<string, string> = {
+  amazon: "Amazon",
+  apple: "Apple",
+  australiapost: "Australia Post",
+  citibank: "Citibank",
+  ebay: "eBay",
+  facebook: "Facebook",
+  fedex: "FedEx",
+  google: "Google",
+  instagram: "Instagram",
+  linkedin: "LinkedIn",
+  meta: "Meta",
+  microsoft: "Microsoft",
+  paypal: "PayPal",
+  revolut: "Revolut",
+  telstra: "Telstra",
+  westernunion: "Western Union",
+  whatsapp: "WhatsApp",
+  // v260 — classifier free-text variants of brands ALREADY on the watchlist.
+  anzbank: "ANZ",
+  australiantaxofficeato: "Australian Taxation Office",
+  googleaustralia: "Google",
+  googleplay: "Google",
+  instagrammeta: "Instagram",
+  metafacebook: "Facebook",
+  appleincicloud: "Apple",
+  mygovaustraliangovernment: "myGov",
+};
 
 /** Live output of aggregate_scam_report_brands(30d, 2) on 2026-07-30. */
 const PROD_SCAM = [
@@ -125,9 +180,20 @@ const PROD_KNOWN_BRANDS = [
 function replay(opts: { autoPromote: boolean }) {
   const watched = buildWatchedKeySet(AU_BRAND_WATCHLIST);
   const known = new Set(PROD_EXISTING_KEYS);
+  const resolveCanonical = buildBrandResolver(PROD_ALIASES);
 
-  const isFresh = (c: { brandNormalized: string }) =>
-    !CANDIDATE_DENYLIST.has(c.brandNormalized) && !watched.has(c.brandNormalized);
+  // Mirrors isFreshCandidate() in the cron EXACTLY, including the alias
+  // second-chance. An earlier version of this harness omitted that third check,
+  // which is precisely the leak v260 closes — so a replay without it cannot
+  // observe either the bug or the fix.
+  const isFresh = (c: { brandNormalized: string; rawBrand: string }) => {
+    if (CANDIDATE_DENYLIST.has(c.brandNormalized)) return false;
+    if (watched.has(c.brandNormalized)) return false;
+    const canonical = resolveCanonical(c.rawBrand);
+    const canonicalKey = canonical ? brandNormalize(canonical) : null;
+    if (canonicalKey && watched.has(canonicalKey)) return false;
+    return true;
+  };
 
   const reddit = PROD_REDDIT.map((r) => ({
     brandNormalized: r.brand_normalized,
@@ -168,21 +234,69 @@ function replay(opts: { autoPromote: boolean }) {
 describe("PROD REPLAY — what Monday's digest will contain", () => {
   const r = replay({ autoPromote: false });
 
-  it("is currently in its SILENT steady state — every list is empty", () => {
-    // Written expecting a non-empty list; the replay proved the opposite, and
-    // the code is right. On real 2026-07-30 data every AU-evidenced brand is
-    // already watched (PayPal), denylisted as a platform (Facebook
-    // Marketplace, YouTube), or already in the queue (eBay, Vinted, Capital
-    // One). So the digest has nothing NEW to report.
+  it("proposes no brand that is already watched, aliased to a watched brand, or denylisted", () => {
+    // THE property, replacing an earlier assertion that both lists were empty.
     //
-    // This is the finding that mattered most: under the original send
-    // condition the cron would have posted NOTHING, and seven days of silence
-    // reads identically to a dead cron. The fix is the unconditional send +
-    // heartbeat in the function. Keep this assertion — the day it fails is the
-    // day a genuinely new AU-evidenced brand appears, which is exactly when
-    // someone should look at the digest.
-    expect(r.auEvidenced).toHaveLength(0);
-    expect(r.globalOnly).toHaveLength(0);
+    // That assertion was a point-in-time FACT dressed as a property, and it went
+    // stale within hours: the fixture it was written against captured 38 of the
+    // 45 rows the live RPC returns, and one of the 7 dropped rows —
+    // `googleplay` — was the only brand in the window that is net-new, not
+    // denylisted and not watched. So the harness reported "global-only: (none)"
+    // and the handoff predicted a heartbeat-only digest, when the real cron
+    // would have named Google Play and SUPPRESSED the heartbeat (which was
+    // conditional on every list being empty).
+    //
+    // The lesson is about test design, not about this brand: assert what must
+    // always be true, and let the counts drift. "No already-covered brand is
+    // ever proposed" is the invariant the feature actually owes the operator.
+    const watched = buildWatchedKeySet(AU_BRAND_WATCHLIST);
+    const resolveCanonical = buildBrandResolver(PROD_ALIASES);
+    for (const m of [...r.auEvidenced, ...r.globalOnly]) {
+      expect(CANDIDATE_DENYLIST.has(m.brandNormalized)).toBe(false);
+      expect(watched.has(m.brandNormalized)).toBe(false);
+      const canonical = resolveCanonical(m.rawBrand);
+      if (canonical) expect(watched.has(brandNormalize(canonical)!)).toBe(false);
+    }
+  });
+
+  it("v260: the classifier's free-text variants resolve to their watched canonical", () => {
+    // Each of these is a real label seen in production data whose normalised key
+    // does NOT equal its watchlist key. Without the alias they surface as
+    // brand-new candidates for brands already covered; `australiantaxofficeato`
+    // and `googleaustralia` additionally clear the auto-promotion bar (scam >= 2)
+    // at a 90-day window, so this is the gate that keeps them out.
+    const watched = buildWatchedKeySet(AU_BRAND_WATCHLIST);
+    const resolveCanonical = buildBrandResolver(PROD_ALIASES);
+    for (const [raw, key] of [
+      ["Australian Tax Office (ATO)", "australiantaxofficeato"],
+      ["Google Australia", "googleaustralia"],
+      ["Google Play", "googleplay"],
+      ["Instagram / Meta", "instagrammeta"],
+      ["Meta/Facebook", "metafacebook"],
+      ["Apple Inc. / iCloud", "appleincicloud"],
+      ["myGov (Australian Government)", "mygovaustraliangovernment"],
+    ] as const) {
+      expect(brandNormalize(raw)).toBe(key);
+      // The variant key itself is NOT on the watchlist — that is the leak.
+      expect(watched.has(key)).toBe(false);
+      // …but its canonical is, so the alias second-chance closes it.
+      const canonical = resolveCanonical(raw);
+      expect(canonical).toBeTruthy();
+      expect(watched.has(brandNormalize(canonical)!)).toBe(true);
+    }
+  });
+
+  it("Google Play is filtered by the v260 alias, not by luck", () => {
+    // The concrete case from the bug above: present in the live aggregate at 3
+    // mentions, absent from the candidate queue, absent from the denylist, and
+    // `googleplay` !== `google` so the direct watched check does not catch it.
+    // Only the alias does. If this alias is ever dropped, the brand returns to
+    // the digest and the heartbeat regression returns with it.
+    expect(PROD_REDDIT.some((x) => x.brand_normalized === "googleplay")).toBe(true);
+    expect(PROD_EXISTING_KEYS).not.toContain("googleplay");
+    expect(CANDIDATE_DENYLIST.has("googleplay")).toBe(false);
+    expect(buildWatchedKeySet(AU_BRAND_WATCHLIST).has("googleplay")).toBe(false);
+    expect(r.allFresh.find((m) => m.brandNormalized === "googleplay")).toBeUndefined();
   });
 
   it("has AU-evidenced brands in the raw aggregate — the gate is not over-filtering", () => {
@@ -256,6 +370,33 @@ describe("PROD REPLAY — what Monday's digest will contain", () => {
     console.log("  actionable :", r.auEvidenced.map(fmt).join(", ") || "(none)");
     console.log("  global-only:", r.globalOnly.map(fmt).join(", ") || "(none)");
     expect(true).toBe(true);
+  });
+
+  it("prints the ACTUAL Telegram message this data produces", () => {
+    // The population above is the input; this is the artefact an operator
+    // actually reads on a Monday morning. Printing it is how the suppressed
+    // heartbeat would have been caught by eye rather than by reasoning about
+    // `nothingAtAll` — the digest population looked fine, the MESSAGE was
+    // missing its most important line.
+    const msg = buildDigestMessage({
+      auEvidenced: r.auEvidenced,
+      globalOnly: r.globalOnly,
+      promote: r.promote,
+      promoted: r.promote.map((p) => p.brandName),
+      needsDomain: r.needsDomain,
+      candidatesExamined: PROD_REDDIT.length,
+      scamExamined: PROD_SCAM.length,
+      upserted: r.allFresh.length,
+      upsertAttempted: r.allFresh.length,
+      degraded: [],
+      hasAlias: (raw) => Boolean(PROD_ALIASES[brandNormalize(raw) ?? ""]),
+    });
+    console.log("\n--- digest as it will be sent ---\n" + msg + "\n---\n");
+
+    // The one thing that must be true of EVERY message, whatever the window
+    // happens to contain: it proves the run actually looked.
+    expect(msg).toContain("Examined");
+    expect(msg).toContain("Review queue:");
   });
 });
 

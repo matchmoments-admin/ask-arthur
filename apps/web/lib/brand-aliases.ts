@@ -28,9 +28,16 @@ export async function loadAliasRecord(
 ): Promise<BrandAliasRecord> {
   const map: BrandAliasRecord = {};
   for (let from = 0; ; from += 1000) {
+    // ORDER BY is required for a correct .range() walk: Postgres guarantees no
+    // stable row order across separate queries, so past one page an unordered
+    // walk can skip or repeat rows. A skipped alias here silently WIDENS every
+    // caller's "already watched?" gate — the brand stops resolving to its
+    // canonical and re-surfaces as a brand-new candidate. Latent at 311 rows;
+    // the cost of ordering an indexed unique column is nil.
     const { data, error } = await sb
       .from("brand_aliases")
       .select("alias_normalized, canonical_brand")
+      .order("alias_normalized", { ascending: true })
       .range(from, from + 999);
     if (error) {
       logger.error(`${logLabel}: brand_aliases load failed`, {
