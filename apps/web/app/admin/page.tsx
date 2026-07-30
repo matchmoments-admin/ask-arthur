@@ -94,6 +94,8 @@ async function getTiles(svc: ReturnType<typeof createServiceClient>): Promise<Ti
     queuePendingRes,
     cloneWatchPendingRes,
     cloneWatchTpRes,
+    brandCandidatesPendingRes,
+    brandCandidatesAuRes,
   ] = await Promise.all([
     svc
       .from("feed_items")
@@ -142,6 +144,19 @@ async function getTiles(svc: ReturnType<typeof createServiceClient>): Promise<Ti
       .eq("source", "nrd")
       .in("triage_status", ["tp_confirmed", "tp_actioned"])
       .gte("first_seen_at", since7d),
+    svc
+      .from("reddit_watchlist_candidates")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "pending"),
+    // AU-evidenced is the number that decides whether the queue is worth
+    // opening. A large raw pending count is a fact about r/Scams traffic, not
+    // about Australian exposure — ranking on it is exactly how the queue
+    // reached 51 rows with zero ever actioned.
+    svc
+      .from("reddit_watchlist_candidates")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "pending")
+      .gt("au_mention_count", 0),
   ]);
 
   const inboundActiveCount = new Set(
@@ -204,6 +219,20 @@ async function getTiles(svc: ReturnType<typeof createServiceClient>): Promise<Ti
       metricLabel: "Awaiting triage",
       warn: (cloneWatchPendingRes.count ?? 0) > 20,
       secondary: `${cloneWatchTpRes.count ?? 0} TP confirmed in last 7d`,
+    },
+    {
+      // Was reachable ONLY via a text link at the bottom of /admin/brand-register,
+      // so the operator surface for the whole discovery loop was effectively
+      // undiscoverable — the founder could not find it to action a digest that
+      // links straight to it.
+      href: "/admin/brand-candidates",
+      title: "Watchlist candidates",
+      purpose: "Impersonated brands not yet on the clone-watch watchlist",
+      // The AU-evidenced count leads because it is the actionable one; the raw
+      // pending total sits underneath as context.
+      metric: String(brandCandidatesAuRes.count ?? 0),
+      metricLabel: "AU-evidenced pending",
+      secondary: `${brandCandidatesPendingRes.count ?? 0} pending in total`,
     },
     {
       href: "/admin/vulnerabilities",
