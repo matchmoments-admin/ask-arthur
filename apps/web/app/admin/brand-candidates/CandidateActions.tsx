@@ -108,11 +108,30 @@ export function CandidateActions({
     );
   }
 
+  // Dismissed / reviewed used to render as dead text with no controls, so a
+  // misclick was unrecoverable from this page — the only surface that shows
+  // these rows. That asymmetry was the trap: `promoted` (the consequential,
+  // writes-to-the-live-matcher action) had an Undo, while `dismissed` (the
+  // cheap one an operator does in bulk down a list) did not. Reversing a
+  // triage decision needs no domain and touches nothing live, so there is no
+  // reason for it to require an engineer with SQL access.
   if (current === "dismissed" || current === "reviewed") {
     return (
-      <span style={{ fontSize: 12, color: "var(--color-muted)" }}>
-        {current}
-        {error ? ` · ${error}` : ""}
+      <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+        <span style={{ fontSize: 12, color: "var(--color-muted)" }}>{current}</span>
+        <button
+          type="button"
+          style={BTN}
+          disabled={pending}
+          onClick={() =>
+            act("pending", `Returned to pending from '${current}' in the admin queue.`)
+          }
+          title="Put this brand back in the pending queue"
+        >
+          Undo
+        </button>
+        {pending && <span style={{ fontSize: 12, color: "var(--color-muted)" }}>…</span>}
+        {error && <span style={{ fontSize: 12, color: "#b91c1c" }}>{error}</span>}
       </span>
     );
   }
