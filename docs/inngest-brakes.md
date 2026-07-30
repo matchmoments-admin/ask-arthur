@@ -8,12 +8,12 @@ Inventory of every Inngest function and its safety brakes. Maintained as a check
 - **Rate** — `rateLimit: { limit, period }`. Caps invocations per period by **DISCARDING** events over the limit. Right for event-driven functions where a dropped duplicate is harmless. **Wrong for a cron**: a manual-trigger burst can consume the budget and make Inngest silently drop the SCHEDULED tick, so the run just never happens.
 - **Throt.** — `throttle: { limit, period }`. Caps runs per period by **QUEUEING** events over the limit rather than dropping them. This is the correct defence for a cron that also takes a manual trigger — excess fires are delayed, never lost. Also used to cap work _inside_ runs (e.g. external-API submission count).
 
-> **Choosing between them (this glossary previously got it wrong, and the error propagated into a PR):** ask what should happen to the event you are over budget on. If losing it is acceptable, `rateLimit`. If it must still run, just later — which is always true of a scheduled tick — `throttle`.
-
 - **Idem.** — `idempotency` key. Inngest dedups events with the same key.
 - **Kill** — feature flag or env var that early-returns the function. Durable kill-switch.
 - **Cost** — function writes to `cost_telemetry` for paid-API calls.
 - **Brake** — function checks `feature_brakes.<feature>.paused_until` and early-returns if set.
+
+> **Rate vs Throt. — this glossary previously got it wrong, and the error propagated into a PR.** Ask what should happen to the event you are over budget on. If losing it is acceptable, `rateLimit`. If it must still run, just later — which is **always** true of a scheduled tick — `throttle`.
 
 | Function id                                                                                                                  | Trigger                                                         | Conc.         | Rate                                                                                                                                                | Throt. | Idem.                    | Kill (flag)                                      | Cost        | Brake                               |
 | ---------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ------------------------ | ------------------------------------------------ | ----------- | ----------------------------------- |
