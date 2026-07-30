@@ -226,21 +226,50 @@ jobs:
       # update SOURCE_URL in pipeline/scrapers/cryptoscamdb.py to a working
       # mirror, then restore this step + the choice option above.
 
-      # crt.sh — DISABLED on the schedule (and from feed=='all') 2026-07-30.
-      # 29/29 runs reported success and fetched 31,584 certificates, but
-      # records_new was 0 on every single one, and threat_intel_urls confirms it
-      # independently: 1,959 crtsh rows with max(first_reported_at) 2026-06-05,
-      # i.e. 55 days without a new row. It re-fetched the same ~1,089
-      # certificates daily at 13.6 min/run — the slowest step in this workflow,
-      # 284 of 3,067 step-minutes over 29 days (~US$1.77/mo) for zero output.
+      # crt.sh — KEPT DAILY, deliberately, despite producing 0 new rows for 55
+      # days. It was moved to manual-only on 2026-07-30 and that was REVERTED the
+      # same day when the consequence was measured. Do not retire it again
+      # without doing the durability work described below.
       #
-      # ADR-0016's 2026-07-17 amendment already found the CT-log mechanism dead
-      # (Calidog streams zero frames, crt.sh fails on every access pattern) but
-      # treated this scraper as the surviving exception. It has now stopped
-      # producing too, so the exception no longer holds. Kept manual-only so
-      # `-f feed=crtsh` still works for re-probing.
-      - name: crt.sh [manual-only — 0 new rows in 55 days, see ADR-0016]
-        if: github.event.inputs.feed == 'crtsh'
+      # Why retiring it loses real functionality: this scraper's `last_seen_in_feed`
+      # touch is the only thing keeping its findings ACTIVE. `mark_stale_urls`
+      # (migration-v11, run daily 03:00 UTC by pipeline-staleness-check) sets
+      # is_active=FALSE on any URL not seen in a feed for 7 days, and exempts only
+      # URLs with unique_reporter_count >= 3 or confidence_level in
+      # ('high','confirmed'). Measured in prod 2026-07-30 for the crtsh set:
+      #
+      #   4,970 URLs total, 1,726 currently active
+      #       0 also present in another feed  → nothing else refreshes them
+      #       0 exempt from the staleness sweep
+      #   1,726 would go is_active=FALSE within 7 days of retiring this step
+      #
+      # And is_active=TRUE is the gate on /api/scam-urls/lookup:86,
+      # /api/v1/threats/domains:33 and /api/v1/threats/urls/trending:33 — so those
+      # 1,726 would silently drop out of the blocklist the extension and the B2B
+      # API read. They are AU brand lookalikes (mygov, centrelink, ato.gov,
+      # medicare, auspost, commbank, nab, anz, westpac, telstra, nbn, optus,
+      # woolworths, coles — see AU_BRAND_KEYWORDS in pipeline/scrapers/crtsh.py),
+      # i.e. the product's core signal, not incidental IOC volume.
+      #
+      # So the 284 step-min/29d (~US$1.77/mo) is not buying new rows — it is
+      # buying a keep-alive for 1,726 existing ones. That is an accidental
+      # architecture and worth fixing, but the fix is a schema decision, not a
+      # workflow edit: a CT-log finding ("a lookalike certificate existed") is a
+      # historical fact that should not expire on a 7-day feed-freshness clock,
+      # whereas urlhaus/openphish list currently-live threats where the clock is
+      # correct. Exempting crtsh from mark_stale_urls needs a migration AND a
+      # product call on whether an unvalidated lookalike cert should stay flagged
+      # indefinitely. Tracked in docs/plans/ops-audit-gha-inngest-2026-07-30.md.
+      #
+      # ADR-0016's 2026-07-17 amendment found the CT mechanism dead for DISCOVERY
+      # and that still holds — this step discovers nothing. It is retained purely
+      # for retention of prior discoveries. Note crt.sh is ALSO used at runtime by
+      # packages/scam-engine/src/ct-lookup.ts, which is a separate live path and
+      # unaffected either way.
+      - name: crt.sh [0 new rows since 2026-06-05 — retained as staleness keep-alive, see comment]
+        if: |
+          github.event.inputs.feed == 'all' || github.event.inputs.feed == 'crtsh'
+          || (github.event_name == 'schedule' && github.event.schedule == '0 16 * * *')
         run: python -m crtsh || echo "crtsh" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
       # ACNC Charity Register mirror — gated independently of ENABLE_SCRAPER.
