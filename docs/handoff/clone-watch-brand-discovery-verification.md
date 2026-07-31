@@ -428,6 +428,53 @@ plain forms (`netflix`, `spotify`, `binance`, `foxtel`, `linkt`, `disney`,
 `translink`) in one PR and measure a full sweep against the baseline before
 deciding on the four-character ones.
 
+## 6c. What `status` actually does — read this before triaging the queue
+
+Established 2026-07-30 by measuring rather than assuming, after the founder asked
+whether dismissing brands was necessary at all "if we wanted to be global one
+day". The honest answer is that **dismissal is very nearly inert**:
+
+|                                    |                                                                                                                                                                               |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Stops mention counts accruing?     | **No.** The cron never reads `status`; every run still upserts the row.                                                                                                       |
+| Blocks promotion later?            | **No.** `promote_watchlist_candidate` has no status guard.                                                                                                                    |
+| Stops the digest re-announcing it? | **No difference.** `newlySurfaced` excludes anything already in the table _regardless of status_, so a `pending` row re-announces exactly as often as a dismissed one: never. |
+| Hides the evidence?                | Only sorts the row into the "Actioned" section of the same page.                                                                                                              |
+
+So dismissal moves rows between two lists on one page. Nothing operational hangs
+off it.
+
+**The trap it creates is semantic, not mechanical.** `status` is being asked to
+answer two different questions at once:
+
+1. _Should the clone-watch matcher watch this brand?_ — operational.
+2. _Is this brand interesting to us?_ — commercial: the queue is also a record of
+   who scammers impersonate, which is the raw material for Brand Monitor.
+
+`dismissed` reads as a verdict on (2) while only ever affecting (1). Nineteen
+brands were dismissed on 2026-07-30 as "no Australian consumer surface" and then
+moved to `reviewed`, because the first label wrote off a partnership signal to
+tidy a matcher input. **Prefer `reviewed` ("Worth monitoring") for anything that
+is merely not-for-us-today; reserve `dismissed` for genuine non-brands** — the
+platform mis-tags (Reddit, Discord, Facebook Marketplace, X (Twitter)) and
+already-covered duplicates like the eBay/`eBay Australia` case in §4.8.
+
+**Going global needs none of this undone.** The Australia-specificity lives in
+exactly two pure functions — `hasAuEvidence` (what the digest calls actionable)
+and `meetsPromotionBar` (what may be promoted unattended). Widening coverage
+means changing those two, not revisiting per-row human decisions; every brand's
+mention history is retained and still accruing either way.
+
+**Auto-promotion overrides triage, and now says so (#888).** `planPromotions`
+runs over `allFresh`, which never consults `status`, so with
+`FF_BRAND_AUTO_PROMOTE` ON a dismissed brand that later clears the bar IS
+promoted to the live matcher. That is deliberate — two Australians reporting a
+brand is new evidence, and a call made when evidence was thinner should not bind
+forever — but it is no longer silent: the digest prints
+`⚠️ OVERRIDES your earlier 'dismissed'` against that brand, and the Axiom summary
+carries `promotionOverrides` so the question "did a cron ever reverse one of my
+decisions?" is answerable by query.
+
 ## 7. Known limitations (accepted, documented, not bugs)
 
 - **Overlay cache invalidation is per-instance.** 60s TTL, in-process. A
