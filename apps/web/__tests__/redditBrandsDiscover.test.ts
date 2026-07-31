@@ -590,3 +590,92 @@ describe("buildDigestMessage — the digest cannot lie about the run", () => {
     expect(msg).toContain("(known alias)");
   });
 });
+
+describe("buildDigestMessage — an unattended promotion cannot silently override a human", () => {
+  const plan = (over: Record<string, unknown> = {}) => ({
+    brandNormalized: "acme",
+    brandName: "Acme",
+    domains: ["acme.com.au"],
+    domainSource: "known_brands",
+    au: 2,
+    scam: 2,
+    total: 4,
+    ...over,
+  });
+
+  const base = {
+    auEvidenced: [],
+    globalOnly: [],
+    needsDomain: [],
+    candidatesExamined: 45,
+    scamExamined: 1,
+    upserted: 12,
+    upsertAttempted: 12,
+    degraded: [],
+    hasAlias: () => false,
+  };
+
+  it("flags a promotion that reverses an earlier dismissal", () => {
+    // The scenario: an operator dismissed Acme as irrelevant. Weeks later two
+    // Australians report it, clearing the promotion bar, and the cron adds it
+    // to the LIVE matcher unattended. That is defensible — new evidence — but
+    // the operator must not discover it by noticing it.
+    const msg = buildDigestMessage({
+      ...base,
+      promote: [plan()],
+      promoted: ["Acme"],
+      priorTriage: { acme: "dismissed" },
+    } as DigestInput);
+    expect(msg).toContain("OVERRIDES your earlier 'dismissed'");
+    expect(msg).toContain("reversed a decision you had already made");
+  });
+
+  it("flags a reversal of 'reviewed' too, not just 'dismissed'", () => {
+    const msg = buildDigestMessage({
+      ...base,
+      promote: [plan()],
+      promoted: ["Acme"],
+      priorTriage: { acme: "reviewed" },
+    } as DigestInput);
+    expect(msg).toContain("OVERRIDES your earlier 'reviewed'");
+  });
+
+  it("says nothing about overrides when the brand was never triaged", () => {
+    // No false alarms: a brand nobody has ruled on is just a normal promotion.
+    const msg = buildDigestMessage({
+      ...base,
+      promote: [plan()],
+      promoted: ["Acme"],
+      priorTriage: {},
+    } as DigestInput);
+    expect(msg).not.toContain("OVERRIDES");
+    expect(msg).toContain("Undo any of these from the review queue.");
+  });
+
+  it("keys the override on the canonical key, not the display label", () => {
+    // Two raw spellings share one canonical key; the triage record is keyed on
+    // the canonical, so matching on brandName would miss the override.
+    const msg = buildDigestMessage({
+      ...base,
+      promote: [plan({ brandNormalized: "acme", brandName: "ACME Corp" })],
+      promoted: ["ACME Corp"],
+      priorTriage: { acme: "dismissed" },
+    } as DigestInput);
+    expect(msg).toContain("OVERRIDES");
+  });
+
+  it("counts only the overriding promotions, not every promotion", () => {
+    const msg = buildDigestMessage({
+      ...base,
+      promote: [
+        plan(),
+        plan({ brandNormalized: "beta", brandName: "Beta" }),
+        plan({ brandNormalized: "gamma", brandName: "Gamma" }),
+      ],
+      promoted: ["Acme", "Beta", "Gamma"],
+      priorTriage: { acme: "dismissed" },
+    } as DigestInput);
+    expect(msg).toContain("Auto-promoted to the watchlist (3)");
+    expect(msg).toContain("1 of these reversed a decision");
+  });
+});

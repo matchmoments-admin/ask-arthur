@@ -384,6 +384,17 @@ export interface DigestInput {
   degraded: readonly string[];
   /** True when the brand has a known alias — renders a "(known alias)" tag. */
   hasAlias: (rawBrand: string) => boolean;
+  /**
+   * Brands a human already ruled on, by canonical key -> that status.
+   *
+   * Auto-promotion deliberately does NOT respect this: two Australians
+   * independently reporting a brand is genuinely new evidence, and a triage
+   * decision made when the evidence was thinner should not bind forever. But
+   * overriding a human silently is a different thing entirely — the operator
+   * would discover it only by noticing a brand they dismissed sitting on the
+   * live matcher. So the override is allowed and ANNOUNCED.
+   */
+  priorTriage?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -484,19 +495,34 @@ export function buildDigestMessage(d: DigestInput): string {
   // Auto-promotions are reported even though nobody asked for them: an
   // unattended write to the live matcher that shows up only in logs is how you
   // find out about it from a customer.
+  const promotedPlans = d.promote.filter((p) => d.promoted.includes(p.brandName));
+  const overrides = promotedPlans.filter(
+    (p) => d.priorTriage?.[p.brandNormalized],
+  );
   const promotedLines =
     d.promoted.length > 0
       ? [
           ``,
           `<b>Auto-promoted to the watchlist (${d.promoted.length}):</b>`,
-          ...d.promote
-            .filter((p) => d.promoted.includes(p.brandName))
-            .map(
-              (p) =>
-                `• <b>${p.brandName}</b> → ${p.domains.join(", ")} ` +
-                `(AU ${p.au}, reported ${p.scam}; domain from ${p.domainSource})`,
-            ),
-          `<i>Undo any of these from the review queue.</i>`,
+          ...promotedPlans.map((p) => {
+            const prior = d.priorTriage?.[p.brandNormalized];
+            // The load-bearing half of this line. Without it an operator finds
+            // out that a brand they ruled on is live on the matcher by noticing
+            // it, which is how you stop trusting the digest.
+            const overrode = prior
+              ? ` — ⚠️ <b>OVERRIDES your earlier '${prior}'</b>`
+              : "";
+            return (
+              `• <b>${p.brandName}</b> → ${p.domains.join(", ")} ` +
+              `(AU ${p.au}, reported ${p.scam}; domain from ${p.domainSource})${overrode}`
+            );
+          }),
+          ...(overrides.length > 0
+            ? [
+                `<i>${overrides.length} of these reversed a decision you had already made — ` +
+                  `new evidence cleared the bar. Undo from the review queue if that is wrong.</i>`,
+              ]
+            : [`<i>Undo any of these from the review queue.</i>`]),
         ]
       : [];
 
@@ -703,8 +729,13 @@ export const redditBrandsDiscover = inngest.createFunction(
     //     already holds the standing list, so re-announcing it weekly is noise.
     const knownStep = await step.run("load-existing-candidates", async () => {
       const sb = createServiceClient();
-      if (!sb) return { rows: [] as string[], failed: "no_db_client" };
+      if (!sb) {
+        return { rows: [] as string[], triaged: {} as Record<string, string>, failed: "no_db_client" };
+      }
       const keys: string[] = [];
+      // Brands a HUMAN has already ruled on. Carried out of this step purely so
+      // an unattended promotion can say it is overriding one — see the digest.
+      const triaged: Record<string, string> = {};
       for (let from = 0; ; from += 1000) {
         // ORDER BY is load-bearing, not cosmetic: Postgres gives no stable row
         // order across separate queries, so an unordered .range() walk can skip
@@ -713,7 +744,7 @@ export const redditBrandsDiscover = inngest.createFunction(
         // the queue — the exact failure this step exists to prevent.
         const { data, error } = await sb
           .from("reddit_watchlist_candidates")
-          .select("brand_normalized")
+          .select("brand_normalized, status")
           .order("brand_normalized", { ascending: true })
           .range(from, from + 999);
         if (error) {
@@ -723,12 +754,21 @@ export const redditBrandsDiscover = inngest.createFunction(
           // Fail CLOSED. A partial key set is worse than none: every key we
           // failed to read looks net-new, so a transient error would announce
           // the whole standing queue as fresh discoveries.
-          return { rows: [] as string[], failed: "existing_candidates_partial" };
+          return {
+            rows: [] as string[],
+            triaged: {} as Record<string, string>,
+            failed: "existing_candidates_partial",
+          };
         }
-        for (const r of data ?? []) keys.push(r.brand_normalized as string);
+        for (const r of data ?? []) {
+          const key = r.brand_normalized as string;
+          keys.push(key);
+          const st = r.status as string | null;
+          if (st === "dismissed" || st === "reviewed") triaged[key] = st;
+        }
         if ((data?.length ?? 0) < 1000) break;
       }
-      return { rows: keys, failed: null as string | null };
+      return { rows: keys, triaged, failed: null as string | null };
     });
     markDegraded(knownStep.failed);
     const knownCandidates = new Set(knownStep.rows);
@@ -962,6 +1002,7 @@ export const redditBrandsDiscover = inngest.createFunction(
           upsertAttempted: upsertStep.attempted,
           degraded,
           hasAlias: (raw) => resolveCanonical(raw) !== null,
+          priorTriage: knownStep.triaged,
         }),
       );
     });
@@ -980,6 +1021,13 @@ export const redditBrandsDiscover = inngest.createFunction(
       upsertAttempted: upsertStep.attempted,
       degraded: degraded.length > 0,
       degradedReasons: degraded,
+      // Queryable, not just readable in Telegram: "did a cron ever reverse one
+      // of my decisions?" should be answerable from Axiom without scrolling a
+      // year of chat history.
+      promotionOverrides: promote
+        .filter((p) => promoted.includes(p.brandName))
+        .filter((p) => knownStep.triaged[p.brandNormalized])
+        .map((p) => `${p.brandNormalized}:${knownStep.triaged[p.brandNormalized]}`),
     };
 
     // ONE always-ship Axiom event per run. `warn` deliberately, not `info`:
