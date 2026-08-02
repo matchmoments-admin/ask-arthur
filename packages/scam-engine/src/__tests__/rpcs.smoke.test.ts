@@ -252,6 +252,73 @@ describe.skipIf(!hasEnv)("SQL RPC smoke tests", () => {
     expect(error).toBeNull();
     expect(data ?? []).toHaveLength(0);
   });
+
+  // ── migration-v262: mark_stale_urls ──────────────────────────────────
+  //
+  // v262 recreated this SECURITY DEFINER function with `SET search_path = ''`
+  // and fully-qualified names, per supabase/CLAUDE.md rule 4 — v11 predated the
+  // convention. That change is exactly the class of bug this suite exists for:
+  // a search_path mistake surfaces as an immediate exception on first
+  // invocation regardless of input data, and this function runs UNATTENDED at
+  // 03:00 UTC daily via pipeline-staleness-check. A silent break there stops
+  // URL expiry fleet-wide and nothing would page.
+  //
+  // Called with an absurd threshold so it is a guaranteed no-op — it resolves
+  // every name, reads feed_sources, and builds the exempt array, but matches no
+  // rows. Safe against prod.
+  it("mark_stale_urls executes under search_path='' and is a no-op at an absurd threshold", async () => {
+    const supabase = getClient();
+    const { data, error } = await supabase.rpc("mark_stale_urls", {
+      p_stale_days: 100000,
+    });
+
+    expect(error).toBeNull();
+    // PGRST202 = function not found. Worth asserting explicitly because
+    // createServiceClient() omits the <Database> generic, so a renamed or
+    // dropped RPC typechecks clean everywhere else in the app.
+    expect(error?.code).not.toBe("PGRST202");
+
+    const result = data as {
+      deactivated_count: number;
+      exempt_feeds: string[];
+    } | null;
+    expect(result).toBeTruthy();
+    expect(result?.deactivated_count).toBe(0);
+    // The exemption is what allows a historical-signal feed to be retired
+    // without its findings silently expiring — see migration-v262. If this
+    // array comes back empty, crt.sh's 1,726 URLs are unprotected again.
+    expect(Array.isArray(result?.exempt_feeds)).toBe(true);
+    expect(result?.exempt_feeds).toContain("crtsh");
+  });
+
+  // ── migration-v261: feed_health ──────────────────────────────────────
+  //
+  // A view rather than a function, but the same failure mode: health-digest is
+  // its only consumer and runs unattended, so a broken view means the digest
+  // silently reports nothing wrong. The LEFT JOIN is the load-bearing part —
+  // an enabled feed with no log rows must still produce a row, or "absent"
+  // becomes undetectable again.
+  it("feed_health returns one row per enabled feed, including feeds with no log rows", async () => {
+    const supabase = getClient();
+    const { data, error } = await supabase
+      .from("feed_health")
+      .select("feed_name, last_run_at, last_success_at, is_muted");
+
+    expect(error).toBeNull();
+    const rows = (data ?? []) as {
+      feed_name: string;
+      last_run_at: string | null;
+      is_muted: boolean;
+    }[];
+    expect(rows.length).toBeGreaterThan(0);
+
+    // Every row must carry a feed_name; a NULL last_run_at is EXPECTED and is
+    // precisely the case the view exists to surface.
+    for (const r of rows) {
+      expect(typeof r.feed_name).toBe("string");
+      expect(r.feed_name.length).toBeGreaterThan(0);
+    }
+  });
 });
 
 describe.skipIf(hasEnv)("SQL RPC smoke tests — env not configured", () => {
