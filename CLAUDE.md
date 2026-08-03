@@ -343,3 +343,13 @@ The "report this scam" flow already has a single **routing brain** — extend it
 - **Reusable helpers:** `buildEvidenceBlock`/`EvidenceContext`/`getDeepLink` (`apps/web/lib/onward/destinations.ts`), `redactPII` + `stripUrlPii` (`redact.ts` / `url-blocklist-report.ts`), `runUrlBlocklistOnward` + the `ONWARD_CANARY_RECIPIENT` internal-inbox reroute, and the `OnwardReportSummary` deep-link/status UI. The national AU destinations (Scamwatch / ReportCyber / IDCARE URLs + phones) are constants in `destinations.ts` — reference them there, never re-declare.
 - **Dormant jurisdiction aggregates (already built, service-role only, zero app callers):** `get_jurisdiction_summary` (`supabase/migration-v40-financial-impact.sql` — per-region × scam_type × brand × channel × loss, purpose-built "for state police and jurisdiction coordination") and `threat_intel_daily_summary` (v38, by region). `components/charts/AustraliaMap.tsx` takes exactly `Record<StateCode, number>`; `parseStateFromRegion()` (`apps/web/lib/chart-tokens.ts`) buckets `region` strings into state codes. A route-click funnel event fits the first-party `analytics_events` store by adding to `ANALYTICS_EVENT_TYPES` (`apps/web/lib/analytics-events.ts`) with **no migration** (`event_props` is jsonb; metadata-only per its privacy rule).
 - **Loss/PII signal source (resolved 2026-07-13):** ReportCyber + IDCARE only surface when `get_onward_destinations` sees financial loss or PII compromise, and nothing in the analyze pipeline produces those signals. `OnwardReportPicker` now asks the user directly — a two-checkbox micro-question is its first step, and the answers feed `/api/report/destinations`. Do NOT try to derive these from `scamType` ("finance-shaped scam" ≠ "user lost money"); the user's answer is the source of truth.
+
+## Memory
+
+`memory/MEMORY.md` is curated cross-session memory — smaller and faster-moving than the
+system map or CONVENTIONS.md. Read it at session start; it holds gotchas and build facts
+learned the hard way. When you learn something durable (a command quirk, a constraint that
+caused a mistake, a stated preference), append a one-line entry tagged `[src: <session-id>]`.
+Bulk reorganisation happens only through `/dream`, which opens a PR for human review — never
+merged by the agent that wrote it. Durable decisions still belong in ADRs and the system map,
+not memory; memory is for the operational residue that doesn't warrant a doc.
