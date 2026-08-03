@@ -151,7 +151,7 @@ Gated by `FF_ANALYZE_INNGEST_WEB`. When false, the legacy `waitUntil` path runs 
 
 `meta-brp-report` (Meta Brand Rights Protection deepfake reporter) was deregistered in PR #552 and **fully removed 2026-07-13** (fleet review): a pure stub that never ran (unregistered, `deepfake_detections` empty all-time, Graph-API call commented out, footgun #519), it saved 0 step-runs. The source file, its `metaBrpReporter` feature flag, and doc references are gone; resurrect from git history (`git revert`) if deepfake→Meta BRP reporting is ever built. Same PR retired `pipeline-ct-monitor` (below).
 
-`pipeline-ct-monitor` (CT-log brand-impersonation sweep) was **retired 2026-07-13** (fleet review): 0 attributable `scam_urls` rows all-time — crt.sh's JSON endpoint 502s the lightweight access pattern, and the Python `crtsh` scraper already provides CT coverage (~4,970 rows). The Inngest fn + its registration are removed; the pure keyword-config helper `getCtMonitorConfig` (+ tests) is retained in `@askarthur/shopfront-glue` for a future rebuild.
+`pipeline-ct-monitor` (CT-log brand-impersonation sweep) was **retired 2026-07-13** (fleet review): 0 attributable `scam_urls` rows all-time — crt.sh's JSON endpoint 502s the lightweight access pattern, and the Python `crtsh` scraper already provides CT coverage (~4,970 rows). **Superseded 2026-07-30:** the `crtsh` scraper has itself produced 0 new rows since 2026-06-05 and was retired from the schedule, so there is no live CT discovery at all. Its existing findings survive via `feed_sources.staleness_exempt` (migration-v262). The Inngest fn + its registration are removed; the pure keyword-config helper `getCtMonitorConfig` (+ tests) is retained in `@askarthur/shopfront-glue` for a future rebuild.
 
 ### Onward reporting (event-driven + producer/report crons)
 
@@ -212,21 +212,25 @@ Run on GitHub Actions, gated by `ENABLE_SCRAPER` (regular) / `ENABLE_VULN_SCRAPE
 ### IOC scrapers (write to `vulnerability_iocs` and entity tables)
 
 | Scraper                | Source                   | Schedule               |
-| ---------------------- | ------------------------ | ---------------------- | ----------------------------- |
+| ---------------------- | ------------------------ | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `urlhaus.py`           | abuse.ch URLhaus         | 6h / 12h / daily tiers |
 | `openphish.py`         | OpenPhish                | 6h / 12h / daily tiers |
 | `phishtank.py`         | PhishTank                | 6h / 12h / daily tiers |
-| `phishstats.py`        | PhishStats               | 12h / daily tiers      |
-| `phishing_database.py` | Phishing Database mirror | 12h / daily tiers      |
-| `phishing_army.py`     | Phishing Army            | 12h / daily tiers      |
-| `feodo.py`             | Feodo Tracker            | 12h / daily tiers      |
-| `spamhaus.py`          | Spamhaus DROP/EDROP      | 12h / daily tiers      |
+| `phishstats.py`        | PhishStats               | 12h                    | ⚠️ 0 successes ever — HTTP 522 upstream                                                                                                                         |
+| `phishing_database.py` | Phishing Database mirror | **manual only**        | Retired 2026-07-30 — upstream returns HTTP 200 with a 1-byte body; 244 runs, 0 rows ever                                                                        |
+| `phishing_army.py`     | Phishing Army            | 12h                    |
+| `feodo.py`             | Feodo Tracker            | Daily 16:00 UTC        | Re-tiered 2026-07-30 — static 5-entry upstream, 0 new rows in 82 days                                                                                           |
+| `spamhaus.py`          | Spamhaus DROP/EDROP      | Daily 16:00 UTC        | Re-tiered 2026-07-30 — 14 new rows in 30 days                                                                                                                   |
 | `ipsum.py`             | IPSUM proxy list         | Daily 16:00 UTC        |
 | `abuseipdb.py`         | AbuseIPDB                | Daily 16:00 UTC        |
-| `crtsh.py`             | crt.sh CT logs           | Daily 16:00 UTC        | Brand-impersonation detection |
-| `cert_au.py`           | CERT-AU advisories       | Weekly 04:00 UTC       |
+| `crtsh.py`             | crt.sh CT logs           | **manual only**        | Retired 2026-07-30 — 0 new rows since 2026-06-05. Its 1,726 findings are held active by `feed_sources.staleness_exempt` (migration-v262), NOT by re-observation |
+| `cert_au.py`           | CERT-AU advisories       | **never invoked**      | Orphan module — no workflow calls `scrape()`, and `feed_ingestion_log` has 0 rows for either of its feed names                                                  |
 | `cryptoscamdb.py`      | CryptoScamDB             | (paused / TBD)         |
 | `threatfox.py`         | abuse.ch ThreatFox       | (paused / TBD)         |
+
+> **Tier contract (2026-07-30).** Each step in `scrape-feeds.yml` matches EXACTLY ONE cron. Until then every tier also accepted every lower-cadence schedule, so tier-3h scrapers ran on all 15 daily workflow runs instead of their own 8 — 33.8% of step-minutes were literal re-runs. Effective cadences are now: tier-3h 8 runs/day, tier-6h 4, tier-12h 2, tier-daily 1. If you add a step, give it one schedule.
+>
+> **Feed health is data, not code.** The roster, per-feed productivity expectations and alarm mutes live in `feed_sources` (`enabled` / `expect_new_rows_days` / `muted_until`), surfaced by the `feed_health` view. `health-digest` reads that view — it no longer carries a hardcoded feed list. Mutes carry an expiry on purpose.
 
 ### B2B / vertical scrapers
 
