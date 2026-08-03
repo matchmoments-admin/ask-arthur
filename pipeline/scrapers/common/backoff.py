@@ -10,13 +10,11 @@ machine is:
   partial → does NOT count toward consecutive_errors
 
 When consecutive_errors >= threshold, the next run writes a
-'partial:backoff_active:...' row and exits cleanly. While the most-recent
-'partial:backoff_active' is younger than `cooldown_hours` (default 24h),
-should_backoff() returns True immediately without re-counting — that's
-the actual circuit breaker, distinct from the threshold trip. After the
-cooldown expires, the next call probes upstream once. If it succeeds,
-the streak resets; if it errors, we re-trip and re-arm for another
-cooldown period.
+'partial:backoff_active:...' row and exits cleanly. While the CURRENT BACKOFF
+STREAK started less than `cooldown_hours` ago (default 24h), should_backoff()
+returns True immediately without re-counting — that's the actual circuit
+breaker, distinct from the threshold trip. Once the streak is older than the
+cooldown, calls fall through and probe upstream again.
 
 Without the cooldown, the partial that lives at the head of the log
 would break the consecutive-error streak on the next call (count=0),
@@ -26,6 +24,36 @@ brake. The cooldown is what makes it a real circuit breaker.
 Why not delete the cron entry: keep the heartbeat. A 'partial' row
 every cron firing with `backoff_active:N` is queryable proof that we
 are deliberately not running, not silently dropped.
+
+THE LATCH BUG — fixed 2026-07-30. Read this before touching the cooldown.
+
+The cooldown used to be measured from the MOST RECENT log row. But
+enforce_backoff_or_skip() writes a NEW 'backoff_active' partial every time it
+skips, so the head row was always seconds old and the window was re-armed by
+the very act of skipping. Release required `cooldown_hours` of total workflow
+silence, which a cron firing more often than the cooldown makes impossible.
+
+The result was a permanent latch, in prod, for months. Measured 2026-07-30:
+`acsc` had logged 1,091 consecutive backoff partials with ZERO successes across
+its entire 1,167-row history, inter-row gaps averaging 1.79h against a 24h
+cooldown that therefore never once elapsed. `phishstats` was in the same state,
+243 rows deep. The recorded message on every one of them was the tell —
+`backoff_active: 0 consecutive failures (threshold=3); skipping for cooldown` —
+zero failures, and still skipping. AUSTRAC was de-scheduled for this same root
+cause on 2026-06-29 without the general case being recognised.
+
+Note that the unit test `test_cooldown_expires_after_24h` PASSED throughout,
+because it mocked a 25h-old head row — a state the old code could not produce
+once a cron was firing faster than the cooldown. A test that fabricates an
+unreachable state proves nothing about the loop, which is why the regression
+tests now drive the streak-start query rather than the head row.
+
+The cooldown is now measured from the OLDEST contiguous 'backoff_active' row at
+the head of the log (see _backoff_streak_start), so repeated skips cannot extend
+it. One consequence worth knowing: after the cooldown expires the brake allows
+up to `threshold` probe attempts before re-tripping, because release drops back
+into the ordinary consecutive-error count. That is deliberate — a few requests
+per cooldown window is the price of ever noticing the upstream came back.
 """
 from __future__ import annotations
 
@@ -95,6 +123,44 @@ def _most_recent_run(conn, feed_name: str) -> Tuple[str | None, str | None, date
     return row[0], row[1], row[2]
 
 
+def _backoff_streak_start(conn, feed_name: str) -> datetime | None:
+    """created_at of the OLDEST contiguous 'backoff_active' row at the head.
+
+    This is the anchor the cooldown is measured from. Measuring from the head
+    row instead is the latch bug in the module docstring: every skip writes a
+    new head, so the window never elapses.
+
+    Implemented as two indexed aggregates rather than by walking the streak,
+    because a latched feed's streak runs to a thousand rows: find the most
+    recent row that is NOT a backoff partial, then take the oldest row after it.
+    Everything after that boundary is a backoff partial by construction.
+
+    Returns None when the feed has no rows, or when nothing at the head is a
+    backoff partial — in which case there is no streak to anchor.
+    """
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT min(created_at)
+              FROM public.feed_ingestion_log
+             WHERE feed_name = %s
+               AND created_at > COALESCE((
+                     SELECT max(created_at)
+                       FROM public.feed_ingestion_log
+                      WHERE feed_name = %s
+                        AND NOT (status = 'partial'
+                                 AND error_message LIKE %s)
+                   ), '-infinity'::timestamptz)
+            """,
+            (feed_name, feed_name, BACKOFF_PREFIX + "%"),
+        )
+        row = cursor.fetchone()
+    finally:
+        cursor.close()
+    return row[0] if row else None
+
+
 def should_backoff(
     conn,
     feed_name: str,
@@ -104,8 +170,8 @@ def should_backoff(
     """Return (skip, consecutive_error_count).
 
     skip is True when EITHER:
-      - the most recent row is a 'partial:backoff_active' younger than
-        cooldown_hours (still cooling down from a prior trip), OR
+      - the head row is a 'partial:backoff_active' AND the streak it belongs to
+        started less than cooldown_hours ago (still cooling down), OR
       - consecutive errors >= threshold (fresh trip).
 
     The count is returned regardless so the caller can include it in the
@@ -113,17 +179,24 @@ def should_backoff(
     """
     status, error_message, created_at = _most_recent_run(conn, feed_name)
 
-    # Cooldown path — most recent run was a backoff skip and we're still
-    # within the cooldown window. Skip immediately, no need to recount.
+    # Cooldown path — the head row is a backoff skip. Measure the window from
+    # the START of the current streak, NOT from this row: see the latch bug in
+    # the module docstring.
     if (
         status == "partial"
         and error_message is not None
         and error_message.startswith(BACKOFF_PREFIX)
         and created_at is not None
     ):
+        # Fall back to the head row only if the streak query returns nothing,
+        # which should not happen when the head IS a backoff partial. Note the
+        # fallback reproduces the old latch, so prefer the streak start
+        # whenever it is available.
+        streak_start = _backoff_streak_start(conn, feed_name) or created_at
+
         # Postgres returns timezone-aware datetimes for TIMESTAMPTZ columns.
         # Compare in UTC to avoid TZ confusion.
-        age = datetime.now(timezone.utc) - created_at
+        age = datetime.now(timezone.utc) - streak_start
         if age < timedelta(hours=cooldown_hours):
             # Surface the original consecutive-error count so the caller
             # can echo it back into the new partial row's error_message.
@@ -143,6 +216,23 @@ def should_backoff(
                 },
             )
             return True, count
+
+        # Cooldown has elapsed. Fall through and let the upstream be probed.
+        # Logged at warning so it always ships (INFO is 10%-sampled), because
+        # "the brake released" is the event whose absence hid the latch for
+        # months — with no release log there was nothing to notice missing.
+        logger.warning(
+            f"backoff cooldown EXPIRED for {feed_name} after "
+            f"{int(age.total_seconds() // 3600)}h — probing upstream",
+            extra={
+                "metadata": {
+                    "feed_name": feed_name,
+                    "streak_started_at": streak_start.isoformat(),
+                    "streak_age_hours": int(age.total_seconds() // 3600),
+                    "cooldown_hours": cooldown_hours,
+                }
+            },
+        )
 
     # Threshold path — count consecutive errors back from the head and
     # trip if we've crossed the limit.
