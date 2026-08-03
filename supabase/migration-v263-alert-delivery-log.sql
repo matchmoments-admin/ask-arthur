@@ -1,4 +1,15 @@
--- migration-v260-alert-delivery-log.sql
+-- migration-v263-alert-delivery-log.sql
+--
+-- NUMBERING NOTE. This file was authored as v260 and APPLIED TO PRODUCTION under
+-- that name on 2026-07-30 02:48 UTC. While this branch was open, another session
+-- merged `migration-v260-brand-alias-classifier-variants.sql` to `main` first and
+-- claimed the number. The file was renumbered to v263 so that
+-- `ls supabase/migration-v*.sql | sort -V | tail -1` stays meaningful; the prod
+-- `supabase_migrations` ledger still records this as `v260_alert_delivery_log`.
+-- The objects below already exist in prod — DO NOT re-apply expecting a change.
+-- One knowing divergence: the COMMENT ON TABLE string below was updated to say
+-- v263, so it points at a file that exists; prod's stored comment still reads
+-- "migration-v260 header" until this file is next re-run. Cosmetic either way.
 --
 -- WHY. As of 2026-07-30 nothing in this database recorded that an operator alert
 -- was delivered. An information_schema sweep for %alert%/%digest%/%notif%/%cron%/
@@ -76,7 +87,7 @@ CREATE INDEX IF NOT EXISTS idx_alert_delivery_log_failures
   WHERE outcome IN ('failed','skipped_no_config','muted');
 
 COMMENT ON TABLE public.alert_delivery_log IS
-  'One row per operator-alerter firing, including no-issue firings. A missing row means the alerter did not run — never that nothing was wrong. See migration-v260 header.';
+  'One row per operator-alerter firing, including no-issue firings. A missing row means the alerter did not run — never that nothing was wrong. See migration-v263 header.';
 COMMENT ON COLUMN public.alert_delivery_log.condition_met IS
   'FALSE rows are required, not noise: they are what distinguishes a healthy alerter from a dead one.';
 

@@ -7,7 +7,7 @@ import {
 } from "@/lib/bots/telegram/sendAdminMessage";
 
 /**
- * Alerter delivery accounting — see migration-v260 for the full why.
+ * Alerter delivery accounting — see migration-v263 for the full why.
  *
  * THE RULE every alerter must follow: write exactly ONE row per firing,
  * including the firing where nothing was wrong. That is what makes a MISSING
@@ -21,7 +21,7 @@ import {
  * neither throws.
  */
 
-/** Keep in sync with the CHECK constraint in migration-v260. */
+/** Keep in sync with the CHECK constraint in migration-v263. */
 export type AlertOutcome =
   | "sent"
   | "no_alert_needed"

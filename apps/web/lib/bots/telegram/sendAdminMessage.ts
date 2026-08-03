@@ -7,7 +7,7 @@ import { logger } from "@askarthur/utils/logger";
  * `logger.error`, which is console-only. Combined with ~1-day Vercel log
  * retention and no cron route emitting to Axiom, that made "did the alert
  * actually arrive?" unanswerable across ~35 call sites — the root cause behind
- * several multi-week silent outages (see migration-v260 header).
+ * several multi-week silent outages (see migration-v263 header).
  *
  * Callers that are alerters should pass this to `recordAlertDelivery()` rather
  * than ignoring it. The return value is intentionally NOT a thrown error:
