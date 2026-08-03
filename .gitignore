@@ -89,3 +89,6 @@ scratchpad/
 # Generated marketing copy staged for manual posting (LinkedIn report card).
 # Output, not source; regenerated on demand.
 apps/web/report-card-out/
+
+# agent memory scratch space (per-session, never committed)
+memory/.scratch/

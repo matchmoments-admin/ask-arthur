@@ -17,5 +17,12 @@ So: one master, referenced from everywhere. If you find yourself wanting to add 
 `CLAUDE.md` is the root. Some directories add scoped guidance on top of it — read the local one first when working inside:
 
 - `apps/web/CLAUDE.md`
+- `packages/bot-core/CLAUDE.md`
 - `packages/scam-engine/CLAUDE.md`
+- `packages/supabase/CLAUDE.md`
+- `packages/types/CLAUDE.md`
 - `pipeline/scrapers/CLAUDE.md`
+- `supabase/CLAUDE.md`
+
+This list must match `git ls-files '*CLAUDE.md'` (minus the root) — it drifted once already;
+`/drift-check` verifies it.
