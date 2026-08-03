@@ -1,9 +1,16 @@
 # Handoff — clone-watch brand-discovery: verification state
 
-**Written 2026-07-30.** Owner of the next session: read this top to bottom before
-touching anything. It exists because the honest answer to "does it work?" is
-_mostly yes, and here is precisely which parts are proven, which are not, and
-how to finish proving them._
+**Written 2026-07-30, closed out 2026-08-03.** Owner of the next session: read
+this top to bottom before touching anything. It exists because the honest answer
+to "does it work?" was _mostly yes, and here is precisely which parts are proven,
+which are not, and how to finish proving them._
+
+**Status: the verification is now COMPLETE.** The unattended Monday run fired on
+schedule (§3a-i) and surfaced its first genuinely new brand. Every structural gap
+this document opened is closed. What remains is not verification but two pieces of
+real work — the matcher gap (§6b, the larger one) and an operator's judgement on
+21 pending global brands — plus the standing question no amount of testing can
+answer: whether the signal is valuable enough to be worth the weekly digest.
 
 Workstream: PRs **#863–#872** (migrations **v254–v257**) plus follow-ups. All
 merged to `main`, all migrations applied to prod project `rquomhcgnodxzkhokwni`.
@@ -80,9 +87,40 @@ the live aggregate at ≥3 mentions, not denylisted, not in the queue, and
 **52**. The table stayed at 51 and `brand_normalized='googleplay'` returns 0 rows.
 Exactly one brand suppressed, correctly.
 
-Still worth watching on **Monday 2026-08-03 07:00 UTC**: that is the first
-UNATTENDED run, and it exercises the cron trigger rather than the event trigger.
-The machinery is now proven; the schedule is not.
+### 3a-i. The unattended run — HAPPENED 2026-08-03 07:01:59 UTC
+
+The last structural gap is closed. The cron fired on schedule, unattended, with
+no manual trigger:
+
+| Check                              | Result                                                   |
+| ---------------------------------- | -------------------------------------------------------- |
+| Fired on schedule                  | **Yes** — `07:01:59 UTC`, cron trigger not event trigger |
+| Rows touched                       | 22                                                       |
+| **NEW rows**                       | **1** — `Mercari` (Reddit ×3, AU 0), table 51 → 52       |
+| Invariant violations / jsonb drift | 0                                                        |
+| Auto-promotions                    | 0 (nothing clears the bar — §3b-i)                       |
+| Errors                             | none                                                     |
+
+**Mercari is the case that matters, and it is lucky timing.** It is net-new, not
+denylisted, not watched, and carries NO Australian evidence — so it lands in
+`globalOnly`. Under the pre-#884 logic that made `nothingAtAll` false, which
+**suppressed the heartbeat**. The very first unattended run hit the exact
+scenario the fix was written for: had it not shipped, the digest would have read
+
+> No new AU-evidenced brands this week.
+> _Plus 1 new global-only candidate(s)… Mercari ×3_
+
+with no "Examined N…" line at all — no proof the run had looked at anything.
+
+Expected digest for this run (aggregates measured ~3h later, so ±1):
+`Examined 44 Reddit brand(s) … and 1 reported-scam brand(s) …; recorded 22/22`,
+no degradation, plus the Mercari global-only line.
+
+Mercari is a Japanese/US marketplace with no Australian consumer surface — a
+`reviewed` candidate at most (see §6c on why not `dismissed`). It is left
+**pending** deliberately: it is the first genuinely new brand this feature has
+surfaced unattended, and the operator's own call on it is the thing worth
+observing.
 
 ### 3b. What Monday will actually produce — measured, not guessed
 
@@ -253,7 +291,16 @@ three were invisible to every prior review.
 
 ---
 
-## 5. Monday 2026-08-03 — the checklist
+## 5. The post-run checklist — RUN 2026-08-03, all green
+
+Steps 1–4 were executed against the 2026-08-03 07:01:59 unattended run and passed
+(see §3a-i). **Step 5 is the only one still outstanding**, and it is the only
+check an agent cannot perform: no human has yet clicked a button on
+`/admin/brand-candidates` in production. The server actions have been exercised
+via their RPCs, but not through the browser path (auth → server action → RPC →
+revalidate).
+
+Keep the steps below — they are the template for any future run, not a one-off.
 
 Run these in order. Stop at the first surprise.
 
