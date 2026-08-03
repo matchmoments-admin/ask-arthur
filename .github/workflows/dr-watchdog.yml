@@ -1,0 +1,146 @@
+name: DR — backup freshness watchdog
+
+# WHY THIS EXISTS. `dr-pg-dump.yml` is gated on `vars.ENABLE_DR_DUMP == 'true'`
+# so a partially-configured deploy doesn't fail nightly — a deliberate and
+# reasonable choice. The problem is what that gate produces: a GitHub
+# `conclusion=skipped`, which renders as a grey tick and emits NO notification
+# of any kind. Measured 2026-07-30: 83 of 83 scheduled runs skipped, unbroken
+# from 2026-05-08, because ENABLE_DR_DUMP was never created. The repo therefore
+# had no off-Supabase backup and no signal that it had none.
+#
+# This watchdog is the signal. It is deliberately loud in BOTH failure modes:
+#
+#   1. DR is not configured at all → page. An unconfigured disaster-recovery
+#      lane is a finding, not a quiet default. This will fire every day until
+#      the setup in dr-pg-dump.yml's header is done — that is intended.
+#   2. DR is configured but the newest object is older than MAX_AGE_HOURS →
+#      page. Catches a dump that starts failing after having worked.
+#
+# It does NOT duplicate the dump's own pre-flight check, which fails a run that
+# was already going to run. This answers the different question the `skipped`
+# conclusion made unanswerable: is there a recent backup at all?
+#
+# Runs 19:00 UTC — two hours after the 17:00 UTC dump, leaving margin for
+# GitHub's cron dispatch delay (median ~114 min, p90 175 min, so on a bad day
+# the dump may not have started yet; MAX_AGE_HOURS=48 absorbs that rather than
+# alerting on jitter).
+
+on:
+  schedule:
+    - cron: "0 19 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_DR_BUCKET: ${{ secrets.R2_DR_BUCKET }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_DR_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_DR_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+      MAX_AGE_HOURS: "48"
+      DR_ENABLED: ${{ vars.ENABLE_DR_DUMP }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Check DR backup freshness
+        id: check
+        run: |
+          set -uo pipefail
+
+          fail() {
+            echo "::error::$1"
+            {
+              echo "verdict=fail"
+              echo "detail=$1"
+            } >> "$GITHUB_OUTPUT"
+            exit 0   # keep going so the notify step runs; the job fails at the end
+          }
+
+          # ---- Mode 1: not configured -------------------------------------
+          missing=()
+          [ -z "${R2_ACCOUNT_ID:-}" ] && missing+=(R2_ACCOUNT_ID)
+          [ -z "${R2_DR_BUCKET:-}" ] && missing+=(R2_DR_BUCKET)
+          [ -z "${AWS_ACCESS_KEY_ID:-}" ] && missing+=(R2_DR_ACCESS_KEY_ID)
+          [ -z "${AWS_SECRET_ACCESS_KEY:-}" ] && missing+=(R2_DR_SECRET_ACCESS_KEY)
+
+          if [ "${DR_ENABLED:-}" != "true" ]; then
+            fail "DR is DISABLED: repo variable ENABLE_DR_DUMP is '${DR_ENABLED:-<unset>}', not 'true'. dr-pg-dump.yml has been skipping every scheduled run, which produces a grey tick and no alert. There is no off-Supabase backup. Setup: .github/workflows/dr-pg-dump.yml header."
+          fi
+
+          if [ ${#missing[@]} -gt 0 ]; then
+            fail "DR is MISCONFIGURED: missing secrets ${missing[*]}. Even a manual dispatch of dr-pg-dump.yml would fail pre-flight, so no backup exists."
+          fi
+
+          # ---- Mode 2: configured — is the newest object fresh? -----------
+          if ! LISTING=$(aws --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" \
+                s3api list-objects-v2 \
+                --bucket "${R2_DR_BUCKET}" \
+                --prefix "safeverify-dr/" \
+                --query 'sort_by(Contents,&LastModified)[-1].[Key,LastModified,Size]' \
+                --output text 2>&1); then
+            fail "Could not list s3://${R2_DR_BUCKET}/safeverify-dr/ — ${LISTING}"
+          fi
+
+          if [ -z "$LISTING" ] || [ "$LISTING" = "None" ]; then
+            fail "Bucket ${R2_DR_BUCKET} contains NO objects under safeverify-dr/. The lane is configured but has never produced a dump."
+          fi
+
+          KEY=$(printf '%s' "$LISTING" | cut -f1)
+          LAST_MODIFIED=$(printf '%s' "$LISTING" | cut -f2)
+          SIZE=$(printf '%s' "$LISTING" | cut -f3)
+
+          NEWEST_EPOCH=$(date -u -d "$LAST_MODIFIED" +%s 2>/dev/null || echo "")
+          if [ -z "$NEWEST_EPOCH" ]; then
+            fail "Could not parse LastModified '${LAST_MODIFIED}' for ${KEY}"
+          fi
+
+          AGE_HOURS=$(( ( $(date -u +%s) - NEWEST_EPOCH ) / 3600 ))
+          echo "Newest dump: ${KEY} (${SIZE} bytes, ${AGE_HOURS}h old)"
+
+          # A zero-byte or implausibly small dump is a silent-success shape: the
+          # upload verified its own sha256 but of nothing useful. 1 MB floor is
+          # far below the ~2.4 GB live DB.
+          if [ "${SIZE:-0}" -lt 1048576 ]; then
+            fail "Newest dump ${KEY} is only ${SIZE} bytes — implausibly small for a ~2.4 GB database."
+          fi
+
+          if [ "$AGE_HOURS" -gt "$MAX_AGE_HOURS" ]; then
+            fail "Newest DR dump is ${AGE_HOURS}h old (limit ${MAX_AGE_HOURS}h): ${KEY}. The dump lane has stopped producing."
+          fi
+
+          echo "verdict=ok" >> "$GITHUB_OUTPUT"
+          echo "detail=Newest dump ${KEY}, ${AGE_HOURS}h old, $((SIZE / 1024 / 1024)) MB" >> "$GITHUB_OUTPUT"
+          echo "::notice::DR backup is fresh — ${AGE_HOURS}h old"
+
+      - name: Page on Telegram
+        if: steps.check.outputs.verdict == 'fail'
+        env:
+          DETAIL: ${{ steps.check.outputs.detail }}
+        run: |
+          set -uo pipefail
+          if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_ADMIN_CHAT_ID:-}" ]; then
+            echo "::error::TELEGRAM_* secrets not set — the DR alert reached nobody"
+            exit 1
+          fi
+          TEXT=$(printf '🗄️ DR BACKUP ALERT\n%s\nRun: %s' "$DETAIL" "$RUN_URL")
+          if ! curl -sf -X POST \
+              "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+              --data-urlencode "chat_id=${TELEGRAM_ADMIN_CHAT_ID}" \
+              --data-urlencode "text=${TEXT}" \
+              -o /dev/null; then
+            echo "::error::Telegram send failed — the DR alert was not delivered"
+            exit 1
+          fi
+          echo "DR alert delivered."
+
+      # Fail the run last, so the page above always goes out first. A red run
+      # here is also a second, passive record for anyone reading the Actions tab.
+      - name: Fail the run if DR is unhealthy
+        if: steps.check.outputs.verdict == 'fail'
+        run: |
+          echo "::error::${{ steps.check.outputs.detail }}"
+          exit 1

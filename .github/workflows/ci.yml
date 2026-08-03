@@ -69,23 +69,81 @@ jobs:
     timeout-minutes: 10
     if: github.event.pull_request.draft == false
 
+    # This job ALWAYS reports, but only does work when pipeline/ changed.
+    #
+    # Why not a separate workflow with `paths: ['pipeline/**']`: a paths-filtered
+    # workflow does not report at all on non-matching commits, and a required
+    # status check that never reports leaves every merge stuck pending. Since
+    # making these checks required is the planned next step, the filter has to
+    # live inside a job that always produces a conclusion.
+    #
+    # Measured 2026-07-30: 475 of 475 CI runs ran this job, 480 billable minutes
+    # over 29 days, while only 6 of 212 main-push commits (2.83%) touched
+    # pipeline/. ~US$2.90/mo.
+    #
+    # The filter FAILS SAFE — any trouble computing the diff runs the tests.
+    # Skipping a test suite by accident is the failure mode worth avoiding here.
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Needed to resolve the base ref for the diff below.
+          fetch-depth: 0
+
+      - name: Detect pipeline/ changes
+        id: filter
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -uo pipefail
+          RANGE=""
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            RANGE="origin/${BASE_REF}...HEAD"
+          elif [ -n "${BEFORE_SHA:-}" ] && [ "${BEFORE_SHA}" != "0000000000000000000000000000000000000000" ]; then
+            RANGE="${BEFORE_SHA}..HEAD"
+          fi
+
+          if [ -z "$RANGE" ]; then
+            echo "::warning::no usable diff range for $EVENT_NAME — running tests"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! CHANGED=$(git diff --name-only "$RANGE" 2>/dev/null); then
+            echo "::warning::could not diff $RANGE — running tests"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Also run when this workflow itself changes, so a bad filter can't
+          # merge without the suite it gates having executed once.
+          if printf '%s\n' "$CHANGED" | grep -qE '^(pipeline/|\.github/workflows/ci\.yml$)'; then
+            echo "pipeline/ touched — running tests"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "no pipeline/ changes in $RANGE — skipping the suite"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: actions/setup-python@v5
+        if: steps.filter.outputs.run == 'true'
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: pipeline/scrapers/requirements.txt
 
       - name: Install dependencies
+        if: steps.filter.outputs.run == 'true'
         run: pip install -r pipeline/scrapers/requirements.txt
 
       - name: Run pipeline tests
+        if: steps.filter.outputs.run == 'true'
         working-directory: pipeline/scrapers
         run: python -m pytest tests/ -v
 
       - name: Run investigation parser tests
+        if: steps.filter.outputs.run == 'true'
         working-directory: pipeline
         # Install the package's own deps (incl. pytest) rather than relying on
         # the scrapers job incidentally pulling pytest into the same runner.

@@ -4,6 +4,32 @@ name: Scrape Threat Feeds
 # burn CI minutes on no-op fetches. RSS scrapers also send If-None-Match /
 # If-Modified-Since via common/http_cache.py, so unchanged feeds short-circuit
 # server-side too.
+#
+# THE TIER CONTRACT: a step's `if:` matches EXACTLY ONE schedule — its own.
+# Until 2026-07-30 every tier also accepted every lower-cadence schedule (the
+# tier-3h steps listed all four crons), so a tier-3h scraper ran on all 15 daily
+# workflow runs instead of its own 8. Measured cost: 1,038 of 3,067 step-minutes
+# over 29 days were literal re-runs — 33.8%, ~US$6.47/mo — confirmed twice, from
+# 11,319 GitHub step records and independently from prod feed_ingestion_log,
+# agreeing to 0.1%. The comments above each tier described the intended design
+# all along; the conditions defeated it.
+#
+# Effective cadence after the fix: tier-3h 8 runs/day, tier-6h 4, tier-12h 2,
+# tier-daily 1. If you add a step, give it ONE schedule. If you want a feed on
+# two cadences, that is a signal it belongs in the faster tier, not a reason to
+# list both.
+#
+# NOT consolidated into a single cron on purpose. Collapsing the four entries
+# into `0 */3` plus in-job hour dispatch would save a further ~US$0.92/mo, but
+# on a `0 */3` grid `date -u +%H` never equals 16, so the daily tier (ASIC,
+# IPsum, AbuseIPDB, ACNC, PFRA) would silently stop while the workflow stayed
+# green — the exact failure shape this file just had. Not worth US$0.92.
+#
+# Also do NOT add `concurrency: cancel-in-progress` here: only 64 of 414
+# consecutive run pairs overlap, and each overlap is a different tier doing
+# different work, so cancelling would kill legitimate runs. GitHub's median
+# dispatch delay is ~114 min (p90 175), which is also why any runbook line
+# claiming this workflow "runs at HH:MM" is off by one to four hours.
 on:
   schedule:
     - cron: '0 */3 * * *'    # tier-3h: AU regulator narratives (latency-sensitive)
@@ -67,13 +93,13 @@ jobs:
       - name: Scamwatch alerts (HTML narrative)
         if: |
           github.event.inputs.feed == 'all' || github.event.inputs.feed == 'scamwatch_alerts'
-          || (github.event_name == 'schedule' && (github.event.schedule == '0 */3 * * *' || github.event.schedule == '0 */6 * * *' || github.event.schedule == '0 */12 * * *' || github.event.schedule == '0 16 * * *'))
+          || (github.event_name == 'schedule' && github.event.schedule == '0 */3 * * *')
         run: python -m scamwatch_alerts || echo "scamwatch_alerts" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
       - name: ACSC alerts + advisories (RSS)
         if: |
           github.event.inputs.feed == 'all' || github.event.inputs.feed == 'acsc_alerts'
-          || (github.event_name == 'schedule' && (github.event.schedule == '0 */3 * * *' || github.event.schedule == '0 */6 * * *' || github.event.schedule == '0 */12 * * *' || github.event.schedule == '0 16 * * *'))
+          || (github.event_name == 'schedule' && github.event.schedule == '0 */3 * * *')
         run: python -m acsc_alerts || echo "acsc_alerts" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
       # One-shot diagnostic probe — workflow_dispatch only. Captures HTTP
@@ -90,19 +116,19 @@ jobs:
       - name: URLhaus
         if: |
           github.event.inputs.feed == 'all' || github.event.inputs.feed == 'urlhaus'
-          || (github.event_name == 'schedule' && (github.event.schedule == '0 */6 * * *' || github.event.schedule == '0 */12 * * *' || github.event.schedule == '0 16 * * *'))
+          || (github.event_name == 'schedule' && github.event.schedule == '0 */6 * * *')
         run: python -m urlhaus || echo "urlhaus" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
       - name: OpenPhish
         if: |
           github.event.inputs.feed == 'all' || github.event.inputs.feed == 'openphish'
-          || (github.event_name == 'schedule' && (github.event.schedule == '0 */6 * * *' || github.event.schedule == '0 */12 * * *' || github.event.schedule == '0 16 * * *'))
+          || (github.event_name == 'schedule' && github.event.schedule == '0 */6 * * *')
         run: python -m openphish || echo "openphish" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
       - name: PhishTank
         if: |
           github.event.inputs.feed == 'all' || github.event.inputs.feed == 'phishtank'
-          || (github.event_name == 'schedule' && (github.event.schedule == '0 */6 * * *' || github.event.schedule == '0 */12 * * *' || github.event.schedule == '0 16 * * *'))
+          || (github.event_name == 'schedule' && github.event.schedule == '0 */6 * * *')
         run: python -m phishtank || echo "phishtank" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
       # ThreatFox — DISABLED 2026-05-11. abuse.ch API key returning 401
@@ -118,31 +144,41 @@ jobs:
       - name: PhishStats
         if: |
           github.event.inputs.feed == 'all' || github.event.inputs.feed == 'phishstats'
-          || (github.event_name == 'schedule' && (github.event.schedule == '0 */12 * * *' || github.event.schedule == '0 16 * * *'))
+          || (github.event_name == 'schedule' && github.event.schedule == '0 */12 * * *')
         run: python -m phishstats || echo "phishstats" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
-      - name: Phishing.Database
-        if: |
-          github.event.inputs.feed == 'all' || github.event.inputs.feed == 'phishing_database'
-          || (github.event_name == 'schedule' && (github.event.schedule == '0 */12 * * *' || github.event.schedule == '0 16 * * *'))
+      # Phishing.Database — DISABLED on the schedule 2026-07-30. 244 lifetime
+      # runs, ALL status='success', records_fetched=0 on every one. Probed
+      # 2026-07-30: the configured upstream returns HTTP 200 with a 1-byte body
+      # (a bare newline), so raise_for_status() passes, the parse loop yields
+      # nothing, and the status-downgrade guard never fires because it sits
+      # inside the `if urls:` branch. It has contributed nothing while counting
+      # toward the "16 threat feeds" headline. Kept manual-only for re-probing;
+      # find a working upstream mirror before re-enabling.
+      - name: Phishing.Database [manual-only — upstream returns a 1-byte body]
+        if: github.event.inputs.feed == 'phishing_database'
         run: python -m phishing_database || echo "phishing_database" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
       - name: Phishing Army
         if: |
           github.event.inputs.feed == 'all' || github.event.inputs.feed == 'phishing_army'
-          || (github.event_name == 'schedule' && (github.event.schedule == '0 */12 * * *' || github.event.schedule == '0 16 * * *'))
+          || (github.event_name == 'schedule' && github.event.schedule == '0 */12 * * *')
         run: python -m phishing_army || echo "phishing_army" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
+      # Feodo + Spamhaus moved 12h → daily 2026-07-30. Both upstreams change far
+      # more slowly than we were polling: feodo has produced 0 new rows in 82
+      # days (its upstream list is a static 5 entries) and spamhaus 14 new rows
+      # in 30 days. Daily is still ahead of either upstream's real cadence.
       - name: Feodo Tracker
         if: |
           github.event.inputs.feed == 'all' || github.event.inputs.feed == 'feodo'
-          || (github.event_name == 'schedule' && (github.event.schedule == '0 */12 * * *' || github.event.schedule == '0 16 * * *'))
+          || (github.event_name == 'schedule' && github.event.schedule == '0 16 * * *')
         run: python -m feodo || echo "feodo" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
       - name: Spamhaus DROP/EDROP
         if: |
           github.event.inputs.feed == 'all' || github.event.inputs.feed == 'spamhaus'
-          || (github.event_name == 'schedule' && (github.event.schedule == '0 */12 * * *' || github.event.schedule == '0 16 * * *'))
+          || (github.event_name == 'schedule' && github.event.schedule == '0 16 * * *')
         run: python -m spamhaus || echo "spamhaus" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
       # ──────────────────────────────────────────────────────────────────
@@ -190,10 +226,36 @@ jobs:
       # update SOURCE_URL in pipeline/scrapers/cryptoscamdb.py to a working
       # mirror, then restore this step + the choice option above.
 
-      - name: crt.sh
-        if: |
-          github.event.inputs.feed == 'all' || github.event.inputs.feed == 'crtsh'
-          || (github.event_name == 'schedule' && github.event.schedule == '0 16 * * *')
+      # crt.sh — RETIRED from the schedule 2026-07-30, on the second attempt.
+      #
+      # It discovers nothing: 29/29 runs succeeded and fetched 31,584
+      # certificates, but records_new was 0 on every one, and threat_intel_urls
+      # confirms it independently — max(first_reported_at) 2026-06-05, i.e. 55
+      # days without a new row. At 13.6 min/run it was the slowest step here,
+      # 284 of 3,067 step-minutes over 29 days (~US$1.77/mo) for zero output.
+      #
+      # The FIRST attempt to retire it was reverted the same day, because its
+      # daily last_seen_in_feed touch was load-bearing: mark_stale_urls would
+      # have deactivated 1,726 crtsh-only URLs within 7 days, and is_active=TRUE
+      # gates /api/scam-urls/lookup, /api/v1/threats/domains and
+      # /api/v1/threats/urls/trending — so AU brand lookalikes (mygov,
+      # centrelink, ato.gov, auspost, commbank, nab, anz, westpac, telstra, nbn,
+      # optus, woolworths, coles) would have silently dropped out of the
+      # blocklist the extension and B2B API read.
+      #
+      # migration-v262 fixes that properly: feed_sources.staleness_exempt marks
+      # crtsh as carrying a HISTORICAL signal ("a lookalike certificate was
+      # issued" does not stop being true), so mark_stale_urls no longer expires
+      # rows whose only source is crtsh. Verified on prod before retiring —
+      # exempt_feeds=['crtsh'], 1,726 rows protected, 252,886 unaffected, 0 crtsh
+      # rows still sweepable. Only now is the scraper genuinely redundant.
+      #
+      # ADR-0016's 2026-07-17 amendment already found the CT mechanism dead for
+      # discovery; this closes the retention half. crt.sh is ALSO used at runtime
+      # by packages/scam-engine/src/ct-lookup.ts — a separate live path,
+      # unaffected. Kept dispatchable via `-f feed=crtsh` for re-probing.
+      - name: crt.sh [retired — 0 new rows since 2026-06-05; findings preserved by v262 exemption]
+        if: github.event.inputs.feed == 'crtsh'
         run: python -m crtsh || echo "crtsh" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
       # ACNC Charity Register mirror — gated independently of ENABLE_SCRAPER.
@@ -216,13 +278,12 @@ jobs:
           FF_CHARITY_CHECK_INGEST: 'true'
         run: python -m pfra_members || echo "pfra_members" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
-      # Reddit — kept on its own daily 06:00 UTC slot (matched here by 0 16
-      # for daily, but we still want the original cadence to avoid double-runs
-      # on the 6h/12h/3h tiers). Restrict Reddit to the daily and 6h tiers.
+      # Reddit — 6h tier only (00/06/12/18 UTC). Previously also matched the
+      # daily 0-16 cron, which added a 5th run/day for no cadence benefit.
       - name: Scrape Reddit r/Scams
         if: |
           github.event.inputs.feed == 'all' || github.event.inputs.feed == 'reddit'
-          || (github.event_name == 'schedule' && (github.event.schedule == '0 */6 * * *' || github.event.schedule == '0 16 * * *'))
+          || (github.event_name == 'schedule' && github.event.schedule == '0 */6 * * *')
         env:
           REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
           REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
@@ -257,13 +318,31 @@ jobs:
     if: failure() || cancelled()
     runs-on: ubuntu-latest
     steps:
-      - name: Send Slack notification
-        if: vars.SLACK_WEBHOOK_URL != ''
+      # Was a Slack incoming webhook read from `vars.SLACK_WEBHOOK_URL`. Moved to
+      # Telegram 2026-07-30: a repo *variable* is not masked, so on a public repo
+      # this step printed the webhook URL verbatim into its own log on every
+      # firing — exposed from 2026-03-20 and still live when found. TELEGRAM_*
+      # are secrets and are masked, and this is the channel the 8 cron alerters
+      # already page to.
+      - name: Send Telegram notification
         env:
-          SLACK_WEBHOOK_URL: ${{ vars.SLACK_WEBHOOK_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+          TRIGGER: ${{ github.event_name }} (${{ github.event.schedule || github.event.inputs.feed || 'manual' }})
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          curl -sf -X POST "$SLACK_WEBHOOK_URL" \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"text\": \":rotating_light: *Scraper failed* — <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View logs>\"
-            }"
+          set -uo pipefail
+          if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_ADMIN_CHAT_ID:-}" ]; then
+            echo "::error::TELEGRAM_BOT_TOKEN / TELEGRAM_ADMIN_CHAT_ID not set — this failure reached nobody"
+            exit 1
+          fi
+          TEXT=$(printf '🚨 Threat feed scraper failed\nTrigger: %s\nRun: %s' "$TRIGGER" "$RUN_URL")
+          if ! curl -sf -X POST \
+              "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+              --data-urlencode "chat_id=${TELEGRAM_ADMIN_CHAT_ID}" \
+              --data-urlencode "text=${TEXT}" \
+              -o /dev/null; then
+            echo "::error::Telegram send failed — the scraper failure was not delivered"
+            exit 1
+          fi
+          echo "Telegram notification delivered."
