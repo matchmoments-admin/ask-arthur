@@ -18,6 +18,10 @@ Curated cross-session memory for this repo. How it works:
 
 ## Gotchas
 
+- A stacked PR does **not** auto-retarget to `main` when its parent merges — GitHub only re-points it if the base branch is DELETED, and our ship workflow prescribes `--delete-branch=false`. `gh pr merge` then merges it into the parent's feature branch, lands nothing on `main`, and reports success. Always re-read `gh pr view <n> --json baseRefName` after the parent lands. [src: session_01HQRVXxTwyL3b1TkZtxCsMN]
+- Retargeting that PR shows CONFLICTING immediately: the parent was **squash**-merged, so `main` has one new commit while the child still carries the pre-squash originals. Fix with `git rebase --onto origin/main <last-parent-sha> <child-branch>`, never a plain `git rebase main` — that replays content already in `main` and throws duplicate-conflicts that look like real disagreements. Verify with `git diff --stat origin/main..HEAD` showing only the child's own files. [src: session_01HQRVXxTwyL3b1TkZtxCsMN]
+- A handoff doc's state assertions go stale the instant the work lands. `ops-audit-2026-08-02.md` shipped with "all eight green and unmerged" and "#877 not yet merged" one commit after both stopped being true — the header was updated, the body was not. Re-grep a handoff for its own state claims after acting on it. [src: session_01HQRVXxTwyL3b1TkZtxCsMN]
+
 ## Preferences
 
 ## Domain
