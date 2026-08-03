@@ -1,4 +1,15 @@
--- migration-v261-feed-health-view.sql
+-- migration-v264-feed-health-view.sql
+--
+-- NUMBERING NOTE. Authored as v261 and APPLIED TO PRODUCTION under that name on
+-- 2026-07-30 03:17 UTC. Another session merged
+-- `migration-v261-watchlist-label-variants.sql` to `main` first and claimed the
+-- number, so this file was renumbered to v264 to keep
+-- `ls supabase/migration-v*.sql | sort -V | tail -1` meaningful. The prod
+-- `supabase_migrations` ledger still records this as `v261_feed_health_view`,
+-- and the view + the three `feed_sources` columns already exist — DO NOT
+-- re-apply expecting a change. (The COMMENT ON VIEW string below was updated to
+-- v264 so it points at a file that exists; prod's stored comment still says
+-- v261 until this file is next re-run. Cosmetic.) Same treatment as v263.
 --
 -- Makes health-digest capable of SEEING a dead feed. Three defects, measured
 -- 2026-07-30, all of which let it print "all clear" while three non-muted feeds
@@ -174,7 +185,7 @@ SELECT s.slug                       AS feed_name,
  WHERE s.enabled;
 
 COMMENT ON VIEW public.feed_health IS
-  'One row per ENABLED feed whether or not it has logged anything — the LEFT JOIN is what makes an absent feed detectable. NULL last_success_at means never succeeded and must be read as infinitely stale. See migration-v261.';
+  'One row per ENABLED feed whether or not it has logged anything — the LEFT JOIN is what makes an absent feed detectable. NULL last_success_at means never succeeded and must be read as infinitely stale. See migration-v264.';
 
 REVOKE ALL ON public.feed_health FROM PUBLIC, anon, authenticated;
 GRANT SELECT ON public.feed_health TO service_role;

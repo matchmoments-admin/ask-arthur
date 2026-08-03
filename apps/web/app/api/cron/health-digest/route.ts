@@ -31,7 +31,7 @@ export const dynamic = "force-dynamic";
  */
 
 // Roster, per-feed expectations and mute state all live in the database
-// (feed_sources → feed_health view, migration-v261). Classification lives in
+// (feed_sources → feed_health view, migration-v264). Classification lives in
 // @/lib/feedHealth so the four verdicts are testable without a DB. This file
 // deliberately carries NO hardcoded feed list — the one it used to have
 // (KNOWN_DORMANT_FEEDS) muted 7 actively-producing feeds for months.
@@ -171,7 +171,7 @@ export async function GET(req: Request) {
   );
 
   // ── Check 2: feed health ──────────────────────────────────────────────
-  // Reads the feed_health view (migration-v261), which is one row per ENABLED
+  // Reads the feed_health view (migration-v264), which is one row per ENABLED
   // feed WHETHER OR NOT IT HAS LOGGED ANYTHING. That LEFT JOIN is the whole
   // point: the previous implementation read `.limit(500)` from
   // feed_ingestion_log, which spanned 6.7 days and contained 15 of 20 feeds —

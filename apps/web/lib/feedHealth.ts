@@ -3,7 +3,7 @@
  *
  * Extracted from the route so the four verdicts can be tested directly. The old
  * implementation had one notion of "stale" and it was wrong in three separate
- * ways at once (measured 2026-07-30, see migration-v261):
+ * ways at once (measured 2026-07-30, see migration-v264):
  *
  *   - it read `.limit(500)` from feed_ingestion_log, which spanned 6.7 days and
  *     15 of 20 feeds — the 5 absent were exactly the dead ones, because a feed
@@ -44,7 +44,7 @@ export interface FeedProblem {
   detail: string;
 }
 
-/** Shape of a public.feed_health row (migration-v261). */
+/** Shape of a public.feed_health row (migration-v264). */
 export interface FeedHealthRow {
   feed_name: string;
   poll_schedule: string | null;
