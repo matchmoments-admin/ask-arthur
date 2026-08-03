@@ -3,7 +3,7 @@ import { requireCronAuth } from "@/lib/cron-auth";
 import { readBoolEnv } from "@askarthur/utils/env";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
-import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
+import { alertAndRecord, recordNoAlertNeeded } from "@/lib/alerting/deliveryLog";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -242,6 +242,15 @@ export async function GET(req: Request) {
       cost_usd: cost.cost_usd,
       events: cost.events,
     });
+    // Record the all-clear. This row is load-bearing: on 2026-07-29 this exact
+    // branch reported healthy while acnc_register was 86 days stale, and with no
+    // row there was no way to tell a true all-clear from a dead cron. The
+    // metadata records WHAT was checked so a wrong all-clear stays diagnosable.
+    await recordNoAlertNeeded("health-digest", {
+      errors_24h: 0,
+      stale_feeds: 0,
+      cost_usd: cost.cost_usd,
+    });
     return NextResponse.json({
       healthy: true,
       errors_24h: 0,
@@ -258,8 +267,20 @@ export async function GET(req: Request) {
   // incident or while the new brief is being trusted.
   const legacyTelegramEnabled = readBoolEnv("FF_LEGACY_DIGEST_TELEGRAM");
 
+  await alertAndRecord({
+    alerter: "health-digest",
+    text: message,
+    enabled: legacyTelegramEnabled,
+    metadata: {
+      error_count: errors.reduce((s, e) => s + e.hits, 0),
+      stale_count: stale.length,
+      stale_feeds: stale.map((s) => s.feed_name),
+      cost_usd: cost.cost_usd,
+      mutedBy: legacyTelegramEnabled ? null : "FF_LEGACY_DIGEST_TELEGRAM",
+    },
+  });
+
   if (legacyTelegramEnabled) {
-    await sendAdminTelegramMessage(message);
     logger.warn("health-digest: issues detected, admin notified", {
       error_count: errors.reduce((s, e) => s + e.hits, 0),
       stale_count: stale.length,

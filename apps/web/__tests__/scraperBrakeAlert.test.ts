@@ -7,7 +7,9 @@ vi.mock("@askarthur/supabase/server", () => ({
   createServiceClient: vi.fn(),
 }));
 vi.mock("@/lib/bots/telegram/sendAdminMessage", () => ({
-  sendAdminTelegramMessage: vi.fn(),
+  // Must resolve to an AdminMessageResult, not undefined: alertAndRecord()
+  // inspects .ok to decide the outcome it records.
+  sendAdminTelegramMessage: vi.fn(async () => ({ ok: true, latencyMs: 1 })),
 }));
 vi.mock("@askarthur/utils/logger", () => ({
   logger: {

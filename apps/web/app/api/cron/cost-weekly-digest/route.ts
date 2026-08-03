@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireCronAuth } from "@/lib/cron-auth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
-import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
+import { alertAndRecord } from "@/lib/alerting/deliveryLog";
 import {
   buildCostDigest,
   earliestDayNeeded,
@@ -83,9 +83,15 @@ export async function GET(req: Request) {
 
   const digest = buildCostDigest(rows, now);
 
-  await sendAdminTelegramMessage(
-    formatCostDigest(digest, { inboundScanFailures }).join("\n"),
-  );
+  await alertAndRecord({
+    alerter: "cost-weekly-digest",
+    text: formatCostDigest(digest, { inboundScanFailures }).join("\n"),
+    metadata: {
+      weekEnding: digest.weekEnding,
+      thisTotalUsd: digest.thisTotal,
+      prevTotalUsd: digest.prevTotal,
+    },
+  });
 
   return NextResponse.json({
     weekEnding: digest.weekEnding,

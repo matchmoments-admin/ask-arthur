@@ -3,7 +3,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 vi.mock("@/lib/cron-auth", () => ({ requireCronAuth: vi.fn(() => null) }));
 vi.mock("@/lib/axiom-query", () => ({ axiomQuery: vi.fn() }));
 vi.mock("@/lib/bots/telegram/sendAdminMessage", () => ({
-  sendAdminTelegramMessage: vi.fn(),
+  // Must resolve to an AdminMessageResult, not undefined: alertAndRecord()
+  // inspects .ok to decide the outcome it records.
+  sendAdminTelegramMessage: vi.fn(async () => ({ ok: true, latencyMs: 1 })),
 }));
 
 import { axiomQuery } from "@/lib/axiom-query";

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireCronAuth } from "@/lib/cron-auth";
 import { readNumberEnv } from "@/lib/env-coerce";
 import { logger } from "@askarthur/utils/logger";
-import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
+import { alertAndRecord, recordNoAlertNeeded } from "@/lib/alerting/deliveryLog";
 import { axiomQuery } from "@/lib/axiom-query";
 import { axiomInfoSamplePct } from "@askarthur/utils/axiom-logger";
 
@@ -147,6 +147,7 @@ export async function GET(req: Request) {
   };
 
   if (reasons.length === 0) {
+    await recordNoAlertNeeded("axiom-fleet-watch", summary as Record<string, unknown>);
     return NextResponse.json(summary);
   }
 
@@ -161,7 +162,11 @@ export async function GET(req: Request) {
     `\n\nInspect: Axiom → <code>${DATASET}</code> dataset (Query: ` +
     `<code>['${DATASET}'] | where source=='inngest' and message=='fn.error'</code>)`;
 
-  await sendAdminTelegramMessage(text);
+  await alertAndRecord({
+    alerter: "axiom-fleet-watch",
+    text,
+    metadata: summary as Record<string, unknown>,
+  });
   logger.warn("axiom-fleet-watch paged admin", summary);
 
   return NextResponse.json({ ...summary, paged: true });
