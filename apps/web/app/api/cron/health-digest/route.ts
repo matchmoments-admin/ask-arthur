@@ -4,6 +4,12 @@ import { readBoolEnv } from "@askarthur/utils/env";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { alertAndRecord, recordNoAlertNeeded } from "@/lib/alerting/deliveryLog";
+import {
+  classifyFeedHealth,
+  type FeedHealthRow,
+  type FeedProblem,
+  type FeedProblemKind,
+} from "@/lib/feedHealth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,56 +30,17 @@ export const dynamic = "force-dynamic";
  * itself; if THIS function stops firing, that's a Vercel-level alert.
  */
 
-// Per-feed staleness thresholds in hours. Anything outside this map falls
-// back to DEFAULT_STALENESS_HOURS. Tightened thresholds for hot feeds so
-// a 12h regression on Scamwatch (which runs 3-hourly) doesn't slip past
-// the wider 36h default.
-const STALENESS_THRESHOLD_HOURS: Record<string, number> = {
-  reddit: 36,
-  scamwatch_alert: 12,
-  // ACSC dormant: cyber.gov.au tarpits both GH Actions egress (Azure IPs)
-  // and Vercel egress (proven 2026-05-11 by 7d of 0-success ingest rows).
-  // Scamwatch + ASIC carry AU regulator narrative coverage. Threshold left
-  // at 999 so the daily digest stays silent without removing the entry.
-  acsc: 999,
-  asic_investor: 36,
-  acnc_register: 36,
-  pfra_members: 36,
-  reddit_intel: 30,
-};
-
-const DEFAULT_STALENESS_HOURS = 36;
-
-// Feeds we know are dormant by choice (manual-only, low-priority — see
-// BACKLOG.md → Pipeline / Scrapers). Excluded from staleness alerts so
-// the daily digest stays signal, not noise.
-const KNOWN_DORMANT_FEEDS = new Set([
-  "phishing_army",
-  "openphish",
-  "crtsh",
-  "phishtank",
-  "ipsum",
-  "feodo",
-  "phishing_database",
-  "phishstats",
-  "threatfox",
-  "spamhaus",
-  "abuseipdb",
-  "cryptoscamdb",
-]);
+// Roster, per-feed expectations and mute state all live in the database
+// (feed_sources → feed_health view, migration-v264). Classification lives in
+// @/lib/feedHealth so the four verdicts are testable without a DB. This file
+// deliberately carries NO hardcoded feed list — the one it used to have
+// (KNOWN_DORMANT_FEEDS) muted 7 actively-producing feeds for months.
 
 interface ErrorRow {
   feature: string;
   operation: string;
   hits: number;
   last_seen: string;
-}
-
-interface StaleFeed {
-  feed_name: string;
-  last_run: string;
-  hours_stale: number;
-  threshold_hours: number;
 }
 
 interface CostSummary {
@@ -90,8 +57,9 @@ function escapeHtml(s: string): string {
 
 function buildMessage(
   errors: ErrorRow[],
-  stale: StaleFeed[],
+  problems: FeedProblem[],
   cost: CostSummary,
+  mutedCount: number,
 ): string {
   const dateStr = new Date().toLocaleString("en-AU", {
     timeZone: "Australia/Sydney",
@@ -114,14 +82,37 @@ function buildMessage(
     lines.push("");
   }
 
-  if (stale.length > 0) {
-    lines.push("⏱️ <b>Stale feeds:</b>");
-    for (const s of stale) {
-      lines.push(
-        `  • ${escapeHtml(s.feed_name)} — ${s.hours_stale.toFixed(1)}h since last run (threshold ${s.threshold_hours}h)`,
-      );
+  if (problems.length > 0) {
+    const LABEL: Record<FeedProblemKind, string> = {
+      absent: "🚫 <b>Not running at all:</b>",
+      never_succeeds: "💀 <b>Never succeeded:</b>",
+      stale: "⏱️ <b>Stale:</b>",
+      silent_success: "🕳️ <b>Succeeding but producing nothing:</b>",
+    };
+    // Grouped by kind, worst first — "not running" and "never succeeded" are
+    // categorically worse than "a bit behind" and used to be indistinguishable.
+    for (const kind of [
+      "absent",
+      "never_succeeds",
+      "stale",
+      "silent_success",
+    ] as FeedProblemKind[]) {
+      const group = problems.filter((p) => p.kind === kind);
+      if (group.length === 0) continue;
+      lines.push(LABEL[kind]);
+      for (const p of group) {
+        lines.push(`  • ${escapeHtml(p.feed_name)} — ${escapeHtml(p.detail)}`);
+      }
+      lines.push("");
     }
-    lines.push("");
+  }
+
+  // Muted feeds are always counted, never hidden. The suppression list this
+  // replaced was invisible, which is how it drifted to muting 7 live feeds.
+  if (mutedCount > 0) {
+    lines.push(
+      `🔇 ${mutedCount} feed${mutedCount === 1 ? "" : "s"} muted (see feed_sources.muted_until / muted_reason)`,
+    );
   }
 
   lines.push(
@@ -179,41 +170,28 @@ export async function GET(req: Request) {
     (a, b) => b.hits - a.hits,
   );
 
-  // ── Check 2: stale feeds ──────────────────────────────────────────────
-  // Pull the latest run per feed. supabase-js doesn't expose
-  // SELECT DISTINCT ON, so fetch ordered + dedupe in TS.
-  const { data: feedRows, error: feedError } = await supabase
-    .from("feed_ingestion_log")
-    .select("feed_name, created_at")
-    .order("created_at", { ascending: false })
-    .limit(500);
+  // ── Check 2: feed health ──────────────────────────────────────────────
+  // Reads the feed_health view (migration-v264), which is one row per ENABLED
+  // feed WHETHER OR NOT IT HAS LOGGED ANYTHING. That LEFT JOIN is the whole
+  // point: the previous implementation read `.limit(500)` from
+  // feed_ingestion_log, which spanned 6.7 days and contained 15 of 20 feeds —
+  // and the 5 missing were exactly the dead ones. A feed that stops writing
+  // drops out of any query that groups by what is present, so the harder a feed
+  // failed, the more certainly it was invisible.
+  const { data: healthRows, error: healthError } = await supabase
+    .from("feed_health")
+    .select("*");
 
-  if (feedError) {
-    logger.error("health-digest: feed query failed", {
-      error: feedError.message,
+  if (healthError) {
+    logger.error("health-digest: feed_health query failed", {
+      error: healthError.message,
     });
   }
 
-  const lastRunByFeed = new Map<string, string>();
-  for (const row of feedRows ?? []) {
-    const name = row.feed_name as string;
-    if (!lastRunByFeed.has(name)) {
-      lastRunByFeed.set(name, row.created_at as string);
-    }
-  }
+  const rows = (healthRows ?? []) as unknown as FeedHealthRow[];
+  const { problems, mutedCount } = classifyFeedHealth(rows);
 
   const now = Date.now();
-  const stale: StaleFeed[] = [];
-  for (const [feed_name, last_run] of lastRunByFeed) {
-    if (KNOWN_DORMANT_FEEDS.has(feed_name)) continue;
-    const hours_stale = (now - new Date(last_run).getTime()) / 3_600_000;
-    const threshold_hours =
-      STALENESS_THRESHOLD_HOURS[feed_name] ?? DEFAULT_STALENESS_HOURS;
-    if (hours_stale > threshold_hours) {
-      stale.push({ feed_name, last_run, hours_stale, threshold_hours });
-    }
-  }
-  stale.sort((a, b) => b.hours_stale - a.hours_stale);
 
   // ── Check 3: cost summary (informational) ─────────────────────────────
   const { data: costRows, error: costError } = await supabase
@@ -236,7 +214,7 @@ export async function GET(req: Request) {
   };
 
   // ── Decision: alert or stay silent ────────────────────────────────────
-  const issues = errors.length > 0 || stale.length > 0;
+  const issues = errors.length > 0 || problems.length > 0;
   if (!issues) {
     logger.info("health-digest: all clear", {
       cost_usd: cost.cost_usd,
@@ -248,18 +226,21 @@ export async function GET(req: Request) {
     // metadata records WHAT was checked so a wrong all-clear stays diagnosable.
     await recordNoAlertNeeded("health-digest", {
       errors_24h: 0,
-      stale_feeds: 0,
+      feeds_checked: rows.length,
+      feeds_muted: mutedCount,
       cost_usd: cost.cost_usd,
     });
     return NextResponse.json({
       healthy: true,
       errors_24h: 0,
-      stale_feeds: 0,
+      feeds_checked: rows.length,
+      feeds_muted: mutedCount,
+      problems: 0,
       cost,
     });
   }
 
-  const message = buildMessage(errors, stale, cost);
+  const message = buildMessage(errors, problems, cost, mutedCount);
 
   // Telegram send is gated by FF_LEGACY_DIGEST_TELEGRAM. The signal now rides
   // in the consolidated 7am founder brief (Claude Code Routine "Daily Founder
@@ -273,8 +254,10 @@ export async function GET(req: Request) {
     enabled: legacyTelegramEnabled,
     metadata: {
       error_count: errors.reduce((s, e) => s + e.hits, 0),
-      stale_count: stale.length,
-      stale_feeds: stale.map((s) => s.feed_name),
+      problem_count: problems.length,
+      problems: problems.map((p) => `${p.kind}:${p.feed_name}`),
+      feeds_checked: rows.length,
+      feeds_muted: mutedCount,
       cost_usd: cost.cost_usd,
       mutedBy: legacyTelegramEnabled ? null : "FF_LEGACY_DIGEST_TELEGRAM",
     },
@@ -283,7 +266,7 @@ export async function GET(req: Request) {
   if (legacyTelegramEnabled) {
     logger.warn("health-digest: issues detected, admin notified", {
       error_count: errors.reduce((s, e) => s + e.hits, 0),
-      stale_count: stale.length,
+      problem_count: problems.length,
       cost_usd: cost.cost_usd,
     });
   } else {
@@ -291,7 +274,7 @@ export async function GET(req: Request) {
       "health-digest: issues detected; telegram muted (FF_LEGACY_DIGEST_TELEGRAM off), rolled into morning brief",
       {
         error_count: errors.reduce((s, e) => s + e.hits, 0),
-        stale_count: stale.length,
+        problem_count: problems.length,
         cost_usd: cost.cost_usd,
       },
     );
@@ -301,7 +284,9 @@ export async function GET(req: Request) {
     alerted: legacyTelegramEnabled,
     muted: !legacyTelegramEnabled,
     errors,
-    stale_feeds: stale,
+    problems,
+    feeds_checked: rows.length,
+    feeds_muted: mutedCount,
     cost,
   });
 }
