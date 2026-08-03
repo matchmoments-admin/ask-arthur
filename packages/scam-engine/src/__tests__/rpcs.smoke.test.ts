@@ -291,7 +291,7 @@ describe.skipIf(!hasEnv)("SQL RPC smoke tests", () => {
     expect(result?.exempt_feeds).toContain("crtsh");
   });
 
-  // ── migration-v261: feed_health ──────────────────────────────────────
+  // ── migration-v264: feed_health ──────────────────────────────────────
   //
   // A view rather than a function, but the same failure mode: health-digest is
   // its only consumer and runs unattended, so a broken view means the digest
