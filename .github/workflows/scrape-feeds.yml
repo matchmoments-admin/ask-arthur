@@ -70,6 +70,11 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || vars.ENABLE_SCRAPER == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    # Surfaced to notify-failure so the Telegram page can NAME the failing
+    # feeds. $GITHUB_ENV does not cross jobs — these must be step outputs.
+    outputs:
+      failed_scrapers: ${{ steps.gate.outputs.failed_scrapers }}
+      suppressed_count: ${{ steps.gate.outputs.suppressed_count }}
     defaults:
       run:
         working-directory: pipeline/scrapers
@@ -299,15 +304,21 @@ jobs:
       # aborts the remaining sequential steps (the pre-#564 cascade). This gate
       # restores the "page on real failure" intent of #556/#564 while preserving
       # full ingestion coverage on every run.
-      - name: Fail if any scraper errored
+      # Page only for feeds that are NOT muted. The previous version of this
+      # step failed the job for ANY non-zero scraper, which is why `acsc` —
+      # blocked at the cyber.gov.au edge since 2026-05-11 and deliberately muted
+      # in feed_sources by migration v264 — paged Telegram every 3 hours from
+      # 2026-08-03. `feed_sources.muted_until` was the single source of truth for
+      # "knowingly broken, do not alarm" and only health-digest honoured it.
+      #
+      # Suppression requires a POSITIVE match to a disabled or currently-muted
+      # row. Unresolvable module, missing roster row, or an unreachable DB all
+      # page — see the fail-safe rule in check_scraper_failures.py. An expired
+      # mute pages too, which is what makes the 2026-08-29 acsc expiry work.
+      - name: Fail if any UNMUTED scraper errored
+        id: gate
         if: always()
-        run: |
-          if [ -s "$GITHUB_WORKSPACE/scraper_failures.txt" ]; then
-            echo "Scrapers that exited non-zero this run:"
-            cat "$GITHUB_WORKSPACE/scraper_failures.txt"
-            exit 1
-          fi
-          echo "All scrapers completed without a hard error."
+        run: python -m check_scraper_failures --file "$GITHUB_WORKSPACE/scraper_failures.txt"
 
   notify-failure:
     needs: scrape
@@ -330,13 +341,25 @@ jobs:
           TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
           TRIGGER: ${{ github.event_name }} (${{ github.event.schedule || github.event.inputs.feed || 'manual' }})
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          # Which feeds, named in the page itself. Empty on a cancelled/timed-out
+          # run, where the gate step never executed to set them.
+          FAILED_SCRAPERS: ${{ needs.scrape.outputs.failed_scrapers }}
+          SUPPRESSED_COUNT: ${{ needs.scrape.outputs.suppressed_count }}
         run: |
           set -uo pipefail
           if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_ADMIN_CHAT_ID:-}" ]; then
             echo "::error::TELEGRAM_BOT_TOKEN / TELEGRAM_ADMIN_CHAT_ID not set — this failure reached nobody"
             exit 1
           fi
-          TEXT=$(printf '🚨 Threat feed scraper failed\nTrigger: %s\nRun: %s' "$TRIGGER" "$RUN_URL")
+          # Name the feeds in the alert. "which feed?" previously required
+          # opening the run; an alert should carry its own evidence.
+          WHICH="${FAILED_SCRAPERS:-unknown (gate did not run — cancelled or timed out)}"
+          SUPPRESSED_NOTE=""
+          if [ -n "${SUPPRESSED_COUNT:-}" ] && [ "${SUPPRESSED_COUNT}" != "0" ]; then
+            SUPPRESSED_NOTE=$(printf '\nAlso failing but muted: %s (see feed_sources.muted_until)' "$SUPPRESSED_COUNT")
+          fi
+          TEXT=$(printf '🚨 Threat feed scraper failed\nFeeds: %s\nTrigger: %s\nRun: %s%s' \
+            "$WHICH" "$TRIGGER" "$RUN_URL" "$SUPPRESSED_NOTE")
           if ! curl -sf -X POST \
               "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
               --data-urlencode "chat_id=${TELEGRAM_ADMIN_CHAT_ID}" \
