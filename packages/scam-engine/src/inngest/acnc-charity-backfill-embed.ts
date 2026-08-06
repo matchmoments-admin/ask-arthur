@@ -159,29 +159,37 @@ export const acncCharityBackfillEmbed = inngest.createFunction(
           );
         }
 
-        // Write to the sibling table via single bulk upsert. ON CONFLICT
-        // (charity_abn) DO UPDATE keeps re-embeds idempotent — e.g. if the
-        // function is retried after a partial write, we don't get
-        // duplicate-PK errors. The previous per-row UPDATE loop is now a
-        // single round-trip which is meaningfully faster at batch=200.
+        // Write to the sibling table in SMALL upsert statements. A single
+        // 200-row statement timed out in prod on 2026-08-06 (Inngest run
+        // 01KZB51PR9P60V6EZZPJN4TYQT): the May backfill loaded 63k rows
+        // BEFORE v121 built idx_acnc_charity_embeddings_hnsw, but now every
+        // INSERT pays HNSW graph construction, and 200 vectors in one
+        // statement exceeds the pooler's statement timeout. 25 rows/statement
+        // keeps each write well under it; ON CONFLICT (charity_abn) DO
+        // UPDATE keeps chunk retries idempotent after a partial write.
         const upsertRows = rows.map((row, i) => ({
           charity_abn: row.abn,
           embedding: vectorToPgString(result.vectors[i]),
           model: result.modelId,
           embedded_at: new Date().toISOString(),
         }));
-        const { error: writeErr, count } = await supabase
-          .from("acnc_charity_embeddings")
-          .upsert(upsertRows, {
-            onConflict: "charity_abn",
-            count: "exact",
-          });
-        if (writeErr) {
-          throw new Error(
-            `batch-${batchIdx} sibling upsert failed: ${writeErr.message}`,
-          );
+        const WRITE_CHUNK = 25;
+        let written = 0;
+        for (let off = 0; off < upsertRows.length; off += WRITE_CHUNK) {
+          const chunk = upsertRows.slice(off, off + WRITE_CHUNK);
+          const { error: writeErr, count } = await supabase
+            .from("acnc_charity_embeddings")
+            .upsert(chunk, {
+              onConflict: "charity_abn",
+              count: "exact",
+            });
+          if (writeErr) {
+            throw new Error(
+              `batch-${batchIdx} sibling upsert failed at offset ${off}/${upsertRows.length}: ${writeErr.message}`,
+            );
+          }
+          written += count ?? chunk.length;
         }
-        const written = count ?? rows.length;
 
         return {
           written,
