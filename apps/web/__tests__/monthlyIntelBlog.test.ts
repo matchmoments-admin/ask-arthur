@@ -23,6 +23,8 @@ vi.mock("@/lib/blog-cta", () => ({
   appendBlogCtaBlock: (md: string) => `${md}\n\n[CTA]`,
 }));
 
+// Flat shape (2026-08-07): post fields live at top level — the nested
+// `post` object invited persistent stringified-JSON tool outputs.
 const validGeneration = {
   ideas: Array.from({ length: 10 }, (_, i) => ({
     title: `Idea number ${i + 1} about scams`,
@@ -30,14 +32,12 @@ const validGeneration = {
     dataPoints: ["fact"],
     targetKeyword: "scam",
   })),
-  post: {
-    title: "Fake stores flooded June",
-    subtitle: "A subtitle",
-    excerpt: "Clone-watch logged hundreds of lookalike domains last month.",
-    content: "x".repeat(500),
-    tags: ["clone-watch"],
-    category: "scam-alerts",
-  },
+  title: "Fake stores flooded June",
+  subtitle: "A subtitle",
+  excerpt: "Clone-watch logged hundreds of lookalike domains last month.",
+  content: "x".repeat(500),
+  tags: ["clone-watch"],
+  category: "scam-alerts",
 };
 
 const mockCallClaudeJson = vi.fn();
@@ -130,19 +130,21 @@ describe("generateMonthlyIntelPost", () => {
 
   it("coerces an unknown category to scam-alerts", async () => {
     const gen = structuredClone(validGeneration);
-    gen.post.category = "not-a-category";
+    gen.category = "not-a-category";
     mockCallClaudeJson.mockResolvedValue(claudeResult(gen));
 
     const result = await generateMonthlyIntelPost(facts());
     expect(result!.category).toBe("scam-alerts");
   });
 
-  it("returns null when callClaudeJson throws (schema/API failure)", async () => {
+  it("throws when callClaudeJson fails so step.run retries (was a green-lie null)", async () => {
     mockCallClaudeJson.mockRejectedValue(
       new Error("Claude JSON response failed schema validation")
     );
 
-    expect(await generateMonthlyIntelPost(facts())).toBeNull();
+    await expect(generateMonthlyIntelPost(facts())).rejects.toThrow(
+      /generation failed validation/
+    );
   });
 
   it("returns null without an API key", async () => {
@@ -153,15 +155,17 @@ describe("generateMonthlyIntelPost", () => {
 
   it("rejects drafts containing placeholder tokens like [NAME]", async () => {
     const gen = structuredClone(validGeneration);
-    gen.post.content = "x".repeat(300) + " [NAME] is one of Australia's most popular platforms " + "y".repeat(200);
+    gen.content = "x".repeat(300) + " [NAME] is one of Australia's most popular platforms " + "y".repeat(200);
     mockCallClaudeJson.mockResolvedValue(claudeResult(gen));
 
-    expect(await generateMonthlyIntelPost(facts())).toBeNull();
+    await expect(generateMonthlyIntelPost(facts())).rejects.toThrow(
+      /placeholder token/
+    );
   });
 
   it("does not flag callout markers or ALL-CAPS markdown links as placeholders", async () => {
     const gen = structuredClone(validGeneration);
-    gen.post.content =
+    gen.content =
       "> [!WARNING] real warning\n\nSee [ACCC](https://www.accc.gov.au) guidance. " + "x".repeat(450);
     mockCallClaudeJson.mockResolvedValue(claudeResult(gen));
 
@@ -182,25 +186,25 @@ describe("generateMonthlyIntelPost", () => {
 });
 
 describe("monthlyGenerationSchema leniency", () => {
-  it("accepts post/ideas as proper structures", () => {
+  it("accepts the flat structure", () => {
     expect(monthlyGenerationSchema.safeParse(validGeneration).success).toBe(true);
   });
 
-  it("accepts a JSON-stringified post (2026-06 rerun failure mode) and re-validates it", () => {
+  it("accepts JSON-stringified ideas/tags arrays and re-validates them", () => {
     const parsed = monthlyGenerationSchema.parse({
-      ideas: validGeneration.ideas,
-      post: JSON.stringify(validGeneration.post),
+      ...validGeneration,
+      ideas: JSON.stringify(validGeneration.ideas),
+      tags: JSON.stringify(validGeneration.tags),
     });
-    expect(typeof parsed.post).toBe("object");
-    expect((parsed.post as { title: string }).title).toBe(validGeneration.post.title);
+    expect(Array.isArray(parsed.ideas)).toBe(true);
+    expect(Array.isArray(parsed.tags)).toBe(true);
   });
 
-  it("rejects a stringified post that fails the inner schema", () => {
-    const bad = { ...validGeneration.post, content: "too short" };
+  it("rejects stringified ideas that fail the inner schema", () => {
     expect(
       monthlyGenerationSchema.safeParse({
-        ideas: validGeneration.ideas,
-        post: JSON.stringify(bad),
+        ...validGeneration,
+        ideas: JSON.stringify([{ title: "only one idea" }]),
       }).success
     ).toBe(false);
   });
@@ -208,7 +212,8 @@ describe("monthlyGenerationSchema leniency", () => {
   it("stays representable as a tool-use JSON Schema (what callClaudeJson does)", async () => {
     const { z } = await import("zod");
     const jsonSchema = z.toJSONSchema(monthlyGenerationSchema, { io: "input" });
-    expect(jsonSchema).toHaveProperty("properties.post");
+    expect(jsonSchema).toHaveProperty("properties.title");
+    expect(jsonSchema).toHaveProperty("properties.content");
     expect(jsonSchema).toHaveProperty("properties.ideas");
   });
 });

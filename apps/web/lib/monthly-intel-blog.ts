@@ -265,19 +265,23 @@ function objectOrJsonString<T extends z.ZodType>(schema: T) {
   ]);
 }
 
-const PostSchema = z.object({
+// Exported for tests — validation runs inside callClaudeJson in production.
+//
+// FLAT on purpose. The original shape nested the post under a `post` object,
+// and Sonnet persistently returned that large nested object as a hand-
+// stringified JSON string with broken escaping — every sample across two
+// canary runs (2026-08-07) failed parse+validation. Top-level scalar fields
+// leave nothing to stringify; the small `ideas`/`tags` arrays keep the
+// objectOrJsonString wrapper as cheap insurance (stringified arrays did
+// parse fine).
+export const monthlyGenerationSchema = z.object({
+  ideas: objectOrJsonString(z.array(IdeaSchema).min(5).max(12)),
   title: z.string().min(5).max(120),
   subtitle: z.string().max(200),
   excerpt: z.string().min(10).max(300),
   content: z.string().min(400),
-  tags: z.array(z.string()).max(8),
+  tags: objectOrJsonString(z.array(z.string()).max(8)),
   category: z.string(),
-});
-
-// Exported for tests — validation runs inside callClaudeJson in production.
-export const monthlyGenerationSchema = z.object({
-  ideas: objectOrJsonString(z.array(IdeaSchema).min(5).max(12)),
-  post: objectOrJsonString(PostSchema),
 });
 
 export interface MonthlyGeneratedPost {
@@ -351,7 +355,7 @@ FORMATTING RULES for the post content (markdown):
 - No calls-to-action, sign-offs or askarthur.au links — a standard CTA block is appended automatically.
 - category must be one of the live blog_categories slugs: scam-alerts, guides, intelligence, product, security, compliance, real-stories.
 - Respond ONLY by calling the submit_monthly_blog tool. "ideas" must be exactly 10 items, best first. Post title ≤90 chars; subtitle ≤180; excerpt ≤280.
-- Tool input fields must be actual JSON structures — "post" is an object and "ideas" is an array, never JSON-encoded strings.`,
+- The post fields (title, subtitle, excerpt, content, tags, category) are TOP-LEVEL tool fields. "ideas" and "tags" are actual JSON arrays, never JSON-encoded strings.`,
       user: `Facts for ${facts.periodMonth} (all counts code-derived from production data):
 
 ${JSON.stringify(facts, null, 1)}`,
@@ -391,10 +395,10 @@ ${JSON.stringify(facts, null, 1)}`,
   // [!WARNING]-style callout markers never match ("!" fails the [A-Z] start).
   const PLACEHOLDER = /\[[A-Z][A-Z_ ]{0,24}\](?!\()/;
   const userFacing = [
-    parsed.post.title,
-    parsed.post.subtitle,
-    parsed.post.excerpt,
-    parsed.post.content,
+    parsed.title,
+    parsed.subtitle,
+    parsed.excerpt,
+    parsed.content,
   ].join("\n");
   if (PLACEHOLDER.test(userFacing)) {
     logger.error("monthly-intel-blog: draft contains placeholder token", {
@@ -407,8 +411,8 @@ ${JSON.stringify(facts, null, 1)}`,
     );
   }
 
-  const title = scrubPII(parsed.post.title);
-  const content = appendBlogCtaBlock(scrubPII(parsed.post.content));
+  const title = scrubPII(parsed.title);
+  const content = appendBlogCtaBlock(scrubPII(parsed.content));
   const slug =
     `${facts.periodMonth}-` +
     title
@@ -420,12 +424,12 @@ ${JSON.stringify(facts, null, 1)}`,
   return {
     slug,
     title,
-    subtitle: scrubPII(parsed.post.subtitle),
-    excerpt: scrubPII(parsed.post.excerpt),
+    subtitle: scrubPII(parsed.subtitle),
+    excerpt: scrubPII(parsed.excerpt),
     content,
-    tags: parsed.post.tags,
-    category: VALID_CATEGORIES.includes(parsed.post.category)
-      ? parsed.post.category
+    tags: parsed.tags,
+    category: VALID_CATEGORIES.includes(parsed.category)
+      ? parsed.category
       : "scam-alerts",
     readingTimeMinutes: Math.max(1, Math.ceil(content.split(/\s+/).length / 200)),
     ideas: parsed.ideas,
