@@ -275,3 +275,48 @@ describe("/api/inbound-scan — rate-limit branches", () => {
     );
   });
 });
+
+describe("/api/inbound-scan — reply threading", () => {
+  it("threads the verdict under the forward when message_id is present", async () => {
+    analyzeForBotMock.mockResolvedValueOnce({
+      verdict: "HIGH_RISK",
+      confidence: 0.92,
+      summary: "Phishing — fake parcel-redelivery lure.",
+      redFlags: ["Spoofed sender"],
+      nextSteps: ["Do not click"],
+    });
+
+    const { POST } = await loadRoute();
+    const res = await POST(
+      makeRequest(makePayload({ message_id: "CAF+abc123@mail.gmail.com" })),
+    );
+
+    expect(res.status).toBe(200);
+    expect(resendSendMock).toHaveBeenCalledTimes(1);
+    const call = resendSendMock.mock.calls[0][0];
+    expect(call.subject).toBe("Re: Your parcel could not be delivered");
+    // Angle brackets added when the worker's parse stripped them.
+    expect(call.headers).toEqual({
+      "In-Reply-To": "<CAF+abc123@mail.gmail.com>",
+      References: "<CAF+abc123@mail.gmail.com>",
+    });
+  });
+
+  it("keeps the standalone subject and no threading headers without message_id", async () => {
+    analyzeForBotMock.mockResolvedValueOnce({
+      verdict: "SUSPICIOUS",
+      confidence: 0.7,
+      summary: "Possible phishing.",
+      redFlags: [],
+      nextSteps: [],
+    });
+
+    const { POST } = await loadRoute();
+    const res = await POST(makeRequest(makePayload()));
+
+    expect(res.status).toBe(200);
+    const call = resendSendMock.mock.calls[0][0];
+    expect(call.subject).toMatch(/^Ask Arthur scan result: /);
+    expect(call.headers).toBeUndefined();
+  });
+});

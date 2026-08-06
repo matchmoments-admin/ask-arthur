@@ -54,7 +54,21 @@ const InboundScanPayload = z.object({
   to: z.string().min(3).max(320),
   received_at: z.string().datetime(),
   tags: z.array(z.string().max(64)).max(20).optional(),
+  // RFC 5322 Message-ID of the sender's forward (with or without angle
+  // brackets). When present, replies thread under the forwarded email.
+  message_id: z.string().min(3).max(998).optional(),
 });
+
+// Build In-Reply-To/References headers so the reply lands in the same
+// thread as the user's forward. RFC 5322 requires the angle brackets;
+// PostalMime usually preserves them but header-parsed fallbacks may not.
+function threadingHeaders(
+  messageId: string | undefined,
+): Record<string, string> | undefined {
+  if (!messageId) return undefined;
+  const id = messageId.startsWith("<") ? messageId : `<${messageId}>`;
+  return { "In-Reply-To": id, References: id };
+}
 
 type InboundScanPayload = z.infer<typeof InboundScanPayload>;
 
@@ -305,6 +319,7 @@ export async function POST(req: NextRequest) {
         await resend.emails.send({
           from: fromEmail,
           to: sender.email,
+          headers: threadingHeaders(payload.message_id),
           subject: "Ask Arthur — daily forward limit reached",
           text: [
             sender.displayName ? `Hi ${sender.displayName.split(" ")[0]},` : "Hi,",
@@ -386,6 +401,7 @@ export async function POST(req: NextRequest) {
         const sendResult = await resend.emails.send({
           from: fromEmail,
           to: sender.email,
+          headers: threadingHeaders(payload.message_id),
           subject: "Ask Arthur — temporarily overloaded, please retry",
           text: [
             sender.displayName ? `Hi ${sender.displayName.split(" ")[0]},` : "Hi,",
@@ -502,7 +518,14 @@ export async function POST(req: NextRequest) {
     const sendResult = await resend.emails.send({
       from: fromEmail,
       to: sender.email,
-      subject: `Ask Arthur scan result: ${headline}`,
+      // Reply-style subject + In-Reply-To makes the verdict land in the
+      // same thread as the forward across Gmail/Outlook/Apple Mail. The
+      // headline still leads the body; without a message_id we fall back
+      // to the standalone subject so the verdict is identifiable.
+      subject: payload.message_id
+        ? `Re: ${payload.subject}`
+        : `Ask Arthur scan result: ${headline}`,
+      headers: threadingHeaders(payload.message_id),
       html,
       text,
       // Tag for Resend analytics so we can split scan-reply volume from

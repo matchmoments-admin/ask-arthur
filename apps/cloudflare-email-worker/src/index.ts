@@ -333,6 +333,11 @@ export default {
       to: toCandidates[0] ?? message.to,
       received_at: new Date(receivedAt).toISOString(),
       tags: undefined as string[] | undefined,
+      // Raw RFC 5322 Message-ID of the sender's forward. Set only on the
+      // user-scan path (below) — the verdict reply threads under the
+      // forwarded email via In-Reply-To/References. The intel edge
+      // function's schema does not accept this field.
+      message_id: undefined as string | undefined,
     };
 
     // Resolve the target URL for this source.
@@ -363,6 +368,7 @@ export default {
         return;
       }
       targetUrl = env.SCAN_REPORT_ENDPOINT_URL;
+      payload.message_id = messageId;
     } else {
       targetUrl = env.SUPABASE_EDGE_FUNCTION_URL;
     }
