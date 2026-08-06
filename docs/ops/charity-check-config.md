@@ -62,7 +62,7 @@ be true for the scraper to actually run on a scheduled or dispatched job.
 
 | Env var                        | Status | Notes                                                                                                                                                                                                                                  |
 | ------------------------------ | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NEXT_PUBLIC_FF_CHARITY_CHECK` | ❌     | Default OFF — flip on Vercel preview to drive `/charity-check`                                                                                                                                                                         |
+| `NEXT_PUBLIC_FF_CHARITY_CHECK` | ✅     | Flipped ON (preview + production) 2026-08-06 — wayfinder #904 lever 3 (#910). Interactive checker only; the programmatic per-charity SEO pages stay held until v0.2c fusion exists                                                     |
 | `FF_CHARITY_CHECK_INGEST`      | ✅     | Set in `.github/workflows/scrape-feeds.yml` step env; also a turbo.json `globalEnv` entry so local dev can opt in                                                                                                                      |
 | `CHARITY_CHECK_CAP_USD`        | ✅     | Default $5/day. Used by `apps/web/app/api/cron/cost-daily-check/route.ts` to engage `feature_brakes.charity_check`. v0.1+v0.2a are zero-marginal-cost; the brake exists ahead of v0.2b's image OCR (Claude Vision ~$0.002–$0.01/image) |
 
