@@ -39,7 +39,11 @@ export const monthlyIntelBlog = inngest.createFunction(
   {
     id: "monthly-intel-blog",
     name: "Blog: monthly intel-driven draft",
-    timeouts: { finish: "4m" },
+    // 4m was measured too tight: the 2026-08-07 canary (run against real
+    // July data, cold start + full Sonnet draft) was cancelled at exactly
+    // 4m00s by this ceiling. Generation is one long Claude call — 10m is
+    // generous without masking a hang (retries still bound the tail).
+    timeouts: { finish: "10m" },
     retries: 2,
   },
   [
