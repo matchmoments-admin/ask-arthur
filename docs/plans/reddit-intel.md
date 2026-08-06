@@ -39,7 +39,7 @@ Feature flags (all default OFF, flip in Vercel env):
 - `NEXT_PUBLIC_FF_REDDIT_INTEL_DASHBOARD` — gates the threats-page widget
 - `FF_REDDIT_INTEL_EMAIL` — gates the weekly intel digest send
 - `NEXT_PUBLIC_FF_REDDIT_INTEL_B2B_API` — gates `/api/v1/intel/*` (returns 503 when off)
-- `NEXT_PUBLIC_FF_REDDIT_INTEL_PUBLIC_PAGES` — gates the public `/intel/themes/[slug]` page (added #124). When OFF the route returns notFound() and email theme titles still link to a URL that 404s — flip on per-environment after preview confirms the page renders.
+- `NEXT_PUBLIC_FF_REDDIT_INTEL_PUBLIC_PAGES` — gates the public `/intel/themes/[slug]` page (added #124). When OFF the route returns notFound() and email theme titles still link to a URL that 404s. **Flipped ON in production + preview 2026-08-07** (wayfinder #905 education-surface decision): 200 themes, all slugged, data fresh at flip; page is force-dynamic with a per-request gate and a flag-gated sitemap.
 
 Steady-state cost projection: **~A\$0.30/day = ~A\$9/month** Anthropic +
 Voyage, well below the A\$50 cost-daily-check alert. Cron runs once
