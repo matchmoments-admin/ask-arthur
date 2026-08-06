@@ -62,7 +62,7 @@ be true for the scraper to actually run on a scheduled or dispatched job.
 
 | Env var                        | Status | Notes                                                                                                                                                                                                                                  |
 | ------------------------------ | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NEXT_PUBLIC_FF_CHARITY_CHECK` | ❌     | Default OFF — flip on Vercel preview to drive `/charity-check`                                                                                                                                                                         |
+| `NEXT_PUBLIC_FF_CHARITY_CHECK` | ✅     | Flipped ON (preview + production) 2026-08-06 — wayfinder #904 lever 3 (#910). Interactive checker only; the programmatic per-charity SEO pages stay held until v0.2c fusion exists                                                     |
 | `FF_CHARITY_CHECK_INGEST`      | ✅     | Set in `.github/workflows/scrape-feeds.yml` step env; also a turbo.json `globalEnv` entry so local dev can opt in                                                                                                                      |
 | `CHARITY_CHECK_CAP_USD`        | ✅     | Default $5/day. Used by `apps/web/app/api/cron/cost-daily-check/route.ts` to engage `feature_brakes.charity_check`. v0.1+v0.2a are zero-marginal-cost; the brake exists ahead of v0.2b's image OCR (Claude Vision ~$0.002–$0.01/image) |
 
@@ -168,9 +168,9 @@ Manual scrape: `gh workflow run scrape-feeds.yml -f feed=acnc_register` (also ac
 
 Then run these on the preview deployment after setting `NEXT_PUBLIC_FF_CHARITY_CHECK=true`:
 
-1. **SAFE happy path** — Visit `/charity-check?abn=11005357522`, expect SAFE verdict for "Australian Red Cross Society" with all four ticks lit, official donation URL CTA → `www.redcross.org.au`.
+1. **SAFE happy path** — Visit `/charity-check?abn=50169561394`, expect SAFE verdict for "Australian Red Cross Society" with all four ticks lit, official donation URL CTA → `www.redcross.org.au`. (The ABN previously listed here, 11005357522, is ANZ Bank's — a wrong fixture that the checker correctly flags as not-a-charity; caught during the 2026-08-06 activation smoke run.)
 2. **Autocomplete** — Type "Cancer Council" in the name field, expect a listbox of all five state-level Councils with town + state shown.
-3. **No match** — Submit `name=Definitely Not A Real Charity 12345`, expect SUSPICIOUS verdict with "we can't find this in the ACNC register" copy.
+3. **No match** — Submit `name=Definitely Not A Real Charity 12345`, expect a not-in-register verdict with "we can't find this in the ACNC register" copy. (Observed 2026-08-06: returns HIGH_RISK, not the SUSPICIOUS this doc originally predicted — treated as acceptable-or-stronger, since an unregistered solicitation is the core doorknock-scam case.)
 4. **Typosquat** — Submit `name=Astralian Red Cross` (1-letter typo), expect HIGH_RISK with `nearest_match: "Australian Red Cross Society"` shown in the verdict copy.
 5. **Cash payment hard-floor** — Submit any registered charity with `paymentMethod=cash`, expect HIGH_RISK regardless of verdict score.
 6. **Donation-URL pillar** — Submit `abn=11005357522` with `donationUrl=https://www.redcross.org.au`, expect 4 ticks lit including Donation URL; verify the collapsible "Donation URL details" section shows domain age + Safe Browsing clean.
