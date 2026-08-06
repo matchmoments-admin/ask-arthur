@@ -2,9 +2,11 @@
 // NRD hits with factual-signal-only copy per docs/policy/draft-disclaimer-pack-v0.md
 // Surface 5 principles.
 //
-// `noindex` for the first 7 days while v0 copy is unvetted. Sitemap
-// excludes /clone-watch (see apps/web/app/sitemap.ts). Index-flip is a
-// follow-up PR after #371 lawyer-vetted v1 copy lands — NOT this design change.
+// Indexing is gated on NEXT_PUBLIC_FF_CLONE_WATCH_PUBLIC (same flag as
+// /clone-watch/method and /clone-watch/[period]). Copy hardened 2026-08-06
+// (registrant correction path + review-accurate disclaimers); professional
+// vetting of the disclaimer pack remains open as #371 but no longer gates
+// indexing — founder decision, wayfinder #904/#908.
 //
 // Read path: service-role Supabase client (the table is service-role-only
 // per v140 RLS); page renders server-side, never via browser supabase-js.
@@ -34,9 +36,10 @@ export const metadata: Metadata = {
     "Clone-watch — newly-registered AU brand-pattern domains | Ask Arthur",
   description:
     "A daily list of newly-registered domains matching the lexical pattern of Australian retail brand names. Public-registry observations only.",
-  // v0 page — noindex for the first 7 days while v0 copy is unvetted by
-  // counsel. Flip via a follow-up PR after #371 lawyer pack returns.
-  robots: { index: false, follow: false },
+  robots: {
+    index: featureFlags.cloneWatchPublic,
+    follow: featureFlags.cloneWatchPublic,
+  },
 };
 
 interface CloneAlertRow {
@@ -502,6 +505,22 @@ export default async function CloneWatchPage() {
             Contact our team →
           </Link>
         </FeatureCard>
+        <FeatureCard icon={Mail} title="If you registered one of these domains" titleAs="h3">
+          <p className="text-sm text-gov-slate mt-1 leading-relaxed">
+            Inclusion here is a factual record of name similarity — it is{" "}
+            <strong className="font-semibold text-deep-navy">not an allegation</strong>{" "}
+            that you have done anything wrong. If you believe your domain is
+            listed in error, or you want to explain its purpose, contact us and
+            we will review the entry — corrections and removals are actioned on
+            every substantiated request.
+          </p>
+          <Link
+            href="/contact"
+            className="mt-3 inline-block text-sm font-semibold text-action-teal underline underline-offset-2"
+          >
+            Request a review →
+          </Link>
+        </FeatureCard>
         <SampleReportForm />
       </section>
 
@@ -531,9 +550,10 @@ export default async function CloneWatchPage() {
             What we have not done
           </div>
           <p className="text-[13.5px] leading-relaxed text-slate-500">
-            We have not contacted the registrant, verified whether the domain
-            resolves or serves content, or made any legal characterisation of
-            the domain or its registrant.
+            Entries appear only after a human reviewer confirms the
+            name-similarity match. That review does not determine who registered
+            the domain or why: we have not contacted registrants, and we make no
+            legal characterisation of any domain or its registrant.
           </p>
         </div>
         <div>
