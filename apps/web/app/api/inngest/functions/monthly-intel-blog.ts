@@ -119,7 +119,10 @@ export const monthlyIntelBlog = inngest.createFunction(
           content: generated.content,
           tags: generated.tags,
           author: "Arthur AI",
-          published: false,
+          // NB: no `published` column exists on prod blog_posts — the first
+          // canary (2026-08-07, run 01KZC9WM…) lost its draft because this
+          // upsert wrote one and PostgREST rejected the whole row. `status`
+          // is the real publish gate.
           status: "draft",
           category: generated.category,
           reading_time_minutes: generated.readingTimeMinutes,
