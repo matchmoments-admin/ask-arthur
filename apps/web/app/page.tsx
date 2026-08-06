@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { ShieldCheck, ClipboardClock, Shield } from "lucide-react";
+import { ShieldCheck, ClipboardClock, Shield, Mail } from "lucide-react";
 import ScamChecker from "@/components/ScamChecker";
 import ScamCounter from "@/components/ScamCounter";
 import Footer from "@/components/Footer";
@@ -106,6 +106,34 @@ export default function Home() {
               Your messages are never stored. Analyzed and immediately discarded.
             </p>
           </div>
+        </section>
+
+        {/* Email forwarding entry point — activation lever 2 (#909).
+            The address is a public distribution group on askarthur.au that
+            relays to the Cloudflare inbound pipeline; verdict replies thread
+            under the forwarded email. */}
+        <section
+          aria-labelledby="forward-heading"
+          className="mt-16 rounded-2xl border border-deep-navy/15 bg-deep-navy/[0.03] p-7 text-center"
+        >
+          <Mail className="text-deep-navy mb-3 mx-auto" size={32} />
+          <h2
+            id="forward-heading"
+            className="text-deep-navy font-bold text-sm uppercase tracking-widest mb-2"
+          >
+            Or just forward it
+          </h2>
+          <p className="text-gov-slate text-base leading-relaxed max-w-[46ch] mx-auto">
+            Forward any suspicious email to{" "}
+            <a
+              href="mailto:scan@askarthur.au"
+              className="font-semibold text-deep-navy underline underline-offset-2"
+            >
+              scan@askarthur.au
+            </a>{" "}
+            and Arthur replies with a verdict in the same thread — usually
+            within a minute. Free, no signup, three checks a day.
+          </p>
         </section>
       </main>
 
