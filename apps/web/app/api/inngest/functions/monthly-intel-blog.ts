@@ -84,15 +84,25 @@ export const monthlyIntelBlog = inngest.createFunction(
       return { skipped: true, reason: "insufficient data", periodMonth: facts.periodMonth };
     }
 
-    const generated = await step.run("generate", () =>
-      generateMonthlyIntelPost(facts)
-    );
-    if (!generated) {
-      // step.run already retried; a null here is a validation/parse failure.
-      await sendAdminTelegramMessage(
-        `⚠️ Monthly intel blog (${facts.periodMonth}): generation failed validation — no draft created. Re-run with blog/monthly-intel.manual-trigger.v1.`
+    // generateMonthlyIntelPost THROWS on validation/placeholder failures so
+    // step.run genuinely retries (fresh Claude sample each attempt). Only
+    // after retries are exhausted does the error reach this catch — which
+    // notifies, then rethrows so the run status is honestly Failed instead
+    // of a green "skipped" (the 2026-08-07 canary reported success while
+    // producing nothing). A null return is reserved for config absence.
+    let generated;
+    try {
+      generated = await step.run("generate", () =>
+        generateMonthlyIntelPost(facts)
       );
-      return { skipped: true, reason: "generation failed" };
+    } catch (err) {
+      await sendAdminTelegramMessage(
+        `⚠️ Monthly intel blog (${facts.periodMonth}): generation failed after retries — no draft created. Re-run with blog/monthly-intel.manual-trigger.v1.`
+      );
+      throw err;
+    }
+    if (!generated) {
+      return { skipped: true, reason: "generation not configured" };
     }
 
     const persisted = await step.run("persist-draft", async () => {
