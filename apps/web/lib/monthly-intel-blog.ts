@@ -360,7 +360,12 @@ ${JSON.stringify(facts, null, 1)}`,
     logger.error("monthly-intel-blog: generation failed validation", {
       error: String(err),
     });
-    return null;
+    // THROW, don't return null: a schema/parse failure is sampling noise
+    // (e.g. Sonnet stringifying the `post` field — 2026-08-07 canary), and
+    // a fresh attempt usually passes. Returning null made step.run resolve
+    // successfully, so Inngest never retried and the run reported a green
+    // "skipped" for what was actually a failure.
+    throw new Error(`monthly-intel-blog generation failed validation: ${String(err)}`);
   }
 
   logCost({
@@ -395,7 +400,11 @@ ${JSON.stringify(facts, null, 1)}`,
     logger.error("monthly-intel-blog: draft contains placeholder token", {
       match: userFacing.match(PLACEHOLDER)?.[0],
     });
-    return null;
+    // Throw for the same reason as the validation catch above — a fresh
+    // sample usually has no placeholder; null suppressed the retry.
+    throw new Error(
+      `monthly-intel-blog draft contains placeholder token: ${userFacing.match(PLACEHOLDER)?.[0]}`,
+    );
   }
 
   const title = scrubPII(parsed.post.title);
