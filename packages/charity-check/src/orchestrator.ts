@@ -133,7 +133,7 @@ export async function runCharityCheck(
     pillars,
     official_donation_url: officialDonationUrl,
   };
-  const explanation = explainResult(draft);
+  const explanation = explainResult(draft, input);
 
   return {
     verdict,

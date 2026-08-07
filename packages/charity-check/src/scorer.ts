@@ -129,11 +129,27 @@ function escalateOneStep(v: Verdict): Verdict {
   }
 }
 
+/** Payment methods that trip the HIGH_RISK floor, with reader-facing labels. */
+const PAYMENT_LABELS: Record<string, string> = {
+  cash: "cash",
+  gift_card: "gift cards",
+  crypto: "cryptocurrency",
+  bank_transfer: "bank transfer",
+};
+
 /** Build a plain-English summary from the pillar payloads. v0.1 is
  *  template-only — no Claude call — so the engine works offline and at
- *  zero marginal cost. v0.2 may swap to Haiku for nuance. */
+ *  zero marginal cost. v0.2 may swap to Haiku for nuance.
+ *
+ *  `input` (optional, founder request 2026-08-07): when provided, the
+ *  HIGH_RISK "Stop" copy names the signals that ACTUALLY fired (register
+ *  miss / delisted, inactive ABN, payment-method floor, refused ID,
+ *  malicious donation URL) instead of the old generic OR-list of every
+ *  possible trigger. Falls back to the generic line when no specific
+ *  signal is identifiable (e.g. composite-only escalation). */
 export function explainResult(
   result: Pick<CharityCheckResult, "verdict" | "pillars" | "official_donation_url">,
+  input?: Pick<CharityCheckInput, "paymentMethod" | "inPersonContext" | "idShown">,
 ): string {
   const acnc = result.pillars.acnc_registration;
   const abr = result.pillars.abr_dgr;
@@ -163,7 +179,47 @@ export function explainResult(
       if (typosquat && closest) {
         return `Stop. The name you entered closely resembles "${closest}" — a registered charity. This is a common impersonation pattern. Don't donate; report this fundraiser to Scamwatch (scamwatch.gov.au) if approached in person or online.`;
       }
-      return `Stop. The signals point to a high risk of scam — unverified charity, cancelled ABN, or a payment method (cash, gift cards, crypto, bank transfer) that legitimate Australian charities don't ask for. Don't donate.`;
+
+      // Name the signals that actually fired, most damning first.
+      const reasons: string[] = [];
+      if (acnc?.available && acncDetail.registered === false) {
+        reasons.push(
+          acncDetail.reason === "acnc_delisted"
+            ? "this charity has been removed from the ACNC register"
+            : "we can't find this charity on the ACNC register",
+        );
+      }
+      const abnStatus = abr?.detail?.abn_status as string | undefined;
+      if (abr?.available && abnStatus && abnStatus.toLowerCase() !== "active") {
+        reasons.push(`its ABN is ${abnStatus.toLowerCase()}, not active`);
+      }
+      const paymentLabel = input?.paymentMethod
+        ? PAYMENT_LABELS[input.paymentMethod]
+        : undefined;
+      if (paymentLabel) {
+        reasons.push(
+          `they're asking for payment by ${paymentLabel} — legitimate Australian charities don't ask for this`,
+        );
+      }
+      if (input?.inPersonContext && input.idShown === "refused") {
+        reasons.push("the collector refused to show ID");
+      }
+      if (result.pillars.donation_url?.detail?.safe_browsing_malicious === true) {
+        reasons.push("the donation link is flagged as malicious");
+      }
+
+      if (reasons.length === 0) {
+        // Composite-only escalation with no single nameable trigger — keep
+        // the generic framing rather than inventing specifics.
+        return `Stop. The signals point to a high risk of scam — unverified charity, cancelled ABN, or a payment method (cash, gift cards, crypto, bank transfer) that legitimate Australian charities don't ask for. Don't donate.`;
+      }
+
+      const joined =
+        reasons.length === 1
+          ? reasons[0]
+          : `${reasons.slice(0, -1).join("; ")}; and ${reasons[reasons.length - 1]}`;
+      const first = joined.charAt(0).toUpperCase() + joined.slice(1);
+      return `Stop. ${first}. Don't donate.`;
     }
   }
 }
