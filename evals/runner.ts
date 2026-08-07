@@ -26,35 +26,46 @@ interface PromptfooResult {
   error?: string;
 }
 
-export default async function callApi(
-  _prompt: string,
-  context: PromptfooContext,
-): Promise<PromptfooResult> {
-  const text = context.vars?.text;
-  if (!text) {
-    return { output: null, error: "No text provided in fixture vars.text" };
+// promptfoo's file:// custom-provider contract (verified against 0.122 on the
+// first-ever real run, 2026-08-07): the default export must be a CLASS whose
+// instances expose `id()` and `callApi()`. The original default-exported
+// async function threw "(intermediate value) is not a constructor" — another
+// defect the exit-0 era never let surface.
+export default class AskArthurAnalyzeProvider {
+  id(): string {
+    return "askarthur-analyze";
   }
 
-  try {
-    const result = await analyzeWithClaude(
-      text,
-      undefined,
-      context.vars?.mode ?? "text",
-    );
-    return {
-      output: result,
-      tokenUsage: result.usage
-        ? {
-            total: result.usage.inputTokens + result.usage.outputTokens,
-            prompt: result.usage.inputTokens,
-            completion: result.usage.outputTokens,
-          }
-        : undefined,
-    };
-  } catch (err) {
-    return {
-      output: null,
-      error: err instanceof Error ? err.message : String(err),
-    };
+  async callApi(
+    _prompt: string,
+    context: PromptfooContext,
+  ): Promise<PromptfooResult> {
+    const text = context.vars?.text;
+    if (!text) {
+      return { output: null, error: "No text provided in fixture vars.text" };
+    }
+
+    try {
+      const result = await analyzeWithClaude(
+        text,
+        undefined,
+        context.vars?.mode ?? "text",
+      );
+      return {
+        output: result,
+        tokenUsage: result.usage
+          ? {
+              total: result.usage.inputTokens + result.usage.outputTokens,
+              prompt: result.usage.inputTokens,
+              completion: result.usage.outputTokens,
+            }
+          : undefined,
+      };
+    } catch (err) {
+      return {
+        output: null,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
   }
 }

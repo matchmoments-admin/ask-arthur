@@ -14,13 +14,16 @@ prompts:
   - "{{text}}"
 
 providers:
-  - id: file://evals/runner.ts
+  # Paths are resolved relative to THIS config file's directory — the
+  # original `file://evals/runner.ts` resolved to evals/evals/runner.ts and
+  # ENOENT'd on the first-ever real run (2026-08-07). exit-0 had hidden it.
+  - id: file://runner.ts
     label: claude-haiku-4.5
 
 # Each fixture file in fixtures/ is loaded as a test case. The runner
 # calls analyzeWithClaude with the input and the assertions verify the
 # returned JSON structure.
-tests: file://evals/fixtures/*.yaml
+tests: file://fixtures/*.yaml
 
 defaultTest:
   options:
@@ -31,4 +34,4 @@ defaultTest:
 
 # Outputs go to evals/output.json by default. The HTML report renders
 # from that file via `pnpm dlx promptfoo view`.
-outputPath: evals/output.json
+outputPath: output.json
