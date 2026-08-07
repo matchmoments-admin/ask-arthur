@@ -10,27 +10,28 @@ Everything that runs without a user request: Vercel crons, Inngest functions, Py
 
 ---
 
-## Vercel crons (16)
+## Vercel crons (17)
 
 Defined in `apps/web/vercel.json`. All routes verify the Vercel cron signature.
 
-| Path                                | Schedule                       | Purpose                                    |
-| ----------------------------------- | ------------------------------ | ------------------------------------------ |
-| `/api/cron/weekly-email`            | `0 14 * * 1` (Mon 14:00 UTC)   | Weekly scam digest email                   |
-| `/api/cron/nurture`                 | `0 23 * * *` (daily 23:00 UTC) | B2B leads nurture sequence                 |
-| `/api/cron/bot-queue-sweep`         | `0 */6 * * *` (every 6h)       | Bot queue safety net (>2 min pending)      |
-| `/api/cron/bot-queue-cleanup`       | `0 4 * * *` (daily 04:00 UTC)  | Hard-delete terminal queue rows >24h       |
-| `/api/cron/cost-daily-check`        | `0 */6 * * *` (every 6h)       | Cost threshold alert + brake gate          |
-| `/api/cron/cost-weekly-digest`      | `0 22 * * 0` (Sun 22:00 UTC)   | WoW cost report to Telegram                |
-| `/api/cron/vuln-retention`          | `0 3 * * *` (daily 03:00 UTC)  | Prune `vulnerability_detections` >180d     |
-| `/api/cron/scam-reports-retention`  | `30 3 * * *` (daily 03:30 UTC) | Archive `scam_reports` + prune shadows     |
-| `/api/cron/ensure-partitions`       | `0 2 * * *` (daily 02:00 UTC)  | Create next-month partitions               |
-| `/api/cron/reddit-intel-trigger`    | `0 8 * * *` (daily 08:00 UTC)  | Poll `feed_items` for Reddit batches       |
-| `/api/cron/reddit-intel-retention`  | `30 4 * * *` (daily 04:30 UTC) | Prune `reddit_processed_posts` dedup table |
-| `/api/cron/feedback-digest`         | `0 9 * * *` (daily 09:00 UTC)  | Verdict-feedback audit report              |
-| `/api/cron/health-digest`           | `0 22 * * *` (daily 22:00 UTC) | Daily health + errors to Telegram          |
-| `/api/cron/pg-stuck-query-watchdog` | `*/5 * * * *` (every 5 min)    | Alert + kill long-running queries          |
-| `/api/cron/scraper-brake-alert`     | `*/15 * * * *` (every 15 min)  | Monitor `feature_brakes` activation        |
+| Path                                | Schedule                       | Purpose                                                                                                                                                                                                                     |
+| ----------------------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/api/cron/weekly-email`            | `0 14 * * 1` (Mon 14:00 UTC)   | Weekly scam digest email                                                                                                                                                                                                    |
+| `/api/cron/nurture`                 | `0 23 * * *` (daily 23:00 UTC) | B2B leads nurture sequence                                                                                                                                                                                                  |
+| `/api/cron/bot-queue-sweep`         | `0 */6 * * *` (every 6h)       | Bot queue safety net (>2 min pending)                                                                                                                                                                                       |
+| `/api/cron/bot-queue-cleanup`       | `0 4 * * *` (daily 04:00 UTC)  | Hard-delete terminal queue rows >24h                                                                                                                                                                                        |
+| `/api/cron/cost-daily-check`        | `0 */6 * * *` (every 6h)       | Cost threshold alert + brake gate                                                                                                                                                                                           |
+| `/api/cron/cost-weekly-digest`      | `0 22 * * 0` (Sun 22:00 UTC)   | WoW cost report to Telegram                                                                                                                                                                                                 |
+| `/api/cron/alerting-canary`         | `0 8 * * 1` (Mon 08:00 UTC)    | Weekly synthetic alerting canary (Tier 2 #903): sends a Telegram heartbeat UNCONDITIONALLY + liveness-sweeps every alerter's `alert_delivery_log` row count against conservative floors; 500s if the channel itself is dead |
+| `/api/cron/vuln-retention`          | `0 3 * * *` (daily 03:00 UTC)  | Prune `vulnerability_detections` >180d                                                                                                                                                                                      |
+| `/api/cron/scam-reports-retention`  | `30 3 * * *` (daily 03:30 UTC) | Archive `scam_reports` + prune shadows                                                                                                                                                                                      |
+| `/api/cron/ensure-partitions`       | `0 2 * * *` (daily 02:00 UTC)  | Create next-month partitions                                                                                                                                                                                                |
+| `/api/cron/reddit-intel-trigger`    | `0 8 * * *` (daily 08:00 UTC)  | Poll `feed_items` for Reddit batches                                                                                                                                                                                        |
+| `/api/cron/reddit-intel-retention`  | `30 4 * * *` (daily 04:30 UTC) | Prune `reddit_processed_posts` dedup table                                                                                                                                                                                  |
+| `/api/cron/feedback-digest`         | `0 9 * * *` (daily 09:00 UTC)  | Verdict-feedback audit report                                                                                                                                                                                               |
+| `/api/cron/health-digest`           | `0 22 * * *` (daily 22:00 UTC) | Daily health + errors to Telegram                                                                                                                                                                                           |
+| `/api/cron/pg-stuck-query-watchdog` | `*/5 * * * *` (every 5 min)    | Alert + kill long-running queries                                                                                                                                                                                           |
+| `/api/cron/scraper-brake-alert`     | `*/15 * * * *` (every 15 min)  | Monitor `feature_brakes` activation                                                                                                                                                                                         |
 
 ---
 

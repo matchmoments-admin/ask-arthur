@@ -47,6 +47,11 @@ export const ALERTERS = [
   "pg-stuck-query-watchdog",
   "clone-lead-digest",
   "axiom-fleet-watch",
+  // The weekly synthetic canary (Tier 2 item 5): sends unconditionally every
+  // Monday and liveness-sweeps the other alerters' row counts. Its own
+  // liveness is proven by the message arriving, so it exempts itself from
+  // the sweep floors.
+  "alerting-canary",
 ] as const;
 
 export type Alerter = (typeof ALERTERS)[number];

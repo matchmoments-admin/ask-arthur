@@ -132,9 +132,10 @@ describe("alertAndRecord outcome mapping", () => {
 });
 
 describe("ALERTERS roster", () => {
-  it("lists the 8 alerters the acceptance-test liveness query expects", () => {
-    expect(ALERTERS).toHaveLength(8);
-    expect(new Set(ALERTERS).size).toBe(8);
+  it("lists the 9 alerters the liveness sweep expects (8 + the canary)", () => {
+    expect(ALERTERS).toHaveLength(9);
+    expect(new Set(ALERTERS).size).toBe(9);
+    expect(ALERTERS).toContain("alerting-canary");
   });
 
   it("every id matches a cron route directory name", () => {
