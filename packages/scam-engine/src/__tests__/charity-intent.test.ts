@@ -101,9 +101,18 @@ describe("detectCharityIntent", () => {
       "I gave through GoFundMe last week",
       "Looking for a reputable charity",
       "It says donating helps disaster victims",
+      "Will you sponsor me for the fun run next month",
+      "Buying raffle tickets from a guy at the door",
     ])("fires on '%s'", (text) => {
       const r = detectCharityIntent(text);
       expect(r?.detected).toBe(true);
+    });
+
+    it("does NOT fire on bare 'sponsor' in commercial contexts", () => {
+      // "sponsor me" is the keyword phrase, not "sponsor" — sponsored posts
+      // and sponsorship deals must not get a charity nudge.
+      expect(detectCharityIntent("This sponsored post is from our brand sponsor")).toBeNull();
+      expect(detectCharityIntent("We signed a sponsorship deal with the club")).toBeNull();
     });
   });
 
