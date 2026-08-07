@@ -34,6 +34,12 @@ const CHARITY_KEYWORDS = [
   "tax-deductible",
   "tax deductible",
   "gofundme",
+  // Added 2026-08-07 (founder request, post-v0.2e). "sponsor me" is the
+  // PHRASE, not bare "sponsor" — "sponsored post" / "sponsorship deal" are
+  // commercial contexts that must not trigger a charity nudge. "raffle"
+  // covers fundraising raffles (ticket sellers at the door / in messages).
+  "sponsor me",
+  "raffle",
 ];
 
 // Heuristic name-extraction patterns. Order matters — first match wins.
