@@ -4,8 +4,19 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { checkFormRateLimit } from "@askarthur/utils/rate-limit";
 import { logger } from "@askarthur/utils/logger";
 
+// Known capture surfaces (#933 item 4). Stored verbatim as consent_source so
+// the weekly signal review can attribute subscriber growth per surface.
+const KNOWN_SOURCES = [
+  "blog_index",
+  "blog_post",
+  "charity_check",
+  "clone_watch",
+  "subscribe_page",
+] as const;
+
 const SubscribeSchema = z.object({
   email: z.string().email("Please enter a valid email address"),
+  source: z.enum(KNOWN_SOURCES).optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -32,7 +43,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { email } = parsed.data;
+    const { email, source } = parsed.data;
     const supabase = createServiceClient();
     if (!supabase) {
       return NextResponse.json({ success: true });
@@ -45,7 +56,7 @@ export async function POST(req: NextRequest) {
           email,
           is_active: true,
           consent_at: new Date().toISOString(),
-          consent_source: "subscribe_form",
+          consent_source: source ?? "subscribe_form",
         },
         { onConflict: "email" }
       );

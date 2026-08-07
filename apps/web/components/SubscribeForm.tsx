@@ -4,9 +4,12 @@ import { useState } from "react";
 
 interface SubscribeFormProps {
   variant?: "default" | "inline";
+  /** Which surface the signup came from — stored as consent_source so the
+   *  weekly signal review can attribute subscribers per surface (#933). */
+  source?: string;
 }
 
-export default function SubscribeForm({ variant = "default" }: SubscribeFormProps) {
+export default function SubscribeForm({ variant = "default", source }: SubscribeFormProps) {
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
 
@@ -18,7 +21,7 @@ export default function SubscribeForm({ variant = "default" }: SubscribeFormProp
       const res = await fetch("/api/subscribe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify(source ? { email, source } : { email }),
       });
 
       if (!res.ok) throw new Error("Failed");

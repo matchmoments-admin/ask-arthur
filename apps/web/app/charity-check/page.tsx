@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
 import CharityChecker from "@/components/CharityChecker";
+import SubscribeForm from "@/components/SubscribeForm";
 import { gateOrNotFound } from "@/lib/featureGate";
 import type { Metadata } from "next";
 
@@ -41,6 +42,18 @@ export default function CharityCheckPage() {
         <Suspense>
           <CharityChecker />
         </Suspense>
+
+        {/* Newsletter capture — capture-before-content (#933 item 4) */}
+        <section className="mt-14 pt-8 border-t border-border-light">
+          <h3 className="text-deep-navy text-sm font-bold uppercase tracking-wider mb-1">
+            Get weekly scam alerts
+          </h3>
+          <p className="text-slate-400 text-sm mb-3">
+            Fake charities, fake stores, fake texts — the week&rsquo;s scams in
+            your inbox every Monday.
+          </p>
+          <SubscribeForm variant="inline" source="charity_check" />
+        </section>
       </main>
       <Footer />
     </div>

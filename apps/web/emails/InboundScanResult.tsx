@@ -721,6 +721,26 @@ export default function InboundScanResult({
                 color: NAVY_SOFT,
               }}
             >
+              Want the weekly rundown? Get the scams circulating in Australia
+              in your inbox every Monday —{" "}
+              <Link
+                href="https://askarthur.au/subscribe?utm_source=email&utm_medium=email&utm_campaign=inbound-scan-footer"
+                style={{ color: NAVY_SOFT, textDecoration: "underline" }}
+              >
+                subscribe free
+              </Link>
+              .
+            </Text>
+            <Text
+              style={{
+                margin: "20px 0 0 0",
+                padding: 0,
+                fontFamily: SANS,
+                fontSize: "12px",
+                lineHeight: "18px",
+                color: NAVY_SOFT,
+              }}
+            >
               Ask Arthur · ABN 72 695 772 313 · Sydney, Australia
             </Text>
           </Section>

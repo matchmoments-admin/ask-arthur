@@ -76,10 +76,11 @@ Every consumer page, authenticated page, admin page, and API route, grouped by d
 
 ### Misc consumer
 
-| Route          | Purpose                         |
-| -------------- | ------------------------------- |
-| `/unsubscribe` | Email unsubscribe form          |
-| `/onboarding`  | Post-signup welcome flow (anon) |
+| Route          | Purpose                                                                  |
+| -------------- | ------------------------------------------------------------------------ |
+| `/subscribe`   | Newsletter signup landing (link target for the scan@ email footer; #933) |
+| `/unsubscribe` | Email unsubscribe form                                                   |
+| `/onboarding`  | Post-signup welcome flow (anon)                                          |
 
 ---
 
