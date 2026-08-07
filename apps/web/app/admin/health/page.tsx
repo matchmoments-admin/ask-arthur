@@ -25,12 +25,11 @@ export default async function HealthPage() {
   // Async Server Component: this function executes once per request, not on
   // every React render, so Date.now() here is deterministic for the response.
   // The react-hooks/purity rule can't tell the difference, so disable inline.
-  const feedStale = feedRuns.filter((r) => {
-    if (!r.started_at) return true;
-    // eslint-disable-next-line react-hooks/purity
-    const ageHours = (Date.now() - new Date(r.started_at).getTime()) / 3_600_000;
-    return ageHours > 36 || r.status === "error";
-  });
+  // Staleness is computed in getRecentFeedRuns from the feed_health view's
+  // per-feed success aggregates (hours_since_success), not from row age —
+  // a backoff heartbeat row is not a success. Muted feeds are knowingly
+  // broken and excluded from the alarm count.
+  const feedStale = feedRuns.filter((r) => r.status === "stale");
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-10 font-sans text-slate-800">

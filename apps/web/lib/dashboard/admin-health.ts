@@ -96,19 +96,31 @@ export async function getOldestPendingMinutes(
 
 export async function getRecentFeedRuns(svc: Svc): Promise<FeedRun[]> {
   if (!svc) return [];
+  // Reads the feed_health VIEW (migration-v264), not raw feed_ingestion_log.
+  // The previous implementation had the exact defect class v264 was built to
+  // kill — newest-N rows grouped by what's present, so a feed that stopped
+  // writing vanished from the panel — and on top of that selected a
+  // `started_at` column that does not exist in prod, so the query errored
+  // and this panel silently rendered EMPTY (found 2026-08-07, Tier 3 review;
+  // one row per enabled feed with real per-feed aggregates is the fix).
   const { data } = await svc
-    .from("feed_ingestion_log")
-    .select("feed_name, status, started_at")
-    .order("started_at", { ascending: false })
-    .limit(50);
-  const seen = new Set<string>();
-  const recent: FeedRun[] = [];
-  for (const r of (data ?? []) as FeedRun[]) {
-    if (seen.has(r.feed_name)) continue;
-    seen.add(r.feed_name);
-    recent.push(r);
-  }
-  return recent;
+    .from("feed_health")
+    .select("feed_name, is_muted, last_run_at, hours_since_success")
+    .order("feed_name");
+  return ((data ?? []) as Array<{
+    feed_name: string;
+    is_muted: boolean;
+    last_run_at: string | null;
+    hours_since_success: number | null;
+  }>).map((r) => ({
+    feed_name: r.feed_name,
+    started_at: r.last_run_at,
+    status: r.is_muted
+      ? "muted"
+      : r.hours_since_success !== null && r.hours_since_success <= 36
+        ? "ok"
+        : "stale",
+  }));
 }
 
 export async function getArchiveStats(svc: Svc): Promise<ArchiveStats> {
