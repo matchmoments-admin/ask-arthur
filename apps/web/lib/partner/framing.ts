@@ -125,22 +125,16 @@ export function resolveJurisdiction(raw: string | null | undefined): AuJurisdict
   return (AU_JURISDICTIONS as readonly string[]).includes(j) ? (j as AuJurisdiction) : null;
 }
 
-const AU_CODE_SET = new Set<string>(AU_JURISDICTIONS);
-
 /**
- * Map a region string to an AU state code, tolerant of BOTH stored forms —
- * real `scam_reports.region` values mix full names ("Sydney, New South Wales")
- * and codes ("Sydney, NSW"). `parseStateFromRegion` only handles full names,
- * so without the code fallback the largest buckets are silently dropped
- * (measured: NSW undercounted 4× on prod data). Returns null for non-AU or
- * country-only regions ("AU", "KR", …).
+ * Null-tolerant wrapper over the canonical `parseStateFromRegion`, which
+ * (since 2026-08-07) handles BOTH stored region forms — full names
+ * ("Sydney, New South Wales") and codes ("Sydney, NSW"). This fn used to
+ * carry its own code-form fallback; that logic is folded into the parser,
+ * and this stays only for the `string | null` signature its callers use.
  */
 export function regionToStateCode(region: string | null): string | null {
   if (!region) return null;
-  const byFullName = parseStateFromRegion(region);
-  if (byFullName) return byFullName;
-  const last = region.split(", ").pop()?.trim().toUpperCase() ?? "";
-  return AU_CODE_SET.has(last) ? last : null;
+  return parseStateFromRegion(region);
 }
 
 export interface RankedItem {
