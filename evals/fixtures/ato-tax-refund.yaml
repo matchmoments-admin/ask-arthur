@@ -22,5 +22,5 @@
       value: |
         // ATO is a top-3 AU brand — Haiku should name it as the
         // impersonated brand on a confident match.
-        typeof output.impersonatedBrand === "string" &&
+        return typeof output.impersonatedBrand === "string" &&
         /ato|tax|mygov/i.test(output.impersonatedBrand)

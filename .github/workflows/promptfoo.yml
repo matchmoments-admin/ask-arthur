@@ -26,6 +26,18 @@ name: Promptfoo regression eval
 # passed. Once the secret lands, verify it can actually go red by pushing a
 # deliberate prompt regression to a scratch branch. A check that has never failed
 # has never been tested.
+#
+# MADE REAL (2026-08-07, Tier 2 item 7): ANTHROPIC_API_KEY_EVAL set (interim:
+# shares the platform key; rotate to a dedicated eval key at leisure). The
+# first-ever execution surfaced three defect layers the exit-0 era had hidden:
+# config file:// paths resolving config-relative (evals/evals/ ENOENT), the
+# provider needing a default-exported CLASS not a function, and promptfoo's
+# split assertion semantics (single-line = expression, multi-line = function
+# body needing `return` — comment-led bodies silently returned undefined).
+# After fixes: 4/4 fixtures pass with correct verdicts (no prompt drift found
+# across the uncovered 86 days), and the go-red test — a deliberate
+# impossible assertion on a scratch branch — produced a genuine failure
+# (run 31140822180). Both directions of the control are now tested.
 
 on:
   pull_request:
