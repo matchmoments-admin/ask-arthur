@@ -160,6 +160,13 @@ async function getTiles(svc: ReturnType<typeof createServiceClient>): Promise<Ti
 
   return [
     {
+      href: "/admin/weekly-review",
+      title: "Weekly review",
+      purpose: "The Monday signal rhythm — live numbers + the recorded log",
+      metric: "Mon",
+      metricLabel: "Run weekly",
+    },
+    {
       href: "/admin/costs",
       title: "Costs",
       purpose: "AI + paid-API per-call spend",

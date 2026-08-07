@@ -1,5 +1,11 @@
 # Weekly signal review — Monday runbook
 
+> **The live panel:** [`/admin/weekly-review`](https://askarthur.au/admin/weekly-review) (#950)
+> renders these queries live and persists the log to `weekly_signal_log` (v270)
+> via its "Record this week" button — the table below remains the fallback and
+> the source of truth for query semantics. Clone-watch/theme organics stay in
+> Plausible (external).
+
 _~10 minutes, founder or agent. Issue [#934](https://github.com/matchmoments-admin/ask-arthur/issues/934); signals named per surface in [NORTH_STAR.md](../../NORTH_STAR.md) ("a feature isn't done when merged; it's done when someone used it and we saw the signal")._
 
 Run every Monday, after the 08:00 UTC canary has fired (≈ 6pm AEST; running earlier in the AU morning reads _last_ week's canary — fine, just note it). Record the numbers in the log at the bottom **every week, including zero weeks**.

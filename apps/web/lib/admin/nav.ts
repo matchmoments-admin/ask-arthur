@@ -26,6 +26,7 @@ import {
   SearchX,
   Sparkles,
   Server,
+  CalendarCheck,
 } from "lucide-react";
 
 export interface AdminNavItem {
@@ -45,6 +46,7 @@ export const ADMIN_NAV_SECTIONS: AdminNavSection[] = [
     label: "Operations",
     items: [
       { id: "overview", name: "Overview", href: "/admin", icon: LayoutDashboard },
+      { id: "weekly-review", name: "Weekly review", href: "/admin/weekly-review", icon: CalendarCheck },
       { id: "clone-watch", name: "Clone-watch triage", href: "/admin/clone-watch", icon: ShieldCheck },
       { id: "feedback", name: "Feedback triage", href: "/admin/feedback", icon: MessageSquare },
       { id: "inbound", name: "Inbound queue", href: "/admin/inbound-quarantine", icon: Inbox },
