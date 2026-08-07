@@ -34,10 +34,15 @@ const Body = z.object({
 });
 
 /**
- * Best-effort insert into the brand_outreach_log ledger. Never throws — the
- * email has already been sent (or failed) by the time this runs, so a ledger
- * hiccup must not change the caller's outcome. It only affects the worklist's
- * already-contacted memory, which is self-healing on the next send.
+ * Insert into the brand_outreach_log ledger. Never throws — the email has
+ * already been sent (or failed) by the time this runs, so a ledger hiccup
+ * must not change the caller's outcome — but the failure IS surfaced:
+ * returns false so the response can carry `ledger_recorded`, and logs an
+ * always-ship warn. The ledger is the worklist's ONLY "already contacted"
+ * memory; #941 finding 3 showed it at 0 rows lifetime while a real send
+ * sat in cost_telemetry — an invisible insert failure is a silently
+ * broken worklist, not a hiccup. (The old comment's "self-healing on the
+ * next send" was false when every insert fails the same way.)
  */
 async function recordOutreach(row: {
   brandKey?: string;
@@ -47,10 +52,13 @@ async function recordOutreach(row: {
   mode: "real" | "shadow";
   status: "sent" | "failed";
   providerMessageId?: string | null;
-}): Promise<void> {
+}): Promise<boolean> {
   try {
     const sb = createServiceClient();
-    if (!sb) return;
+    if (!sb) {
+      logger.warn("brand_outreach_ledger_insert_failed", { reason: "no_client" });
+      return false;
+    }
     const { error } = await sb.from("brand_outreach_log").insert({
       brand_key: row.brandKey ?? null,
       brand_name: row.brandName,
@@ -61,10 +69,13 @@ async function recordOutreach(row: {
       provider_message_id: row.providerMessageId ?? null,
     });
     if (error) {
-      logger.warn("brand-outreach: log insert failed", { error: String(error) });
+      logger.warn("brand_outreach_ledger_insert_failed", { error: String(error) });
+      return false;
     }
+    return true;
   } catch (err) {
-    logger.warn("brand-outreach: log insert threw", { error: String(err) });
+    logger.warn("brand_outreach_ledger_insert_failed", { error: String(err) });
+    return false;
   }
 }
 
@@ -215,7 +226,7 @@ export async function POST(req: NextRequest) {
 
   // Ledger the successful send — this is what the "Next brand to email"
   // worklist reads to know this brand has been contacted.
-  await recordOutreach({
+  const ledgerRecorded = await recordOutreach({
     brandKey: body.brandKey,
     brandName: body.brandName,
     recipient,
@@ -257,5 +268,6 @@ export async function POST(req: NextRequest) {
     mode: isShadow ? "shadow" : "real",
     recipient,
     provider_message_id: messageId,
+    ledger_recorded: ledgerRecorded,
   });
 }

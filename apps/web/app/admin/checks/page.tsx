@@ -149,7 +149,8 @@ export default async function ChecksPage({
       return { date, counterTotal, storedRows, delta: counterTotal - storedRows };
     });
 
-  // --- All-time headline totals (the canonical 104 / 68 / 5). ---
+  // --- All-time headline totals (the canonical counter / stored / archive
+  // numbers; live values — don't hardcode a snapshot here, it drifts). ---
   const [{ data: allStats }, { count: hotCount }, { count: archiveCount }] =
     await Promise.all([
       supabase.from("check_stats").select("total_checks"),

@@ -6,6 +6,7 @@ import {
   getRecentFeedRuns,
   getArchiveStats,
   getStripeEventStats,
+  type LoadErrors,
 } from "@/lib/dashboard/admin-health";
 
 export const dynamic = "force-dynamic";
@@ -14,12 +15,15 @@ export default async function HealthPage() {
   await requireAdmin();
   const svc = createServiceClient();
 
+  // Failed queries must NOT render as healthy zeros/green (#941 finding 9;
+  // the #929 class): loaders push labels here and the band below renders red.
+  const loadErrors: LoadErrors = [];
   const [queue, oldestPendingMinutes, feedRuns, archive, stripeStats] = await Promise.all([
-    getQueueCounts(svc),
+    getQueueCounts(svc, loadErrors),
     getOldestPendingMinutes(svc),
-    getRecentFeedRuns(svc),
-    getArchiveStats(svc),
-    getStripeEventStats(svc),
+    getRecentFeedRuns(svc, loadErrors),
+    getArchiveStats(svc, loadErrors),
+    getStripeEventStats(svc, loadErrors),
   ]);
 
   // Async Server Component: this function executes once per request, not on
@@ -37,6 +41,13 @@ export default async function HealthPage() {
       <p className="mt-1 text-sm text-slate-500">
         Operational surface for queue, feeds, archive, and Stripe idempotency.
       </p>
+
+      {loadErrors.length > 0 && (
+        <div className="mt-4 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <strong>Some panels failed to load</strong> — the zeros below them
+          are NOT measurements: {loadErrors.join(", ")}.
+        </div>
+      )}
 
       <section className="mt-8 grid grid-cols-2 gap-4 md:grid-cols-4">
         <Stat label="Queue pending" value={queue.pending} warn={queue.pending > 100} />
@@ -98,7 +109,9 @@ export default async function HealthPage() {
           </ul>
         )}
         <p className="mt-2 text-xs text-slate-500">
-          Showing the most recent run per feed that is older than 36 hours or ended in error.
+          Showing feeds whose last successful run is older than 36 hours (or
+          that have never run), from the <code>feed_health</code> view —
+          status derives from <code>hours_since_success</code> + muted state.
         </p>
       </section>
     </main>

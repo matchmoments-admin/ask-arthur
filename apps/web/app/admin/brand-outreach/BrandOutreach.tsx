@@ -21,6 +21,7 @@ interface SendResult {
   recipient?: string;
   error?: string;
   detail?: string;
+  ledger_recorded?: boolean;
 }
 
 /**
@@ -135,10 +136,17 @@ export default function BrandOutreach({ pilotTemplate }: Props) {
       });
       const json: SendResult = await res.json();
       if (res.ok && json.ok) {
+        // ledger_recorded=false means the send worked but the worklist's
+        // "already contacted" memory did NOT record it (#941 finding 3) —
+        // surface it loudly instead of letting the ledger fail silently.
+        const ledgerNote =
+          json.ledger_recorded === false
+            ? " — ⚠ NOT recorded in the outreach ledger (worklist won't remember this contact)"
+            : "";
         setStatus(
           json.mode === "real"
-            ? `Sent to ${json.recipient} ✓`
-            : `Test sent to ${json.recipient} (your inbox) ✓`,
+            ? `Sent to ${json.recipient} ✓${ledgerNote}`
+            : `Test sent to ${json.recipient} (your inbox) ✓${ledgerNote}`,
         );
         if (json.mode === "real") void loadWorklist(); // refresh contacted flags
       } else {

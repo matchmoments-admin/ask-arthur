@@ -63,7 +63,7 @@ export default function CostsDashboard({
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="rounded-xl border border-border-light bg-white p-5">
           <p className="text-xs font-semibold uppercase tracking-wide text-gov-slate">
-            Today
+            Today (UTC)
           </p>
           <p className="mt-1 text-2xl font-extrabold text-deep-navy">
             {usd.format(todayCostUsd)}

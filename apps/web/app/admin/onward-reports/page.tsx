@@ -188,9 +188,11 @@ export default async function OnwardReportsPage() {
           </p>
         ) : (
           <p className="mt-2 text-xs text-gov-slate">
-            None yet — the onward pipeline is gated off (FF_ONWARD_AUTO_REPORT /
-            FF_ONWARD_OPENPHISH). Counts only <code>status=&apos;sent&apos;</code>;
-            never claims a takedown.
+            None yet. The user-click path (OnwardReportPicker →
+            /api/report/onward) writes this table unconditionally since PR
+            #874 — so zero here means no user has completed that flow, not
+            that a flag is off (#941 finding 6). Counts only{" "}
+            <code>status=&apos;sent&apos;</code>; never claims a takedown.
           </p>
         )}
       </section>

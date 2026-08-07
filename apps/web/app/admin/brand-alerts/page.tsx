@@ -22,10 +22,12 @@ export default async function BrandAlertsPage() {
 
     alerts = data || [];
 
+    // gt, not gte: the boundary date is "today minus 7 days" — including it
+    // makes an 8-calendar-date "week" (#941 finding 11, the 8-vs-7 class).
     const { data: stats } = await supabase
       .from("check_stats")
       .select("total_checks")
-      .gte("date", sevenDaysAgoIsoDate());
+      .gt("date", sevenDaysAgoIsoDate());
 
     totalChecks = (stats || []).reduce((sum: number, r: Record<string, unknown>) => sum + ((r.total_checks as number) || 0), 0);
   }

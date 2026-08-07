@@ -28,30 +28,43 @@ export default function BrandAlertsDashboard({
   const [draftLong, setDraftLong] = useState("");
   const [publishing, setPublishing] = useState(false);
 
-  // Aggregate by brand
+  // The weekly draft claims a 7-day period, so every number in it must come
+  // from the last 7 days — the full `alerts` list (200 most recent, all-time)
+  // stays for the review list only. Before this, the draft published all-time
+  // counts under a "this week" header: 32 detections vs 2 actually in-window
+  // on 2026-08-07 (#941 finding 1).
+  const weeklyAlerts = useMemo(() => {
+    const cutoff = Date.now() - 7 * 86400000;
+    return alerts.filter((a) => new Date(a.created_at).getTime() >= cutoff);
+  }, [alerts]);
+
+  // Aggregate by brand (weekly window — feeds the draft copy)
   const brandCounts = useMemo(() => {
     const map = new Map<string, { count: number; category: string | null }>();
-    for (const a of alerts) {
+    for (const a of weeklyAlerts) {
       const existing = map.get(a.brand_name) || { count: 0, category: a.brand_category };
       map.set(a.brand_name, { count: existing.count + 1, category: existing.category });
     }
     return Array.from(map.entries())
       .map(([brand, { count, category }]) => ({ brand, count, category }))
       .sort((a, b) => b.count - a.count);
-  }, [alerts]);
+  }, [weeklyAlerts]);
 
-  // Aggregate by delivery method
+  // Aggregate by delivery method (weekly window — feeds the draft copy)
   const deliveryCounts = useMemo(() => {
     const map = new Map<string, number>();
-    for (const a of alerts) {
+    for (const a of weeklyAlerts) {
       const method = a.delivery_method || "unknown";
       map.set(method, (map.get(method) || 0) + 1);
     }
     return Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
-  }, [alerts]);
+  }, [weeklyAlerts]);
 
   const topMethod = deliveryCounts[0];
-  const topMethodPct = topMethod ? Math.round((topMethod[1] / alerts.length) * 100) : 0;
+  const topMethodPct =
+    topMethod && weeklyAlerts.length > 0
+      ? Math.round((topMethod[1] / weeklyAlerts.length) * 100)
+      : 0;
 
   // Generate weekly summary draft
   const generateDraft = () => {
@@ -62,11 +75,11 @@ export default function BrandAlertsDashboard({
     const topBrands = brandCounts.slice(0, 3);
     const brandTags = topBrands.map((b) => `${b.brand} (${b.count})`).join(", ");
 
-    const short = `🚨 Weekly Scam Intelligence — ${period}\n\n📊 ${alerts.length} brand impersonation alerts\n🏦 Most targeted: ${brandTags}\n📱 ${topMethod?.[0] || "SMS"} is #1 method (${topMethodPct}%)\n\n🔍 Free scam checker: askarthur.au\n\n#ScamAlert #Australia #AskArthur`;
+    const short = `🚨 Weekly Scam Intelligence — ${period}\n\n📊 ${weeklyAlerts.length} brand impersonation alerts\n🏦 Most targeted: ${brandTags}\n📱 ${topMethod?.[0] || "SMS"} is #1 method (${topMethodPct}%)\n\n🔍 Free scam checker: askarthur.au\n\n#ScamAlert #Australia #AskArthur`;
 
     const brandLines = brandCounts.slice(0, 8).map((b, i) => `${i + 1}. ${b.brand} — ${b.count} scam${b.count !== 1 ? "s" : ""} detected`);
 
-    const long = `🚨 Ask Arthur Weekly Scam Intelligence Report\n📅 ${period}\n\nThis week, Ask Arthur analysed ${totalChecks.toLocaleString()} suspicious messages and detected ${alerts.length} brand impersonation scams targeting Australians.\n\n📊 Most Impersonated Brands:\n${brandLines.join("\n")}\n\n📱 Primary delivery method: ${topMethod?.[0] || "SMS"} (${topMethodPct}% of attacks)\n\n🛡️ How to protect yourself:\n• Never click links in unexpected messages\n• Verify directly via official websites or apps\n• Report to Scamwatch: scamwatch.gov.au\n• Check any message free at askarthur.au\n\n#ScamAlert #CyberSecurity #Australia #AskArthur`;
+    const long = `🚨 Ask Arthur Weekly Scam Intelligence Report\n📅 ${period}\n\nThis week, Ask Arthur analysed ${totalChecks.toLocaleString()} suspicious messages and detected ${weeklyAlerts.length} brand impersonation scams targeting Australians.\n\n📊 Most Impersonated Brands:\n${brandLines.join("\n")}\n\n📱 Primary delivery method: ${topMethod?.[0] || "SMS"} (${topMethodPct}% of attacks)\n\n🛡️ How to protect yourself:\n• Never click links in unexpected messages\n• Verify directly via official websites or apps\n• Report to Scamwatch: scamwatch.gov.au\n• Check any message free at askarthur.au\n\n#ScamAlert #CyberSecurity #Australia #AskArthur`;
 
     setDraftShort(short.slice(0, 280));
     setDraftLong(long);
@@ -97,15 +110,15 @@ export default function BrandAlertsDashboard({
       {/* Summary KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <div className="bg-white border border-border-light rounded-xl shadow-sm p-4">
-          <p className="text-[10px] font-medium uppercase tracking-wider text-slate-400">Total Alerts</p>
+          <p className="text-[10px] font-medium uppercase tracking-wider text-slate-400">Total Alerts (all time)</p>
           <p className="text-2xl font-bold text-deep-navy" style={{ fontVariantNumeric: "tabular-nums" }}>{alerts.length}</p>
         </div>
         <div className="bg-white border border-border-light rounded-xl shadow-sm p-4">
-          <p className="text-[10px] font-medium uppercase tracking-wider text-slate-400">Brands Targeted</p>
+          <p className="text-[10px] font-medium uppercase tracking-wider text-slate-400">Brands Targeted (7d)</p>
           <p className="text-2xl font-bold text-deep-navy" style={{ fontVariantNumeric: "tabular-nums" }}>{brandCounts.length}</p>
         </div>
         <div className="bg-white border border-border-light rounded-xl shadow-sm p-4">
-          <p className="text-[10px] font-medium uppercase tracking-wider text-slate-400">Top Method</p>
+          <p className="text-[10px] font-medium uppercase tracking-wider text-slate-400">Top Method (7d)</p>
           <p className="text-lg font-bold text-deep-navy">{topMethod?.[0] || "—"} ({topMethodPct}%)</p>
         </div>
         <div className="bg-white border border-border-light rounded-xl shadow-sm p-4">
