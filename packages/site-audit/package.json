@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint ."
   },
   "exports": {
     ".": "./src/index.ts",
@@ -20,6 +21,8 @@
   },
   "devDependencies": {
     "vitest": "^4.0.18",
-    "typescript": "^5"
+    "typescript": "^5",
+    "@askarthur/eslint-config": "workspace:*",
+    "eslint": "^9"
   }
 }

@@ -1,12 +1,10 @@
 // Flat-config for React apps that aren't Next.js (e.g. @askarthur/extension
-// with WXT). Extends base with React / react-hooks / jsx-a11y when those
-// plugins are installed by the consuming package.
-//
-// NOTE: currently a thin re-export of the base. Consuming packages should
-// install eslint-plugin-react / react-hooks / jsx-a11y themselves and extend
-// this config via their own eslint.config.mjs until this shared config gains
-// a hard dependency on those plugins.
+// with WXT, @askarthur/mobile with Expo). Same parser/plugin registration and
+// shared rules as the node config; React-specific plugins (react, react-hooks,
+// jsx-a11y) are still the consuming package's responsibility to install and
+// layer on top via its own eslint.config.mjs until this shared config gains a
+// hard dependency on them.
 
-import base from "./base.js";
+import node from "./node.js";
 
-export default base;
+export default node;

@@ -17,5 +17,12 @@
     "@upstash/redis": "^1.36.2",
     "next-axiom": "1.10.0",
     "ulid": "^3.0.0"
+  },
+  "scripts": {
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@askarthur/eslint-config": "workspace:*",
+    "eslint": "^9"
   }
 }
