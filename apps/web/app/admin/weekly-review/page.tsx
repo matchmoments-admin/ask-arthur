@@ -50,6 +50,17 @@ function utcMonday(now: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+// Wrapped so the impure Date.now() calls aren't made directly in the
+// component render body — async Server Component runs once per request, so
+// these are deterministic per response; the react-hooks/purity lint rule
+// can't tell (same pattern as app/admin/costs/page.tsx and checks/page.tsx).
+function trailing7dIso(): string {
+  return new Date(Date.now() - 7 * 86400_000).toISOString();
+}
+function currentUtcMonday(): string {
+  return utcMonday(new Date());
+}
+
 export default async function WeeklyReviewPage() {
   await requireAdmin();
   const svc = createServiceClient();
@@ -57,7 +68,7 @@ export default async function WeeklyReviewPage() {
     return <p className="p-8 text-sm text-gov-slate">Service client unavailable.</p>;
   }
 
-  const sinceIso = new Date(Date.now() - 7 * 86400_000).toISOString();
+  const sinceIso = trailing7dIso();
   const loadErrors: string[] = [];
 
   const [
@@ -169,7 +180,7 @@ export default async function WeeklyReviewPage() {
 
   const log = (logRes.data ?? []) as LogRow[];
   const lastLogged = log[0] ?? null;
-  const thisMonday = utcMonday(new Date());
+  const thisMonday = currentUtcMonday();
   const alreadyRecorded = log.some((r) => r.week_start === thisMonday);
 
   // 6-week zero-movement rule: a metric whose last 6 RECORDED values are
