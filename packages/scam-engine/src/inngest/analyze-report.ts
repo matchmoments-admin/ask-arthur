@@ -78,6 +78,7 @@ export const handleAnalyzeCompletedReport = inngest.createFunction(
           channel: data.channel,
           impersonatedBrand: data.impersonatedBrand,
           shopSignal: data.shopSignal,
+          cacheHit: data.cacheHit,
         },
         text: data.text,
         region: data.region,
