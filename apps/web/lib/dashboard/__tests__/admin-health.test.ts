@@ -94,16 +94,23 @@ describe("admin-health loaders — happy path", () => {
     expect(await getOldestPendingMinutes(svc)).toBeNull();
   });
 
-  it("getRecentFeedRuns dedupes by feed_name, preserving first occurrence", async () => {
+  it("getRecentFeedRuns maps feed_health rows to honest statuses", async () => {
+    // Reads the v264 feed_health VIEW — one row per enabled feed. The old
+    // newest-50-raw-rows version vanished dead feeds AND selected a
+    // nonexistent started_at column, so the panel silently rendered empty.
     const data = [
-      { feed_name: "scamwatch_alerts", status: "success", started_at: "2026-05-18T10:00:00Z" },
-      { feed_name: "scamwatch_alerts", status: "error", started_at: "2026-05-18T09:00:00Z" },
-      { feed_name: "urlhaus", status: "success", started_at: "2026-05-18T08:00:00Z" },
+      { feed_name: "urlhaus", is_muted: false, last_run_at: "2026-08-07T01:00:00Z", hours_since_success: 2 },
+      { feed_name: "acsc", is_muted: true, last_run_at: "2026-08-07T01:00:00Z", hours_since_success: 900 },
+      { feed_name: "pfra_members", is_muted: false, last_run_at: "2026-05-01T01:00:00Z", hours_since_success: 2000 },
+      { feed_name: "never_ran", is_muted: false, last_run_at: null, hours_since_success: null },
     ];
-    const svc = makeSvc("feed_ingestion_log", { data });
+    const svc = makeSvc("feed_health", { data });
     const result = await getRecentFeedRuns(svc);
-    expect(result).toHaveLength(2);
-    expect(result[0]).toMatchObject({ feed_name: "scamwatch_alerts", status: "success" });
-    expect(result[1]).toMatchObject({ feed_name: "urlhaus" });
+    expect(result).toHaveLength(4);
+    expect(result[0]).toMatchObject({ feed_name: "urlhaus", status: "ok" });
+    expect(result[1]).toMatchObject({ feed_name: "acsc", status: "muted" });
+    expect(result[2]).toMatchObject({ feed_name: "pfra_members", status: "stale" });
+    // hours_since_success null = never succeeded = stale, not ok.
+    expect(result[3]).toMatchObject({ feed_name: "never_ran", status: "stale" });
   });
 });
