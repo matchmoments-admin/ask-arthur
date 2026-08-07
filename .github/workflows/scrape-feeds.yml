@@ -101,10 +101,18 @@ jobs:
           || (github.event_name == 'schedule' && github.event.schedule == '0 */3 * * *')
         run: python -m scamwatch_alerts || echo "scamwatch_alerts" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
+      # RETIRED from cron 2026-08-07 (Tier 1, wayfinder #903 item 3): the
+      # 2026-08-07 probe_acsc run proved cyber.gov.au silently blackholes
+      # GH-runner IPs at the HTTP layer — TLS handshake OK, then read-timeout
+      # on every UA/method/endpoint permutation — while residential IPs get
+      # 200 in ~0.3s. Unfixable from GHA. ACSC coverage continues via the
+      # inbound_acsc GovDelivery email subscription (verified: it delivered
+      # the 2026-07-09 alert, matching the RSS head exactly). Kept manually
+      # dispatchable (`-f feed=acsc_alerts`) for re-probing, per the crtsh
+      # retirement precedent. feed_sources row disabled with the same reason.
       - name: ACSC alerts + advisories (RSS)
         if: |
-          github.event.inputs.feed == 'all' || github.event.inputs.feed == 'acsc_alerts'
-          || (github.event_name == 'schedule' && github.event.schedule == '0 */3 * * *')
+          github.event.inputs.feed == 'acsc_alerts'
         run: python -m acsc_alerts || echo "acsc_alerts" >> "$GITHUB_WORKSPACE/scraper_failures.txt"
 
       # One-shot diagnostic probe — workflow_dispatch only. Captures HTTP
