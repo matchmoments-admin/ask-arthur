@@ -686,7 +686,10 @@ export async function POST(req: NextRequest) {
             const verifiedScamId = await storeVerifiedScam(aiResult, region, images.length > 0 ? images : undefined, screenshotUploader);
             await storeScamReport({
               reporterHash, source: "web", inputMode: mode || (images.length > 0 ? "image" : "text"),
-              analysis: aiResult, text, region, countryCode, verifiedScamId, entities: entitiesToLink,
+              // charityIntent is computed outside aiResult (v0.2e) — spread it
+              // in so the legacy path persists it like the Inngest consumer.
+              analysis: { ...aiResult, ...(charityIntent && { charityIntent }) },
+              text, region, countryCode, verifiedScamId, entities: entitiesToLink,
               scammerUrls: reportableScammerUrls,
             });
           })().catch(err => logger.error("Report pipeline failed", { error: String(err) }))
@@ -695,7 +698,8 @@ export async function POST(req: NextRequest) {
         waitUntil(
           storeScamReport({
             reporterHash, source: "web", inputMode: mode || (images.length > 0 ? "image" : "text"),
-            analysis: aiResult, text, region, countryCode, entities: entitiesToLink,
+            analysis: { ...aiResult, ...(charityIntent && { charityIntent }) },
+            text, region, countryCode, entities: entitiesToLink,
             scammerUrls: reportableScammerUrls,
           }).catch(err => logger.error("storeScamReport failed", { error: String(err) }))
         );

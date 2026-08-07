@@ -103,6 +103,21 @@ export async function storeScamReport(
     if (params.analysis.shopSignal) {
       scrubbedResult.shopSignal = params.analysis.shopSignal;
     }
+    // Charity intent (v0.2e) — persisted like shopSignal so the weekly
+    // signal review can count charity-shaped inputs to the main scanner.
+    // Only the extraction fields are written (the `detected` literal is
+    // redundant at rest — key presence IS the detection). extractedName is
+    // scrubbed as belt-and-braces even though it's entity-side data.
+    if (params.analysis.charityIntent) {
+      const ci: Record<string, string> = {};
+      if (params.analysis.charityIntent.extractedAbn) {
+        ci.extractedAbn = params.analysis.charityIntent.extractedAbn;
+      }
+      if (params.analysis.charityIntent.extractedName) {
+        ci.extractedName = scrubPII(params.analysis.charityIntent.extractedName);
+      }
+      scrubbedResult.charityIntent = ci;
+    }
     // Cache-served submissions persist like fresh ones (a cached hit is a
     // real user encountering a real scam — item 13b) but carry the marker so
     // "analyses" vs "cache-served submissions" stays distinguishable.

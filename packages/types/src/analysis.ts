@@ -298,6 +298,18 @@ export const AnalysisResultSchema = z.object({
   // Populated by analyzeWithClaude; absent on cached/mock paths.
   usage: UsageSchema.optional(),
   shopSignal: ShopSignalSchema.optional(),
+  /** Charity-intent detection (v0.2e) — pure detector output threaded like
+   *  shopSignal so it persists onto scam_reports.analysis_result and the
+   *  weekly signal review can count charity-shaped inputs. ABN is a public
+   *  business identifier; name is entity-side (a charity's name) — no user
+   *  PII. `detected` is optional because the Inngest event variant omits it. */
+  charityIntent: z
+    .object({
+      detected: z.literal(true).optional(),
+      extractedAbn: z.string().optional(),
+      extractedName: z.string().optional(),
+    })
+    .optional(),
   /** True when this result was served from the analysis cache rather than a
    *  fresh Claude call. Persisted into scam_reports.analysis_result so corpus
    *  analytics can distinguish fresh analyses from cache-served submissions
