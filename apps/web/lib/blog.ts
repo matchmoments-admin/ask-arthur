@@ -233,10 +233,11 @@ export async function getPostViewCount(slug: string): Promise<number | null> {
  * sync, an admin edit, a category set via SQL — needs an explicit flush or it
  * lingers for up to an hour.
  *
- * Single source of the flush target set so the Ghost webhook
- * (app/api/blog/ghost-webhook) and the admin flush route
- * (app/api/admin/blog/revalidate) can't drift. Pass a slug to also bust that
- * post; omit it for index-only (list-level) changes.
+ * Single source of the flush target set so callers (the dormant Ghost
+ * webhook at app/api/blog/ghost-webhook, /admin/blog's server actions)
+ * can't drift. Pass a slug to also bust that post; omit it for index-only
+ * (list-level) changes. The standalone /api/admin/blog/revalidate route was
+ * deleted 2026-08-07 (map #939 verdict #944 — no UI caller).
  *
  * Must be called from a Server Action or Route Handler (Next constraint).
  */

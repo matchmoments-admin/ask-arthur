@@ -8,10 +8,13 @@
 //
 // Admin auth only via the existing requireAdmin() cookie pattern. No
 // direct write capability — this is read-only observability; writes
-// happen via Inngest / the API routes. Feature-flag gated by the same
-// pattern as other admin pages (the admin area itself sits behind
-// NEXT_PUBLIC_FF_BILLING / ADMIN_SECRET; Phone Footprint panel just
-// shows empty state when the tables have no rows).
+// happen via Inngest / the API routes. The panel shows an empty state
+// when the tables have no rows.
+//
+// Phone Footprint is MOTHBALLED (NORTH_STAR.md — zero lifetime usage;
+// revive gated on a named prospect + #417). This page is deliberately
+// absent from the admin nav and overview tiles (map #939, verdict #944)
+// but stays URL-reachable for the revive condition.
 
 import { requireAdmin } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";

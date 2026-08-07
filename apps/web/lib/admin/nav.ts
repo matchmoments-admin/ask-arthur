@@ -16,13 +16,16 @@ import {
   Coins,
   Activity,
   Lock,
-  Phone,
   Send,
   FileText,
   Mail,
   Megaphone,
   ListChecks,
   BarChart3,
+  Landmark,
+  SearchX,
+  Sparkles,
+  Server,
 } from "lucide-react";
 
 export interface AdminNavItem {
@@ -46,6 +49,9 @@ export const ADMIN_NAV_SECTIONS: AdminNavSection[] = [
       { id: "feedback", name: "Feedback triage", href: "/admin/feedback", icon: MessageSquare },
       { id: "inbound", name: "Inbound queue", href: "/admin/inbound-quarantine", icon: Inbox },
       { id: "alerts", name: "Brand alerts", href: "/admin/brand-alerts", icon: Bell },
+      { id: "brand-candidates", name: "Brand candidates", href: "/admin/brand-candidates", icon: Sparkles },
+      { id: "netcraft", name: "Netcraft results", href: "/admin/netcraft-results", icon: SearchX },
+      { id: "stewardship", name: "Brand stewardship", href: "/admin/brand-stewardship", icon: Landmark },
     ],
   },
   {
@@ -54,9 +60,13 @@ export const ADMIN_NAV_SECTIONS: AdminNavSection[] = [
       { id: "checks", name: "Recent checks", href: "/admin/checks", icon: ListChecks },
       { id: "analytics", name: "Analytics", href: "/admin/analytics", icon: BarChart3 },
       { id: "costs", name: "Costs", href: "/admin/costs", icon: Coins },
+      { id: "costs-infra", name: "Infra costs", href: "/admin/costs/infra", icon: Server },
       { id: "health", name: "System health", href: "/admin/health", icon: Activity },
       { id: "vuln", name: "Vulnerabilities", href: "/admin/vulnerabilities", icon: Lock },
-      { id: "phone", name: "Phone footprint", href: "/admin/phone-footprint", icon: Phone },
+      // phone-footprint deliberately absent: the feature is mothballed
+      // (NORTH_STAR.md) — its read-only panel stays URL-reachable at
+      // /admin/phone-footprint for the revive condition, but the console
+      // no longer advertises it (map #939, verdict #944).
       { id: "onward", name: "Onward reports", href: "/admin/onward-reports", icon: Send },
       { id: "email-studio", name: "Email Studio", href: "/admin/email-studio", icon: Mail },
       { id: "brand-outreach", name: "Brand reach-out", href: "/admin/brand-outreach", icon: Megaphone },
