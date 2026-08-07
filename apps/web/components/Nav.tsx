@@ -9,9 +9,12 @@ export default async function Nav() {
     links.push({ href: "/health", label: "Scanner" });
   }
   links.push({ href: "/persona-check", label: "Persona Check" });
-  if (featureFlags.charityCheck) {
-    links.push({ href: "/charity-check", label: "Charity Check" });
-  }
+  // Charity Check removed from the nav 2026-08-08 (founder decision after
+  // v0.2e): the main scanner now detects charity-shaped input and runs the
+  // register check inline, so the one box is the front door. The
+  // /charity-check PAGE stays live (SEO landing, guided payment/ID
+  // questions, deep-link target) — de-navved, not deleted, same as the
+  // phone-footprint precedent.
   if (featureFlags.scamFeed) {
     links.push({ href: "/scam-feed", label: "Feed" });
   }

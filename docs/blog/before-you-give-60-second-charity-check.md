@@ -34,7 +34,7 @@ The third one is worth memorising now: **no legitimate charity collects donation
 Every real charity in Australia is registered with the ACNC — the Australian Charities and Not-for-profits Commission — and the register is public. Checking it used to mean navigating a government database. Now it works like this:
 
 1. Take the charity's name (from the collector's ID, the caller, the website, the ad).
-2. Type it into [askarthur.au/charity-check](/charity-check).
+2. Paste it — or exactly what they said — into the checker at [askarthur.au](/). Arthur recognises a charity ask and checks the register automatically.
 3. Read the verdict.
 
 Arthur checks the name against all **66,484 registered Australian charities**, refreshed daily from the official register.
@@ -65,6 +65,6 @@ Australians lost $2.18 billion to scams in 2025 (ACCC Targeting Scams report) �
 
 So don't give less. Check first, then give more confidently:
 
-**Take the name. Check it at [askarthur.au/charity-check](/charity-check). Then give.**
+**Take the name. Check it at [askarthur.au](/). Then give.**
 
 Free, no signup, all 66,484 registered Australian charities — and the fakes pretending to be them.
