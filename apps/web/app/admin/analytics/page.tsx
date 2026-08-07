@@ -166,7 +166,10 @@ export default async function AnalyticsPage() {
     <div className="max-w-5xl mx-auto px-5 py-8">
       <h1 className="text-deep-navy text-xl font-extrabold mb-1">Analytics &amp; attribution</h1>
       <p className="text-gov-slate text-sm mb-6">
-        First-party owned event store. Rows are written fire-and-forget by
+        First-party owned event store — <strong>beacon-instrumented web scans
+        only</strong>, a third counter that agrees with neither the homepage
+        counter (check_stats) nor scam_reports; most scan surfaces don&apos;t
+        emit the beacon yet (#941 finding 8). Rows are written fire-and-forget by
         <code className="mx-1 rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs">logEvent()</code>
         and stamped with each visitor&apos;s write-once first-touch attribution. Metadata only — no
         scanned content. Populates once

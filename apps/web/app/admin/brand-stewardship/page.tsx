@@ -20,7 +20,12 @@ export default async function BrandStewardshipPage() {
   let rows: StewardshipRow[] = [];
 
   if (supabase) {
-    // Most recent 100 ledger rows across periods; the dashboard groups by month.
+    // All ledger rows (capped high); the dashboard groups by month. The old
+    // limit(100) truncated below a single period's size — July 2026 alone had
+    // 149 rows, so ≥49 of the current month never rendered and the LinkedIn
+    // outreach to-do count was silently understated (123 actual vs ≤100
+    // renderable — #941 finding 2). 1000 covers ~3 years at current volume;
+    // revisit with per-period pagination before then.
     const { data } = await supabase
       .from("brand_stewardship_reports")
       .select(
@@ -28,7 +33,7 @@ export default async function BrandStewardshipPage() {
       )
       .order("period_month", { ascending: false })
       .order("prepared_at", { ascending: false })
-      .limit(100);
+      .limit(1000);
 
     rows = (data ?? []).map((r) => {
       const m = (r.metrics ?? {}) as MetricsShape;

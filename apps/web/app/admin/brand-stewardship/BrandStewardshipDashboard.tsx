@@ -53,9 +53,11 @@ function linkedInMessage(r: StewardshipRow): string {
   ].join("\n");
 }
 
+// No `pending_send` entry: that status had a styled branch here but no
+// writer anywhere in the codebase (#941 finding 14) — prod statuses are
+// prepared / sent / skipped (+ failed as a defensive branch).
 const STATUS_TONE: Record<string, string> = {
   prepared: "text-blue-700 bg-blue-50",
-  pending_send: "text-amber-800 bg-amber-50",
   sent: "text-emerald-700 bg-emerald-50",
   skipped: "text-slate-700 bg-slate-100",
   failed: "text-red-700 bg-red-50",
@@ -359,9 +361,16 @@ export default function BrandStewardshipDashboard({
                 </div>
 
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs text-gov-slate">
-                  <Field label="Detected" value={String(r.detected)} />
+                  {/* Detected / Reports sent source from onward_report_log,
+                      which is structurally empty (0 nonzero across all 335
+                      rows, #941 finding 7) — render "—" so a dead zero is
+                      distinguishable from a measured one. */}
+                  <Field label="Detected" value={r.detected > 0 ? String(r.detected) : "—"} />
                   <Field label="Clones" value={String(r.clonesDetected)} />
-                  <Field label="Reports sent" value={String(r.reportsSent)} />
+                  <Field
+                    label="Reports sent"
+                    value={r.reportsSent > 0 ? String(r.reportsSent) : "—"}
+                  />
                   <Field label="Brand key" value={r.brandKey} />
                 </div>
 

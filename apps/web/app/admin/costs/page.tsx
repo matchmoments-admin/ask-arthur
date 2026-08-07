@@ -56,18 +56,23 @@ export default async function CostsPage() {
     }));
   }
 
-  // Aggregate last 7 days and previous 7 days for WoW delta.
+  // Aggregate the last 7 COMPLETE UTC days vs the prior 7 for the WoW delta.
+  // Today's partial day is excluded from both windows: comparing "6 complete
+  // days + a few hours" against 7 complete days let the partial day dominate
+  // the tile (-23.5% shown vs -2.8% on complete weeks, measured 2026-08-07 —
+  // #941 finding 5, the 8-vs-7 digest precedent's sibling).
   const now = getNowMs();
   const dayMs = 86400000;
   const isWithin = (dayStr: string, startMs: number, endMs: number) => {
     const t = new Date(dayStr + "T00:00:00Z").getTime();
     return t >= startMs && t < endMs;
   };
-  const sevenDaysAgo = now - 7 * dayMs;
-  const fourteenDaysAgo = now - 14 * dayMs;
+  const todayUtcStart = Math.floor(now / dayMs) * dayMs;
+  const sevenDaysAgo = todayUtcStart - 7 * dayMs;
+  const fourteenDaysAgo = todayUtcStart - 14 * dayMs;
 
   const last7Total = daily
-    .filter((r) => isWithin(r.day, sevenDaysAgo, now))
+    .filter((r) => isWithin(r.day, sevenDaysAgo, todayUtcStart))
     .reduce((s, r) => s + Number(r.total_cost_usd), 0);
 
   const prev7Total = daily
