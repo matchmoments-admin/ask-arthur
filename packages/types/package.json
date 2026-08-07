@@ -12,9 +12,14 @@
     "./scanner": "./src/scanner.ts"
   },
   "scripts": {
-    "gen:db": "supabase gen types typescript --project-id rquomhcgnodxzkhokwni --schema public > src/db.generated.ts"
+    "gen:db": "supabase gen types typescript --project-id rquomhcgnodxzkhokwni --schema public > src/db.generated.ts",
+    "lint": "eslint ."
   },
   "dependencies": {
     "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@askarthur/eslint-config": "workspace:*",
+    "eslint": "^9"
   }
 }

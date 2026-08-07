@@ -87,6 +87,18 @@
     "clean": {
       "cache": false
     },
+    "//#boundaries": {
+      "inputs": [
+        "apps/*/src/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+        "apps/web/{app,lib,components,hooks}/**/*.{ts,tsx}",
+        "packages/*/src/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+        "apps/*/package.json",
+        "packages/*/package.json",
+        ".dependency-cruiser.cjs"
+      ],
+      "outputs": [],
+      "outputLogs": "errors-only"
+    },
     "@askarthur/web#build": {
       "dependsOn": ["^build"],
       "env": ["NEXT_PUBLIC_*"],

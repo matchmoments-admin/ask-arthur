@@ -18,8 +18,34 @@ const unusedVars = [
   },
 ];
 
+// Interface-discipline rules (ADR-0024). All three patterns have zero
+// violations in the repo, so they start at "error" — they are a ratchet
+// against regressions, not a cleanup burden.
+const restrictedImports = [
+  "error",
+  {
+    patterns: [
+      {
+        group: ["@askarthur/*/src", "@askarthur/*/src/*"],
+        message:
+          "Deep import bypasses the package's interface. Import the entry point or a subpath export declared in its package.json.",
+      },
+      {
+        group: ["@ask-arthur/*"],
+        message: "Wrong scope — the workspace scope is @askarthur/* (no hyphen).",
+      },
+      {
+        group: ["**/../packages/**", "**/../apps/**"],
+        message:
+          "Relative path into another workspace. Use the @askarthur/* workspace specifier instead.",
+      },
+    ],
+  },
+];
+
 export const baseRules = {
   "@typescript-eslint/no-unused-vars": unusedVars,
+  "no-restricted-imports": restrictedImports,
 };
 
 export const baseIgnores = {
@@ -32,6 +58,8 @@ export const baseIgnores = {
     "**/coverage/**",
     "**/build/**",
     "**/out/**",
+    "**/.output/**",
+    "**/.wxt/**",
     "**/*.min.js",
     "**/next-env.d.ts",
   ],
