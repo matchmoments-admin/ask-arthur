@@ -1,28 +1,61 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyAdminToken } from "@/lib/adminAuth";
+import { z } from "zod";
+import { isAdminRequest } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { publishToSocial } from "@/lib/social-publish";
 import { logger } from "@askarthur/utils/logger";
 
+// Hardened per map #939 / #942 gap 2: dual-mode auth (isAdminRequest — the
+// old raw verifyAdminToken check had no Supabase-admin path), Zod body,
+// replay guard on outreach_status, and an always-ship warn log (the old
+// info line was 10%-sampled, so most publishes left no Axiom trace).
+
+const PublishSchema = z.object({
+  // 0 = freeform draft post not tied to an alert row (BrandAlertsDashboard's
+  // compose flow) — publishes without a record, guarded by the UI confirm.
+  alertId: z.number().int().min(0),
+  shortText: z.string().min(1).max(2000),
+  longText: z.string().max(10000).optional(),
+});
+
 export async function POST(req: NextRequest) {
-  // Verify admin HMAC token (not just cookie presence)
-  const adminCookie = req.cookies.get("__aa_admin")?.value;
-  if (!adminCookie || !verifyAdminToken(adminCookie)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await isAdminRequest())) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const { alertId, shortText, longText } = await req.json();
+  const parsed = PublishSchema.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) {
+    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+  }
+  const { alertId, shortText, longText } = parsed.data;
 
-  if (!alertId || !shortText) {
-    return NextResponse.json({ error: "Missing alertId or shortText" }, { status: 400 });
+  const supabase = createServiceClient();
+
+  if (alertId > 0) {
+    // Refuse to publish when the outcome can't be recorded — an unrecorded
+    // social post is invisible to this replay guard on the next click.
+    if (!supabase) {
+      return NextResponse.json({ error: "store_unavailable" }, { status: 503 });
+    }
+    const { data: existing } = await supabase
+      .from("brand_impersonation_alerts")
+      .select("outreach_status")
+      .eq("id", alertId)
+      .single();
+    if (!existing) {
+      return NextResponse.json({ error: "not_found" }, { status: 404 });
+    }
+    // Replay guard: a published alert stays published. A small TOCTOU window
+    // remains for two truly simultaneous clicks — acceptable on a
+    // single-operator console with the UI confirm in front of this.
+    if (existing.outreach_status === "sent") {
+      return NextResponse.json({ error: "already_published" }, { status: 409 });
+    }
   }
 
-  // Publish to social platforms
   const result = await publishToSocial(shortText, longText || shortText);
 
-  // Update alert in database
-  const supabase = createServiceClient();
-  if (supabase) {
+  if (supabase && alertId > 0) {
     await supabase
       .from("brand_impersonation_alerts")
       .update({
@@ -37,8 +70,10 @@ export async function POST(req: NextRequest) {
       .eq("id", alertId);
   }
 
-  logger.info("Brand alert published to social", {
+  // warn, not info: rare high-value outbound event — always ships to Axiom.
+  logger.warn("brand_alert_published", {
     alertId,
+    freeform: alertId === 0,
     twitter: !!result.twitter,
     linkedin: !!result.linkedin,
     facebook: !!result.facebook,

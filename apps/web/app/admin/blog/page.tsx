@@ -4,8 +4,9 @@ import { z } from "zod";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { scrubPII } from "@askarthur/scam-engine/sanitize";
 import { getCategories } from "@/lib/blog";
-import { requireAdmin, verifyAdminToken, COOKIE_NAME } from "@/lib/adminAuth";
+import { requireAdmin, isAdminRequest, COOKIE_NAME } from "@/lib/adminAuth";
 import { cookies } from "next/headers";
+import { logger } from "@askarthur/utils/logger";
 
 // "Further reading" curation (blog_external_links, v227). Everything defaults
 // to nofollow per /blog/editorial-policy; origin records how the link arrived.
@@ -79,10 +80,10 @@ export default async function AdminBlogPage() {
   async function updatePost(formData: FormData) {
     "use server";
 
-    // Validate admin cookie
-    const cookieStore = await cookies();
-    const token = cookieStore.get(COOKIE_NAME)?.value;
-    if (!token || !verifyAdminToken(token)) return;
+    // Dual-mode auth, thrown not swallowed (map #939 / #942 gap 5): the old
+    // cookie-only check skipped the Supabase-admin path and silently no-op'd
+    // on failure, so a Supabase-role admin's publish clicks did nothing.
+    if (!(await isAdminRequest())) throw new Error("admin_required");
 
     const postId = formData.get("postId") as string;
     const status = formData.get("status") as string;
@@ -118,6 +119,10 @@ export default async function AdminBlogPage() {
 
     await sb.from("blog_posts").update(updateData).eq("id", postId);
 
+    // warn: always-ship — publish/unpublish mutates public content and must
+    // leave an Axiom trace (10% INFO sampling would hide most of these).
+    logger.warn("blog_post_updated", { postId, status });
+
     revalidatePath("/blog");
     revalidatePath("/admin/blog");
   }
@@ -125,9 +130,7 @@ export default async function AdminBlogPage() {
   async function addExternalLink(formData: FormData) {
     "use server";
 
-    const cookieStore = await cookies();
-    const token = cookieStore.get(COOKIE_NAME)?.value;
-    if (!token || !verifyAdminToken(token)) return;
+    if (!(await isAdminRequest())) throw new Error("admin_required");
 
     const parsed = externalLinkSchema.safeParse({
       postId: formData.get("postId"),
@@ -165,9 +168,7 @@ export default async function AdminBlogPage() {
   async function toggleExternalLink(formData: FormData) {
     "use server";
 
-    const cookieStore = await cookies();
-    const token = cookieStore.get(COOKIE_NAME)?.value;
-    if (!token || !verifyAdminToken(token)) return;
+    if (!(await isAdminRequest())) throw new Error("admin_required");
 
     const linkId = formData.get("linkId") as string;
     const slug = formData.get("slug") as string;
@@ -189,9 +190,7 @@ export default async function AdminBlogPage() {
   async function deleteExternalLink(formData: FormData) {
     "use server";
 
-    const cookieStore = await cookies();
-    const token = cookieStore.get(COOKIE_NAME)?.value;
-    if (!token || !verifyAdminToken(token)) return;
+    if (!(await isAdminRequest())) throw new Error("admin_required");
 
     const linkId = formData.get("linkId") as string;
     const slug = formData.get("slug") as string;

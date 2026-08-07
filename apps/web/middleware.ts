@@ -172,6 +172,30 @@ export async function middleware(req: NextRequest) {
   let authState: "auth_disabled" | "anonymous" | "user" | "admin" =
     authEnabled ? "anonymous" : "auth_disabled";
 
+  // ---------------------------------------------------------------------------
+  // 2a. Backstop for /api/admin/*. Every admin API route self-guards with
+  //     requireAdmin() as its first statement, but middleware is the second
+  //     layer so ONE forgotten guard on a future route is a 401, not a full
+  //     exposure (map #939 / #942 gap 3). /api/admin/login is the cookie
+  //     mint and stays open (it verifies ADMIN_SECRET itself). HMAC-valid
+  //     callers pass here; Supabase-role admins without the HMAC cookie are
+  //     resolved inside the auth block below; with auth disabled there is
+  //     no Supabase path, so no valid cookie means 401 outright.
+  // ---------------------------------------------------------------------------
+  const isAdminApi =
+    req.nextUrl.pathname.startsWith("/api/admin") &&
+    req.nextUrl.pathname !== "/api/admin/login";
+  let adminApiHmacOk = false;
+  if (isAdminApi) {
+    const adminCookie = req.cookies.get(ADMIN_COOKIE)?.value;
+    adminApiHmacOk = !!adminCookie && verifyAdminToken(adminCookie);
+    if (!adminApiHmacOk && !(authEnabled && supabase)) {
+      const denied = NextResponse.json({ error: "unauthorized" }, { status: 401 });
+      denied.headers.set("X-Request-Id", requestId);
+      return denied;
+    }
+  }
+
   if (authEnabled && supabase) {
     // getUser() validates JWT server-side (not spoofable like getSession).
     // Wrapped in a 3s timeout so a degraded Supabase Auth can't hang the
@@ -229,6 +253,15 @@ export async function middleware(req: NextRequest) {
         // Non-admin user — fall through to existing HMAC admin auth
         // (dual-mode during transition, don't block here)
       }
+    }
+
+    // /api/admin backstop, Supabase side (see 2a): a caller with neither a
+    // valid HMAC cookie nor the Supabase admin role gets 401 here — API
+    // routes get JSON, never a login redirect.
+    if (isAdminApi && !adminApiHmacOk && user?.app_metadata?.role !== "admin") {
+      const denied = NextResponse.json({ error: "unauthorized" }, { status: 401 });
+      denied.headers.set("X-Request-Id", requestId);
+      return denied;
     }
   }
 
