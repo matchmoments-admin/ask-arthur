@@ -33,6 +33,7 @@ import { logger } from "@askarthur/utils/logger";
 import { inngest } from "./client";
 import { withAxiomLogging } from "./with-axiom-logging";
 import { embed } from "../embeddings";
+import { isFeatureBraked } from "../cost-log";
 
 // Tuneable per-run limits. 200 rows/batch is well under Voyage's 1000-input
 // per-call limit but keeps a single batch under ~6k tokens (well below the
@@ -102,6 +103,16 @@ export const acncCharityBackfillEmbed = inngest.createFunction(
     { event: ACNC_CHARITY_EMBED_BACKFILL_EVENT },
   ],
   withAxiomLogging({ fnId: "acnc-charity-backfill-embed" }, async ({ step }) => {
+    // Tier 3 brake gap (enterprise-review P2, closed 2026-08-07): this fn
+    // spends on Voyage with logCost but never READ the charity_check brake
+    // that cost-daily-check engages — a brake nothing reads is scenery.
+    const braked = await step.run("brake-check", () =>
+      isFeatureBraked("charity_check"),
+    );
+    if (braked) {
+      return { skipped: true, reason: "feature_brakes.charity_check engaged" };
+    }
+
     let totalEmbedded = 0;
     let totalTokens = 0;
     let totalCostUsd = 0;
