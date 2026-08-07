@@ -11,16 +11,16 @@ This file is **opinionated and tight**. When two words exist for the same concep
 _Avoid_: strategy doc, vision, mission statement (bare).
 
 **Engine** (Engine 1 / Engine 2):
-The two survival loops in NORTH*STAR.md. **Engine 1** = consumer protection (free checking surfaces; the mission and the data flywheel). **Engine 2** = B2B protection & intel (brand monitoring, intel licensing; what funds Engine 1). Features are argued in terms of which Engine they strengthen.
-\_Avoid*: business line, revenue stream, product area.
+The two survival loops in `NORTH_STAR.md`. **Engine 1** = consumer protection (free checking surfaces; the mission and the data flywheel). **Engine 2** = B2B protection & intel (brand monitoring, intel licensing; what funds Engine 1). Features are argued in terms of which Engine they strengthen.
+_Avoid_: business line, revenue stream, product area.
 
 **Pillar** (Protect / Fund / Teach):
 The three activity groupings over the Engines: Protect (Engine 1 surfaces), Fund (Engine 2 rail), Teach (the broadcast arm — content generated _from_ platform data or leading _to_ a live tool).
 _Avoid_: vertical, workstream, track.
 
 **Mothballed**:
-A built feature explicitly parked by decision, with a written revive condition that must be met before any work resumes (NORTH*STAR.md § Mothballed). Distinct from **parked-blocked** (done, waiting only on an external unlock) and **dead** (mechanism disproven, per ADR).
-\_Avoid*: deprecated, on hold, paused (bare).
+A built feature explicitly parked by decision, with a written revive condition that must be met before any work resumes (`NORTH_STAR.md` § Mothballed). Distinct from **parked-blocked** (done, waiting only on an external unlock) and **dead** (mechanism disproven, per ADR).
+_Avoid_: deprecated, on hold, paused (bare).
 
 **Verdict**:
 One of `SAFE | UNCERTAIN | SUSPICIOUS | HIGH_RISK` — the safety classification we return for any submitted content.
