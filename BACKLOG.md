@@ -20,6 +20,10 @@ Two rules for this file, learned the hard way:
 
 ---
 
+## Mothballed graveyard
+
+Decided 2026-08-06 ([#906](https://github.com/matchmoments-admin/ask-arthur/issues/906)); authoritative entries with revive conditions live in [NORTH_STAR.md § Mothballed](./NORTH_STAR.md#mothballed). Summary: **Phone Footprint** (mothballed; #417 gates revival), **Breach Defence** (mothballed; Engine-2 evidence revives), **Mobile app** (mothballed as-built; discovery #916 first, traction-gated), **WhatsApp bot** (parked-blocked only — eSIM activation + ADR-0023 runbook unlocks it). The feature sections retained below are historical reference, not open work.
+
 ## Enterprise Review Remediation (2026-07-29) — OPEN QUEUE
 
 An 18-agent review (8 dimensions, adversarially verified: 85 findings survived,
@@ -35,6 +39,38 @@ extension rate-limit tier chosen by an unsigned client header; raw user text sen
 to Inngest's third-party event store; the structurally-dead consumer reporting
 loop (`onward_report_log` had 0 rows lifetime) plus the sequential-id IDOR that
 wiring it up would have exposed.
+
+### Next-quarter schedule — THE authoritative ordering (ranked 2026-08-07, wayfinder [#903](https://github.com/matchmoments-admin/ask-arthur/issues/903))
+
+The P1/P2 lists below are the review's _findings_; this schedule is the
+_decision_ — each item ranked against the two engines in
+[NORTH_STAR.md](./NORTH_STAR.md). Work the tiers in order.
+
+**Tier 1 — this week:**
+
+1. Rotate `SLACK_WEBHOOK_URL` to a GitHub secret (live credential on a public repo)
+2. Branch protection: require CI + scraper checks on `main` (verified absent 2026-08-07)
+3. Gov inbound email investigation — **hard deadline 2026-08-29** (acsc mute expiry; ACSC coverage currently zero from both paths)
+4. `parseStateFromRegion` region-string fix — promoted to pre-sale blocker by the intel-licensing scoping (#902); also corrupts the public scam-map
+
+**Tier 2 — this month:**
+
+5. Alerting auditability: `admin_alert_log` + boolean `sendAdminMessage` + weekly synthetic canary
+6. Feed-upsert conditional `DO UPDATE` (78% of dirty-page IO)
+7. Prompt-regression eval made real (missing secret must fail loudly)
+8. NASC data-partner contribution (credibility wedge, #902)
+
+**Tier 3 — this quarter:**
+
+9. Charity v0.2c fusion — gated on ~4 weeks of live checker signal (#910)
+10. Per-feed freshness registry (finish what the mute-aware pager started)
+11. The four brake gaps in one PR (three review-found + monthly-blog)
+12. Migration-ledger CI check — **three live drift specimens hit during the 2026-08 realignment alone** (`feed_ingestion_log` columns, `blog_posts.published`, `blog_posts_category_check`)
+13. `UNCERTAIN` verdict constraint + cache-hit persistence semantics
+
+**Explicit waits (reasons in #903):** retention column-drop fix; blanket anon-DML revoke; `verified_scam_id` linking; extension analyze writes; extension ad-scanning expansion (bundle with next CWS release); `scam-reports-backfill-embed` chunking.
+
+**Superseded/fixed since the review:** scraper backoff latch (#880), mute-blind pager (#896), `shopfront-clone-poll-netcraft` (replaced by reconcile/resubmit lanes, verified active 2026-08-06), charity ingestion gate (re-enabled 2026-08-06), off-platform backup (founder-owned, DR watchdog nags daily by design).
 
 ### P1 — next
 
@@ -708,7 +744,7 @@ order.
 - [x] ✅ **Daily pg_dump → R2 workflow shipped** (#173) — gated on `ENABLE_DR_DUMP`; 4-step setup documented
 - [x] ✅ **Operational docs:** `docs/ops/data-retention.md` (#167), `docs/ops/dr-plan.md` (#167), `docs/ops/index-baseline-2026-05.md` (#153)
 
-## Breach Defence Suite — paused after PR 2 (2026-04-29)
+## Breach Defence Suite — MOTHBALLED 2026-08-06 (was: paused after PR 2, 2026-04-29) — see NORTH_STAR.md § Mothballed
 
 19-PR pillar (F1–F11). Spine schema is shipped to prod (v80, three tables + RPC + RLS, all flags default OFF, zero rows, harmless if it stays paused). Full plan + pause rationale + lessons learned: [`docs/plans/breach-defence-suite.md`](./docs/plans/breach-defence-suite.md). Tracked in ROADMAP.md → Phase 16.
 

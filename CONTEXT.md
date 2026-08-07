@@ -6,6 +6,22 @@ This file is **opinionated and tight**. When two words exist for the same concep
 
 ## Language
 
+**North Star / the Filter**:
+[NORTH_STAR.md](./NORTH_STAR.md) (adopted 2026-08-06) is the one-page strategy every feature decision orients to. **The Filter** is its four-question build test (who now / which engine / already built? / named signal) — a proposal "passes the Filter" or it doesn't get built.
+_Avoid_: strategy doc, vision, mission statement (bare).
+
+**Engine** (Engine 1 / Engine 2):
+The two survival loops in NORTH*STAR.md. **Engine 1** = consumer protection (free checking surfaces; the mission and the data flywheel). **Engine 2** = B2B protection & intel (brand monitoring, intel licensing; what funds Engine 1). Features are argued in terms of which Engine they strengthen.
+\_Avoid*: business line, revenue stream, product area.
+
+**Pillar** (Protect / Fund / Teach):
+The three activity groupings over the Engines: Protect (Engine 1 surfaces), Fund (Engine 2 rail), Teach (the broadcast arm — content generated _from_ platform data or leading _to_ a live tool).
+_Avoid_: vertical, workstream, track.
+
+**Mothballed**:
+A built feature explicitly parked by decision, with a written revive condition that must be met before any work resumes (NORTH*STAR.md § Mothballed). Distinct from **parked-blocked** (done, waiting only on an external unlock) and **dead** (mechanism disproven, per ADR).
+\_Avoid*: deprecated, on hold, paused (bare).
+
 **Verdict**:
 One of `SAFE | UNCERTAIN | SUSPICIOUS | HIGH_RISK` — the safety classification we return for any submitted content.
 _Avoid_: result, classification, score, rating.
