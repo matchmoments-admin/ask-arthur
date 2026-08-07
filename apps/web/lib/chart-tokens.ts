@@ -36,7 +36,15 @@ export const CODE_TO_PREFIX: Record<string, string> = Object.fromEntries(
  * Returns null if the region doesn't match an Australian state.
  */
 export function parseStateFromRegion(region: string): string | null {
-  const parts = region.split(", ");
-  const stateName = parts[parts.length - 1];
-  return AU_STATE_MAP[stateName]?.code ?? null;
+  // Prod region strings carry BOTH forms — "Sydney, NSW" (the dominant one,
+  // 84% of AU rows measured 2026-08-07) and "Sydney, New South Wales" — and
+  // this parser only matched full names, silently dropping the code form
+  // from every state aggregate (the /scam-map + /about choropleth undercount;
+  // promoted to a pre-sale blocker for the jurisdiction dashboard by #902).
+  const parts = region.split(",");
+  const last = parts[parts.length - 1]?.trim() ?? "";
+  const byName = AU_STATE_MAP[last]?.code;
+  if (byName) return byName;
+  const upper = last.toUpperCase();
+  return upper in CODE_TO_PREFIX ? upper : null;
 }

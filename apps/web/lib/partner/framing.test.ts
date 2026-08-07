@@ -48,9 +48,9 @@ describe("regionToStateCode (tolerant of both stored region forms)", () => {
     expect(regionToStateCode("Melbourne, Victoria")).toBe("VIC");
   });
 
-  it("maps state-code regions (the form parseStateFromRegion misses)", () => {
-    // Real prod data — the largest NSW bucket is stored this way; without the
-    // code fallback it would be dropped (measured 4× undercount).
+  it("maps state-code regions (handled by parseStateFromRegion since 2026-08-07)", () => {
+    // Real prod data — the largest NSW bucket is stored this way; before the
+    // canonical parser learned the code form it was dropped (4× undercount).
     expect(regionToStateCode("Sydney, NSW")).toBe("NSW");
     expect(regionToStateCode("Melbourne, VIC")).toBe("VIC");
   });
