@@ -15,6 +15,28 @@ Phased build plan for Ask Arthur with current status tracking. See `BACKLOG.md` 
 >
 > More broadly: **127 of 128 feature flags default OFF, and 95 of ~159 production tables have never held a row.** Building behind a flag and moving on is the dominant pattern here, so treat ✅ as "built", and **check prod before believing anything is live.** The fastest check is usually `select count(*)` on the feature's own table.
 
+## How this roadmap is steered now (2026-08 realignment)
+
+Every phase below records what was _built_. What gets built **next** is decided
+by [NORTH_STAR.md](./NORTH_STAR.md) (adopted 2026-08-06): features must pass its
+four-question filter, strengthen one of the two engines (consumer flywheel /
+B2B rail) or the Teach pillar, and name their success signal before the build.
+The next-quarter ordering lives in `BACKLOG.md → Next-quarter schedule`.
+Mothballed features (Phone Footprint, Breach Defence, mobile app) are closed to
+investment regardless of their ✅ marks below — revive conditions are in the
+North Star.
+
+**The 2026-08 activation record** — the realignment's "ship, don't shelve"
+pass took five dark-but-built surfaces live in 48h, each verified against prod:
+
+| Surface                                                   | Went live                        | Signal to watch                    |
+| --------------------------------------------------------- | -------------------------------- | ---------------------------------- |
+| `/clone-watch` (indexed, hardened copy)                   | 2026-08-06 (PR #911)             | organic entries/week               |
+| `scan@askarthur.au` email forwarding (threaded replies)   | 2026-08-06 (PRs #912/#913)       | forwarded scans/week               |
+| `/charity-check` (checker; register + embeddings current) | 2026-08-06 (PRs #914/#915)       | charity checks/week                |
+| `/intel/themes/[slug]` public pages (200 SEO deep links)  | 2026-08-07 (PR #917)             | theme-page views                   |
+| Monthly intel blog (drafts → /admin/blog)                 | 2026-08-07 (PRs #918–#921, v265) | monthly draft produced + published |
+
 ---
 
 ## Phase 1 — Core Platform ✅

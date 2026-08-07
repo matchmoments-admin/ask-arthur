@@ -316,10 +316,10 @@ First-touch is captured by `middleware.ts`, which sets the `aa_attribution` cook
 
 ### Third-party integration webhooks (signature)
 
-| Route                     | Method | Purpose                                                      |
-| ------------------------- | ------ | ------------------------------------------------------------ |
-| `/api/blog/ghost-webhook` | POST   | Ghost CMS post-publish event                                 |
-| `/api/stripe/webhook`     | POST   | Stripe subscription events (also listed above under Billing) |
+| Route                     | Method | Purpose                                                                                                                                                                |
+| ------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/api/blog/ghost-webhook` | POST   | **DORMANT** — Ghost CMS post-publish event (Vultr Ghost instance decommissioned 2026-08-07; GHOST\_\* env vars removed; publish flow is now `/admin/blog` status flip) |
+| `/api/stripe/webhook`     | POST   | Stripe subscription events (also listed above under Billing)                                                                                                           |
 
 ### Auth + onboarding (open)
 
@@ -397,43 +397,43 @@ Full timetable, cron-route handlers, and Inngest cross-references in [background
 
 ## `apps/web/lib/*` — top-level modules
 
-| Module                         | Purpose                                                                        |
-| ------------------------------ | ------------------------------------------------------------------------------ |
-| `auth.ts`                      | Supabase `getUser()` helper (5s `Promise.race`, throws `AuthUnavailableError`) |
-| `adminAuth.ts`                 | HMAC token + Supabase admin-role verification                                  |
-| `apiAuth.ts`                   | API key validation, rate-limit checks, usage logging                           |
-| `blog.ts`                      | Ghost API integration                                                          |
-| `blogGenerator.ts`             | Generate blog post from structured data                                        |
-| `blogRenderer.ts`              | Render blog post HTML + metadata                                               |
-| `ghost-sync.ts`                | Sync Ghost webhooks to internal feed                                           |
-| `social-publish.ts`            | Cross-post to LinkedIn / Twitter                                               |
-| `stripe.ts`                    | Stripe client (checkout, portal, subscriptions)                                |
-| `cost-telemetry.ts`            | `logCost()` helper + daily spend brake checks                                  |
-| `input-detector.ts`            | Classify input type (email / URL / phone / domain / file)                      |
-| `charityRegistrySources.ts`    | ACNC charity-registry data sources                                             |
-| `charityResultToResultCard.ts` | Transform charity lookup → card UI                                             |
-| `officialBrands.ts`            | Whitelist of verified brand data                                               |
-| `reddit-intel.ts`              | Reddit scam-post fetcher + processor                                           |
-| `reddit-intel-weekly.ts`       | Weekly summary generation                                                      |
-| `regulator-alerts-weekly.ts`   | Scamwatch / ACSC / ASIC digest builder                                         |
-| `org.ts`                       | Org creation, invites, role enforcement                                        |
-| `unsubscribe.ts`               | Email unsubscribe token validation                                             |
-| `phoneFootprintSkus.ts`        | Pricing tiers for phone-monitor subscriptions                                  |
-| `twilioLookup.ts`              | Twilio Lookup v2 phone intelligence                                            |
-| `twilioVerify.ts`              | Twilio Verify OTP flow                                                         |
-| `mediaAnalysis.ts`             | Audio / video upload pipeline (R2 → Whisper → analysis)                        |
-| `whisper.ts`                   | OpenAI Whisper transcription client                                            |
-| `deepfakeDetection.ts`         | Reality Defender deepfake detection API                                        |
-| `compressImage.ts`             | Image optimisation before upload                                               |
-| `r2.ts`                        | Cloudflare R2 upload helper                                                    |
-| `resend.ts`                    | Resend email API (transactional + marketing)                                   |
-| `qrDecode.ts`                  | QR-code decoding from images                                                   |
-| `resembleDetect.ts`            | Voice-cloning detection (Resemble AI)                                          |
-| `recoverySteps.ts`             | Post-breach recovery guidance templates                                        |
-| `env-coerce.ts`                | Type-safe env-var parsing                                                      |
-| `chart-tokens.ts`              | Design tokens for Chart.js / Recharts                                          |
-| `utm.ts`                       | UTM parameter parsing                                                          |
-| `region.ts`                    | Geolocation + timezone helpers                                                 |
+| Module                         | Purpose                                                                                                                                                  |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auth.ts`                      | Supabase `getUser()` helper (5s `Promise.race`, throws `AuthUnavailableError`)                                                                           |
+| `adminAuth.ts`                 | HMAC token + Supabase admin-role verification                                                                                                            |
+| `apiAuth.ts`                   | API key validation, rate-limit checks, usage logging                                                                                                     |
+| `blog.ts`                      | Ghost API integration                                                                                                                                    |
+| `blogGenerator.ts`             | Generate blog post from structured data                                                                                                                  |
+| `blogRenderer.ts`              | Render blog post HTML + metadata                                                                                                                         |
+| `ghost-sync.ts`                | **DORMANT** — synced Ghost webhooks to internal feed (Ghost decommissioned 2026-08-07; newsletter-on-publish parked with the ≥100-subscriber gate, #905) |
+| `social-publish.ts`            | Cross-post to LinkedIn / Twitter                                                                                                                         |
+| `stripe.ts`                    | Stripe client (checkout, portal, subscriptions)                                                                                                          |
+| `cost-telemetry.ts`            | `logCost()` helper + daily spend brake checks                                                                                                            |
+| `input-detector.ts`            | Classify input type (email / URL / phone / domain / file)                                                                                                |
+| `charityRegistrySources.ts`    | ACNC charity-registry data sources                                                                                                                       |
+| `charityResultToResultCard.ts` | Transform charity lookup → card UI                                                                                                                       |
+| `officialBrands.ts`            | Whitelist of verified brand data                                                                                                                         |
+| `reddit-intel.ts`              | Reddit scam-post fetcher + processor                                                                                                                     |
+| `reddit-intel-weekly.ts`       | Weekly summary generation                                                                                                                                |
+| `regulator-alerts-weekly.ts`   | Scamwatch / ACSC / ASIC digest builder                                                                                                                   |
+| `org.ts`                       | Org creation, invites, role enforcement                                                                                                                  |
+| `unsubscribe.ts`               | Email unsubscribe token validation                                                                                                                       |
+| `phoneFootprintSkus.ts`        | Pricing tiers for phone-monitor subscriptions                                                                                                            |
+| `twilioLookup.ts`              | Twilio Lookup v2 phone intelligence                                                                                                                      |
+| `twilioVerify.ts`              | Twilio Verify OTP flow                                                                                                                                   |
+| `mediaAnalysis.ts`             | Audio / video upload pipeline (R2 → Whisper → analysis)                                                                                                  |
+| `whisper.ts`                   | OpenAI Whisper transcription client                                                                                                                      |
+| `deepfakeDetection.ts`         | Reality Defender deepfake detection API                                                                                                                  |
+| `compressImage.ts`             | Image optimisation before upload                                                                                                                         |
+| `r2.ts`                        | Cloudflare R2 upload helper                                                                                                                              |
+| `resend.ts`                    | Resend email API (transactional + marketing)                                                                                                             |
+| `qrDecode.ts`                  | QR-code decoding from images                                                                                                                             |
+| `resembleDetect.ts`            | Voice-cloning detection (Resemble AI)                                                                                                                    |
+| `recoverySteps.ts`             | Post-breach recovery guidance templates                                                                                                                  |
+| `env-coerce.ts`                | Type-safe env-var parsing                                                                                                                                |
+| `chart-tokens.ts`              | Design tokens for Chart.js / Recharts                                                                                                                    |
+| `utm.ts`                       | UTM parameter parsing                                                                                                                                    |
+| `region.ts`                    | Geolocation + timezone helpers                                                                                                                           |
 
 ### `apps/web/lib/*` directories
 
