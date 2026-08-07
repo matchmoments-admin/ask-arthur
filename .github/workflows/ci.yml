@@ -33,6 +33,11 @@ jobs:
           # Required for `--filter="...[origin/<base>]"` to resolve the diff base.
           fetch-depth: 0
 
+      # Fast static guard (Tier 3 item 12): no two migration files may claim
+      # one version number — the v261/v264 collision class. Seconds, no deps.
+      - name: Check migration numbering
+        run: ./scripts/check-migration-numbers.sh
+
       - uses: pnpm/action-setup@v4
         # Version is read from the `packageManager` field in package.json
 
