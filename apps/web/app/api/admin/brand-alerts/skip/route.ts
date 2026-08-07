@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyAdminToken } from "@/lib/adminAuth";
+import { isAdminRequest } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
 
 export async function POST(req: NextRequest) {
-  const adminCookie = req.cookies.get("__aa_admin")?.value;
-  if (!adminCookie || !verifyAdminToken(adminCookie)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Dual-mode auth (map #939 / #942): the old raw verifyAdminToken check
+  // had no Supabase-admin path.
+  if (!(await isAdminRequest())) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const { alertId } = await req.json();

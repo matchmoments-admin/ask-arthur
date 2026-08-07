@@ -190,6 +190,30 @@ export async function requireAdmin(): Promise<void> {
 }
 
 /**
+ * Non-redirecting dual-mode admin check for API routes and server actions
+ * that return their own 401/error instead of bouncing to /admin/login.
+ * Same two paths as requireAdmin(): Supabase admin role (when the auth
+ * flag is on), then the HMAC cookie. Added for map #939 / #942 gap 5 —
+ * the hand-rolled `verifyAdminToken(cookie)` checks in brand-alerts and
+ * the blog server actions skipped the Supabase path entirely, so a
+ * Supabase-role admin passed the page gate and then silently no-op'd.
+ */
+export async function isAdminRequest(): Promise<boolean> {
+  if (featureFlags.auth) {
+    try {
+      const { getUser } = await import("@/lib/auth");
+      const user = await getUser();
+      if (user?.role === "admin") return true;
+    } catch {
+      // Fall through to HMAC check
+    }
+  }
+  const cookieStore = await cookies();
+  const token = cookieStore.get(COOKIE_NAME)?.value;
+  return !!token && verifyAdminToken(token);
+}
+
+/**
  * Resolve the acting admin's user id when one is available (Supabase Auth
  * path). Returns null under the HMAC-cookie fallback — no user id exists.
  *

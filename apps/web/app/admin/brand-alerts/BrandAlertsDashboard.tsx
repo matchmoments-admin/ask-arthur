@@ -74,6 +74,9 @@ export default function BrandAlertsDashboard({
   };
 
   const handlePublish = async () => {
+    // Freeform post (alertId 0 — no replay guard row), so the confirm is the
+    // only double-post protection (map #939 / #942 gap 2).
+    if (!window.confirm("Publish this draft to Twitter, LinkedIn and Facebook?")) return;
     setPublishing(true);
     try {
       await fetch("/api/admin/brand-alerts/publish", {

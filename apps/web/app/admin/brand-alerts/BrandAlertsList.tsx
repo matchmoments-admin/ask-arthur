@@ -54,6 +54,9 @@ export default function BrandAlertsList({ initialAlerts }: { initialAlerts: Arra
 
   const handlePublish = async () => {
     if (!selectedId) return;
+    // Publishes to Twitter/LinkedIn/Facebook — confirm before the outbound
+    // action (map #939 / #942 gap 2; the server also 409s a replay).
+    if (!window.confirm("Publish this alert to Twitter, LinkedIn and Facebook?")) return;
     setPublishing(true);
 
     try {
