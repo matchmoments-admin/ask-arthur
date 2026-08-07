@@ -248,6 +248,7 @@ export async function POST(req: NextRequest) {
                   text: text ? scrubPII(text) : text,
                   imageCount: images.length,
                   cacheHit: true,
+                  ...(charityIntent && { charityIntent }),
                   consumerFlags: {
                     intelligenceCore: featureFlags.intelligenceCore,
                     scamContactReporting: featureFlags.scamContactReporting,
@@ -300,6 +301,10 @@ export async function POST(req: NextRequest) {
             ...(cached.scamType && { scamType: cached.scamType }),
             ...(cached.impersonatedBrand && { impersonatedBrand: cached.impersonatedBrand }),
             ...(cached.channel && { channel: cached.channel }),
+            // charityIntent is computed from the INPUT (before the cache
+            // branch), so a cache hit must not drop the CTA (#941-adjacent:
+            // the cached response previously vanished it silently).
+            ...(charityIntent && { charityIntent }),
             ...(cachedNextStep ?? {}),
           },
           {
@@ -765,6 +770,7 @@ export async function POST(req: NextRequest) {
               usage: aiResult.usage,
               cacheHit: false, // route returned cache hit earlier; reaching here means we called Claude
               shopSignal: aiResult.shopSignal,
+              ...(charityIntent && { charityIntent }),
               consumerFlags: {
                 intelligenceCore: featureFlags.intelligenceCore,
                 scamContactReporting: featureFlags.scamContactReporting,

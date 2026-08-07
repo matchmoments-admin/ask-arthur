@@ -9,6 +9,7 @@ import OnwardReportPicker from "./result/OnwardReportPicker";
 import DeepShopCheckTray from "./result/DeepShopCheckTray";
 import NextStepsCard from "./NextStepsCard";
 import type { EvidenceContext } from "@/lib/onward/destinations";
+import { buildCharityCheckHref } from "@/lib/charity-check-href";
 import type { ReportingAction, ScammerContacts, ShopSignal, Verdict } from "@askarthur/types";
 import { COMMERCE_FLAG_LABELS } from "@askarthur/types";
 
@@ -49,6 +50,12 @@ interface ResultCardProps {
     extractedAbn?: string;
     extractedName?: string;
   };
+  /** When provided, the charity-intent CTA runs the register check INLINE
+   *  (no page hop) via this callback instead of deep-linking; the
+   *  /charity-check deep-link is demoted to a secondary "full check" link
+   *  for the guided questions (payment method, in-person ID). Wired from
+   *  ScamChecker's existing inline charity flow. */
+  onCharityCheck?: (intent: { name?: string; abn?: string }) => void;
   /** Shop Guard Stage 0 — when the input looked commerce-shaped, surface
    *  the deduplicated commerce-flag chip row beneath the verdict. Plan:
    *  docs/plans/shop-guard-v2.md. */
@@ -150,6 +157,7 @@ export default function ResultCard({
   scamReportId,
   analysisRef,
   charityIntent,
+  onCharityCheck,
   shopSignal,
   commerceUrl,
   bestNextStep,
@@ -282,18 +290,10 @@ export default function ResultCard({
           },
         ];
 
-  // Build a /charity-check?... URL pre-filled with whatever charity-intent
-  // detection extracted. Both fields optional — the dedicated page handles
-  // either, both, or neither.
-  const charityCheckHref = charityIntent
-    ? (() => {
-        const params = new URLSearchParams();
-        if (charityIntent.extractedAbn) params.set("abn", charityIntent.extractedAbn);
-        if (charityIntent.extractedName) params.set("name", charityIntent.extractedName);
-        const qs = params.toString();
-        return qs ? `/charity-check?${qs}` : "/charity-check";
-      })()
-    : null;
+  // /charity-check deep-link pre-filled with whatever charity-intent
+  // detection extracted (incl. the mode=abn dead-end fix) — pure helper,
+  // unit-tested in __tests__/charityCheckHref.test.ts.
+  const charityCheckHref = charityIntent ? buildCharityCheckHref(charityIntent) : null;
 
   return (
     <div
@@ -301,30 +301,75 @@ export default function ResultCard({
       className="mt-6 rounded-lg border border-slate-200 bg-white px-5 py-5 sm:px-6 sm:py-6"
     >
       {/* Charity-intent CTA — surfaced ABOVE the generic verdict because the
-          dedicated /charity-check tool is more specific to what the user is
-          asking about. Verdict still renders below as the safety net. */}
+          register check is more specific to what the user is asking about.
+          Verdict still renders below as the safety net. With an
+          onCharityCheck handler (the homepage scanner) the check runs INLINE
+          — no page hop — and the /charity-check deep-link demotes to a
+          secondary "full check" line for the guided questions. Without a
+          handler (any other render site) the whole card deep-links as
+          before. */}
       {charityIntent && charityCheckHref && (
-        <a
-          href={charityCheckHref}
-          className="mb-5 flex items-center justify-between gap-3 rounded-lg border-2 border-deep-navy bg-deep-navy/5 px-4 py-3 text-deep-navy hover:bg-deep-navy/10 transition"
-        >
-          <div className="flex items-center gap-3">
-            <HandCoins size={24} className="shrink-0" aria-hidden="true" />
-            <div>
-              <p className="text-sm font-bold leading-tight">
-                This looks like a charity request
-              </p>
-              <p className="text-xs text-gov-slate leading-snug mt-0.5">
-                {charityIntent.extractedName
-                  ? `Run a full check on "${charityIntent.extractedName}"`
-                  : charityIntent.extractedAbn
-                    ? `Run a full check on ABN ${charityIntent.extractedAbn}`
-                    : "Run a full check against the ACNC, ABR, and donation-URL safety registers"}
-              </p>
-            </div>
-          </div>
-          <ArrowRight size={20} className="shrink-0" aria-hidden="true" />
-        </a>
+        <div className="mb-5">
+          {onCharityCheck ? (
+            <button
+              type="button"
+              onClick={() =>
+                onCharityCheck({
+                  name: charityIntent.extractedName,
+                  abn: charityIntent.extractedAbn,
+                })
+              }
+              className="w-full flex items-center justify-between gap-3 rounded-lg border-2 border-deep-navy bg-deep-navy/5 px-4 py-3 text-deep-navy hover:bg-deep-navy/10 transition text-left"
+            >
+              <div className="flex items-center gap-3">
+                <HandCoins size={24} className="shrink-0" aria-hidden="true" />
+                <div>
+                  <p className="text-sm font-bold leading-tight">
+                    This looks like a charity request
+                  </p>
+                  <p className="text-xs text-gov-slate leading-snug mt-0.5">
+                    {charityIntent.extractedName
+                      ? `Check "${charityIntent.extractedName}" against the ACNC register — right here`
+                      : charityIntent.extractedAbn
+                        ? `Check ABN ${charityIntent.extractedAbn} against the ACNC register — right here`
+                        : "Check it against the ACNC register — right here"}
+                  </p>
+                </div>
+              </div>
+              <ArrowRight size={20} className="shrink-0" aria-hidden="true" />
+            </button>
+          ) : (
+            <a
+              href={charityCheckHref}
+              className="flex items-center justify-between gap-3 rounded-lg border-2 border-deep-navy bg-deep-navy/5 px-4 py-3 text-deep-navy hover:bg-deep-navy/10 transition"
+            >
+              <div className="flex items-center gap-3">
+                <HandCoins size={24} className="shrink-0" aria-hidden="true" />
+                <div>
+                  <p className="text-sm font-bold leading-tight">
+                    This looks like a charity request
+                  </p>
+                  <p className="text-xs text-gov-slate leading-snug mt-0.5">
+                    {charityIntent.extractedName
+                      ? `Run a full check on "${charityIntent.extractedName}"`
+                      : charityIntent.extractedAbn
+                        ? `Run a full check on ABN ${charityIntent.extractedAbn}`
+                        : "Run a full check against the ACNC, ABR, and donation-URL safety registers"}
+                  </p>
+                </div>
+              </div>
+              <ArrowRight size={20} className="shrink-0" aria-hidden="true" />
+            </a>
+          )}
+          {onCharityCheck && (
+            <a
+              href={charityCheckHref}
+              className="mt-1.5 inline-block text-xs text-gov-slate underline underline-offset-2 hover:text-deep-navy"
+            >
+              Or run the full check — payment-method and in-person ID questions →
+            </a>
+          )}
+        </div>
       )}
 
       {/* Verdict chip */}

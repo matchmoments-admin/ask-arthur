@@ -103,6 +103,23 @@ export const AnalyzeCompletedDataSchema = z.object({
   // match. Field shape mirrors AnalysisResult.shopSignal (same Schema).
   shopSignal: ShopSignalSchema.optional(),
 
+  // Charity-intent detection (v0.2e) — pure zero-latency detector output
+  // (packages/scam-engine/src/charity-intent.ts), threaded through like
+  // shopSignal so the durable consumer persists it onto
+  // scam_reports.analysis_result and the weekly signal review can count
+  // charity-shaped inputs to the main scanner. Absent when
+  // NEXT_PUBLIC_FF_CHARITY_CHECK is off or the detector didn't match.
+  // PII class: extractedAbn is a PUBLIC business identifier and
+  // extractedName is entity-side data (a charity's name — same class as
+  // scammerContacts); neither is user PII, but both derive from the RAW
+  // pre-scrub text — do NOT add fields here that could carry user PII.
+  charityIntent: z
+    .object({
+      extractedAbn: z.string().optional(),
+      extractedName: z.string().optional(),
+    })
+    .optional(),
+
   // Flags that gate consumer behaviour — captured at emission time so
   // consumers don't race a flag flip mid-flight.
   consumerFlags: z.object({

@@ -195,6 +195,78 @@ export default function ScamChecker() {
     setErrorMsg("");
   }, []);
 
+  // Shared inline charity-check submit (v0.2e) — one POST + state pipeline
+  // used by BOTH the drawer-initiated flow (body from the textarea/image)
+  // and the charity-intent CTA on an analyze result (body from detector
+  // extraction). Renders the charity ResultCard in place; no page hop.
+  const submitCharityCheck = useCallback(
+    async (body: Record<string, string | boolean>) => {
+      setStatus("analyzing");
+      setCharityResult(null);
+      setErrorMsg("");
+      setProgressStep("upload");
+      try {
+        setProgressStep("lookup");
+        const res = await fetch("/api/charity-check", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+
+        if (res.status === 429) {
+          const data = await res.json().catch(() => ({}));
+          setStatus("rate_limited");
+          setProgressStep(undefined);
+          setErrorMsg(
+            (data?.error?.message as string | undefined) ??
+              "Too many requests. Please try again later.",
+          );
+          return;
+        }
+
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(
+            (data?.error?.message as string | undefined) ?? "Charity check failed",
+          );
+        }
+
+        setProgressStep("analyse");
+        const data = (await res.json()) as CharityCheckResult;
+        setProgressStep("write");
+        setCharityResult(data);
+        setStatus("complete");
+        setProgressStep("done");
+        setErrorAttempts(0);
+        setErrorRef(null);
+        window.dispatchEvent(new Event("safeverify:check-complete"));
+      } catch (err) {
+        setStatus("error");
+        setProgressStep(undefined);
+        setErrorAttempts((n) => n + 1);
+        setErrorRef(makeReferenceId());
+        setErrorMsg(
+          err instanceof Error ? err.message : "Something went wrong. Please try again.",
+        );
+      }
+    },
+    [],
+  );
+
+  // Charity-intent CTA on an analyze result: run the register check inline
+  // with whatever the detector extracted. The charity ResultCard replaces
+  // the generic verdict card when it lands (render precedence below).
+  const handleCharityIntentCheck = useCallback(
+    (intent: { name?: string; abn?: string }) => {
+      const body: Record<string, string | boolean> = {};
+      if (intent.abn) body.abn = intent.abn;
+      if (intent.name) body.name = intent.name;
+      if (!body.abn && !body.name) return;
+      void submitCharityCheck(body);
+    },
+    [submitCharityCheck],
+  );
+
   const processFiles = useCallback(async (files: File[], mode?: "image" | "qrcode") => {
     // A non-charity image picker overrides any prior charity-image selection
     // so the regular /api/analyze pipeline takes over.
@@ -314,11 +386,6 @@ export default function ScamChecker() {
     // intentionally omitted; they can re-appear later as conditional inputs
     // rendered only when charityIntent is true.
     if (charityIntent && (images[0] || text.trim())) {
-      setStatus("analyzing");
-      setCharityResult(null);
-      setErrorMsg("");
-      setProgressStep("upload");
-
       const trimmedText = text.trim();
       const intent = trimmedText ? detectCharityIntent(trimmedText) : null;
       const body: Record<string, string | boolean> = {};
@@ -338,50 +405,7 @@ export default function ScamChecker() {
         body.name = trimmedText.slice(0, 200);
       }
 
-      try {
-        setProgressStep("lookup");
-        const res = await fetch("/api/charity-check", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-
-        if (res.status === 429) {
-          const data = await res.json().catch(() => ({}));
-          setStatus("rate_limited");
-          setProgressStep(undefined);
-          setErrorMsg(
-            (data?.error?.message as string | undefined) ??
-              "Too many requests. Please try again later.",
-          );
-          return;
-        }
-
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          throw new Error(
-            (data?.error?.message as string | undefined) ?? "Charity check failed",
-          );
-        }
-
-        setProgressStep("analyse");
-        const data = (await res.json()) as CharityCheckResult;
-        setProgressStep("write");
-        setCharityResult(data);
-        setStatus("complete");
-        setProgressStep("done");
-        setErrorAttempts(0);
-        setErrorRef(null);
-        window.dispatchEvent(new Event("safeverify:check-complete"));
-      } catch (err) {
-        setStatus("error");
-        setProgressStep(undefined);
-        setErrorAttempts((n) => n + 1);
-        setErrorRef(makeReferenceId());
-        setErrorMsg(
-          err instanceof Error ? err.message : "Something went wrong. Please try again.",
-        );
-      }
+      await submitCharityCheck(body);
       return;
     }
 
@@ -734,7 +758,7 @@ export default function ScamChecker() {
       {charityResult && status === "complete" && (
           <ResultCard
             {...charityResultToResultCardProps(charityResult)}
-            inputMode="charity-image"
+            inputMode={inputMode === "charity-image" ? "charity-image" : "charity-text"}
             onCheckAnother={handleReset}
           />
       )}
@@ -756,6 +780,7 @@ export default function ScamChecker() {
             channel={result.channel}
             inputMode={result.inputMode || inputMode}
             charityIntent={result.charityIntent}
+            onCharityCheck={handleCharityIntentCheck}
             shopSignal={result.shopSignal}
             commerceUrl={
               result.shopSignal ? deriveCommerceUrl(text) : undefined

@@ -260,6 +260,8 @@ Inngest: phone-footprint-retention  (03:15 UTC)
 
 Free consumer page (`/charity-check`) backed by the ACNC register mirror + Voyage-embedded semantic search for fuzzy / typosquat matches.
 
+**Main-scanner integration (v0.2e, 2026-08-07):** `/api/analyze` runs the pure `detectCharityIntent()` (`packages/scam-engine/src/charity-intent.ts` — keyword precision gate + checksum-validated ABN, zero latency) behind `NEXT_PUBLIC_FF_CHARITY_CHECK`; `charityIntent` rides the response (cache hits included) AND `analyze.completed.v1` (shopSignal precedent — persisted onto `scam_reports.analysis_result`, countable by the weekly signal review). On the homepage, the ResultCard CTA runs the register check **inline** via ScamChecker's shared `submitCharityCheck` (no page hop); the `/charity-check` deep-link (now with the `mode=abn` fix) is the secondary path for the guided payment/in-person questions.
+
 ```
 User search on /charity-check
   └─ GET /api/charity-check/autocomplete?q=<prefix>
