@@ -357,7 +357,9 @@ First-touch is captured by `middleware.ts`, which sets the `aa_attribution` cook
 | `/api/admin/clone-watch/scamwatch-export`         | GET    | CSV export of TP-confirmed alerts in Scamwatch report-upload format. Manual upload until Playwright form-POST automation (#485) lands.                                                                                                                                                                                                                                               |
 | `/api/admin/onward-reports/approve`               | POST   | Pre-approve regulator report                                                                                                                                                                                                                                                                                                                                                         |
 
-_`/api/admin/blog/revalidate` and `/api/admin/stripe/invoice` were deleted 2026-08-07 (admin-console map #939, verdict #944) — both were orphans with no UI caller; `/admin/blog`'s server actions call `revalidateBlogPost()` directly, and manual invoicing happens from the Stripe dashboard._
+| `/api/admin/blog/revalidate` | POST | On-demand ISR flush for `/blog/[slug]` + the `/blog` index. Operator-called (curl/script), not UI-called — for direct `blog_posts` edits (hero, category, status) that the 1-hour ISR would otherwise hide. `requireAdmin` + kebab-case slug via Zod; omit the slug for an index-only flush. Deleted 2026-08-07 as an "orphan", **restored 2026-08-08** — the caller was always the operator. |
+
+_`/api/admin/stripe/invoice` was deleted 2026-08-07 (admin-console map #939, verdict #944) — an orphan route with no page; manual invoicing happens from the Stripe dashboard._
 
 ### Cron routes (Vercel signature)
 
