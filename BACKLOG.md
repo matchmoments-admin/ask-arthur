@@ -46,21 +46,21 @@ The P1/P2 lists below are the review's _findings_; this schedule is the
 _decision_ — each item ranked against the two engines in
 [NORTH_STAR.md](./NORTH_STAR.md). Work the tiers in order.
 
-**Tier 1 — this week:**
+**Tier 1 — this week: ✅ ALL DONE 2026-08-07** (PRs #923/#924 + config; Slack webhook revocation = founder):
 
 1. Rotate `SLACK_WEBHOOK_URL` to a GitHub secret (live credential on a public repo)
 2. Branch protection: require CI + scraper checks on `main` (verified absent 2026-08-07)
 3. Gov inbound email investigation — **hard deadline 2026-08-29** (acsc mute expiry; ACSC coverage currently zero from both paths)
 4. `parseStateFromRegion` region-string fix — promoted to pre-sale blocker by the intel-licensing scoping (#902); also corrupts the public scam-map
 
-**Tier 2 — this month:**
+**Tier 2 — this month: ✅ ALL DONE 2026-08-07** (PRs #925–#927; NASC pack delivered to founder for sending):
 
 5. Alerting auditability: `admin_alert_log` + boolean `sendAdminMessage` + weekly synthetic canary
 6. Feed-upsert conditional `DO UPDATE` (78% of dirty-page IO)
 7. Prompt-regression eval made real (missing secret must fail loudly)
 8. NASC data-partner contribution (credibility wedge, #902)
 
-**Tier 3 — this quarter:**
+**Tier 3 — this quarter** (status 2026-08-07: 10 ✅ #929 · 11 ✅ #928+v267 · 12 static-half ✅ #930, prod-diff deferred-credentialed · 9 signal-gated to ~Sept · 13 needs a founder grilling session):
 
 9. Charity v0.2c fusion — gated on ~4 weeks of live checker signal (#910)
 10. Per-feed freshness registry (finish what the mute-aware pager started)
