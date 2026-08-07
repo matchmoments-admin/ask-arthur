@@ -17,7 +17,6 @@ import PageviewBeacon from "@/components/blog/PageviewBeacon";
 import MermaidDiagram from "@/components/blog/MermaidDiagram";
 import SubscribeForm from "@/components/SubscribeForm";
 import Pill from "@/components/Pill";
-import { featureFlags } from "@askarthur/utils/feature-flags";
 import type { Metadata } from "next";
 
 interface PageProps {
@@ -386,18 +385,16 @@ export default async function BlogPostPage({ params }: PageProps) {
         </Link>
       </section>
 
-      {/* Newsletter — feature-flagged */}
-      {featureFlags.newsletter && (
-        <section className="mt-12 max-w-md mx-auto">
-          <h3 className="text-deep-navy text-lg font-bold mb-1">
-            Stay ahead of scams
-          </h3>
-          <p className="text-slate-500 text-sm mb-4">
-            Weekly alerts delivered to your inbox every Monday.
-          </p>
-          <SubscribeForm variant="inline" />
-        </section>
-      )}
+      {/* Newsletter — always on: capture-before-content (#933 item 4) */}
+      <section className="mt-12 max-w-md mx-auto">
+        <h3 className="text-deep-navy text-lg font-bold mb-1">
+          Stay ahead of scams
+        </h3>
+        <p className="text-slate-500 text-sm mb-4">
+          Weekly alerts delivered to your inbox every Monday.
+        </p>
+        <SubscribeForm variant="inline" source="blog_post" />
+      </section>
     </article>
   );
 }

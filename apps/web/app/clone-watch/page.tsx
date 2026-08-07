@@ -25,6 +25,7 @@ import {
 import FeatureCard from "@/components/FeatureCard";
 import SampleReportForm from "@/components/SampleReportForm";
 import CloneListRequestForm from "@/components/CloneListRequestForm";
+import SubscribeForm from "@/components/SubscribeForm";
 import CloneWatchDomainList, {
   type CloneDomainItem,
 } from "@/components/clone-watch/CloneWatchDomainList";
@@ -532,6 +533,18 @@ export default async function CloneWatchPage() {
 
       {/* Interactive domain list */}
       <CloneWatchDomainList items={items} />
+
+      {/* Newsletter capture — capture-before-content (#933 item 4) */}
+      <section className="mt-14 max-w-md">
+        <h3 className="text-deep-navy text-sm font-bold uppercase tracking-wider mb-1">
+          Get weekly scam alerts
+        </h3>
+        <p className="text-slate-500 text-sm mb-3">
+          Lookalike domains, fake stores, the week&rsquo;s scams — in your
+          inbox every Monday.
+        </p>
+        <SubscribeForm variant="inline" source="clone_watch" />
+      </section>
 
       {/* Methodology footnotes */}
       <section className="mt-14 grid gap-7 border-t border-slate-200 pt-9 md:grid-cols-3">

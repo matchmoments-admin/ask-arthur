@@ -31,8 +31,9 @@ export const featureFlags = {
   /** Phase 4: Threat feed ingestion pipeline + Inngest orchestration */
   dataPipeline: process.env.NEXT_PUBLIC_FF_DATA_PIPELINE === "true",
 
-  /** Newsletter signup form on blog pages */
-  newsletter: process.env.NEXT_PUBLIC_FF_NEWSLETTER === "true",
+  // `newsletter` flag retired 2026-08-07 (#933 item 4): the signup form is
+  // now always-on across blog, /charity-check, /clone-watch and /subscribe —
+  // capture-before-content per #905.
 
   /** Resolve URL redirect chains before reputation checking */
   redirectResolve: process.env.NEXT_PUBLIC_FF_REDIRECT_RESOLVE === "true",

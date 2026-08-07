@@ -1,7 +1,6 @@
 import Link from "next/link";
 import Image from "next/image";
 import { getAllPosts, getCategories } from "@/lib/blog";
-import { featureFlags } from "@askarthur/utils/feature-flags";
 import SubscribeForm from "@/components/SubscribeForm";
 import type { Metadata } from "next";
 
@@ -164,20 +163,18 @@ export default async function BlogPage({ searchParams }: PageProps) {
         </Link>
       </section>
 
-      {/* ── Newsletter (feature-flagged) ── */}
-      {featureFlags.newsletter && (
-        <section className="mt-10 pt-8 border-t border-border-light">
-          <div className="max-w-md mx-auto">
-            <h3 className="text-deep-navy text-sm font-bold uppercase tracking-wider mb-1">
-              Get weekly scam alerts
-            </h3>
-            <p className="text-slate-400 text-sm mb-3">
-              Stay ahead of the latest scams — delivered to your inbox every Monday.
-            </p>
-            <SubscribeForm variant="inline" />
-          </div>
-        </section>
-      )}
+      {/* ── Newsletter — always on: capture-before-content (#933 item 4) ── */}
+      <section className="mt-10 pt-8 border-t border-border-light">
+        <div className="max-w-md mx-auto">
+          <h3 className="text-deep-navy text-sm font-bold uppercase tracking-wider mb-1">
+            Get weekly scam alerts
+          </h3>
+          <p className="text-slate-400 text-sm mb-3">
+            Stay ahead of the latest scams — delivered to your inbox every Monday.
+          </p>
+          <SubscribeForm variant="inline" source="blog_index" />
+        </div>
+      </section>
     </div>
   );
 }
