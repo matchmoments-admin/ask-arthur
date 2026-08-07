@@ -309,4 +309,72 @@ describe("explainResult", () => {
     expect(text).toMatch(/can't find/i);
     expect(text).toMatch(/acnc.gov.au/);
   });
+
+  // Sharpened HIGH_RISK "Stop" copy (founder request 2026-08-07): names the
+  // signals that ACTUALLY fired instead of a generic OR-list.
+  describe("HIGH_RISK names actual triggers", () => {
+    it("register miss + gift-card payment → both named, OR-list gone", () => {
+      const text = explainResult(
+        {
+          verdict: "HIGH_RISK",
+          pillars: make({
+            acnc_registration: {
+              score: 100,
+              detail: { registered: false, reason: "no_name_match" },
+            },
+          }),
+          official_donation_url: null,
+        },
+        { paymentMethod: "gift_card" },
+      );
+      expect(text).toMatch(/can't find this charity on the ACNC register/);
+      expect(text).toMatch(/payment by gift cards/);
+      expect(text).toMatch(/Don't donate/);
+      expect(text).not.toMatch(/cancelled ABN, or a payment method/); // old OR-list
+    });
+
+    it("delisted charity → says removed, not merely unfound", () => {
+      const text = explainResult(
+        {
+          verdict: "HIGH_RISK",
+          pillars: make({
+            acnc_registration: {
+              score: 100,
+              detail: { registered: false, reason: "acnc_delisted" },
+            },
+          }),
+          official_donation_url: null,
+        },
+        {},
+      );
+      expect(text).toMatch(/removed from the ACNC register/);
+    });
+
+    it("inactive ABN + refused ID → both named", () => {
+      const text = explainResult(
+        {
+          verdict: "HIGH_RISK",
+          pillars: make({
+            abr_dgr: { score: 100, detail: { abn_status: "Cancelled" } },
+          }),
+          official_donation_url: null,
+        },
+        { inPersonContext: true, idShown: "refused" },
+      );
+      expect(text).toMatch(/ABN is cancelled/);
+      expect(text).toMatch(/refused to show ID/);
+    });
+
+    it("no nameable trigger → falls back to the generic line", () => {
+      const text = explainResult(
+        {
+          verdict: "HIGH_RISK",
+          pillars: make(),
+          official_donation_url: null,
+        },
+        {},
+      );
+      expect(text).toMatch(/unverified charity, cancelled ABN/); // generic fallback
+    });
+  });
 });
