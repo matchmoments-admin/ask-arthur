@@ -112,6 +112,11 @@ def bulk_upsert_urls(
                     data = row[0] if isinstance(row[0], dict) else json.loads(row[0])
                     if data.get("is_new"):
                         stats["new"] += 1
+                    elif data.get("unchanged"):
+                        # v266: WHERE-suppressed conflict — the row exists and
+                        # this sighting carried no new information, so nothing
+                        # was written. Counted as skipped, not updated.
+                        stats["skipped"] += 1
                     else:
                         stats["updated"] += 1
             except Exception as e:
@@ -132,6 +137,8 @@ def bulk_upsert_urls(
                             data = r[0] if isinstance(r[0], dict) else json.loads(r[0])
                             if data.get("is_new"):
                                 stats["new"] += 1
+                            elif data.get("unchanged"):
+                                stats["skipped"] += 1
                             else:
                                 stats["updated"] += 1
                     except Exception as e2:
@@ -247,6 +254,11 @@ def bulk_upsert_ips(
                     data = row[0] if isinstance(row[0], dict) else json.loads(row[0])
                     if data.get("is_new"):
                         stats["new"] += 1
+                    elif data.get("unchanged"):
+                        # v266: WHERE-suppressed conflict — the row exists and
+                        # this sighting carried no new information, so nothing
+                        # was written. Counted as skipped, not updated.
+                        stats["skipped"] += 1
                     else:
                         stats["updated"] += 1
             except Exception as e:
@@ -268,6 +280,8 @@ def bulk_upsert_ips(
                             data = r[0] if isinstance(r[0], dict) else json.loads(r[0])
                             if data.get("is_new"):
                                 stats["new"] += 1
+                            elif data.get("unchanged"):
+                                stats["skipped"] += 1
                             else:
                                 stats["updated"] += 1
                     except Exception as e2:
@@ -372,6 +386,11 @@ def bulk_upsert_crypto_wallets(
                     data = row[0] if isinstance(row[0], dict) else json.loads(row[0])
                     if data.get("is_new"):
                         stats["new"] += 1
+                    elif data.get("unchanged"):
+                        # v266: WHERE-suppressed conflict — the row exists and
+                        # this sighting carried no new information, so nothing
+                        # was written. Counted as skipped, not updated.
+                        stats["skipped"] += 1
                     else:
                         stats["updated"] += 1
             except Exception as e:
@@ -392,6 +411,8 @@ def bulk_upsert_crypto_wallets(
                             data = r[0] if isinstance(r[0], dict) else json.loads(r[0])
                             if data.get("is_new"):
                                 stats["new"] += 1
+                            elif data.get("unchanged"):
+                                stats["skipped"] += 1
                             else:
                                 stats["updated"] += 1
                     except Exception as e2:
@@ -492,6 +513,11 @@ def bulk_upsert_entities(
                     data = row[0] if isinstance(row[0], dict) else json.loads(row[0])
                     if data.get("is_new"):
                         stats["new"] += 1
+                    elif data.get("unchanged"):
+                        # v266: WHERE-suppressed conflict — the row exists and
+                        # this sighting carried no new information, so nothing
+                        # was written. Counted as skipped, not updated.
+                        stats["skipped"] += 1
                     else:
                         stats["updated"] += 1
             except Exception as e:
@@ -512,6 +538,8 @@ def bulk_upsert_entities(
                             data = r[0] if isinstance(r[0], dict) else json.loads(r[0])
                             if data.get("is_new"):
                                 stats["new"] += 1
+                            elif data.get("unchanged"):
+                                stats["skipped"] += 1
                             else:
                                 stats["updated"] += 1
                     except Exception as e2:
@@ -631,6 +659,11 @@ def bulk_upsert_feed_items(
                     data = row[0] if isinstance(row[0], dict) else json.loads(row[0])
                     if data.get("is_new"):
                         stats["new"] += 1
+                    elif data.get("unchanged"):
+                        # v266: WHERE-suppressed conflict — the row exists and
+                        # this sighting carried no new information, so nothing
+                        # was written. Counted as skipped, not updated.
+                        stats["skipped"] += 1
                     else:
                         stats["updated"] += 1
             except Exception as e:
@@ -652,6 +685,8 @@ def bulk_upsert_feed_items(
                             data = r[0] if isinstance(r[0], dict) else json.loads(r[0])
                             if data.get("is_new"):
                                 stats["new"] += 1
+                            elif data.get("unchanged"):
+                                stats["skipped"] += 1
                             else:
                                 stats["updated"] += 1
                     except Exception as e2:
