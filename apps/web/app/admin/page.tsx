@@ -88,7 +88,6 @@ async function getTiles(svc: ReturnType<typeof createServiceClient>): Promise<Ti
     inboundActiveRes,
     brandAlertsRes,
     vulnsRes,
-    phoneRes,
     onwardRes,
     blogDraftsRes,
     queuePendingRes,
@@ -117,10 +116,6 @@ async function getTiles(svc: ReturnType<typeof createServiceClient>): Promise<Ti
       .select("id", { count: "exact", head: true })
       .gte("cvss_score", 7)
       .gte("published_at", since7d),
-    svc
-      .from("phone_footprints")
-      .select("id", { count: "exact", head: true })
-      .gte("created_at", since7d),
     svc
       .from("onward_report_log")
       .select("id", { count: "exact", head: true })
@@ -241,13 +236,9 @@ async function getTiles(svc: ReturnType<typeof createServiceClient>): Promise<Ti
       metric: String(vulnsRes.count ?? 0),
       metricLabel: "Critical CVSS≥7 in 7d",
     },
-    {
-      href: "/admin/phone-footprint",
-      title: "Phone footprint",
-      purpose: "Phone-intel lookups + telco-API cost telemetry",
-      metric: String(phoneRes.count ?? 0),
-      metricLabel: "Footprints 7d",
-    },
+    // Phone-footprint tile removed (map #939, verdict #944): the feature is
+    // mothballed — the read-only panel stays at /admin/phone-footprint for
+    // the revive condition, but the overview no longer advertises it.
     {
       href: "/admin/onward-reports",
       title: "Onward reports",
