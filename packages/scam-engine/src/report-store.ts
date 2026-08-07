@@ -103,6 +103,12 @@ export async function storeScamReport(
     if (params.analysis.shopSignal) {
       scrubbedResult.shopSignal = params.analysis.shopSignal;
     }
+    // Cache-served submissions persist like fresh ones (a cached hit is a
+    // real user encountering a real scam — item 13b) but carry the marker so
+    // "analyses" vs "cache-served submissions" stays distinguishable.
+    if (params.analysis.cacheHit) {
+      scrubbedResult.cacheHit = true;
+    }
     // Persist caller-vetted (isMalicious-filtered) scammer URLs as a plain
     // string[] so the onward-report producer's extractScammerUrls finds them.
     // Strip to host/path + dedupe + cap. Only written when non-empty.

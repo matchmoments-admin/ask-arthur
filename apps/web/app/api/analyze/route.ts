@@ -212,6 +212,58 @@ export async function POST(req: NextRequest) {
           submissionType: mode ?? (images.length > 0 ? "image" : "text"),
           start,
         });
+        // Item 13b (2026-08-08, founder decision): a cache-served check is a
+        // real user encountering a real scam, so it persists like a fresh
+        // one — previously the cache path emitted no analyze.completed.v1,
+        // which meant no scam_reports row and no report CTA for exactly the
+        // popular scams most likely to cache-hit. cacheHit: true makes
+        // analyze-cost skip (no Claude spend to bill) and rides into
+        // analysis_result so corpus analytics stay honest. Same privacy
+        // boundary as the main-path emit: text scrubbed at the send site.
+        if (featureFlags.analyzeInngestWeb) {
+          waitUntil(
+            inngest
+              .send({
+                name: ANALYZE_COMPLETED_EVENT,
+                id: requestId,
+                data: {
+                  requestId,
+                  source: "web" as const,
+                  verdict: cached.verdict,
+                  confidence: cached.confidence,
+                  summary: cached.summary,
+                  redFlags: cached.redFlags,
+                  nextSteps: cached.nextSteps,
+                  scamType: cached.scamType,
+                  channel: cached.channel,
+                  impersonatedBrand: cached.impersonatedBrand,
+                  reporterHash: await hashIdentifier(clientIp, ua),
+                  inputMode: (mode ??
+                    (images.length > 0 ? "image" : "text")) as
+                    | "text"
+                    | "image"
+                    | "qrcode",
+                  region: geo.region,
+                  countryCode: geo.countryCode,
+                  text: text ? scrubPII(text) : text,
+                  imageCount: images.length,
+                  cacheHit: true,
+                  consumerFlags: {
+                    intelligenceCore: featureFlags.intelligenceCore,
+                    scamContactReporting: featureFlags.scamContactReporting,
+                    scamUrlReporting: featureFlags.scamUrlReporting,
+                    phoneIntelligence: featureFlags.phoneIntelligence,
+                  },
+                },
+              })
+              .catch((err) =>
+                logger.error("analyze.completed.v1 send failed (cache path)", {
+                  error: String(err),
+                  requestId,
+                })
+              )
+          );
+        }
         const cachedStateCode =
           featureFlags.nextStepsRouting && cached.verdict !== "SAFE" && geo.region
             ? parseStateFromRegion(geo.region)

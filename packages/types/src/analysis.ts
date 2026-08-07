@@ -298,6 +298,11 @@ export const AnalysisResultSchema = z.object({
   // Populated by analyzeWithClaude; absent on cached/mock paths.
   usage: UsageSchema.optional(),
   shopSignal: ShopSignalSchema.optional(),
+  /** True when this result was served from the analysis cache rather than a
+   *  fresh Claude call. Persisted into scam_reports.analysis_result so corpus
+   *  analytics can distinguish fresh analyses from cache-served submissions
+   *  (item 13b, 2026-08-08). */
+  cacheHit: z.boolean().optional(),
 });
 export type AnalysisResult = z.infer<typeof AnalysisResultSchema>;
 
