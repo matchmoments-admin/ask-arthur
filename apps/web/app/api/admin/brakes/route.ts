@@ -10,9 +10,13 @@ import { z } from "zod";
 import { requireAdmin, getAdminUserId } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
+import { KNOWN_BRAKE_KEYS } from "@/lib/dashboard/feature-brakes";
 
 const Body = z.object({
-  feature: z.string().trim().min(2).max(64).regex(/^[a-z0-9_]+$/, "snake_case key expected"),
+  // Constrained to keys a worker actually reads: a typo'd key would write a
+  // row nobody checks while the panel rendered it "BRAKED" — a false claim of
+  // protection, which is worse than no brake at all.
+  feature: z.enum(KNOWN_BRAKE_KEYS),
   action: z.enum(["brake", "release"]),
   /** brake only. Capped at 30 days so a brake can't be forgotten forever. */
   hours: z.number().int().min(1).max(720).optional(),

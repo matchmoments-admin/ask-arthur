@@ -13,7 +13,15 @@ const PLANS = [
   { value: "brand_enterprise", label: "Enterprise" },
 ] as const;
 
-export default function BrandOnboardForm({ orgId, orgName }: { orgId: string; orgName: string }) {
+/** v256's reserved house org — brands Arthur watches on its own evidence. */
+const HOUSE_ORG = {
+  id: "00000000-0000-4000-8000-000000000001",
+  name: "Ask Arthur (house) — no customer org yet",
+};
+
+export default function BrandOnboardForm({ orgs }: { orgs: Array<{ id: string; name: string }> }) {
+  const options = [HOUSE_ORG, ...orgs.filter((o) => o.id !== HOUSE_ORG.id)];
+  const [orgId, setOrgId] = useState(HOUSE_ORG.id);
   const [brandName, setBrandName] = useState("");
   const [domains, setDomains] = useState("");
   const [aliases, setAliases] = useState("");
@@ -93,6 +101,15 @@ export default function BrandOnboardForm({ orgId, orgName }: { orgId: string; or
           className="mt-1 w-full rounded border border-border-light px-3 py-2 text-sm" />
       </div>
       <div>
+        <label className="block text-xs font-semibold uppercase tracking-wide text-gov-slate">
+          Organisation <span className="font-normal normal-case text-slate-400">— who owns this brand&rsquo;s monitoring</span>
+        </label>
+        <select value={orgId} onChange={(e) => setOrgId(e.target.value)}
+          className="mt-1 w-full rounded border border-border-light px-3 py-2 text-sm">
+          {options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+        </select>
+      </div>
+      <div>
         <label className="block text-xs font-semibold uppercase tracking-wide text-gov-slate">Plan</label>
         <select value={plan} onChange={(e) => setPlan(e.target.value)}
           className="mt-1 w-full rounded border border-border-light px-3 py-2 text-sm">
@@ -100,7 +117,8 @@ export default function BrandOnboardForm({ orgId, orgName }: { orgId: string; or
         </select>
       </div>
       <p className="text-xs text-gov-slate">
-        Org: <code className="font-mono">{orgName}</code>. Created rows start{" "}
+        A customer org must have members or its users can never read the brand
+        (v207 RLS) — pick the house org when there&rsquo;s no customer yet. Created rows start{" "}
         <strong>pending verification</strong> — the matcher only covers verified + active
         brands, so nothing goes live until it&rsquo;s verified.
       </p>

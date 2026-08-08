@@ -8,7 +8,7 @@ import type { BrakeRow } from "@/lib/dashboard/feature-brakes";
 // braked are still listed — an empty feature_brakes table must not render as an
 // empty console, or the surface is useless on the day you need it.
 
-export default function BrakeControls({ rows }: { rows: BrakeRow[] }) {
+export default function BrakeControls({ rows, loadFailed = false }: { rows: BrakeRow[]; loadFailed?: boolean }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<Record<string, string>>({});
 
@@ -48,9 +48,11 @@ export default function BrakeControls({ rows }: { rows: BrakeRow[] }) {
   return (
     <div className="mt-3">
       <p className="mb-2 text-xs text-slate-500">
-        {activeCount === 0
-          ? "No brakes are currently holding — every feature is free to run."
-          : `${activeCount} brake${activeCount === 1 ? "" : "s"} currently holding.`}{" "}
+        {loadFailed
+          ? "Brake state could not be read — treat the rows below as unknown, not as \"nothing braked\"."
+          : activeCount === 0
+            ? "No brakes are currently holding — every feature is free to run."
+            : `${activeCount} brake${activeCount === 1 ? "" : "s"} currently holding.`}{" "}
         A brake holds while <code>paused_until</code> is in the future; releasing sets it to
         now and keeps the row, so who braked it and why survives for the incident review.
       </p>

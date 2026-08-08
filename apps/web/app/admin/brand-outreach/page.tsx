@@ -19,15 +19,22 @@ export default async function BrandOutreachPage() {
   // in the same flow as the pitch (#953). monitored_brands was empty when the
   // first five pilot emails went out on 2026-08-08.
   const sb = createServiceClient();
-  let org: { id: string; name: string } | null = null;
+  let orgs: Array<{ id: string; name: string }> = [];
   let monitoredCount = 0;
+  let loadFailed = false;
   if (sb) {
-    const [{ data: orgRow }, { count }] = await Promise.all([
-      sb.from("organizations").select("id, name").order("created_at").limit(1).maybeSingle(),
+    const [{ data: orgRows, error: orgErr }, { count, error: countErr }] = await Promise.all([
+      // ALL orgs, not organizations[0]: silently binding every pilot to
+      // whichever org happens to be oldest files a paying customer's brand
+      // under our own org, where their users can never read it (v207 RLS).
+      sb.from("organizations").select("id, name").order("name"),
       sb.from("monitored_brands").select("id", { count: "exact", head: true }),
     ]);
-    org = (orgRow as { id: string; name: string } | null) ?? null;
+    orgs = (orgRows as Array<{ id: string; name: string }> | null) ?? [];
     monitoredCount = count ?? 0;
+    // Without this, a failed query renders "No brands are monitored yet" or
+    // "No organisation row found" — affirmative claims on a failure path.
+    loadFailed = Boolean(orgErr || countErr);
   }
 
   return (
@@ -42,13 +49,13 @@ export default async function BrandOutreachPage() {
             ? "No brands are monitored yet — this would be the first."
             : `${monitoredCount} brand${monitoredCount === 1 ? "" : "s"} monitored.`}
         </p>
-        {org ? (
-          <BrandOnboardForm orgId={org.id} orgName={org.name} />
-        ) : (
-          <p className="mt-3 text-sm text-danger-text">
-            No organisation row found — create one before onboarding a brand.
+        {loadFailed && (
+          <p className="mt-2 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">
+            Couldn&rsquo;t read the org / monitored-brand data — the counts above are not
+            measurements. Reload before onboarding anything.
           </p>
         )}
+        <BrandOnboardForm orgs={orgs} />
       </section>
     </>
   );

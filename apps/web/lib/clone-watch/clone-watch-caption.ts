@@ -121,6 +121,10 @@ export function generateCloneWatchCaption(
   // → globals) and never repeats last month's, so the series can't tell the
   // same story twice (it did: HESTA led June AND July 2026).
   const globals = card.globalBrands.map((b) => ({ name: prettyBrand(b.brand), n: b.clones }));
+  // Tracks whether globals already appeared AS a finding, so the standalone
+  // globals sentence can't repeat it. The pre-ladder code got this free from
+  // mutually-exclusive branches; the ladder broke that (review finding 6b).
+  let usedGlobalsFinding = false;
   const sp = card.spotlight;
   const spName = sp.brand ? prettyBrand(sp.brand) : null;
   const spotlightIsLead = spName != null && au[0]?.name === spName;
@@ -129,7 +133,7 @@ export function generateCloneWatchCaption(
     findings.push(
       `${spName} was the month's sharpest riser — ${sp.priorClones} lookalike domains last month, ${sp.clones} this month${doubled ? ", more than double" : ""}. A jump like that usually means one actor registering in bulk, not steady background noise.`,
     );
-  } else if (sp.kind === "new_entrant" && spName) {
+  } else if (sp.kind === "new_entrant" && spName && !spotlightIsLead) {
     findings.push(
       `${spName} appeared on the map for the first time (${sp.clones} lookalike domains) — it wasn't targeted at all last month. A brand's first month is when its customers are least primed to expect a fake.`,
     );
@@ -142,6 +146,7 @@ export function generateCloneWatchCaption(
     findings.push(
       `It's not just local brands. Global names were aimed at Australians too — ${joinAnd(top)} among the most-cloned.`,
     );
+    usedGlobalsFinding = true;
   }
 
   // Finding 3 — registrar concentration + the WHOIS-privacy caveat.
@@ -162,7 +167,7 @@ export function generateCloneWatchCaption(
   // Optional standalone globals sentence (only if globals exist and weren't
   // already promoted into a finding by the no-super-fund branch).
   const globalsLine =
-    sp.kind !== "globals" && globals.length > 0
+    !usedGlobalsFinding && globals.length > 0
       ? `Global brands were aimed at Australians too — ${joinAnd(globals.slice(0, 3).map((b) => `${b.name} (${b.n})`))} among them.`
       : "";
 

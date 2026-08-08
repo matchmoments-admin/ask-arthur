@@ -1,11 +1,15 @@
 // Feed control surface for /admin/health (#952).
 //
-// Why this exists: muting, unmuting and probing a threat feed were SQL +
-// `gh workflow run` jobs, so a dark feed stayed dark until someone happened to
-// look. The state that made the case: `acsc` sits at enabled=false with NO
-// muted_until — it is not a lapsing mute, it is simply off, indefinitely, with
-// nothing surfacing it. `phishstats` is muted until 2026-09-03. Both facts were
-// invisible from the console.
+// WHAT THESE COLUMNS ACTUALLY DO — corrected after review. `feed_sources.enabled`
+// and `.muted_until` are read by exactly ONE consumer:
+// pipeline/scrapers/check_scraper_failures.py. They decide whether a failing
+// feed PAGES you. They do NOT decide whether the scraper runs — that is
+// hardcoded per-step in .github/workflows/scrape-feeds.yml `if:` conditions.
+// The first version of this file claimed "switched off entirely" and blamed
+// these columns for acsc going dark; the causality is the reverse — the
+// workflow step was retired and the row was updated to match. Labels here now
+// say what the columns do, because a control that misdescribes itself is worse
+// than no control.
 //
 // Deliberately EXTENDS /admin/health rather than adding a page: that surface
 // already reads the feed_health view (v264) and already owns "is the fleet
@@ -61,7 +65,7 @@ export function dispatchTargetFor(feedName: string): string | null {
 export interface FeedControlRow {
   slug: string;
   name: string | null;
-  /** false = switched off entirely; it will NOT come back on its own. */
+  /** false = failures never page. Says nothing about whether the feed runs. */
   enabled: boolean;
   mutedUntil: string | null;
   mutedReason: string | null;
@@ -69,7 +73,11 @@ export interface FeedControlRow {
   newRows7d: number;
   runs7d: number;
   /** Derived: what an operator should read at a glance. */
-  state: "ok" | "stale" | "muted" | "disabled" | "never-run";
+  state: "ok" | "stale" | "never-run" | "silenced" | "muted" | "retired";
+  /** No feed_health row — an inbound-email source or a retired scraper, not
+   *  something the fleet monitor watches. Keeps 47 non-scraper rows out of the
+   *  alarm zone (review finding 10). */
+  nonScraper: boolean;
   /** Dispatch input for a probe, or null when the workflow can't run it. */
   dispatchTarget: string | null;
 }
@@ -80,10 +88,12 @@ export function deriveState(row: {
   enabled: boolean;
   mutedUntil: string | null;
   hoursSinceSuccess: number | null;
+  /** A source the fleet monitor doesn't watch (no health row) — inbound-email
+   *  subscriptions and retired scrapers. `enabled=false` is NORMAL for these,
+   *  so flagging them red buries the two rows that actually need attention. */
+  nonScraper?: boolean;
 }): FeedControlRow["state"] {
-  // Order matters: "disabled" outranks everything because it is the state that
-  // never resolves itself, and it is the one the console previously hid.
-  if (!row.enabled) return "disabled";
+  if (!row.enabled) return row.nonScraper ? "retired" : "silenced";
   if (row.mutedUntil && new Date(row.mutedUntil).getTime() > Date.now()) return "muted";
   if (row.hoursSinceSuccess == null) return "never-run";
   return row.hoursSinceSuccess <= STALE_HOURS ? "ok" : "stale";
@@ -134,16 +144,22 @@ export async function getFeedControlRows(
       hoursSinceSuccess,
       newRows7d: Number(h.new_rows_7d ?? 0),
       runs7d: Number(h.runs_7d ?? 0),
-      state: deriveState({ enabled, mutedUntil, hoursSinceSuccess }),
+      state: deriveState({ enabled, mutedUntil, hoursSinceSuccess, nonScraper: false }),
+      nonScraper: false,
       dispatchTarget: dispatchTargetFor(slug),
     };
   });
 
-  // Feeds present in feed_sources but with no health row at all — the most
-  // invisible failure of the lot, so they are included rather than dropped.
+  // Sources with no feed_health row: inbound-email subscriptions and retired
+  // scrapers. Included so nothing is hidden, but classed `retired` rather than
+  // alarmed — 47 of 66 sources are legitimately enabled=false, and ranking them
+  // as problems buried the two rows that were real.
   for (const [slug, src] of sources) {
     if (rows.some((r) => r.slug === slug)) continue;
-    if (!src.enabled || src.muted_until) {
+    // No enabled/muted filter here: an ENABLED source with no health row is
+    // exactly the invisible case worth showing, and the earlier condition
+    // dropped it while the comment claimed otherwise.
+    {
       rows.push({
         slug,
         name: src.name,
@@ -153,18 +169,26 @@ export async function getFeedControlRows(
         hoursSinceSuccess: null,
         newRows7d: 0,
         runs7d: 0,
-        state: deriveState({ enabled: src.enabled, mutedUntil: src.muted_until, hoursSinceSuccess: null }),
+        state: deriveState({
+          enabled: src.enabled,
+          mutedUntil: src.muted_until,
+          hoursSinceSuccess: null,
+          nonScraper: true,
+        }),
+        nonScraper: true,
         dispatchTarget: dispatchTargetFor(slug),
       });
     }
   }
 
+  // Real problems first; normal states after; retired non-scrapers last.
   const rank: Record<FeedControlRow["state"], number> = {
-    disabled: 0,
-    stale: 1,
-    "never-run": 2,
+    stale: 0,
+    "never-run": 1,
+    silenced: 2,
     muted: 3,
     ok: 4,
+    retired: 5,
   };
   return rows.sort((a, b) => rank[a.state] - rank[b.state] || a.slug.localeCompare(b.slug));
 }

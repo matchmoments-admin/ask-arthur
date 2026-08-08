@@ -14,9 +14,17 @@ describe("deriveState", () => {
   const future = new Date(Date.now() + 86400_000).toISOString();
   const past = new Date(Date.now() - 86400_000).toISOString();
 
-  it("disabled outranks every other signal", () => {
-    expect(deriveState({ enabled: false, mutedUntil: null, hoursSinceSuccess: 1 })).toBe("disabled");
-    expect(deriveState({ enabled: false, mutedUntil: future, hoursSinceSuccess: null })).toBe("disabled");
+  it("a silenced scraper reads silenced, whatever else is true", () => {
+    expect(deriveState({ enabled: false, mutedUntil: null, hoursSinceSuccess: 1 })).toBe("silenced");
+    expect(deriveState({ enabled: false, mutedUntil: future, hoursSinceSuccess: null })).toBe("silenced");
+  });
+
+  it("a disabled NON-scraper reads retired, not alarmed", () => {
+    // 47 of 66 feed_sources rows are enabled=false — mostly inbound-email
+    // subscriptions. Alarming on those buries the rows that matter.
+    expect(
+      deriveState({ enabled: false, mutedUntil: null, hoursSinceSuccess: null, nonScraper: true }),
+    ).toBe("retired");
   });
 
   it("an in-force mute reads muted; a lapsed one does not", () => {

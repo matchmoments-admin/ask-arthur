@@ -34,7 +34,9 @@ export default async function HealthPage() {
   const feedRows = await getFeedControlRows(svc, loadErrors);
   // Kill switches (#951) — SQL-only until now, i.e. unavailable exactly when
   // an incident makes them urgent.
-  const brakeRows = await getBrakeRows(svc, loadErrors);
+  const brakeErrors: string[] = [];
+  const brakeRows = await getBrakeRows(svc, brakeErrors);
+  loadErrors.push(...brakeErrors);
 
   // Async Server Component: this function executes once per request, not on
   // every React render, so Date.now() here is deterministic for the response.
@@ -126,15 +128,19 @@ export default async function HealthPage() {
 
         <h3 className="mt-6 text-sm font-semibold">All feeds — state &amp; controls</h3>
         <p className="mt-1 text-xs text-slate-500">
-          Worst first. <strong>OFF</strong> means switched off entirely — unlike a
-          mute it has no expiry and will not resume on its own (that is how{" "}
-          <code>acsc</code> went dark unnoticed). Mute/unmute/enable write{" "}
-          <code>feed_sources</code>; Probe dispatches the scrape-feeds workflow.
+          Problems first. These controls govern <strong>alerting</strong>, not
+          scraping: <code>feed_sources.enabled</code> / <code>muted_until</code> are
+          read only by <code>check_scraper_failures.py</code> to decide whether a
+          failing feed pages you. Whether a feed <em>runs</em> is set per-step in{" "}
+          <code>scrape-feeds.yml</code>. &ldquo;Retired / not a scraper&rdquo; rows are
+          inbound-email sources and decommissioned feeds — normal, not alarms.
+          Probe dispatches the scrape-feeds workflow (needs a token with{" "}
+          <code>actions:write</code>; otherwise it hands you the <code>gh</code> command).
         </p>
         <FeedControls rows={feedRows} />
 
         <h3 className="mt-8 text-sm font-semibold">Kill switches (feature brakes)</h3>
-        <BrakeControls rows={brakeRows} />
+        <BrakeControls rows={brakeRows} loadFailed={brakeErrors.length > 0} />
       </section>
     </main>
   );
