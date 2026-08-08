@@ -1,6 +1,8 @@
 import { requireAdmin } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import FeedControls from "@/components/admin/FeedControls";
+import BrakeControls from "@/components/admin/BrakeControls";
+import { getBrakeRows } from "@/lib/dashboard/feature-brakes";
 import { getFeedControlRows } from "@/lib/dashboard/feed-controls";
 import {
   getQueueCounts,
@@ -30,6 +32,9 @@ export default async function HealthPage() {
   // Full feed roster + controls (#952). Read AFTER the stale summary above so
   // the alarm count keeps its existing meaning; this table is additive.
   const feedRows = await getFeedControlRows(svc, loadErrors);
+  // Kill switches (#951) — SQL-only until now, i.e. unavailable exactly when
+  // an incident makes them urgent.
+  const brakeRows = await getBrakeRows(svc, loadErrors);
 
   // Async Server Component: this function executes once per request, not on
   // every React render, so Date.now() here is deterministic for the response.
@@ -127,6 +132,9 @@ export default async function HealthPage() {
           <code>feed_sources</code>; Probe dispatches the scrape-feeds workflow.
         </p>
         <FeedControls rows={feedRows} />
+
+        <h3 className="mt-8 text-sm font-semibold">Kill switches (feature brakes)</h3>
+        <BrakeControls rows={brakeRows} />
       </section>
     </main>
   );
