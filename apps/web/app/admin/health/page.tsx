@@ -1,5 +1,7 @@
 import { requireAdmin } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
+import FeedControls from "@/components/admin/FeedControls";
+import { getFeedControlRows } from "@/lib/dashboard/feed-controls";
 import {
   getQueueCounts,
   getOldestPendingMinutes,
@@ -25,6 +27,9 @@ export default async function HealthPage() {
     getArchiveStats(svc, loadErrors),
     getStripeEventStats(svc, loadErrors),
   ]);
+  // Full feed roster + controls (#952). Read AFTER the stale summary above so
+  // the alarm count keeps its existing meaning; this table is additive.
+  const feedRows = await getFeedControlRows(svc, loadErrors);
 
   // Async Server Component: this function executes once per request, not on
   // every React render, so Date.now() here is deterministic for the response.
@@ -113,6 +118,15 @@ export default async function HealthPage() {
           that have never run), from the <code>feed_health</code> view —
           status derives from <code>hours_since_success</code> + muted state.
         </p>
+
+        <h3 className="mt-6 text-sm font-semibold">All feeds — state &amp; controls</h3>
+        <p className="mt-1 text-xs text-slate-500">
+          Worst first. <strong>OFF</strong> means switched off entirely — unlike a
+          mute it has no expiry and will not resume on its own (that is how{" "}
+          <code>acsc</code> went dark unnoticed). Mute/unmute/enable write{" "}
+          <code>feed_sources</code>; Probe dispatches the scrape-feeds workflow.
+        </p>
+        <FeedControls rows={feedRows} />
       </section>
     </main>
   );
