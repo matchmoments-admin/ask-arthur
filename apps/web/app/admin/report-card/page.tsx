@@ -369,26 +369,53 @@ function auRankPhrase(rank: number): string {
   return `the ${ord} most-targeted`;
 }
 
-/* ── 03 — super-fund spotlight (falls back to global brands if no fund) ───── */
+/* ── 03 — the month's spotlight, chosen by news value (v271 ladder) ─────────
+   Biggest MoM mover → first-time entrant → super fund → global brands, never
+   repeating last month's subject. The old category-only rule showed HESTA two
+   months running while Apple 42→85 and Google 21→54 went unmentioned. */
 function SlideSuperFund({ data, page }: SlideProps) {
-  const sf = data.superFund;
-  // No watchlisted super fund this month → show the global-brands slide in this
-  // slot instead (the "what it means" anatomy slide already holds position 5).
-  if (!sf) return <SlideGlobal data={data} page={page} />;
+  const sp = data.spotlight;
+  // Nothing individual qualified → the global-brands slide holds this slot.
+  if (sp.kind === "globals" || !sp.brand) return <SlideGlobal data={data} page={page} />;
   const period = data.periodLabel.toUpperCase();
-  const name = prettyBrand(sf.brand);
+  const name = prettyBrand(sp.brand);
+  const isFund = sp.kind === "super_fund";
+  const eyebrow =
+    sp.kind === "mover" ? "THE BIGGEST MOVER"
+    : sp.kind === "new_entrant" ? "NEW ON THE MAP"
+    : "THE SUPER-FUND ANGLE";
+  const rightTag =
+    sp.kind === "mover" ? `MOVER · ${period}`
+    : sp.kind === "new_entrant" ? `NEW ENTRANT · ${period}`
+    : `SUPER FUND · ${period}`;
+  const heading =
+    sp.kind === "mover" ? (
+      <>{name} lookalikes<br />more than {sp.priorClones && sp.clones >= sp.priorClones * 2 ? "doubled" : "jumped"}.</>
+    ) : sp.kind === "new_entrant" ? (
+      <>{name} appeared for<br />the first time.</>
+    ) : (
+      <>A super fund was {auRankPhrase(sp.auRank)}<br />Australian brand.</>
+    );
+  const lead =
+    sp.kind === "mover" ? (
+      <>Up from <b>{sp.priorClones} last month</b> to {sp.clones} — the sharpest single-brand rise we recorded. A spike like this usually means one actor registering in bulk.</>
+    ) : sp.kind === "new_entrant" ? (
+      <>Not on last month&rsquo;s map at all. A brand&rsquo;s first appearance is the moment its customers are least primed to expect a fake.</>
+    ) : (
+      <>Retirement savings are a front-line target now — <b>not just your bank login.</b> One super-fund password can open a lifetime of savings.</>
+    );
   return (
     <section className="slide">
       <div className="hdr">
-        <span className="l">THE SUPER-FUND ANGLE</span>
-        <span className="r">SUPER FUND · {period}</span>
+        <span className="l">{eyebrow}</span>
+        <span className="r">{rightTag}</span>
       </div>
-      <h2 className="h2b sf">A super fund was {auRankPhrase(sf.auRank)}<br />Australian brand.</h2>
+      <h2 className={`h2b${isFund ? " sf" : ""}`}>{heading}</h2>
       <div className="spotstat">
-        <span className="spotnum">{sf.clones}</span>
+        <span className="spotnum">{sp.clones}</span>
         <span className="spotname">{name}<span>lookalike domains · {data.periodLabel}</span></span>
       </div>
-      <p className="spotlead">Retirement savings are a front-line target now — <b>not just your bank login.</b> One super-fund password can open a lifetime of savings.</p>
+      <p className="spotlead">{lead}</p>
       <div className="note">Lookalike domains impersonating {name}; {name} is the targeted party, not the source. Detected, not all confirmed malicious.</div>
       <div className="foot rule2 bot">
         <div className="reg">Ranked among Australian (.au) brands by lookalike domains detected in {data.periodLabel}.</div>

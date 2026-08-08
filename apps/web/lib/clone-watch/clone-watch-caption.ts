@@ -1,6 +1,7 @@
 import type { CloneWatchReportCard } from "@/lib/clone-watch/report-card-data";
 import { buildOutcomesBlock } from "@/lib/clone-watch/outcome-copy";
 import { prettyBrand } from "@/lib/clone-watch/brand-display";
+import { pickFurtherReading } from "@/lib/clone-watch/further-reading";
 
 /**
  * Deterministic evidence-first LinkedIn caption for the monthly Clone Watch
@@ -115,15 +116,28 @@ export function generateCloneWatchCaption(
     );
   }
 
-  // Finding 2 — super-fund spotlight when a fund appears BUT isn't already the
-  // lead (keeps slide 3 + caption in lockstep); else a global-brands finding.
+  // Finding 2 — the month's spotlight, kept in lockstep with slide 3. The
+  // subject comes from the news-value ladder (mover → new entrant → super fund
+  // → globals) and never repeats last month's, so the series can't tell the
+  // same story twice (it did: HESTA led June AND July 2026).
   const globals = card.globalBrands.map((b) => ({ name: prettyBrand(b.brand), n: b.clones }));
-  if (card.superFund && !fundIsLead) {
-    const fund = prettyBrand(card.superFund.brand);
+  const sp = card.spotlight;
+  const spName = sp.brand ? prettyBrand(sp.brand) : null;
+  const spotlightIsLead = spName != null && au[0]?.name === spName;
+  if (sp.kind === "mover" && spName && !spotlightIsLead) {
+    const doubled = sp.priorClones != null && sp.priorClones > 0 && sp.clones >= sp.priorClones * 2;
     findings.push(
-      `It's not just shopping — or banking. ${fund}, an industry super fund, was ${rankPhrase(card.superFund.auRank)} Australian brand (${card.superFund.clones}). Retirement savings are a front-line target now; one super-fund login can open a lifetime of savings.`,
+      `${spName} was the month's sharpest riser — ${sp.priorClones} lookalike domains last month, ${sp.clones} this month${doubled ? ", more than double" : ""}. A jump like that usually means one actor registering in bulk, not steady background noise.`,
     );
-  } else if (!card.superFund && globals.length > 0) {
+  } else if (sp.kind === "new_entrant" && spName) {
+    findings.push(
+      `${spName} appeared on the map for the first time (${sp.clones} lookalike domains) — it wasn't targeted at all last month. A brand's first month is when its customers are least primed to expect a fake.`,
+    );
+  } else if (sp.kind === "super_fund" && spName && !fundIsLead) {
+    findings.push(
+      `It's not just shopping — or banking. ${spName}, an industry super fund, was ${rankPhrase(sp.auRank)} Australian brand (${sp.clones}). Retirement savings are a front-line target now; one super-fund login can open a lifetime of savings.`,
+    );
+  } else if (globals.length > 0) {
     const top = globals.slice(0, 3).map((b) => `${b.name} (${b.n})`);
     findings.push(
       `It's not just local brands. Global names were aimed at Australians too — ${joinAnd(top)} among the most-cloned.`,
@@ -148,7 +162,7 @@ export function generateCloneWatchCaption(
   // Optional standalone globals sentence (only if globals exist and weren't
   // already promoted into a finding by the no-super-fund branch).
   const globalsLine =
-    card.superFund && globals.length > 0
+    sp.kind !== "globals" && globals.length > 0
       ? `Global brands were aimed at Australians too — ${joinAnd(globals.slice(0, 3).map((b) => `${b.name} (${b.n})`))} among them.`
       : "";
 
@@ -191,12 +205,17 @@ export function generateCloneWatchCaption(
     .join("\n\n");
 
   // ── Hashtags (lead tag rotates on the standout) ───────────────────────────
-  const leadTag = card.superFund ? "#Superannuation" : "#FraudPrevention";
+  const leadTag = sp.kind === "super_fund" ? "#Superannuation" : "#FraudPrevention";
   const hashtags = ["#ScamAwareness", "#CyberSecurity", "#Australia", leadTag];
 
   // ── First comment (pasted by hand — the link never goes in the body) ──────
+  // Further reading rotates and, where possible, matches the month's lead story
+  // — so each edition teaches something and sends traffic to a different page
+  // instead of every month pointing at the same two links.
+  const reading = pickFurtherReading(sp.brand || au[0]?.name || null, card.periodMonth);
   const firstComment = [
     "Check any link, text or number yourself → https://askarthur.au (free, no signup).",
+    `${reading.label} → https://askarthur.au/blog/${reading.slug}`,
     methodUrl ? `How we count these → ${methodUrl}` : "",
     "Targeted brand and want your full clone list? Partner with us → https://askarthur.au/contact",
   ]

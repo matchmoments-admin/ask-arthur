@@ -38,6 +38,8 @@ export function summaryRow(
     global_brands: card.globalBrands,
     top_registrars: card.topRegistrars,
     super_fund: card.superFund,
+    // What slide 3 led with — read by NEXT month's ladder to block a repeat (v271).
+    spotlight: card.spotlight,
     mom: card.mom,
     // Cohort-windowed vendor-gap clock (v231 jsonb; includes excludedNegativeN
     // + asOf). Expected to differ from the rolling-window public RPC.

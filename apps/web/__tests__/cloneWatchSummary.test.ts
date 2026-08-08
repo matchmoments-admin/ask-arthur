@@ -32,6 +32,7 @@ const CARD: CloneWatchReportCard = {
     brandsDelta: 129,
   },
   superFund: { brand: "hesta.com.au", clones: 35, auRank: 2 },
+  spotlight: { kind: "globals" as const, brand: "", clones: 0, auRank: 0 },
   durations: {
     declineToWeaponise: { n: 1, medianHours: 30 },
     weaponiseToRefile: { n: 1, medianHours: 13 },
