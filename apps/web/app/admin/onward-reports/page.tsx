@@ -1,6 +1,7 @@
 import { requireAdmin } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import OnwardReportsDashboard from "./OnwardReportsDashboard";
+import QueryErrorBand from "@/components/admin/QueryErrorBand";
 
 interface ReviewRow {
   id: string;
@@ -31,13 +32,15 @@ interface SentStats {
  */
 async function loadSentStats(
   supabase: NonNullable<ReturnType<typeof createServiceClient>>,
+  loadErrors: string[],
 ): Promise<SentStats> {
   const stats: SentStats = { total: 0, last30d: 0, byDestination: {} };
-  const { data: sentRows } = await supabase
+  const { data: sentRows, error: qe1 } = await supabase
     .from("onward_report_log")
     .select("destination, sent_at")
     .eq("status", "sent")
     .limit(5000);
+  if (qe1 && qe1.code !== "PGRST116") loadErrors.push("sent reports");
   const cutoff = Date.now() - 30 * 86400000;
   for (const r of sentRows ?? []) {
     stats.total += 1;
@@ -52,17 +55,20 @@ async function loadSentStats(
 
 export default async function OnwardReportsPage() {
   await requireAdmin();
+
+  // #945: a failed query must never render as a healthy empty state.
+  const loadErrors: string[] = [];
   const supabase = createServiceClient();
   let manualReview: ReviewRow[] = [];
   let recent: ReviewRow[] = [];
   const sentStats = supabase
-    ? await loadSentStats(supabase)
+    ? await loadSentStats(supabase, loadErrors)
     : { total: 0, last30d: 0, byDestination: {} as Record<string, number> };
 
   if (supabase) {
 
     // Manual-review queue (held pending admin approval)
-    const { data: pending } = await supabase
+    const { data: pending, error: qe2 } = await supabase
       .from("onward_report_log")
       .select(
         `id, scam_report_id, destination, destination_key, status,
@@ -72,9 +78,10 @@ export default async function OnwardReportsPage() {
       .eq("status", "manual_review")
       .order("queued_at", { ascending: true })
       .limit(50);
+    if (qe2 && qe2.code !== "PGRST116") loadErrors.push("pending reports");
 
     // Recent activity for context (sent / failed / skipped, last 50)
-    const { data: recentRows } = await supabase
+    const { data: recentRows, error: qe3 } = await supabase
       .from("onward_report_log")
       .select(
         `id, scam_report_id, destination, destination_key, status,
@@ -84,6 +91,7 @@ export default async function OnwardReportsPage() {
       .neq("status", "manual_review")
       .order("queued_at", { ascending: false })
       .limit(50);
+    if (qe3 && qe3.code !== "PGRST116") loadErrors.push("recent reports");
 
     // Resolve brand contact + send count for each manual_review row
     const brandKeys = Array.from(
@@ -99,10 +107,11 @@ export default async function OnwardReportsPage() {
       { name: string; email: string | null; sent: number }
     >();
     if (brandKeys.length > 0) {
-      const { data: brandRows } = await supabase
+      const { data: brandRows, error: qe4 } = await supabase
         .from("known_brands")
         .select("brand_key, brand_name, security_contact_email")
         .in("brand_key", brandKeys);
+      if (qe4 && qe4.code !== "PGRST116") loadErrors.push("brands");
       for (const b of brandRows ?? []) {
         brandLookup.set(b.brand_key, {
           name: b.brand_name,
@@ -154,6 +163,7 @@ export default async function OnwardReportsPage() {
 
   return (
     <div className="max-w-5xl mx-auto px-5 py-8">
+      <QueryErrorBand errors={loadErrors} />
       <h1 className="text-deep-navy text-2xl font-extrabold mb-1">
         Onward reports — manual review
       </h1>

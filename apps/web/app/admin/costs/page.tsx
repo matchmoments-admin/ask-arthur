@@ -1,6 +1,7 @@
 import { requireAdmin } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import CostsDashboard from "./CostsDashboard";
+import QueryErrorBand from "@/components/admin/QueryErrorBand";
 
 export const dynamic = "force-dynamic";
 
@@ -24,27 +25,32 @@ function getNowMs(): number {
 export default async function CostsPage() {
   await requireAdmin();
 
+  // #945: a failed query must never render as a healthy empty state.
+  const loadErrors: string[] = [];
+
   const supabase = createServiceClient();
   let todayCostUsd = 0;
   let todayEventCount = 0;
   let daily: DailyRow[] = [];
 
   if (supabase) {
-    const { data: today } = await supabase
+    const { data: today, error: qe1 } = await supabase
       .from("today_cost_total")
       .select("total_cost_usd, event_count")
       .single();
+    if (qe1 && qe1.code !== "PGRST116") loadErrors.push("today's spend");
 
     todayCostUsd = Number(today?.total_cost_usd ?? 0);
     todayEventCount = Number(today?.event_count ?? 0);
 
     const thirtyDaysAgo = thirtyDaysAgoIsoDate();
 
-    const { data } = await supabase
+    const { data, error: qe2 } = await supabase
       .from("daily_cost_summary")
       .select("day, feature, provider, event_count, total_cost_usd, avg_cost_usd")
       .gte("day", thirtyDaysAgo)
       .order("day", { ascending: false });
+    if (qe2 && qe2.code !== "PGRST116") loadErrors.push("page data");
 
     daily = (data ?? []).map((r) => ({
       day: r.day as string,
@@ -109,6 +115,7 @@ export default async function CostsPage() {
 
   return (
     <div className="max-w-5xl mx-auto px-5 py-8">
+      <QueryErrorBand errors={loadErrors} />
       <h1 className="text-deep-navy text-xl font-extrabold mb-1">Cost telemetry</h1>
       <p className="text-gov-slate text-sm mb-6">
         Per-call AI / paid-API spend. Rows are written fire-and-forget by

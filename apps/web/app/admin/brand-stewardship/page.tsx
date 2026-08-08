@@ -1,6 +1,7 @@
 import { requireAdmin } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { readStringEnv } from "@askarthur/utils/env";
+import QueryErrorBand from "@/components/admin/QueryErrorBand";
 import BrandStewardshipDashboard, {
   type StewardshipRow,
 } from "./BrandStewardshipDashboard";
@@ -16,6 +17,9 @@ interface MetricsShape {
 
 export default async function BrandStewardshipPage() {
   await requireAdmin();
+
+  // #945: a failed query must never render as a healthy empty state.
+  const loadErrors: string[] = [];
   const supabase = createServiceClient();
   let rows: StewardshipRow[] = [];
 
@@ -26,7 +30,7 @@ export default async function BrandStewardshipPage() {
     // outreach to-do count was silently understated (123 actual vs ≤100
     // renderable — #941 finding 2). 1000 covers ~3 years at current volume;
     // revisit with per-period pagination before then.
-    const { data } = await supabase
+    const { data, error: qe1 } = await supabase
       .from("brand_stewardship_reports")
       .select(
         "id, brand_key, brand_name, period_month, metrics, recipient_email, status, status_reason, prepared_at, sent_at, share_token, outreach_done_at",
@@ -34,6 +38,7 @@ export default async function BrandStewardshipPage() {
       .order("period_month", { ascending: false })
       .order("prepared_at", { ascending: false })
       .limit(1000);
+    if (qe1 && qe1.code !== "PGRST116") loadErrors.push("page data");
 
     rows = (data ?? []).map((r) => {
       const m = (r.metrics ?? {}) as MetricsShape;
@@ -58,6 +63,7 @@ export default async function BrandStewardshipPage() {
 
   return (
     <div className="max-w-5xl mx-auto px-5 py-8">
+      <QueryErrorBand errors={loadErrors} />
       <h1 className="text-deep-navy text-2xl font-extrabold mb-1">
         Brand stewardship — monthly summaries
       </h1>

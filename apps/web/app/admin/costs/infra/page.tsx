@@ -12,6 +12,7 @@
 
 import { requireAdmin } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
+import QueryErrorBand from "@/components/admin/QueryErrorBand";
 
 export const dynamic = "force-dynamic";
 
@@ -94,17 +95,21 @@ function extractTopVercelServices(rows: InfraRow[]): VercelServicesBreakdown[] {
 export default async function InfraCostsPage() {
   await requireAdmin();
 
+  // #945: a failed query must never render as a healthy empty state.
+  const loadErrors: string[] = [];
+
   const supabase = createServiceClient();
   let rows: InfraRow[] = [];
 
   if (supabase) {
     const since = thirtyDaysAgoIsoDate();
-    const { data } = await supabase
+    const { data, error: qe1 } = await supabase
       .from("infra_cost_daily")
       .select("date, provider, usd_cents, ingested_at, raw_usage_jsonb")
       .gte("date", since)
       .order("date", { ascending: false })
       .order("provider", { ascending: true });
+    if (qe1 && qe1.code !== "PGRST116") loadErrors.push("page data");
     rows = (data ?? []) as InfraRow[];
   }
 
@@ -153,6 +158,7 @@ export default async function InfraCostsPage() {
 
   return (
     <div className="max-w-5xl mx-auto px-5 py-8">
+      <QueryErrorBand errors={loadErrors} />
       <h1 className="text-deep-navy text-xl font-extrabold mb-1">
         Infra cost rollup
       </h1>
