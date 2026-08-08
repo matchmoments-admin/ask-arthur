@@ -209,15 +209,30 @@ export async function verifyPost(opts: {
   postUrn: string;
   accessToken: string;
   authorUrn?: string;
+  /** Read-after-write retries. LinkedIn 404s a just-created post for a second
+   *  or two; without this the check cried wolf on a perfectly good post (seen
+   *  2026-08-08). Set 0 in tests to keep them instant. */
+  retries?: number;
+  retryDelayMs?: number;
 }): Promise<PostVerification> {
   const problems: string[] = [];
   const out: PostVerification = { ok: false, problems };
 
-  const res = await fetch(`${REST}/posts/${encodeURIComponent(opts.postUrn)}`, {
-    headers: jsonHeaders(opts.accessToken),
-  });
+  // Read-after-write is eventually consistent: retry a 404 before believing it.
+  const attempts = (opts.retries ?? 4) + 1;
+  const delay = opts.retryDelayMs ?? 3000;
+  let res!: Response;
+  for (let i = 0; i < attempts; i++) {
+    res = await fetch(`${REST}/posts/${encodeURIComponent(opts.postUrn)}`, {
+      headers: jsonHeaders(opts.accessToken),
+    });
+    if (res.status !== 404) break;
+    if (i < attempts - 1) await new Promise((r) => setTimeout(r, delay));
+  }
   if (!res.ok) {
-    problems.push(`post not readable back (HTTP ${res.status})`);
+    problems.push(
+      `post not readable back (HTTP ${res.status}${res.status === 404 ? ` after ${attempts} attempts` : ""})`,
+    );
     return out;
   }
   const post = (await res.json()) as {

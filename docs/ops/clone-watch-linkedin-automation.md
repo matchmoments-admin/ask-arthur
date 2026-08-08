@@ -9,6 +9,12 @@ Workflow: [`.github/workflows/clone-watch-linkedin.yml`](../../.github/workflows
 
 ## The monthly loop
 
+0. **You see the slides before you approve.** The `prepare` job sends the
+   rendered slide PNGs to Telegram as an album, plus the exact PDF that will be
+   posted, _before_ the approval gate. (Added 2026-08-09: previously the ping
+   carried only a caption preview and the carousel lived in a GitHub artifact
+   you had to download and unzip — so the approval was made without ever seeing
+   the images.)
 1. **`prepare` job** (cron ~2nd of month, or manual) renders the 7-slide carousel
    PDF against **prod** (`report-card:export --base=https://askarthur.au`) and
    generates the caption + first-comment from live data
