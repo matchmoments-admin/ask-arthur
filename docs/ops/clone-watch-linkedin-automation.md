@@ -24,8 +24,21 @@ Workflow: [`.github/workflows/clone-watch-linkedin.yml`](../../.github/workflows
    links straight to it). Nothing publishes without this.
 3. **`publish` job** publishes the document post to the Ask Arthur company page
    and pings Telegram with the post URL + the two manual steps.
-4. **You do the two things the API can't** (Community Management **Dev-Tier**):
-   paste the first comment (the link), and reshare from your personal profile.
+4. **You confirm it is actually visible, then do the two things the API can't**
+   (Community Management **Dev-Tier**): open the post URL and check it renders,
+   then paste the first comment (the link) and reshare from your personal profile.
+
+> [!WARNING]
+> **A successful publish is not proof the post is visible.** On 2026-08-07 the
+> July edition returned HTTP 201, read back as `PUBLISHED` / `PUBLIC` /
+> `MAIN_FEED` with an `AVAILABLE` document, appeared in the org's own post
+> listing — and still rendered "Post cannot be displayed" and never appeared in
+> Page posts. LinkedIn exposes **no member-visibility signal** at this tier
+> (`socialActions` is 403), so no automated check can close that gap.
+> `clone-watch-publish.ts` now re-reads the post and prints `VERIFY=ok|problems`
+> covering every field the API _can_ see, and the Telegram message leads with
+> "Step 0 — confirm it is visible". Treat green as necessary, never sufficient:
+> **eyeball the URL before you consider an edition published.**
 
 The durable per-month record (`clone_watch_report_summary`) is written
 separately by the `clone-watch-report-summary` Inngest cron (1st of month) — the
