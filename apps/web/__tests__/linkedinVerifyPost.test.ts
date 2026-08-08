@@ -46,7 +46,7 @@ describe("verifyPost", () => {
       doc: { status: "AVAILABLE" },
       listing: { elements: [{ id: POST }] },
     }));
-    const v = await verifyPost({ postUrn: POST, accessToken: "t", authorUrn: ORG });
+    const v = await verifyPost({ postUrn: POST, accessToken: "t", authorUrn: ORG, retries: 0 });
     expect(v.ok).toBe(true);
     expect(v.problems).toEqual([]);
     expect(v.inAuthorListing).toBe(true);
@@ -58,7 +58,7 @@ describe("verifyPost", () => {
       doc: { status: "AVAILABLE" },
       listing: { elements: [{ id: POST }] },
     }));
-    const v = await verifyPost({ postUrn: POST, accessToken: "t", authorUrn: ORG });
+    const v = await verifyPost({ postUrn: POST, accessToken: "t", authorUrn: ORG, retries: 0 });
     expect(v.ok).toBe(false);
     expect(v.problems.join(" ")).toMatch(/lifecycleState is DRAFT/);
   });
@@ -69,7 +69,7 @@ describe("verifyPost", () => {
       doc: { status: "PROCESSING" },
       listing: { elements: [{ id: POST }] },
     }));
-    const v = await verifyPost({ postUrn: POST, accessToken: "t", authorUrn: ORG });
+    const v = await verifyPost({ postUrn: POST, accessToken: "t", authorUrn: ORG, retries: 0 });
     expect(v.ok).toBe(false);
     expect(v.problems.join(" ")).toMatch(/document status is PROCESSING/);
   });
@@ -80,15 +80,39 @@ describe("verifyPost", () => {
       doc: { status: "AVAILABLE" },
       listing: { elements: [{ id: "urn:li:ugcPost:999" }] },
     }));
-    const v = await verifyPost({ postUrn: POST, accessToken: "t", authorUrn: ORG });
+    const v = await verifyPost({ postUrn: POST, accessToken: "t", authorUrn: ORG, retries: 0 });
     expect(v.ok).toBe(false);
     expect(v.problems.join(" ")).toMatch(/absent from the org's own recent-post listing/);
   });
 
   it("flags a post that can't be read back at all", async () => {
     vi.stubGlobal("fetch", mockFetch({ postStatus: 404 }));
-    const v = await verifyPost({ postUrn: POST, accessToken: "t", authorUrn: ORG });
+    const v = await verifyPost({ postUrn: POST, accessToken: "t", authorUrn: ORG, retries: 0 });
     expect(v.ok).toBe(false);
-    expect(v.problems.join(" ")).toMatch(/not readable back \(HTTP 404\)/);
+    expect(v.problems.join(" ")).toMatch(/not readable back \(HTTP 404 after 1 attempts\)/);
+  });
+});
+
+describe("verifyPost read-after-write", () => {
+  it("retries a 404 and succeeds once LinkedIn catches up", async () => {
+    let calls = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      const u = String(url);
+      if (u.includes("/documents/")) return { ok: true, status: 200, json: async () => ({ status: "AVAILABLE" }) };
+      if (u.includes("q=author")) return { ok: true, status: 200, json: async () => ({ elements: [{ id: POST }] }) };
+      calls += 1;
+      if (calls === 1) return { ok: false, status: 404, json: async () => ({}) };
+      return { ok: true, status: 200, json: async () => healthyPost };
+    }));
+    const v = await verifyPost({ postUrn: POST, accessToken: "t", authorUrn: ORG, retries: 2, retryDelayMs: 1 });
+    expect(calls).toBe(2);
+    expect(v.ok).toBe(true);
+  });
+
+  it("gives up after the retries and says so", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 404, json: async () => ({}) })));
+    const v = await verifyPost({ postUrn: POST, accessToken: "t", authorUrn: ORG, retries: 1, retryDelayMs: 1 });
+    expect(v.ok).toBe(false);
+    expect(v.problems[0]).toMatch(/after 2 attempts/);
   });
 });
