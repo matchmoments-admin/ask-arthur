@@ -23,6 +23,7 @@ export default async function CloneWatchAdminPage() {
 
   const supabase = createServiceClient();
   let pending: PendingAlert[] = [];
+  let pendingTotal = 0;
   let pendingBatches: PendingBatch[] = [];
   let weekly: WeeklySnapshot = EMPTY_WEEKLY;
   let brandBreakdown: BrandBreakdownRow[] = [];
@@ -75,6 +76,16 @@ export default async function CloneWatchAdminPage() {
     if (Array.isArray(pendingRes.data)) {
       pending = pendingRes.data as PendingAlert[];
     }
+    // True backlog, not the RPC page size. The KPI tile rendered
+    // pending.length — capped at p_limit=200, accurate at today's 149 and
+    // silently wrong above the cap (#945). The triage LIST stays paged; only
+    // the COUNT is exact.
+    const { count: pendingCountExact } = await supabase
+      .from("shopfront_clone_alerts")
+      .select("id", { count: "exact", head: true })
+      .eq("source", "nrd")
+      .eq("triage_status", "pending");
+    pendingTotal = pendingCountExact ?? pending.length;
     if (Array.isArray(weeklyRes.data) && weeklyRes.data[0]) {
       weekly = weeklyRes.data[0] as WeeklySnapshot;
     }
@@ -130,7 +141,7 @@ export default async function CloneWatchAdminPage() {
         </div>
       </div>
 
-      <WeeklyKpis snapshot={weekly} pendingCount={pending.length} />
+      <WeeklyKpis snapshot={weekly} pendingCount={pendingTotal} />
 
       <TakedownStatsRow stats={takedown} />
 
