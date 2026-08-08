@@ -532,18 +532,28 @@ export async function getCloneWatchReportCard(
   // the series can't tell the same story twice running.
   const MOVER_MIN_DELTA = 10; // ignore noise-level movement
   const ENTRANT_MIN_CLONES = 10; // a first-timer must be material to lead
+  // Both comparative rungs REQUIRE a fair prior month. Without this, a month
+  // with no comparable prior window (month one, or a data gap) makes
+  // priorClonesOf() return 0 for every brand — which disables the mover rung
+  // and makes EVERY brand look like a first-time entrant. The caption would
+  // then publish "wasn't targeted at all last month" directly above its own
+  // "This is month one" line (review finding 5).
   const priorClonesOf = (brand: string) => priorByBrand.get(brand)?.detected ?? 0;
   const notLastMonth = (brand: string) =>
     !priorSpotlightBrand || brand.toLowerCase() !== priorSpotlightBrand.toLowerCase();
 
-  const mover = auOrFund
-    .map((r) => ({ ...r, priorClones: priorClonesOf(r.brand), delta: r.clones - priorClonesOf(r.brand) }))
-    .filter((r) => r.priorClones > 0 && r.delta >= MOVER_MIN_DELTA && notLastMonth(r.brand))
-    .sort((a, b) => b.delta - a.delta)[0];
+  const mover = !momAvailable
+    ? undefined
+    : auOrFund
+        .map((r) => ({ ...r, priorClones: priorClonesOf(r.brand), delta: r.clones - priorClonesOf(r.brand) }))
+        .filter((r) => r.priorClones > 0 && r.delta >= MOVER_MIN_DELTA && notLastMonth(r.brand))
+        .sort((a, b) => b.delta - a.delta)[0];
 
-  const entrant = auOrFund
-    .filter((r) => priorClonesOf(r.brand) === 0 && r.clones >= ENTRANT_MIN_CLONES && notLastMonth(r.brand))
-    .sort((a, b) => b.clones - a.clones)[0];
+  const entrant = !momAvailable
+    ? undefined
+    : auOrFund
+        .filter((r) => priorClonesOf(r.brand) === 0 && r.clones >= ENTRANT_MIN_CLONES && notLastMonth(r.brand))
+        .sort((a, b) => b.clones - a.clones)[0];
 
   const rankOf = (brand: string) => auOrFund.findIndex((r) => r.brand === brand) + 1;
   const spotlight: Spotlight = mover

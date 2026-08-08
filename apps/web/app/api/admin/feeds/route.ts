@@ -80,10 +80,20 @@ export async function POST(req: NextRequest) {
     patch.muted_until = null;
     patch.muted_reason = null;
   } else if (action === "disable") {
+    // Indefinite by nature — that is the point of this action — but the reason
+    // is REQUIRED so the next reader isn't left guessing why alerts are off,
+    // which is precisely how acsc's silence became a mystery.
+    if (!reason) {
+      return NextResponse.json({ error: "reason_required_to_silence" }, { status: 400 });
+    }
     patch.enabled = false;
-    if (reason) patch.muted_reason = reason;
+    patch.muted_reason = reason;
   } else {
+    // Resuming clears BOTH silencing mechanisms and the stale reason, so the
+    // panel can't render an old explanation as if it were current.
     patch.enabled = true;
+    patch.muted_until = null;
+    patch.muted_reason = null;
   }
 
   const { data, error } = await sb

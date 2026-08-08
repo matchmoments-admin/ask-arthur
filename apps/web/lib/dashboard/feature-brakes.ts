@@ -18,11 +18,14 @@ import type { createServiceClient } from "@askarthur/supabase/server";
 type Svc = ReturnType<typeof createServiceClient>;
 
 /**
- * Every brake key a worker actually checks. Sourced by grepping
- * isFeatureBraked() call sites + the cost-daily-check cron's auto-pause keys,
- * so the panel can offer a brake for a feature that has never been braked
- * before (an empty table must not mean an empty console).
- * Kept in sync by featureBrakes.test.ts, which greps the same call sites.
+ * Every brake key a worker actually checks, across BOTH apps/web and packages/
+ * (the first version scanned only apps/web/app/api and so missed six live keys
+ * — phone_footprint, shop_signal, shop_signal_reviews, scam_report_embed,
+ * vuln_au_enrichment, shopfront_clone_watch — which meant the panel could not
+ * brake them on the day it mattered). Listed here so a never-braked feature is
+ * still offered: an empty feature_brakes table must not render as an empty
+ * console. featureBrakes.test.ts walks the whole repo and fails if code uses a
+ * key this list lacks.
  */
 export const KNOWN_BRAKE_KEYS = [
   "bot_analyze",
@@ -35,10 +38,16 @@ export const KNOWN_BRAKE_KEYS = [
   "monthly_intel_blog",
   "news_intel_embed",
   "onward_reporting",
+  "phone_footprint",
   "reddit_intel",
+  "scam_report_embed",
   "scam_contacts_twilio",
+  "shop_signal",
+  "shop_signal_reviews",
   "shopfront_clone_outreach",
   "shopfront_clone_recheck",
+  "shopfront_clone_watch",
+  "vuln_au_enrichment",
 ] as const;
 
 export interface BrakeRow {

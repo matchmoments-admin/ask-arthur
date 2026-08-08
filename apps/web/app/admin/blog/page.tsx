@@ -45,7 +45,8 @@ export default async function AdminBlogPage() {
     return <p className="p-8 text-gov-slate">Database not configured</p>;
   }
 
-  const [{ data: posts }, categories, { data: linkRows }] = await Promise.all([
+  const [{ data: posts, error: postsErr }, categories, { data: linkRows, error: linksErr }] =
+    await Promise.all([
     supabase
       .from("blog_posts")
       .select(
@@ -59,6 +60,14 @@ export default async function AdminBlogPage() {
       .order("sort_order", { ascending: true })
       .order("created_at", { ascending: true }),
   ]);
+
+  // These are the queries that actually render the page. The earlier sweep
+  // instrumented the one inside updatePost() — a SERVER ACTION, whose
+  // loadErrors is a deserialised copy that revalidatePath then discards, so
+  // the push could never reach the band. A failed blog_posts select was still
+  // rendering "No blog posts yet" on a green page (review finding 1).
+  if (postsErr) loadErrors.push("blog posts");
+  if (linksErr) loadErrors.push("further-reading links");
 
   const linksByPost = new Map<number, ExternalLinkRow[]>();
   for (const row of (linkRows as ExternalLinkRow[] | null) || []) {
@@ -109,12 +118,11 @@ export default async function AdminBlogPage() {
     // Set published_at when first published; scrub PII as a safety net
     if (status === "published") {
       updateData.published_at = new Date().toISOString();
-      const { data: post, error: qe1 } = await sb
+      const { data: post } = await sb
         .from("blog_posts")
         .select("content, title, excerpt")
         .eq("id", postId)
         .single();
-      if (qe1 && qe1.code !== "PGRST116") loadErrors.push("posts");
       if (post) {
         updateData.content = scrubPII(post.content || "");
         updateData.title = scrubPII(post.title || "");

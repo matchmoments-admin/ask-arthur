@@ -7,8 +7,13 @@
 // traffic to a different page instead of compounding on one.
 //
 // Deterministic and pure: same inputs → same link, so a caption regenerated for
-// an old month is stable. Slugs are checked by a drift test against the live
-// blog_posts table (any rename fails CI rather than shipping a 404).
+// an old month is stable.
+//
+// NOT verified against the live blog_posts table — the test only checks that
+// emitted slugs come from this file's own list, which is a tautology. All 8
+// were confirmed published by hand on 2026-08-09; a later rename would ship a
+// 404 into a LinkedIn first comment with CI green. Verify before each edition
+// (or wire a real check into the prepare job, which already talks to prod).
 
 export interface FurtherReading {
   slug: string;

@@ -24,6 +24,7 @@ export default async function CloneWatchAdminPage() {
   const supabase = createServiceClient();
   let pending: PendingAlert[] = [];
   let pendingTotal = 0;
+  let countFellBack = false;
   let pendingBatches: PendingBatch[] = [];
   let weekly: WeeklySnapshot = EMPTY_WEEKLY;
   let brandBreakdown: BrandBreakdownRow[] = [];
@@ -80,11 +81,14 @@ export default async function CloneWatchAdminPage() {
     // pending.length — capped at p_limit=200, accurate at today's 149 and
     // silently wrong above the cap (#945). The triage LIST stays paged; only
     // the COUNT is exact.
-    const { count: pendingCountExact } = await supabase
+    const { count: pendingCountExact, error: pendingCountErr } = await supabase
       .from("shopfront_clone_alerts")
       .select("id", { count: "exact", head: true })
       .eq("source", "nrd")
       .eq("triage_status", "pending");
+    // If the exact count fails we fall back to the capped list length — the
+    // very number this replaced — so say so rather than showing it silently.
+    if (pendingCountErr) countFellBack = true;
     pendingTotal = pendingCountExact ?? pending.length;
     if (Array.isArray(weeklyRes.data) && weeklyRes.data[0]) {
       weekly = weeklyRes.data[0] as WeeklySnapshot;
@@ -141,6 +145,12 @@ export default async function CloneWatchAdminPage() {
         </div>
       </div>
 
+      {countFellBack && (
+        <p className="mt-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          The exact backlog count failed to load — &ldquo;Awaiting triage&rdquo; below is the
+          capped list length (max 200), not the true total.
+        </p>
+      )}
       <WeeklyKpis snapshot={weekly} pendingCount={pendingTotal} />
 
       <TakedownStatsRow stats={takedown} />

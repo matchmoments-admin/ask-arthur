@@ -21,13 +21,20 @@ import { logger } from "@askarthur/utils/logger";
 
 const DOMAIN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
 
+/** v256's reserved "brands Arthur watches on its own evidence" org. Brands with
+ *  no paying customer belong here — NOT in Ask Arthur's operational org, which
+ *  is what an arbitrary organizations[0] pick produced. */
+export const HOUSE_ORG_ID = "00000000-0000-4000-8000-000000000001";
+
 const Body = z.object({
   orgId: z.string().uuid(),
   brandName: z.string().trim().min(2).max(120),
   /** Domains the brand legitimately owns — the exclusion list the matcher uses
    *  so a brand's OWN sites never surface as lookalikes of itself. */
   legitimateDomains: z.array(z.string().trim().toLowerCase()).min(1).max(20),
-  aliases: z.array(z.string().trim()).max(20).optional(),
+  // ≥5 chars per au-brand-watchlist.ts: a short alias becomes a false-positive
+  // engine once it enters the NRD lexical sweep.
+  aliases: z.array(z.string().trim().min(5)).max(20).optional(),
   plan: z.enum(["brand_pilot", "brand_monitor", "brand_monitor_plus", "brand_enterprise"]),
   verificationMethod: z.enum(["dns_txt", "email_domain", "manual"]).optional(),
 });
@@ -58,6 +65,27 @@ export async function POST(req: NextRequest) {
 
   const sb = createServiceClient();
   if (!sb) return NextResponse.json({ error: "store_unavailable" }, { status: 503 });
+
+  // A customer org must actually have members, or the v207 RLS read policy
+  // (membership via org_members) means the customer can never see the brand we
+  // just onboarded for them — it would be visible only to us. The house org is
+  // exempt by design: it has no members and isn't meant to.
+  if (orgId !== HOUSE_ORG_ID) {
+    const { count: memberCount } = await sb
+      .from("org_members")
+      .select("user_id", { count: "exact", head: true })
+      .eq("org_id", orgId);
+    if (!memberCount) {
+      return NextResponse.json(
+        {
+          error: "org_has_no_members",
+          detail:
+            "That org has no members, so its users could never read this brand (v207 RLS). Use the house org for brands with no customer yet.",
+        },
+        { status: 400 },
+      );
+    }
+  }
 
   const { data, error } = await sb
     .from("monitored_brands")
