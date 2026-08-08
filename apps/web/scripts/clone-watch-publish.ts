@@ -26,6 +26,7 @@ import {
   createDocumentPost,
   addComment,
   postUrl,
+  verifyPost,
 } from "../lib/linkedin/client";
 import { getCloneWatchReportCard } from "../lib/clone-watch/report-card-data";
 import { getPublishedUrn, upsertSummary } from "../lib/clone-watch/report-summary";
@@ -77,6 +78,27 @@ async function main() {
   console.log("RESULT=published");
   console.log(`URL=${postUrl(post)}`);
   console.log(`\n✓ PUBLISHED: ${postUrl(post)}  (urn ${post})`);
+
+  // ── 2b. Verify — read the post back rather than trusting the 201 ──────────
+  // A 201 means "LinkedIn accepted the request", NOT "the post is visible".
+  // The July 2026 edition proved the gap: 201 + every field healthy, and the
+  // post still rendered "Post cannot be displayed" and never appeared on the
+  // page. So we assert what the API CAN tell us, print VERIFY=..., and — pass
+  // or fail — always tell the operator to eyeball the URL, because member
+  // visibility is not observable at this API tier.
+  const v = await verifyPost({ postUrn: post, accessToken: token });
+  console.log(`VERIFY=${v.ok ? "ok" : "problems"}`);
+  console.log(
+    `  state=${v.lifecycleState ?? "?"} visibility=${v.visibility ?? "?"} ` +
+      `distribution=${v.feedDistribution ?? "?"} document=${v.documentStatus ?? "?"} ` +
+      `inAuthorListing=${v.inAuthorListing ?? "?"}`,
+  );
+  for (const p of v.problems) console.log(`  ⚠ ${p}`);
+  console.log(
+    "  NOTE: these checks cannot prove a member can SEE the post — LinkedIn exposes\n" +
+      "        no member-visibility signal at Development tier. Open the URL and confirm\n" +
+      "        it renders before treating this edition as published.",
+  );
 
   // ── 3. Write-back — record the URN (creates/refreshes the row from live data,
   //       so a re-run is guarded even if the monthly snapshot hasn't run) ──────

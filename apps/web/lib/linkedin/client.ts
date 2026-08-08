@@ -173,3 +173,110 @@ export function postUrl(postUrn: string): string {
   // e.g. urn:li:share:12345 -> https://www.linkedin.com/feed/update/urn:li:share:12345
   return `https://www.linkedin.com/feed/update/${postUrn}`;
 }
+
+export interface PostVerification {
+  ok: boolean;
+  /** Human-readable problems; empty when ok. */
+  problems: string[];
+  lifecycleState?: string;
+  visibility?: string;
+  feedDistribution?: string;
+  documentStatus?: string;
+  /** Did the post show up in the org's own author-listing? */
+  inAuthorListing?: boolean;
+}
+
+/**
+ * Re-read a just-published post and assert it is in the state we asked for.
+ *
+ * WHAT THIS CAN AND CANNOT PROVE — read before trusting a green result.
+ * It CAN catch: a post that failed to reach PUBLISHED, lost PUBLIC
+ * visibility or MAIN_FEED distribution, lost its document, has a document
+ * still PROCESSING or FAILED, or vanished from the org's own post list.
+ * It CANNOT prove a member actually sees the post in a feed: LinkedIn
+ * exposes no member-visibility signal at this tier (socialActions is
+ * 403 on Development tier), and a post can be API-healthy on every field
+ * while still being withheld from the UI.
+ *
+ * That is not hypothetical — it is why this function exists. The July 2026
+ * edition returned 201, read back PUBLISHED / PUBLIC / MAIN_FEED with an
+ * AVAILABLE document, appeared in the author-listing, and STILL rendered
+ * "Post cannot be displayed" and never appeared in the page's post list.
+ * So: a green verification is necessary, not sufficient — the caller must
+ * still tell a human to eyeball the URL.
+ */
+export async function verifyPost(opts: {
+  postUrn: string;
+  accessToken: string;
+  authorUrn?: string;
+}): Promise<PostVerification> {
+  const problems: string[] = [];
+  const out: PostVerification = { ok: false, problems };
+
+  const res = await fetch(`${REST}/posts/${encodeURIComponent(opts.postUrn)}`, {
+    headers: jsonHeaders(opts.accessToken),
+  });
+  if (!res.ok) {
+    problems.push(`post not readable back (HTTP ${res.status})`);
+    return out;
+  }
+  const post = (await res.json()) as {
+    lifecycleState?: string;
+    visibility?: string;
+    distribution?: { feedDistribution?: string };
+    content?: { media?: { id?: string } };
+  };
+
+  out.lifecycleState = post.lifecycleState;
+  out.visibility = post.visibility;
+  out.feedDistribution = post.distribution?.feedDistribution;
+  if (post.lifecycleState !== "PUBLISHED") {
+    problems.push(`lifecycleState is ${post.lifecycleState ?? "missing"}, expected PUBLISHED`);
+  }
+  if (post.visibility !== "PUBLIC") {
+    problems.push(`visibility is ${post.visibility ?? "missing"}, expected PUBLIC`);
+  }
+  if (post.distribution?.feedDistribution !== "MAIN_FEED") {
+    problems.push(
+      `feedDistribution is ${post.distribution?.feedDistribution ?? "missing"}, expected MAIN_FEED`,
+    );
+  }
+
+  // The attached document must be finished processing, or the carousel
+  // renders as a dead tile even on an otherwise-healthy post.
+  const documentUrn = post.content?.media?.id;
+  if (!documentUrn) {
+    problems.push("post has no attached document");
+  } else {
+    const dres = await fetch(`${REST}/documents/${encodeURIComponent(documentUrn)}`, {
+      headers: jsonHeaders(opts.accessToken),
+    });
+    if (!dres.ok) {
+      problems.push(`document not readable (HTTP ${dres.status})`);
+    } else {
+      const doc = (await dres.json()) as { status?: string };
+      out.documentStatus = doc.status;
+      if (doc.status !== "AVAILABLE") {
+        problems.push(`document status is ${doc.status ?? "missing"}, expected AVAILABLE`);
+      }
+    }
+  }
+
+  // Does the org's own post listing include it? Cheapest available proxy for
+  // "LinkedIn considers this a real post on the page".
+  const author = encodeURIComponent(opts.authorUrn ?? orgUrn());
+  const lres = await fetch(
+    `${REST}/posts?author=${author}&q=author&count=10&sortBy=LAST_MODIFIED`,
+    { headers: jsonHeaders(opts.accessToken) },
+  );
+  if (lres.ok) {
+    const list = (await lres.json()) as { elements?: Array<{ id?: string }> };
+    out.inAuthorListing = (list.elements ?? []).some((e) => e.id === opts.postUrn);
+    if (!out.inAuthorListing) problems.push("post absent from the org's own recent-post listing");
+  } else {
+    problems.push(`author listing not readable (HTTP ${lres.status}) — could not confirm presence`);
+  }
+
+  out.ok = problems.length === 0;
+  return out;
+}
