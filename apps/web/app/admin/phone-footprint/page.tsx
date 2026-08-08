@@ -18,6 +18,7 @@
 
 import { requireAdmin } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
+import QueryErrorBand from "@/components/admin/QueryErrorBand";
 
 export const dynamic = "force-dynamic";
 
@@ -67,6 +68,9 @@ function sevenDaysAgoIso(): string {
 export default async function AdminPhoneFootprint() {
   await requireAdmin();
 
+  // #945: a failed query must never render as a healthy empty state.
+  const loadErrors: string[] = [];
+
   const supa = createServiceClient();
   let metrics: MetricsRow[] = [];
   let costs: CostRow[] = [];
@@ -74,18 +78,20 @@ export default async function AdminPhoneFootprint() {
   let recent: RecentRow[] = [];
 
   if (supa) {
-    const { data: m } = await supa
+    const { data: m, error: qe1 } = await supa
       .from("v_phone_footprint_metrics")
       .select("*")
       .gte("day", thirtyDaysAgo())
       .order("day", { ascending: false });
+    if (qe1 && qe1.code !== "PGRST116") loadErrors.push("metrics");
     metrics = (m ?? []) as MetricsRow[];
 
-    const { data: c } = await supa
+    const { data: c, error: qe2 } = await supa
       .from("cost_telemetry")
       .select("created_at, provider, estimated_cost_usd")
       .eq("feature", "phone_footprint")
       .gte("created_at", sevenDaysAgoIso());
+    if (qe2 && qe2.code !== "PGRST116") loadErrors.push("provider costs");
 
     // Aggregate cost_telemetry rows to (day, provider).
     const byKey = new Map<string, CostRow>();
@@ -107,10 +113,11 @@ export default async function AdminPhoneFootprint() {
     }
     costs = [...byKey.values()].sort((a, b) => b.day.localeCompare(a.day));
 
-    const { data: t } = await supa
+    const { data: t, error: qe3 } = await supa
       .from("telco_api_usage")
       .select("provider, status, latency_ms")
       .gte("created_at", sevenDaysAgoIso());
+    if (qe3 && qe3.code !== "PGRST116") loadErrors.push("telco health");
 
     const tKey = new Map<string, { provider: string; status: string; count: number; latency_sum: number; latency_n: number }>();
     for (const r of t ?? []) {
@@ -138,11 +145,12 @@ export default async function AdminPhoneFootprint() {
       avg_latency_ms: x.latency_n > 0 ? Math.round(x.latency_sum / x.latency_n) : null,
     }));
 
-    const { data: r } = await supa
+    const { data: r, error: qe4 } = await supa
       .from("phone_footprints")
       .select("id, msisdn_e164, tier_generated, composite_score, band, providers_used, generated_at")
       .order("generated_at", { ascending: false })
       .limit(25);
+    if (qe4 && qe4.code !== "PGRST116") loadErrors.push("recent lookups");
     recent = (r ?? []) as RecentRow[];
   }
 
@@ -153,6 +161,7 @@ export default async function AdminPhoneFootprint() {
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-10">
+      <QueryErrorBand errors={loadErrors} />
       <header className="mb-8 flex items-end justify-between">
         <div>
           <p className="text-xs font-medium tracking-wider uppercase text-gray-500">

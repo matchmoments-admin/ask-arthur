@@ -7,6 +7,7 @@ import { getCategories } from "@/lib/blog";
 import { requireAdmin, isAdminRequest, COOKIE_NAME } from "@/lib/adminAuth";
 import { cookies } from "next/headers";
 import { logger } from "@askarthur/utils/logger";
+import QueryErrorBand from "@/components/admin/QueryErrorBand";
 
 // "Further reading" curation (blog_external_links, v227). Everything defaults
 // to nofollow per /blog/editorial-policy; origin records how the link arrived.
@@ -35,6 +36,9 @@ interface ExternalLinkRow {
 
 export default async function AdminBlogPage() {
   await requireAdmin();
+
+  // #945: a failed query must never render as a healthy empty state.
+  const loadErrors: string[] = [];
 
   const supabase = createServiceClient();
   if (!supabase) {
@@ -105,11 +109,12 @@ export default async function AdminBlogPage() {
     // Set published_at when first published; scrub PII as a safety net
     if (status === "published") {
       updateData.published_at = new Date().toISOString();
-      const { data: post } = await sb
+      const { data: post, error: qe1 } = await sb
         .from("blog_posts")
         .select("content, title, excerpt")
         .eq("id", postId)
         .single();
+      if (qe1 && qe1.code !== "PGRST116") loadErrors.push("posts");
       if (post) {
         updateData.content = scrubPII(post.content || "");
         updateData.title = scrubPII(post.title || "");
@@ -213,6 +218,7 @@ export default async function AdminBlogPage() {
 
   return (
     <div className="max-w-4xl mx-auto py-10 px-5">
+      <QueryErrorBand errors={loadErrors} />
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-deep-navy text-2xl font-bold">Blog Admin</h1>
         <form action={logout}>
