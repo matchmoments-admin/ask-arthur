@@ -90,6 +90,25 @@ export interface SuperFundSpotlight {
   auRank: number;
 }
 
+/** Which story earned slide 3 this month. The ladder exists because a
+ *  category-only rule repeats: HESTA was the top super fund in both June and
+ *  July 2026, so it took the spotlight twice while the month's actual news
+ *  (Apple 42→85, Google 21→54, two first-time entrants) went untold. */
+export type SpotlightKind = "mover" | "new_entrant" | "super_fund" | "globals";
+
+export interface Spotlight {
+  kind: SpotlightKind;
+  /** Domain of the spotlit brand; empty for the "globals" fallback. */
+  brand: string;
+  clones: number;
+  /** 1-based rank among AU brands + funds; 0 when not applicable. */
+  auRank: number;
+  /** Prior-month clone count — present for movers (0 for new entrants). */
+  priorClones?: number;
+  /** clones - priorClones, present for movers. */
+  delta?: number;
+}
+
 export interface MonthOverMonth {
   /** Whether a fair MoM comparison exists (both months fully tracked). When
    *  false, the card shows a baseline framing rather than a misleading delta. */
@@ -148,6 +167,9 @@ export interface CloneWatchReportCard {
    *  powers the "super fund" spotlight slide. null when no watchlisted fund
    *  appears this month (the slide falls back to the evergreen "why it works"). */
   superFund: SuperFundSpotlight | null;
+  /** Slide 3's subject, chosen by news value and never repeating last month's
+   *  (see SpotlightKind). Falls back to "globals" when nothing else qualifies. */
+  spotlight: Spotlight;
   /** The vendor-gap clock over THIS month's first_seen_at cohort. Cohort
    *  medians — expected to differ from the rolling-event-window
    *  clone_watch_vendor_gap_stats RPC that feeds the public panel. */
@@ -438,6 +460,25 @@ export async function getCloneWatchReportCard(
     prevWin.periodMonth,
   );
   const prior = totalsOf(priorByBrand);
+
+  // What did LAST month's edition actually spotlight? Read the persisted value
+  // so the no-repeat rule works off published history rather than a guess.
+  // Editions predating the `spotlight` column fall back to `super_fund`, which
+  // IS what those months showed on slide 3 — so no backfill is needed.
+  let priorSpotlightBrand: string | null = null;
+  try {
+    const { data: priorRow } = await sb
+      .from("clone_watch_report_summary")
+      .select("spotlight, super_fund")
+      .eq("period_month", prevWin.periodMonth)
+      .maybeSingle();
+    const sp = priorRow?.spotlight as { brand?: string } | null | undefined;
+    const sf = priorRow?.super_fund as { brand?: string } | null | undefined;
+    priorSpotlightBrand = sp?.brand ?? sf?.brand ?? null;
+  } catch {
+    // No prior row (or the column is missing on an older deploy) — the ladder
+    // simply runs without the no-repeat constraint this month.
+  }
   // Only a fair comparison when BOTH months are fully tracked (see
   // FIRST_FULL_MONTH); otherwise the card renders a baseline, not a delta.
   const momAvailable =
@@ -485,6 +526,41 @@ export async function getCloneWatchReportCard(
         }
       : null;
 
+  // ── Spotlight ladder (slide 3) ────────────────────────────────────────────
+  // Priority: biggest MoM mover → first-time entrant → super fund → globals.
+  // A candidate matching LAST month's spotlight is skipped at every rung, so
+  // the series can't tell the same story twice running.
+  const MOVER_MIN_DELTA = 10; // ignore noise-level movement
+  const ENTRANT_MIN_CLONES = 10; // a first-timer must be material to lead
+  const priorClonesOf = (brand: string) => priorByBrand.get(brand)?.detected ?? 0;
+  const notLastMonth = (brand: string) =>
+    !priorSpotlightBrand || brand.toLowerCase() !== priorSpotlightBrand.toLowerCase();
+
+  const mover = auOrFund
+    .map((r) => ({ ...r, priorClones: priorClonesOf(r.brand), delta: r.clones - priorClonesOf(r.brand) }))
+    .filter((r) => r.priorClones > 0 && r.delta >= MOVER_MIN_DELTA && notLastMonth(r.brand))
+    .sort((a, b) => b.delta - a.delta)[0];
+
+  const entrant = auOrFund
+    .filter((r) => priorClonesOf(r.brand) === 0 && r.clones >= ENTRANT_MIN_CLONES && notLastMonth(r.brand))
+    .sort((a, b) => b.clones - a.clones)[0];
+
+  const rankOf = (brand: string) => auOrFund.findIndex((r) => r.brand === brand) + 1;
+  const spotlight: Spotlight = mover
+    ? {
+        kind: "mover",
+        brand: mover.brand,
+        clones: mover.clones,
+        auRank: rankOf(mover.brand),
+        priorClones: mover.priorClones,
+        delta: mover.delta,
+      }
+    : entrant
+      ? { kind: "new_entrant", brand: entrant.brand, clones: entrant.clones, auRank: rankOf(entrant.brand), priorClones: 0 }
+      : superFund && notLastMonth(superFund.brand)
+        ? { kind: "super_fund", brand: superFund.brand, clones: superFund.clones, auRank: superFund.auRank }
+        : { kind: "globals", brand: "", clones: 0, auRank: 0 };
+
   return {
     periodMonth,
     periodLabel: label,
@@ -511,6 +587,7 @@ export async function getCloneWatchReportCard(
     unknownRegistrarCount: unknownCount,
     mom,
     superFund,
+    spotlight,
     // The vendor-gap clock + weaponisation cuts, computed over the SAME
     // FP-filtered cohort rows the aggregate came from (one fetch, no drift).
     durations: computeDurationKpis(rows),

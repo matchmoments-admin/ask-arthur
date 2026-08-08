@@ -53,6 +53,8 @@ const JUNE: CloneWatchReportCard = {
     brandsDelta: 129,
   },
   superFund: { brand: "hesta.com.au", clones: 35, auRank: 2 },
+  // June 2026 genuinely led with the fund — the ladder only blocks a REPEAT.
+  spotlight: { kind: "super_fund" as const, brand: "hesta.com.au", clones: 35, auRank: 2 },
   durations: {
     declineToWeaponise: { n: 0, medianHours: null },
     weaponiseToRefile: { n: 0, medianHours: null },
@@ -74,6 +76,7 @@ const JULY: CloneWatchReportCard = {
   periodLabel: "July 2026",
   total: 900,
   superFund: null,
+  spotlight: { kind: "globals" as const, brand: "", clones: 0, auRank: 0 },
   mom: {
     available: true,
     priorLabel: "June 2026",
@@ -141,6 +144,7 @@ describe("generateCloneWatchCaption", () => {
         { brand: "kmart.com.au", clones: 28 },
       ],
       superFund: { brand: "hesta.com.au", clones: 50, auRank: 1 },
+      spotlight: { kind: "globals" as const, brand: "", clones: 0, auRank: 0 },
     };
     const c = generateCloneWatchCaption(fundLeads);
     expect(c.body).toContain(
@@ -157,6 +161,7 @@ describe("generateCloneWatchCaption", () => {
     const only1: CloneWatchReportCard = {
       ...JUNE,
       superFund: null,
+      spotlight: { kind: "globals" as const, brand: "", clones: 0, auRank: 0 },
       globalBrands: [],
       topRegistrars: [],
     };
