@@ -4,7 +4,7 @@ import {
   type CloneWatchWeaponisedData,
 } from "@askarthur/scam-engine/inngest/events";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
-import { retrieveURLScan } from "@askarthur/scam-engine/urlscan";
+import { retrieveURLScanDetailed } from "@askarthur/scam-engine/urlscan";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
@@ -38,6 +38,11 @@ import {
 const RETRIEVE_BATCH_LIMIT = 40;
 const MIN_AGE_MINUTES = 10; // give urlscan time to finish before first poll
 const MAX_FAILURE_STREAK = 3;
+// Consecutive OUR-fault retrieval misses (5xx / timeout / parse) before one is
+// allowed to cost a failure-streak point. Bounds the skip: 3 misses x 3 streak
+// = 9 ticks (~27h) to evict, versus one unlucky window before v272 and never
+// after it. See migration-v274.
+const MAX_TRANSIENT_MISSES = 3;
 // Break the batch loop before the 5m Inngest finish budget so worst-case
 // external latency can't force a full-batch replay (leftovers drain next tick).
 const BATCH_WALL_CLOCK_MS = 200_000;
@@ -128,13 +133,60 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
       let classified = 0;
       let stillPending = 0;
       let reputationFallback = 0;
+      // Rows we did not read because the miss was OUR fault (quota/transient),
+      // not evidence about the URL. Counted, not silent.
+      let skippedNotOurSignal = 0;
+      let quotaExhausted = false;
 
-      for (const row of pending) {
+      for (const [idx, row] of pending.entries()) {
         if (Date.now() - batchStartMs > BATCH_WALL_CLOCK_MS) break;
         try {
           const reputation = reputationFromEvidence(row.urlscan_evidence);
-          const result = await retrieveURLScan(row.urlscan_uuid);
+          const retrieval = await retrieveURLScanDetailed(row.urlscan_uuid);
           const nowIso = new Date().toISOString();
+
+          // A 429 is OUR quota running out and a 5xx/timeout is urlscan being
+          // unhealthy — neither is evidence about this URL. Persisting a null
+          // classification here would bump urlscan_failure_streak, and three
+          // strikes drop the row out of BOTH worklists permanently. This lane
+          // runs 8x/day, so a single rate-limited window could strand a whole
+          // batch.
+          //
+          // A 429 is global to the API key, so the rest of the batch would 429
+          // too — stop, don't burn the remaining rows on calls we know will fail.
+          if (retrieval.kind === "quota_exhausted") {
+            skippedNotOurSignal += pending.length - idx;
+            quotaExhausted = true;
+            break;
+          }
+
+          // A transient miss leaves the verdict alone but MUST still be stamped.
+          // The worklist is ORDER BY urlscan_submitted_at ASC LIMIT 40 and is
+          // saturated on ~45% of runs, so a uuid that deterministically returns
+          // `transient` would keep its oldest submitted_at and re-present at the
+          // head forever, starving everything behind it — an unbounded skip is
+          // the worklist-gate-starvation trap, not a fix for it. v274 counts the
+          // miss in evidence without touching urlscan_scanned_at or the streak,
+          // and only escalates to the streak after MAX_TRANSIENT_MISSES.
+          if (retrieval.kind === "transient") {
+            skippedNotOurSignal++;
+            const miss = await sb.rpc(
+              "record_clone_alert_urlscan_transient_miss",
+              {
+                p_alert_id: row.id,
+                p_detail: retrieval.detail.slice(0, 200),
+                p_max_misses: MAX_TRANSIENT_MISSES,
+              },
+            );
+            if (miss.error) {
+              throw new Error(
+                `record_clone_alert_urlscan_transient_miss failed for alert ${row.id}: ${miss.error.message}`,
+              );
+            }
+            continue;
+          }
+
+          const result = retrieval.kind === "ready" ? retrieval.result : null;
 
           // Render ready → full classification (reputation merged in).
           if (result) {
@@ -211,10 +263,22 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
         }
       }
 
-      return { classified, stillPending, reputationFallback };
+      return {
+        classified,
+        stillPending,
+        reputationFallback,
+        skippedNotOurSignal,
+        quotaExhausted,
+      };
     });
 
-    const { classified, stillPending, reputationFallback } = batch;
+    const {
+      classified,
+      stillPending,
+      reputationFallback,
+      skippedNotOurSignal,
+      quotaExhausted,
+    } = batch;
 
     // Durable weaponised.v1 emission (the escalation seam — notify-weaponised +
     // enforcement-plan consume it). Driven from PERSISTED state, not the batch's
@@ -292,6 +356,8 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
           classified,
           still_pending: stillPending,
           reputation_fallback: reputationFallback,
+          skipped_not_our_signal: skippedNotOurSignal,
+          quota_exhausted: quotaExhausted,
         },
       });
     });
@@ -301,8 +367,36 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
       classified,
       stillPending,
       reputationFallback,
+      skippedNotOurSignal,
+      quotaExhausted,
     });
 
-    return { ok: true, classified, stillPending, reputationFallback };
+    // Rows we could not read because of OUR quota or urlscan's health, not the
+    // URL. Silent before this change — and each one used to cost a
+    // failure-streak strike toward permanent exclusion.
+    //
+    // NOTE ON DESTINATION: `logger` (packages/utils/src/logger.ts) is
+    // console-only — console.log/warn/error, no Axiom transport at ANY level.
+    // The 10%-INFO-sampling rule belongs to the separate axiom-logger.ts, which
+    // this file reaches only through the withAxiomLogging wrapper around the
+    // whole function. So this warn buys stderr visibility and nothing more;
+    // the durable signal is the cost_telemetry metadata written above, which is
+    // what the verification queries read. Do not describe it as "always-ship".
+    if (skippedNotOurSignal > 0) {
+      logger.warn("clone-watch urlscan retrieve: skipped on quota/transient", {
+        skipped: skippedNotOurSignal,
+        pending: pending.length,
+        quotaExhausted,
+      });
+    }
+
+    return {
+      ok: true,
+      classified,
+      stillPending,
+      reputationFallback,
+      skippedNotOurSignal,
+      quotaExhausted,
+    };
   }),
 );

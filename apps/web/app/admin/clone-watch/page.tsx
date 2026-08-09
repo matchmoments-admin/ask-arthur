@@ -33,6 +33,13 @@ export default async function CloneWatchAdminPage() {
   let brandBreakdown: BrandBreakdownRow[] = [];
   let takedown: TakedownStats = EMPTY_TAKEDOWN;
   let disputes: DisputeRow[] = [];
+  // Alerts no automated lane will retry (v272, union added v274). Null = not read.
+  let stranded: {
+    total: number;
+    streak: number;
+    submittedNoUuid: number;
+    uuidNoSubmittedAt: number;
+  } | null = null;
   let enforcementCases: EnforcementCase[] = [];
 
   if (supabase) {
@@ -83,6 +90,30 @@ export default async function CloneWatchAdminPage() {
       p_limit: 200,
       p_include_closed: false,
     });
+    // Nothing in the codebase read urlscan_failure_streak before v272 — no
+    // admin page, no digest, no log — so every previous instance of rows being
+    // permanently excluded from urlscan was found by a human querying prod.
+    const strandedRes = await supabase.rpc("clone_watch_urlscan_stranded_count", {
+      p_max_failure_streak: 3,
+    });
+    if (strandedRes.error) {
+      loadErrors.push("urlscan stranded count");
+    } else {
+      const row = Array.isArray(strandedRes.data) ? strandedRes.data[0] : null;
+      if (row) {
+        const r = row as Record<string, unknown>;
+        stranded = {
+          // The three shapes OVERLAP (a failed submit both leaves the uuid NULL
+          // and bumps the streak) — 534 vs a true union of 305 when this panel
+          // summed them. Read the union the RPC computes; never add these up.
+          total: Number(r.stranded_total ?? 0),
+          streak: Number(r.stranded_streak ?? 0),
+          submittedNoUuid: Number(r.stranded_submitted_no_uuid ?? 0),
+          uuidNoSubmittedAt: Number(r.stranded_uuid_no_submitted_at ?? 0),
+        };
+      }
+    }
+
     if (casesRes.error) loadErrors.push("enforcement cases");
     if (Array.isArray(casesRes.data)) {
       enforcementCases = casesRes.data as EnforcementCase[];
@@ -165,6 +196,25 @@ export default async function CloneWatchAdminPage() {
         <p className="mt-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
           The exact backlog count failed to load — &ldquo;Awaiting triage&rdquo; below is the
           capped list length (max 200), not the true total.
+        </p>
+      )}
+      {stranded && stranded.total > 0 && (
+        <p className="mt-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <b>
+            {stranded.total.toLocaleString()} candidate
+            {stranded.total === 1 ? "" : "s"} that no automated lane will retry
+          </b>{" "}
+          — they stay <code>unclassified</code>, counted as detections but never
+          reaching a verdict. The shapes below <em>overlap</em>; the headline is
+          their union, not their sum.{" "}
+          {stranded.uuidNoSubmittedAt.toLocaleString()} hold a scan id with no
+          submitted-at, which the retrieve gate&apos;s <code>NULL</code>{" "}
+          comparison hides from every lane;{" "}
+          {stranded.streak.toLocaleString()} are frozen at the failure-streak
+          cutoff (the recheck pool still retries most of these, so &ldquo;frozen&rdquo;
+          means frozen for submit and retrieve only); and{" "}
+          {stranded.submittedNoUuid.toLocaleString()} were stamped as submitted
+          with no scan id by a failed submit before v272.
         </p>
       )}
       <WeeklyKpis snapshot={weekly} pendingCount={pendingTotal} />
