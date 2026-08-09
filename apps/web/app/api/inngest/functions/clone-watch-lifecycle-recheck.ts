@@ -36,10 +36,20 @@ import { submitCloneCandidate } from "@/lib/clone-watch/urlscan-submit-one";
 
 const RECHECK_BATCH_LIMIT = 50; // × 4 runs/day = ≤200 rescans/day, bounded
 // F3: over-fetch the staleness-ordered pool, rank by weaponisation risk in TS
-// (ONE scorer — weaponisation-risk.ts), rescan the top 50. Unselected rows
-// keep their stale last_rechecked_at and rotate through on later runs
-// (staleness-ordered pool → no starvation; full ~800-row rotation ≈ 4 days).
+// (ONE scorer — weaponisation-risk.ts), rescan the top 50. Unselected rows keep
+// their stale last_rechecked_at and rotate through on later runs.
+//
+// That rotation does NOT happen on its own. This comment used to claim
+// "staleness-ordered pool → no starvation; full ~800-row rotation ≈ 4 days";
+// measured in prod 2026-08-09, 108 pool rows had never been rechecked at all and
+// 41 had gone >7.8 days. The pool is staleness-ordered but the SELECTION is
+// risk-ordered, so a persistently low-risk row is fetched every run and picked
+// never. selectTopRiskCandidates now reserves STALE_FLOOR_SHARE of each batch
+// for the stalest rows, which is what actually bounds the rotation.
 const RECHECK_FETCH_LIMIT = 200;
+// Share of each batch reserved for the stalest rows regardless of risk score.
+// 20% of 50 = 10 slots/run x 4 runs/day = 40 guaranteed rotations/day.
+const STALE_FLOOR_SHARE = 0.2;
 const RECHECK_CADENCE_HOURS = 6; // don't re-scan the same domain more often
 // Break the submit loop before the 8m finish budget so worst-case urlscan
 // latency can't force a full-batch re-POST; leftovers rotate next run.
@@ -68,14 +78,44 @@ interface RecheckRow {
   brand_category: string | null;
 }
 
-/** Rank the fetched pool: risk desc, then staleness (asc, nulls first), then
- *  id — deterministic. Exported for unit tests. */
+type ScoredRow = RecheckRow & { risk: number };
+
+/** Staleness ascending, nulls first, then id — the pool's own fetch order. */
+function byStaleness(a: ScoredRow, b: ScoredRow): number {
+  const ta = a.last_rechecked_at ? Date.parse(a.last_rechecked_at) : -Infinity;
+  const tb = b.last_rechecked_at ? Date.parse(b.last_rechecked_at) : -Infinity;
+  if (ta !== tb) return ta - tb;
+  return a.id - b.id;
+}
+
+/**
+ * Rank the fetched pool: risk desc, then staleness (asc, nulls first), then id —
+ * deterministic. Exported for unit tests.
+ *
+ * STARVATION FLOOR. Risk sorts BEFORE staleness, and the pool is over-fetched
+ * (RECHECK_FETCH_LIMIT rows ranked down to `limit`), so a persistently low-risk
+ * row is fetched every run and selected never. The original comment on
+ * RECHECK_FETCH_LIMIT asserted the opposite — "staleness-ordered pool → no
+ * starvation; full ~800-row rotation ≈ 4 days" — and prod disagreed: 108 pool
+ * rows had never been rechecked at all and 41 had gone more than 7.8 days,
+ * against a claimed 4-day full rotation.
+ *
+ * So a fixed share of each batch is reserved for the stalest rows regardless of
+ * risk. Every row therefore reaches the front of the staleness queue in bounded
+ * time, while the large majority of the batch still goes to the risk ranking the
+ * feature exists for. This is a floor, not a quota: if the risk-ranked selection
+ * already contains the stalest rows, the reserve costs nothing.
+ */
 export function selectTopRiskCandidates(
   rows: RecheckRow[],
   limit: number,
   nowMs: number,
-): Array<RecheckRow & { risk: number }> {
-  const scored = rows.map((r) => ({
+  // Proportional, deliberately NOT max(1, …): at a batch of 2 a one-slot reserve
+  // would be half the run. The floor is a production-scale device — it is 0 below
+  // a limit of 5 and 10 at the real batch size of 50.
+  staleFloor: number = Math.floor(limit * STALE_FLOOR_SHARE),
+): ScoredRow[] {
+  const scored: ScoredRow[] = rows.map((r) => ({
     ...r,
     risk: computeWeaponisationRisk({
       urlscanClassification: r.urlscan_classification,
@@ -91,14 +131,32 @@ export function selectTopRiskCandidates(
       nowMs,
     }).score,
   }));
-  scored.sort((a, b) => {
+
+  const byRisk = [...scored].sort((a, b) => {
     if (a.risk !== b.risk) return b.risk - a.risk;
-    const ta = a.last_rechecked_at ? Date.parse(a.last_rechecked_at) : -Infinity;
-    const tb = b.last_rechecked_at ? Date.parse(b.last_rechecked_at) : -Infinity;
-    if (ta !== tb) return ta - tb;
-    return a.id - b.id;
+    return byStaleness(a, b);
   });
-  return scored.slice(0, limit);
+
+  const floor = Math.min(Math.max(0, staleFloor), limit);
+  const chosen = new Map<number, ScoredRow>();
+  for (const r of byRisk.slice(0, Math.max(0, limit - floor))) chosen.set(r.id, r);
+  // Fill the reserve from the stalest end, then top back up from the risk order
+  // if the reserve overlapped what risk already picked.
+  for (const r of [...scored].sort(byStaleness)) {
+    if (chosen.size >= limit) break;
+    chosen.set(r.id, r);
+  }
+  for (const r of byRisk) {
+    if (chosen.size >= limit) break;
+    chosen.set(r.id, r);
+  }
+
+  // Return in risk order so the wall-clock guard spends the batch's early,
+  // guaranteed-to-run slots on the highest-risk candidates.
+  return [...chosen.values()].sort((a, b) => {
+    if (a.risk !== b.risk) return b.risk - a.risk;
+    return byStaleness(a, b);
+  });
 }
 
 export const cloneWatchLifecycleRecheck = inngest.createFunction(

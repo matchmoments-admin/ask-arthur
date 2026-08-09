@@ -204,4 +204,52 @@ describe("selectTopRiskCandidates (recheck ranking)", () => {
     const all = selectTopRiskCandidates(rows, 4, NOW);
     expect(all.map((r) => r.id)).toEqual([1, 4, 2, 3]);
   });
+
+  // The starvation floor. Risk sorts BEFORE staleness, so without a reserve a
+  // persistently low-risk row is fetched every run and selected never — measured
+  // in prod as 108 pool rows never rechecked and 41 unrevisited >7.8 days,
+  // against a code comment claiming a 4-day full rotation.
+  it("reserves a share of the batch for the stalest rows regardless of risk", () => {
+    // 20 high-risk rows that would otherwise monopolise every batch, plus one
+    // ancient low-risk row that never scores into the top 10.
+    const hot = Array.from({ length: 20 }, (_, i) =>
+      row(100 + i, {
+        urlscan_classification: "likely_phishing",
+        brand_category: "bank",
+        last_rechecked_at: "2026-08-09T00:00:00Z",
+      }),
+    );
+    const starved = row(1, { last_rechecked_at: "2026-05-01T00:00:00Z" });
+
+    // Without a floor this row is invisible at any batch size below the pool.
+    expect(
+      selectTopRiskCandidates([...hot, starved], 10, NOW, 0).map((r) => r.id),
+    ).not.toContain(1);
+
+    // With the production 20% share it is guaranteed a slot.
+    const withFloor = selectTopRiskCandidates([...hot, starved], 10, NOW);
+    expect(withFloor.map((r) => r.id)).toContain(1);
+    expect(withFloor).toHaveLength(10);
+    // The reserve costs exactly its share — the rest is still risk-ranked.
+    expect(withFloor.filter((r) => r.risk > 0)).not.toHaveLength(0);
+  });
+
+  it("the floor is proportional, so small batches keep pure risk order", () => {
+    const rows = [
+      row(1, { last_rechecked_at: "2026-05-01T00:00:00Z" }),
+      row(2, { urlscan_classification: "likely_phishing", brand_category: "bank" }),
+      row(3, { brand_category: "gov" }),
+    ];
+    // floor(2 * 0.2) === 0 — a one-slot reserve would be half of a 2-row batch.
+    expect(selectTopRiskCandidates(rows, 2, NOW).map((r) => r.id)).toEqual([2, 3]);
+  });
+
+  it("never returns duplicates when the reserve overlaps the risk selection", () => {
+    const rows = Array.from({ length: 30 }, (_, i) =>
+      row(i + 1, { last_rechecked_at: `2026-07-${String((i % 28) + 1).padStart(2, "0")}T00:00:00Z` }),
+    );
+    const picked = selectTopRiskCandidates(rows, 10, NOW);
+    expect(picked).toHaveLength(10);
+    expect(new Set(picked.map((r) => r.id)).size).toBe(10);
+  });
 });
