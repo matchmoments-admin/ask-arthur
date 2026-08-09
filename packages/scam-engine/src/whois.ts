@@ -10,8 +10,8 @@ export interface WhoisResult {
    *  contact. High-value for clone-watch / takedown workflows. */
   registrarAbuseEmail: string | null;
   registrantCountry: string | null;
-  createdDate: string | null;   // ISO date string (YYYY-MM-DD)
-  expiresDate: string | null;   // ISO date string (YYYY-MM-DD)
+  createdDate: string | null; // ISO date string (YYYY-MM-DD)
+  expiresDate: string | null; // ISO date string (YYYY-MM-DD)
   nameServers: string[];
   isPrivate: boolean;
   raw: Record<string, unknown> | null;
@@ -48,7 +48,7 @@ export async function lookupWhois(domain: string): Promise<WhoisResult> {
           Authorization: `TOKEN=${apiKey}`,
         },
         signal: AbortSignal.timeout(5000),
-      }
+      },
     );
 
     if (!res.ok) {
@@ -80,12 +80,17 @@ export async function lookupWhois(domain: string): Promise<WhoisResult> {
     // .email explicitly, with string + flat-field fallbacks for other providers.
     const reg = data.registrar;
     const registrar =
-      (reg && typeof reg === "object" ? reg.name : typeof reg === "string" ? reg : null) ??
+      (reg && typeof reg === "object"
+        ? reg.name
+        : typeof reg === "string"
+          ? reg
+          : null) ??
       data.registrar_name ??
       null;
     const registrarAbuseEmail =
-      (reg && typeof reg === "object" && typeof reg.email === "string" ? reg.email : null) ??
-      null;
+      (reg && typeof reg === "object" && typeof reg.email === "string"
+        ? reg.email
+        : null) ?? null;
 
     // Registrant country is usually redacted; check the parsed-contact shapes
     // whoisjson actually uses (contacts.owner[].country) before flat fallbacks.
@@ -100,16 +105,28 @@ export async function lookupWhois(domain: string): Promise<WhoisResult> {
       null;
 
     const createdDate = parseDate(
-      data.creation_date || data.created || data.created_date || data.registered
+      data.creation_date ||
+        data.created ||
+        data.created_date ||
+        data.registered,
     );
     const expiresDate = parseDate(
-      data.expiration_date || data.expires || data.registry_expiry_date || data.expires_date
+      data.expiration_date ||
+        data.expires ||
+        data.registry_expiry_date ||
+        data.expires_date,
     );
 
     // whoisjson uses `nameserver`; keep the other providers' field names too.
     const rawNameServers =
-      data.nameserver || data.name_servers || data.nameservers || data.name_server || [];
-    const nameServers = (Array.isArray(rawNameServers) ? rawNameServers : [rawNameServers])
+      data.nameserver ||
+      data.name_servers ||
+      data.nameservers ||
+      data.name_server ||
+      [];
+    const nameServers = (
+      Array.isArray(rawNameServers) ? rawNameServers : [rawNameServers]
+    )
       .filter(Boolean)
       .map((ns: string) => String(ns).toLowerCase());
 
@@ -125,7 +142,8 @@ export async function lookupWhois(domain: string): Promise<WhoisResult> {
     return {
       registrar: typeof registrar === "string" ? registrar : null,
       registrarAbuseEmail,
-      registrantCountry: typeof registrantCountry === "string" ? registrantCountry : null,
+      registrantCountry:
+        typeof registrantCountry === "string" ? registrantCountry : null,
       createdDate,
       expiresDate,
       nameServers,

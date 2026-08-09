@@ -9,7 +9,9 @@ import { ImageCheckEvidencePdf, type ImageCheckEvidence } from "./template";
 
 export type { ImageCheckEvidence };
 
-export async function renderEvidencePdf(evidence: ImageCheckEvidence): Promise<Buffer> {
+export async function renderEvidencePdf(
+  evidence: ImageCheckEvidence,
+): Promise<Buffer> {
   // Same cast rationale as phone-footprint/pdf/render.ts: the runtime root
   // is always a <Document>, but TS can't narrow a custom component to
   // ReactElement<DocumentProps>.

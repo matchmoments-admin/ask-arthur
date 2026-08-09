@@ -32,10 +32,7 @@ const GTLD_RESPONSE = {
     },
     {
       roles: ["registrant"],
-      vcardArray: [
-        "vcard",
-        [["country-name", {}, "text", "Russia"]],
-      ],
+      vcardArray: ["vcard", [["country-name", {}, "text", "Russia"]]],
     },
   ],
 };
@@ -59,7 +56,11 @@ describe("parseRdapResponse", () => {
 
   it("flags clientHold via the statuses array (registrar-suspended signal)", () => {
     const r = parseRdapResponse(GTLD_RESPONSE, "nab-login.shop");
-    expect(r.statuses.some((s) => s.replace(/\s+/g, "").toLowerCase() === "clienthold")).toBe(true);
+    expect(
+      r.statuses.some(
+        (s) => s.replace(/\s+/g, "").toLowerCase() === "clienthold",
+      ),
+    ).toBe(true);
   });
 
   it("degrades gracefully on a sparse/redacted response", () => {

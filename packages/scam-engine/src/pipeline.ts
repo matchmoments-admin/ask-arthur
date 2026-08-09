@@ -4,7 +4,10 @@ import { logger } from "@askarthur/utils/logger";
 // PII scrubbing is a pre-processing step, not storage logic — it lives in ./sanitize.
 import { scrubPII, scrubPhoneForStorage } from "./sanitize";
 
-type UploadScreenshotFn = (buffer: Buffer, contentType: string) => Promise<string | null>;
+type UploadScreenshotFn = (
+  buffer: Buffer,
+  contentType: string,
+) => Promise<string | null>;
 
 // Store a PII-scrubbed scam record for HIGH_RISK verdicts only.
 // Returns the inserted row ID (or null on error / no client).
@@ -12,7 +15,7 @@ export async function storeVerifiedScam(
   analysis: AnalysisResult,
   region: string | null,
   imagesBase64?: string[],
-  uploadScreenshot?: UploadScreenshotFn
+  uploadScreenshot?: UploadScreenshotFn,
 ): Promise<number | null> {
   try {
     const supabase = createServiceClient();
@@ -28,7 +31,9 @@ export async function storeVerifiedScam(
         try {
           const buffer = Buffer.from(imgBase64, "base64");
           if (buffer.length > 4 * 1024 * 1024) {
-            logger.info("Skipping R2 upload — decoded image exceeds 4MB", { size: buffer.length });
+            logger.info("Skipping R2 upload — decoded image exceeds 4MB", {
+              size: buffer.length,
+            });
             continue;
           }
           let contentType = "image/png";
@@ -38,11 +43,15 @@ export async function storeVerifiedScam(
           const key = await uploadScreenshot(buffer, contentType);
           if (key) screenshotKeys.push(key);
         } catch (err) {
-          logger.error("R2 upload failed (non-blocking)", { error: String(err) });
+          logger.error("R2 upload failed (non-blocking)", {
+            error: String(err),
+          });
         }
       }
       if (imagesBase64.length > 1) {
-        logger.info(`Uploaded ${screenshotKeys.length}/${imagesBase64.length} screenshots to R2`);
+        logger.info(
+          `Uploaded ${screenshotKeys.length}/${imagesBase64.length} screenshots to R2`,
+        );
       }
     } else {
       logger.info("HIGH_RISK verdict stored without screenshot");
@@ -51,16 +60,20 @@ export async function storeVerifiedScam(
     // Store first key in screenshot_key for backward compat
     const screenshotKey = screenshotKeys.length > 0 ? screenshotKeys[0] : null;
 
-    const { data, error } = await supabase.from("verified_scams").insert({
-      scam_type: analysis.scamType || "other",
-      channel: analysis.channel,
-      summary: scrubbedSummary,
-      red_flags: scrubbedFlags,
-      region,
-      confidence_score: analysis.confidence,
-      impersonated_brand: analysis.impersonatedBrand,
-      ...(screenshotKey && { screenshot_key: screenshotKey }),
-    }).select("id").single();
+    const { data, error } = await supabase
+      .from("verified_scams")
+      .insert({
+        scam_type: analysis.scamType || "other",
+        channel: analysis.channel,
+        summary: scrubbedSummary,
+        red_flags: scrubbedFlags,
+        region,
+        confidence_score: analysis.confidence,
+        impersonated_brand: analysis.impersonatedBrand,
+        ...(screenshotKey && { screenshot_key: screenshotKey }),
+      })
+      .select("id")
+      .single();
 
     if (error) {
       logger.error("verified_scams insert failed", {
@@ -80,7 +93,7 @@ export async function storeVerifiedScam(
 // Phase 2: Store phone lookup results for a media analysis (HIGH_RISK only)
 export async function storePhoneLookups(
   analysisId: string,
-  lookups: PhoneLookupResult[]
+  lookups: PhoneLookupResult[],
 ): Promise<void> {
   const supabase = createServiceClient();
   if (!supabase || lookups.length === 0) return;
@@ -112,7 +125,7 @@ export async function storePhoneLookups(
 // Increment daily check stats (fire-and-forget)
 export async function incrementStats(
   verdict: string,
-  region: string | null
+  region: string | null,
 ): Promise<void> {
   try {
     const supabase = createServiceClient();

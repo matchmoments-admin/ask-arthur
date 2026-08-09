@@ -54,7 +54,9 @@ interface CharityRowForEmbed {
 function buildEmbedText(row: CharityRowForEmbed): string {
   const parts = [row.charity_legal_name];
   if (row.other_names && row.other_names.length > 0) {
-    parts.push(row.other_names.filter((n) => n && n.trim().length > 0).join(" | "));
+    parts.push(
+      row.other_names.filter((n) => n && n.trim().length > 0).join(" | "),
+    );
   }
   // Hard cap the composite text at ~512 chars (~ 100 tokens) to avoid edge
   // cases where a charity has dozens of trading-name variants and the
@@ -102,152 +104,160 @@ export const acncCharityBackfillEmbed = inngest.createFunction(
     { cron: "0 4 * * *" }, // daily 04:00 UTC
     { event: ACNC_CHARITY_EMBED_BACKFILL_EVENT },
   ],
-  withAxiomLogging({ fnId: "acnc-charity-backfill-embed" }, async ({ step }) => {
-    // Tier 3 brake gap (enterprise-review P2, closed 2026-08-07): this fn
-    // spends on Voyage with logCost but never READ the charity_check brake
-    // that cost-daily-check engages — a brake nothing reads is scenery.
-    const braked = await step.run("brake-check", () =>
-      isFeatureBraked("charity_check"),
-    );
-    if (braked) {
-      return { skipped: true, reason: "feature_brakes.charity_check engaged" };
-    }
+  withAxiomLogging(
+    { fnId: "acnc-charity-backfill-embed" },
+    async ({ step }) => {
+      // Tier 3 brake gap (enterprise-review P2, closed 2026-08-07): this fn
+      // spends on Voyage with logCost but never READ the charity_check brake
+      // that cost-daily-check engages — a brake nothing reads is scenery.
+      const braked = await step.run("brake-check", () =>
+        isFeatureBraked("charity_check"),
+      );
+      if (braked) {
+        return {
+          skipped: true,
+          reason: "feature_brakes.charity_check engaged",
+        };
+      }
 
-    let totalEmbedded = 0;
-    let totalTokens = 0;
-    let totalCostUsd = 0;
-    let lastProvider = "";
-    let lastModelId = "";
+      let totalEmbedded = 0;
+      let totalTokens = 0;
+      let totalCostUsd = 0;
+      let lastProvider = "";
+      let lastModelId = "";
 
-    // Each batch runs as ONE step.run that loads + embeds + writes,
-    // returning only a small summary. Splitting into three steps caused
-    // InngestErrStateOverflowed at ~13 batches because every step output
-    // is persisted as JSON state for replay; each `embed-batch-N` step
-    // returned 200 vectors × 1024 floats ≈ 2.5 MB, hitting the 32 MB
-    // state cap. Folding into one step keeps the vectors inside the
-    // closure; the only output is a 4-field count/tokens summary.
-    //
-    // Trade-off: lose per-step retry granularity. That's fine — Voyage
-    // and Supabase failures are transient and a whole-batch retry is
-    // correct (the load-step is idempotent on `IS NULL`, the write-step
-    // is per-row keyed and idempotent on the `embedding IS NULL` filter
-    // of the next load).
-    for (let batchIdx = 0; batchIdx < MAX_BATCHES_PER_RUN; batchIdx++) {
-      const summary = await step.run(`batch-${batchIdx}`, async () => {
-        const supabase = createServiceClient();
-        if (!supabase) throw new Error("Supabase service client unavailable");
+      // Each batch runs as ONE step.run that loads + embeds + writes,
+      // returning only a small summary. Splitting into three steps caused
+      // InngestErrStateOverflowed at ~13 batches because every step output
+      // is persisted as JSON state for replay; each `embed-batch-N` step
+      // returned 200 vectors × 1024 floats ≈ 2.5 MB, hitting the 32 MB
+      // state cap. Folding into one step keeps the vectors inside the
+      // closure; the only output is a 4-field count/tokens summary.
+      //
+      // Trade-off: lose per-step retry granularity. That's fine — Voyage
+      // and Supabase failures are transient and a whole-batch retry is
+      // correct (the load-step is idempotent on `IS NULL`, the write-step
+      // is per-row keyed and idempotent on the `embedding IS NULL` filter
+      // of the next load).
+      for (let batchIdx = 0; batchIdx < MAX_BATCHES_PER_RUN; batchIdx++) {
+        const summary = await step.run(`batch-${batchIdx}`, async () => {
+          const supabase = createServiceClient();
+          if (!supabase) throw new Error("Supabase service client unavailable");
 
-        // v121: load via RPC that excludes charities already in the sibling
-        // embeddings table. Avoids the previous IS NULL filter on the
-        // parent column (which is being deprecated) and naturally excludes
-        // soft-deleted (is_delisted=true) charities.
-        const { data, error: loadErr } = await supabase.rpc(
-          "get_acnc_charities_missing_embedding",
-          { p_limit: BATCH_SIZE },
-        );
-
-        if (loadErr) {
-          throw new Error(`batch-${batchIdx} load failed: ${loadErr.message}`);
-        }
-        const rows = (data ?? []) as CharityRowForEmbed[];
-        if (rows.length === 0) {
-          return {
-            written: 0,
-            totalTokens: 0,
-            estimatedCostUsd: 0,
-            provider: "",
-            modelId: "",
-            rowsRequested: 0,
-          };
-        }
-
-        const texts = rows.map(buildEmbedText);
-        const result = await embed(texts, { domain: "generic" });
-
-        if (result.vectors.length !== rows.length) {
-          throw new Error(
-            `batch-${batchIdx} embed count mismatch: ${result.vectors.length} vectors for ${rows.length} rows`,
+          // v121: load via RPC that excludes charities already in the sibling
+          // embeddings table. Avoids the previous IS NULL filter on the
+          // parent column (which is being deprecated) and naturally excludes
+          // soft-deleted (is_delisted=true) charities.
+          const { data, error: loadErr } = await supabase.rpc(
+            "get_acnc_charities_missing_embedding",
+            { p_limit: BATCH_SIZE },
           );
-        }
 
-        // Write to the sibling table in SMALL upsert statements. A single
-        // 200-row statement timed out in prod on 2026-08-06 (Inngest run
-        // 01KZB51PR9P60V6EZZPJN4TYQT): the May backfill loaded 63k rows
-        // BEFORE v121 built idx_acnc_charity_embeddings_hnsw, but now every
-        // INSERT pays HNSW graph construction, and 200 vectors in one
-        // statement exceeds the pooler's statement timeout. 25 rows/statement
-        // keeps each write well under it; ON CONFLICT (charity_abn) DO
-        // UPDATE keeps chunk retries idempotent after a partial write.
-        const upsertRows = rows.map((row, i) => ({
-          charity_abn: row.abn,
-          embedding: vectorToPgString(result.vectors[i]),
-          model: result.modelId,
-          embedded_at: new Date().toISOString(),
-        }));
-        const WRITE_CHUNK = 25;
-        let written = 0;
-        for (let off = 0; off < upsertRows.length; off += WRITE_CHUNK) {
-          const chunk = upsertRows.slice(off, off + WRITE_CHUNK);
-          const { error: writeErr, count } = await supabase
-            .from("acnc_charity_embeddings")
-            .upsert(chunk, {
-              onConflict: "charity_abn",
-              count: "exact",
-            });
-          if (writeErr) {
+          if (loadErr) {
             throw new Error(
-              `batch-${batchIdx} sibling upsert failed at offset ${off}/${upsertRows.length}: ${writeErr.message}`,
+              `batch-${batchIdx} load failed: ${loadErr.message}`,
             );
           }
-          written += count ?? chunk.length;
-        }
+          const rows = (data ?? []) as CharityRowForEmbed[];
+          if (rows.length === 0) {
+            return {
+              written: 0,
+              totalTokens: 0,
+              estimatedCostUsd: 0,
+              provider: "",
+              modelId: "",
+              rowsRequested: 0,
+            };
+          }
 
-        return {
-          written,
-          totalTokens: result.totalTokens,
-          estimatedCostUsd: result.estimatedCostUsd,
-          provider: result.provider,
-          modelId: result.modelId,
-          rowsRequested: rows.length,
-        };
+          const texts = rows.map(buildEmbedText);
+          const result = await embed(texts, { domain: "generic" });
+
+          if (result.vectors.length !== rows.length) {
+            throw new Error(
+              `batch-${batchIdx} embed count mismatch: ${result.vectors.length} vectors for ${rows.length} rows`,
+            );
+          }
+
+          // Write to the sibling table in SMALL upsert statements. A single
+          // 200-row statement timed out in prod on 2026-08-06 (Inngest run
+          // 01KZB51PR9P60V6EZZPJN4TYQT): the May backfill loaded 63k rows
+          // BEFORE v121 built idx_acnc_charity_embeddings_hnsw, but now every
+          // INSERT pays HNSW graph construction, and 200 vectors in one
+          // statement exceeds the pooler's statement timeout. 25 rows/statement
+          // keeps each write well under it; ON CONFLICT (charity_abn) DO
+          // UPDATE keeps chunk retries idempotent after a partial write.
+          const upsertRows = rows.map((row, i) => ({
+            charity_abn: row.abn,
+            embedding: vectorToPgString(result.vectors[i]),
+            model: result.modelId,
+            embedded_at: new Date().toISOString(),
+          }));
+          const WRITE_CHUNK = 25;
+          let written = 0;
+          for (let off = 0; off < upsertRows.length; off += WRITE_CHUNK) {
+            const chunk = upsertRows.slice(off, off + WRITE_CHUNK);
+            const { error: writeErr, count } = await supabase
+              .from("acnc_charity_embeddings")
+              .upsert(chunk, {
+                onConflict: "charity_abn",
+                count: "exact",
+              });
+            if (writeErr) {
+              throw new Error(
+                `batch-${batchIdx} sibling upsert failed at offset ${off}/${upsertRows.length}: ${writeErr.message}`,
+              );
+            }
+            written += count ?? chunk.length;
+          }
+
+          return {
+            written,
+            totalTokens: result.totalTokens,
+            estimatedCostUsd: result.estimatedCostUsd,
+            provider: result.provider,
+            modelId: result.modelId,
+            rowsRequested: rows.length,
+          };
+        });
+
+        if (summary.rowsRequested === 0) break;
+
+        totalEmbedded += summary.written;
+        totalTokens += summary.totalTokens;
+        totalCostUsd += summary.estimatedCostUsd;
+        if (summary.provider) lastProvider = summary.provider;
+        if (summary.modelId) lastModelId = summary.modelId;
+
+        // Last batch was partial — no more rows to embed.
+        if (summary.rowsRequested < BATCH_SIZE) break;
+      }
+
+      if (totalEmbedded > 0) {
+        await step.run("log-cost", () =>
+          logCost({
+            estimatedCostUsd: totalCostUsd,
+            totalTokens: totalTokens,
+            provider: lastProvider,
+            modelId: lastModelId,
+            rowsEmbedded: totalEmbedded,
+          }),
+        );
+      }
+
+      logger.info("acnc-charity-backfill-embed: complete", {
+        rowsEmbedded: totalEmbedded,
+        totalTokens,
+        estimatedCostUsd: totalCostUsd.toFixed(6),
+        modelId: lastModelId,
       });
 
-      if (summary.rowsRequested === 0) break;
-
-      totalEmbedded += summary.written;
-      totalTokens += summary.totalTokens;
-      totalCostUsd += summary.estimatedCostUsd;
-      if (summary.provider) lastProvider = summary.provider;
-      if (summary.modelId) lastModelId = summary.modelId;
-
-      // Last batch was partial — no more rows to embed.
-      if (summary.rowsRequested < BATCH_SIZE) break;
-    }
-
-    if (totalEmbedded > 0) {
-      await step.run("log-cost", () =>
-        logCost({
-          estimatedCostUsd: totalCostUsd,
-          totalTokens: totalTokens,
-          provider: lastProvider,
-          modelId: lastModelId,
-          rowsEmbedded: totalEmbedded,
-        }),
-      );
-    }
-
-    logger.info("acnc-charity-backfill-embed: complete", {
-      rowsEmbedded: totalEmbedded,
-      totalTokens,
-      estimatedCostUsd: totalCostUsd.toFixed(6),
-      modelId: lastModelId,
-    });
-
-    return {
-      rowsEmbedded: totalEmbedded,
-      totalTokens,
-      estimatedCostUsd: totalCostUsd,
-      modelId: lastModelId,
-    };
-  }),
+      return {
+        rowsEmbedded: totalEmbedded,
+        totalTokens,
+        estimatedCostUsd: totalCostUsd,
+        modelId: lastModelId,
+      };
+    },
+  ),
 );

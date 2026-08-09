@@ -87,7 +87,10 @@ const MAX_ABR_BYTES = 1024 * 1024;
 let _redis: Redis | null = null;
 
 function getRedis(): Redis | null {
-  if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) {
+  if (
+    !process.env.UPSTASH_REDIS_REST_URL ||
+    !process.env.UPSTASH_REDIS_REST_TOKEN
+  ) {
     return null;
   }
   if (!_redis) {
@@ -126,12 +129,15 @@ export function extractCharityFields(xml: string): {
   taxConcessionCharity: boolean;
 } {
   // ACNC: status==='Registered' inside the <acncRegistration> block.
-  const acncBlock = xml.match(/<acncRegistration\b[\s\S]*?<\/acncRegistration>/i)?.[0] ?? "";
+  const acncBlock =
+    xml.match(/<acncRegistration\b[\s\S]*?<\/acncRegistration>/i)?.[0] ?? "";
   const isAcncRegistered = acncBlock
-    ? (extractTag(acncBlock, "status") ?? "").trim().toLowerCase() === "registered"
+    ? (extractTag(acncBlock, "status") ?? "").trim().toLowerCase() ===
+      "registered"
     : false;
 
-  const dgrBlocks = xml.match(/<dgrEndorsement\b[\s\S]*?<\/dgrEndorsement>/gi) ?? [];
+  const dgrBlocks =
+    xml.match(/<dgrEndorsement\b[\s\S]*?<\/dgrEndorsement>/gi) ?? [];
   let dgrEndorsed = false;
   let dgrItemNumber: string | null = null;
   let dgrEffectiveFrom: string | null = null;
@@ -142,18 +148,21 @@ export function extractCharityFields(xml: string): {
     const from = extractTag(block, "endorsedFrom");
     const to = extractTag(block, "endorsedTo");
     const itemNumber =
-      extractTag(block, "itemNumber") ??
-      extractTag(block, "endorsementType");
+      extractTag(block, "itemNumber") ?? extractTag(block, "endorsementType");
     // Active = endorsedFrom in past AND (endorsedTo absent OR in future).
     const startedActive = from && from <= today;
     const stillActive = !to || to >= today;
     if (startedActive && stillActive) {
       dgrEndorsed = true;
       if (!dgrItemNumber && itemNumber) dgrItemNumber = itemNumber;
-      if (!dgrEffectiveFrom || (from && from < dgrEffectiveFrom)) dgrEffectiveFrom = from;
+      if (!dgrEffectiveFrom || (from && from < dgrEffectiveFrom))
+        dgrEffectiveFrom = from;
       // For end date, NULL (open-ended) wins over any specific date.
       if (to === null || to === undefined) dgrEffectiveTo = null;
-      else if (dgrEffectiveTo !== null && (!dgrEffectiveTo || to > dgrEffectiveTo)) {
+      else if (
+        dgrEffectiveTo !== null &&
+        (!dgrEffectiveTo || to > dgrEffectiveTo)
+      ) {
         dgrEffectiveTo = to;
       }
     }
@@ -169,8 +178,9 @@ export function extractCharityFields(xml: string): {
 
   // Tax concession charity — simpler presence/status check.
   const tccBlock =
-    xml.match(/<taxConcessionCharityEndorsement\b[\s\S]*?<\/taxConcessionCharityEndorsement>/i)?.[0] ??
-    "";
+    xml.match(
+      /<taxConcessionCharityEndorsement\b[\s\S]*?<\/taxConcessionCharityEndorsement>/i,
+    )?.[0] ?? "";
   let taxConcessionCharity = false;
   if (tccBlock) {
     const from = extractTag(tccBlock, "endorsedFrom");
@@ -253,7 +263,9 @@ export async function lookupABN(
       const cached = await redis.get<ABNLookupResult>(cacheKey);
       if (cached) return cached;
     } catch (err) {
-      logger.error("Redis cache read failed for ABN lookup", { error: String(err) });
+      logger.error("Redis cache read failed for ABN lookup", {
+        error: String(err),
+      });
     }
   }
 
@@ -275,7 +287,9 @@ export async function lookupABN(
     });
 
     if (!response.ok) {
-      logger.error("ABR API returned non-OK status", { status: response.status });
+      logger.error("ABR API returned non-OK status", {
+        status: response.status,
+      });
       return { ok: false, reason: "lookup-failed" };
     }
 
@@ -329,9 +343,13 @@ export async function lookupABN(
     };
 
     if (redis) {
-      redis.set(cacheKey, result, { ex: CACHE_TTL }).catch((err) =>
-        logger.error("Redis cache write failed for ABN lookup", { error: String(err) }),
-      );
+      redis
+        .set(cacheKey, result, { ex: CACHE_TTL })
+        .catch((err) =>
+          logger.error("Redis cache write failed for ABN lookup", {
+            error: String(err),
+          }),
+        );
     }
 
     return result;

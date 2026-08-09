@@ -77,9 +77,13 @@ export async function getDomainCreatedDate(
 
       if (data?.whois_lookup_at) {
         const fresh =
-          Date.now() - new Date(data.whois_lookup_at).getTime() < CACHE_MAX_AGE_MS;
+          Date.now() - new Date(data.whois_lookup_at).getTime() <
+          CACHE_MAX_AGE_MS;
         if (fresh) {
-          return { createdDate: data.whois_created_date ?? null, source: "cache" };
+          return {
+            createdDate: data.whois_created_date ?? null,
+            source: "cache",
+          };
         }
       }
     } catch (err) {

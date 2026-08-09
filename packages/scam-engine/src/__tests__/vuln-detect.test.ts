@@ -110,7 +110,9 @@ describe("recordDetection — happy path", () => {
   });
 
   it("coerces NULL/undefined targetVersion to 'unknown' so the unique key dedupes", async () => {
-    createServiceClientMock.mockReturnValue(makeFakeClient({ vulnRow: { id: 1 } }));
+    createServiceClientMock.mockReturnValue(
+      makeFakeClient({ vulnRow: { id: 1 } }),
+    );
 
     await recordDetection({
       identifier: "CVE-2025-4144",
@@ -125,7 +127,9 @@ describe("recordDetection — happy path", () => {
   });
 
   it("caches identifier→id so a second call doesn't re-query vulnerabilities", async () => {
-    createServiceClientMock.mockReturnValue(makeFakeClient({ vulnRow: { id: 7 } }));
+    createServiceClientMock.mockReturnValue(
+      makeFakeClient({ vulnRow: { id: 7 } }),
+    );
 
     await recordDetection({
       identifier: "CVE-2025-6514",
@@ -173,14 +177,19 @@ describe("recordDetection — graceful skip paths", () => {
 
     expect(upsertMock).not.toHaveBeenCalled();
     expect(loggerMock.warn).toHaveBeenCalledTimes(1);
-    expect(loggerMock.warn.mock.calls[0][0]).toMatch(/identifier not in vulnerabilities/);
+    expect(loggerMock.warn.mock.calls[0][0]).toMatch(
+      /identifier not in vulnerabilities/,
+    );
   });
 });
 
 describe("recordDetection — error paths never throw", () => {
   it("logs and swallows errors when the lookup fails", async () => {
     createServiceClientMock.mockReturnValue(
-      makeFakeClient({ vulnRow: null, lookupError: { message: "connection reset" } })
+      makeFakeClient({
+        vulnRow: null,
+        lookupError: { message: "connection reset" },
+      }),
     );
 
     await expect(
@@ -189,7 +198,7 @@ describe("recordDetection — error paths never throw", () => {
         scanner: "mcp-audit",
         targetType: "npm_package",
         targetValue: "mcp-remote",
-      })
+      }),
     ).resolves.toBeUndefined();
 
     expect(upsertMock).not.toHaveBeenCalled();
@@ -198,7 +207,10 @@ describe("recordDetection — error paths never throw", () => {
 
   it("logs and swallows errors when the upsert fails", async () => {
     createServiceClientMock.mockReturnValue(
-      makeFakeClient({ vulnRow: { id: 1 }, upsertError: { message: "deadlock" } })
+      makeFakeClient({
+        vulnRow: { id: 1 },
+        upsertError: { message: "deadlock" },
+      }),
     );
 
     await expect(
@@ -207,7 +219,7 @@ describe("recordDetection — error paths never throw", () => {
         scanner: "mcp-audit",
         targetType: "npm_package",
         targetValue: "mcp-remote",
-      })
+      }),
     ).resolves.toBeUndefined();
 
     expect(loggerMock.error).toHaveBeenCalledTimes(1);
@@ -215,14 +227,19 @@ describe("recordDetection — error paths never throw", () => {
   });
 
   it("scrubs non-serializable evidence (BigInt) to {} and warns", async () => {
-    createServiceClientMock.mockReturnValue(makeFakeClient({ vulnRow: { id: 1 } }));
+    createServiceClientMock.mockReturnValue(
+      makeFakeClient({ vulnRow: { id: 1 } }),
+    );
 
     await recordDetection({
       identifier: "CVE-2025-6514",
       scanner: "mcp-audit",
       targetType: "npm_package",
       targetValue: "mcp-remote",
-      evidence: { huge: BigInt("9007199254740993") } as unknown as Record<string, unknown>,
+      evidence: { huge: BigInt("9007199254740993") } as unknown as Record<
+        string,
+        unknown
+      >,
     });
 
     expect(loggerMock.warn).toHaveBeenCalledTimes(1);

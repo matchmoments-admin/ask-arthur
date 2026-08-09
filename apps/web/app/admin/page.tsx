@@ -123,7 +123,10 @@ async function getTiles(
       .select("source")
       .like("source", "inbound_%")
       .gte("created_at", since7d)
-      .limit(2000),
+      // 1000 is PostgREST's hard ceiling; asking for more silently got 1000.
+      // This one only feeds a distinct-source Set of ~17 possible values, so
+      // one page is ample — but the number must not claim otherwise.
+      .limit(1000),
     svc
       .from("brand_impersonation_alerts")
       .select("id", { count: "exact", head: true })

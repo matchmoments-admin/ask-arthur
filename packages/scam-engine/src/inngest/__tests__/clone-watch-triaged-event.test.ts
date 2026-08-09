@@ -28,7 +28,9 @@ describe("parseCloneWatchTriagedData — triagedAt normalisation", () => {
   });
 
   it("accepts an ISO string with a +00:00 offset (the backfill shape) and normalises to Z", () => {
-    const out = parseCloneWatchTriagedData(base("2026-06-15T06:20:00.591+00:00"));
+    const out = parseCloneWatchTriagedData(
+      base("2026-06-15T06:20:00.591+00:00"),
+    );
     expect(out.triagedAt).toBe("2026-06-15T06:20:00.591Z");
   });
 

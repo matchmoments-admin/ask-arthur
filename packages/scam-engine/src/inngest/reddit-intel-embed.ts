@@ -28,7 +28,10 @@ import {
   parseRedditIntelSummarisedData,
 } from "./events";
 import { embed } from "../embeddings";
-import { logFunctionError, isRedditIntelBraked } from "./reddit-intel-error-log";
+import {
+  logFunctionError,
+  isRedditIntelBraked,
+} from "./reddit-intel-error-log";
 
 interface IntelRowForEmbed {
   id: string;
@@ -120,7 +123,9 @@ export const redditIntelEmbed = inngest.createFunction(
       // We don't have a cohort_date column on reddit_post_intel — joining
       // back via feed_items would be slow. Instead, key on processed_at
       // window: anything processed in the 24h around the cohort date.
-      const cohortStart = new Date(`${data.cohortDate}T00:00:00Z`).toISOString();
+      const cohortStart = new Date(
+        `${data.cohortDate}T00:00:00Z`,
+      ).toISOString();
       const cohortEnd = new Date(
         new Date(cohortStart).getTime() + 24 * 3600 * 1000,
       ).toISOString();

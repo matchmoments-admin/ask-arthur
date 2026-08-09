@@ -23,8 +23,12 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "service_unavailable" }, { status: 503 });
   }
 
-  const terminalCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const staleBlackHoleCutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+  const terminalCutoff = new Date(
+    Date.now() - 24 * 60 * 60 * 1000,
+  ).toISOString();
+  const staleBlackHoleCutoff = new Date(
+    Date.now() - 48 * 60 * 60 * 1000,
+  ).toISOString();
 
   try {
     const { count: terminalDeleted, error: termErr } = await supabase

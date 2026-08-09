@@ -67,7 +67,10 @@ describe("withAxiomLogging", () => {
 
 describe("withAxiomLogging — production-only cron guard", () => {
   const cronCtx = (): HandlerCtx =>
-    ({ event: { name: "inngest/scheduled.timer" }, runId: "run_c" }) as unknown as HandlerCtx;
+    ({
+      event: { name: "inngest/scheduled.timer" },
+      runId: "run_c",
+    }) as unknown as HandlerCtx;
 
   beforeEach(() => {
     delete process.env.FF_AXIOM_ENABLED;

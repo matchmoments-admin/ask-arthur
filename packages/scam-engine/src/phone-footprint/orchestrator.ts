@@ -11,7 +11,11 @@ import type {
   PillarId,
   Coverage,
 } from "./types";
-import { computeCompositeScore, initialCoverage, redactForFree } from "./scorer";
+import {
+  computeCompositeScore,
+  initialCoverage,
+  redactForFree,
+} from "./scorer";
 import { hashMsisdn } from "./normalize";
 import { explainFootprint } from "./explain";
 import { computeCarrierDrift } from "./providers/carrier-drift";
@@ -20,7 +24,11 @@ import { twilioProvider } from "./providers/twilio";
 import { ipqsProvider } from "./providers/ipqs";
 import { vonageProvider } from "./providers/vonage";
 import { leakcheckProvider } from "./providers/leakcheck";
-import { withTimeout, unavailablePillar, type ProviderContract } from "./provider-contract";
+import {
+  withTimeout,
+  unavailablePillar,
+  type ProviderContract,
+} from "./provider-contract";
 
 const BATCH_TIMEOUT_MS = 6000;
 const TEASER_TTL_MS = 24 * 3600 * 1000;
@@ -156,7 +164,10 @@ export async function buildPhoneFootprint(
   if (!providersUsed.includes("vonage") && coverage.vonage === "disabled") {
     coverage.vonage = "disabled";
   }
-  if (!providersUsed.includes("leakcheck-phone") && coverage.leakcheck === "disabled") {
+  if (
+    !providersUsed.includes("leakcheck-phone") &&
+    coverage.leakcheck === "disabled"
+  ) {
     coverage.leakcheck = "disabled";
   }
   if (!providersUsed.includes("ipqs-phone") && coverage.ipqs === "disabled") {
@@ -190,7 +201,12 @@ export async function buildPhoneFootprint(
       ? redactForFree(pillars)
       : pillars;
 
-  const ttl = ctx.tier === "teaser" ? TEASER_TTL_MS : ctx.tier === "basic" ? BASIC_TTL_MS : FULL_TTL_MS;
+  const ttl =
+    ctx.tier === "teaser"
+      ? TEASER_TTL_MS
+      : ctx.tier === "basic"
+        ? BASIC_TTL_MS
+        : FULL_TTL_MS;
   const baseFootprint: Footprint = {
     msisdn_e164: msisdn,
     msisdn_hash: msisdnHash,
@@ -228,7 +244,8 @@ export async function persistFootprint(
   const supa = createServiceClient();
   if (!supa) return null;
 
-  const tierGenerated = fp.tier === "teaser" ? "teaser" : fp.tier === "basic" ? "basic" : "full";
+  const tierGenerated =
+    fp.tier === "teaser" ? "teaser" : fp.tier === "basic" ? "basic" : "full";
   const { data, error } = await supa
     .from("phone_footprints")
     .insert({
@@ -252,7 +269,9 @@ export async function persistFootprint(
     .single();
 
   if (error) {
-    logger.warn("persistFootprint insert failed", { error: String(error.message) });
+    logger.warn("persistFootprint insert failed", {
+      error: String(error.message),
+    });
     return null;
   }
   return data?.id ?? null;
@@ -280,11 +299,18 @@ function stampCoverageForDown(coverage: Coverage, providerId: string) {
   }
 }
 
-function vonageCoverageFromReason(reason: string | undefined): Coverage["vonage"] {
+function vonageCoverageFromReason(
+  reason: string | undefined,
+): Coverage["vonage"] {
   if (!reason) return "degraded";
   if (reason === "vonage_disabled") return "disabled";
   if (reason.startsWith("camara_not_configured")) return "pending";
-  if (reason.includes("403") || reason.includes("404") || reason.includes("422") || reason.includes("409")) {
+  if (
+    reason.includes("403") ||
+    reason.includes("404") ||
+    reason.includes("422") ||
+    reason.includes("409")
+  ) {
     return "pending";
   }
   return "degraded";

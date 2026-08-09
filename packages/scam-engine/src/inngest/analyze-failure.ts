@@ -18,43 +18,47 @@ export const onAnalyzeFailed = inngest.createFunction(
     name: "Analyze: subscribe to function failures",
   },
   { event: "inngest/function.failed" },
-  withAxiomLogging({ fnId: "analyze-failure-subscriber" }, async ({ event }) => {
-    // The system event's data shape is:
-    // {
-    //   function_id: string,
-    //   run_id: string,
-    //   error: { name, message, stack },
-    //   event: <original event that triggered the failed fn>,
-    // }
-    const data = event.data as {
-      function_id?: string;
-      run_id?: string;
-      error?: { name?: string; message?: string; stack?: string };
-      event?: { name?: string; data?: Record<string, unknown> };
-    };
+  withAxiomLogging(
+    { fnId: "analyze-failure-subscriber" },
+    async ({ event }) => {
+      // The system event's data shape is:
+      // {
+      //   function_id: string,
+      //   run_id: string,
+      //   error: { name, message, stack },
+      //   event: <original event that triggered the failed fn>,
+      // }
+      const data = event.data as {
+        function_id?: string;
+        run_id?: string;
+        error?: { name?: string; message?: string; stack?: string };
+        event?: { name?: string; data?: Record<string, unknown> };
+      };
 
-    const fnId = data.function_id ?? "unknown";
-    if (!fnId.startsWith(ANALYZE_FUNCTION_ID_PREFIX)) {
-      // Out of scope — another subscriber can handle other function
-      // families. Returning early is cheaper than filtering server-side
-      // (Inngest doesn't have a prefix match in `event` filters).
-      return { filtered: true, fnId };
-    }
+      const fnId = data.function_id ?? "unknown";
+      if (!fnId.startsWith(ANALYZE_FUNCTION_ID_PREFIX)) {
+        // Out of scope — another subscriber can handle other function
+        // families. Returning early is cheaper than filtering server-side
+        // (Inngest doesn't have a prefix match in `event` filters).
+        return { filtered: true, fnId };
+      }
 
-    logger.error("analyze.function.failed", {
-      functionId: fnId,
-      runId: data.run_id,
-      errorName: data.error?.name,
-      errorMessage: data.error?.message,
-      // Log the triggering event's requestId so we can correlate the
-      // failure back to the original request without dumping PII.
-      triggeringRequestId:
-        (data.event?.data as { requestId?: string } | undefined)?.requestId,
-      triggeringEvent: data.event?.name,
-    });
+      logger.error("analyze.function.failed", {
+        functionId: fnId,
+        runId: data.run_id,
+        errorName: data.error?.name,
+        errorMessage: data.error?.message,
+        // Log the triggering event's requestId so we can correlate the
+        // failure back to the original request without dumping PII.
+        triggeringRequestId: (
+          data.event?.data as { requestId?: string } | undefined
+        )?.requestId,
+        triggeringEvent: data.event?.name,
+      });
 
-    // Phase 4b TODO: Sentry.captureException + Telegram admin ping here.
+      // Phase 4b TODO: Sentry.captureException + Telegram admin ping here.
 
-    return { logged: true, fnId };
-  })
+      return { logged: true, fnId };
+    },
+  ),
 );

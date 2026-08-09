@@ -18,7 +18,11 @@ export const dynamic = "force-dynamic";
  *
  * No-op today (onward_report_log is empty until the onward flags are flipped).
  */
-const CHUNK = 5000;
+// PostgREST caps a response at 1000 rows, so a CHUNK above that made the loop's
+// `batch.length < CHUNK` terminator true on the very first page — the sweep
+// exited after 1000 rows while its MAX_ITERATIONS ceiling implied far more.
+// At the real page size the loop actually iterates.
+const CHUNK = 1000;
 const MAX_ITERATIONS = 50; // 250K-row safety ceiling
 
 export async function GET(req: Request) {
@@ -41,7 +45,9 @@ export async function GET(req: Request) {
       .lt("retention_expires_at", nowIso)
       .limit(CHUNK);
     if (selErr) {
-      logger.error("onward-retention: select failed", { error: selErr.message });
+      logger.error("onward-retention: select failed", {
+        error: selErr.message,
+      });
       return NextResponse.json({ error: "select_failed" }, { status: 500 });
     }
     const batch = (ids ?? []).map((r) => r.id as string);
@@ -52,7 +58,9 @@ export async function GET(req: Request) {
       .delete()
       .in("id", batch);
     if (delErr) {
-      logger.error("onward-retention: delete failed", { error: delErr.message });
+      logger.error("onward-retention: delete failed", {
+        error: delErr.message,
+      });
       return NextResponse.json({ error: "delete_failed" }, { status: 500 });
     }
     purged += batch.length;

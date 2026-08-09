@@ -42,9 +42,9 @@ describe("submitURLScanWithDetails", () => {
   });
 
   it("returns { ok: false, error: 'rate_limited', status: 429 } on 429", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response("Too Many Requests", { status: 429 }),
-    );
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(new Response("Too Many Requests", { status: 429 }));
     const result = await submitURLScanWithDetails("https://example.com");
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -59,7 +59,9 @@ describe("submitURLScanWithDetails", () => {
         status: 400,
       }),
     );
-    const result = await submitURLScanWithDetails("https://westpachomesb.info/");
+    const result = await submitURLScanWithDetails(
+      "https://westpachomesb.info/",
+    );
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error).toBe("rejected");
@@ -69,9 +71,11 @@ describe("submitURLScanWithDetails", () => {
   });
 
   it("returns { ok: false, error: 'http_error', status } on other 5xx", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response("Internal Server Error", { status: 503 }),
-    );
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response("Internal Server Error", { status: 503 }),
+      );
     const result = await submitURLScanWithDetails("https://example.com");
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -81,18 +85,20 @@ describe("submitURLScanWithDetails", () => {
   });
 
   it("returns { ok: false, error: 'network_error' } on fetch throw", async () => {
-    globalThis.fetch = vi.fn().mockRejectedValue(
-      new TypeError("getaddrinfo ENOTFOUND"),
-    );
+    globalThis.fetch = vi
+      .fn()
+      .mockRejectedValue(new TypeError("getaddrinfo ENOTFOUND"));
     const result = await submitURLScanWithDetails("https://example.com");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toBe("network_error");
   });
 
   it("returns { ok: false, error: 'timeout' } on AbortError", async () => {
-    globalThis.fetch = vi.fn().mockRejectedValue(
-      Object.assign(new Error("aborted"), { name: "AbortError" }),
-    );
+    globalThis.fetch = vi
+      .fn()
+      .mockRejectedValue(
+        Object.assign(new Error("aborted"), { name: "AbortError" }),
+      );
     const result = await submitURLScanWithDetails("https://example.com");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toBe("timeout");
@@ -100,9 +106,9 @@ describe("submitURLScanWithDetails", () => {
 
   it("truncates oversized error bodies to 500 chars", async () => {
     const longBody = "x".repeat(2000);
-    globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(longBody, { status: 400 }),
-    );
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(new Response(longBody, { status: 400 }));
     const result = await submitURLScanWithDetails("https://example.com");
     expect(result.ok).toBe(false);
     if (!result.ok) {

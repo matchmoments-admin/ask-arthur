@@ -38,8 +38,17 @@ describe("searchURLScan", () => {
       json: async () => ({
         total: 2,
         results: [
-          { page: { domain: "a.shop", url: "https://a.shop/" }, task: { time: "2026-07-16T00:00:00Z" } },
-          { task: { domain: "b.shop", url: "https://b.shop/", time: "2026-07-15T00:00:00Z" } },
+          {
+            page: { domain: "a.shop", url: "https://a.shop/" },
+            task: { time: "2026-07-16T00:00:00Z" },
+          },
+          {
+            task: {
+              domain: "b.shop",
+              url: "https://b.shop/",
+              time: "2026-07-15T00:00:00Z",
+            },
+          },
         ],
       }),
     }) as unknown as typeof fetch;
@@ -48,8 +57,16 @@ describe("searchURLScan", () => {
     if (r.ok) {
       expect(r.total).toBe(2);
       expect(r.results).toEqual([
-        { domain: "a.shop", url: "https://a.shop/", lastSeen: "2026-07-16T00:00:00Z" },
-        { domain: "b.shop", url: "https://b.shop/", lastSeen: "2026-07-15T00:00:00Z" },
+        {
+          domain: "a.shop",
+          url: "https://a.shop/",
+          lastSeen: "2026-07-16T00:00:00Z",
+        },
+        {
+          domain: "b.shop",
+          url: "https://b.shop/",
+          lastSeen: "2026-07-15T00:00:00Z",
+        },
       ]);
     }
   });

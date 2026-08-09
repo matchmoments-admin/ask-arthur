@@ -79,9 +79,9 @@ describe("buildRegistryDomainUrl", () => {
   });
 
   it("tolerates a base without a trailing slash", () => {
-    expect(buildRegistryDomainUrl("https://rdap.nic.hamburg/v1", "y.hamburg")).toBe(
-      "https://rdap.nic.hamburg/v1/domain/y.hamburg",
-    );
+    expect(
+      buildRegistryDomainUrl("https://rdap.nic.hamburg/v1", "y.hamburg"),
+    ).toBe("https://rdap.nic.hamburg/v1/domain/y.hamburg");
   });
 
   it("encodes the domain", () => {

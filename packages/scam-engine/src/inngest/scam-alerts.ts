@@ -4,6 +4,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { sendPushNotifications, buildScamAlertMessage } from "../push-sender";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
+import { fetchAllRows } from "@askarthur/supabase/paginate";
 
 /**
  * Scam alert push system (B2).
@@ -68,7 +69,9 @@ export const scamAlertCron = inngest.createFunction(
 
       const parts: string[] = [];
       for (const [type, count] of types) {
-        parts.push(`${count} new ${type.toLowerCase()} scam${count > 1 ? "s" : ""}`);
+        parts.push(
+          `${count} new ${type.toLowerCase()} scam${count > 1 ? "s" : ""}`,
+        );
       }
 
       return parts.join(", ") + " detected in Australia. Stay vigilant!";
@@ -76,18 +79,28 @@ export const scamAlertCron = inngest.createFunction(
 
     // Step 3: Fetch active push tokens
     const tokens = await step.run("fetch-tokens", async () => {
-      const { data, error } = await supabase
-        .from("device_push_tokens")
-        .select("expo_token")
-        .eq("active", true)
-        .limit(10000);
+      // Paged: `.limit(10000)` returned at most 1000 tokens, so past 1000
+      // active devices the rest were silently never alerted.
+      const { rows: data, error } = await fetchAllRows<{ expo_token: string }>(
+        (from, to) =>
+          supabase
+            .from("device_push_tokens")
+            .select("expo_token")
+            .eq("active", true)
+            .order("id", { ascending: true })
+            .range(from, to) as unknown as PromiseLike<{
+            data: Array<{ expo_token: string }> | null;
+            error: { message: string } | null;
+          }>,
+        { maxRows: 500_000 },
+      );
 
       if (error) {
         logger.error("Failed to fetch push tokens", { error });
         return [];
       }
 
-      return (data ?? []).map((d) => d.expo_token);
+      return data.map((d) => d.expo_token);
     });
 
     if (tokens.length === 0) {
@@ -98,7 +111,7 @@ export const scamAlertCron = inngest.createFunction(
     const result = await step.run("send-alerts", async () => {
       const primaryType = threats[0]?.scam_type ?? "Security";
       const messages = tokens.map((token) =>
-        buildScamAlertMessage(token, primaryType, alertSummary)
+        buildScamAlertMessage(token, primaryType, alertSummary),
       );
 
       const tickets = await sendPushNotifications(messages);
@@ -110,5 +123,5 @@ export const scamAlertCron = inngest.createFunction(
     });
 
     return result;
-  })
+  }),
 );

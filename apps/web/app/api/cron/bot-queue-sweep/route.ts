@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { requireCronAuth } from "@/lib/cron-auth";
 import { createServiceClient } from "@askarthur/supabase/server";
-import { markCompleted, markFailed, type QueuedMessage } from "@askarthur/bot-core/queue";
+import {
+  markCompleted,
+  markFailed,
+  type QueuedMessage,
+} from "@askarthur/bot-core/queue";
 import { logger } from "@askarthur/utils/logger";
 import { processQueuedMessage } from "@/lib/bot-message-processor";
 
@@ -39,14 +43,18 @@ export async function POST(req: Request) {
 
   const { data: stale, error: selectError } = await supabase
     .from("bot_message_queue")
-    .select("id, platform, user_id, message_text, images, reply_to, retries, max_retries")
+    .select(
+      "id, platform, user_id, message_text, images, reply_to, retries, max_retries",
+    )
     .eq("status", "pending")
     .lt("created_at", cutoff)
     .order("created_at", { ascending: true })
     .limit(20);
 
   if (selectError) {
-    logger.error("bot-queue-sweep: select error", { error: selectError.message });
+    logger.error("bot-queue-sweep: select error", {
+      error: selectError.message,
+    });
     return NextResponse.json({ error: "select_failed" }, { status: 500 });
   }
 

@@ -49,8 +49,10 @@ export function computeDelta(
   }
 
   // New breach(es) on the breach pillar.
-  const prevBreaches = (pillarField(prev, "breach", "breaches") as string[] | undefined) ?? [];
-  const nextBreaches = (pillarField(next, "breach", "breaches") as string[] | undefined) ?? [];
+  const prevBreaches =
+    (pillarField(prev, "breach", "breaches") as string[] | undefined) ?? [];
+  const nextBreaches =
+    (pillarField(next, "breach", "breaches") as string[] | undefined) ?? [];
   const newBreaches = diffArrays(prevBreaches, nextBreaches);
   if (newBreaches.length) {
     deltas.push({
@@ -61,20 +63,30 @@ export function computeDelta(
   }
 
   // New scam_reports on the internal pillar — watch the entity_report_count.
-  const prevReports = (pillarField(prev, "scam_reports", "entity_report_count") as number) ?? 0;
-  const nextReports = (pillarField(next, "scam_reports", "entity_report_count") as number) ?? 0;
+  const prevReports =
+    (pillarField(prev, "scam_reports", "entity_report_count") as number) ?? 0;
+  const nextReports =
+    (pillarField(next, "scam_reports", "entity_report_count") as number) ?? 0;
   if (nextReports > prevReports) {
     deltas.push({
       type: "new_scam_reports",
       severity: nextReports - prevReports >= 3 ? "warning" : "info",
-      detail: { prev: prevReports, next: nextReports, new: nextReports - prevReports },
+      detail: {
+        prev: prevReports,
+        next: nextReports,
+        new: nextReports - prevReports,
+      },
     });
   }
 
   // Fresh SIM swap on the sim_swap pillar. This is the flagship premium
   // alert when Vonage is live.
-  const prevSwap = pillarField(prev, "sim_swap", "most_recent_swap_at") as string | undefined;
-  const nextSwap = pillarField(next, "sim_swap", "most_recent_swap_at") as string | undefined;
+  const prevSwap = pillarField(prev, "sim_swap", "most_recent_swap_at") as
+    | string
+    | undefined;
+  const nextSwap = pillarField(next, "sim_swap", "most_recent_swap_at") as
+    | string
+    | undefined;
   if (nextSwap && nextSwap !== prevSwap) {
     deltas.push({
       type: "sim_swap",
@@ -84,8 +96,12 @@ export function computeDelta(
   }
 
   // Carrier change detected by Twilio Lookup / identity pillar.
-  const prevCarrier = pillarField(prev, "identity", "carrier") as string | undefined;
-  const nextCarrier = pillarField(next, "identity", "carrier") as string | undefined;
+  const prevCarrier = pillarField(prev, "identity", "carrier") as
+    | string
+    | undefined;
+  const nextCarrier = pillarField(next, "identity", "carrier") as
+    | string
+    | undefined;
   if (prevCarrier && nextCarrier && prevCarrier !== nextCarrier) {
     deltas.push({
       type: "carrier_change",
@@ -96,13 +112,23 @@ export function computeDelta(
 
   // Fraud-score jump on the reputation pillar — 25-point swing on Vonage's
   // own fraud_score is worth a heads-up even without a band change.
-  const prevFraud = (pillarField(prev, "reputation", "fraud_score") as number) ?? null;
-  const nextFraud = (pillarField(next, "reputation", "fraud_score") as number) ?? null;
-  if (prevFraud !== null && nextFraud !== null && Math.abs(nextFraud - prevFraud) >= 25) {
+  const prevFraud =
+    (pillarField(prev, "reputation", "fraud_score") as number) ?? null;
+  const nextFraud =
+    (pillarField(next, "reputation", "fraud_score") as number) ?? null;
+  if (
+    prevFraud !== null &&
+    nextFraud !== null &&
+    Math.abs(nextFraud - prevFraud) >= 25
+  ) {
     deltas.push({
       type: "fraud_score_delta",
       severity: "warning",
-      detail: { prev: prevFraud, next: nextFraud, delta: nextFraud - prevFraud },
+      detail: {
+        prev: prevFraud,
+        next: nextFraud,
+        delta: nextFraud - prevFraud,
+      },
     });
   }
 

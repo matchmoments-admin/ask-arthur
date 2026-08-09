@@ -53,10 +53,7 @@ import { extractDomain } from "../url-normalize";
 import { fetchShopPage } from "../fetch-shop-page";
 import { detectAndFetchReviews } from "../providers/reviews";
 import { assessReviewLanguage } from "../providers/reviews/language";
-import {
-  scoreReviewDistribution,
-  fuseReviewsVerdict,
-} from "../reviews-signal";
+import { scoreReviewDistribution, fuseReviewsVerdict } from "../reviews-signal";
 import { isFeatureBraked } from "../cost-log";
 
 /** Merge a deepCheck patch into shop_checks.signal. Throws on RPC error. */

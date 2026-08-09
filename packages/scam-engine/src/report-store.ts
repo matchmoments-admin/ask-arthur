@@ -79,7 +79,7 @@ export function stripUrlToHostPath(rawUrl: string): string {
  * Fire-and-forget: logs errors but never throws.
  */
 export async function storeScamReport(
-  params: StoreScamReportParams
+  params: StoreScamReportParams,
 ): Promise<number | null> {
   try {
     const supabase = createServiceClient();
@@ -114,7 +114,9 @@ export async function storeScamReport(
         ci.extractedAbn = params.analysis.charityIntent.extractedAbn;
       }
       if (params.analysis.charityIntent.extractedName) {
-        ci.extractedName = scrubPII(params.analysis.charityIntent.extractedName);
+        ci.extractedName = scrubPII(
+          params.analysis.charityIntent.extractedName,
+        );
       }
       scrubbedResult.charityIntent = ci;
     }
@@ -155,7 +157,7 @@ export async function storeScamReport(
         p_region: params.region,
         p_country_code: params.countryCode,
         p_idempotency_key: params.idempotencyKey ?? null,
-      }
+      },
     );
 
     if (reportError) {
@@ -177,7 +179,7 @@ export async function storeScamReport(
             p_entity_type: entity.entityType,
             p_normalized_value: entity.normalizedValue,
             p_raw_value: entity.rawValue ?? null,
-          }
+          },
         );
 
         if (entityError) {
@@ -193,15 +195,12 @@ export async function storeScamReport(
           is_new: boolean;
         };
 
-        const { error: linkError } = await supabase.rpc(
-          "link_report_entity",
-          {
-            p_report_id: reportId,
-            p_entity_id: entityId,
-            p_extraction_method: entity.extractionMethod,
-            p_role: entity.role,
-          }
-        );
+        const { error: linkError } = await supabase.rpc("link_report_entity", {
+          p_report_id: reportId,
+          p_entity_id: entityId,
+          p_extraction_method: entity.extractionMethod,
+          p_role: entity.role,
+        });
 
         if (linkError) {
           logger.error("link_report_entity RPC failed", {

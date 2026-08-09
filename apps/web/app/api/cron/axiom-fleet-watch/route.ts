@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { requireCronAuth } from "@/lib/cron-auth";
 import { readNumberEnv } from "@/lib/env-coerce";
 import { logger } from "@askarthur/utils/logger";
-import { alertAndRecord, recordNoAlertNeeded } from "@/lib/alerting/deliveryLog";
+import {
+  alertAndRecord,
+  recordNoAlertNeeded,
+} from "@/lib/alerting/deliveryLog";
 import { axiomQuery } from "@/lib/axiom-query";
 import { axiomInfoSamplePct } from "@askarthur/utils/axiom-logger";
 
@@ -51,8 +54,14 @@ export async function GET(req: Request) {
   }
 
   const errorThreshold = readNumberEnv("AXIOM_FLEET_ERROR_THRESHOLD", 5).value;
-  const perFnThreshold = readNumberEnv("AXIOM_FLEET_PER_FN_ERROR_THRESHOLD", 3).value;
-  const runawayThreshold = readNumberEnv("AXIOM_FLEET_RUNAWAY_THRESHOLD", 300).value;
+  const perFnThreshold = readNumberEnv(
+    "AXIOM_FLEET_PER_FN_ERROR_THRESHOLD",
+    3,
+  ).value;
+  const runawayThreshold = readNumberEnv(
+    "AXIOM_FLEET_RUNAWAY_THRESHOLD",
+    300,
+  ).value;
   const http5xxThreshold = readNumberEnv("AXIOM_FLEET_5XX_THRESHOLD", 10).value;
 
   const end = new Date();
@@ -115,7 +124,9 @@ export async function GET(req: Request) {
 
   const reasons: string[] = [];
   if (inngestErrors >= errorThreshold) {
-    reasons.push(`Inngest errors: <b>${inngestErrors}</b> (≥ ${errorThreshold})`);
+    reasons.push(
+      `Inngest errors: <b>${inngestErrors}</b> (≥ ${errorThreshold})`,
+    );
   } else if (worstFn && worstFn.n >= perFnThreshold) {
     reasons.push(
       `<b>${worstFn.fn}</b> failing repeatedly: ${worstFn.n}× (≥ ${perFnThreshold})`,
@@ -147,7 +158,10 @@ export async function GET(req: Request) {
   };
 
   if (reasons.length === 0) {
-    await recordNoAlertNeeded("axiom-fleet-watch", summary as Record<string, unknown>);
+    await recordNoAlertNeeded(
+      "axiom-fleet-watch",
+      summary as Record<string, unknown>,
+    );
     return NextResponse.json(summary);
   }
 

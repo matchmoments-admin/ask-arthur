@@ -108,7 +108,9 @@ describe("fetchShopPage", () => {
   it("follows a public multi-hop redirect chain to the final page", async () => {
     const fetchSpy = vi
       .fn()
-      .mockResolvedValueOnce(redirectResponse("https://shop.example.com/step-2"))
+      .mockResolvedValueOnce(
+        redirectResponse("https://shop.example.com/step-2"),
+      )
       .mockResolvedValueOnce(redirectResponse("https://shop.example.com/final"))
       .mockResolvedValueOnce(htmlResponse("<html>final shop</html>"));
     vi.stubGlobal("fetch", fetchSpy);

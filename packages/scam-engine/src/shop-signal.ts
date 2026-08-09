@@ -73,17 +73,154 @@ const COMMERCE_TEXT_VERBS = [
 // shopSignal.commerceFlags as a normalised tag.
 const COMMERCE_FLAG_TAXONOMY: Array<{ tag: string; matches: string[] }> = [
   { tag: "payid-scam", matches: ["payid", "pay id"] },
-  { tag: "fake-payment-confirmation", matches: ["fake payment", "fake confirmation", "payment confirmation", "payid confirmation", "fake receipt", "forged receipt", "doctored receipt", "payment screenshot", "screenshot of payment", "proof of payment"] },
-  { tag: "overpayment-refund", matches: ["overpayment", "overpaid", "refund the difference", "send back the difference", "excess payment"] },
-  { tag: "off-platform-move", matches: ["whatsapp", "off-platform", "off platform", "messenger", "move communication", "move the conversation", "move to text", "move to sms", "off marketplace"] },
-  { tag: "relative-will-collect", matches: ["relative will collect", "friend will collect", "send a relative", "send a friend", "collect the item", "collect the goods", "collect the order", "collect the parcel", "pick up the item", "picking up the item", "courier will collect", "send a courier", "third party will collect", "arrange collection"] },
-  { tag: "implausible-discount", matches: ["too-good-to-be-true", "too good to be true", "implausible price", "unrealistic discount", "extreme discount", "massive discount", "huge discount", "high discount", "large discount", "% off", "% discount", "deeply discounted", "heavily discounted", "implausibly low price", "below market value", "suspiciously cheap", "unrealistically low", "too cheap"] },
-  { tag: "domain-renewal-invoice", matches: ["domain renewal", "domain invoice", ".com.au renewal", "domain expiry", "renewal invoice"] },
-  { tag: "stock-photo-product", matches: ["stock photo", "stock image", "lifted image", "lifted photo", "reverse image", "generic product photo", "images used elsewhere"] },
-  { tag: "fake-trust-badge", matches: ["trust badge", "fake badge", "trusted store badge", "trust seal", "security seal", "fake seal", "verified badge"] },
-  { tag: "fake-australia-post", matches: ["australia post", "auspost", "auspost.com.au", "aus post"] },
-  { tag: "urgent-purchase-pressure", matches: ["first to deposit", "first to pay", "deposit can pick", "limited stock", "while stocks last", "selling fast", "stock won't last", "only a few left", "limited quantity"] },
-  { tag: "fake-reviews", matches: ["fake reviews", "fake review", "uniformly 5-star", "generic reviews", "5-star", "5 star", "all positive review", "fabricated review", "no negative review", "suspiciously positive"] },
+  {
+    tag: "fake-payment-confirmation",
+    matches: [
+      "fake payment",
+      "fake confirmation",
+      "payment confirmation",
+      "payid confirmation",
+      "fake receipt",
+      "forged receipt",
+      "doctored receipt",
+      "payment screenshot",
+      "screenshot of payment",
+      "proof of payment",
+    ],
+  },
+  {
+    tag: "overpayment-refund",
+    matches: [
+      "overpayment",
+      "overpaid",
+      "refund the difference",
+      "send back the difference",
+      "excess payment",
+    ],
+  },
+  {
+    tag: "off-platform-move",
+    matches: [
+      "whatsapp",
+      "off-platform",
+      "off platform",
+      "messenger",
+      "move communication",
+      "move the conversation",
+      "move to text",
+      "move to sms",
+      "off marketplace",
+    ],
+  },
+  {
+    tag: "relative-will-collect",
+    matches: [
+      "relative will collect",
+      "friend will collect",
+      "send a relative",
+      "send a friend",
+      "collect the item",
+      "collect the goods",
+      "collect the order",
+      "collect the parcel",
+      "pick up the item",
+      "picking up the item",
+      "courier will collect",
+      "send a courier",
+      "third party will collect",
+      "arrange collection",
+    ],
+  },
+  {
+    tag: "implausible-discount",
+    matches: [
+      "too-good-to-be-true",
+      "too good to be true",
+      "implausible price",
+      "unrealistic discount",
+      "extreme discount",
+      "massive discount",
+      "huge discount",
+      "high discount",
+      "large discount",
+      "% off",
+      "% discount",
+      "deeply discounted",
+      "heavily discounted",
+      "implausibly low price",
+      "below market value",
+      "suspiciously cheap",
+      "unrealistically low",
+      "too cheap",
+    ],
+  },
+  {
+    tag: "domain-renewal-invoice",
+    matches: [
+      "domain renewal",
+      "domain invoice",
+      ".com.au renewal",
+      "domain expiry",
+      "renewal invoice",
+    ],
+  },
+  {
+    tag: "stock-photo-product",
+    matches: [
+      "stock photo",
+      "stock image",
+      "lifted image",
+      "lifted photo",
+      "reverse image",
+      "generic product photo",
+      "images used elsewhere",
+    ],
+  },
+  {
+    tag: "fake-trust-badge",
+    matches: [
+      "trust badge",
+      "fake badge",
+      "trusted store badge",
+      "trust seal",
+      "security seal",
+      "fake seal",
+      "verified badge",
+    ],
+  },
+  {
+    tag: "fake-australia-post",
+    matches: ["australia post", "auspost", "auspost.com.au", "aus post"],
+  },
+  {
+    tag: "urgent-purchase-pressure",
+    matches: [
+      "first to deposit",
+      "first to pay",
+      "deposit can pick",
+      "limited stock",
+      "while stocks last",
+      "selling fast",
+      "stock won't last",
+      "only a few left",
+      "limited quantity",
+    ],
+  },
+  {
+    tag: "fake-reviews",
+    matches: [
+      "fake reviews",
+      "fake review",
+      "uniformly 5-star",
+      "generic reviews",
+      "5-star",
+      "5 star",
+      "all positive review",
+      "fabricated review",
+      "no negative review",
+      "suspiciously positive",
+    ],
+  },
 ];
 
 /**
@@ -107,7 +244,9 @@ export function detectCommerceSignal(
       try {
         // Best-effort parse — extractURLs already validated shape, but
         // protocol-less inputs ("example.shop") slip through.
-        const url = new URL(lower.startsWith("http") ? lower : `https://${lower}`);
+        const url = new URL(
+          lower.startsWith("http") ? lower : `https://${lower}`,
+        );
         const host = url.hostname;
         const path = url.pathname;
         const tld = host.split(".").pop();

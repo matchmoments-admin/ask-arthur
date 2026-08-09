@@ -12,12 +12,42 @@ import { signUnsubscribeUrl } from "@/lib/unsubscribe";
 
 // Nurture email schedule: days after lead creation → email template
 const NURTURE_SCHEDULE = [
-  { step: 1, daysAfter: 0, subject: "The SPF Act is live. Is your organisation ready?", Template: SPFIntro },
-  { step: 2, daysAfter: 3, subject: "What counts as 'reasonable steps' under the SPF Act?", Template: ReasonableSteps },
-  { step: 3, daysAfter: 7, subject: "Why isolated scam prevention isn't enough", Template: CollectiveIntelligence },
-  { step: 4, daysAfter: 12, subject: "How Australian organisations are preparing for SPF compliance", Template: CaseStudy },
-  { step: 5, daysAfter: 18, subject: "Six API endpoints. Live in under a day.", Template: TechnicalOverview },
-  { step: 6, daysAfter: 25, subject: "SPF sector codes take effect July 2026. Let's talk this week.", Template: Deadline },
+  {
+    step: 1,
+    daysAfter: 0,
+    subject: "The SPF Act is live. Is your organisation ready?",
+    Template: SPFIntro,
+  },
+  {
+    step: 2,
+    daysAfter: 3,
+    subject: "What counts as 'reasonable steps' under the SPF Act?",
+    Template: ReasonableSteps,
+  },
+  {
+    step: 3,
+    daysAfter: 7,
+    subject: "Why isolated scam prevention isn't enough",
+    Template: CollectiveIntelligence,
+  },
+  {
+    step: 4,
+    daysAfter: 12,
+    subject: "How Australian organisations are preparing for SPF compliance",
+    Template: CaseStudy,
+  },
+  {
+    step: 5,
+    daysAfter: 18,
+    subject: "Six API endpoints. Live in under a day.",
+    Template: TechnicalOverview,
+  },
+  {
+    step: 6,
+    daysAfter: 25,
+    subject: "SPF sector codes take effect July 2026. Let's talk this week.",
+    Template: Deadline,
+  },
 ];
 
 export async function GET(req: NextRequest) {
@@ -31,7 +61,10 @@ export async function GET(req: NextRequest) {
   }
 
   if (!process.env.RESEND_API_KEY) {
-    return NextResponse.json({ error: "Email service not configured" }, { status: 503 });
+    return NextResponse.json(
+      { error: "Email service not configured" },
+      { status: 503 },
+    );
   }
 
   // Fetch leads that need nurture emails
@@ -49,7 +82,10 @@ export async function GET(req: NextRequest) {
     .limit(50);
 
   if (error || !leads) {
-    return NextResponse.json({ error: "Failed to fetch leads" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Failed to fetch leads" },
+      { status: 500 },
+    );
   }
 
   const now = new Date();
@@ -67,7 +103,7 @@ export async function GET(req: NextRequest) {
     // Check if enough time has passed since lead creation
     const createdAt = new Date(lead.created_at);
     const daysSinceCreation = Math.floor(
-      (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24)
+      (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24),
     );
 
     if (daysSinceCreation < schedule.daysAfter) {
@@ -78,7 +114,8 @@ export async function GET(req: NextRequest) {
     // Don't send more than one email per day per lead
     if (lead.nurture_last_sent_at) {
       const lastSent = new Date(lead.nurture_last_sent_at);
-      const hoursSinceLastSend = (now.getTime() - lastSent.getTime()) / (1000 * 60 * 60);
+      const hoursSinceLastSend =
+        (now.getTime() - lastSent.getTime()) / (1000 * 60 * 60);
       if (hoursSinceLastSend < 20) {
         skipped++;
         continue;

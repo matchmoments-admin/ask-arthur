@@ -3,7 +3,10 @@ import { requireCronAuth } from "@/lib/cron-auth";
 import { readBoolEnv } from "@askarthur/utils/env";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
-import { alertAndRecord, recordNoAlertNeeded } from "@/lib/alerting/deliveryLog";
+import {
+  alertAndRecord,
+  recordNoAlertNeeded,
+} from "@/lib/alerting/deliveryLog";
 import {
   classifyFeedHealth,
   type FeedHealthRow,
@@ -49,10 +52,7 @@ interface CostSummary {
 }
 
 function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function buildMessage(
@@ -118,9 +118,7 @@ function buildMessage(
   lines.push(
     `💰 Last 24h: $${cost.cost_usd.toFixed(2)} across ${cost.events.toLocaleString()} events`,
   );
-  lines.push(
-    `🔗 <a href="https://askarthur.au/admin/health">Full status</a>`,
-  );
+  lines.push(`🔗 <a href="https://askarthur.au/admin/health">Full status</a>`);
   return lines.join("\n");
 }
 

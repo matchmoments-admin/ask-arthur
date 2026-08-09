@@ -3,6 +3,7 @@ import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logg
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
+import { fetchAllRows } from "@askarthur/supabase/paginate";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import { logCost } from "@/lib/cost-telemetry";
 
@@ -29,16 +30,16 @@ import { logCost } from "@/lib/cost-telemetry";
  */
 
 export interface FpRow {
-  brand: string;            // inferred_target_domain
+  brand: string; // inferred_target_domain
   candidate_domain: string;
 }
 
 export interface FpCluster {
   brand: string;
-  tld: string;              // last label of the candidate (e.g. "design", "shop")
-  prefix: string;           // first N chars of the candidate's primary label
+  tld: string; // last label of the candidate (e.g. "design", "shop")
+  prefix: string; // first N chars of the candidate's primary label
   count: number;
-  examples: string[];       // up to 3 candidate_domain samples
+  examples: string[]; // up to 3 candidate_domain samples
   proposed_exception: string;
 }
 
@@ -64,93 +65,115 @@ export const cloneWatchFpClusterDigest = inngest.createFunction(
     { cron: "30 9 * * 0" },
     { event: "shopfront/clone.fp-cluster-digest.manual-trigger.v1" },
   ],
-  withAxiomLogging({ fnId: "shopfront-clone-fp-cluster-digest" }, async ({ step }) => {
-    logger.info("clone-watch fp-cluster-digest: invoked");
+  withAxiomLogging(
+    { fnId: "shopfront-clone-fp-cluster-digest" },
+    async ({ step }) => {
+      logger.info("clone-watch fp-cluster-digest: invoked");
 
-    if (!featureFlags.shopfrontCloneWatch) {
-      return { skipped: true, reason: "FF_SHOPFRONT_CLONE_WATCH disabled" };
-    }
-
-    const sb = createServiceClient();
-    if (!sb) return { skipped: true, reason: "supabase_unavailable" };
-
-    // Pull trailing-14d FP rows. We need the brand (inferred_target_domain)
-    // and the candidate_domain. Bounded result set — at ~5 FP/day × 14 =
-    // ~70 rows; even a 10x noise spike (700 rows) stays well under the
-    // pg_stat_statements query budget.
-    const rows = await step.run("load-recent-fps", async () => {
-      const sinceIso = new Date(
-        Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000,
-      ).toISOString();
-      const { data, error } = await sb
-        .from("shopfront_clone_alerts")
-        .select("inferred_target_domain, candidate_domain")
-        .eq("triage_status", "fp")
-        .gte("triage_at", sinceIso)
-        .limit(5000);
-      if (error) {
-        throw new Error(`load-recent-fps: ${error.message}`);
+      if (!featureFlags.shopfrontCloneWatch) {
+        return { skipped: true, reason: "FF_SHOPFRONT_CLONE_WATCH disabled" };
       }
-      return (
-        (data as Array<{
+
+      const sb = createServiceClient();
+      if (!sb) return { skipped: true, reason: "supabase_unavailable" };
+
+      // Pull trailing-14d FP rows. We need the brand (inferred_target_domain)
+      // and the candidate_domain. Bounded result set — at ~5 FP/day × 14 =
+      // ~70 rows; even a 10x noise spike (700 rows) stays well under the
+      // pg_stat_statements query budget.
+      const rows = await step.run("load-recent-fps", async () => {
+        const sinceIso = new Date(
+          Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000,
+        ).toISOString();
+        // Was `.limit(5000)` with no ORDER BY: the server returned an arbitrary
+        // 1000 of the matching rows, so WHICH false positives got clustered — and
+        // the published fp_count — changed between runs.
+        const { rows: data, error } = await fetchAllRows<{
           inferred_target_domain: string;
           candidate_domain: string;
-        }> | null) ?? []
-      ).map((r) => ({
-        brand: r.inferred_target_domain,
-        candidate_domain: r.candidate_domain,
-      })) as FpRow[];
-    });
+        }>(
+          (from, to) =>
+            sb
+              .from("shopfront_clone_alerts")
+              .select("inferred_target_domain, candidate_domain")
+              .eq("triage_status", "fp")
+              .gte("triage_at", sinceIso)
+              .order("id", { ascending: true })
+              .range(from, to) as unknown as PromiseLike<{
+              data: Array<{
+                inferred_target_domain: string;
+                candidate_domain: string;
+              }> | null;
+              error: { message: string } | null;
+            }>,
+          { maxRows: 20_000 },
+        );
+        if (error) {
+          throw new Error(`load-recent-fps: ${error.message}`);
+        }
+        return (
+          (data as Array<{
+            inferred_target_domain: string;
+            candidate_domain: string;
+          }> | null) ?? []
+        ).map((r) => ({
+          brand: r.inferred_target_domain,
+          candidate_domain: r.candidate_domain,
+        })) as FpRow[];
+      });
 
-    if (rows.length === 0) {
-      logger.info("clone-watch fp-cluster-digest: no FPs in window");
-      return { ok: true, clusters: 0, window_days: WINDOW_DAYS };
-    }
+      if (rows.length === 0) {
+        logger.info("clone-watch fp-cluster-digest: no FPs in window");
+        return { ok: true, clusters: 0, window_days: WINDOW_DAYS };
+      }
 
-    const clusters = summariseFpClusters(rows);
+      const clusters = summariseFpClusters(rows);
 
-    if (clusters.length === 0) {
-      logger.info(
-        "clone-watch fp-cluster-digest: no clusters ≥ threshold",
-        { fp_count: rows.length, min_cluster_size: MIN_CLUSTER_SIZE },
-      );
+      if (clusters.length === 0) {
+        logger.info("clone-watch fp-cluster-digest: no clusters ≥ threshold", {
+          fp_count: rows.length,
+          min_cluster_size: MIN_CLUSTER_SIZE,
+        });
+        return {
+          ok: true,
+          clusters: 0,
+          fp_count: rows.length,
+          reason: "no_clusters_above_threshold",
+        };
+      }
+
+      await step.run("notify-admin-digest", async () => {
+        await sendAdminTelegramMessage(
+          buildTelegramMessage(clusters, rows.length),
+        );
+      });
+
+      logCost({
+        feature: "shopfront_clone_fp_cluster_digest",
+        provider: "telegram",
+        operation: "weekly_digest",
+        units: 0,
+        unitCostUsd: 0,
+        metadata: {
+          clusters: clusters.length,
+          fp_count: rows.length,
+          window_days: WINDOW_DAYS,
+        },
+      });
+
+      logger.info("clone-watch fp-cluster-digest: done", {
+        clusters: clusters.length,
+        fp_count: rows.length,
+      });
+
       return {
         ok: true,
-        clusters: 0,
-        fp_count: rows.length,
-        reason: "no_clusters_above_threshold",
-      };
-    }
-
-    await step.run("notify-admin-digest", async () => {
-      await sendAdminTelegramMessage(buildTelegramMessage(clusters, rows.length));
-    });
-
-    logCost({
-      feature: "shopfront_clone_fp_cluster_digest",
-      provider: "telegram",
-      operation: "weekly_digest",
-      units: 0,
-      unitCostUsd: 0,
-      metadata: {
         clusters: clusters.length,
         fp_count: rows.length,
         window_days: WINDOW_DAYS,
-      },
-    });
-
-    logger.info("clone-watch fp-cluster-digest: done", {
-      clusters: clusters.length,
-      fp_count: rows.length,
-    });
-
-    return {
-      ok: true,
-      clusters: clusters.length,
-      fp_count: rows.length,
-      window_days: WINDOW_DAYS,
-    };
-  }),
+      };
+    },
+  ),
 );
 
 // ── Pure helpers (exported for unit testing) ─────────────────────────────
@@ -189,7 +212,7 @@ export function buildClusterKey(row: FpRow): {
  */
 export function longestCommonPrefix(candidates: string[]): string {
   if (candidates.length === 0) return "";
-  const primaries = candidates.map((c) => (c.toLowerCase().split(".")[0] ?? c));
+  const primaries = candidates.map((c) => c.toLowerCase().split(".")[0] ?? c);
   let prefix = primaries[0]!;
   for (let i = 1; i < primaries.length; i++) {
     const other = primaries[i]!;
@@ -299,9 +322,10 @@ export function buildTelegramMessage(
     ].join("\n");
   });
 
-  const overflow = clusters.length > shown.length
-    ? [``, `+${clusters.length - shown.length} smaller clusters omitted`]
-    : [];
+  const overflow =
+    clusters.length > shown.length
+      ? [``, `+${clusters.length - shown.length} smaller clusters omitted`]
+      : [];
 
   const footer = [
     ``,

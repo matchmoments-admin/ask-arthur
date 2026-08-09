@@ -107,9 +107,7 @@ describe("rerank", () => {
   });
 
   it("HTTP failure throws — caller's retry boundary handles it", async () => {
-    fetchSpy.mockResolvedValueOnce(
-      new Response("rate limit", { status: 429 }),
-    );
+    fetchSpy.mockResolvedValueOnce(new Response("rate limit", { status: 429 }));
     await expect(rerank("q", ["a", "b"])).rejects.toThrow(/Voyage rerank 429/);
   });
 

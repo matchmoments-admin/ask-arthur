@@ -161,11 +161,19 @@ describe("buildMatchesPayload", () => {
   it("sorts CISA KEV first, then CVSS score desc", () => {
     const triples = [
       {
-        vuln: vuln({ identifier: "CVE-LOW-CVSS", cvss_score: 5.0, cisa_kev: false }),
+        vuln: vuln({
+          identifier: "CVE-LOW-CVSS",
+          cvss_score: 5.0,
+          cisa_kev: false,
+        }),
         product: { name: "p", version: "0.1.0" },
       },
       {
-        vuln: vuln({ identifier: "CVE-HIGH-CVSS", cvss_score: 9.5, cisa_kev: false }),
+        vuln: vuln({
+          identifier: "CVE-HIGH-CVSS",
+          cvss_score: 9.5,
+          cisa_kev: false,
+        }),
         product: { name: "p", version: "0.1.0" },
       },
       {

@@ -12,7 +12,10 @@ describe("assertSafeURL", () => {
   describe("IPv6 — the forms the old inline blocklist could not match", () => {
     const blocked = [
       ["bracketed loopback", "http://[::1]/"],
-      ["IPv4-mapped metadata, dotted", "http://[::ffff:169.254.169.254]/latest/meta-data/"],
+      [
+        "IPv4-mapped metadata, dotted",
+        "http://[::ffff:169.254.169.254]/latest/meta-data/",
+      ],
       ["IPv4-mapped metadata, hex", "http://[::ffff:a9fe:a9fe]/"],
       ["IPv4-mapped loopback", "http://[::ffff:127.0.0.1]/"],
       ["link-local", "http://[fe80::1]/"],
@@ -28,7 +31,9 @@ describe("assertSafeURL", () => {
     }
 
     it("still allows a public IPv6 literal", () => {
-      expect(() => assertSafeURL("http://[2606:4700:4700::1111]/")).not.toThrow();
+      expect(() =>
+        assertSafeURL("http://[2606:4700:4700::1111]/"),
+      ).not.toThrow();
     });
   });
 
@@ -51,16 +56,24 @@ describe("assertSafeURL", () => {
 
   describe("hostnames and schemes", () => {
     it("blocks localhost", () => {
-      expect(() => assertSafeURL("http://localhost:3000/")).toThrow(/Blocked host/);
+      expect(() => assertSafeURL("http://localhost:3000/")).toThrow(
+        /Blocked host/,
+      );
     });
 
     it("blocks the GCP metadata hostname", () => {
-      expect(() => assertSafeURL("http://metadata.google.internal/")).toThrow(/Blocked host/);
+      expect(() => assertSafeURL("http://metadata.google.internal/")).toThrow(
+        /Blocked host/,
+      );
     });
 
     it("blocks non-http(s) schemes", () => {
-      expect(() => assertSafeURL("file:///etc/passwd")).toThrow(/Blocked scheme/);
-      expect(() => assertSafeURL("gopher://example.com/")).toThrow(/Blocked scheme/);
+      expect(() => assertSafeURL("file:///etc/passwd")).toThrow(
+        /Blocked scheme/,
+      );
+      expect(() => assertSafeURL("gopher://example.com/")).toThrow(
+        /Blocked scheme/,
+      );
     });
 
     // Node's URL parser normalises both of these to 127.0.0.1 before the
@@ -91,7 +104,7 @@ describe("filterSafeURLs", () => {
         "http://[::ffff:169.254.169.254]/",
         "https://example.org/two",
         "http://127.0.0.1/",
-      ])
+      ]),
     ).toEqual(["https://example.com/one", "https://example.org/two"]);
   });
 });

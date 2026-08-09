@@ -30,26 +30,30 @@ export async function createBrandAlert(input: BrandAlertInput): Promise<void> {
     .eq("brand_name", input.brandName)
     .single();
 
-  const { error } = await supabase
-    .from("brand_impersonation_alerts")
-    .insert({
-      brand_name: input.brandName,
-      brand_category: brand?.brand_category || null,
-      scam_type: input.scamType || null,
-      delivery_method: input.channel || null,
-      scam_content_hash: input.contentHash || null,
-      confidence_score: input.confidence,
-      scammer_phones: input.scammerPhones || [],
-      scammer_urls: input.scammerUrls || [],
-      scammer_emails: input.scammerEmails || [],
-      evidence_summary: input.summary || null,
-      outreach_contact: brand?.security_contact_email || null,
-      outreach_status: "pending",
-    });
+  const { error } = await supabase.from("brand_impersonation_alerts").insert({
+    brand_name: input.brandName,
+    brand_category: brand?.brand_category || null,
+    scam_type: input.scamType || null,
+    delivery_method: input.channel || null,
+    scam_content_hash: input.contentHash || null,
+    confidence_score: input.confidence,
+    scammer_phones: input.scammerPhones || [],
+    scammer_urls: input.scammerUrls || [],
+    scammer_emails: input.scammerEmails || [],
+    evidence_summary: input.summary || null,
+    outreach_contact: brand?.security_contact_email || null,
+    outreach_status: "pending",
+  });
 
   if (error) {
-    logger.error("Failed to create brand alert", { error: error.message, brand: input.brandName });
+    logger.error("Failed to create brand alert", {
+      error: error.message,
+      brand: input.brandName,
+    });
   } else {
-    logger.info("Brand alert created", { brand: input.brandName, confidence: input.confidence });
+    logger.info("Brand alert created", {
+      brand: input.brandName,
+      confidence: input.confidence,
+    });
   }
 }

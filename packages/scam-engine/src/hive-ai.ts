@@ -50,7 +50,10 @@ const NON_GENERATOR_CLASSES = new Set([
 let _redis: Redis | null = null;
 
 function getRedis(): Redis | null {
-  if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) {
+  if (
+    !process.env.UPSTASH_REDIS_REST_URL ||
+    !process.env.UPSTASH_REDIS_REST_TOKEN
+  ) {
     return null;
   }
   if (!_redis) {
@@ -87,7 +90,9 @@ async function sha256(input: string): Promise<string> {
  * class; the remaining classes are generator attribution (midjourney, dalle,
  * flux, stablediffusion, sora, …). Thresholds unchanged (ai/deepfake ≥ 0.9).
  */
-export async function checkHiveAI(imageUrl: string): Promise<HiveAIResult | null> {
+export async function checkHiveAI(
+  imageUrl: string,
+): Promise<HiveAIResult | null> {
   const apiKey = process.env.HIVE_API_KEY;
   if (!apiKey) {
     return null;
@@ -125,7 +130,10 @@ export async function checkHiveAI(imageUrl: string): Promise<HiveAIResult | null
     clearTimeout(timeout);
 
     if (!res.ok) {
-      logger.warn("Hive AI API error", { status: res.status, imageUrl: imageUrl.slice(0, 80) });
+      logger.warn("Hive AI API error", {
+        status: res.status,
+        imageUrl: imageUrl.slice(0, 80),
+      });
       return null;
     }
 
@@ -135,7 +143,9 @@ export async function checkHiveAI(imageUrl: string): Promise<HiveAIResult | null
     // data.status[0].response.output). Score field is `value` (V2: `score`).
     const classes = json?.output?.[0]?.classes;
     if (!Array.isArray(classes)) {
-      logger.warn("Hive AI unexpected response shape", { imageUrl: imageUrl.slice(0, 80) });
+      logger.warn("Hive AI unexpected response shape", {
+        imageUrl: imageUrl.slice(0, 80),
+      });
       return null;
     }
 
@@ -184,17 +194,24 @@ export async function checkHiveAI(imageUrl: string): Promise<HiveAIResult | null
 
     // Cache result
     if (redis) {
-      await redis.set(cacheKey, result, { ex: CACHE_TTL_SECONDS }).catch((err) => {
-        logger.warn("Hive AI cache set failed", { error: String(err) });
-      });
+      await redis
+        .set(cacheKey, result, { ex: CACHE_TTL_SECONDS })
+        .catch((err) => {
+          logger.warn("Hive AI cache set failed", { error: String(err) });
+        });
     }
 
     return result;
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
-      logger.warn("Hive AI request timed out", { imageUrl: imageUrl.slice(0, 80) });
+      logger.warn("Hive AI request timed out", {
+        imageUrl: imageUrl.slice(0, 80),
+      });
     } else {
-      logger.error("Hive AI check failed", { error: String(err), imageUrl: imageUrl.slice(0, 80) });
+      logger.error("Hive AI check failed", {
+        error: String(err),
+        imageUrl: imageUrl.slice(0, 80),
+      });
     }
     return null;
   }

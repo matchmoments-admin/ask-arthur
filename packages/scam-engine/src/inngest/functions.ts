@@ -11,7 +11,10 @@ import { riskScorer } from "./risk-scorer";
 import { urlscanEnrichment } from "./urlscan-enrichment";
 import { scamAlertCron } from "./scam-alerts";
 import { syncVerifiedScamsToFeed, syncUserReportsToFeed } from "./feed-sync";
-import { enrichVulnerability, enrichVulnerabilitiesCron } from "./enrich-vulnerability";
+import {
+  enrichVulnerability,
+  enrichVulnerabilitiesCron,
+} from "./enrich-vulnerability";
 import { matchB2bExposure } from "./match-b2b-exposure";
 
 // Phase 2: analyze.completed.v1 fan-out — durable replacements for the

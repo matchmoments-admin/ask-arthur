@@ -67,7 +67,11 @@ describe("lookupDomainRegistration", () => {
 
   it("flag ON + RDAP empty → falls back to whoisjson", async () => {
     flags.rdapLookup = true;
-    lookupRdap.mockResolvedValue({ ...RDAP, registrar: null, createdDate: null });
+    lookupRdap.mockResolvedValue({
+      ...RDAP,
+      registrar: null,
+      createdDate: null,
+    });
     lookupWhois.mockResolvedValue(WHOIS);
     const r = await lookupDomainRegistration("x.shop");
     expect(lookupWhois).toHaveBeenCalledOnce();

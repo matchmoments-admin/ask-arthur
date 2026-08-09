@@ -140,7 +140,9 @@ describe.skipIf(!hasEnv)("SQL RPC smoke tests", () => {
   // Unactioned-lookalike age snapshot (v231).
   it("clone_watch_unactioned_age_stats executes without error", async () => {
     const supabase = getClient();
-    const { data, error } = await supabase.rpc("clone_watch_unactioned_age_stats");
+    const { data, error } = await supabase.rpc(
+      "clone_watch_unactioned_age_stats",
+    );
     expect(error).toBeNull();
     const rows = Array.isArray(data) ? data : [data];
     expect(rows).toHaveLength(1);
@@ -157,15 +159,20 @@ describe.skipIf(!hasEnv)("SQL RPC smoke tests", () => {
 
   it("aggregate_reddit_brands_with_au executes without error", async () => {
     const supabase = getClient();
-    const { data, error } = await supabase.rpc("aggregate_reddit_brands_with_au", {
-      p_since: new Date(Date.now() - 30 * 86_400_000).toISOString(),
-      p_min_count: 3,
-    });
+    const { data, error } = await supabase.rpc(
+      "aggregate_reddit_brands_with_au",
+      {
+        p_since: new Date(Date.now() - 30 * 86_400_000).toISOString(),
+        p_min_count: 3,
+      },
+    );
     expect(error).toBeNull();
     expect(Array.isArray(data)).toBe(true);
     for (const row of (data ?? []) as Array<Record<string, unknown>>) {
       // The invariant the v254 aggregate exists to provide.
-      expect(Number(row.au_count)).toBeLessThanOrEqual(Number(row.mention_count));
+      expect(Number(row.au_count)).toBeLessThanOrEqual(
+        Number(row.mention_count),
+      );
     }
   });
 
@@ -184,7 +191,9 @@ describe.skipIf(!hasEnv)("SQL RPC smoke tests", () => {
     const { data, error } = await supabase.rpc("list_active_monitored_brands");
     expect(error).toBeNull();
     expect(Array.isArray(data)).toBe(true);
-    for (const row of (data ?? []) as Array<{ legitimate_domains?: string[] }>) {
+    for (const row of (data ?? []) as Array<{
+      legitimate_domains?: string[];
+    }>) {
       // legitimate_domains is the matcher's EXCLUSION list. An empty one makes
       // the brand's own site match as a clone of itself, which is why v256
       // guards it in BOTH a CHECK and this RPC's predicate.
@@ -203,11 +212,14 @@ describe.skipIf(!hasEnv)("SQL RPC smoke tests", () => {
 
   it("set_watchlist_candidate_status resolves and no-ops on an absent brand", async () => {
     const supabase = getClient();
-    const { data, error } = await supabase.rpc("set_watchlist_candidate_status", {
-      p_brand_normalized: ABSENT_KEY,
-      p_status: "dismissed",
-      p_note: "rpc smoke test — matches nothing",
-    });
+    const { data, error } = await supabase.rpc(
+      "set_watchlist_candidate_status",
+      {
+        p_brand_normalized: ABSENT_KEY,
+        p_status: "dismissed",
+        p_note: "rpc smoke test — matches nothing",
+      },
+    );
     expect(error).toBeNull();
     expect(Number(data)).toBe(0); // 0 rows changed = nothing was mutated
   });

@@ -13,9 +13,10 @@ const MAGIC_BYTES: Array<{ type: string; sig: number[] }> = [
 // into a 6 MB Buffer before we check its magic bytes.
 const MAX_DECODED_BYTES = 5_000_000;
 
-export function validateImageMagicBytes(
-  base64: string
-): { valid: boolean; detectedType: string | null } {
+export function validateImageMagicBytes(base64: string): {
+  valid: boolean;
+  detectedType: string | null;
+} {
   // Strip data URI prefix if present
   const raw = base64.replace(/^data:[^;]+;base64,/, "");
 

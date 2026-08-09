@@ -276,9 +276,11 @@ describe("runShopSignalEnrich", () => {
     expect(assessReviewLanguage).not.toHaveBeenCalled();
 
     const written = completePatch(rpc);
-    const deepCheck = (written![1] as {
-      p_patch: { deepCheck: { reviews?: { verdict: string; app: string } } };
-    }).p_patch.deepCheck;
+    const deepCheck = (
+      written![1] as {
+        p_patch: { deepCheck: { reviews?: { verdict: string; app: string } } };
+      }
+    ).p_patch.deepCheck;
     expect(deepCheck.reviews?.verdict).toBe("suspicious");
     expect(deepCheck.reviews?.app).toBe("okendo");
     expect(insert).toHaveBeenCalledWith(
@@ -324,7 +326,9 @@ describe("runShopSignalEnrich", () => {
       averageRating: 4.6,
       distribution: { one: 1, two: 1, three: 3, four: 10, five: 25 },
       verifiedBuyerRatio: 0.8,
-      reviews: [{ rating: 5, text: "good", author: null, date: null, verified: true }],
+      reviews: [
+        { rating: 5, text: "good", author: null, date: null, verified: true },
+      ],
       fetchedFrom: "api.okendo.io",
     });
     const { client, rpc } = fakeSupabase();
@@ -369,9 +373,11 @@ describe("runShopSignalEnrich", () => {
     // (12), not manipulated (25). unknown (6) + no-abn (18) + suspicious (12) = 36.
     expect(result.score).toBe(36);
     const written = completePatch(rpc);
-    const deepCheck = (written![1] as {
-      p_patch: { deepCheck: { reviews?: { verdict: string } } };
-    }).p_patch.deepCheck;
+    const deepCheck = (
+      written![1] as {
+        p_patch: { deepCheck: { reviews?: { verdict: string } } };
+      }
+    ).p_patch.deepCheck;
     expect(deepCheck.reviews?.verdict).toBe("suspicious");
     // The paid call's cost is logged under the anthropic provider.
     expect(insert).toHaveBeenCalledWith(
@@ -404,8 +410,11 @@ describe("runShopSignalEnrich", () => {
     expect(result.score).toBe(36);
     const written = completePatch(rpc);
     expect(
-      (written![1] as { p_patch: { deepCheck: { reviews?: { verdict: string } } } })
-        .p_patch.deepCheck.reviews?.verdict,
+      (
+        written![1] as {
+          p_patch: { deepCheck: { reviews?: { verdict: string } } };
+        }
+      ).p_patch.deepCheck.reviews?.verdict,
     ).toBe("suspicious");
     // No anthropic cost row when the pass didn't run.
     expect(insert).not.toHaveBeenCalledWith(

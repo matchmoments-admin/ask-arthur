@@ -67,7 +67,9 @@ function collectAggregates(
   }
   const obj = node as Record<string, unknown>;
   const typeStr =
-    typeof obj["@type"] === "string" ? (obj["@type"] as string).toLowerCase() : "";
+    typeof obj["@type"] === "string"
+      ? (obj["@type"] as string).toLowerCase()
+      : "";
   const isProduct = typeStr === "product";
   const agg = obj.aggregateRating as Record<string, unknown> | undefined;
   const isAggType = typeStr === "aggregaterating";
@@ -75,7 +77,8 @@ function collectAggregates(
   if (source) {
     const rawCount = source.reviewCount ?? source.ratingCount;
     const count = Number(rawCount);
-    const average = source.ratingValue != null ? Number(source.ratingValue) : null;
+    const average =
+      source.ratingValue != null ? Number(source.ratingValue) : null;
     if (Number.isFinite(count) && count > 0) {
       // A nested aggregateRating is product-scoped when its host node is a
       // Product; a standalone AggregateRating inherits its parent's scope.
@@ -133,9 +136,7 @@ function parseAggregate(
   if (aggregates.length === 0) {
     return { totalReviews: null, averageRating: null };
   }
-  const products = preferProduct
-    ? aggregates.filter((a) => a.fromProduct)
-    : [];
+  const products = preferProduct ? aggregates.filter((a) => a.fromProduct) : [];
   const pool = products.length > 0 ? products : aggregates;
   const best = pool.reduce((a, b) => (b.count > a.count ? b : a));
   return {
@@ -258,7 +259,9 @@ export async function fetchOkendoReviews(
     totalReviews: aggregate.totalReviews ?? fetched,
     averageRating:
       aggregate.averageRating ??
-      (ratingCount > 0 ? Math.round((ratingSum / ratingCount) * 10) / 10 : null),
+      (ratingCount > 0
+        ? Math.round((ratingSum / ratingCount) * 10) / 10
+        : null),
     distribution,
     verifiedBuyerRatio: verifiedKnown > 0 ? verified / verifiedKnown : null,
     reviews: sample,

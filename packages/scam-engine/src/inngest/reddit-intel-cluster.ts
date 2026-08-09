@@ -48,7 +48,10 @@ import {
   parseRedditIntelEmbeddedData,
 } from "./events";
 import { callClaudeJson } from "../anthropic";
-import { logFunctionError, isRedditIntelBraked } from "./reddit-intel-error-log";
+import {
+  logFunctionError,
+  isRedditIntelBraked,
+} from "./reddit-intel-error-log";
 import { withAxiomLogging } from "./with-axiom-logging";
 
 const COSINE_THRESHOLD = 0.62;
@@ -114,7 +117,8 @@ function updateCentroid(
 ): number[] {
   const next = new Array(oldCentroid.length);
   for (let i = 0; i < oldCentroid.length; i++) {
-    next[i] = (oldCentroid[i] * oldMemberCount + newVector[i]) / (oldMemberCount + 1);
+    next[i] =
+      (oldCentroid[i] * oldMemberCount + newVector[i]) / (oldMemberCount + 1);
   }
   return next;
 }
@@ -137,7 +141,9 @@ function kebabSlug(title: string): string {
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "")
-      .slice(0, 60) + "-" + randomSuffix(4)
+      .slice(0, 60) +
+    "-" +
+    randomSuffix(4)
   );
 }
 
@@ -335,419 +341,434 @@ export const redditIntelCluster = inngest.createFunction(
     concurrency: { limit: 1 },
   },
   { event: REDDIT_INTEL_EMBEDDED_EVENT },
-  withAxiomLogging({ fnId: "reddit-intel-cluster" }, async ({ event, step }) => {
-    if (!featureFlags.redditIntelIngest) {
-      return { skipped: true, reason: "redditIntelIngest flag off" };
-    }
+  withAxiomLogging(
+    { fnId: "reddit-intel-cluster" },
+    async ({ event, step }) => {
+      if (!featureFlags.redditIntelIngest) {
+        return { skipped: true, reason: "redditIntelIngest flag off" };
+      }
 
-    const braked = await step.run("check-cost-brake", isRedditIntelBraked);
-    if (braked) {
-      return { paused: true, reason: "feature_brakes.reddit_intel is set" };
-    }
+      const braked = await step.run("check-cost-brake", isRedditIntelBraked);
+      if (braked) {
+        return { paused: true, reason: "feature_brakes.reddit_intel is set" };
+      }
 
-    // Inline (not a step.run): pure deterministic Zod parse, free to re-run on
-    // retry — memoising it as a durable step only cost an Inngest execution.
-    const data = parseRedditIntelEmbeddedData(event.data);
+      // Inline (not a step.run): pure deterministic Zod parse, free to re-run on
+      // retry — memoising it as a durable step only cost an Inngest execution.
+      const data = parseRedditIntelEmbeddedData(event.data);
 
-    // ── Step 1: load unassigned posts in this cohort + active themes ─────
-    const { posts, themes } = await step.run("load-state", async () => {
-      const supabase = createServiceClient();
-      if (!supabase) throw new Error("Supabase service client unavailable");
+      // ── Step 1: load unassigned posts in this cohort + active themes ─────
+      const { posts, themes } = await step.run("load-state", async () => {
+        const supabase = createServiceClient();
+        if (!supabase) throw new Error("Supabase service client unavailable");
 
-      const cohortStart = new Date(`${data.cohortDate}T00:00:00Z`).toISOString();
-      const cohortEnd = new Date(
-        new Date(cohortStart).getTime() + 24 * 3600 * 1000,
-      ).toISOString();
+        const cohortStart = new Date(
+          `${data.cohortDate}T00:00:00Z`,
+        ).toISOString();
+        const cohortEnd = new Date(
+          new Date(cohortStart).getTime() + 24 * 3600 * 1000,
+        ).toISOString();
 
-      const { data: postRows, error: postErr } = await supabase
-        .from("reddit_post_intel")
-        .select("id, embedding, embedding_model_version")
-        .gte("processed_at", cohortStart)
-        .lt("processed_at", cohortEnd)
-        .is("theme_id", null)
-        .not("embedding", "is", null)
-        .limit(500);
+        const { data: postRows, error: postErr } = await supabase
+          .from("reddit_post_intel")
+          .select("id, embedding, embedding_model_version")
+          .gte("processed_at", cohortStart)
+          .lt("processed_at", cohortEnd)
+          .is("theme_id", null)
+          .not("embedding", "is", null)
+          .limit(500);
 
-      if (postErr) throw new Error(`load posts: ${postErr.message}`);
+        if (postErr) throw new Error(`load posts: ${postErr.message}`);
 
-      const { data: themeRows, error: themeErr } = await supabase
-        .from("reddit_intel_themes")
-        .select("id, centroid_embedding, member_count")
-        .eq("is_active", true)
-        .not("centroid_embedding", "is", null)
-        .limit(500);
+        const { data: themeRows, error: themeErr } = await supabase
+          .from("reddit_intel_themes")
+          .select("id, centroid_embedding, member_count")
+          .eq("is_active", true)
+          .not("centroid_embedding", "is", null)
+          .limit(500);
 
-      if (themeErr) throw new Error(`load themes: ${themeErr.message}`);
+        if (themeErr) throw new Error(`load themes: ${themeErr.message}`);
 
-      const posts: NewPost[] = (postRows ?? [])
-        .map((r) => ({
-          id: r.id as string,
-          embedding: parsePgVector(r.embedding as string | null) ?? [],
-          embeddingModelVersion:
-            (r.embedding_model_version as string | null) ?? null,
-        }))
-        .filter((p) => p.embedding.length > 0);
+        const posts: NewPost[] = (postRows ?? [])
+          .map((r) => ({
+            id: r.id as string,
+            embedding: parsePgVector(r.embedding as string | null) ?? [],
+            embeddingModelVersion:
+              (r.embedding_model_version as string | null) ?? null,
+          }))
+          .filter((p) => p.embedding.length > 0);
 
-      const themes: ActiveTheme[] = (themeRows ?? [])
-        .map((r) => ({
-          id: r.id as string,
-          centroid:
-            parsePgVector(r.centroid_embedding as string | null) ?? [],
-          memberCount: (r.member_count as number) ?? 0,
-        }))
-        .filter((t) => t.centroid.length > 0);
+        const themes: ActiveTheme[] = (themeRows ?? [])
+          .map((r) => ({
+            id: r.id as string,
+            centroid:
+              parsePgVector(r.centroid_embedding as string | null) ?? [],
+            memberCount: (r.member_count as number) ?? 0,
+          }))
+          .filter((t) => t.centroid.length > 0);
 
-      return { posts, themes };
-    });
-
-    if (posts.length === 0) {
-      logger.info("reddit-intel-cluster: nothing to cluster", {
-        cohortDate: data.cohortDate,
+        return { posts, themes };
       });
-      return { skipped: true, reason: "no_unassigned_posts" };
-    }
 
-    // ── Step 2: greedy assignment, in-memory ─────────────────────────────
-    // Pure, unit-tested (see reddit-intel-cluster.assign.test.ts). The
-    // anti-runaway guards (centroid freeze + join ceiling) live inside
-    // assignPostsToThemes so the collapse can be reproduced and prevented in a
-    // test without a DB.
-    const { assignments, oversizedThemeCount } = assignPostsToThemes(
-      posts,
-      themes,
-    );
+      if (posts.length === 0) {
+        logger.info("reddit-intel-cluster: nothing to cluster", {
+          cohortDate: data.cohortDate,
+        });
+        return { skipped: true, reason: "no_unassigned_posts" };
+      }
 
-    // Health alarm (always-ship .warn, bypasses INFO sampling): if a cohort of
-    // real size produced no new themes and every joined post landed in a SINGLE
-    // theme, that is the mega-theme-collapse signature — page instead of
-    // silently persisting (the 2026-07-12 fleet-review lesson). Also warn when
-    // any theme has grown past the join ceiling and is being contained.
-    const joinedThemeIds = new Set(
-      assignments.filter((a) => !a.isNewTheme).map((a) => a.themeId),
-    );
-    const newThemeSeeds = assignments.filter((a) => a.isNewTheme).length;
-    if (posts.length >= 10 && newThemeSeeds === 0 && joinedThemeIds.size <= 1) {
-      logger.warn("reddit-intel-cluster: single-attractor collapse signature", {
-        cohortDate: data.cohortDate,
-        postsConsidered: posts.length,
-        distinctJoinedThemes: joinedThemeIds.size,
-        newThemeSeeds,
-        hint: "all posts joined one theme and none re-seeded — check centroid drift / rebuild the runaway theme",
-      });
-    }
-    if (oversizedThemeCount > 0) {
-      logger.warn("reddit-intel-cluster: themes over member ceiling contained", {
-        cohortDate: data.cohortDate,
-        oversizedThemeCount,
-        ceiling: MAX_THEME_MEMBERS_FOR_JOIN,
-        hint: "an over-large theme was skipped as a match target — historical rebuild recommended",
-      });
-    }
-
-    // ── Step 3: persist new themes + assignments + centroid updates ──────
-    const persistResult = await step.run("persist-clusters", async () => {
-      const supabase = createServiceClient();
-      if (!supabase) throw new Error("Supabase service client unavailable");
-
-      let newThemeCount = 0;
-      let joinedThemeCount = 0;
-
-      // Idempotency guard (#520 H5): Inngest retries the WHOLE step on
-      // failure, and the matching above is recomputed deterministically from
-      // the memoised load step. A prior partial run may have already linked
-      // some posts; re-read their current theme_id and skip the done ones so
-      // a retry doesn't create duplicate themes. (slug has no unique
-      // constraint, so we can't rely on upsert-on-conflict.)
-      const alreadyLinked = await supabase
-        .from("reddit_post_intel")
-        .select("id, theme_id")
-        .in(
-          "id",
-          assignments.map((a) => a.postId),
-        );
-      const donePostIds = new Set(
-        (alreadyLinked.data ?? [])
-          .filter((r) => r.theme_id)
-          .map((r) => r.id as string),
+      // ── Step 2: greedy assignment, in-memory ─────────────────────────────
+      // Pure, unit-tested (see reddit-intel-cluster.assign.test.ts). The
+      // anti-runaway guards (centroid freeze + join ceiling) live inside
+      // assignPostsToThemes so the collapse can be reproduced and prevented in a
+      // test without a DB.
+      const { assignments, oversizedThemeCount } = assignPostsToThemes(
+        posts,
+        themes,
       );
 
-      for (const a of assignments) {
-        if (donePostIds.has(a.postId)) continue; // already persisted in a prior attempt
-        if (a.isNewTheme) {
-          // Insert new theme row first to get its UUID. Slug is DETERMINISTIC
-          // (auto-<seed post id>) not Math.random()-based, so a retry of this
-          // step produces a stable handle instead of proliferating random
-          // slugs. The naming step later rewrites it to the kebab-cased title.
-          const { data: created, error: insErr } = await supabase
-            .from("reddit_intel_themes")
+      // Health alarm (always-ship .warn, bypasses INFO sampling): if a cohort of
+      // real size produced no new themes and every joined post landed in a SINGLE
+      // theme, that is the mega-theme-collapse signature — page instead of
+      // silently persisting (the 2026-07-12 fleet-review lesson). Also warn when
+      // any theme has grown past the join ceiling and is being contained.
+      const joinedThemeIds = new Set(
+        assignments.filter((a) => !a.isNewTheme).map((a) => a.themeId),
+      );
+      const newThemeSeeds = assignments.filter((a) => a.isNewTheme).length;
+      if (
+        posts.length >= 10 &&
+        newThemeSeeds === 0 &&
+        joinedThemeIds.size <= 1
+      ) {
+        logger.warn(
+          "reddit-intel-cluster: single-attractor collapse signature",
+          {
+            cohortDate: data.cohortDate,
+            postsConsidered: posts.length,
+            distinctJoinedThemes: joinedThemeIds.size,
+            newThemeSeeds,
+            hint: "all posts joined one theme and none re-seeded — check centroid drift / rebuild the runaway theme",
+          },
+        );
+      }
+      if (oversizedThemeCount > 0) {
+        logger.warn(
+          "reddit-intel-cluster: themes over member ceiling contained",
+          {
+            cohortDate: data.cohortDate,
+            oversizedThemeCount,
+            ceiling: MAX_THEME_MEMBERS_FOR_JOIN,
+            hint: "an over-large theme was skipped as a match target — historical rebuild recommended",
+          },
+        );
+      }
+
+      // ── Step 3: persist new themes + assignments + centroid updates ──────
+      const persistResult = await step.run("persist-clusters", async () => {
+        const supabase = createServiceClient();
+        if (!supabase) throw new Error("Supabase service client unavailable");
+
+        let newThemeCount = 0;
+        let joinedThemeCount = 0;
+
+        // Idempotency guard (#520 H5): Inngest retries the WHOLE step on
+        // failure, and the matching above is recomputed deterministically from
+        // the memoised load step. A prior partial run may have already linked
+        // some posts; re-read their current theme_id and skip the done ones so
+        // a retry doesn't create duplicate themes. (slug has no unique
+        // constraint, so we can't rely on upsert-on-conflict.)
+        const alreadyLinked = await supabase
+          .from("reddit_post_intel")
+          .select("id, theme_id")
+          .in(
+            "id",
+            assignments.map((a) => a.postId),
+          );
+        const donePostIds = new Set(
+          (alreadyLinked.data ?? [])
+            .filter((r) => r.theme_id)
+            .map((r) => r.id as string),
+        );
+
+        for (const a of assignments) {
+          if (donePostIds.has(a.postId)) continue; // already persisted in a prior attempt
+          if (a.isNewTheme) {
+            // Insert new theme row first to get its UUID. Slug is DETERMINISTIC
+            // (auto-<seed post id>) not Math.random()-based, so a retry of this
+            // step produces a stable handle instead of proliferating random
+            // slugs. The naming step later rewrites it to the kebab-cased title.
+            const { data: created, error: insErr } = await supabase
+              .from("reddit_intel_themes")
+              .insert({
+                slug: `auto-${a.postId}`,
+                title: "Pending naming",
+                centroid_embedding: vectorToPgString(a.newCentroid),
+                centroid_embedding_model_version: a.embeddingModelVersion,
+                member_count: 1,
+                first_seen_at: new Date().toISOString(),
+                last_seen_at: new Date().toISOString(),
+                signal_strength: "weak",
+                is_active: true,
+              })
+              .select("id")
+              .single();
+
+            if (insErr || !created) {
+              logger.warn("cluster: new theme insert failed", {
+                error: insErr?.message,
+              });
+              continue;
+            }
+            a.themeId = created.id as string;
+            newThemeCount++;
+          } else {
+            // Existing theme: update centroid + bump member count + last_seen_at.
+            // Stamp the centroid's model version with the joining post's
+            // version. If old centroid was on voyage-3 and the new post is
+            // on voyage-3.5, the centroid is now mixed-model — the version
+            // column captures the most-recent contributor so a future
+            // re-embed sweep can detect mixed centroids and rebuild them.
+            // See ADR-0003.
+            const { error: upErr } = await supabase
+              .from("reddit_intel_themes")
+              .update({
+                centroid_embedding: vectorToPgString(a.newCentroid),
+                centroid_embedding_model_version: a.embeddingModelVersion,
+                member_count: a.newMemberCount,
+                last_seen_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", a.themeId);
+
+            if (upErr) {
+              logger.warn("cluster: theme update failed", {
+                themeId: a.themeId,
+                error: upErr.message,
+              });
+              continue;
+            }
+            joinedThemeCount++;
+          }
+
+          // Link the post → theme.
+          const { error: postErr } = await supabase
+            .from("reddit_post_intel")
+            .update({ theme_id: a.themeId })
+            .eq("id", a.postId);
+          if (postErr) {
+            logger.warn("cluster: post theme_id update failed", {
+              postId: a.postId,
+              error: postErr.message,
+            });
+            continue;
+          }
+
+          // Insert membership row (primary).
+          const { error: memErr } = await supabase
+            .from("reddit_post_intel_themes")
             .insert({
-              slug: `auto-${a.postId}`,
-              title: "Pending naming",
-              centroid_embedding: vectorToPgString(a.newCentroid),
-              centroid_embedding_model_version: a.embeddingModelVersion,
-              member_count: 1,
-              first_seen_at: new Date().toISOString(),
-              last_seen_at: new Date().toISOString(),
-              signal_strength: "weak",
-              is_active: true,
-            })
-            .select("id")
-            .single();
-
-          if (insErr || !created) {
-            logger.warn("cluster: new theme insert failed", {
-              error: insErr?.message,
+              intel_id: a.postId,
+              theme_id: a.themeId,
+              similarity: Math.min(1, Math.max(0, a.similarity)),
+              is_primary: true,
             });
-            continue;
-          }
-          a.themeId = created.id as string;
-          newThemeCount++;
-        } else {
-          // Existing theme: update centroid + bump member count + last_seen_at.
-          // Stamp the centroid's model version with the joining post's
-          // version. If old centroid was on voyage-3 and the new post is
-          // on voyage-3.5, the centroid is now mixed-model — the version
-          // column captures the most-recent contributor so a future
-          // re-embed sweep can detect mixed centroids and rebuild them.
-          // See ADR-0003.
-          const { error: upErr } = await supabase
-            .from("reddit_intel_themes")
-            .update({
-              centroid_embedding: vectorToPgString(a.newCentroid),
-              centroid_embedding_model_version: a.embeddingModelVersion,
-              member_count: a.newMemberCount,
-              last_seen_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", a.themeId);
-
-          if (upErr) {
-            logger.warn("cluster: theme update failed", {
+          if (memErr) {
+            logger.warn("cluster: membership insert failed", {
+              postId: a.postId,
               themeId: a.themeId,
-              error: upErr.message,
+              error: memErr.message,
             });
-            continue;
-          }
-          joinedThemeCount++;
-        }
-
-        // Link the post → theme.
-        const { error: postErr } = await supabase
-          .from("reddit_post_intel")
-          .update({ theme_id: a.themeId })
-          .eq("id", a.postId);
-        if (postErr) {
-          logger.warn("cluster: post theme_id update failed", {
-            postId: a.postId,
-            error: postErr.message,
-          });
-          continue;
-        }
-
-        // Insert membership row (primary).
-        const { error: memErr } = await supabase
-          .from("reddit_post_intel_themes")
-          .insert({
-            intel_id: a.postId,
-            theme_id: a.themeId,
-            similarity: Math.min(1, Math.max(0, a.similarity)),
-            is_primary: true,
-          });
-        if (memErr) {
-          logger.warn("cluster: membership insert failed", {
-            postId: a.postId,
-            themeId: a.themeId,
-            error: memErr.message,
-          });
-        }
-      }
-
-      return { newThemeCount, joinedThemeCount };
-    });
-
-    // ── Step 4: name themes that have just crossed MIN_MEMBERS_FOR_NAMING ─
-    // Only themes where member_count ≥ 3 AND title still 'Pending naming'.
-    // Skipping naming when there are no candidates avoids a wasted Sonnet call.
-
-    const namingResult = await step.run("name-pending-themes", async () => {
-      const supabase = createServiceClient();
-      if (!supabase) throw new Error("Supabase service client unavailable");
-
-      const { data: pending, error: pendErr } = await supabase
-        .from("reddit_intel_themes")
-        .select("id, member_count")
-        .eq("title", "Pending naming")
-        .gte("member_count", MIN_MEMBERS_FOR_NAMING)
-        .limit(20);
-
-      if (pendErr) throw new Error(`pending themes: ${pendErr.message}`);
-      if (!pending || pending.length === 0) {
-        return { named: 0 };
-      }
-
-      const themeIds = pending.map((t) => t.id as string);
-
-      // For each pending theme, fetch up to 5 sample post intel rows so
-      // Sonnet has rich context to write the title from.
-      const samples: Record<
-        string,
-        Array<{
-          intentLabel: string;
-          brands: string[];
-          modusOperandi: string | null;
-          narrativeSummary: string | null;
-          tactics: string[];
-        }>
-      > = {};
-
-      for (const tid of themeIds) {
-        const { data: members } = await supabase
-          .from("reddit_post_intel")
-          .select(
-            "intent_label, brands_impersonated, modus_operandi, narrative_summary, tactic_tags",
-          )
-          .eq("theme_id", tid)
-          .limit(5);
-        samples[tid] = (members ?? []).map((m) => ({
-          intentLabel: m.intent_label as string,
-          brands: (m.brands_impersonated as string[]) ?? [],
-          modusOperandi: (m.modus_operandi as string | null) ?? null,
-          narrativeSummary: (m.narrative_summary as string | null) ?? null,
-          tactics: (m.tactic_tags as string[] | null) ?? [],
-        }));
-      }
-
-      // Wrap Sonnet naming so any failure (model rejecting prefill, schema
-      // validation fail, JSON parse fail, rate-limit) lands in cost_telemetry
-      // feature='reddit-intel-error' for SQL-queryable triage. Inngest still
-      // retries via the function-level retries: 3 — the catch is additive.
-      let namingResponse;
-      try {
-        namingResponse = await callClaudeJson<
-          z.infer<typeof NamingOutputSchema>
-        >({
-          model: "SONNET_4_6",
-          system: NAMING_SYSTEM_PROMPT,
-          user: JSON.stringify({
-            instruction:
-              "Name each theme cluster. Match the input themeIds exactly.",
-            themes: themeIds.map((tid) => ({
-              themeId: tid,
-              samples: samples[tid],
-            })),
-          }),
-          schema: NamingOutputSchema,
-          maxTokens: 4_000,
-          timeoutMs: 60_000,
-          cacheSystem: true,
-        });
-      } catch (err) {
-        await logFunctionError({
-          step: "name-pending-themes",
-          cohortDate: data.cohortDate,
-          postCount: themeIds.length,
-          error: err,
-          promptVersion: NAMING_PROMPT_VERSION,
-          extra: { theme_count: themeIds.length },
-        });
-        throw err;
-      }
-
-      let named = 0;
-      const validInputIds = new Set(themeIds);
-      for (const named_theme of namingResponse.result.themes) {
-        if (!validInputIds.has(named_theme.themeId)) {
-          logger.warn("cluster: Sonnet returned themeId not in input", {
-            themeId: named_theme.themeId,
-          });
-          continue;
-        }
-        const slug = kebabSlug(named_theme.title);
-        // Aggregate the most frequent social-engineering tactics across the
-        // theme's sampled posts (v186) so the RAG prompt can surface them.
-        // Sample-based (the same ≤5 members fetched for naming context) — it
-        // self-heals on the next naming pass as a cluster grows.
-        const tacticCounts = new Map<string, number>();
-        for (const s of samples[named_theme.themeId] ?? []) {
-          for (const tag of s.tactics) {
-            tacticCounts.set(tag, (tacticCounts.get(tag) ?? 0) + 1);
           }
         }
-        const topTactics = [...tacticCounts.entries()]
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 4)
-          .map(([tag]) => tag);
-        const { error } = await supabase
-          .from("reddit_intel_themes")
-          .update({
-            title: named_theme.title,
-            slug,
-            narrative: named_theme.narrative,
-            modus_operandi: named_theme.modusOperandi ?? null,
-            representative_brands: named_theme.representativeBrands,
-            top_tactic_tags: topTactics.length > 0 ? topTactics : null,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", named_theme.themeId);
-        if (error) {
-          logger.warn("cluster: theme rename update failed", {
-            themeId: named_theme.themeId,
-            error: error.message,
-          });
-          continue;
-        }
-        named++;
-      }
 
-      // Cost log
-      await logNamingCost({
-        estimatedCostUsd: namingResponse.estimatedCostUsd,
-        inputTokens: namingResponse.usage.inputTokens,
-        outputTokens: namingResponse.usage.outputTokens,
-        modelId: namingResponse.modelId,
-        themeCount: themeIds.length,
+        return { newThemeCount, joinedThemeCount };
       });
 
-      return { named };
-    });
+      // ── Step 4: name themes that have just crossed MIN_MEMBERS_FOR_NAMING ─
+      // Only themes where member_count ≥ 3 AND title still 'Pending naming'.
+      // Skipping naming when there are no candidates avoids a wasted Sonnet call.
 
-    // ── Step 5: count active themes for downstream event ─────────────────
-    const activeCount = await step.run("count-active-themes", async () => {
-      const supabase = createServiceClient();
-      if (!supabase) return 0;
-      const { count } = await supabase
-        .from("reddit_intel_themes")
-        .select("id", { count: "exact", head: true })
-        .eq("is_active", true);
-      return count ?? 0;
-    });
+      const namingResult = await step.run("name-pending-themes", async () => {
+        const supabase = createServiceClient();
+        if (!supabase) throw new Error("Supabase service client unavailable");
 
-    await step.run("emit-themes-recomputed", () =>
-      inngest.send({
-        name: REDDIT_INTEL_THEMES_RECOMPUTED_EVENT,
-        data: {
-          weekStart: data.cohortDate,
-          activeThemeCount: activeCount,
-          newThemeCount: persistResult.newThemeCount,
-          computedAt: new Date().toISOString(),
-        },
-      }),
-    );
+        const { data: pending, error: pendErr } = await supabase
+          .from("reddit_intel_themes")
+          .select("id, member_count")
+          .eq("title", "Pending naming")
+          .gte("member_count", MIN_MEMBERS_FOR_NAMING)
+          .limit(20);
 
-    logger.info("reddit-intel-cluster: complete", {
-      cohortDate: data.cohortDate,
-      postsConsidered: posts.length,
-      newThemes: persistResult.newThemeCount,
-      joinedThemes: persistResult.joinedThemeCount,
-      themesNamed: namingResult.named,
-      activeThemes: activeCount,
-    });
+        if (pendErr) throw new Error(`pending themes: ${pendErr.message}`);
+        if (!pending || pending.length === 0) {
+          return { named: 0 };
+        }
 
-    return {
-      cohortDate: data.cohortDate,
-      newThemes: persistResult.newThemeCount,
-      joinedThemes: persistResult.joinedThemeCount,
-      themesNamed: namingResult.named,
-    };
-  }),
+        const themeIds = pending.map((t) => t.id as string);
+
+        // For each pending theme, fetch up to 5 sample post intel rows so
+        // Sonnet has rich context to write the title from.
+        const samples: Record<
+          string,
+          Array<{
+            intentLabel: string;
+            brands: string[];
+            modusOperandi: string | null;
+            narrativeSummary: string | null;
+            tactics: string[];
+          }>
+        > = {};
+
+        for (const tid of themeIds) {
+          const { data: members } = await supabase
+            .from("reddit_post_intel")
+            .select(
+              "intent_label, brands_impersonated, modus_operandi, narrative_summary, tactic_tags",
+            )
+            .eq("theme_id", tid)
+            .limit(5);
+          samples[tid] = (members ?? []).map((m) => ({
+            intentLabel: m.intent_label as string,
+            brands: (m.brands_impersonated as string[]) ?? [],
+            modusOperandi: (m.modus_operandi as string | null) ?? null,
+            narrativeSummary: (m.narrative_summary as string | null) ?? null,
+            tactics: (m.tactic_tags as string[] | null) ?? [],
+          }));
+        }
+
+        // Wrap Sonnet naming so any failure (model rejecting prefill, schema
+        // validation fail, JSON parse fail, rate-limit) lands in cost_telemetry
+        // feature='reddit-intel-error' for SQL-queryable triage. Inngest still
+        // retries via the function-level retries: 3 — the catch is additive.
+        let namingResponse;
+        try {
+          namingResponse = await callClaudeJson<
+            z.infer<typeof NamingOutputSchema>
+          >({
+            model: "SONNET_4_6",
+            system: NAMING_SYSTEM_PROMPT,
+            user: JSON.stringify({
+              instruction:
+                "Name each theme cluster. Match the input themeIds exactly.",
+              themes: themeIds.map((tid) => ({
+                themeId: tid,
+                samples: samples[tid],
+              })),
+            }),
+            schema: NamingOutputSchema,
+            maxTokens: 4_000,
+            timeoutMs: 60_000,
+            cacheSystem: true,
+          });
+        } catch (err) {
+          await logFunctionError({
+            step: "name-pending-themes",
+            cohortDate: data.cohortDate,
+            postCount: themeIds.length,
+            error: err,
+            promptVersion: NAMING_PROMPT_VERSION,
+            extra: { theme_count: themeIds.length },
+          });
+          throw err;
+        }
+
+        let named = 0;
+        const validInputIds = new Set(themeIds);
+        for (const named_theme of namingResponse.result.themes) {
+          if (!validInputIds.has(named_theme.themeId)) {
+            logger.warn("cluster: Sonnet returned themeId not in input", {
+              themeId: named_theme.themeId,
+            });
+            continue;
+          }
+          const slug = kebabSlug(named_theme.title);
+          // Aggregate the most frequent social-engineering tactics across the
+          // theme's sampled posts (v186) so the RAG prompt can surface them.
+          // Sample-based (the same ≤5 members fetched for naming context) — it
+          // self-heals on the next naming pass as a cluster grows.
+          const tacticCounts = new Map<string, number>();
+          for (const s of samples[named_theme.themeId] ?? []) {
+            for (const tag of s.tactics) {
+              tacticCounts.set(tag, (tacticCounts.get(tag) ?? 0) + 1);
+            }
+          }
+          const topTactics = [...tacticCounts.entries()]
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 4)
+            .map(([tag]) => tag);
+          const { error } = await supabase
+            .from("reddit_intel_themes")
+            .update({
+              title: named_theme.title,
+              slug,
+              narrative: named_theme.narrative,
+              modus_operandi: named_theme.modusOperandi ?? null,
+              representative_brands: named_theme.representativeBrands,
+              top_tactic_tags: topTactics.length > 0 ? topTactics : null,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", named_theme.themeId);
+          if (error) {
+            logger.warn("cluster: theme rename update failed", {
+              themeId: named_theme.themeId,
+              error: error.message,
+            });
+            continue;
+          }
+          named++;
+        }
+
+        // Cost log
+        await logNamingCost({
+          estimatedCostUsd: namingResponse.estimatedCostUsd,
+          inputTokens: namingResponse.usage.inputTokens,
+          outputTokens: namingResponse.usage.outputTokens,
+          modelId: namingResponse.modelId,
+          themeCount: themeIds.length,
+        });
+
+        return { named };
+      });
+
+      // ── Step 5: count active themes for downstream event ─────────────────
+      const activeCount = await step.run("count-active-themes", async () => {
+        const supabase = createServiceClient();
+        if (!supabase) return 0;
+        const { count } = await supabase
+          .from("reddit_intel_themes")
+          .select("id", { count: "exact", head: true })
+          .eq("is_active", true);
+        return count ?? 0;
+      });
+
+      await step.run("emit-themes-recomputed", () =>
+        inngest.send({
+          name: REDDIT_INTEL_THEMES_RECOMPUTED_EVENT,
+          data: {
+            weekStart: data.cohortDate,
+            activeThemeCount: activeCount,
+            newThemeCount: persistResult.newThemeCount,
+            computedAt: new Date().toISOString(),
+          },
+        }),
+      );
+
+      logger.info("reddit-intel-cluster: complete", {
+        cohortDate: data.cohortDate,
+        postsConsidered: posts.length,
+        newThemes: persistResult.newThemeCount,
+        joinedThemes: persistResult.joinedThemeCount,
+        themesNamed: namingResult.named,
+        activeThemes: activeCount,
+      });
+
+      return {
+        cohortDate: data.cohortDate,
+        newThemes: persistResult.newThemeCount,
+        joinedThemes: persistResult.joinedThemeCount,
+        themesNamed: namingResult.named,
+      };
+    },
+  ),
 );

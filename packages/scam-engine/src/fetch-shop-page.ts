@@ -73,7 +73,12 @@ export async function fetchShopPage(
   budgetMs: number = TIMEOUT_MS,
 ): Promise<ShopPageFetch> {
   if (isPrivateURL(url)) {
-    return { html: null, finalUrl: null, status: null, error: "blocked-private-url" };
+    return {
+      html: null,
+      finalUrl: null,
+      status: null,
+      error: "blocked-private-url",
+    };
   }
 
   const deadline = Date.now() + budgetMs;

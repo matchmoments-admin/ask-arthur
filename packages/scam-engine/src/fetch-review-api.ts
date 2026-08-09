@@ -75,7 +75,11 @@ export async function fetchReviewApiJson(
         await res.body?.cancel().catch(() => {});
         const location = res.headers.get("location");
         if (!location) {
-          return { data: null, status: res.status, error: "redirect-no-location" };
+          return {
+            data: null,
+            status: res.status,
+            error: "redirect-no-location",
+          };
         }
         let next: string;
         try {
@@ -88,7 +92,11 @@ export async function fetchReviewApiJson(
             from: currentUrl,
             to: next,
           });
-          return { data: null, status: res.status, error: "blocked-private-redirect" };
+          return {
+            data: null,
+            status: res.status,
+            error: "blocked-private-redirect",
+          };
         }
         currentUrl = next;
         continue;
@@ -147,7 +155,11 @@ export async function fetchReviewApiJson(
       err instanceof DOMException && err.name === "TimeoutError"
         ? "timeout"
         : "network-error";
-    logger.warn("fetchReviewApiJson failed", { url, error, detail: String(err) });
+    logger.warn("fetchReviewApiJson failed", {
+      url,
+      error,
+      detail: String(err),
+    });
     return { data: null, status: null, error };
   }
 }

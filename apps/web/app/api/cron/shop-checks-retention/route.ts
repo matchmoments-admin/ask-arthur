@@ -31,9 +31,12 @@ export async function GET(req: Request) {
 
   try {
     while (Date.now() - startedAt < deadlineMs) {
-      const { data, error } = await supabase.rpc("cleanup_expired_shop_checks", {
-        p_batch_size: 5000,
-      });
+      const { data, error } = await supabase.rpc(
+        "cleanup_expired_shop_checks",
+        {
+          p_batch_size: 5000,
+        },
+      );
       if (error) throw new Error(error.message);
 
       const deleted = Number(Array.isArray(data) ? data[0] : data) || 0;

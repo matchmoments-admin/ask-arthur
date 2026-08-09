@@ -111,19 +111,27 @@ describe("detectCharityIntent", () => {
     it("does NOT fire on bare 'sponsor' in commercial contexts", () => {
       // "sponsor me" is the keyword phrase, not "sponsor" — sponsored posts
       // and sponsorship deals must not get a charity nudge.
-      expect(detectCharityIntent("This sponsored post is from our brand sponsor")).toBeNull();
-      expect(detectCharityIntent("We signed a sponsorship deal with the club")).toBeNull();
+      expect(
+        detectCharityIntent("This sponsored post is from our brand sponsor"),
+      ).toBeNull();
+      expect(
+        detectCharityIntent("We signed a sponsorship deal with the club"),
+      ).toBeNull();
     });
   });
 
   describe("name extraction", () => {
     it("'donate to <Name>' pattern", () => {
-      const r = detectCharityIntent("I want to donate to Cancer Council Australia today");
+      const r = detectCharityIntent(
+        "I want to donate to Cancer Council Australia today",
+      );
       expect(r?.extractedName).toBe("Cancer Council Australia");
     });
 
     it("'<Name> Foundation' pattern", () => {
-      const r = detectCharityIntent("Have you heard of the Smith Family Foundation charity?");
+      const r = detectCharityIntent(
+        "Have you heard of the Smith Family Foundation charity?",
+      );
       // Either pattern can fire — Foundation match wins because it's
       // more specific
       expect(r?.extractedName).toBeDefined();

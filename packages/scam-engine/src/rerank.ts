@@ -155,9 +155,7 @@ export async function rerank(
       docCount: documents.length,
       preview: errBody.slice(0, 200),
     });
-    throw new Error(
-      `Voyage rerank ${res.status}: ${errBody.slice(0, 200)}`,
-    );
+    throw new Error(`Voyage rerank ${res.status}: ${errBody.slice(0, 200)}`);
   }
 
   const json = (await res.json()) as {

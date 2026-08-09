@@ -2,6 +2,7 @@ import { requireAdmin } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import OnwardReportsDashboard from "./OnwardReportsDashboard";
 import QueryErrorBand from "@/components/admin/QueryErrorBand";
+import { fetchAllRows } from "@askarthur/supabase/paginate";
 
 interface ReviewRow {
   id: string;
@@ -35,14 +36,28 @@ async function loadSentStats(
   loadErrors: string[],
 ): Promise<SentStats> {
   const stats: SentStats = { total: 0, last30d: 0, byDestination: {} };
-  const { data: sentRows, error: qe1 } = await supabase
-    .from("onward_report_log")
-    .select("destination, sent_at")
-    .eq("status", "sent")
-    .limit(5000);
-  if (qe1 && qe1.code !== "PGRST116") loadErrors.push("sent reports");
+  // `.limit(5000)` returned at most 1000 rows, so `stats.total` — a lifetime
+  // running total — was guaranteed wrong the moment the table passed 1000.
+  // Paged, because the per-destination tally needs the rows, not just a count.
+  const { rows: sentRows, error: qe1 } = await fetchAllRows<{
+    destination: string;
+    sent_at: string | null;
+  }>(
+    (from, to) =>
+      supabase
+        .from("onward_report_log")
+        .select("destination, sent_at")
+        .eq("status", "sent")
+        .order("id", { ascending: true })
+        .range(from, to) as unknown as PromiseLike<{
+        data: Array<{ destination: string; sent_at: string | null }> | null;
+        error: { message: string } | null;
+      }>,
+    { maxRows: 200_000 },
+  );
+  if (qe1) loadErrors.push("sent reports");
   const cutoff = Date.now() - 30 * 86400000;
-  for (const r of sentRows ?? []) {
+  for (const r of sentRows) {
     stats.total += 1;
     if (r.sent_at && new Date(r.sent_at as string).getTime() > cutoff) {
       stats.last30d += 1;
@@ -66,14 +81,13 @@ export default async function OnwardReportsPage() {
     : { total: 0, last30d: 0, byDestination: {} as Record<string, number> };
 
   if (supabase) {
-
     // Manual-review queue (held pending admin approval)
     const { data: pending, error: qe2 } = await supabase
       .from("onward_report_log")
       .select(
         `id, scam_report_id, destination, destination_key, status,
          status_reason, queued_at,
-         scam_reports ( scam_type, impersonated_brand, channel )`
+         scam_reports ( scam_type, impersonated_brand, channel )`,
       )
       .eq("status", "manual_review")
       .order("queued_at", { ascending: true })
@@ -86,7 +100,7 @@ export default async function OnwardReportsPage() {
       .select(
         `id, scam_report_id, destination, destination_key, status,
          status_reason, queued_at,
-         scam_reports ( scam_type, impersonated_brand, channel )`
+         scam_reports ( scam_type, impersonated_brand, channel )`,
       )
       .neq("status", "manual_review")
       .order("queued_at", { ascending: false })
@@ -98,8 +112,8 @@ export default async function OnwardReportsPage() {
       new Set(
         (pending ?? [])
           .filter((r) => r.destination === "brand_abuse" && r.destination_key)
-          .map((r) => r.destination_key as string)
-      )
+          .map((r) => r.destination_key as string),
+      ),
     );
 
     const brandLookup = new Map<
@@ -199,9 +213,9 @@ export default async function OnwardReportsPage() {
         ) : (
           <p className="mt-2 text-xs text-gov-slate">
             None yet. The user-click path (OnwardReportPicker →
-            /api/report/onward) writes this table unconditionally since PR
-            #874 — so zero here means no user has completed that flow, not
-            that a flag is off (#941 finding 6). Counts only{" "}
+            /api/report/onward) writes this table unconditionally since PR #874
+            — so zero here means no user has completed that flow, not that a
+            flag is off (#941 finding 6). Counts only{" "}
             <code>status=&apos;sent&apos;</code>; never claims a takedown.
           </p>
         )}

@@ -62,7 +62,9 @@ export const enrichmentFanOut = inngest.createFunction(
           .limit(200); // Fetch more to find unique domains
 
         if (error) {
-          logger.error("Failed to fetch pending URLs", { error: String(error) });
+          logger.error("Failed to fetch pending URLs", {
+            error: String(error),
+          });
           throw new Error(error.message);
         }
 
@@ -94,11 +96,14 @@ export const enrichmentFanOut = inngest.createFunction(
     // the enrich-what-users-check scoping decision without paging on a
     // permanent state. The raw backlog is also directly queryable from scam_urls.
     if (backlog > 5000) {
-      logger.info("pipeline-enrichment-fanout: pending backlog far exceeds throughput", {
-        backlog,
-        perRunCap: MAX_DOMAINS_PER_RUN,
-        hint: "queue is ~all source_type='feed' (blocklist dumps); newest-first enriches fresh threats, stale tail sheds via staleness. Permanent by design — on-demand enrichment (D3) covers user-checked URLs.",
-      });
+      logger.info(
+        "pipeline-enrichment-fanout: pending backlog far exceeds throughput",
+        {
+          backlog,
+          perRunCap: MAX_DOMAINS_PER_RUN,
+          hint: "queue is ~all source_type='feed' (blocklist dumps); newest-first enriches fresh threats, stale tail sheds via staleness. Permanent by design — on-demand enrichment (D3) covers user-checked URLs.",
+        },
+      );
     }
 
     if (pendingDomains.length === 0) {
@@ -154,8 +159,8 @@ export const enrichmentFanOut = inngest.createFunction(
           }
 
           return { domain: entry.domain, updated: entry.urlIds.length };
-        })
-      )
+        }),
+      ),
     );
 
     const totalUpdated = results.reduce((sum, r) => sum + (r.updated || 0), 0);
@@ -164,6 +169,10 @@ export const enrichmentFanOut = inngest.createFunction(
       urlsUpdated: totalUpdated,
     });
 
-    return { domains: pendingDomains.length, urlsUpdated: totalUpdated, results };
-  })
+    return {
+      domains: pendingDomains.length,
+      urlsUpdated: totalUpdated,
+      results,
+    };
+  }),
 );

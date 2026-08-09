@@ -53,7 +53,10 @@ const FALLBACK_TTL_SECONDS = 3600;
 let _redis: Redis | null = null;
 
 function getRedis(): Redis | null {
-  if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) {
+  if (
+    !process.env.UPSTASH_REDIS_REST_URL ||
+    !process.env.UPSTASH_REDIS_REST_TOKEN
+  ) {
     return null;
   }
   if (!_redis) {
@@ -79,7 +82,7 @@ async function sha256Hex(text: string): Promise<string> {
  * Caller must pass a shallow object of primitives (no nested objects, no functions).
  */
 async function sha256OfObject(
-  obj: Record<string, boolean | string | number | null | undefined>
+  obj: Record<string, boolean | string | number | null | undefined>,
 ): Promise<string> {
   const sortedKeys = Object.keys(obj).sort();
   const canonical = sortedKeys.map((k) => `${k}:${String(obj[k])}`).join("|");
@@ -137,10 +140,14 @@ function modeTag(input: AnalyzeCacheInput): string {
  * Build a composite versioned cache key. Async because image + text hashes
  * are async (Web Crypto `subtle.digest`).
  */
-export async function buildAnalyzeCacheKey(input: AnalyzeCacheInput): Promise<string> {
+export async function buildAnalyzeCacheKey(
+  input: AnalyzeCacheInput,
+): Promise<string> {
   const surface = input.surface ?? DEFAULT_SURFACE;
   const model = input.modelShort ?? DEFAULT_MODEL_SHORT;
-  const textHash = input.text ? (await sha256Hex(input.text)).slice(0, 16) : "0";
+  const textHash = input.text
+    ? (await sha256Hex(input.text)).slice(0, 16)
+    : "0";
   const imagesHash = await hashImageList(input.images);
   const flagsHash = input.outputAffectingFlags
     ? (await sha256OfObject(input.outputAffectingFlags)).slice(0, 8)
@@ -166,13 +173,15 @@ function scrubCacheablePII(result: AnalysisResult): AnalysisResult {
 }
 
 /** Accept a legacy string arg (text only) OR the new object form. */
-function normalizeInput(inputOrText: string | AnalyzeCacheInput): AnalyzeCacheInput {
+function normalizeInput(
+  inputOrText: string | AnalyzeCacheInput,
+): AnalyzeCacheInput {
   return typeof inputOrText === "string" ? { text: inputOrText } : inputOrText;
 }
 
 /** Get a cached analysis result keyed by the composite key. */
 export async function getCachedAnalysis(
-  inputOrText: string | AnalyzeCacheInput
+  inputOrText: string | AnalyzeCacheInput,
 ): Promise<AnalysisResult | null> {
   const redis = getRedis();
   if (!redis) return null;
@@ -199,7 +208,7 @@ export async function getCachedAnalysis(
  */
 export async function setCachedAnalysis(
   inputOrText: string | AnalyzeCacheInput,
-  result: AnalysisResult
+  result: AnalysisResult,
 ): Promise<void> {
   const redis = getRedis();
   if (!redis) return;

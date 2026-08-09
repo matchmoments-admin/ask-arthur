@@ -35,6 +35,7 @@ import { logger } from "@askarthur/utils/logger";
 
 import { callClaudeJson } from "../anthropic";
 import { isRedditIntelBraked } from "../inngest/reddit-intel-error-log";
+import { fetchAllRows } from "@askarthur/supabase/paginate";
 
 // Bump when the prompt or output schema changes materially.
 const PROMPT_VERSION = "reddit-intel-weekly-synth-v1@2026-07-07";
@@ -129,7 +130,9 @@ export interface CohortAggregate {
  * baseline is "new this week".
  */
 export function aggregateWeeklyCohort(
-  cohort: Array<Pick<CohortRow, "intent_label" | "brands_impersonated" | "tactic_tags">>,
+  cohort: Array<
+    Pick<CohortRow, "intent_label" | "brands_impersonated" | "tactic_tags">
+  >,
   baseline: Array<Pick<CohortRow, "brands_impersonated" | "tactic_tags">>,
 ): CohortAggregate {
   const catTotals: Record<string, number> = {};
@@ -139,7 +142,8 @@ export function aggregateWeeklyCohort(
   const weekTactics = new Map<string, string>();
 
   for (const r of cohort) {
-    if (r.intent_label) catTotals[r.intent_label] = (catTotals[r.intent_label] ?? 0) + 1;
+    if (r.intent_label)
+      catTotals[r.intent_label] = (catTotals[r.intent_label] ?? 0) + 1;
     for (const b of r.brands_impersonated ?? []) {
       brandTotals[b] = (brandTotals[b] ?? 0) + 1;
       const k = b.toLowerCase();
@@ -154,7 +158,8 @@ export function aggregateWeeklyCohort(
   const baseBrands = new Set<string>();
   const baseTactics = new Set<string>();
   for (const r of baseline) {
-    for (const b of r.brands_impersonated ?? []) baseBrands.add(b.toLowerCase());
+    for (const b of r.brands_impersonated ?? [])
+      baseBrands.add(b.toLowerCase());
     for (const t of r.tactic_tags ?? []) baseTactics.add(t.toLowerCase());
   }
 
@@ -215,7 +220,9 @@ export async function synthesizeWeeklyIntel(
 
   // 2. Respect the shared reddit-intel cost brake.
   if (await isRedditIntelBraked()) {
-    logger.warn("weekly-synthesis: reddit_intel brake engaged — skipping generation");
+    logger.warn(
+      "weekly-synthesis: reddit_intel brake engaged — skipping generation",
+    );
     return null;
   }
 
@@ -225,19 +232,25 @@ export async function synthesizeWeeklyIntel(
   //    shrinking and recency-biasing the sample.
   const { data: cohort, error: cohortErr } = await supabase
     .from("reddit_post_intel")
-    .select("intent_label, brands_impersonated, tactic_tags, narrative_summary, confidence")
+    .select(
+      "intent_label, brands_impersonated, tactic_tags, narrative_summary, confidence",
+    )
     .gte("processed_at", `${weekStart}T00:00:00Z`)
     .gte("confidence", MIN_CONFIDENCE)
     .order("processed_at", { ascending: false })
     .limit(MAX_COHORT_ROWS);
 
-  if (cohortErr) throw new Error(`weekly-synthesis cohort fetch: ${cohortErr.message}`);
+  if (cohortErr)
+    throw new Error(`weekly-synthesis cohort fetch: ${cohortErr.message}`);
   const rows = (cohort ?? []) as CohortRow[];
   if (rows.length === 0) {
-    logger.info("weekly-synthesis: empty cohort in window — nothing to synthesise", {
-      weekStart,
-      weekEnd,
-    });
+    logger.info(
+      "weekly-synthesis: empty cohort in window — nothing to synthesise",
+      {
+        weekStart,
+        weekEnd,
+      },
+    );
     return null;
   }
 
@@ -250,16 +263,25 @@ export async function synthesizeWeeklyIntel(
   // recent baseline rather than an arbitrary Postgres page order — otherwise a
   // perennial brand could fall outside an unordered sample and be mis-flagged
   // "new this week". At current ~1k rows/28d the cap isn't reached.
-  const { data: baseline } = await supabase
-    .from("reddit_post_intel")
-    .select("brands_impersonated, tactic_tags")
-    .gte("processed_at", `${baselineStart}T00:00:00Z`)
-    .lt("processed_at", `${weekStart}T00:00:00Z`)
-    .order("processed_at", { ascending: false })
-    .limit(5000);
+  // A TRUNCATED baseline is worse than a small one: brands present in the
+  // dropped tail read as absent, so they get published as "new this week".
+  const { rows: baseline } = await fetchAllRows<CohortRow>(
+    (from, to) =>
+      supabase
+        .from("reddit_post_intel")
+        .select("brands_impersonated, tactic_tags")
+        .gte("processed_at", `${baselineStart}T00:00:00Z`)
+        .lt("processed_at", `${weekStart}T00:00:00Z`)
+        .order("id", { ascending: false })
+        .range(from, to) as unknown as PromiseLike<{
+        data: CohortRow[] | null;
+        error: { message: string } | null;
+      }>,
+    { maxRows: 100_000 },
+  );
 
   const { catTotals, topBrands, topCategories, novelBrands, novelTactics } =
-    aggregateWeeklyCohort(rows, (baseline ?? []) as CohortRow[]);
+    aggregateWeeklyCohort(rows, baseline);
 
   // 6. Deterministic scam-of-the-week quote (real extracted quote, never
   //    fabricated). Most recent high-confidence quote in the window.
@@ -283,7 +305,8 @@ export async function synthesizeWeeklyIntel(
     .filter((r) => r.narrative_summary)
     .slice(0, MAX_NARRATIVES_IN_PROMPT)
     .map((r, i) => {
-      const brands = (r.brands_impersonated ?? []).slice(0, 3).join(", ") || "—";
+      const brands =
+        (r.brands_impersonated ?? []).slice(0, 3).join(", ") || "—";
       return `${i + 1}. [${r.intent_label ?? "other"}] brands:${brands} — ${r.narrative_summary}`;
     })
     .join("\n");
@@ -292,7 +315,10 @@ export async function synthesizeWeeklyIntel(
     window: { weekStart, weekEnd, postsAnalysed: rows.length },
     categoryCounts: catTotals,
     topBrandsThisWeek: topBrands,
-    firstSeenThisWeek: { brands: novelBrands.slice(0, 20), tactics: novelTactics.slice(0, 20) },
+    firstSeenThisWeek: {
+      brands: novelBrands.slice(0, 20),
+      tactics: novelTactics.slice(0, 20),
+    },
     instructions:
       "Use ONLY the counts and novelty flags provided — do not invent figures. " +
       "Set category to one of the categoryCounts keys. Set noveltySignal='new' " +
@@ -321,7 +347,8 @@ export async function synthesizeWeeklyIntel(
   //    romance_scam count instead of silently rendering "0 reports this week".
   const normCat = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
   const countByNorm: Record<string, number> = {};
-  for (const [label, count] of Object.entries(catTotals)) countByNorm[normCat(label)] = count;
+  for (const [label, count] of Object.entries(catTotals))
+    countByNorm[normCat(label)] = count;
 
   const stories: WeeklyIntelStory[] = result.stories.map((s, i) => ({
     rank: i + 1,
@@ -340,7 +367,10 @@ export async function synthesizeWeeklyIntel(
     stories,
     topBrands,
     topCategories,
-    novelty: { brands: novelBrands.slice(0, 20), tactics: novelTactics.slice(0, 20) },
+    novelty: {
+      brands: novelBrands.slice(0, 20),
+      tactics: novelTactics.slice(0, 20),
+    },
     scamOfTheWeek,
     modelVersion: modelId,
     promptVersion: PROMPT_VERSION,
@@ -368,23 +398,26 @@ export async function synthesizeWeeklyIntel(
     },
   });
 
-  const { error: upsertErr } = await supabase.from("reddit_intel_weekly_digest").upsert(
-    {
-      week_start: weekStart,
-      week_end: weekEnd,
-      cohort_post_count: rows.length,
-      stories: digest.stories,
-      top_brands: topBrands,
-      top_categories: topCategories,
-      novelty: digest.novelty,
-      scam_of_the_week: scamOfTheWeek,
-      model_version: modelId,
-      prompt_version: PROMPT_VERSION,
-      generated_at: now.toISOString(),
-    },
-    { onConflict: "week_start" },
-  );
-  if (upsertErr) throw new Error(`weekly-synthesis upsert: ${upsertErr.message}`);
+  const { error: upsertErr } = await supabase
+    .from("reddit_intel_weekly_digest")
+    .upsert(
+      {
+        week_start: weekStart,
+        week_end: weekEnd,
+        cohort_post_count: rows.length,
+        stories: digest.stories,
+        top_brands: topBrands,
+        top_categories: topCategories,
+        novelty: digest.novelty,
+        scam_of_the_week: scamOfTheWeek,
+        model_version: modelId,
+        prompt_version: PROMPT_VERSION,
+        generated_at: now.toISOString(),
+      },
+      { onConflict: "week_start" },
+    );
+  if (upsertErr)
+    throw new Error(`weekly-synthesis upsert: ${upsertErr.message}`);
 
   logger.info("weekly-synthesis: generated digest", {
     weekStart,
@@ -405,13 +438,15 @@ function rowToDigest(row: Record<string, unknown>): WeeklyIntelDigest {
     stories: (row.stories as WeeklyIntelStory[]) ?? [],
     topBrands:
       (row.top_brands as Array<{ brand: string; mentionCount: number }>) ?? [],
-    topCategories: (row.top_categories as Array<{ label: string; count: number }>) ?? [],
+    topCategories:
+      (row.top_categories as Array<{ label: string; count: number }>) ?? [],
     novelty: (row.novelty as { brands: string[]; tactics: string[] }) ?? {
       brands: [],
       tactics: [],
     },
     scamOfTheWeek:
-      (row.scam_of_the_week as { text: string; speakerRole: string } | null) ?? null,
+      (row.scam_of_the_week as { text: string; speakerRole: string } | null) ??
+      null,
     modelVersion: (row.model_version as string) ?? "",
     promptVersion: (row.prompt_version as string) ?? "",
     generatedAt: (row.generated_at as string) ?? "",

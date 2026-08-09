@@ -20,6 +20,7 @@ import { logger } from "@askarthur/utils/logger";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { sendPushNotifications } from "@askarthur/scam-engine/push-sender";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
+import { fetchAllRows } from "@askarthur/supabase/paginate";
 
 const SOURCE_LABEL: Record<string, string> = {
   scamwatch_alert: "ACCC Scamwatch",
@@ -32,7 +33,7 @@ const SOURCE_LABEL: Record<string, string> = {
 // tick boundary slips through. The "haven't been pushed yet" dedup below makes
 // the overlap safe (no duplicate pushes).
 const LOOKBACK_MINUTES = 195;
-const MAX_PER_TICK = 10;     // safety cap — never push >10 narratives per cron tick
+const MAX_PER_TICK = 10; // safety cap — never push >10 narratives per cron tick
 
 interface NarrativeRow {
   id: number;
@@ -109,18 +110,29 @@ export const regulatorAlertPush = inngest.createFunction(
     const tokens = await step.run("fetch-tokens", async () => {
       const supabase = createServiceClient();
       if (!supabase) return [];
-      const { data, error } = await supabase
-        .from("device_push_tokens")
-        .select("expo_token")
-        .eq("active", true)
-        .limit(10000);
+      // Paged: `.limit(10000)` returned at most 1000 tokens, so past 1000
+      // active devices the remainder were never notified — silently, with the
+      // run still reporting success.
+      const { rows: data, error } = await fetchAllRows<{ expo_token: string }>(
+        (from, to) =>
+          supabase
+            .from("device_push_tokens")
+            .select("expo_token")
+            .eq("active", true)
+            .order("id", { ascending: true })
+            .range(from, to) as unknown as PromiseLike<{
+            data: Array<{ expo_token: string }> | null;
+            error: { message: string } | null;
+          }>,
+        { maxRows: 500_000 },
+      );
       if (error) {
         logger.error("regulator-alert-push: token query failed", {
           error: error.message,
         });
         return [];
       }
-      return (data ?? []).map((d) => d.expo_token as string);
+      return data.map((d) => d.expo_token as string);
     });
 
     if (tokens.length === 0) {
@@ -172,17 +184,15 @@ export const regulatorAlertPush = inngest.createFunction(
 
         // Record dedup row. ON CONFLICT DO NOTHING handles a concurrent
         // tick that races us — the loser silently no-ops.
-        const { error } = await supabase
-          .from("regulator_alert_pushes")
-          .upsert(
-            {
-              feed_item_id: narrative.id,
-              recipient_count: sent,
-              error_count: failed,
-              pushed_at: new Date().toISOString(),
-            },
-            { onConflict: "feed_item_id", ignoreDuplicates: true },
-          );
+        const { error } = await supabase.from("regulator_alert_pushes").upsert(
+          {
+            feed_item_id: narrative.id,
+            recipient_count: sent,
+            error_count: failed,
+            pushed_at: new Date().toISOString(),
+          },
+          { onConflict: "feed_item_id", ignoreDuplicates: true },
+        );
         if (error) {
           logger.warn("regulator-alert-push: dedup insert failed", {
             feed_item_id: narrative.id,

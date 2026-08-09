@@ -28,8 +28,10 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { hashMsisdn } from "../normalize";
 
 const VONAGE_NI_URL = "https://api.nexmo.com/v2/ni";
-const VONAGE_SIM_SWAP_URL = "https://api-eu.vonage.com/camara/sim-swap/v040/check";
-const VONAGE_DEVICE_SWAP_URL = "https://api-eu.vonage.com/camara/device-status/v0/device-swap";
+const VONAGE_SIM_SWAP_URL =
+  "https://api-eu.vonage.com/camara/sim-swap/v040/check";
+const VONAGE_DEVICE_SWAP_URL =
+  "https://api-eu.vonage.com/camara/device-status/v0/device-swap";
 const DEFAULT_MAX_AGE_HOURS = 240;
 
 // ---------------------------------------------------------------------------
@@ -135,8 +137,17 @@ async function recordUsage(args: {
 // NI v2 — pillar 3 primary
 // ---------------------------------------------------------------------------
 interface NiV2Response {
-  fraud_score?: { risk_score?: number; risk_recommendation?: string; label?: string };
-  phone_validation?: { valid?: boolean; line_type?: string; country_code?: string; carrier?: { name?: string } };
+  fraud_score?: {
+    risk_score?: number;
+    risk_recommendation?: string;
+    label?: string;
+  };
+  phone_validation?: {
+    valid?: boolean;
+    line_type?: string;
+    country_code?: string;
+    carrier?: { name?: string };
+  };
 }
 
 async function callNumberInsight(
@@ -391,9 +402,18 @@ export const vonageProvider: ProviderContract = {
       });
     } else {
       const reason = !simOk
-        ? String(simR.status === "rejected" ? simR.reason?.message : "sim_unknown")
-        : String(devR.status === "rejected" ? devR.reason?.message : "device_unknown");
-      simSwap = unavailablePillar("sim_swap", `vonage_camara_${reason.slice(0, 32)}`);
+        ? String(
+            simR.status === "rejected" ? simR.reason?.message : "sim_unknown",
+          )
+        : String(
+            devR.status === "rejected"
+              ? devR.reason?.message
+              : "device_unknown",
+          );
+      simSwap = unavailablePillar(
+        "sim_swap",
+        `vonage_camara_${reason.slice(0, 32)}`,
+      );
       void recordUsage({
         endpoint: "camara/sim-swap+device-swap",
         userId: ctx.userId,

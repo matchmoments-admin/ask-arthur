@@ -150,7 +150,9 @@ export async function callClaudeJson<T>(
       logger.error(`${msg} in production — refusing to serve`, { requestId });
       throw new Error("Claude unavailable in production: missing API key");
     }
-    throw new Error(`${msg} (dev/test) — set the env var or mock at the call site`);
+    throw new Error(
+      `${msg} (dev/test) — set the env var or mock at the call site`,
+    );
   }
 
   const spec = MODELS[model];
@@ -210,7 +212,9 @@ export async function callClaudeJson<T>(
   // pattern with `400 invalid_request_error: This model does not support
   // assistant message prefill`. On the legacy text path we rely on the
   // system prompt's "Return JSON only" instruction + extractJson() below.
-  const response = await client.messages.create(requestParams, { timeout: timeoutMs });
+  const response = await client.messages.create(requestParams, {
+    timeout: timeoutMs,
+  });
 
   const usage: CallClaudeUsage = {
     inputTokens: response.usage?.input_tokens ?? 0,
@@ -238,12 +242,15 @@ export async function callClaudeJson<T>(
       (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use",
     );
     if (!toolUseBlock) {
-      logger.error("Tool-use mode requested but no tool_use block in response", {
-        requestId,
-        modelId: spec.id,
-        stopReason: response.stop_reason,
-        contentTypes: response.content.map((b) => b.type),
-      });
+      logger.error(
+        "Tool-use mode requested but no tool_use block in response",
+        {
+          requestId,
+          modelId: spec.id,
+          stopReason: response.stop_reason,
+          contentTypes: response.content.map((b) => b.type),
+        },
+      );
       throw new Error(
         `Claude tool-use response missing (${spec.id}): stop_reason=${response.stop_reason}`,
       );

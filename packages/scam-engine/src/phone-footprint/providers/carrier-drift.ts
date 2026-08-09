@@ -23,10 +23,7 @@
 // have completed, because it needs both the current Twilio result and
 // the previous footprint as inputs (not a fresh external call).
 
-import type {
-  Footprint,
-  PillarResult,
-} from "../types";
+import type { Footprint, PillarResult } from "../types";
 import { unavailablePillar } from "../provider-contract";
 
 /**

@@ -59,7 +59,10 @@ export interface DetectionCandidate {
 
 const idCache = new Map<string, number>();
 
-function safeEvidence(input: Record<string, unknown> | undefined, identifier: string): Record<string, unknown> {
+function safeEvidence(
+  input: Record<string, unknown> | undefined,
+  identifier: string,
+): Record<string, unknown> {
   if (!input) return {};
   try {
     return JSON.parse(JSON.stringify(input)) as Record<string, unknown>;
@@ -74,7 +77,7 @@ function safeEvidence(input: Record<string, unknown> | undefined, identifier: st
 
 async function lookupVulnerabilityId(
   supabase: NonNullable<ReturnType<typeof createServiceClient>>,
-  identifier: string
+  identifier: string,
 ): Promise<number | null> {
   const cached = idCache.get(identifier);
   if (cached !== undefined) return cached;
@@ -144,7 +147,7 @@ export async function recordDetection(c: DetectionCandidate): Promise<void> {
       {
         onConflict: "vulnerability_id,target_type,target_value,target_version",
         ignoreDuplicates: true,
-      }
+      },
     );
 
     if (error) {
@@ -168,7 +171,9 @@ export async function recordDetection(c: DetectionCandidate): Promise<void> {
  * doesn't fail the others. Sequential to keep error attribution clean and
  * because the typical batch is ≤4 rows per scan.
  */
-export async function recordDetections(cs: DetectionCandidate[]): Promise<void> {
+export async function recordDetections(
+  cs: DetectionCandidate[],
+): Promise<void> {
   for (const c of cs) {
     await recordDetection(c);
   }

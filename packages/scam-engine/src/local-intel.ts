@@ -26,14 +26,14 @@ async function dnsLookup<T>(
   fn: (resolver: Resolver) => Promise<T>,
   checkName: string,
   checksCompleted: string[],
-  checksFailed: string[]
+  checksFailed: string[],
 ): Promise<T | null> {
   const resolver = createResolver();
   try {
     const result = await Promise.race([
       fn(resolver),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("DNS_TIMEOUT")), DNS_TIMEOUT_MS)
+        setTimeout(() => reject(new Error("DNS_TIMEOUT")), DNS_TIMEOUT_MS),
       ),
     ]);
     checksCompleted.push(checkName);
@@ -99,7 +99,7 @@ const PARKING_NS_PATTERNS = [
 
 function isParkedDomain(nsRecords: string[]): boolean {
   return nsRecords.some((ns) =>
-    PARKING_NS_PATTERNS.some((pattern) => pattern.test(ns))
+    PARKING_NS_PATTERNS.some((pattern) => pattern.test(ns)),
   );
 }
 
@@ -214,19 +214,19 @@ export async function analyzeEmail(email: string): Promise<EmailIntel> {
       (r) => r.resolveMx(domain),
       "mx_lookup",
       checksCompleted,
-      checksFailed
+      checksFailed,
     ),
     dnsLookup(
       (r) => r.resolveTxt(domain),
       "txt_lookup",
       checksCompleted,
-      checksFailed
+      checksFailed,
     ),
     dnsLookup(
       (r) => r.resolveTxt(`_dmarc.${domain}`),
       "dmarc_lookup",
       checksCompleted,
-      checksFailed
+      checksFailed,
     ),
   ]);
 
@@ -284,31 +284,31 @@ export async function analyzeDomain(domain: string): Promise<DomainIntel> {
         (r) => r.resolve4(domain),
         "a_lookup",
         checksCompleted,
-        checksFailed
+        checksFailed,
       ),
       dnsLookup(
         (r) => r.resolve6(domain),
         "aaaa_lookup",
         checksCompleted,
-        checksFailed
+        checksFailed,
       ),
       dnsLookup(
         (r) => r.resolveNs(domain),
         "ns_lookup",
         checksCompleted,
-        checksFailed
+        checksFailed,
       ),
       dnsLookup(
         (r) => r.resolveMx(domain),
         "mx_lookup",
         checksCompleted,
-        checksFailed
+        checksFailed,
       ),
       dnsLookup(
         (r) => r.resolveTxt(domain),
         "txt_lookup",
         checksCompleted,
-        checksFailed
+        checksFailed,
       ),
     ]);
 
@@ -347,7 +347,7 @@ export async function analyzeIP(ip: string): Promise<IPIntel> {
     (r) => r.reverse(ip),
     "ptr_lookup",
     checksCompleted,
-    checksFailed
+    checksFailed,
   );
 
   const ptrHostname = ptrResult?.[0] ?? null;
@@ -361,7 +361,7 @@ export async function analyzeIP(ip: string): Promise<IPIntel> {
       (r) => r.resolve4(ptrHostname),
       "fcrdns_lookup",
       checksCompleted,
-      checksFailed
+      checksFailed,
     );
 
     if (forwardResult !== null) {

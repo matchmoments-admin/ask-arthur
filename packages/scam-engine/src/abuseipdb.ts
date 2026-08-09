@@ -8,12 +8,16 @@ import { logger } from "@askarthur/utils/logger";
 import { logCost, ENGINE_PRICING } from "./cost-log";
 
 const CACHE_TTL = 86_400; // 24 hours — IP reputation moves slowly; longer TTL
-                          // protects the 1,000/day free-tier cap (bumped from 6h)
+// protects the 1,000/day free-tier cap (bumped from 6h)
 const CACHE_PREFIX = "askarthur:abuseipdb";
 
 let _redis: Redis | null = null;
 function getRedis(): Redis | null {
-  if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) return null;
+  if (
+    !process.env.UPSTASH_REDIS_REST_URL ||
+    !process.env.UPSTASH_REDIS_REST_TOKEN
+  )
+    return null;
   if (!_redis) {
     _redis = new Redis({
       url: process.env.UPSTASH_REDIS_REST_URL,
@@ -74,7 +78,7 @@ export async function checkAbuseIPDB(ip: string): Promise<AbuseIPDBResult> {
           Accept: "application/json",
         },
         signal: AbortSignal.timeout(5000),
-      }
+      },
     );
 
     if (!res.ok) {
@@ -108,7 +112,9 @@ export async function checkAbuseIPDB(ip: string): Promise<AbuseIPDBResult> {
 
     // Cache result (fire-and-forget)
     if (redis) {
-      redis.set(`${CACHE_PREFIX}:${ip}`, result, { ex: CACHE_TTL }).catch(() => {});
+      redis
+        .set(`${CACHE_PREFIX}:${ip}`, result, { ex: CACHE_TTL })
+        .catch(() => {});
     }
 
     return result;

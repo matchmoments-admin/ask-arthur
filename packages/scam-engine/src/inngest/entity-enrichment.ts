@@ -56,14 +56,14 @@ async function enrichPhone(value: string): Promise<Record<string, unknown>> {
 
   // IPQualityScore phone fraud scoring — gated by flag and env var
   const useIPQS =
-    featureFlags.ipqualityScore &&
-    !!process.env.IPQUALITYSCORE_API_KEY;
+    featureFlags.ipqualityScore && !!process.env.IPQUALITYSCORE_API_KEY;
   if (useIPQS) {
     checks.push(checkIPQS(value));
   }
 
   const results = await Promise.allSettled(checks);
-  const localIntel = results[0].status === "fulfilled" ? results[0].value : null;
+  const localIntel =
+    results[0].status === "fulfilled" ? results[0].value : null;
 
   const data: Record<string, unknown> = { localIntel };
 
@@ -99,25 +99,37 @@ async function enrichDomain(value: string): Promise<Record<string, unknown>> {
   }
 
   const results = await Promise.allSettled(checks);
-  const localIntel = results[0].status === "fulfilled" ? results[0].value : null;
-  const whois = results[1].status === "fulfilled" ? results[1].value as Record<string, unknown> : null;
-  const ssl = results[2].status === "fulfilled" ? results[2].value as Record<string, unknown> : null;
+  const localIntel =
+    results[0].status === "fulfilled" ? results[0].value : null;
+  const whois =
+    results[1].status === "fulfilled"
+      ? (results[1].value as Record<string, unknown>)
+      : null;
+  const ssl =
+    results[2].status === "fulfilled"
+      ? (results[2].value as Record<string, unknown>)
+      : null;
 
   const data: Record<string, unknown> = {
     localIntel,
-    whois: whois ? {
-      registrar: (whois as { registrar?: string }).registrar,
-      registrantCountry: (whois as { registrantCountry?: string }).registrantCountry,
-      createdDate: (whois as { createdDate?: string }).createdDate,
-      expiresDate: (whois as { expiresDate?: string }).expiresDate,
-      nameServers: (whois as { nameServers?: string[] }).nameServers,
-      isPrivate: (whois as { isPrivate?: boolean }).isPrivate,
-    } : null,
-    ssl: ssl ? {
-      valid: (ssl as { valid?: boolean }).valid,
-      issuer: (ssl as { issuer?: string }).issuer,
-      daysRemaining: (ssl as { daysRemaining?: number }).daysRemaining,
-    } : null,
+    whois: whois
+      ? {
+          registrar: (whois as { registrar?: string }).registrar,
+          registrantCountry: (whois as { registrantCountry?: string })
+            .registrantCountry,
+          createdDate: (whois as { createdDate?: string }).createdDate,
+          expiresDate: (whois as { expiresDate?: string }).expiresDate,
+          nameServers: (whois as { nameServers?: string[] }).nameServers,
+          isPrivate: (whois as { isPrivate?: boolean }).isPrivate,
+        }
+      : null,
+    ssl: ssl
+      ? {
+          valid: (ssl as { valid?: boolean }).valid,
+          issuer: (ssl as { issuer?: string }).issuer,
+          daysRemaining: (ssl as { daysRemaining?: number }).daysRemaining,
+        }
+      : null,
   };
 
   if (useCT && results[3]?.status === "fulfilled") {
@@ -163,20 +175,22 @@ async function enrichURL(value: string): Promise<Record<string, unknown>> {
 }
 
 async function enrichIP(value: string): Promise<Record<string, unknown>> {
-  const checks: Promise<unknown>[] = [
-    analyzeIP(value),
-    geolocateIP(value),
-  ];
+  const checks: Promise<unknown>[] = [analyzeIP(value), geolocateIP(value)];
 
   // AbuseIPDB — gated by abuseIPDB flag and env var
-  const useAbuseIPDB = featureFlags.abuseIPDB && !!process.env.ABUSEIPDB_API_KEY;
+  const useAbuseIPDB =
+    featureFlags.abuseIPDB && !!process.env.ABUSEIPDB_API_KEY;
   if (useAbuseIPDB) {
     checks.push(checkAbuseIPDB(value));
   }
 
   const results = await Promise.allSettled(checks);
-  const localIntel = results[0].status === "fulfilled" ? results[0].value : null;
-  const geo = results[1].status === "fulfilled" ? results[1].value as { region?: string; countryCode?: string } : null;
+  const localIntel =
+    results[0].status === "fulfilled" ? results[0].value : null;
+  const geo =
+    results[1].status === "fulfilled"
+      ? (results[1].value as { region?: string; countryCode?: string })
+      : null;
 
   const data: Record<string, unknown> = {
     localIntel,
@@ -229,10 +243,12 @@ async function enrichEmail(value: string): Promise<Record<string, unknown>> {
   }
 
   const results = await Promise.allSettled(checks);
-  const localIntel = results[0].status === "fulfilled" ? results[0].value : null;
-  const domainEnrichment = results[1].status === "fulfilled"
-    ? results[1].value as Record<string, unknown>
-    : {};
+  const localIntel =
+    results[0].status === "fulfilled" ? results[0].value : null;
+  const domainEnrichment =
+    results[1].status === "fulfilled"
+      ? (results[1].value as Record<string, unknown>)
+      : {};
 
   const data: Record<string, unknown> = {
     localIntel,
@@ -261,7 +277,10 @@ export const entityEnrichmentFanOut = inngest.createFunction(
   { cron: "0 */8 * * *" }, // Every 8h (was 4h). Pending-status queue is self-draining + capped per run, so wider cadence only adds enrichment-freshness lag — no entities skipped.
   withAxiomLogging({ fnId: "pipeline-entity-enrichment" }, async ({ step }) => {
     if (!featureFlags.entityEnrichment) {
-      return { skipped: true, reason: "entityEnrichment feature flag disabled" };
+      return {
+        skipped: true,
+        reason: "entityEnrichment feature flag disabled",
+      };
     }
 
     // Step 0: Reap orphaned `in_progress` rows (#520 H3). If a prior run
@@ -326,7 +345,7 @@ export const entityEnrichmentFanOut = inngest.createFunction(
           type: row.entity_type as string,
           value: row.normalized_value as string,
         }));
-      }
+      },
     );
 
     if (pendingEntities.length === 0) {
@@ -414,8 +433,8 @@ export const entityEnrichmentFanOut = inngest.createFunction(
               error: errorMsg,
             };
           }
-        })
-      )
+        }),
+      ),
     );
 
     const completed = results.filter((r) => r.status === "completed").length;
@@ -428,5 +447,5 @@ export const entityEnrichmentFanOut = inngest.createFunction(
     });
 
     return { total: pendingEntities.length, completed, failed, results };
-  })
+  }),
 );

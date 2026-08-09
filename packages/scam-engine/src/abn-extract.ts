@@ -32,10 +32,25 @@ export { isValidAbnChecksum };
 // Company-form words + articles stripped before name matching — a shop's
 // registered name routinely differs from its trading name only by these.
 const NAME_STOPWORDS = new Set([
-  "pty", "ltd", "limited", "proprietary", "pl",
-  "the", "and", "co", "inc", "incorporated",
-  "trading", "as", "ta", "group", "holdings", "enterprises",
-  "australia", "australian", "aust",
+  "pty",
+  "ltd",
+  "limited",
+  "proprietary",
+  "pl",
+  "the",
+  "and",
+  "co",
+  "inc",
+  "incorporated",
+  "trading",
+  "as",
+  "ta",
+  "group",
+  "holdings",
+  "enterprises",
+  "australia",
+  "australian",
+  "aust",
 ]);
 
 export interface ShopAbnResult {

@@ -26,7 +26,7 @@ const BATCH_SIZE = 100;
  * Automatically batches messages (max 100 per request per Expo's limit).
  */
 export async function sendPushNotifications(
-  messages: ExpoPushMessage[]
+  messages: ExpoPushMessage[],
 ): Promise<ExpoPushTicket[]> {
   const tickets: ExpoPushTicket[] = [];
 
@@ -37,7 +37,7 @@ export async function sendPushNotifications(
       const res = await fetch(EXPO_PUSH_URL, {
         method: "POST",
         headers: {
-          "Accept": "application/json",
+          Accept: "application/json",
           "Accept-Encoding": "gzip, deflate",
           "Content-Type": "application/json",
         },
@@ -66,7 +66,10 @@ export async function sendPushNotifications(
         }
       }
     } catch (err) {
-      logger.error("Failed to send push batch", { error: err, batch: i / BATCH_SIZE });
+      logger.error("Failed to send push batch", {
+        error: err,
+        batch: i / BATCH_SIZE,
+      });
     }
   }
 
@@ -79,7 +82,7 @@ export async function sendPushNotifications(
 export function buildScamAlertMessage(
   token: string,
   alertType: string,
-  summary: string
+  summary: string,
 ): ExpoPushMessage {
   return {
     to: token,

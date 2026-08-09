@@ -58,9 +58,12 @@ export async function geolocateIP(ip: string): Promise<GeoResult> {
       return { region: null, countryCode: null };
     }
 
-    const res = await fetch(`http://ip-api.com/json/${ip}?fields=city,regionName,country,countryCode`, {
-      signal: AbortSignal.timeout(3000),
-    });
+    const res = await fetch(
+      `http://ip-api.com/json/${ip}?fields=city,regionName,country,countryCode`,
+      {
+        signal: AbortSignal.timeout(3000),
+      },
+    );
 
     if (!res.ok) return { region: null, countryCode: null };
 

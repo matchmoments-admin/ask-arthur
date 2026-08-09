@@ -121,9 +121,9 @@ interface PillarSummary {
 }
 
 function compactSummary(fp: Footprint, ownershipProven: boolean) {
-  const pillars: PillarSummary[] = (
-    Object.keys(fp.pillars) as PillarId[]
-  ).map((id) => pillarSummary(id, fp.pillars[id]));
+  const pillars: PillarSummary[] = (Object.keys(fp.pillars) as PillarId[]).map(
+    (id) => pillarSummary(id, fp.pillars[id]),
+  );
   return {
     msisdn_suffix: fp.msisdn_e164.slice(-4),
     ownershipProven,

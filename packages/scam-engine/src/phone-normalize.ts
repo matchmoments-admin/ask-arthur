@@ -15,7 +15,8 @@ export function normalizePhoneE164(raw: string): string | null {
   if (!digits || digits.length < 8) return null;
 
   // Already valid E.164 with + (international)
-  if (hasPlus && digits.length >= 10 && digits.length <= 15) return `+${digits}`;
+  if (hasPlus && digits.length >= 10 && digits.length <= 15)
+    return `+${digits}`;
 
   // AU mobile: 04xx or 05xx (10 digits starting with 0)
   if (/^0[45]\d{8}$/.test(digits)) return `+61${digits.slice(1)}`;
@@ -95,7 +96,10 @@ export function extractContactsFromText(text: string): {
       const normalized = normalizePhoneE164(match[0]);
       if (normalized && !seenPhones.has(normalized)) {
         seenPhones.add(normalized);
-        phoneNumbers.push({ value: match[0].trim(), context: "extracted from message" });
+        phoneNumbers.push({
+          value: match[0].trim(),
+          context: "extracted from message",
+        });
       }
     }
   }
@@ -107,7 +111,10 @@ export function extractContactsFromText(text: string): {
     const email = emailMatch[0].toLowerCase();
     if (!seenEmails.has(email)) {
       seenEmails.add(email);
-      emailAddresses.push({ value: emailMatch[0], context: "extracted from message" });
+      emailAddresses.push({
+        value: emailMatch[0],
+        context: "extracted from message",
+      });
     }
   }
 

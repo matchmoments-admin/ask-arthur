@@ -3,7 +3,10 @@ import { requireCronAuth } from "@/lib/cron-auth";
 import { readBoolEnv } from "@askarthur/utils/env";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
-import { alertAndRecord, recordNoAlertNeeded } from "@/lib/alerting/deliveryLog";
+import {
+  alertAndRecord,
+  recordNoAlertNeeded,
+} from "@/lib/alerting/deliveryLog";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -68,7 +71,11 @@ export async function GET(req: Request) {
   if (disagreements === 0) {
     // Healthy day. Record it anyway — this row is what distinguishes "no
     // disagreements today" from "this cron stopped running a month ago".
-    await recordNoAlertNeeded("feedback-digest", { total, correct, disagreements: 0 });
+    await recordNoAlertNeeded("feedback-digest", {
+      total,
+      correct,
+      disagreements: 0,
+    });
     return NextResponse.json({
       silent: true,
       total,
@@ -85,7 +92,9 @@ export async function GET(req: Request) {
   ];
 
   if (falseNeg > 0) {
-    lines.push(`• 🛑 false-negative: ${falseNeg}${fnOnSafe.length > 0 ? ` (on SAFE: ${fnOnSafe.length})` : ""}`);
+    lines.push(
+      `• 🛑 false-negative: ${falseNeg}${fnOnSafe.length > 0 ? ` (on SAFE: ${fnOnSafe.length})` : ""}`,
+    );
   }
   if (userReported > 0) {
     lines.push(`• ⚠️ user-reported: ${userReported}`);
@@ -96,7 +105,11 @@ export async function GET(req: Request) {
 
   if (fnOnSafe.length > 0) {
     const sample = fnOnSafe.slice(0, 5).map((h) => h.slice(0, 12));
-    lines.push("", `<b>Top FN-on-SAFE hashes:</b>`, ...sample.map((h) => `<code>${h}</code>`));
+    lines.push(
+      "",
+      `<b>Top FN-on-SAFE hashes:</b>`,
+      ...sample.map((h) => `<code>${h}</code>`),
+    );
   }
 
   lines.push("", `Triage queue: https://askarthur.au/admin/feedback`);

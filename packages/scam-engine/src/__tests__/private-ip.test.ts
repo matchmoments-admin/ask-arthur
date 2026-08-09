@@ -12,9 +12,8 @@ describe("isPrivateIP — IPv4", () => {
     "100.64.0.1", // CGNAT
   ])("blocks private %s", (ip) => expect(isPrivateIP(ip)).toBe(true));
 
-  it.each(["8.8.8.8", "1.1.1.1", "203.0.113.5"])(
-    "allows public %s",
-    (ip) => expect(isPrivateIP(ip)).toBe(false),
+  it.each(["8.8.8.8", "1.1.1.1", "203.0.113.5"])("allows public %s", (ip) =>
+    expect(isPrivateIP(ip)).toBe(false),
   );
 });
 

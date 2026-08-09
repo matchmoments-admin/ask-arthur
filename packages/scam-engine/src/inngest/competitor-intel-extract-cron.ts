@@ -49,102 +49,110 @@ export const competitorIntelExtractCron = inngest.createFunction(
   // can't sit open indefinitely (L16); matches feed-items-embed's shape.
   { id: "competitor-intel-extract", retries: 1, timeouts: { finish: "6m" } },
   { cron: "0 */6 * * *" },
-  withAxiomLogging({ fnId: "competitor-intel-extract" }, async ({ step, runId }) => {
-    if (!featureFlags.competitorIntelExtract) {
-      return { skipped: true, reason: "flag_off" };
-    }
+  withAxiomLogging(
+    { fnId: "competitor-intel-extract" },
+    async ({ step, runId }) => {
+      if (!featureFlags.competitorIntelExtract) {
+        return { skipped: true, reason: "flag_off" };
+      }
 
-    const candidates = await step.run("load-unextracted", async () => {
-      const supabase = createServiceClient();
-      if (!supabase) throw new Error("supabase service client unavailable");
+      const candidates = await step.run("load-unextracted", async () => {
+        const supabase = createServiceClient();
+        if (!supabase) throw new Error("supabase service client unavailable");
 
-      const since = new Date(Date.now() - LOOKBACK_DAYS * 86_400_000).toISOString();
+        const since = new Date(
+          Date.now() - LOOKBACK_DAYS * 86_400_000,
+        ).toISOString();
 
-      // Marker-based candidate selection (H2): un-attempted competitor rows
-      // only. The idx_feed_items_competitor_unextracted partial index backs this
-      // exact predicate. No observations join needed — a zero-yield newsletter
-      // is still marked competitor_extracted_at, so it drops out here.
-      const { data: items, error: itemsErr } = await supabase
-        .from("feed_items")
-        .select("id")
-        .eq("category", "competitor_intel")
-        .is("competitor_extracted_at", null)
-        .gte("created_at", since)
-        .order("created_at", { ascending: false })
-        .limit(BATCH_LIMIT);
-      if (itemsErr) throw new Error(`load candidates: ${itemsErr.message}`);
+        // Marker-based candidate selection (H2): un-attempted competitor rows
+        // only. The idx_feed_items_competitor_unextracted partial index backs this
+        // exact predicate. No observations join needed — a zero-yield newsletter
+        // is still marked competitor_extracted_at, so it drops out here.
+        const { data: items, error: itemsErr } = await supabase
+          .from("feed_items")
+          .select("id")
+          .eq("category", "competitor_intel")
+          .is("competitor_extracted_at", null)
+          .gte("created_at", since)
+          .order("created_at", { ascending: false })
+          .limit(BATCH_LIMIT);
+        if (itemsErr) throw new Error(`load candidates: ${itemsErr.message}`);
 
-      return (items ?? []).map((r) => r.id as number);
-    });
+        return (items ?? []).map((r) => r.id as number);
+      });
 
-    if (candidates.length === 0) {
-      return { skipped: true, reason: "no_unextracted_rows" };
-    }
+      if (candidates.length === 0) {
+        return { skipped: true, reason: "no_unextracted_rows" };
+      }
 
-    // One checkpointed step per newsletter. Deterministic step id (the feed_item
-    // id) is replay-safe. Failures are caught here, recorded to the error sink,
-    // and swallowed so the batch + invocation count stay stable.
-    let totalObservations = 0;
-    let failures = 0;
-    for (const id of candidates) {
-      const outcome = await step.run(`extract-${id}`, async () => {
-        try {
-          const res = await extractCompetitorObservations(id);
-          return { observations: res.observations, error: false };
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          logger.warn("competitor-intel-extract: row failed", {
-            feedItemId: id,
-            error: message,
-          });
-          // Best-effort error sink (L12): this insert must never throw out of
-          // the step (that would fail the function + step-retry → a paid re-run).
+      // One checkpointed step per newsletter. Deterministic step id (the feed_item
+      // id) is replay-safe. Failures are caught here, recorded to the error sink,
+      // and swallowed so the batch + invocation count stay stable.
+      let totalObservations = 0;
+      let failures = 0;
+      for (const id of candidates) {
+        const outcome = await step.run(`extract-${id}`, async () => {
           try {
-            const sb = createServiceClient();
-            if (sb) {
-              await sb.from("cost_telemetry").insert({
-                feature: "reddit-intel-error",
-                provider: "diagnostic",
-                operation: "competitor-intel-extract",
-                units: 0,
-                estimated_cost_usd: 0,
-                metadata: { feed_item_id: id, error_message: message.slice(0, 500) },
-              });
+            const res = await extractCompetitorObservations(id);
+            return { observations: res.observations, error: false };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            logger.warn("competitor-intel-extract: row failed", {
+              feedItemId: id,
+              error: message,
+            });
+            // Best-effort error sink (L12): this insert must never throw out of
+            // the step (that would fail the function + step-retry → a paid re-run).
+            try {
+              const sb = createServiceClient();
+              if (sb) {
+                await sb.from("cost_telemetry").insert({
+                  feature: "reddit-intel-error",
+                  provider: "diagnostic",
+                  operation: "competitor-intel-extract",
+                  units: 0,
+                  estimated_cost_usd: 0,
+                  metadata: {
+                    feed_item_id: id,
+                    error_message: message.slice(0, 500),
+                  },
+                });
+              }
+            } catch {
+              /* swallow — console log above already recorded it */
             }
-          } catch {
-            /* swallow — console log above already recorded it */
+            return { observations: 0, error: true };
           }
-          return { observations: 0, error: true };
-        }
-      });
-      totalObservations += outcome.observations;
-      if (outcome.error) failures += 1;
-    }
+        });
+        totalObservations += outcome.observations;
+        if (outcome.error) failures += 1;
+      }
 
-    logger.info("competitor-intel-extract: batch done", {
-      processed: candidates.length,
-      totalObservations,
-      failures,
-    });
-
-    // Surface failures to Axiom (M7): row failures are caught + swallowed above,
-    // so withAxiomLogging would otherwise emit a healthy fn.complete even when
-    // every newsletter failed. A WARN always ships (bypasses INFO sampling), so
-    // an all-fail run is visible in the #515 dashboards without a DB query.
-    if (failures > 0) {
-      const log = getLogger({
-        source: "inngest",
-        requestId: runId,
-        fn: "competitor-intel-extract",
-      });
-      log.warn("competitor-intel-extract.failures", {
-        failures,
+      logger.info("competitor-intel-extract: batch done", {
         processed: candidates.length,
         totalObservations,
+        failures,
       });
-      void log.flush();
-    }
 
-    return { processed: candidates.length, totalObservations, failures };
-  }),
+      // Surface failures to Axiom (M7): row failures are caught + swallowed above,
+      // so withAxiomLogging would otherwise emit a healthy fn.complete even when
+      // every newsletter failed. A WARN always ships (bypasses INFO sampling), so
+      // an all-fail run is visible in the #515 dashboards without a DB query.
+      if (failures > 0) {
+        const log = getLogger({
+          source: "inngest",
+          requestId: runId,
+          fn: "competitor-intel-extract",
+        });
+        log.warn("competitor-intel-extract.failures", {
+          failures,
+          processed: candidates.length,
+          totalObservations,
+        });
+        void log.flush();
+      }
+
+      return { processed: candidates.length, totalObservations, failures };
+    },
+  ),
 );

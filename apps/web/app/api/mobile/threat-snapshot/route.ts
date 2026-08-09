@@ -11,31 +11,30 @@ export async function GET() {
   if (!featureFlags.offlineDB) {
     return NextResponse.json(
       { error: "Offline DB not enabled" },
-      { status: 404 }
+      { status: 404 },
     );
   }
 
   const supabase = createServiceClient();
   if (!supabase) {
-    return NextResponse.json(
-      { error: "Service unavailable" },
-      { status: 503 }
-    );
+    return NextResponse.json({ error: "Service unavailable" }, { status: 503 });
   }
 
   try {
+    // 1000 is PostgREST's ceiling; the old 10000 promised ten times what the
+    // server ever returned. Ordered by report_count, so this is the top 1000.
     const { data, error } = await supabase
       .from("scam_urls")
       .select("domain, scam_type")
       .gte("report_count", 2)
       .order("report_count", { ascending: false })
-      .limit(10000);
+      .limit(1000);
 
     if (error) {
       logger.error("Failed to fetch threat snapshot", { error });
       return NextResponse.json(
         { error: "Failed to fetch data" },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
@@ -53,9 +52,6 @@ export async function GET() {
     });
   } catch (err) {
     logger.error("Threat snapshot error", { error: err });
-    return NextResponse.json(
-      { error: "Internal error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }
 }

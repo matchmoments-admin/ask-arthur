@@ -79,8 +79,9 @@ export function withAxiomLogging<TResult>(
       } as unknown as TResult;
     }
 
-    const rawRequestId = (ctx.event?.data as Record<string, unknown> | undefined)
-      ?.requestId;
+    const rawRequestId = (
+      ctx.event?.data as Record<string, unknown> | undefined
+    )?.requestId;
     const requestId =
       typeof rawRequestId === "string" && rawRequestId.length > 0
         ? rawRequestId

@@ -13,13 +13,17 @@ interface DeepfakeResult {
  */
 export async function analyzeAudioForDeepfake(
   audioBuffer: ArrayBuffer,
-  mimeType: string
+  mimeType: string,
 ): Promise<DeepfakeResult> {
   // Try Reality Defender first
   const realityDefenderKey = process.env.REALITY_DEFENDER_API_KEY;
   if (realityDefenderKey) {
     try {
-      return await analyzeWithRealityDefender(audioBuffer, mimeType, realityDefenderKey);
+      return await analyzeWithRealityDefender(
+        audioBuffer,
+        mimeType,
+        realityDefenderKey,
+      );
     } catch (err) {
       logger.warn("Reality Defender failed, trying fallback", { error: err });
     }
@@ -47,7 +51,7 @@ export async function analyzeAudioForDeepfake(
 async function analyzeWithRealityDefender(
   audioBuffer: ArrayBuffer,
   mimeType: string,
-  apiKey: string
+  apiKey: string,
 ): Promise<DeepfakeResult> {
   const formData = new FormData();
   formData.append("file", new Blob([audioBuffer], { type: mimeType }), "audio");
@@ -77,7 +81,7 @@ async function analyzeWithRealityDefender(
 async function analyzeWithResembleAI(
   audioBuffer: ArrayBuffer,
   mimeType: string,
-  apiKey: string
+  apiKey: string,
 ): Promise<DeepfakeResult> {
   const formData = new FormData();
   formData.append("file", new Blob([audioBuffer], { type: mimeType }), "audio");

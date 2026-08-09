@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import { hashMsisdn, hashIdentifierForPf, normalizePhoneE164 } from "../normalize";
+import {
+  hashMsisdn,
+  hashIdentifierForPf,
+  normalizePhoneE164,
+} from "../normalize";
 
 // Tests for the Phone Footprint normalization + hashing primitives.
 // Uses a fixed pepper so hash assertions are stable in CI.

@@ -10,7 +10,12 @@ function jpegWithSegments(
   const parts: Buffer[] = [Buffer.from([0xff, 0xd8])]; // SOI
   for (const seg of segments) {
     const length = seg.payload.length + 2;
-    const header = Buffer.from([0xff, seg.marker, (length >> 8) & 0xff, length & 0xff]);
+    const header = Buffer.from([
+      0xff,
+      seg.marker,
+      (length >> 8) & 0xff,
+      length & 0xff,
+    ]);
     parts.push(header, seg.payload);
   }
   parts.push(Buffer.from([0xff, 0xda, 0x00, 0x04, 0x00, 0x00])); // SOS then "data"
@@ -38,7 +43,12 @@ function pngWithChunks(types: string[]): Buffer {
     const data = Buffer.alloc(4, 0xab);
     const len = Buffer.alloc(4);
     len.writeUInt32BE(data.length);
-    return Buffer.concat([len, Buffer.from(t, "ascii"), data, Buffer.alloc(4, 0)]);
+    return Buffer.concat([
+      len,
+      Buffer.from(t, "ascii"),
+      data,
+      Buffer.alloc(4, 0),
+    ]);
   });
   return Buffer.concat([sig, ...chunks]);
 }
@@ -81,9 +91,12 @@ describe("detectC2PA", () => {
   });
 
   it("survives a truncated JPEG without throwing", () => {
-    const buf = jpegWithSegments([{ marker: 0xeb, payload: JUMBF_C2PA_PAYLOAD }], {
-      truncateLast: true,
-    });
+    const buf = jpegWithSegments(
+      [{ marker: 0xeb, payload: JUMBF_C2PA_PAYLOAD }],
+      {
+        truncateLast: true,
+      },
+    );
     expect(() => detectC2PA(buf)).not.toThrow();
   });
 
@@ -95,7 +108,9 @@ describe("detectC2PA", () => {
   });
 
   it("clean PNG → not present", () => {
-    expect(detectC2PA(pngWithChunks(["IHDR", "IDAT", "IEND"])).present).toBe(false);
+    expect(detectC2PA(pngWithChunks(["IHDR", "IDAT", "IEND"])).present).toBe(
+      false,
+    );
   });
 
   it("detects a WebP C2PA chunk", () => {

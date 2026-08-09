@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { createServiceClient } from "@askarthur/supabase/server";
+import { fetchAllRows } from "@askarthur/supabase/paginate";
 import { callClaudeJson } from "@askarthur/scam-engine/anthropic";
 import { scrubPII } from "@askarthur/scam-engine/sanitize";
 import { logger } from "@askarthur/utils/logger";
@@ -51,7 +52,11 @@ export interface MonthlyIntelFacts {
     brandCount: number;
     reportedOnward: number;
     topBrands: Array<{ brand: string; clones: number; reported: number }>;
-    weaponisedDomains: Array<{ domain: string; target: string | null; date: string }>;
+    weaponisedDomains: Array<{
+      domain: string;
+      target: string | null;
+      date: string;
+    }>;
     /** Month's detections by lifecycle_state — the honest detected→reported
      *  funnel (detected / monitoring / weaponised / reported / declined /
      *  taken_down) so the model can explain count gaps instead of glossing. */
@@ -87,81 +92,125 @@ function tally(values: Array<string | null | undefined>): LabelCount[] {
  */
 export async function collectMonthlyIntelFacts(
   startIso: string,
-  endIso: string
+  endIso: string,
 ): Promise<MonthlyIntelFacts | null> {
   const sb = createServiceClient();
   if (!sb) return null;
 
   const periodMonth = startIso.slice(0, 7);
 
-  const [reddit, competitor, cloneStats, weaponised, lifecycle, regulator, consumer, coverage] =
-    await Promise.all([
+  const [competitor, weaponised, regulator, coverage] = await Promise.all([
+    sb
+      .from("competitor_intel_observations")
+      .select("scam_title, scam_type, brands, novelty, summary")
+      .gte("extracted_at", startIso)
+      .lt("extracted_at", endIso)
+      .order("extracted_at", { ascending: false })
+      .limit(40),
+    sb
+      .from("shopfront_clone_alerts")
+      .select("candidate_domain, inferred_target_domain, weaponised_at")
+      .gte("weaponised_at", startIso)
+      .lt("weaponised_at", endIso)
+      .order("weaponised_at", { ascending: false })
+      .limit(25),
+    sb
+      .from("feed_items")
+      .select("source, title, published_at, created_at")
+      .in("source", [
+        "scamwatch_alert",
+        "acsc",
+        "inbound_scamwatch",
+        // inbound_wa_scamnet removed (#807): WA ScamNet copyright bars
+        // commercial reproduction — ingest-only, never blog-published.
+        "inbound_acma",
+        "inbound_ato",
+      ])
+      .gte("created_at", startIso)
+      .lt("created_at", endIso)
+      .order("created_at", { ascending: false })
+      .limit(30),
+    sb
+      .from("blog_posts")
+      .select("slug, title")
+      .eq("status", "published")
+      .order("published_at", { ascending: false })
+      .limit(100),
+  ]);
+
+  // Paged, not `.limit(N)`: PostgREST caps every response at 1000 rows, so the
+  // old limits (5000 / 2000 / unbounded) silently truncated these four
+  // aggregating reads — and every tally below is computed from their length.
+  const page = <T>(
+    build: (from: number, to: number) => unknown,
+    maxRows = 50_000,
+  ) =>
+    fetchAllRows<T>(
+      (from, to) =>
+        build(from, to) as PromiseLike<{
+          data: T[] | null;
+          error: { message: string } | null;
+        }>,
+      { maxRows },
+    );
+
+  const [reddit, cloneStats, lifecycle, consumer] = await Promise.all([
+    page<{
+      intent_label: string | null;
+      brands_impersonated: string[] | null;
+      tactic_tags: string[] | null;
+      novelty_signals: string[] | null;
+    }>((from, to) =>
       sb
         .from("reddit_post_intel")
-        .select("intent_label, brands_impersonated, tactic_tags, novelty_signals")
+        .select(
+          "intent_label, brands_impersonated, tactic_tags, novelty_signals",
+        )
         .gte("processed_at", startIso)
         .lt("processed_at", endIso)
         .gte("confidence", MIN_REDDIT_CONFIDENCE)
-        .limit(REDDIT_FETCH_LIMIT),
-      sb
-        .from("competitor_intel_observations")
-        .select("scam_title, scam_type, brands, novelty, summary")
-        .gte("extracted_at", startIso)
-        .lt("extracted_at", endIso)
-        .order("extracted_at", { ascending: false })
-        .limit(40),
-      sb
-        .from("clone_watch_monthly_brand_stats")
-        .select("brand, clones, reported_to_netcraft")
-        .eq("period_month", `${periodMonth}-01`)
-        .order("clones", { ascending: false }),
-      sb
-        .from("shopfront_clone_alerts")
-        .select("candidate_domain, inferred_target_domain, weaponised_at")
-        .gte("weaponised_at", startIso)
-        .lt("weaponised_at", endIso)
-        .order("weaponised_at", { ascending: false })
-        .limit(25),
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    page<{ brand: string; clones: number; reported_to_netcraft: number }>(
+      (from, to) =>
+        sb
+          .from("clone_watch_monthly_brand_stats")
+          .select("brand, clones, reported_to_netcraft")
+          .eq("period_month", `${periodMonth}-01`)
+          .order("clones", { ascending: false })
+          .order("brand", { ascending: true })
+          .range(from, to),
+    ),
+    page<{ lifecycle_state: string | null }>((from, to) =>
       sb
         .from("shopfront_clone_alerts")
         .select("lifecycle_state")
         .gte("created_at", startIso)
         .lt("created_at", endIso)
-        .limit(5000),
-      sb
-        .from("feed_items")
-        .select("source, title, published_at, created_at")
-        .in("source", [
-          "scamwatch_alert",
-          "acsc",
-          "inbound_scamwatch",
-          // inbound_wa_scamnet removed (#807): WA ScamNet copyright bars
-          // commercial reproduction — ingest-only, never blog-published.
-          "inbound_acma",
-          "inbound_ato",
-        ])
-        .gte("created_at", startIso)
-        .lt("created_at", endIso)
-        .order("created_at", { ascending: false })
-        .limit(30),
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    page<{
+      scam_type: string | null;
+      channel: string | null;
+      impersonated_brand: string | null;
+      verdict: string;
+    }>((from, to) =>
       sb
         .from("scam_reports")
         .select("scam_type, channel, impersonated_brand, verdict")
         .gte("created_at", startIso)
         .lt("created_at", endIso)
         .neq("verdict", "SAFE")
-        .limit(2000),
-      sb
-        .from("blog_posts")
-        .select("slug, title")
-        .eq("status", "published")
-        .order("published_at", { ascending: false })
-        .limit(100),
-    ]);
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+  ]);
 
-  const redditRows = reddit.data ?? [];
-  const consumerRows = consumer.data ?? [];
-  const cloneRows = cloneStats.data ?? [];
+  const redditRows = reddit.rows;
+  const consumerRows = consumer.rows;
+  const cloneRows = cloneStats.rows;
 
   return {
     periodMonth,
@@ -170,12 +219,18 @@ export async function collectMonthlyIntelFacts(
       categories: tally(
         redditRows
           .map((r) => r.intent_label as string | null)
-          .filter((l) => l !== "informational" && l !== "other")
+          .filter((l) => l !== "informational" && l !== "other"),
       ),
-      brands: tally(redditRows.flatMap((r) => (r.brands_impersonated as string[] | null) ?? [])),
-      tactics: tally(redditRows.flatMap((r) => (r.tactic_tags as string[] | null) ?? [])),
+      brands: tally(
+        redditRows.flatMap(
+          (r) => (r.brands_impersonated as string[] | null) ?? [],
+        ),
+      ),
+      tactics: tally(
+        redditRows.flatMap((r) => (r.tactic_tags as string[] | null) ?? []),
+      ),
       noveltySignals: tally(
-        redditRows.flatMap((r) => (r.novelty_signals as string[] | null) ?? [])
+        redditRows.flatMap((r) => (r.novelty_signals as string[] | null) ?? []),
       ),
     },
     competitorObservations: (competitor.data ?? []).map((o) => ({
@@ -186,11 +241,14 @@ export async function collectMonthlyIntelFacts(
       summary: (o.summary as string | null) ?? null,
     })),
     cloneWatch: {
-      totalClones: cloneRows.reduce((s, r) => s + ((r.clones as number) ?? 0), 0),
+      totalClones: cloneRows.reduce(
+        (s, r) => s + ((r.clones as number) ?? 0),
+        0,
+      ),
       brandCount: cloneRows.length,
       reportedOnward: cloneRows.reduce(
         (s, r) => s + ((r.reported_to_netcraft as number) ?? 0),
-        0
+        0,
       ),
       topBrands: cloneRows.slice(0, 15).map((r) => ({
         brand: r.brand as string,
@@ -203,7 +261,7 @@ export async function collectMonthlyIntelFacts(
         date: String(w.weaponised_at).slice(0, 10),
       })),
       lifecycle: tally(
-        (lifecycle.data ?? []).map((r) => r.lifecycle_state as string | null)
+        lifecycle.rows.map((r) => r.lifecycle_state as string | null),
       ),
     },
     regulatorAlerts: (regulator.data ?? []).map((f) => ({
@@ -215,7 +273,9 @@ export async function collectMonthlyIntelFacts(
       total: consumerRows.length,
       categories: tally(consumerRows.map((r) => r.scam_type as string | null)),
       channels: tally(consumerRows.map((r) => r.channel as string | null)),
-      brands: tally(consumerRows.map((r) => r.impersonated_brand as string | null)),
+      brands: tally(
+        consumerRows.map((r) => r.impersonated_brand as string | null),
+      ),
     },
     existingCoverage: (coverage.data ?? []).map((p) => ({
       slug: p.slug as string,
@@ -311,7 +371,7 @@ const VALID_CATEGORIES = [
 ];
 
 export async function generateMonthlyIntelPost(
-  facts: MonthlyIntelFacts
+  facts: MonthlyIntelFacts,
 ): Promise<MonthlyGeneratedPost | null> {
   if (!process.env["ANTHROPIC_API_KEY"]) return null;
 
@@ -369,7 +429,9 @@ ${JSON.stringify(facts, null, 1)}`,
     // a fresh attempt usually passes. Returning null made step.run resolve
     // successfully, so Inngest never retried and the run reported a green
     // "skipped" for what was actually a failure.
-    throw new Error(`monthly-intel-blog generation failed validation: ${String(err)}`);
+    throw new Error(
+      `monthly-intel-blog generation failed validation: ${String(err)}`,
+    );
   }
 
   logCost({
@@ -431,7 +493,10 @@ ${JSON.stringify(facts, null, 1)}`,
     category: VALID_CATEGORIES.includes(parsed.category)
       ? parsed.category
       : "scam-alerts",
-    readingTimeMinutes: Math.max(1, Math.ceil(content.split(/\s+/).length / 200)),
+    readingTimeMinutes: Math.max(
+      1,
+      Math.ceil(content.split(/\s+/).length / 200),
+    ),
     ideas: parsed.ideas,
   };
 }

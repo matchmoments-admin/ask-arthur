@@ -28,10 +28,7 @@
 // the web app and packages/* must not import upward.
 
 import { logger } from "@askarthur/utils/logger";
-import {
-  getCachedEmbedding,
-  setCachedEmbedding,
-} from "./embedding-cache";
+import { getCachedEmbedding, setCachedEmbedding } from "./embedding-cache";
 
 export type EmbeddingProvider = "voyage" | "openai";
 export type EmbeddingDomain = "generic" | "finance" | "multimodal";
@@ -245,12 +242,7 @@ async function embedInternal(
 
   // Populate cache on success — fire-and-forget, never blocks.
   if (texts.length === 1 && result.vectors.length === 1) {
-    void setCachedEmbedding(
-      spec.modelId,
-      inputType,
-      texts[0],
-      result.vectors,
-    );
+    void setCachedEmbedding(spec.modelId, inputType, texts[0], result.vectors);
   }
 
   return result;

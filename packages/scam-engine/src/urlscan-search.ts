@@ -19,7 +19,10 @@ export interface UrlscanSearchHit {
 
 export type UrlscanSearchOutcome =
   | { ok: true; results: UrlscanSearchHit[]; total: number }
-  | { ok: false; error: "rate_limited" | "http_error" | "no_key" | "exception" };
+  | {
+      ok: false;
+      error: "rate_limited" | "http_error" | "no_key" | "exception";
+    };
 
 interface RawSearchResponse {
   results?: Array<{

@@ -1,10 +1,7 @@
 import { inngest } from "./client";
 import { logger } from "@askarthur/utils/logger";
 import { createBrandAlert } from "../brand-alerts";
-import {
-  ANALYZE_COMPLETED_EVENT,
-  parseAnalyzeCompletedData,
-} from "./events";
+import { ANALYZE_COMPLETED_EVENT, parseAnalyzeCompletedData } from "./events";
 import { withAxiomLogging } from "./with-axiom-logging";
 
 // Durable consumer for analyze.completed.v1 — emits a
@@ -26,41 +23,46 @@ export const handleAnalyzeCompletedBrand = inngest.createFunction(
     retries: 2,
   },
   { event: ANALYZE_COMPLETED_EVENT },
-  withAxiomLogging({ fnId: "analyze-completed-brand" }, async ({ event, step }) => {
-    // Parsed inline (not in a step.run): pure, deterministic Zod parse — see
-    // analyze-report.ts. Removing the step means the common no-brand / SAFE
-    // early-returns below cost zero durable steps (just one function exec).
-    const data = parseAnalyzeCompletedData(event.data);
+  withAxiomLogging(
+    { fnId: "analyze-completed-brand" },
+    async ({ event, step }) => {
+      // Parsed inline (not in a step.run): pure, deterministic Zod parse — see
+      // analyze-report.ts. Removing the step means the common no-brand / SAFE
+      // early-returns below cost zero durable steps (just one function exec).
+      const data = parseAnalyzeCompletedData(event.data);
 
-    if (!data.impersonatedBrand) {
-      return { skipped: true, reason: "no impersonated brand" };
-    }
-    if (data.verdict === "SAFE") {
-      // Matches existing route.ts:430 guard: brand alerts only fire when
-      // the verdict is non-SAFE (no point alerting about an unimpersonated
-      // legitimate communication that happens to name a brand).
-      return { skipped: true, reason: "verdict=SAFE" };
-    }
+      if (!data.impersonatedBrand) {
+        return { skipped: true, reason: "no impersonated brand" };
+      }
+      if (data.verdict === "SAFE") {
+        // Matches existing route.ts:430 guard: brand alerts only fire when
+        // the verdict is non-SAFE (no point alerting about an unimpersonated
+        // legitimate communication that happens to name a brand).
+        return { skipped: true, reason: "verdict=SAFE" };
+      }
 
-    await step.run("create-brand-alert", async () => {
-      await createBrandAlert({
-        brandName: data.impersonatedBrand!,
-        scamType: data.scamType,
-        channel: data.channel,
-        confidence: data.confidence,
-        scammerPhones: data.scammerContacts?.phoneNumbers.map((p) => p.value) ?? [],
-        scammerUrls: data.urlResults?.slice(0, 10).map((u) => u.url) ?? [],
-        scammerEmails: data.scammerContacts?.emailAddresses.map((e) => e.value) ?? [],
-        summary: data.summary,
+      await step.run("create-brand-alert", async () => {
+        await createBrandAlert({
+          brandName: data.impersonatedBrand!,
+          scamType: data.scamType,
+          channel: data.channel,
+          confidence: data.confidence,
+          scammerPhones:
+            data.scammerContacts?.phoneNumbers.map((p) => p.value) ?? [],
+          scammerUrls: data.urlResults?.slice(0, 10).map((u) => u.url) ?? [],
+          scammerEmails:
+            data.scammerContacts?.emailAddresses.map((e) => e.value) ?? [],
+          summary: data.summary,
+        });
       });
-    });
 
-    logger.info("analyze.brand.alerted", {
-      requestId: data.requestId,
-      brand: data.impersonatedBrand,
-      verdict: data.verdict,
-    });
+      logger.info("analyze.brand.alerted", {
+        requestId: data.requestId,
+        brand: data.impersonatedBrand,
+        verdict: data.verdict,
+      });
 
-    return { alerted: true, brand: data.impersonatedBrand };
-  })
+      return { alerted: true, brand: data.impersonatedBrand };
+    },
+  ),
 );

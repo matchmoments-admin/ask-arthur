@@ -187,7 +187,11 @@ describe("HIBP cost telemetry — only on cache-miss upstream calls", () => {
   });
 
   it("checkHIBPDetailed: does NOT log on cache hit", async () => {
-    redisGet.mockResolvedValue({ breached: true, breachCount: 1, breaches: [] });
+    redisGet.mockResolvedValue({
+      breached: true,
+      breachCount: 1,
+      breaches: [],
+    });
 
     const { checkHIBPDetailed } = await importFresh();
     await checkHIBPDetailed("cached@example.com");

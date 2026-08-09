@@ -80,7 +80,11 @@ function apivoidBody(
 }
 
 function okResponse(body: unknown): Response {
-  return { ok: true, status: 200, json: async () => body } as unknown as Response;
+  return {
+    ok: true,
+    status: 200,
+    json: async () => body,
+  } as unknown as Response;
 }
 
 let fetchSpy: ReturnType<typeof vi.spyOn>;
@@ -121,7 +125,9 @@ describe("getSiteTrustworthiness — verdict mapping", () => {
 
   it("maps a blacklisted domain to risky regardless of trust score", async () => {
     fetchSpy.mockResolvedValue(
-      okResponse(apivoidBody({ trust: 95, checks: { is_domain_blacklisted: true } })),
+      okResponse(
+        apivoidBody({ trust: 95, checks: { is_domain_blacklisted: true } }),
+      ),
     );
     const out = asTrust(await getSiteTrustworthiness("https://x.shop"));
     expect(out.paidProviderVerdict.verdict).toBe("risky");
@@ -129,7 +135,9 @@ describe("getSiteTrustworthiness — verdict mapping", () => {
   });
 
   it("maps blacklist detections > 0 to risky", async () => {
-    fetchSpy.mockResolvedValue(okResponse(apivoidBody({ blacklistDetections: 3 })));
+    fetchSpy.mockResolvedValue(
+      okResponse(apivoidBody({ blacklistDetections: 3 })),
+    );
     const out = asTrust(await getSiteTrustworthiness("https://x.shop"));
     expect(out.paidProviderVerdict.verdict).toBe("risky");
     expect(out.paidProviderVerdict.blacklistDetections).toBe(3);
@@ -150,7 +158,9 @@ describe("getSiteTrustworthiness — verdict mapping", () => {
 
   it("maps a suspended site to suspicious even with a good score", async () => {
     fetchSpy.mockResolvedValue(
-      okResponse(apivoidBody({ trust: 85, checks: { is_suspended_site: true } })),
+      okResponse(
+        apivoidBody({ trust: 85, checks: { is_suspended_site: true } }),
+      ),
     );
     const out = asTrust(await getSiteTrustworthiness("https://x.shop"));
     expect(out.paidProviderVerdict.verdict).toBe("suspicious");
@@ -159,7 +169,9 @@ describe("getSiteTrustworthiness — verdict mapping", () => {
 
   it("maps a sinkholed domain to suspicious", async () => {
     fetchSpy.mockResolvedValue(
-      okResponse(apivoidBody({ trust: 80, checks: { is_sinkholed_domain: true } })),
+      okResponse(
+        apivoidBody({ trust: 80, checks: { is_sinkholed_domain: true } }),
+      ),
     );
     const out = asTrust(await getSiteTrustworthiness("https://x.shop"));
     expect(out.paidProviderVerdict.verdict).toBe("suspicious");
@@ -210,8 +222,12 @@ describe("getSiteTrustworthiness — request shape", () => {
     const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("https://api.apivoid.com/v2/site-trust");
     expect(init.method).toBe("POST");
-    expect((init.headers as Record<string, string>)["X-API-Key"]).toBe("test-key");
-    expect(JSON.parse(init.body as string)).toEqual({ host: "designer-bags.shop" });
+    expect((init.headers as Record<string, string>)["X-API-Key"]).toBe(
+      "test-key",
+    );
+    expect(JSON.parse(init.body as string)).toEqual({
+      host: "designer-bags.shop",
+    });
   });
 
   it("accepts a bare host without a protocol", async () => {
@@ -266,14 +282,20 @@ describe("getSiteTrustworthiness — graceful degradation returns a discriminate
   });
 
   it("returns brake when the brake lookup errors", async () => {
-    maybeSingleMock.mockResolvedValue({ data: null, error: { message: "db down" } });
+    maybeSingleMock.mockResolvedValue({
+      data: null,
+      error: { message: "db down" },
+    });
     const out = await getSiteTrustworthiness("https://x.shop");
     expect(out).toEqual({ ok: false, reason: "brake" });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("returns http-error on an HTTP error response", async () => {
-    fetchSpy.mockResolvedValue({ ok: false, status: 500 } as unknown as Response);
+    fetchSpy.mockResolvedValue({
+      ok: false,
+      status: 500,
+    } as unknown as Response);
     const out = await getSiteTrustworthiness("https://x.shop");
     expect(out).toEqual({ ok: false, reason: "http-error" });
   });

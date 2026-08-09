@@ -26,6 +26,9 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: true });
   } catch (err) {
     logger.error("ensure-partitions failed", { error: String(err) });
-    return NextResponse.json({ error: "failed", message: String(err) }, { status: 500 });
+    return NextResponse.json(
+      { error: "failed", message: String(err) },
+      { status: 500 },
+    );
   }
 }

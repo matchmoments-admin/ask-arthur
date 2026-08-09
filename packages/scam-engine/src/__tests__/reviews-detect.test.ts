@@ -32,7 +32,10 @@ describe("detectReviewApp", () => {
 
   it("detects Yotpo and extracts the app key from the widget host", () => {
     const html = `<script src="https://staticw2.yotpo.com/aBc12345Key/widget.js"></script>`;
-    expect(detectReviewApp(html)).toEqual({ app: "yotpo", identifier: "aBc12345Key" });
+    expect(detectReviewApp(html)).toEqual({
+      app: "yotpo",
+      identifier: "aBc12345Key",
+    });
   });
 
   it("detects Judge.me and extracts the myshopify domain", () => {
@@ -45,11 +48,16 @@ describe("detectReviewApp", () => {
 
   it("detects Loox (with a store id)", () => {
     const html = `<div id="looxReviews"></div><script src="https://loox.io/widget/loox.js"></script><script>window.looxSettings={"storeId":"abc123xyz"};</script>`;
-    expect(detectReviewApp(html)).toEqual({ app: "loox", identifier: "abc123xyz" });
+    expect(detectReviewApp(html)).toEqual({
+      app: "loox",
+      identifier: "abc123xyz",
+    });
   });
 
   it("returns null when no review app is fingerprinted", () => {
-    expect(detectReviewApp("<html><body>a plain page</body></html>")).toBeNull();
+    expect(
+      detectReviewApp("<html><body>a plain page</body></html>"),
+    ).toBeNull();
   });
 
   it("does not let a stray app mention short-circuit real detection", () => {
@@ -117,7 +125,10 @@ describe("fetchOkendoReviews", () => {
   it("paginates via nextUrl up to the cap", async () => {
     fetchMock
       .mockResolvedValueOnce({
-        data: { reviews: [review(5, true), review(5, true)], nextUrl: "/stores/x/reviews?p=2" },
+        data: {
+          reviews: [review(5, true), review(5, true)],
+          nextUrl: "/stores/x/reviews?p=2",
+        },
         error: null,
       })
       .mockResolvedValueOnce({
@@ -229,7 +240,10 @@ describe("detectAndFetchReviews", () => {
 
   it("dispatches Okendo through to a corpus", async () => {
     fetchMock.mockResolvedValueOnce({
-      data: { reviews: [{ rating: 5, body: "great", reviewer: { isVerified: true } }], nextUrl: null },
+      data: {
+        reviews: [{ rating: 5, body: "great", reviewer: { isVerified: true } }],
+        nextUrl: null,
+      },
       error: null,
     });
     const result = await detectAndFetchReviews(OKENDO_HTML);

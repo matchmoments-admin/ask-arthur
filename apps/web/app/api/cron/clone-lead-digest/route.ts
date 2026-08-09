@@ -2,7 +2,10 @@ import { NextResponse, type NextRequest } from "next/server";
 import { requireCronAuth } from "@/lib/cron-auth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
-import { alertAndRecord, recordNoAlertNeeded } from "@/lib/alerting/deliveryLog";
+import {
+  alertAndRecord,
+  recordNoAlertNeeded,
+} from "@/lib/alerting/deliveryLog";
 
 // Weekly digest of open Clone Watch lead-magnet leads. clone-list-request
 // does NOT fire the real-time founder pings that /api/leads does, so this is
@@ -46,7 +49,9 @@ export async function GET(req: NextRequest) {
   ]);
 
   if (weekRes.error) {
-    logger.error("clone-lead-digest: query failed", { error: weekRes.error.message });
+    logger.error("clone-lead-digest: query failed", {
+      error: weekRes.error.message,
+    });
     return NextResponse.json({ error: "query_failed" }, { status: 500 });
   }
 

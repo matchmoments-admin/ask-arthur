@@ -13,9 +13,20 @@ import {
 } from "@askarthur/types";
 
 export { PROMPT_VERSION };
-export type { Verdict, AnalysisMode, AnalysisResult, ScammerContacts, InjectionCheckResult };
+export type {
+  Verdict,
+  AnalysisMode,
+  AnalysisResult,
+  ScammerContacts,
+  InjectionCheckResult,
+};
 
-const VALID_VERDICTS: readonly string[] = ["SAFE", "UNCERTAIN", "SUSPICIOUS", "HIGH_RISK"];
+const VALID_VERDICTS: readonly string[] = [
+  "SAFE",
+  "UNCERTAIN",
+  "SUSPICIOUS",
+  "HIGH_RISK",
+];
 
 // Confidence threshold: if Claude is less than 60% confident, downgrade to UNCERTAIN
 const UNCERTAIN_CONFIDENCE_THRESHOLD = 0.6;
@@ -33,7 +44,10 @@ const UNCERTAIN_CONFIDENCE_THRESHOLD = 0.6;
  */
 export function sanitizeUnicode(text: string): string {
   return text
-    .replace(/[\u200B\u200C\u200D\uFEFF\u2060\u2062-\u2064\u{E0000}-\u{E007F}]/gu, "")
+    .replace(
+      /[\u200B\u200C\u200D\uFEFF\u2060\u2062-\u2064\u{E0000}-\u{E007F}]/gu,
+      "",
+    )
     .normalize("NFKC");
 }
 
@@ -92,12 +106,21 @@ export function buildInjectionSandwich(
 
 // Pre-filter regex patterns for prompt injection attempts
 const INJECTION_PATTERNS: [RegExp, string][] = [
-  [/ignore\s+(all\s+)?previous\s+instructions/i, "Attempted to override system instructions"],
-  [/disregard\s+(your\s+)?instructions/i, "Attempted to override system instructions"],
+  [
+    /ignore\s+(all\s+)?previous\s+instructions/i,
+    "Attempted to override system instructions",
+  ],
+  [
+    /disregard\s+(your\s+)?instructions/i,
+    "Attempted to override system instructions",
+  ],
   [/you\s+are\s+now\s+a/i, "Attempted role reassignment"],
   [/jailbreak/i, "Jailbreak keyword detected"],
   [/return\s+("|')?\s*SAFE\s*("|')?/i, "Attempted to force SAFE verdict"],
-  [/return\s+("|')?\s*LOW.?RISK\s*("|')?/i, "Attempted to force low-risk verdict"],
+  [
+    /return\s+("|')?\s*LOW.?RISK\s*("|')?/i,
+    "Attempted to force low-risk verdict",
+  ],
   [/output\s*:\s*\{/i, "Attempted direct JSON injection"],
   [/"verdict"\s*:\s*"SAFE"/i, "Attempted to inject SAFE verdict via JSON"],
   [/forget\s+(everything|all|your\s+prompt)/i, "Attempted prompt memory wipe"],
@@ -236,8 +259,6 @@ PROFILE SCREENSHOT ANALYSIS: If an image appears to be a screenshot of the other
 - A recently-created account (roughly within the last ~12 months of the current date) is a WEAK signal on its own — legitimate new users exist — but COMBINED with off-platform payment, a high-value item, zero/low reviews, few friends, a stock/AI-looking photo, or urgency, it should push the verdict toward SUSPICIOUS or HIGH_RISK. Never manufacture HIGH_RISK from account age alone.
 - If you cannot read a join date from the image, say the account age is "unconfirmed" — do NOT treat a missing join-date as reassuring.`;
 
-
-
 /**
  * First 8 hex chars of SHA-256(SYSTEM_PROMPT). Computed once at module load
  * and embedded in analyze cache keys so that prompt edits — even a typo fix —
@@ -272,10 +293,15 @@ const MOCK_RESPONSE: AnalysisResult = {
   channel: "other",
 };
 
-export function validateResult(parsed: Record<string, unknown>): AnalysisResult {
+export function validateResult(
+  parsed: Record<string, unknown>,
+): AnalysisResult {
   // Validate verdict is one of the allowed values
   let verdict: Verdict = "SUSPICIOUS";
-  if (typeof parsed.verdict === "string" && VALID_VERDICTS.includes(parsed.verdict)) {
+  if (
+    typeof parsed.verdict === "string" &&
+    VALID_VERDICTS.includes(parsed.verdict)
+  ) {
     verdict = parsed.verdict as Verdict;
   }
 
@@ -303,7 +329,8 @@ export function validateResult(parsed: Record<string, unknown>): AnalysisResult 
     .slice(0, 10);
 
   // Sanitize string lengths
-  const summary = typeof parsed.summary === "string" ? parsed.summary.slice(0, 500) : "";
+  const summary =
+    typeof parsed.summary === "string" ? parsed.summary.slice(0, 500) : "";
 
   // Parse scammerContacts — only include for HIGH_RISK or SUSPICIOUS verdicts
   let scammerContacts: ScammerContacts | undefined;
@@ -314,12 +341,15 @@ export function validateResult(parsed: Record<string, unknown>): AnalysisResult 
   ) {
     const raw = parsed.scammerContacts as Record<string, unknown>;
 
-    const phoneNumbers = (Array.isArray(raw.phoneNumbers) ? raw.phoneNumbers : [])
+    const phoneNumbers = (
+      Array.isArray(raw.phoneNumbers) ? raw.phoneNumbers : []
+    )
       .filter(
         (p: unknown): p is { value: string; context: string } =>
-          typeof p === "object" && p !== null &&
+          typeof p === "object" &&
+          p !== null &&
           typeof (p as Record<string, unknown>).value === "string" &&
-          typeof (p as Record<string, unknown>).context === "string"
+          typeof (p as Record<string, unknown>).context === "string",
       )
       .map((p) => ({
         value: p.value.slice(0, 50),
@@ -327,12 +357,15 @@ export function validateResult(parsed: Record<string, unknown>): AnalysisResult 
       }))
       .slice(0, 5);
 
-    const emailAddresses = (Array.isArray(raw.emailAddresses) ? raw.emailAddresses : [])
+    const emailAddresses = (
+      Array.isArray(raw.emailAddresses) ? raw.emailAddresses : []
+    )
       .filter(
         (e: unknown): e is { value: string; context: string } =>
-          typeof e === "object" && e !== null &&
+          typeof e === "object" &&
+          e !== null &&
           typeof (e as Record<string, unknown>).value === "string" &&
-          typeof (e as Record<string, unknown>).context === "string"
+          typeof (e as Record<string, unknown>).context === "string",
       )
       .map((e) => ({
         value: e.value.slice(0, 100),
@@ -351,12 +384,18 @@ export function validateResult(parsed: Record<string, unknown>): AnalysisResult 
     summary,
     redFlags,
     nextSteps,
-    scamType: typeof parsed.scamType === "string" ? parsed.scamType.slice(0, 100) : undefined,
+    scamType:
+      typeof parsed.scamType === "string"
+        ? parsed.scamType.slice(0, 100)
+        : undefined,
     impersonatedBrand:
       typeof parsed.impersonatedBrand === "string"
         ? parsed.impersonatedBrand.slice(0, 100)
         : undefined,
-    channel: typeof parsed.channel === "string" ? parsed.channel.slice(0, 50) : undefined,
+    channel:
+      typeof parsed.channel === "string"
+        ? parsed.channel.slice(0, 50)
+        : undefined,
     scammerContacts,
   };
 }
@@ -385,7 +424,9 @@ export async function analyzeWithClaude(
   // Fail-closed in production, mock in dev
   if (!process.env.ANTHROPIC_API_KEY) {
     if (process.env.NODE_ENV === "production") {
-      logger.error("ANTHROPIC_API_KEY not set in production — refusing to serve mock");
+      logger.error(
+        "ANTHROPIC_API_KEY not set in production — refusing to serve mock",
+      );
       throw new Error("Analysis service unavailable.");
     }
     logger.warn("ANTHROPIC_API_KEY not set — returning mock analysis");
@@ -400,7 +441,10 @@ export async function analyzeWithClaude(
     // explicit pre/post instructions). Shared with anthropic.ts::callClaudeJson.
     content.push({
       type: "text",
-      text: buildInjectionSandwich(text, { variant: "scam-analysis", scrubPii: true }),
+      text: buildInjectionSandwich(text, {
+        variant: "scam-analysis",
+        scrubPii: true,
+      }),
     });
   }
 
@@ -410,7 +454,8 @@ export async function analyzeWithClaude(
     for (let i = 0; i < imagesBase64.length; i++) {
       const imgData = imagesBase64[i];
       // Detect media type from base64 header
-      let mediaType: "image/jpeg" | "image/png" | "image/gif" | "image/webp" = "image/png";
+      let mediaType: "image/jpeg" | "image/png" | "image/gif" | "image/webp" =
+        "image/png";
       if (imgData.startsWith("/9j/")) mediaType = "image/jpeg";
       else if (imgData.startsWith("R0lGOD")) mediaType = "image/gif";
       else if (imgData.startsWith("UklGR")) mediaType = "image/webp";
@@ -456,10 +501,15 @@ export async function analyzeWithClaude(
   if (redirectChains && redirectChains.length > 0) {
     const chainSummaries = redirectChains
       .map((chain) => {
-        const parts = [`Original: ${chain.originalUrl}`, `Final destination: ${chain.finalUrl}`, `Hops: ${chain.hopCount}`];
+        const parts = [
+          `Original: ${chain.originalUrl}`,
+          `Final destination: ${chain.finalUrl}`,
+          `Hops: ${chain.hopCount}`,
+        ];
         if (chain.isShortened) parts.push("URL SHORTENER detected");
         if (chain.hasOpenRedirect) parts.push("OPEN REDIRECT detected");
-        if (chain.truncated) parts.push("EXCESSIVE REDIRECTS (chain truncated)");
+        if (chain.truncated)
+          parts.push("EXCESSIVE REDIRECTS (chain truncated)");
         if (chain.error) parts.push(`Error: ${chain.error}`);
         return parts.join(" | ");
       })
@@ -515,7 +565,7 @@ export async function analyzeWithClaude(
         { role: "assistant", content: [{ type: "text", text: "{" }] },
       ],
     },
-    { timeout: timeoutMs, maxRetries }
+    { timeout: timeoutMs, maxRetries },
   );
 
   const responseText =
@@ -536,8 +586,9 @@ export async function analyzeWithClaude(
   result.usage = {
     inputTokens: response.usage.input_tokens,
     outputTokens: response.usage.output_tokens,
-    cacheReadInputTokens:
-      (response.usage as { cache_read_input_tokens?: number }).cache_read_input_tokens,
+    cacheReadInputTokens: (
+      response.usage as { cache_read_input_tokens?: number }
+    ).cache_read_input_tokens,
   };
   return result;
 }

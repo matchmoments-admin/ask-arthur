@@ -79,7 +79,9 @@ function stubFetch(json: unknown) {
 beforeEach(() => {
   vi.clearAllMocks();
   redisMock.store.clear();
-  redisMock.get.mockImplementation(async (k: string) => redisMock.store.get(k) ?? null);
+  redisMock.get.mockImplementation(
+    async (k: string) => redisMock.store.get(k) ?? null,
+  );
   redisMock.set.mockImplementation(async (k: string, v: unknown) => {
     redisMock.store.set(k, v);
     return "OK";

@@ -109,7 +109,10 @@ function eventDate(
 }
 
 /** Pure parser — exported for fixture tests. */
-export function parseRdapResponse(json: RdapDomain, domain: string): RdapResult {
+export function parseRdapResponse(
+  json: RdapDomain,
+  domain: string,
+): RdapResult {
   const registrarEntity = findEntity(json.entities, "registrar");
   const registrar = registrarEntity
     ? vcardValue(registrarEntity.vcardArray, "fn")
@@ -129,9 +132,7 @@ export function parseRdapResponse(json: RdapDomain, domain: string): RdapResult 
     ? vcardValue(abuseEntity.vcardArray, "tel")
     : null;
   const abuseContact =
-    abuseEmail || abusePhone
-      ? { email: abuseEmail, phone: abusePhone }
-      : null;
+    abuseEmail || abusePhone ? { email: abuseEmail, phone: abusePhone } : null;
 
   const registrantEntity = findEntity(json.entities, "registrant");
   const registrantCountry = registrantEntity

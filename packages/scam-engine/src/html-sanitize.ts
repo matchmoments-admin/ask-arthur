@@ -22,7 +22,7 @@ export function stripEmailHtml(text: string): string {
   // Matches self-closing and paired tags with these styles
   cleaned = cleaned.replace(
     /<[^>]+style\s*=\s*["'][^"']*(?:display\s*:\s*none|visibility\s*:\s*hidden)[^"']*["'][^>]*(?:\/>|>[\s\S]*?<\/[^>]+>)/gi,
-    ""
+    "",
   );
 
   // Remove data-* attributes from remaining tags
