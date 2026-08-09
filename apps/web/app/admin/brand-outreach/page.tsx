@@ -1,5 +1,7 @@
 import { requireAdmin } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
+import QueryErrorBand from "@/components/admin/QueryErrorBand";
+import { readCount } from "@/lib/dashboard/read-count";
 import { PILOT_TEMPLATE_BODY } from "@/lib/email/brand-outreach";
 import BrandOutreach from "./BrandOutreach";
 import BrandOnboardForm from "@/components/admin/BrandOnboardForm";
@@ -20,8 +22,9 @@ export default async function BrandOutreachPage() {
   // first five pilot emails went out on 2026-08-08.
   const sb = createServiceClient();
   let orgs: Array<{ id: string; name: string }> = [];
-  let monitoredCount = 0;
-  let loadFailed = false;
+  let monitoredCount: number | null = 0;
+  const loadErrors: string[] = [];
+  if (!sb) loadErrors.push("service client unavailable");
   if (sb) {
     const [{ data: orgRows, error: orgErr }, { count, error: countErr }] = await Promise.all([
       // ALL orgs, not organizations[0]: silently binding every pilot to
@@ -31,30 +34,29 @@ export default async function BrandOutreachPage() {
       sb.from("monitored_brands").select("id", { count: "exact", head: true }),
     ]);
     orgs = (orgRows as Array<{ id: string; name: string }> | null) ?? [];
-    monitoredCount = count ?? 0;
+    // readCount, not `count ?? 0`: a head-count against a broken table returns
+    // count:null with error:null, so "0 brands monitored" would be a guess.
+    monitoredCount = readCount({ count, error: countErr }, "monitored brands", loadErrors);
     // Without this, a failed query renders "No brands are monitored yet" or
     // "No organisation row found" — affirmative claims on a failure path.
-    loadFailed = Boolean(orgErr || countErr);
+    if (orgErr) loadErrors.push("organisations");
   }
 
   return (
     <>
       <BrandOutreach pilotTemplate={PILOT_TEMPLATE_BODY} />
       <section className="mx-auto mt-10 max-w-4xl px-5 pb-12">
+        <QueryErrorBand errors={loadErrors} />
         <h2 className="text-deep-navy text-lg font-extrabold">They said yes — onboard the brand</h2>
         <p className="mt-1 text-sm text-gov-slate">
           Creates the <code className="font-mono text-xs">monitored_brands</code> row that turns
           clone-watch detections into a monitored brand.{" "}
-          {monitoredCount === 0
-            ? "No brands are monitored yet — this would be the first."
-            : `${monitoredCount} brand${monitoredCount === 1 ? "" : "s"} monitored.`}
+          {monitoredCount === null
+            ? "The monitored-brand count could not be read."
+            : monitoredCount === 0
+              ? "No brands are monitored yet — this would be the first."
+              : `${monitoredCount} brand${monitoredCount === 1 ? "" : "s"} monitored.`}
         </p>
-        {loadFailed && (
-          <p className="mt-2 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">
-            Couldn&rsquo;t read the org / monitored-brand data — the counts above are not
-            measurements. Reload before onboarding anything.
-          </p>
-        )}
         <BrandOnboardForm orgs={orgs} />
       </section>
     </>

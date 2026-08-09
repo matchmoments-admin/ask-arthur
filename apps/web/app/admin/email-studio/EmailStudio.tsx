@@ -18,9 +18,15 @@ export interface StudioTemplate {
 interface Props {
   templates: StudioTemplate[];
   overrides: Record<string, Record<string, string>>;
+  /**
+   * The saved-overrides read failed, so every slot below is showing its
+   * REGISTRY DEFAULT rather than what is actually saved. Saving in that state
+   * writes the defaults over real copy — so saving is disabled while true.
+   */
+  loadFailed?: boolean;
 }
 
-export default function EmailStudio({ templates, overrides }: Props) {
+export default function EmailStudio({ templates, overrides, loadFailed }: Props) {
   const [selectedKey, setSelectedKey] = useState(templates[0]?.key ?? "");
   // draft[templateKey][slotKey] = current editor value
   const [draft, setDraft] = useState<Record<string, Record<string, string>>>(() => {
@@ -94,6 +100,23 @@ export default function EmailStudio({ templates, overrides }: Props) {
       setBusy(false);
     }
   };
+
+  if (loadFailed) {
+    return (
+      <div className="p-4 sm:p-6">
+        <div
+          role="alert"
+          className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800"
+        >
+          <strong>Saved copy could not be loaded</strong> — the fields below
+          would show registry <em>defaults</em>, not your saved text, and saving
+          them would overwrite the real copy. Editing is disabled until the read
+          succeeds. Reload; if it persists, check the service role and Supabase
+          status.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:flex-row">
@@ -181,7 +204,12 @@ export default function EmailStudio({ templates, overrides }: Props) {
                 </button>
                 <button
                   type="button"
-                  disabled={busy}
+                  disabled={busy || loadFailed}
+                  title={
+                    loadFailed
+                      ? "Saving is disabled — the saved copy could not be loaded, so these fields are registry defaults, not your text"
+                      : undefined
+                  }
                   onClick={() => action("save", "Saved")}
                   className="rounded bg-slate-900 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:opacity-50"
                 >

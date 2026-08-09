@@ -1,5 +1,6 @@
 import { requireAdmin } from "@/lib/adminAuth";
 import { getNetcraftResults } from "@/lib/clone-watch/netcraft-results-data";
+import QueryErrorBand from "@/components/admin/QueryErrorBand";
 
 export const dynamic = "force-dynamic";
 
@@ -14,11 +15,18 @@ export const dynamic = "force-dynamic";
  */
 export default async function NetcraftResultsPage() {
   await requireAdmin();
-  const { pending, filed } = await getNetcraftResults();
+  const { pending, filed, configured, filedTotal, loadErrors } =
+    await getNetcraftResults();
+  // `configured: false` means there is no service client at all — every list
+  // below would render its "nothing here" copy off zero reads.
+  const errors = configured
+    ? loadErrors
+    : ["service client unavailable — no data was read at all", ...loadErrors];
 
   return (
     <div className="min-h-screen bg-slate-50 px-6 py-10">
       <div className="mx-auto max-w-6xl">
+        <QueryErrorBand errors={errors} />
         <header className="mb-6">
           <h1 className="text-deep-navy text-3xl font-bold">Netcraft results</h1>
           <p className="mt-2 max-w-3xl text-sm leading-relaxed text-gov-slate">
@@ -32,10 +40,13 @@ export default async function NetcraftResultsPage() {
           </p>
           <div className="mt-4 flex gap-3 text-xs">
             <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-amber-900">
-              {pending.length} pending submission{pending.length === 1 ? "" : "s"}
+              {/* Capped at the RPC's 100-uuid page — see the note in
+                  netcraft-results-data.ts for why this one is not exact. */}
+              {pending.length === 100 ? "100+" : pending.length} pending
+              submission{pending.length === 1 ? "" : "s"}
             </span>
             <span className="rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-slate-700">
-              {filed.length} filed
+              {filedTotal ?? `${filed.length}+`} filed
             </span>
           </div>
         </header>

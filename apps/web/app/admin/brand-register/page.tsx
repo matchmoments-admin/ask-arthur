@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { requireAdmin } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
+import QueryErrorBand from "@/components/admin/QueryErrorBand";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 
 export const dynamic = "force-dynamic";
@@ -44,14 +45,19 @@ export default async function BrandRegisterPage() {
   }
 
   const supabase = createServiceClient();
+  const loadErrors: string[] = [];
+  if (!supabase) loadErrors.push("service client unavailable");
   let rows: BrandRegisterRow[] = [];
   if (supabase) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("brand_register")
       .select("*")
       .order("cross_stream_priority", { ascending: false })
       .order("display_name", { ascending: true })
       .limit(500);
+    // The empty state below blames the cron and the feature flag. On a failed
+    // read that sentence is a false diagnosis, so the band has to override it.
+    if (error) loadErrors.push("brand register");
     rows = (data ?? []) as BrandRegisterRow[];
   }
 
@@ -65,6 +71,7 @@ export default async function BrandRegisterPage() {
 
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: "32px 20px" }}>
+      <QueryErrorBand errors={loadErrors} />
       <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>
         Brand Register — brand 360
       </h1>

@@ -26,6 +26,14 @@ export interface NetcraftResults {
   pending: PendingIssueRow[];
   filed: FiledIssueRow[];
   configured: boolean;
+  /**
+   * EXACT count of filed issues, independent of the capped `filed` list.
+   * Null when the count query itself failed — the caller must then say the
+   * number is a floor rather than print the capped length as if it were total.
+   */
+  filedTotal: number | null;
+  /** Human-readable names of the reads that failed; empty when all succeeded. */
+  loadErrors: string[];
 }
 
 interface WorklistAlert {
@@ -37,14 +45,25 @@ interface WorklistAlert {
 }
 
 export async function getNetcraftResults(): Promise<NetcraftResults> {
+  const loadErrors: string[] = [];
   const sb = createServiceClient();
-  if (!sb) return { pending: [], filed: [], configured: false };
+  if (!sb) {
+    return { pending: [], filed: [], configured: false, filedTotal: null, loadErrors };
+  }
 
   // v216 RPC is uuid-atomic: one row per submission with its alerts aggregated.
-  const { data: worklist } = await sb.rpc(
+  //
+  // `pending` stays a CAPPED list length on purpose. Its gate is the 9-clause
+  // jsonb predicate in migration-v221 (evidence gate + drain-aware
+  // issue_reported_at triple + attempts < 3 + recheck_after cool-down) and the
+  // value wanted is COUNT(DISTINCT uuid); re-expressing that through PostgREST
+  // would fork the evidence gate and drift from it silently. An exact figure
+  // needs a count_* RPC — tracked on #945, not faked here.
+  const { data: worklist, error: worklistErr } = await sb.rpc(
     "list_clone_alerts_pending_netcraft_issue",
     { p_max_age_days: 30, p_uuid_limit: 100 },
   );
+  if (worklistErr) loadErrors.push("pending submissions");
 
   const pending: PendingIssueRow[] = (
     (worklist as Array<{ netcraft_uuid: string; alerts: unknown }> | null) ?? []
@@ -65,7 +84,9 @@ export async function getNetcraftResults(): Promise<NetcraftResults> {
   });
 
   // Recently-filed issues (netcraft_issue.issue_reported_at present).
-  const { data: filedRows } = await sb
+  // The list is capped at 100 for the table; the pill reads filedTotal below,
+  // so "N filed" does not silently freeze at 100 once we pass it.
+  const { data: filedRows, error: filedErr } = await sb
     .from("shopfront_clone_alerts")
     .select(
       "id, candidate_url, candidate_domain, target_brand_normalized, inferred_target_domain, submitted_to",
@@ -75,6 +96,17 @@ export async function getNetcraftResults(): Promise<NetcraftResults> {
       ascending: false,
     })
     .limit(100);
+  if (filedErr) loadErrors.push("filed issues");
+
+  const { count: filedCount, error: filedCountErr } = await sb
+    .from("shopfront_clone_alerts")
+    .select("id", { count: "exact", head: true })
+    .not("submitted_to->netcraft_issue->>issue_reported_at", "is", null);
+  // A head-count against a missing table/column returns count:null with a null
+  // error (measured 2026-08-09), so the null check is the load-bearing one —
+  // without it the pill printed a confident "0 filed" over 41 real rows.
+  const filedCountFailed = Boolean(filedCountErr) || filedCount === null;
+  if (filedCountFailed) loadErrors.push("filed-issue count");
 
   const filed: FiledIssueRow[] = ((filedRows as Array<Record<string, unknown>> | null) ?? []).map(
     (r) => {
@@ -95,5 +127,11 @@ export async function getNetcraftResults(): Promise<NetcraftResults> {
     },
   );
 
-  return { pending, filed, configured: true };
+  return {
+    pending,
+    filed,
+    configured: true,
+    filedTotal: filedCountFailed ? null : filedCount,
+    loadErrors,
+  };
 }

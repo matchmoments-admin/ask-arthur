@@ -2,6 +2,8 @@ import { requireAdmin } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import StatTopCard, { type StatTone } from "@/components/admin/overview/StatTopCard";
 import OverviewTile from "@/components/admin/overview/OverviewTile";
+import QueryErrorBand from "@/components/admin/QueryErrorBand";
+import { readCount, fmtCount, over } from "@/lib/dashboard/read-count";
 
 export const dynamic = "force-dynamic";
 
@@ -13,8 +15,8 @@ export const dynamic = "force-dynamic";
 interface Summary {
   todayCostUsd: number;
   todayCostEventCount: number;
-  feedbackOpen: number;
-  brakesPaused: number;
+  feedbackOpen: number | null;
+  brakesPaused: number | null;
   costThresholdUsd: number;
 }
 
@@ -48,7 +50,10 @@ const ALL_INBOUND_SLUGS = [
   "inbound_securityweek",
 ] as const;
 
-async function getSummary(svc: ReturnType<typeof createServiceClient>): Promise<Summary> {
+async function getSummary(
+  svc: ReturnType<typeof createServiceClient>,
+  loadErrors: string[],
+): Promise<Summary> {
   const costThresholdUsd = Number(process.env.DAILY_COST_THRESHOLD_USD ?? "2");
   const empty: Summary = {
     todayCostUsd: 0,
@@ -57,7 +62,10 @@ async function getSummary(svc: ReturnType<typeof createServiceClient>): Promise<
     brakesPaused: 0,
     costThresholdUsd,
   };
-  if (!svc) return empty;
+  if (!svc) {
+    loadErrors.push("service client unavailable");
+    return empty;
+  }
 
   const [todayRes, feedbackRes, brakesRes] = await Promise.all([
     svc.from("today_cost_total").select("total_cost_usd, event_count").single(),
@@ -68,16 +76,25 @@ async function getSummary(svc: ReturnType<typeof createServiceClient>): Promise<
       .gt("paused_until", new Date().toISOString()),
   ]);
 
+  // PGRST116 = "no rows" from .single(); on a day with no spend yet that is the
+  // correct answer, not a failure.
+  if (todayRes.error && todayRes.error.code !== "PGRST116") {
+    loadErrors.push("today's spend");
+  }
+
   return {
     todayCostUsd: Number(todayRes.data?.total_cost_usd ?? 0),
     todayCostEventCount: Number(todayRes.data?.event_count ?? 0),
-    feedbackOpen: feedbackRes.count ?? 0,
-    brakesPaused: brakesRes.count ?? 0,
+    feedbackOpen: readCount(feedbackRes, "feedback queue", loadErrors),
+    brakesPaused: readCount(brakesRes, "paused brakes", loadErrors),
     costThresholdUsd,
   };
 }
 
-async function getTiles(svc: ReturnType<typeof createServiceClient>): Promise<TileMetric[]> {
+async function getTiles(
+  svc: ReturnType<typeof createServiceClient>,
+  loadErrors: string[],
+): Promise<TileMetric[]> {
   if (!svc) return [];
 
   const since24h = new Date(Date.now() - 24 * 3600_000).toISOString();
@@ -154,9 +171,21 @@ async function getTiles(svc: ReturnType<typeof createServiceClient>): Promise<Ti
       .gt("au_mention_count", 0),
   ]);
 
-  const inboundActiveCount = new Set(
-    (inboundActiveRes.data ?? []).map((r) => r.source as string),
-  ).size;
+  if (inboundActiveRes.error) loadErrors.push("inbound source activity");
+  const inboundActiveCount = inboundActiveRes.error
+    ? null
+    : new Set((inboundActiveRes.data ?? []).map((r) => r.source as string)).size;
+
+  const quarantine = readCount(quarantineRes, "inbound quarantine", loadErrors);
+  const brandAlerts = readCount(brandAlertsRes, "brand alerts", loadErrors);
+  const vulns = readCount(vulnsRes, "vulnerabilities", loadErrors);
+  const onward = readCount(onwardRes, "onward reports", loadErrors);
+  const blogDrafts = readCount(blogDraftsRes, "blog drafts", loadErrors);
+  const queuePending = readCount(queuePendingRes, "bot queue", loadErrors);
+  const clonePending = readCount(cloneWatchPendingRes, "clone-watch triage backlog", loadErrors);
+  const cloneTp = readCount(cloneWatchTpRes, "clone-watch TP count", loadErrors);
+  const candidatesPending = readCount(brandCandidatesPendingRes, "watchlist candidates", loadErrors);
+  const candidatesAu = readCount(brandCandidatesAuRes, "AU-evidenced candidates", loadErrors);
 
   return [
     {
@@ -193,34 +222,34 @@ async function getTiles(svc: ReturnType<typeof createServiceClient>): Promise<Ti
       href: "/admin/health",
       title: "System health",
       purpose: "Bot queue, feed freshness, archive, Stripe",
-      metric: String(queuePendingRes.count ?? 0),
+      metric: fmtCount(queuePending),
       metricLabel: "Bot queue pending",
-      warn: (queuePendingRes.count ?? 0) > 100,
+      warn: over(queuePending, 100),
     },
     {
       href: "/admin/inbound-quarantine",
       title: "Inbound queue",
       purpose: "Email-routed digests awaiting promote/delete",
-      metric: String(quarantineRes.count ?? 0),
+      metric: fmtCount(quarantine),
       metricLabel: "Rows in quarantine",
-      warn: (quarantineRes.count ?? 0) > 50,
-      secondary: `${inboundActiveCount} of ${ALL_INBOUND_SLUGS.length} sources active 7d`,
+      warn: over(quarantine, 50),
+      secondary: `${fmtCount(inboundActiveCount)} of ${ALL_INBOUND_SLUGS.length} sources active 7d`,
     },
     {
       href: "/admin/brand-alerts",
       title: "Brand alerts",
       purpose: "Brand impersonation hits surfaced for review",
-      metric: String(brandAlertsRes.count ?? 0),
+      metric: fmtCount(brandAlerts),
       metricLabel: "New 24h",
     },
     {
       href: "/admin/clone-watch",
       title: "Clone-watch triage",
       purpose: "Daily NRD candidates awaiting FP / TP / Investigate verdict",
-      metric: String(cloneWatchPendingRes.count ?? 0),
+      metric: fmtCount(clonePending),
       metricLabel: "Awaiting triage",
-      warn: (cloneWatchPendingRes.count ?? 0) > 20,
-      secondary: `${cloneWatchTpRes.count ?? 0} TP confirmed in last 7d`,
+      warn: over(clonePending, 20),
+      secondary: `${fmtCount(cloneTp)} TP confirmed in last 7d`,
     },
     {
       // Was reachable ONLY via a text link at the bottom of /admin/brand-register,
@@ -232,15 +261,15 @@ async function getTiles(svc: ReturnType<typeof createServiceClient>): Promise<Ti
       purpose: "Impersonated brands not yet on the clone-watch watchlist",
       // The AU-evidenced count leads because it is the actionable one; the raw
       // pending total sits underneath as context.
-      metric: String(brandCandidatesAuRes.count ?? 0),
+      metric: fmtCount(candidatesAu),
       metricLabel: "AU-evidenced pending",
-      secondary: `${brandCandidatesPendingRes.count ?? 0} pending in total`,
+      secondary: `${fmtCount(candidatesPending)} pending in total`,
     },
     {
       href: "/admin/vulnerabilities",
       title: "Vulnerabilities",
       purpose: "CVE feed with AU-context enrichment",
-      metric: String(vulnsRes.count ?? 0),
+      metric: fmtCount(vulns),
       metricLabel: "Critical CVSS≥7 in 7d",
     },
     // Phone-footprint tile removed (map #939, verdict #944): the feature is
@@ -250,14 +279,14 @@ async function getTiles(svc: ReturnType<typeof createServiceClient>): Promise<Ti
       href: "/admin/onward-reports",
       title: "Onward reports",
       purpose: "Forwarded scam reports to gov/brand recipients",
-      metric: String(onwardRes.count ?? 0),
+      metric: fmtCount(onward),
       metricLabel: "Sent 7d",
     },
     {
       href: "/admin/blog",
       title: "Blog",
       purpose: "Drafts, scheduled posts, generation pipeline",
-      metric: String(blogDraftsRes.count ?? 0),
+      metric: fmtCount(blogDrafts),
       metricLabel: "Drafts",
     },
     {
@@ -275,17 +304,29 @@ export default async function AdminIndexPage() {
   await requireAdmin();
   const svc = createServiceClient();
 
-  const [summary, tiles] = await Promise.all([getSummary(svc), getTiles(svc)]);
+  const loadErrors: string[] = [];
+  const [summary, tiles] = await Promise.all([
+    getSummary(svc, loadErrors),
+    getTiles(svc, loadErrors),
+  ]);
 
   const todayOverBudget = summary.todayCostUsd >= summary.costThresholdUsd;
   const spendTone: StatTone = todayOverBudget ? "attention" : "neutral";
   const feedbackTone: StatTone =
-    summary.feedbackOpen > 100 ? "attention" : summary.feedbackOpen > 0 ? "attention" : "neutral";
+    summary.feedbackOpen !== null && summary.feedbackOpen > 0 ? "attention" : "neutral";
+  // An unknown brake count must NOT read "ok" — "all features running" is the
+  // single most consequential green on this page, and a failed read is exactly
+  // when it would be a lie.
   const brakesTone: StatTone =
-    summary.brakesPaused > 0 ? "danger" : "ok";
+    summary.brakesPaused === null
+      ? "attention"
+      : summary.brakesPaused > 0
+        ? "danger"
+        : "ok";
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6 lg:px-6 lg:py-8">
+      <QueryErrorBand errors={loadErrors} />
       <header className="px-1 pb-4">
         <h1
           className="serif"
@@ -314,14 +355,26 @@ export default async function AdminIndexPage() {
         />
         <StatTopCard
           label="Feedback queue"
-          value={summary.feedbackOpen.toLocaleString()}
-          sub={summary.feedbackOpen === 0 ? "no items awaiting triage" : "awaiting triage"}
+          value={summary.feedbackOpen?.toLocaleString() ?? "—"}
+          sub={
+            summary.feedbackOpen === null
+              ? "could not be read"
+              : summary.feedbackOpen === 0
+                ? "no items awaiting triage"
+                : "awaiting triage"
+          }
           tone={feedbackTone}
         />
         <StatTopCard
           label="Paused brakes"
-          value={summary.brakesPaused.toLocaleString()}
-          sub={summary.brakesPaused === 0 ? "all features running" : "at least one feature paused"}
+          value={summary.brakesPaused?.toLocaleString() ?? "—"}
+          sub={
+            summary.brakesPaused === null
+              ? "could not be read — do NOT read this as all-clear"
+              : summary.brakesPaused === 0
+                ? "all features running"
+                : "at least one feature paused"
+          }
           tone={brakesTone}
         />
       </section>

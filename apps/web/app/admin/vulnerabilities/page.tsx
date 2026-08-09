@@ -1,5 +1,7 @@
 import { requireAdmin } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
+import QueryErrorBand from "@/components/admin/QueryErrorBand";
+import { readCount, fmtCount } from "@/lib/dashboard/read-count";
 
 export const dynamic = "force-dynamic";
 
@@ -103,9 +105,11 @@ export default async function VulnerabilitiesPage({ searchParams }: PageProps) {
   const govFilter = govParam === "true";
 
   const supabase = createServiceClient();
-  let totalCount = 0;
-  let kevCount = 0;
-  let inWildCount = 0;
+  const loadErrors: string[] = [];
+  if (!supabase) loadErrors.push("service client unavailable");
+  let totalCount: number | null = 0;
+  let kevCount: number | null = 0;
+  let inWildCount: number | null = 0;
   let criticalRows: CriticalRow[] = [];
   let ingestionRows: IngestionRow[] = [];
 
@@ -132,9 +136,15 @@ export default async function VulnerabilitiesPage({ searchParams }: PageProps) {
         .limit(10),
     ]);
 
-    totalCount = totalRes.count ?? 0;
-    kevCount = kevRes.count ?? 0;
-    inWildCount = wildRes.count ?? 0;
+    // The three headline counts feed straight into the KPI row; a failed read
+    // renders "0 KEV, 0 exploited in the wild", which is the reassuring answer.
+    if (criticalRes.error) loadErrors.push("critical CVE list");
+    if (logRes.error) loadErrors.push("ingestion log");
+    // Head counts: `?? 0` would render "0 KEV, 0 exploited in the wild" — the
+    // reassuring answer — off a failed read that carries no error object.
+    totalCount = readCount(totalRes, "total CVEs", loadErrors);
+    kevCount = readCount(kevRes, "CISA KEV count", loadErrors);
+    inWildCount = readCount(wildRes, "exploited-in-wild count", loadErrors);
     let rows = (criticalRes.data ?? []) as unknown as CriticalRow[];
 
     if (banksFilter && banksFilter.length > 0) {
@@ -155,6 +165,7 @@ export default async function VulnerabilitiesPage({ searchParams }: PageProps) {
 
   return (
     <div className="mx-auto max-w-5xl px-5 py-8">
+      <QueryErrorBand errors={loadErrors} />
       <h1 className="mb-1 text-xl font-extrabold text-deep-navy">Vulnerability intelligence</h1>
       <p className="mb-6 text-sm text-gov-slate">
         Phase 14 data asset. Weekly scrapers populate{" "}
@@ -168,13 +179,13 @@ export default async function VulnerabilitiesPage({ searchParams }: PageProps) {
           <p className="text-xs font-semibold uppercase tracking-wide text-gov-slate">
             Total vulnerabilities
           </p>
-          <p className="mt-1 text-2xl font-extrabold text-deep-navy">{count.format(totalCount)}</p>
+          <p className="mt-1 text-2xl font-extrabold text-deep-navy">{fmtCount(totalCount)}</p>
         </div>
         <div className="rounded-xl border border-border-light bg-white p-5">
           <p className="text-xs font-semibold uppercase tracking-wide text-gov-slate">
             CISA KEV
           </p>
-          <p className="mt-1 text-2xl font-extrabold text-deep-navy">{count.format(kevCount)}</p>
+          <p className="mt-1 text-2xl font-extrabold text-deep-navy">{fmtCount(kevCount)}</p>
           <p className="mt-1 text-xs text-gov-slate">Known-exploited catalog</p>
         </div>
         <div className="rounded-xl border border-border-light bg-white p-5">
@@ -182,7 +193,7 @@ export default async function VulnerabilitiesPage({ searchParams }: PageProps) {
             Exploited in wild
           </p>
           <p className="mt-1 text-2xl font-extrabold text-deep-navy">
-            {count.format(inWildCount)}
+            {fmtCount(inWildCount)}
           </p>
         </div>
       </div>

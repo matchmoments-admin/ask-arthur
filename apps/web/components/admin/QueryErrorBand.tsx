@@ -5,12 +5,11 @@
 // healthy-empty result — an operator reading "0 pending" during an outage
 // concludes all is well. PR #929 fixed exactly this for one feed panel.
 //
-// Wired so far: blog, brand-alerts, brand-stewardship, costs, costs/infra,
-// onward-reports, phone-footprint (+ health and weekly-review, which carry
-// their own bands). STILL UNWIRED — analytics, brand-candidates, brand-outreach,
-// brand-register, checks, clone-watch, email-studio, feedback, report-card,
-// vulnerabilities and the admin index — so this is a pattern being retired, not
-// a pattern already retired.
+// The sweep is COMPLETE as of #945: every admin page that builds a service
+// client either renders this band or is an allowlisted exception with a written
+// reason. Don't re-list the pages here — that list drifted the moment it was
+// written. `__tests__/adminErrorBand.test.ts` enforces it, and its ALLOWLIST is
+// the one place the exceptions live.
 //
 // Renders nothing when there are no errors, so it is safe to place
 // unconditionally at the top of any admin page.

@@ -1,5 +1,6 @@
 import { requireAdmin } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
+import QueryErrorBand from "@/components/admin/QueryErrorBand";
 import { CandidateActions } from "./CandidateActions";
 
 export const dynamic = "force-dynamic";
@@ -59,9 +60,11 @@ export default async function BrandCandidatesPage() {
   await requireAdmin();
 
   const supabase = createServiceClient();
+  const loadErrors: string[] = [];
+  if (!supabase) loadErrors.push("service client unavailable");
   let rows: CandidateRow[] = [];
   if (supabase) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("reddit_watchlist_candidates")
       // AU evidence first — the whole reason the 2026-07-26 digest proposed
       // Xfinity and Chime for an Australian watchlist is that nothing ordered
@@ -70,6 +73,9 @@ export default async function BrandCandidatesPage() {
       .order("au_mention_count", { ascending: false })
       .order("mention_count", { ascending: false })
       .limit(500);
+    // Without this the queue renders "Queue empty — nothing awaiting a
+    // decision" on a failed read, which reads as "you're all caught up".
+    if (error) loadErrors.push("watchlist candidates");
     rows = (data ?? []) as CandidateRow[];
   }
 
@@ -79,6 +85,7 @@ export default async function BrandCandidatesPage() {
 
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: "32px 20px" }}>
+      <QueryErrorBand errors={loadErrors} />
       <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>
         Watchlist candidates — review queue
       </h1>

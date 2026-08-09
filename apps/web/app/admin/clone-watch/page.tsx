@@ -6,6 +6,7 @@ import CloneWatchTriage, {
   type PendingAlert,
   type PendingBatch,
 } from "./CloneWatchTriage";
+import QueryErrorBand from "@/components/admin/QueryErrorBand";
 import BackfillButton from "./BackfillButton";
 import DisputesPanel, { type DisputeRow } from "./DisputesPanel";
 import EnforcementCasesPanel, {
@@ -22,6 +23,8 @@ export default async function CloneWatchAdminPage() {
   }
 
   const supabase = createServiceClient();
+  const loadErrors: string[] = [];
+  if (!supabase) loadErrors.push("service client unavailable");
   let pending: PendingAlert[] = [];
   let pendingTotal = 0;
   let countFellBack = false;
@@ -63,6 +66,15 @@ export default async function CloneWatchAdminPage() {
         .order("created_at", { ascending: false })
         .limit(50),
     ]);
+    // Each of these legs previously degraded to an empty panel via an
+    // `Array.isArray(res.data)` guard — which is true of a FAILED read as well
+    // as an empty one, so a broken RPC rendered the KPI row as a quiet zero.
+    if (pendingRes.error) loadErrors.push("triage worklist");
+    if (weeklyRes.error) loadErrors.push("weekly KPIs");
+    if (brandRes.error) loadErrors.push("brand breakdown");
+    if (takedownRes.error) loadErrors.push("takedown stats");
+    if (pendingBatchesRes.error) loadErrors.push("pending notification batches");
+    if (disputesRes.error) loadErrors.push("disputes");
     disputes = (disputesRes.data ?? []) as DisputeRow[];
 
     // Enforcement cases (v202) — read-only worklist. Separate query so a missing
@@ -71,6 +83,7 @@ export default async function CloneWatchAdminPage() {
       p_limit: 200,
       p_include_closed: false,
     });
+    if (casesRes.error) loadErrors.push("enforcement cases");
     if (Array.isArray(casesRes.data)) {
       enforcementCases = casesRes.data as EnforcementCase[];
     }
@@ -88,7 +101,9 @@ export default async function CloneWatchAdminPage() {
       .eq("triage_status", "pending");
     // If the exact count fails we fall back to the capped list length — the
     // very number this replaced — so say so rather than showing it silently.
-    if (pendingCountErr) countFellBack = true;
+    // count===null as well as error: a head-count against a broken table comes
+    // back count:null / error:null, so the error check alone never fires.
+    if (pendingCountErr || pendingCountExact === null) countFellBack = true;
     pendingTotal = pendingCountExact ?? pending.length;
     if (Array.isArray(weeklyRes.data) && weeklyRes.data[0]) {
       weekly = weeklyRes.data[0] as WeeklySnapshot;
@@ -115,6 +130,7 @@ export default async function CloneWatchAdminPage() {
 
   return (
     <div className="max-w-5xl mx-auto px-5 py-8">
+      <QueryErrorBand errors={loadErrors} />
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
           <h1 className="text-deep-navy text-xl font-extrabold mb-1">

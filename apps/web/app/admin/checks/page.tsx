@@ -1,5 +1,7 @@
 import { requireAdmin } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
+import QueryErrorBand from "@/components/admin/QueryErrorBand";
+import { readCount } from "@/lib/dashboard/read-count";
 import ChecksDashboard from "./ChecksDashboard";
 
 export const dynamic = "force-dynamic";
@@ -104,7 +106,9 @@ export default async function ChecksPage({
     .limit(100);
   if (source) query = query.eq("source", source);
   if (verdict) query = query.eq("verdict", verdict);
-  const { data: reportData } = await query;
+  const loadErrors: string[] = [];
+  const { data: reportData, error: reportErr } = await query;
+  if (reportErr) loadErrors.push("recent checks");
   const rows = (reportData ?? []) as ChecksRow[];
 
   // --- Rollups: reduce the fetched rows in JS (no extra round-trip). ---
@@ -116,7 +120,10 @@ export default async function ChecksPage({
   }
 
   // --- Reconciliation (per-day, within window). ---
-  const [{ data: statsRows }, { data: reconReports }] = await Promise.all([
+  const [
+    { data: statsRows, error: statsErr },
+    { data: reconReports, error: reconErr },
+  ] = await Promise.all([
     supabase
       .from("check_stats")
       .select("date, total_checks")
@@ -126,6 +133,12 @@ export default async function ChecksPage({
       .select("id, created_at")
       .gte("created_at", sinceIso),
   ]);
+
+  // A failed leg here does not blank the panel — it SHIFTS every delta, because
+  // delta = counterTotal − storedRows and a missing side reads as zero. The
+  // panel would look like a real reconciliation gap rather than a broken read.
+  if (statsErr) loadErrors.push("daily counter totals");
+  if (reconErr) loadErrors.push("daily stored rows");
 
   const counterByDate = new Map<string, number>();
   for (const s of statsRows ?? []) {
@@ -151,8 +164,11 @@ export default async function ChecksPage({
 
   // --- All-time headline totals (the canonical counter / stored / archive
   // numbers; live values — don't hardcode a snapshot here, it drifts). ---
-  const [{ data: allStats }, { count: hotCount }, { count: archiveCount }] =
-    await Promise.all([
+  const [
+    { data: allStats, error: allStatsErr },
+    { count: hotCount, error: hotErr },
+    { count: archiveCount, error: archiveErr },
+  ] = await Promise.all([
       supabase.from("check_stats").select("total_checks"),
       supabase
         .from("scam_reports")
@@ -161,12 +177,21 @@ export default async function ChecksPage({
         .from("scam_reports_archive")
         .select("id", { count: "exact", head: true }),
     ]);
+  // Same shape, worse blast radius: residual is a three-way subtraction, so ONE
+  // failed leg invents a residual the size of the whole missing term — the
+  // headline number on the page, silently wrong in the alarming direction.
+  if (allStatsErr) loadErrors.push("all-time counter");
+
   const counterAllTime = (allStats ?? []).reduce(
     (acc, r) => acc + (r.total_checks ?? 0),
     0,
   );
-  const storedHot = hotCount ?? 0;
-  const storedArchive = archiveCount ?? 0;
+  // A failed head-count arrives as count:null with NO error, so `?? 0` here
+  // would silently inflate `residual` by the whole missing term.
+  const storedHot =
+    readCount({ count: hotCount, error: hotErr }, "stored rows (hot)", loadErrors) ?? 0;
+  const storedArchive =
+    readCount({ count: archiveCount, error: archiveErr }, "stored rows (archive)", loadErrors) ?? 0;
   const totals: ChecksTotals = {
     counterAllTime,
     storedHot,
@@ -176,6 +201,7 @@ export default async function ChecksPage({
 
   return (
     <div className="max-w-6xl mx-auto px-5 py-8">
+      <QueryErrorBand errors={loadErrors} />
       <h1 className="text-deep-navy text-xl font-extrabold mb-1">Recent checks</h1>
       <p className="text-gov-slate text-sm mb-6">
         Per-analysis records from{" "}
