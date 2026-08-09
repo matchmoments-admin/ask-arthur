@@ -43,6 +43,84 @@ function mintAdminToken(secret: string): string {
   return `${payload}:${hmac}`;
 }
 
+/**
+ * A rendered slide PNG is 220–380 KB at 2160×2700; the root `app/loading.tsx`
+ * spinner on white compresses to ~25 KB. Anything under this floor is not a
+ * slide. Deliberately coarse — it only has to separate "a page" from "a spinner".
+ */
+const BLANK_PNG_BYTES = 80_000;
+
+/**
+ * Navigate to one slide and screenshot it, returning the PNG's byte length.
+ *
+ * WHY THIS IS MORE CAREFUL THAN IT LOOKS — the July 2026 edition shipped a
+ * loading spinner as slide 06 to LinkedIn with every guard green, and a re-run
+ * reproduced it on slide 04. The old code checked the DOM (`page.$('.slide')`,
+ * then `scrollHeight`) and screenshotted immediately. But `page.screenshot`
+ * captures the COMPOSITOR'S CURRENT FRAME, not the DOM: after
+ * `waitUntil: "domcontentloaded"` the streamed slide markup is in the document
+ * while the last painted frame is still the `app/loading.tsx` shell. Every DOM
+ * assertion passed and the picture was a spinner — the DOM and the pixels are
+ * different sources of truth, and only the pixels ship.
+ *
+ * So: wait for the slide to be *visible*, wait for the spinner to be *gone*,
+ * then yield two animation frames so the current DOM is guaranteed to have been
+ * painted before the shot. The caller then checks the file the user will
+ * actually see, which is the only check the spinner could not have passed.
+ */
+async function captureSlide(
+  page: import("puppeteer").Page,
+  url: string,
+  n: number,
+  out: string,
+): Promise<number> {
+  // domcontentloaded (not networkidle0): the route is a server component so the
+  // .slide markup is in the initial HTML, and a deployed page's analytics
+  // (Plausible) keep the network perpetually busy — networkidle0 never fires
+  // against prod and the goto times out.
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 });
+  // `visible` (not a bare `$`) — an element that exists but has no box is the
+  // shape a half-rendered page takes. A requireAdmin() redirect or a data error
+  // lands us off-page and this times out, which is the intended failure.
+  await page
+    .waitForSelector(".rc-root.rc-solo .slide", { visible: true, timeout: 30_000 })
+    .catch(() => {
+      throw new Error(`slide ${n} did not render (auth/redirect/data error?) at ${url}`);
+    });
+  // The root loading fallback must be gone, not merely overlaid.
+  await page.waitForFunction(() => !document.querySelector(".animate-spin"), {
+    timeout: 30_000,
+  });
+  await page.evaluate(() => (document as unknown as { fonts: FontFaceSet }).fonts.ready);
+  // Strip the Next.js dev-mode indicator (a <nextjs-portal> element that only
+  // exists under `next dev`; absent on the deployed app) so local screenshots
+  // are clean.
+  await page.evaluate(() => document.querySelectorAll("nextjs-portal").forEach((e) => e.remove()));
+  // Overflow guard: .slide is a fixed 1080×1350 box that CLIPS overflow, so a
+  // heavy month (e.g. a long outcomes line on slide 06) would silently lose the
+  // footer in the shipped PDF. Fail loud here — in the prepare job, before the
+  // approval gate — instead. A MISSING element throws: the old version returned
+  // 0 for "no element", i.e. it read absence as a comfortably-short slide.
+  const contentHeight = await page.evaluate(() => {
+    const slide = document.querySelector(".rc-root.rc-solo .slide");
+    return slide ? slide.scrollHeight : -1;
+  });
+  if (contentHeight < 0) throw new Error(`slide ${n} vanished from the DOM before capture`);
+  if (contentHeight > HEIGHT) {
+    throw new Error(
+      `slide ${n} content overflows the ${HEIGHT}px frame (scrollHeight ${contentHeight}) — the PDF would clip; tighten the slide's copy/spacing`,
+    );
+  }
+  // Two animation frames: the first schedules a paint of the current DOM, the
+  // second resolves only once that paint has been committed. This is what makes
+  // the compositor frame match the DOM we just asserted on.
+  await page.evaluate(
+    () => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))),
+  );
+  await page.screenshot({ path: out as `${string}.png`, clip: { x: 0, y: 0, width: WIDTH, height: HEIGHT } });
+  return (await fs.stat(out)).size;
+}
+
 async function main() {
   // Trim to match the server: adminAuth verifies with readStringEnv() (which
   // trims), so a stored secret with trailing whitespace would otherwise mint a
@@ -66,39 +144,42 @@ async function main() {
 
     const monthQ = month ? `&month=${month}` : "";
     const pngPaths: string[] = [];
+    const sizes: number[] = [];
     for (let n = 1; n <= SLIDE_COUNT; n++) {
       const url = `${base}/admin/report-card?slide=${n}${monthQ}`;
-      // domcontentloaded (not networkidle0): the route is a server component so
-      // the .slide markup is in the initial HTML, and a deployed page's analytics
-      // (Plausible) keep the network perpetually busy — networkidle0 never fires
-      // against prod and the goto times out. The .slide + fonts.ready guards below
-      // handle render/font readiness.
-      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 });
-      // Guard: a requireAdmin() redirect or an error would land us off-page.
-      const ok = await page.$(".rc-root.rc-solo .slide");
-      if (!ok) throw new Error(`slide ${n} did not render (auth/redirect/data error?) at ${url}`);
-      await page.evaluate(() => (document as unknown as { fonts: FontFaceSet }).fonts.ready);
-      // Strip the Next.js dev-mode indicator (a <nextjs-portal> element that
-      // only exists under `next dev`; absent on the deployed app) so local
-      // screenshots are clean.
-      await page.evaluate(() => document.querySelectorAll("nextjs-portal").forEach((e) => e.remove()));
-      // Overflow guard: .slide is a fixed 1080×1350 box that CLIPS overflow, so
-      // a heavy month (e.g. a long outcomes line on slide 06) would silently
-      // lose the footer in the shipped PDF. Fail loud here — in the prepare
-      // job, before the approval gate — instead.
-      const contentHeight = await page.evaluate(() => {
-        const slide = document.querySelector(".rc-root.rc-solo .slide");
-        return slide ? slide.scrollHeight : 0;
-      });
-      if (contentHeight > HEIGHT) {
-        throw new Error(
-          `slide ${n} content overflows the ${HEIGHT}px frame (scrollHeight ${contentHeight}) — the PDF would clip; tighten the slide's copy/spacing`,
-        );
-      }
       const out = path.join(outDir, `slide-${n}.png`);
-      await page.screenshot({ path: out as `${string}.png`, clip: { x: 0, y: 0, width: WIDTH, height: HEIGHT } });
+      let bytes = 0;
+      // Retry the whole capture: the blank-frame race below is transient, so a
+      // re-navigation fixes it. Better to self-heal than to fail the monthly job.
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        bytes = await captureSlide(page, url, n, out);
+        if (bytes >= BLANK_PNG_BYTES) break;
+        if (attempt === 3) {
+          throw new Error(
+            `slide ${n} captured blank ${attempt}x (${bytes} bytes — a rendered slide is >${BLANK_PNG_BYTES}); giving up rather than shipping a spinner`,
+          );
+        }
+        console.log(`  ⟳ slide ${n} captured blank (${bytes} bytes) — retrying`);
+      }
+      sizes.push(bytes);
       pngPaths.push(out);
-      console.log(`✓ slide ${n} → ${out}`);
+      console.log(`✓ slide ${n} → ${out} (${Math.round(bytes / 1024)} KB)`);
+    }
+
+    // Relative blank check, across the finished set. The absolute floor above
+    // can only catch a page that is nearly all white; this catches a slide that
+    // rendered but lost most of its content, without a hand-tuned threshold —
+    // slides in one edition share a template, so their sizes cluster.
+    const median = [...sizes].sort((a, b) => a - b)[Math.floor(sizes.length / 2)];
+    const runts = sizes
+      .map((b, i) => ({ n: i + 1, b }))
+      .filter(({ b }) => b < median * 0.25);
+    if (runts.length > 0) {
+      throw new Error(
+        `slide(s) ${runts.map((r) => r.n).join(", ")} are far smaller than the others ` +
+          `(${runts.map((r) => `${r.n}=${Math.round(r.b / 1024)}KB`).join(", ")} vs median ${Math.round(median / 1024)}KB) — ` +
+          `they most likely captured a partly-rendered page; inspect the PNGs before publishing`,
+      );
     }
 
     // Assemble the PNGs into a single 1080×1350-per-page PDF (Puppeteer only).
