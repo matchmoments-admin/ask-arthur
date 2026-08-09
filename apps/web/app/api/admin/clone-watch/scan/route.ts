@@ -61,14 +61,36 @@ export async function POST(req: Request) {
     );
   }
 
-  // Soft rate-limit on admin-triggered scans (ultrareview F20)
+  // Soft rate-limit on admin-triggered scans (ultrareview F20).
+  //
+  // This counts cost_telemetry rows under feature='shopfront_clone_urlscan'.
+  // Until scan-one started writing one row per operator scan, the only rows here
+  // were the batch lanes' ~13/day, so no rolling hour could reach 20 and this
+  // cap could not fire however hard the button was clicked.
   const oneHourAgo = new Date(Date.now() - 3600 * 1000).toISOString();
-  const { count: recentScanCount } = await sb
+  const { count: recentScanCount, error: recentScanErr } = await sb
     .from("cost_telemetry")
     .select("id", { head: true, count: "exact" })
     .eq("feature", "shopfront_clone_urlscan")
     .gte("created_at", oneHourAgo);
-  if ((recentScanCount ?? 0) >= MAX_ADMIN_SCANS_PER_HOUR) {
+  // A failed head-count returns count:null AND error:null (204, no body to
+  // parse), so `?? 0` silently reads as "zero scans this hour" and opens the
+  // gate. A rate limit that fails open is not a rate limit — treat an
+  // unreadable count as the cap being reached.
+  if (recentScanErr || recentScanCount === null) {
+    logger.warn("admin scan: rate-limit count unreadable, failing closed", {
+      error: recentScanErr?.message ?? null,
+    });
+    return NextResponse.json(
+      {
+        error: "rate_limit_unavailable",
+        details:
+          "Could not read the recent-scan count, so the hourly cap cannot be enforced. Try again shortly.",
+      },
+      { status: 503 },
+    );
+  }
+  if (recentScanCount >= MAX_ADMIN_SCANS_PER_HOUR) {
     logger.warn("admin scan: rate-limited", {
       recentScanCount,
       max: MAX_ADMIN_SCANS_PER_HOUR,

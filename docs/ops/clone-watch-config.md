@@ -669,7 +669,7 @@ only, leaving the issue reporter and the auto lane untouched.
 
 ### Enabling `FF_SHOPFRONT_CLONE_RECHECK` (runbook)
 
-The recheck loop (`shopfront-clone-lifecycle-recheck`, cron `0 */6 * * *`,
+The recheck loop (`shopfront-clone-lifecycle-recheck`, cron `30 */6 * * *`,
 batch 50/run → ≤200 unlisted urlscan submits/day) is the declined→weaponised
 detector — the enabler for F1 and the F4 evidence gate.
 
@@ -729,10 +729,31 @@ WHERE brand = 'Bunnings';
 
 ### urlscan rate-limit & budget
 
-- Free tier: 100 scans/day.
-- Expected use: ~5-10 new + ~50 daily re-scans + occasional admin "Scan now" = ~60-70/day.
-- Admin "Scan now" soft rate-limit: 20/hour (cost_telemetry counted).
-- If urlscan returns 429, the fn skips silently (no Telegram page). Rate-limit alerting tracked in [issue #426](https://github.com/matchmoments-admin/ask-arthur/issues/426).
+- **Documented free tier: 100 scans/day. UNVERIFIED against the production key —
+  nobody has run the quota check below, and measured volume is 2-3x this figure
+  without producing a single recorded 429.** Either the entitlement is higher than
+  the doc says or the limit is not enforced the way we assume. Settle it before
+  citing the number in any capacity decision:
+  `curl -s -H "API-Key: $URLSCAN_API_KEY" https://urlscan.io/user/quotas/ | jq '.limits'`
+  (`URLSCAN_API_KEY` is Vercel-only — not in any local `.env`.)
+- **Measured use, 30 days to 2026-08-09: ~230 submit POSTs/day** —
+  `recheck_submit` ~200/day (50 x 4 crons) + `submit_batch` 30/day. The previous
+  estimate here ("~5-10 new + ~50 daily re-scans = ~60-70/day") predated the
+  recheck loop going live and understated reality by 3-4x. Query it, don't
+  estimate it:
+  `select date_trunc('day',created_at)::date, operation, sum(units) from cost_telemetry where provider='urlscan' group by 1,2 order by 1 desc;`
+- Admin "Scan now" soft rate-limit: 20/hour, counted from `cost_telemetry` rows
+  under `feature='shopfront_clone_urlscan'`. **This was dead until 2026-08-10** —
+  `clone-watch-urlscan-scan-one` wrote no `logCost` row, so the counter only ever
+  saw the batch lanes' ~13 rows/day and no rolling hour could reach 20. It now
+  logs one row per operator scan, and the route fails CLOSED (503) when the count
+  is unreadable rather than treating a null head-count as zero.
+- If urlscan returns 429 the submit path leaves the row untouched (quota is not
+  evidence about the URL) and now counts it as `rate_limited` in the
+  `submit_batch` cost_telemetry metadata. Before that it was folded into
+  `submit_failed` and left no trace anywhere, which is why "has urlscan ever
+  rate-limited us?" had no answer. Telegram alerting still tracked in
+  [issue #426](https://github.com/matchmoments-admin/ask-arthur/issues/426).
 
 ### urlscan classification → triage mapping
 

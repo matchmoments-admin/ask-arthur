@@ -118,12 +118,24 @@ export function serialiseSubmitFailure(
   status: number | null,
   reputation: ReputationVerdict,
   attemptedAt: string,
+  /**
+   * urlscan's response body, truncated. Load-bearing, not decoration: without it
+   * every 400 is stored as an identical, information-free
+   * `{error:'rejected', status:400}` — 326 rows of it — and answering "why did
+   * urlscan refuse?" costs a fresh out-of-band DNS sweep. The 44 rows that
+   * happen to retain a body all say "DNS Error - Could not resolve domain",
+   * which is the only reason the no-DNS explanation is known at all.
+   */
+  message?: string | null,
 ): Record<string, unknown> {
   return {
     stage: "submit_failed",
     submit_failed: true,
     error,
     status,
+    // Capped well under the 500 chars submitURLScanWithDetails already truncates
+    // to; this lands in a jsonb column on a write-frequent table.
+    message: message ? message.slice(0, 300) : null,
     attempted_at: attemptedAt,
     reputation: { is_malicious: reputation.isMalicious, sources: reputation.sources },
   };

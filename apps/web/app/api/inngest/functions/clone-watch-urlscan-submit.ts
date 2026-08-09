@@ -86,6 +86,7 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
     const batch = await step.run("submit-batch", async () => {
       let submitted = 0;
       let submitFailed = 0;
+      let rateLimited = 0;
       let reputationHits = 0;
       for (const row of candidates) {
         if (Date.now() - submitStartMs > SUBMIT_WALL_CLOCK_MS) break;
@@ -97,6 +98,12 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
             outcome.kind === "reputation_classified"
           ) {
             submitted++;
+          } else if (outcome.kind === "rate_limited") {
+            // Counted apart from failures: a 429 is quota exhaustion, leaves the
+            // row untouched, and must not read as evidence about the URL. Before
+            // this it was folded into submitFailed and left no DB trace, so
+            // "has urlscan ever rate-limited us?" had no answer anywhere.
+            rateLimited++;
           } else {
             submitFailed++;
           }
@@ -108,9 +115,9 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
           });
         }
       }
-      return { submitted, submitFailed, reputationHits };
+      return { submitted, submitFailed, rateLimited, reputationHits };
     });
-    const { submitted, submitFailed, reputationHits } = batch;
+    const { submitted, submitFailed, rateLimited, reputationHits } = batch;
 
     await step.run("log-cost", async () => {
       logCost({
@@ -119,7 +126,12 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
         operation: "submit_batch",
         units: candidates.length,
         unitCostUsd: 0, // free tier (urlscan + SB/VT)
-        metadata: { submitted, submit_failed: submitFailed, reputation_hits: reputationHits },
+        metadata: {
+          submitted,
+          submit_failed: submitFailed,
+          rate_limited: rateLimited,
+          reputation_hits: reputationHits,
+        },
       });
     });
 
@@ -127,9 +139,19 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
       candidates: candidates.length,
       submitted,
       submitFailed,
+      rateLimited,
       reputationHits,
     });
 
-    return { ok: true, submitted, submitFailed, reputationHits };
+    // The durable signal is the cost_telemetry row above; this is stderr only
+    // (packages/utils/src/logger.ts is console-backed, no Axiom transport).
+    if (rateLimited > 0) {
+      logger.warn("clone-watch urlscan submit: rate-limited by urlscan", {
+        rateLimited,
+        candidates: candidates.length,
+      });
+    }
+
+    return { ok: true, submitted, submitFailed, rateLimited, reputationHits };
   }),
 );
