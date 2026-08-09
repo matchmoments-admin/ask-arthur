@@ -83,6 +83,67 @@ function isTlsError(code: string): boolean {
   );
 }
 
+/** Outcome of one DNS query: the records, or the resolver's error code. */
+export type DnsLookup = { records: string[] } | { errorCode: string };
+
+/**
+ * Resolver error codes that actually prove the name does not exist. Everything
+ * else — SERVFAIL, REFUSED, timeouts, connection errors — means our resolver had
+ * a bad day, which is not a fact about the domain.
+ */
+const NAME_ABSENT_CODES = new Set(["ENOTFOUND", "NOTFOUND", "ENODATA", "NXDOMAIN"]);
+
+/** True when this lookup proves the name is absent (as opposed to unreachable). */
+function provesAbsent(l: DnsLookup): boolean {
+  return "errorCode" in l && NAME_ABSENT_CODES.has(l.errorCode);
+}
+
+/**
+ * Decide deadness from an A lookup and an NS lookup. Pure, so the three-valued
+ * logic is unit-testable without a live resolver.
+ *
+ *   false — records exist, or NS exists: the name is there.
+ *   true  — BOTH lookups proved absence. The only honest "gone".
+ *   null  — any lookup failed for a reason that is not absence. Prove nothing.
+ *
+ * `ns` is lazy so the caller can skip the second query when A already answered.
+ *
+ * THE BUG THIS FIXES. Both lookups used to be `.catch(() => [] as string[])`,
+ * which flattened every failure mode into an empty array — so SERVFAIL, REFUSED
+ * and resolver timeouts all returned "gone". That is the exact conflation the
+ * module header's 2026-07-26 rewrite was written to remove, surviving one layer
+ * below the fetch-error classification that rewrite did fix. It went unnoticed
+ * because the injectable `resolveGone` seam meant no test ever drove the real
+ * resolver path — every liveness test supplies its own verdict. Live today via
+ * the Netcraft issue reporter, which gates filings on `live !== false`.
+ */
+export function classifyDnsLookups(
+  a: DnsLookup,
+  ns: () => DnsLookup,
+): boolean | null {
+  if ("records" in a) {
+    if (a.records.length > 0) return false;
+    // Answered, but empty. Not proof of absence on its own — fall through to NS,
+    // exactly as the pre-fix code did.
+  } else if (!provesAbsent(a)) {
+    return null;
+  }
+
+  const nsResult = ns();
+  if ("records" in nsResult) return nsResult.records.length === 0;
+  return provesAbsent(nsResult) ? true : null;
+}
+
+/** Run one resolver query, capturing the error code instead of discarding it. */
+async function lookup(fn: () => Promise<string[]>): Promise<DnsLookup> {
+  try {
+    return { records: await fn() };
+  } catch (err) {
+    const code = (err as { code?: unknown }).code;
+    return { errorCode: typeof code === "string" ? code : "UNKNOWN" };
+  }
+}
+
 /** True when the domain has neither an A nor an NS record — the only signal
  *  that honestly means "gone". Inconclusive resolver errors read as `null`,
  *  matching clone-watch-reemergence-monitor.ts's domainResolves(). */
@@ -90,10 +151,13 @@ async function domainIsGone(hostname: string): Promise<boolean | null> {
   if (!hostname) return null;
   const r = new Resolver({ timeout: DNS_TIMEOUT_MS, tries: 1 });
   try {
-    const a = await r.resolve4(hostname).catch(() => [] as string[]);
-    if (a.length > 0) return false;
-    const ns = await r.resolveNs(hostname).catch(() => [] as string[]);
-    return ns.length === 0;
+    const a = await lookup(() => r.resolve4(hostname));
+    // Short-circuit exactly as before: skip the NS query when A already answered
+    // with records, or when A failed for a reason that proves nothing.
+    if ("records" in a && a.records.length > 0) return false;
+    if ("errorCode" in a && !provesAbsent(a)) return null;
+    const ns = await lookup(() => r.resolveNs(hostname));
+    return classifyDnsLookups(a, () => ns);
   } catch {
     return null; // resolver itself failed — prove nothing
   }

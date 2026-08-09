@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  classifyDnsLookups,
   isCandidateLive,
   probeLivenessDetailed,
   probeLivenessVerdict,
@@ -199,5 +200,64 @@ describe("probeLivenessDetailed", () => {
       reason: "http",
       status: 200,
     });
+  });
+});
+
+// ── DNS three-valued logic (v/PR7) ──────────────────────────────────────────
+// These drive classifyDnsLookups directly. Every OTHER test in this file
+// injects `resolveGone`, so until now nothing exercised the real resolver
+// path — which is exactly how a SERVFAIL-reads-as-dead bug survived the
+// 2026-07-26 "only NXDOMAIN counts as dead" rewrite one layer above it.
+describe("classifyDnsLookups (only absence proves deadness)", () => {
+  const abort = () => {
+    throw new Error("NS lookup should not have run");
+  };
+
+  it("A records present → alive, without querying NS", () => {
+    expect(classifyDnsLookups({ records: ["1.2.3.4"] }, abort)).toBe(false);
+  });
+
+  it("NS records present → alive even with no A record", () => {
+    expect(
+      classifyDnsLookups({ errorCode: "ENODATA" }, () => ({ records: ["ns1.x"] })),
+    ).toBe(false);
+  });
+
+  it("both lookups prove absence → gone", () => {
+    expect(
+      classifyDnsLookups({ errorCode: "ENOTFOUND" }, () => ({ errorCode: "ENOTFOUND" })),
+    ).toBe(true);
+  });
+
+  it("empty NS array with an absent A → gone", () => {
+    expect(
+      classifyDnsLookups({ errorCode: "ENOTFOUND" }, () => ({ records: [] })),
+    ).toBe(true);
+  });
+
+  // The regression. Each of these used to return `true` (gone) because both
+  // resolver calls were `.catch(() => [])`.
+  it.each(["SERVFAIL", "REFUSED", "ETIMEOUT", "ECONNREFUSED", "UNKNOWN"])(
+    "%s on the A lookup is inconclusive, never dead",
+    (code) => {
+      expect(classifyDnsLookups({ errorCode: code }, abort)).toBeNull();
+    },
+  );
+
+  it.each(["SERVFAIL", "REFUSED", "ETIMEOUT"])(
+    "%s on the NS lookup is inconclusive, never dead",
+    (code) => {
+      expect(
+        classifyDnsLookups({ errorCode: "ENOTFOUND" }, () => ({ errorCode: code })),
+      ).toBeNull();
+    },
+  );
+
+  it("an empty A record array is not absence on its own", () => {
+    // No error code means the query succeeded; an empty answer still has to be
+    // confirmed against NS rather than read as deadness.
+    expect(classifyDnsLookups({ records: [] }, () => ({ records: ["ns1.x"] }))).toBe(
+      false,
+    );
   });
 });
