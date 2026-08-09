@@ -72,6 +72,29 @@ export async function submitCloneCandidate(
       p_classification: "likely_phishing",
       p_set_triage_status: null, // operator confirms TP (ultrareview F5)
     });
+    // persist_clone_alert_urlscan writes the VERDICT; apply_clone_urlscan_verdict
+    // writes the LIFECYCLE. This branch only ever called the first, so a
+    // reputation-decided likely_phishing never advanced declined/monitoring →
+    // weaponised, never stamped weaponised_at, and therefore never satisfied the
+    // retrieve fn's durable emit gate (weaponised_at NOT NULL AND
+    // weaponised_notified_at NULL) — no brand alert, no enforcement plan, and the
+    // row invisible to every weaponised_at-keyed metric. 12 declined alerts sat
+    // in that state. The retrieve lane has always paired the two calls; this one
+    // is the odd path out, which is exactly why it went unnoticed.
+    //
+    // Edge-guarded and idempotent: the RPC takes the row lock, never downgrades a
+    // terminal state (a taken_down row correctly stays taken_down rather than
+    // being re-weaponised), and only reports newly_weaponised on a real
+    // transition — so a batch-step retry cannot double-fire.
+    const { error: verdictErr } = await sb.rpc("apply_clone_urlscan_verdict", {
+      p_alert_id: candidate.id,
+      p_classification: "likely_phishing",
+    });
+    if (verdictErr) {
+      throw new Error(
+        `apply_clone_urlscan_verdict failed for alert ${candidate.id}: ${verdictErr.message}`,
+      );
+    }
     return { kind: "reputation_classified", reputationMalicious: true };
   }
 
