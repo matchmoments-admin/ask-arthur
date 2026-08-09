@@ -13,7 +13,11 @@ const MAX_CERTS = 20; // Limit to 20 most recent (crt.sh can return thousands)
 
 let _redis: Redis | null = null;
 function getRedis(): Redis | null {
-  if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) return null;
+  if (
+    !process.env.UPSTASH_REDIS_REST_URL ||
+    !process.env.UPSTASH_REDIS_REST_TOKEN
+  )
+    return null;
   if (!_redis) {
     _redis = new Redis({
       url: process.env.UPSTASH_REDIS_REST_URL,
@@ -55,7 +59,9 @@ export async function lookupCT(domain: string): Promise<CTLookupResult> {
   const redis = getRedis();
   if (redis) {
     try {
-      const cached = await redis.get<CTLookupResult>(`${CACHE_PREFIX}:${domain}`);
+      const cached = await redis.get<CTLookupResult>(
+        `${CACHE_PREFIX}:${domain}`,
+      );
       if (cached) return cached;
     } catch {
       // Cache miss — continue to API
@@ -67,7 +73,7 @@ export async function lookupCT(domain: string): Promise<CTLookupResult> {
       `https://crt.sh/?q=${encodeURIComponent(domain)}&output=json`,
       {
         signal: AbortSignal.timeout(5000),
-      }
+      },
     );
 
     if (!res.ok) {
@@ -79,7 +85,9 @@ export async function lookupCT(domain: string): Promise<CTLookupResult> {
     if (!Array.isArray(rawCerts) || rawCerts.length === 0) {
       const emptyResult = { ...EMPTY_RESULT };
       if (redis) {
-        redis.set(`${CACHE_PREFIX}:${domain}`, emptyResult, { ex: CACHE_TTL }).catch(() => {});
+        redis
+          .set(`${CACHE_PREFIX}:${domain}`, emptyResult, { ex: CACHE_TTL })
+          .catch(() => {});
       }
       return emptyResult;
     }
@@ -131,12 +139,14 @@ export async function lookupCT(domain: string): Promise<CTLookupResult> {
     const allDates = uniqueCerts
       .map((c) => new Date(c.not_before || 0).getTime())
       .filter((t) => t > 0);
-    const oldestCertDate = allDates.length > 0
-      ? new Date(Math.min(...allDates)).toISOString().slice(0, 10)
-      : null;
-    const newestCertDate = allDates.length > 0
-      ? new Date(Math.max(...allDates)).toISOString().slice(0, 10)
-      : null;
+    const oldestCertDate =
+      allDates.length > 0
+        ? new Date(Math.min(...allDates)).toISOString().slice(0, 10)
+        : null;
+    const newestCertDate =
+      allDates.length > 0
+        ? new Date(Math.max(...allDates)).toISOString().slice(0, 10)
+        : null;
 
     const result: CTLookupResult = {
       certificateCount: uniqueCerts.length,
@@ -160,7 +170,9 @@ export async function lookupCT(domain: string): Promise<CTLookupResult> {
 
     // Cache result (fire-and-forget)
     if (redis) {
-      redis.set(`${CACHE_PREFIX}:${domain}`, result, { ex: CACHE_TTL }).catch(() => {});
+      redis
+        .set(`${CACHE_PREFIX}:${domain}`, result, { ex: CACHE_TTL })
+        .catch(() => {});
     }
 
     return result;

@@ -32,21 +32,39 @@ function makeResult(overrides?: Partial<AnalysisResult>): AnalysisResult {
 describe("detectCommerceSignal", () => {
   describe("URL-side signals", () => {
     it("fires on commerce TLDs", () => {
-      expect(detectCommerceSignal(null, ["https://designer-bags.shop"])).toBe(true);
-      expect(detectCommerceSignal(null, ["https://luxury-deals.store"])).toBe(true);
-      expect(detectCommerceSignal(null, ["https://discount-au.top"])).toBe(true);
+      expect(detectCommerceSignal(null, ["https://designer-bags.shop"])).toBe(
+        true,
+      );
+      expect(detectCommerceSignal(null, ["https://luxury-deals.store"])).toBe(
+        true,
+      );
+      expect(detectCommerceSignal(null, ["https://discount-au.top"])).toBe(
+        true,
+      );
     });
 
     it("fires on cart/checkout paths", () => {
-      expect(detectCommerceSignal(null, ["https://example.com/cart"])).toBe(true);
-      expect(detectCommerceSignal(null, ["https://example.com/checkout"])).toBe(true);
-      expect(detectCommerceSignal(null, ["https://example.com/products/foo"])).toBe(true);
-      expect(detectCommerceSignal(null, ["https://example.com/collections/sale"])).toBe(true);
+      expect(detectCommerceSignal(null, ["https://example.com/cart"])).toBe(
+        true,
+      );
+      expect(detectCommerceSignal(null, ["https://example.com/checkout"])).toBe(
+        true,
+      );
+      expect(
+        detectCommerceSignal(null, ["https://example.com/products/foo"]),
+      ).toBe(true);
+      expect(
+        detectCommerceSignal(null, ["https://example.com/collections/sale"]),
+      ).toBe(true);
     });
 
     it("fires on Shopify/WooCommerce/Sellvia platform hints in hostname", () => {
-      expect(detectCommerceSignal(null, ["https://my-store.shopify.com"])).toBe(true);
-      expect(detectCommerceSignal(null, ["https://sellvia-store.example.com"])).toBe(true);
+      expect(detectCommerceSignal(null, ["https://my-store.shopify.com"])).toBe(
+        true,
+      );
+      expect(
+        detectCommerceSignal(null, ["https://sellvia-store.example.com"]),
+      ).toBe(true);
     });
 
     it("handles protocol-less URLs (extractURLs sometimes passes these)", () => {
@@ -55,7 +73,9 @@ describe("detectCommerceSignal", () => {
 
     it("returns false for non-commerce URLs", () => {
       expect(detectCommerceSignal(null, ["https://example.com"])).toBe(false);
-      expect(detectCommerceSignal(null, ["https://news.com.au/article"])).toBe(false);
+      expect(detectCommerceSignal(null, ["https://news.com.au/article"])).toBe(
+        false,
+      );
     });
 
     it("returns false for malformed URLs without crashing", () => {
@@ -66,14 +86,20 @@ describe("detectCommerceSignal", () => {
 
   describe("text-side signals", () => {
     it("fires on commerce verbs", () => {
-      expect(detectCommerceSignal("Add to cart and check out today")).toBe(true);
+      expect(detectCommerceSignal("Add to cart and check out today")).toBe(
+        true,
+      );
       expect(detectCommerceSignal("BUY NOW — 70% off")).toBe(true);
       expect(detectCommerceSignal("Free shipping on all orders")).toBe(true);
-      expect(detectCommerceSignal("Limited stock — closing down sale")).toBe(true);
+      expect(detectCommerceSignal("Limited stock — closing down sale")).toBe(
+        true,
+      );
     });
 
     it("returns false for non-commerce text", () => {
-      expect(detectCommerceSignal("Hi mum it's me my phone is broken")).toBe(false);
+      expect(detectCommerceSignal("Hi mum it's me my phone is broken")).toBe(
+        false,
+      );
       expect(detectCommerceSignal("Your ATO refund is ready")).toBe(false);
     });
 
@@ -87,11 +113,17 @@ describe("detectCommerceSignal", () => {
   describe("combined", () => {
     it("fires when URL OR text carries a signal (OR, not AND)", () => {
       // URL signal only
-      expect(detectCommerceSignal("not commerce text", ["https://x.shop"])).toBe(true);
+      expect(
+        detectCommerceSignal("not commerce text", ["https://x.shop"]),
+      ).toBe(true);
       // Text signal only
-      expect(detectCommerceSignal("add to cart", ["https://example.com"])).toBe(true);
+      expect(detectCommerceSignal("add to cart", ["https://example.com"])).toBe(
+        true,
+      );
       // Both
-      expect(detectCommerceSignal("buy now", ["https://x.shop/cart"])).toBe(true);
+      expect(detectCommerceSignal("buy now", ["https://x.shop/cart"])).toBe(
+        true,
+      );
     });
   });
 });
@@ -123,7 +155,9 @@ describe("extractCommerceFlags", () => {
 
   it("extracts overpayment-refund tag", () => {
     expect(
-      extractCommerceFlags(["Classic overpayment scam — wants refund of the difference"]),
+      extractCommerceFlags([
+        "Classic overpayment scam — wants refund of the difference",
+      ]),
     ).toContain("overpayment-refund");
   });
 
@@ -157,10 +191,14 @@ describe("extractCommerceFlags", () => {
   // must cover the semantic variants, not one canonical wording.
   it("extracts relative-will-collect from varied collection phrasings (#333)", () => {
     expect(
-      extractCommerceFlags(["My brother will collect the item — third-party pickup"]),
+      extractCommerceFlags([
+        "My brother will collect the item — third-party pickup",
+      ]),
     ).toContain("relative-will-collect");
     expect(
-      extractCommerceFlags(["A courier will collect the goods once payment clears"]),
+      extractCommerceFlags([
+        "A courier will collect the goods once payment clears",
+      ]),
     ).toContain("relative-will-collect");
   });
 
@@ -169,7 +207,9 @@ describe("extractCommerceFlags", () => {
       extractCommerceFlags(["Extreme discount (80% off) on designer handbags"]),
     ).toContain("implausible-discount");
     expect(
-      extractCommerceFlags(["Prices sit well below market value for genuine goods"]),
+      extractCommerceFlags([
+        "Prices sit well below market value for genuine goods",
+      ]),
     ).toContain("implausible-discount");
   });
 
@@ -178,10 +218,14 @@ describe("extractCommerceFlags", () => {
   // still missed. "% off" / "% discount" are the structural discount markers.
   it("extracts implausible-discount from percentage and high-discount markers", () => {
     expect(
-      extractCommerceFlags(["Unusually high discount (80% off designer goods)"]),
+      extractCommerceFlags([
+        "Unusually high discount (80% off designer goods)",
+      ]),
     ).toContain("implausible-discount");
     expect(
-      extractCommerceFlags(["Listing offers an 80% discount on genuine handbags"]),
+      extractCommerceFlags([
+        "Listing offers an 80% discount on genuine handbags",
+      ]),
     ).toContain("implausible-discount");
   });
 
@@ -190,19 +234,27 @@ describe("extractCommerceFlags", () => {
       extractCommerceFlags(["All reviews are 5 stars and posted the same day"]),
     ).toContain("fake-reviews");
     expect(
-      extractCommerceFlags(["Reverse image search shows the product photos elsewhere"]),
+      extractCommerceFlags([
+        "Reverse image search shows the product photos elsewhere",
+      ]),
     ).toContain("stock-photo-product");
     expect(
-      extractCommerceFlags(["Buyer wants to move to text message off Marketplace"]),
+      extractCommerceFlags([
+        "Buyer wants to move to text message off Marketplace",
+      ]),
     ).toContain("off-platform-move");
     expect(
-      extractCommerceFlags(["Seller sent a doctored receipt as proof of payment"]),
+      extractCommerceFlags([
+        "Seller sent a doctored receipt as proof of payment",
+      ]),
     ).toContain("fake-payment-confirmation");
   });
 
   it("does NOT tag urgent-purchase-pressure on generic non-commerce urgency", () => {
     expect(
-      extractCommerceFlags(["Urgency tactics — 'act now or your account is suspended'"]),
+      extractCommerceFlags([
+        "Urgency tactics — 'act now or your account is suspended'",
+      ]),
     ).not.toContain("urgent-purchase-pressure");
   });
 });
@@ -241,11 +293,15 @@ describe("applyShopSignal", () => {
 
   it("mutates result.shopSignal in place when commerce-shaped + flag on (F1 guard)", () => {
     const result = makeResult();
-    const ret = applyShopSignal(result, "buy now while stocks last", ["https://x.shop/cart"]);
+    const ret = applyShopSignal(result, "buy now while stocks last", [
+      "https://x.shop/cart",
+    ]);
     expect(ret).toBeUndefined(); // mutates, returns void
     expect(result.shopSignal?.isCommerce).toBe(true);
     // commerceFlags derived from result.redFlags, not a separate list.
-    expect(result.shopSignal?.commerceFlags).toContain("fake-payment-confirmation");
+    expect(result.shopSignal?.commerceFlags).toContain(
+      "fake-payment-confirmation",
+    );
   });
 
   it("is a no-op when the flag is off", () => {
@@ -257,7 +313,9 @@ describe("applyShopSignal", () => {
 
   it("is a no-op when the submission is not commerce-shaped", () => {
     const result = makeResult();
-    applyShopSignal(result, "Hi mum it's me my phone is broken", ["https://example.com"]);
+    applyShopSignal(result, "Hi mum it's me my phone is broken", [
+      "https://example.com",
+    ]);
     expect(result.shopSignal).toBeUndefined();
   });
 

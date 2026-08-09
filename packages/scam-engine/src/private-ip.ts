@@ -32,7 +32,11 @@ export const PRIVATE_IP_PATTERNS: RegExp[] = [
  * the hex form `::ffff:aabb:ccdd`), decoding the embedded IPv4 and re-checking.
  */
 export function isPrivateIP(address: string): boolean {
-  const addr = address.trim().toLowerCase().replace(/^\[/, "").replace(/\]$/, "");
+  const addr = address
+    .trim()
+    .toLowerCase()
+    .replace(/^\[/, "")
+    .replace(/\]$/, "");
 
   // IPv4-mapped IPv6 — decode the embedded IPv4 and re-test against the IPv4
   // ranges (::ffff:169.254.169.254 and ::ffff:a9fe:a9fe both → 169.254.169.254).

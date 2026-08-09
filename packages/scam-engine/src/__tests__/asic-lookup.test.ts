@@ -41,7 +41,11 @@ const HIT_ROW = {
 };
 
 function baseResult() {
-  return { verdict: "SAFE", redFlags: ["existing flag"], nextSteps: [] } as never;
+  return {
+    verdict: "SAFE",
+    redFlags: ["existing flag"],
+    nextSteps: [],
+  } as never;
 }
 
 describe("checkAsicListed", () => {
@@ -112,9 +116,13 @@ describe("applyAsicCitation", () => {
     rpcMock.mockResolvedValue({ data: [HIT_ROW], error: null });
     const { applyAsicCitation } = await importFresh();
     const result = baseResult();
-    expect(await applyAsicCitation(result, "https://tagmarkets.com")).toBeNull();
+    expect(
+      await applyAsicCitation(result, "https://tagmarkets.com"),
+    ).toBeNull();
     expect(rpcMock).not.toHaveBeenCalled();
-    expect((result as { redFlags: string[] }).redFlags).toEqual(["existing flag"]);
+    expect((result as { redFlags: string[] }).redFlags).toEqual([
+      "existing flag",
+    ]);
   });
 
   it("appends an ASIC red flag on a hit (preserving existing flags)", async () => {
@@ -135,7 +143,9 @@ describe("applyAsicCitation", () => {
     const { applyAsicCitation } = await importFresh();
     const result = baseResult();
     expect(await applyAsicCitation(result, "clean text")).toBeNull();
-    expect((result as { redFlags: string[] }).redFlags).toEqual(["existing flag"]);
+    expect((result as { redFlags: string[] }).redFlags).toEqual([
+      "existing flag",
+    ]);
   });
 
   it("never throws + leaves redFlags unchanged when the RPC rejects", async () => {
@@ -145,6 +155,8 @@ describe("applyAsicCitation", () => {
     await expect(
       applyAsicCitation(result, "https://tagmarkets.com"),
     ).resolves.toBeNull();
-    expect((result as { redFlags: string[] }).redFlags).toEqual(["existing flag"]);
+    expect((result as { redFlags: string[] }).redFlags).toEqual([
+      "existing flag",
+    ]);
   });
 });

@@ -45,7 +45,10 @@ export async function GET(req: Request) {
       .from("vulnerability_detections")
       .select("id, vulnerability_id")
       .lt("detected_at", cutoff)
-      .limit(10_000);
+      // 1000 is PostgREST's hard ceiling — the old 10_000 deleted 1000/run
+      // while reading as if it cleared ten times that. Stating the real page
+      // size keeps the per-run figure honest; the cron repeats daily.
+      .limit(1000);
 
     if (eligibleError) {
       throw new Error(`eligible query: ${eligibleError.message}`);

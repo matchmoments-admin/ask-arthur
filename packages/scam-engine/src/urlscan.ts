@@ -161,16 +161,15 @@ export async function submitURLScanWithDetails(
  * cause of the 100% clone-watch urlscan failure (0/343 retrieved). The scans
  * rendered fine; we just never authenticated the fetch.
  */
-export async function retrieveURLScan(uuid: string): Promise<URLScanResult | null> {
+export async function retrieveURLScan(
+  uuid: string,
+): Promise<URLScanResult | null> {
   try {
     const apiKey = process.env.URLSCAN_API_KEY;
-    const res = await fetch(
-      `https://urlscan.io/api/v1/result/${uuid}/`,
-      {
-        headers: apiKey ? { "API-Key": apiKey } : undefined,
-        signal: AbortSignal.timeout(10_000),
-      }
-    );
+    const res = await fetch(`https://urlscan.io/api/v1/result/${uuid}/`, {
+      headers: apiKey ? { "API-Key": apiKey } : undefined,
+      signal: AbortSignal.timeout(10_000),
+    });
 
     // 404 = scan not yet complete (or unlisted result without a valid key)
     if (res.status === 404) {
@@ -197,7 +196,9 @@ export async function retrieveURLScan(uuid: string): Promise<URLScanResult | nul
       score: verdicts.score ?? 0,
       categories: Array.isArray(verdicts.categories) ? verdicts.categories : [],
       technologies: Array.isArray(lists.technologies)
-        ? lists.technologies.map((t: { name?: string }) => t.name || String(t)).slice(0, 20)
+        ? lists.technologies
+            .map((t: { name?: string }) => t.name || String(t))
+            .slice(0, 20)
         : [],
       serverInfo: {
         ip: page.ip || null,

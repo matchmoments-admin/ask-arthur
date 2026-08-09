@@ -40,7 +40,9 @@ describe("fetchRdapDomain — direct-registry with rdap.org fallback", () => {
     const out = await fetchRdapDomain("nimblepayday.com");
 
     expect(out).toEqual(RDAP_JSON);
-    expect(urls).toEqual(["https://rdap.verisign.com/com/v1/domain/nimblepayday.com"]);
+    expect(urls).toEqual([
+      "https://rdap.verisign.com/com/v1/domain/nimblepayday.com",
+    ]);
     expect(urls.some((u) => u.includes("rdap.org"))).toBe(false);
     expect(logCost).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -59,7 +61,8 @@ describe("fetchRdapDomain — direct-registry with rdap.org fallback", () => {
     const urls: string[] = [];
     stubFetch((url) => {
       urls.push(url);
-      if (url.includes("verisign")) return { ok: false, status: 500, json: async () => ({}) };
+      if (url.includes("verisign"))
+        return { ok: false, status: 500, json: async () => ({}) };
       return { ok: true, json: async () => RDAP_JSON }; // rdap.org
     });
 

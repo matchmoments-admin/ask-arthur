@@ -101,7 +101,9 @@ export interface CharityIntent {
  * be cheap (no network, just regex) and side-effect-free so it's safe
  * to call on every /api/analyze request.
  */
-export function detectCharityIntent(text: string | null | undefined): CharityIntent | null {
+export function detectCharityIntent(
+  text: string | null | undefined,
+): CharityIntent | null {
   if (!text) return null;
   const trimmed = text.trim();
   if (trimmed.length < 4 || trimmed.length > 5000) return null;

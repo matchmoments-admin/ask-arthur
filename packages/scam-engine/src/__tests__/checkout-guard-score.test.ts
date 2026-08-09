@@ -110,10 +110,14 @@ describe("scoreCheckoutGuard", () => {
 
   it("threshold boundaries: exactly 25 → SUSPICIOUS, exactly 60 → HIGH_RISK", () => {
     // fresh(25) alone hits the SUSPICIOUS floor exactly.
-    expect(scoreCheckoutGuard(signals({ domainAgeBand: "fresh" })).verdict).toBe("SUSPICIOUS");
+    expect(
+      scoreCheckoutGuard(signals({ domainAgeBand: "fresh" })).verdict,
+    ).toBe("SUSPICIOUS");
     // scam_urls(35) + fresh(25) = 60 hits the HIGH_RISK floor exactly.
     expect(
-      scoreCheckoutGuard(signals({ scamUrlListed: true, domainAgeBand: "fresh" })).verdict,
+      scoreCheckoutGuard(
+        signals({ scamUrlListed: true, domainAgeBand: "fresh" }),
+      ).verdict,
     ).toBe("HIGH_RISK");
   });
 

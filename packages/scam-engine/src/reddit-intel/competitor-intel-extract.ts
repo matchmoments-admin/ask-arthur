@@ -100,7 +100,13 @@ export interface ExtractOptions {
 export interface ExtractResult {
   feedItemId: number;
   observations: number;
-  skipped?: "not_found" | "not_competitor" | "already_extracted" | "empty_body" | "braked" | "no_client";
+  skipped?:
+    | "not_found"
+    | "not_competitor"
+    | "already_extracted"
+    | "empty_body"
+    | "braked"
+    | "no_client";
 }
 
 // ── Engine ───────────────────────────────────────────────────────────────────
@@ -125,7 +131,9 @@ export async function extractCompetitorObservations(
 
   const { data: item, error: readErr } = await supabase
     .from("feed_items")
-    .select("id, source, category, title, body_md, country_code, competitor_extracted_at")
+    .select(
+      "id, source, category, title, body_md, country_code, competitor_extracted_at",
+    )
     .eq("id", feedItemId)
     .maybeSingle();
   if (readErr) throw new Error(`competitor-extract read: ${readErr.message}`);
@@ -223,7 +231,8 @@ export async function extractCompetitorObservations(
       .upsert(rows, { onConflict: "feed_item_id,scam_title" });
     // Throw on upsert failure so the marker is NOT set and the row retries next
     // run (rare after the dedupe above). The cron catches + surfaces this.
-    if (upsertErr) throw new Error(`competitor-extract upsert: ${upsertErr.message}`);
+    if (upsertErr)
+      throw new Error(`competitor-extract upsert: ${upsertErr.message}`);
   }
 
   // Mark attempted (H2) — reached only on a successful upsert OR a zero-yield

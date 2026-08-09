@@ -96,7 +96,9 @@ export function invalidateActiveWatchlistCache(): void {
 /** Read the overlay rows, cached. Returns null when the read FAILED (as
  *  distinct from succeeding with zero rows) so the caller can tell a genuine
  *  empty overlay from a degraded one. */
-async function loadOverlayRows(now: number): Promise<DynamicBrandEntry[] | null> {
+async function loadOverlayRows(
+  now: number,
+): Promise<DynamicBrandEntry[] | null> {
   if (cache && now - cache.fetchedAt < OVERLAY_TTL_MS) return cache.rows;
   if (inFlight) return inFlight;
 

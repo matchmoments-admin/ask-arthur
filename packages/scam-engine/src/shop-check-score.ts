@@ -122,8 +122,7 @@ export function computeCompositeScore(
   raw += ABN_POINTS[input.abnStatus];
   raw += input.apivoidVerdict ? APIVOID_POINTS[input.apivoidVerdict] : 0;
   raw += input.reviewsVerdict ? REVIEWS_POINTS[input.reviewsVerdict] : 0;
-  raw +=
-    Math.min(Math.max(input.commerceFlagCount, 0), FLAG_CAP) * FLAG_POINTS;
+  raw += Math.min(Math.max(input.commerceFlagCount, 0), FLAG_CAP) * FLAG_POINTS;
 
   const score = Math.min(100, Math.max(0, Math.round(raw)));
   return { score, band: scoreToBand(score) };

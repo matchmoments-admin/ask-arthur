@@ -8,8 +8,7 @@ import {
 const baseHit = {
   candidate_domain: "bunings-au-deals.shop",
   candidate_url: "https://bunings-au-deals.shop/",
-  url_hash:
-    "0000000000000000000000000000000000000000000000000000000000000000",
+  url_hash: "0000000000000000000000000000000000000000000000000000000000000000",
   brand: "Bunnings",
   legitimate_domain: "bunnings.com.au",
   signal_type: "substring",

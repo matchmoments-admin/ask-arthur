@@ -135,7 +135,7 @@ export const clusterBuilder = inngest.createFunction(
         }
 
         return filtered;
-      }
+      },
     );
 
     const entityIds = Object.keys(entityReportMap).map(Number);
@@ -269,5 +269,5 @@ export const clusterBuilder = inngest.createFunction(
       membersLinked: results.membersLinked,
       componentsFound: components.length,
     };
-  })
+  }),
 );

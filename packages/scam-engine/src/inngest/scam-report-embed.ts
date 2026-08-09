@@ -21,10 +21,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
 import { inngest } from "./client";
-import {
-  SCAM_REPORT_STORED_EVENT,
-  parseScamReportStoredData,
-} from "./events";
+import { SCAM_REPORT_STORED_EVENT, parseScamReportStoredData } from "./events";
 import { embed, type EmbeddingDomain } from "../embeddings";
 import { isFeatureBraked } from "../cost-log";
 import { withAxiomLogging } from "./with-axiom-logging";

@@ -25,7 +25,9 @@ const mockCreateServiceClient = vi.mocked(createServiceClient);
 // asserting telemetry can replace the insert fn via `telemetryInsert`.
 function makeSupabaseMock(
   rpcResult: { data: unknown[] | null; error: { message: string } | null },
-  telemetryInsert: ReturnType<typeof vi.fn> = vi.fn().mockResolvedValue({ error: null }),
+  telemetryInsert: ReturnType<typeof vi.fn> = vi
+    .fn()
+    .mockResolvedValue({ error: null }),
 ) {
   return {
     rpc: vi.fn().mockResolvedValue(rpcResult),
@@ -88,7 +90,10 @@ describe("getSimilarReports", () => {
 
   it("filters out candidates below minRelevance after rerank", async () => {
     mockCreateServiceClient.mockReturnValue(
-      makeSupabaseMock({ data: [sampleHybridRow, { ...sampleHybridRow, id: 2 }], error: null }),
+      makeSupabaseMock({
+        data: [sampleHybridRow, { ...sampleHybridRow, id: 2 }],
+        error: null,
+      }),
     );
     mockRerank.mockResolvedValue({
       results: [
@@ -194,7 +199,11 @@ describe("getSimilarReports", () => {
     // Defensive narrowing: if a future migration adds a new verdict literal
     // to scam_reports, the helper must not surface it as one of the typed
     // allowed values without a type-level update first.
-    const weirdVerdict = { ...sampleHybridRow, id: 99, verdict: "FUTURE_NEW_VERDICT" };
+    const weirdVerdict = {
+      ...sampleHybridRow,
+      id: 99,
+      verdict: "FUTURE_NEW_VERDICT",
+    };
     mockCreateServiceClient.mockReturnValue(
       makeSupabaseMock({ data: [weirdVerdict], error: null }),
     );

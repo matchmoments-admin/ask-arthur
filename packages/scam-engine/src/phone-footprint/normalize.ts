@@ -31,7 +31,9 @@ export function hashMsisdn(e164: string): string {
       throw new Error("PHONE_FOOTPRINT_PEPPER not configured");
     }
     // Dev fallback — predictable hash so local tests are stable.
-    return createHmac("sha256", "dev-pepper-insecure").update(e164).digest("hex");
+    return createHmac("sha256", "dev-pepper-insecure")
+      .update(e164)
+      .digest("hex");
   }
   return createHmac("sha256", pepper).update(e164).digest("hex");
 }
@@ -42,7 +44,12 @@ export function hashMsisdn(e164: string): string {
  * different message prefix so collisions between (hashIp, hashMsisdn) are
  * impossible by construction.
  */
-export function hashIdentifierForPf(prefix: "ip" | "ua", value: string): string {
+export function hashIdentifierForPf(
+  prefix: "ip" | "ua",
+  value: string,
+): string {
   const pepper = process.env.PHONE_FOOTPRINT_PEPPER ?? "dev-pepper-insecure";
-  return createHmac("sha256", pepper).update(`${prefix}:${value}`).digest("hex");
+  return createHmac("sha256", pepper)
+    .update(`${prefix}:${value}`)
+    .digest("hex");
 }

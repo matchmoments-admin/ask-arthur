@@ -20,7 +20,9 @@ const mockCreateServiceClient = vi.mocked(createServiceClient);
 
 function makeSupabaseMock(
   rpcResult: { data: unknown[] | null; error: { message: string } | null },
-  telemetryInsert: ReturnType<typeof vi.fn> = vi.fn().mockResolvedValue({ error: null }),
+  telemetryInsert: ReturnType<typeof vi.fn> = vi
+    .fn()
+    .mockResolvedValue({ error: null }),
 ) {
   return {
     rpc: vi.fn().mockResolvedValue(rpcResult),
@@ -33,8 +35,7 @@ const sampleRow = {
   id: "11111111-1111-1111-1111-111111111111",
   slug: "payid-relative-collect",
   title: "PayID 'relative will collect'",
-  narrative:
-    "Marketplace buyer offers PayID and sends a relative to collect.",
+  narrative: "Marketplace buyer offers PayID and sends a relative to collect.",
   modus_operandi:
     "Buyer fakes urgency, sends a forged PayID confirmation email.",
   representative_brands: ["PayID", "Facebook Marketplace"],
@@ -176,9 +177,7 @@ describe("renderThemesForPrompt", () => {
     expect(out).toContain("Targets: PayID, Facebook Marketplace");
     expect(out).toContain("Modus operandi:");
     expect(out).toContain("Common tactics: urgency_window, authority_appeal");
-    expect(out).toContain(
-      "name it in the summary using the title above",
-    );
+    expect(out).toContain("name it in the summary using the title above");
   });
 
   it("omits the tactics line when there are no tactic tags", () => {

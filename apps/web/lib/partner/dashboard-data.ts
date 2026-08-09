@@ -9,7 +9,13 @@
 import "server-only";
 
 import { createServiceClient } from "@askarthur/supabase/server";
-import { regionToStateCode, tallyRanked, type AuJurisdiction, type RankedItem } from "./framing";
+import {
+  regionToStateCode,
+  tallyRanked,
+  type AuJurisdiction,
+  type RankedItem,
+} from "./framing";
+import { fetchAllRows } from "@askarthur/supabase/paginate";
 
 export interface JurisdictionThreatPicture {
   /** Report volume per AU state, for the choropleth (all-time). */
@@ -44,16 +50,19 @@ export async function getJurisdictionThreatPicture(
   const { data, error } = await supabase.rpc("get_jurisdiction_summary", {
     p_min_reports: 1,
   });
-  if (error || !data) return { stateData: {}, focusLoss: null, unavailable: true };
+  if (error || !data)
+    return { stateData: {}, focusLoss: null, unavailable: true };
 
-  const regions = ((data as { regions?: JurisdictionRegionRow[] }).regions ?? []) as JurisdictionRegionRow[];
+  const regions = ((data as { regions?: JurisdictionRegionRow[] }).regions ??
+    []) as JurisdictionRegionRow[];
 
   const stateData: Record<string, number> = {};
   let focusLoss = 0;
   for (const row of regions) {
     const stateCode = regionToStateCode(row.effective_region);
     if (!stateCode) continue;
-    stateData[stateCode] = (stateData[stateCode] ?? 0) + (row.total_reports ?? 0);
+    stateData[stateCode] =
+      (stateData[stateCode] ?? 0) + (row.total_reports ?? 0);
     if (jurisdiction && stateCode === jurisdiction) {
       focusLoss += Number(row.total_loss ?? 0);
     }
@@ -101,7 +110,9 @@ interface DailySummaryRow {
 // check should never appear as a "top scam type").
 const NOISE_TOKENS = new Set(["none", "unknown", "n/a", "na", "other", "null"]);
 function dropNoise(arr: string[] | null): string[] {
-  return (arr ?? []).filter((x) => x && !NOISE_TOKENS.has(x.trim().toLowerCase()));
+  return (arr ?? []).filter(
+    (x) => x && !NOISE_TOKENS.has(x.trim().toLowerCase()),
+  );
 }
 
 /**
@@ -132,7 +143,9 @@ export async function getJurisdictionTrend(
     .slice(0, 10);
   const { data, error } = await supabase
     .from("threat_intel_daily_summary")
-    .select("date, region, total_checks, high_risk_count, scam_reports_count, top_scam_types, top_brands")
+    .select(
+      "date, region, total_checks, high_risk_count, scam_reports_count, top_scam_types, top_brands",
+    )
     .gte("date", cutoffDate)
     .order("date", { ascending: true });
   if (error || !data) return empty;
@@ -145,7 +158,12 @@ export async function getJurisdictionTrend(
 
   for (const row of data as DailySummaryRow[]) {
     if (regionToStateCode(row.region) !== jurisdiction) continue;
-    const pt = byDate.get(row.date) ?? { date: row.date, checks: 0, highRisk: 0, reports: 0 };
+    const pt = byDate.get(row.date) ?? {
+      date: row.date,
+      checks: 0,
+      highRisk: 0,
+      reports: 0,
+    };
     pt.checks += row.total_checks ?? 0;
     pt.highRisk += row.high_risk_count ?? 0;
     pt.reports += row.scam_reports_count ?? 0;
@@ -186,19 +204,31 @@ export async function getRouteClickFunnel(
   const supabase = createServiceClient();
   if (!supabase) return { rows: [], total: 0 };
 
-  const { data, error } = await supabase
-    .from("analytics_events")
-    .select("event_props")
-    .eq("event_type", "reporting_route_click")
-    .order("created_at", { ascending: false })
-    .limit(5000);
-  if (error || !data) return { rows: [], total: 0 };
+  // `total` below is a running sum over these rows, so the 1000-row cap made
+  // the partner-facing funnel silently under-report.
+  const { rows: data, error } = await fetchAllRows<{
+    event_props: Record<string, unknown> | null;
+  }>(
+    (from, to) =>
+      supabase
+        .from("analytics_events")
+        .select("event_props")
+        .eq("event_type", "reporting_route_click")
+        .order("id", { ascending: false })
+        .range(from, to) as unknown as PromiseLike<{
+        data: Array<{ event_props: Record<string, unknown> | null }> | null;
+        error: { message: string } | null;
+      }>,
+    { maxRows: 200_000 },
+  );
+  if (error) return { rows: [], total: 0 };
 
   const counts = new Map<string, number>();
   let total = 0;
   for (const row of data as { event_props: Record<string, unknown> | null }[]) {
     const props = row.event_props ?? {};
-    if (jurisdiction && String(props.jurisdiction ?? "") !== jurisdiction) continue;
+    if (jurisdiction && String(props.jurisdiction ?? "") !== jurisdiction)
+      continue;
     const label = String(props.routeLabel ?? "").trim();
     if (!label) continue;
     counts.set(label, (counts.get(label) ?? 0) + 1);

@@ -12,7 +12,11 @@ const CACHE_PREFIX = "askarthur:ipqs";
 
 let _redis: Redis | null = null;
 function getRedis(): Redis | null {
-  if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) return null;
+  if (
+    !process.env.UPSTASH_REDIS_REST_URL ||
+    !process.env.UPSTASH_REDIS_REST_TOKEN
+  )
+    return null;
   if (!_redis) {
     _redis = new Redis({
       url: process.env.UPSTASH_REDIS_REST_URL,
@@ -65,7 +69,9 @@ export async function checkIPQS(phone: string): Promise<IPQSPhoneResult> {
   const redis = getRedis();
   if (redis) {
     try {
-      const cached = await redis.get<IPQSPhoneResult>(`${CACHE_PREFIX}:${phone}`);
+      const cached = await redis.get<IPQSPhoneResult>(
+        `${CACHE_PREFIX}:${phone}`,
+      );
       if (cached) return cached;
     } catch {
       // Cache miss — continue to API
@@ -78,7 +84,7 @@ export async function checkIPQS(phone: string): Promise<IPQSPhoneResult> {
       {
         headers: { Accept: "application/json" },
         signal: AbortSignal.timeout(5000),
-      }
+      },
     );
 
     if (!res.ok) {
@@ -114,7 +120,9 @@ export async function checkIPQS(phone: string): Promise<IPQSPhoneResult> {
 
     // Cache result (fire-and-forget)
     if (redis) {
-      redis.set(`${CACHE_PREFIX}:${phone}`, result, { ex: CACHE_TTL }).catch(() => {});
+      redis
+        .set(`${CACHE_PREFIX}:${phone}`, result, { ex: CACHE_TTL })
+        .catch(() => {});
     }
 
     return result;

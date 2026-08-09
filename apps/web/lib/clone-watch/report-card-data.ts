@@ -1,5 +1,6 @@
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
+import { fetchAllRows } from "@askarthur/supabase/paginate";
 import {
   aggregateClonesByDomain,
   priorMonthStart,
@@ -41,7 +42,13 @@ import { rollupRegistrars } from "@/lib/clone-watch/registrar-canonical";
 
 /** The digest's window/source/FP filters, verbatim, so counts reconcile. */
 const CLONE_SOURCE = "nrd";
-const FETCH_LIMIT = 5000;
+// A REACHABLE ceiling. The previous value was 5000, passed to `.limit()` and
+// then guarded with `raw.length === FETCH_LIMIT` — but PostgREST caps every
+// response at 1000 rows, so the guard compared against a number the server can
+// never return and never fired. July 2026 published "1000 detected" when the
+// truth was 1064. We now paginate, and this bound is checked against the paged
+// total, which CAN reach it.
+const FETCH_LIMIT = 20_000;
 
 /**
  * First month with a FULL month of clone-watch coverage. Clone Watch launched
@@ -279,24 +286,37 @@ async function fetchMonthByBrand(
   endIso: string,
   periodMonth: string,
 ): Promise<{ byBrand: Map<string, CloneBrandMetrics>; rows: CloneAlertRow[] }> {
-  const { data, error } = await sb
-    .from("shopfront_clone_alerts")
-    .select(
-      "id, candidate_domain, inferred_target_domain, urlscan_classification, urlscan_evidence, attribution, campaign_key, submitted_to, lifecycle_state, netcraft_declined_at, weaponised_at, first_seen_at",
-    )
-    .eq("source", CLONE_SOURCE)
-    .gte("first_seen_at", startIso)
-    .lt("first_seen_at", endIso)
-    .not("inferred_target_domain", "is", null)
-    .or("triage_status.is.null,triage_status.neq.fp")
-    .limit(FETCH_LIMIT);
+  // `.order("id")` is load-bearing, not cosmetic: a .range() walk over an
+  // unordered query can skip and repeat rows between pages.
+  const {
+    rows: raw,
+    truncated,
+    error,
+  } = await fetchAllRows<CloneAlertRow>(
+    (from, to) =>
+      sb
+        .from("shopfront_clone_alerts")
+        .select(
+          "id, candidate_domain, inferred_target_domain, urlscan_classification, urlscan_evidence, attribution, campaign_key, submitted_to, lifecycle_state, netcraft_declined_at, weaponised_at, first_seen_at",
+        )
+        .eq("source", CLONE_SOURCE)
+        .gte("first_seen_at", startIso)
+        .lt("first_seen_at", endIso)
+        .not("inferred_target_domain", "is", null)
+        .or("triage_status.is.null,triage_status.neq.fp")
+        .order("id", { ascending: true })
+        .range(from, to) as unknown as PromiseLike<{
+        data: CloneAlertRow[] | null;
+        error: { message: string } | null;
+      }>,
+    { maxRows: FETCH_LIMIT },
+  );
 
   if (error) throw new Error(`report-card fetch failed: ${error.message}`);
 
-  // Warn on the RAW result length (pre-FP-filter), matching the digest, so an
-  // FP row dropped after fetch can't mask a truncated (capped) DB result.
-  const raw = (data ?? []) as unknown as CloneAlertRow[];
-  if (raw.length === FETCH_LIMIT) {
+  // Warn on the RAW count (pre-FP-filter), matching the digest, so an FP row
+  // dropped after fetch can't mask a truncated result.
+  if (truncated) {
     logger.warn("report-card: clone fetch hit LIMIT", {
       limit: FETCH_LIMIT,
       period: periodMonth,
@@ -376,15 +396,15 @@ export async function getCloneWatchTrendRows(
     registrarWeaponisation(rows).map((w) => [w.registrar, w]),
   );
   const { rows: rawRegistrars } = buildRegistrarRollup(byBrand);
-  const registrarRows: RegistrarTrendRow[] = rollupRegistrars(rawRegistrars).map(
-    (r) => ({
-      registrar: r.registrar,
-      clones: r.clones,
-      weaponised: weaponisationByRegistrar.get(r.registrar)?.weaponised ?? 0,
-      median_days_to_weaponise:
-        weaponisationByRegistrar.get(r.registrar)?.medianDaysToWeaponise ?? null,
-    }),
-  );
+  const registrarRows: RegistrarTrendRow[] = rollupRegistrars(
+    rawRegistrars,
+  ).map((r) => ({
+    registrar: r.registrar,
+    clones: r.clones,
+    weaponised: weaponisationByRegistrar.get(r.registrar)?.weaponised ?? 0,
+    median_days_to_weaponise:
+      weaponisationByRegistrar.get(r.registrar)?.medianDaysToWeaponise ?? null,
+  }));
 
   return { periodMonth, brandRows, registrarRows };
 }
@@ -538,24 +558,41 @@ export async function getCloneWatchReportCard(
   // and makes EVERY brand look like a first-time entrant. The caption would
   // then publish "wasn't targeted at all last month" directly above its own
   // "This is month one" line (review finding 5).
-  const priorClonesOf = (brand: string) => priorByBrand.get(brand)?.detected ?? 0;
+  const priorClonesOf = (brand: string) =>
+    priorByBrand.get(brand)?.detected ?? 0;
   const notLastMonth = (brand: string) =>
-    !priorSpotlightBrand || brand.toLowerCase() !== priorSpotlightBrand.toLowerCase();
+    !priorSpotlightBrand ||
+    brand.toLowerCase() !== priorSpotlightBrand.toLowerCase();
 
   const mover = !momAvailable
     ? undefined
     : auOrFund
-        .map((r) => ({ ...r, priorClones: priorClonesOf(r.brand), delta: r.clones - priorClonesOf(r.brand) }))
-        .filter((r) => r.priorClones > 0 && r.delta >= MOVER_MIN_DELTA && notLastMonth(r.brand))
+        .map((r) => ({
+          ...r,
+          priorClones: priorClonesOf(r.brand),
+          delta: r.clones - priorClonesOf(r.brand),
+        }))
+        .filter(
+          (r) =>
+            r.priorClones > 0 &&
+            r.delta >= MOVER_MIN_DELTA &&
+            notLastMonth(r.brand),
+        )
         .sort((a, b) => b.delta - a.delta)[0];
 
   const entrant = !momAvailable
     ? undefined
     : auOrFund
-        .filter((r) => priorClonesOf(r.brand) === 0 && r.clones >= ENTRANT_MIN_CLONES && notLastMonth(r.brand))
+        .filter(
+          (r) =>
+            priorClonesOf(r.brand) === 0 &&
+            r.clones >= ENTRANT_MIN_CLONES &&
+            notLastMonth(r.brand),
+        )
         .sort((a, b) => b.clones - a.clones)[0];
 
-  const rankOf = (brand: string) => auOrFund.findIndex((r) => r.brand === brand) + 1;
+  const rankOf = (brand: string) =>
+    auOrFund.findIndex((r) => r.brand === brand) + 1;
   const spotlight: Spotlight = mover
     ? {
         kind: "mover",
@@ -566,9 +603,20 @@ export async function getCloneWatchReportCard(
         delta: mover.delta,
       }
     : entrant
-      ? { kind: "new_entrant", brand: entrant.brand, clones: entrant.clones, auRank: rankOf(entrant.brand), priorClones: 0 }
+      ? {
+          kind: "new_entrant",
+          brand: entrant.brand,
+          clones: entrant.clones,
+          auRank: rankOf(entrant.brand),
+          priorClones: 0,
+        }
       : superFund && notLastMonth(superFund.brand)
-        ? { kind: "super_fund", brand: superFund.brand, clones: superFund.clones, auRank: superFund.auRank }
+        ? {
+            kind: "super_fund",
+            brand: superFund.brand,
+            clones: superFund.clones,
+            auRank: superFund.auRank,
+          }
         : { kind: "globals", brand: "", clones: 0, auRank: 0 };
 
   return {

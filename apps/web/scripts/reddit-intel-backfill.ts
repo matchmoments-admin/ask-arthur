@@ -56,7 +56,7 @@ async function main() {
     .eq("source", "reddit")
     .gte("source_created_at", cutoff)
     .order("source_created_at", { ascending: false })
-    .limit(5_000); // 5k = ~130 days at 38 posts/day, generous safety margin
+    .limit(1000); // 5k = ~130 days at 38 posts/day, generous safety margin
 
   if (candErr) {
     console.error(`[backfill] candidate query failed: ${candErr.message}`);

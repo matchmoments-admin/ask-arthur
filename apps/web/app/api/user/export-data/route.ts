@@ -4,6 +4,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
 import { AuthUnavailableError, getSupabaseUserOrThrow } from "@/lib/auth";
+import { fetchAllRows } from "@askarthur/supabase/paginate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -54,26 +55,48 @@ export async function GET() {
       costTelemetry,
     ] = await Promise.all([
       svc.from("user_profiles").select("*").eq("id", userId).maybeSingle(),
-      svc.from("api_keys")
-        .select("id, name, tier, daily_limit, created_at, last_used_at, revoked_at")
+      svc
+        .from("api_keys")
+        .select(
+          "id, name, tier, daily_limit, created_at, last_used_at, revoked_at",
+        )
         .eq("user_id", userId),
-      svc.from("subscriptions")
-        .select("id, tier, status, billing_provider, current_period_end, created_at, updated_at")
+      svc
+        .from("subscriptions")
+        .select(
+          "id, tier, status, billing_provider, current_period_end, created_at, updated_at",
+        )
         .eq("user_id", userId),
-      svc.from("push_tokens")
+      svc
+        .from("push_tokens")
         .select("id, platform, region, active, last_seen, created_at")
         .eq("user_id", userId),
       svc.from("family_groups").select("*").eq("owner_id", userId),
-      svc.from("family_members")
+      svc
+        .from("family_members")
         .select("id, group_id, email, role, created_at")
         .eq("user_id", userId),
-      svc.from("org_members")
+      svc
+        .from("org_members")
         .select("id, org_id, role, status, accepted_at")
         .eq("user_id", userId),
-      svc.from("cost_telemetry")
-        .select("id, feature, provider, operation, units, estimated_cost_usd, created_at")
-        .eq("user_id", userId)
-        .limit(10_000),
+      // Subject-access export: an incomplete bundle is a compliance problem,
+      // and `.limit(10_000)` silently returned at most 1000 rows.
+      fetchAllRows<Record<string, unknown>>(
+        (from, to) =>
+          svc
+            .from("cost_telemetry")
+            .select(
+              "id, feature, provider, operation, units, estimated_cost_usd, created_at",
+            )
+            .eq("user_id", userId)
+            .order("id", { ascending: true })
+            .range(from, to) as unknown as PromiseLike<{
+            data: Array<Record<string, unknown>> | null;
+            error: { message: string } | null;
+          }>,
+        { maxRows: 500_000 },
+      ).then((r) => ({ data: r.rows, error: r.error })),
     ]);
 
     const bundle = {

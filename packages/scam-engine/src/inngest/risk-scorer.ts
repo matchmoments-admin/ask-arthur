@@ -138,5 +138,5 @@ export const riskScorer = inngest.createFunction(
     });
 
     return { total: entityIds.length, ...results };
-  })
+  }),
 );

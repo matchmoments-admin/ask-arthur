@@ -76,7 +76,9 @@ describe("scoreReviewDistribution", () => {
       totalReviews: 1200,
       distribution: { one: 0, two: 5, three: 40, four: 300, five: 855 },
     });
-    expect(scoreReviewDistribution(complete, null).statBand).toBe("implausible");
+    expect(scoreReviewDistribution(complete, null).statBand).toBe(
+      "implausible",
+    );
   });
 
   it("flags an extreme five-star skew as skewed (not implausible)", () => {

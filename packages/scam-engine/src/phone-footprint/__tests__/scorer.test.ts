@@ -12,7 +12,12 @@ import type { PillarId, PillarResult } from "../types";
 // Helper: build a full pillars record with a baseline of available=false.
 function emptyPillars(): Record<PillarId, PillarResult> {
   return {
-    scam_reports: { id: "scam_reports", score: 0, confidence: 0, available: false },
+    scam_reports: {
+      id: "scam_reports",
+      score: 0,
+      confidence: 0,
+      available: false,
+    },
     breach: { id: "breach", score: 0, confidence: 0, available: false },
     reputation: { id: "reputation", score: 0, confidence: 0, available: false },
     sim_swap: { id: "sim_swap", score: 0, confidence: 0, available: false },
@@ -60,7 +65,12 @@ describe("computeCompositeScore", () => {
     // Available weight = 0.30 + 0.10 + 0.20 = 0.60.
     // Composite = (100 * 0.30 / 0.60) + (100 * 0.20 / 0.60) + (100 * 0.10 / 0.60) = 100.
     const p = emptyPillars();
-    p.scam_reports = { id: "scam_reports", score: 100, confidence: 1, available: true };
+    p.scam_reports = {
+      id: "scam_reports",
+      score: 100,
+      confidence: 1,
+      available: true,
+    };
     p.breach = { id: "breach", score: 100, confidence: 1, available: true };
     p.identity = { id: "identity", score: 100, confidence: 1, available: true };
     expect(computeCompositeScore(p).score).toBe(100);
@@ -68,7 +78,12 @@ describe("computeCompositeScore", () => {
 
   it("clamps score to [0, 100]", () => {
     const p = emptyPillars();
-    p.scam_reports = { id: "scam_reports", score: 200, confidence: 1, available: true };
+    p.scam_reports = {
+      id: "scam_reports",
+      score: 200,
+      confidence: 1,
+      available: true,
+    };
     // Only scam_reports available → weight 1.0 → score 200 clamps to 100.
     expect(computeCompositeScore(p).score).toBe(100);
   });
@@ -102,7 +117,12 @@ describe("redactForFree", () => {
 
   it("treats an available pillar with score 0 as not-triggered", () => {
     const p = emptyPillars();
-    p.scam_reports = { id: "scam_reports", score: 0, confidence: 1, available: true };
+    p.scam_reports = {
+      id: "scam_reports",
+      score: 0,
+      confidence: 1,
+      available: true,
+    };
     const r = redactForFree(p);
     expect(r.scam_reports.score).toBe(0);
     expect(r.scam_reports.available).toBe(true);
@@ -112,22 +132,38 @@ describe("redactForFree", () => {
 describe("effectiveTier", () => {
   it("downgrades any tier to teaser when ownership not proven", () => {
     expect(
-      effectiveTier({ requestedTier: "full", ownershipProven: false, crossIpDowngrade: false }),
+      effectiveTier({
+        requestedTier: "full",
+        ownershipProven: false,
+        crossIpDowngrade: false,
+      }),
     ).toBe("teaser");
     expect(
-      effectiveTier({ requestedTier: "basic", ownershipProven: false, crossIpDowngrade: false }),
+      effectiveTier({
+        requestedTier: "basic",
+        ownershipProven: false,
+        crossIpDowngrade: false,
+      }),
     ).toBe("teaser");
   });
 
   it("downgrades any tier to teaser on cross-IP detection even with ownership", () => {
     expect(
-      effectiveTier({ requestedTier: "full", ownershipProven: true, crossIpDowngrade: true }),
+      effectiveTier({
+        requestedTier: "full",
+        ownershipProven: true,
+        crossIpDowngrade: true,
+      }),
     ).toBe("teaser");
   });
 
   it("preserves requested tier when ownership proven and no downgrade", () => {
     expect(
-      effectiveTier({ requestedTier: "full", ownershipProven: true, crossIpDowngrade: false }),
+      effectiveTier({
+        requestedTier: "full",
+        ownershipProven: true,
+        crossIpDowngrade: false,
+      }),
     ).toBe("full");
   });
 });

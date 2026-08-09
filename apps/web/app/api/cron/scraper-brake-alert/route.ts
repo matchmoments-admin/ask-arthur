@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { requireCronAuth } from "@/lib/cron-auth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
-import { alertAndRecord, recordNoAlertNeeded } from "@/lib/alerting/deliveryLog";
+import {
+  alertAndRecord,
+  recordNoAlertNeeded,
+} from "@/lib/alerting/deliveryLog";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,7 +43,9 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "service_unavailable" }, { status: 503 });
   }
 
-  const since = new Date(Date.now() - LOOKBACK_MINUTES * 60 * 1000).toISOString();
+  const since = new Date(
+    Date.now() - LOOKBACK_MINUTES * 60 * 1000,
+  ).toISOString();
   const { data: recent, error: recentErr } = await supabase
     .from("feed_ingestion_log")
     .select("feed_name, status, error_message, created_at")
@@ -102,11 +107,17 @@ export async function GET(req: Request) {
       scanned: recentRows.length,
       feedsInBackoff: [...seen],
     });
-    return NextResponse.json({ ok: true, alerted: 0, scanned: recentRows.length });
+    return NextResponse.json({
+      ok: true,
+      alerted: 0,
+      scanned: recentRows.length,
+    });
   }
 
   const lines = transitions.map((row) => {
-    const reason = (row.error_message ?? "").slice(BACKOFF_PREFIX.length).trim();
+    const reason = (row.error_message ?? "")
+      .slice(BACKOFF_PREFIX.length)
+      .trim();
     return `• <code>${escapeHtml(row.feed_name)}</code> — ${escapeHtml(reason)}`;
   });
 
@@ -132,8 +143,5 @@ export async function GET(req: Request) {
 }
 
 function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }

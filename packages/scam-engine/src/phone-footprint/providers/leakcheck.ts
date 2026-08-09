@@ -22,7 +22,10 @@ const LEAKCHECK_URL = "https://leakcheck.io/api/v2/query";
 
 let _redis: Redis | null = null;
 function getRedis(): Redis | null {
-  if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) {
+  if (
+    !process.env.UPSTASH_REDIS_REST_URL ||
+    !process.env.UPSTASH_REDIS_REST_TOKEN
+  ) {
     return null;
   }
   if (!_redis) {
@@ -102,7 +105,9 @@ export const leakcheckProvider: ProviderContract = {
     const redis = getRedis();
     if (redis) {
       try {
-        const cached = await redis.get<LeakCheckCacheEntry>(`${CACHE_PREFIX}:${msisdn}`);
+        const cached = await redis.get<LeakCheckCacheEntry>(
+          `${CACHE_PREFIX}:${msisdn}`,
+        );
         if (cached) {
           return {
             id: "breach",
@@ -138,7 +143,9 @@ export const leakcheckProvider: ProviderContract = {
         // 404 can mean "no breach" for this provider.
         if (redis) {
           redis
-            .set(`${CACHE_PREFIX}:${msisdn}`, EMPTY_CACHE_ENTRY, { ex: CACHE_TTL })
+            .set(`${CACHE_PREFIX}:${msisdn}`, EMPTY_CACHE_ENTRY, {
+              ex: CACHE_TTL,
+            })
             .catch(() => {});
         }
         return {
@@ -150,7 +157,10 @@ export const leakcheckProvider: ProviderContract = {
         };
       }
       if (res.status === 401 || res.status === 403) {
-        return unavailablePillar("breach", `leakcheck_unauthorized_${res.status}`);
+        return unavailablePillar(
+          "breach",
+          `leakcheck_unauthorized_${res.status}`,
+        );
       }
       if (!res.ok) {
         logger.warn("leakcheck http error", { status: res.status });
@@ -170,7 +180,8 @@ export const leakcheckProvider: ProviderContract = {
         const src = item.source;
         const name = src?.name ?? item.name;
         if (name && !names.includes(name)) names.push(name);
-        if (src?.leaked_fields) for (const f of src.leaked_fields) fields.add(f);
+        if (src?.leaked_fields)
+          for (const f of src.leaked_fields) fields.add(f);
         if (src?.breach_date) {
           if (!latest || src.breach_date > latest) latest = src.breach_date;
         }

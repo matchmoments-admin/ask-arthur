@@ -46,5 +46,5 @@ export const stalenessCheck = inngest.createFunction(
     });
 
     return result;
-  })
+  }),
 );

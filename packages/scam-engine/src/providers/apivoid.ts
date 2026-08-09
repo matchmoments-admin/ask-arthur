@@ -70,7 +70,9 @@ function extractHost(input: string): string | null {
   const trimmed = input.trim().toLowerCase();
   if (!trimmed) return null;
   try {
-    const url = new URL(trimmed.startsWith("http") ? trimmed : `https://${trimmed}`);
+    const url = new URL(
+      trimmed.startsWith("http") ? trimmed : `https://${trimmed}`,
+    );
     return url.hostname || null;
   } catch {
     return null;
@@ -87,7 +89,9 @@ function extractHost(input: string): string | null {
 async function isBrakeEngaged(): Promise<boolean> {
   const supabase = createServiceClient();
   if (!supabase) {
-    logger.warn("apivoid: no Supabase client — skipping paid call (brake unverifiable)");
+    logger.warn(
+      "apivoid: no Supabase client — skipping paid call (brake unverifiable)",
+    );
     return true;
   }
   const { data, error } = await supabase
@@ -186,12 +190,16 @@ export async function getSiteTrustworthiness(
 
   const host = extractHost(input);
   if (!host) {
-    logger.warn("apivoid: could not extract host from input — skipping", { input });
+    logger.warn("apivoid: could not extract host from input — skipping", {
+      input,
+    });
     return { ok: false, reason: "bad-host" };
   }
 
   if (await isBrakeEngaged()) {
-    logger.warn("apivoid: shop_signal brake engaged — skipping paid call", { host });
+    logger.warn("apivoid: shop_signal brake engaged — skipping paid call", {
+      host,
+    });
     return { ok: false, reason: "brake" };
   }
 
@@ -208,7 +216,10 @@ export async function getSiteTrustworthiness(
     });
 
     if (!res.ok) {
-      logger.warn("apivoid: site-trust HTTP error", { status: res.status, host });
+      logger.warn("apivoid: site-trust HTTP error", {
+        status: res.status,
+        host,
+      });
       return { ok: false, reason: "http-error" };
     }
 

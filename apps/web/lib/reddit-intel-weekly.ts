@@ -24,8 +24,13 @@ import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import { synthesizeWeeklyIntel } from "@askarthur/scam-engine/reddit-intel/weekly-synthesis";
 import { withUtm } from "@/lib/utm";
+import { fetchAllRows } from "@askarthur/supabase/paginate";
 
-const EMAIL_UTM = { source: "email", campaign: "weekly-intel-digest", medium: "email" };
+const EMAIL_UTM = {
+  source: "email",
+  campaign: "weekly-intel-digest",
+  medium: "email",
+};
 
 export interface WeeklyEmergingTheme {
   /** UUID (theme) or synthetic `story-N` id. */
@@ -96,7 +101,9 @@ export async function getWeeklyIntelForEmail(): Promise<WeeklyRedditIntel | null
           promptVersion: digest.promptVersion,
         };
       }
-      logger.info("weekly-intel: synthesis flag on but no digest — falling back to themes");
+      logger.info(
+        "weekly-intel: synthesis flag on but no digest — falling back to themes",
+      );
     } catch (err) {
       // Synthesis is best-effort for the email — a Claude/DB hiccup must not
       // block the Monday send. Fall through to the theme-table path.
@@ -124,7 +131,9 @@ async function getWeeklyRedditIntelFromThemes(): Promise<WeeklyRedditIntel | nul
   // 1. Daily summaries in window → stats.
   const { data: dailies, error: dailiesErr } = await supabase
     .from("reddit_intel_daily_summary")
-    .select("cohort_date, lead_narrative, stats, posts_classified, model_version, prompt_version")
+    .select(
+      "cohort_date, lead_narrative, stats, posts_classified, model_version, prompt_version",
+    )
     .eq("audience", "internal")
     .is("country_code", null)
     .gte("cohort_date", weekStart)
@@ -160,15 +169,25 @@ async function getWeeklyRedditIntelFromThemes(): Promise<WeeklyRedditIntel | nul
     .slice(0, 5);
 
   // 2. Track A velocity — count posts that JOINED each theme this week.
-  const { data: recentPosts } = await supabase
-    .from("reddit_post_intel")
-    .select("theme_id")
-    .gte("processed_at", weekStartDate.toISOString())
-    .not("theme_id", "is", null)
-    .limit(5000);
+  // Velocity is a per-theme COUNT, so a truncated read silently deflates every
+  // theme's number and reorders the top-5.
+  const { rows: recentPosts } = await fetchAllRows<{ theme_id: string | null }>(
+    (from, to) =>
+      supabase
+        .from("reddit_post_intel")
+        .select("theme_id")
+        .gte("processed_at", weekStartDate.toISOString())
+        .not("theme_id", "is", null)
+        .order("id", { ascending: true })
+        .range(from, to) as unknown as PromiseLike<{
+        data: Array<{ theme_id: string | null }> | null;
+        error: { message: string } | null;
+      }>,
+    { maxRows: 100_000 },
+  );
 
   const velocity: Record<string, number> = {};
-  for (const p of recentPosts ?? []) {
+  for (const p of recentPosts) {
     const id = p.theme_id as string | null;
     if (id) velocity[id] = (velocity[id] ?? 0) + 1;
   }
@@ -199,7 +218,10 @@ async function getWeeklyRedditIntelFromThemes(): Promise<WeeklyRedditIntel | nul
           narrative: (t.narrative as string | null) ?? null,
           memberCount: velocity[id] ?? 0,
           representativeBrands: (t.representative_brands as string[]) ?? [],
-          href: withUtm(`https://askarthur.au/intel/themes/${slug ?? id}`, EMAIL_UTM),
+          href: withUtm(
+            `https://askarthur.au/intel/themes/${slug ?? id}`,
+            EMAIL_UTM,
+          ),
           signalLabel: null,
         };
       })

@@ -44,19 +44,21 @@ export function checkSSL(domain: string): Promise<SSLResult> {
             const validTo = new Date(cert.valid_to);
             const now = new Date();
             const daysRemaining = Math.floor(
-              (validTo.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+              (validTo.getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
             );
 
             // Node's tls DN fields are typed `string | string[]` (a field can
             // repeat) — flatten to a single string before joining.
-            const dnField = (v: string | string[] | undefined): string | null =>
-              Array.isArray(v) ? v.join(", ") : (v ?? null);
+            const dnField = (
+              v: string | string[] | undefined,
+            ): string | null => (Array.isArray(v) ? v.join(", ") : (v ?? null));
             const issuerParts: string[] = [];
             const issuerO = dnField(cert.issuer?.O);
             const issuerCN = dnField(cert.issuer?.CN);
             if (issuerO) issuerParts.push(issuerO);
             if (issuerCN) issuerParts.push(issuerCN);
-            const issuer = issuerParts.length > 0 ? issuerParts.join(" - ") : null;
+            const issuer =
+              issuerParts.length > 0 ? issuerParts.join(" - ") : null;
 
             const valid = socket.authorized && daysRemaining > 0;
 
@@ -68,7 +70,7 @@ export function checkSSL(domain: string): Promise<SSLResult> {
             socket.destroy();
             resolve(EMPTY_RESULT);
           }
-        }
+        },
       );
 
       socket.on("error", () => {

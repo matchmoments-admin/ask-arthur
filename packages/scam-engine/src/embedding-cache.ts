@@ -112,9 +112,13 @@ export async function setCachedEmbedding(
 
   try {
     const key = await buildKey(modelId, inputType, text);
-    await redis.set<CachedEmbedding>(key, { vectors, modelId }, {
-      ex: TTL_SECONDS,
-    });
+    await redis.set<CachedEmbedding>(
+      key,
+      { vectors, modelId },
+      {
+        ex: TTL_SECONDS,
+      },
+    );
   } catch (err) {
     logger.warn("embedding-cache: set failed", { error: String(err) });
   }

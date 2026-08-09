@@ -123,7 +123,7 @@ export function detectOpenRedirect(url: string): boolean {
  */
 export async function resolveRedirectChain(
   url: string,
-  opts?: ResolveOptions
+  opts?: ResolveOptions,
 ): Promise<RedirectChain> {
   const config = { ...DEFAULTS, ...opts };
   const hops: RedirectHop[] = [];
@@ -244,12 +244,12 @@ export async function resolveRedirectChain(
  */
 export async function resolveRedirects(
   urls: string[],
-  opts?: ResolveOptions
+  opts?: ResolveOptions,
 ): Promise<RedirectChain[]> {
   if (urls.length === 0) return [];
 
   const results = await Promise.allSettled(
-    urls.map((url) => resolveRedirectChain(url, opts))
+    urls.map((url) => resolveRedirectChain(url, opts)),
   );
 
   return results.map((result, i) => {

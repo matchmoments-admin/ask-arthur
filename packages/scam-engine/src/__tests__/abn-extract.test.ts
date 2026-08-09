@@ -249,7 +249,10 @@ describe("verifyShopAbnDeep", () => {
         ? okPage(`<footer>ABN ${ATO_ABN}</footer>`, u)
         : okPage("<footer>no abn here</footer>", u),
     );
-    const result = await verifyShopAbnDeep("https://widgets.com.au/", fetchPage);
+    const result = await verifyShopAbnDeep(
+      "https://widgets.com.au/",
+      fetchPage,
+    );
     expect(result.abn).toBe(ATO_ABN);
     expect(result.status).toBe("unregistered"); // lookupABN mocked not-found
     expect(fetchPage).toHaveBeenCalledTimes(2); // homepage + /about
@@ -265,7 +268,10 @@ describe("verifyShopAbnDeep", () => {
     const fetchPage = vi.fn(async (u: string) =>
       okPage("<footer>contact us</footer>", u),
     );
-    const result = await verifyShopAbnDeep("https://widgets.com.au/", fetchPage);
+    const result = await verifyShopAbnDeep(
+      "https://widgets.com.au/",
+      fetchPage,
+    );
     expect(result.status).toBe("no-abn");
     expect(fetchPage).toHaveBeenCalledTimes(5); // homepage + 4 candidate pages
     expect(mockedLookupABN).not.toHaveBeenCalled();
@@ -282,7 +288,10 @@ describe("verifyShopAbnDeep", () => {
 
   it("returns unverified — not no-abn — when the homepage itself could not be read", async () => {
     const fetchPage = vi.fn(async () => failedPage("timeout"));
-    const result = await verifyShopAbnDeep("https://widgets.com.au/", fetchPage);
+    const result = await verifyShopAbnDeep(
+      "https://widgets.com.au/",
+      fetchPage,
+    );
     expect(result.status).toBe("unverified");
     expect(fetchPage).toHaveBeenCalledTimes(1);
   });
@@ -295,7 +304,10 @@ describe("verifyShopAbnDeep", () => {
         return okPage(`<footer>ABN ${ATO_ABN}</footer>`, u);
       return okPage("<footer>no abn</footer>", u);
     });
-    const result = await verifyShopAbnDeep("https://widgets.com.au/", fetchPage);
+    const result = await verifyShopAbnDeep(
+      "https://widgets.com.au/",
+      fetchPage,
+    );
     expect(result.abn).toBe(ATO_ABN);
     // homepage + /about (failed, skipped) + /about-us (hit)
     expect(fetchPage).toHaveBeenCalledTimes(3);

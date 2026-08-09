@@ -63,7 +63,9 @@ describe("extractEntityName", () => {
   });
 
   it("prefers <fullName> when the legal name carries one", () => {
-    expect(extractEntityName(INDIVIDUAL_FULLNAME_XML)).toBe("JOHN QUINCY PUBLIC");
+    expect(extractEntityName(INDIVIDUAL_FULLNAME_XML)).toBe(
+      "JOHN QUINCY PUBLIC",
+    );
   });
 
   it("returns null for an exception response (no entity)", () => {

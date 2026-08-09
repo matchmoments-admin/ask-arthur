@@ -34,7 +34,10 @@ import {
 } from "./events";
 import { callClaudeJson, type ClaudeModelKey } from "../anthropic";
 import { readStringEnv } from "@askarthur/utils/env";
-import { logFunctionError, isRedditIntelBraked } from "./reddit-intel-error-log";
+import {
+  logFunctionError,
+  isRedditIntelBraked,
+} from "./reddit-intel-error-log";
 import { withAxiomLogging } from "./with-axiom-logging";
 
 // ── Versioning ────────────────────────────────────────────────────────────
@@ -154,7 +157,9 @@ const QuoteSchema = z.object({
     .string()
     .min(1)
     .transform((s) => (s.length <= 140 ? s : s.slice(0, 137) + "…")),
-  speakerRole: z.enum(["victim", "scammer", "witness", "unknown"]).default("unknown"),
+  speakerRole: z
+    .enum(["victim", "scammer", "witness", "unknown"])
+    .default("unknown"),
   themeTag: z.string().max(60).nullish(),
   confidence: z.number().min(0).max(1).default(0.7),
 });
@@ -209,8 +214,12 @@ const DailySummarySchema = z.object({
   stats: z
     .object({
       totalPosts: z.number().int().nonnegative(),
-      topCategories: z.record(z.string(), z.number().int().nonnegative()).default({}),
-      topBrands: z.record(z.string(), z.number().int().nonnegative()).default({}),
+      topCategories: z
+        .record(z.string(), z.number().int().nonnegative())
+        .default({}),
+      topBrands: z
+        .record(z.string(), z.number().int().nonnegative())
+        .default({}),
     })
     .default({ totalPosts: 0, topCategories: {}, topBrands: {} }),
 });
@@ -244,7 +253,9 @@ const jsonStringPassthrough = (v: unknown) => {
 // upserts only when present.
 const SonnetOutputSchema = z.object({
   perPost: z.preprocess(jsonStringPassthrough, z.array(PerPostSchema)),
-  dailySummary: z.preprocess(jsonStringPassthrough, DailySummarySchema).optional(),
+  dailySummary: z
+    .preprocess(jsonStringPassthrough, DailySummarySchema)
+    .optional(),
 });
 
 type SonnetOutput = z.infer<typeof SonnetOutputSchema>;
@@ -304,7 +315,9 @@ function buildCorrectionUser(originalUser: string, errMsg: string): string {
  */
 export async function classifyWithRetry<TSchema extends z.ZodType<unknown>>(
   callArgs: CallClaudeJsonArgs<TSchema>,
-  callFn: (args: CallClaudeJsonArgs<TSchema>) => Promise<CallClaudeJsonReturn<z.infer<TSchema>>> = callClaudeJson,
+  callFn: (
+    args: CallClaudeJsonArgs<TSchema>,
+  ) => Promise<CallClaudeJsonReturn<z.infer<TSchema>>> = callClaudeJson,
 ): Promise<ClassifyResult<z.infer<TSchema>>> {
   try {
     const first = await callFn(callArgs);
@@ -312,9 +325,12 @@ export async function classifyWithRetry<TSchema extends z.ZodType<unknown>>(
   } catch (err) {
     if (!isSchemaRetryableError(err)) throw err;
     const errMsg = err.message;
-    logger.warn("classifyWithRetry: first call failed schema validation, retrying once", {
-      errorMessage: errMsg,
-    });
+    logger.warn(
+      "classifyWithRetry: first call failed schema validation, retrying once",
+      {
+        errorMessage: errMsg,
+      },
+    );
     const correctedArgs: CallClaudeJsonArgs<TSchema> = {
       ...callArgs,
       user: buildCorrectionUser(callArgs.user, errMsg),
@@ -561,7 +577,10 @@ export const redditIntelDaily = inngest.createFunction(
       // quotes insert.
       const { error: intelErr } = await supabase
         .from("reddit_post_intel")
-        .upsert(intelRows, { onConflict: "feed_item_id", ignoreDuplicates: true });
+        .upsert(intelRows, {
+          onConflict: "feed_item_id",
+          ignoreDuplicates: true,
+        });
 
       if (intelErr) {
         throw new Error(`upsert reddit_post_intel: ${intelErr.message}`);
@@ -651,11 +670,14 @@ export const redditIntelDaily = inngest.createFunction(
           throw new Error(`upsert daily_summary: ${summaryErr.message}`);
         }
       } else {
-        logger.warn("reddit-intel-daily: dailySummary missing from Sonnet output — skipping summary upsert", {
-          cohortDate,
-          postCount: validPerPost.length,
-          retried: classification.retried,
-        });
+        logger.warn(
+          "reddit-intel-daily: dailySummary missing from Sonnet output — skipping summary upsert",
+          {
+            cohortDate,
+            postCount: validPerPost.length,
+            retried: classification.retried,
+          },
+        );
       }
 
       return {

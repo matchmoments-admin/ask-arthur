@@ -17,7 +17,11 @@ const CACHE_PREFIX = "askarthur:twilio";
 
 let _redis: Redis | null = null;
 function getRedis(): Redis | null {
-  if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) return null;
+  if (
+    !process.env.UPSTASH_REDIS_REST_URL ||
+    !process.env.UPSTASH_REDIS_REST_TOKEN
+  )
+    return null;
   if (!_redis) {
     _redis = new Redis({
       url: process.env.UPSTASH_REDIS_REST_URL,
@@ -59,10 +63,13 @@ export function computePhoneRiskScore(flags: {
   score = Math.min(score, 100);
 
   const riskLevel: PhoneRiskLevel =
-    score >= 70 ? "CRITICAL" :
-    score >= 40 ? "HIGH" :
-    score >= 20 ? "MEDIUM" :
-    "LOW";
+    score >= 70
+      ? "CRITICAL"
+      : score >= 40
+        ? "HIGH"
+        : score >= 20
+          ? "MEDIUM"
+          : "LOW";
 
   return { riskScore: score, riskLevel };
 }
@@ -72,12 +79,16 @@ export function computePhoneRiskScore(flags: {
  * Line type intelligence ($0.008) + CNAM ($0.01) = $0.018/lookup.
  * Results cached in Redis for 24h.
  */
-export async function lookupPhoneNumber(phoneNumber: string): Promise<PhoneLookupResult> {
+export async function lookupPhoneNumber(
+  phoneNumber: string,
+): Promise<PhoneLookupResult> {
   // Check cache first
   const redis = getRedis();
   if (redis) {
     try {
-      const cached = await redis.get<PhoneLookupResult>(`${CACHE_PREFIX}:${phoneNumber}`);
+      const cached = await redis.get<PhoneLookupResult>(
+        `${CACHE_PREFIX}:${phoneNumber}`,
+      );
       if (cached) return cached;
     } catch {
       // Cache miss — continue to API
@@ -89,19 +100,24 @@ export async function lookupPhoneNumber(phoneNumber: string): Promise<PhoneLooku
   try {
     const result = await client.lookups.v2
       .phoneNumbers(phoneNumber)
-      .fetch({ fields: "line_type_intelligence,caller_name", countryCode: "AU" });
+      .fetch({
+        fields: "line_type_intelligence,caller_name",
+        countryCode: "AU",
+      });
 
     const lineType = result.lineTypeIntelligence?.type ?? null;
     const carrier = result.lineTypeIntelligence?.carrierName ?? null;
     const isVoip = lineType === "nonFixedVoip";
-    const callerName = (result as unknown as Record<string, unknown>).callerName as { caller_name?: string; caller_type?: string } | null;
+    const callerName = (result as unknown as Record<string, unknown>)
+      .callerName as { caller_name?: string; caller_type?: string } | null;
     const callerNameValue = callerName?.caller_name ?? null;
     const callerNameType = callerName?.caller_type ?? null;
 
     const riskFlags: string[] = [];
     if (isVoip) riskFlags.push("voip");
     if (!result.valid) riskFlags.push("invalid_number");
-    if (result.countryCode && result.countryCode !== "AU") riskFlags.push("non_au_origin");
+    if (result.countryCode && result.countryCode !== "AU")
+      riskFlags.push("non_au_origin");
     if (!carrier) riskFlags.push("unknown_carrier");
     if (!callerNameValue) riskFlags.push("no_registered_name");
 
@@ -143,12 +159,17 @@ export async function lookupPhoneNumber(phoneNumber: string): Promise<PhoneLooku
 
     // Cache result (fire-and-forget)
     if (redis) {
-      redis.set(`${CACHE_PREFIX}:${phoneNumber}`, lookupResult, { ex: CACHE_TTL }).catch(() => {});
+      redis
+        .set(`${CACHE_PREFIX}:${phoneNumber}`, lookupResult, { ex: CACHE_TTL })
+        .catch(() => {});
     }
 
     return lookupResult;
   } catch (err) {
-    logger.error("Twilio lookup failed", { phone: phoneNumber.slice(-4), error: String(err) });
+    logger.error("Twilio lookup failed", {
+      phone: phoneNumber.slice(-4),
+      error: String(err),
+    });
     return {
       valid: false,
       phoneNumber,
@@ -171,7 +192,7 @@ export async function lookupPhoneNumber(phoneNumber: string): Promise<PhoneLooku
  * Returns deduplicated list with E.164 conversion.
  */
 export function extractPhoneNumbers(
-  transcript: string
+  transcript: string,
 ): Array<{ original: string; e164: string | null }> {
   const patterns = [
     /\+\d{10,15}/g, // International E.164

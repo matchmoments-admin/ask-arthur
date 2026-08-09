@@ -26,8 +26,14 @@ describe("buildAnalyzeCacheKey", () => {
   });
 
   it("produces different keys for different images, same text", async () => {
-    const a = await buildAnalyzeCacheKey({ text: "hi", images: ["img1base64"] });
-    const b = await buildAnalyzeCacheKey({ text: "hi", images: ["img2base64"] });
+    const a = await buildAnalyzeCacheKey({
+      text: "hi",
+      images: ["img1base64"],
+    });
+    const b = await buildAnalyzeCacheKey({
+      text: "hi",
+      images: ["img2base64"],
+    });
     expect(a).not.toBe(b);
   });
 
@@ -68,7 +74,10 @@ describe("buildAnalyzeCacheKey", () => {
     // Same image bytes, same (empty) text — but one is a vision screenshot
     // analysis and the other a QR-code decode. Different verdicts → must not
     // share a cache key. modeTag alone (presence-based) would collide here.
-    const vision = await buildAnalyzeCacheKey({ images: ["imgX"], mode: "image" });
+    const vision = await buildAnalyzeCacheKey({
+      images: ["imgX"],
+      mode: "image",
+    });
     const qr = await buildAnalyzeCacheKey({ images: ["imgX"], mode: "qrcode" });
     expect(vision).not.toBe(qr);
   });
@@ -84,7 +93,10 @@ describe("buildAnalyzeCacheKey", () => {
 
   it("model axis separates different models", async () => {
     const a = await buildAnalyzeCacheKey({ text: "hi", modelShort: "haiku45" });
-    const b = await buildAnalyzeCacheKey({ text: "hi", modelShort: "sonnet45" });
+    const b = await buildAnalyzeCacheKey({
+      text: "hi",
+      modelShort: "sonnet45",
+    });
     expect(a).not.toBe(b);
   });
 
@@ -94,7 +106,10 @@ describe("buildAnalyzeCacheKey", () => {
     // e.g. extension adding an output field that web's render path doesn't
     // expect, served from a cached response written by the extension.
     const web = await buildAnalyzeCacheKey({ text: "hi", surface: "web" });
-    const ext = await buildAnalyzeCacheKey({ text: "hi", surface: "extension" });
+    const ext = await buildAnalyzeCacheKey({
+      text: "hi",
+      surface: "extension",
+    });
     expect(web).not.toBe(ext);
     expect(web).toContain(":srfweb:");
     expect(ext).toContain(":srfextension:");

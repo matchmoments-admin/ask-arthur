@@ -11,7 +11,9 @@ describe("scrubPII", () => {
     });
 
     it("redacts a display-name email and its name", () => {
-      expect(scrubPII("from John Smith <john@example.com>")).toBe("from [EMAIL]");
+      expect(scrubPII("from John Smith <john@example.com>")).toBe(
+        "from [EMAIL]",
+      );
     });
 
     it("redacts a username left attached to an [EMAIL] placeholder", () => {
@@ -87,12 +89,15 @@ describe("scrubPII", () => {
 
   describe("safety", () => {
     it("leaves PII-free text untouched", () => {
-      const text = "This looks like a phishing attempt asking you to verify your login.";
+      const text =
+        "This looks like a phishing attempt asking you to verify your login.";
       expect(scrubPII(text)).toBe(text);
     });
 
     it("redacts multiple PII types in one pass", () => {
-      const out = scrubPII("Email jane@x.com or call 0412 345 678 about card 4111 1111 1111 1111");
+      const out = scrubPII(
+        "Email jane@x.com or call 0412 345 678 about card 4111 1111 1111 1111",
+      );
       expect(out).toContain("[EMAIL]");
       expect(out).toContain("[AU_PHONE]");
       expect(out).toContain("[CARD]");

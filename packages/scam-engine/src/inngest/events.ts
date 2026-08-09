@@ -280,8 +280,7 @@ export type RedditIntelEmbeddedData = z.infer<
   typeof RedditIntelEmbeddedDataSchema
 >;
 
-export const REDDIT_INTEL_EMBEDDED_EVENT =
-  "reddit.intel.embedded.v1" as const;
+export const REDDIT_INTEL_EMBEDDED_EVENT = "reddit.intel.embedded.v1" as const;
 
 export interface RedditIntelEmbeddedEvent {
   name: typeof REDDIT_INTEL_EMBEDDED_EVENT;
@@ -553,7 +552,7 @@ export function parseCloneWatchScanRequestedData(
 // and writes the result to clone_watch_classifications (sibling table).
 const CloneWatchPreclassifyRequestedDataSchema = z.object({
   alertId: z.number().int().positive(),
-  brand: z.string(),                    // inferred_target_domain
+  brand: z.string(), // inferred_target_domain
   candidateDomain: z.string(),
   candidateUrl: z.string(),
 });

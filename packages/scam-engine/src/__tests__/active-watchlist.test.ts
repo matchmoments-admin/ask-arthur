@@ -46,7 +46,8 @@ const getActiveWatchlist: Mod["getActiveWatchlist"] = (...a) =>
   mod.getActiveWatchlist(...a);
 const getActiveWatchlistDetailed: Mod["getActiveWatchlistDetailed"] = (...a) =>
   mod.getActiveWatchlistDetailed(...a);
-const invalidateActiveWatchlistCache = () => mod.invalidateActiveWatchlistCache();
+const invalidateActiveWatchlistCache = () =>
+  mod.invalidateActiveWatchlistCache();
 
 describe("getActiveWatchlist — fail-safe behaviour", () => {
   it("never queries the database when the flag is off", async () => {
@@ -134,7 +135,8 @@ describe("overlay caching", () => {
     const results = await all;
     // Single-flight: a warming instance must not stampede the RPC.
     expect(rpcMock).toHaveBeenCalledTimes(1);
-    for (const r of results) expect(r.map((e) => e.brand)).toContain("Pilot Co");
+    for (const r of results)
+      expect(r.map((e) => e.brand)).toContain("Pilot Co");
   });
 
   it("re-queries after an explicit invalidation", async () => {

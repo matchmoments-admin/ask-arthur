@@ -74,7 +74,11 @@ async function logHibpCall(
 
 let _redis: Redis | null = null;
 function getRedis(): Redis | null {
-  if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) return null;
+  if (
+    !process.env.UPSTASH_REDIS_REST_URL ||
+    !process.env.UPSTASH_REDIS_REST_TOKEN
+  )
+    return null;
   if (!_redis) {
     _redis = new Redis({
       url: process.env.UPSTASH_REDIS_REST_URL,
@@ -87,7 +91,9 @@ function getRedis(): Redis | null {
 async function hashEmail(email: string): Promise<string> {
   const data = new TextEncoder().encode(email.toLowerCase());
   const buf = await crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 export interface HIBPResult {
@@ -157,7 +163,9 @@ export async function checkHIBP(email: string): Promise<HIBPResult> {
   const emailHash = await hashEmail(email);
   if (redis) {
     try {
-      const cached = await redis.get<HIBPResult>(`${CACHE_PREFIX}:${emailHash}`);
+      const cached = await redis.get<HIBPResult>(
+        `${CACHE_PREFIX}:${emailHash}`,
+      );
       if (cached) return cached;
     } catch {
       // Cache miss — continue to API
@@ -173,14 +181,16 @@ export async function checkHIBP(email: string): Promise<HIBPResult> {
           "user-agent": "AskArthur-SafeCheck/1.0",
         },
         signal: AbortSignal.timeout(HIBP_TIMEOUT_MS),
-      }
+      },
     );
 
     // 404 = not found in any breaches
     if (res.status === 404) {
       void logHibpCall("check", "not_found", 404);
       if (redis) {
-        redis.set(`${CACHE_PREFIX}:${emailHash}`, EMPTY_RESULT, { ex: CACHE_TTL }).catch(() => {});
+        redis
+          .set(`${CACHE_PREFIX}:${emailHash}`, EMPTY_RESULT, { ex: CACHE_TTL })
+          .catch(() => {});
       }
       return EMPTY_RESULT;
     }
@@ -206,7 +216,9 @@ export async function checkHIBP(email: string): Promise<HIBPResult> {
 
     // Cache result (fire-and-forget)
     if (redis) {
-      redis.set(`${CACHE_PREFIX}:${emailHash}`, result, { ex: CACHE_TTL }).catch(() => {});
+      redis
+        .set(`${CACHE_PREFIX}:${emailHash}`, result, { ex: CACHE_TTL })
+        .catch(() => {});
     }
 
     return result;
@@ -227,7 +239,9 @@ export async function checkHIBP(email: string): Promise<HIBPResult> {
  * distinguish "checked, no breaches" from "could not check". 404 from
  * HIBP is the documented "no breaches" signal — not an error.
  */
-export async function checkHIBPDetailed(email: string): Promise<HIBPDetailedResult> {
+export async function checkHIBPDetailed(
+  email: string,
+): Promise<HIBPDetailedResult> {
   const apiKey = process.env.HIBP_API_KEY;
   if (!apiKey) {
     throw new Error("HIBP_API_KEY not configured");
@@ -237,7 +251,9 @@ export async function checkHIBPDetailed(email: string): Promise<HIBPDetailedResu
   const emailHash = await hashEmail(email);
   if (redis) {
     try {
-      const cached = await redis.get<HIBPDetailedResult>(`${DETAIL_CACHE_PREFIX}:${emailHash}`);
+      const cached = await redis.get<HIBPDetailedResult>(
+        `${DETAIL_CACHE_PREFIX}:${emailHash}`,
+      );
       if (cached) return cached;
     } catch {
       // Cache miss — continue to API
@@ -267,7 +283,11 @@ export async function checkHIBPDetailed(email: string): Promise<HIBPDetailedResu
   if (res.status === 404) {
     void logHibpCall("detailed", "not_found", 404);
     if (redis) {
-      redis.set(`${DETAIL_CACHE_PREFIX}:${emailHash}`, EMPTY_DETAIL, { ex: CACHE_TTL }).catch(() => {});
+      redis
+        .set(`${DETAIL_CACHE_PREFIX}:${emailHash}`, EMPTY_DETAIL, {
+          ex: CACHE_TTL,
+        })
+        .catch(() => {});
     }
     return EMPTY_DETAIL;
   }
@@ -287,7 +307,9 @@ export async function checkHIBPDetailed(email: string): Promise<HIBPDetailedResu
   void logHibpCall("detailed", "found", res.status);
 
   if (redis) {
-    redis.set(`${DETAIL_CACHE_PREFIX}:${emailHash}`, result, { ex: CACHE_TTL }).catch(() => {});
+    redis
+      .set(`${DETAIL_CACHE_PREFIX}:${emailHash}`, result, { ex: CACHE_TTL })
+      .catch(() => {});
   }
 
   return result;

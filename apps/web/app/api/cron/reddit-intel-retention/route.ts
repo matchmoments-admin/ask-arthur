@@ -72,9 +72,7 @@ export async function GET(req: Request) {
         .from("reddit_post_intel")
         .select("id")
         .lt("processed_at", stage1Cutoff)
-        .or(
-          "modus_operandi.not.is.null,narrative_summary.not.is.null",
-        )
+        .or("modus_operandi.not.is.null,narrative_summary.not.is.null")
         .order("id", { ascending: true })
         .limit(DELETE_CHUNK);
 

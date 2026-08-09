@@ -40,9 +40,12 @@ export async function GET(req: NextRequest) {
     if (featureFlags.redditIntelEmail) {
       const intel = await getWeeklyIntelForEmail();
       if (!intel) {
-        logger.info("weekly-email: redditIntelEmail flag on but no intel data yet");
+        logger.info(
+          "weekly-email: redditIntelEmail flag on but no intel data yet",
+        );
         return NextResponse.json({
-          message: "redditIntelEmail flag on but no daily summaries in window — skipping send",
+          message:
+            "redditIntelEmail flag on but no daily summaries in window — skipping send",
         });
       }
 
@@ -51,7 +54,9 @@ export async function GET(req: NextRequest) {
         .select("email")
         .eq("is_active", true);
       const subscriberEmails = (subs ?? []).map((s) => s.email as string);
-      const recipients = Array.from(new Set([OPERATOR_EMAIL, ...subscriberEmails]));
+      const recipients = Array.from(
+        new Set([OPERATOR_EMAIL, ...subscriberEmails]),
+      );
 
       // Sibling fresh streams — both degrade gracefully to empty so the
       // newsletter stands on Reddit alone when they're quiet. allSettled (not
@@ -83,8 +88,7 @@ export async function GET(req: NextRequest) {
         // the Inngest function errors at feature='reddit-intel-error'.
         // Keep the original error in the response body so the cron's
         // failed-status visibility surfaces it immediately.
-        const errorMessage =
-          err instanceof Error ? err.message : String(err);
+        const errorMessage = err instanceof Error ? err.message : String(err);
         const errorStack =
           err instanceof Error ? (err.stack ?? "").slice(0, 2000) : "";
         logger.error("weekly-email: intel digest send failed", {
@@ -175,7 +179,7 @@ export async function GET(req: NextRequest) {
         ${scams
           .map(
             (s) =>
-              `<li><strong>${escapeHtml(s.impersonated_brand || s.scam_type)}</strong>: ${escapeHtml(s.summary)}</li>`
+              `<li><strong>${escapeHtml(s.impersonated_brand || s.scam_type)}</strong>: ${escapeHtml(s.summary)}</li>`,
           )
           .join("")}
       </ul>
@@ -196,7 +200,7 @@ export async function GET(req: NextRequest) {
     logger.error("Weekly email cron error", { error: String(err) });
     return NextResponse.json(
       { error: "Failed to send weekly emails" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

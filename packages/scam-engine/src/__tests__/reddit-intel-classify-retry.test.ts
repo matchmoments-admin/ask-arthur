@@ -16,7 +16,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-import { classifyWithRetry, resolveClassifyModel } from "../inngest/reddit-intel-daily";
+import {
+  classifyWithRetry,
+  resolveClassifyModel,
+} from "../inngest/reddit-intel-daily";
 
 // Minimal schema shape — just enough to satisfy the helper's generic.
 const StubSchema = z.object({ ok: z.boolean() });
@@ -31,10 +34,12 @@ function buildCallArgs() {
   };
 }
 
-function successResponse(overrides: Partial<{
-  result: z.infer<typeof StubSchema>;
-  estimatedCostUsd: number;
-}> = {}) {
+function successResponse(
+  overrides: Partial<{
+    result: z.infer<typeof StubSchema>;
+    estimatedCostUsd: number;
+  }> = {},
+) {
   return {
     result: overrides.result ?? { ok: true },
     usage: {

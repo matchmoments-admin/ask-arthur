@@ -106,7 +106,9 @@ export async function getSimilarReports(
 
   const supabase = createServiceClient();
   if (!supabase) {
-    logger.warn("getSimilarReports: supabase service client unavailable", { requestId });
+    logger.warn("getSimilarReports: supabase service client unavailable", {
+      requestId,
+    });
     return [];
   }
 
@@ -156,7 +158,11 @@ export async function getSimilarReports(
     if (r.relevanceScore < minRelevance) continue;
     const row = withContent[r.index];
     if (!row) continue;
-    if (row.verdict !== "SUSPICIOUS" && row.verdict !== "HIGH_RISK" && row.verdict !== "UNCERTAIN") {
+    if (
+      row.verdict !== "SUSPICIOUS" &&
+      row.verdict !== "HIGH_RISK" &&
+      row.verdict !== "UNCERTAIN"
+    ) {
       // Defensive — the RPC already excludes SAFE but new verdicts could
       // creep in via a future migration. Keep the type narrow.
       continue;

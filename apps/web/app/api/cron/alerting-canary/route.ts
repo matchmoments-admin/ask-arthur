@@ -62,21 +62,32 @@ export async function GET(req: Request) {
   let counts: Record<string, number> | null = null;
   if (supabase) {
     const since = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
-    const { data, error } = await supabase
-      .from("alert_delivery_log")
-      .select("alerter")
-      .gte("fired_at", since)
-      .limit(10_000);
-    if (error) {
-      logger.error("alerting-canary: liveness query failed", {
-        error: error.message,
-      });
-    } else {
-      counts = {};
-      for (const row of data ?? []) {
-        const a = (row as { alerter: string }).alerter;
-        counts[a] = (counts[a] ?? 0) + 1;
+    // Per-alerter EXACT counts, one head query each. The old shape fetched
+    // rows with `.limit(10_000)` and tallied them — but PostgREST caps the
+    // response at 1000, so once the 8-day window held more than that the
+    // tallies were arbitrary. That inverts the control this cron exists to be:
+    // a capped count can drop an alerter below its floor and page a false
+    // "silent alerter", or spread the cap across alerters and mask a real one.
+    // `count: "exact", head: true` is not row-capped.
+    counts = {};
+    for (const alerter of Object.keys(LIVENESS_FLOORS)) {
+      const { count, error } = await supabase
+        .from("alert_delivery_log")
+        .select("id", { count: "exact", head: true })
+        .eq("alerter", alerter)
+        .gte("fired_at", since);
+      // A head-count failure returns count:null with error:null (no body to
+      // parse), so the null check is the load-bearing one.
+      if (error || count === null) {
+        logger.error("alerting-canary: liveness query failed", {
+          alerter,
+          error:
+            error?.message ?? "count was null (head query returned no count)",
+        });
+        counts = null;
+        break;
       }
+      counts[alerter] = count;
     }
   }
 

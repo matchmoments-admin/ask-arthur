@@ -103,18 +103,29 @@ function detectWebp(buf: Buffer): boolean {
  */
 export function detectC2PA(buf: Buffer): C2PADetection {
   try {
-    if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) {
-      return detectJpeg(buf) ? { present: true, format: "jpeg" } : { present: false };
+    if (
+      buf.length >= 3 &&
+      buf[0] === 0xff &&
+      buf[1] === 0xd8 &&
+      buf[2] === 0xff
+    ) {
+      return detectJpeg(buf)
+        ? { present: true, format: "jpeg" }
+        : { present: false };
     }
     if (
       buf.length >= 8 &&
       buf[0] === 0x89 &&
       buf.subarray(1, 4).toString("ascii") === "PNG"
     ) {
-      return detectPng(buf) ? { present: true, format: "png" } : { present: false };
+      return detectPng(buf)
+        ? { present: true, format: "png" }
+        : { present: false };
     }
     if (buf.length >= 4 && buf.subarray(0, 4).toString("ascii") === "RIFF") {
-      return detectWebp(buf) ? { present: true, format: "webp" } : { present: false };
+      return detectWebp(buf)
+        ? { present: true, format: "webp" }
+        : { present: false };
     }
     return { present: false };
   } catch {

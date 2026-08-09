@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { requireCronAuth } from "@/lib/cron-auth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
-import { alertAndRecord, recordAlertDelivery } from "@/lib/alerting/deliveryLog";
+import {
+  alertAndRecord,
+  recordAlertDelivery,
+} from "@/lib/alerting/deliveryLog";
 import { readNumberEnv, type NumberEnvResult } from "@/lib/env-coerce";
 
 export const runtime = "nodejs";
@@ -68,7 +71,10 @@ export async function GET(req: Request) {
     // checks. analyze-image gates ONLY the Claude call on
     // isFeatureBraked("extension_image_check") — the free byte fetch keeps
     // running so C2PA/sha256 still work while braked.
-    EXTENSION_IMAGE_CHECK_CAP_USD: readNumberEnv("EXTENSION_IMAGE_CHECK_CAP_USD", 5),
+    EXTENSION_IMAGE_CHECK_CAP_USD: readNumberEnv(
+      "EXTENSION_IMAGE_CHECK_CAP_USD",
+      5,
+    ),
   };
   const thresholdUsd = envReads.DAILY_COST_THRESHOLD_USD.value;
 
@@ -85,11 +91,14 @@ export async function GET(req: Request) {
   const invalidEnvs = Object.entries(envReads).filter(([, r]) => r.invalid);
   if (invalidEnvs.length > 0) {
     for (const [name, result] of invalidEnvs) {
-      logger.warn("cost-daily-check: invalid env value, falling back to default", {
-        env_var: name,
-        raw_value: result.rawValue,
-        fallback: result.value,
-      });
+      logger.warn(
+        "cost-daily-check: invalid env value, falling back to default",
+        {
+          env_var: name,
+          raw_value: result.rawValue,
+          fallback: result.value,
+        },
+      );
     }
     await supabase.from("cost_telemetry").insert(
       invalidEnvs.map(([name, result]) => ({
@@ -113,7 +122,9 @@ export async function GET(req: Request) {
     .single();
 
   if (todayError) {
-    logger.error("cost-daily-check: query failed", { error: todayError.message });
+    logger.error("cost-daily-check: query failed", {
+      error: todayError.message,
+    });
     return NextResponse.json({ error: "query_failed" }, { status: 500 });
   }
 
@@ -176,9 +187,8 @@ export async function GET(req: Request) {
   // (excluding reddit-intel-error which is $0 diagnostic). If sum exceeds
   // REDDIT_INTEL_CAP_USD, brake the whole pipeline for 24h.
   const vulnEnrichThresholdUsd = envReads.VULN_AU_ENRICHMENT_CAP_USD.value;
-  const vulnEnrichCost = top.find(
-    (t) => t.feature === "vuln_au_enrichment",
-  )?.cost ?? 0;
+  const vulnEnrichCost =
+    top.find((t) => t.feature === "vuln_au_enrichment")?.cost ?? 0;
 
   const redditIntelThresholdUsd = envReads.REDDIT_INTEL_CAP_USD.value;
   const redditIntelCost = top
@@ -209,7 +219,8 @@ export async function GET(req: Request) {
   // threshold is wired before the spend appears. Default $5/day matches
   // the per-feature pattern used elsewhere.
   const charityCheckThresholdUsd = envReads.CHARITY_CHECK_CAP_USD.value;
-  const charityCheckCost = top.find((t) => t.feature === "charity_check")?.cost ?? 0;
+  const charityCheckCost =
+    top.find((t) => t.feature === "charity_check")?.cost ?? 0;
 
   // Shop Signal — APIVoid Site Trustworthiness paid feed. Same multi-tag
   // aggregation as Reddit Intel: the headline `shop_signal` tag carries the
@@ -335,21 +346,21 @@ export async function GET(req: Request) {
   let hiveAiBrakeSet = false;
   let extensionImageCheckBrakeSet = false;
   if (vulnEnrichCost > vulnEnrichThresholdUsd) {
-    const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    const { error: brakeError } = await supabase
-      .from("feature_brakes")
-      .upsert(
-        {
-          feature: "vuln_au_enrichment",
-          paused_until: pausedUntil,
-          reason: `Daily spend $${vulnEnrichCost.toFixed(2)} exceeded $${vulnEnrichThresholdUsd} cap`,
-          set_by: "cost-daily-check",
-          set_cost_usd: vulnEnrichCost,
-          set_threshold_usd: vulnEnrichThresholdUsd,
-          set_at: new Date().toISOString(),
-        },
-        { onConflict: "feature" },
-      );
+    const pausedUntil = new Date(
+      Date.now() + 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const { error: brakeError } = await supabase.from("feature_brakes").upsert(
+      {
+        feature: "vuln_au_enrichment",
+        paused_until: pausedUntil,
+        reason: `Daily spend $${vulnEnrichCost.toFixed(2)} exceeded $${vulnEnrichThresholdUsd} cap`,
+        set_by: "cost-daily-check",
+        set_cost_usd: vulnEnrichCost,
+        set_threshold_usd: vulnEnrichThresholdUsd,
+        set_at: new Date().toISOString(),
+      },
+      { onConflict: "feature" },
+    );
     if (brakeError) {
       logger.error("failed to set vuln_au_enrichment brake", {
         error: brakeError.message,
@@ -368,20 +379,18 @@ export async function GET(req: Request) {
     const pausedUntil = new Date(
       Date.now() + 24 * 60 * 60 * 1000,
     ).toISOString();
-    const { error: brakeError } = await supabase
-      .from("feature_brakes")
-      .upsert(
-        {
-          feature: "reddit_intel",
-          paused_until: pausedUntil,
-          reason: `Daily spend $${redditIntelCost.toFixed(2)} exceeded $${redditIntelThresholdUsd} cap`,
-          set_by: "cost-daily-check",
-          set_cost_usd: redditIntelCost,
-          set_threshold_usd: redditIntelThresholdUsd,
-          set_at: new Date().toISOString(),
-        },
-        { onConflict: "feature" },
-      );
+    const { error: brakeError } = await supabase.from("feature_brakes").upsert(
+      {
+        feature: "reddit_intel",
+        paused_until: pausedUntil,
+        reason: `Daily spend $${redditIntelCost.toFixed(2)} exceeded $${redditIntelThresholdUsd} cap`,
+        set_by: "cost-daily-check",
+        set_cost_usd: redditIntelCost,
+        set_threshold_usd: redditIntelThresholdUsd,
+        set_at: new Date().toISOString(),
+      },
+      { onConflict: "feature" },
+    );
     if (brakeError) {
       logger.error("failed to set reddit_intel brake", {
         error: brakeError.message,
@@ -397,23 +406,25 @@ export async function GET(req: Request) {
   }
 
   if (charityCheckCost > charityCheckThresholdUsd) {
-    const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    const { error: brakeError } = await supabase
-      .from("feature_brakes")
-      .upsert(
-        {
-          feature: "charity_check",
-          paused_until: pausedUntil,
-          reason: `Daily spend $${charityCheckCost.toFixed(2)} exceeded $${charityCheckThresholdUsd} cap`,
-          set_by: "cost-daily-check",
-          set_cost_usd: charityCheckCost,
-          set_threshold_usd: charityCheckThresholdUsd,
-          set_at: new Date().toISOString(),
-        },
-        { onConflict: "feature" },
-      );
+    const pausedUntil = new Date(
+      Date.now() + 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const { error: brakeError } = await supabase.from("feature_brakes").upsert(
+      {
+        feature: "charity_check",
+        paused_until: pausedUntil,
+        reason: `Daily spend $${charityCheckCost.toFixed(2)} exceeded $${charityCheckThresholdUsd} cap`,
+        set_by: "cost-daily-check",
+        set_cost_usd: charityCheckCost,
+        set_threshold_usd: charityCheckThresholdUsd,
+        set_at: new Date().toISOString(),
+      },
+      { onConflict: "feature" },
+    );
     if (brakeError) {
-      logger.error("failed to set charity_check brake", { error: brakeError.message });
+      logger.error("failed to set charity_check brake", {
+        error: brakeError.message,
+      });
     } else {
       charityCheckBrakeSet = true;
       logger.warn("charity_check brake engaged", {
@@ -428,20 +439,18 @@ export async function GET(req: Request) {
     const pausedUntil = new Date(
       Date.now() + 24 * 60 * 60 * 1000,
     ).toISOString();
-    const { error: brakeError } = await supabase
-      .from("feature_brakes")
-      .upsert(
-        {
-          feature: "phone_footprint",
-          paused_until: pausedUntil,
-          reason: `Daily spend $${phoneFootprintCost.toFixed(2)} exceeded $${phoneFootprintThresholdUsd} cap (Vonage $${vonageCost.toFixed(2)} + telemetry $${phoneFootprintTelemetryCost.toFixed(2)})`,
-          set_by: "cost-daily-check",
-          set_cost_usd: phoneFootprintCost,
-          set_threshold_usd: phoneFootprintThresholdUsd,
-          set_at: new Date().toISOString(),
-        },
-        { onConflict: "feature" },
-      );
+    const { error: brakeError } = await supabase.from("feature_brakes").upsert(
+      {
+        feature: "phone_footprint",
+        paused_until: pausedUntil,
+        reason: `Daily spend $${phoneFootprintCost.toFixed(2)} exceeded $${phoneFootprintThresholdUsd} cap (Vonage $${vonageCost.toFixed(2)} + telemetry $${phoneFootprintTelemetryCost.toFixed(2)})`,
+        set_by: "cost-daily-check",
+        set_cost_usd: phoneFootprintCost,
+        set_threshold_usd: phoneFootprintThresholdUsd,
+        set_at: new Date().toISOString(),
+      },
+      { onConflict: "feature" },
+    );
     if (brakeError) {
       logger.error("failed to set phone_footprint brake", {
         error: brakeError.message,
@@ -458,21 +467,21 @@ export async function GET(req: Request) {
   }
 
   if (shopSignalCost > shopSignalThresholdUsd) {
-    const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    const { error: brakeError } = await supabase
-      .from("feature_brakes")
-      .upsert(
-        {
-          feature: "shop_signal",
-          paused_until: pausedUntil,
-          reason: `Daily spend $${shopSignalCost.toFixed(2)} exceeded $${shopSignalThresholdUsd} cap`,
-          set_by: "cost-daily-check",
-          set_cost_usd: shopSignalCost,
-          set_threshold_usd: shopSignalThresholdUsd,
-          set_at: new Date().toISOString(),
-        },
-        { onConflict: "feature" },
-      );
+    const pausedUntil = new Date(
+      Date.now() + 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const { error: brakeError } = await supabase.from("feature_brakes").upsert(
+      {
+        feature: "shop_signal",
+        paused_until: pausedUntil,
+        reason: `Daily spend $${shopSignalCost.toFixed(2)} exceeded $${shopSignalThresholdUsd} cap`,
+        set_by: "cost-daily-check",
+        set_cost_usd: shopSignalCost,
+        set_threshold_usd: shopSignalThresholdUsd,
+        set_at: new Date().toISOString(),
+      },
+      { onConflict: "feature" },
+    );
     if (brakeError) {
       logger.error("failed to set shop_signal brake", {
         error: brakeError.message,
@@ -488,21 +497,21 @@ export async function GET(req: Request) {
   }
 
   if (shopSignalReviewsCost > shopSignalReviewsThresholdUsd) {
-    const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    const { error: brakeError } = await supabase
-      .from("feature_brakes")
-      .upsert(
-        {
-          feature: "shop_signal_reviews",
-          paused_until: pausedUntil,
-          reason: `Daily spend $${shopSignalReviewsCost.toFixed(2)} exceeded $${shopSignalReviewsThresholdUsd} cap`,
-          set_by: "cost-daily-check",
-          set_cost_usd: shopSignalReviewsCost,
-          set_threshold_usd: shopSignalReviewsThresholdUsd,
-          set_at: new Date().toISOString(),
-        },
-        { onConflict: "feature" },
-      );
+    const pausedUntil = new Date(
+      Date.now() + 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const { error: brakeError } = await supabase.from("feature_brakes").upsert(
+      {
+        feature: "shop_signal_reviews",
+        paused_until: pausedUntil,
+        reason: `Daily spend $${shopSignalReviewsCost.toFixed(2)} exceeded $${shopSignalReviewsThresholdUsd} cap`,
+        set_by: "cost-daily-check",
+        set_cost_usd: shopSignalReviewsCost,
+        set_threshold_usd: shopSignalReviewsThresholdUsd,
+        set_at: new Date().toISOString(),
+      },
+      { onConflict: "feature" },
+    );
     if (brakeError) {
       logger.error("failed to set shop_signal_reviews brake", {
         error: brakeError.message,
@@ -521,20 +530,18 @@ export async function GET(req: Request) {
     const pausedUntil = new Date(
       Date.now() + 24 * 60 * 60 * 1000,
     ).toISOString();
-    const { error: brakeError } = await supabase
-      .from("feature_brakes")
-      .upsert(
-        {
-          feature: "shopfront_clone_outreach",
-          paused_until: pausedUntil,
-          reason: `Daily spend $${shopfrontCloneOutreachCost.toFixed(2)} exceeded $${shopfrontCloneOutreachThresholdUsd} cap`,
-          set_by: "cost-daily-check",
-          set_cost_usd: shopfrontCloneOutreachCost,
-          set_threshold_usd: shopfrontCloneOutreachThresholdUsd,
-          set_at: new Date().toISOString(),
-        },
-        { onConflict: "feature" },
-      );
+    const { error: brakeError } = await supabase.from("feature_brakes").upsert(
+      {
+        feature: "shopfront_clone_outreach",
+        paused_until: pausedUntil,
+        reason: `Daily spend $${shopfrontCloneOutreachCost.toFixed(2)} exceeded $${shopfrontCloneOutreachThresholdUsd} cap`,
+        set_by: "cost-daily-check",
+        set_cost_usd: shopfrontCloneOutreachCost,
+        set_threshold_usd: shopfrontCloneOutreachThresholdUsd,
+        set_at: new Date().toISOString(),
+      },
+      { onConflict: "feature" },
+    );
     if (brakeError) {
       logger.error("failed to set shopfront_clone_outreach brake", {
         error: brakeError.message,
@@ -553,20 +560,18 @@ export async function GET(req: Request) {
     const pausedUntil = new Date(
       Date.now() + 24 * 60 * 60 * 1000,
     ).toISOString();
-    const { error: brakeError } = await supabase
-      .from("feature_brakes")
-      .upsert(
-        {
-          feature: "shopfront_clone_watch",
-          paused_until: pausedUntil,
-          reason: `Daily spend $${shopfrontCloneWatchCost.toFixed(2)} exceeded $${shopfrontCloneWatchThresholdUsd} cap`,
-          set_by: "cost-daily-check",
-          set_cost_usd: shopfrontCloneWatchCost,
-          set_threshold_usd: shopfrontCloneWatchThresholdUsd,
-          set_at: new Date().toISOString(),
-        },
-        { onConflict: "feature" },
-      );
+    const { error: brakeError } = await supabase.from("feature_brakes").upsert(
+      {
+        feature: "shopfront_clone_watch",
+        paused_until: pausedUntil,
+        reason: `Daily spend $${shopfrontCloneWatchCost.toFixed(2)} exceeded $${shopfrontCloneWatchThresholdUsd} cap`,
+        set_by: "cost-daily-check",
+        set_cost_usd: shopfrontCloneWatchCost,
+        set_threshold_usd: shopfrontCloneWatchThresholdUsd,
+        set_at: new Date().toISOString(),
+      },
+      { onConflict: "feature" },
+    );
     if (brakeError) {
       logger.error("failed to set shopfront_clone_watch brake", {
         error: brakeError.message,
@@ -582,21 +587,21 @@ export async function GET(req: Request) {
   }
 
   if (newsIntelEmbedCost > newsIntelEmbedThresholdUsd) {
-    const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    const { error: brakeError } = await supabase
-      .from("feature_brakes")
-      .upsert(
-        {
-          feature: "news_intel_embed",
-          paused_until: pausedUntil,
-          reason: `Daily spend $${newsIntelEmbedCost.toFixed(2)} exceeded $${newsIntelEmbedThresholdUsd} cap`,
-          set_by: "cost-daily-check",
-          set_cost_usd: newsIntelEmbedCost,
-          set_threshold_usd: newsIntelEmbedThresholdUsd,
-          set_at: new Date().toISOString(),
-        },
-        { onConflict: "feature" },
-      );
+    const pausedUntil = new Date(
+      Date.now() + 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const { error: brakeError } = await supabase.from("feature_brakes").upsert(
+      {
+        feature: "news_intel_embed",
+        paused_until: pausedUntil,
+        reason: `Daily spend $${newsIntelEmbedCost.toFixed(2)} exceeded $${newsIntelEmbedThresholdUsd} cap`,
+        set_by: "cost-daily-check",
+        set_cost_usd: newsIntelEmbedCost,
+        set_threshold_usd: newsIntelEmbedThresholdUsd,
+        set_at: new Date().toISOString(),
+      },
+      { onConflict: "feature" },
+    );
     if (brakeError) {
       logger.error("failed to set news_intel_embed brake", {
         error: brakeError.message,
@@ -612,21 +617,21 @@ export async function GET(req: Request) {
   }
 
   if (scamReportEmbedCost > scamReportEmbedThresholdUsd) {
-    const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    const { error: brakeError } = await supabase
-      .from("feature_brakes")
-      .upsert(
-        {
-          feature: "scam_report_embed",
-          paused_until: pausedUntil,
-          reason: `Daily spend $${scamReportEmbedCost.toFixed(2)} exceeded $${scamReportEmbedThresholdUsd} cap`,
-          set_by: "cost-daily-check",
-          set_cost_usd: scamReportEmbedCost,
-          set_threshold_usd: scamReportEmbedThresholdUsd,
-          set_at: new Date().toISOString(),
-        },
-        { onConflict: "feature" },
-      );
+    const pausedUntil = new Date(
+      Date.now() + 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const { error: brakeError } = await supabase.from("feature_brakes").upsert(
+      {
+        feature: "scam_report_embed",
+        paused_until: pausedUntil,
+        reason: `Daily spend $${scamReportEmbedCost.toFixed(2)} exceeded $${scamReportEmbedThresholdUsd} cap`,
+        set_by: "cost-daily-check",
+        set_cost_usd: scamReportEmbedCost,
+        set_threshold_usd: scamReportEmbedThresholdUsd,
+        set_at: new Date().toISOString(),
+      },
+      { onConflict: "feature" },
+    );
     if (brakeError) {
       logger.error("failed to set scam_report_embed brake", {
         error: brakeError.message,
@@ -642,21 +647,21 @@ export async function GET(req: Request) {
   }
 
   if (botAnalyzeCost > botAnalyzeThresholdUsd) {
-    const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    const { error: brakeError } = await supabase
-      .from("feature_brakes")
-      .upsert(
-        {
-          feature: "bot_analyze",
-          paused_until: pausedUntil,
-          reason: `Daily spend $${botAnalyzeCost.toFixed(2)} exceeded $${botAnalyzeThresholdUsd} cap`,
-          set_by: "cost-daily-check",
-          set_cost_usd: botAnalyzeCost,
-          set_threshold_usd: botAnalyzeThresholdUsd,
-          set_at: new Date().toISOString(),
-        },
-        { onConflict: "feature" },
-      );
+    const pausedUntil = new Date(
+      Date.now() + 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const { error: brakeError } = await supabase.from("feature_brakes").upsert(
+      {
+        feature: "bot_analyze",
+        paused_until: pausedUntil,
+        reason: `Daily spend $${botAnalyzeCost.toFixed(2)} exceeded $${botAnalyzeThresholdUsd} cap`,
+        set_by: "cost-daily-check",
+        set_cost_usd: botAnalyzeCost,
+        set_threshold_usd: botAnalyzeThresholdUsd,
+        set_at: new Date().toISOString(),
+      },
+      { onConflict: "feature" },
+    );
     if (brakeError) {
       logger.error("failed to set bot_analyze brake", {
         error: brakeError.message,
@@ -672,21 +677,21 @@ export async function GET(req: Request) {
   }
 
   if (hiveAiCost > hiveAiThresholdUsd) {
-    const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    const { error: brakeError } = await supabase
-      .from("feature_brakes")
-      .upsert(
-        {
-          feature: "hive_ai",
-          paused_until: pausedUntil,
-          reason: `Daily spend $${hiveAiCost.toFixed(2)} exceeded $${hiveAiThresholdUsd} cap`,
-          set_by: "cost-daily-check",
-          set_cost_usd: hiveAiCost,
-          set_threshold_usd: hiveAiThresholdUsd,
-          set_at: new Date().toISOString(),
-        },
-        { onConflict: "feature" },
-      );
+    const pausedUntil = new Date(
+      Date.now() + 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const { error: brakeError } = await supabase.from("feature_brakes").upsert(
+      {
+        feature: "hive_ai",
+        paused_until: pausedUntil,
+        reason: `Daily spend $${hiveAiCost.toFixed(2)} exceeded $${hiveAiThresholdUsd} cap`,
+        set_by: "cost-daily-check",
+        set_cost_usd: hiveAiCost,
+        set_threshold_usd: hiveAiThresholdUsd,
+        set_at: new Date().toISOString(),
+      },
+      { onConflict: "feature" },
+    );
     if (brakeError) {
       logger.error("failed to set hive_ai brake", {
         error: brakeError.message,
@@ -702,21 +707,21 @@ export async function GET(req: Request) {
   }
 
   if (extensionImageCheckCost > extensionImageCheckThresholdUsd) {
-    const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    const { error: brakeError } = await supabase
-      .from("feature_brakes")
-      .upsert(
-        {
-          feature: "extension_image_check",
-          paused_until: pausedUntil,
-          reason: `Daily spend $${extensionImageCheckCost.toFixed(2)} exceeded $${extensionImageCheckThresholdUsd} cap`,
-          set_by: "cost-daily-check",
-          set_cost_usd: extensionImageCheckCost,
-          set_threshold_usd: extensionImageCheckThresholdUsd,
-          set_at: new Date().toISOString(),
-        },
-        { onConflict: "feature" },
-      );
+    const pausedUntil = new Date(
+      Date.now() + 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const { error: brakeError } = await supabase.from("feature_brakes").upsert(
+      {
+        feature: "extension_image_check",
+        paused_until: pausedUntil,
+        reason: `Daily spend $${extensionImageCheckCost.toFixed(2)} exceeded $${extensionImageCheckThresholdUsd} cap`,
+        set_by: "cost-daily-check",
+        set_cost_usd: extensionImageCheckCost,
+        set_threshold_usd: extensionImageCheckThresholdUsd,
+        set_at: new Date().toISOString(),
+      },
+      { onConflict: "feature" },
+    );
     if (brakeError) {
       logger.error("failed to set extension_image_check brake", {
         error: brakeError.message,

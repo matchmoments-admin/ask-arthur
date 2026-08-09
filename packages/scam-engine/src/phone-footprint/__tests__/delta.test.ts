@@ -121,7 +121,12 @@ describe("computeDelta", () => {
     );
     const next = buildFootprint(
       {},
-      { sim_swap: { score: 80, detail: { most_recent_swap_at: "2026-04-20T00:00:00Z" } } },
+      {
+        sim_swap: {
+          score: 80,
+          detail: { most_recent_swap_at: "2026-04-20T00:00:00Z" },
+        },
+      },
     );
     const d = computeDelta(prev, next);
     const s = d.find((x) => x.type === "sim_swap");

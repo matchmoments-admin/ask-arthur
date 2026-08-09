@@ -22,17 +22,14 @@ const InnerSchema = z.object({
 
 const StrictSchema = z.object({
   // Pattern from packages/scam-engine/src/inngest/reddit-intel-daily.ts
-  perPost: z.preprocess(
-    (v: unknown) => {
-      if (typeof v !== "string") return v;
-      try {
-        return JSON.parse(v);
-      } catch {
-        return v;
-      }
-    },
-    z.array(InnerSchema),
-  ),
+  perPost: z.preprocess((v: unknown) => {
+    if (typeof v !== "string") return v;
+    try {
+      return JSON.parse(v);
+    } catch {
+      return v;
+    }
+  }, z.array(InnerSchema)),
 });
 
 describe("z.toJSONSchema for preprocess'd arrays — anthropic.ts tool_use", () => {

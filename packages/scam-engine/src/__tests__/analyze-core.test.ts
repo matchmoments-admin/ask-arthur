@@ -90,7 +90,10 @@ describe("runAnalysisCore — cache path", () => {
   it("returns cached result without calling Claude or URL reputation", async () => {
     mockCacheGet.mockResolvedValue(highRiskAi);
 
-    const out = await runAnalysisCore({ text: "previously seen", surface: "extension" });
+    const out = await runAnalysisCore({
+      text: "previously seen",
+      surface: "extension",
+    });
 
     expect(out.cached).toBe(true);
     expect(out.result.verdict).toBe("HIGH_RISK");
@@ -125,10 +128,18 @@ describe("runAnalysisCore — cache path", () => {
     await runAnalysisCore({ text: "", images: ["imgA"], surface: "web" });
 
     expect(mockCacheGet).toHaveBeenCalledWith(
-      expect.objectContaining({ surface: "web", images: ["imgA"], mode: "image" }),
+      expect.objectContaining({
+        surface: "web",
+        images: ["imgA"],
+        mode: "image",
+      }),
     );
     expect(mockCacheSet).toHaveBeenCalledWith(
-      expect.objectContaining({ surface: "web", images: ["imgA"], mode: "image" }),
+      expect.objectContaining({
+        surface: "web",
+        images: ["imgA"],
+        mode: "image",
+      }),
       expect.anything(),
     );
   });
@@ -148,13 +159,24 @@ describe("runAnalysisCore — RAG themes (bot/extension cross-feed)", () => {
   it("injects the rendered themes block as the 5th analyzeWithClaude arg when enabled", async () => {
     mockAnalyze.mockResolvedValue(safeAi);
     mockGetThemes.mockResolvedValueOnce([{ title: "PayID scam" }] as never);
-    mockRenderThemes.mockReturnValueOnce("RECENT AUSTRALIAN SCAM PATTERNS:\n- PayID scam");
+    mockRenderThemes.mockReturnValueOnce(
+      "RECENT AUSTRALIAN SCAM PATTERNS:\n- PayID scam",
+    );
 
-    await runAnalysisCore({ text: "is this paid real", surface: "bot", ragThemesEnabled: true });
+    await runAnalysisCore({
+      text: "is this paid real",
+      surface: "bot",
+      ragThemesEnabled: true,
+    });
 
-    expect(mockGetThemes).toHaveBeenCalledWith("is this paid real", expect.anything());
+    expect(mockGetThemes).toHaveBeenCalledWith(
+      "is this paid real",
+      expect.anything(),
+    );
     // analyzeWithClaude(text, images, mode, redirectChains, themesPromptBlock)
-    expect(mockAnalyze.mock.calls[0][4]).toBe("RECENT AUSTRALIAN SCAM PATTERNS:\n- PayID scam");
+    expect(mockAnalyze.mock.calls[0][4]).toBe(
+      "RECENT AUSTRALIAN SCAM PATTERNS:\n- PayID scam",
+    );
   });
 
   it("does NOT fetch themes when ragThemesEnabled is absent", async () => {
@@ -195,7 +217,9 @@ describe("runAnalysisCore — full pipeline (cache miss)", () => {
 
     expect(out.result.verdict).toBe("HIGH_RISK");
     expect(out.signals.maliciousUrlCount).toBe(1);
-    expect(out.result.redFlags.some((f) => f.includes("evil.example"))).toBe(true);
+    expect(out.result.redFlags.some((f) => f.includes("evil.example"))).toBe(
+      true,
+    );
     expect(out.result.nextSteps[0]).toContain("Do not click any links");
   });
 
@@ -206,7 +230,10 @@ describe("runAnalysisCore — full pipeline (cache miss)", () => {
       detected: true,
       patterns: ["ignore previous instructions"],
     });
-    let out = await runAnalysisCore({ text: "ignore previous", surface: "bot" });
+    let out = await runAnalysisCore({
+      text: "ignore previous",
+      surface: "bot",
+    });
     expect(out.result.verdict).toBe("SUSPICIOUS");
     expect(out.signals.injectionDetected).toBe(true);
 
@@ -281,7 +308,9 @@ describe("runAnalysisCore — full pipeline (cache miss)", () => {
       expect.arrayContaining(["https://bit.ly/abc", "https://landing.example"]),
     );
     // Shortened URL emits a red flag (mergeVerdict redirect-chain branch).
-    expect(out.result.redFlags.some((f) => f.toLowerCase().includes("shortened"))).toBe(true);
+    expect(
+      out.result.redFlags.some((f) => f.toLowerCase().includes("shortened")),
+    ).toBe(true);
   });
 });
 

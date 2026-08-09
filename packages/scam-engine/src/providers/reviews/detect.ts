@@ -30,7 +30,8 @@ export interface DetectedReviewApp {
 const GUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 const OKENDO_PRODUCT_ID = /(shopify-\d{6,})/i;
 // Yotpo public app keys are alphanumeric tokens embedded in the widget host.
-const YOTPO_APP_KEY = /(?:staticw2\.yotpo\.com|api-cdn\.yotpo\.com\/v1\/widget)\/([A-Za-z0-9]{8,})/i;
+const YOTPO_APP_KEY =
+  /(?:staticw2\.yotpo\.com|api-cdn\.yotpo\.com\/v1\/widget)\/([A-Za-z0-9]{8,})/i;
 // A Shopify permanent domain, used by Judge.me's public widget endpoint.
 const MYSHOPIFY_DOMAIN = /([a-z0-9-]+\.myshopify\.com)/i;
 
@@ -39,12 +40,20 @@ function detectOkendo(html: string): DetectedReviewApp | null {
   // subscriberId appears both as `subscriberId":"<guid>"` in the widget config
   // and inside the `api.okendo.io/v1/stores/<guid>` URLs. Either yields it.
   const sub =
-    html.match(new RegExp(`subscriberId"\\s*:\\s*"(${GUID.source})"`, "i"))?.[1] ??
-    html.match(new RegExp(`okendo\\.io\\/v1\\/stores\\/(${GUID.source})`, "i"))?.[1] ??
+    html.match(
+      new RegExp(`subscriberId"\\s*:\\s*"(${GUID.source})"`, "i"),
+    )?.[1] ??
+    html.match(
+      new RegExp(`okendo\\.io\\/v1\\/stores\\/(${GUID.source})`, "i"),
+    )?.[1] ??
     html.match(new RegExp(`subscriberId=(${GUID.source})`, "i"))?.[1];
   if (!sub) return null;
   const productId = html.match(OKENDO_PRODUCT_ID)?.[1];
-  return { app: "okendo", identifier: sub.toLowerCase(), ...(productId && { productId }) };
+  return {
+    app: "okendo",
+    identifier: sub.toLowerCase(),
+    ...(productId && { productId }),
+  };
 }
 
 // These three return null (not an empty-identifier object) when the app is
@@ -61,7 +70,9 @@ function detectYotpo(html: string): DetectedReviewApp | null {
 function detectLoox(html: string): DetectedReviewApp | null {
   if (!/loox\.(io|app)/i.test(html) && !/looxReviews/i.test(html)) return null;
   // Loox's public storefront id lives in its widget config; shape unconfirmed.
-  const id = html.match(/loox[^"]*?["']?(?:store|shop)Id["']?\s*[:=]\s*["']([A-Za-z0-9-]{6,})/i)?.[1];
+  const id = html.match(
+    /loox[^"]*?["']?(?:store|shop)Id["']?\s*[:=]\s*["']([A-Za-z0-9-]{6,})/i,
+  )?.[1];
   if (!id) return null;
   return { app: "loox", identifier: id };
 }

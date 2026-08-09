@@ -5,7 +5,9 @@ import { assignPostsToThemes } from "../reddit-intel-cluster";
 // Build a unit vector in `dim` dimensions pointing mostly along axis `axis`
 // with a little spread, so cosine similarity is controllable in a test.
 function vec(dim: number, axis: number, jitter = 0): number[] {
-  const v: number[] = new Array(dim).fill(0).map((_, i) => (i === axis ? 1 : 0));
+  const v: number[] = new Array(dim)
+    .fill(0)
+    .map((_, i) => (i === axis ? 1 : 0));
   if (jitter) v[(axis + 1) % dim] = jitter;
   return v;
 }
@@ -22,7 +24,9 @@ describe("assignPostsToThemes — anti-runaway guards", () => {
     // roughly equal) scores > 0.62 against almost anything. With the ceiling
     // disabled and freeze disabled, every distinct post is swallowed.
     const driftedCentroid = new Array(DIM).fill(1 / Math.sqrt(DIM));
-    const themes = [{ id: "mega", centroid: driftedCentroid, memberCount: 2263 }];
+    const themes = [
+      { id: "mega", centroid: driftedCentroid, memberCount: 2263 },
+    ];
 
     // Posts spread across different axes — semantically distinct.
     const posts = Array.from({ length: 12 }, (_, i) =>
@@ -40,12 +44,16 @@ describe("assignPostsToThemes — anti-runaway guards", () => {
     ).length;
     // Control: with guards off the mega theme eats (nearly) all posts.
     expect(joinedMega).toBeGreaterThanOrEqual(10);
-    expect(assignments.filter((a) => a.isNewTheme).length).toBeLessThanOrEqual(2);
+    expect(assignments.filter((a) => a.isNewTheme).length).toBeLessThanOrEqual(
+      2,
+    );
   });
 
   it("join ceiling stops an over-large theme from absorbing → posts re-seed", () => {
     const driftedCentroid = new Array(DIM).fill(1 / Math.sqrt(DIM));
-    const themes = [{ id: "mega", centroid: driftedCentroid, memberCount: 2263 }];
+    const themes = [
+      { id: "mega", centroid: driftedCentroid, memberCount: 2263 },
+    ];
     const posts = Array.from({ length: 12 }, (_, i) =>
       post(`p${i}`, vec(DIM, i % DIM)),
     );
@@ -76,10 +84,14 @@ describe("assignPostsToThemes — anti-runaway guards", () => {
     );
     const offAxis = [post("off", vec(DIM, 3))];
 
-    const { assignments } = assignPostsToThemes([...onAxis, ...offAxis], themes, {
-      freezeAt: 50,
-      threshold: 0.62,
-    });
+    const { assignments } = assignPostsToThemes(
+      [...onAxis, ...offAxis],
+      themes,
+      {
+        freezeAt: 50,
+        threshold: 0.62,
+      },
+    );
 
     // on-axis posts join t0; the off-axis post re-seeds (does not join).
     const off = assignments.find((a) => a.postId === "off")!;

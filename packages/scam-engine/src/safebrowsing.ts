@@ -10,13 +10,17 @@ import { isPrivateIP } from "./private-ip";
 // Naming is historical: MALICIOUS verdicts use SAFE_BROWSING_CACHE_TTL (short — we
 // want to re-confirm a flagged URL sooner), CLEAN verdicts use the longer TTL (a
 // non-malicious URL rarely flips, so cache it longer to protect the free-tier caps).
-const SAFE_BROWSING_CACHE_TTL = 3_600;   // 1 hour  (malicious results)
-const CLEAN_URL_CACHE_TTL = 86_400;      // 24 hours (non-malicious results — bumped from 6h)
+const SAFE_BROWSING_CACHE_TTL = 3_600; // 1 hour  (malicious results)
+const CLEAN_URL_CACHE_TTL = 86_400; // 24 hours (non-malicious results — bumped from 6h)
 const URL_CACHE_PREFIX = "askarthur:urlrep";
 
 let _redis: Redis | null = null;
 function getRedis(): Redis | null {
-  if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) return null;
+  if (
+    !process.env.UPSTASH_REDIS_REST_URL ||
+    !process.env.UPSTASH_REDIS_REST_TOKEN
+  )
+    return null;
   if (!_redis) {
     _redis = new Redis({
       url: process.env.UPSTASH_REDIS_REST_URL,
@@ -29,7 +33,9 @@ function getRedis(): Redis | null {
 async function hashURL(url: string): Promise<string> {
   const data = new TextEncoder().encode(url);
   const buf = await crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 export interface URLCheckResult {
@@ -43,8 +49,8 @@ export interface URLCheckResult {
 // blocklists can't drift between this syntactic layer and the ssrf-dispatcher.
 const BLOCKED_HOSTNAMES = [
   "localhost",
-  "metadata.google.internal",        // GCP metadata
-  "instance-data",                    // AWS metadata alias
+  "metadata.google.internal", // GCP metadata
+  "instance-data", // AWS metadata alias
 ];
 
 /** Check if a URL points to a private/internal resource (SSRF protection) */
@@ -70,9 +76,9 @@ export function isPrivateURL(urlString: string): boolean {
     // Block alternative IP notations (decimal, hex, octal) — these are
     // integer/hex encodings the classifier doesn't decode.
     // e.g., http://2130706433 (= 127.0.0.1), http://0x7f000001
-    if (/^\d+$/.test(hostname)) return true;  // decimal IP
-    if (/^0x[0-9a-f]+$/i.test(hostname)) return true;  // hex IP
-    if (/^0[0-7]+$/.test(hostname)) return true;  // octal IP
+    if (/^\d+$/.test(hostname)) return true; // decimal IP
+    if (/^0x[0-9a-f]+$/i.test(hostname)) return true; // hex IP
+    if (/^0[0-7]+$/.test(hostname)) return true; // octal IP
 
     // Block metadata.goog (GCP alternate)
     if (hostname === "metadata.goog") return true;
@@ -118,11 +124,13 @@ async function checkGoogleSafeBrowsing(urls: string[]): Promise<Set<string>> {
           },
         }),
         signal: AbortSignal.timeout(5000),
-      }
+      },
     );
 
     if (res.ok) {
-      const data = (await res.json()) as { matches?: Array<{ threat: { url: string } }> };
+      const data = (await res.json()) as {
+        matches?: Array<{ threat: { url: string } }>;
+      };
       if (data.matches) {
         for (const match of data.matches) {
           malicious.add(match.threat.url);
@@ -171,17 +179,26 @@ async function checkVirusTotal(urls: string[]): Promise<Set<string>> {
     urlsToCheck.map(async (url) => {
       try {
         // URL must be base64url-encoded without padding
-        const urlId = btoa(url).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+        const urlId = btoa(url)
+          .replace(/\+/g, "-")
+          .replace(/\//g, "_")
+          .replace(/=+$/, "");
         const res = await fetch(
           `https://www.virustotal.com/api/v3/urls/${urlId}`,
           {
             headers: { "x-apikey": apiKey },
             signal: AbortSignal.timeout(5000),
-          }
+          },
         );
 
         if (res.ok) {
-          const data = (await res.json()) as { data?: { attributes?: { last_analysis_stats?: { malicious: number; suspicious: number } } } };
+          const data = (await res.json()) as {
+            data?: {
+              attributes?: {
+                last_analysis_stats?: { malicious: number; suspicious: number };
+              };
+            };
+          };
           const stats = data.data?.attributes?.last_analysis_stats;
           if (stats && stats.malicious + stats.suspicious > 2) {
             malicious.add(url);
@@ -190,14 +207,14 @@ async function checkVirusTotal(urls: string[]): Promise<Set<string>> {
       } catch {
         // Non-blocking
       }
-    })
+    }),
   );
 
   return malicious;
 }
 
 export async function checkURLReputation(
-  urls: string[]
+  urls: string[],
 ): Promise<URLCheckResult[]> {
   if (urls.length === 0) return [];
 
@@ -212,7 +229,9 @@ export async function checkURLReputation(
       urls.map(async (url) => {
         try {
           const hash = await hashURL(url);
-          const cached = await redis.get<URLCheckResult>(`${URL_CACHE_PREFIX}:${hash}`);
+          const cached = await redis.get<URLCheckResult>(
+            `${URL_CACHE_PREFIX}:${hash}`,
+          );
           if (cached) {
             results.push(cached);
           } else {
@@ -221,7 +240,7 @@ export async function checkURLReputation(
         } catch {
           uncachedURLs.push(url);
         }
-      })
+      }),
     );
   } else {
     uncachedURLs.push(...urls);
@@ -236,7 +255,9 @@ export async function checkURLReputation(
   ]);
 
   const googleMalicious =
-    googleResult.status === "fulfilled" ? googleResult.value : new Set<string>();
+    googleResult.status === "fulfilled"
+      ? googleResult.value
+      : new Set<string>();
   const vtMalicious =
     vtResult.status === "fulfilled" ? vtResult.value : new Set<string>();
 
@@ -252,7 +273,9 @@ export async function checkURLReputation(
     for (const r of freshResults) {
       hashURL(r.url)
         .then((hash) => {
-          const ttl = r.isMalicious ? SAFE_BROWSING_CACHE_TTL : CLEAN_URL_CACHE_TTL;
+          const ttl = r.isMalicious
+            ? SAFE_BROWSING_CACHE_TTL
+            : CLEAN_URL_CACHE_TTL;
           return redis.set(`${URL_CACHE_PREFIX}:${hash}`, r, { ex: ttl });
         })
         .catch(() => {});
