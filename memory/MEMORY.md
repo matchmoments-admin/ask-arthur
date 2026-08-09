@@ -29,3 +29,5 @@ Curated cross-session memory for this repo. How it works:
 ## Preferences
 
 ## Domain
+
+- `netcraft_declined_at` has a hard discontinuity at **2026-08-09**: until v273, `advance_clone_lifecycle` stamped it `now()` with no COALESCE, and the 6h lifecycle-recheck cron calls that function with the row's OWN current state as a no-op — so every declined row's decline clock was walked forward every 6h. 859/1561 declined rows had `netcraft_declined_at = last_rechecked_at` exactly. The published decline→weaponise vendor-gap median read **2.5h (min 2.0h, n=33)** at the time of the fix against a previously-published **33h** — it had become a measurement of the recheck cadence. Pre-fix originals were overwritten in place, never archived, so the compression is UNRECOVERABLE: disclose the discontinuity in the next monthly data drop, do not smooth it, and do not publish a new median in the same cycle as the fix. [src: session_01CaT4vAimGXyiHAAqA4Wsaj]
