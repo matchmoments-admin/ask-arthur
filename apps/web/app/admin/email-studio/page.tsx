@@ -11,10 +11,16 @@ export default async function EmailStudioPage() {
   // Current saved overrides → { templateKey: { slotKey: content_md } }
   const overrides: Record<string, Record<string, string>> = {};
   const sb = createServiceClient();
+  // A failed read here is NOT cosmetic. Every slot falls back to its registry
+  // default (EmailStudio: `overrides[t.key]?.[s.key] ?? s.default`), which looks
+  // exactly like copy nobody has edited — so the operator saves, and the
+  // defaults overwrite the real saved overrides. The flag disables saving.
+  let loadFailed = !sb;
   if (sb) {
-    const { data } = await sb
+    const { data, error } = await sb
       .from("email_copy")
       .select("template_key, slot_key, content_md");
+    if (error) loadFailed = true;
     for (const r of data ?? []) {
       (overrides[r.template_key as string] ??= {})[r.slot_key as string] =
         r.content_md as string;
@@ -34,5 +40,7 @@ export default async function EmailStudioPage() {
     })),
   }));
 
-  return <EmailStudio templates={templates} overrides={overrides} />;
+  return (
+    <EmailStudio templates={templates} overrides={overrides} loadFailed={loadFailed} />
+  );
 }

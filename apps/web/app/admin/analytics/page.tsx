@@ -1,5 +1,6 @@
 import { requireAdmin } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
+import QueryErrorBand from "@/components/admin/QueryErrorBand";
 import AnalyticsDashboard from "./AnalyticsDashboard";
 
 export const dynamic = "force-dynamic";
@@ -58,6 +59,8 @@ export default async function AnalyticsPage() {
   await requireAdmin();
 
   const supabase = createServiceClient();
+  const loadErrors: string[] = [];
+  if (!supabase) loadErrors.push("service client unavailable");
   let dailyScans: DayScan[] = [];
   let scansByType: TypeScan[] = [];
   let noScanRate: NoScanRow[] = [];
@@ -81,6 +84,23 @@ export default async function AnalyticsPage() {
       supabase.from("analytics_event_daily").select("day, event_type, events").gte("day", since),
       supabase.from("scans_new_vs_returning").select("day, new_scanner_scans, returning_scanner_scans").gte("day", since),
     ]);
+
+    // Every panel below maps `res.data ?? []`, so a failed view read draws an
+    // empty chart — which on an analytics page is indistinguishable from "no
+    // traffic", the exact conclusion an operator would act on.
+    // PGRST116 = the .single() view legitimately having no row yet.
+    for (const [res, label] of [
+      [ds, "daily scans"],
+      [sbt, "scans by type"],
+      [nsr, "no-scan visitor rate"],
+      [uac, "UTM-attributed conversions"],
+      [funnel, "blog→scan funnel"],
+      [cpf, "per-post funnel"],
+      [evd, "daily events"],
+      [nvr, "new vs returning"],
+    ] as const) {
+      if (res.error && res.error.code !== "PGRST116") loadErrors.push(label);
+    }
 
     dailyScans = (ds.data ?? []).map((r) => ({ day: r.day as string, scans: Number(r.scans) }));
     scansByType = (sbt.data ?? []).map((r) => ({
@@ -164,6 +184,7 @@ export default async function AnalyticsPage() {
 
   return (
     <div className="max-w-5xl mx-auto px-5 py-8">
+      <QueryErrorBand errors={loadErrors} />
       <h1 className="text-deep-navy text-xl font-extrabold mb-1">Analytics &amp; attribution</h1>
       <p className="text-gov-slate text-sm mb-6">
         First-party owned event store — <strong>beacon-instrumented web scans

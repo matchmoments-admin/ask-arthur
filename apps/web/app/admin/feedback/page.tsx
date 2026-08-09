@@ -1,6 +1,7 @@
 import { requireAdmin } from "@/lib/adminAuth";
 import type { Tables } from "@askarthur/types";
 import { createServiceClient } from "@askarthur/supabase/server";
+import QueryErrorBand from "@/components/admin/QueryErrorBand";
 import TriageTable from "./TriageTable";
 
 export const dynamic = "force-dynamic";
@@ -46,6 +47,8 @@ export default async function FeedbackTriagePage({
   const filter = (sp.filter ?? "top") as FilterMode;
 
   const supabase = createServiceClient();
+  const loadErrors: string[] = [];
+  if (!supabase) loadErrors.push("service client unavailable");
   let rows: TriageRow[] = [];
   let totalCount = 0;
   const counts = { false_positive: 0, false_negative: 0, user_reported: 0 };
@@ -53,10 +56,11 @@ export default async function FeedbackTriagePage({
   if (supabase) {
     // Single round-trip via v133 RPC (replaces 3 sequential queries).
     // Server-side aggregation against the v94 MV; ~2.5 ms on prod.
-    const { data: summary } = await supabase.rpc(
+    const { data: summary, error } = await supabase.rpc(
       "get_feedback_triage_summary",
       { p_filter: filter, p_limit: 100 },
     );
+    if (error) loadErrors.push("feedback triage summary");
 
     if (summary && typeof summary === "object") {
       const s = summary as {
@@ -71,11 +75,18 @@ export default async function FeedbackTriagePage({
           counts[k] = s.counts[k] ?? 0;
         }
       }
+    } else if (!error) {
+      // Second silent path, independent of `error`: the RPC returned something
+      // that is not the {rows,total,counts} object. Every pill would render 0
+      // and the table "No feedback in the last 30 days" — indistinguishable
+      // from a genuinely quiet month.
+      loadErrors.push("feedback triage summary (unexpected shape)");
     }
   }
 
   return (
     <div className="max-w-6xl mx-auto px-5 py-8">
+      <QueryErrorBand errors={loadErrors} />
       <h1 className="text-deep-navy text-xl font-extrabold mb-1">Feedback triage</h1>
       <p className="text-gov-slate text-sm mb-6">
         User disagreements with verdicts, ranked by uncertainty × harm. Scored as
