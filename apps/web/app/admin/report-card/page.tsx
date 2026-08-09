@@ -532,18 +532,52 @@ function SlideActed({ data, page }: SlideProps) {
         <span className="r">ASK ARTHUR · {period}</span>
       </div>
       <h2 className="h2b">Detected — then acted.</h2>
-      <div className="kpis" style={{ marginTop: 40 }}>
-        <div className="kpi accent"><div className="n">{data.kpis.reportedToNetcraft}</div><div className="l">reported to Netcraft for takedown review</div></div>
-        <div className="kpi"><div className="n">{data.kpis.likelyPhishing}</div><div className="l">flagged as likely phishing</div></div>
-        <div className="kpi"><div className="n">{data.kpis.parkedForSale}</div><div className="l">parked / squatting domains</div></div>
+      {/* ONE action number, on its own. The old layout sat it beside two
+          classification counts, so a reader tried to reconcile 792 / 40 / 6
+          against a 1000 headline and could not — three numbers, two different
+          axes, no denominator. */}
+      <div className="kpis" style={{ marginTop: 36 }}>
+        <div className="kpi accent">
+          <div className="n">{data.kpis.reportedToNetcraft}</div>
+          <div className="l">
+            of {data.total} reported to Netcraft for takedown review
+          </div>
+        </div>
+      </div>
+      {/* The classification axis, COMPLETE — the buckets partition the cohort and
+          sum to the headline, so the two small newsworthy buckets finally carry a
+          denominator and "no verdict" stops being invisible.
+
+          Two wording rules learned the hard way:
+          (1) `unresolved` renders only when non-zero. It has never been written —
+              0 rows across every source, all time — because classifyScan only
+              runs on a non-null render. Printing "0 didn't resolve" under a
+              header reading ALL {total} tells the reader every scan resolved,
+              which is the opposite of true for the bucket below it.
+          (2) The last bucket is NOT "not yet scanned". The submit worklist gates
+              on `first_seen_at >= now() - 14 days`, so once a month's cohort ages
+              past that window its unclassified rows are never scanned — for the
+              June cohort that was 320 of 804, every one of them permanently
+              unscannable. "Not yet" is a promise the pipeline cannot keep. */}
+      <div className="know" style={{ marginTop: 28 }}>
+        <div className="lab">WHAT THE SCANS FOUND — ALL {data.total}</div>
+        <div className="txt">
+          {data.kpis.likelyPhishing} serving likely phishing ·{" "}
+          {data.kpis.parkedForSale} parked / for sale ·{" "}
+          {data.kpis.neutral} resolved, nothing malicious found ·{" "}
+          {data.kpis.unresolved > 0 && (
+            <>{data.kpis.unresolved} scanned but didn&apos;t render · </>
+          )}
+          {data.kpis.unclassified} with no verdict on record.
+        </div>
       </div>
       {outcomes && (
-        <div className="know" style={{ marginTop: 40 }}>
+        <div className="know" style={{ marginTop: 24 }}>
           <div className="lab">WHAT HAPPENED NEXT</div>
           <div className="txt">Of this month&apos;s detections: {outcomes}.</div>
         </div>
       )}
-      <div className="know" style={{ marginTop: outcomes ? 32 : 56 }}>
+      <div className="know" style={{ marginTop: outcomes ? 24 : 28 }}>
         <div className="lab">HOW WE KNOW</div>
         <div className="txt">We sweep newly-registered domains against ~50 major Australian brands daily, enrich with WHOIS + certificate data, and review by hand — each with a public evidence page on urlscan.io.</div>
       </div>

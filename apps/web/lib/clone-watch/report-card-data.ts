@@ -142,6 +142,18 @@ export interface CloneWatchReportCard {
     reportedToNetcraft: number;
     likelyPhishing: number;
     parkedForSale: number;
+    /**
+     * The rest of the classification axis. `likely_phishing` + `parked_for_sale`
+     * are two of FIVE mutually-exclusive buckets that partition the cohort, and
+     * showing only those two left the slide's numbers unable to reconcile
+     * against its own headline. These three complete it:
+     *   neutral      — resolved, nothing auto-classified, awaiting human review
+     *   unresolved   — we scanned it and the page didn't render
+     *   unclassified — we never obtained a verdict at all (the stranded cohort)
+     */
+    neutral: number;
+    unresolved: number;
+    unclassified: number;
     /** Netcraft actioned (lifecycle taken_down) — populated by the PR3.1 reconciler. */
     takenDown: number;
     /** Netcraft declined (still live/parked) — the "unactioned lookalike" headline. */
@@ -628,6 +640,9 @@ export async function getCloneWatchReportCard(
       reportedToNetcraft,
       likelyPhishing: sumClassification(byBrand, "likely_phishing"),
       parkedForSale: sumClassification(byBrand, "parked_for_sale"),
+      neutral: sumClassification(byBrand, "neutral"),
+      unresolved: sumClassification(byBrand, "unresolved"),
+      unclassified: sumClassification(byBrand, "unclassified"),
       takenDown: sumMetric(byBrand, "takenDown"),
       declined: sumMetric(byBrand, "declined"),
       escalated: sumMetric(byBrand, "escalated"),

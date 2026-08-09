@@ -161,9 +161,34 @@ export async function submitURLScanWithDetails(
  * cause of the 100% clone-watch urlscan failure (0/343 retrieved). The scans
  * rendered fine; we just never authenticated the fetch.
  */
-export async function retrieveURLScan(
+/**
+ * Why a retrieval produced no result. The distinction is load-bearing for
+ * clone-watch: its caller bumps `urlscan_failure_streak` on a miss, and three
+ * strikes remove the row from BOTH the submit and retrieve worklists
+ * permanently. Conflating "urlscan rate-limited us" with "this URL is dead"
+ * therefore strands live candidates — the repo already learned this on the
+ * submit side (lib/clone-watch/urlscan-submit-one.ts) and the lesson never
+ * reached here, because this function collapsed 429, 500, timeout and a
+ * genuine not-ready 404 into a single `null`.
+ */
+export type URLScanRetrieval =
+  | { kind: "ready"; result: URLScanResult }
+  /** Scan genuinely not rendered yet (404). Waiting is correct; retry later. */
+  | { kind: "not_ready" }
+  /** Rate-limited (429). OUR quota, not the URL's health — never count as a failure. */
+  | { kind: "quota_exhausted" }
+  /** Timeout / network error / 5xx. Transient on urlscan's side, not evidence about the URL. */
+  | { kind: "transient"; detail: string }
+  /** A real, non-retryable rejection from the API. */
+  | { kind: "failed"; status: number };
+
+/**
+ * Discriminated retrieval — prefer this when the outcome drives a failure
+ * counter. {@link retrieveURLScan} is the lossy convenience wrapper.
+ */
+export async function retrieveURLScanDetailed(
   uuid: string,
-): Promise<URLScanResult | null> {
+): Promise<URLScanRetrieval> {
   try {
     const apiKey = process.env.URLSCAN_API_KEY;
     const res = await fetch(`https://urlscan.io/api/v1/result/${uuid}/`, {
@@ -174,12 +199,24 @@ export async function retrieveURLScan(
     // 404 = scan not yet complete (or unlisted result without a valid key)
     if (res.status === 404) {
       logger.info("URLScan result not ready yet", { uuid });
-      return null;
+      return { kind: "not_ready" };
+    }
+
+    // 429 is quota exhaustion — says nothing about the URL.
+    if (res.status === 429) {
+      logger.warn("URLScan retrieval rate-limited", { uuid });
+      return { kind: "quota_exhausted" };
+    }
+
+    // 5xx is urlscan being unhealthy, likewise not evidence about the URL.
+    if (res.status >= 500) {
+      logger.warn("URLScan retrieval upstream error", { status: res.status, uuid });
+      return { kind: "transient", detail: `http_${res.status}` };
     }
 
     if (!res.ok) {
       logger.warn("URLScan retrieval failed", { status: res.status, uuid });
-      return null;
+      return { kind: "failed", status: res.status };
     }
 
     const data = await res.json();
@@ -188,7 +225,7 @@ export async function retrieveURLScan(
     const page = data.page || {};
     const lists = data.lists || {};
 
-    return {
+    const result: URLScanResult = {
       scanId: uuid,
       screenshotUrl: data.task?.screenshotURL || null,
       effectiveUrl: page.url || data.task?.url || "",
@@ -207,10 +244,24 @@ export async function retrieveURLScan(
       },
       domainAge: null, // URLScan doesn't directly provide this
     };
+    return { kind: "ready", result };
   } catch (err) {
+    // AbortSignal timeouts land here. Transient, not a verdict about the URL.
     logger.error("URLScan retrieval error", { error: String(err), uuid });
-    return null;
+    return { kind: "transient", detail: String(err).slice(0, 120) };
   }
+}
+
+/**
+ * Lossy wrapper kept for callers that only care whether a result exists and do
+ * not drive a failure counter from the answer. If you are about to increment a
+ * streak or age a row out of a worklist, use {@link retrieveURLScanDetailed}.
+ */
+export async function retrieveURLScan(
+  uuid: string,
+): Promise<URLScanResult | null> {
+  const r = await retrieveURLScanDetailed(uuid);
+  return r.kind === "ready" ? r.result : null;
 }
 
 export { EMPTY_RESULT as URLSCAN_EMPTY_RESULT };
