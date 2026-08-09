@@ -22,7 +22,17 @@ export interface CloneCandidate {
 }
 
 export interface SubmitOutcome {
-  kind: "submitted" | "reputation_classified" | "submit_failed" | "no_client";
+  kind:
+    | "submitted"
+    | "reputation_classified"
+    // Distinct from submit_failed on purpose: a 429 is OUR quota, not a fact
+    // about the URL, and it leaves the row untouched. Collapsing the two hid
+    // rate-limiting inside a "failures" counter, which is why "have we ever been
+    // 429'd?" was unanswerable — the guard below returns before any DB write, so
+    // the row carries no trace either.
+    | "rate_limited"
+    | "submit_failed"
+    | "no_client";
   reputationMalicious: boolean;
   error?: string;
 }
@@ -68,6 +78,7 @@ export async function submitCloneCandidate(
         submission.status ?? null,
         reputation,
         nowIso,
+        submission.message,
       ),
       p_classification: "likely_phishing",
       p_set_triage_status: null, // operator confirms TP (ultrareview F5)
@@ -82,7 +93,7 @@ export async function submitCloneCandidate(
   // the row untouched so the next cadence retries it.
   if (submission.status === 429) {
     return {
-      kind: "submit_failed",
+      kind: "rate_limited",
       reputationMalicious: false,
       error: submission.error,
     };
@@ -98,6 +109,7 @@ export async function submitCloneCandidate(
       submission.status ?? null,
       reputation,
       nowIso,
+      submission.message,
     ),
   });
   return {
