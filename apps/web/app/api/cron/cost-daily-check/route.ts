@@ -190,13 +190,25 @@ export async function GET(req: Request) {
   const vulnEnrichCost =
     top.find((t) => t.feature === "vuln_au_enrichment")?.cost ?? 0;
 
+  // Every reddit-intel-* Claude tag must be in this list or the cap that
+  // names the feature does not govern its spend. Two were missing until
+  // 2026-08-10: `-classify-retry` (a retry re-sends the whole 40-post batch,
+  // so it is the most expensive row this feature produces — $0.49 across 3
+  // rows) and `-weekly-synthesis` ($0.20). Both are live Claude spend that
+  // REDDIT_INTEL_CAP_USD was supposed to bound and did not.
+  //
+  // `reddit-intel-truncated` is deliberately EXCLUDED: it is a $0 diagnostic
+  // marker, so summing it changes nothing, and leaving it out keeps this
+  // list meaning "things that cost money".
   const redditIntelThresholdUsd = envReads.REDDIT_INTEL_CAP_USD.value;
   const redditIntelCost = top
     .filter(
       (t) =>
         t.feature === "reddit-intel-classify" ||
+        t.feature === "reddit-intel-classify-retry" ||
         t.feature === "reddit-intel-embed" ||
         t.feature === "reddit-intel-name-themes" ||
+        t.feature === "reddit-intel-weekly-synthesis" ||
         t.feature === "competitor-intel-extract",
     )
     .reduce((sum, t) => sum + t.cost, 0);
@@ -218,9 +230,17 @@ export async function GET(req: Request) {
   // of v0.2's image OCR (Claude Vision ~$0.002–$0.01/image) so the
   // threshold is wired before the spend appears. Default $5/day matches
   // the per-feature pattern used elsewhere.
+  //
+  // `.filter().reduce()`, not `.find()`: `daily_cost_summary` groups by
+  // (day, feature, provider), so a feature with more than one provider
+  // produces more than one row and `.find()` silently returns only the
+  // first. charity_check already has two (`composite`, `voyage`), so the
+  // brake has been under-counting live — it just has not mattered yet
+  // because lifetime spend is $0.00. It would matter the day OCR ships.
   const charityCheckThresholdUsd = envReads.CHARITY_CHECK_CAP_USD.value;
-  const charityCheckCost =
-    top.find((t) => t.feature === "charity_check")?.cost ?? 0;
+  const charityCheckCost = top
+    .filter((t) => t.feature === "charity_check")
+    .reduce((sum, t) => sum + t.cost, 0);
 
   // Shop Signal — APIVoid Site Trustworthiness paid feed. Same multi-tag
   // aggregation as Reddit Intel: the headline `shop_signal` tag carries the
