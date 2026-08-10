@@ -97,8 +97,21 @@ export interface CallClaudeJsonOptions<T> {
   timeoutMs?: number;
   /** Apply `cache_control: ephemeral` to system prompt. Default true. */
   cacheSystem?: boolean;
-  /** Skip sanitise/escape on `user`. Use only for system-controlled inputs
-   *  (your own JSON envelopes, never raw external text). Default false. */
+  /** Skip the injection sandwich on `user`. Default false, and there is
+   *  currently no caller that sets it — both that did were wrong.
+   *
+   *  "Your own JSON envelope" is NOT the test, and phrasing it that way is
+   *  what justified both removals: an envelope you built can still carry
+   *  values you did not author. The two live cases were a JSON object whose
+   *  fields were attacker-registered domain names, and an envelope with model
+   *  output derived from raw Reddit posts appended to it. Serialising
+   *  untrusted text into a structured shape escapes the delimiters; it does
+   *  nothing about instruction-shaped text inside a value.
+   *
+   *  The real test is on PROVENANCE, not shape: every byte of `user` must
+   *  originate from this codebase or from a trusted internal system. If any
+   *  part of it can be traced back to something a third party wrote, chose,
+   *  or registered — however many transformations ago — leave this false. */
   userIsTrusted?: boolean;
   /** Correlation ID surfaced in logger metadata. Optional. */
   requestId?: string;
@@ -160,10 +173,12 @@ export async function callClaudeJson<T>(
 
   // Sandwich defence: nonce-tagged delimiter + explicit pre/post instruction
   // (shared with claude.ts::analyzeWithClaude via buildInjectionSandwich).
-  // Skip only when caller asserts the input is already trusted (e.g. our own
-  // JSON envelope of pre-classified post IDs). Never skip for raw user text.
-  // No scrubPii here: trusted-or-not, this wrapper's callers pass non-PII
-  // envelopes, matching the pre-refactor behaviour (which never scrubbed).
+  // Applied to every caller — `userIsTrusted` exists but nothing sets it, and
+  // the two call sites that did were both wrong about their own input (see
+  // the field's JSDoc). Judge the escape hatch on provenance, not on whether
+  // the string happens to be JSON.
+  // No scrubPii here: this wrapper's callers pass non-PII envelopes, matching
+  // the pre-refactor behaviour (which never scrubbed).
   const userContent = userIsTrusted
     ? user
     : buildInjectionSandwich(user, { variant: "generic" });

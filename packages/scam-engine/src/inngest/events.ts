@@ -552,9 +552,20 @@ export function parseCloneWatchScanRequestedData(
 // and writes the result to clone_watch_classifications (sibling table).
 const CloneWatchPreclassifyRequestedDataSchema = z.object({
   alertId: z.number().int().positive(),
+  // `brand` is deliberately left unbounded, unlike its siblings. It maps to
+  // shopfront_clone_alerts.inferred_target_domain, and migration-v159 filters
+  // that column on IS NOT NULL only — never `<> ''`. So an empty brand is a
+  // shape the pipeline is permitted to emit, and a `.min(1)` here would turn
+  // it into a validation failure that drops the alert instead of classifying
+  // it. Prod has 0 empty rows today (2,386 alerts, checked 2026-08-10); if
+  // v159's filter is ever tightened, tighten this in the same change.
   brand: z.string(), // inferred_target_domain
-  candidateDomain: z.string(),
-  candidateUrl: z.string(),
+  // Bounded to match every sibling schema in this file (scan-requested,
+  // rescan, weaponised). These two carry attacker-chosen values from the NRD
+  // feed, so an upper bound is cheap containment against a pathological
+  // registration. Prod maxima at 2,386 alerts: domain 67, url 76.
+  candidateDomain: z.string().min(1).max(255),
+  candidateUrl: z.string().min(1).max(2048),
 });
 
 export type CloneWatchPreclassifyRequestedData = z.infer<
