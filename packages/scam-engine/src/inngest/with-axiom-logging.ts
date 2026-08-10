@@ -1,8 +1,8 @@
 // withAxiomLogging — Inngest function observability HOF (#514).
 //
 // Wraps an Inngest handler to emit exactly the lifecycle signals the #515
-// dashboards/monitors need: `fn.start` (INFO), `fn.complete` (INFO,
-// durationMs) and `fn.error` (ERROR, always ships). It threads the same
+// dashboards/monitors need: `fn.start` (INFO, sampled), `fn.complete` (WARN,
+// always ships, durationMs) and `fn.error` (ERROR, always ships). It threads the same
 // `requestId` that flows through middleware (#490) and /api/analyze (#491)
 // when the triggering event carries one, so an analyze → Inngest fan-out is
 // joinable on a single id. Cron functions have no event.data.requestId, so we
@@ -93,7 +93,21 @@ export function withAxiomLogging<TResult>(
 
     try {
       const result = await handler(ctx);
-      log.info("fn.complete", {
+      // WARN, not INFO — and this is the one signal that must not be sampled.
+      //
+      // `fn.complete` fires exactly ONCE per logical run (see the replay note
+      // above), which makes it the only true run counter this wrapper emits.
+      // At INFO it was sampled to 10%, so for any low-frequency function you
+      // could not tell "ran fine" from "never ran": archive-shadows-retention
+      // showed 1 start and 0 completes across ~19 nightly runs, and answering
+      // "is it healthy?" meant querying whether rows had actually moved.
+      // warn/error bypass sampling entirely (axiom-logger.ts), so this now
+      // ships every time.
+      //
+      // `fn.start` deliberately stays INFO: Inngest re-executes the handler at
+      // every step boundary, so it fires MORE than once per run. Un-sampling
+      // it would add volume without producing a run counter.
+      log.warn("fn.complete", {
         fn: meta.fnId,
         durationMs: Date.now() - startedAt,
       });
