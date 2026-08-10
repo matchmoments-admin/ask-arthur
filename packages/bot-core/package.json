@@ -23,10 +23,13 @@
   },
   "devDependencies": {
     "typescript": "^5",
-    "vitest": "^4.0.18"
+    "vitest": "^4.0.18",
+    "@askarthur/eslint-config": "workspace:*",
+    "eslint": "^9"
   },
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint ."
   }
 }

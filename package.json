@@ -13,7 +13,8 @@
     "lint": "turbo run lint",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
-    "check": "turbo run lint typecheck test",
+    "boundaries": "depcruise apps packages --config .dependency-cruiser.cjs",
+    "check": "turbo run lint typecheck test //#boundaries",
     "clean": "turbo run clean",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -34,6 +35,7 @@
     ]
   },
   "devDependencies": {
+    "dependency-cruiser": "^16",
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
     "prettier": "^3.8.3",
