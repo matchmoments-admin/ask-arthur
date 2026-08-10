@@ -4,7 +4,7 @@ Scoped guidance for the top-level `supabase/` directory — versioned migration 
 
 ## What this directory owns
 
-- **Versioned migration SQL** — `migration-v<N>-<slug>.sql` files (currently v2 through v142+). Apply with `mcp__supabase__apply_migration` against project `rquomhcgnodxzkhokwni`.
+- **Versioned migration SQL** — `migration-v<N>-<slug>.sql` files (currently v2 through v277+). Apply with `mcp__supabase__apply_migration` against project `rquomhcgnodxzkhokwni`.
 - **Edge functions** — `supabase/functions/` (deployed via Supabase CLI / MCP).
 - **Schema-derived assets** — the generated `packages/types/src/db.generated.ts` is regenerated against this schema after every applied migration.
 
