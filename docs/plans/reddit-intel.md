@@ -211,6 +211,18 @@ Each Anthropic and Voyage call writes to `cost_telemetry` with a stable
 `feature` tag (`reddit-intel-classify`, `reddit-intel-embed`) so the existing
 `/admin/costs` dashboard segments it correctly.
 
+**`reddit-intel-truncated` (#996)** — a $0 diagnostic tag, `provider:'diagnostic'`,
+written once per classify run whose output stopped at the 12,000-token cap.
+Not a spend row and deliberately outside every cap aggregate: `units` and
+`estimated_cost_usd` are 0 by construction, so it cannot move a threshold.
+It exists because truncation was previously invisible — the trailing
+`dailySummary` field is `.optional()`, so a truncated payload parses cleanly
+and silently loses the summary. Prod at the time of writing: 24 of 79 runs
+truncated, all 24 missing their summary, every one at `post_count` 40. Query
+it joined against `reddit_intel_daily_summary` to track whether truncation is
+getting better or worse; Axiom carries the same event as a warn, but with
+shorter retention.
+
 ---
 
 ## 6. Privacy and retention

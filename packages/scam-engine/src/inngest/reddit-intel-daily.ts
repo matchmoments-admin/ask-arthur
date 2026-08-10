@@ -244,13 +244,26 @@ const jsonStringPassthrough = (v: unknown) => {
   }
 };
 
-// dailySummary is .optional() since 2026-05-16 (#228 fix). Sonnet 4.6
-// occasionally omits the field entirely — most often on low-volume
-// cohorts (≤5 posts) where there's not enough signal to summarise. The
-// per-post classifications are the load-bearing artefact; a missing
-// summary degrades the dashboard but doesn't justify aborting the
-// whole run and losing the per-post intel. Consumer at line ~479
-// upserts only when present.
+// dailySummary is .optional() since 2026-05-16 (#228 fix). Keeping it
+// optional is still right — the per-post classifications are the
+// load-bearing artefact, and a missing summary degrades the dashboard
+// without justifying the loss of a whole cohort's intel. The consumer
+// below upserts only when the field is present.
+//
+// The ORIGINAL reason recorded here was wrong, and it sent three
+// investigations down the wrong path, so it is worth stating plainly:
+// this comment used to blame "low-volume cohorts (≤5 posts) where
+// there's not enough signal to summarise". Production says otherwise.
+// Of 79 classify runs, 24 stopped at exactly 12000 output tokens — the
+// maxTokens cap — and ALL 24 are missing the summary, while 53 of the
+// 55 that did not hit the cap have one. Every affected cohort had
+// post_count 40, the LARGEST size, not the smallest.
+//
+// So the mechanism is truncation, not model reticence: `dailySummary`
+// is the trailing field, generation stops mid-object, and because the
+// field is optional the truncated payload still parses cleanly. Being
+// optional is what makes the failure SILENT — the wrapper now reports
+// `truncated` so it is at least visible (#996).
 const SonnetOutputSchema = z.object({
   perPost: z.preprocess(jsonStringPassthrough, z.array(PerPostSchema)),
   dailySummary: z
@@ -274,9 +287,14 @@ type SonnetOutput = z.infer<typeof SonnetOutputSchema>;
 // cost_telemetry row so the daily health digest can track "how often
 // Sonnet needed re-prompting" as a leading indicator of prompt drift.
 //
-// Pattern matches the surface area of the existing error in anthropic.ts
-// line 290: "Claude output schema mismatch (${spec.id}): ..." and the
-// twin "Claude JSON parse failed (${spec.id}): ..." at line 276.
+// Pattern matches the surface area of the two existing errors in
+// anthropic.ts: "Claude output schema mismatch (${spec.id}): ..." and the
+// twin "Claude JSON parse failed (${spec.id}): ...". Matched by prefix in
+// isSchemaRetryableError below — so if a new throw is ever added to the
+// wrapper and should be retried with feedback, its prefix must be added
+// there too, or it silently bypasses the retry and burns all three Inngest
+// attempts on the same input. (Line numbers deliberately omitted: the
+// previous version of this comment cited lines 290/276, which drifted.)
 
 type CallClaudeJsonArgs<TSchema extends z.ZodType<unknown>> = Parameters<
   typeof callClaudeJson<z.infer<TSchema>>
@@ -353,6 +371,51 @@ export async function classifyWithRetry<TSchema extends z.ZodType<unknown>>(
 // ── Cost telemetry ────────────────────────────────────────────────────────
 // Direct insert because logCost lives in apps/web/lib and packages/* must
 // not import upward. Same shape as the cost_telemetry table per v62.
+
+/**
+ * $0 diagnostic marker for a run whose output hit the token cap (#996).
+ *
+ * Queryable counterpart to the Axiom warn — Axiom retention is shorter than
+ * the question "is truncation getting better or worse?" needs, and this keeps
+ * the answer joinable against reddit_intel_daily_summary in one query.
+ *
+ * NEVER THROWS. The caller's own logCost above deliberately does not guard
+ * `createServiceClient()` or the insert, which is survivable for a row that
+ * accompanies real work — but this one accompanies nothing, and a telemetry
+ * failure that fails an otherwise-successful classification run would be a
+ * regression caused purely by observability.
+ */
+async function logTruncationMarker(args: {
+  cohortDate: string;
+  postCount: number;
+  outputTokens: number;
+  maxTokens: number;
+  modelId: string;
+}): Promise<void> {
+  try {
+    const supabase = createServiceClient();
+    if (!supabase) return;
+    await supabase.from("cost_telemetry").insert({
+      feature: "reddit-intel-truncated",
+      provider: "diagnostic",
+      operation: "classify",
+      units: 0,
+      estimated_cost_usd: 0,
+      metadata: {
+        cohort_date: args.cohortDate,
+        post_count: args.postCount,
+        output_tokens: args.outputTokens,
+        max_tokens: args.maxTokens,
+        model: args.modelId,
+        prompt_version: PROMPT_VERSION,
+      },
+    });
+  } catch (err) {
+    logger.warn("reddit-intel-daily: truncation marker insert failed", {
+      error: String(err),
+    });
+  }
+}
 
 async function logCost(args: {
   estimatedCostUsd: number;
@@ -540,6 +603,22 @@ export const redditIntelDaily = inngest.createFunction(
       }
     });
 
+    // ── Step 2b: record truncation, if any (#996) ────────────────────────
+    // Its own step so a marker failure retries in isolation, and internally
+    // guarded so it can never fail the run — the classification above has
+    // already succeeded and its per-post intel is about to be written.
+    if (classification.truncated) {
+      await step.run("log-truncation", () =>
+        logTruncationMarker({
+          cohortDate: new Date(data.triggeredAt).toISOString().slice(0, 10),
+          postCount: posts.length,
+          outputTokens: classification.usage.outputTokens,
+          maxTokens: 12_000,
+          modelId: classification.modelId,
+        }),
+      );
+    }
+
     // ── Step 3: filter hallucinated post IDs ─────────────────────────────
     const inputIds = new Set(posts.map((p) => p.id as number));
     const validPerPost = classification.result.perPost.filter((entry) => {
@@ -639,11 +718,16 @@ export const redditIntelDaily = inngest.createFunction(
       // Daily summary upsert — overwrites same-day rows, allowing same-day
       // re-runs to refresh as more posts arrive in subsequent batches.
       //
-      // #228: dailySummary is now .optional() — Sonnet 4.6 occasionally
-      // omits it (especially on low-volume cohorts). When missing we skip
-      // the summary upsert entirely rather than fabricating one. The
-      // dashboard will show a missing day; the per-post intel still wrote
-      // through to reddit_post_intel, which is the load-bearing artefact.
+      // #228: dailySummary is .optional(). When missing we skip the summary
+      // upsert entirely rather than fabricating one. The dashboard shows a
+      // missing day; the per-post intel still wrote through to
+      // reddit_post_intel, which is the load-bearing artefact.
+      //
+      // #996: the dominant cause is TRUNCATION, not the model choosing to
+      // omit the field — see the note on SonnetOutputSchema above. The warn
+      // below now distinguishes the two, because they need different fixes:
+      // truncation is a token-budget problem, an unexplained omission is a
+      // prompt-compliance problem.
       const cohortDate = new Date(data.triggeredAt).toISOString().slice(0, 10);
       const summary = classification.result.dailySummary;
 
@@ -671,11 +755,16 @@ export const redditIntelDaily = inngest.createFunction(
         }
       } else {
         logger.warn(
-          "reddit-intel-daily: dailySummary missing from Sonnet output — skipping summary upsert",
+          classification.truncated
+            ? "reddit-intel-daily: dailySummary lost to max_tokens truncation — skipping summary upsert"
+            : "reddit-intel-daily: dailySummary missing from Sonnet output (not truncated) — skipping summary upsert",
           {
             cohortDate,
             postCount: validPerPost.length,
             retried: classification.retried,
+            truncated: classification.truncated,
+            stopReason: classification.stopReason,
+            outputTokens: classification.usage.outputTokens,
           },
         );
       }

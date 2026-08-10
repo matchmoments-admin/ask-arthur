@@ -24,6 +24,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 
+import { getLogger } from "@askarthur/utils/axiom-logger";
 import { logger } from "@askarthur/utils/logger";
 
 import { buildInjectionSandwich } from "./claude";
@@ -81,6 +82,55 @@ export interface CallClaudeResult<T> {
   /** Computed against MODELS[*] rates; cents-of-a-cent precision. */
   estimatedCostUsd: number;
   modelId: string;
+  /** Raw `stop_reason` from the API. `end_turn` on a normal completion. */
+  stopReason: string | null;
+  /** True when generation stopped because it hit `maxTokens`.
+   *
+   *  A truncated response can still PARSE CLEANLY — Zod accepts it whenever
+   *  the fields lost to truncation happen to be `.optional()`. That is not a
+   *  hypothetical: of 79 production `reddit-intel-classify` runs, 24 stopped
+   *  exactly at the cap, and all 24 silently lost `dailySummary` while
+   *  writing their 40 per-post rows successfully. Whether truncation is
+   *  loud, quiet or invisible is decided by an unrelated schema detail, so
+   *  callers that care must check this flag rather than trusting a clean
+   *  parse. */
+  truncated: boolean;
+}
+
+/**
+ * Thrown when generation stopped at `maxTokens` and the caller opted in via
+ * `throwOnTruncation`. Diagnostics travel as TYPED FIELDS, never as digits in
+ * `message` — two live classifiers pattern-match Claude error text
+ * (`apps/web/app/api/inbound-scan/route.ts` by regex, `reddit-intel-daily.ts`
+ * by prefix), and the former treats any bare 3-digit 5xx-shaped number as a
+ * transient failure worth retrying. An `output_tokens=587` in the message
+ * would therefore be misread as a server error.
+ */
+export class ClaudeTruncatedOutputError extends Error {
+  /** Explicit — a subclass that does not set this still reports "Error",
+   *  and `apps/web/app/api/analyze/route.ts` logs `err.name` as `errorType`. */
+  override readonly name = "ClaudeTruncatedOutputError";
+  readonly modelId: string;
+  readonly maxTokens: number;
+  readonly usage: CallClaudeUsage;
+  readonly estimatedCostUsd: number;
+  /** The parsed-but-incomplete payload, when it satisfied the schema. */
+  readonly partial: unknown;
+
+  constructor(args: {
+    modelId: string;
+    maxTokens: number;
+    usage: CallClaudeUsage;
+    estimatedCostUsd: number;
+    partial: unknown;
+  }) {
+    super(`Claude output truncated (${args.modelId})`);
+    this.modelId = args.modelId;
+    this.maxTokens = args.maxTokens;
+    this.usage = args.usage;
+    this.estimatedCostUsd = args.estimatedCostUsd;
+    this.partial = args.partial;
+  }
 }
 
 export interface CallClaudeJsonOptions<T> {
@@ -114,6 +164,17 @@ export interface CallClaudeJsonOptions<T> {
    *  in Anthropic's response metadata; choose something descriptive like
    *  'classify_reddit_posts' for easier log triage. */
   toolName?: string;
+  /** Throw `ClaudeTruncatedOutputError` when generation stops at `maxTokens`,
+   *  instead of returning a possibly-incomplete result. Default false.
+   *
+   *  Leave this OFF unless you have checked what the caller does with a
+   *  partial result today. Truncated responses frequently parse cleanly and
+   *  persist most of their work; throwing discards that. The reddit-intel
+   *  classifier is the worst case — it writes 40 of 40 per-post rows on a
+   *  truncated run, so throwing there would trade a missing summary for the
+   *  loss of the entire cohort, and the 6-hourly trigger would re-offer the
+   *  same posts indefinitely. */
+  throwOnTruncation?: boolean;
 }
 
 /**
@@ -142,6 +203,7 @@ export async function callClaudeJson<T>(
     requestId,
     useToolUse = false,
     toolName = "submit_response",
+    throwOnTruncation = false,
   } = opts;
 
   if (!process.env.ANTHROPIC_API_KEY) {
@@ -230,6 +292,30 @@ export async function callClaudeJson<T>(
     usage.cacheWriteTokens * spec.cacheWriteUsdPerToken +
     usage.cacheReadTokens * spec.cacheReadUsdPerToken;
 
+  // Detected here, AFTER usage and cost are in scope, rather than at the
+  // response boundary — so any throw below can carry them. The classifier
+  // documents the cost of the alternative against itself: "We don't have the
+  // failed call's usage object (the wrapper threw before returning)"
+  // (reddit-intel-daily.ts, retryEstimatedCostUsd).
+  const stopReason = response.stop_reason ?? null;
+  const truncated = stopReason === "max_tokens";
+
+  if (truncated) {
+    // warn, not info: `getLogger` samples info at 10% in production but
+    // passes warn and error through unsampled, and truncation is exactly the
+    // rare-but-load-bearing event sampling would hide.
+    getLogger({ source: "scam-engine/anthropic", requestId }).warn(
+      "Claude output truncated at max_tokens — result may be partial",
+      {
+        modelId: spec.id,
+        maxTokens,
+        outputTokens: usage.outputTokens,
+        useToolUse,
+        throwOnTruncation,
+      },
+    );
+  }
+
   // Tool-use response: the model called our forced tool, so the input is
   // already a parsed JS object. Skip extractJson + JSON.parse entirely.
   // If for any reason the response lacks a tool_use block (shouldn't happen
@@ -296,12 +382,28 @@ export async function callClaudeJson<T>(
     );
   }
 
+  // Opt-in only, and off by default: a truncated response has usually already
+  // done most of its work, and several callers persist that partial result
+  // today. Throwing here would discard it. Callers opt in one at a time, once
+  // the `reddit-intel-truncated` markers show what they would be giving up.
+  if (truncated && throwOnTruncation) {
+    throw new ClaudeTruncatedOutputError({
+      modelId: spec.id,
+      maxTokens,
+      usage,
+      estimatedCostUsd,
+      partial: result.data,
+    });
+  }
+
   return {
     result: result.data,
     usage,
     cacheHit,
     estimatedCostUsd,
     modelId: spec.id,
+    stopReason,
+    truncated,
   };
 }
 
