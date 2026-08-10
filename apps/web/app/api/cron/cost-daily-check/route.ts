@@ -220,9 +220,21 @@ export async function GET(req: Request) {
   // feature='phone_footprint') for the brake calculation. Cap tighter than
   // the per-feature plan ($5/day) — at 1k DAU a runaway refresh loop could
   // rack up Vonage spend in minutes.
+  // The telemetry half is `.filter().reduce()`, not `.find()`, for the same
+  // reason as charity_check: daily_cost_summary groups by
+  // (day, feature, provider), so a multi-provider feature yields multiple rows
+  // and `.find()` silently keeps only the first. It sums to 0 today —
+  // phone-footprint is mothballed (NORTH_STAR.md) behind
+  // NEXT_PUBLIC_FF_PHONE_FOOTPRINT_CONSUMER and has written zero cost_telemetry
+  // rows ever — so this is pre-emptive rather than a live fix.
+  //
+  // The brake itself stays: `vonageCost` above is a REAL and separate source
+  // (telco_api_usage, ~$0.12/lookup), so this guard is live even while the
+  // telemetry side is empty. Deleting it would remove a working control.
   const phoneFootprintThresholdUsd = envReads.PHONE_FOOTPRINT_CAP_USD.value;
-  const phoneFootprintTelemetryCost =
-    top.find((t) => t.feature === "phone_footprint")?.cost ?? 0;
+  const phoneFootprintTelemetryCost = top
+    .filter((t) => t.feature === "phone_footprint")
+    .reduce((sum, t) => sum + t.cost, 0);
   const phoneFootprintCost = vonageCost + phoneFootprintTelemetryCost;
 
   // Charity Check — v0.1 has zero marginal external cost (ACNC is a local

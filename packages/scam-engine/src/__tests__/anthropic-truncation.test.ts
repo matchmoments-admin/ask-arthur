@@ -192,6 +192,32 @@ describe("callClaudeJson truncation detection", () => {
   });
 });
 
+describe("transport failures", () => {
+  it("rethrows the original error unchanged", async () => {
+    // The telemetry row is observation, not handling. A caller's retry logic
+    // keys on the real SDK error, so replacing or wrapping it would change
+    // behaviour — and if the telemetry insert itself throws, the caller must
+    // still see the Anthropic error rather than a Supabase one.
+    const rateLimit = Object.assign(new Error("429 rate_limit_error"), {
+      status: 429,
+    });
+    mockCreate.mockRejectedValueOnce(rateLimit);
+
+    const err = await callClaudeJson(args()).catch((e: unknown) => e);
+
+    expect(err).toBe(rateLimit);
+    expect((err as { status?: number }).status).toBe(429);
+  });
+
+  it("does not swallow the failure when telemetry is unavailable", async () => {
+    // No Supabase env in tests, so logCost's createServiceClient() returns
+    // null or throws — either way the original error must still surface.
+    mockCreate.mockRejectedValueOnce(new Error("ETIMEDOUT"));
+
+    await expect(callClaudeJson(args())).rejects.toThrow("ETIMEDOUT");
+  });
+});
+
 describe("truncation that BREAKS the schema", () => {
   it("still throws the schema-mismatch error, but logs truncation as the cause", async () => {
     // The misdiagnosis path this whole issue is about. Generation stops
