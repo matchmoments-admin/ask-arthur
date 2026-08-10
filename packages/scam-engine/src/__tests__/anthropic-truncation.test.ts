@@ -165,6 +165,42 @@ describe("callClaudeJson truncation detection", () => {
   });
 });
 
+describe("truncation that BREAKS the schema", () => {
+  it("still throws the schema-mismatch error, but logs truncation as the cause", async () => {
+    // The misdiagnosis path this whole issue is about. Generation stops
+    // mid-object, the trailing REQUIRED field is absent, and Zod reports a
+    // missing field — which reads as prompt non-compliance rather than
+    // running out of room. The message must not change (two classifiers
+    // match it), so the root cause has to ride in the log metadata.
+    const errorSpy = vi
+      .spyOn(await import("@askarthur/utils/logger").then((m) => m.logger), "error")
+      .mockImplementation(() => {});
+
+    mockCreate.mockResolvedValueOnce(
+      apiResponse({
+        stopReason: "max_tokens",
+        text: JSON.stringify({ tail: "b" }), // required `head` lost
+        outputTokens: 500,
+      }),
+    );
+
+    const err = (await callClaudeJson(args()).catch(
+      (e: unknown) => e,
+    )) as Error;
+
+    // Unchanged surface — retry-with-feedback still recognises it.
+    expect(err.message.startsWith("Claude output schema mismatch")).toBe(true);
+
+    // ...but the log now says WHY, which it previously could not.
+    const logged = errorSpy.mock.calls.at(-1)?.[1] as Record<string, unknown>;
+    expect(logged.truncated).toBe(true);
+    expect(logged.stopReason).toBe("max_tokens");
+    expect(logged.outputTokens).toBe(500);
+
+    errorSpy.mockRestore();
+  });
+});
+
 describe("existing error prefixes are byte-stable", () => {
   // isSchemaRetryableError in reddit-intel-daily.ts matches these by
   // startsWith. A change here silently disables retry-with-feedback.

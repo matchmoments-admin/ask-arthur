@@ -304,16 +304,20 @@ export async function callClaudeJson<T>(
     // warn, not info: `getLogger` samples info at 10% in production but
     // passes warn and error through unsampled, and truncation is exactly the
     // rare-but-load-bearing event sampling would hide.
-    getLogger({ source: "scam-engine/anthropic", requestId }).warn(
-      "Claude output truncated at max_tokens — result may be partial",
-      {
-        modelId: spec.id,
-        maxTokens,
-        outputTokens: usage.outputTokens,
-        useToolUse,
-        throwOnTruncation,
-      },
-    );
+    const axiom = getLogger({ source: "scam-engine/anthropic", requestId });
+    axiom.warn("Claude output truncated at max_tokens — result may be partial", {
+      modelId: spec.id,
+      maxTokens,
+      outputTokens: usage.outputTokens,
+      useToolUse,
+      throwOnTruncation,
+    });
+    // Flush explicitly. Every other Axiom call site in the repo does
+    // (asic-lookup, competitor-intel-extract-cron, with-axiom-logging,
+    // middleware) because an Inngest invocation or serverless request can end
+    // before a buffered log ships — and a truncation warn that never arrives
+    // is an observability change that is not observable.
+    void axiom.flush().catch(() => {});
   }
 
   // Tool-use response: the model called our forced tool, so the input is
@@ -368,11 +372,22 @@ export async function callClaudeJson<T>(
 
   const result = schema.safeParse(parsed);
   if (!result.success) {
+    // `truncated` is the root cause a reader of this log most often wants and
+    // cannot otherwise get: when generation stops mid-object, the trailing
+    // required field is simply absent, and Zod reports it as a missing field —
+    // which reads as prompt non-compliance, not as running out of room. The
+    // thrown message stays byte-identical (isSchemaRetryableError matches it
+    // by prefix, and inbound-scan's retry gate regex-matches its text), so the
+    // diagnosis rides in metadata where nothing pattern-matches it.
     logger.error("Claude output failed schema validation", {
       requestId,
       modelId: spec.id,
       issues: result.error.issues.slice(0, 5),
       preview: JSON.stringify(parsed).slice(0, 200),
+      truncated,
+      stopReason,
+      outputTokens: usage.outputTokens,
+      maxTokens,
     });
     throw new Error(
       `Claude output schema mismatch (${spec.id}): ${result.error.issues
