@@ -167,13 +167,21 @@ export interface CallClaudeJsonOptions<T> {
   /** Throw `ClaudeTruncatedOutputError` when generation stops at `maxTokens`,
    *  instead of returning a possibly-incomplete result. Default false.
    *
-   *  Leave this OFF unless you have checked what the caller does with a
-   *  partial result today. Truncated responses frequently parse cleanly and
-   *  persist most of their work; throwing discards that. The reddit-intel
-   *  classifier is the worst case — it writes 40 of 40 per-post rows on a
-   *  truncated run, so throwing there would trade a missing summary for the
-   *  loss of the entire cohort, and the 6-hourly trigger would re-offer the
-   *  same posts indefinitely. */
+   *  ORDERING, verified against the live API: schema validation runs FIRST,
+   *  so this only fires when a truncated payload still SATISFIES the schema.
+   *  When truncation removes a *required* field the schema throw wins and you
+   *  get "Claude output schema mismatch" instead — now carrying
+   *  `truncated`/`stopReason`/`outputTokens` in its log metadata, which is
+   *  how you tell that case apart. So this flag targets exactly the silent
+   *  branch: truncated, parsed, quietly missing optional data.
+   *
+   *  Leave it OFF unless you have checked what the caller does with a partial
+   *  result today. Truncated responses frequently parse cleanly and persist
+   *  most of their work; throwing discards that. The reddit-intel classifier
+   *  is the worst case — it writes 40 of 40 per-post rows on a truncated run,
+   *  so throwing there would trade a missing summary for the loss of the
+   *  entire cohort, and the 6-hourly trigger would re-offer the same posts
+   *  indefinitely. */
   throwOnTruncation?: boolean;
 }
 

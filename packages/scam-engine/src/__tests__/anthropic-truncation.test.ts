@@ -85,6 +85,33 @@ describe("callClaudeJson truncation detection", () => {
     expect(out.result).toEqual({ head: "a", tail: "b" });
   });
 
+  it("treats tool_use as a normal completion — what 6 of 7 callers actually see", async () => {
+    // Verified against the live API: in tool-use mode a successful response
+    // carries stop_reason "tool_use", NOT "end_turn". Since almost every
+    // production caller sets useToolUse, "tool_use" is the normal case in
+    // this codebase, and a truncation check written as `!== "end_turn"`
+    // would flag every healthy tool-use call. `=== "max_tokens"` is the only
+    // formulation that survives both paths.
+    mockCreate.mockResolvedValueOnce({
+      content: [{ type: "tool_use", input: { head: "a", tail: "b" } }],
+      stop_reason: "tool_use",
+      usage: {
+        input_tokens: 100,
+        output_tokens: 34,
+        cache_read_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+      },
+    });
+
+    const out = await callClaudeJson(
+      args({ useToolUse: true, toolName: "submit_stub" }),
+    );
+
+    expect(out.stopReason).toBe("tool_use");
+    expect(out.truncated).toBe(false);
+    expect(out.result).toEqual({ head: "a", tail: "b" });
+  });
+
   it("reports truncated=true when generation stopped at max_tokens", async () => {
     mockCreate.mockResolvedValueOnce(apiResponse({ stopReason: "max_tokens" }));
 
