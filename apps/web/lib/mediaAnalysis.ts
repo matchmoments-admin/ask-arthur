@@ -5,6 +5,7 @@ import { analyzeWithClaude, detectInjectionAttempt } from "@askarthur/scam-engin
 import { scrubPII } from "@askarthur/scam-engine/sanitize";
 import { incrementStats } from "@askarthur/scam-engine/pipeline";
 import { logger } from "@askarthur/utils/logger";
+import { logCost, claudeHaikuCostUsd } from "@/lib/cost-telemetry";
 
 export interface MediaJob {
   id: string;
@@ -163,6 +164,42 @@ export async function runMediaAnalysis(
     incrementStats(aiResult.verdict, null).catch((err) =>
       logger.error("incrementStats fire-and-forget failed (media)", { error: String(err) })
     );
+
+    // 7. Cost telemetry. Until now this leg called Claude and recorded
+    // nothing — the file's own Whisper call logs (lib/whisper.ts), so the
+    // omission was Claude-specific and /api/media/analyze spend was invisible
+    // to /admin/costs, the weekly digest and the DAILY_COST_THRESHOLD_USD gate.
+    //
+    // Its OWN try/catch, and deliberately after the status:'complete' write
+    // above: `logCost` calls createServiceClient() outside its internal try, so
+    // it CAN throw, and anything thrown here lands in the outer catch that
+    // stamps status:'error'. That would turn a finished, already-billed
+    // analysis into a failed job — a regression caused purely by adding
+    // observability. Telemetry never fails the work it measures.
+    try {
+      if (aiResult.usage) {
+        await logCost({
+          feature: "media_analyze",
+          provider: "anthropic",
+          operation: "claude-haiku-4-5-20251001",
+          units: aiResult.usage.inputTokens + aiResult.usage.outputTokens,
+          estimatedCostUsd: claudeHaikuCostUsd(
+            aiResult.usage.inputTokens,
+            aiResult.usage.outputTokens,
+          ),
+          metadata: {
+            input_tokens: aiResult.usage.inputTokens,
+            output_tokens: aiResult.usage.outputTokens,
+            job_id: jobId,
+          },
+        });
+      }
+    } catch (err) {
+      logger.warn("media_analyze cost telemetry failed (non-fatal)", {
+        jobId,
+        error: String(err),
+      });
+    }
 
     return getMediaJob(jobId);
   } catch (err) {

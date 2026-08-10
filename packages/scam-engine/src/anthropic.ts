@@ -28,6 +28,7 @@ import { getLogger } from "@askarthur/utils/axiom-logger";
 import { logger } from "@askarthur/utils/logger";
 
 import { buildInjectionSandwich } from "./claude";
+import { logCost } from "./cost-log";
 
 export type ClaudeModelKey = "HAIKU_4_5" | "SONNET_4_6" | "OPUS_4_7";
 
@@ -297,9 +298,52 @@ export async function callClaudeJson<T>(
   // pattern with `400 invalid_request_error: This model does not support
   // assistant message prefill`. On the legacy text path we rely on the
   // system prompt's "Return JSON only" instruction + extractJson() below.
-  const response = await client.messages.create(requestParams, {
-    timeout: timeoutMs,
-  });
+  //
+  // TRANSPORT FAILURES ARE LOGGED HERE, and this is the only place they can
+  // be. Every caller logs cost AFTER callClaudeJson returns, so a call that
+  // throws leaves no cost_telemetry row at all — across 2,582 lifetime
+  // Anthropic rows there was not one 429, 529 or timeout. That does not mean
+  // none happened; it means the table records survivors only, and every
+  // distribution drawn from it is a survivorship sample. Anything reasoning
+  // about Claude reliability from cost_telemetry is unsound until this row
+  // exists.
+  let response: Anthropic.Messages.Message;
+  try {
+    response = await client.messages.create(requestParams, {
+      timeout: timeoutMs,
+    });
+  } catch (err) {
+    // $0 diagnostic row, then rethrow unchanged — this observes the failure,
+    // it does not handle it. Its own try/catch because logCost calls
+    // createServiceClient() outside its internal try and can therefore throw:
+    // a telemetry failure must never replace the real Anthropic error with a
+    // Supabase one, which would be strictly worse than no telemetry.
+    const status = (err as { status?: number })?.status;
+    try {
+      await logCost({
+        feature: "claude-transport-error",
+        provider: "diagnostic",
+        operation: "messages.create",
+        units: 0,
+        estimatedCostUsd: 0,
+        metadata: {
+          model: spec.id,
+          status: status ?? null,
+          error_name: err instanceof Error ? err.name : "Unknown",
+          // Message only — no stack, and nothing here is parsed by the two
+          // classifiers that match on Claude error TEXT (see
+          // ClaudeTruncatedOutputError). This is a metadata field, not a
+          // message, so digits are safe.
+          error: err instanceof Error ? err.message.slice(0, 300) : String(err),
+          use_tool_use: useToolUse,
+          request_id: requestId ?? null,
+        },
+      });
+    } catch {
+      // Deliberately silent: the caller is about to see the real error.
+    }
+    throw err;
+  }
 
   const usage: CallClaudeUsage = {
     inputTokens: response.usage?.input_tokens ?? 0,
