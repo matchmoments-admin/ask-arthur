@@ -55,6 +55,36 @@ import { withAxiomLogging } from "./with-axiom-logging";
 // on and is irrelevant (input is ~11% of cost).
 const PROMPT_VERSION = "reddit-intel-v2@2026-06-28";
 
+// ── Output budget ─────────────────────────────────────────────────────────
+//
+// One constant, referenced by the call AND by the truncation marker, so the
+// two can never disagree about what the ceiling was.
+//
+// Raised 12,000 → 16,000 on 2026-08-10. The v2 note above predicted the trim
+// would stop 40-post batches hitting the cap. Production says it did not:
+// of 78 classify runs, 24 stopped at exactly 12,000 output tokens, and all
+// 24 lost their dailySummary while still writing 40 of 40 per-post rows.
+// That is $5.01 of the $14.91 this feature has spent — a third of the
+// largest Claude cost line in the platform, paid in full for partial output.
+//
+// Headroom is free: billing is on tokens actually generated, so a ceiling
+// the model does not reach costs nothing. The real risk is the opposite one
+// — see CLASSIFY_TIMEOUT_MS.
+//
+// Deliberately below ~16K: past that the Anthropic SDK wants streaming to
+// avoid HTTP timeouts, and this is a non-streaming call. Going higher is a
+// bigger change than raising a number.
+export const CLASSIFY_MAX_TOKENS = 16_000;
+
+// MUST be raised whenever CLASSIFY_MAX_TOKENS is. Sonnet 4.6 emits at
+// ~50-100 tokens/sec, so the worst case is maxTokens/50 seconds: 240s was
+// exactly right for 12k, and would now cut a full-length 16k response off
+// mid-flight — converting a truncation into a timeout, which is strictly
+// worse because a timeout returns nothing at all. 16,000/50 = 320s, so 360s
+// carries a margin. Inngest's function ceiling is 15 min, so retries still
+// have room.
+export const CLASSIFY_TIMEOUT_MS = 360_000;
+
 /**
  * Resolve the Claude model for the daily classify call. Defaults to Sonnet 4.6
  * (the historical model), overridable to Haiku 4.5 via the
@@ -264,6 +294,10 @@ const jsonStringPassthrough = (v: unknown) => {
 // field is optional the truncated payload still parses cleanly. Being
 // optional is what makes the failure SILENT — the wrapper now reports
 // `truncated` so it is at least visible (#996).
+//
+// Those figures describe the 12,000-token era. CLASSIFY_MAX_TOKENS is now
+// 16,000, which is the actual fix — the field stays optional so that a
+// cohort is never lost outright if the ceiling is reached again.
 const SonnetOutputSchema = z.object({
   perPost: z.preprocess(jsonStringPassthrough, z.array(PerPostSchema)),
   dailySummary: z
@@ -566,17 +600,8 @@ export const redditIntelDaily = inngest.createFunction(
           system: SYSTEM_PROMPT,
           user: JSON.stringify(envelope),
           schema: SonnetOutputSchema,
-          // Output budget kept at 12k. Pre-v2 this was the binding constraint:
-          // actual output averaged ~11.5k for 40 posts and ~half the runs hit
-          // the cap, which truncates the tail of `perPost` (load-bearing). The
-          // v2 trim (1 quote/post, ~120-word narrative) frees budget so the
-          // per-post classifications fit comfortably under 12k. Billing is on
-          // actual usage, so the headroom itself costs nothing.
-          maxTokens: 12_000,
-          // 240s = 4 min. Sonnet 4.6 outputs at ~50-100 tokens/sec, so 12k
-          // worst-case output finishes in ~4 min. Inngest function-level
-          // limit is 15 min so retries still have headroom.
-          timeoutMs: 240_000,
+          maxTokens: CLASSIFY_MAX_TOKENS,
+          timeoutMs: CLASSIFY_TIMEOUT_MS,
           // No assistant prefill in the wrapper anymore (Sonnet 4.6 rejects
           // it). cacheSystem stays on — wrapper still requests cache, just
           // without the prefill scaffolding.
@@ -613,7 +638,7 @@ export const redditIntelDaily = inngest.createFunction(
           cohortDate: new Date(data.triggeredAt).toISOString().slice(0, 10),
           postCount: posts.length,
           outputTokens: classification.usage.outputTokens,
-          maxTokens: 12_000,
+          maxTokens: CLASSIFY_MAX_TOKENS,
           modelId: classification.modelId,
         }),
       );
