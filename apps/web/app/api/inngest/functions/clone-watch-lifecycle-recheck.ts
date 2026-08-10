@@ -290,18 +290,28 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
       const { submitted, submitFailed, reputationHits } = submitBatch;
 
       // Mark each candidate rechecked (bump recheck_count + last_rechecked_at)
-      // via the same guarded transition RPC, holding lifecycle_state unchanged
       // so it drops out of the cadence window until the re-scan verdict lands.
+      //
+      // This used to call advance_clone_lifecycle with
+      // `p_to_state: c.lifecycle_state` as a "no-op state change" — a value read
+      // back in the load-candidates step, BEFORE submit-batch ran. Since #990 the
+      // submit step can itself move a row declined -> weaponised, so the no-op
+      // stopped being a no-op: it replayed a stale state and overwrote the
+      // weaponisation the same run had just discovered. Caught in prod on alert
+      // 2272 (`qantasa.exchange`) — weaponised 00:31:43, back to 'declined'
+      // 00:32:13. weaponised_at survived (so the alert still fired) but every
+      // count reads lifecycle_state, so it landed in the wrong bucket.
+      //
+      // v278's RPC takes an id and nothing else, so this step cannot name a
+      // lifecycle state at all.
       await step.run("mark-rechecked", async () => {
         for (const c of candidates) {
-          const { error } = await sb.rpc("advance_clone_lifecycle", {
+          const { error } = await sb.rpc("mark_clone_alert_rechecked", {
             p_alert_id: c.id,
-            p_to_state: c.lifecycle_state, // no-op state change; just re-check bookkeeping
-            p_mark_rechecked: true,
           });
           if (error) {
             throw new Error(
-              `advance_clone_lifecycle(mark_rechecked) failed for alert ${c.id}: ${error.message}`,
+              `mark_clone_alert_rechecked failed for alert ${c.id}: ${error.message}`,
             );
           }
         }
