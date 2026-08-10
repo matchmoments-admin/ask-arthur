@@ -144,6 +144,18 @@ const nextConfig: NextConfig = {
         destination: "https://askarthur.au/:path*",
         permanent: true,
       },
+      // justaskarthur.com — global .com entry point acquired 2026-07-13.
+      // 301 to the canonical AU domain so link equity consolidates on
+      // askarthur.au and the .au trust/positioning signal stays primary.
+      // Same host-match pattern as askarthur.com.au above; requires the
+      // domain to be added to the Vercel project + GoDaddy DNS pointed at
+      // Vercel before it resolves.
+      {
+        source: "/:path*",
+        has: [{ type: "host", value: "(www\\.)?justaskarthur\\.com" }],
+        destination: "https://askarthur.au/:path*",
+        permanent: true,
+      },
       {
         source: "/audit",
         destination: "/health",
