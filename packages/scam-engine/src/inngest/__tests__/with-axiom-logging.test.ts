@@ -139,17 +139,25 @@ describe("withAxiomLogging — production-only cron guard", () => {
  * docs/agents/defect-shapes.md shape N.
  */
 describe("fn.complete reports true elapsed time, not the final replay segment", () => {
-  const logged: Array<{ msg: string; fields: Record<string, unknown> }> = [];
+  const logged: Array<{
+    msg: string;
+    fields: Record<string, unknown>;
+    level: string;
+  }> = [];
 
   beforeEach(() => {
     logged.length = 0;
     process.env.FF_AXIOM_ENABLED = "true";
     vi.spyOn(axiomLogger, "getLogger").mockReturnValue({
       info: (msg: string, fields: Record<string, unknown>) =>
-        logged.push({ msg, fields }),
-      warn: () => {},
+        logged.push({ msg, fields, level: "info" }),
+      // Captured, not stubbed: fn.complete is deliberately WARN so it bypasses
+      // the 10% INFO sampling (#1007). Stubbing warn here would make every
+      // assertion below silently read an empty array.
+      warn: (msg: string, fields: Record<string, unknown>) =>
+        logged.push({ msg, fields, level: "warn" }),
       error: (msg: string, fields: Record<string, unknown>) =>
-        logged.push({ msg, fields }),
+        logged.push({ msg, fields, level: "error" }),
       debug: () => {},
       flush: async () => {},
     } as unknown as ReturnType<typeof axiomLogger.getLogger>);
@@ -212,17 +220,25 @@ describe("fn.complete reports true elapsed time, not the final replay segment", 
 });
 
 describe("the elapsed metric is interpretable on a retry", () => {
-  const logged: Array<{ msg: string; fields: Record<string, unknown> }> = [];
+  const logged: Array<{
+    msg: string;
+    fields: Record<string, unknown>;
+    level: string;
+  }> = [];
 
   beforeEach(() => {
     logged.length = 0;
     process.env.FF_AXIOM_ENABLED = "true";
     vi.spyOn(axiomLogger, "getLogger").mockReturnValue({
       info: (msg: string, fields: Record<string, unknown>) =>
-        logged.push({ msg, fields }),
-      warn: () => {},
+        logged.push({ msg, fields, level: "info" }),
+      // Captured, not stubbed: fn.complete is deliberately WARN so it bypasses
+      // the 10% INFO sampling (#1007). Stubbing warn here would make every
+      // assertion below silently read an empty array.
+      warn: (msg: string, fields: Record<string, unknown>) =>
+        logged.push({ msg, fields, level: "warn" }),
       error: (msg: string, fields: Record<string, unknown>) =>
-        logged.push({ msg, fields }),
+        logged.push({ msg, fields, level: "error" }),
       debug: () => {},
       flush: async () => {},
     } as unknown as ReturnType<typeof axiomLogger.getLogger>);
@@ -240,6 +256,26 @@ describe("the elapsed metric is interpretable on a retry", () => {
 
     const fields = logged.find((l) => l.msg === "fn.complete")!.fields;
     expect(fields["attempt"]).toBe(2);
+  });
+
+  it("emits fn.complete at WARN so it is never sampled away", async () => {
+    // The point of #1007. fn.complete fires exactly once per logical run, which
+    // makes it the only true run counter this wrapper emits — at INFO's 10%
+    // sampling a low-frequency cron was indistinguishable from one that never
+    // ran (archive-shadows-retention: 1 start, 0 completes across ~19 nightly
+    // runs). Demoting it back to info would silently restore that blindness,
+    // and would also invalidate docs/ops/inngest-slot-budget.md, which now
+    // states the percentiles cover every run.
+    const wrapped = withAxiomLogging({ fnId: "test-fn" }, async () => "ok");
+    await wrapped(ctx({ event: { ts: Date.now() - 1_000 }, runId: "r" }));
+
+    const complete = logged.find((l) => l.msg === "fn.complete")!;
+    expect(complete.level).toBe("warn");
+
+    // fn.start deliberately stays INFO: it fires more than once per run (the
+    // handler is re-executed at every step boundary), so un-sampling it would
+    // add volume without producing a run counter.
+    expect(logged.find((l) => l.msg === "fn.start")!.level).toBe("info");
   });
 
   it("carries `attempt` on fn.error too", async () => {
