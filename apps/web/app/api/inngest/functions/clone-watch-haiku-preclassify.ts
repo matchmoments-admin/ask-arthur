@@ -49,7 +49,15 @@ import { logCost } from "@/lib/cost-telemetry";
 // Prompt rubric version. Bump on every change so trend queries can
 // filter to a consistent classifier. The DB persists this alongside
 // each row.
-const PROMPT_VERSION = "v1";
+// v2 (2026-08-10, #999): the user turn is now wrapped in the injection
+// sandwich — `userIsTrusted: true` was removed because candidate_domain and
+// candidate_url are attacker-registered strings from the NRD feed. The model
+// now sees pre/post instructions and a nonce-tagged delimiter around that
+// envelope, so classifications may shift. prompt_version is persisted on
+// every clone_watch_classifications row (2,386 of them, all v1 as of
+// 2026-08-10), so this bump is what makes the two cohorts separable — a
+// discriminator that cannot be reconstructed after the fact.
+const PROMPT_VERSION = "v2";
 
 // System prompt — cached via cache_control:ephemeral (callClaudeJson
 // default). Static across calls so the Anthropic cache hits.
@@ -211,7 +219,14 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
           model: "HAIKU_4_5",
           system: SYSTEM_PROMPT,
           user: userMessage,
-          userIsTrusted: true, // structured envelope, not raw user text
+          // The removed `userIsTrusted: true` said "structured envelope, not
+          // raw user text". The envelope's SHAPE is ours; its CONTENTS are
+          // not. `candidate_domain` and `candidate_url` come from the whoisds
+          // newly-registered-domain feed — strings an attacker chose and paid
+          // to register, which is as untrusted as input gets. JSON.stringify
+          // escapes quotes and control characters, so the JSON cannot be
+          // broken out of; it does nothing about instruction-shaped text
+          // inside a value. The sandwich is what handles that.
           schema: ClassificationOutputSchema,
           maxTokens: 256,
           cacheSystem: true,

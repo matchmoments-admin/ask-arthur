@@ -38,7 +38,15 @@ import { isRedditIntelBraked } from "../inngest/reddit-intel-error-log";
 import { fetchAllRows } from "@askarthur/supabase/paginate";
 
 // Bump when the prompt or output schema changes materially.
-const PROMPT_VERSION = "reddit-intel-weekly-synth-v1@2026-07-07";
+// v2 (2026-08-10, #999): the user turn is now wrapped in the injection
+// sandwich — `userIsTrusted: true` was removed because the prompt appends
+// model-written narratives derived from raw Reddit posts. The wrapper adds
+// pre/post instructions and a nonce-tagged delimiter around that content, so
+// what the model sees is materially different and outputs may shift.
+// Bumping is the only way to tell pre- from post-sandwich rows apart later:
+// prompt_version is persisted with every row, and the discriminator cannot
+// be reconstructed after the fact.
+const PROMPT_VERSION = "reddit-intel-weekly-synth-v2@2026-08-10";
 const MODEL_KEY = "SONNET_4_6" as const;
 
 const COHORT_DAYS = 7;
@@ -337,7 +345,13 @@ export async function synthesizeWeeklyIntel(
     timeoutMs: 60_000,
     useToolUse: true,
     toolName: "submit_weekly_stories",
-    userIsTrusted: true, // our own aggregated envelope, not raw external text
+    // The `user` string is NOT purely our own envelope, which is what the
+    // removed `userIsTrusted: true` claimed. It appends `narrativeLines`,
+    // built above from `narrative_summary` and `brands_impersonated` — model
+    // output derived from raw Reddit post titles and bodies, up to
+    // MAX_NARRATIVES_IN_PROMPT rows of it. Laundering attacker-authored text
+    // through one model does not make it trusted input to the next, so it
+    // gets the wrapper's default sandwich like any other external content.
     requestId: `weekly-synth-${weekStart}`,
   });
 
