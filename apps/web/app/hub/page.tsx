@@ -27,11 +27,14 @@ export const revalidate = 3600; // 1 hour — matches /clone-watch/[period]
 
 const ORIGIN = "https://askarthur.au";
 
-// PRE-LAUNCH: set this to the real profile/company URL. Left null deliberately
-// rather than guessed — the "Elsewhere" row omits itself while it is unset, so
-// the deck can ship without a dead link on it. A page whose whole job is
-// teaching people to verify links does not get to serve a broken one.
-const LINKEDIN_URL: string | null = null;
+// The Ask Arthur company page. Same URL the homepage already publishes as the
+// organisation's schema.org `sameAs` (app/page.tsx) — taken from there rather
+// than guessed, so there is one answer to "which LinkedIn is ours".
+//
+// Typed `string | null` on purpose: the "Elsewhere" row omits itself when this
+// is null, so the deck can never render a dead LinkedIn link. A page whose job
+// is teaching people to verify links does not get to serve a broken one.
+const LINKEDIN_URL: string | null = "https://www.linkedin.com/company/114874091";
 
 export const metadata: Metadata = {
   title: "Ask Arthur — Check a scam, read the research, watch the clones",
