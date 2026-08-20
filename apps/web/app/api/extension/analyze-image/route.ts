@@ -3,8 +3,7 @@ import { waitUntil } from "@vercel/functions";
 import { checkHiveAI } from "@askarthur/scam-engine/hive-ai";
 import { analyzeWithClaude } from "@askarthur/scam-engine/claude";
 import { assertSafeURL } from "@askarthur/scam-engine/ssrf-guard";
-import { ssrfSafeDispatcher } from "@askarthur/scam-engine/ssrf-dispatcher";
-import { validateImageMagicBytes } from "@askarthur/scam-engine/image-validate";
+import { fetchImageBytes } from "@askarthur/scam-engine/image-fetch";
 import { detectC2PA } from "@askarthur/scam-engine/c2pa-detect";
 import { verifyC2PA } from "@askarthur/scam-engine/c2pa-verify";
 import { detectMetadataOrigin } from "@askarthur/scam-engine/metadata-origin";
@@ -53,54 +52,9 @@ function generatorBreakdown(
   return generators.length > 0 ? generators : null;
 }
 
-const VISION_FETCH_TIMEOUT_MS = 5_000;
-const VISION_MAX_BYTES = 5_000_000;
-
-interface FetchedImage {
-  buffer: Buffer;
-  base64: string;
-  sha256: string;
-}
-
-/**
- * Fetch image bytes for the byte-derived signals: the Claude-vision context
- * pass, C2PA presence detection, and the evidence-record SHA-256.
- * DNS-rebinding-safe via ssrfSafeDispatcher (assertSafeURL has already
- * vetted the hostname, the dispatcher re-checks the resolved IP), capped at
- * 5MB, magic-byte validated. Returns null on any failure — byte-derived
- * signals are best-effort on top of the Hive verdict, never a reason to
- * fail the check. Bytes live only for the request; they are never stored
- * (ADR-0022 / ADR-0010).
- */
-async function fetchImageBytes(imageUrl: string): Promise<FetchedImage | null> {
-  try {
-    const res = await fetch(imageUrl, {
-      signal: AbortSignal.timeout(VISION_FETCH_TIMEOUT_MS),
-      redirect: "error",
-      ...({ dispatcher: ssrfSafeDispatcher } as Record<string, unknown>),
-    });
-    if (!res.ok) return null;
-
-    const declared = parseInt(res.headers.get("content-length") ?? "0", 10);
-    if (declared > VISION_MAX_BYTES) return null;
-
-    const buffer = Buffer.from(await res.arrayBuffer());
-    if (buffer.length === 0 || buffer.length > VISION_MAX_BYTES) return null;
-
-    const base64 = buffer.toString("base64");
-    const { valid } = validateImageMagicBytes(base64);
-    if (!valid) return null;
-
-    const hashBuf = await crypto.subtle.digest("SHA-256", buffer);
-    const sha256 = Array.from(new Uint8Array(hashBuf))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
-
-    return { buffer, base64, sha256 };
-  } catch {
-    return null;
-  }
-}
+// Byte fetch (SSRF-safe, 5 MB cap, magic-byte validated) is the shared
+// fetchImageBytes from @askarthur/scam-engine/image-fetch — same helper as
+// the public /api/image-check route.
 
 export async function POST(req: NextRequest) {
   try {
