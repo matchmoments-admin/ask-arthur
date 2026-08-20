@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Public_Sans } from "next/font/google";
+import { OG_DEFAULT_IMAGE, OG_DEFAULT_IMAGE_URL } from "@/lib/og";
 import PlausibleProvider from "next-plausible";
 import { AxiomWebVitals } from "next-axiom";
 import "./globals.css";
@@ -23,10 +24,24 @@ export const metadata: Metadata = {
     siteName: "Ask Arthur",
     locale: "en_AU",
     type: "website",
+    // Sitewide fallback card. Until this existed, EVERY shared askarthur.au
+    // link — every blog post, the scanner, /clone-watch, the SPF landing pages
+    // — rendered a bare preview on LinkedIn, Slack and iMessage.
+    //
+    // Static PNG rather than an ImageResponse route: the card is a fixed brand
+    // asset, so there is nothing to compute per request, and a static file
+    // costs nothing on the scrape. Regenerate with
+    // `pnpm --filter @askarthur/web og:card` (scripts/og-card-export.ts) after
+    // editing the copy, and commit the PNG.
+    //
+    // Routes that ship their own opengraph-image file convention (e.g. /hub)
+    // override this automatically — the file convention beats parent metadata.
+    images: OG_DEFAULT_IMAGE,
   },
   twitter: {
     card: "summary_large_image",
     site: "@askarthur_au",
+    images: [OG_DEFAULT_IMAGE_URL],
   },
   robots: {
     index: true,
