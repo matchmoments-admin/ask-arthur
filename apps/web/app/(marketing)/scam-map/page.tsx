@@ -3,7 +3,7 @@ import WorldScamMapWithHighlights from "@/components/charts/WorldScamMapWithHigh
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
 import { getWorldStats } from "@/lib/dashboard/public-stats";
-import { OG_DEFAULT_IMAGE } from "@/lib/og";
+import { OG_BASE } from "@/lib/og";
 
 export const revalidate = 3600;
 
@@ -13,9 +13,9 @@ export const metadata: Metadata = {
     "See where scams are being reported around the world. Live data from the Ask Arthur community and 14+ threat intelligence feeds.",
   alternates: { canonical: "https://askarthur.au/scam-map" },
   openGraph: {
-      // Next replaces the parent openGraph wholesale, so this must be set
-      // explicitly or the page ships with no preview card. See lib/og.ts.
-      images: OG_DEFAULT_IMAGE,
+      // Next replaces the parent openGraph wholesale — every key not named
+      // here is dropped. Spread the base first. See lib/og.ts.
+      ...OG_BASE,
     title: "Global Scam Map — Ask Arthur",
     description:
       "See where scams are being reported around the world. Live scam intelligence data.",

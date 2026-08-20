@@ -20,6 +20,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { getAllPosts } from "@/lib/blog";
 import { blogPostPath } from "@/lib/blogPath";
 import { withUtm } from "@/lib/utm";
+import { OG_BASE } from "@/lib/og";
 import Deck from "./Deck";
 import type { Chapter } from "./chapters";
 
@@ -36,17 +37,28 @@ const ORIGIN = "https://askarthur.au";
 // is teaching people to verify links does not get to serve a broken one.
 const LINKEDIN_URL: string | null = "https://www.linkedin.com/company/114874091";
 
+const HUB_TITLE = "Ask Arthur — Check a scam, read the research, watch the clones";
+const HUB_DESCRIPTION =
+  "One place for everything Ask Arthur: the free scam scanner, Persona Check, the blog, and the daily clone-watch sweep of lookalike Australian domains.";
+
 export const metadata: Metadata = {
-  title: "Ask Arthur — Check a scam, read the research, watch the clones",
-  description:
-    "One place for everything Ask Arthur: the free scam scanner, Persona Check, the blog, and the daily clone-watch sweep of lookalike Australian domains.",
+  // `absolute` bypasses the root layout's `template: "%s — Ask Arthur"`. Without
+  // it the tab and search result read "Ask Arthur — Check a scam, read the
+  // research, watch the clones — Ask Arthur" — the brand twice.
+  title: { absolute: HUB_TITLE },
+  description: HUB_DESCRIPTION,
   alternates: { canonical: "/hub" },
   openGraph: {
     type: "website",
     url: "/hub",
-    title: "Ask Arthur — Check a scam, read the research, watch the clones",
-    description:
-      "One place for everything Ask Arthur: the free scam scanner, Persona Check, the blog, and the daily clone-watch sweep of lookalike Australian domains.",
+    title: HUB_TITLE,
+    description: HUB_DESCRIPTION,
+    // Spread first: Next SHALLOW-merges metadata, so every key this block does
+    // not name is dropped, not inherited. Crawling /hub as LinkedInBot showed
+    // og:site_name and og:locale missing for exactly this reason. `images` is
+    // NOT overridden — app/hub/opengraph-image.tsx wins by file convention,
+    // which is what serves /hub its own dark card.
+    ...OG_BASE,
   },
   robots: { index: true, follow: true },
 };

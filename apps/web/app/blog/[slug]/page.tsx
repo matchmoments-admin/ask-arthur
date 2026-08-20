@@ -18,7 +18,7 @@ import MermaidDiagram from "@/components/blog/MermaidDiagram";
 import SubscribeForm from "@/components/SubscribeForm";
 import Pill from "@/components/Pill";
 import type { Metadata } from "next";
-import { ogImages } from "@/lib/og";
+import { ogImages, OG_BASE } from "@/lib/og";
 
 interface PageProps {
   params: Promise<{ slug: string }>;
@@ -56,6 +56,7 @@ export async function generateMetadata({
       // AND, by defining openGraph at all, suppressed the sitewide PNG
       // fallback. ogImages() keeps the hero when it is a renderable format and
       // falls back otherwise.
+      ...OG_BASE,
       images: ogImages(post.heroImageUrl),
     },
   };

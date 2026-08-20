@@ -3,12 +3,14 @@
 // Two rules live here, both learned the hard way:
 //
 // 1. NEXT METADATA IS SHALLOW-MERGED. A route that exports `openGraph` replaces
-//    the root layout's `openGraph` wholesale — it does NOT inherit the parent's
-//    `images`. So a page that sets only `openGraph.title` silently loses the
-//    sitewide card. Verified 2026-08-20 against a dev server: /trust (no own
-//    openGraph) inherited /og-default.png, while /about and /scam-feed — which
-//    set openGraph without images — emitted no og:image at all.
-//    => Any route exporting `openGraph` must set `images` explicitly.
+//    the root layout's `openGraph` WHOLESALE — every key it does not name is
+//    dropped, not inherited. Verified 2026-08-20 against prod: /trust (no own
+//    openGraph) inherited everything, while /about and /blog — which set
+//    openGraph without them — emitted no og:image, no og:site_name and no
+//    og:locale at all.
+//    NOTE this applies to EVERY key. The first pass at this fix restored only
+//    `images`, which is why site_name/locale were still missing a day later.
+//    => Any route exporting `openGraph` must spread OG_BASE first.
 //
 // 2. LINKEDIN DOES NOT RENDER WEBP. A .webp og:image is not a smaller card, it
 //    is NO card — the scrape succeeds and the post shows bare. All 23 published
@@ -28,6 +30,21 @@ export const OG_DEFAULT_IMAGE = [
     alt: "Ask Arthur — free AI scam checker for Australia",
   },
 ];
+
+/**
+ * Everything the root layout's `openGraph` contributes. Spread this FIRST in
+ * any route that declares its own openGraph, then override what differs:
+ *
+ *     openGraph: { ...OG_BASE, title, description, url: "/thing" }
+ *
+ * Spreading the whole base makes the shallow-merge omission structurally
+ * impossible, rather than something each author has to remember key by key.
+ */
+export const OG_BASE = {
+  siteName: "Ask Arthur",
+  locale: "en_AU",
+  images: OG_DEFAULT_IMAGE,
+};
 
 /**
  * Formats the major social scrapers actually decode. WebP and AVIF are
