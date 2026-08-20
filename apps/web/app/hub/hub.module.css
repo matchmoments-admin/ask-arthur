@@ -114,13 +114,34 @@
   position: fixed;
   inset: 0 auto auto 0;
   width: 100%;
-  padding: clamp(18px, 3vh, 30px) var(--gutter) 0;
+  padding: clamp(18px, 3vh, 30px) var(--gutter) clamp(10px, 1.6vh, 16px);
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 20px;
   pointer-events: none;
   z-index: 20;
+  /* OPAQUE, at every viewport. The chrome is position:fixed, and .slide has its
+     own `overflow-y: auto` — so on any viewport too short to fit a chapter
+     (e.g. 1406x644, a normal laptop window), the chapter scrolls INSIDE itself
+     and its heading travels up behind the chrome. With no backdrop that read as
+     the wordmark and the chapter title printed on top of each other.
+     Previously only the mobile breakpoint set a background, and even there it
+     was a gradient that went transparent at 60%, so content ghosted through the
+     lower band. */
+  background: var(--ink);
+}
+/* Short fade below the bar so content dissolves rather than meeting a hard
+   edge. Sits outside the opaque band, so nothing is ever half-visible. */
+.chrome::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: 26px;
+  background: linear-gradient(var(--ink), transparent);
+  pointer-events: none;
 }
 .wordmark {
   font-family: var(--display);
@@ -543,9 +564,11 @@
   }
   /* Chrome stays fixed (it is a sibling of the scroll container, so it cannot
      be sticky); the gradient keeps slide text legible as it passes under. */
+  /* The opaque background + fade now live on the base .chrome rule, so the
+     mobile breakpoint no longer needs its own (the gradient it used to set here
+     was the thing that let content ghost through). */
   .chrome {
     padding-bottom: 14px;
-    background: linear-gradient(var(--ink) 60%, transparent);
   }
   .links a {
     flex-wrap: wrap;
