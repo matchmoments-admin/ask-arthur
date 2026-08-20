@@ -8,6 +8,7 @@ import { urlCache } from "@/lib/url-cache";
 import { detectPhoneInSelection } from "@/lib/phone-detect";
 import { classifyImageSrc, describeConfidence, formatGeneratorName } from "@/lib/image-check-routing";
 import { renderImageCheckCard } from "@/lib/image-check-card";
+import { IMAGE_CHECK_ORIGIN_COPY } from "@askarthur/types";
 import type { ExtensionMessage, MessageResponse } from "@/lib/types";
 
 const WEB_APP_BASE = __WEB_APP_BASE__;
@@ -283,7 +284,13 @@ async function handleImageCheck(
       contextLine: data.context?.summary || undefined,
       lensUrl: `https://lens.google.com/uploadbyurl?url=${encodeURIComponent(srcUrl)}`,
       contentCredentialsLine: data.contentCredentials?.present
-        ? "Content Credentials present (issuer unverified)"
+        ? IMAGE_CHECK_ORIGIN_COPY.ccPresentShort
+        : undefined,
+      // Claimed tier only renders when a tag was FOUND — an absent tag gets
+      // no line (asymmetry rule: absence is not "not AI", so it isn't a
+      // result worth a card row).
+      metadataOriginLine: data.metadataOrigin?.claimed
+        ? IMAGE_CHECK_ORIGIN_COPY.originClaimedShort(data.metadataOrigin.generator)
         : undefined,
       evidenceRef: data.checkRef ?? undefined,
       evidenceUrl: data.checkRef

@@ -6,6 +6,7 @@ import { assertSafeURL } from "@askarthur/scam-engine/ssrf-guard";
 import { ssrfSafeDispatcher } from "@askarthur/scam-engine/ssrf-dispatcher";
 import { validateImageMagicBytes } from "@askarthur/scam-engine/image-validate";
 import { detectC2PA } from "@askarthur/scam-engine/c2pa-detect";
+import { detectMetadataOrigin } from "@askarthur/scam-engine/metadata-origin";
 import { isFeatureBraked } from "@askarthur/scam-engine/cost-log";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
@@ -224,6 +225,7 @@ export async function POST(req: NextRequest) {
         generatorSource: null,
         generatorBreakdown: null,
         contentCredentials: null,
+        metadataOrigin: null,
         imageChecksRemaining: imageLimit.remaining,
         disclaimer: DISCLAIMER,
       };
@@ -241,13 +243,17 @@ export async function POST(req: NextRequest) {
     // keep working. A brake stops spend, not the free fetch.
     let context: ExtensionImageCheckResponse["context"] = null;
     let contentCredentials: ExtensionImageCheckResponse["contentCredentials"] = null;
+    let metadataOrigin: ExtensionImageCheckResponse["metadataOrigin"] = null;
     let imageSha256: string | null = null;
     if (featureFlags.imageCheckVision) {
       const bytes = await fetchImageBytes(imageUrl);
-      // C2PA presence is a structural sniff over the fetched bytes — free,
-      // deterministic, runs even while the vision brake is engaged. null
-      // (bytes unavailable) means "unknown", never fabricated.
+      // C2PA presence + claimed-origin metadata are structural sniffs over
+      // the fetched bytes — free, deterministic, run even while the vision
+      // brake is engaged. null (bytes unavailable) means "unknown", never
+      // fabricated — and {claimed:false}/{present:false} mean "not found",
+      // never "not AI" (asymmetry rule).
       contentCredentials = bytes ? detectC2PA(bytes.buffer) : null;
+      metadataOrigin = bytes ? detectMetadataOrigin(bytes.buffer) : null;
       imageSha256 = bytes?.sha256 ?? null;
       const visionBraked = await isFeatureBraked("extension_image_check");
       if (bytes && !visionBraked) {
@@ -337,6 +343,7 @@ export async function POST(req: NextRequest) {
         generator_source: hive.generatorSource,
         generator_breakdown: generatorBreakdown(hive.classes),
         content_credentials: contentCredentials,
+        origin_metadata: metadataOrigin,
         vision_summary: context?.summary ?? null,
         impersonated_brand: context?.impersonatedBrand ?? null,
         impersonated_celebrity: context?.impersonatedCelebrity ?? null,
@@ -364,6 +371,7 @@ export async function POST(req: NextRequest) {
       generatorSource: hive.generatorSource,
       generatorBreakdown: generatorBreakdown(hive.classes),
       contentCredentials,
+      metadataOrigin,
       context,
       checkRef,
       imageChecksRemaining: imageLimit.remaining,

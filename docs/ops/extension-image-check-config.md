@@ -60,7 +60,12 @@ the scan didn't run, which is different from low confidence.
    `hive_ai / surface=image_check` with non-zero cost.
 4. Fourth call the same UTC day → 429 `image_limit_reached` with upgrade copy.
 5. With `FF_IMAGE_CHECK_VISION=true`: response also carries `context.summary`,
-   `generatorBreakdown`, and `contentCredentials` (non-null when bytes fetched).
+   `generatorBreakdown`, `contentCredentials`, and `metadataOrigin` (both
+   non-null when bytes fetched; `metadataOrigin.claimed` fires on XMP
+   DigitalSourceType `trainedAlgorithmicMedia`/composite or a known AI
+   generator in CreatorTool/EXIF Software — copy comes from
+   `IMAGE_CHECK_ORIGIN_COPY`, guarded by the asymmetry test
+   `apps/web/__tests__/imageCheckOriginCopy.test.ts`).
 6. With `FF_IMAGE_CHECK_RECORDS=true` and a FLAGGED image: response carries
    `checkRef`; `image_check_records` has the row (hashed install id, no byte
    columns); `/image-check/{ref}` renders; the PDF downloads; the record

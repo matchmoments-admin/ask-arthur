@@ -46,6 +46,17 @@ export interface ExtensionImageCheckResponse {
    *  when the image bytes weren't available to inspect (unknown), which is
    *  different from {present: false}. */
   contentCredentials: { present: boolean; format?: string } | null;
+  /** CLAIMED AI-origin metadata (XMP DigitalSourceType / CreatorTool, EXIF
+   *  Software) — the forgeable tier below Content Credentials. Null when the
+   *  image bytes weren't available to inspect (unknown); {claimed: false}
+   *  means "no tag found", NEVER "not AI" (asymmetry rule — copy must come
+   *  from IMAGE_CHECK_ORIGIN_COPY). */
+  metadataOrigin: {
+    claimed: boolean;
+    source?: "xmp" | "exif";
+    generator?: string | null;
+    digitalSourceType?: string | null;
+  } | null;
   /** Present only when the server-side Claude-vision context pass is enabled
    *  (FF_IMAGE_CHECK_VISION). */
   context?: {

@@ -10,6 +10,7 @@
 
 import React from "react";
 import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
+import { IMAGE_CHECK_ORIGIN_COPY } from "@askarthur/types";
 
 export interface ImageCheckEvidence {
   checkRef: string;
@@ -22,6 +23,11 @@ export interface ImageCheckEvidence {
   generatorSource: string | null;
   generatorBreakdown: Array<{ class: string; score: number }> | null;
   contentCredentials: { present: boolean; format?: string } | null;
+  originMetadata: {
+    claimed: boolean;
+    source?: string;
+    generator?: string | null;
+  } | null;
   visionSummary: string | null;
   impersonatedBrand: string | null;
   impersonatedCelebrity: string | null;
@@ -133,10 +139,20 @@ export function ImageCheckEvidencePdf({ evidence }: { evidence: ImageCheckEviden
             <Text style={styles.label}>Content Credentials</Text>
             <Text style={styles.value}>
               {e.contentCredentials === null
-                ? "not assessed (image bytes unavailable)"
+                ? IMAGE_CHECK_ORIGIN_COPY.ccUnknown
                 : e.contentCredentials.present
-                  ? `C2PA manifest present in ${e.contentCredentials.format ?? "image"} container (issuer not cryptographically verified)`
-                  : "no C2PA manifest detected"}
+                  ? IMAGE_CHECK_ORIGIN_COPY.ccPresent(e.contentCredentials.format)
+                  : IMAGE_CHECK_ORIGIN_COPY.ccAbsent}
+            </Text>
+          </View>
+          <View style={styles.row}>
+            <Text style={styles.label}>Metadata origin tag</Text>
+            <Text style={styles.value}>
+              {e.originMetadata === null
+                ? IMAGE_CHECK_ORIGIN_COPY.originUnknown
+                : e.originMetadata.claimed
+                  ? IMAGE_CHECK_ORIGIN_COPY.originClaimed(e.originMetadata.generator)
+                  : IMAGE_CHECK_ORIGIN_COPY.originAbsent}
             </Text>
           </View>
         </View>
