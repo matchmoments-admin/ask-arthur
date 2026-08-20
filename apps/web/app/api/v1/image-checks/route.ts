@@ -13,7 +13,7 @@ import { logger } from "@askarthur/utils/logger";
 // by construction: the table is empty until FF_IMAGE_CHECK_RECORDS is on.
 
 const SELECT_COLUMNS =
-  "check_ref, checked_at, image_url, page_url, image_sha256, ai_confidence, deepfake_confidence, generator_source, generator_breakdown, content_credentials, vision_summary, impersonated_brand, impersonated_celebrity";
+  "check_ref, checked_at, image_url, page_url, image_sha256, ai_confidence, deepfake_confidence, generator_source, generator_breakdown, content_credentials, origin_metadata, vision_summary, impersonated_brand, impersonated_celebrity";
 
 function parsePeriodDays(period: string | null): number {
   if (!period) return 30;

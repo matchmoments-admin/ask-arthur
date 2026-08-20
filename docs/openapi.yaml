@@ -476,8 +476,12 @@ paths:
         Metadata-only evidence records for right-click image checks that
         flagged as likely AI-generated or deepfake (ADR-0022). Includes the
         quotable check reference, detector confidences, generator
-        attribution, Content-Credentials presence, and the image SHA-256 for
-        corroboration. Never includes image bytes or install identifiers.
+        attribution, Content-Credentials presence, claimed AI-origin
+        metadata (origin_metadata — XMP DigitalSourceType / CreatorTool and
+        EXIF Software; a forgeable claim, not verification), and the image
+        SHA-256 for corroboration. Never includes image bytes or install
+        identifiers. Absence of provenance data is not evidence of human
+        origin — most platforms strip metadata on upload.
       operationId: listImageChecks
       tags: [Deepfakes]
       parameters:

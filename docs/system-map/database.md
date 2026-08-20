@@ -98,7 +98,7 @@ Supabase Postgres (project `rquomhcgnodxzkhokwni`). 75+ tables across 12 domain 
 ### Deepfake / Media
 
 - `deepfake_detections` — Media analysis results (file, hash, deepfake_confidence, predicted_labels). v54.
-- `image_check_records` — Metadata-only evidence records for FLAGGED right-click image checks (check_ref, install_id_hash, scores, generator_breakdown, content_credentials, image_sha256 — never bytes; ADR-0022). v239.
+- `image_check_records` — Metadata-only evidence records for FLAGGED right-click image checks (check_ref, install_id_hash, scores, generator_breakdown, content_credentials, origin_metadata, image_sha256 — never bytes; ADR-0022). v239; `origin_metadata` (claimed AI-origin tier: XMP DigitalSourceType / CreatorTool + EXIF Software, `detectMetadataOrigin`) added v280 to parent AND archive twin.
 - `media_analyses` — Image / video forensics (media_type, format, dimensions, exif_data, phash_vector). JSONB versioning v117.
 
 ### Brand & Ads
