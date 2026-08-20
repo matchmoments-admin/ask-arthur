@@ -13,6 +13,7 @@ import type { Metadata } from "next";
 import { Shield } from "lucide-react";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { SOURCE_CONFIG, relativeTime } from "@/lib/feed";
+import { OG_DEFAULT_IMAGE } from "@/lib/og";
 
 export const revalidate = 1800; // 30 min ISR
 
@@ -21,6 +22,9 @@ export const metadata: Metadata = {
   description:
     "Latest scam alerts published by Australian regulators (ACCC Scamwatch, ASD ACSC, ASIC Moneysmart). Authoritative warnings about active fraud campaigns targeting Australians.",
   openGraph: {
+      // Next replaces the parent openGraph wholesale, so this must be set
+      // explicitly or the page ships with no preview card. See lib/og.ts.
+      images: OG_DEFAULT_IMAGE,
     title: "Regulator scam alerts — Scamwatch, ACSC, ASIC",
     description:
       "Authoritative AU regulator scam warnings. Scamwatch, ACSC and ASIC alerts in one place.",

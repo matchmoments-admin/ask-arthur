@@ -3,6 +3,7 @@ import Image from "next/image";
 import { getAllPosts, getCategories } from "@/lib/blog";
 import SubscribeForm from "@/components/SubscribeForm";
 import type { Metadata } from "next";
+import { OG_DEFAULT_IMAGE } from "@/lib/og";
 
 export const metadata: Metadata = {
   title: "Blog — Ask Arthur",
@@ -12,6 +13,9 @@ export const metadata: Metadata = {
     canonical: "https://askarthur.au/blog",
   },
   openGraph: {
+      // Next replaces the parent openGraph wholesale, so this must be set
+      // explicitly or the page ships with no preview card. See lib/og.ts.
+      images: OG_DEFAULT_IMAGE,
     title: "Blog — Ask Arthur",
     description: "Scam alerts, security guides, and product updates.",
     type: "website",
