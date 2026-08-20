@@ -31,6 +31,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import puppeteer from "puppeteer";
+import sharp from "sharp";
 
 const WIDTH = 1200;
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -150,6 +151,7 @@ async function main() {
   const dataUri = `data:image/jpeg;base64,${illo.toString("base64")}`;
   const out = path.resolve(arg("out") ?? path.join(WEB_ROOT, "public", "og-default.png"));
 
+  let shot: Uint8Array;
   const browser = await puppeteer.launch({ headless: true, args: ["--no-sandbox"] });
   try {
     const page = await browser.newPage();
@@ -196,25 +198,35 @@ async function main() {
       );
     }
 
-    await page.screenshot({
-      path: out as `${string}.png`,
+    shot = await page.screenshot({
       clip: { x: 0, y: 0, width: WIDTH, height: HEIGHT },
     });
   } finally {
     await browser.close();
   }
 
-  // Downsample the 2x capture to exactly 1200x630. Social scrapers read the
-  // declared og:image:width/height; shipping a 2400x1260 file under a 1200x630
-  // declaration is a mismatch some of them handle badly.
-  const sharpen = await import("node:child_process");
-  await new Promise<void>((resolve, reject) => {
-    const p = sharpen.spawn("sips", ["-z", String(HEIGHT), String(WIDTH), out], {
-      stdio: "ignore",
-    });
-    p.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`sips exited ${code}`))));
-    p.on("error", reject);
-  });
+  // Downsample the 2x capture to exactly 1200x630 and compress LOSSLESSLY.
+  //
+  // Size: the default 2x-downsampled png is ~403 KB, which made this the
+  // third-largest file in public/ — bigger than every existing illustration.
+  // The bulk is the artwork's halftone grain, not the type. `effort: 10` +
+  // max zlib takes it to ~151 KB (-63%) with every pixel bit-identical.
+  //
+  // DELIBERATELY NOT `palette: true`. A 128-entry palette is far smaller
+  // (~48 KB) and its effect on the type is invisible — but it wrecks a brand
+  // colour: the lone ochre accent dot (#D9A441) has too little pixel area to
+  // earn its own palette slot and gets merged into the illustration's
+  // neighbouring terracotta, landing at rgb(198,114,78) — a 50-point drop in
+  // green, mustard to rust. Raising `colours` to 192/256 fixes the hue but
+  // returns the file to ~155 KB, i.e. no better than lossless while now being
+  // lossy. Lossless is the correct trade here.
+  //
+  // sharp rather than `sips`: same result on every platform, and it keeps this
+  // script runnable off macOS.
+  await sharp(shot)
+    .resize(WIDTH, HEIGHT)
+    .png({ effort: 10, compressionLevel: 9 })
+    .toFile(out);
 
   const { size } = await fs.stat(out);
   console.log(`✓ OG card → ${out} (${Math.round(size / 1024)} KB, ${WIDTH}x${HEIGHT})`);
