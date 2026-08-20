@@ -1,0 +1,615 @@
+/* Ask Arthur hub — chaptered deck.
+ *
+ * Ported from the standalone template. Two deliberate deviations from it:
+ *
+ * 1. Design tokens live on `.shell`, not `:root` — same posture as
+ *    investors.module.css. This route is dark and off-brand; nothing it
+ *    defines may leak into the light global shell.
+ *
+ * 2. The original relied on `body{overflow:hidden}` to stop the page scrolling
+ *    behind the deck. A CSS module cannot set that, and forcing it would leak
+ *    into every other route. `.deck` is `position:fixed; inset:0` instead,
+ *    which gives the same full-viewport behaviour, covers the root layout's
+ *    `bg-white text-gov-slate` body, and touches nothing global.
+ */
+
+.shell {
+  --ink: #0b0b0c; /* page background            */
+  --ink-raised: #131315; /* cards, raised surfaces     */
+  --cream: #f3f0e9; /* primary text               */
+  --muted: #9a968d; /* secondary text             */
+  --accent: #e5b94e; /* single accent — used sparingly */
+  --hairline: rgba(243, 240, 233, 0.12);
+
+  --display: var(--font-archivo), system-ui, sans-serif;
+  --body: var(--font-instrument-sans), system-ui, sans-serif;
+  --mono: var(--font-jetbrains-mono), ui-monospace, monospace;
+
+  --gutter: clamp(20px, 5vw, 72px);
+  --slide-max: 1180px;
+
+  background: var(--ink);
+  color: var(--cream);
+  font-family: var(--body);
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+.shell *,
+.shell *::before,
+.shell *::after {
+  box-sizing: border-box;
+}
+
+.shell a {
+  color: inherit;
+}
+
+.shell img {
+  max-width: 100%;
+  display: block;
+}
+
+/* Visible focus for keyboard users everywhere in the deck. */
+.shell :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+.skip {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  background: var(--accent);
+  color: var(--ink);
+  padding: 12px 18px;
+  font-family: var(--mono);
+  font-size: 13px;
+  text-decoration: none;
+}
+.skip:focus {
+  left: 12px;
+  top: 12px;
+}
+
+/* ---------------------------------------------------------------------
+   The deck. Horizontal scroll-snap on desktop, vertical page on mobile.
+   ------------------------------------------------------------------ */
+.deck {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+  background: var(--ink);
+}
+.deck::-webkit-scrollbar {
+  display: none;
+}
+
+.slide {
+  flex: 0 0 100vw;
+  height: 100dvh;
+  overflow-y: auto;
+  scroll-snap-align: start;
+  padding: clamp(88px, 11vh, 120px) var(--gutter) clamp(88px, 12vh, 116px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.inner {
+  width: 100%;
+  max-width: var(--slide-max);
+  margin: 0 auto;
+}
+
+/* ---- Persistent chrome: wordmark + progress ---- */
+.chrome {
+  position: fixed;
+  inset: 0 auto auto 0;
+  width: 100%;
+  padding: clamp(18px, 3vh, 30px) var(--gutter) 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  pointer-events: none;
+  z-index: 20;
+}
+.wordmark {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+  pointer-events: auto;
+}
+.progress {
+  text-align: right;
+}
+.count {
+  font-family: var(--body);
+  font-size: 15px;
+  color: var(--cream);
+  font-variant-numeric: tabular-nums;
+}
+.sep {
+  color: var(--muted);
+  margin: 0 0.35em;
+}
+.ticks {
+  display: flex;
+  gap: 7px;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+.tick {
+  width: 26px;
+  height: 3px;
+  background: var(--hairline);
+  border-radius: 2px;
+  transition: background 0.35s ease;
+}
+.tick[data-on="true"] {
+  background: var(--accent);
+}
+
+/* Screen-reader-only live region announcing the current chapter. */
+.live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ---- Prev / next controls ---- */
+.controls {
+  position: fixed;
+  right: var(--gutter);
+  bottom: clamp(20px, 4vh, 34px);
+  display: flex;
+  gap: 12px;
+  z-index: 20;
+}
+.ctrl {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--cream);
+  border: 1px solid var(--hairline);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition:
+    border-color 0.25s ease,
+    background 0.25s ease,
+    opacity 0.25s ease;
+}
+.ctrl:hover {
+  border-color: var(--accent);
+  background: rgba(229, 185, 78, 0.08);
+}
+.ctrl[disabled] {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* ---------------------------------------------------------------------
+   Type scale + shared blocks
+   ------------------------------------------------------------------ */
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 10px;
+}
+.kicker {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 4px;
+}
+.h1 {
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: clamp(46px, 9vw, 104px);
+  line-height: 0.92;
+  letter-spacing: -0.035em;
+  margin: 0 0 18px;
+}
+.h2 {
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: clamp(38px, 7vw, 76px);
+  line-height: 0.94;
+  letter-spacing: -0.035em;
+  margin: 0 0 16px;
+}
+.lede {
+  font-size: clamp(16px, 1.9vw, 20px);
+  color: var(--muted);
+  max-width: 56ch;
+  margin: 0 0 26px;
+}
+.lede strong {
+  color: var(--cream);
+  font-weight: 500;
+}
+
+.textlink {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  font-size: 16px;
+  color: var(--cream);
+  padding-bottom: 6px;
+  border-bottom: 2px solid var(--accent);
+  transition: gap 0.2s ease;
+}
+.textlink:hover {
+  gap: 14px;
+}
+.arrow {
+  color: var(--accent);
+  font-size: 14px;
+}
+
+/* ---- Card grid ---- */
+.grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  margin-top: 30px;
+}
+.card {
+  background: var(--ink-raised);
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  overflow: hidden;
+  text-decoration: none;
+  display: flex;
+  flex-direction: column;
+  transition:
+    border-color 0.25s ease,
+    transform 0.25s ease;
+}
+.card:hover {
+  border-color: rgba(229, 185, 78, 0.5);
+  transform: translateY(-3px);
+}
+.art {
+  aspect-ratio: 16 / 9;
+  position: relative;
+  background: #0e0e10;
+}
+/* Generated pattern stands in for artwork we do not have. */
+.art::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(
+      120% 80% at 20% 10%,
+      rgba(229, 185, 78, 0.16),
+      transparent 60%
+    ),
+    repeating-linear-gradient(
+      115deg,
+      rgba(243, 240, 233, 0.05) 0 1px,
+      transparent 1px 14px
+    );
+}
+.cardMeta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+}
+.idx {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--accent);
+  flex: 0 0 auto;
+}
+.label {
+  flex: 1;
+  min-width: 0;
+}
+.label b {
+  display: block;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: -0.01em;
+}
+.label span {
+  display: block;
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.go {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* ---- Row list ---- */
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 26px;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 16px 20px;
+  border-radius: 12px;
+  background: var(--ink-raised);
+  border: 1px solid var(--hairline);
+  text-decoration: none;
+  transition:
+    border-color 0.25s ease,
+    background 0.25s ease;
+}
+.row:hover {
+  border-color: rgba(229, 185, 78, 0.5);
+  background: #17171a;
+}
+.rowTitle {
+  flex: 1;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+.time {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+/* ---- Feature panel ---- */
+.panel {
+  border: 1px solid var(--hairline);
+  border-radius: 18px;
+  background: linear-gradient(150deg, #141416 0%, #0d0d0f 70%);
+  padding: clamp(24px, 4vw, 42px);
+}
+.stats {
+  display: grid;
+  gap: 22px;
+  margin: 0 0 10px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+.statN {
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: clamp(34px, 5.2vw, 54px);
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+.statK {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 6px;
+}
+.statAccent .statN {
+  color: var(--accent);
+}
+/* The measurement window is part of the claim, not a footnote. */
+.statsWindow {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 26px;
+}
+.panelNote {
+  font-size: 14px;
+  color: var(--muted);
+  max-width: 60ch;
+  margin: 0 0 24px;
+}
+.featured {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--hairline);
+  padding-top: 22px;
+  text-decoration: none;
+}
+.featuredBody {
+  flex: 1;
+  min-width: 220px;
+}
+.featuredBody b {
+  display: block;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 19px;
+  letter-spacing: -0.015em;
+}
+.featuredBody span {
+  font-size: 14px;
+  color: var(--muted);
+}
+.panelCta {
+  margin-top: 26px;
+}
+
+/* ---- Link list ---- */
+.links {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.links li {
+  border-bottom: 1px solid var(--hairline);
+}
+.links li:first-child {
+  border-top: 1px solid var(--hairline);
+}
+.links a {
+  display: flex;
+  align-items: center;
+  gap: clamp(14px, 4vw, 40px);
+  padding: clamp(18px, 2.6vh, 26px) 4px;
+  text-decoration: none;
+  transition: padding-left 0.25s ease;
+}
+.links a:hover {
+  padding-left: 14px;
+}
+.links a:hover .name {
+  color: var(--accent);
+}
+.linkIdx {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--accent);
+  flex: 0 0 26px;
+}
+.name {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: clamp(20px, 2.6vw, 27px);
+  letter-spacing: -0.02em;
+  flex: 0 0 clamp(130px, 26%, 240px);
+  transition: color 0.25s ease;
+}
+.desc {
+  flex: 1;
+  color: var(--muted);
+  font-size: 15px;
+}
+.linkGo {
+  color: var(--accent);
+  font-size: 14px;
+}
+
+.colophon {
+  margin-top: 30px;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+.colophon a {
+  color: var(--muted);
+}
+
+/* ---------------------------------------------------------------------
+   Mobile — the deck becomes an ordinary vertical page.
+   ------------------------------------------------------------------ */
+@media (max-width: 860px) {
+  .deck {
+    display: block;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scroll-snap-type: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .slide {
+    width: auto;
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+    padding: 96px var(--gutter) 72px;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .controls {
+    display: none;
+  }
+  /* Chrome stays fixed (it is a sibling of the scroll container, so it cannot
+     be sticky); the gradient keeps slide text legible as it passes under. */
+  .chrome {
+    padding-bottom: 14px;
+    background: linear-gradient(var(--ink) 60%, transparent);
+  }
+  .links a {
+    flex-wrap: wrap;
+    gap: 6px 16px;
+  }
+  .name {
+    flex: 1 0 auto;
+  }
+  .desc {
+    flex: 1 0 100%;
+    padding-left: 42px;
+  }
+}
+
+/* ---------------------------------------------------------------------
+   Reduced motion — required, not optional.
+   ------------------------------------------------------------------ */
+@media (prefers-reduced-motion: reduce) {
+  .deck {
+    scroll-behavior: auto;
+    scroll-snap-type: none;
+  }
+  .shell *,
+  .shell *::before,
+  .shell *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ---------------------------------------------------------------------
+   Carousel export — `?slide=N` pins one chapter at 1080x1350 so the
+   Puppeteer exporter (scripts/hub-carousel-export.ts) can screenshot it.
+   Chrome and controls are hidden; the slide fills the frame.
+   ------------------------------------------------------------------ */
+.shell[data-export="true"] .chrome,
+.shell[data-export="true"] .controls,
+.shell[data-export="true"] .skip {
+  display: none;
+}
+.shell[data-export="true"] .deck {
+  display: block;
+  overflow: hidden;
+  scroll-snap-type: none;
+}
+.shell[data-export="true"] .slide {
+  width: 100%;
+  height: 100dvh;
+  /* Top-aligned, not centred. The web deck is landscape, where centring reads
+     well; a 4:5 carousel frame is much taller than its content (measured
+     38-62% fill), so centring leaves dead space at BOTH ends. Flowing from the
+     top collects the slack at the bottom, where it reads as margin. */
+  justify-content: flex-start;
+  padding: clamp(56px, 7vh, 92px) clamp(56px, 7vw, 88px);
+  border-bottom: 0;
+  overflow: hidden;
+}
+/* `zoom`, deliberately not `transform: scale()`. A transform does not affect
+   layout, so scrollHeight would stay at the unscaled value and the exporter's
+   overflow guard would go blind exactly when scaling made overflow possible.
+   zoom scales layout, so the guard keeps working.
+   Headroom check at 1.2: the tallest chapter measures 839px, and 7 "Elsewhere"
+   rows (one more than today, once the LinkedIn URL is filled in) would be
+   ~909px -> 1091px zoomed, inside the ~1166px usable frame. */
+.shell[data-export="true"] .inner {
+  zoom: 1.2;
+}
