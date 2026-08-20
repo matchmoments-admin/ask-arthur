@@ -114,6 +114,13 @@ export const featureFlags = {
    *  gates the /image-check/[ref] evidence page + PDF. */
   imageCheckRecords: readBoolEnv("FF_IMAGE_CHECK_RECORDS"),
 
+  /** AI-origin red-flag corroborator (ADR-0024): on flagged ad checks,
+   *  fetch the image bytes (free, SSRF-guarded) and add non-escalating
+   *  red-flag lines when metadata claims AI origin without Content
+   *  Credentials, or a C2PA signature fails validation. Server-only,
+   *  default OFF — canaries a live surface (analyze-ad). */
+  imageOriginRedFlags: readBoolEnv("FF_IMAGE_ORIGIN_RED_FLAGS"),
+
   /** Extension image check: cryptographic C2PA manifest validation
    *  (@contentauth/c2pa-node — signature + issuer chain), upgrading the
    *  presence-only Content Credentials sniff to "signed by {tool}" /

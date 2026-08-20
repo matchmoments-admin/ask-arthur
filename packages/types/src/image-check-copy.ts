@@ -61,4 +61,17 @@ export const IMAGE_CHECK_ORIGIN_COPY = {
     "no machine-readable origin tag found (such tags are routinely stripped on upload)",
   /** Bytes unavailable — unknown, distinct from absent. */
   originUnknown: "not assessed (image bytes unavailable)",
+
+  // Red-flag lines for the verdict corroborator (ADR-0024): rendered inside
+  // an Analysis Result's red-flag list on ad/image surfaces. NON-ESCALATING
+  // by doctrine — they follow the isAiGenerated precedent (a red flag never
+  // moves the Verdict; ADR-0015: corroboration never mutates a score).
+  /** Image metadata claims AI origin and carries no signed manifest. */
+  redFlagClaimedAiOrigin: (generator?: string | null): string =>
+    `AI-origin metadata: the image carries a tag claiming AI origin${
+      generator ? ` (${generator})` : ""
+    } with no verified Content Credentials — tags like this are editable, so treat it as a hint`,
+  /** Manifest signature failed — altered-since-signing, never "fake". */
+  redFlagInvalidCredentials:
+    "Content Credentials: the image's C2PA manifest fails signature validation — it may have been altered since it was signed",
 } as const;

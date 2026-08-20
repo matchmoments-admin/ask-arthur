@@ -65,6 +65,7 @@ All feature flags live in `packages/utils/src/feature-flags.ts`. Default is **OF
 | `imageCheckVision`       | OFF     | Server-only sub-flag: Claude-vision context pass on image checks (`FF_IMAGE_CHECK_VISION`)                                                                                                                                   |
 | `imageCheckRecords`      | OFF     | Server-only: persist flagged image checks as metadata-only evidence records (`FF_IMAGE_CHECK_RECORDS`, ADR-0022) + the `/image-check/[ref]` evidence page                                                                    |
 | `imageCheckC2paValidate` | OFF     | Server-only sub-flag: cryptographic C2PA manifest validation via `@contentauth/c2pa-node` — upgrades Content Credentials copy to "signed by {tool}" / "manifest invalid" (`FF_IMAGE_CHECK_C2PA_VALIDATE`; no per-call spend) |
+| `imageOriginRedFlags`    | OFF     | Server-only: AI-origin red-flag corroborator on flagged analyze-ad checks — non-escalating lines for claimed-AI-origin-without-credentials / invalid C2PA signature (`FF_IMAGE_ORIGIN_RED_FLAGS`, ADR-0024)                  |
 | `extensionBilling`       | OFF     | Install↔account link flow + Extension Pro billing (paired with `WXT_EXTENSION_BILLING`; ops: [extension-billing-config](../ops/extension-billing-config.md))                                                                 |
 
 ## Mobile features
