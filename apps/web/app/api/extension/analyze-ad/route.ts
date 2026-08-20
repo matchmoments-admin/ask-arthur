@@ -6,6 +6,7 @@ import { analyzeWithClaude } from "@askarthur/scam-engine/claude";
 import { extractURLs, checkURLReputation } from "@askarthur/scam-engine/safebrowsing";
 import { checkHiveAI } from "@askarthur/scam-engine/hive-ai";
 import { mergeVerdict, type DeepfakeSignal } from "@askarthur/core-analysis";
+import { collectImageOriginRedFlags } from "@askarthur/scam-engine/image-origin-flags";
 import { brandNormalize } from "@askarthur/shopfront-glue";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
@@ -224,6 +225,24 @@ export async function POST(req: NextRequest) {
     const verdict = merged.verdict;
     const redFlags = merged.redFlags;
     const urlMalicious = merged.signals.maliciousUrlCount > 0;
+
+    // 5c. AI-origin corroborator (ADR-0024, post-merge applier pattern like
+    // applyShopSignal/applyAsicCitation): on ads Hive already FLAGGED, read
+    // the image's provenance and append red-flag lines — claimed-AI-origin
+    // without Content Credentials, or an invalid C2PA signature. Never
+    // escalates the Verdict (isAiGenerated precedent); absence of
+    // provenance adds nothing (asymmetry rule). Free byte fetch, flagged
+    // ads only, so clean-ad latency is untouched.
+    if (
+      featureFlags.imageOriginRedFlags &&
+      safeImageUrl &&
+      (hive?.isAiGenerated || hive?.isDeepfake)
+    ) {
+      const originFlags = await collectImageOriginRedFlags(safeImageUrl, {
+        validateC2pa: featureFlags.imageCheckC2paValidate,
+      });
+      redFlags.push(...originFlags);
+    }
 
     // 6. Celebrity matching (if deepfake detected)
     if (deepfakeDetected && analysis?.impersonatedBrand) {
