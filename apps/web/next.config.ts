@@ -82,6 +82,11 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   transpilePackages: ["@askarthur/types", "@askarthur/supabase", "@askarthur/utils", "@askarthur/scam-engine", "@askarthur/bot-core", "@askarthur/extension-audit", "@askarthur/mcp-audit"],
+  // c2pa-node is a Rust-native module (dist/index.node, ~39 MB) loaded
+  // dynamically by scam-engine's c2pa-verify adapter. It must be required
+  // at runtime from node_modules, never bundled — bundling breaks the
+  // .node dlopen and bloats every function.
+  serverExternalPackages: ["@contentauth/c2pa-node"],
   poweredByHeader: false,
   images: {
     formats: ["image/avif", "image/webp"],

@@ -22,7 +22,13 @@ export interface ImageCheckEvidence {
   deepfakeConfidence: number | null;
   generatorSource: string | null;
   generatorBreakdown: Array<{ class: string; score: number }> | null;
-  contentCredentials: { present: boolean; format?: string } | null;
+  contentCredentials: {
+    present: boolean;
+    format?: string;
+    validationState?: "trusted" | "valid" | "invalid";
+    issuer?: string | null;
+    generator?: string | null;
+  } | null;
   originMetadata: {
     claimed: boolean;
     source?: string;
@@ -140,9 +146,13 @@ export function ImageCheckEvidencePdf({ evidence }: { evidence: ImageCheckEviden
             <Text style={styles.value}>
               {e.contentCredentials === null
                 ? IMAGE_CHECK_ORIGIN_COPY.ccUnknown
-                : e.contentCredentials.present
-                  ? IMAGE_CHECK_ORIGIN_COPY.ccPresent(e.contentCredentials.format)
-                  : IMAGE_CHECK_ORIGIN_COPY.ccAbsent}
+                : !e.contentCredentials.present
+                  ? IMAGE_CHECK_ORIGIN_COPY.ccAbsent
+                  : e.contentCredentials.validationState
+                    ? e.contentCredentials.validationState === "invalid"
+                      ? IMAGE_CHECK_ORIGIN_COPY.ccInvalid
+                      : IMAGE_CHECK_ORIGIN_COPY.ccSigned(e.contentCredentials)
+                    : IMAGE_CHECK_ORIGIN_COPY.ccPresent(e.contentCredentials.format)}
             </Text>
           </View>
           <View style={styles.row}>

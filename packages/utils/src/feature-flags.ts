@@ -114,6 +114,15 @@ export const featureFlags = {
    *  gates the /image-check/[ref] evidence page + PDF. */
   imageCheckRecords: readBoolEnv("FF_IMAGE_CHECK_RECORDS"),
 
+  /** Extension image check: cryptographic C2PA manifest validation
+   *  (@contentauth/c2pa-node — signature + issuer chain), upgrading the
+   *  presence-only Content Credentials sniff to "signed by {tool}" /
+   *  "manifest invalid". Server-only sub-flag of imageCheck; only runs when
+   *  detectC2PA already found a manifest, so most checks never touch the
+   *  native library. No per-call spend — the cost is the 39 MB native dep
+   *  in the function bundle. */
+  imageCheckC2paValidate: readBoolEnv("FF_IMAGE_CHECK_C2PA_VALIDATE"),
+
   /** ASIC Investor Alert lookup (PR-A2): surface an "ASIC-listed" red flag
    *  when an analyze submission mentions a domain on ASIC's regulator
    *  Investor Alert List. Server-only (analyze route + runAnalysisCore →

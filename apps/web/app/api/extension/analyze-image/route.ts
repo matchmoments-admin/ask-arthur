@@ -6,6 +6,7 @@ import { assertSafeURL } from "@askarthur/scam-engine/ssrf-guard";
 import { ssrfSafeDispatcher } from "@askarthur/scam-engine/ssrf-dispatcher";
 import { validateImageMagicBytes } from "@askarthur/scam-engine/image-validate";
 import { detectC2PA } from "@askarthur/scam-engine/c2pa-detect";
+import { verifyC2PA } from "@askarthur/scam-engine/c2pa-verify";
 import { detectMetadataOrigin } from "@askarthur/scam-engine/metadata-origin";
 import { isFeatureBraked } from "@askarthur/scam-engine/cost-log";
 import { createServiceClient } from "@askarthur/supabase/server";
@@ -255,6 +256,20 @@ export async function POST(req: NextRequest) {
       contentCredentials = bytes ? detectC2PA(bytes.buffer) : null;
       metadataOrigin = bytes ? detectMetadataOrigin(bytes.buffer) : null;
       imageSha256 = bytes?.sha256 ?? null;
+      // Signed-tier upgrade: cryptographic validation runs ONLY when the
+      // sniff found a manifest (native parser never sees manifest-less
+      // attacker bytes) and the sub-flag is on. verifyC2PA returning null
+      // means "could not validate" — presence-only copy stands, never
+      // "invalid".
+      if (bytes && contentCredentials?.present && featureFlags.imageCheckC2paValidate) {
+        const verification = await verifyC2PA(
+          bytes.buffer,
+          `image/${contentCredentials.format ?? "jpeg"}`,
+        );
+        if (verification) {
+          contentCredentials = { ...contentCredentials, ...verification };
+        }
+      }
       const visionBraked = await isFeatureBraked("extension_image_check");
       if (bytes && !visionBraked) {
         try {

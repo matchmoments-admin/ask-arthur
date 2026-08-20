@@ -283,8 +283,17 @@ async function handleImageCheck(
       generatorLines: generatorLines.length > 0 ? generatorLines : undefined,
       contextLine: data.context?.summary || undefined,
       lensUrl: `https://lens.google.com/uploadbyurl?url=${encodeURIComponent(srcUrl)}`,
+      // Signed tier beats presence tier; an invalid signature gets its own
+      // line ("altered since signing" — never "fake"). No validationState
+      // means validation didn't run: presence-only copy.
       contentCredentialsLine: data.contentCredentials?.present
-        ? IMAGE_CHECK_ORIGIN_COPY.ccPresentShort
+        ? data.contentCredentials.validationState
+          ? data.contentCredentials.validationState === "invalid"
+            ? IMAGE_CHECK_ORIGIN_COPY.ccInvalidShort
+            : IMAGE_CHECK_ORIGIN_COPY.ccSignedShort(
+                data.contentCredentials.generator ?? data.contentCredentials.issuer,
+              )
+          : IMAGE_CHECK_ORIGIN_COPY.ccPresentShort
         : undefined,
       // Claimed tier only renders when a tag was FOUND — an absent tag gets
       // no line (asymmetry rule: absence is not "not AI", so it isn't a
