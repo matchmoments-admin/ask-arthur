@@ -29,6 +29,18 @@ export default function Deck({ chapters }: { chapters: Chapter[] }) {
   const slideRefs = useRef<(HTMLElement | null)[]>([]);
   /** Chapters already reported, so a scroll back and forth does not double-count. */
   const seen = useRef<Set<string>>(new Set());
+  /** True once the initial deep-link navigation has been applied. Until then the
+   *  hash-writer effect must not run, or it overwrites the incoming hash. */
+  const didInit = useRef(false);
+  /** The hash the visitor ARRIVED with, captured during render — before any
+   *  effect (including this component's own hash-writer) can replace it.
+   *  Empty string on the server and for a plain /hub visit. */
+  const initialHashRef = useRef<string | null>(null);
+  if (initialHashRef.current === null) {
+    initialHashRef.current =
+      typeof window === "undefined" ? "" : window.location.hash.slice(1);
+  }
+  const initialHash = initialHashRef.current;
 
   /* ---- Export mode ---------------------------------------------------- */
   useEffect(() => {
@@ -90,9 +102,15 @@ export default function Deck({ chapters }: { chapters: Chapter[] }) {
     return () => observer.disconnect();
   }, [visible.length, isExport, exportSlide, report]);
 
-  /* ---- Deep-linkable: each chapter owns a hash ------------------------- */
+  /* ---- Deep-linkable: each chapter owns a hash -------------------------
+     Gated on `didInit`. This effect is declared BEFORE the deep-link effect
+     below, so on mount it runs first — and with `current` still 0 it used to
+     rewrite an incoming /hub#elsewhere to /hub#now via replaceState. The
+     deep-link effect then read the hash it had just clobbered, found "now",
+     and stayed on chapter 01. The deck was overwriting its own deep link
+     before it could act on it. */
   useEffect(() => {
-    if (isExport) return;
+    if (isExport || !didInit.current) return;
     const id = chapters[current]?.id;
     if (id && window.location.hash.slice(1) !== id) {
       window.history.replaceState(null, "", `#${id}`);
@@ -100,23 +118,41 @@ export default function Deck({ chapters }: { chapters: Chapter[] }) {
   }, [current, chapters, isExport]);
 
   const goTo = useCallback(
-    (i: number) => {
+    (i: number, behavior: ScrollBehavior = "smooth") => {
       const clamped = Math.max(0, Math.min(visible.length - 1, i));
       const node = slideRefs.current[clamped];
       if (!node) return;
-      node.scrollIntoView({ behavior: "smooth", inline: "start", block: "start" });
+      node.scrollIntoView({ behavior, inline: "start", block: "start" });
       node.focus?.({ preventScroll: true });
       setCurrent(clamped);
     },
     [visible.length],
   );
 
-  /* ---- Open on the chapter named in the URL, e.g. /hub#clone-watch ----- */
+  /* ---- Open on the chapter named in the URL, e.g. /hub#clone-watch -----
+     Reads `initialHash`, captured during the first RENDER, not
+     window.location at effect time — by the time effects run the hash-writer
+     above may already have replaced it.
+
+     Deferred two frames so the slides have been laid out (scrollIntoView
+     against an unlaid-out flex row lands short), and jumped with
+     behavior:"auto" rather than "smooth": a deep link should arrive already
+     there, not animate past four chapters on open. */
   useEffect(() => {
     if (isExport) return;
-    const i = chapters.findIndex((c) => c.id === window.location.hash.slice(1));
-    if (i > -1) goTo(i);
-    else report(0);
+    const i = chapters.findIndex((c) => c.id === initialHash);
+    if (i < 0) {
+      didInit.current = true;
+      report(0);
+      return;
+    }
+    const raf = requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        goTo(i, "auto");
+        didInit.current = true;
+      }),
+    );
+    return () => cancelAnimationFrame(raf);
     // Runs once on mount; goTo/report are stable and re-running would fight
     // the user's own scrolling.
     // eslint-disable-next-line react-hooks/exhaustive-deps
