@@ -41,11 +41,21 @@ export interface ExtensionImageCheckResponse {
    *  verdict classes ai_generated/not_ai_generated/deepfake). Null when the
    *  detector didn't return a class list (e.g. pre-v2 cached results). */
   generatorBreakdown: Array<{ class: string; score: number }> | null;
-  /** C2PA / Content Credentials PRESENCE (structural container sniff, no
-   *  cryptographic validation — copy must say "issuer unverified"). Null
-   *  when the image bytes weren't available to inspect (unknown), which is
-   *  different from {present: false}. */
-  contentCredentials: { present: boolean; format?: string } | null;
+  /** C2PA / Content Credentials. `present` is the structural container
+   *  sniff; the validation fields are set only when
+   *  FF_IMAGE_CHECK_C2PA_VALIDATE ran cryptographic validation — when
+   *  absent, copy must say "issuer unverified". Null when the image bytes
+   *  weren't available to inspect (unknown), which is different from
+   *  {present: false}. An "invalid" state means altered-since-signing,
+   *  NEVER "fake" (asymmetry rule — copy from IMAGE_CHECK_ORIGIN_COPY). */
+  contentCredentials: {
+    present: boolean;
+    format?: string;
+    validationState?: "trusted" | "valid" | "invalid";
+    signatureValid?: boolean;
+    issuer?: string | null;
+    generator?: string | null;
+  } | null;
   /** CLAIMED AI-origin metadata (XMP DigitalSourceType / CreatorTool, EXIF
    *  Software) — the forgeable tier below Content Credentials. Null when the
    *  image bytes weren't available to inspect (unknown); {claimed: false}

@@ -23,6 +23,31 @@ export const IMAGE_CHECK_ORIGIN_COPY = {
   /** Bytes unavailable — unknown, distinct from absent. */
   ccUnknown: "not assessed (image bytes unavailable)",
 
+  /** Extension card — manifest signature VERIFIED (FF_IMAGE_CHECK_C2PA_VALIDATE). */
+  ccSignedShort: (name?: string | null): string =>
+    name
+      ? `Content Credentials verified — signed by ${name}`
+      : "Content Credentials verified (signed manifest)",
+  /** Evidence page/PDF — manifest signature verified, with detail.
+   *  validationState "valid" (vs "trusted") = signature holds but the
+   *  issuer isn't on the C2PA trust list — say so. */
+  ccSigned: (opts: {
+    generator?: string | null;
+    issuer?: string | null;
+    validationState?: string;
+  }): string =>
+    `C2PA manifest signature verified — file records creation or editing with ${
+      opts.generator ?? "an unidentified tool"
+    }${opts.issuer ? `, certificate issued to ${opts.issuer}` : ""}${
+      opts.validationState === "valid" ? " (issuer not on the C2PA trust list)" : ""
+    }`,
+  /** Manifest present but signature FAILED — altered-since-signing, never
+   *  "fake" (asymmetry rule cuts both ways). */
+  ccInvalidShort:
+    "Content Credentials manifest invalid — the file may have been altered since it was signed",
+  ccInvalid:
+    "C2PA manifest present but its signature does not validate — the file may have been altered since signing (or the manifest is malformed). This shows tampering with the provenance record, not what the image is",
+
   /** Extension card — claimed AI-origin tag found (short form). */
   originClaimedShort: (generator?: string | null): string =>
     generator

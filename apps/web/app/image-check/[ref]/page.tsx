@@ -46,7 +46,13 @@ export default async function ImageCheckEvidencePage({
     v === null || v === undefined ? "not assessed" : `${Math.round(Number(v) * 100)}%`;
   const breakdown =
     (record.generator_breakdown as Array<{ class: string; score: number }> | null) ?? null;
-  const cc = record.content_credentials as { present: boolean; format?: string } | null;
+  const cc = record.content_credentials as {
+    present: boolean;
+    format?: string;
+    validationState?: "trusted" | "valid" | "invalid";
+    issuer?: string | null;
+    generator?: string | null;
+  } | null;
   const origin = record.origin_metadata as {
     claimed: boolean;
     source?: string;
@@ -129,9 +135,13 @@ export default async function ImageCheckEvidencePage({
               <dd className="text-gray-800">
                 {cc === null
                   ? IMAGE_CHECK_ORIGIN_COPY.ccUnknown
-                  : cc.present
-                    ? IMAGE_CHECK_ORIGIN_COPY.ccPresent(cc.format)
-                    : IMAGE_CHECK_ORIGIN_COPY.ccAbsent}
+                  : !cc.present
+                    ? IMAGE_CHECK_ORIGIN_COPY.ccAbsent
+                    : cc.validationState
+                      ? cc.validationState === "invalid"
+                        ? IMAGE_CHECK_ORIGIN_COPY.ccInvalid
+                        : IMAGE_CHECK_ORIGIN_COPY.ccSigned(cc)
+                      : IMAGE_CHECK_ORIGIN_COPY.ccPresent(cc.format)}
               </dd>
             </div>
             <div>

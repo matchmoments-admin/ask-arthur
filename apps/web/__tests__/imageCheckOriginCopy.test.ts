@@ -50,4 +50,20 @@ describe("image-check origin copy — asymmetry rule", () => {
     expect(IMAGE_CHECK_ORIGIN_COPY.ccPresentShort).toMatch(/unverified/i);
     expect(IMAGE_CHECK_ORIGIN_COPY.ccPresent("jpeg")).toMatch(/not cryptographically verified/i);
   });
+
+  it("invalid-signature copy blames the provenance record, never calls the image fake", () => {
+    for (const s of [IMAGE_CHECK_ORIGIN_COPY.ccInvalidShort, IMAGE_CHECK_ORIGIN_COPY.ccInvalid]) {
+      expect(s).not.toMatch(/fake|forged|scam/i);
+      expect(s).toMatch(/altered|tamper/i);
+    }
+  });
+
+  it("valid-but-untrusted signatures disclose the trust-list gap", () => {
+    expect(
+      IMAGE_CHECK_ORIGIN_COPY.ccSigned({ generator: "Adobe Firefly", validationState: "valid" }),
+    ).toMatch(/not on the C2PA trust list/i);
+    expect(
+      IMAGE_CHECK_ORIGIN_COPY.ccSigned({ generator: "Adobe Firefly", validationState: "trusted" }),
+    ).not.toMatch(/not on the C2PA trust list/i);
+  });
 });

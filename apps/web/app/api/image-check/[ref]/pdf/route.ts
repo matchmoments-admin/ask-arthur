@@ -57,8 +57,13 @@ export async function GET(
         (record.generator_breakdown as Array<{ class: string; score: number }> | null) ??
         null,
       contentCredentials:
-        (record.content_credentials as { present: boolean; format?: string } | null) ??
-        null,
+        (record.content_credentials as {
+          present: boolean;
+          format?: string;
+          validationState?: "trusted" | "valid" | "invalid";
+          issuer?: string | null;
+          generator?: string | null;
+        } | null) ?? null,
       originMetadata:
         (record.origin_metadata as {
           claimed: boolean;
