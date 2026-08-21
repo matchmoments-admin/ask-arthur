@@ -28,8 +28,14 @@ on:
         required: false
         default: "Ask Arthur — check a scam, read the research, watch the clones"
         type: string
+      format:
+        description: "link = preview card to the live page (default) | document = carousel in-feed"
+        required: false
+        default: link
+        type: choice
+        options: [link, document]
       dry_run:
-        description: "Upload the document but do NOT publish"
+        description: "Validate everything but do NOT publish"
         required: false
         default: false
         type: boolean
@@ -52,16 +58,21 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
+      # Only needed for the carousel. A link post ships no rendered asset, so
+      # skipping this takes the prepare job from minutes to seconds.
       - name: Install Chromium for Puppeteer
+        if: inputs.format == 'document'
         run: pnpm --filter @askarthur/web exec puppeteer browsers install chrome
 
       - name: Render hub carousel (against prod)
+        if: inputs.format == 'document'
         working-directory: apps/web
         run: pnpm hub:carousel -- --base=https://askarthur.au --out=out
 
       - name: Stage caption
         id: meta
         run: |
+          mkdir -p apps/web/out
           cp docs/linkedin/hub-launch-caption.txt apps/web/out/caption.txt
           echo "title=${{ inputs.title }}" >> "$GITHUB_OUTPUT"
           echo "Caption: $(wc -c < apps/web/out/caption.txt) bytes"
@@ -77,6 +88,7 @@ jobs:
       # monthly edition (2026-08-09): approving a public post without having
       # seen the images is approving blind.
       - name: Telegram — slide preview
+        if: inputs.format == 'document'
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
@@ -169,8 +181,17 @@ jobs:
           set -o pipefail
           DRY=""
           if [ "${{ inputs.dry_run }}" = "true" ]; then DRY="--dry-run"; fi
+          if [ "${{ inputs.format }}" = "document" ]; then
+            SHAPE=(--pdf=out/ask-arthur-hub.pdf)
+          else
+            # Card title/description are sent explicitly rather than left to
+            # LinkedIn's scrape — see createArticlePost. Keep them in step with
+            # app/hub/page.tsx's openGraph.
+            SHAPE=(--link=https://askarthur.au/hub
+                   --description="One place for everything Ask Arthur: the free scam scanner, Persona Check, the blog, and the daily clone-watch sweep of lookalike Australian domains.")
+          fi
           pnpm linkedin:document -- \
-            --pdf=out/ask-arthur-hub.pdf \
+            "${SHAPE[@]}" \
             --caption-file=out/caption.txt \
             --title="$TITLE" \
             $DRY | tee publish.log

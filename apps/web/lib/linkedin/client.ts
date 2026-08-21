@@ -143,6 +143,63 @@ export async function createDocumentPost(opts: {
   return postUrn;
 }
 
+/**
+ * Create a PUBLISHED article (link) post on the org page. Returns the post URN.
+ * DESTRUCTIVE - this publishes publicly to the page.
+ *
+ * The other shape of post: instead of carrying a document, it carries a URL and
+ * LinkedIn renders a preview card from it. Use this when the destination IS the
+ * artifact — an interactive page beats a flattened screenshot of one, and the
+ * card is tappable where carousel slides are not.
+ *
+ * `title`/`description` are sent explicitly rather than left for LinkedIn to
+ * scrape. Scraping usually works — /hub serves correct og:title, og:description
+ * and og:image — but "usually" is decided by a cache we do not control, and a
+ * post that renders bare cannot be fixed after the fact (LinkedIn holds a
+ * preview ~7 days and its Post Inspector only corrects FUTURE posts).
+ *
+ * No `thumbnail`: that field takes an uploaded image URN, and supplying one
+ * would fork the card art away from the route's own opengraph-image, which is
+ * the thing every other surface already shows. LinkedIn fetches og:image.
+ */
+export async function createArticlePost(opts: {
+  url: string;
+  title: string;
+  description: string;
+  commentary: string;
+  accessToken: string;
+  authorUrn?: string;
+}): Promise<string> {
+  const author = opts.authorUrn ?? orgUrn();
+  const res = await fetch(`${REST}/posts`, {
+    method: "POST",
+    headers: jsonHeaders(opts.accessToken),
+    body: JSON.stringify({
+      author,
+      commentary: opts.commentary,
+      visibility: "PUBLIC",
+      distribution: {
+        feedDistribution: "MAIN_FEED",
+        targetEntities: [],
+        thirdPartyDistributionChannels: [],
+      },
+      content: {
+        article: {
+          source: opts.url,
+          title: opts.title,
+          description: opts.description,
+        },
+      },
+      lifecycleState: "PUBLISHED",
+      isReshareDisabledByAuthor: false,
+    }),
+  });
+  if (res.status !== 201) throw new Error(`create article post failed: ${await readError(res)}`);
+  const postUrn = res.headers.get("x-restli-id");
+  if (!postUrn) throw new Error("create article post succeeded but no x-restli-id header");
+  return postUrn;
+}
+
 /** Add a comment (e.g. the link) to a post. Actor defaults to the org. */
 export async function addComment(opts: {
   postUrn: string;

@@ -1,12 +1,22 @@
 /**
- * Generic LinkedIn document (carousel) publisher for the Ask Arthur company page.
+ * Generic LinkedIn publisher for the Ask Arthur company page. Two post shapes:
  *
- *   pnpm --filter @askarthur/web linkedin:document -- \
- *     --pdf=out/ask-arthur-hub.pdf \
- *     --caption-file=docs/linkedin/hub-launch-caption.txt \
- *     --title="Ask Arthur — the hub" \
- *     [--comment="first comment text"] \
- *     [--dry-run]
+ *   DOCUMENT (carousel) — the slides live in the feed:
+ *     pnpm --filter @askarthur/web linkedin:document -- \
+ *       --pdf=out/ask-arthur-hub.pdf \
+ *       --caption-file=docs/linkedin/hub-launch-caption.txt \
+ *       --title="Ask Arthur — the hub" [--comment="…"] [--dry-run]
+ *
+ *   LINK (article) — a preview card that taps through to the live page:
+ *     pnpm --filter @askarthur/web linkedin:document -- \
+ *       --link=https://askarthur.au/hub \
+ *       --caption-file=docs/linkedin/hub-launch-caption.txt \
+ *       --title="…" --description="…" [--dry-run]
+ *
+ * Pick LINK when the destination IS the artifact. A carousel is five flattened
+ * screenshots of an interactive page whose numbers are live; the link is the
+ * page itself, and the card is tappable where slides are not. Pick DOCUMENT
+ * when the content should be consumed without leaving the feed.
  *
  * WHY THIS EXISTS SEPARATELY FROM clone-watch-publish.ts
  * That publisher is bound to the monthly edition: it keys its duplicate guard
@@ -39,6 +49,7 @@ import {
   orgUrn,
   uploadDocument,
   createDocumentPost,
+  createArticlePost,
   addComment,
   postUrl,
   verifyPost,
@@ -57,11 +68,22 @@ async function main() {
   const comment = arg("comment");
   const dryRun = flag("dry-run");
 
-  if (!pdfPath) throw new Error("--pdf is required");
+  const link = arg("link");
+  const description = arg("description");
+
+  if (!!pdfPath === !!link) {
+    throw new Error("pass exactly one of --pdf (document post) or --link (article post)");
+  }
   if (!captionFile) throw new Error("--caption-file is required");
   if (!title) throw new Error("--title is required");
+  if (link) {
+    // Fully-qualified only. A scheme-less "askarthur.au/hub" is not reliably
+    // auto-linked by LinkedIn, and in a post whose whole CTA is the link that
+    // is the difference between a working post and a dead end.
+    if (!/^https:\/\//.test(link)) throw new Error(`--link must be an https:// URL, got "${link}"`);
+    if (!description) throw new Error("--description is required for a link post (card subtitle)");
+  }
 
-  const pdf = await fs.readFile(path.resolve(pdfPath));
   const caption = (await fs.readFile(path.resolve(captionFile), "utf8")).trim();
   if (!caption) throw new Error(`caption file ${captionFile} is empty`);
   // LinkedIn truncates commentary past 3000 chars. Fail loudly rather than ship
@@ -86,30 +108,48 @@ async function main() {
     );
   }
 
-  console.log(`pdf      : ${pdfPath} (${Math.round(pdf.byteLength / 1024)} KB)`);
+  console.log(`mode     : ${link ? "link (article card)" : "document (carousel)"}`);
+  if (link) console.log(`link     : ${link}`);
   console.log(`caption  : ${caption.length} chars`);
   console.log(`title    : ${title}`);
   console.log(`author   : ${author} (company page)`);
 
   const accessToken = await resolveAccessToken();
 
-  const documentUrn = await uploadDocument(pdf, accessToken);
-  console.log(`uploaded : ${documentUrn}`);
+  let documentUrn: string | undefined;
+  if (pdfPath) {
+    const pdf = await fs.readFile(path.resolve(pdfPath));
+    console.log(`pdf      : ${pdfPath} (${Math.round(pdf.byteLength / 1024)} KB)`);
+    documentUrn = await uploadDocument(pdf, accessToken);
+    console.log(`uploaded : ${documentUrn}`);
+  }
 
   if (dryRun) {
     console.log("RESULT=dry-run");
     console.log("URL=");
     console.log("VERIFY=skipped");
-    console.log("\n--dry-run: uploaded the document but did NOT publish.");
+    console.log(
+      link
+        ? "\n--dry-run: validated everything but did NOT publish (a link post uploads nothing)."
+        : "\n--dry-run: uploaded the document but did NOT publish.",
+    );
     return;
   }
 
-  const postUrn = await createDocumentPost({
-    documentUrn,
-    title,
-    commentary: caption,
-    accessToken,
-  });
+  const postUrn = link
+    ? await createArticlePost({
+        url: link,
+        title,
+        description: description!,
+        commentary: caption,
+        accessToken,
+      })
+    : await createDocumentPost({
+        documentUrn: documentUrn!,
+        title,
+        commentary: caption,
+        accessToken,
+      });
   const url = postUrl(postUrn);
   console.log(`RESULT=published`);
   console.log(`URL=${url}`);
