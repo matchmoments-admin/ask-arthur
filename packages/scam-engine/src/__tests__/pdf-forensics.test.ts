@@ -242,12 +242,12 @@ describe("edge signals", () => {
     expect(collectStructuralFindings(s).map((f) => f.signal)).toContain("scan_limited");
   });
 
-  it("inspectDocument seam: hash + pairing + content:null in one call", async () => {
+  it("inspectDocument seam: hash + pairing in one call; content null when no pack requested", async () => {
     const { inspectDocument } = await import("../document-check");
     const doctored = appendUpdate(buildPdf({ producer: "Xero" }), {
       producer: "Canva",
     });
-    const r = inspectDocument(doctored);
+    const r = await inspectDocument(doctored);
     expect(r.docSha256).toMatch(/^[0-9a-f]{64}$/);
     expect(r.structural.incrementalUpdates).toBe(1);
     expect(r.findings.map((f) => f.signal)).toContain("multiple_revisions");

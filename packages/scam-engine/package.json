@@ -86,6 +86,7 @@
     "inngest": "^3.54.2",
     "jszip": "^3.10.1",
     "libphonenumber-js": "^1.11.0",
+    "pdfjs-dist": "^6.2.108",
     "semver": "^7.6.0",
     "tldts": "^7.0.23",
     "twilio": "^5.4.0",

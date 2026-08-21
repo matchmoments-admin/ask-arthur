@@ -92,9 +92,10 @@ export async function POST(req: NextRequest) {
     }
 
     // One call on the Document Check Module's seam — the module owns the
-    // summary→findings pairing, the hash, and (in the follow-up PR) the
-    // jurisdiction pack dispatch, so this route never grows orchestration.
-    const inspection = inspectDocument(buffer);
+    // summary→findings pairing, the hash, and the jurisdiction pack
+    // dispatch, so this route never grows orchestration. AU-first product:
+    // the AU pack (ABN checksum + ABR, free, braked) always runs here.
+    const inspection = await inspectDocument(buffer, { jurisdiction: "au" });
 
     // Volume signal that does NOT depend on the attribution cookie: a $0
     // cost_telemetry row per check (the free-tier "units at $0" convention),

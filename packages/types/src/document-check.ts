@@ -31,6 +31,12 @@ export const DOCUMENT_FINDING_SIGNALS = [
   "encrypted_document",
   /** Metadata lives in compressed object streams this scan doesn't open. */
   "scan_limited",
+  // ---- content layer (AU jurisdiction pack) --------------------------------
+  /** An ABN printed on the document fails the ATO mod-89 checksum. */
+  "abn_checksum_fail",
+  /** An ABN printed on the document is not on the ABR register (the register
+   *  answered cleanly — this is NOT the lookup-failed case, ADR-0009). */
+  "abn_not_registered",
 ] as const;
 
 export type DocumentFindingSignal = (typeof DOCUMENT_FINDING_SIGNALS)[number];
@@ -86,6 +92,27 @@ export interface PdfStructuralSummary {
   trailerIdMatches: boolean | null;
 }
 
+/** One ABN found in the document text and its verification outcome. The
+ *  four states keep the ADR-0009 discipline: `unverified` (lookup could not
+ *  run/complete) is a neutral non-signal, never conflated with
+ *  `not_registered` (register answered: not on it). */
+export interface DocumentAbnCheck {
+  /** The 11 digits as printed (normalised, no spaces). */
+  abn: string;
+  status: "invalid_checksum" | "registered" | "not_registered" | "unverified";
+  /** ABR legal entity name when registered, else null. */
+  entityName: string | null;
+}
+
+/** Jurisdiction content-logic results. `textExtracted:false` means the
+ *  content layer had nothing to read (scanned/image PDF, extraction failed)
+ *  — not that the document has no ABNs. */
+export interface DocumentContentSummary {
+  jurisdiction: "au";
+  textExtracted: boolean;
+  abns: DocumentAbnCheck[];
+}
+
 /** Response of POST /api/document-check (multipart upload mode). */
 export interface WebDocumentCheckResponse {
   checked: boolean;
@@ -94,8 +121,8 @@ export interface WebDocumentCheckResponse {
   docSha256: string | null;
   structural: PdfStructuralSummary | null;
   findings: DocumentFinding[];
-  /** Jurisdiction content-logic results — always null until the AU pack
-   *  ships. Null = "not assessed", never "clean". */
-  content: null;
+  /** Jurisdiction content-logic results. Null = "not assessed" (no pack ran
+   *  for this request), never "clean". */
+  content: DocumentContentSummary | null;
   disclaimer: string;
 }

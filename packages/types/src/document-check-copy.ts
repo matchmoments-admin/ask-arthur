@@ -58,6 +58,16 @@ export const DOCUMENT_CHECK_COPY: Record<DocumentFindingSignal, DocumentFindingC
     explain:
       "This file stores its metadata in compressed streams this scan doesn't open, so fewer signals were available. That is normal for many modern PDFs and says nothing about the document either way.",
   },
+  abn_checksum_fail: {
+    label: "ABN fails its checksum",
+    explain:
+      "An ABN printed on this document isn't a mathematically possible ABN. Real ABNs pass a checksum; a typo can cause this too, so compare the number against ABN Lookup yourself.",
+  },
+  abn_not_registered: {
+    label: "ABN not on the register",
+    explain:
+      "An ABN printed on this document is not on the Australian Business Register. Check the number on abr.business.gov.au and confirm the business through a channel you already trust before paying.",
+  },
 };
 
 /** Heading for the zero-findings state. Lives here (not hardcoded in the

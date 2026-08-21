@@ -145,7 +145,9 @@ describe("POST /api/document-check", () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.checked).toBe(true);
-    expect(data.content).toBeNull();
+    // The AU pack runs on this surface; these fixtures carry no extractable
+    // text, so the content layer honestly reports "nothing to read".
+    expect(data.content).toEqual({ jurisdiction: "au", textExtracted: false, abns: [] });
     expect(data.docSha256).toMatch(/^[0-9a-f]{64}$/);
     const signals = data.findings.map((f: { signal: string }) => f.signal);
     expect(signals).toContain("multiple_revisions");
