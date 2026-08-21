@@ -42,6 +42,7 @@
     "./image-origin-flags": "./src/image-origin-flags.ts",
     "./metadata-origin": "./src/metadata-origin.ts",
     "./image-check-pdf": "./src/image-check/pdf/render.ts",
+    "./document-check": "./src/document-check/pdf-forensics.ts",
     "./ssrf-guard": "./src/ssrf-guard.ts",
     "./brand-alerts": "./src/brand-alerts.ts",
     "./social-post": "./src/social-post.ts",
