@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { checkHiveAI } from "@askarthur/scam-engine/hive-ai";
+import { checkHiveAI, generatorBreakdown } from "@askarthur/scam-engine/hive-ai";
 import { assertSafeURL } from "@askarthur/scam-engine/ssrf-guard";
 import { fetchImageBytes, sha256Hex } from "@askarthur/scam-engine/image-fetch";
 import { validateImageMagicBytes } from "@askarthur/scam-engine/image-validate";
-import { detectC2PA } from "@askarthur/scam-engine/c2pa-detect";
-import { verifyC2PA } from "@askarthur/scam-engine/c2pa-verify";
-import { detectMetadataOrigin } from "@askarthur/scam-engine/metadata-origin";
+import { readImageOrigin } from "@askarthur/scam-engine/image-origin";
 import { isFeatureBraked } from "@askarthur/scam-engine/cost-log";
 import { checkImageUploadRateLimit } from "@askarthur/utils/rate-limit";
 import { logger } from "@askarthur/utils/logger";
@@ -34,38 +32,12 @@ const DISCLAIMER =
   "AI-detection classifiers are probabilistic. A high score means the image shares characteristics with AI-generated content, not certainty either way. No provenance data found is normal — most platforms strip it on upload.";
 
 const MAX_UPLOAD_BYTES = 5_000_000;
-const VERDICT_CLASSES = new Set(["ai_generated", "not_ai_generated", "deepfake"]);
-const BREAKDOWN_TOP_N = 3;
 
-function generatorBreakdown(
-  classes: Array<{ class: string; score: number }> | undefined,
-): Array<{ class: string; score: number }> | null {
-  if (!classes || classes.length === 0) return null;
-  const generators = classes
-    .filter((c) => !VERDICT_CLASSES.has(c.class) && c.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, BREAKDOWN_TOP_N);
-  return generators.length > 0 ? generators : null;
-}
-
-/** The deterministic AI-origin ladder over fetched/uploaded bytes. */
-async function originLadder(buffer: Buffer): Promise<{
-  contentCredentials: WebImageCheckResponse["contentCredentials"];
-  metadataOrigin: WebImageCheckResponse["metadataOrigin"];
-}> {
-  let contentCredentials: WebImageCheckResponse["contentCredentials"] =
-    detectC2PA(buffer);
-  const metadataOrigin = detectMetadataOrigin(buffer);
-  if (contentCredentials.present && featureFlags.imageCheckC2paValidate) {
-    const verification = await verifyC2PA(
-      buffer,
-      `image/${contentCredentials.format ?? "jpeg"}`,
-    );
-    if (verification) {
-      contentCredentials = { ...contentCredentials, ...verification };
-    }
-  }
-  return { contentCredentials, metadataOrigin };
+/** The deterministic AI-origin ladder — shared readImageOrigin Module. */
+function originLadder(buffer: Buffer) {
+  return readImageOrigin(buffer, {
+    validateC2pa: featureFlags.imageCheckC2paValidate,
+  });
 }
 
 export async function POST(req: NextRequest) {

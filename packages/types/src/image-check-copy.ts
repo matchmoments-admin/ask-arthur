@@ -48,6 +48,67 @@ export const IMAGE_CHECK_ORIGIN_COPY = {
   ccInvalid:
     "C2PA manifest present but its signature does not validate — the file may have been altered since signing (or the manifest is malformed). This shows tampering with the provenance record, not what the image is",
 
+  // ---- tier SELECTORS (consolidated 2026-08-21) --------------------------
+  // Every surface previously re-implemented the (null | absent | signed |
+  // invalid | present-unverified) selection as its own ternary tree — four
+  // copies of the same decision, invisible to the asymmetry test. These
+  // selectors ARE the decision; surfaces call them and the test exercises
+  // the selection paths, so a mis-wired branch (e.g. "verified" copy for an
+  // invalid signature) fails the build.
+
+  /** Long-form C2PA line for the evidence page / PDF / web checker. */
+  ccLine(cc: {
+    present: boolean;
+    format?: string;
+    validationState?: string;
+    issuer?: string | null;
+    generator?: string | null;
+  } | null): string {
+    if (cc === null) return IMAGE_CHECK_ORIGIN_COPY.ccUnknown;
+    if (!cc.present) return IMAGE_CHECK_ORIGIN_COPY.ccAbsent;
+    if (cc.validationState) {
+      return cc.validationState === "invalid"
+        ? IMAGE_CHECK_ORIGIN_COPY.ccInvalid
+        : IMAGE_CHECK_ORIGIN_COPY.ccSigned(cc);
+    }
+    return IMAGE_CHECK_ORIGIN_COPY.ccPresent(cc.format);
+  },
+
+  /** Short-form C2PA line for the extension card — undefined means "render
+   *  no line" (absent/unknown tiers get no card row; asymmetry rule). */
+  ccCardLine(cc: {
+    present: boolean;
+    validationState?: string;
+    issuer?: string | null;
+    generator?: string | null;
+  } | null): string | undefined {
+    if (!cc?.present) return undefined;
+    if (cc.validationState) {
+      return cc.validationState === "invalid"
+        ? IMAGE_CHECK_ORIGIN_COPY.ccInvalidShort
+        : IMAGE_CHECK_ORIGIN_COPY.ccSignedShort(cc.generator ?? cc.issuer);
+    }
+    return IMAGE_CHECK_ORIGIN_COPY.ccPresentShort;
+  },
+
+  /** Long-form metadata-origin line for the evidence page / PDF / web checker. */
+  originLine(origin: { claimed: boolean; generator?: string | null } | null): string {
+    if (origin === null) return IMAGE_CHECK_ORIGIN_COPY.originUnknown;
+    return origin.claimed
+      ? IMAGE_CHECK_ORIGIN_COPY.originClaimed(origin.generator)
+      : IMAGE_CHECK_ORIGIN_COPY.originAbsent;
+  },
+
+  /** Short-form metadata-origin line for the extension card — undefined
+   *  means "render no line" (only a FOUND tag earns a card row). */
+  originCardLine(
+    origin: { claimed: boolean; generator?: string | null } | null,
+  ): string | undefined {
+    return origin?.claimed
+      ? IMAGE_CHECK_ORIGIN_COPY.originClaimedShort(origin.generator)
+      : undefined;
+  },
+
   /** Extension card — claimed AI-origin tag found (short form). */
   originClaimedShort: (generator?: string | null): string =>
     generator

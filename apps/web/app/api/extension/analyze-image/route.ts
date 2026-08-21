@@ -4,9 +4,8 @@ import { checkHiveAI } from "@askarthur/scam-engine/hive-ai";
 import { analyzeWithClaude } from "@askarthur/scam-engine/claude";
 import { assertSafeURL } from "@askarthur/scam-engine/ssrf-guard";
 import { fetchImageBytes } from "@askarthur/scam-engine/image-fetch";
-import { detectC2PA } from "@askarthur/scam-engine/c2pa-detect";
-import { verifyC2PA } from "@askarthur/scam-engine/c2pa-verify";
-import { detectMetadataOrigin } from "@askarthur/scam-engine/metadata-origin";
+import { readImageOrigin } from "@askarthur/scam-engine/image-origin";
+import { generatorBreakdown } from "@askarthur/scam-engine/hive-ai";
 import { isFeatureBraked } from "@askarthur/scam-engine/cost-log";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
@@ -34,22 +33,6 @@ const DISCLAIMER =
 // Confidence-only response; `likely` mirrors Hive's 0.9 thresholds.
 function signal(likely: boolean, confidence: number) {
   return { likely, confidence };
-}
-
-// Verdict classes are surfaced as their own signals; everything else in
-// Hive's class list is generator attribution (midjourney, dalle, flux, …).
-const VERDICT_CLASSES = new Set(["ai_generated", "not_ai_generated", "deepfake"]);
-const BREAKDOWN_TOP_N = 3;
-
-function generatorBreakdown(
-  classes: Array<{ class: string; score: number }> | undefined,
-): Array<{ class: string; score: number }> | null {
-  if (!classes || classes.length === 0) return null;
-  const generators = classes
-    .filter((c) => !VERDICT_CLASSES.has(c.class) && c.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, BREAKDOWN_TOP_N);
-  return generators.length > 0 ? generators : null;
 }
 
 // Byte fetch (SSRF-safe, 5 MB cap, magic-byte validated) is the shared
@@ -202,28 +185,17 @@ export async function POST(req: NextRequest) {
     let imageSha256: string | null = null;
     if (featureFlags.imageCheckVision) {
       const bytes = await fetchImageBytes(imageUrl);
-      // C2PA presence + claimed-origin metadata are structural sniffs over
-      // the fetched bytes — free, deterministic, run even while the vision
-      // brake is engaged. null (bytes unavailable) means "unknown", never
-      // fabricated — and {claimed:false}/{present:false} mean "not found",
-      // never "not AI" (asymmetry rule).
-      contentCredentials = bytes ? detectC2PA(bytes.buffer) : null;
-      metadataOrigin = bytes ? detectMetadataOrigin(bytes.buffer) : null;
-      imageSha256 = bytes?.sha256 ?? null;
-      // Signed-tier upgrade: cryptographic validation runs ONLY when the
-      // sniff found a manifest (native parser never sees manifest-less
-      // attacker bytes) and the sub-flag is on. verifyC2PA returning null
-      // means "could not validate" — presence-only copy stands, never
-      // "invalid".
-      if (bytes && contentCredentials?.present && featureFlags.imageCheckC2paValidate) {
-        const verification = await verifyC2PA(
+      // The AI-origin ladder (C2PA sniff → flag-gated validation →
+      // claimed-origin metadata) — free, deterministic, runs even while
+      // the vision brake is engaged. null (bytes unavailable) means
+      // "unknown", never fabricated (asymmetry rule).
+      if (bytes) {
+        ({ contentCredentials, metadataOrigin } = await readImageOrigin(
           bytes.buffer,
-          `image/${contentCredentials.format ?? "jpeg"}`,
-        );
-        if (verification) {
-          contentCredentials = { ...contentCredentials, ...verification };
-        }
+          { validateC2pa: featureFlags.imageCheckC2paValidate },
+        ));
       }
+      imageSha256 = bytes?.sha256 ?? null;
       const visionBraked = await isFeatureBraked("extension_image_check");
       if (bytes && !visionBraked) {
         try {

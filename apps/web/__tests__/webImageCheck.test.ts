@@ -5,9 +5,13 @@ import { NextRequest } from "next/server";
 // URL mode (Hive + AI-origin ladder) and the upload mode (deterministic
 // ladder only, no classifier). assertSafeURL + c2pa-detect +
 // metadata-origin + image-validate run unmocked (pure).
-vi.mock("@askarthur/scam-engine/hive-ai", () => ({
-  checkHiveAI: vi.fn(),
-}));
+vi.mock("@askarthur/scam-engine/hive-ai", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@askarthur/scam-engine/hive-ai")>();
+  // Keep the REAL generatorBreakdown — the route imports it from this
+  // module, and the class-filtering behavior is part of what's asserted.
+  return { ...actual, checkHiveAI: vi.fn() };
+});
 vi.mock("@askarthur/scam-engine/cost-log", () => ({
   isFeatureBraked: vi.fn(async () => false),
 }));

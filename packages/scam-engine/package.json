@@ -38,6 +38,7 @@
     "./c2pa-detect": "./src/c2pa-detect.ts",
     "./c2pa-verify": "./src/c2pa-verify.ts",
     "./image-fetch": "./src/image-fetch.ts",
+    "./image-origin": "./src/image-origin.ts",
     "./image-origin-flags": "./src/image-origin-flags.ts",
     "./metadata-origin": "./src/metadata-origin.ts",
     "./image-check-pdf": "./src/image-check/pdf/render.ts",
