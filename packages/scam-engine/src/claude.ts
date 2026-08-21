@@ -45,7 +45,12 @@ const UNCERTAIN_CONFIDENCE_THRESHOLD = 0.6;
 export function sanitizeUnicode(text: string): string {
   return text
     .replace(
-      /[\u200B\u200C\u200D\uFEFF\u2060\u2062-\u2064\u{E0000}-\u{E007F}]/gu,
+      // Zero-width set + word joiner + invisible operators + Unicode tag
+      // block (ASCII smuggling), plus the bidi controls (LRM/RLM,
+      // embeddings, overrides, isolates — Trojan-source / display-spoofing
+      // vectors; direction control carries no analysis value, so stripping
+      // is safe for legitimate RTL text).
+      /[\u200B\u200C\u200D\u200E\u200F\uFEFF\u2060\u2062-\u2064\u202A-\u202E\u2066-\u2069\u{E0000}-\u{E007F}]/gu,
       "",
     )
     .normalize("NFKC");
@@ -132,11 +137,51 @@ const INJECTION_PATTERNS: [RegExp, string][] = [
   [/<\/?\s*system/i, "Attempted system tag injection"],
 ];
 
+// Deterministic character-class checks — NOT AI detection (ADR-0024
+// Amendment: invisible-character inspection is a manipulation signal and
+// sits outside the text-watermark prohibition). These run on the RAW text,
+// because sanitizeUnicode strips exactly these characters — the evidence
+// must be read before it is destroyed. Deliberately near-zero-FP:
+// - Unicode tag block: no legitimate use in consumer messages (the classic
+//   hidden-ASCII smuggling channel).
+// - Bidi OVERRIDES only (LRO/RLO) — embeddings/isolates/marks appear in
+//   legitimate RTL copy-paste and are stripped but never flagged.
+// - Runs of ≥2 CONSECUTIVE zero-width chars (mcp-audit OBF-002 precedent).
+//   Emoji ZWJ sequences never place zero-width chars adjacently, and a
+//   single stray ZWSP from web copy-paste does not fire.
+const UNICODE_OBFUSCATION_PATTERNS: [RegExp, string][] = [
+  [
+    /[\u{E0000}-\u{E007F}]/u,
+    "Hidden Unicode tag characters (invisible text smuggling)",
+  ],
+  [
+    /[\u202D\u202E]/,
+    "Bidirectional override characters (display-order spoofing)",
+  ],
+  [
+    /[\u200B\u200C\u200D\uFEFF]{2,}/,
+    "Runs of zero-width characters (content obfuscation)",
+  ],
+];
+
 export function detectInjectionAttempt(text: string): InjectionCheckResult {
   const patterns: string[] = [];
 
-  for (const [regex, description] of INJECTION_PATTERNS) {
+  for (const [regex, description] of UNICODE_OBFUSCATION_PATTERNS) {
     if (regex.test(text)) {
+      patterns.push(description);
+    }
+  }
+
+  // Phrase patterns run on the FOLDED text: sanitizeUnicode strips the
+  // invisible characters that split keywords and NFKC collapses
+  // fullwidth/mathematical variants — so fullwidth "ignore previous…" and
+  // zero-width-split "ig[ZWSP]nore pre[ZWSP]vious…" are both visible to
+  // the regexes. Folding INSIDE the detector (rather than at call sites)
+  // makes the invariant un-bypassable by a caller passing raw text.
+  const folded = sanitizeUnicode(text);
+  for (const [regex, description] of INJECTION_PATTERNS) {
+    if (regex.test(folded)) {
       patterns.push(description);
     }
   }
