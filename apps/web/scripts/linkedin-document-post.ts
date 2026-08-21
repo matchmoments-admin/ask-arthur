@@ -70,10 +70,26 @@ async function main() {
     throw new Error(`caption is ${caption.length} chars; LinkedIn's limit is 3000`);
   }
 
+  // HARD BOUNDARY: this lane posts as the COMPANY, never as a person.
+  // createDocumentPost/uploadDocument each accept an optional authorUrn/ownerUrn
+  // override and this script passes neither, so the author is always orgUrn().
+  // That is a property of today's code, not a guarantee. This assertion makes it
+  // one: if LINKEDIN_ORG_URN is ever pointed at a urn:li:person:… — a
+  // misconfigured secret, a token minted from a personal profile — the run stops
+  // here rather than publishing to somebody's personal feed, which is not
+  // undoable in any way that matters.
+  const author = orgUrn();
+  if (!author.startsWith("urn:li:organization:")) {
+    throw new Error(
+      `refusing to post: LINKEDIN_ORG_URN is "${author}", not a urn:li:organization: — ` +
+        `this lane publishes to the company page only`,
+    );
+  }
+
   console.log(`pdf      : ${pdfPath} (${Math.round(pdf.byteLength / 1024)} KB)`);
   console.log(`caption  : ${caption.length} chars`);
   console.log(`title    : ${title}`);
-  console.log(`author   : ${orgUrn()}`);
+  console.log(`author   : ${author} (company page)`);
 
   const accessToken = await resolveAccessToken();
 
