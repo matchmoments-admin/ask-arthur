@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Redis } from "@upstash/redis";
 import { guardV1 } from "@/lib/v1-guard";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { inspectDocument } from "@askarthur/scam-engine/document-check";
@@ -11,76 +10,47 @@ import {
   type WebDocumentCheckResponse,
 } from "@askarthur/types";
 import { recordDocumentCheck } from "@/lib/document-check-records";
+import { consumeMonthlyQuota, secondsToMonthEnd } from "@/lib/v1-quota";
+import { parsePeriodDays } from "@/lib/v1-params";
 import { logCost } from "@/lib/cost-telemetry";
 
 // B2B Document Check (Stage 2; rental-vertical pilot surface).
-// - POST: per-document check — the same inspectDocument seam as the consumer
-//   route, plus an org-attributed evidence record when flagged. Metered per
-//   calendar month from TIER_LIMITS[tier].documentChecksPerMonth (0 = tier
-//   has no document allowance → 402). The counter fails CLOSED in prod
-//   (quota is a rate-limit-class control — CLAUDE.md Never list).
-// - GET: the calling organisation's own flagged records — org-scoped via
-//   the key's orgId, NEVER a global feed (a pilot property manager sees
-//   their checks, nobody else's).
+// - POST (endpoint slug `document-checks.submit`): per-document check — the
+//   same inspectDocument seam as the consumer route, plus an org-attributed
+//   evidence record when flagged. Requires an ORG-LINKED key: the monthly
+//   allowance (TIER_LIMITS[tier].documentChecksPerMonth) is billed per
+//   organisation, shared across the org's keys. The meter is consumed ONLY
+//   after the upload validates — malformed requests never burn paid units.
+// - GET (endpoint slug `document-checks`): the calling organisation's own
+//   flagged records — NEVER a global feed. Distinct slugs let a read-only
+//   dashboard key be scoped to the feed without granting submission.
 // Both dark behind FF_DOCUMENT_CHECK_V1_API until the first pilot key is
-// provisioned (per-key allowed_endpoints scoping applies on top).
+// provisioned.
 
 const MAX_UPLOAD_BYTES = 10_000_000;
 
 const SELECT_COLUMNS =
   "check_ref, checked_at, doc_sha256, jurisdiction, source, structural_summary, findings, abn_summary";
 
-let _redis: Redis | null = null;
-function getRedis(): Redis | null {
-  if (!process.env.UPSTASH_REDIS_REST_URL) return null;
-  if (!_redis) {
-    _redis = new Redis({
-      url: process.env.UPSTASH_REDIS_REST_URL,
-      token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-    });
-  }
-  return _redis;
-}
-
-/** INCR the caller's calendar-month counter. Returns the count after
- *  increment, or null when the store is unavailable. */
-async function bumpMonthlyCount(scope: string): Promise<number | null> {
-  const redis = getRedis();
-  if (!redis) return null;
-  try {
-    const month = new Date().toISOString().slice(0, 7); // YYYY-MM
-    const key = `askarthur:doccheck:month:${scope}:${month}`;
-    const count = await redis.incr(key);
-    if (count === 1) await redis.expire(key, 60 * 60 * 24 * 40);
-    return count;
-  } catch (err) {
-    logger.error("document-checks: monthly counter unavailable", { error: String(err) });
-    return null;
-  }
-}
-
 export async function GET(req: NextRequest) {
   if (!featureFlags.documentCheckV1Api) {
     return NextResponse.json({ error: "feature_disabled" }, { status: 503 });
   }
-  const guard = await guardV1(req);
+  const guard = await guardV1(req, "document-checks");
   if (!guard.ok) return guard.error;
   if (!guard.auth.orgId) {
     return NextResponse.json(
-      { error: "This endpoint requires an organisation-linked API key" },
+      { error: "org_key_required", message: "This endpoint requires an organisation-linked API key." },
       { status: 403 },
     );
   }
 
   const supabase = createServiceClient();
   if (!supabase) {
-    return NextResponse.json({ error: "Service unavailable" }, { status: 503 });
+    return NextResponse.json({ error: "service_unavailable" }, { status: 503 });
   }
 
-  const days = Math.min(
-    Math.max(parseInt(req.nextUrl.searchParams.get("period")?.replace(/d$/, "") ?? "30") || 30, 1),
-    90,
-  );
+  const days = parsePeriodDays(req.nextUrl.searchParams.get("period"));
   const since = new Date();
   since.setDate(since.getDate() - days);
 
@@ -94,7 +64,7 @@ export async function GET(req: NextRequest) {
       .limit(100);
     if (error) {
       logger.error("document-checks feed query error", { error: String(error) });
-      return NextResponse.json({ error: "Failed to fetch document checks" }, { status: 500 });
+      return NextResponse.json({ error: "query_failed" }, { status: 500 });
     }
     return NextResponse.json({
       meta: { period_days: days, total: checks?.length ?? 0, generated_at: new Date().toISOString() },
@@ -102,7 +72,7 @@ export async function GET(req: NextRequest) {
     });
   } catch (err) {
     logger.error("document-checks feed error", { error: String(err) });
-    return NextResponse.json({ error: "Internal error" }, { status: 500 });
+    return NextResponse.json({ error: "internal_error" }, { status: 500 });
   }
 }
 
@@ -115,8 +85,16 @@ export async function POST(req: NextRequest) {
     if (contentLength > MAX_UPLOAD_BYTES + 50_000) {
       return NextResponse.json({ error: "payload_too_large" }, { status: 413 });
     }
-    const guard = await guardV1(req);
+    const guard = await guardV1(req, "document-checks.submit");
     if (!guard.ok) return guard.error;
+    if (!guard.auth.orgId) {
+      // The allowance is per-organisation; an org-less key has no meter to
+      // bill against (and every pilot key is org-provisioned).
+      return NextResponse.json(
+        { error: "org_key_required", message: "This endpoint requires an organisation-linked API key." },
+        { status: 403 },
+      );
+    }
 
     const tier = (guard.auth.tier ?? "free") as keyof typeof TIER_LIMITS;
     const monthlyLimit = TIER_LIMITS[tier]?.documentChecksPerMonth ?? 0;
@@ -130,25 +108,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Meter BEFORE the work; fail closed when the counter is unavailable.
-    const scope = guard.auth.orgId ?? guard.auth.keyHash ?? "unknown";
-    const count = await bumpMonthlyCount(scope);
-    if (count === null) {
-      return NextResponse.json(
-        { error: "service_unavailable", message: "Metering briefly unavailable. Try again shortly." },
-        { status: 503, headers: { "Retry-After": "60" } },
-      );
-    }
-    if (count > monthlyLimit) {
-      return NextResponse.json(
-        {
-          error: "monthly_limit_reached",
-          message: `Monthly document-check allowance (${monthlyLimit}) reached.`,
-        },
-        { status: 429 },
-      );
-    }
-
+    // ---- validate the upload BEFORE consuming any allowance --------------
     const contentType = req.headers.get("content-type") ?? "";
     if (!contentType.startsWith("multipart/form-data")) {
       return NextResponse.json(
@@ -169,6 +129,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: "unsupported_file", message: "Only PDF documents are supported." },
         { status: 422 },
+      );
+    }
+
+    // ---- meter (org-scoped, fail-closed in prod, non-refundable) ---------
+    const quota = await consumeMonthlyQuota("document_check", guard.auth.orgId, monthlyLimit);
+    if (!quota.allowed && quota.reason === "store_unavailable") {
+      return NextResponse.json(
+        { error: "service_unavailable", message: "Metering briefly unavailable. Try again shortly." },
+        { status: 503, headers: { "Retry-After": "60" } },
+      );
+    }
+    if (!quota.allowed) {
+      return NextResponse.json(
+        {
+          error: "monthly_limit_reached",
+          message: `Monthly document-check allowance (${monthlyLimit}) reached. Resets on the 1st (UTC).`,
+        },
+        { status: 429, headers: { "Retry-After": String(secondsToMonthEnd()) } },
       );
     }
 
@@ -208,13 +186,13 @@ export async function POST(req: NextRequest) {
       checked: true,
       mode: "upload",
       ...inspection,
-      checkRef: recordDocumentCheck(inspection, {
+      checkRef: await recordDocumentCheck(inspection, {
         source: "api",
-        orgId: guard.auth.orgId ?? null,
+        orgId: guard.auth.orgId,
         apiKeyHash: guard.auth.keyHash ?? null,
       }),
       disclaimer: DOCUMENT_CHECK_DISCLAIMER,
-      monthlyRemaining: Math.max(0, monthlyLimit - count),
+      monthlyRemaining: quota.remaining,
     };
     return NextResponse.json(response);
   } catch (err) {

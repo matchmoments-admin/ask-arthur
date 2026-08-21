@@ -7,6 +7,7 @@ import { inspectPdfStructure, collectStructuralFindings } from "@askarthur/scam-
 
 const flagState = vi.hoisted(() => ({ documentCheckRecords: true }));
 const inserts = vi.hoisted(() => ({ rows: [] as Array<Record<string, unknown>> }));
+const dbState = vi.hoisted(() => ({ fail: false }));
 
 vi.mock("@askarthur/utils/feature-flags", () => ({ featureFlags: flagState }));
 vi.mock("@askarthur/utils/logger", () => ({
@@ -17,6 +18,7 @@ vi.mock("@askarthur/supabase/server", () => ({
   createServiceClient: vi.fn(() => ({
     from: vi.fn(() => ({
       insert: vi.fn(async (row: Record<string, unknown>) => {
+        if (dbState.fail) return { error: { message: "insert failed" } };
         inserts.rows.push(row);
         return { error: null };
       }),
@@ -47,12 +49,13 @@ function flaggedInspection() {
 beforeEach(() => {
   flagState.documentCheckRecords = true;
   inserts.rows.length = 0;
+  dbState.fail = false;
 });
 
 describe("recordDocumentCheck", () => {
   it("returns null and writes nothing while the records flag is off", async () => {
     flagState.documentCheckRecords = false;
-    expect(recordDocumentCheck(flaggedInspection(), { source: "web" })).toBeNull();
+    expect(await recordDocumentCheck(flaggedInspection(), { source: "web" })).toBeNull();
     expect(inserts.rows).toHaveLength(0);
   });
 
@@ -61,20 +64,24 @@ describe("recordDocumentCheck", () => {
       Buffer.from("%PDF-1.7\ntrailer\n<< >>\nstartxref\n9\n%%EOF\n", "latin1"),
     );
     const clean = { docSha256: "b".repeat(64), structural, findings: [], content: null };
-    expect(recordDocumentCheck(clean, { source: "web" })).toBeNull();
+    expect(await recordDocumentCheck(clean, { source: "web" })).toBeNull();
     expect(inserts.rows).toHaveLength(0);
+  });
+
+  it("never hands out a ref whose row failed to write — insert error → null", async () => {
+    dbState.fail = true;
+    expect(await recordDocumentCheck(flaggedInspection(), { source: "web" })).toBeNull();
   });
 
   it("writes a DC- keyed, metadata-only row for a flagged check", async () => {
     const inspection = flaggedInspection();
     expect(inspection.findings.length).toBeGreaterThan(0);
-    const ref = recordDocumentCheck(inspection, {
+    const ref = await recordDocumentCheck(inspection, {
       source: "api",
       orgId: "org-123",
       apiKeyHash: "hash-abc",
     });
     expect(ref).toMatch(/^DC-[0-9A-HJKMNP-TV-Z]{12}$/);
-    await Promise.resolve(); // let the waitUntil-wrapped insert settle
     expect(inserts.rows).toHaveLength(1);
     const row = inserts.rows[0]!;
     expect(row.check_ref).toBe(ref);

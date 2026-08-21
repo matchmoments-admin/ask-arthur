@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { guardV1 } from "@/lib/v1-guard";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
+import { TIER_LIMITS } from "@askarthur/types";
+import { peekMonthlyQuota } from "@/lib/v1-quota";
 
 export async function GET(req: NextRequest) {
   const guard = await guardV1(req);
@@ -61,10 +63,27 @@ export async function GET(req: NextRequest) {
       byDay[row.day] = (byDay[row.day] || 0) + row.call_count;
     }
 
+    // Document-check monthly allowance (org-billed, UTC calendar months) —
+    // surfaced here so a pilot can see remaining without a chargeable POST.
+    const docLimit =
+      TIER_LIMITS[(auth.tier ?? "free") as keyof typeof TIER_LIMITS]
+        ?.documentChecksPerMonth ?? 0;
+    const documentChecks =
+      docLimit > 0 && auth.orgId
+        ? {
+            monthlyLimit: docLimit,
+            ...((await peekMonthlyQuota("document_check", auth.orgId, docLimit)) ?? {
+              used: null,
+              remaining: null,
+            }),
+          }
+        : null;
+
     return NextResponse.json({
       period: { days, since: since.toISOString().slice(0, 10) },
       totalCalls,
       dailyRemaining: auth.dailyRemaining,
+      documentChecks,
       byEndpoint,
       dailyBreakdown: Object.entries(byDay)
         .map(([day, count]) => ({ day, calls: count }))

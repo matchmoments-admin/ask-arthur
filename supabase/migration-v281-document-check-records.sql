@@ -196,3 +196,13 @@ $$;
 
 REVOKE EXECUTE ON FUNCTION public.archive_secondary_tables_batch(INT)
   FROM anon, authenticated, PUBLIC;
+
+-- v239 ended with a GRANT + COMMENT that a full-replace would drop on a
+-- fresh environment (CREATE OR REPLACE preserves ACLs in-place, but a
+-- preview-branch bootstrap or DR restore applying only later migrations
+-- would leave service_role without EXECUTE after the REVOKE) — restate
+-- both, with the table count kept true.
+GRANT EXECUTE ON FUNCTION public.archive_secondary_tables_batch(INT)
+  TO service_role;
+COMMENT ON FUNCTION public.archive_secondary_tables_batch(INT) IS
+  'Nightly batch mover: archives 8 medium-volume tables to their _archive twins (flagged_ads, deepfake_detections, media_analyses 180d, scan_results, verdict_feedback 730d, brand_impersonation_alerts, image_check_records, document_check_records; default 365d). Called by the archive-shadows-retention Inngest cron.';

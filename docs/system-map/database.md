@@ -208,7 +208,7 @@ Supabase Postgres (project `rquomhcgnodxzkhokwni`). 75+ tables across 12 domain 
 
 ---
 
-## Archive shadows (×11)
+## Archive shadows (×12)
 
 All have `BRIN(created_at)` for cheap range queries.
 

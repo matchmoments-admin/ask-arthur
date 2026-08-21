@@ -166,6 +166,24 @@ export default function DocumentCheckClient() {
             ) : null}
           </dl>
 
+          {result.checkRef ? (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+              <p className="text-gray-500">Evidence reference</p>
+              <p className="mt-1">
+                <a
+                  href={`/document-check/${result.checkRef}`}
+                  className="font-mono text-sm text-gray-900 underline"
+                >
+                  {result.checkRef}
+                </a>
+              </p>
+              <p className="mt-1 text-xs text-gray-500">
+                A permanent record of these findings (no document content is
+                stored). Quote this reference when reporting or disputing.
+              </p>
+            </div>
+          ) : null}
+
           <p className="text-xs text-gray-500">{result.disclaimer}</p>
         </div>
       ) : null}

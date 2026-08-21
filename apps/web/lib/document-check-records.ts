@@ -8,11 +8,12 @@
 //   facts — never document bytes, never extracted text (the abn_summary
 //   digits are numbers the ABR publishes, not document content);
 // - flag-gated by FF_DOCUMENT_CHECK_RECORDS, independent of the route flag;
-// - fire-and-forget via waitUntil, logger.error on failure (error level
-//   always ships to Axiom — a silent write failure would undercount the
-//   evidence corpus invisibly).
+// - the insert is AWAITED and the ref is returned only when the row exists:
+//   a DC- ref is sold as quotable evidence (B2B pilots forward it to
+//   tenants/tribunals), so a fire-and-forget write could hand out refs that
+//   permanently 404 (PR #1031 review). Insert failure → null + error-level
+//   log (always ships to Axiom).
 
-import { waitUntil } from "@vercel/functions";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -26,12 +27,14 @@ export interface RecordDocumentCheckContext {
 }
 
 /** Persist a FLAGGED document check as a metadata-only evidence record.
- *  Returns the DC- checkRef, or null when nothing is recorded (feature off,
- *  zero findings, or no service client). Never throws. */
-export function recordDocumentCheck(
+ *  Returns the DC- checkRef only after the row is written; null when
+ *  nothing is recorded (feature off, zero findings, no client, or the
+ *  insert failed — a ref that would 404 is never handed out). Never
+ *  throws. */
+export async function recordDocumentCheck(
   inspection: DocumentInspection,
   ctx: RecordDocumentCheckContext,
-): string | null {
+): Promise<string | null> {
   if (!featureFlags.documentCheckRecords) return null;
   if (inspection.findings.length === 0) return null;
   const supabase = createServiceClient();
@@ -67,19 +70,22 @@ export function recordDocumentCheck(
     abn_summary: inspection.content?.abns ?? null,
   };
 
-  waitUntil(
-    (async () => {
-      const { error } = await supabase
-        .from("document_check_records")
-        .insert(record);
-      if (error) {
-        logger.error("Failed to store document check record", {
-          error: error.message,
-          checkRef,
-        });
-      }
-    })(),
-  );
+  try {
+    const { error } = await supabase.from("document_check_records").insert(record);
+    if (error) {
+      logger.error("Failed to store document check record", {
+        error: error.message,
+        checkRef,
+      });
+      return null;
+    }
+  } catch (err) {
+    logger.error("Failed to store document check record", {
+      error: String(err),
+      checkRef,
+    });
+    return null;
+  }
 
   return checkRef;
 }

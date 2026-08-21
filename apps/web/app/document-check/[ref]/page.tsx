@@ -28,7 +28,11 @@ export default async function DocumentCheckEvidencePage({
 }: {
   params: Promise<{ ref: string }>;
 }) {
-  if (!featureFlags.documentCheck || !featureFlags.documentCheckRecords) {
+  // Gate on the RECORDS flag alone: B2B DC- refs are minted under
+  // documentCheckV1Api + documentCheckRecords with the consumer flag still
+  // dark, and a quoted evidence ref that 404s is indistinguishable from a
+  // fabricated one. The unguessable ref is the access control (ADR-0022).
+  if (!featureFlags.documentCheckRecords) {
     notFound();
   }
 
@@ -99,7 +103,7 @@ export default async function DocumentCheckEvidencePage({
                       {a.status === "registered"
                         ? `registered${a.entityName ? ` — ${a.entityName}` : ""}`
                         : a.status === "cancelled"
-                          ? "cancelled on the register"
+                          ? `cancelled on the register${a.entityName ? ` — ${a.entityName}` : ""}`
                           : a.status === "not_registered"
                             ? "not on the ABR register"
                             : a.status === "invalid_checksum"

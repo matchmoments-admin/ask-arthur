@@ -153,8 +153,9 @@ export async function POST(req: NextRequest) {
       mode: "upload",
       ...inspection,
       // Evidence record for FLAGGED checks only (ADR-0022 pattern) —
-      // recordDocumentCheck owns the flag-gate and metadata-only rules.
-      checkRef: recordDocumentCheck(inspection, { source: "web" }),
+      // recordDocumentCheck owns the flag-gate and metadata-only rules,
+      // and only returns a ref once the row exists.
+      checkRef: await recordDocumentCheck(inspection, { source: "web" }),
       disclaimer: DOCUMENT_CHECK_DISCLAIMER,
     };
     return NextResponse.json(response);
