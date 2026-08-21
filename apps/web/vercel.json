@@ -90,6 +90,9 @@
     "app/api/analyze/route.ts": {
       "maxDuration": 60
     },
+    "app/api/document-check/route.ts": {
+      "maxDuration": 30
+    },
     "app/api/media/analyze/route.ts": {
       "maxDuration": 60
     },

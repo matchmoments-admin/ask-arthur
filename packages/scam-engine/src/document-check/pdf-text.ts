@@ -6,7 +6,8 @@
 // hand-roll. pdfjs-dist is the most-fuzzed PDF parser in existence (it
 // ships in Firefox), and it runs here under strict containment:
 // - only AFTER the dependency-free structural walk admitted the file;
-// - `isEvalSupported: false` (no PostScript-function eval);
+// - no PostScript-function eval exists to disable — pdfjs-dist 6.x removed
+//   the eval path (and its isEvalSupported switch) upstream entirely;
 // - a hard timeout that destroys the parse;
 // - page and character caps;
 // - any failure returns null — the content layer reports "not assessed"

@@ -37,6 +37,10 @@ export const DOCUMENT_FINDING_SIGNALS = [
   /** An ABN printed on the document is not on the ABR register (the register
    *  answered cleanly — this is NOT the lookup-failed case, ADR-0009). */
   "abn_not_registered",
+  /** An ABN printed on the document exists on the register but is no longer
+   *  active (cancelled) — a real record must not lend the document its
+   *  credibility (verifyShopAbn's status!=="active" precedent). */
+  "abn_cancelled",
 ] as const;
 
 export type DocumentFindingSignal = (typeof DOCUMENT_FINDING_SIGNALS)[number];
@@ -99,7 +103,7 @@ export interface PdfStructuralSummary {
 export interface DocumentAbnCheck {
   /** The 11 digits as printed (normalised, no spaces). */
   abn: string;
-  status: "invalid_checksum" | "registered" | "not_registered" | "unverified";
+  status: "invalid_checksum" | "registered" | "cancelled" | "not_registered" | "unverified";
   /** ABR legal entity name when registered, else null. */
   entityName: string | null;
 }

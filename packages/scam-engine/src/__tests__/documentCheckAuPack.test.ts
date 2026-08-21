@@ -8,23 +8,33 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { isValidAbnChecksum } from "../abn-checksum";
 
 const abrState = vi.hoisted(() => ({
-  mode: "registered" as "registered" | "not-found" | "lookup-failed",
+  mode: "registered" as "registered" | "cancelled" | "not-found" | "lookup-failed",
+  cached: false,
   calls: [] as string[],
 }));
 const brakeState = vi.hoisted(() => ({ braked: false }));
+const costState = vi.hoisted(() => ({ calls: 0 }));
 
 vi.mock("../abr-lookup", () => ({
   lookupABN: vi.fn(async (abn: string) => {
     abrState.calls.push(abn);
-    if (abrState.mode === "registered") {
-      return { abn, entityName: "EXAMPLE PTY LTD", entityType: "PRV", status: "Active" };
+    if (abrState.mode === "registered" || abrState.mode === "cancelled") {
+      return {
+        abn,
+        entityName: "EXAMPLE PTY LTD",
+        entityType: "PRV",
+        status: abrState.mode === "cancelled" ? "Cancelled" : "Active",
+        ...(abrState.cached ? { cached: true } : {}),
+      };
     }
     return { ok: false, reason: abrState.mode };
   }),
 }));
 vi.mock("../cost-log", () => ({
   isFeatureBraked: vi.fn(async () => brakeState.braked),
-  logCost: vi.fn(async () => undefined),
+  logCost: vi.fn(async () => {
+    costState.calls++;
+  }),
 }));
 
 import { runAuPack } from "../document-check/packs/au";
@@ -42,8 +52,10 @@ const INVALID_ABN = "11111111111"; // fails the mod-89 checksum
 
 beforeEach(() => {
   abrState.mode = "registered";
+  abrState.cached = false;
   abrState.calls.length = 0;
   brakeState.braked = false;
+  costState.calls = 0;
 });
 
 describe("runAuPack", () => {
@@ -96,6 +108,49 @@ describe("runAuPack", () => {
     expect(abrState.calls).toEqual([]);
     expect(r.content.abns).toContainEqual({ abn, status: "unverified", entityName: null });
     expect(r.findings.map((f) => f.signal)).toEqual(["abn_checksum_fail"]);
+  });
+
+  it("a BARE 11-digit junk number (phone/account) is neither accused nor listed", async () => {
+    // 11 digits, no "ABN" label, fails checksum — matching it would amber-
+    // flag ordinary invoices (review finding, PR #1030).
+    const r = await runAuPack("Payment reference 61412345678 due 30 days.");
+    expect(r.findings).toEqual([]);
+    expect(r.content.abns).toEqual([]);
+    expect(abrState.calls).toEqual([]);
+  });
+
+  it("a real-but-cancelled ABN → status cancelled + abn_cancelled finding, never 'registered'", async () => {
+    abrState.mode = "cancelled";
+    const [abn] = validAbns(1);
+    const r = await runAuPack(`ABN ${abn}`);
+    expect(r.content.abns).toEqual([
+      { abn, status: "cancelled", entityName: "EXAMPLE PTY LTD" },
+    ]);
+    expect(r.findings.map((f) => f.signal)).toEqual(["abn_cancelled"]);
+  });
+
+  it("cache-served lookups do NOT log a cost row (the cost-log contract)", async () => {
+    abrState.cached = true;
+    const [abn] = validAbns(1);
+    await runAuPack(`ABN ${abn}`);
+    expect(costState.calls).toBe(0);
+    abrState.cached = false;
+    const [, abn2] = validAbns(2);
+    await runAuPack(`ABN ${abn2}`);
+    expect(costState.calls).toBe(1);
+  });
+
+  it("checksum junk cannot crowd a genuine candidate out of the lookup slots", async () => {
+    const [real] = validAbns(1);
+    // Six labelled checksum-fail numbers ahead of the one real ABN.
+    const junk = Array.from({ length: 6 }, (_, i) => `ABN 1111111111${i}`).join("\n");
+    const r = await runAuPack(`${junk}\nABN ${real}`);
+    expect(abrState.calls).toEqual([real]);
+    expect(r.content.abns).toContainEqual({
+      abn: real,
+      status: "registered",
+      entityName: "EXAMPLE PTY LTD",
+    });
   });
 
   it("caps ABR lookups at 5 per document", async () => {

@@ -124,11 +124,13 @@ export default function DocumentCheckClient() {
                     <span className="text-right text-gray-800">
                       {a.status === "registered"
                         ? `registered${a.entityName ? ` — ${a.entityName}` : ""}`
-                        : a.status === "not_registered"
-                          ? "not on the ABR register"
-                          : a.status === "invalid_checksum"
-                            ? "not a possible ABN"
-                            : "could not be checked"}
+                        : a.status === "cancelled"
+                          ? `cancelled on the register${a.entityName ? ` — ${a.entityName}` : ""}`
+                          : a.status === "not_registered"
+                            ? "not on the ABR register"
+                            : a.status === "invalid_checksum"
+                              ? "not a possible ABN"
+                              : "could not be checked"}
                     </span>
                   </li>
                 ))}

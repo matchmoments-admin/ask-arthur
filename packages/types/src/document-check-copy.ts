@@ -68,6 +68,11 @@ export const DOCUMENT_CHECK_COPY: Record<DocumentFindingSignal, DocumentFindingC
     explain:
       "An ABN printed on this document is not on the Australian Business Register. Check the number on abr.business.gov.au and confirm the business through a channel you already trust before paying.",
   },
+  abn_cancelled: {
+    label: "ABN cancelled on the register",
+    explain:
+      "An ABN printed on this document exists on the Australian Business Register but is no longer active. Businesses do close — but a cancelled ABN on a current invoice or payslip is worth confirming through a channel you already trust.",
+  },
 };
 
 /** Heading for the zero-findings state. Lives here (not hardcoded in the

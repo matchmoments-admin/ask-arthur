@@ -52,6 +52,10 @@ export interface ABNLookupResult {
    *  endorsement (income tax exempt). Surface alongside DGR for the
    *  fuller charity-tax picture. */
   taxConcessionCharity: boolean;
+  /** True when this result was served from the 24h Redis cache — no
+   *  upstream ABR call was made. Callers that logCost per real API call
+   *  (the cost-log contract) must skip cached results. Never stored. */
+  cached?: boolean;
 }
 
 /**
@@ -261,7 +265,7 @@ export async function lookupABN(
   if (redis) {
     try {
       const cached = await redis.get<ABNLookupResult>(cacheKey);
-      if (cached) return cached;
+      if (cached) return { ...cached, cached: true };
     } catch (err) {
       logger.error("Redis cache read failed for ABN lookup", {
         error: String(err),
