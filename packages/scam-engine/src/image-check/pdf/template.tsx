@@ -144,25 +144,13 @@ export function ImageCheckEvidencePdf({ evidence }: { evidence: ImageCheckEviden
           <View style={styles.row}>
             <Text style={styles.label}>Content Credentials</Text>
             <Text style={styles.value}>
-              {e.contentCredentials === null
-                ? IMAGE_CHECK_ORIGIN_COPY.ccUnknown
-                : !e.contentCredentials.present
-                  ? IMAGE_CHECK_ORIGIN_COPY.ccAbsent
-                  : e.contentCredentials.validationState
-                    ? e.contentCredentials.validationState === "invalid"
-                      ? IMAGE_CHECK_ORIGIN_COPY.ccInvalid
-                      : IMAGE_CHECK_ORIGIN_COPY.ccSigned(e.contentCredentials)
-                    : IMAGE_CHECK_ORIGIN_COPY.ccPresent(e.contentCredentials.format)}
+              {IMAGE_CHECK_ORIGIN_COPY.ccLine(e.contentCredentials)}
             </Text>
           </View>
           <View style={styles.row}>
             <Text style={styles.label}>Metadata origin tag</Text>
             <Text style={styles.value}>
-              {e.originMetadata === null
-                ? IMAGE_CHECK_ORIGIN_COPY.originUnknown
-                : e.originMetadata.claimed
-                  ? IMAGE_CHECK_ORIGIN_COPY.originClaimed(e.originMetadata.generator)
-                  : IMAGE_CHECK_ORIGIN_COPY.originAbsent}
+              {IMAGE_CHECK_ORIGIN_COPY.originLine(e.originMetadata)}
             </Text>
           </View>
         </View>

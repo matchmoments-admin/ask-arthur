@@ -16,23 +16,10 @@ function pct(v: number): string {
   return `${Math.round(v * 100)}%`;
 }
 
-function ccLine(cc: WebImageCheckResponse["contentCredentials"]): string {
-  if (cc === null) return IMAGE_CHECK_ORIGIN_COPY.ccUnknown;
-  if (!cc.present) return IMAGE_CHECK_ORIGIN_COPY.ccAbsent;
-  if (cc.validationState) {
-    return cc.validationState === "invalid"
-      ? IMAGE_CHECK_ORIGIN_COPY.ccInvalid
-      : IMAGE_CHECK_ORIGIN_COPY.ccSigned(cc);
-  }
-  return IMAGE_CHECK_ORIGIN_COPY.ccPresent(cc.format);
-}
-
-function originLine(origin: WebImageCheckResponse["metadataOrigin"]): string {
-  if (origin === null) return IMAGE_CHECK_ORIGIN_COPY.originUnknown;
-  return origin.claimed
-    ? IMAGE_CHECK_ORIGIN_COPY.originClaimed(origin.generator)
-    : IMAGE_CHECK_ORIGIN_COPY.originAbsent;
-}
+// Tier selection lives in the shared IMAGE_CHECK_ORIGIN_COPY selectors
+// (ccLine / originLine) so the asymmetry test covers this surface's
+// selection paths too.
+const { ccLine, originLine } = IMAGE_CHECK_ORIGIN_COPY;
 
 export default function ImageCheckClient() {
   const [mode, setMode] = useState<Mode>("url");

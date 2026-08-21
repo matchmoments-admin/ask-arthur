@@ -133,25 +133,13 @@ export default async function ImageCheckEvidencePage({
             <div>
               <dt className="text-gray-500">Content Credentials (C2PA)</dt>
               <dd className="text-gray-800">
-                {cc === null
-                  ? IMAGE_CHECK_ORIGIN_COPY.ccUnknown
-                  : !cc.present
-                    ? IMAGE_CHECK_ORIGIN_COPY.ccAbsent
-                    : cc.validationState
-                      ? cc.validationState === "invalid"
-                        ? IMAGE_CHECK_ORIGIN_COPY.ccInvalid
-                        : IMAGE_CHECK_ORIGIN_COPY.ccSigned(cc)
-                      : IMAGE_CHECK_ORIGIN_COPY.ccPresent(cc.format)}
+                {IMAGE_CHECK_ORIGIN_COPY.ccLine(cc)}
               </dd>
             </div>
             <div>
               <dt className="text-gray-500">Metadata origin tag (XMP/EXIF)</dt>
               <dd className="text-gray-800">
-                {origin === null
-                  ? IMAGE_CHECK_ORIGIN_COPY.originUnknown
-                  : origin.claimed
-                    ? IMAGE_CHECK_ORIGIN_COPY.originClaimed(origin.generator)
-                    : IMAGE_CHECK_ORIGIN_COPY.originAbsent}
+                {IMAGE_CHECK_ORIGIN_COPY.originLine(origin)}
               </dd>
             </div>
           </dl>

@@ -47,6 +47,33 @@ const NON_GENERATOR_CLASSES = new Set([
   "inconclusive",
 ]);
 
+const BREAKDOWN_TOP_N = 3;
+
+/**
+ * Top generator-attribution classes with raw scores, for UI breakdown
+ * lines ("Midjourney — 62%"). Interprets Hive's class list, so it lives
+ * beside checkHiveAI — the routes consume it rather than re-filtering.
+ * Uses the same exclusion rules as generatorSource above (verdict/sentinel
+ * classes AND the V3 `_audio` head, which fires even for images) — the
+ * routes' original copies only stripped the verdict classes, letting bogus
+ * audio rows into the breakdown.
+ */
+export function generatorBreakdown(
+  classes: Array<{ class: string; score: number }> | undefined,
+): Array<{ class: string; score: number }> | null {
+  if (!classes || classes.length === 0) return null;
+  const generators = classes
+    .filter(
+      (c) =>
+        !NON_GENERATOR_CLASSES.has(c.class) &&
+        !c.class.endsWith("_audio") &&
+        c.score > 0,
+    )
+    .sort((a, b) => b.score - a.score)
+    .slice(0, BREAKDOWN_TOP_N);
+  return generators.length > 0 ? generators : null;
+}
+
 let _redis: Redis | null = null;
 
 function getRedis(): Redis | null {

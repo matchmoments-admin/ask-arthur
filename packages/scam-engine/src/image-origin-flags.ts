@@ -18,9 +18,7 @@
 // latency untouched.
 
 import { fetchImageBytes } from "./image-fetch";
-import { detectC2PA } from "./c2pa-detect";
-import { verifyC2PA } from "./c2pa-verify";
-import { detectMetadataOrigin } from "./metadata-origin";
+import { readImageOrigin } from "./image-origin";
 import { IMAGE_CHECK_ORIGIN_COPY } from "@askarthur/types";
 
 export interface ImageOriginFlagOptions {
@@ -42,24 +40,16 @@ export async function collectImageOriginRedFlags(
     const bytes = await fetchImageBytes(imageUrl);
     if (!bytes) return [];
 
+    const { contentCredentials: cc, metadataOrigin: origin } =
+      await readImageOrigin(bytes.buffer, { validateC2pa: opts.validateC2pa });
+
     const flags: string[] = [];
-    const cc = detectC2PA(bytes.buffer);
-    const origin = detectMetadataOrigin(bytes.buffer);
-
-    if (cc.present && opts.validateC2pa) {
-      const verification = await verifyC2PA(
-        bytes.buffer,
-        `image/${cc.format ?? "jpeg"}`,
-      );
-      if (verification?.validationState === "invalid") {
-        flags.push(IMAGE_CHECK_ORIGIN_COPY.redFlagInvalidCredentials);
-      }
+    if (cc.validationState === "invalid") {
+      flags.push(IMAGE_CHECK_ORIGIN_COPY.redFlagInvalidCredentials);
     }
-
     if (origin.claimed && !cc.present) {
       flags.push(IMAGE_CHECK_ORIGIN_COPY.redFlagClaimedAiOrigin(origin.generator));
     }
-
     return flags;
   } catch {
     return [];

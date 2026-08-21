@@ -58,6 +58,40 @@ describe("image-check origin copy — asymmetry rule", () => {
     }
   });
 
+  it("tier selectors route every state to the right copy (consolidated 2026-08-21)", () => {
+    const C = IMAGE_CHECK_ORIGIN_COPY;
+    // long-form C2PA selector
+    expect(C.ccLine(null)).toBe(C.ccUnknown);
+    expect(C.ccLine({ present: false })).toBe(C.ccAbsent);
+    expect(C.ccLine({ present: true, format: "jpeg" })).toBe(C.ccPresent("jpeg"));
+    expect(C.ccLine({ present: true, validationState: "invalid" })).toBe(C.ccInvalid);
+    expect(
+      C.ccLine({ present: true, validationState: "valid", generator: "Adobe Firefly" }),
+    ).toContain("signature verified");
+    // the mis-wire this test exists to catch: an invalid signature must
+    // NEVER select verified copy, on any selector
+    expect(C.ccLine({ present: true, validationState: "invalid" })).not.toMatch(/verified/i);
+    expect(C.ccCardLine({ present: true, validationState: "invalid" })).toBe(C.ccInvalidShort);
+    expect(C.ccCardLine({ present: true, validationState: "invalid" })).not.toMatch(/verified/i);
+    // card selectors render nothing for absent/unknown (asymmetry rule)
+    expect(C.ccCardLine(null)).toBeUndefined();
+    expect(C.ccCardLine({ present: false })).toBeUndefined();
+    expect(C.ccCardLine({ present: true })).toBe(C.ccPresentShort);
+    expect(C.ccCardLine({ present: true, validationState: "trusted", generator: "Adobe Firefly" }))
+      .toBe(C.ccSignedShort("Adobe Firefly"));
+    // metadata-origin selectors
+    expect(C.originLine(null)).toBe(C.originUnknown);
+    expect(C.originLine({ claimed: false })).toBe(C.originAbsent);
+    expect(C.originLine({ claimed: true, generator: "Midjourney" })).toBe(
+      C.originClaimed("Midjourney"),
+    );
+    expect(C.originCardLine(null)).toBeUndefined();
+    expect(C.originCardLine({ claimed: false })).toBeUndefined();
+    expect(C.originCardLine({ claimed: true, generator: "Midjourney" })).toBe(
+      C.originClaimedShort("Midjourney"),
+    );
+  });
+
   it("valid-but-untrusted signatures disclose the trust-list gap", () => {
     expect(
       IMAGE_CHECK_ORIGIN_COPY.ccSigned({ generator: "Adobe Firefly", validationState: "valid" }),
