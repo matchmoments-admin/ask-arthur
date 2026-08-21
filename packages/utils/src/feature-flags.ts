@@ -100,6 +100,12 @@ export const featureFlags = {
    *  requests, keeping Hive spend at zero while the feature is dark. */
   imageCheck: process.env.NEXT_PUBLIC_FF_IMAGE_CHECK === "true",
 
+  /** Document Check Module: deterministic PDF forensics (/document-check
+   *  page + /api/document-check). Structural layer only until the AU
+   *  content-logic pack ships; no paid API in the core path. When off the
+   *  route 503s and the page 404s (same double-gate posture as imageCheck). */
+  documentCheck: process.env.NEXT_PUBLIC_FF_DOCUMENT_CHECK === "true",
+
   /** Extension image check: optional Claude Haiku vision context pass
    *  (what the image depicts, impersonated brand/celebrity → feeds
    *  deepfake_detections). Server-only sub-flag of imageCheck — v1 launches

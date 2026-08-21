@@ -33,6 +33,7 @@ Every consumer page, authenticated page, admin page, and API route, grouped by d
 | `/persona-check`       | Person / entity reputation lookup                                                                   | —                                  |
 | `/extension`           | Chrome extension landing                                                                            | —                                  |
 | `/extension-turnstile` | Turnstile bridge iframe for extension registration                                                  | —                                  |
+| `/document-check`      | Public PDF document checker (deterministic structural forensics — no classifier, no paid APIs)      | `documentCheck`                    |
 | `/image-check`         | Public AI image checker (URL mode: Hive + AI-origin ladder; upload mode: deterministic ladder only) | `imageCheck`                       |
 | `/image-check/[ref]`   | Public image-check evidence page (+ `/api/image-check/[ref]/pdf` download)                          | `imageCheck` + `imageCheckRecords` |
 
@@ -171,17 +172,18 @@ Every consumer page, authenticated page, admin page, and API route, grouped by d
 
 ### Consumer lookup
 
-| Route                               | Method | Auth   | Purpose                                                                                                                                                                      |
-| ----------------------------------- | ------ | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/api/image-check`                  | POST   | open   | Public image check — JSON `{imageUrl}` (Hive + provenance ladder, `hive_ai` brake) or multipart upload (provenance only, free); 5/h per-IP fail-closed limit, no persistence |
-| `/api/charity-check`                | POST   | open   | Charity legitimacy lookup                                                                                                                                                    |
-| `/api/charity-check/autocomplete`   | GET    | open   | Charity name autocomplete                                                                                                                                                    |
-| `/api/phone-footprint/[msisdn]`     | POST   | open   | Phone-number footprint (free teaser; paid via monitors)                                                                                                                      |
-| `/api/phone-footprint/[msisdn]/pdf` | GET    | open   | PDF report export (Inngest queued)                                                                                                                                           |
-| `/api/scam-contacts/lookup`         | GET    | apikey | Lookup known scam contact                                                                                                                                                    |
-| `/api/scam-contacts/report`         | POST   | open   | Report a scam contact                                                                                                                                                        |
-| `/api/scam-urls/lookup`             | POST   | apikey | Lookup scam URL with WHOIS / SSL                                                                                                                                             |
-| `/api/scam-urls/report`             | POST   | open   | Report a scam URL                                                                                                                                                            |
+| Route                               | Method | Auth   | Purpose                                                                                                                                                                                   |
+| ----------------------------------- | ------ | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/api/document-check`               | POST   | open   | Public document check — multipart PDF upload only; deterministic structural forensics (Document Check Module), named findings, no paid APIs; 5/h per-IP fail-closed limit, no persistence |
+| `/api/image-check`                  | POST   | open   | Public image check — JSON `{imageUrl}` (Hive + provenance ladder, `hive_ai` brake) or multipart upload (provenance only, free); 5/h per-IP fail-closed limit, no persistence              |
+| `/api/charity-check`                | POST   | open   | Charity legitimacy lookup                                                                                                                                                                 |
+| `/api/charity-check/autocomplete`   | GET    | open   | Charity name autocomplete                                                                                                                                                                 |
+| `/api/phone-footprint/[msisdn]`     | POST   | open   | Phone-number footprint (free teaser; paid via monitors)                                                                                                                                   |
+| `/api/phone-footprint/[msisdn]/pdf` | GET    | open   | PDF report export (Inngest queued)                                                                                                                                                        |
+| `/api/scam-contacts/lookup`         | GET    | apikey | Lookup known scam contact                                                                                                                                                                 |
+| `/api/scam-contacts/report`         | POST   | open   | Report a scam contact                                                                                                                                                                     |
+| `/api/scam-urls/lookup`             | POST   | apikey | Lookup scam URL with WHOIS / SSL                                                                                                                                                          |
+| `/api/scam-urls/report`             | POST   | open   | Report a scam URL                                                                                                                                                                         |
 
 ### Extension integration (open, ECDSA-signed install requests)
 

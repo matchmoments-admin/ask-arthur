@@ -1,5 +1,7 @@
 export * from "./analysis";
 export * from "./billing";
+export * from "./document-check";
+export * from "./document-check-copy";
 export * from "./extension";
 export * from "./extension-security";
 export * from "./image-check";
