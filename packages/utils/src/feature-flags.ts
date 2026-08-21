@@ -106,6 +106,18 @@ export const featureFlags = {
    *  route 503s and the page 404s (same double-gate posture as imageCheck). */
   documentCheck: process.env.NEXT_PUBLIC_FF_DOCUMENT_CHECK === "true",
 
+  /** Document Check: persist evidence records (metadata-only, flagged-only,
+   *  never bytes or extracted text — ADR-0022 pattern, v281) to
+   *  document_check_records and return a DC- checkRef. Server-only,
+   *  independent of the route flag so persistence can be switched off
+   *  without darkening the check. Also gates /document-check/[ref]. */
+  documentCheckRecords: readBoolEnv("FF_DOCUMENT_CHECK_RECORDS"),
+
+  /** Document Check: the keyed B2B surface /api/v1/document-checks (POST
+   *  per-document check + GET own-org flagged feed). Server-only; dark
+   *  until the first rental-vertical pilot key is provisioned. */
+  documentCheckV1Api: readBoolEnv("FF_DOCUMENT_CHECK_V1_API"),
+
   /** Extension image check: optional Claude Haiku vision context pass
    *  (what the image depicts, impersonated brand/celebrity → feeds
    *  deepfake_detections). Server-only sub-flag of imageCheck — v1 launches
