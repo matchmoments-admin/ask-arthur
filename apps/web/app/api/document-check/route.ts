@@ -1,9 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  collectStructuralFindings,
-  inspectPdfStructure,
-} from "@askarthur/scam-engine/document-check";
-import { sha256Hex } from "@askarthur/scam-engine/image-fetch";
+import { inspectDocument } from "@askarthur/scam-engine/document-check";
 import { checkDocumentUploadRateLimit } from "@askarthur/utils/rate-limit";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -11,6 +7,7 @@ import {
   DOCUMENT_CHECK_DISCLAIMER,
   type WebDocumentCheckResponse,
 } from "@askarthur/types";
+import { logEvent } from "@/lib/analytics-events";
 
 // Public document checker (/document-check page). Upload mode only —
 // deterministic PDF structural forensics, no classifier, no Claude, no paid
@@ -84,14 +81,27 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const structural = inspectPdfStructure(buffer);
+    // One call on the Document Check Module's seam — the module owns the
+    // summary→findings pairing, the hash, and (in the follow-up PR) the
+    // jurisdiction pack dispatch, so this route never grows orchestration.
+    const inspection = inspectDocument(buffer);
+
+    // Stage-1 usage signal (metadata only — signal names, never content).
+    void logEvent({
+      eventType: "document_check_completed",
+      eventProps: {
+        findings: inspection.findings.length,
+        signals: inspection.findings.map((f) => f.signal).join(","),
+        is_pdf: inspection.structural.isPdf,
+      },
+      path: "/api/document-check",
+      requestId: null,
+    });
+
     const response: WebDocumentCheckResponse = {
       checked: true,
       mode: "upload",
-      docSha256: await sha256Hex(buffer),
-      structural,
-      findings: collectStructuralFindings(structural),
-      content: null,
+      ...inspection,
       disclaimer: DOCUMENT_CHECK_DISCLAIMER,
     };
     return NextResponse.json(response);

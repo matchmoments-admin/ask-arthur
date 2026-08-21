@@ -188,6 +188,42 @@ describe("inspectPdfStructure", () => {
   });
 });
 
+describe("edge signals", () => {
+  it("notes encryption without treating it as suspicious on its own", () => {
+    const raw = buildPdf({}).toString("latin1").replace(
+      "/Root 1 0 R",
+      "/Root 1 0 R /Encrypt 9 0 R",
+    );
+    const s = inspectPdfStructure(Buffer.from(raw, "latin1"));
+    expect(s.encrypted).toBe(true);
+    expect(collectStructuralFindings(s).map((f) => f.signal)).toContain(
+      "encrypted_document",
+    );
+  });
+
+  it("reports scan_limited when metadata is locked in object streams", () => {
+    const raw =
+      `%PDF-1.7\n1 0 obj\n<< /Type /ObjStm /N 3 /First 20 >>\nstream\nxx\nendstream\nendobj\n` +
+      `xref\n0 1\n0000000000 65535 f \ntrailer\n<< /Size 2 /Root 1 0 R >>\nstartxref\n9\n%%EOF\n`;
+    const s = inspectPdfStructure(Buffer.from(raw, "latin1"));
+    expect(s.hasObjectStreams).toBe(true);
+    expect(s.info.producer).toBeNull();
+    expect(collectStructuralFindings(s).map((f) => f.signal)).toContain("scan_limited");
+  });
+
+  it("inspectDocument seam: hash + pairing + content:null in one call", async () => {
+    const { inspectDocument } = await import("../document-check");
+    const doctored = appendUpdate(buildPdf({ producer: "Xero" }), {
+      producer: "Canva",
+    });
+    const r = inspectDocument(doctored);
+    expect(r.docSha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(r.structural.incrementalUpdates).toBe(1);
+    expect(r.findings.map((f) => f.signal)).toContain("multiple_revisions");
+    expect(r.content).toBeNull();
+  });
+});
+
 describe("parsePdfDate", () => {
   it("parses timezone offsets", () => {
     expect(parsePdfDate("D:20260801120000+10'00'")).toBe(Date.UTC(2026, 7, 1, 2, 0, 0));

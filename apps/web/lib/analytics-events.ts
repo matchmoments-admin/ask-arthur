@@ -33,6 +33,10 @@ export const ANALYTICS_EVENT_TYPES = [
   "link_click",
   "clone_citation_shown",
   "asic_citation_shown",
+  // Document Check funnel — the Stage-1 usage signal (plan: ≥25 checks/week
+  // with ≥1 finding within 30 days of flag-on). Metadata only: counts and
+  // signal names, never document content.
+  "document_check_completed",
   // Brand-exposure funnel (Wave 2) — measures the "Is your brand being cloned?"
   // checker so we can attribute leads back to Clone Watch. Server-emitted only.
   "brand_exposure_checked",
