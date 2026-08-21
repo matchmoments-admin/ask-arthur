@@ -1,4 +1,6 @@
 import { notFound } from "next/navigation";
+import Nav from "@/components/Nav";
+import Footer from "@/components/Footer";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import {
   DOCUMENT_CHECK_COPY,
@@ -19,19 +21,17 @@ export const dynamic = "force-dynamic";
 
 // Public evidence page, keyed on the unguessable DC- ref alone (ADR-0022:
 // ~60 bits vs at most thousands of flagged, metadata-only records —
-// enumeration is impractical). 404s identically for a missing ref, a
-// malformed ref, and flag-off, so the page leaks nothing about which refs
-// exist while dark. Renders the same named findings + asymmetry framing as
-// the live checker — never a verdict.
+// enumeration is impractical). Gates on the RECORDS flag alone: B2B refs
+// are minted while the consumer flag is dark, and a quoted evidence ref
+// that 404s is indistinguishable from a fabricated one. 404s identically
+// for a missing ref, a malformed ref, and flag-off. Renders the same named
+// findings + asymmetry framing as the live checker — never a verdict.
+// Marketing page shell + verdict tokens per DESIGN_SYSTEM.md.
 export default async function DocumentCheckEvidencePage({
   params,
 }: {
   params: Promise<{ ref: string }>;
 }) {
-  // Gate on the RECORDS flag alone: B2B DC- refs are minted under
-  // documentCheckV1Api + documentCheckRecords with the consumer flag still
-  // dark, and a quoted evidence ref that 404s is indistinguishable from a
-  // fabricated one. The unguessable ref is the access control (ADR-0022).
   if (!featureFlags.documentCheckRecords) {
     notFound();
   }
@@ -62,44 +62,55 @@ export default async function DocumentCheckEvidencePage({
   } | null;
 
   return (
-    <main className="min-h-screen bg-[#fbfbfa] px-4 py-12">
-      <div className="mx-auto w-full max-w-2xl space-y-6">
-        <header>
-          <p className="text-xs uppercase tracking-wider text-gray-500">
-            Ask Arthur — Document Check Evidence
-          </p>
-          <h1 className="mt-1 text-2xl font-semibold text-gray-900">
-            Check reference {record.check_ref}
-          </h1>
-          <p className="mt-1 text-sm text-gray-600">
-            Recorded {new Date(record.checked_at as string).toLocaleString("en-AU")}. This
-            page shows the structural signals read from the file at check
-            time — it is not a verdict about the document.
-          </p>
-        </header>
+    <div className="min-h-screen flex flex-col">
+      <Nav />
+      <main
+        id="main-content"
+        className="flex-1 w-full max-w-[640px] mx-auto px-5 pt-16 pb-16"
+      >
+        <h1 className="text-deep-navy text-4xl font-extrabold mb-4 leading-tight text-center">
+          Document Check Evidence
+        </h1>
+        <p className="text-lg text-gov-slate mb-2 leading-relaxed text-center">
+          Reference{" "}
+          <span className="font-mono text-base text-deep-navy">{record.check_ref}</span>
+        </p>
+        <p className="text-sm text-slate-500 mb-10 text-center">
+          Recorded {new Date(record.checked_at as string).toLocaleString("en-AU")} —
+          these are the structural signals read from the file at check time,
+          not a verdict about the document.
+        </p>
 
-        <section className="rounded-xl border border-gray-200 bg-white p-6 space-y-3 text-sm">
+        <section className="bg-white border border-border-light rounded-xl shadow-sm p-6 space-y-4 text-sm">
           <ul className="space-y-3">
             {findings.map((f) => {
               const copy = DOCUMENT_CHECK_COPY[f.signal];
               if (!copy) return null;
               return (
-                <li key={f.signal} className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-                  <p className="font-medium text-gray-900">{copy.label}</p>
-                  <p className="mt-1 text-gray-700">{copy.explain}</p>
+                <li key={f.signal} className="rounded-xl border border-[#FFE082] bg-[#FFF8E1] p-4">
+                  <p className="font-semibold text-[#E65100]">{copy.label}</p>
+                  <p className="mt-1 leading-relaxed text-gov-slate">{copy.explain}</p>
                 </li>
               );
             })}
           </ul>
 
           {abns.length > 0 ? (
-            <div className="rounded-lg border border-gray-200 p-3">
-              <p className="text-gray-500">ABNs on the document at check time</p>
-              <ul className="mt-1 space-y-1">
+            <div className="rounded-xl border border-border-light p-4">
+              <p className="text-xs font-bold uppercase tracking-widest text-deep-navy">
+                ABNs on the document at check time
+              </p>
+              <ul className="mt-2 space-y-1.5">
                 {abns.map((a) => (
                   <li key={a.abn} className="flex justify-between gap-4">
-                    <span className="font-mono text-xs text-gray-700">{a.abn}</span>
-                    <span className="text-right text-gray-800">
+                    <span className="font-mono text-xs text-gov-slate">{a.abn}</span>
+                    <span
+                      className={
+                        a.status === "registered" || a.status === "unverified"
+                          ? "text-right text-gov-slate"
+                          : "text-right font-medium text-[#F57C00]"
+                      }
+                    >
                       {a.status === "registered"
                         ? `registered${a.entityName ? ` — ${a.entityName}` : ""}`
                         : a.status === "cancelled"
@@ -119,21 +130,24 @@ export default async function DocumentCheckEvidencePage({
           <dl className="space-y-2">
             {structural?.producer ? (
               <div className="flex justify-between gap-4">
-                <dt className="text-gray-500">Produced by</dt>
-                <dd className="text-right text-gray-800">{structural.producer}</dd>
+                <dt className="text-slate-500">Produced by</dt>
+                <dd className="text-right text-gov-slate">{structural.producer}</dd>
               </div>
             ) : null}
             <div>
-              <dt className="text-gray-500">Document SHA-256</dt>
-              <dd className="break-all font-mono text-xs text-gray-700">
+              <dt className="text-slate-500">Document SHA-256</dt>
+              <dd className="break-all font-mono text-xs text-slate-500">
                 {record.doc_sha256}
               </dd>
             </div>
           </dl>
 
-          <p className="text-xs text-gray-500">{DOCUMENT_CHECK_DISCLAIMER}</p>
+          <p className="text-xs leading-relaxed text-slate-500">
+            {DOCUMENT_CHECK_DISCLAIMER}
+          </p>
         </section>
-      </div>
-    </main>
+      </main>
+      <Footer />
+    </div>
   );
 }
