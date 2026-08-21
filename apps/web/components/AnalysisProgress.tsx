@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { CircleCheck } from "lucide-react";
+import { Check, CircleCheck, Loader2 } from "lucide-react";
 
 // Legacy labels (used when no currentStep prop is passed — keeps pre-V2
 // behaviour identical for the flag-off path).
@@ -285,20 +285,17 @@ function StepIndicator({ state }: { state: StepState }) {
 
   if (state === "active") {
     return (
-      <div className="w-5 h-5 flex-shrink-0">
-        <svg className="animate-spin w-5 h-5 text-action-teal" viewBox="0 0 24 24" fill="none">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-        </svg>
-      </div>
+      <Loader2
+        size={20}
+        className="w-5 h-5 flex-shrink-0 animate-spin text-deep-navy"
+        aria-hidden="true"
+      />
     );
   }
 
   return (
     <div className="w-5 h-5 rounded-full bg-deep-navy flex items-center justify-center flex-shrink-0">
-      <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-      </svg>
+      <Check size={12} strokeWidth={3} className="text-white" aria-hidden="true" />
     </div>
   );
 }
