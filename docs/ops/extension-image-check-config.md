@@ -4,6 +4,14 @@ Right-click "Check this image" (extension-monetisation W1). Server route:
 `apps/web/app/api/extension/analyze-image/route.ts`. Client side ships in the
 `WXT_IMAGE_CHECK` build (PR 4). Plan: `docs/plans/extension-monetisation.md`.
 
+> **Activation status (2026-08-21):** web surface LIVE — `NEXT_PUBLIC_FF_IMAGE_CHECK`,
+> `FF_IMAGE_CHECK_VISION`, and `FF_IMAGE_CHECK_C2PA_VALIDATE` are `true` in Preview +
+> Production (this PR is the `[build]` deploy that bakes them). The extension surface
+> still needs the `WXT_IMAGE_CHECK=true` v1.1.0 CWS build (Phase B runbook).
+> Env-var gotcha found during activation: `vercel env add` on this project defaults to
+> type **Sensitive**, whose values `vercel env pull` returns as `""` — verify a flag by
+> deployed behaviour (page body / API response), never by pulling the value back.
+
 ## Flags & env
 
 | Name                            | Where                               | Default | Meaning                                                                                                                                                                                                                                                                                                                    |
