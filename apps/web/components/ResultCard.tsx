@@ -8,6 +8,7 @@ import ResultActionButtons from "./result/ResultActionButtons";
 import OnwardReportPicker from "./result/OnwardReportPicker";
 import DeepShopCheckTray from "./result/DeepShopCheckTray";
 import NextStepsCard from "./NextStepsCard";
+import { AnalysisChecksSummary } from "./AnalysisProgress";
 import type { EvidenceContext } from "@/lib/onward/destinations";
 import { buildCharityCheckHref } from "@/lib/charity-check-href";
 import type { ReportingAction, ScammerContacts, ShopSignal, Verdict } from "@askarthur/types";
@@ -71,6 +72,12 @@ interface ResultCardProps {
   bestNextStep?: ReportingAction[];
   /** Server-derived AU jurisdiction seed for NextStepsCard. */
   stateCode?: string | null;
+  /** Labels of the analysis steps that actually ran, surfaced as the collapsed
+   *  "Checked against known scams" row inside the verdict panel. Pass
+   *  `V2_STEP_LABELS` from AnalysisProgress ONLY on paths that ran those four
+   *  steps — the media path does not, and claiming checks that never happened
+   *  is the dishonesty AnalysisProgress already guards against. */
+  completedChecks?: string[];
 }
 
 interface VerdictStyle {
@@ -80,6 +87,16 @@ interface VerdictStyle {
   chipBorder: string;
   iconColor: string;
   flagBar: string;
+  /** Short uppercase risk label for the badge pill. */
+  badgeLabel: string;
+  /** The safety instruction under the headline. Deliberately STATIC rather
+   *  than model output — this is the one line that has to be right even when
+   *  the summary is vague. */
+  directive: string;
+  /** Text colour that stays legible ON the tinted verdict panel. The `*-text`
+   *  tokens used for icons are too light for that (warn-text on warn-bg is
+   *  ~2.6:1), so the accent uses the darker `*-heading` tokens. */
+  accentText: string;
 }
 
 // Token-driven verdict styling. Two amber levels (low-risk + suspicious) +
@@ -93,6 +110,10 @@ const VERDICT_CONFIG: Record<Verdict, VerdictStyle> = {
     chipBorder: "border-warn-border/70",
     iconColor: "text-warn-text",
     flagBar: "bg-warn-text",
+    badgeLabel: "No red flags",
+    directive:
+      "Nothing obvious stood out — still verify through official channels before you pay or share anything.",
+    accentText: "text-safe-heading",
   },
   UNCERTAIN: {
     baseTitle: "We can't confirm this is safe — verify before acting",
@@ -101,6 +122,10 @@ const VERDICT_CONFIG: Record<Verdict, VerdictStyle> = {
     chipBorder: "border-slate-300",
     iconColor: "text-gov-slate",
     flagBar: "bg-gov-slate",
+    badgeLabel: "Unclear",
+    directive:
+      "Don't act on this yet. Verify it through a channel you look up yourself, not one supplied in the message.",
+    accentText: "text-gov-slate",
   },
   SUSPICIOUS: {
     baseTitle: "This looks suspicious",
@@ -109,6 +134,10 @@ const VERDICT_CONFIG: Record<Verdict, VerdictStyle> = {
     chipBorder: "border-warn-border",
     iconColor: "text-warn-heading",
     flagBar: "bg-warn-heading",
+    badgeLabel: "Suspicious",
+    directive:
+      "Don't click any links or share details until you've verified this another way.",
+    accentText: "text-warn-heading",
   },
   HIGH_RISK: {
     baseTitle: "This looks like a scam",
@@ -117,8 +146,17 @@ const VERDICT_CONFIG: Record<Verdict, VerdictStyle> = {
     chipBorder: "border-danger-border",
     iconColor: "text-danger-text",
     flagBar: "bg-danger-text",
+    badgeLabel: "High risk",
+    directive:
+      "Don't reply, click any links, or send money or personal details.",
+    accentText: "text-danger-heading",
   },
 };
+
+/** Red flags shown before the "show all" toggle. Claude routinely returns ten;
+ *  rendering all of them at full size turns the answer into a wall of red and
+ *  pushes the reporting route below three screens of scrolling. */
+const FLAG_PREVIEW_COUNT = 5;
 
 function resolveTitle(verdict: Verdict, scamType: string | undefined): string {
   const base = VERDICT_CONFIG[verdict].baseTitle;
@@ -144,6 +182,7 @@ function splitFlag(flag: string): { heading: string; body: string } {
 
 export default function ResultCard({
   verdict,
+  summary,
   redFlags,
   scamType,
   impersonatedBrand,
@@ -162,6 +201,7 @@ export default function ResultCard({
   commerceUrl,
   bestNextStep,
   stateCode,
+  completedChecks,
 }: ResultCardProps) {
   const config = VERDICT_CONFIG[verdict];
   const title = resolveTitle(verdict, scamType);
@@ -179,6 +219,7 @@ export default function ResultCard({
   // holding only a numeric id could not complete a submission anyway.
   const showReport = verdict !== "SAFE" && typeof analysisRef === "string";
   const [showPicker, setShowPicker] = useState(false);
+  const [showAllFlags, setShowAllFlags] = useState(false);
   // Resolved lazily from `analysisRef`; seeded when a caller passed an id.
   const [resolvedReportId, setResolvedReportId] = useState<number | null>(
     typeof scamReportId === "number" ? scamReportId : null,
@@ -295,10 +336,15 @@ export default function ResultCard({
   // unit-tested in __tests__/charityCheckHref.test.ts.
   const charityCheckHref = charityIntent ? buildCharityCheckHref(charityIntent) : null;
 
+  const visibleFlags = showAllFlags
+    ? flagItems
+    : flagItems.slice(0, FLAG_PREVIEW_COUNT);
+  const flagsCollapsible = flagItems.length > FLAG_PREVIEW_COUNT;
+
   return (
     <div
       role="alert"
-      className="mt-6 rounded-lg border border-slate-200 bg-white px-5 py-5 sm:px-6 sm:py-6"
+      className="mt-6 overflow-hidden rounded-lg border border-slate-200 bg-white"
     >
       {/* Charity-intent CTA — surfaced ABOVE the generic verdict because the
           register check is more specific to what the user is asking about.
@@ -309,7 +355,7 @@ export default function ResultCard({
           handler (any other render site) the whole card deep-links as
           before. */}
       {charityIntent && charityCheckHref && (
-        <div className="mb-5">
+        <div className="border-b border-slate-200 px-5 py-5 sm:px-6">
           {onCharityCheck ? (
             <button
               type="button"
@@ -372,15 +418,39 @@ export default function ResultCard({
         </div>
       )}
 
-      {/* Verdict chip */}
-      <div
-        className={`flex items-center gap-3 rounded-lg border-2 px-4 py-3 ${config.chipBg} ${config.chipBorder}`}
-      >
-        <Icon className={`${config.iconColor} shrink-0`} size={28} aria-hidden="true" />
-        <h2 className="text-lg font-bold text-deep-navy leading-tight">
+      {/* Verdict panel — tinted and full-bleed, so the risk tier is readable
+          before a single word is. Badge + count carry the colour; the headline
+          stays deep-navy so it never loses contrast against the tint. */}
+      <div className={`border-b px-5 py-5 sm:px-6 ${config.chipBg} ${config.chipBorder}`}>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-full border bg-white px-2.5 py-1 text-xs font-extrabold uppercase tracking-widest ${config.chipBorder} ${config.accentText}`}
+          >
+            <Icon size={14} className="shrink-0" aria-hidden="true" />
+            {config.badgeLabel}
+          </span>
+          {redFlags.length > 0 && (
+            <span className={`text-sm font-semibold ${config.accentText}`}>
+              {redFlags.length} warning sign{redFlags.length === 1 ? "" : "s"}{" "}
+              found
+            </span>
+          )}
+        </div>
+        <h2 className="mt-3 text-lg font-bold leading-tight text-deep-navy">
           {title}
         </h2>
+        {/* Static per-verdict instruction — the one line that must be right
+            even when the model summary is vague. */}
+        <p className="mt-1.5 text-base leading-relaxed text-gov-slate">
+          {config.directive}
+        </p>
       </div>
+
+      {/* The four analysis steps, collapsed. Renders only on paths that
+          actually ran them (see the `completedChecks` prop doc). */}
+      {completedChecks && completedChecks.length > 0 && (
+        <AnalysisChecksSummary steps={completedChecks} />
+      )}
 
       {/* Shop Guard Stage 0 — commerce-flag chips. Renders when shopSignal is
           present AND at least one tag was extracted. Empty-flag case (commerce
@@ -388,136 +458,167 @@ export default function ResultCard({
           chip — surfacing the detection itself is part of the measurement
           goal in the 30-day Stage 0 window. */}
       {shopSignal && (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <ShoppingBag size={16} className="text-gov-slate shrink-0" aria-hidden="true" />
-          <span className="text-xs font-semibold uppercase tracking-wide text-gov-slate">
-            Shop signals
-          </span>
-          {shopSignal.commerceFlags.length === 0 ? (
-            <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs text-gov-slate">
-              Online shop detected
+        <div className="border-b border-slate-200 px-5 py-4 sm:px-6">
+          <div className="flex flex-wrap items-center gap-2">
+            <ShoppingBag size={16} className="text-gov-slate shrink-0" aria-hidden="true" />
+            <span className="text-xs font-semibold uppercase tracking-wide text-gov-slate">
+              Shop signals
             </span>
-          ) : (
-            shopSignal.commerceFlags.map((tag) => (
-              <span
-                key={tag}
-                className="rounded-full border border-warn-border bg-warn-bg/40 px-2 py-0.5 text-xs text-warn-text"
-              >
-                {COMMERCE_FLAG_LABELS[tag] ?? tag}
+            {shopSignal.commerceFlags.length === 0 ? (
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs text-gov-slate">
+                Online shop detected
               </span>
-            ))
+            ) : (
+              shopSignal.commerceFlags.map((tag) => (
+                <span
+                  key={tag}
+                  className="rounded-full border border-warn-border bg-warn-bg/40 px-2 py-0.5 text-xs text-warn-text"
+                >
+                  {COMMERCE_FLAG_LABELS[tag] ?? tag}
+                </span>
+              ))
+            )}
+          </div>
+
+          {/* Deep Shop Check tray (Stage 1) — user-initiated ABN + domain-age +
+              reputation enrichment. Renders only with a commerce URL to check. */}
+          {commerceUrl && (
+            <DeepShopCheckTray commerceUrl={commerceUrl} shopSignal={shopSignal} />
           )}
         </div>
       )}
 
-      {/* Deep Shop Check tray (Stage 1) — user-initiated ABN + domain-age +
-          reputation enrichment. Renders only with a commerce URL to check. */}
-      {shopSignal && commerceUrl && (
-        <DeepShopCheckTray commerceUrl={commerceUrl} shopSignal={shopSignal} />
-      )}
-
-      {/* Red flag cards */}
-      <ul className="mt-6 space-y-5">
-        {flagItems.map((flag, i) => (
-          <li key={i} className="flex gap-3">
-            <span
-              aria-hidden="true"
-              className={`block w-1 rounded-full shrink-0 self-stretch ${config.flagBar}`}
-            />
-            <div>
-              <p className="text-base font-bold text-deep-navy leading-snug mb-1">
-                {flag.heading}
-              </p>
-              {flag.body && (
-                <p className="text-base text-gov-slate leading-relaxed">
-                  {flag.body}
+      {/* Why we think so — the evidence, capped so it reads as a list rather
+          than a wall. */}
+      <div className="border-b border-slate-200 px-5 py-5 sm:px-6">
+        <p className="text-xs font-extrabold uppercase tracking-widest text-slate-500">
+          Why we think so
+        </p>
+        {summary?.trim() && (
+          <p className="mt-3 text-base leading-relaxed text-gov-slate">
+            {summary.trim()}
+          </p>
+        )}
+        <ul className="mt-2">
+          {visibleFlags.map((flag, i) => (
+            <li
+              key={i}
+              className="flex gap-3 border-b border-slate-100 py-3 last:border-b-0"
+            >
+              <TriangleAlert
+                size={18}
+                className={`mt-0.5 shrink-0 ${config.accentText}`}
+                aria-hidden="true"
+              />
+              <div>
+                <p className="text-base font-bold text-deep-navy leading-snug">
+                  {flag.heading}
                 </p>
-              )}
-            </div>
-          </li>
-        ))}
-      </ul>
+                {flag.body && (
+                  <p className="mt-0.5 text-base text-gov-slate leading-relaxed">
+                    {flag.body}
+                  </p>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+        {flagsCollapsible && (
+          <button
+            type="button"
+            onClick={() => setShowAllFlags((v) => !v)}
+            aria-expanded={showAllFlags}
+            className="mt-2 inline-flex min-h-[44px] items-center text-sm font-bold text-deep-navy underline underline-offset-4"
+          >
+            {showAllFlags
+              ? "Show fewer"
+              : `Show all ${flagItems.length} warning signs`}
+          </button>
+        )}
+      </div>
 
       {/* Next Steps funnel — geo/brand-aware "what do I do now" routing.
           Renders only when the server attached best-report actions (flag on +
           non-SAFE). The card recomputes client-side from the routing context. */}
       {bestNextStep && bestNextStep.length > 0 && verdict !== "SAFE" && (
-        <NextStepsCard
-          verdict={verdict}
-          scamType={scamType}
-          impersonatedBrand={impersonatedBrand}
-          channel={channel}
-          countryCode={countryCode}
-          initialStateCode={stateCode}
-          onRouteClick={(action, jurisdiction) => {
-            // Metadata-only funnel signal (no PII, no content). Fire-and-forget;
-            // the endpoint drops it unless FF_ROUTE_CLICK_TELEMETRY is on.
-            void fetch("/api/events", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                eventType: "reporting_route_click",
-                eventProps: {
-                  routeLabel: action.label.slice(0, 120),
-                  jurisdiction: jurisdiction ?? "none",
-                  scamType: (scamType ?? "unknown").slice(0, 120),
-                },
-                path: "/",
-              }),
-            }).catch(() => {});
-          }}
-        />
+        <div className="border-b border-slate-200 px-5 py-5 sm:px-6">
+          <NextStepsCard
+            verdict={verdict}
+            scamType={scamType}
+            impersonatedBrand={impersonatedBrand}
+            channel={channel}
+            countryCode={countryCode}
+            initialStateCode={stateCode}
+            onRouteClick={(action, jurisdiction) => {
+              // Metadata-only funnel signal (no PII, no content). Fire-and-forget;
+              // the endpoint drops it unless FF_ROUTE_CLICK_TELEMETRY is on.
+              void fetch("/api/events", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  eventType: "reporting_route_click",
+                  eventProps: {
+                    routeLabel: action.label.slice(0, 120),
+                    jurisdiction: jurisdiction ?? "none",
+                    scamType: (scamType ?? "unknown").slice(0, 120),
+                  },
+                  path: "/",
+                }),
+              }).catch(() => {});
+            }}
+          />
+        </div>
       )}
 
-      {/* Remember disclaimer */}
-      <div className="mt-6 border-y border-slate-200 py-4">
+      <div className="px-5 py-5 sm:px-6">
+        {/* Remember disclaimer */}
         <p className="text-sm text-gov-slate leading-relaxed">
           <span className="font-bold text-deep-navy">Remember:</span>{" "}
           Arthur is a free resource to be used alongside your own research and
           best judgment. Always verify information through official channels
           and use caution when clicking links.
         </p>
-      </div>
 
-      {/* Thumbs feedback */}
-      <ResultFeedback
-        verdictGiven={verdict}
-        analysisId={analysisId}
-        scamReportId={resolvedReportId ?? undefined}
-        contentHash={contentHash}
-      />
-
-      {/* Onward report picker — opens inline when user clicks "Report this scam".
-          The picker swaps to OnwardReportSummary after the user submits. */}
-      {showPicker && resolvedReportId != null && analysisRef && (
-        <OnwardReportPicker
-          scamReportId={resolvedReportId}
-          analysisRef={analysisRef}
+        {/* Thumbs feedback */}
+        <ResultFeedback
+          verdictGiven={verdict}
           analysisId={analysisId}
-          scamType={scamType}
-          impersonatedBrand={impersonatedBrand}
-          channel={channel}
-          evidence={evidence}
-          onClose={() => setShowPicker(false)}
+          scamReportId={resolvedReportId ?? undefined}
+          contentHash={contentHash}
         />
-      )}
 
-      {resolveFailed && (
-        <p className="mt-3 text-sm text-slate-600" role="status">
-          We couldn&apos;t attach your report just yet. Your check was still
-          recorded — please use the recommended next step above.
-        </p>
-      )}
+        {/* Onward report picker — opens inline when user clicks "Report this scam".
+            The picker swaps to OnwardReportSummary after the user submits. */}
+        {showPicker && resolvedReportId != null && analysisRef && (
+          <OnwardReportPicker
+            scamReportId={resolvedReportId}
+            analysisRef={analysisRef}
+            analysisId={analysisId}
+            scamType={scamType}
+            impersonatedBrand={impersonatedBrand}
+            channel={channel}
+            evidence={evidence}
+            onClose={() => setShowPicker(false)}
+          />
+        )}
 
-      {/* Two-button footer */}
-      {onCheckAnother && (
-        <ResultActionButtons
-          onCheckAnother={onCheckAnother}
-          onReport={showReport ? handleReport : undefined}
-          showReport={showReport}
-          reportPending={resolving}
-        />
-      )}
+        {resolveFailed && (
+          <p className="mt-3 text-sm text-slate-600" role="status">
+            We couldn&apos;t attach your report just yet. Your check was still
+            recorded — please use the recommended next step above.
+          </p>
+        )}
+
+        {/* Two-button footer */}
+        {onCheckAnother && (
+          <ResultActionButtons
+            onCheckAnother={onCheckAnother}
+            onReport={showReport ? handleReport : undefined}
+            showReport={showReport}
+            reportPending={resolving}
+          />
+        )}
+      </div>
     </div>
   );
 }
