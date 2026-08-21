@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { CircleCheck } from "lucide-react";
 
 // Legacy labels (used when no currentStep prop is passed — keeps pre-V2
 // behaviour identical for the flag-off path).
@@ -18,6 +19,11 @@ const V2_STEPS: Array<{ key: Step; label: string }> = [
   { key: "analyse", label: "Looking for tell-tale signs" },
   { key: "write", label: "Writing your answer" },
 ];
+
+/** The V2 labels as a plain list, for surfaces that report the checks AFTER
+ *  the run finished (the collapsed summary inside ResultCard). Derived from
+ *  V2_STEPS so the labels have exactly one definition. */
+export const V2_STEP_LABELS = V2_STEPS.map((s) => s.label);
 
 const STEP_DELAYS = [0, 1200, 2800, 4500];
 
@@ -90,14 +96,15 @@ function V2Progress({ currentStep }: { currentStep: Step }) {
   }, [currentStep]);
 
   const activeIndex = V2_STEPS.findIndex((s) => s.key === currentStep);
-  const isDone = currentStep === "done";
-  const announced = isDone
-    ? "Done."
-    : V2_STEPS[Math.max(0, activeIndex)]?.label ?? "";
+  // Once the run finishes, the checks are reported by AnalysisChecksSummary
+  // INSIDE the verdict card. Leaving a second, fully-ticked copy of the same
+  // four steps stranded above the result is the redundancy this replaces.
+  if (currentStep === "done") return null;
+  const announced = V2_STEPS[Math.max(0, activeIndex)]?.label ?? "";
 
   return (
     <section
-      aria-busy={!isDone}
+      aria-busy
       aria-labelledby="analysis-progress-heading"
       className="mt-6 rounded-lg border border-slate-200 bg-white p-5"
     >
@@ -109,9 +116,8 @@ function V2Progress({ currentStep }: { currentStep: Step }) {
       </h2>
       <ol aria-hidden="true" className="mt-3 space-y-2">
         {V2_STEPS.map((s, i) => {
-          const state: StepState = isDone
-            ? "done"
-            : i < activeIndex
+          const state: StepState =
+            i < activeIndex
               ? "done"
               : i === activeIndex
                 ? "active"
@@ -142,12 +148,56 @@ function V2Progress({ currentStep }: { currentStep: Step }) {
       >
         {announced}
       </p>
-      {showSlow && !isDone && (
+      {showSlow && (
         <p className="mt-4 text-sm text-gov-slate">
           Still working on it — deep checks can take up to 30 seconds.
         </p>
       )}
     </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Post-run summary — the collapsed "we did check things" row that lives inside
+// the verdict card. Separate from V2Progress because it is rendered by a
+// different component at a different time; it shares only the step labels.
+// ---------------------------------------------------------------------------
+
+export function AnalysisChecksSummary({ steps }: { steps: string[] }) {
+  const [open, setOpen] = useState(false);
+  if (steps.length === 0) return null;
+
+  return (
+    <div className="border-t border-slate-200">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2.5 px-5 py-3 text-left text-sm font-semibold text-gov-slate transition-colors hover:bg-slate-50 sm:px-6"
+      >
+        <CircleCheck size={18} className="shrink-0 text-safe-green" aria-hidden="true" />
+        <span className="flex-1">
+          Checked against known scams · {steps.length} of {steps.length} steps
+          done
+        </span>
+        <span className="shrink-0 text-xs font-normal text-slate-500">
+          {open ? "Hide" : "Details"}
+        </span>
+      </button>
+      {open && (
+        <ul className="space-y-2 px-5 pb-4 sm:px-6">
+          {steps.map((s) => (
+            <li key={s} className="flex items-center gap-2.5 text-sm text-gov-slate">
+              <span
+                aria-hidden="true"
+                className="h-1.5 w-1.5 shrink-0 rounded-full bg-safe-green"
+              />
+              {s}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

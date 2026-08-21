@@ -40,6 +40,19 @@ const AU_STATE_OPTIONS = Object.entries(AU_STATE_MAP).map(([name, { code }]) => 
   code,
 }));
 
+// One sentence of immediate guidance per answer to the micro-question. Kept
+// deliberately generic so it can never contradict the destinations
+// resolveBestNextStep() routes to directly below it — this tells the user what
+// to do in the next sixty seconds, the action rows tell them where to report.
+const TRIAGE_ADVICE: Record<Exclude<LossState, null>, string> = {
+  money:
+    "Contact your bank now — they may be able to stop or recover the payment. Then report it below.",
+  details:
+    "Change the password on any account you mentioned, and watch for follow-up contact. Then report it below.",
+  neither:
+    "Good — don't reply. Block the sender, and report it below to help warn others.",
+};
+
 const digitsOnly = (v: string) => v.replace(/[^0-9+]/g, "");
 const looksLikePhone = (v: string) => /^[0-9()+\s]{3,}$/.test(v);
 
@@ -97,9 +110,9 @@ export default function NextStepsCard({
   return (
     <section
       aria-labelledby="next-steps-heading"
-      className="mt-5 rounded-lg border-2 border-deep-navy/20 bg-white overflow-hidden"
+      className="rounded-lg bg-deep-navy px-5 py-5 text-white"
     >
-      <div className="flex items-center justify-between gap-2 bg-deep-navy px-5 py-4">
+      <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Siren className="text-white shrink-0" size={20} aria-hidden="true" />
           <h3
@@ -114,12 +127,12 @@ export default function NextStepsCard({
         )}
       </div>
 
-      <div className="px-5 py-5 space-y-4">
+      <div className="mt-4 space-y-4">
         {/* Loss / PII micro-question — routes to the single best destination. */}
-        <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+        <div>
           <div className="flex items-center gap-2 mb-2">
-            <ShieldQuestion size={18} className="text-deep-navy shrink-0" aria-hidden="true" />
-            <p className="text-sm font-bold text-deep-navy">
+            <ShieldQuestion size={18} className="text-white/70 shrink-0" aria-hidden="true" />
+            <p className="text-sm font-bold text-white">
               Did you send money or share personal details?
             </p>
           </div>
@@ -138,10 +151,10 @@ export default function NextStepsCard({
                   type="button"
                   onClick={() => setLossState(active ? null : opt.key)}
                   aria-pressed={active}
-                  className={`min-h-[2.75rem] rounded-lg border-2 px-4 py-2 text-sm font-semibold transition ${
+                  className={`min-h-[2.75rem] rounded-full border-2 px-4 py-2 text-sm font-semibold transition ${
                     active
-                      ? "border-deep-navy bg-deep-navy text-white"
-                      : "border-slate-300 bg-white text-deep-navy hover:border-deep-navy"
+                      ? "border-white bg-white text-deep-navy"
+                      : "border-white/40 bg-transparent text-white hover:border-white"
                   }`}
                 >
                   {opt.label}
@@ -149,6 +162,14 @@ export default function NextStepsCard({
               );
             })}
           </div>
+          {lossState && (
+            <p
+              role="status"
+              className="mt-3 rounded-lg bg-white/10 px-3.5 py-3 text-sm leading-relaxed text-white/90"
+            >
+              {TRIAGE_ADVICE[lossState]}
+            </p>
+          )}
         </div>
 
         {/* Ordered best-report actions. First is the recommended action. */}
@@ -168,17 +189,17 @@ export default function NextStepsCard({
 
         {/* Jurisdiction line + change-location control (AU only). */}
         {isAU && (
-          <div className="pt-1 text-xs text-gov-slate">
+          <div className="pt-1 text-xs text-white/75">
             <MapPin size={13} className="inline mr-1 -mt-0.5" aria-hidden="true" />
             {stateLabel ? (
-              <>Showing options for <strong className="text-deep-navy">{stateLabel}</strong>. </>
+              <>Showing options for <strong className="text-white">{stateLabel}</strong>. </>
             ) : (
               <>Showing national options. </>
             )}
             <button
               type="button"
               onClick={() => setShowLocation((s) => !s)}
-              className="underline font-semibold text-deep-navy"
+              className="underline font-semibold text-white"
               aria-expanded={showLocation}
             >
               Change location
@@ -226,11 +247,15 @@ function ActionRow({
   const urgent = action.urgent;
   const base =
     "flex items-center gap-3 min-h-[3.25rem] w-full rounded-lg border-2 px-4 py-3 text-left transition";
+  // On the navy ground the recommended action is the white card and everything
+  // else is outlined; urgent keeps the light-red surface so it still reads as
+  // the most pressing thing in the card.
   const tone = urgent
     ? "border-danger-border bg-danger-bg text-danger-text"
     : primary
-      ? "border-deep-navy bg-deep-navy/5 text-deep-navy hover:bg-deep-navy/10"
-      : "border-slate-200 bg-white text-deep-navy hover:border-deep-navy/40";
+      ? "border-white bg-white text-deep-navy"
+      : "border-white/40 bg-transparent text-white hover:border-white";
+  const descTone = urgent || primary ? "text-gov-slate" : "text-white/75";
 
   const Body = (
     <>
@@ -238,7 +263,7 @@ function ActionRow({
       <span className="min-w-0 flex-1">
         <span className="block text-base font-bold leading-snug">{action.label}</span>
         {action.description && (
-          <span className="block text-sm text-gov-slate leading-snug mt-0.5">
+          <span className={`block text-sm leading-snug mt-0.5 ${descTone}`}>
             {action.description}
           </span>
         )}

@@ -5,7 +5,10 @@ import { useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { usePlausible } from "next-plausible";
 import { X, ScanLine, Paperclip, Mic, Lock, EyeOff, BadgeCheck } from "lucide-react";
-import AnalysisProgress, { type Step as ProgressStep } from "./AnalysisProgress";
+import AnalysisProgress, {
+  V2_STEP_LABELS,
+  type Step as ProgressStep,
+} from "./AnalysisProgress";
 import ResultCard from "./ResultCard";
 import ScreenshotDrawer from "./ScreenshotDrawer";
 import QrScanFlow from "./QrScanFlow";
@@ -759,6 +762,9 @@ export default function ScamChecker() {
           <ResultCard
             {...charityResultToResultCardProps(charityResult)}
             inputMode={inputMode === "charity-image" ? "charity-image" : "charity-text"}
+            completedChecks={
+              progressStep === "done" ? V2_STEP_LABELS : undefined
+            }
             onCheckAnother={handleReset}
           />
       )}
@@ -787,6 +793,12 @@ export default function ScamChecker() {
             }
             bestNextStep={result.bestNextStep}
             stateCode={result.stateCode}
+            // The four V2 steps genuinely ran on this path, so the verdict card
+            // can report them. Deliberately NOT passed on the media call site
+            // below — that flow never emits them.
+            completedChecks={
+              progressStep === "done" ? V2_STEP_LABELS : undefined
+            }
             // Enables the "Report this scam" CTA. Without this one prop the
             // whole onward-reporting apparatus is unreachable from the surface
             // that produces the overwhelming majority of reports.

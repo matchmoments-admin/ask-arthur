@@ -66,66 +66,66 @@ export default function ResultFeedback({
     post(userSays);
   }
 
-  if (submitted) {
-    return (
-      <p
-        role="status"
-        aria-live="polite"
-        className="mt-6 text-sm text-gov-slate"
-      >
-        Thanks — that helps us recognise scams better.
-      </p>
-    );
-  }
-
   return (
-    <section className="mt-6 text-center" aria-labelledby="result-feedback-label">
-      <span
-        id="result-feedback-label"
-        className="block text-sm font-semibold text-deep-navy mb-3"
-      >
-        How did we do?
-      </span>
-      <div className="flex items-center justify-center gap-3">
-        <button
-          type="button"
-          aria-pressed={vote === "up"}
-          aria-label="Yes, this check was helpful"
-          disabled={isPending}
-          onClick={() => {
-            setVote("up");
-            post("correct");
-          }}
-          className={`inline-flex h-12 w-12 items-center justify-center rounded-full border transition-colors disabled:opacity-50 ${
-            vote === "up"
-              ? "border-deep-navy bg-deep-navy text-white"
-              : "border-slate-300 bg-white text-gov-slate hover:border-slate-500"
-          }`}
+    <section className="mt-6" aria-labelledby="result-feedback-label">
+      {/* Resting and submitted states share one card shell. The submitted state
+          used to replace the whole section with a bare sentence, which read as
+          the UI falling over rather than as an acknowledgement. */}
+      <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 bg-white px-4 py-3">
+        <span
+          id="result-feedback-label"
+          role="status"
+          aria-live="polite"
+          className="text-sm font-semibold text-deep-navy"
         >
-          <ThumbsUp size={20} aria-hidden="true" />
-        </button>
+          {submitted
+            ? "Thanks — that helps us recognise scams better."
+            : "How did we do?"}
+        </span>
 
-        <button
-          type="button"
-          aria-pressed={vote === "down"}
-          aria-label="No, this check wasn't helpful"
-          disabled={isPending}
-          onClick={() => setVote("down")}
-          className={`inline-flex h-12 w-12 items-center justify-center rounded-full border transition-colors disabled:opacity-50 ${
-            vote === "down"
-              ? "border-alert-amber bg-amber-50 text-alert-amber"
-              : "border-slate-300 bg-white text-gov-slate hover:border-slate-500"
-          }`}
-        >
-          <ThumbsDown size={20} aria-hidden="true" />
-        </button>
+        {!submitted && (
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              aria-pressed={vote === "up"}
+              aria-label="Yes, this check was helpful"
+              disabled={isPending}
+              onClick={() => {
+                setVote("up");
+                post("correct");
+              }}
+              className={`inline-flex h-12 w-12 items-center justify-center rounded-full border transition-colors disabled:opacity-50 ${
+                vote === "up"
+                  ? "border-deep-navy bg-deep-navy text-white"
+                  : "border-slate-300 bg-white text-gov-slate hover:border-slate-500"
+              }`}
+            >
+              <ThumbsUp size={20} aria-hidden="true" />
+            </button>
+
+            <button
+              type="button"
+              aria-pressed={vote === "down"}
+              aria-label="No, this check wasn't helpful"
+              disabled={isPending}
+              onClick={() => setVote("down")}
+              className={`inline-flex h-12 w-12 items-center justify-center rounded-full border transition-colors disabled:opacity-50 ${
+                vote === "down"
+                  ? "border-alert-amber bg-amber-50 text-alert-amber"
+                  : "border-slate-300 bg-white text-gov-slate hover:border-slate-500"
+              }`}
+            >
+              <ThumbsDown size={20} aria-hidden="true" />
+            </button>
+          </div>
+        )}
       </div>
 
-      {vote === "down" && (
+      {vote === "down" && !submitted && (
         <div
           role="region"
           aria-label="Tell us what went wrong"
-          className="mt-4 space-y-3 rounded-md border border-slate-200 bg-slate-50 p-4"
+          className="mt-3 space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-4"
         >
           <p className="text-sm font-semibold text-deep-navy">
             What went wrong?
