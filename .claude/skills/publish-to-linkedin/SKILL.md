@@ -1,6 +1,6 @@
 ---
 name: publish-to-linkedin
-description: Publish a document/carousel post to the Ask Arthur LinkedIn COMPANY page through the approval-gated GitHub Actions lanes. Use when the user wants to post a deck, carousel, monthly report or launch announcement to LinkedIn, asks why a post has not gone out, or wants a new recurring/one-off LinkedIn publishing lane. Triggers "post this to LinkedIn", "put it on the company page", "publish the deck", "why hasn't it posted", "add a LinkedIn lane". For the COPY itself use the linkedin-writing skill; this one is the delivery mechanism.
+description: Publish to the Ask Arthur LinkedIn COMPANY page through the approval-gated GitHub Actions lanes, in either shape — a link/article card (product + launch posts) or a document carousel (the monthly Clone Watch edition). Use when the user wants to post a deck, carousel, monthly report or launch announcement to LinkedIn, asks why a post has not gone out, or wants a new recurring/one-off LinkedIn publishing lane. Triggers "post this to LinkedIn", "put it on the company page", "publish the deck", "why hasn't it posted", "add a LinkedIn lane". For the COPY itself use the linkedin-writing skill; this one is the delivery mechanism.
 ---
 
 # Publish to LinkedIn
@@ -14,12 +14,40 @@ GitHub Actions Environment with a required reviewer. The workflow runs, renders,
 pings Telegram, then _pauses_ until a human clicks approve in the Actions UI.
 That gate is deliberate — check for a waiting job before debugging anything.
 
+## Which post SHAPE — get this right first
+
+Two shapes, and the choice is not cosmetic.
+
+|                     | DOCUMENT (carousel)                                           | LINK (article card)                           |
+| ------------------- | ------------------------------------------------------------- | --------------------------------------------- |
+| What the feed shows | the slides themselves                                         | a preview card built from the page's og:image |
+| Tappable?           | **no** — slides are images; only the caption can carry a link | yes, card and text both                       |
+| Content freshness   | frozen at render time                                         | live every time someone opens it              |
+| Reach               | highest-engagement format (~7%)                               | ~19% median reach cost                        |
+
+**Choose by whether the destination IS the artifact.**
+
+- **Monthly Clone Watch → always DOCUMENT.** The data IS the post; the slides are
+  the deliverable and there is nothing better to click through to. Do not
+  "improve" this into a link post.
+- **Product / launch posts (e.g. the hub) → LINK.** The page is interactive and
+  its numbers are live. A carousel is five flattened screenshots of it, and those
+  figures freeze the moment the PDF renders.
+
+**The trap that cost a post:** the hub first went out as a carousel whose caption
+CTA was the bare string `askarthur.au/hub` — no scheme. LinkedIn does not
+reliably auto-link a scheme-less domain, and carousel slides are not tappable, so
+the post advertising the hub may have had no working route to it. It was deleted
+and redone as a link post. `linkedin-document-post.ts` now rejects a `--link`
+without `https://`, so that exact mistake is unshippable — but the general lesson
+stands: **in a document post the caption link is the ONLY way out.**
+
 ## What exists
 
-| Lane                | Workflow                                     | Trigger                      | For                           |
-| ------------------- | -------------------------------------------- | ---------------------------- | ----------------------------- |
-| Monthly Clone Watch | `.github/workflows/clone-watch-linkedin.yml` | cron 2nd of month + dispatch | The recurring 7-slide edition |
-| One-off decks       | `.github/workflows/hub-linkedin.yml`         | dispatch only                | Launch decks, announcements   |
+| Lane                | Workflow                                     | Trigger                      | For                                                                                        |
+| ------------------- | -------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------ |
+| Monthly Clone Watch | `.github/workflows/clone-watch-linkedin.yml` | cron 2nd of month + dispatch | document, always — it has NO format input, so it cannot be dispatched as a link by mistake |
+| One-off / product   | `.github/workflows/hub-linkedin.yml`         | dispatch only                | `format` input, defaults to `link`                                                         |
 
 Both are two-stage — `prepare` (render + Telegram the slides for review) →
 `publish` (gated) — and both post as the company via `lib/linkedin/client.ts`.
@@ -28,7 +56,7 @@ Both are two-stage — `prepare` (render + Telegram the slides for review) →
 | ------------------------------------------------------------------------------------------- | --------------------------------------------- |
 | API client (the only place that knows LinkedIn)                                             | `apps/web/lib/linkedin/client.ts`             |
 | Monthly publisher (month-keyed, dedupes on `clone_watch_report_summary.published_post_urn`) | `apps/web/scripts/clone-watch-publish.ts`     |
-| Generic publisher (no month, no DB write-back)                                              | `apps/web/scripts/linkedin-document-post.ts`  |
+| Generic publisher — both shapes, `--pdf` or `--link`                                        | `apps/web/scripts/linkedin-document-post.ts`  |
 | Carousel renderers                                                                          | `hub:carousel`, `report-card:export`          |
 | Hub caption                                                                                 | `docs/linkedin/hub-launch-caption.txt`        |
 | Design + runbook                                                                            | `docs/ops/clone-watch-linkedin-automation.md` |
@@ -61,6 +89,18 @@ the latter is bound to a month key and a summary row that a one-off doesn't have
 
 ## Hard constraints (LinkedIn Dev-Tier — not bugs, do not "fix")
 
+- **Link-post card art is the route's own `opengraph-image`.** `createArticlePost`
+  sends `source`/`title`/`description` explicitly (a scrape is decided by a cache
+  we do not control, and a bare-rendering post cannot be repaired afterwards) but
+  sends NO thumbnail — supplying one would fork the card away from the image
+  every other surface shows. So if the card looks wrong, fix the route's
+  `opengraph-image`, not the publisher.
+- **Link-post card art is the route's own `opengraph-image`.** `createArticlePost`
+  sends `source`/`title`/`description` explicitly — a scrape is decided by a cache
+  we do not control and a bare-rendering post cannot be repaired afterwards — but
+  sends NO thumbnail, which would fork the card away from the image every other
+  surface shows. If the card looks wrong, fix the route's `opengraph-image`, not
+  the publisher.
 - **Company page only.** The author is always `LINKEDIN_ORG_URN`, and
   `linkedin-document-post.ts` refuses to run unless it is a
   `urn:li:organization:`. Personal-profile resharing is always manual.
