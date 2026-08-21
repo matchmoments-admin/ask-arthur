@@ -10,10 +10,16 @@ import {
 } from "@askarthur/types";
 
 // Client half of /document-check: PDF upload → deterministic structural
-// findings. Every finding string comes from DOCUMENT_CHECK_COPY and the
-// empty-findings state renders DOCUMENT_CHECK_CLEAN_COPY (the asymmetry
-// rule) — both guarded by documentCheckCopy.test.ts, so this surface can't
-// drift into verdict language.
+// findings + AU content checks. Every finding string comes from
+// DOCUMENT_CHECK_COPY and the empty-findings state renders
+// DOCUMENT_CHECK_CLEAN_COPY (the asymmetry rule) — both guarded by
+// documentCheckCopy.test.ts, so this surface can't drift into verdict
+// language.
+//
+// Design tokens (DESIGN_SYSTEM.md): marketing card (white, border-light,
+// rounded-xl, shadow-sm); findings use the SUSPICIOUS verdict palette; the
+// clean state is deliberately NEUTRAL (#f8fafc), never the SAFE green — "no
+// editing traces" is not a safety verdict.
 
 export default function DocumentCheckClient() {
   const [file, setFile] = useState<File | null>(null);
@@ -54,10 +60,34 @@ export default function DocumentCheckClient() {
     }
   }
 
+  const abnStatusLine = (a: {
+    status: string;
+    entityName: string | null;
+  }): { text: string; tone: "neutral" | "warn" } => {
+    switch (a.status) {
+      case "registered":
+        return {
+          text: `registered${a.entityName ? ` — ${a.entityName}` : ""}`,
+          tone: "neutral",
+        };
+      case "cancelled":
+        return {
+          text: `cancelled on the register${a.entityName ? ` — ${a.entityName}` : ""}`,
+          tone: "warn",
+        };
+      case "not_registered":
+        return { text: "not on the ABR register", tone: "warn" };
+      case "invalid_checksum":
+        return { text: "not a possible ABN", tone: "warn" };
+      default:
+        return { text: "could not be checked", tone: "neutral" };
+    }
+  };
+
   return (
-    <section className="rounded-xl border border-gray-200 bg-white p-6 space-y-4">
-      <div className="space-y-1">
-        <label htmlFor="document-file" className="text-sm font-medium text-gray-900">
+    <section className="bg-white border border-border-light rounded-xl shadow-sm p-6 space-y-5">
+      <div className="space-y-2">
+        <label htmlFor="document-file" className="block text-sm font-bold text-deep-navy">
           PDF document (up to 10 MB)
         </label>
         <input
@@ -65,9 +95,9 @@ export default function DocumentCheckClient() {
           type="file"
           accept="application/pdf,.pdf"
           onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-          className="w-full text-sm"
+          className="w-full text-sm text-gov-slate file:mr-3 file:rounded-lg file:border file:border-border-light file:bg-white file:px-4 file:py-2 file:text-sm file:font-semibold file:text-deep-navy hover:file:bg-slate-50"
         />
-        <p className="text-xs text-gray-500">
+        <p className="text-xs text-slate-500 leading-relaxed">
           Reads the file&rsquo;s structure and metadata only — your document is
           checked in memory and never stored. Photographed or scanned documents
           aren&rsquo;t supported yet.
@@ -77,15 +107,17 @@ export default function DocumentCheckClient() {
       <button
         onClick={runCheck}
         disabled={busy || !file}
-        className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-50"
+        className="w-full rounded-lg bg-deep-navy px-6 py-3 text-sm font-semibold text-white transition-all duration-200 hover:opacity-90 disabled:opacity-50"
       >
         {busy ? "Checking…" : "Check document"}
       </button>
 
-      {error ? <p className="text-sm text-red-700">{error}</p> : null}
+      {error ? (
+        <p className="text-sm leading-relaxed text-[#D32F2F]">{error}</p>
+      ) : null}
 
       {result?.checked ? (
-        <div className="space-y-3 border-t border-gray-100 pt-4 text-sm">
+        <div className="space-y-4 border-t border-border-light pt-5 text-sm">
           {result.findings.length > 0 ? (
             <ul className="space-y-3">
               {result.findings.map((f) => {
@@ -95,11 +127,14 @@ export default function DocumentCheckClient() {
                 if (!copy) return null;
                 const evidence = Object.entries(f.evidence);
                 return (
-                  <li key={f.signal} className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-                    <p className="font-medium text-gray-900">{copy.label}</p>
-                    <p className="mt-1 text-gray-700">{copy.explain}</p>
+                  <li
+                    key={f.signal}
+                    className="rounded-xl border border-[#FFE082] bg-[#FFF8E1] p-4"
+                  >
+                    <p className="font-semibold text-[#E65100]">{copy.label}</p>
+                    <p className="mt-1 leading-relaxed text-gov-slate">{copy.explain}</p>
                     {evidence.length > 0 ? (
-                      <p className="mt-1 font-mono text-xs text-gray-500">
+                      <p className="mt-2 font-mono text-xs text-slate-500">
                         {evidence.map(([k, v]) => `${k}: ${v}`).join(" · ")}
                       </p>
                     ) : null}
@@ -108,65 +143,96 @@ export default function DocumentCheckClient() {
               })}
             </ul>
           ) : (
-            <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-              <p className="font-medium text-gray-900">{DOCUMENT_CHECK_CLEAN_LABEL}</p>
-              <p className="mt-1 text-gray-700">{DOCUMENT_CHECK_CLEAN_COPY}</p>
+            // Deliberately neutral — never the SAFE green (asymmetry rule).
+            <div className="rounded-xl border border-border-light bg-[#f8fafc] p-4">
+              <p className="font-semibold text-deep-navy">{DOCUMENT_CHECK_CLEAN_LABEL}</p>
+              <p className="mt-1 leading-relaxed text-gov-slate">
+                {DOCUMENT_CHECK_CLEAN_COPY}
+              </p>
             </div>
           )}
 
           {result.content && result.content.abns.length > 0 ? (
-            <div className="rounded-lg border border-gray-200 p-3">
-              <p className="text-gray-500">ABNs found on this document</p>
-              <ul className="mt-1 space-y-1">
-                {result.content.abns.map((a) => (
-                  <li key={a.abn} className="flex justify-between gap-4">
-                    <span className="font-mono text-xs text-gray-700">{a.abn}</span>
-                    <span className="text-right text-gray-800">
-                      {a.status === "registered"
-                        ? `registered${a.entityName ? ` — ${a.entityName}` : ""}`
-                        : a.status === "cancelled"
-                          ? `cancelled on the register${a.entityName ? ` — ${a.entityName}` : ""}`
-                          : a.status === "not_registered"
-                            ? "not on the ABR register"
-                            : a.status === "invalid_checksum"
-                              ? "not a possible ABN"
-                              : "could not be checked"}
-                    </span>
-                  </li>
-                ))}
+            <div className="rounded-xl border border-border-light p-4">
+              <p className="text-xs font-bold uppercase tracking-widest text-deep-navy">
+                ABNs found on this document
+              </p>
+              <ul className="mt-2 space-y-1.5">
+                {result.content.abns.map((a) => {
+                  const line = abnStatusLine(a);
+                  return (
+                    <li key={a.abn} className="flex justify-between gap-4">
+                      <span className="font-mono text-xs text-gov-slate">{a.abn}</span>
+                      <span
+                        className={`text-right ${
+                          line.tone === "warn"
+                            ? "font-medium text-[#F57C00]"
+                            : "text-gov-slate"
+                        }`}
+                      >
+                        {line.text}
+                      </span>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           ) : null}
           {result.content && !result.content.textExtracted ? (
-            <p className="text-xs text-gray-500">
-              No text could be read from this file (scanned or image-based
-              PDFs aren&rsquo;t supported yet), so content checks didn&rsquo;t
-              run.
+            <p className="text-xs leading-relaxed text-slate-500">
+              No text could be read from this file (scanned or image-based PDFs
+              aren&rsquo;t supported yet), so content checks didn&rsquo;t run.
             </p>
           ) : null}
 
           <dl className="space-y-2">
             {result.structural?.info.producer ? (
               <div className="flex justify-between gap-4">
-                <dt className="text-gray-500">Produced by</dt>
-                <dd className="text-right text-gray-800">{result.structural.info.producer}</dd>
+                <dt className="text-slate-500">Produced by</dt>
+                <dd className="text-right text-gov-slate">
+                  {result.structural.info.producer}
+                </dd>
               </div>
             ) : null}
             {result.structural?.info.creator ? (
               <div className="flex justify-between gap-4">
-                <dt className="text-gray-500">Created with</dt>
-                <dd className="text-right text-gray-800">{result.structural.info.creator}</dd>
+                <dt className="text-slate-500">Created with</dt>
+                <dd className="text-right text-gov-slate">
+                  {result.structural.info.creator}
+                </dd>
               </div>
             ) : null}
             {result.docSha256 ? (
               <div>
-                <dt className="text-gray-500">Document SHA-256</dt>
-                <dd className="break-all font-mono text-xs text-gray-700">{result.docSha256}</dd>
+                <dt className="text-slate-500">Document SHA-256</dt>
+                <dd className="break-all font-mono text-xs text-slate-500">
+                  {result.docSha256}
+                </dd>
               </div>
             ) : null}
           </dl>
 
-          <p className="text-xs text-gray-500">{result.disclaimer}</p>
+          {result.checkRef ? (
+            <div className="rounded-xl border border-border-light bg-[#f8fafc] p-4">
+              <p className="text-xs font-bold uppercase tracking-widest text-deep-navy">
+                Evidence reference
+              </p>
+              <p className="mt-1">
+                <a
+                  href={`/document-check/${result.checkRef}`}
+                  className="font-mono text-sm text-deep-navy underline"
+                >
+                  {result.checkRef}
+                </a>
+              </p>
+              <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                A permanent record of these findings (no document content is
+                stored). Quote this reference when reporting or disputing.
+              </p>
+            </div>
+          ) : null}
+
+          <p className="text-xs leading-relaxed text-slate-500">{result.disclaimer}</p>
         </div>
       ) : null}
     </section>

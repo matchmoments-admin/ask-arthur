@@ -469,6 +469,46 @@ components:
           type: string
 
 paths:
+  /document-checks:
+    post:
+      summary: Run a document check (PDF forensics)
+      description: >
+        Multipart PDF upload (field `file`, ≤10 MB). Returns named structural
+        findings (revision history, producer tells, metadata dates) plus AU
+        content checks (ABN checksum + ABR register status). Never a
+        FAKE/GENUINE verdict — an empty findings list means "no editing
+        traces found", not "genuine" (a fraudulent document generated from
+        scratch carries no revision history). Flagged checks persist a
+        metadata-only evidence record and return its DC- checkRef. Metered
+        per calendar month by plan tier; response carries monthlyRemaining.
+      operationId: runDocumentCheck
+      tags: [DocumentChecks]
+      responses:
+        "200":
+          description: Check result (or checked:false/scan_unavailable when the scan could not run).
+        "402":
+          description: The key's plan has no document-check allowance.
+        "429":
+          description: Monthly allowance reached.
+    get:
+      summary: List your organisation's flagged document-check records
+      description: >
+        Org-scoped (the calling key's organisation only — never a global
+        feed). Metadata-only rows — never document bytes or extracted text.
+      operationId: listDocumentChecks
+      tags: [DocumentChecks]
+      parameters:
+        - name: period
+          in: query
+          schema:
+            type: string
+            example: 30d
+          description: Lookback window, e.g. 7d (1–90 days, default 30).
+      responses:
+        "200":
+          description: Flagged records for the calling organisation.
+        "403":
+          description: API key is not linked to an organisation.
   /image-checks:
     get:
       summary: List flagged image-check evidence records

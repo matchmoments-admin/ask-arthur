@@ -9,6 +9,7 @@ import {
 } from "@askarthur/types";
 import { logEvent } from "@/lib/analytics-events";
 import { logCost } from "@/lib/cost-telemetry";
+import { recordDocumentCheck } from "@/lib/document-check-records";
 
 // Public document checker (/document-check page). Upload mode only — the
 // deterministic structural walk plus the AU content pack: ABN checksum
@@ -151,6 +152,10 @@ export async function POST(req: NextRequest) {
       checked: true,
       mode: "upload",
       ...inspection,
+      // Evidence record for FLAGGED checks only (ADR-0022 pattern) —
+      // recordDocumentCheck owns the flag-gate and metadata-only rules,
+      // and only returns a ref once the row exists.
+      checkRef: await recordDocumentCheck(inspection, { source: "web" }),
       disclaimer: DOCUMENT_CHECK_DISCLAIMER,
     };
     return NextResponse.json(response);

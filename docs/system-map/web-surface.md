@@ -26,16 +26,17 @@ Every consumer page, authenticated page, admin page, and API route, grouped by d
 
 ### Consumer products
 
-| Route                  | Purpose                                                                                             | Flag                               |
-| ---------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------- |
-| `/charity-check`       | Free charity legitimacy lookup                                                                      | `charityCheck`                     |
-| `/phone-footprint`     | Phone-number digital footprint scanner (teaser + paid)                                              | `phoneFootprintConsumer`           |
-| `/persona-check`       | Person / entity reputation lookup                                                                   | —                                  |
-| `/extension`           | Chrome extension landing                                                                            | —                                  |
-| `/extension-turnstile` | Turnstile bridge iframe for extension registration                                                  | —                                  |
-| `/document-check`      | Public PDF document checker (deterministic structural forensics — no classifier, no paid APIs)      | `documentCheck`                    |
-| `/image-check`         | Public AI image checker (URL mode: Hive + AI-origin ladder; upload mode: deterministic ladder only) | `imageCheck`                       |
-| `/image-check/[ref]`   | Public image-check evidence page (+ `/api/image-check/[ref]/pdf` download)                          | `imageCheck` + `imageCheckRecords` |
+| Route                   | Purpose                                                                                             | Flag                                     |
+| ----------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `/charity-check`        | Free charity legitimacy lookup                                                                      | `charityCheck`                           |
+| `/phone-footprint`      | Phone-number digital footprint scanner (teaser + paid)                                              | `phoneFootprintConsumer`                 |
+| `/persona-check`        | Person / entity reputation lookup                                                                   | —                                        |
+| `/extension`            | Chrome extension landing                                                                            | —                                        |
+| `/extension-turnstile`  | Turnstile bridge iframe for extension registration                                                  | —                                        |
+| `/document-check`       | Public PDF document checker (deterministic structural forensics — no classifier, no paid APIs)      | `documentCheck`                          |
+| `/document-check/[ref]` | Public document-check evidence page (DC- ref, metadata-only, identical 404 while dark)              | `documentCheck` + `documentCheckRecords` |
+| `/image-check`          | Public AI image checker (URL mode: Hive + AI-origin ladder; upload mode: deterministic ladder only) | `imageCheck`                             |
+| `/image-check/[ref]`    | Public image-check evidence page (+ `/api/image-check/[ref]/pdf` download)                          | `imageCheck` + `imageCheckRecords`       |
 
 ### Vertical landing pages
 
@@ -249,30 +250,31 @@ Every consumer page, authenticated page, admin page, and API route, grouped by d
 
 ### B2B threat intelligence API `/api/v1/*` (apikey)
 
-| Route                            | Method | Flag                | Purpose                                                                                                                                      |
-| -------------------------------- | ------ | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/api/v1/openapi.json`           | GET    | —                   | OpenAPI 3.0 spec                                                                                                                             |
-| `/api/v1/usage`                  | GET    | `auth`              | API usage breakdown (daily / monthly)                                                                                                        |
-| `/api/v1/threats/urls/lookup`    | POST   | `auth`              | Batch URL reputation                                                                                                                         |
-| `/api/v1/threats/urls/trending`  | GET    | `auth`              | Trending malicious URLs                                                                                                                      |
-| `/api/v1/threats/domains`        | GET    | `auth`              | Domain reputation lookup                                                                                                                     |
-| `/api/v1/threats/stats`          | GET    | `auth`              | Threat statistics                                                                                                                            |
-| `/api/v1/threats/trending`       | GET    | `auth`              | Trending threats                                                                                                                             |
-| `/api/v1/threats/wallets/lookup` | GET    | `auth`              | Crypto wallet risk score                                                                                                                     |
-| `/api/v1/deepfakes`              | GET    | `auth`              | Deepfake detection results                                                                                                                   |
-| `/api/v1/deepfakes/trending`     | GET    | `auth`              | Top trending deepfakes                                                                                                                       |
-| `/api/v1/image-checks`           | GET    | `apikey`            | Flagged image-check evidence feed (filters: period, min_confidence, generator, has_celebrity; never exposes install hash / raw hive payload) |
-| `/api/v1/entities/[id]`          | GET    | `auth`              | Entity details                                                                                                                               |
-| `/api/v1/entities/lookup`        | GET    | `auth`              | Batch entity lookup                                                                                                                          |
-| `/api/v1/entities/batch`         | POST   | `auth`              | Batch entity enrichment                                                                                                                      |
-| `/api/v1/scams/search`           | POST   | `scamsSearchB2bApi` | Semantic search over verified scams                                                                                                          |
-| `/api/v1/intel/themes`           | GET    | `redditIntelB2bApi` | List Reddit scam themes                                                                                                                      |
-| `/api/v1/intel/themes/[id]`      | GET    | `redditIntelB2bApi` | Theme details + member posts                                                                                                                 |
-| `/api/v1/intel/search`           | POST   | `redditIntelB2bApi` | Semantic search over Reddit + regulator narratives                                                                                           |
-| `/api/v1/intel/digest`           | GET    | `redditIntelB2bApi` | Weekly summary                                                                                                                               |
-| `/api/v1/intel/quotes`           | GET    | `redditIntelB2bApi` | Quoted snippets from latest posts                                                                                                            |
-| `/api/v1/clusters`               | GET    | `auth`              | Scam-cluster listing                                                                                                                         |
-| `/api/v1/clusters/[id]`          | GET    | `auth`              | Cluster members + risk                                                                                                                       |
+| Route                            | Method   | Flag                | Purpose                                                                                                                                                                                                               |
+| -------------------------------- | -------- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/api/v1/openapi.json`           | GET      | —                   | OpenAPI 3.0 spec                                                                                                                                                                                                      |
+| `/api/v1/usage`                  | GET      | `auth`              | API usage breakdown (daily / monthly)                                                                                                                                                                                 |
+| `/api/v1/threats/urls/lookup`    | POST     | `auth`              | Batch URL reputation                                                                                                                                                                                                  |
+| `/api/v1/threats/urls/trending`  | GET      | `auth`              | Trending malicious URLs                                                                                                                                                                                               |
+| `/api/v1/threats/domains`        | GET      | `auth`              | Domain reputation lookup                                                                                                                                                                                              |
+| `/api/v1/threats/stats`          | GET      | `auth`              | Threat statistics                                                                                                                                                                                                     |
+| `/api/v1/threats/trending`       | GET      | `auth`              | Trending threats                                                                                                                                                                                                      |
+| `/api/v1/threats/wallets/lookup` | GET      | `auth`              | Crypto wallet risk score                                                                                                                                                                                              |
+| `/api/v1/deepfakes`              | GET      | `auth`              | Deepfake detection results                                                                                                                                                                                            |
+| `/api/v1/deepfakes/trending`     | GET      | `auth`              | Top trending deepfakes                                                                                                                                                                                                |
+| `/api/v1/image-checks`           | GET      | `apikey`            | Flagged image-check evidence feed (filters: period, min_confidence, generator, has_celebrity; never exposes install hash / raw hive payload)                                                                          |
+| `/api/v1/document-checks`        | GET/POST | `apikey`            | B2B document check — POST per-document scan (monthly-metered from `TIER_LIMITS.documentChecksPerMonth`, fail-closed meter) + GET own-org flagged records (org-scoped, never global); dark behind `documentCheckV1Api` |
+| `/api/v1/entities/[id]`          | GET      | `auth`              | Entity details                                                                                                                                                                                                        |
+| `/api/v1/entities/lookup`        | GET      | `auth`              | Batch entity lookup                                                                                                                                                                                                   |
+| `/api/v1/entities/batch`         | POST     | `auth`              | Batch entity enrichment                                                                                                                                                                                               |
+| `/api/v1/scams/search`           | POST     | `scamsSearchB2bApi` | Semantic search over verified scams                                                                                                                                                                                   |
+| `/api/v1/intel/themes`           | GET      | `redditIntelB2bApi` | List Reddit scam themes                                                                                                                                                                                               |
+| `/api/v1/intel/themes/[id]`      | GET      | `redditIntelB2bApi` | Theme details + member posts                                                                                                                                                                                          |
+| `/api/v1/intel/search`           | POST     | `redditIntelB2bApi` | Semantic search over Reddit + regulator narratives                                                                                                                                                                    |
+| `/api/v1/intel/digest`           | GET      | `redditIntelB2bApi` | Weekly summary                                                                                                                                                                                                        |
+| `/api/v1/intel/quotes`           | GET      | `redditIntelB2bApi` | Quoted snippets from latest posts                                                                                                                                                                                     |
+| `/api/v1/clusters`               | GET      | `auth`              | Scam-cluster listing                                                                                                                                                                                                  |
+| `/api/v1/clusters/[id]`          | GET      | `auth`              | Cluster members + risk                                                                                                                                                                                                |
 
 ### Billing + Stripe (open, signature for webhook)
 

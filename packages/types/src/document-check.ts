@@ -128,5 +128,9 @@ export interface WebDocumentCheckResponse {
   /** Jurisdiction content-logic results. Null = "not assessed" (no pack ran
    *  for this request), never "clean". */
   content: DocumentContentSummary | null;
+  /** DC- evidence reference — present only when the check was FLAGGED and
+   *  FF_DOCUMENT_CHECK_RECORDS is on (ADR-0022 pattern). Keys the public
+   *  /document-check/[ref] page. */
+  checkRef?: string | null;
   disclaimer: string;
 }

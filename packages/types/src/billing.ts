@@ -109,6 +109,11 @@ export interface TierLimit {
   orgSeats: number;
   monthlyPriceAud?: number;
   annualPriceAud?: number;
+  /** Document Check B2B: POST /api/v1/document-checks per calendar month.
+   *  0 = endpoint not available on this tier (402 upsell). Pricing research
+   *  2026-08-21: Starter A$29→200 docs, Pro A$99→1,500 — mapped onto the
+   *  existing tiers until dedicated doc SKUs ship. */
+  documentChecksPerMonth: number;
 }
 
 export const TIER_LIMITS = {
@@ -118,6 +123,7 @@ export const TIER_LIMITS = {
     batchSize: 10,
     apiKeys: 1,
     orgSeats: 1,
+    documentChecksPerMonth: 0,
   },
   pro: {
     requestsPerDay: 200,
@@ -127,6 +133,7 @@ export const TIER_LIMITS = {
     orgSeats: 1,
     monthlyPriceAud: 99,
     annualPriceAud: 990,
+    documentChecksPerMonth: 200,
   },
   business: {
     requestsPerDay: 2000,
@@ -136,6 +143,7 @@ export const TIER_LIMITS = {
     orgSeats: 10,
     monthlyPriceAud: 449,
     annualPriceAud: 4490,
+    documentChecksPerMonth: 1500,
   },
   enterprise: {
     requestsPerDay: 10000,
@@ -143,6 +151,7 @@ export const TIER_LIMITS = {
     batchSize: 2000,
     apiKeys: 999,
     orgSeats: 999,
+    documentChecksPerMonth: 10000,
   },
   custom: {
     requestsPerDay: 25000,
@@ -150,6 +159,7 @@ export const TIER_LIMITS = {
     batchSize: 2000,
     apiKeys: 999,
     orgSeats: 999,
+    documentChecksPerMonth: 25000,
   },
 } as const;
 
