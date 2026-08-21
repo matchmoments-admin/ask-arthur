@@ -12,6 +12,7 @@ import type {
 } from "@askarthur/types";
 import { logger } from "@askarthur/utils/logger";
 import { scrubPII } from "./sanitize";
+import { sanitizeUnicode } from "./claude";
 import { normalizePhoneE164, normalizeEmail } from "./phone-normalize";
 import { normalizeURL, extractDomain } from "./url-normalize";
 
@@ -85,7 +86,13 @@ export async function storeScamReport(
     const supabase = createServiceClient();
     if (!supabase) return null;
 
-    const scrubbedContent = params.text ? scrubPII(params.text) : null;
+    // Fold invisible Unicode BEFORE scrubbing (review fix 2026-08-21):
+    // zero-width-split emails/phones/TFNs evade PII_PATTERNS' literal
+    // separators, so the raw text must be sanitized first — which also
+    // keeps invisible characters out of the stored scrubbed_content.
+    const scrubbedContent = params.text
+      ? scrubPII(sanitizeUnicode(params.text))
+      : null;
     const scrubbedResult: Record<string, unknown> = {
       summary: scrubPII(params.analysis.summary),
       redFlags: params.analysis.redFlags.map(scrubPII),
