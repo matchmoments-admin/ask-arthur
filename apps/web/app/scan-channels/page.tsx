@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
-import { OG_DEFAULT_IMAGE } from "@/lib/og";
+import { OG_BASE } from "@/lib/og";
 
 export const metadata: Metadata = {
   title: "Send Arthur a scam — every way to ask | Ask Arthur",
@@ -28,9 +28,9 @@ export const metadata: Metadata = {
     "Forward suspicious emails to scan@askarthur.au, paste a message at askarthur.au, talk to the bot on WhatsApp/Telegram/Slack/Messenger, or use the Chrome extension and mobile app. Every channel returns the same scam verdict.",
   alternates: { canonical: "https://askarthur.au/scan-channels" },
   openGraph: {
-      // Next replaces the parent openGraph wholesale, so this must be set
-      // explicitly or the page ships with no preview card. See lib/og.ts.
-      images: OG_DEFAULT_IMAGE,
+      // Next replaces the parent openGraph wholesale — every key not named
+      // here is dropped. Spread the base first. See lib/og.ts.
+      ...OG_BASE,
     title: "Send Arthur a scam — every way to ask",
     description:
       "Forward, paste, or chat — Arthur scans suspicious messages across web, email, bots, extension, and mobile.",

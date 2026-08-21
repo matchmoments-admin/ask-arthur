@@ -6,7 +6,7 @@ import FeatureCard from "@/components/FeatureCard";
 import ChartsSection from "@/components/charts/ChartsSection";
 import WorldScamMapWithHighlights from "@/components/charts/WorldScamMapWithHighlights";
 import { getChartData, getWorldStats } from "@/lib/dashboard/public-stats";
-import { OG_DEFAULT_IMAGE } from "@/lib/og";
+import { OG_BASE } from "@/lib/og";
 
 export const revalidate = 3600;
 
@@ -15,9 +15,9 @@ export const metadata: Metadata = {
   description:
     "Ask Arthur helps Australians pause before they click, transfer, or sign in. A suite of tools — scam checker, security scanner, persona check, feed — built around a simple idea: asking is protective.",
   openGraph: {
-      // Next replaces the parent openGraph wholesale, so this must be set
-      // explicitly or the page ships with no preview card. See lib/og.ts.
-      images: OG_DEFAULT_IMAGE,
+      // Next replaces the parent openGraph wholesale — every key not named
+      // here is dropped. Spread the base first. See lib/og.ts.
+      ...OG_BASE,
     title: "About Ask Arthur",
     description:
       "Ask Arthur is the pause — a calm second opinion before you click, transfer, or sign in.",

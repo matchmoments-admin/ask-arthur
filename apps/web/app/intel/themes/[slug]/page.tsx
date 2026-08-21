@@ -15,7 +15,7 @@ import { featureFlags } from "@askarthur/utils/feature-flags";
 import { gateOrNotFound } from "@/lib/featureGate";
 import { withUtm } from "@/lib/utm";
 import { loadTheme } from "@/lib/intel/themes";
-import { OG_DEFAULT_IMAGE } from "@/lib/og";
+import { OG_BASE } from "@/lib/og";
 
 interface PageProps {
   params: Promise<{ slug: string }>;
@@ -43,9 +43,9 @@ export async function generateMetadata({
       canonical: `https://askarthur.au/intel/themes/${result.theme.slug ?? result.theme.id}`,
     },
     openGraph: {
-      // Next replaces the parent openGraph wholesale, so this must be set
-      // explicitly or the page ships with no preview card. See lib/og.ts.
-      images: OG_DEFAULT_IMAGE,
+      // Next replaces the parent openGraph wholesale — every key not named
+      // here is dropped. Spread the base first. See lib/og.ts.
+      ...OG_BASE,
       title: result.theme.title,
       description: desc,
       type: "article",

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import Image from "next/image";
 import InstallCtaButton from "./InstallCtaButton";
-import { ogImages } from "@/lib/og";
+import { ogImages, OG_BASE } from "@/lib/og";
 
 export const metadata: Metadata = {
   title: "Chrome Extension — Ask Arthur | AI Scam Detection for Facebook",
@@ -15,7 +15,8 @@ export const metadata: Metadata = {
     // .webp is unrenderable on LinkedIn; ogImages() swaps in the sitewide
     // PNG card and will pick this back up automatically if the asset is
     // ever re-exported as png/jpg. See lib/og.ts.
-    images: ogImages("/illustrations/extension-launch.webp"),
+    ...OG_BASE,
+      images: ogImages("/illustrations/extension-launch.webp"),
   },
 };
 
