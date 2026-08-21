@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
   DOCUMENT_CHECK_CLEAN_COPY,
+  DOCUMENT_CHECK_CLEAN_LABEL,
   DOCUMENT_CHECK_COPY,
   DOCUMENT_CHECK_DISCLAIMER,
+  DOCUMENT_CHECK_UNAVAILABLE_COPY,
   DOCUMENT_FINDING_SIGNALS,
 } from "@askarthur/types";
 
@@ -54,6 +56,18 @@ describe("document-check copy — no verdict language", () => {
     for (const re of BANNED_VERDICTS) {
       expect(DOCUMENT_CHECK_CLEAN_COPY).not.toMatch(re);
     }
+  });
+
+  it("clean-state heading and unavailable copy carry no verdict language", () => {
+    for (const s of [DOCUMENT_CHECK_CLEAN_LABEL, DOCUMENT_CHECK_UNAVAILABLE_COPY]) {
+      for (const re of BANNED_VERDICTS) {
+        expect(s).not.toMatch(re);
+      }
+    }
+    // The heading states what was FOUND, never what the document IS.
+    expect(DOCUMENT_CHECK_CLEAN_LABEL).toMatch(/traces/i);
+    // Could-not-run copy must say the non-result means nothing either way.
+    expect(DOCUMENT_CHECK_UNAVAILABLE_COPY).toMatch(/nothing about the document/i);
   });
 
   it("disclaimer says these are signals, not a verdict, and routes to independent verification", () => {

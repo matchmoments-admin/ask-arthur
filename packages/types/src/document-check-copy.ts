@@ -60,6 +60,15 @@ export const DOCUMENT_CHECK_COPY: Record<DocumentFindingSignal, DocumentFindingC
   },
 };
 
+/** Heading for the zero-findings state. Lives here (not hardcoded in the
+ *  page) so the honesty test covers the surface's most verdict-prone string. */
+export const DOCUMENT_CHECK_CLEAN_LABEL = "No editing traces found";
+
+/** Copy for a scan that could not run (checked:false / scan_unavailable) —
+ *  which is NOT the clean state and must never borrow its copy. */
+export const DOCUMENT_CHECK_UNAVAILABLE_COPY =
+  "We couldn't read this file's structure, so no checks ran. That says nothing about the document either way — try re-exporting it as a standard PDF, or verify the details with the sender directly.";
+
 /** The asymmetry rule, verbatim — shown whenever a scan finds nothing.
  *  The copy test asserts this exact framing survives edits. */
 export const DOCUMENT_CHECK_CLEAN_COPY =

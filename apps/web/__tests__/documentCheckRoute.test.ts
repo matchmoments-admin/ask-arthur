@@ -6,17 +6,33 @@ import { NextRequest } from "next/server";
 // and deterministic, so mocking it would only test the mock). Only the
 // harness seams are mocked: flags, rate limit, logger, analytics.
 
-const rateState = vi.hoisted(() => ({ allowed: true }));
+const rateState = vi.hoisted(() => ({ allowed: true, storeDown: false }));
 const flagState = vi.hoisted(() => ({ documentCheck: true }));
 const events = vi.hoisted(() => ({ rows: [] as Array<Record<string, unknown>> }));
 
 vi.mock("@askarthur/utils/rate-limit", () => ({
-  checkDocumentUploadRateLimit: vi.fn(async () =>
-    rateState.allowed
-      ? { allowed: true, remaining: 4, resetAt: null }
-      : { allowed: false, remaining: 0, resetAt: new Date(Date.now() + 60_000), message: "Too many document checks. Try again later." },
-  ),
+  checkDocumentUploadRateLimit: vi.fn(async () => {
+    if (rateState.storeDown) {
+      return {
+        allowed: false,
+        remaining: 0,
+        resetAt: null,
+        message: "Service temporarily unavailable.",
+        reason: "store_unavailable",
+      };
+    }
+    return rateState.allowed
+      ? { allowed: true, remaining: 4, resetAt: null, reason: "ok" }
+      : {
+          allowed: false,
+          remaining: 0,
+          resetAt: new Date(Date.now() + 60_000),
+          message: "Too many document checks. Try again later.",
+          reason: "exceeded",
+        };
+  }),
 }));
+vi.mock("@/lib/cost-telemetry", () => ({ logCost: vi.fn() }));
 vi.mock("@askarthur/utils/feature-flags", () => ({ featureFlags: flagState }));
 vi.mock("@askarthur/utils/logger", () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
@@ -57,6 +73,7 @@ function multipartRequest(bytes: Buffer, filename = "doc.pdf"): NextRequest {
 
 beforeEach(() => {
   rateState.allowed = true;
+  rateState.storeDown = false;
   flagState.documentCheck = true;
   events.rows.length = 0;
 });
@@ -102,6 +119,25 @@ describe("POST /api/document-check", () => {
     });
     const res = await POST(req);
     expect(res.status).toBe(413);
+  });
+
+  it("503s (not 429) when the rate-limit store is down — outage is not a quota hit", async () => {
+    rateState.storeDown = true;
+    const res = await POST(multipartRequest(CLEAN_PDF));
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe("service_unavailable");
+    expect(res.headers.get("Retry-After")).toBe("60");
+  });
+
+  it("returns checked:false scan_unavailable when the scan cannot run — never the clean state", async () => {
+    // Passes the route's 5-byte %PDF- gate but fails the module's 8-byte
+    // minimum: a scan that did not run must not render as zero findings.
+    const res = await POST(multipartRequest(Buffer.from("%PDF-1", "latin1")));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.checked).toBe(false);
+    expect(data.reason).toBe("scan_unavailable");
+    expect(data.structural).toBeNull();
   });
 
   it("returns named findings for a doctored PDF and fires the usage event", async () => {

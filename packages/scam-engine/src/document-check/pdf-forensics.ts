@@ -6,25 +6,37 @@
 // changed trailer IDs, producer-tool tells, divergent timestamps, XMP edit
 // history. A general PDF library (pdf-lib etc.) is deliberately NOT used:
 // parsers normalise and REPAIR exactly the anomalies we are here to observe,
-// and these bytes are attacker-controlled — a ~300-line scan is less parser
+// and these bytes are attacker-controlled — a targeted scan is less parser
 // surface than a full object-graph parser.
 //
 // Epistemics (ADR-0015/0024 applied to documents): output is a factual
 // summary plus NAMED findings. Nothing here scores, weighs, or concludes
-// "fake"; absence of every signal is NOT evidence of authenticity (a
-// freshly generated fraudulent document has no revision history). Copy for
-// these signals lives in @askarthur/types/document-check-copy.
+// "fake"; absence of every signal is NOT evidence of authenticity (a freshly
+// generated fraudulent document has no revision history).
 //
-// Reading notes:
-// - Incremental updates: each re-save appends objects + a new xref section +
-//   trailer + %%EOF, so `startxref` count exceeds one. Linearized ("fast web
-//   view") files legitimately carry one extra xref pair — detected via the
-//   /Linearized hint dict near the header and discounted.
-// - /Info fields and the XMP packet are read via LAST occurrence — appended
-//   revisions win, matching how a conforming reader resolves them.
-// - On modern PDFs metadata often lives inside compressed object streams
-//   (/ObjStm) this scan doesn't inflate. That reports as a `scan_limited`
-//   finding, never as a clean result — "didn't find" ≠ "absent".
+// Adversarial-input rules this file follows everywhere (2026-08-21 review of
+// PR #1028 — each rule closed a CONFIRMED finding):
+// - Structural tokens (startxref / %%EOF / /Encrypt / /ObjStm) only count
+//   OUTSIDE stream…endstream ranges and only at a token boundary — content
+//   streams and embedded PDFs (PDF/A-3 e-invoice attachments) must not
+//   inflate the revision count or fire false findings on legitimate files.
+// - /Info fields are resolved through the trailer's /Info N G R reference to
+//   the actual Info object — never a byte-anywhere lastIndexOf, which was
+//   both spoofable (appended "/Producer (Xero)" in a comment shadowed the
+//   real Photoshop entry) and a false-positive source.
+// - The linearization discount requires a real /Linearized dict in the FIRST
+//   object whose /L equals the exact file length — a "/Linearized" comment
+//   can't cancel a genuine incremental update, and any append changes the
+//   length, voiding the discount.
+// - /ID is read from the LAST trailer region only (literal and hex string
+//   forms); an unparseable last trailer reports null (unknown), never an
+//   earlier trailer's answer.
+// - Every backward walk is capped (MAX_WALK) and every string scan is
+//   window-bounded — a 10 MB upload of pathological bytes must cost O(N),
+//   not O(N²), on this anonymous route.
+// - A malformed single field degrades to null for THAT field only; the scan
+//   never throws and never collapses to isPdf:false because one string was
+//   bad (the swap16 odd-length crash class).
 
 import type {
   DocumentFinding,
@@ -58,45 +70,129 @@ const OFFICE_SUITE_PATTERNS: Array<{ re: RegExp; name: string }> = [
 ];
 
 const MAX_SCAN_BYTES = 25_000_000; // hard stop — route caps uploads well below
+const MAX_WALK = 64; // cap on every backward lastIndexOf loop
+const MAX_STRING_LEN = 2048; // longest field string we'll decode
+const MAX_STREAMS = 10_000; // cap on stream-range discovery
 
-// ---------- byte-scan primitives -------------------------------------------
+const tok = (s: string): Buffer => Buffer.from(s, "latin1");
 
-/** Count non-overlapping occurrences of an ASCII token. */
-function countToken(buf: Buffer, token: string): number {
-  const needle = Buffer.from(token, "latin1");
+// ---------- stream ranges ---------------------------------------------------
+
+interface ByteRange {
+  start: number;
+  end: number;
+}
+
+const isAlnum = (b: number): boolean =>
+  (b >= 0x30 && b <= 0x39) || (b >= 0x41 && b <= 0x5a) || (b >= 0x61 && b <= 0x7a);
+
+/** Locate stream…endstream payload ranges so structural tokens inside
+ *  content/attachment streams (including whole embedded PDFs) are ignored.
+ *  Best-effort: binary payloads containing the literal "endstream" end a
+ *  range early — acceptable, the goal is excluding well-formed payloads. */
+function findStreamRanges(buf: Buffer): ByteRange[] {
+  const ranges: ByteRange[] = [];
+  const streamTok = tok("stream");
+  const endTok = tok("endstream");
+  let pos = 0;
+  while (ranges.length < MAX_STREAMS) {
+    const s = buf.indexOf(streamTok, pos);
+    if (s < 0) break;
+    // token boundary: skip the "stream" inside "endstream"
+    if (s > 0 && isAlnum(buf[s - 1]!)) {
+      pos = s + 6;
+      continue;
+    }
+    const dataStart = s + 6;
+    const e = buf.indexOf(endTok, dataStart);
+    if (e < 0) {
+      ranges.push({ start: dataStart, end: buf.length });
+      break;
+    }
+    ranges.push({ start: dataStart, end: e });
+    pos = e + endTok.length;
+  }
+  return ranges;
+}
+
+/** Ranges are discovered in ascending order — binary search membership. */
+function inStream(ranges: ByteRange[], idx: number): boolean {
+  let lo = 0;
+  let hi = ranges.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const r = ranges[mid]!;
+    if (idx < r.start) hi = mid - 1;
+    else if (idx >= r.end) lo = mid + 1;
+    else return true;
+  }
+  return false;
+}
+
+// ---------- token counting --------------------------------------------------
+
+const isDelim = (b: number | undefined): boolean =>
+  b === undefined ||
+  b === 0x20 || b === 0x0a || b === 0x0d || b === 0x09 || b === 0x0c || b === 0x00 ||
+  b === 0x2f || b === 0x3c || b === 0x3e || b === 0x5b || b === 0x5d || b === 0x28 || b === 0x25;
+
+/** Count token occurrences outside stream payloads, requiring a PDF token
+ *  boundary on both sides (so "/Encrypt" ≠ "/EncryptMetadata", and a token
+ *  inside prose can't match without surrounding delimiters). */
+function countToken(buf: Buffer, token: string, ranges: ByteRange[]): number {
+  const needle = tok(token);
   let count = 0;
   let pos = 0;
   while (pos <= buf.length - needle.length) {
     const hit = buf.indexOf(needle, pos);
     if (hit < 0) break;
-    count++;
     pos = hit + needle.length;
+    if (inStream(ranges, hit)) continue;
+    const before = hit > 0 ? buf[hit - 1] : undefined;
+    const after = buf[hit + needle.length];
+    if ((isDelim(before) || before === undefined) && (isDelim(after) || after === undefined)) {
+      count++;
+    }
   }
   return count;
 }
 
-function lastIndexOfToken(buf: Buffer, token: string): number {
-  return buf.lastIndexOf(Buffer.from(token, "latin1"));
+/** Last occurrence of a token outside stream payloads, capped walk. */
+function lastTokenOutside(buf: Buffer, token: string, ranges: ByteRange[]): number {
+  const needle = tok(token);
+  let pos = buf.lastIndexOf(needle);
+  for (let i = 0; i < MAX_WALK && pos >= 0; i++) {
+    if (!inStream(ranges, pos)) return pos;
+    pos = buf.lastIndexOf(needle, pos - 1);
+  }
+  return -1;
 }
 
-/** Read a PDF string object starting at `pos` (after whitespace): either a
- *  literal `(…)` with escape handling or a hex string `<…>`. Returns the
- *  decoded text (UTF-16BE with BOM handled) or null when `pos` doesn't start
- *  a string. Truncates pathological lengths — this is a forensic read, not a
- *  renderer. */
-function readPdfString(buf: Buffer, pos: number): string | null {
-  while (pos < buf.length && (buf[pos] === 0x20 || buf[pos] === 0x0a || buf[pos] === 0x0d || buf[pos] === 0x09)) {
+// ---------- PDF string reading ----------------------------------------------
+
+/** Read a PDF string object's RAW bytes starting at `pos` (after optional
+ *  whitespace): literal `(…)` with escapes, or hex `<…>`. Window-bounded:
+ *  never scans more than a few KB past `pos`. Null when `pos` doesn't start
+ *  a parseable string. `end` is the offset just past the closing delimiter,
+ *  so a caller can read consecutive strings (the /ID pair). */
+function readPdfStringAt(
+  buf: Buffer,
+  pos: number,
+): { bytes: Buffer; end: number } | null {
+  while (
+    pos < buf.length &&
+    (buf[pos] === 0x20 || buf[pos] === 0x0a || buf[pos] === 0x0d || buf[pos] === 0x09)
+  ) {
     pos++;
   }
   if (pos >= buf.length) return null;
-
-  const MAX_LEN = 2048;
 
   if (buf[pos] === 0x28 /* ( */) {
     const out: number[] = [];
     let depth = 1;
     let i = pos + 1;
-    while (i < buf.length && out.length < MAX_LEN) {
+    const limit = Math.min(buf.length, pos + 1 + MAX_STRING_LEN * 4);
+    while (i < limit && out.length < MAX_STRING_LEN) {
       const b = buf[i]!;
       if (b === 0x5c /* \ */ && i + 1 < buf.length) {
         const next = buf[i + 1]!;
@@ -110,7 +206,6 @@ function readPdfString(buf: Buffer, pos: number): string | null {
           continue;
         }
         if (next >= 0x30 && next <= 0x37) {
-          // octal escape, 1–3 digits
           let oct = 0;
           let j = i + 1;
           while (j < buf.length && j < i + 4 && buf[j]! >= 0x30 && buf[j]! <= 0x37) {
@@ -121,54 +216,120 @@ function readPdfString(buf: Buffer, pos: number): string | null {
           i = j;
           continue;
         }
-        i += 2; // line continuation or unknown escape — drop
+        i += 2;
         continue;
       }
       if (b === 0x28) depth++;
       if (b === 0x29) {
         depth--;
-        if (depth === 0) break;
+        if (depth === 0) return { bytes: Buffer.from(out), end: i + 1 };
       }
       out.push(b);
       i++;
     }
-    return decodePdfText(Buffer.from(out));
+    return null; // unterminated within window
   }
 
   if (buf[pos] === 0x3c /* < */ && buf[pos + 1] !== 0x3c) {
-    const end = buf.indexOf(0x3e /* > */, pos + 1);
-    if (end < 0 || end - pos > MAX_LEN * 2) return null;
+    // Window-bounded close scan — an unterminated '<' must cost O(window),
+    // not O(distance-to-EOF) (the O(N²) DoS class).
+    const window = Math.min(buf.length, pos + 1 + MAX_STRING_LEN * 2 + 64);
+    let end = -1;
+    for (let i = pos + 1; i < window; i++) {
+      if (buf[i] === 0x3e /* > */) {
+        end = i;
+        break;
+      }
+    }
+    if (end < 0) return null;
     const hex = buf.subarray(pos + 1, end).toString("latin1").replace(/\s+/g, "");
     if (!/^[0-9a-fA-F]*$/.test(hex)) return null;
-    const bytes = Buffer.from(hex.length % 2 ? hex + "0" : hex, "hex");
-    return decodePdfText(bytes);
+    return { bytes: Buffer.from(hex.length % 2 ? hex + "0" : hex, "hex"), end: end + 1 };
   }
 
   return null;
 }
 
-/** PDFDocEncoding is close enough to latin1 for the fields we read; UTF-16BE
- *  is signalled by a BOM per spec. */
+/** PDFDocEncoding ≈ latin1 for the fields we read; UTF-16BE is signalled by
+ *  a BOM. Never throws — an odd-length UTF-16 payload drops its dangling
+ *  byte instead of crashing swap16 (which would have collapsed the whole
+ *  scan through the caller's catch). */
 function decodePdfText(bytes: Buffer): string | null {
-  if (bytes.length === 0) return null;
-  const text =
-    bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff
-      ? Buffer.from(bytes.subarray(2)).swap16().toString("utf16le")
-      : bytes.toString("latin1");
-  const cleaned = text.replace(/\0/g, "").trim();
-  return cleaned.length > 0 ? cleaned : null;
+  try {
+    if (bytes.length === 0) return null;
+    let text: string;
+    if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
+      let body = bytes.subarray(2);
+      if (body.length % 2 === 1) body = body.subarray(0, body.length - 1);
+      text = Buffer.from(body).swap16().toString("utf16le");
+    } else {
+      text = bytes.toString("latin1");
+    }
+    const cleaned = text.replace(/\0/g, "").trim();
+    return cleaned.length > 0 ? cleaned : null;
+  } catch {
+    return null;
+  }
 }
 
-/** Latest-revision-wins read of a name-keyed string field (/Producer etc.). */
-function readLastStringField(buf: Buffer, key: string): string | null {
-  const needle = Buffer.from(key, "latin1");
-  let pos = buf.lastIndexOf(needle);
-  while (pos >= 0) {
-    const value = readPdfString(buf, pos + needle.length);
-    if (value !== null) return value;
-    pos = buf.lastIndexOf(needle, pos - 1);
+/** First occurrence of `key` within a SLICE (one dict), then its string. */
+function readStringFieldIn(slice: Buffer, key: string): string | null {
+  const needle = tok(key);
+  let pos = slice.indexOf(needle);
+  for (let i = 0; i < 8 && pos >= 0; i++) {
+    const read = readPdfStringAt(slice, pos + needle.length);
+    if (read) return decodePdfText(read.bytes);
+    pos = slice.indexOf(needle, pos + needle.length);
   }
   return null;
+}
+
+// ---------- /Info dict resolution -------------------------------------------
+
+/** Resolve the trailer's `/Info N G R` reference to the LAST `N G obj` in
+ *  the file (appended revisions legitimately redefine Info — latest wins)
+ *  and read the fields from that object only. Byte-anywhere scans are
+ *  spoofable and false-positive-prone; "not found" reports null, which the
+ *  scan_limited finding covers when object streams are present. */
+function readInfoFields(buf: Buffer, ranges: ByteRange[]): PdfInfoFields {
+  const empty: PdfInfoFields = { producer: null, creator: null, creationDate: null, modDate: null };
+
+  const infoTok = tok("/Info");
+  let pos = buf.lastIndexOf(infoTok);
+  let ref: { num: number; gen: number } | null = null;
+  for (let i = 0; i < MAX_WALK && pos >= 0; i++) {
+    if (!inStream(ranges, pos)) {
+      const window = buf.subarray(pos, Math.min(pos + 48, buf.length)).toString("latin1");
+      const m = window.match(/^\/Info\s+(\d{1,10})\s+(\d{1,5})\s+R/);
+      if (m) {
+        ref = { num: Number(m[1]), gen: Number(m[2]) };
+        break;
+      }
+    }
+    pos = buf.lastIndexOf(infoTok, pos - 1);
+  }
+  if (!ref) return empty;
+
+  const objNeedle = tok(`${ref.num} ${ref.gen} obj`);
+  let objPos = buf.lastIndexOf(objNeedle);
+  for (let i = 0; i < MAX_WALK && objPos >= 0; i++) {
+    const before = objPos > 0 ? buf[objPos - 1] : undefined;
+    const beforeIsDigit = before !== undefined && before >= 0x30 && before <= 0x39;
+    if (!inStream(ranges, objPos) && !beforeIsDigit) break;
+    objPos = buf.lastIndexOf(objNeedle, objPos - 1);
+  }
+  if (objPos < 0) return empty;
+
+  const endObj = buf.indexOf(tok("endobj"), objPos);
+  const sliceEnd = Math.min(endObj > objPos ? endObj : objPos + 8192, objPos + 8192, buf.length);
+  const slice = buf.subarray(objPos, sliceEnd);
+
+  return {
+    producer: readStringFieldIn(slice, "/Producer"),
+    creator: readStringFieldIn(slice, "/Creator"),
+    creationDate: readStringFieldIn(slice, "/CreationDate"),
+    modDate: readStringFieldIn(slice, "/ModDate"),
+  };
 }
 
 // ---------- date handling ---------------------------------------------------
@@ -197,6 +358,25 @@ export function parsePdfDate(raw: string | null): number | null {
   return utc;
 }
 
+// ---------- linearization ---------------------------------------------------
+
+/** True only for a REAL linearized file: the first object is a /Linearized
+ *  dict whose /L equals the exact file length. A "/Linearized" comment can't
+ *  earn the extra-xref-pair discount, and appending anything changes the
+ *  length, voiding it — so the discount can never hide a real update. */
+function isLinearized(buf: Buffer, fileLength: number): boolean {
+  const head = buf.subarray(0, 2048);
+  const objIdx = head.indexOf(tok(" obj"));
+  if (objIdx < 0) return false;
+  const sliceEnd = Math.min(objIdx + 1024, buf.length);
+  const slice = buf.subarray(objIdx, sliceEnd).toString("latin1");
+  const endObj = slice.indexOf("endobj");
+  const dict = endObj > 0 ? slice.slice(0, endObj) : slice;
+  if (!dict.includes("/Linearized")) return false;
+  const l = dict.match(/\/L\s+(\d{1,12})/);
+  return l !== null && Number(l[1]) === fileLength;
+}
+
 // ---------- XMP -------------------------------------------------------------
 
 function readXmpSummary(buf: Buffer): PdfXmpSummary {
@@ -208,9 +388,9 @@ function readXmpSummary(buf: Buffer): PdfXmpSummary {
     historyEvents: null,
     derivedFrom: false,
   };
-  const start = lastIndexOfToken(buf, "<?xpacket begin");
+  const start = buf.lastIndexOf(tok("<?xpacket begin"));
   if (start < 0) return empty;
-  const endTag = buf.indexOf(Buffer.from("<?xpacket end", "latin1"), start);
+  const endTag = buf.indexOf(tok("<?xpacket end"), start);
   const xmp = buf
     .subarray(start, endTag > start ? endTag : Math.min(start + 65_536, buf.length))
     .toString("utf8");
@@ -244,21 +424,42 @@ function readXmpSummary(buf: Buffer): PdfXmpSummary {
 
 // ---------- trailer /ID -----------------------------------------------------
 
-/** Compare the LAST trailer /ID pair. false = pair differs (file changed
- *  since creation); null = no pair found. */
-function readTrailerIdMatches(buf: Buffer): boolean | null {
-  let pos = lastIndexOfToken(buf, "/ID");
-  while (pos >= 0) {
-    const window = buf.subarray(pos, Math.min(pos + 200, buf.length)).toString("latin1");
-    const m = window.match(/\/ID\s*\[\s*<([0-9a-fA-F\s]*)>\s*<([0-9a-fA-F\s]*)>\s*\]/);
-    if (m) {
-      const a = m[1]!.replace(/\s+/g, "").toLowerCase();
-      const b = m[2]!.replace(/\s+/g, "").toLowerCase();
-      if (a.length > 0 && b.length > 0) return a === b;
-    }
-    pos = buf.lastIndexOf(Buffer.from("/ID", "latin1"), pos - 1);
+/** Compare the LAST trailer's /ID pair — literal and hex string forms both
+ *  parse (readPdfStringBytes handles either). An unparseable or absent pair
+ *  in the LAST trailer reports null (unknown); we never fall back to an
+ *  earlier trailer, whose matching pair would mask a modified file. */
+function readTrailerIdMatches(buf: Buffer, ranges: ByteRange[]): boolean | null {
+  let region: Buffer | null = null;
+
+  const trailerPos = lastTokenOutside(buf, "trailer", ranges);
+  if (trailerPos >= 0) {
+    region = buf.subarray(trailerPos, Math.min(trailerPos + 2048, buf.length));
+  } else {
+    // Cross-reference-stream PDF: the /ID lives in the xref stream dict at
+    // the offset the last startxref points to.
+    const sx = buf.lastIndexOf(tok("startxref"));
+    if (sx < 0) return null;
+    const digits = buf.subarray(sx + 9, Math.min(sx + 32, buf.length)).toString("latin1");
+    const off = digits.match(/(\d{1,12})/)?.[1];
+    if (!off) return null;
+    const at = Number(off);
+    if (!Number.isFinite(at) || at < 0 || at >= buf.length) return null;
+    region = buf.subarray(at, Math.min(at + 2048, buf.length));
   }
-  return null;
+
+  const idPos = region.indexOf(tok("/ID"));
+  if (idPos < 0) return null;
+  let p = idPos + 3;
+  while (p < region.length && region[p] !== 0x5b /* [ */) {
+    if (p - idPos > 16) return null;
+    p++;
+  }
+  if (p >= region.length) return null;
+  const first = readPdfStringAt(region, p + 1); // skips leading whitespace
+  if (!first || first.bytes.length === 0) return null;
+  const second = readPdfStringAt(region, first.end);
+  if (!second || second.bytes.length === 0) return null;
+  return first.bytes.equals(second.bytes);
 }
 
 // ---------- main ------------------------------------------------------------
@@ -285,6 +486,17 @@ const NOT_PDF: PdfStructuralSummary = {
   trailerIdMatches: null,
 };
 
+/** Run one field-reader, degrading to a fallback on ANY error — a malformed
+ *  string must cost that field, never the scan ("never throws / best-effort
+ *  partial fields" is this module's contract). */
+function safe<T>(fallback: T, fn: () => T): T {
+  try {
+    return fn();
+  } catch {
+    return fallback;
+  }
+}
+
 /**
  * Read the structural summary of a PDF. Never throws; non-PDF, truncated,
  * or pathological input reports {isPdf:false} or best-effort partial fields.
@@ -298,30 +510,25 @@ export function inspectPdfStructure(input: Buffer): PdfStructuralSummary {
     }
 
     const versionMatch = buf.subarray(0, 16).toString("latin1").match(/%PDF-(\d\.\d)/);
-    const startxrefCount = countToken(buf, "startxref");
-    const linearized = buf.subarray(0, 2048).includes("/Linearized");
-    const info: PdfInfoFields = {
-      producer: readLastStringField(buf, "/Producer"),
-      creator: readLastStringField(buf, "/Creator"),
-      creationDate: readLastStringField(buf, "/CreationDate"),
-      modDate: readLastStringField(buf, "/ModDate"),
-    };
+    const ranges = safe<ByteRange[]>([], () => findStreamRanges(buf));
+    const startxrefCount = safe(0, () => countToken(buf, "startxref", ranges));
+    const linearized = safe(false, () => isLinearized(buf, input.length));
 
     return {
       isPdf: true,
       pdfVersion: versionMatch?.[1] ?? null,
       byteLength: input.length,
-      eofCount: countToken(buf, "%%EOF"),
+      eofCount: safe(0, () => countToken(buf, "%%EOF", ranges)),
       startxrefCount,
       linearized,
-      // A single-revision file has one startxref (two when linearized);
-      // every incremental update appends one more.
+      // A single-revision file has one startxref (two when genuinely
+      // linearized); every incremental update appends one more.
       incrementalUpdates: Math.max(0, startxrefCount - (linearized ? 2 : 1)),
-      encrypted: countToken(buf, "/Encrypt") > 0,
-      hasObjectStreams: countToken(buf, "/ObjStm") > 0,
-      info,
-      xmp: readXmpSummary(buf),
-      trailerIdMatches: readTrailerIdMatches(buf),
+      encrypted: safe(0, () => countToken(buf, "/Encrypt", ranges)) > 0,
+      hasObjectStreams: safe(0, () => countToken(buf, "/ObjStm", ranges)) > 0,
+      info: safe(NOT_PDF.info, () => readInfoFields(buf, ranges)),
+      xmp: safe(NOT_PDF.xmp, () => readXmpSummary(buf)),
+      trailerIdMatches: safe(null, () => readTrailerIdMatches(buf, ranges)),
     };
   } catch {
     return { ...NOT_PDF, byteLength: input.length };

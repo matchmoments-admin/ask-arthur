@@ -8,6 +8,7 @@ import {
   type WebDocumentCheckResponse,
 } from "@askarthur/types";
 import { logEvent } from "@/lib/analytics-events";
+import { logCost } from "@/lib/cost-telemetry";
 
 // Public document checker (/document-check page). Upload mode only —
 // deterministic PDF structural forensics, no classifier, no Claude, no paid
@@ -46,6 +47,15 @@ export async function POST(req: NextRequest) {
       "unknown";
     const rate = await checkDocumentUploadRateLimit(ip);
     if (!rate.allowed) {
+      // A fail-closed store outage is NOT a quota hit — telling a first-time
+      // user they exceeded a limit they never used is the caller mistake the
+      // rate-limit module's docstring warns about. 503 + retry instead.
+      if (rate.reason === "store_unavailable") {
+        return NextResponse.json(
+          { error: "service_unavailable", message: "Checking is briefly unavailable. Try again in a minute." },
+          { status: 503, headers: { "Retry-After": "60" } },
+        );
+      }
       return NextResponse.json(
         { error: "rate_limited", message: rate.message ?? "Too many checks. Try again later." },
         {
@@ -86,7 +96,25 @@ export async function POST(req: NextRequest) {
     // jurisdiction pack dispatch, so this route never grows orchestration.
     const inspection = inspectDocument(buffer);
 
-    // Stage-1 usage signal (metadata only — signal names, never content).
+    // Volume signal that does NOT depend on the attribution cookie: a $0
+    // cost_telemetry row per check (the free-tier "units at $0" convention),
+    // so the Stage-1 go/no-go gate can't read a false zero when
+    // FF_ANALYTICS_ATTRIBUTION is off or the visitor blocks cookies.
+    logCost({
+      feature: "document_check",
+      provider: "internal",
+      operation: "structural-scan",
+      units: 1,
+      unitCostUsd: 0,
+      metadata: {
+        surface: "document_check_web",
+        is_pdf: inspection.structural.isPdf,
+        findings: inspection.findings.length,
+      },
+      requestId: null,
+    });
+
+    // Attribution-funnel signal (metadata only — signal names, never content).
     void logEvent({
       eventType: "document_check_completed",
       eventProps: {
@@ -97,6 +125,23 @@ export async function POST(req: NextRequest) {
       path: "/api/document-check",
       requestId: null,
     });
+
+    // The module admitted the magic bytes but the scan could not run (e.g. a
+    // sub-8-byte stub, or a fully collapsed parse). A scan that did not run
+    // must never render as the clean state — that is the asymmetry rule.
+    if (!inspection.structural.isPdf) {
+      const unavailable: WebDocumentCheckResponse = {
+        checked: false,
+        reason: "scan_unavailable",
+        mode: "upload",
+        docSha256: inspection.docSha256,
+        structural: null,
+        findings: [],
+        content: null,
+        disclaimer: DOCUMENT_CHECK_DISCLAIMER,
+      };
+      return NextResponse.json(unavailable);
+    }
 
     const response: WebDocumentCheckResponse = {
       checked: true,

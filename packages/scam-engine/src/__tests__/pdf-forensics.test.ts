@@ -33,7 +33,8 @@ function buildPdf(opts: BuildOptions = {}): Buffer {
   };
 
   if (opts.linearized) {
-    push("1 0 obj\n<< /Linearized 1 /L 9999 /O 3 /E 999 /N 1 /T 999 >>\nendobj\n");
+    // /L must equal the final byte length — patched by patchLinearizedLength.
+    push("1 0 obj\n<< /Linearized 1 /L 000000 /O 3 /E 999 /N 1 /T 999 >>\nendobj\n");
   } else {
     push("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
   }
@@ -71,15 +72,27 @@ function buildPdf(opts: BuildOptions = {}): Buffer {
   return Buffer.from(parts.join(""), "latin1");
 }
 
+/** Fix up a linearized fixture so /L equals the true byte length (the
+ *  structural check the discount now requires). Same-width replacement so
+ *  offsets stay valid. */
+function patchLinearizedLength(pdf: Buffer): Buffer {
+  const padded = String(pdf.length).padStart(6, "0");
+  return Buffer.from(pdf.toString("latin1").replace("/L 000000", `/L ${padded}`), "latin1");
+}
+
 /** A real incremental update: appended object, xref section, trailer with
  *  /Prev, new %%EOF — and a changed second /ID half. */
-function appendUpdate(pdf: Buffer, opts: { modDate?: string; producer?: string } = {}): Buffer {
+function appendUpdate(
+  pdf: Buffer,
+  opts: { modDate?: string; producer?: string; creationDate?: string } = {},
+): Buffer {
   const base = pdf.toString("latin1");
   const prevStart = Number(base.match(/startxref\n(\d+)/g)?.pop()?.match(/(\d+)/)?.[1] ?? 0);
   let update = "";
   const objOffset = pdf.length;
   const fields: string[] = [];
   if (opts.producer) fields.push(`/Producer (${opts.producer})`);
+  if (opts.creationDate) fields.push(`/CreationDate (${opts.creationDate})`);
   if (opts.modDate) fields.push(`/ModDate (${opts.modDate})`);
   update += `4 0 obj\n<< ${fields.join(" ")} >>\nendobj\n`;
   const xrefStart = pdf.length + update.length;
@@ -118,8 +131,10 @@ describe("inspectPdfStructure", () => {
       creationDate: "D:20260801120000Z",
       modDate: "D:20260801120000Z",
     });
+    // Editors carry CreationDate forward on re-save; only ModDate moves.
     const doctored = appendUpdate(original, {
       producer: "Adobe Photoshop 26.0",
+      creationDate: "D:20260801120000Z",
       modDate: "D:20260815093000Z",
     });
     const s = inspectPdfStructure(doctored);
@@ -137,14 +152,30 @@ describe("inspectPdfStructure", () => {
 
   it("does NOT count linearization's extra xref pair as an update", () => {
     const pdf = buildPdf({ linearized: true, producer: "Acrobat Distiller" });
-    // Simulate the linearized layout's second startxref/%%EOF pair.
-    const withHint = Buffer.concat([
-      pdf,
-      Buffer.from("startxref\n0\n%%EOF\n", "latin1"),
-    ]);
+    // Simulate the linearized layout's second startxref/%%EOF pair, then
+    // patch /L to the true final length (the structural requirement).
+    const withHint = patchLinearizedLength(
+      Buffer.concat([pdf, Buffer.from("startxref\n0\n%%EOF\n", "latin1")]),
+    );
     const s = inspectPdfStructure(withHint);
     expect(s.linearized).toBe(true);
     expect(s.incrementalUpdates).toBe(0);
+  });
+
+  it("a '/Linearized' header COMMENT cannot cancel a real incremental update", () => {
+    // Forger writes the token as a comment in a non-linearized file, then
+    // appends one genuine update — the discount must NOT apply.
+    const base = buildPdf({ producer: "Xero Payroll" }).toString("latin1")
+      .replace("%PDF-1.7\n", "%PDF-1.7\n%/Linearized 1 /L 999\n");
+    const doctored = appendUpdate(Buffer.from(base, "latin1"), {
+      modDate: "D:20260815093000Z",
+    });
+    const s = inspectPdfStructure(doctored);
+    expect(s.linearized).toBe(false);
+    expect(s.incrementalUpdates).toBe(1);
+    expect(collectStructuralFindings(s).map((f) => f.signal)).toContain(
+      "multiple_revisions",
+    );
   });
 
   it("flags a changed trailer ID even without a countable update", () => {
@@ -221,6 +252,85 @@ describe("edge signals", () => {
     expect(r.structural.incrementalUpdates).toBe(1);
     expect(r.findings.map((f) => f.signal)).toContain("multiple_revisions");
     expect(r.content).toBeNull();
+  });
+});
+
+describe("adversarial input (2026-08-21 review findings)", () => {
+  it("an odd-length UTF-16BE string degrades ONE field, never the scan", () => {
+    // <FEFF41> = BOM + 1 dangling byte — swap16 on it used to throw and
+    // collapse the whole scan to isPdf:false via the outer catch.
+    const raw = buildPdf({
+      producer: "placeholder",
+      creationDate: "D:20260801120000Z",
+    }).toString("latin1").replace("/Producer (placeholder)", "/Producer <FEFF41>");
+    const s = inspectPdfStructure(Buffer.from(raw, "latin1"));
+    expect(s.isPdf).toBe(true);
+    expect(s.info.creationDate).toBe("D:20260801120000Z");
+  });
+
+  it("a flood of unterminated '/Producer<' and '/ID' tokens completes in linear time", () => {
+    const flood = Buffer.from(
+      "%PDF-1.7\n" +
+        "/Producer</ID".repeat(150_000) + // ~2 MB of pathological tokens
+        "\ntrailer\n<< /Size 2 /Root 1 0 R /Info 4 0 R >>\nstartxref\n9\n%%EOF\n",
+      "latin1",
+    );
+    const started = performance.now();
+    const s = inspectPdfStructure(flood);
+    expect(performance.now() - started).toBeLessThan(2000);
+    expect(s.isPdf).toBe(true);
+  });
+
+  it("structural tokens inside stream payloads (embedded PDFs) count nothing", () => {
+    // A PDF/A-3-style attachment: a whole inner PDF inside a stream. Its
+    // startxref/%%EOF//Encrypt//ObjStm bytes must not fire findings on the
+    // pristine outer file.
+    const inner = "%PDF-1.4\n/Encrypt /ObjStm\nstartxref\n0\n%%EOF\nstartxref\n0\n%%EOF\n";
+    const raw = buildPdf({ producer: "Xero Payroll" }).toString("latin1").replace(
+      "3 0 obj\n",
+      `9 0 obj\n<< /Type /EmbeddedFile /Length ${inner.length} >>\nstream\n${inner}\nendstream\nendobj\n3 0 obj\n`,
+    );
+    const s = inspectPdfStructure(Buffer.from(raw, "latin1"));
+    expect(s.incrementalUpdates).toBe(0);
+    expect(s.encrypted).toBe(false);
+    expect(s.hasObjectStreams).toBe(false);
+    expect(collectStructuralFindings(s)).toEqual([]);
+  });
+
+  it("a spoofed /Producer inside a stream cannot shadow the real Info dict", () => {
+    const raw = buildPdf({ producer: "Adobe Photoshop 26.0" }).toString("latin1").replace(
+      "3 0 obj\n",
+      `9 0 obj\n<< /Length 26 >>\nstream\n/Producer (Xero Payroll)\nendstream\nendobj\n3 0 obj\n`,
+    );
+    const s = inspectPdfStructure(Buffer.from(raw, "latin1"));
+    expect(s.info.producer).toBe("Adobe Photoshop 26.0");
+    expect(collectStructuralFindings(s).map((f) => f.signal)).toContain(
+      "producer_design_tool",
+    );
+  });
+
+  it("reads a literal-string /ID pair in the LAST trailer (mismatch detected)", () => {
+    const base = buildPdf({ producer: "Xero Payroll" });
+    const update = Buffer.from(
+      `9 0 obj\n<< >>\nendobj\n` +
+        `xref\n9 1\n0000000000 00000 n \n` +
+        `trailer\n<< /Size 10 /Root 1 0 R /Prev 9 /ID [(aaaa) (bbbb)] >>\n` +
+        `startxref\n${base.length}\n%%EOF\n`,
+      "latin1",
+    );
+    const s = inspectPdfStructure(Buffer.concat([base, update]));
+    expect(s.trailerIdMatches).toBe(false);
+    expect(s.incrementalUpdates).toBe(1);
+  });
+
+  it("an unparseable LAST trailer /ID reports null — never an earlier trailer's answer", () => {
+    const base = buildPdf({}); // original trailer: matching hex pair
+    const update = Buffer.from(
+      `trailer\n<< /Size 10 /Prev 9 /ID [garbage] >>\nstartxref\n${base.length}\n%%EOF\n`,
+      "latin1",
+    );
+    const s = inspectPdfStructure(Buffer.concat([base, update]));
+    expect(s.trailerIdMatches).toBeNull();
   });
 });
 

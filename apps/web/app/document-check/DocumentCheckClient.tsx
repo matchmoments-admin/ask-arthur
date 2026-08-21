@@ -3,7 +3,9 @@
 import { useState } from "react";
 import {
   DOCUMENT_CHECK_CLEAN_COPY,
+  DOCUMENT_CHECK_CLEAN_LABEL,
   DOCUMENT_CHECK_COPY,
+  DOCUMENT_CHECK_UNAVAILABLE_COPY,
   type WebDocumentCheckResponse,
 } from "@askarthur/types";
 
@@ -37,6 +39,11 @@ export default function DocumentCheckClient() {
       };
       if (!res.ok) {
         setError(data.message ?? "Couldn't check this document. Try again later.");
+        return;
+      }
+      if (!data.checked) {
+        // A scan that did not run is NOT the clean state (asymmetry rule).
+        setError(DOCUMENT_CHECK_UNAVAILABLE_COPY);
         return;
       }
       setResult(data);
@@ -83,6 +90,9 @@ export default function DocumentCheckClient() {
             <ul className="space-y-3">
               {result.findings.map((f) => {
                 const copy = DOCUMENT_CHECK_COPY[f.signal];
+                // Deploy skew: a new server signal reaching an old client
+                // bundle renders nothing rather than crashing the list.
+                if (!copy) return null;
                 const evidence = Object.entries(f.evidence);
                 return (
                   <li key={f.signal} className="rounded-lg border border-amber-200 bg-amber-50 p-3">
@@ -99,7 +109,7 @@ export default function DocumentCheckClient() {
             </ul>
           ) : (
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-              <p className="font-medium text-gray-900">No editing traces found</p>
+              <p className="font-medium text-gray-900">{DOCUMENT_CHECK_CLEAN_LABEL}</p>
               <p className="mt-1 text-gray-700">{DOCUMENT_CHECK_CLEAN_COPY}</p>
             </div>
           )}
