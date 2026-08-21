@@ -271,6 +271,10 @@ export async function verifyPost(opts: {
    *  2026-08-08). Set 0 in tests to keep them instant. */
   retries?: number;
   retryDelayMs?: number;
+  /** Which post shape to assert. "document" expects an attached, processed
+   *  document; "article" expects a link card and NO document. Defaults to
+   *  "document" so existing callers are unchanged. */
+  shape?: "document" | "article";
 }): Promise<PostVerification> {
   const problems: string[] = [];
   const out: PostVerification = { ok: false, problems };
@@ -296,7 +300,7 @@ export async function verifyPost(opts: {
     lifecycleState?: string;
     visibility?: string;
     distribution?: { feedDistribution?: string };
-    content?: { media?: { id?: string } };
+    content?: { media?: { id?: string }; article?: { source?: string } };
   };
 
   out.lifecycleState = post.lifecycleState;
@@ -312,6 +316,19 @@ export async function verifyPost(opts: {
     problems.push(
       `feedDistribution is ${post.distribution?.feedDistribution ?? "missing"}, expected MAIN_FEED`,
     );
+  }
+
+  // Shape-specific content check. An ARTICLE post correctly carries no
+  // document — asserting one flagged the first healthy link post as
+  // "post has no attached document" (2026-08-21). A verifier that cries wolf
+  // is worse than none: this repo has already been bitten by a green check
+  // that meant nothing, and the inverse trains people to ignore a real one.
+  if (opts.shape === "article") {
+    if (!post.content?.article?.source) {
+      problems.push("article post has no link source");
+    }
+    out.ok = problems.length === 0;
+    return out;
   }
 
   // The attached document must be finished processing, or the carousel
