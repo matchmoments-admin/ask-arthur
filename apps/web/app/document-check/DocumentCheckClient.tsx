@@ -114,6 +114,37 @@ export default function DocumentCheckClient() {
             </div>
           )}
 
+          {result.content && result.content.abns.length > 0 ? (
+            <div className="rounded-lg border border-gray-200 p-3">
+              <p className="text-gray-500">ABNs found on this document</p>
+              <ul className="mt-1 space-y-1">
+                {result.content.abns.map((a) => (
+                  <li key={a.abn} className="flex justify-between gap-4">
+                    <span className="font-mono text-xs text-gray-700">{a.abn}</span>
+                    <span className="text-right text-gray-800">
+                      {a.status === "registered"
+                        ? `registered${a.entityName ? ` — ${a.entityName}` : ""}`
+                        : a.status === "cancelled"
+                          ? `cancelled on the register${a.entityName ? ` — ${a.entityName}` : ""}`
+                          : a.status === "not_registered"
+                            ? "not on the ABR register"
+                            : a.status === "invalid_checksum"
+                              ? "not a possible ABN"
+                              : "could not be checked"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {result.content && !result.content.textExtracted ? (
+            <p className="text-xs text-gray-500">
+              No text could be read from this file (scanned or image-based
+              PDFs aren&rsquo;t supported yet), so content checks didn&rsquo;t
+              run.
+            </p>
+          ) : null}
+
           <dl className="space-y-2">
             {result.structural?.info.producer ? (
               <div className="flex justify-between gap-4">

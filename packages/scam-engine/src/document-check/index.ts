@@ -15,32 +15,62 @@
 
 import { createHash } from "node:crypto";
 
-import type { DocumentFinding, PdfStructuralSummary } from "@askarthur/types";
+import type {
+  DocumentContentSummary,
+  DocumentFinding,
+  PdfStructuralSummary,
+} from "@askarthur/types";
 import { collectStructuralFindings, inspectPdfStructure } from "./pdf-forensics";
+import { extractPdfText } from "./pdf-text";
+import { runAuPack } from "./packs/au";
 
 export {
   collectStructuralFindings,
   inspectPdfStructure,
   parsePdfDate,
 } from "./pdf-forensics";
+export { extractPdfText } from "./pdf-text";
 
 export interface DocumentInspection {
   docSha256: string;
   structural: PdfStructuralSummary;
   findings: DocumentFinding[];
-  /** Jurisdiction content-logic results — null until a pack runs. */
-  content: null;
+  /** Jurisdiction content-logic results — null when no pack was requested
+   *  or the file wasn't scannable ("not assessed", never "clean"). */
+  content: DocumentContentSummary | null;
 }
 
-/** Inspect one uploaded document (PDF). Pure and deterministic: no network,
- *  no paid APIs, never throws. Non-PDF bytes report structural.isPdf=false
- *  with zero findings — the caller decides whether that's a 422. */
-export function inspectDocument(buffer: Buffer): DocumentInspection {
+export interface InspectDocumentOptions {
+  /** Run a jurisdiction content-logic pack over the extracted text. Omit
+   *  (or null) for the structural layer only. */
+  jurisdiction?: "au" | null;
+}
+
+/** Inspect one uploaded document (PDF). The structural layer is pure and
+ *  deterministic; the content layer (opt-in via `jurisdiction`) extracts
+ *  text and runs free validators — checksum locally, ABR behind the
+ *  `document_check` brake. Never throws. Non-PDF bytes report
+ *  structural.isPdf=false with zero findings — the caller decides whether
+ *  that's a 422. */
+export async function inspectDocument(
+  buffer: Buffer,
+  opts: InspectDocumentOptions = {},
+): Promise<DocumentInspection> {
   const structural = inspectPdfStructure(buffer);
+  const findings = collectStructuralFindings(structural);
+
+  let content: DocumentContentSummary | null = null;
+  if (opts.jurisdiction === "au" && structural.isPdf) {
+    const text = await extractPdfText(buffer);
+    const pack = await runAuPack(text);
+    content = pack.content;
+    findings.push(...pack.findings);
+  }
+
   return {
     docSha256: createHash("sha256").update(buffer).digest("hex"),
     structural,
-    findings: collectStructuralFindings(structural),
-    content: null,
+    findings,
+    content,
   };
 }

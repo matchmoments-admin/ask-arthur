@@ -112,6 +112,31 @@ export function extractAbnCandidates(html: string): string[] {
   return [...labelled, ...bare];
 }
 
+/**
+ * Same extraction, keeping the labelled/bare distinction. Consumers that
+ * ACCUSE on a failed checksum (document-check) must only do so for labelled
+ * candidates — the bare regex matches any standalone 11-digit run (account
+ * numbers, references, +61 phone formats), which is why this module's own
+ * shop path only ever `.find(isValidAbnChecksum)`s and never flags bare
+ * junk. Labelled = explicitly presented as an ABN on the page/document.
+ */
+export function extractAbnCandidatesDetailed(html: string): {
+  labelled: string[];
+  bare: string[];
+} {
+  const all = extractAbnCandidates(html);
+  const labelledSet = new Set<string>();
+  const labelledRe = /A\.?B\.?N\.?[\s:.]*((?:\d[\s]*){11})/gi;
+  for (const m of stripToText(html).matchAll(labelledRe)) {
+    const d = m[1]!.replace(/\D/g, "");
+    if (d.length === 11) labelledSet.add(d);
+  }
+  return {
+    labelled: all.filter((d) => labelledSet.has(d)),
+    bare: all.filter((d) => !labelledSet.has(d)),
+  };
+}
+
 function normalizeTokens(s: string): string[] {
   return s
     .toLowerCase()

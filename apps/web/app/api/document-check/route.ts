@@ -10,18 +10,21 @@ import {
 import { logEvent } from "@/lib/analytics-events";
 import { logCost } from "@/lib/cost-telemetry";
 
-// Public document checker (/document-check page). Upload mode only —
-// deterministic PDF structural forensics, no classifier, no Claude, no paid
-// API, zero marginal cost. Findings are named signals (ADR-0015/0024
-// epistemics); the UI must render an empty findings list with the asymmetry
-// caveat (DOCUMENT_CHECK_CLEAN_COPY), never as "genuine".
+// Public document checker (/document-check page). Upload mode only — the
+// deterministic structural walk plus the AU content pack: ABN checksum
+// locally, ABR verification as a free/cached/braked network call. No
+// classifier, no Claude, no PAID APIs. Findings are named signals
+// (ADR-0015/0024 epistemics); the UI must render an empty findings list
+// with the asymmetry caveat (DOCUMENT_CHECK_CLEAN_COPY), never as
+// "genuine".
 //
 // Unauthenticated, so the budget posture is: per-IP sliding-window limit
-// (5/h, fail-closed in prod) BEFORE the parse — the walk is CPU-only but
-// accepts 10 MB uploads. Bytes live only for the request (ADR-0010); no
-// persistence in this stage (evidence records are the Stage-2 migration).
-// The jurisdiction content-logic pack (ABN/BSB/arithmetic) is a follow-up
-// PR — until then `content` is always null, meaning "not assessed".
+// (5/h, fail-closed in prod) BEFORE any work; the pack's ABR lookups run
+// in parallel under a per-lookup deadline (packs/au.ts) so a degraded ABR
+// can't hold the function open. Bytes live only for the request
+// (ADR-0010); no persistence in this stage (evidence records are the
+// Stage-2 migration). `content: null` in the response means the pack did
+// not run for this request — "not assessed", never "clean".
 
 const MAX_UPLOAD_BYTES = 10_000_000; // bank statements exceed the 5 MB image cap
 
@@ -92,9 +95,10 @@ export async function POST(req: NextRequest) {
     }
 
     // One call on the Document Check Module's seam — the module owns the
-    // summary→findings pairing, the hash, and (in the follow-up PR) the
-    // jurisdiction pack dispatch, so this route never grows orchestration.
-    const inspection = inspectDocument(buffer);
+    // summary→findings pairing, the hash, and the jurisdiction pack
+    // dispatch, so this route never grows orchestration. AU-first product:
+    // the AU pack (ABN checksum + ABR, free, braked) always runs here.
+    const inspection = await inspectDocument(buffer, { jurisdiction: "au" });
 
     // Volume signal that does NOT depend on the attribution cookie: a $0
     // cost_telemetry row per check (the free-tier "units at $0" convention),

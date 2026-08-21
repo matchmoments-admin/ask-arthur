@@ -86,7 +86,11 @@ const nextConfig: NextConfig = {
   // dynamically by scam-engine's c2pa-verify adapter. It must be required
   // at runtime from node_modules, never bundled — bundling breaks the
   // .node dlopen and bloats every function.
-  serverExternalPackages: ["@contentauth/c2pa-node"],
+  // pdfjs-dist must stay external: bundling it breaks the fake-worker's
+  // runtime import of ./pdf.worker.mjs relative to the compiled chunk, which
+  // would silently null out document-check text extraction in prod while
+  // vitest (resolving from node_modules) stays green.
+  serverExternalPackages: ["@contentauth/c2pa-node", "pdfjs-dist"],
   poweredByHeader: false,
   images: {
     formats: ["image/avif", "image/webp"],

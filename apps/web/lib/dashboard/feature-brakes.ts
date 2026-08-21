@@ -33,6 +33,7 @@ export const KNOWN_BRAKE_KEYS = [
   "clone_enforcement",
   "clone_netcraft_issue",
   "clone_netcraft_resubmit",
+  "document_check",
   "extension_image_check",
   "hive_ai",
   "monthly_intel_blog",
