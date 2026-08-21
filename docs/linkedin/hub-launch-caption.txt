@@ -1,0 +1,31 @@
+Last month, 1,000 domains were registered that were pretending to be Australian brands.
+
+Not "suspicious-looking websites". Newly-registered names sitting a character or two away from a bank, a telco, a retailer you'd know on sight.
+
+150 different brands. In one month.
+
+We run that sweep every day and publish the totals every month. We don't publish which specific domains we report — those go to community blocklists so browsers block them globally. Naming them here would just be a directory for whoever's next.
+
+Ask Arthur started as a smaller question: when a text arrives and you're not sure, where do you actually go?
+
+Not a government portal with a form. Not a forum thread from 2019. Somewhere you can paste the thing and get an answer before you decide.
+
+It's grown since then:
+
+— The scanner. Paste a message, link, phone number or screenshot. Verdict in seconds.
+— Persona Check. For when it isn't a message you're unsure about but a person — the recruiter, the match, the seller.
+— Clone-watch. The daily sweep above. Least glamorous thing we do, probably the most useful.
+
+All free. No signup. Nothing stored.
+
+The problem was that it was scattered — four things in four places with no front door. So I built one. Five chapters, one page, everything in it.
+
+Australians lost A$2.18 billion to scams in 2025 (ACCC Targeting Scams Report, March 2026). Almost none of that started with someone being careless. It started with something that looked right.
+
+Arthur won't stop every scam. It gives you the moment to pause.
+
+If there's a message sitting in your phone right now that you're not sure about — that's exactly what it's for.
+
+askarthur.au/hub
+
+PS — being scammed is never your fault. Reporting helps the next person.

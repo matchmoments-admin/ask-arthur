@@ -1,0 +1,195 @@
+name: Hub → LinkedIn (manual)
+
+# One-off / occasional "Ask Arthur hub" LinkedIn document post, modelled on
+# clone-watch-linkedin.yml. Same two-stage shape, same approval gate:
+#
+#   prepare  → renders the 5-slide hub carousel against PROD, then Telegrams the
+#              actual slides + the exact PDF + the caption for review.
+#   publish  → GATED behind the `clone-watch-linkedin` Environment (required
+#              reviewer = the founder). On approval, publishes the document to
+#              the Ask Arthur company page.
+#
+# WHY IT REUSES THE clone-watch-linkedin ENVIRONMENT rather than declaring its
+# own: the reviewer requirement is configured ON the environment. A brand-new
+# environment starts with NO required reviewer, so it would publish straight to
+# the company page unapproved until someone remembered to configure it — the
+# failure would be silent and public. Reusing the environment inherits the gate
+# that is already known to work.
+#
+# NO cron. Unlike the monthly edition this is dispatch-only: there is nothing
+# here that recurs on a schedule, and an unattended re-post of a launch deck is
+# never what anyone wants.
+
+on:
+  workflow_dispatch:
+    inputs:
+      title:
+        description: "Document title shown above the carousel"
+        required: false
+        default: "Ask Arthur — check a scam, read the research, watch the clones"
+        type: string
+      dry_run:
+        description: "Upload the document but do NOT publish"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      title: ${{ steps.meta.outputs.title }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium for Puppeteer
+        run: pnpm --filter @askarthur/web exec puppeteer browsers install chrome
+
+      - name: Render hub carousel (against prod)
+        working-directory: apps/web
+        run: pnpm hub:carousel -- --base=https://askarthur.au --out=out
+
+      - name: Stage caption
+        id: meta
+        run: |
+          cp docs/linkedin/hub-launch-caption.txt apps/web/out/caption.txt
+          echo "title=${{ inputs.title }}" >> "$GITHUB_OUTPUT"
+          echo "Caption: $(wc -c < apps/web/out/caption.txt) bytes"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hub-carousel
+          path: apps/web/out
+          retention-days: 14
+
+      # Send the ACTUAL slides before the approval gate. Same lesson as the
+      # monthly edition (2026-08-09): approving a public post without having
+      # seen the images is approving blind.
+      - name: Telegram — slide preview
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+          TITLE: ${{ steps.meta.outputs.title }}
+        working-directory: apps/web
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_ADMIN_CHAT_ID" ]; then
+            echo "Telegram not configured — skipping slide preview"; exit 0
+          fi
+          SLIDES=$(ls out/slide-*.png 2>/dev/null | sort -V)
+          if [ -z "$SLIDES" ]; then
+            echo "no slide PNGs found — skipping preview (PDF still in the artifact)"; exit 0
+          fi
+          ARGS=""; MEDIA="["; i=0
+          for f in $SLIDES; do
+            i=$((i+1))
+            ARGS="$ARGS -F file$i=@$f"
+            if [ "$i" -gt 1 ]; then MEDIA="$MEDIA,"; fi
+            if [ "$i" -eq 1 ]; then
+              MEDIA="$MEDIA{\"type\":\"photo\",\"media\":\"attach://file$i\",\"caption\":\"$TITLE — slides for review\"}"
+            else
+              MEDIA="$MEDIA{\"type\":\"photo\",\"media\":\"attach://file$i\"}"
+            fi
+          done
+          MEDIA="$MEDIA]"
+          # shellcheck disable=SC2086
+          curl -sS -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMediaGroup" \
+            -F "chat_id=$TELEGRAM_ADMIN_CHAT_ID" -F "media=$MEDIA" $ARGS \
+            -o /tmp/tg-media.json -w 'slide preview HTTP %{http_code}\n' || true
+          grep -q '"ok":true' /tmp/tg-media.json || echo "⚠ slide preview failed: $(head -c 300 /tmp/tg-media.json)"
+          PDF=$(ls out/*.pdf 2>/dev/null | head -1)
+          if [ -n "$PDF" ]; then
+            curl -sS -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendDocument" \
+              -F "chat_id=$TELEGRAM_ADMIN_CHAT_ID" -F "document=@$PDF" \
+              -F "caption=The exact PDF that will be posted" \
+              -o /dev/null -w 'pdf HTTP %{http_code}\n' || true
+          fi
+
+      - name: Telegram — ready for review
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TITLE: ${{ steps.meta.outputs.title }}
+        working-directory: apps/web
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_ADMIN_CHAT_ID" ]; then
+            echo "Telegram not configured — skipping ping"; exit 0
+          fi
+          PREVIEW=$(head -c 900 out/caption.txt)
+          TEXT=$(printf '📣 *%s* is ready for review.\n\n👆 The slides above are exactly what will be posted.\n\nApprove the publish here → %s\n\nCaption preview:\n%s' "$TITLE" "$RUN_URL" "$PREVIEW")
+          curl -sS -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+            --data-urlencode "chat_id=$TELEGRAM_ADMIN_CHAT_ID" \
+            --data-urlencode "text=$TEXT" \
+            --data-urlencode "parse_mode=Markdown" >/dev/null
+
+  publish:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # THE APPROVAL GATE. Reused from the monthly edition so the required
+    # reviewer is already configured — see the note at the top of this file.
+    environment: clone-watch-linkedin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: hub-carousel
+          path: apps/web/out
+
+      - name: Publish to LinkedIn (company page)
+        id: publish
+        working-directory: apps/web
+        env:
+          LINKEDIN_CLIENT_ID: ${{ secrets.LINKEDIN_CLIENT_ID }}
+          LINKEDIN_CLIENT_SECRET: ${{ secrets.LINKEDIN_CLIENT_SECRET }}
+          LINKEDIN_REFRESH_TOKEN: ${{ secrets.LINKEDIN_REFRESH_TOKEN }}
+          LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
+          LINKEDIN_ORG_URN: ${{ secrets.LINKEDIN_ORG_URN }}
+          TITLE: ${{ needs.prepare.outputs.title }}
+        run: |
+          set -o pipefail
+          DRY=""
+          if [ "${{ inputs.dry_run }}" = "true" ]; then DRY="--dry-run"; fi
+          pnpm linkedin:document -- \
+            --pdf=out/ask-arthur-hub.pdf \
+            --caption-file=out/caption.txt \
+            --title="$TITLE" \
+            $DRY | tee publish.log
+          echo "result=$(grep -m1 -oE 'RESULT=[a-z-]+' publish.log | cut -d= -f2 || true)" >> "$GITHUB_OUTPUT"
+          echo "url=$(grep -m1 -oE 'URL=[^[:space:]]+' publish.log | cut -d= -f2 || true)" >> "$GITHUB_OUTPUT"
+          echo "verify=$(grep -m1 -oE 'VERIFY=[a-z]+' publish.log | cut -d= -f2 || true)" >> "$GITHUB_OUTPUT"
+
+      - name: Telegram — published
+        if: always() && steps.publish.outcome == 'success'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+          POST_URL: ${{ steps.publish.outputs.url }}
+          RESULT: ${{ steps.publish.outputs.result }}
+          VERIFY: ${{ steps.publish.outputs.verify }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_ADMIN_CHAT_ID" ]; then exit 0; fi
+          TEXT=$(printf '✅ Hub deck: *%s* (verify=%s)\n\nStep 0 — OPEN IT AND CONFIRM IT RENDERS. A green verify is necessary, not sufficient: LinkedIn exposes no member-visibility signal at Dev-Tier, and a post has read back perfectly while showing "Post cannot be displayed".\n%s\n\nThen: paste the first comment by hand, and reshare from your personal profile (the API posts to the company page only).' "$RESULT" "$VERIFY" "$POST_URL")
+          curl -sS -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+            --data-urlencode "chat_id=$TELEGRAM_ADMIN_CHAT_ID" \
+            --data-urlencode "text=$TEXT" \
+            --data-urlencode "parse_mode=Markdown" >/dev/null
