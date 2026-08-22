@@ -84,11 +84,12 @@ vi.mock("@/lib/cost-telemetry", () => ({ logCost: vi.fn() }));
 // Allowance resolver: mirror the tier fallback the real resolver applies so
 // the quota assertions stay meaningful (business 1500, free 0). The
 // resolver itself is unit-tested in documentCheckBilling.test.ts.
+const allowanceState = vi.hoisted(() => ({ degraded: false }));
 vi.mock("@/lib/document-allowance", () => ({
   documentAllowanceForOrg: vi.fn(async (_orgId: string, tier: string) => {
     const limits: Record<string, number> = { free: 0, pro: 200, business: 1500 };
     const monthlyLimit = limits[tier] ?? 0;
-    return { monthlyLimit, source: "tier", plan: null };
+    return { monthlyLimit, source: "tier", plan: null, degraded: allowanceState.degraded };
   }),
 }));
 
@@ -153,6 +154,16 @@ describe("v1 document-checks", () => {
     const res = await POST(postReq());
     expect(res.status).toBe(402);
     expect(quotaState.calls).toBe(0);
+  });
+
+  it("degraded-zero allowance → 503 retryable, never the permanent-looking 402", async () => {
+    guardState.tier = "free";
+    allowanceState.degraded = true;
+    const res = await POST(postReq());
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe("service_unavailable");
+    expect(res.headers.get("Retry-After")).toBeTruthy();
+    allowanceState.degraded = false;
   });
 
   it("malformed uploads NEVER consume the paid allowance (validate-before-meter)", async () => {

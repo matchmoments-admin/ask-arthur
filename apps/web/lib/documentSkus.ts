@@ -54,8 +54,12 @@ export function documentPlanForPrice(priceId: string): DocumentPlanKey | null {
 }
 
 /** Map a Stripe subscription status onto the document-billing record's
- *  status. Same grace semantics as brand billing: past_due keeps the
- *  allowance alive through Stripe's dunning window. */
+ *  status. NARROWER than the brand mapping on purpose (PR #1033 review):
+ *  the allowance IS the entitlement here (no second active-only gate like
+ *  monitored_brands.plan), so only true dunning (`past_due`) keeps it
+ *  alive. `incomplete` (first payment never succeeded) and `unpaid`
+ *  (terminal dunning failure that never emits subscription.deleted) must
+ *  NOT grant 200/1,500 checks — they map to non-entitled states. */
 export function mapStripeStatusToDocumentBillingStatus(
   stripeStatus: string,
 ): "active" | "past_due" | "canceled" | "paused" {
@@ -64,12 +68,12 @@ export function mapStripeStatusToDocumentBillingStatus(
     case "trialing":
       return "active";
     case "past_due":
-    case "unpaid":
-    case "incomplete":
       return "past_due";
     case "paused":
+    case "incomplete":
       return "paused";
     default:
+      // canceled, unpaid, incomplete_expired, anything new Stripe adds.
       return "canceled";
   }
 }

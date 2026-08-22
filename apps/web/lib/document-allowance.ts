@@ -26,6 +26,11 @@ export interface DocumentAllowance {
   /** Where the allowance came from — displayed in /api/v1/usage. */
   source: "document_plan" | "tier";
   plan: DocumentPlanKey | null;
+  /** True when the org entitlement could NOT be read (Supabase blip, no
+   *  service client) and the value is only the tier fallback. Callers must
+   *  not present degraded-zero as "no plan" — the route maps it to a
+   *  retryable 503, never a 402 (PR #1033 review). */
+  degraded: boolean;
 }
 
 interface DocumentBillingRecord {
@@ -49,10 +54,11 @@ export async function documentAllowanceForOrg(
     monthlyLimit: tierLimit,
     source: "tier",
     plan: null,
+    degraded: false,
   };
 
   const supabase = createServiceClient();
-  if (!supabase) return fallback;
+  if (!supabase) return { ...fallback, degraded: true };
 
   try {
     const { data: org, error } = await supabase
@@ -65,7 +71,7 @@ export async function documentAllowanceForOrg(
         error: error.message,
         orgId,
       });
-      return fallback;
+      return { ...fallback, degraded: true };
     }
     const billing = (org?.settings as Record<string, unknown> | null)
       ?.document_billing as DocumentBillingRecord | undefined;
@@ -82,16 +88,25 @@ export async function documentAllowanceForOrg(
       });
       return fallback;
     }
-    return {
-      monthlyLimit: planDef.documentChecksPerMonth,
-      source: "document_plan",
-      plan,
-    };
+    // MAX, never replace: a doc plan must not shrink an allowance a
+    // higher tier already grants (enterprise 10,000 + doc_starter 200 must
+    // stay 10,000 — the org paid more, they can't get less; and a plan
+    // cancellation must never read as an upgrade).
+    const planLimit = planDef.documentChecksPerMonth;
+    if (planLimit >= tierLimit) {
+      return {
+        monthlyLimit: planLimit,
+        source: "document_plan",
+        plan,
+        degraded: false,
+      };
+    }
+    return { ...fallback };
   } catch (err) {
     logger.error("documentAllowanceForOrg: unexpected error", {
       error: String(err),
       orgId,
     });
-    return fallback;
+    return { ...fallback, degraded: true };
   }
 }

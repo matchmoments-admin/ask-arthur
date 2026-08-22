@@ -70,11 +70,17 @@ export async function GET(req: NextRequest) {
     let documentChecks = null;
     if (auth.orgId) {
       const allowance = await documentAllowanceForOrg(auth.orgId, auth.tier);
-      if (allowance.monthlyLimit > 0) {
+      if (allowance.degraded && allowance.monthlyLimit === 0) {
+        // Could not read the entitlement — say so rather than rendering the
+        // block's absence, which reads as "no plan" (a cancellation look-
+        // alike a paying pilot would escalate).
+        documentChecks = { degraded: true };
+      } else if (allowance.monthlyLimit > 0) {
         documentChecks = {
           monthlyLimit: allowance.monthlyLimit,
           plan: allowance.plan,
           source: allowance.source,
+          ...(allowance.degraded ? { degraded: true } : {}),
           ...((await peekMonthlyQuota(
             "document_check",
             auth.orgId,

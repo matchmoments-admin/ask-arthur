@@ -104,6 +104,16 @@ export async function POST(req: NextRequest) {
     const allowance = await documentAllowanceForOrg(guard.auth.orgId, tier);
     const monthlyLimit = allowance.monthlyLimit;
     if (monthlyLimit === 0) {
+      // Degraded-zero means "could not read the org's entitlement", not
+      // "no plan" — a Supabase blip must never 402 a paying pilot with a
+      // permanent-looking error (ADR-0009's unverified ≠ unregistered,
+      // applied to billing).
+      if (allowance.degraded) {
+        return NextResponse.json(
+          { error: "service_unavailable", message: "Plan lookup briefly unavailable. Try again shortly." },
+          { status: 503, headers: { "Retry-After": "60" } },
+        );
+      }
       return NextResponse.json(
         {
           error: "plan_required",

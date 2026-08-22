@@ -69,12 +69,20 @@ key scoped to `document-checks` / `document-checks.submit`
 3. Live mode: repeat with live price IDs. No new webhook endpoint — the
    existing `/api/stripe/webhook` dispatches by price ID
    (`isDocumentPlanPrice`, BEFORE the api_keys tier path).
-4. Flip `FF_DOCUMENT_CHECK_BILLING=true`.
+4. Flip `FF_DOCUMENT_CHECK_BILLING=true` — **and make sure
+   `NEXT_PUBLIC_FF_DOCUMENT_CHECK` is also ON** (different flag, gates the
+   consumer surface a customer will reasonably visit after buying;
+   checkout deliberately redirects to `/app`, not `/document-check`, so a
+   billing-only flip can't 404 a paying customer — but selling checks with
+   the checking surface dark makes no sense).
 5. Optional: create the first-month-free coupon and set
-   `STRIPE_DOC_CHECK_PILOT_COUPON`.
+   `STRIPE_DOC_CHECK_PILOT_COUPON` (then redeploy — env snapshots at
+   deploy; the route reads it trimmed via `readStringEnv`).
 
 ## Smoke test
 
+0. Second checkout for an org with an active plan → 409 `already_subscribed`
+   (one subscription lineage per org; upgrades via portal/support).
 1. Checkout with a non-admin org member → 403 `not_org_billing_admin`.
 2. Checkout with price env unset → 503 `price_not_configured`.
 3. Completed test checkout → `document_billing` record with

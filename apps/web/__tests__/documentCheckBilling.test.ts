@@ -71,9 +71,13 @@ describe("documentSkus", () => {
     });
   });
 
-  it("status mapping keeps the dunning grace (past_due) and degrades unknowns to canceled", () => {
+  it("status mapping: only TRUE dunning keeps entitlement — incomplete/unpaid never grant", () => {
     expect(mapStripeStatusToDocumentBillingStatus("trialing")).toBe("active");
     expect(mapStripeStatusToDocumentBillingStatus("past_due")).toBe("past_due");
+    // The review's two zero-payment holes: incomplete (first payment never
+    // succeeded) and unpaid (terminal dunning, no deletion event fires).
+    expect(mapStripeStatusToDocumentBillingStatus("incomplete")).toBe("paused");
+    expect(mapStripeStatusToDocumentBillingStatus("unpaid")).toBe("canceled");
     expect(mapStripeStatusToDocumentBillingStatus("some_future_status")).toBe("canceled");
   });
 });
@@ -84,6 +88,7 @@ describe("documentAllowanceForOrg", () => {
       monthlyLimit: 1500,
       source: "tier",
       plan: null,
+      degraded: false,
     });
     expect((await documentAllowanceForOrg("org-1", "free")).monthlyLimit).toBe(0);
   });
@@ -96,6 +101,25 @@ describe("documentAllowanceForOrg", () => {
       monthlyLimit: 200,
       source: "document_plan",
       plan: "doc_starter",
+      degraded: false,
+    });
+  });
+
+  it("MAX, never replace: a doc plan can't shrink a higher tier's allowance, and cancelling isn't an upgrade", async () => {
+    // Enterprise tier grants 10,000 — doc_starter (200) must not shrink it.
+    orgState.settings = {
+      document_billing: { plan: "doc_starter", status: "active", billing_provider: "stripe" },
+    };
+    const withPlan = await documentAllowanceForOrg("org-1", "enterprise");
+    expect(withPlan.monthlyLimit).toBe(10000);
+    expect(withPlan.source).toBe("tier");
+    // Equal-or-greater plan wins with its identity.
+    const proOverPro = await documentAllowanceForOrg("org-1", "pro");
+    expect(proOverPro).toEqual({
+      monthlyLimit: 200,
+      source: "document_plan",
+      plan: "doc_starter",
+      degraded: false,
     });
   });
 
@@ -111,10 +135,20 @@ describe("documentAllowanceForOrg", () => {
     expect((await documentAllowanceForOrg("org-1", "pro")).source).toBe("tier");
   });
 
-  it("lookup failure degrades to the tier fallback — never zero for a paying tier", async () => {
+  it("lookup failure degrades to the tier fallback AND flags degraded (route maps degraded-zero to 503, not 402)", async () => {
     orgState.fail = true;
-    const out = await documentAllowanceForOrg("org-1", "pro");
-    expect(out).toEqual({ monthlyLimit: 200, source: "tier", plan: null });
+    expect(await documentAllowanceForOrg("org-1", "pro")).toEqual({
+      monthlyLimit: 200,
+      source: "tier",
+      plan: null,
+      degraded: true,
+    });
+    expect(await documentAllowanceForOrg("org-1", "free")).toEqual({
+      monthlyLimit: 0,
+      source: "tier",
+      plan: null,
+      degraded: true,
+    });
   });
 
   it("an unknown plan value in the record falls back rather than granting", async () => {

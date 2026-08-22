@@ -6,6 +6,7 @@ import { documentPlanPriceId } from "@/lib/documentSkus";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
+import { readStringEnv } from "@askarthur/utils/env";
 import { hasPermission, type OrgRole } from "@askarthur/types";
 
 // Document Check plan checkout (Stage 3, item 3 — the rental-vertical
@@ -92,10 +93,39 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // One live subscription lineage per org: storage is a single org-keyed
+    // record and the deletion branch refuses non-matching sub ids, so a
+    // second checkout (double-submit, second admin, or an upgrade attempt)
+    // would strand an invisible-but-billing subscription. Upgrades go
+    // through the Stripe portal / support until a portal flow ships.
+    const { data: orgRow } = await supabase
+      .from("organizations")
+      .select("settings")
+      .eq("id", orgId)
+      .maybeSingle();
+    const existingBilling = (orgRow?.settings as Record<string, unknown> | null)
+      ?.document_billing as { status?: string } | undefined;
+    if (
+      existingBilling?.status === "active" ||
+      existingBilling?.status === "past_due"
+    ) {
+      return NextResponse.json(
+        {
+          error: "already_subscribed",
+          message:
+            "This organisation already has an active Document Check plan. To change plans, use the billing portal or contact us.",
+        },
+        { status: 409 },
+      );
+    }
+
     const customerId = await getOrCreateStripeCustomer(user.id, user.email, supabase);
     const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://askarthur.au";
     const meta = { org_id: orgId, user_id: user.id, plan };
-    const pilotCoupon = process.env.STRIPE_DOC_CHECK_PILOT_COUPON;
+    // readStringEnv: trims + bracket access (a trailing newline in the
+    // pasted coupon id, or a var added after deploy, must not 500 every
+    // pilot checkout or silently drop the discount).
+    const pilotCoupon = readStringEnv("STRIPE_DOC_CHECK_PILOT_COUPON");
 
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
@@ -110,8 +140,12 @@ export async function POST(req: NextRequest) {
         ? { discounts: [{ coupon: pilotCoupon }] }
         : { allow_promotion_codes: true }),
       metadata: meta,
-      success_url: `${siteUrl}/document-check?billing=success`,
-      cancel_url: `${siteUrl}/document-check?billing=canceled`,
+      // Land on the authed dashboard, NOT /document-check: that page is
+      // gated by a DIFFERENT flag (NEXT_PUBLIC_FF_DOCUMENT_CHECK) and a
+      // paying customer must never 404 after checkout if the operator
+      // flipped only the billing flag.
+      success_url: `${siteUrl}/app?billing=doc_success`,
+      cancel_url: `${siteUrl}/app?billing=doc_canceled`,
     });
 
     return NextResponse.json({ url: session.url });
