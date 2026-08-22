@@ -90,6 +90,11 @@ export async function extractPdfText(
   let task: { destroy: () => Promise<void> } | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
+    // MUST run before the import — pdfjs touches these while evaluating its
+    // module. No unit test can guard this call: extraction succeeds locally
+    // without it (Node masks the gap), so only a deployed smoke shows the
+    // difference. See docs/ops/document-check-config.md.
+    ensureCanvasGlobals();
     const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
     // pdfjs-dist 6.x removed PostScript-function eval entirely, so there is
     // no isEvalSupported switch to turn off any more.
