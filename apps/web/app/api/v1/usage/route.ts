@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { guardV1 } from "@/lib/v1-guard";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
-import { TIER_LIMITS } from "@askarthur/types";
 import { peekMonthlyQuota } from "@/lib/v1-quota";
+import { documentAllowanceForOrg } from "@/lib/document-allowance";
 
 export async function GET(req: NextRequest) {
   const guard = await guardV1(req);
@@ -65,19 +65,24 @@ export async function GET(req: NextRequest) {
 
     // Document-check monthly allowance (org-billed, UTC calendar months) —
     // surfaced here so a pilot can see remaining without a chargeable POST.
-    const docLimit =
-      TIER_LIMITS[(auth.tier ?? "free") as keyof typeof TIER_LIMITS]
-        ?.documentChecksPerMonth ?? 0;
-    const documentChecks =
-      docLimit > 0 && auth.orgId
-        ? {
-            monthlyLimit: docLimit,
-            ...((await peekMonthlyQuota("document_check", auth.orgId, docLimit)) ?? {
-              used: null,
-              remaining: null,
-            }),
-          }
-        : null;
+    // Same resolver as the metered route: doc-plan entitlement first, tier
+    // fallback second.
+    let documentChecks = null;
+    if (auth.orgId) {
+      const allowance = await documentAllowanceForOrg(auth.orgId, auth.tier);
+      if (allowance.monthlyLimit > 0) {
+        documentChecks = {
+          monthlyLimit: allowance.monthlyLimit,
+          plan: allowance.plan,
+          source: allowance.source,
+          ...((await peekMonthlyQuota(
+            "document_check",
+            auth.orgId,
+            allowance.monthlyLimit,
+          )) ?? { used: null, remaining: null }),
+        };
+      }
+    }
 
     return NextResponse.json({
       period: { days, since: since.toISOString().slice(0, 10) },

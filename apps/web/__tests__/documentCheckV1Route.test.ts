@@ -81,6 +81,16 @@ vi.mock("@askarthur/supabase/server", () => ({
   })),
 }));
 vi.mock("@/lib/cost-telemetry", () => ({ logCost: vi.fn() }));
+// Allowance resolver: mirror the tier fallback the real resolver applies so
+// the quota assertions stay meaningful (business 1500, free 0). The
+// resolver itself is unit-tested in documentCheckBilling.test.ts.
+vi.mock("@/lib/document-allowance", () => ({
+  documentAllowanceForOrg: vi.fn(async (_orgId: string, tier: string) => {
+    const limits: Record<string, number> = { free: 0, pro: 200, business: 1500 };
+    const monthlyLimit = limits[tier] ?? 0;
+    return { monthlyLimit, source: "tier", plan: null };
+  }),
+}));
 
 import { GET, POST } from "@/app/api/v1/document-checks/route";
 

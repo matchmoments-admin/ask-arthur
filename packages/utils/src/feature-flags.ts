@@ -118,6 +118,12 @@ export const featureFlags = {
    *  until the first rental-vertical pilot key is provisioned. */
   documentCheckV1Api: readBoolEnv("FF_DOCUMENT_CHECK_V1_API"),
 
+  /** Document Check: self-serve Stripe checkout for the doc plans
+   *  (doc_starter A$29/200, doc_pro A$99/1,500 — a separate SKU axis from
+   *  api_keys.tier, the brand-billing precedent). Server-only; the route
+   *  also 503s price_not_configured until the Stripe price IDs land. */
+  documentCheckBilling: readBoolEnv("FF_DOCUMENT_CHECK_BILLING"),
+
   /** Extension image check: optional Claude Haiku vision context pass
    *  (what the image depicts, impersonated brand/celebrity → feeds
    *  deepfake_detections). Server-only sub-flag of imageCheck — v1 launches

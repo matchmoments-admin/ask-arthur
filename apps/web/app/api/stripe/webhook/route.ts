@@ -15,6 +15,11 @@ import {
   brandPlanForPrice,
   mapStripeStatusToBrandBillingStatus,
 } from "@/lib/brandSkus";
+import {
+  isDocumentPlanPrice,
+  documentPlanForPrice,
+  mapStripeStatusToDocumentBillingStatus,
+} from "@/lib/documentSkus";
 import { hasPermission, type OrgRole } from "@askarthur/types";
 
 export const runtime = "nodejs";
@@ -220,6 +225,16 @@ async function upsertSubscription(
   // this branch must never fall through to the api_keys.tier path below.
   if (isBrandMonitorPrice(priceId)) {
     await upsertBrandSubscription(sub, supabase, priceId);
+    return;
+  }
+
+  // Document Check branch: keyed on org_id, writes the org's document-billing
+  // record (organizations.settings.document_billing — read by
+  // documentAllowanceForOrg). Doc plans are a separate SKU axis from
+  // TIER_LIMITS (see documentSkus.ts) — this branch must never fall through
+  // to the api_keys.tier path below.
+  if (isDocumentPlanPrice(priceId)) {
+    await upsertDocumentSubscription(sub, supabase, priceId);
     return;
   }
 
@@ -663,6 +678,125 @@ async function upsertBrandSubscription(
   });
 }
 
+// Document Check plans — same write target and gates as brand billing
+// (org-anchored jsonb record; subscriptions.api_key_id is NOT NULL so the
+// ledger table can't hold org rows). Read side: documentAllowanceForOrg
+// (apps/web/lib/document-allowance.ts), consumed by /api/v1/document-checks
+// and /api/v1/usage. No monitored_brands analogue — the allowance IS the
+// entitlement.
+interface DocumentBillingRecord {
+  plan: string;
+  status: string;
+  billing_provider: string;
+  stripe_subscription_id: string;
+  stripe_customer_id: string;
+  stripe_price_id: string;
+  current_period_end: string | null;
+  canceled_at?: string | null;
+  updated_at: string;
+}
+
+async function upsertDocumentSubscription(
+  sub: Record<string, unknown>,
+  supabase: SupabaseService,
+  priceId: string,
+) {
+  const plan = documentPlanForPrice(priceId);
+  if (!plan) return; // Defensive — caller already gated
+
+  const metadata = sub.metadata as Record<string, string> | undefined;
+  const orgId = metadata?.org_id;
+  const userId = metadata?.user_id;
+  if (!orgId || !userId) {
+    logger.warn("Document Check subscription missing org_id/user_id metadata", {
+      subscriptionId: sub.id,
+    });
+    return;
+  }
+
+  const [customerOwnerId, isBillingManager] = await Promise.all([
+    getUserIdFromStripeCustomer(supabase, sub.customer as string),
+    isActiveBrandBillingManager(supabase, orgId, userId),
+  ]);
+  if (!customerOwnerId || customerOwnerId !== userId || !isBillingManager) {
+    logger.error("Document Check ownership mismatch — refusing plan sync", {
+      subscriptionId: sub.id,
+      orgId,
+      metadataUserId: userId,
+      customerOwnerId,
+      isBillingManager,
+    });
+    // 200 (not 500) — retries won't fix tampered/incomplete metadata.
+    return;
+  }
+
+  const { data: org, error: orgErr } = await supabase
+    .from("organizations")
+    .select("settings")
+    .eq("id", orgId)
+    .maybeSingle();
+  if (orgErr) {
+    logger.error("Document Check org lookup failed", { error: orgErr, orgId });
+    throw orgErr;
+  }
+  if (!org) {
+    logger.error("Document Check subscription references unknown org", {
+      subscriptionId: sub.id,
+      orgId,
+    });
+    return;
+  }
+
+  // A manually-provisioned pilot record must never be silently replaced by
+  // a Stripe write for a DIFFERENT lineage — but a manual pilot upgrading to
+  // self-serve is exactly this transition, so Stripe wins; log it.
+  const settings = (org.settings as Record<string, unknown> | null) ?? {};
+  const existing = settings.document_billing as DocumentBillingRecord | undefined;
+  if (existing?.billing_provider === "manual") {
+    logger.warn("Document Check: Stripe subscription replacing a manual pilot record", {
+      orgId,
+      previousPlan: existing.plan,
+    });
+  }
+
+  const status = mapStripeStatusToDocumentBillingStatus(sub.status as string);
+  const currentPeriodEnd = sub.current_period_end as number | undefined;
+  const record: DocumentBillingRecord = {
+    plan,
+    status,
+    billing_provider: "stripe",
+    stripe_subscription_id: sub.id as string,
+    stripe_customer_id: sub.customer as string,
+    stripe_price_id: priceId,
+    current_period_end: currentPeriodEnd
+      ? new Date(currentPeriodEnd * 1000).toISOString()
+      : null,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { error: setErr } = await supabase
+    .from("organizations")
+    .update({
+      settings: { ...settings, document_billing: record },
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", orgId);
+  if (setErr) {
+    logger.error("Failed to write org document_billing record", {
+      error: setErr,
+      orgId,
+    });
+    throw setErr;
+  }
+
+  logger.info("Document Check subscription synced", {
+    subscriptionId: sub.id,
+    orgId,
+    plan,
+    status,
+  });
+}
+
 async function handleSubscriptionDeleted(
   sub: Record<string, unknown>,
   supabase: SupabaseService
@@ -774,6 +908,78 @@ async function handleSubscriptionDeleted(
       subscriptionId: sub.id,
       orgId,
       plan,
+    });
+    return;
+  }
+
+  // Document Check branch: mark the org's document_billing record canceled.
+  // Keyed tamper-safe on the STORED stripe_subscription_id (the brand
+  // precedent): a deletion whose sub.id doesn't match is refused, and a
+  // manually-provisioned pilot record (billing_provider='manual') can never
+  // be cancelled by a Stripe event.
+  if (isDocumentPlanPrice(priceId)) {
+    const metadata = sub.metadata as Record<string, string> | undefined;
+    const orgId = metadata?.org_id;
+    if (!orgId) {
+      logger.warn("Document Check deletion missing org_id metadata", {
+        subscriptionId: sub.id,
+      });
+      return;
+    }
+
+    const { data: org, error: orgErr } = await supabase
+      .from("organizations")
+      .select("settings")
+      .eq("id", orgId)
+      .maybeSingle();
+    if (orgErr) {
+      logger.error("Document Check deletion org lookup failed", { error: orgErr, orgId });
+      throw orgErr;
+    }
+    const settings = (org?.settings as Record<string, unknown> | null) ?? {};
+    const billing = settings.document_billing as
+      | { stripe_subscription_id?: string; billing_provider?: string }
+      | undefined;
+    if (
+      !billing ||
+      billing.billing_provider === "manual" ||
+      billing.stripe_subscription_id !== (sub.id as string)
+    ) {
+      logger.error("Document Check deletion subscription mismatch — refusing", {
+        subscriptionId: sub.id,
+        orgId,
+        storedSubscriptionId: billing?.stripe_subscription_id ?? null,
+        storedProvider: billing?.billing_provider ?? null,
+      });
+      return;
+    }
+
+    const { error: setErr } = await supabase
+      .from("organizations")
+      .update({
+        settings: {
+          ...settings,
+          document_billing: {
+            ...billing,
+            status: "canceled",
+            canceled_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+        },
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", orgId);
+    if (setErr) {
+      logger.error("Failed to cancel org document_billing record", {
+        error: setErr,
+        orgId,
+      });
+      throw setErr;
+    }
+
+    logger.info("Document Check subscription canceled", {
+      subscriptionId: sub.id,
+      orgId,
     });
     return;
   }
