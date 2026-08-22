@@ -45,6 +45,11 @@ export const DOCUMENT_FINDING_SIGNALS = [
 
 export type DocumentFindingSignal = (typeof DOCUMENT_FINDING_SIGNALS)[number];
 
+/** The ONE upload cap, shared by both routes and both clients — the
+ *  client-side pre-checks mirror it by import, so raising it can never
+ *  leave a client rejecting files the server accepts. */
+export const DOCUMENT_CHECK_MAX_UPLOAD_BYTES = 10_000_000;
+
 /** One named signal plus the concrete evidence that produced it. Evidence
  *  values are display-safe primitives (tool names, counts, dates) — never
  *  extracted document text. */

@@ -3,11 +3,14 @@ import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import {
-  DOCUMENT_CHECK_COPY,
   DOCUMENT_CHECK_DISCLAIMER,
   type DocumentAbnCheck,
   type DocumentFinding,
 } from "@askarthur/types";
+import {
+  DocumentAbnList,
+  DocumentFindingsList,
+} from "@/components/DocumentCheckResult";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { DOCUMENT_CHECK_REF_PATTERN } from "@/lib/check-ref";
 
@@ -82,49 +85,16 @@ export default async function DocumentCheckEvidencePage({
         </p>
 
         <section className="bg-white border border-border-light rounded-xl shadow-sm p-6 space-y-4 text-sm">
-          <ul className="space-y-3">
-            {findings.map((f) => {
-              const copy = DOCUMENT_CHECK_COPY[f.signal];
-              if (!copy) return null;
-              return (
-                <li key={f.signal} className="rounded-xl border border-[#FFE082] bg-[#FFF8E1] p-4">
-                  <p className="font-semibold text-[#E65100]">{copy.label}</p>
-                  <p className="mt-1 leading-relaxed text-gov-slate">{copy.explain}</p>
-                </li>
-              );
-            })}
-          </ul>
+          {/* Shared with the live checker (components/DocumentCheckResult) so
+              the persisted record always uses the words the user saw. The
+              record stores only signal names — no evidence values. */}
+          <DocumentFindingsList findings={findings} showEvidence={false} />
 
           {abns.length > 0 ? (
-            <div className="rounded-xl border border-border-light p-4">
-              <p className="text-xs font-bold uppercase tracking-widest text-deep-navy">
-                ABNs on the document at check time
-              </p>
-              <ul className="mt-2 space-y-1.5">
-                {abns.map((a) => (
-                  <li key={a.abn} className="flex justify-between gap-4">
-                    <span className="font-mono text-xs text-gov-slate">{a.abn}</span>
-                    <span
-                      className={
-                        a.status === "registered" || a.status === "unverified"
-                          ? "text-right text-gov-slate"
-                          : "text-right font-medium text-[#F57C00]"
-                      }
-                    >
-                      {a.status === "registered"
-                        ? `registered${a.entityName ? ` — ${a.entityName}` : ""}`
-                        : a.status === "cancelled"
-                          ? `cancelled on the register${a.entityName ? ` — ${a.entityName}` : ""}`
-                          : a.status === "not_registered"
-                            ? "not on the ABR register"
-                            : a.status === "invalid_checksum"
-                              ? "not a possible ABN"
-                              : "could not be checked"}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
+            <DocumentAbnList
+              abns={abns}
+              heading="ABNs on the document at check time"
+            />
           ) : null}
 
           <dl className="space-y-2">

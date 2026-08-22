@@ -14,11 +14,23 @@ import ScreenshotDrawer from "./ScreenshotDrawer";
 import QrScanFlow from "./QrScanFlow";
 import InvalidSubmissionState from "./result/InvalidSubmissionState";
 import SimilarReports from "./result/SimilarReports";
-import DocumentCheckResult from "./DocumentCheckResult";
+import dynamic from "next/dynamic";
 import {
   DOCUMENT_MAX_UPLOAD_BYTES,
+  looksLikePdf,
   submitDocumentCheckFile,
 } from "@/lib/documentCheckClient";
+import {
+  DOCUMENT_CHECK_NOT_PDF_COPY,
+  DOCUMENT_CHECK_OVERSIZE_COPY,
+} from "@askarthur/types";
+
+// Render site is unreachable until a flag-gated PDF check succeeds — keep
+// the result component (and its copy tables) out of the homepage's
+// LCP-critical bundle (the ChartsSection precedent).
+const DocumentCheckResult = dynamic(() => import("./DocumentCheckResult"), {
+  ssr: false,
+});
 import { compressImage } from "@/lib/compressImage";
 import { tryDecodeQR } from "@/lib/qrDecode";
 import { track } from "@/lib/track";
@@ -103,6 +115,9 @@ export default function ScamChecker() {
   // never through ResultCard (no verdict exists to feed it — asymmetry rule).
   const [documentFile, setDocumentFile] = useState<File | null>(null);
   const [documentResult, setDocumentResult] = useState<WebDocumentCheckResponse | null>(null);
+  // Rendered inside the input container regardless of status (the qrError
+  // pattern) — an invisible rejection is indistinguishable from a dead drop.
+  const [documentError, setDocumentError] = useState<string | null>(null);
   const [progressStep, setProgressStep] = useState<ProgressStep | undefined>(undefined);
   const [errorAttempts, setErrorAttempts] = useState(0);
   const [errorRef, setErrorRef] = useState<string | null>(null);
@@ -173,11 +188,15 @@ export default function ScamChecker() {
 
   const handleCharityImageSelected = useCallback(async (file: File) => {
     // Reset other modes — charity-image is a hard mode-switch (single image,
-    // routed to /api/charity-check). Other intents would conflict.
+    // routed to /api/charity-check). Other intents would conflict — a stale
+    // documentFile would hijack the submit branch.
     setQrError(null);
     setQrDecodedUrl(null);
     setResult(null);
     setCharityResult(null);
+    setDocumentFile(null);
+    setDocumentResult(null);
+    setDocumentError(null);
     setStatus("idle");
     setInputMode("charity-image");
     setCharityIntent(true);
@@ -203,6 +222,9 @@ export default function ScamChecker() {
     setResult(null);
     setCharityResult(null);
     setImages([]);
+    setDocumentFile(null);
+    setDocumentResult(null);
+    setDocumentError(null);
     setStatus("idle");
     setInputMode("charity-text");
     setCharityIntent(true);
@@ -282,27 +304,44 @@ export default function ScamChecker() {
   );
 
   const processDocumentFile = useCallback((file: File) => {
-    if (file.type !== "application/pdf") return;
-    if (file.size > DOCUMENT_MAX_UPLOAD_BYTES) {
-      setErrorMsg("That PDF is over 10 MB. Try a smaller export.");
+    // MIME is a hint (Android/cloud pickers report PDFs as octet-stream) —
+    // looksLikePdf also accepts a .pdf name; the server's magic bytes
+    // decide. Rejections MUST be visible: documentError renders inside the
+    // input container regardless of status.
+    if (!looksLikePdf(file)) {
+      setDocumentError(DOCUMENT_CHECK_NOT_PDF_COPY);
       return;
     }
-    // Document mode is exclusive — a PDF check is its own pipeline, so any
-    // queued images/charity intent are cleared (mirrors the charity reset).
+    if (file.size > DOCUMENT_MAX_UPLOAD_BYTES) {
+      setDocumentError(DOCUMENT_CHECK_OVERSIZE_COPY);
+      return;
+    }
+    // Document mode is a hard mode-switch (the charity-handler precedent):
+    // clear every other intent AND any completed result, or the stale
+    // verdict card stays rendered and the PDF can never be submitted.
     setCharityIntent(false);
     setCharityResult(null);
     setImages([]);
     setQrError(null);
     setQrDecodedUrl(null);
+    setResult(null);
+    setStatus("idle");
+    setProgressStep(undefined);
     setDocumentResult(null);
+    setDocumentError(null);
     setDocumentFile(file);
     setInputMode("document");
     setErrorMsg("");
   }, []);
 
-  function removeDocument() {
+  function clearDocumentMode() {
     setDocumentFile(null);
     setDocumentResult(null);
+    setDocumentError(null);
+  }
+
+  function removeDocument() {
+    clearDocumentMode();
     setInputMode("text");
   }
 
@@ -314,6 +353,11 @@ export default function ScamChecker() {
       setCharityResult(null);
       setImages([]);
     }
+    // A stale attached PDF must never hijack an image/QR submission — the
+    // submit handler branches on documentFile FIRST.
+    setDocumentFile(null);
+    setDocumentResult(null);
+    setDocumentError(null);
     // Reset QR state
     setQrError(null);
     setQrDecodedUrl(null);
@@ -435,28 +479,34 @@ export default function ScamChecker() {
     if (documentFile) {
       setStatus("analyzing");
       setDocumentResult(null);
+      setDocumentError(null);
       setErrorMsg("");
-      setProgressStep("upload");
+      // Deliberately NO AnalysisProgress steps: the V2 labels describe the
+      // scam-database/AI pipeline, and green-ticking them for a
+      // deterministic PDF walk would be a false claim (the stepper's own
+      // honest-labels rule). The button's "Analysing..." state carries the
+      // busy signal.
       track("scan_started", {
-        input_type: inputMode,
+        input_type: "document",
         referrer_source: referrerSource ?? "direct",
       });
-      setProgressStep("lookup");
       const outcome = await submitDocumentCheckFile(documentFile, "inline");
       if (outcome.ok) {
-        setProgressStep("write");
         setDocumentResult(outcome.result);
         setStatus("complete");
-        setProgressStep("done");
         setErrorAttempts(0);
         setErrorRef(null);
         window.dispatchEvent(new Event("safeverify:check-complete"));
-      } else {
-        setStatus("error");
-        setProgressStep(undefined);
-        setErrorAttempts((n) => n + 1);
-        setErrorRef(makeReferenceId());
+      } else if (outcome.rateLimited) {
+        // The rate_limited status renders errorMsg as the standard banner.
+        setStatus("rate_limited");
         setErrorMsg(outcome.message);
+      } else {
+        // documentError renders the route's actual message (429 aside) —
+        // InvalidSubmissionState takes no message and would tell the user
+        // to retry into whatever just failed.
+        setStatus("idle");
+        setDocumentError(outcome.message);
       }
       return;
     }
@@ -607,8 +657,7 @@ export default function ScamChecker() {
     setErrorRef(null);
     setCharityIntent(false);
     setCharityResult(null);
-    setDocumentFile(null);
-    setDocumentResult(null);
+    clearDocumentMode();
     // Clear the share-sheet origin attribution on "Check Another" — the
     // referrer only describes the inbound landing, not the next manual
     // check, and carrying it forward would inflate the mobile-share
@@ -699,6 +748,15 @@ export default function ScamChecker() {
             <div className="flex items-center gap-2 px-4 pt-2 text-sm text-action-teal font-medium">
               <FileText size={16} />
               Document check — we&rsquo;ll read the PDF&rsquo;s editing traces and verify any ABN
+            </div>
+          )}
+
+          {/* Document error notice — visible regardless of status (a silent
+              rejection reads as a dead drop; the qrError pattern) */}
+          {documentError && (
+            <div className="flex items-center gap-2 px-4 pt-2 text-sm text-red-600 font-medium">
+              <FileText size={16} />
+              {documentError}
             </div>
           )}
 

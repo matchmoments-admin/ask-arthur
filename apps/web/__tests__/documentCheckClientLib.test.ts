@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { DOCUMENT_CHECK_UNAVAILABLE_COPY } from "@askarthur/types";
+import {
+  DOCUMENT_CHECK_NOT_PDF_COPY,
+  DOCUMENT_CHECK_OVERSIZE_COPY,
+  DOCUMENT_CHECK_UNAVAILABLE_COPY,
+} from "@askarthur/types";
 import {
   DOCUMENT_MAX_UPLOAD_BYTES,
+  looksLikePdf,
   submitDocumentCheckFile,
 } from "@/lib/documentCheckClient";
 
@@ -19,12 +24,45 @@ afterEach(() => {
 });
 
 describe("submitDocumentCheckFile", () => {
-  it("rejects oversized files locally — no request made", async () => {
+  it("rejects oversized files locally with the shared copy — no request made", async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
     const out = await submitDocumentCheckFile(pdfFile(DOCUMENT_MAX_UPLOAD_BYTES + 1), "web");
-    expect(out.ok).toBe(false);
+    expect(out).toEqual({ ok: false, message: DOCUMENT_CHECK_OVERSIZE_COPY });
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("MIME is a hint: octet-stream with a .pdf name passes; a JPEG is rejected visibly", async () => {
+    // Android/cloud pickers report PDFs as octet-stream — the server's
+    // magic bytes decide, so the client must let it through.
+    expect(
+      looksLikePdf(new File([""], "payslip.PDF", { type: "application/octet-stream" })),
+    ).toBe(true);
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const out = await submitDocumentCheckFile(
+      new File([new Uint8Array(100)], "photo.jpg", { type: "image/jpeg" }),
+      "web",
+    );
+    expect(out).toEqual({ ok: false, message: DOCUMENT_CHECK_NOT_PDF_COPY });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("flags 429 as rateLimited so callers can render their rate-limit state", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ message: "Too many checks. Try again later." }), {
+          status: 429,
+        }),
+      ),
+    );
+    const out = await submitDocumentCheckFile(pdfFile(), "inline");
+    expect(out).toEqual({
+      ok: false,
+      message: "Too many checks. Try again later.",
+      rateLimited: true,
+    });
   });
 
   it("sends the surface discriminator in the form body", async () => {
@@ -55,7 +93,11 @@ describe("submitDocumentCheckFile", () => {
       ),
     );
     const out = await submitDocumentCheckFile(pdfFile(), "web");
-    expect(out).toEqual({ ok: false, message: "Too many checks. Try again later." });
+    expect(out).toEqual({
+      ok: false,
+      message: "Too many checks. Try again later.",
+      rateLimited: true,
+    });
   });
 
   it("maps checked:false to the could-not-run copy — never a result", async () => {

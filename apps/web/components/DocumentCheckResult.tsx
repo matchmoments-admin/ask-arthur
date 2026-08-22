@@ -13,10 +13,14 @@ import {
   DOCUMENT_CHECK_CLEAN_LABEL,
   DOCUMENT_CHECK_COPY,
   type DocumentAbnCheck,
+  type DocumentFinding,
   type WebDocumentCheckResponse,
 } from "@askarthur/types";
 
-function abnStatusLine(a: DocumentAbnCheck): { text: string; tone: "neutral" | "warn" } {
+/** Exported for the /document-check/[ref] evidence page — the persisted
+ *  record must describe a signal with EXACTLY the words the user saw at
+ *  check time, so there is one copy of this mapping. */
+export function abnStatusLine(a: DocumentAbnCheck): { text: string; tone: "neutral" | "warn" } {
   switch (a.status) {
     case "registered":
       return {
@@ -37,6 +41,72 @@ function abnStatusLine(a: DocumentAbnCheck): { text: string; tone: "neutral" | "
   }
 }
 
+/** The findings list — shared with the evidence page. Unknown future
+ *  signals render nothing (deploy skew). `showEvidence` is off on the
+ *  evidence page, which persists only signal names. */
+export function DocumentFindingsList({
+  findings,
+  showEvidence = true,
+}: {
+  findings: DocumentFinding[];
+  showEvidence?: boolean;
+}) {
+  return (
+    <ul className="space-y-3">
+      {findings.map((f) => {
+        const copy = DOCUMENT_CHECK_COPY[f.signal];
+        if (!copy) return null;
+        const evidence = showEvidence ? Object.entries(f.evidence) : [];
+        return (
+          <li key={f.signal} className="rounded-xl border border-[#FFE082] bg-[#FFF8E1] p-4">
+            <p className="font-semibold text-[#E65100]">{copy.label}</p>
+            <p className="mt-1 leading-relaxed text-gov-slate">{copy.explain}</p>
+            {evidence.length > 0 ? (
+              <p className="mt-2 font-mono text-xs text-slate-500">
+                {evidence.map(([k, v]) => `${k}: ${v}`).join(" · ")}
+              </p>
+            ) : null}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/** The ABN table — shared with the evidence page. */
+export function DocumentAbnList({
+  abns,
+  heading,
+}: {
+  abns: DocumentAbnCheck[];
+  heading: string;
+}) {
+  return (
+    <div className="rounded-xl border border-border-light p-4">
+      <p className="text-xs font-bold uppercase tracking-widest text-deep-navy">
+        {heading}
+      </p>
+      <ul className="mt-2 space-y-1.5">
+        {abns.map((a) => {
+          const line = abnStatusLine(a);
+          return (
+            <li key={a.abn} className="flex justify-between gap-4">
+              <span className="font-mono text-xs text-gov-slate">{a.abn}</span>
+              <span
+                className={`text-right ${
+                  line.tone === "warn" ? "font-medium text-[#F57C00]" : "text-gov-slate"
+                }`}
+              >
+                {line.text}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 export default function DocumentCheckResult({
   result,
 }: {
@@ -47,27 +117,7 @@ export default function DocumentCheckResult({
   return (
     <div className="space-y-4 text-sm">
       {result.findings.length > 0 ? (
-        <ul className="space-y-3">
-          {result.findings.map((f) => {
-            const copy = DOCUMENT_CHECK_COPY[f.signal];
-            if (!copy) return null;
-            const evidence = Object.entries(f.evidence);
-            return (
-              <li
-                key={f.signal}
-                className="rounded-xl border border-[#FFE082] bg-[#FFF8E1] p-4"
-              >
-                <p className="font-semibold text-[#E65100]">{copy.label}</p>
-                <p className="mt-1 leading-relaxed text-gov-slate">{copy.explain}</p>
-                {evidence.length > 0 ? (
-                  <p className="mt-2 font-mono text-xs text-slate-500">
-                    {evidence.map(([k, v]) => `${k}: ${v}`).join(" · ")}
-                  </p>
-                ) : null}
-              </li>
-            );
-          })}
-        </ul>
+        <DocumentFindingsList findings={result.findings} />
       ) : (
         // Deliberately neutral — never the SAFE green (asymmetry rule).
         <div className="rounded-xl border border-border-light bg-[#f8fafc] p-4">
@@ -79,30 +129,10 @@ export default function DocumentCheckResult({
       )}
 
       {result.content && result.content.abns.length > 0 ? (
-        <div className="rounded-xl border border-border-light p-4">
-          <p className="text-xs font-bold uppercase tracking-widest text-deep-navy">
-            ABNs found on this document
-          </p>
-          <ul className="mt-2 space-y-1.5">
-            {result.content.abns.map((a) => {
-              const line = abnStatusLine(a);
-              return (
-                <li key={a.abn} className="flex justify-between gap-4">
-                  <span className="font-mono text-xs text-gov-slate">{a.abn}</span>
-                  <span
-                    className={`text-right ${
-                      line.tone === "warn"
-                        ? "font-medium text-[#F57C00]"
-                        : "text-gov-slate"
-                    }`}
-                  >
-                    {line.text}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
+        <DocumentAbnList
+          abns={result.content.abns}
+          heading="ABNs found on this document"
+        />
       ) : null}
       {result.content && !result.content.textExtracted ? (
         <p className="text-xs leading-relaxed text-slate-500">

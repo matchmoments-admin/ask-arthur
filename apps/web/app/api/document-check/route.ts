@@ -5,6 +5,7 @@ import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import {
   DOCUMENT_CHECK_DISCLAIMER,
+  DOCUMENT_CHECK_MAX_UPLOAD_BYTES,
   type WebDocumentCheckResponse,
 } from "@askarthur/types";
 import { logEvent } from "@/lib/analytics-events";
@@ -27,7 +28,10 @@ import { recordDocumentCheck } from "@/lib/document-check-records";
 // Stage-2 migration). `content: null` in the response means the pack did
 // not run for this request — "not assessed", never "clean".
 
-const MAX_UPLOAD_BYTES = 10_000_000; // bank statements exceed the 5 MB image cap
+// The ONE cap, shared with both clients' pre-checks (@askarthur/types) —
+// raising it here raises it everywhere. Bank statements exceed the 5 MB
+// image cap, hence 10 MB.
+const MAX_UPLOAD_BYTES = DOCUMENT_CHECK_MAX_UPLOAD_BYTES;
 
 export async function POST(req: NextRequest) {
   try {

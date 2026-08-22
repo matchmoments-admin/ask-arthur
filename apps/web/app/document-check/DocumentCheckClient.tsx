@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { type WebDocumentCheckResponse } from "@askarthur/types";
+import type { WebDocumentCheckResponse } from "@askarthur/types";
 import DocumentCheckResult from "@/components/DocumentCheckResult";
 import { submitDocumentCheckFile } from "@/lib/documentCheckClient";
 
