@@ -90,7 +90,8 @@
     "semver": "^7.6.0",
     "tldts": "^7.0.23",
     "twilio": "^5.4.0",
-    "undici": "^6.21.1"
+    "undici": "^6.21.1",
+    "unpdf": "^1.8.1"
   },
   "devDependencies": {
     "@supabase/supabase-js": "^2.95.3",
