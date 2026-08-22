@@ -7,9 +7,9 @@ import { featureFlags } from "@askarthur/utils/feature-flags";
 import {
   DOCUMENT_CHECK_DISCLAIMER,
   DOCUMENT_CHECK_MAX_UPLOAD_BYTES,
-  TIER_LIMITS,
   type WebDocumentCheckResponse,
 } from "@askarthur/types";
+import { documentAllowanceForOrg } from "@/lib/document-allowance";
 import { recordDocumentCheck } from "@/lib/document-check-records";
 import { consumeMonthlyQuota, secondsToMonthEnd } from "@/lib/v1-quota";
 import { parsePeriodDays } from "@/lib/v1-params";
@@ -19,7 +19,7 @@ import { logCost } from "@/lib/cost-telemetry";
 // - POST (endpoint slug `document-checks.submit`): per-document check — the
 //   same inspectDocument seam as the consumer route, plus an org-attributed
 //   evidence record when flagged. Requires an ORG-LINKED key: the monthly
-//   allowance (TIER_LIMITS[tier].documentChecksPerMonth) is billed per
+//   allowance (documentAllowanceForOrg: doc-plan entitlement, tier fallback) is billed per
 //   organisation, shared across the org's keys. The meter is consumed ONLY
 //   after the upload validates — malformed requests never burn paid units.
 // - GET (endpoint slug `document-checks`): the calling organisation's own
@@ -97,9 +97,23 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const tier = (guard.auth.tier ?? "free") as keyof typeof TIER_LIMITS;
-    const monthlyLimit = TIER_LIMITS[tier]?.documentChecksPerMonth ?? 0;
+    // Allowance precedence: org doc-plan entitlement (Stripe or manual
+    // pilot) over the interim tier fallback — resolved in ONE place
+    // (lib/document-allowance.ts) shared with /api/v1/usage.
+    const tier = guard.auth.tier ?? "free";
+    const allowance = await documentAllowanceForOrg(guard.auth.orgId, tier);
+    const monthlyLimit = allowance.monthlyLimit;
     if (monthlyLimit === 0) {
+      // Degraded-zero means "could not read the org's entitlement", not
+      // "no plan" — a Supabase blip must never 402 a paying pilot with a
+      // permanent-looking error (ADR-0009's unverified ≠ unregistered,
+      // applied to billing).
+      if (allowance.degraded) {
+        return NextResponse.json(
+          { error: "service_unavailable", message: "Plan lookup briefly unavailable. Try again shortly." },
+          { status: 503, headers: { "Retry-After": "60" } },
+        );
+      }
       return NextResponse.json(
         {
           error: "plan_required",
