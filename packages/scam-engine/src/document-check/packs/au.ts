@@ -61,7 +61,7 @@ export async function runAuPack(text: string | null): Promise<AuPackResult> {
   const content: DocumentContentSummary = {
     jurisdiction: "au",
     textExtracted: text !== null,
-    abns: [],
+    checks: [],
   };
   const findings: DocumentFinding[] = [];
   if (text === null) return { content, findings };
@@ -73,7 +73,7 @@ export async function runAuPack(text: string | null): Promise<AuPackResult> {
   // explicitly presents the number as an ABN.
   for (const abn of labelled) {
     if (!isValidAbnChecksum(abn)) {
-      content.abns.push({ abn, status: "invalid_checksum", entityName: null });
+      content.checks.push({ kind: "abn", identifier: abn, status: "invalid_checksum", entityName: null });
       findings.push({ signal: "abn_checksum_fail", evidence: { abn } });
     }
   }
@@ -89,7 +89,7 @@ export async function runAuPack(text: string | null): Promise<AuPackResult> {
   // means "accept checks, skip external lookups" — checksum stays free.
   if (await isFeatureBraked("document_check")) {
     for (const abn of toVerify) {
-      content.abns.push({ abn, status: "unverified", entityName: null });
+      content.checks.push({ kind: "abn", identifier: abn, status: "unverified", entityName: null });
     }
     return { content, findings };
   }
@@ -105,11 +105,11 @@ export async function runAuPack(text: string | null): Promise<AuPackResult> {
     const result = results[i]!;
     if ("reason" in result) {
       if (result.reason === "not-found") {
-        content.abns.push({ abn, status: "not_registered", entityName: null });
+        content.checks.push({ kind: "abn", identifier: abn, status: "not_registered", entityName: null });
         findings.push({ signal: "abn_not_registered", evidence: { abn } });
       } else {
         // lookup-failed / deadline: NOT evidence of anything (ADR-0009).
-        content.abns.push({ abn, status: "unverified", entityName: null });
+        content.checks.push({ kind: "abn", identifier: abn, status: "unverified", entityName: null });
       }
       continue;
     }
@@ -126,11 +126,11 @@ export async function runAuPack(text: string | null): Promise<AuPackResult> {
       });
     }
     if (result.status.toLowerCase() !== "active") {
-      content.abns.push({ abn, status: "cancelled", entityName: result.entityName });
+      content.checks.push({ kind: "abn", identifier: abn, status: "cancelled", entityName: result.entityName });
       findings.push({ signal: "abn_cancelled", evidence: { abn } });
       continue;
     }
-    content.abns.push({ abn, status: "registered", entityName: result.entityName });
+    content.checks.push({ kind: "abn", identifier: abn, status: "registered", entityName: result.entityName });
   }
 
   return { content, findings };

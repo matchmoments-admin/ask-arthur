@@ -4,11 +4,11 @@ import Footer from "@/components/Footer";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import {
   DOCUMENT_CHECK_DISCLAIMER,
-  type DocumentAbnCheck,
+  type DocumentRegistryCheck,
   type DocumentFinding,
 } from "@askarthur/types";
 import {
-  DocumentAbnList,
+  DocumentRegistryList,
   DocumentFindingsList,
 } from "@/components/DocumentCheckResult";
 import { createServiceClient } from "@askarthur/supabase/server";
@@ -48,14 +48,14 @@ export default async function DocumentCheckEvidencePage({
   const { data: record } = await supabase
     .from("document_check_records")
     .select(
-      "check_ref, checked_at, doc_sha256, jurisdiction, structural_summary, findings, abn_summary",
+      "check_ref, checked_at, doc_sha256, jurisdiction, structural_summary, findings, registry_checks, case_ref",
     )
     .eq("check_ref", ref)
     .maybeSingle();
   if (!record) notFound();
 
   const findings = (record.findings as DocumentFinding[] | null) ?? [];
-  const abns = (record.abn_summary as DocumentAbnCheck[] | null) ?? [];
+  const checks = (record.registry_checks as DocumentRegistryCheck[] | null) ?? [];
   const structural = record.structural_summary as {
     producer?: string | null;
     creator?: string | null;
@@ -90,9 +90,9 @@ export default async function DocumentCheckEvidencePage({
               record stores only signal names — no evidence values. */}
           <DocumentFindingsList findings={findings} showEvidence={false} />
 
-          {abns.length > 0 ? (
-            <DocumentAbnList
-              abns={abns}
+          {checks.length > 0 ? (
+            <DocumentRegistryList
+              checks={checks}
               heading="ABNs on the document at check time"
             />
           ) : null}

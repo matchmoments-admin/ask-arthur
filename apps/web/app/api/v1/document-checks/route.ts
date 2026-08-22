@@ -31,7 +31,7 @@ import { logCost } from "@/lib/cost-telemetry";
 const MAX_UPLOAD_BYTES = DOCUMENT_CHECK_MAX_UPLOAD_BYTES;
 
 const SELECT_COLUMNS =
-  "check_ref, checked_at, doc_sha256, jurisdiction, source, structural_summary, findings, abn_summary";
+  "check_ref, checked_at, doc_sha256, jurisdiction, source, case_ref, structural_summary, findings, registry_checks";
 
 export async function GET(req: NextRequest) {
   if (!featureFlags.documentCheckV1Api) {
@@ -55,21 +55,39 @@ export async function GET(req: NextRequest) {
   const since = new Date();
   since.setDate(since.getDate() - days);
 
+  // ?case=<ref> returns every check for one applicant/application — the
+  // market's unit of work is the application, not the document.
+  const caseRef = req.nextUrl.searchParams.get("case")?.trim().slice(0, 128);
+
   try {
-    const { data: checks, error } = await supabase
+    let query = supabase
       .from("document_check_records")
       .select(SELECT_COLUMNS)
       .eq("org_id", guard.auth.orgId)
       .gte("checked_at", since.toISOString())
       .order("checked_at", { ascending: false })
       .limit(100);
+    if (caseRef) query = query.eq("case_ref", caseRef);
+
+    const { data: checks, error } = await query;
     if (error) {
       logger.error("document-checks feed query error", { error: String(error) });
       return NextResponse.json({ error: "query_failed" }, { status: 500 });
     }
+    const rows = checks ?? [];
     return NextResponse.json({
-      meta: { period_days: days, total: checks?.length ?? 0, generated_at: new Date().toISOString() },
-      checks: checks ?? [],
+      meta: {
+        period_days: days,
+        case_ref: caseRef ?? null,
+        total: rows.length,
+        // The customer's headline number: how many of their checks in this
+        // window carried at least one finding.
+        flagged: rows.filter(
+          (r) => Array.isArray(r.findings) && r.findings.length > 0,
+        ).length,
+        generated_at: new Date().toISOString(),
+      },
+      checks: rows,
     });
   } catch (err) {
     logger.error("document-checks feed error", { error: String(err) });
@@ -146,6 +164,14 @@ export async function POST(req: NextRequest) {
         { status: 422 },
       );
     }
+    // Optional applicant/application grouping key. Bounded and opaque —
+    // stored verbatim, never parsed; length-capped so it can't become a
+    // smuggling channel for document content.
+    const rawCase = form.get("caseRef");
+    const caseRef =
+      typeof rawCase === "string" && rawCase.trim().length > 0
+        ? rawCase.trim().slice(0, 128)
+        : null;
 
     // ---- meter (org-scoped, fail-closed in prod, non-refundable) ---------
     const quota = await consumeMonthlyQuota("document_check", guard.auth.orgId, monthlyLimit);
@@ -203,6 +229,7 @@ export async function POST(req: NextRequest) {
       ...inspection,
       checkRef: await recordDocumentCheck(inspection, {
         source: "api",
+        caseRef,
         orgId: guard.auth.orgId,
         apiKeyHash: guard.auth.keyHash ?? null,
       }),

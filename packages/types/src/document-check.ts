@@ -101,25 +101,31 @@ export interface PdfStructuralSummary {
   trailerIdMatches: boolean | null;
 }
 
-/** One ABN found in the document text and its verification outcome. The
- *  four states keep the ADR-0009 discipline: `unverified` (lookup could not
- *  run/complete) is a neutral non-signal, never conflated with
- *  `not_registered` (register answered: not on it). */
-export interface DocumentAbnCheck {
-  /** The 11 digits as printed (normalised, no spaces). */
-  abn: string;
+/** An identifier printed on the document, checked against a public
+ *  register. Deliberately jurisdiction-AGNOSTIC: `kind` names the register
+ *  so a UK/NZ pack (company number, IRD, VAT) writes into this same shape
+ *  instead of forcing a parallel field, a DB column and a component branch.
+ *
+ *  The statuses keep the ADR-0009 discipline: `unverified` (the lookup
+ *  could not run or complete) is a neutral non-signal, never conflated with
+ *  `not_registered` (the register answered, and it isn't on it). */
+export interface DocumentRegistryCheck {
+  /** Which register this identifier belongs to. */
+  kind: "abn";
+  /** The identifier as printed, normalised (digits only for an ABN). */
+  identifier: string;
   status: "invalid_checksum" | "registered" | "cancelled" | "not_registered" | "unverified";
-  /** ABR legal entity name when registered, else null. */
+  /** Registered legal entity name when found, else null. */
   entityName: string | null;
 }
 
 /** Jurisdiction content-logic results. `textExtracted:false` means the
  *  content layer had nothing to read (scanned/image PDF, extraction failed)
- *  — not that the document has no ABNs. */
+ *  — not that the document carries no identifiers. */
 export interface DocumentContentSummary {
   jurisdiction: "au";
   textExtracted: boolean;
-  abns: DocumentAbnCheck[];
+  checks: DocumentRegistryCheck[];
 }
 
 /** Response of POST /api/document-check (multipart upload mode). */
