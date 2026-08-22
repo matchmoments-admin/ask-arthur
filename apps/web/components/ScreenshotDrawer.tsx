@@ -10,6 +10,7 @@ import {
   ScanLine,
   BadgeCheck,
   HeartHandshake,
+  FileText,
 } from "lucide-react";
 import { Drawer } from "vaul";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -30,6 +31,10 @@ interface ScreenshotDrawerProps {
    *  user types the name/ABN into the existing textarea) instead of
    *  deep-linking to /charity-check?mode=name. */
   onCharityTextSelected?: () => void;
+  /** Optional. When supplied (documentCheck flag on), a "Check a PDF
+   *  document" row appears: single-PDF picker that flips the homepage
+   *  scanner into document mode (routes to /api/document-check). */
+  onDocumentSelected?: (file: File) => void;
 }
 
 export default function ScreenshotDrawer({
@@ -39,12 +44,14 @@ export default function ScreenshotDrawer({
   onScanQrCode,
   onCharityImageSelected,
   onCharityTextSelected,
+  onDocumentSelected,
 }: ScreenshotDrawerProps) {
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const qrInputRef = useRef<HTMLInputElement>(null);
   const charityImageInputRef = useRef<HTMLInputElement>(null);
+  const documentInputRef = useRef<HTMLInputElement>(null);
   const isMobile = useIsMobile();
   // Initial value computed synchronously at mount: when the permission API is unavailable
   // we optimistically assume clipboard.read() is allowed. The effect below refines this
@@ -290,6 +297,41 @@ export default function ScreenshotDrawer({
                 scanner with charity-check intent set; Name/ABN deep-links to
                 the standalone /charity-check page so both flows can be
                 compared during the rollout. */}
+            {onDocumentSelected && (
+              <>
+                <div className="mx-3 my-1 border-t border-slate-200" />
+                <button
+                  type="button"
+                  onClick={() => documentInputRef.current?.click()}
+                  className="flex items-center gap-4 px-3 py-3 rounded-xl hover:bg-slate-50 transition-colors text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-deep-navy/20"
+                >
+                  <FileText className="text-action-teal" size={24} />
+                  <div>
+                    <div className="text-base font-semibold text-deep-navy">
+                      Check a PDF Document
+                    </div>
+                    <div className="text-sm text-gov-slate">
+                      Invoice, payslip, bank letter or rental document
+                    </div>
+                  </div>
+                </button>
+                <input
+                  ref={documentInputRef}
+                  type="file"
+                  accept="application/pdf,.pdf"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = "";
+                    if (file) {
+                      onDocumentSelected(file);
+                      onOpenChange(false);
+                    }
+                  }}
+                  className="hidden"
+                />
+              </>
+            )}
+
             {featureFlags.charityCheck && (
               <>
                 <div className="mx-3 my-1 border-t border-slate-200" />

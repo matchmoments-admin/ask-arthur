@@ -32,7 +32,11 @@ vi.mock("@askarthur/utils/rate-limit", () => ({
         };
   }),
 }));
-vi.mock("@/lib/cost-telemetry", () => ({ logCost: vi.fn() }));
+vi.mock("@/lib/cost-telemetry", () => ({
+  logCost: vi.fn((row: Record<string, unknown>) => {
+    costRows.rows.push(row);
+  }),
+}));
 vi.mock("@askarthur/utils/feature-flags", () => ({ featureFlags: flagState }));
 vi.mock("@askarthur/utils/logger", () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
@@ -42,6 +46,7 @@ vi.mock("@/lib/analytics-events", () => ({
     events.rows.push(ev);
   }),
 }));
+const costRows = vi.hoisted(() => ({ rows: [] as Array<Record<string, unknown>> }));
 
 import { POST } from "@/app/api/document-check/route";
 
@@ -62,9 +67,14 @@ const DOCTORED_PDF = Buffer.concat([
   ),
 ]);
 
-function multipartRequest(bytes: Buffer, filename = "doc.pdf"): NextRequest {
+function multipartRequest(
+  bytes: Buffer,
+  filename = "doc.pdf",
+  surface?: string,
+): NextRequest {
   const form = new FormData();
   form.append("file", new File([new Uint8Array(bytes)], filename, { type: "application/pdf" }));
+  if (surface) form.append("surface", surface);
   return new NextRequest("http://localhost/api/document-check", {
     method: "POST",
     body: form,
@@ -76,6 +86,7 @@ beforeEach(() => {
   rateState.storeDown = false;
   flagState.documentCheck = true;
   events.rows.length = 0;
+  costRows.rows.length = 0;
 });
 
 describe("POST /api/document-check", () => {
@@ -154,6 +165,20 @@ describe("POST /api/document-check", () => {
     expect(signals).toContain("producer_design_tool");
     expect(events.rows).toHaveLength(1);
     expect(events.rows[0]!.eventType).toBe("document_check_completed");
+  });
+
+  it("surface discriminator is allowlisted: inline maps, anything else falls back to web", async () => {
+    await POST(multipartRequest(CLEAN_PDF, "doc.pdf", "inline"));
+    await POST(multipartRequest(CLEAN_PDF, "doc.pdf", "spoofed-surface"));
+    await POST(multipartRequest(CLEAN_PDF));
+    const surfaces = costRows.rows.map(
+      (r) => (r.metadata as Record<string, unknown>).surface,
+    );
+    expect(surfaces).toEqual([
+      "document_check_inline",
+      "document_check_web",
+      "document_check_web",
+    ]);
   });
 
   it("returns zero findings (never a verdict field) for a clean single-revision PDF", async () => {
