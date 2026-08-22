@@ -19,6 +19,59 @@ const DEFAULT_TIMEOUT_MS = 5_000;
 const MAX_PAGES = 20;
 const MAX_CHARS = 200_000;
 
+/**
+ * pdfjs-dist 6.x references the browser canvas globals (DOMMatrix, Path2D,
+ * ImageData) while EVALUATING its module, and tries to polyfill them from
+ * `@napi-rs/canvas` — a heavy native dep we deliberately don't install
+ * because we extract text and never render. Without it, module load throws
+ * `ReferenceError: DOMMatrix is not defined` on the Vercel runtime; our
+ * catch turned that into `null`, so the whole AU content layer went
+ * silently inert in the deployed bundle while every test passed locally
+ * (Node's own globals mask it in dev — measured against a preview
+ * deployment 2026-08-23, the ONLY place it reproduces).
+ *
+ * Text extraction never touches these, so constructible stubs are enough.
+ * Guarded by typeof so a real implementation always wins.
+ */
+function ensureCanvasGlobals(): void {
+  const g = globalThis as unknown as Record<string, unknown>;
+  if (typeof g.DOMMatrix === "undefined") {
+    g.DOMMatrix = class DOMMatrixStub {
+      a = 1; b = 0; c = 0; d = 1; e = 0; f = 0;
+      constructor(init?: number[] | string) {
+        if (Array.isArray(init) && init.length >= 6) {
+          [this.a, this.b, this.c, this.d, this.e, this.f] = init as number[];
+        }
+      }
+      // pdfjs only constructs these on the render path we never take.
+      multiply(): unknown { return this; }
+      invertSelf(): unknown { return this; }
+      translate(): unknown { return this; }
+      scale(): unknown { return this; }
+    };
+  }
+  if (typeof g.Path2D === "undefined") {
+    g.Path2D = class Path2DStub {
+      addPath(): void {}
+      moveTo(): void {}
+      lineTo(): void {}
+      closePath(): void {}
+    };
+  }
+  if (typeof g.ImageData === "undefined") {
+    g.ImageData = class ImageDataStub {
+      data: Uint8ClampedArray;
+      width: number;
+      height: number;
+      constructor(width = 0, height = 0) {
+        this.width = width;
+        this.height = height;
+        this.data = new Uint8ClampedArray(Math.max(0, width * height * 4));
+      }
+    };
+  }
+}
+
 interface ExtractOptions {
   timeoutMs?: number;
   maxPages?: number;
