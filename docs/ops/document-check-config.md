@@ -91,10 +91,18 @@ still runs, results report `unverified`). Registered in `KNOWN_BRAKE_KEYS`.
 Local dev **cannot** validate item 1 — the failure mode is bundler-specific.
 
 1. **Text extraction works in the deployed bundle.** Upload any text-based
-   PDF: the result must NOT say "No text could be read from this file". If it
-   does, `pdfjs-dist` isn't resolving its worker — check `serverExternalPackages`
-   in `next.config.ts`. Symptom of the silent version: the whole AU/ABN layer
-   is inert while everything looks healthy.
+   PDF: the result must NOT say "No text could be read from this file", and
+   an invoice carrying an ABN must resolve it to an entity name.
+   **History worth knowing before you touch `pdf-text.ts`:** raw
+   `pdfjs-dist` could not load on this runtime in EITHER bundling mode —
+   externalised it threw `DOMMatrix is not defined`, bundled it failed
+   worker resolution — and both degraded to null through our own catch, so
+   the surface looked perfectly healthy while the entire AU/ABN layer did
+   nothing. That is why extraction goes through `unpdf` (serverless pdfjs,
+   no worker, no canvas) and why `pdfjs-dist` must NOT be re-added to
+   `serverExternalPackages`. Verified on a preview deployment 2026-08-23.
+   This failure mode is invisible to unit tests and CI — only a deployed
+   smoke catches it, which is why it is step 1.
 2. **Negative controls (the false-positive check).** Genuine invoices/payslips
    from real issuers (Xero, MYOB, bank statement exports) should mostly return
    "No editing traces found". Any finding on a legitimate document is a
