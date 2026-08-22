@@ -1,7 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import type { WebDocumentCheckResponse } from "@askarthur/types";
+import {
+  DOCUMENT_CHECK_VOLUME_CTA,
+  type WebDocumentCheckResponse,
+} from "@askarthur/types";
 import DocumentCheckResult from "@/components/DocumentCheckResult";
 import { submitDocumentCheckFile } from "@/lib/documentCheckClient";
 
@@ -18,6 +21,7 @@ export default function DocumentCheckClient() {
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [rateLimited, setRateLimited] = useState(false);
   const [result, setResult] = useState<WebDocumentCheckResponse | null>(null);
 
   async function runCheck() {
@@ -27,12 +31,14 @@ export default function DocumentCheckClient() {
     }
     setBusy(true);
     setError(null);
+    setRateLimited(false);
     setResult(null);
     const outcome = await submitDocumentCheckFile(file, "web");
     if (outcome.ok) {
       setResult(outcome.result);
     } else {
       setError(outcome.message);
+      setRateLimited(outcome.rateLimited === true);
     }
     setBusy(false);
   }
@@ -66,7 +72,22 @@ export default function DocumentCheckClient() {
       </button>
 
       {error ? (
-        <p className="text-sm leading-relaxed text-[#D32F2F]">{error}</p>
+        rateLimited ? (
+          // A free-tier boundary, not a fault — neutral tone, and a route
+          // forward rather than a dead end.
+          <div className="rounded-xl border border-[#FFE082] bg-[#FFF8E1] p-4 text-sm">
+            <p className="leading-relaxed text-gov-slate">{error}</p>
+            <p className="mt-2 leading-relaxed text-gov-slate">
+              {DOCUMENT_CHECK_VOLUME_CTA}{" "}
+              <a href="/contact" className="text-deep-navy underline">
+                Talk to us about higher volumes
+              </a>
+              .
+            </p>
+          </div>
+        ) : (
+          <p className="text-sm leading-relaxed text-[#D32F2F]">{error}</p>
+        )
       ) : null}
 
       {result?.checked ? (

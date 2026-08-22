@@ -5,6 +5,8 @@ import {
   DOCUMENT_CHECK_COPY,
   DOCUMENT_CHECK_DISCLAIMER,
   DOCUMENT_CHECK_UNAVAILABLE_COPY,
+  DOCUMENT_CHECK_VOLUME_CTA,
+  documentCheckRateLimitCopy,
   DOCUMENT_FINDING_SIGNALS,
 } from "@askarthur/types";
 
@@ -56,6 +58,23 @@ describe("document-check copy — no verdict language", () => {
     for (const re of BANNED_VERDICTS) {
       expect(DOCUMENT_CHECK_CLEAN_COPY).not.toMatch(re);
     }
+  });
+
+  it("rate-limit copy explains the allowance and when it frees up — never a bare refusal", () => {
+    const withReset = documentCheckRateLimitCopy(5, 12);
+    // States the real allowance and a concrete wait, so the user knows why
+    // and what to do — the old copy said only "too many checks".
+    expect(withReset).toMatch(/limited to 5 an hour/i);
+    expect(withReset).toMatch(/12 minutes/);
+    expect(documentCheckRateLimitCopy(5, 1)).toMatch(/1 minute\b/);
+    // Unknown reset must still be actionable, never a dead end.
+    expect(documentCheckRateLimitCopy(5, null)).toMatch(/shortly/i);
+    // It is a plan boundary, not a fault: no blame, no verdict language.
+    for (const re of [...BANNED_VERDICTS, /error/i, /failed/i]) {
+      expect(withReset).not.toMatch(re);
+    }
+    // The CTA must not promise a checkout page — self-serve billing is dark.
+    expect(DOCUMENT_CHECK_VOLUME_CTA).not.toMatch(/buy|upgrade|subscribe|pricing/i);
   });
 
   it("clean-state heading and unavailable copy carry no verdict language", () => {

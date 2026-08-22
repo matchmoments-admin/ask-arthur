@@ -11,6 +11,10 @@ const flagState = vi.hoisted(() => ({ documentCheck: true }));
 const events = vi.hoisted(() => ({ rows: [] as Array<Record<string, unknown>> }));
 
 vi.mock("@askarthur/utils/rate-limit", () => ({
+  // Must mirror the real module's exports — an ESM named import of a
+  // missing export throws at module init (this mock silently 500'd the
+  // route until the constant was added).
+  DOCUMENT_UPLOAD_LIMIT_PER_HOUR: 5,
   checkDocumentUploadRateLimit: vi.fn(async () => {
     if (rateState.storeDown) {
       return {
