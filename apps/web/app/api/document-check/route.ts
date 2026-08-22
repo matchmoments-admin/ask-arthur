@@ -5,6 +5,7 @@ import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import {
   DOCUMENT_CHECK_DISCLAIMER,
+  DOCUMENT_CHECK_MAX_UPLOAD_BYTES,
   type WebDocumentCheckResponse,
 } from "@askarthur/types";
 import { logEvent } from "@/lib/analytics-events";
@@ -27,7 +28,10 @@ import { recordDocumentCheck } from "@/lib/document-check-records";
 // Stage-2 migration). `content: null` in the response means the pack did
 // not run for this request — "not assessed", never "clean".
 
-const MAX_UPLOAD_BYTES = 10_000_000; // bank statements exceed the 5 MB image cap
+// The ONE cap, shared with both clients' pre-checks (@askarthur/types) —
+// raising it here raises it everywhere. Bank statements exceed the 5 MB
+// image cap, hence 10 MB.
+const MAX_UPLOAD_BYTES = DOCUMENT_CHECK_MAX_UPLOAD_BYTES;
 
 export async function POST(req: NextRequest) {
   try {
@@ -87,6 +91,11 @@ export async function POST(req: NextRequest) {
         { status: file && file instanceof Blob && file.size > MAX_UPLOAD_BYTES ? 413 : 400 },
       );
     }
+    // Funnel discriminator: the standalone page vs the homepage scanner's
+    // document mode share this route — allowlisted so telemetry cardinality
+    // stays fixed regardless of what a client sends.
+    const surface =
+      form.get("surface") === "inline" ? "document_check_inline" : "document_check_web";
     const buffer = Buffer.from(await file.arrayBuffer());
     if (buffer.subarray(0, 5).toString("latin1") !== "%PDF-") {
       return NextResponse.json(
@@ -112,7 +121,7 @@ export async function POST(req: NextRequest) {
       units: 1,
       unitCostUsd: 0,
       metadata: {
-        surface: "document_check_web",
+        surface,
         is_pdf: inspection.structural.isPdf,
         findings: inspection.findings.length,
       },
@@ -126,6 +135,7 @@ export async function POST(req: NextRequest) {
         findings: inspection.findings.length,
         signals: inspection.findings.map((f) => f.signal).join(","),
         is_pdf: inspection.structural.isPdf,
+        surface,
       },
       path: "/api/document-check",
       requestId: null,

@@ -6,6 +6,7 @@ import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import {
   DOCUMENT_CHECK_DISCLAIMER,
+  DOCUMENT_CHECK_MAX_UPLOAD_BYTES,
   TIER_LIMITS,
   type WebDocumentCheckResponse,
 } from "@askarthur/types";
@@ -27,7 +28,7 @@ import { logCost } from "@/lib/cost-telemetry";
 // Both dark behind FF_DOCUMENT_CHECK_V1_API until the first pilot key is
 // provisioned.
 
-const MAX_UPLOAD_BYTES = 10_000_000;
+const MAX_UPLOAD_BYTES = DOCUMENT_CHECK_MAX_UPLOAD_BYTES;
 
 const SELECT_COLUMNS =
   "check_ref, checked_at, doc_sha256, jurisdiction, source, structural_summary, findings, abn_summary";

@@ -79,6 +79,13 @@ export const DOCUMENT_CHECK_COPY: Record<DocumentFindingSignal, DocumentFindingC
  *  page) so the honesty test covers the surface's most verdict-prone string. */
 export const DOCUMENT_CHECK_CLEAN_LABEL = "No editing traces found";
 
+/** Client-side pre-check copy — lives in the guarded table so the honesty
+ *  test covers it and both surfaces render identical strings. */
+export const DOCUMENT_CHECK_OVERSIZE_COPY =
+  "That PDF is over 10 MB. Try a smaller export.";
+export const DOCUMENT_CHECK_NOT_PDF_COPY =
+  "That file doesn't look like a PDF. Only PDF documents are supported for now.";
+
 /** Copy for a scan that could not run (checked:false / scan_unavailable) —
  *  which is NOT the clean state and must never borrow its copy. */
 export const DOCUMENT_CHECK_UNAVAILABLE_COPY =
