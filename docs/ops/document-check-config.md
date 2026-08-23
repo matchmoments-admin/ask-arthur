@@ -6,8 +6,9 @@ LLM-free; the B2B surface is org-metered. Billing config lives separately in
 [document-check-billing-config.md](./document-check-billing-config.md).
 
 Engine: `packages/scam-engine/src/document-check/` (seam: `inspectDocument`).
-Plan + North Star filter: the document-check plan; vocabulary: CONTEXT.md
-**Structural Finding**.
+Session handoff + priorities:
+[document-check-handoff-2026-08-23.md](../plans/document-check-handoff-2026-08-23.md).
+Vocabulary: CONTEXT.md → **Finding**, **Registry Check**.
 
 ## Surfaces
 
