@@ -121,6 +121,35 @@ _Avoid_: "clone hit", "clone finding" (the rejected parallel-table name from the
 The pre-Stage-1 MVP layer pulled forward from ADR-0016 Phase C in the 2026-05-24 amendment. Runs the whoisds NRD daily zip against the static `AU_BRAND_WATCHLIST` (~50 retail/bank/telco/post brands) at 08:30 UTC. Writes hits into `shopfront_clone_alerts` with `target_shop_id IS NULL`, `source = 'nrd'`, `severity_tier = 'low'` (matcher caps score < 0.95 → severity ≤ 38). Surfaces on the public `askarthur.au/clone-watch` page (`noindex` for the first 7 days while #371 v1 copy is pending). Plan: `docs/plans/clone-watch-mvp.md`. Lives in `packages/shopfront-glue/` (same package as Phase A/B; deletion test passes from Layer 0 onward).
 _Avoid_: "Stage 0E" (the issue-ticket stage label, not user-facing), "NRD sweep" without the "Layer 0" framing (loses the source-layering context).
 
+**Clone Lifecycle**:
+The enforcement state machine a Clone Alert moves through after detection, on
+`shopfront_clone_alerts.lifecycle_state`: `detected` → `monitoring` |
+`weaponised` → `reported` → `declined` | `taken_down`, plus `dormant`. Spec —
+the legal edges, the terminal set and the required coarse disposition — lives
+in `apps/web/lib/clone-watch/lifecycle.ts`; the SQL guards (v199 / v200 / v249 /
+v285) implement it and the v288 CHECK enforces its one hard invariant. Distinct
+from `alert_state`, the COARSE operator disposition (`open` / `taken_down` /
+`expired`) that the public `/clone-watch` page and the v198 brand-register
+open-count filter on: the two are synchronised at terminal states ONLY.
+_Avoid_: calling either column "status", and treating `lifecycle_state` as a
+liveness probe — it records the last observation, not whether the domain
+answers right now (that is `probeLiveness`).
+
+**Weaponised**:
+A Clone Alert observed serving live phishing or credential-harvest content —
+our own urlscan verdict, not the vendor's. The state the whole enforcement path
+exists to detect and act on. Only ever exits to `taken_down`: a later benign
+vendor grade must NOT move it back (the no-downgrade rule in
+`apply_netcraft_reconcile`). `declined → weaponised` is the money transition —
+the vendor graded it "no threat" and it weaponised afterwards — and is the
+premise of both the recheck loop and the false-negative escalation lane.
+
+**Vendor Gap**:
+The interval between Netcraft grading a lookalike non-malicious (`declined`)
+and that same domain being observed `weaponised`. The measurable claim behind
+the monthly clone-watch report. Publishable only from witnessed transitions
+(`netcraft_declined_at` + `weaponised_at`), never from backfilled stamps.
+
 **AU Brand Watchlist**:
 The static `BrandEntry[]` array at `packages/shopfront-glue/src/au-brand-watchlist.ts` — ~50 Australian retail, bank, telco, and logistics brand names + their `legitimate_domains` exclusion lists. Per-entry: `{ brand: string, legitimate_domains: string[] }`. Used by Layer 0 (`lexicalMatch()` runs every newly-registered domain against the full list) and reused by Phase A (unioned with installed `shopfront_shops` brand names) and Phase B (corpus-mining adds dynamic patterns to the same matcher). The file IS the seam — opt-out and lawyer-vetting happen by editing this file, not by adding a feature flag.
 
@@ -169,4 +198,5 @@ The per-brand rollup that aligns the three streams — one row per Canonical Bra
 - **"alert"** is still overloaded across the platform: brand alerts (the existing `brand_impersonation_alerts` table — AU govt/bank/telco surface), cost-telemetry alerts (Telegram digests), and oncall alerts (none yet) all live alongside the now-defined **Clone Alert** (clone-detection composite, in `shopfront_clone_alerts`). When the bare word "alert" appears in code or docs, prefer one of the specific terms.
 - **"campaign"** is overloaded: marketing campaigns (the `docs/campaigns/` folder) and scam campaigns (a near-synonym for **Scam Cluster** with an impersonated-brand axis). Prefer **Scam Cluster** for the scam-side meaning.
 - **"candidate"** carries two unrelated meanings: a **candidate domain** (a domain being evaluated as a possible clone — Brand/Visual/Semantic Match, Clone Alert) and a **Watchlist Candidate** (a _brand_ pending curation review in `reddit_watchlist_candidates`). Never write bare "candidate" — say "candidate domain" (a URL) or "watchlist candidate" (a brand).
+- **"dormant"** carries TWO contradictory meanings today and one grey badge renders both. v199 coined it for "was observed live, then dropped off DNS" — evidence the threat receded. v285's sweep reuses it for "we never got a urlscan verdict and gave up at the 90-day horizon" — no evidence either way, and a measured 43% of that cohort resolved again months later. Until a reason field separates them, `urlscan_uuid IS NULL` isolates the v285 cohort. Never read a DORMANT badge as "safe".
 - **"unactioned lookalike"** — a Clone Alert we submitted to Netcraft that Netcraft graded non-malicious (`lifecycle_state='declined'`, per-URL `no threats`/`unavailable`), so it is still live/parked and pre-weaponisation. It is the reportable state that is uniquely ours: commercial vendors surface their own takedowns, not the lookalikes their detection vendor declined to touch. Distinct from **taken_down** (Netcraft actioned) and **weaponised** (flipped to active phishing). The per-URL reconciler (`clone-watch-netcraft-reconcile`) sets it; the false-negative reporter (`clone-watch-netcraft-issue`) escalates it. See `docs/plans/clone-watch-brand-story-reporting.md`.
