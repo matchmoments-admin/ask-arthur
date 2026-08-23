@@ -62,15 +62,15 @@ describe("runAuPack", () => {
   it("null text (extraction unavailable) → textExtracted:false, zero findings", async () => {
     const r = await runAuPack(null);
     expect(r.content.textExtracted).toBe(false);
-    expect(r.content.abns).toEqual([]);
+    expect(r.content.checks).toEqual([]);
     expect(r.findings).toEqual([]);
     expect(abrState.calls).toEqual([]);
   });
 
   it("checksum-fail ABN → finding, and NO ABR call is wasted on it", async () => {
     const r = await runAuPack(`Invoice from Acme. ABN: ${INVALID_ABN}. Pay now.`);
-    expect(r.content.abns).toEqual([
-      { abn: INVALID_ABN, status: "invalid_checksum", entityName: null },
+    expect(r.content.checks).toEqual([
+      { kind: "abn", identifier: INVALID_ABN, status: "invalid_checksum", entityName: null },
     ]);
     expect(r.findings.map((f) => f.signal)).toEqual(["abn_checksum_fail"]);
     expect(abrState.calls).toEqual([]);
@@ -79,8 +79,8 @@ describe("runAuPack", () => {
   it("registered ABN → entity name, no finding", async () => {
     const [abn] = validAbns(1);
     const r = await runAuPack(`ABN ${abn}`);
-    expect(r.content.abns).toEqual([
-      { abn, status: "registered", entityName: "EXAMPLE PTY LTD" },
+    expect(r.content.checks).toEqual([
+      { kind: "abn", identifier: abn, status: "registered", entityName: "EXAMPLE PTY LTD" },
     ]);
     expect(r.findings).toEqual([]);
   });
@@ -89,7 +89,7 @@ describe("runAuPack", () => {
     abrState.mode = "not-found";
     const [abn] = validAbns(1);
     const r = await runAuPack(`ABN ${abn}`);
-    expect(r.content.abns[0]!.status).toBe("not_registered");
+    expect(r.content.checks[0]!.status).toBe("not_registered");
     expect(r.findings.map((f) => f.signal)).toEqual(["abn_not_registered"]);
   });
 
@@ -97,7 +97,7 @@ describe("runAuPack", () => {
     abrState.mode = "lookup-failed";
     const [abn] = validAbns(1);
     const r = await runAuPack(`ABN ${abn}`);
-    expect(r.content.abns[0]!.status).toBe("unverified");
+    expect(r.content.checks[0]!.status).toBe("unverified");
     expect(r.findings).toEqual([]);
   });
 
@@ -106,7 +106,7 @@ describe("runAuPack", () => {
     const [abn] = validAbns(1);
     const r = await runAuPack(`ABN ${abn} and ABN ${INVALID_ABN}`);
     expect(abrState.calls).toEqual([]);
-    expect(r.content.abns).toContainEqual({ abn, status: "unverified", entityName: null });
+    expect(r.content.checks).toContainEqual({ kind: "abn", identifier: abn, status: "unverified", entityName: null });
     expect(r.findings.map((f) => f.signal)).toEqual(["abn_checksum_fail"]);
   });
 
@@ -115,7 +115,7 @@ describe("runAuPack", () => {
     // flag ordinary invoices (review finding, PR #1030).
     const r = await runAuPack("Payment reference 61412345678 due 30 days.");
     expect(r.findings).toEqual([]);
-    expect(r.content.abns).toEqual([]);
+    expect(r.content.checks).toEqual([]);
     expect(abrState.calls).toEqual([]);
   });
 
@@ -123,8 +123,8 @@ describe("runAuPack", () => {
     abrState.mode = "cancelled";
     const [abn] = validAbns(1);
     const r = await runAuPack(`ABN ${abn}`);
-    expect(r.content.abns).toEqual([
-      { abn, status: "cancelled", entityName: "EXAMPLE PTY LTD" },
+    expect(r.content.checks).toEqual([
+      { kind: "abn", identifier: abn, status: "cancelled", entityName: "EXAMPLE PTY LTD" },
     ]);
     expect(r.findings.map((f) => f.signal)).toEqual(["abn_cancelled"]);
   });
@@ -146,8 +146,9 @@ describe("runAuPack", () => {
     const junk = Array.from({ length: 6 }, (_, i) => `ABN 1111111111${i}`).join("\n");
     const r = await runAuPack(`${junk}\nABN ${real}`);
     expect(abrState.calls).toEqual([real]);
-    expect(r.content.abns).toContainEqual({
-      abn: real,
+    expect(r.content.checks).toContainEqual({
+      kind: "abn",
+      identifier: real,
       status: "registered",
       entityName: "EXAMPLE PTY LTD",
     });
@@ -157,7 +158,7 @@ describe("runAuPack", () => {
     const abns = validAbns(8);
     const text = abns.map((a) => `ABN ${a}`).join("\n");
     const r = await runAuPack(text);
-    expect(r.content.abns.length).toBeLessThanOrEqual(5);
+    expect(r.content.checks.length).toBeLessThanOrEqual(5);
     expect(abrState.calls.length).toBeLessThanOrEqual(5);
   });
 });

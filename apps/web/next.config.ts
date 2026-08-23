@@ -86,11 +86,15 @@ const nextConfig: NextConfig = {
   // dynamically by scam-engine's c2pa-verify adapter. It must be required
   // at runtime from node_modules, never bundled — bundling breaks the
   // .node dlopen and bloats every function.
-  // pdfjs-dist must stay external: bundling it breaks the fake-worker's
-  // runtime import of ./pdf.worker.mjs relative to the compiled chunk, which
-  // would silently null out document-check text extraction in prod while
-  // vitest (resolving from node_modules) stays green.
-  serverExternalPackages: ["@contentauth/c2pa-node", "pdfjs-dist"],
+  // pdfjs-dist is deliberately NOT externalised. It was added here on a
+  // guess (that bundling would break its worker resolution); measuring the
+  // deployed build showed the opposite — externalising is what breaks it:
+  // Next's external-module loader evaluates pdf.mjs in a context where its
+  // canvas-global polyfills don't apply, so the module throws
+  // `ReferenceError: DOMMatrix is not defined` and text extraction silently
+  // returned null in every deployed build while passing locally (where it
+  // IS bundled). Verified against preview deployments 2026-08-23.
+  serverExternalPackages: ["@contentauth/c2pa-node"],
   poweredByHeader: false,
   images: {
     formats: ["image/avif", "image/webp"],

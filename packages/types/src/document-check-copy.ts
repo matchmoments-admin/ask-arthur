@@ -79,6 +79,26 @@ export const DOCUMENT_CHECK_COPY: Record<DocumentFindingSignal, DocumentFindingC
  *  page) so the honesty test covers the surface's most verdict-prone string. */
 export const DOCUMENT_CHECK_CLEAN_LABEL = "No editing traces found";
 
+/** Rate-limit copy. A bare "too many checks, try again later" tells the
+ *  user nothing about why they were refused or what to do — so this states
+ *  the actual free allowance, when it frees up, and that a higher-volume
+ *  option exists. Deliberately does NOT promise a purchase page: self-serve
+ *  billing is dark, so the honest route is a conversation. */
+export function documentCheckRateLimitCopy(
+  limitPerHour: number,
+  minutesUntilReset: number | null,
+): string {
+  const when =
+    minutesUntilReset && minutesUntilReset > 0
+      ? `You can check another in about ${minutesUntilReset} minute${minutesUntilReset === 1 ? "" : "s"}.`
+      : "It frees up again shortly.";
+  return `Free document checks are limited to ${limitPerHour} an hour. ${when}`;
+}
+
+/** Shown beside the rate-limit message; the surface renders the link. */
+export const DOCUMENT_CHECK_VOLUME_CTA =
+  "Checking documents regularly, or for a business?";
+
 /** Client-side pre-check copy — lives in the guarded table so the honesty
  *  test covers it and both surfaces render identical strings. */
 export const DOCUMENT_CHECK_OVERSIZE_COPY =

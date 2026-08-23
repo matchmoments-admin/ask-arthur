@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { inspectDocument } from "@askarthur/scam-engine/document-check";
-import { checkDocumentUploadRateLimit } from "@askarthur/utils/rate-limit";
+import {
+  checkDocumentUploadRateLimit,
+  DOCUMENT_UPLOAD_LIMIT_PER_HOUR,
+} from "@askarthur/utils/rate-limit";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import {
   DOCUMENT_CHECK_DISCLAIMER,
   DOCUMENT_CHECK_MAX_UPLOAD_BYTES,
+  documentCheckRateLimitCopy,
   type WebDocumentCheckResponse,
 } from "@askarthur/types";
 import { logEvent } from "@/lib/analytics-events";
@@ -64,12 +68,24 @@ export async function POST(req: NextRequest) {
           { status: 503, headers: { "Retry-After": "60" } },
         );
       }
+      // Explain the allowance rather than just refusing — the limit is a
+      // free-tier boundary, not a fault, and the user can't act on
+      // "too many checks".
+      const secondsToReset = rate.resetAt
+        ? Math.max(1, Math.round((rate.resetAt.getTime() - Date.now()) / 1000))
+        : null;
       return NextResponse.json(
-        { error: "rate_limited", message: rate.message ?? "Too many checks. Try again later." },
+        {
+          error: "rate_limited",
+          message: documentCheckRateLimitCopy(
+            DOCUMENT_UPLOAD_LIMIT_PER_HOUR,
+            secondsToReset ? Math.ceil(secondsToReset / 60) : null,
+          ),
+        },
         {
           status: 429,
-          headers: rate.resetAt
-            ? { "Retry-After": String(Math.max(1, Math.round((rate.resetAt.getTime() - Date.now()) / 1000))) }
+          headers: secondsToReset
+            ? { "Retry-After": String(secondsToReset) }
             : undefined,
         },
       );

@@ -3,15 +3,31 @@
 // This is the Document Check Module's ONE deliberate exception to the
 // no-parser-deps rule (metadata-origin.ts doctrine): extracting text needs
 // Flate inflation and CID font maps, which is a multi-month project to
-// hand-roll. pdfjs-dist is the most-fuzzed PDF parser in existence (it
-// ships in Firefox), and it runs here under strict containment:
+// hand-roll. It runs under strict containment:
 // - only AFTER the dependency-free structural walk admitted the file;
-// - no PostScript-function eval exists to disable — pdfjs-dist 6.x removed
-//   the eval path (and its isEvalSupported switch) upstream entirely;
-// - a hard timeout that destroys the parse;
+// - a hard timeout;
 // - page and character caps;
 // - any failure returns null — the content layer reports "not assessed"
 //   (the ADR-0009 unverified discipline), never a finding.
+//
+// WHY unpdf AND NOT pdfjs-dist DIRECTLY (measured, 2026-08-23 — three
+// preview deployments):
+// Raw pdfjs-dist cannot load on the Vercel runtime, in either bundling
+// mode, and both failures are SILENT here because we degrade to null:
+//   * `serverExternalPackages: ["pdfjs-dist"]` → Next's external-module
+//     loader evaluates pdf.mjs where its canvas-global polyfills don't
+//     apply → `ReferenceError: DOMMatrix is not defined`.
+//   * bundled (the default) → gets past that, then dies in pdfjs's
+//     fake-worker setup: `Cannot find module '.../pdf.worker.mjs'`, because
+//     Vercel's file tracing follows the static import of pdf.mjs but not
+//     the DYNAMIC import of its worker.
+// Both reproduce ONLY in a deployed build — locally pdfjs prints the same
+// canvas warnings and works fine, which is why 45 tests, CI and five review
+// rounds all missed it. unpdf (unjs) exists precisely for this: it ships a
+// serverless build of pdfjs with no worker and no canvas dependency, so
+// there is no dynamic worker import for tracing to miss. Keeping raw pdfjs
+// would mean pinning bundler-tracing globs across a pnpm workspace — a
+// standing trap for the next dependency bump.
 
 import { logger } from "@askarthur/utils/logger";
 
@@ -34,20 +50,9 @@ export async function extractPdfText(
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxPages = opts.maxPages ?? MAX_PAGES;
 
-  let task: { destroy: () => Promise<void> } | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-    // pdfjs-dist 6.x removed PostScript-function eval entirely, so there is
-    // no isEvalSupported switch to turn off any more.
-    const loadingTask = pdfjs.getDocument({
-      // Copy: pdfjs transfers/detaches the buffer it is given.
-      data: new Uint8Array(buffer),
-      disableFontFace: true,
-      useSystemFonts: false,
-      stopAtErrors: false,
-    });
-    task = loadingTask;
+    const { extractText, getDocumentProxy } = await import("unpdf");
 
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new Error("pdf_text_timeout")), timeoutMs);
@@ -55,20 +60,19 @@ export async function extractPdfText(
 
     const extracted = await Promise.race([
       (async () => {
-        const loaded = await loadingTask.promise;
-        const pages = Math.min(loaded.numPages, maxPages);
-        const parts: string[] = [];
-        let chars = 0;
-        for (let i = 1; i <= pages && chars < MAX_CHARS; i++) {
-          const page = await loaded.getPage(i);
-          const content = await page.getTextContent();
-          const text = content.items
-            .map((it) => ("str" in it ? it.str : ""))
-            .join(" ");
-          chars += text.length;
-          parts.push(text);
+        // Copy: the parser may transfer/detach the buffer it is given.
+        const doc = await getDocumentProxy(new Uint8Array(buffer));
+        const pages = Math.min(doc.numPages, maxPages);
+        // mergePages:false returns per-page strings so the page cap is a
+        // real bound on work, not a post-hoc slice.
+        const { text } = await extractText(doc, { mergePages: false });
+        const chosen = Array.isArray(text) ? text.slice(0, pages) : [String(text)];
+        let out = "";
+        for (const part of chosen) {
+          out += (out ? "\n" : "") + part;
+          if (out.length >= MAX_CHARS) break;
         }
-        return parts.join("\n");
+        return out;
       })(),
       timeout,
     ]);
@@ -81,12 +85,5 @@ export async function extractPdfText(
     return null;
   } finally {
     if (timer) clearTimeout(timer);
-    try {
-      // Destroying the loading task tears down the document and worker too —
-      // the teardown path pdfjs 6.x supports.
-      await task?.destroy();
-    } catch {
-      // already torn down
-    }
   }
 }

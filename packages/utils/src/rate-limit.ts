@@ -71,6 +71,11 @@ function getImageUploadLimiter() {
   return _imageUploadLimiter;
 }
 
+/** Free document checks per IP per hour. Exported so user-facing copy can
+ *  state the real number instead of hardcoding one that silently drifts
+ *  from the limiter. */
+export const DOCUMENT_UPLOAD_LIMIT_PER_HOUR = 5;
+
 function getDocumentUploadLimiter() {
   if (!_documentUploadLimiter) {
     _documentUploadLimiter = new Ratelimit({
@@ -78,7 +83,7 @@ function getDocumentUploadLimiter() {
         url: process.env.UPSTASH_REDIS_REST_URL!,
         token: process.env.UPSTASH_REDIS_REST_TOKEN!,
       }),
-      limiter: Ratelimit.slidingWindow(5, "1 h"),
+      limiter: Ratelimit.slidingWindow(DOCUMENT_UPLOAD_LIMIT_PER_HOUR, "1 h"),
       prefix: "askarthur:doc-upload",
       analytics: true,
       timeout: 1000,

@@ -12,7 +12,7 @@ import {
   DOCUMENT_CHECK_CLEAN_COPY,
   DOCUMENT_CHECK_CLEAN_LABEL,
   DOCUMENT_CHECK_COPY,
-  type DocumentAbnCheck,
+  type DocumentRegistryCheck,
   type DocumentFinding,
   type WebDocumentCheckResponse,
 } from "@askarthur/types";
@@ -20,7 +20,7 @@ import {
 /** Exported for the /document-check/[ref] evidence page — the persisted
  *  record must describe a signal with EXACTLY the words the user saw at
  *  check time, so there is one copy of this mapping. */
-export function abnStatusLine(a: DocumentAbnCheck): { text: string; tone: "neutral" | "warn" } {
+export function registryStatusLine(a: DocumentRegistryCheck): { text: string; tone: "neutral" | "warn" } {
   switch (a.status) {
     case "registered":
       return {
@@ -74,11 +74,11 @@ export function DocumentFindingsList({
 }
 
 /** The ABN table — shared with the evidence page. */
-export function DocumentAbnList({
-  abns,
+export function DocumentRegistryList({
+  checks,
   heading,
 }: {
-  abns: DocumentAbnCheck[];
+  checks: DocumentRegistryCheck[];
   heading: string;
 }) {
   return (
@@ -87,11 +87,11 @@ export function DocumentAbnList({
         {heading}
       </p>
       <ul className="mt-2 space-y-1.5">
-        {abns.map((a) => {
-          const line = abnStatusLine(a);
+        {checks.map((a) => {
+          const line = registryStatusLine(a);
           return (
-            <li key={a.abn} className="flex justify-between gap-4">
-              <span className="font-mono text-xs text-gov-slate">{a.abn}</span>
+            <li key={`${a.kind}:${a.identifier}`} className="flex justify-between gap-4">
+              <span className="font-mono text-xs text-gov-slate">{a.identifier}</span>
               <span
                 className={`text-right ${
                   line.tone === "warn" ? "font-medium text-[#F57C00]" : "text-gov-slate"
@@ -128,9 +128,9 @@ export default function DocumentCheckResult({
         </div>
       )}
 
-      {result.content && result.content.abns.length > 0 ? (
-        <DocumentAbnList
-          abns={result.content.abns}
+      {result.content && result.content.checks.length > 0 ? (
+        <DocumentRegistryList
+          checks={result.content.checks}
           heading="ABNs found on this document"
         />
       ) : null}
