@@ -1,0 +1,57 @@
+import { readFileSync } from "node:fs";
+
+import { describe, expect, it } from "vitest";
+
+/**
+ * v285 — the urlscan submit lane's three capacity numbers are coupled, and
+ * getting them out of step fails SILENTLY (the lane just does less work than
+ * its constant claims, which is the exact defect class v284/v285 exist to fix:
+ * 924 alerts never scanned, discovered only by querying prod).
+ *
+ * These read the source rather than importing the module, because importing it
+ * pulls in the whole Inngest/Supabase chain for what is a static invariant.
+ */
+describe("clone-watch urlscan submit capacity invariants", () => {
+  const SRC = readFileSync(
+    new URL(
+      "../app/api/inngest/functions/clone-watch-urlscan-submit.ts",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  const num = (re: RegExp, label: string): number => {
+    const m = re.exec(SRC);
+    expect(m, `could not find ${label}`).not.toBeNull();
+    return Number(m![1].replace(/_/g, ""));
+  };
+
+  const batchLimit = () => num(/const SUBMIT_BATCH_LIMIT = (\d+)/, "SUBMIT_BATCH_LIMIT");
+  const throttleLimit = () =>
+    num(/throttle: \{ limit: (\d+), period: "1d" \}/, "throttle limit");
+  const wallClockMs = () =>
+    num(/const SUBMIT_WALL_CLOCK_MS = ([\d_]+)/, "SUBMIT_WALL_CLOCK_MS");
+  const finishMs = () => num(/timeouts: \{ finish: "(\d+)m" \}/, "finish timeout") * 60_000;
+
+  it("throttle is not below the batch limit, or the batch limit is a lie", () => {
+    // The fn-level throttle is a HARD daily ceiling. If it drops below
+    // SUBMIT_BATCH_LIMIT, a single cron run cannot reach its own batch size and
+    // the lane quietly underperforms its stated capacity.
+    expect(throttleLimit()).toBeGreaterThanOrEqual(batchLimit());
+  });
+
+  it("leaves the wall-clock guard strictly inside the finish budget", () => {
+    // The guard exists so a slow batch breaks cleanly and drains next tick
+    // rather than replaying the whole step (which would re-POST to urlscan).
+    // It only works if it fires BEFORE Inngest cancels the run.
+    expect(wallClockMs()).toBeLessThan(finishMs());
+  });
+
+  it("keeps the dormant horizon aligned with the worklist's 90-day window", () => {
+    // The v285 worklist admits `first_seen_at >= now() - 90 days`; the sweep
+    // retires `< now() - horizon`. They must be the same number or rows are
+    // either retired while still eligible, or fall in a gap and vanish
+    // silently — the very failure this migration removed.
+    expect(num(/const DORMANT_HORIZON_DAYS = (\d+)/, "DORMANT_HORIZON_DAYS")).toBe(90);
+  });
+});

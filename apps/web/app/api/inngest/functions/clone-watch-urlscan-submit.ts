@@ -25,11 +25,34 @@ import {
  *
  * Cron 09:00 UTC — after the 08:30 NRD ingest + the preclassify fan-out it
  * triggers have settled, so the gate has classification rows to read.
+ *
+ * COVERAGE (v285, measured 2026-08-23). 924 of 2,786 alerts had never received
+ * a urlscan verdict, 422 of them high-confidence. Two causes, both fixed in the
+ * v285 worklist: a 400 ("DNS Error - Could not resolve domain") was counting
+ * toward the death streak, retiring 281 high-confidence rows — a random sample
+ * of 70 showed 43% resolving months later, i.e. we were discarding exactly the
+ * pre-weaponisation tail this feature exists to watch; and the worklist was
+ * LIFO with a 14-day cutoff, so backlog rows were outranked until they aged out
+ * permanently. That matters more since v284 made Netcraft submission require a
+ * urlscan verdict: no verdict now means no report, ever.
+ *
+ * The batch limit was raised 30 -> 75 at the same time. 30 was never a vendor
+ * or cost number — the recheck lane already runs ~200 urlscan submits/day on
+ * the same key. The quota check the ops doc had flagged UNVERIFIED for months
+ * was finally run on 2026-08-23: the real entitlement is unlisted 1,000/day
+ * (public 5,000, retrieve 10,000), not the documented 100. At 75 + recheck's
+ * ~200 we sit at roughly a quarter of the ceiling. The binding constraint is
+ * SUBMIT_WALL_CLOCK_MS below, not urlscan — and overshooting is graceful,
+ * because a 429 leaves the row untouched (urlscan-submit-one.ts:112).
  */
 
-const SUBMIT_BATCH_LIMIT = 30;
+const SUBMIT_BATCH_LIMIT = 75;
 const MIN_CONFIDENCE = 0.7;
 const MAX_FAILURE_STREAK = 3;
+// Rows that age past the worklist's 90-day horizon while still unscanned are
+// stamped `dormant` rather than silently vanishing (v285). Bounded per run.
+const DORMANT_HORIZON_DAYS = 90;
+const DORMANT_BATCH_LIMIT = 500;
 // Break the batch loop before the finish budget so worst-case submit latency
 // can't force a full-batch re-POST to urlscan; leftovers drain next tick.
 const SUBMIT_WALL_CLOCK_MS = 200_000;
@@ -42,7 +65,9 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
     concurrency: { limit: 3 },
     // Global ceiling across all submits/day regardless of pool size — keeps a
     // matcher blow-up structurally incapable of recreating the May-27 burst.
-    throttle: { limit: 40, period: "1d" },
+    // v285: 40 -> 90, tracking SUBMIT_BATCH_LIMIT 30 -> 75 and leaving the same
+    // proportional headroom for manual triggers on top of the cron.
+    throttle: { limit: 90, period: "1d" },
     timeouts: { finish: "5m" },
   },
   [
@@ -68,8 +93,56 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
       return (data as CloneCandidate[] | null) ?? [];
     });
 
+    // Retire what we are giving up on, BEFORE the empty-worklist return — a
+    // quiet day is exactly when the horizon still needs sweeping. Widening the
+    // worklist horizon to 90 days without this would only move the silent drop
+    // from day 14 to day 90; stamping `dormant` makes the abandonment countable
+    // (and gives that state its first writer since v199 declared it).
+    const dormant = await step.run("retire-aged-out", async () => {
+      const { data, error } = await sb.rpc("mark_stale_clone_alerts_dormant", {
+        p_horizon_days: DORMANT_HORIZON_DAYS,
+        p_min_confidence: MIN_CONFIDENCE,
+        p_limit: DORMANT_BATCH_LIMIT,
+      });
+      if (error) {
+        // Never fail the submit run over bookkeeping.
+        logger.error("clone-watch urlscan submit: dormant sweep failed", {
+          error: error.message,
+        });
+        return 0;
+      }
+      return typeof data === "number" ? data : 0;
+    });
+
+    if (dormant > 0) {
+      logger.warn("clone-watch urlscan submit: alerts retired as dormant", {
+        dormant,
+        horizonDays: DORMANT_HORIZON_DAYS,
+      });
+    }
+
     if (candidates.length === 0) {
-      return { ok: true, submitted: 0, reason: "no_gated_candidates" };
+      // Still log the sweep — cost_telemetry is the durable record (this
+      // logger is console-backed with no Axiom transport), so a run that only
+      // retired rows must not be invisible.
+      if (dormant > 0) {
+        await step.run("log-cost-dormant-only", async () => {
+          logCost({
+            feature: "shopfront_clone_urlscan",
+            provider: "urlscan",
+            operation: "submit_batch",
+            units: 0,
+            unitCostUsd: 0,
+            metadata: { submitted: 0, dormant_retired: dormant },
+          });
+        });
+      }
+      return {
+        ok: true,
+        submitted: 0,
+        dormant,
+        reason: "no_gated_candidates",
+      };
     }
 
     // Submit the whole batch inside ONE step instead of one step per candidate.
@@ -131,6 +204,7 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
           submit_failed: submitFailed,
           rate_limited: rateLimited,
           reputation_hits: reputationHits,
+          dormant_retired: dormant,
         },
       });
     });
@@ -141,6 +215,7 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
       submitFailed,
       rateLimited,
       reputationHits,
+      dormant,
     });
 
     // The durable signal is the cost_telemetry row above; this is stderr only
@@ -152,6 +227,13 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
       });
     }
 
-    return { ok: true, submitted, submitFailed, rateLimited, reputationHits };
+    return {
+      ok: true,
+      submitted,
+      submitFailed,
+      rateLimited,
+      reputationHits,
+      dormant,
+    };
   }),
 );
