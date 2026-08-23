@@ -854,6 +854,31 @@ horizon alone would have moved the silent drop from day 14 to day 90, so
 empty-worklist return) retires aged-out unscanned rows explicitly and returns a
 count that lands in `cost_telemetry` metadata as `dormant_retired`.
 
+**`dormant` is deliberately TERMINAL, and that is a judgement call worth
+re-examining.** Nothing transitions a row out of it — not submit (the row is
+past the 90-day horizon and `first_seen_at` only gets older), not retrieve (no
+uuid), not recheck (gates on `monitoring`/`declined`). The sweep does not
+_cause_ that loss: those rows were already invisible to every lane the moment
+they crossed the horizon. What it changes is that the abandonment is now
+recorded instead of silent. But given the 43% figure above, a domain that never
+resolved in 90 days is not certainly dead, so if we ever want a cohort back:
+
+```sql
+-- Revive a dormant cohort (re-enters the submit worklist only if it is also
+-- inside the 90-day horizon, so widen the horizon first or this is a no-op).
+UPDATE public.shopfront_clone_alerts
+SET lifecycle_state = 'detected', alert_state = 'open', updated_at = now()
+WHERE lifecycle_state = 'dormant' AND candidate_domain = ANY($1);
+```
+
+**Two different things now share the `dormant` badge.** v199's original meaning
+was "was observed live, then dropped off DNS" — evidence the threat receded.
+v285's is "we never got a single urlscan result and gave up at 90 days" — no
+evidence either way. `lifecycleBadge()` (`apps/web/lib/clone-watch/outcome-copy.ts`)
+renders one grey DORMANT for both, so an operator cannot tell "safe to stop
+worrying" from "we simply stopped looking". Distinguishing them needs a reason
+field; until then, `urlscan_uuid IS NULL` separates the v285 cohort.
+
 Confirm the lane is healthy rather than starved:
 
 ```sql

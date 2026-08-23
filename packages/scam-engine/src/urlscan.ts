@@ -66,7 +66,10 @@ const EMPTY_RESULT: URLScanResult = {
 
 /**
  * Submit a URL for scanning. Returns a scan UUID for later retrieval.
- * Free tier: 100 scans/day (public), 5,000/day (paid).
+ * Quota, MEASURED against the production key 2026-08-23 (the long-standing
+ * "100/day free tier" figure in this repo was wrong by 10x and had never been
+ * verified): public 5,000/day, unlisted 1,000/day, private 50/day, retrieve
+ * 10,000/day. Clone-watch submits as unlisted, so 1,000/day is the real cap.
  *
  * Existing legacy surface — returns `null` on any failure. New code
  * should prefer `submitURLScanWithDetails` so it can record the failure
