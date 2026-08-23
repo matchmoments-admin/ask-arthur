@@ -117,6 +117,48 @@ Local dev **cannot** validate item 1 — the failure mode is bundler-specific.
 7. **Evidence (records flag on).** A flagged check returns a `DC-` ref and
    `/document-check/[ref]` renders it; a malformed ref 404s identically.
 
+## What the structural layer can and cannot see
+
+**Re-rendering erases history — this is inherent, not a bug.** Two things
+are both called "editing":
+
+- **Incremental save** (Acrobat, macOS Preview annotate-and-save) _appends_
+  to the existing file. The original bytes remain, a revision is added, and
+  we read the trail. This is what `multiple_revisions` detects.
+- **Re-render** (print-to-PDF, "Save As", export from a web portal, most
+  online converters) manufactures a **brand-new single-revision file**. No
+  prior history exists in it, so a document edited and _then_ re-rendered
+  is structurally indistinguishable from a freshly-issued one.
+
+Consequence for the threat model: a payslip doctored in Photoshop and then
+printed to PDF has a spotless structural record. That is precisely why the
+clean-state copy says "no editing traces found, not that the document is
+real", and why the **content layer carries the weight for the B2B use
+case** — register checks interrogate the document's _claims_, which survive
+re-rendering, rather than the file's history, which does not.
+
+Recognisable re-render producers seen in the wild: `Skia/PDF` (Chrome
+print-to-PDF, often with a full user-agent in `/Creator`), `Quartz
+PDFContext` (macOS print), `Microsoft Print to PDF`, `wkhtmltopdf`,
+Ghostscript. None of these is a finding — printing to PDF is completely
+normal — but they explain why a clean result on such a file proves even
+less than usual. Surfacing that explicitly in the clean state is a
+proposed, not-yet-built improvement.
+
+## Free-tier rate limit
+
+5 checks per IP per hour (`DOCUMENT_UPLOAD_LIMIT_PER_HOUR`, exported from
+`packages/utils/src/rate-limit.ts` and used by BOTH the limiter and the
+user-facing copy so the stated allowance cannot drift from the enforced
+one). The 429 states the allowance and the wait, and points at `/contact` —
+NOT at a checkout, because self-serve billing is dark; the copy test bans
+buy/upgrade/subscribe/pricing in that CTA. Update it when billing goes live.
+
+**Preview and production share one Upstash instance**, so smoke-testing
+from your own IP consumes the same window a real user (or you) would use.
+To clear it: delete keys matching `askarthur:doc-upload*` via the Upstash
+REST API.
+
 ## Known gaps (deliberate)
 
 - **Scanned / photographed documents** — no OCR. Text extraction returns null

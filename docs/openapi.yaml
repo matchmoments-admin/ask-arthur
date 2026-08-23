@@ -483,6 +483,25 @@ paths:
         per calendar month by plan tier; response carries monthlyRemaining.
       operationId: runDocumentCheck
       tags: [DocumentChecks]
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The PDF to check (≤10 MB).
+                caseRef:
+                  type: string
+                  maxLength: 128
+                  description: >
+                    Optional applicant/application grouping key. Stored
+                    verbatim and never parsed; use it to group the several
+                    documents belonging to one application, then retrieve
+                    them with GET ?case=.
       responses:
         "200":
           description: Check result (or checked:false/scan_unavailable when the scan could not run).
@@ -504,9 +523,23 @@ paths:
             type: string
             example: 30d
           description: Lookback window, e.g. 7d (1–90 days, default 30).
+        - name: case
+          in: query
+          schema:
+            type: string
+            example: APP-2026-0842
+          description: >
+            Return only checks recorded against this applicant/application
+            grouping key (the value supplied as `caseRef` on POST). The unit
+            of work is usually the application, not the document.
       responses:
         "200":
-          description: Flagged records for the calling organisation.
+          description: >
+            The calling organisation's own document-check records — every
+            check it submitted, not only flagged ones, so the feed is a
+            complete audit trail. `meta.flagged` counts those carrying at
+            least one finding. Metadata only: never document bytes or
+            extracted text.
         "403":
           description: API key is not linked to an organisation.
   /image-checks:
