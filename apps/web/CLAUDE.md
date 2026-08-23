@@ -17,11 +17,12 @@ app/
 │   ├── v1/                # B2B endpoints (API-key gated, tier-throttled)
 │   ├── webhooks/          # bot platforms + Stripe
 │   ├── cron/              # Vercel cron handlers
+│   ├── inngest/           # Durable consumers for analyze.completed.v1
 │   └── ...
 ├── app/                   # authenticated consumer pages
-│   ├── dashboard/         # main user dashboard
+│   ├── page.tsx           # main user dashboard
 │   ├── billing/           # Stripe portal entry
-│   ├── reports/threats/   # user's own analyses
+│   ├── reports/, threats/ # user's own analyses (separate sibling routes)
 │   └── ...
 ├── banking/, telco/, digital-platforms/   # SPF sector landing pages
 ├── blog/                  # MDX blog posts
@@ -36,7 +37,6 @@ lib/                       # Local-only utilities (use @/lib/...)
   └── ...
 __tests__/                 # vitest, mocks the @askarthur/* packages
 middleware.ts              # Auth wrapping (Promise.race 3s), bot routing
-inngest/                   # Durable consumers for analyze.completed.v1
 emails/                    # React Email templates
 ```
 
@@ -67,7 +67,7 @@ Only fall back to `pnpm turbo build` (no filter) when verifying cross-package im
 
 ## Recommended local tooling
 
-- **TypeScript LSP** — `/plugin install typescript-lsp@anthropics-claude-code` enables real type diagnostics and cross-package go-to-definition for the Claude Code session. High leverage in a 14-package monorepo with strict TS; per-developer choice (not committed config). Requires `typescript-language-server` available — installed via `pnpm install` at the workspace root.
+- **TypeScript LSP** — `/plugin install typescript-lsp@anthropics-claude-code` enables real type diagnostics and cross-package go-to-definition for the Claude Code session. High leverage in an 18-package monorepo with strict TS; per-developer choice (not committed config). Requires `typescript-language-server` available — installed via `pnpm install` at the workspace root.
 
 > The Zod 4 / Next 16 / React 19 drift hazards live in [`.claude/skills/grill-with-docs/STACK-PINS.md`](../../.claude/skills/grill-with-docs/STACK-PINS.md). Read that first if a session involves any of those libraries.
 
@@ -86,4 +86,4 @@ Only fall back to `pnpm turbo build` (no filter) when verifying cross-package im
 | Feature flag inventory          | [`docs/system-map/feature-flags.md`](../../docs/system-map/feature-flags.md)                                                                                                                                      |
 | The 6 canonical data flows      | [`docs/system-map/data-flows.md`](../../docs/system-map/data-flows.md)                                                                                                                                            |
 | Inngest functions + Vercel cron | [`docs/system-map/background-workers.md`](../../docs/system-map/background-workers.md)                                                                                                                            |
-| DB schema                       | [`docs/system-map/database.md`](../../docs/system-map/database.md) — no table/RPC count here on purpose: it read "121 tables, 71 RPCs" for months while prod had 159 and 177. Query prod when the number matters. |
+| DB schema                       | [`docs/system-map/database.md`](../../docs/system-map/database.md) — has a table/RPC count, but it has drifted from prod before (read "121 tables, 71 RPCs" for months while prod had 159 and 177) and isn't re-verified on every edit. Query prod when the number matters. |

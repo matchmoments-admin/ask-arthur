@@ -13,7 +13,7 @@ Scoped guidance for the scam-engine package — Claude AI integration, threat en
 
 ## What it doesn't own
 
-- **Verdict merge logic** — lives in `@askarthur/core-analysis` (`mergeVerdict`, `runAnalysisCore`). Don't duplicate URL-escalation or injection-floor rules here.
+- **Verdict merge logic** — `mergeVerdict` lives in `@askarthur/core-analysis`; `runAnalysisCore` lives in this package's own `analyze-core.ts`. Don't duplicate URL-escalation or injection-floor rules here.
 - **Bot formatting** — lives in `@askarthur/bot-core` (per-platform formatters, `analyzeForBot`).
 - **Type definitions** — Zod schemas + interfaces live in `@askarthur/types`. Add new public shapes there, not here.
 
@@ -35,7 +35,7 @@ pnpm --filter @askarthur/scam-engine test
 pnpm --filter @askarthur/scam-engine test ssrf-guard
 ```
 
-Package tests live under `src/__tests__/` and `src/inngest/__tests__/`. There is no separate typecheck script; `pnpm --filter @askarthur/web typecheck` will surface any contract breakage because web consumes most exports.
+Package tests live under `src/__tests__/` and `src/inngest/__tests__/`. `pnpm --filter @askarthur/scam-engine typecheck` runs `tsc --noEmit` directly; `pnpm --filter @askarthur/web typecheck` also surfaces contract breakage because web consumes most exports.
 
 ## Gotchas
 
