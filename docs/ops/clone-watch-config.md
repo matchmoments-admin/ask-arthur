@@ -880,6 +880,18 @@ SELECT count(*) FROM list_clone_alerts_pending_urlscan_submit(75, 0.7, 3);
   the recheck lane's ~200/day we sit at roughly a quarter of the real ceiling; the
   binding constraint is the submit fn's 200s wall clock, not urlscan.
 
+- **There is no true per-day SUBMISSION budget on this lane, and the fn-level
+  `throttle` is not one.** Throttle caps RUNS per period (see the
+  [brake-matrix glossary](../inngest-brakes.md)); one run submits up to
+  `SUBMIT_BATCH_LIMIT` rows, so the worst case is `throttle x batch`, not
+  `throttle`. v285 briefly raised the throttle 40 -> 90 on that misreading — which
+  would have widened the manual-trigger blast radius to 90x75 against a 1,000/day
+  quota — and it was reverted the same day. The daily figure in practice is one
+  cron fire = `SUBMIT_BATCH_LIMIT` (75); operator re-fires stack on top. If a real
+  budget is ever wanted, the shape to copy is the `today` CTE in
+  `list_clone_alerts_pending_netcraft_auto` (v284), which folds a 24h allowance
+  into the worklist itself rather than relying on an invocation cap.
+
 - **Measured use, 30 days to 2026-08-09: ~230 submit POSTs/day** —
   `recheck_submit` ~200/day (50 x 4 crons) + `submit_batch` 30/day. The previous
   estimate here ("~5-10 new + ~50 daily re-scans = ~60-70/day") predated the
