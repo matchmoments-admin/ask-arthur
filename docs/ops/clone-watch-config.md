@@ -807,15 +807,79 @@ WHERE brand = 'Bunnings';
 
 `FF_SHOPFRONT_CLONE_NOTIFY_BRAND` is **already ON in prod** (since 2026-05-27, first live NAB send at 09:24 UTC) — verifying a `manual_review` row to `fraud_inbox` immediately makes that brand reachable.
 
+### urlscan coverage (v285, measured 2026-08-23)
+
+**924 of 2,786 alerts had never received a urlscan verdict** — 422 of them rows
+the preclassifier scored as a clone at confidence >= 0.7. This became critical
+when v284 made Netcraft submission require a verdict: no verdict now means no
+report, ever.
+
+| Population                               | n   | high-confidence |
+| ---------------------------------------- | --- | --------------- |
+| retired at `urlscan_failure_streak >= 3` | 282 | **281**         |
+| never attempted                          | 532 | 44              |
+| in flight (streak 1-2)                   | 110 | 97              |
+
+**269 of the 282 retired rows failed with `400 - "DNS Error - Could not resolve
+domain"`.** A random sample of 70 of those domains was resolved on 2026-08-23:
+**30 (43%) resolve today** — `deutschebnk.org`, `kraken-login.org`,
+`noreply-supportfacebook.com`, `amazon-business-service.shop`, `amaz0n.plus`,
+`hsbc.co.mw` among them. A newly-registered domain that does not resolve _yet_ is
+the pre-weaponisation state this feature exists to watch; we were retiring it
+after three attempts and never looking again.
+
+Two causes, both fixed in v285:
+
+- **NXDOMAIN was treated as death.** v279 added a 7-day retry cadence for
+  `status=400` rows, but the `urlscan_failure_streak < 3` gate still killed them
+  first. A 400 no longer counts toward the streak — the same carve-out the repo
+  already makes for 429s (`urlscan-submit-one.ts:112`). No backfill was needed;
+  the predicate change alone re-admitted them.
+- **LIFO starvation + a 14-day cutoff.** `ORDER BY first_seen_at DESC` against a
+  30-row cap meant fresh alerts won every slot; a passed-over row was never
+  stamped (so never "failed"), just outranked until it aged out permanently —
+  invisible to submit (aged out), retrieve (needs a uuid) and recheck (gates on
+  `monitoring`/`declined`). Now the horizon is 90 days and **one third of every
+  batch is reserved for the oldest eligible rows**, ordered first so the
+  wall-clock break cannot re-create the starvation.
+
+Measured effect on apply: the worklist went from returning **18 rows to 75**
+(the full cap), with positions 1-25 being the 84-90-day rows nearest the horizon.
+
+**`dormant` now has a writer.** It has been in the `lifecycle_state` CHECK
+constraint since v199 with readers (UI badges, `NO_DOWNGRADE_STATES`) and the
+comment "NXDOMAIN for N re-checks", but nothing ever wrote it. Widening the
+horizon alone would have moved the silent drop from day 14 to day 90, so
+`mark_stale_clone_alerts_dormant` (called from the submit fn before its
+empty-worklist return) retires aged-out unscanned rows explicitly and returns a
+count that lands in `cost_telemetry` metadata as `dormant_retired`.
+
+Confirm the lane is healthy rather than starved:
+
+```sql
+SELECT count(*) FROM list_clone_alerts_pending_urlscan_submit(75, 0.7, 3);
+```
+
 ### urlscan rate-limit & budget
 
-- **Documented free tier: 100 scans/day. UNVERIFIED against the production key —
-  nobody has run the quota check below, and measured volume is 2-3x this figure
-  without producing a single recorded 429.** Either the entitlement is higher than
-  the doc says or the limit is not enforced the way we assume. Settle it before
-  citing the number in any capacity decision:
+- **SETTLED 2026-08-23 — the quota check had never been run, and the documented
+  figure was wrong by 10x.** Actual entitlement on the production key:
+
+  | Scope                                 | Daily limit | In use that day |
+  | ------------------------------------- | ----------- | --------------- |
+  | `unlisted` (what the lanes submit as) | **1,000**   | 35              |
+  | `public`                              | 5,000       | 0               |
+  | `private`                             | 50          | 0               |
+  | `retrieve`                            | 10,000      | 38              |
+
+  Re-run it with (`URLSCAN_API_KEY` is Vercel-only — not in any local `.env`):
   `curl -s -H "API-Key: $URLSCAN_API_KEY" https://urlscan.io/user/quotas/ | jq '.limits'`
-  (`URLSCAN_API_KEY` is Vercel-only — not in any local `.env`.)
+
+  The old "100/day free tier, UNVERIFIED" note had been used to justify keeping
+  `SUBMIT_BATCH_LIMIT` at 30. It was never a vendor number. At v285's 75/day plus
+  the recheck lane's ~200/day we sit at roughly a quarter of the real ceiling; the
+  binding constraint is the submit fn's 200s wall clock, not urlscan.
+
 - **Measured use, 30 days to 2026-08-09: ~230 submit POSTs/day** —
   `recheck_submit` ~200/day (50 x 4 crons) + `submit_batch` 30/day. The previous
   estimate here ("~5-10 new + ~50 daily re-scans = ~60-70/day") predated the
