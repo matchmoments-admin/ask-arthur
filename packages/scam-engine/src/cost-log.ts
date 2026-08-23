@@ -10,7 +10,7 @@
 // Telegram digest. This concentrates the duplicated insert in one place.
 //
 // Free-tier note: for APIs that bill $0 on their free tier today (AbuseIPDB
-// 1k/day, URLScan 100/day public, crt.sh unmetered) we still log `units` with
+// 1k/day, URLScan 1k/day unlisted (measured 2026-08-23), crt.sh unmetered) we still log `units` with
 // `estimatedCostUsd: 0`, so the dashboard shows call VOLUME and we can see a
 // free-tier ceiling approaching before it starts charging — same convention
 // as the Hive placeholder (BACKLOG #480) and clone-watch's $0 telemetry rows.
@@ -33,7 +33,9 @@ export const ENGINE_PRICING = {
   IPQS_PHONE_FRAUD_USD: 0.003,
   // AbuseIPDB: free tier 1,000 checks/day. Track units to watch the ceiling.
   ABUSEIPDB_CHECK_USD: 0,
-  // URLScan.io: free tier 100 scans/day (public). Paid tier is metered
+  // URLScan.io: measured 2026-08-23 — unlisted 1,000/day (our lane), public
+  // 5,000/day. The "100/day" figure this repo carried was never verified.
+  // Paid tier is metered
   // separately by the urlscan-enrichment function's own telemetry.
   URLSCAN_SUBMIT_USD: 0,
   // crt.sh Certificate Transparency search — unmetered / free.

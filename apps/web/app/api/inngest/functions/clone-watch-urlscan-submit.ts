@@ -63,11 +63,16 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
     name: "Clone-Watch: urlscan submit (gated)",
     retries: 1,
     concurrency: { limit: 3 },
-    // Global ceiling across all submits/day regardless of pool size — keeps a
-    // matcher blow-up structurally incapable of recreating the May-27 burst.
-    // v285: 40 -> 90, tracking SUBMIT_BATCH_LIMIT 30 -> 75 and leaving the same
-    // proportional headroom for manual triggers on top of the cron.
-    throttle: { limit: 90, period: "1d" },
+    // Caps RUNS per day (queueing excess fires rather than dropping them —
+    // docs/inngest-brakes.md §glossary). It is NOT a submissions ceiling: one
+    // run submits up to SUBMIT_BATCH_LIMIT rows, so the true worst case is
+    // limit x SUBMIT_BATCH_LIMIT. The comment here used to claim it was a
+    // "global ceiling across all submits/day", and v285 briefly raised it to 90
+    // on that misreading — which would have widened the manual-trigger blast
+    // radius to 90x75 against a 1,000/day urlscan quota. Reverted: the cron
+    // fires once, so the real daily figure is SUBMIT_BATCH_LIMIT, and 40 runs
+    // is ample headroom for operator re-fires.
+    throttle: { limit: 40, period: "1d" },
     timeouts: { finish: "5m" },
   },
   [

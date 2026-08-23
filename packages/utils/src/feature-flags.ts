@@ -824,7 +824,7 @@ export const featureFlags = {
   shopfrontCloneWeeklyDigest: readBoolEnv("FF_SHOPFRONT_CLONE_WEEKLY_DIGEST"),
 
   /** Phase A.3 — urlscan.io auto-scan + auto-classification for new
-   *  clone-watch candidates. Free tier (100/day) is plenty for our
+   *  clone-watch candidates. Quota is ample for our
    *  ~5-10 daily candidates plus a re-scan cron. Server-side only.
    *  Gates the two Inngest functions (clone-watch-urlscan + clone-watch-
    *  urlscan-rescan). Independent of the master shopfrontCloneOutreach

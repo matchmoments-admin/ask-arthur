@@ -27,17 +27,25 @@ describe("clone-watch urlscan submit capacity invariants", () => {
   };
 
   const batchLimit = () => num(/const SUBMIT_BATCH_LIMIT = (\d+)/, "SUBMIT_BATCH_LIMIT");
-  const throttleLimit = () =>
-    num(/throttle: \{ limit: (\d+), period: "1d" \}/, "throttle limit");
   const wallClockMs = () =>
     num(/const SUBMIT_WALL_CLOCK_MS = ([\d_]+)/, "SUBMIT_WALL_CLOCK_MS");
   const finishMs = () => num(/timeouts: \{ finish: "(\d+)m" \}/, "finish timeout") * 60_000;
 
-  it("throttle is not below the batch limit, or the batch limit is a lie", () => {
-    // The fn-level throttle is a HARD daily ceiling. If it drops below
-    // SUBMIT_BATCH_LIMIT, a single cron run cannot reach its own batch size and
-    // the lane quietly underperforms its stated capacity.
-    expect(throttleLimit()).toBeGreaterThanOrEqual(batchLimit());
+  it("one run cannot exhaust the urlscan daily quota by itself", () => {
+    // Real entitlement, measured 2026-08-23 (the docs had claimed 100/day,
+    // unverified, for months): unlisted 1,000/day. The recheck lane already
+    // consumes ~210. A single submit run must stay well inside what remains.
+    //
+    // NOTE the fn-level `throttle` is deliberately NOT asserted against here.
+    // Throttle caps RUNS per period, not submissions (docs/inngest-brakes.md
+    // §glossary) — one run submits up to SUBMIT_BATCH_LIMIT rows — so any
+    // comparison between the two is a units error. An earlier version of this
+    // test made exactly that mistake. The honest statement of the daily
+    // ceiling is "SUBMIT_BATCH_LIMIT per cron fire"; there is no true
+    // per-day submission budget in this lane (see the ops doc).
+    const URLSCAN_UNLISTED_DAILY = 1_000;
+    const RECHECK_LANE_DAILY = 210;
+    expect(batchLimit()).toBeLessThan(URLSCAN_UNLISTED_DAILY - RECHECK_LANE_DAILY);
   });
 
   it("leaves the wall-clock guard strictly inside the finish budget", () => {

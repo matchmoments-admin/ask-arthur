@@ -237,7 +237,7 @@ Distinct from the `*_CAP_USD` env-var caps above: some `feature_brakes` rows are
 
 - `NETCRAFT_REPORT_API_KEY` — Netcraft v3 Report API; powers Layer 2 community-blocklist submission + the takedown-polling cron. Apply via `report@netcraft.com`. When unset, the submit + poll fns skip-with-reason.
 - `NETCRAFT_REPORTER_EMAIL` — identity included in Netcraft submissions. Defaults to `brendan@askarthur.au`.
-- `URLSCAN_API_KEY` — urlscan.io free-tier API key. Powers Phase A.3 auto-scan + daily re-scan cron (~60/day usage, 100/day cap).
+- `URLSCAN_API_KEY` — urlscan.io API key. Powers Phase A.3 auto-scan + the clone-watch submit/recheck lanes. **Real quota, measured 2026-08-23: unlisted 1,000/day** (what we submit as), public 5,000, retrieve 10,000 — the "100/day" figure carried here for months was never verified and was wrong by 10x. Usage after v285 is ~275/day (submit 75 + recheck ~200).
 - `WHOISDS_NRD_ZIP_URL` — optional override for the Layer 0 daily NRD source. Leave unset; computed deterministically from yesterday's UTC date.
 - `RESEND_FROM_EMAIL` — sender for Layers 3+4 brand-notification emails. Required for both the `notify-brand-prepare` auto-send path and the dashboard send route — both fail closed with `resend_from_email_unset` when missing. Recommended shape `"Ask Arthur <brendan@askarthur.au>"`; read via `readStringEnv` to defeat trailing-whitespace + DefinePlugin static-inlining (see [memory `feedback_inngest_auto_sync_silent_fail`](../../packages/utils/src/env.ts)).
 
