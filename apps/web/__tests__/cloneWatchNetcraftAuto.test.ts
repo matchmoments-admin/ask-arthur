@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -201,5 +203,52 @@ describe("postNetcraftBulk", () => {
     const result = await postNetcraftBulk(BODY, { test: false });
     expect(result.uuid).toBeNull();
     expect(result.raw).toEqual({ raw: "<html>maintenance</html>" });
+  });
+});
+
+/**
+ * v284 — the auto lane's cron time is a correctness constraint, not a
+ * preference. It gates on urlscan evidence (`likely_phishing` OR weaponised),
+ * so it MUST fire after the urlscan-retrieve pass that follows urlscan-submit.
+ * It previously ran 09:30 against a 09:00 submit and a 12:00 first verdict,
+ * and reported 2.5h before the evidence existed — 89.4% of 2,151 submissions
+ * were declined, and 407 went out with no scan at all.
+ *
+ * This derives the constraint from the other two crons rather than hard-coding
+ * 13:00, so moving urlscan-submit or -retrieve fails HERE rather than silently
+ * starving the gate in prod.
+ */
+describe("netcraft auto-lane cron ordering (v284)", () => {
+  const FN_DIR = new URL("../app/api/inngest/functions/", import.meta.url);
+
+  const cronsOf = (file: string): string[] => {
+    const src = readFileSync(new URL(file, FN_DIR), "utf8");
+    return [...src.matchAll(/\bcron:\s*"([^"]+)"/g)].map((m) => m[1]);
+  };
+  const fixedHour = (cron: string): number => {
+    const hour = cron.trim().split(/\s+/)[1];
+    expect(hour, `expected a fixed hour in "${cron}"`).toMatch(/^\d+$/);
+    return Number(hour);
+  };
+
+  it("fires after the first urlscan-retrieve pass following urlscan-submit", () => {
+    const submitHour = fixedHour(cronsOf("clone-watch-urlscan-submit.ts")[0]);
+
+    const retrieveCron = cronsOf("clone-watch-urlscan-retrieve.ts")[0];
+    const step = Number(/^\*\/(\d+)$/.exec(retrieveCron.trim().split(/\s+/)[1])?.[1]);
+    expect(step, `expected a */N hour step in "${retrieveCron}"`).toBeGreaterThan(0);
+
+    // First retrieve pass strictly after the day's scans were submitted.
+    const firstVerdictHour = (Math.floor(submitHour / step) + 1) * step;
+
+    const autoHours = cronsOf("clone-watch-netcraft-auto.ts").map(fixedHour);
+    expect(autoHours.length).toBeGreaterThan(0);
+    for (const h of autoHours) {
+      expect(
+        h,
+        `netcraft-auto runs at ${h}:00 but the first urlscan verdict of the day ` +
+          `does not exist until ${firstVerdictHour}:00 — it would submit blind`,
+      ).toBeGreaterThan(firstVerdictHour);
+    }
   });
 });
