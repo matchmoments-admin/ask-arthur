@@ -50,7 +50,29 @@ import { probeLivenessDetailed } from "@/lib/clone-watch/liveness";
  *
  * Triple-gated: FF_SHOPFRONT_CLONE_NETCRAFT_AUTO (this producer) +
  * FF_SHOPFRONT_CLONE_SUBMIT_NETCRAFT + FF_SHOPFRONT_CLONE_OUTREACH. Default OFF.
- * Cron 09:30 UTC + a manual-trigger event.
+ * Cron 13:00 UTC + a manual-trigger event.
+ *
+ * EVIDENCE GATE + CRON ORDERING (v284, measured 2026-08-23). This lane used to
+ * fire at 09:30 and submit anything the preclassifier called a clone at
+ * confidence >= 0.7. Result over its lifetime: 2,151 submissions, 1,923 of them
+ * DECLINED (89.4%), against ~10 reports Netcraft has ever credited us. The
+ * confidence score was measured to have no predictive power over the verdict
+ * (1.0 declines at 84.5%, 0.7 at 90.5% — a flat curve), while the urlscan
+ * verdict we already store predicts it ~10x better (likely_phishing survives
+ * 53.3%, neutral 5.1%). v284 moves the same `likely_phishing OR weaponised`
+ * predicate the issue reporter has enforced since v221 into the worklist RPC.
+ *
+ * The cron time is load-bearing, not cosmetic: urlscan-submit runs 09:00 and
+ * urlscan-retrieve runs every 3h on the hour, so no verdict for the batch exists
+ * before 12:00. At 09:30 this lane could not have consulted the evidence even
+ * if it wanted to — 407 alerts reached Netcraft with no scan at all. 13:00 is
+ * chosen to sit AFTER the 12:00 retrieve. If you move retrieve, move this too,
+ * or the gate silently starves instead of filtering.
+ *
+ * Expect ~1-2 submissions/day, not ~25: inflow is ~200 alerts/week of which
+ * ~10 are likely_phishing. DAILY_CAP stays 50 as a ceiling, not a target. A
+ * run reporting `no_candidates_or_cap_reached` is now the NORMAL case on a
+ * quiet day and does not by itself indicate a starved lane.
  */
 
 const NETCRAFT_REPORT_ENDPOINT = "https://report.netcraft.com/api/v3/report/urls";
@@ -242,7 +264,9 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
     timeouts: { finish: "6m" },
   },
   [
-    { cron: "30 9 * * *" },
+    // 13:00 UTC — deliberately AFTER urlscan-retrieve's 12:00 pass, so the
+    // v284 evidence gate has a verdict to read. See the header note.
+    { cron: "0 13 * * *" },
     { event: "shopfront/clone.netcraft-auto.producer.manual-trigger.v1" },
   ],
   withAxiomLogging(

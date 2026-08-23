@@ -58,6 +58,14 @@ import {
 // 60-uuid run hit the 5m budget and was cancelled mid-batch. 12 uuids × 2
 // keyless GETs completes with headroom; the 24h cadence throttle + singleton
 // grind the ~164 backlog down over a handful of daily runs, self-healing.
+//
+// Do NOT raise this to buy throughput. Measured 2026-08-23: 44 live uuids in
+// the 30-day window against 12/day means each uuid is actually revisited every
+// ~3.7 days, not the 24h `CADENCE_HOURS` advertises — so `takedown_at`, and
+// the time-to-takedown KPI built on it, ran ~3.7 days stale. The fix is a
+// SECOND daily run (see the cron list below), which doubles throughput to
+// ~1.8-day latency while leaving the per-run budget exactly where the live
+// smoke proved it safe. Raising UUID_LIMIT re-opens the 2026-07-10 timeout.
 const UUID_LIMIT = 12;
 const CADENCE_HOURS = 24;
 const MAX_AGE_DAYS = 30;
@@ -79,7 +87,14 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
     timeouts: { finish: "8m" },
   },
   [
+    // Twice daily (v284). Two 12-uuid runs clear ~24 uuids/day against a live
+    // population of ~44, halving reconcile latency to ~1.8 days without
+    // touching the per-run batch the 2026-07-10 smoke tuned. The 24h
+    // CADENCE_HOURS throttle means the 22:00 run picks up DIFFERENT uuids
+    // than 10:00 did rather than re-checking them, and `singleton: skip`
+    // makes an overrun harmless.
     { cron: "0 10 * * *" },
+    { cron: "0 22 * * *" },
     { event: "shopfront/clone.netcraft-reconcile.manual-trigger.v1" },
   ],
   withAxiomLogging(
