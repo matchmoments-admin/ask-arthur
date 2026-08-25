@@ -32,7 +32,7 @@ export async function GET(
     const { data: record } = await supabase
       .from("image_check_records")
       .select(
-        "check_ref, checked_at, image_url, page_url, image_sha256, ai_confidence, deepfake_confidence, generator_source, generator_breakdown, content_credentials, vision_summary, impersonated_brand, impersonated_celebrity",
+        "check_ref, checked_at, image_url, page_url, image_sha256, ai_confidence, deepfake_confidence, generator_source, generator_breakdown, content_credentials, origin_metadata, vision_summary, impersonated_brand, impersonated_celebrity",
       )
       .eq("check_ref", ref)
       .maybeSingle();
@@ -57,8 +57,19 @@ export async function GET(
         (record.generator_breakdown as Array<{ class: string; score: number }> | null) ??
         null,
       contentCredentials:
-        (record.content_credentials as { present: boolean; format?: string } | null) ??
-        null,
+        (record.content_credentials as {
+          present: boolean;
+          format?: string;
+          validationState?: "trusted" | "valid" | "invalid";
+          issuer?: string | null;
+          generator?: string | null;
+        } | null) ?? null,
+      originMetadata:
+        (record.origin_metadata as {
+          claimed: boolean;
+          source?: string;
+          generator?: string | null;
+        } | null) ?? null,
       visionSummary: (record.vision_summary as string | null) ?? null,
       impersonatedBrand: (record.impersonated_brand as string | null) ?? null,
       impersonatedCelebrity:

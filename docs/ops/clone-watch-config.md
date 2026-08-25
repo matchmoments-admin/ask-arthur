@@ -29,6 +29,84 @@ each PR.
 
 ---
 
+## Submission precision (v284, measured 2026-08-23)
+
+**The lane was not broken. It was running at full volume and being rejected.**
+
+|                                   |                                                                          |
+| --------------------------------- | ------------------------------------------------------------------------ |
+| Submissions to Netcraft, lifetime | 2,151                                                                    |
+| Declined                          | **1,923 (89.4%)**                                                        |
+| Credited by Netcraft, lifetime    | ~10                                                                      |
+| August 2026 declines              | 1,850 (vs 73 in July — a backlog drain at the 50/day cap, now exhausted) |
+
+### Why: the gate carried no information
+
+`list_clone_alerts_pending_netcraft_auto` admitted anything the Haiku
+preclassifier scored `is_clone AND confidence >= 0.7` — a judgement about how
+the domain is _spelled_ — and checked nothing else. Decline rate by confidence:
+
+| Confidence | Submitted | Declined |
+| ---------- | --------- | -------- |
+| 1.0        | 220       | 84.5%    |
+| 0.9        | 1,394     | 90.4%    |
+| 0.8        | 440       | 91.1%    |
+| 0.7        | 84        | 90.5%    |
+
+A flat curve — the most-confident candidates were rejected 5 times in 6. The
+signal already stored on the same row predicts ~10x better:
+
+| urlscan verdict   | Submitted | Survives  |
+| ----------------- | --------- | --------- |
+| `likely_phishing` | 135       | **53.3%** |
+| never scanned     | 407       | 18.2%     |
+| `neutral`         | 1,602     | 5.1%      |
+| `parked_for_sale` | 7         | 0.0%      |
+
+### Why it couldn't have used it: cron ordering
+
+urlscan-submit `0 9`, urlscan-retrieve `0 */3` (first verdict 12:00),
+netcraft-auto **`30 9`**. The lane reported 2.5h before the evidence could
+exist — hence 407 alerts submitted with no scan at all. v284 moves it to 13:00.
+
+### What changed
+
+- **v284 RPC** — requires `urlscan_classification='likely_phishing' OR
+lifecycle_state='weaponised'`, the same predicate the issue reporter has
+  enforced since v221. Signature unchanged (a defaulted extra arg would create
+  an overload); the gate is hard-coded because a knob is how this returns.
+- **Cron 09:30 → 13:00**, after retrieve. _If retrieve moves, move this too_ —
+  otherwise the gate starves instead of filtering.
+- **Reconcile 10:00 + 22:00.** 44 live uuids against 12/day meant each was
+  revisited every ~3.7 days, not the 24h `CADENCE_HOURS` advertises, so
+  `takedown_at` and the TTD KPI ran that stale. A second run doubles throughput;
+  `UUID_LIMIT` stays 12 because 60 hit the finish budget on 2026-07-10.
+
+### Expected steady state
+
+~200 new alerts/week, ~10 of them `likely_phishing` ⇒ **~1–2 submissions/day**,
+not ~25. Absolute volume drops ~90%; expected _credited_ reports rise. A run
+returning `no_candidates_or_cap_reached` is now normal on a quiet day and is
+**not** by itself evidence of a starved lane — confirm against the RPC:
+
+```sql
+SELECT count(*) FROM shopfront_clone_alerts sca
+WHERE NOT (sca.submitted_to ? 'netcraft')
+  AND (sca.urlscan_classification='likely_phishing' OR sca.lifecycle_state='weaponised');
+```
+
+### Watch after activation
+
+- Decline rate on submissions made after 2026-08-23 should fall well below 89%.
+- A side effect worth knowing: the gate opens a path that did not exist —
+  an alert that weaponises **without ever being submitted**. The v250 resubmit
+  lane only covers alerts already carrying a uuid (min age 30 days), so these
+  previously had no route to Netcraft at all.
+- ~28% of new alerts still never get a urlscan verdict. That coverage gap is
+  now the binding constraint on submission volume, and is the next thing to fix.
+
+---
+
 ## 1. Feature flag
 
 | Flag (env var)             | Type   | Default | Status | Gates                                                                                                                                                                                                                                                                            | Flip when                                                                                           |
@@ -364,7 +442,9 @@ Shipped across PRs #424 / #425 / #431 / #432 / #433; hardened across #468 / #469
 - **09:30 UTC** — `shopfront-clone-notify-brand-prepare` runs (daily batch builder). Groups queue rows by (brand, recipient), filters via 24h cooldown, caps each group at 50 candidates, fetches `urlscan_evidence` per alert (link + screenshot), renders React Email, freezes subject + html on the queue, transitions to `pending`. Posts ONE summary Telegram pointing the admin at `/admin/clone-watch#approvals`. When `FF_SHOPFRONT_CLONE_NOTIFY_BRAND_AUTO_SEND=true`, dispatches via Resend on the same tick instead of waiting for admin click.
 - **Admin clicks Send** at `/admin/clone-watch#approvals` → `POST /api/admin/clone-watch/batches/[batchId]/send`. Pre-checks (FF + brake + RESEND_FROM_EMAIL), cross-validates recipient against `brand_contact_directory.brand` PK, re-checks STOP suppression, Resend send with `idempotencyKey: clone-watch-send:{batchId}`, transitions batch, records send (stamps `last_notified_at` + `submitted_to.brand_notification.status='sent'`).
 - **11:00 UTC** — urlscan re-scan cron (`shopfront-clone-urlscan-rescan`) catches up to 50 stale rows (60-day window). Catches the parked → activated transition.
-- **10:00 UTC** — `shopfront-clone-netcraft-reconcile` (v217, gated `FF_CLONE_LIFECYCLE_RECONCILE`) reads the PER-URL truth from `GET /submission/{uuid}/urls` and advances each submitted clone's `lifecycle_state` by its own `url_state` (`malicious→taken_down` + witnessed `takedown_at`; `no threats`/`unavailable→declined`). This is the single Netcraft verdict source.
+- **10:00 + 22:00 UTC** — `shopfront-clone-netcraft-reconcile` (v217, gated `FF_CLONE_LIFECYCLE_RECONCILE`; second daily run added v284 — see § Submission precision) reads the PER-URL truth from `GET /submission/{uuid}/urls` and advances each submitted clone's `lifecycle_state` by its own `url_state` (`malicious→taken_down` + witnessed `takedown_at`; `no threats`/`unavailable→declined`). This is the single Netcraft verdict source.
+- **12:00 UTC** — `shopfront-clone-urlscan-retrieve` (`0 */3`) lands the day's urlscan verdicts. This is the evidence the next step reads, which is why it must precede it.
+- **13:00 UTC** — `shopfront-clone-netcraft-auto` (gated `FF_SHOPFRONT_CLONE_NETCRAFT_AUTO`) bulk-submits to Netcraft. **v284: requires urlscan `likely_phishing` OR `lifecycle_state='weaponised'`** — lexical classifier confidence alone is not evidence (see § Submission precision). Ran at 09:30 until 2026-08-23, i.e. 2.5h _before_ the verdict above existed. Expect ~1–2 URLs/day, not ~25; `DAILY_CAP` 50 is a ceiling, not a target.
 - **11:00 UTC** — `shopfront-clone-netcraft-issue` (v215/v216, gated `FF_CLONE_NETCRAFT_ISSUE`) files a false-negative `report_issue` on branded `no threats` clones (dry-run until `NETCRAFT_ISSUE_DRY_RUN=false`).
 - **~~Every 30 min — Netcraft takedown poll~~ (RETIRED)** — the submission-level rollup poll (`shopfront-clone-poll-netcraft`) is **dark** (cron removed; it stamped rollup `malicious` onto all 50 URLs in a batch when 1 was malicious). Its role is replaced by the per-URL reconciler above; do NOT re-enable it. `submitted_to.netcraft.{state,takedown_at}` is now written by the reconciler.
 
@@ -727,15 +807,116 @@ WHERE brand = 'Bunnings';
 
 `FF_SHOPFRONT_CLONE_NOTIFY_BRAND` is **already ON in prod** (since 2026-05-27, first live NAB send at 09:24 UTC) — verifying a `manual_review` row to `fraud_inbox` immediately makes that brand reachable.
 
+### urlscan coverage (v285, measured 2026-08-23)
+
+**924 of 2,786 alerts had never received a urlscan verdict** — 422 of them rows
+the preclassifier scored as a clone at confidence >= 0.7. This became critical
+when v284 made Netcraft submission require a verdict: no verdict now means no
+report, ever.
+
+| Population                               | n   | high-confidence |
+| ---------------------------------------- | --- | --------------- |
+| retired at `urlscan_failure_streak >= 3` | 282 | **281**         |
+| never attempted                          | 532 | 44              |
+| in flight (streak 1-2)                   | 110 | 97              |
+
+**269 of the 282 retired rows failed with `400 - "DNS Error - Could not resolve
+domain"`.** A random sample of 70 of those domains was resolved on 2026-08-23:
+**30 (43%) resolve today** — `deutschebnk.org`, `kraken-login.org`,
+`noreply-supportfacebook.com`, `amazon-business-service.shop`, `amaz0n.plus`,
+`hsbc.co.mw` among them. A newly-registered domain that does not resolve _yet_ is
+the pre-weaponisation state this feature exists to watch; we were retiring it
+after three attempts and never looking again.
+
+Two causes, both fixed in v285:
+
+- **NXDOMAIN was treated as death.** v279 added a 7-day retry cadence for
+  `status=400` rows, but the `urlscan_failure_streak < 3` gate still killed them
+  first. A 400 no longer counts toward the streak — the same carve-out the repo
+  already makes for 429s (`urlscan-submit-one.ts:112`). No backfill was needed;
+  the predicate change alone re-admitted them.
+- **LIFO starvation + a 14-day cutoff.** `ORDER BY first_seen_at DESC` against a
+  30-row cap meant fresh alerts won every slot; a passed-over row was never
+  stamped (so never "failed"), just outranked until it aged out permanently —
+  invisible to submit (aged out), retrieve (needs a uuid) and recheck (gates on
+  `monitoring`/`declined`). Now the horizon is 90 days and **one third of every
+  batch is reserved for the oldest eligible rows**, ordered first so the
+  wall-clock break cannot re-create the starvation.
+
+Measured effect on apply: the worklist went from returning **18 rows to 75**
+(the full cap), with positions 1-25 being the 84-90-day rows nearest the horizon.
+
+**`dormant` now has a writer.** It has been in the `lifecycle_state` CHECK
+constraint since v199 with readers (UI badges, `NO_DOWNGRADE_STATES`) and the
+comment "NXDOMAIN for N re-checks", but nothing ever wrote it. Widening the
+horizon alone would have moved the silent drop from day 14 to day 90, so
+`mark_stale_clone_alerts_dormant` (called from the submit fn before its
+empty-worklist return) retires aged-out unscanned rows explicitly and returns a
+count that lands in `cost_telemetry` metadata as `dormant_retired`.
+
+**`dormant` is deliberately TERMINAL, and that is a judgement call worth
+re-examining.** Nothing transitions a row out of it — not submit (the row is
+past the 90-day horizon and `first_seen_at` only gets older), not retrieve (no
+uuid), not recheck (gates on `monitoring`/`declined`). The sweep does not
+_cause_ that loss: those rows were already invisible to every lane the moment
+they crossed the horizon. What it changes is that the abandonment is now
+recorded instead of silent. But given the 43% figure above, a domain that never
+resolved in 90 days is not certainly dead, so if we ever want a cohort back:
+
+```sql
+-- Revive a dormant cohort (re-enters the submit worklist only if it is also
+-- inside the 90-day horizon, so widen the horizon first or this is a no-op).
+UPDATE public.shopfront_clone_alerts
+SET lifecycle_state = 'detected', alert_state = 'open', updated_at = now()
+WHERE lifecycle_state = 'dormant' AND candidate_domain = ANY($1);
+```
+
+**Two different things now share the `dormant` badge.** v199's original meaning
+was "was observed live, then dropped off DNS" — evidence the threat receded.
+v285's is "we never got a single urlscan result and gave up at 90 days" — no
+evidence either way. `lifecycleBadge()` (`apps/web/lib/clone-watch/outcome-copy.ts`)
+renders one grey DORMANT for both, so an operator cannot tell "safe to stop
+worrying" from "we simply stopped looking". Distinguishing them needs a reason
+field; until then, `urlscan_uuid IS NULL` separates the v285 cohort.
+
+Confirm the lane is healthy rather than starved:
+
+```sql
+SELECT count(*) FROM list_clone_alerts_pending_urlscan_submit(75, 0.7, 3);
+```
+
 ### urlscan rate-limit & budget
 
-- **Documented free tier: 100 scans/day. UNVERIFIED against the production key —
-  nobody has run the quota check below, and measured volume is 2-3x this figure
-  without producing a single recorded 429.** Either the entitlement is higher than
-  the doc says or the limit is not enforced the way we assume. Settle it before
-  citing the number in any capacity decision:
+- **SETTLED 2026-08-23 — the quota check had never been run, and the documented
+  figure was wrong by 10x.** Actual entitlement on the production key:
+
+  | Scope                                 | Daily limit | In use that day |
+  | ------------------------------------- | ----------- | --------------- |
+  | `unlisted` (what the lanes submit as) | **1,000**   | 35              |
+  | `public`                              | 5,000       | 0               |
+  | `private`                             | 50          | 0               |
+  | `retrieve`                            | 10,000      | 38              |
+
+  Re-run it with (`URLSCAN_API_KEY` is Vercel-only — not in any local `.env`):
   `curl -s -H "API-Key: $URLSCAN_API_KEY" https://urlscan.io/user/quotas/ | jq '.limits'`
-  (`URLSCAN_API_KEY` is Vercel-only — not in any local `.env`.)
+
+  The old "100/day free tier, UNVERIFIED" note had been used to justify keeping
+  `SUBMIT_BATCH_LIMIT` at 30. It was never a vendor number. At v285's 75/day plus
+  the recheck lane's ~200/day we sit at roughly a quarter of the real ceiling; the
+  binding constraint is the submit fn's 200s wall clock, not urlscan.
+
+- **There is no true per-day SUBMISSION budget on this lane, and the fn-level
+  `throttle` is not one.** Throttle caps RUNS per period (see the
+  [brake-matrix glossary](../inngest-brakes.md)); one run submits up to
+  `SUBMIT_BATCH_LIMIT` rows, so the worst case is `throttle x batch`, not
+  `throttle`. v285 briefly raised the throttle 40 -> 90 on that misreading — which
+  would have widened the manual-trigger blast radius to 90x75 against a 1,000/day
+  quota — and it was reverted the same day. The daily figure in practice is one
+  cron fire = `SUBMIT_BATCH_LIMIT` (75); operator re-fires stack on top. If a real
+  budget is ever wanted, the shape to copy is the `today` CTE in
+  `list_clone_alerts_pending_netcraft_auto` (v284), which folds a 24h allowance
+  into the worklist itself rather than relying on an invocation cap.
+
 - **Measured use, 30 days to 2026-08-09: ~230 submit POSTs/day** —
   `recheck_submit` ~200/day (50 x 4 crons) + `submit_batch` 30/day. The previous
   estimate here ("~5-10 new + ~50 daily re-scans = ~60-70/day") predated the

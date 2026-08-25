@@ -12,10 +12,13 @@
     "telegram:dev": "tsx scripts/telegram-dev.ts",
     "report-card:export": "tsx scripts/clone-watch-report-export.ts",
     "clone-watch:caption": "tsx scripts/clone-watch-caption.ts",
+    "hub:carousel": "tsx scripts/hub-carousel-export.ts",
+    "linkedin:document": "tsx scripts/linkedin-document-post.ts",
     "clone-watch:publish": "tsx scripts/clone-watch-publish.ts",
     "linkedin:test": "tsx scripts/linkedin-post-test.ts",
     "ext:dev": "tsx scripts/extension-dev-client.ts",
-    "seed:image-check": "tsx scripts/seed-image-check-record.ts"
+    "seed:image-check": "tsx scripts/seed-image-check-record.ts",
+    "og:card": "tsx scripts/og-card-export.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",

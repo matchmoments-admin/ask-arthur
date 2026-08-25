@@ -4,17 +4,26 @@ Right-click "Check this image" (extension-monetisation W1). Server route:
 `apps/web/app/api/extension/analyze-image/route.ts`. Client side ships in the
 `WXT_IMAGE_CHECK` build (PR 4). Plan: `docs/plans/extension-monetisation.md`.
 
+> **Activation status (2026-08-21):** web surface LIVE — `NEXT_PUBLIC_FF_IMAGE_CHECK`,
+> `FF_IMAGE_CHECK_VISION`, and `FF_IMAGE_CHECK_C2PA_VALIDATE` are `true` in Preview +
+> Production (this PR is the `[build]` deploy that bakes them). The extension surface
+> still needs the `WXT_IMAGE_CHECK=true` v1.1.0 CWS build (Phase B runbook).
+> Env-var gotcha found during activation: `vercel env add` on this project defaults to
+> type **Sensitive**, whose values `vercel env pull` returns as `""` — verify a flag by
+> deployed behaviour (page body / API response), never by pulling the value back.
+
 ## Flags & env
 
-| Name                            | Where                               | Default | Meaning                                                                                                                                                                                                                                              |
-| ------------------------------- | ----------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NEXT_PUBLIC_FF_IMAGE_CHECK`    | Vercel                              | OFF     | Route gate. When off the route 503s even for validly-signed requests (double-gate, same rationale as `NEXT_PUBLIC_FF_FACEBOOK_ADS`).                                                                                                                 |
-| `WXT_IMAGE_CHECK`               | extension build                     | OFF     | Bundles the context-menu item + result card and adds the `scripting` permission. Both flags must be on for the feature to exist.                                                                                                                     |
-| `FF_IMAGE_CHECK_VISION`         | Vercel (server-only, `readBoolEnv`) | OFF     | Claude Haiku vision context pass per check (what's depicted, impersonated brand → celebrity match → `deepfake_detections`). Adds Claude spend + a server-side image-byte fetch. image-check v2: **launches ON** (see the plan's activation runbook). |
-| `HIVE_API_KEY`                  | Vercel                              | —       | Without it `checkHiveAI` returns null and responses are `checked:false, reason:"scan_unavailable"`.                                                                                                                                                  |
-| `HIVE_AI_CAP_USD`               | Vercel                              | `5`     | Shared daily vendor brake (`feature_brakes.hive_ai`, set by cost-daily-check). Covers BOTH analyze-ad and image-check Hive calls.                                                                                                                    |
-| `FF_IMAGE_CHECK_RECORDS`        | Vercel (server-only, `readBoolEnv`) | OFF     | Persist FLAGGED checks as metadata-only evidence records (ADR-0022) + return `checkRef` + serve `/image-check/[ref]` page & PDF + populate `/api/v1/image-checks`. Independent of the route flag.                                                    |
-| `EXTENSION_IMAGE_CHECK_CAP_USD` | Vercel                              | `5`     | Daily cap on the Claude-vision context pass (`feature_brakes.extension_image_check`). Braking pauses ONLY the Claude call — the Hive verdict and the free byte fetch (C2PA/sha256, image-check v2) keep running.                                     |
+| Name                            | Where                               | Default | Meaning                                                                                                                                                                                                                                                                                                                    |
+| ------------------------------- | ----------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NEXT_PUBLIC_FF_IMAGE_CHECK`    | Vercel                              | OFF     | Route gate. When off the route 503s even for validly-signed requests (double-gate, same rationale as `NEXT_PUBLIC_FF_FACEBOOK_ADS`).                                                                                                                                                                                       |
+| `WXT_IMAGE_CHECK`               | extension build                     | OFF     | Bundles the context-menu item + result card and adds the `scripting` permission. Both flags must be on for the feature to exist.                                                                                                                                                                                           |
+| `FF_IMAGE_CHECK_VISION`         | Vercel (server-only, `readBoolEnv`) | OFF     | Claude Haiku vision context pass per check (what's depicted, impersonated brand → celebrity match → `deepfake_detections`). Adds Claude spend + a server-side image-byte fetch. image-check v2: **launches ON** (see the plan's activation runbook).                                                                       |
+| `HIVE_API_KEY`                  | Vercel                              | —       | Without it `checkHiveAI` returns null and responses are `checked:false, reason:"scan_unavailable"`.                                                                                                                                                                                                                        |
+| `HIVE_AI_CAP_USD`               | Vercel                              | `5`     | Shared daily vendor brake (`feature_brakes.hive_ai`, set by cost-daily-check). Covers BOTH analyze-ad and image-check Hive calls.                                                                                                                                                                                          |
+| `FF_IMAGE_CHECK_RECORDS`        | Vercel (server-only, `readBoolEnv`) | OFF     | Persist FLAGGED checks as metadata-only evidence records (ADR-0022) + return `checkRef` + serve `/image-check/[ref]` page & PDF + populate `/api/v1/image-checks`. Independent of the route flag.                                                                                                                          |
+| `EXTENSION_IMAGE_CHECK_CAP_USD` | Vercel                              | `5`     | Daily cap on the Claude-vision context pass (`feature_brakes.extension_image_check`). Braking pauses ONLY the Claude call — the Hive verdict and the free byte fetch (C2PA/sha256, image-check v2) keep running.                                                                                                           |
+| `FF_IMAGE_CHECK_C2PA_VALIDATE`  | Vercel (server-only, `readBoolEnv`) | OFF     | Cryptographic C2PA validation (`@askarthur/scam-engine/c2pa-verify`, `@contentauth/c2pa-node`). Runs only when the presence sniff already found a manifest. Upgrades copy to "signed by {tool}" / "manifest invalid — may have been altered". No per-call spend; the cost is the ~39 MB native lib in the function bundle. |
 
 ## Caps & cost
 
@@ -60,8 +69,33 @@ the scan didn't run, which is different from low confidence.
    `hive_ai / surface=image_check` with non-zero cost.
 4. Fourth call the same UTC day → 429 `image_limit_reached` with upgrade copy.
 5. With `FF_IMAGE_CHECK_VISION=true`: response also carries `context.summary`,
-   `generatorBreakdown`, and `contentCredentials` (non-null when bytes fetched).
+   `generatorBreakdown`, `contentCredentials`, and `metadataOrigin` (both
+   non-null when bytes fetched; `metadataOrigin.claimed` fires on XMP
+   DigitalSourceType `trainedAlgorithmicMedia`/composite or a known AI
+   generator in CreatorTool/EXIF Software — copy comes from
+   `IMAGE_CHECK_ORIGIN_COPY`, guarded by the asymmetry test
+   `apps/web/__tests__/imageCheckOriginCopy.test.ts`).
 6. With `FF_IMAGE_CHECK_RECORDS=true` and a FLAGGED image: response carries
    `checkRef`; `image_check_records` has the row (hashed install id, no byte
    columns); `/image-check/{ref}` renders; the PDF downloads; the record
    appears in `/api/v1/image-checks` (API key required).
+7. With `FF_IMAGE_CHECK_C2PA_VALIDATE=true` and a C2PA-signed image (e.g. a
+   fresh Adobe Firefly export, or `packages/scam-engine/src/__tests__/fixtures/c2pa/signed-valid.jpg`
+   served from a public URL): `contentCredentials.validationState` is
+   `valid`/`trusted` with `issuer` + `generator`; the extension card reads
+   "Content Credentials verified — signed by …".
+
+## `@contentauth/c2pa-node` native-binary gotcha (local dev)
+
+The npm tarball ships a **linux x86_64** `dist/index.node` — correct for
+Vercel and GitHub CI, wrong for macOS. The package's postinstall downloads
+the right platform binary, but pnpm has been observed to skip it silently
+even with `@contentauth/c2pa-node` in root `pnpm.onlyBuiltDependencies`
+(observed pnpm 10.5.2, 2026-08-20 — `pnpm rebuild` also did not run it).
+Symptom: `verifyC2PA` returns null for everything and
+`c2pa-verify.test.ts` fails with dlopen "slice is not valid mach-o file".
+Fix: run the postinstall by hand once —
+
+```bash
+cd node_modules/.pnpm/@contentauth+c2pa-node@*/node_modules/@contentauth/c2pa-node && node scripts/postinstall.cjs
+```

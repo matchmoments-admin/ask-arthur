@@ -10,6 +10,7 @@
 
 import React from "react";
 import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
+import { IMAGE_CHECK_ORIGIN_COPY } from "@askarthur/types";
 
 export interface ImageCheckEvidence {
   checkRef: string;
@@ -21,7 +22,18 @@ export interface ImageCheckEvidence {
   deepfakeConfidence: number | null;
   generatorSource: string | null;
   generatorBreakdown: Array<{ class: string; score: number }> | null;
-  contentCredentials: { present: boolean; format?: string } | null;
+  contentCredentials: {
+    present: boolean;
+    format?: string;
+    validationState?: "trusted" | "valid" | "invalid";
+    issuer?: string | null;
+    generator?: string | null;
+  } | null;
+  originMetadata: {
+    claimed: boolean;
+    source?: string;
+    generator?: string | null;
+  } | null;
   visionSummary: string | null;
   impersonatedBrand: string | null;
   impersonatedCelebrity: string | null;
@@ -132,11 +144,13 @@ export function ImageCheckEvidencePdf({ evidence }: { evidence: ImageCheckEviden
           <View style={styles.row}>
             <Text style={styles.label}>Content Credentials</Text>
             <Text style={styles.value}>
-              {e.contentCredentials === null
-                ? "not assessed (image bytes unavailable)"
-                : e.contentCredentials.present
-                  ? `C2PA manifest present in ${e.contentCredentials.format ?? "image"} container (issuer not cryptographically verified)`
-                  : "no C2PA manifest detected"}
+              {IMAGE_CHECK_ORIGIN_COPY.ccLine(e.contentCredentials)}
+            </Text>
+          </View>
+          <View style={styles.row}>
+            <Text style={styles.label}>Metadata origin tag</Text>
+            <Text style={styles.value}>
+              {IMAGE_CHECK_ORIGIN_COPY.originLine(e.originMetadata)}
             </Text>
           </View>
         </View>

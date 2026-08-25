@@ -11,6 +11,7 @@ let _burstLimiter: Ratelimit | null = null;
 let _dailyLimiter: Ratelimit | null = null;
 let _formLimiter: Ratelimit | null = null;
 let _imageUploadLimiter: Ratelimit | null = null;
+let _documentUploadLimiter: Ratelimit | null = null;
 
 function getBurstLimiter() {
   if (!_burstLimiter) {
@@ -68,6 +69,27 @@ function getImageUploadLimiter() {
     });
   }
   return _imageUploadLimiter;
+}
+
+/** Free document checks per IP per hour. Exported so user-facing copy can
+ *  state the real number instead of hardcoding one that silently drifts
+ *  from the limiter. */
+export const DOCUMENT_UPLOAD_LIMIT_PER_HOUR = 5;
+
+function getDocumentUploadLimiter() {
+  if (!_documentUploadLimiter) {
+    _documentUploadLimiter = new Ratelimit({
+      redis: new Redis({
+        url: process.env.UPSTASH_REDIS_REST_URL!,
+        token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+      }),
+      limiter: Ratelimit.slidingWindow(DOCUMENT_UPLOAD_LIMIT_PER_HOUR, "1 h"),
+      prefix: "askarthur:doc-upload",
+      analytics: true,
+      timeout: 1000,
+    });
+  }
+  return _documentUploadLimiter;
 }
 
 export type RateLimitResult = {
@@ -209,6 +231,34 @@ export async function checkImageUploadRateLimit(
   } catch (err) {
     logger.error("checkImageUploadRateLimit: store error", { error: String(err) });
     return storeUnavailable(failMode, "checkImageUploadRateLimit");
+  }
+}
+
+export async function checkDocumentUploadRateLimit(
+  ip: string,
+  failMode: FailMode = defaultFailMode()
+): Promise<RateLimitResult> {
+  // The document forensics path is CPU-only (no paid API), but it accepts
+  // 10 MB uploads from anonymous users — the limit bounds bandwidth/compute
+  // abuse. Same fail-closed-in-prod posture as image uploads.
+  if (!process.env.UPSTASH_REDIS_REST_URL) {
+    return storeUnavailable(failMode, "checkDocumentUploadRateLimit");
+  }
+
+  try {
+    const result = await getDocumentUploadLimiter().limit(`ip:${ip}`);
+    if (!result.success) {
+      return {
+        allowed: false,
+        remaining: 0,
+        resetAt: new Date(result.reset),
+        message: "Too many document checks. Try again later.",
+      };
+    }
+    return { allowed: true, remaining: result.remaining, resetAt: null };
+  } catch (err) {
+    logger.error("checkDocumentUploadRateLimit: store error", { error: String(err) });
+    return storeUnavailable(failMode, "checkDocumentUploadRateLimit");
   }
 }
 

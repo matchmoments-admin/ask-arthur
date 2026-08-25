@@ -18,6 +18,7 @@ import MermaidDiagram from "@/components/blog/MermaidDiagram";
 import SubscribeForm from "@/components/SubscribeForm";
 import Pill from "@/components/Pill";
 import type { Metadata } from "next";
+import { ogImages, OG_BASE } from "@/lib/og";
 
 interface PageProps {
   params: Promise<{ slug: string }>;
@@ -49,7 +50,14 @@ export async function generateMetadata({
       description: post.metaDescription || post.excerpt,
       type: "article",
       publishedTime: post.publishedAt,
-      ...(post.heroImageUrl && { images: [post.heroImageUrl] }),
+      // Was `...(post.heroImageUrl && { images: [post.heroImageUrl] })`, which
+      // shipped the hero raw. Every published hero is .webp, which LinkedIn
+      // cannot render — so each post advertised an image no scraper could use
+      // AND, by defining openGraph at all, suppressed the sitewide PNG
+      // fallback. ogImages() keeps the hero when it is a renderable format and
+      // falls back otherwise.
+      ...OG_BASE,
+      images: ogImages(post.heroImageUrl),
     },
   };
 }

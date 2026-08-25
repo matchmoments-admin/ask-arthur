@@ -30,6 +30,9 @@ export interface ImageCheckCardPayload {
   /** Pre-formatted Content Credentials line ("Content Credentials present
    *  (issuer unverified)") — only set when a manifest was detected. */
   contentCredentialsLine?: string;
+  /** Pre-formatted claimed-origin line ("File metadata claims AI origin …")
+   *  — only set when a forgeable AI-origin tag was found. */
+  metadataOriginLine?: string;
   /** Evidence-record reference (IC-…) — shown when the check was persisted. */
   evidenceRef?: string;
   /** Link to the public evidence page (precomputed by the background). */
@@ -50,6 +53,7 @@ export function renderImageCheckCard(payload: {
   contextLine?: string;
   lensUrl?: string;
   contentCredentialsLine?: string;
+  metadataOriginLine?: string;
   evidenceRef?: string;
   evidenceUrl?: string;
   checksRemaining?: number | null;
@@ -139,6 +143,9 @@ export function renderImageCheckCard(payload: {
     }
     if (payload.contentCredentialsLine) {
       lines.push(`<div class="line">📜 ${esc(payload.contentCredentialsLine)}</div>`);
+    }
+    if (payload.metadataOriginLine) {
+      lines.push(`<div class="line">🏷️ ${esc(payload.metadataOriginLine)}</div>`);
     }
     if (payload.lensUrl && /^https:\/\/lens\.google\.com\//.test(payload.lensUrl)) {
       lines.push(

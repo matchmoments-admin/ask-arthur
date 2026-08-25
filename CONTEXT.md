@@ -72,6 +72,19 @@ _Avoid_: shop result, shop verdict, "Shop Guard pillar" (it isn't one — Shop G
 The outcome of verifying an Australian Business Number displayed on a shop page — `ShopCheckAbn.status`, produced by `verifyShopAbn`. Six values, and the distinction between three of them is load-bearing: `verified` (ABN on the ABR register, holder name matches the shop), `name-mismatch` (registered, but the holder name doesn't match), `unregistered` (an ABN is displayed but the ABR register has no active record — a real scam signal, +30), `no-abn` (an `.au` shop displays no ABN at all), `unverified` (the check could not run — the page was unreadable, or the ABR lookup itself failed — a neutral non-signal, +6, **never** an accusation), `not-applicable` (non-AU host, no ABN expected). Treating a failed _lookup_ as `unregistered` was the F-A bug (GitHub #349, ADR 0009); `unverified` exists precisely so a transient ABR outage is not reported as a fake ABN. The same `unregistered`-vs-`lookup-failed` distinction lives one layer down in `lookupABN`'s discriminated `AbnLookupFailure.reason`.
 _Avoid_: conflating `unverified` with `unregistered` — "we could not check" is not "we checked and it is fake".
 
+**AI Origin** (Image Check ladder):
+The provenance tier of an image inside the Image Check Module, a three-rung ladder: **signed** (a C2PA / Content Credentials manifest — cryptographic, though presence-only until full validation ships), **claimed** (a forgeable metadata tag — XMP `DigitalSourceType=trainedAlgorithmicMedia`/composite, or a known AI generator in `CreatorTool`/EXIF `Software`; `detectMetadataOrigin` in `packages/scam-engine/src/metadata-origin.ts`), and **none** (no provenance data found — which says NOTHING about how the image was made, because most platforms strip metadata on upload). The asymmetry rule is load-bearing: absence is never evidence of human origin, and a mark means "processed by", not "authored by". Canonical copy lives in `IMAGE_CHECK_ORIGIN_COPY` (`packages/types/src/image-check-copy.ts`), guarded by `apps/web/__tests__/imageCheckOriginCopy.test.ts`. Same could-not-check ≠ checked-and-absent discipline as ABN Status: bytes-unavailable is `null` (unknown), never `{claimed:false}`/`{present:false}`.
+_Avoid_: "AI provenance" as a feature name ("provenance" is claimed by the Verified Directory's per-shop provenance page, ADR-0014); "AI detected"/"no AI detected" (verdict framing the ladder exists to prevent); "watermark" for the metadata tiers (a watermark is in-content; these are metadata).
+
+**Finding** (Document Check Module):
+One named, explainable signal about an uploaded document, from either of the Module's two layers (`DOCUMENT_FINDING_SIGNALS` in `packages/types/src/document-check.ts`). The Document Check Module (`packages/scam-engine/src/document-check/`, seam: `inspectDocument(buffer, {jurisdiction})`) is the document sibling of the Image Check Module and inherits its epistemics wholesale: findings are facts ("records 2 incremental updates", "this ABN is not on the register"), never a verdict about the document — no composite score, no FAKE/GENUINE output, per ADR-0015/0024.
+
+- **Structural findings** — jurisdiction-agnostic byte forensics: `multiple_revisions`, `producer_design_tool`, `dates_differ`, `xmp_edit_history`, …
+- **Content findings** — from a per-jurisdiction validator pack: `abn_checksum_fail`, `abn_not_registered`, `abn_cancelled`. Pack results are **Registry Checks** (`DocumentRegistryCheck{kind, identifier, status, entityName}`) — deliberately jurisdiction-agnostic so a UK/NZ pack writes into the same shape and DB column (`registry_checks`); `content: null` means "not assessed" (the ABN-Status `unverified` discipline), never "clean".
+
+The asymmetry rule governs both: zero findings means "no editing traces found", never "genuine". Two reasons, both load-bearing — a document fabricated from scratch has no revision history to find, and **any re-render erases the history that did exist** (printing to PDF, "Save As", exporting from a web portal produces a brand-new single-revision file; only an _incremental_ save appends to the original and leaves a trail). Content findings survive re-rendering, which is why they carry the weight for the B2B use case. Canonical copy in `DOCUMENT_CHECK_COPY` (`packages/types/src/document-check-copy.ts`), guarded by `apps/web/__tests__/documentCheckCopy.test.ts`.
+_Avoid_: "document verification" (implies a verdict we never render); "forensic score" (no scores — named signals only); "tamper detection" as a promise (we detect _traces_; their absence proves nothing, especially on a re-rendered file); "Structural Finding" as the umbrella term (it was, until content-layer signals landed — structural is now one of two kinds).
+
 **Referrer Source**:
 The in-app browser the user arrived from when redirected via the Web Share Target route. A finite enum: `instagram-inapp`, `tiktok-inapp`, `facebook-inapp`, `whatsapp-inapp`. Detected server-side in `apps/web/app/share-target/route.ts` via UA fingerprint + Referer header. Optional — only set when the request originated from a share-sheet redirect; absent on direct visits. Used by **Shop Signal** Stage 0 (`shopSignal.referrerSource`) as the mobile-share axis in measurement Q3, and reusable by future Pillars (Phone Footprint mobile-share rollout).
 _Avoid_: "share source", "inapp browser tag", "UA tag".
@@ -107,6 +120,35 @@ _Avoid_: "clone hit", "clone finding" (the rejected parallel-table name from the
 **Layer 0 / Clone-watch**:
 The pre-Stage-1 MVP layer pulled forward from ADR-0016 Phase C in the 2026-05-24 amendment. Runs the whoisds NRD daily zip against the static `AU_BRAND_WATCHLIST` (~50 retail/bank/telco/post brands) at 08:30 UTC. Writes hits into `shopfront_clone_alerts` with `target_shop_id IS NULL`, `source = 'nrd'`, `severity_tier = 'low'` (matcher caps score < 0.95 → severity ≤ 38). Surfaces on the public `askarthur.au/clone-watch` page (`noindex` for the first 7 days while #371 v1 copy is pending). Plan: `docs/plans/clone-watch-mvp.md`. Lives in `packages/shopfront-glue/` (same package as Phase A/B; deletion test passes from Layer 0 onward).
 _Avoid_: "Stage 0E" (the issue-ticket stage label, not user-facing), "NRD sweep" without the "Layer 0" framing (loses the source-layering context).
+
+**Clone Lifecycle**:
+The enforcement state machine a Clone Alert moves through after detection, on
+`shopfront_clone_alerts.lifecycle_state`: `detected` → `monitoring` |
+`weaponised` → `reported` → `declined` | `taken_down`, plus `dormant`. Spec —
+the legal edges, the terminal set and the required coarse disposition — lives
+in `apps/web/lib/clone-watch/lifecycle.ts`; the SQL guards (v199 / v200 / v249 /
+v285) implement it and the v288 CHECK enforces its one hard invariant. Distinct
+from `alert_state`, the COARSE operator disposition (`open` / `taken_down` /
+`expired`) that the public `/clone-watch` page and the v198 brand-register
+open-count filter on: the two are synchronised at terminal states ONLY.
+_Avoid_: calling either column "status", and treating `lifecycle_state` as a
+liveness probe — it records the last observation, not whether the domain
+answers right now (that is `probeLiveness`).
+
+**Weaponised**:
+A Clone Alert observed serving live phishing or credential-harvest content —
+our own urlscan verdict, not the vendor's. The state the whole enforcement path
+exists to detect and act on. Only ever exits to `taken_down`: a later benign
+vendor grade must NOT move it back (the no-downgrade rule in
+`apply_netcraft_reconcile`). `declined → weaponised` is the money transition —
+the vendor graded it "no threat" and it weaponised afterwards — and is the
+premise of both the recheck loop and the false-negative escalation lane.
+
+**Vendor Gap**:
+The interval between Netcraft grading a lookalike non-malicious (`declined`)
+and that same domain being observed `weaponised`. The measurable claim behind
+the monthly clone-watch report. Publishable only from witnessed transitions
+(`netcraft_declined_at` + `weaponised_at`), never from backfilled stamps.
 
 **AU Brand Watchlist**:
 The static `BrandEntry[]` array at `packages/shopfront-glue/src/au-brand-watchlist.ts` — ~50 Australian retail, bank, telco, and logistics brand names + their `legitimate_domains` exclusion lists. Per-entry: `{ brand: string, legitimate_domains: string[] }`. Used by Layer 0 (`lexicalMatch()` runs every newly-registered domain against the full list) and reused by Phase A (unioned with installed `shopfront_shops` brand names) and Phase B (corpus-mining adds dynamic patterns to the same matcher). The file IS the seam — opt-out and lawyer-vetting happen by editing this file, not by adding a feature flag.
@@ -156,4 +198,5 @@ The per-brand rollup that aligns the three streams — one row per Canonical Bra
 - **"alert"** is still overloaded across the platform: brand alerts (the existing `brand_impersonation_alerts` table — AU govt/bank/telco surface), cost-telemetry alerts (Telegram digests), and oncall alerts (none yet) all live alongside the now-defined **Clone Alert** (clone-detection composite, in `shopfront_clone_alerts`). When the bare word "alert" appears in code or docs, prefer one of the specific terms.
 - **"campaign"** is overloaded: marketing campaigns (the `docs/campaigns/` folder) and scam campaigns (a near-synonym for **Scam Cluster** with an impersonated-brand axis). Prefer **Scam Cluster** for the scam-side meaning.
 - **"candidate"** carries two unrelated meanings: a **candidate domain** (a domain being evaluated as a possible clone — Brand/Visual/Semantic Match, Clone Alert) and a **Watchlist Candidate** (a _brand_ pending curation review in `reddit_watchlist_candidates`). Never write bare "candidate" — say "candidate domain" (a URL) or "watchlist candidate" (a brand).
+- **"dormant"** carries TWO contradictory meanings today and one grey badge renders both. v199 coined it for "was observed live, then dropped off DNS" — evidence the threat receded. v285's sweep reuses it for "we never got a urlscan verdict and gave up at the 90-day horizon" — no evidence either way, and a measured 43% of that cohort resolved again months later. Until a reason field separates them, `urlscan_uuid IS NULL` isolates the v285 cohort. Never read a DORMANT badge as "safe".
 - **"unactioned lookalike"** — a Clone Alert we submitted to Netcraft that Netcraft graded non-malicious (`lifecycle_state='declined'`, per-URL `no threats`/`unavailable`), so it is still live/parked and pre-weaponisation. It is the reportable state that is uniquely ours: commercial vendors surface their own takedowns, not the lookalikes their detection vendor declined to touch. Distinct from **taken_down** (Netcraft actioned) and **weaponised** (flipped to active phishing). The per-URL reconciler (`clone-watch-netcraft-reconcile`) sets it; the false-negative reporter (`clone-watch-netcraft-issue`) escalates it. See `docs/plans/clone-watch-brand-story-reporting.md`.

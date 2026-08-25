@@ -100,6 +100,30 @@ export const featureFlags = {
    *  requests, keeping Hive spend at zero while the feature is dark. */
   imageCheck: process.env.NEXT_PUBLIC_FF_IMAGE_CHECK === "true",
 
+  /** Document Check Module: deterministic PDF forensics (/document-check
+   *  page + /api/document-check). Structural layer only until the AU
+   *  content-logic pack ships; no paid API in the core path. When off the
+   *  route 503s and the page 404s (same double-gate posture as imageCheck). */
+  documentCheck: process.env.NEXT_PUBLIC_FF_DOCUMENT_CHECK === "true",
+
+  /** Document Check: persist evidence records (metadata-only, flagged-only,
+   *  never bytes or extracted text — ADR-0022 pattern, v281) to
+   *  document_check_records and return a DC- checkRef. Server-only,
+   *  independent of the route flag so persistence can be switched off
+   *  without darkening the check. Also gates /document-check/[ref]. */
+  documentCheckRecords: readBoolEnv("FF_DOCUMENT_CHECK_RECORDS"),
+
+  /** Document Check: the keyed B2B surface /api/v1/document-checks (POST
+   *  per-document check + GET own-org flagged feed). Server-only; dark
+   *  until the first rental-vertical pilot key is provisioned. */
+  documentCheckV1Api: readBoolEnv("FF_DOCUMENT_CHECK_V1_API"),
+
+  /** Document Check: self-serve Stripe checkout for the doc plans
+   *  (doc_starter A$29/200, doc_pro A$99/1,500 — a separate SKU axis from
+   *  api_keys.tier, the brand-billing precedent). Server-only; the route
+   *  also 503s price_not_configured until the Stripe price IDs land. */
+  documentCheckBilling: readBoolEnv("FF_DOCUMENT_CHECK_BILLING"),
+
   /** Extension image check: optional Claude Haiku vision context pass
    *  (what the image depicts, impersonated brand/celebrity → feeds
    *  deepfake_detections). Server-only sub-flag of imageCheck — v1 launches
@@ -113,6 +137,22 @@ export const featureFlags = {
    *  persistence can be switched off without darkening the check. Also
    *  gates the /image-check/[ref] evidence page + PDF. */
   imageCheckRecords: readBoolEnv("FF_IMAGE_CHECK_RECORDS"),
+
+  /** AI-origin red-flag corroborator (ADR-0024): on flagged ad checks,
+   *  fetch the image bytes (free, SSRF-guarded) and add non-escalating
+   *  red-flag lines when metadata claims AI origin without Content
+   *  Credentials, or a C2PA signature fails validation. Server-only,
+   *  default OFF — canaries a live surface (analyze-ad). */
+  imageOriginRedFlags: readBoolEnv("FF_IMAGE_ORIGIN_RED_FLAGS"),
+
+  /** Extension image check: cryptographic C2PA manifest validation
+   *  (@contentauth/c2pa-node — signature + issuer chain), upgrading the
+   *  presence-only Content Credentials sniff to "signed by {tool}" /
+   *  "manifest invalid". Server-only sub-flag of imageCheck; only runs when
+   *  detectC2PA already found a manifest, so most checks never touch the
+   *  native library. No per-call spend — the cost is the 39 MB native dep
+   *  in the function bundle. */
+  imageCheckC2paValidate: readBoolEnv("FF_IMAGE_CHECK_C2PA_VALIDATE"),
 
   /** ASIC Investor Alert lookup (PR-A2): surface an "ASIC-listed" red flag
    *  when an analyze submission mentions a domain on ASIC's regulator
@@ -784,7 +824,7 @@ export const featureFlags = {
   shopfrontCloneWeeklyDigest: readBoolEnv("FF_SHOPFRONT_CLONE_WEEKLY_DIGEST"),
 
   /** Phase A.3 — urlscan.io auto-scan + auto-classification for new
-   *  clone-watch candidates. Free tier (100/day) is plenty for our
+   *  clone-watch candidates. Quota is ample for our
    *  ~5-10 daily candidates plus a re-scan cron. Server-side only.
    *  Gates the two Inngest functions (clone-watch-urlscan + clone-watch-
    *  urlscan-rescan). Independent of the master shopfrontCloneOutreach

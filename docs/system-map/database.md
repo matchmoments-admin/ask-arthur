@@ -98,7 +98,8 @@ Supabase Postgres (project `rquomhcgnodxzkhokwni`). 75+ tables across 12 domain 
 ### Deepfake / Media
 
 - `deepfake_detections` — Media analysis results (file, hash, deepfake_confidence, predicted_labels). v54.
-- `image_check_records` — Metadata-only evidence records for FLAGGED right-click image checks (check_ref, install_id_hash, scores, generator_breakdown, content_credentials, image_sha256 — never bytes; ADR-0022). v239.
+- `image_check_records` — Metadata-only evidence records for FLAGGED right-click image checks (check_ref, install_id_hash, scores, generator_breakdown, content_credentials, origin_metadata, image_sha256 — never bytes; ADR-0022). v239; `origin_metadata` (claimed AI-origin tier: XMP DigitalSourceType / CreatorTool + EXIF Software, `detectMetadataOrigin`) added v280 to parent AND archive twin.
+- `document_check_records` — Metadata-only document-check evidence (DC- check_ref, doc_sha256, curated `structural_summary`, `findings`, `registry_checks`, `case_ref`, org_id/api_key_hash for B2B attribution — **never bytes, never extracted text**; ADR-0022 pattern). v281; v283 renamed `abn_summary`→`registry_checks` (pack-agnostic `{kind,identifier,status,entityName}`) and added `case_ref` (caller's applicant/application grouping key, opaque). **Retention differs by source**: `web` keeps FLAGGED checks only (anonymous consumer, data minimisation); `api` keeps EVERY check (the paying org is the controller and is buying an audit trail). Written only by `recordDocumentCheck` (`apps/web/lib/document-check-records.ts`), gated `FF_DOCUMENT_CHECK_RECORDS`.
 - `media_analyses` — Image / video forensics (media_type, format, dimensions, exif_data, phash_vector). JSONB versioning v117.
 
 ### Brand & Ads
@@ -207,7 +208,7 @@ Supabase Postgres (project `rquomhcgnodxzkhokwni`). 75+ tables across 12 domain 
 
 ---
 
-## Archive shadows (×11)
+## Archive shadows (×12)
 
 All have `BRIN(created_at)` for cheap range queries.
 
@@ -216,6 +217,7 @@ All have `BRIN(created_at)` for cheap range queries.
 | `flagged_ads_archive`                | `flagged_ads`                | >180d                          | v118 `archive_secondary_tables_batch` |
 | `deepfake_detections_archive`        | `deepfake_detections`        | >180d                          | v118                                  |
 | `image_check_records_archive`        | `image_check_records`        | >365d                          | v239                                  |
+| `document_check_records_archive`     | `document_check_records`     | >365d                          | v281                                  |
 | `media_analyses_archive`             | `media_analyses`             | >180d                          | v118                                  |
 | `scan_results_archive`               | `scan_results`               | >180d                          | v118                                  |
 | `verdict_feedback_archive`           | `verdict_feedback`           | >180d                          | v118                                  |

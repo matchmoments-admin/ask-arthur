@@ -45,7 +45,12 @@ const UNCERTAIN_CONFIDENCE_THRESHOLD = 0.6;
 export function sanitizeUnicode(text: string): string {
   return text
     .replace(
-      /[\u200B\u200C\u200D\uFEFF\u2060\u2062-\u2064\u{E0000}-\u{E007F}]/gu,
+      // Zero-width set + word joiner + invisible operators + Unicode tag
+      // block (ASCII smuggling), plus the bidi controls (LRM/RLM,
+      // embeddings, overrides, isolates — Trojan-source / display-spoofing
+      // vectors; direction control carries no analysis value, so stripping
+      // is safe for legitimate RTL text).
+      /[\u200B\u200C\u200D\u200E\u200F\uFEFF\u2060\u2062-\u2064\u202A-\u202E\u2066-\u2069\u{E0000}-\u{E007F}]/gu,
       "",
     )
     .normalize("NFKC");
@@ -132,11 +137,70 @@ const INJECTION_PATTERNS: [RegExp, string][] = [
   [/<\/?\s*system/i, "Attempted system tag injection"],
 ];
 
+// Deterministic character-class checks — NOT AI detection (ADR-0024
+// Amendment: invisible-character inspection is a manipulation signal and
+// sits outside the text-watermark prohibition). These run on the RAW text,
+// because sanitizeUnicode strips exactly these characters — the evidence
+// must be read before it is destroyed. Deliberately near-zero-FP:
+// - Unicode tag block: the ONE legitimate consumer use is emoji
+//   subdivision-flag sequences (England/Scotland/Wales: U+1F3F4 black flag
+//   + tag-letter region code + U+E007F CANCEL TAG) — those are removed
+//   before testing (post-merge FP found by review, 2026-08-21); orphan tag
+//   characters remain the classic hidden-ASCII smuggling channel.
+// - Bidi OVERRIDES only (LRO/RLO) — embeddings/isolates/marks appear in
+//   legitimate RTL copy-paste and are stripped but never flagged.
+// - Runs of ≥2 CONSECUTIVE zero-width-class chars (mcp-audit OBF-002
+//   precedent; now includes word joiner + invisible operators, which
+//   sanitizeUnicode strips and therefore must also report). Emoji ZWJ
+//   sequences never place zero-width chars adjacently, and a single stray
+//   ZWSP from web copy-paste does not fire.
+const EMOJI_TAG_FLAG_SEQUENCE =
+  /\u{1F3F4}[\u{E0030}-\u{E0039}\u{E0061}-\u{E007A}]{2,8}\u{E007F}/gu;
+
+// Every invisible character sanitizeUnicode strips. Used to build the
+// space-fold phrase variant; keep in sync with sanitizeUnicode's class.
+const INVISIBLE_CHARS =
+  /[\u200B\u200C\u200D\u200E\u200F\uFEFF\u2060\u2062-\u2064\u202A-\u202E\u2066-\u2069\u{E0000}-\u{E007F}]/gu;
+
+const UNICODE_OBFUSCATION_PATTERNS: [RegExp, string][] = [
+  [
+    /[\u{E0000}-\u{E007F}]/u,
+    "Hidden Unicode tag characters (invisible text smuggling)",
+  ],
+  [
+    /[\u202D\u202E]/,
+    "Bidirectional override characters (display-order spoofing)",
+  ],
+  [
+    /[\u200B\u200C\u200D\u2060\u2062-\u2064\uFEFF]{2,}/,
+    "Runs of zero-width characters (content obfuscation)",
+  ],
+];
+
 export function detectInjectionAttempt(text: string): InjectionCheckResult {
   const patterns: string[] = [];
 
+  const rawForCharChecks = text.replace(EMOJI_TAG_FLAG_SEQUENCE, "");
+  for (const [regex, description] of UNICODE_OBFUSCATION_PATTERNS) {
+    if (regex.test(rawForCharChecks)) {
+      patterns.push(description);
+    }
+  }
+
+  // Phrase patterns run on TWO folded variants (review fix 2026-08-21 —
+  // one fold is not enough, because an invisible char can play two roles):
+  // - joined: sanitizeUnicode deletes invisibles + NFKC, catching in-word
+  //   splits ("ig[ZWSP]nore") and fullwidth variants;
+  // - spaced: invisibles become spaces, catching invisible chars used AS
+  //   the separator ("ignore[FEFF]previous") — deleting those joins the
+  //   words and silently breaks every \s+ pattern (a regression from the
+  //   pre-fold behavior, where JS \s matched FEFF on raw text).
+  // Folding INSIDE the detector (rather than at call sites) makes the
+  // invariant un-bypassable by a caller passing raw text.
+  const foldedJoined = sanitizeUnicode(text);
+  const foldedSpaced = text.replace(INVISIBLE_CHARS, " ").normalize("NFKC");
   for (const [regex, description] of INJECTION_PATTERNS) {
-    if (regex.test(text)) {
+    if (regex.test(foldedJoined) || regex.test(foldedSpaced)) {
       patterns.push(description);
     }
   }

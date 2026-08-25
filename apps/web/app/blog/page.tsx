@@ -3,6 +3,7 @@ import Image from "next/image";
 import { getAllPosts, getCategories } from "@/lib/blog";
 import SubscribeForm from "@/components/SubscribeForm";
 import type { Metadata } from "next";
+import { OG_BASE } from "@/lib/og";
 
 export const metadata: Metadata = {
   title: "Blog — Ask Arthur",
@@ -12,6 +13,9 @@ export const metadata: Metadata = {
     canonical: "https://askarthur.au/blog",
   },
   openGraph: {
+      // Next replaces the parent openGraph wholesale — every key not named
+      // here is dropped. Spread the base first. See lib/og.ts.
+      ...OG_BASE,
     title: "Blog — Ask Arthur",
     description: "Scam alerts, security guides, and product updates.",
     type: "website",

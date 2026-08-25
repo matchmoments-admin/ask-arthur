@@ -7,6 +7,7 @@ import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
 import { SOURCE_CONFIG, relativeTime } from "@/lib/feed";
 import { getInitialFeed, getPinnedRegulatorAlerts } from "@/lib/feed-loaders";
+import { OG_BASE } from "@/lib/og";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +16,9 @@ export const metadata: Metadata = {
   description:
     "Browse the latest scam alerts from Australian regulators (Scamwatch, ACSC, ASIC), Reddit, verified intelligence, and community reports. Filter by category, country, and search for specific threats.",
   openGraph: {
+      // Next replaces the parent openGraph wholesale — every key not named
+      // here is dropped. Spread the base first. See lib/og.ts.
+      ...OG_BASE,
     title: "Feed — Latest Australian Scam Alerts",
     description:
       "Real-time scam intelligence from Australian regulators and the community. See what scams are trending right now.",

@@ -1,7 +1,11 @@
 import { createServiceClient } from "@askarthur/supabase/server";
 import { downloadMediaBuffer } from "./r2";
 import { transcribeAudio } from "./whisper";
-import { analyzeWithClaude, detectInjectionAttempt } from "@askarthur/scam-engine/claude";
+import {
+  analyzeWithClaude,
+  detectInjectionAttempt,
+  sanitizeUnicode,
+} from "@askarthur/scam-engine/claude";
 import { scrubPII } from "@askarthur/scam-engine/sanitize";
 import { incrementStats } from "@askarthur/scam-engine/pipeline";
 import { logger } from "@askarthur/utils/logger";
@@ -125,7 +129,9 @@ export async function runMediaAnalysis(
     }
 
     // 2. Scrub PII from transcript
-    const scrubbedTranscript = scrubPII(rawTranscript);
+    // Fold invisible Unicode before scrubbing (same PII-evasion fix as
+    // report-store.ts, 2026-08-21).
+    const scrubbedTranscript = scrubPII(sanitizeUnicode(rawTranscript));
 
     // 3. Set status → analyzing, store transcript, run Claude
     await updateMediaJob(jobId, {

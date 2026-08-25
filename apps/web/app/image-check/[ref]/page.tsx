@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { featureFlags } from "@askarthur/utils/feature-flags";
+import { IMAGE_CHECK_ORIGIN_COPY } from "@askarthur/types";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { CHECK_REF_PATTERN } from "@/lib/check-ref";
 import {
@@ -35,7 +36,7 @@ export default async function ImageCheckEvidencePage({
   const { data: record } = await supabase
     .from("image_check_records")
     .select(
-      "check_ref, checked_at, image_url, page_url, image_sha256, ai_confidence, deepfake_confidence, generator_source, generator_breakdown, content_credentials, vision_summary, impersonated_brand, impersonated_celebrity",
+      "check_ref, checked_at, image_url, page_url, image_sha256, ai_confidence, deepfake_confidence, generator_source, generator_breakdown, content_credentials, origin_metadata, vision_summary, impersonated_brand, impersonated_celebrity",
     )
     .eq("check_ref", ref)
     .maybeSingle();
@@ -45,7 +46,18 @@ export default async function ImageCheckEvidencePage({
     v === null || v === undefined ? "not assessed" : `${Math.round(Number(v) * 100)}%`;
   const breakdown =
     (record.generator_breakdown as Array<{ class: string; score: number }> | null) ?? null;
-  const cc = record.content_credentials as { present: boolean; format?: string } | null;
+  const cc = record.content_credentials as {
+    present: boolean;
+    format?: string;
+    validationState?: "trusted" | "valid" | "invalid";
+    issuer?: string | null;
+    generator?: string | null;
+  } | null;
+  const origin = record.origin_metadata as {
+    claimed: boolean;
+    source?: string;
+    generator?: string | null;
+  } | null;
 
   return (
     <main className="min-h-screen bg-[#fbfbfa] px-4 py-12">
@@ -121,11 +133,13 @@ export default async function ImageCheckEvidencePage({
             <div>
               <dt className="text-gray-500">Content Credentials (C2PA)</dt>
               <dd className="text-gray-800">
-                {cc === null
-                  ? "not assessed (image bytes unavailable)"
-                  : cc.present
-                    ? `manifest present in ${cc.format ?? "image"} container (issuer not cryptographically verified)`
-                    : "no manifest detected"}
+                {IMAGE_CHECK_ORIGIN_COPY.ccLine(cc)}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-gray-500">Metadata origin tag (XMP/EXIF)</dt>
+              <dd className="text-gray-800">
+                {IMAGE_CHECK_ORIGIN_COPY.originLine(origin)}
               </dd>
             </div>
           </dl>

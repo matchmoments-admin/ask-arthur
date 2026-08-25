@@ -469,6 +469,79 @@ components:
           type: string
 
 paths:
+  /document-checks:
+    post:
+      summary: Run a document check (PDF forensics)
+      description: >
+        Multipart PDF upload (field `file`, ≤10 MB). Returns named structural
+        findings (revision history, producer tells, metadata dates) plus AU
+        content checks (ABN checksum + ABR register status). Never a
+        FAKE/GENUINE verdict — an empty findings list means "no editing
+        traces found", not "genuine" (a fraudulent document generated from
+        scratch carries no revision history). Flagged checks persist a
+        metadata-only evidence record and return its DC- checkRef. Metered
+        per calendar month by plan tier; response carries monthlyRemaining.
+      operationId: runDocumentCheck
+      tags: [DocumentChecks]
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The PDF to check (≤10 MB).
+                caseRef:
+                  type: string
+                  maxLength: 128
+                  description: >
+                    Optional applicant/application grouping key. Stored
+                    verbatim and never parsed; use it to group the several
+                    documents belonging to one application, then retrieve
+                    them with GET ?case=.
+      responses:
+        "200":
+          description: Check result (or checked:false/scan_unavailable when the scan could not run).
+        "402":
+          description: The key's plan has no document-check allowance.
+        "429":
+          description: Monthly allowance reached.
+    get:
+      summary: List your organisation's flagged document-check records
+      description: >
+        Org-scoped (the calling key's organisation only — never a global
+        feed). Metadata-only rows — never document bytes or extracted text.
+      operationId: listDocumentChecks
+      tags: [DocumentChecks]
+      parameters:
+        - name: period
+          in: query
+          schema:
+            type: string
+            example: 30d
+          description: Lookback window, e.g. 7d (1–90 days, default 30).
+        - name: case
+          in: query
+          schema:
+            type: string
+            example: APP-2026-0842
+          description: >
+            Return only checks recorded against this applicant/application
+            grouping key (the value supplied as `caseRef` on POST). The unit
+            of work is usually the application, not the document.
+      responses:
+        "200":
+          description: >
+            The calling organisation's own document-check records — every
+            check it submitted, not only flagged ones, so the feed is a
+            complete audit trail. `meta.flagged` counts those carrying at
+            least one finding. Metadata only: never document bytes or
+            extracted text.
+        "403":
+          description: API key is not linked to an organisation.
   /image-checks:
     get:
       summary: List flagged image-check evidence records
@@ -476,8 +549,12 @@ paths:
         Metadata-only evidence records for right-click image checks that
         flagged as likely AI-generated or deepfake (ADR-0022). Includes the
         quotable check reference, detector confidences, generator
-        attribution, Content-Credentials presence, and the image SHA-256 for
-        corroboration. Never includes image bytes or install identifiers.
+        attribution, Content-Credentials presence, claimed AI-origin
+        metadata (origin_metadata — XMP DigitalSourceType / CreatorTool and
+        EXIF Software; a forgeable claim, not verification), and the image
+        SHA-256 for corroboration. Never includes image bytes or install
+        identifiers. Absence of provenance data is not evidence of human
+        origin — most platforms strip metadata on upload.
       operationId: listImageChecks
       tags: [Deepfakes]
       parameters:

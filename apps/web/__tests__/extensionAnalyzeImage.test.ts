@@ -4,9 +4,12 @@ import { NextRequest } from "next/server";
 // /api/extension/analyze-image — flag gate, scheme/SSRF guards, tiered image
 // cap, hive_ai brake, and the Hive-only happy path. assertSafeURL is used
 // unmocked (pure function) so the SSRF test exercises the real guard.
-vi.mock("@askarthur/scam-engine/hive-ai", () => ({
-  checkHiveAI: vi.fn(),
-}));
+vi.mock("@askarthur/scam-engine/hive-ai", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@askarthur/scam-engine/hive-ai")>();
+  // Keep the REAL generatorBreakdown — the route imports it from this module.
+  return { ...actual, checkHiveAI: vi.fn() };
+});
 vi.mock("@askarthur/scam-engine/claude", () => ({
   analyzeWithClaude: vi.fn(),
 }));

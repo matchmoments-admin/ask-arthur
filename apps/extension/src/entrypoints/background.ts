@@ -8,6 +8,7 @@ import { urlCache } from "@/lib/url-cache";
 import { detectPhoneInSelection } from "@/lib/phone-detect";
 import { classifyImageSrc, describeConfidence, formatGeneratorName } from "@/lib/image-check-routing";
 import { renderImageCheckCard } from "@/lib/image-check-card";
+import { IMAGE_CHECK_ORIGIN_COPY } from "@askarthur/types";
 import type { ExtensionMessage, MessageResponse } from "@/lib/types";
 
 const WEB_APP_BASE = __WEB_APP_BASE__;
@@ -282,9 +283,15 @@ async function handleImageCheck(
       generatorLines: generatorLines.length > 0 ? generatorLines : undefined,
       contextLine: data.context?.summary || undefined,
       lensUrl: `https://lens.google.com/uploadbyurl?url=${encodeURIComponent(srcUrl)}`,
-      contentCredentialsLine: data.contentCredentials?.present
-        ? "Content Credentials present (issuer unverified)"
-        : undefined,
+      // Tier selection lives in the shared selectors (asymmetry-tested):
+      // signed beats presence, invalid gets its own line, absent/unknown
+      // render nothing.
+      contentCredentialsLine: IMAGE_CHECK_ORIGIN_COPY.ccCardLine(
+        data.contentCredentials,
+      ),
+      metadataOriginLine: IMAGE_CHECK_ORIGIN_COPY.originCardLine(
+        data.metadataOrigin,
+      ),
       evidenceRef: data.checkRef ?? undefined,
       evidenceUrl: data.checkRef
         ? `${WEB_APP_BASE}/image-check/${encodeURIComponent(data.checkRef)}`

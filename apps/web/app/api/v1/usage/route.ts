@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { guardV1 } from "@/lib/v1-guard";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
+import { peekMonthlyQuota } from "@/lib/v1-quota";
+import { documentAllowanceForOrg } from "@/lib/document-allowance";
 
 export async function GET(req: NextRequest) {
   const guard = await guardV1(req);
@@ -61,10 +63,38 @@ export async function GET(req: NextRequest) {
       byDay[row.day] = (byDay[row.day] || 0) + row.call_count;
     }
 
+    // Document-check monthly allowance (org-billed, UTC calendar months) —
+    // surfaced here so a pilot can see remaining without a chargeable POST.
+    // Same resolver as the metered route: doc-plan entitlement first, tier
+    // fallback second.
+    let documentChecks = null;
+    if (auth.orgId) {
+      const allowance = await documentAllowanceForOrg(auth.orgId, auth.tier);
+      if (allowance.degraded && allowance.monthlyLimit === 0) {
+        // Could not read the entitlement — say so rather than rendering the
+        // block's absence, which reads as "no plan" (a cancellation look-
+        // alike a paying pilot would escalate).
+        documentChecks = { degraded: true };
+      } else if (allowance.monthlyLimit > 0) {
+        documentChecks = {
+          monthlyLimit: allowance.monthlyLimit,
+          plan: allowance.plan,
+          source: allowance.source,
+          ...(allowance.degraded ? { degraded: true } : {}),
+          ...((await peekMonthlyQuota(
+            "document_check",
+            auth.orgId,
+            allowance.monthlyLimit,
+          )) ?? { used: null, remaining: null }),
+        };
+      }
+    }
+
     return NextResponse.json({
       period: { days, since: since.toISOString().slice(0, 10) },
       totalCalls,
       dailyRemaining: auth.dailyRemaining,
+      documentChecks,
       byEndpoint,
       dailyBreakdown: Object.entries(byDay)
         .map(([day, count]) => ({ day, calls: count }))

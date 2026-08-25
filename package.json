@@ -38,10 +38,12 @@
     "lint-staged": "^16.4.0",
     "prettier": "^3.8.3",
     "puppeteer": "^24.10.0",
+    "sharp": "^0.34.5",
     "turbo": "^2.8.10"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
+      "@contentauth/c2pa-node",
       "esbuild",
       "puppeteer",
       "sharp",
