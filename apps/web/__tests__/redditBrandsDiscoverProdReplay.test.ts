@@ -491,8 +491,8 @@ describe("PROD REPLAY — what Monday's digest will contain", () => {
       upserted: r.allFresh.length,
       upsertAttempted: r.allFresh.length,
       degraded: [],
-      unresolvedLabels: 0,
-      unresolvedSample: [],
+      compoundUnresolved: 0,
+      compoundUnresolvedSample: [],
       hasAlias: (raw) => Boolean(PROD_ALIASES[brandNormalize(raw) ?? ""]),
     });
     console.log("\n--- digest as it will be sent ---\n" + msg + "\n---\n");

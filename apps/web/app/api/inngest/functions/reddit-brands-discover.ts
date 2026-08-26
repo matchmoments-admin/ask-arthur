@@ -6,6 +6,7 @@ import {
   buildBrandMultiResolver,
   buildWatchedKeySet,
   isNonBrandLabel,
+  splitBrandLabel,
   type BrandAliasRecord,
 } from "@askarthur/shopfront-glue";
 import { getActiveWatchlist } from "@askarthur/scam-engine/active-watchlist";
@@ -344,6 +345,41 @@ export interface PromotionPlan {
  * Pure + unit-tested. Exported for testing.
  */
 /**
+ * The leak detector: COMPOUND labels this run could not resolve to any brand.
+ *
+ * Extracted rather than inlined for the reason this file keeps re-learning —
+ * `partitionForDigest` and `buildDigestMessage` were both pulled out because
+ * reporting logic that lives inside the handler is unreachable to tests, and
+ * reporting is where this feature's bugs live. The compound-only rule below is
+ * a judgement call measured against prod; a comment cannot hold it in place.
+ *
+ * Two exclusions, both deliberate:
+ *   - HEDGED labels. "Generic health insurance provider (OFHC or similar)" is
+ *     the classifier reporting that it could not identify the brand. That is a
+ *     handled outcome, not a miss.
+ *   - SIMPLE labels. "American Express" resolving to nothing means we do not
+ *     track American Express; there is no parse to have got wrong. Counting
+ *     them put the number at 29 of 44 on the live 30-day window, which is large
+ *     enough and stable enough to be skimmed — and a skimmed alarm is the
+ *     failure this telemetry exists to prevent.
+ *
+ * What is left is the shape a brand we ALREADY WATCH can hide inside, because
+ * the surrounding prose is what breaks the key: 2 of 44 on that same window,
+ * and before this PR "NAB (National Australia Bank)" was one of the two.
+ */
+export function findLeakSuspects(
+  candidates: readonly CandidateAgg[],
+  resolveMulti: (raw: string) => string[],
+): CandidateAgg[] {
+  return candidates.filter(
+    (c) =>
+      !isNonBrandLabel(c.rawBrand) &&
+      splitBrandLabel(c.rawBrand).length > 1 &&
+      resolveMulti(c.rawBrand).length === 0,
+  );
+}
+
+/**
  * Build the already-watched gate: does this aggregated brand mention deserve to
  * become a Watchlist Candidate at all?
  *
@@ -460,23 +496,28 @@ export interface DigestInput {
   /** Non-empty means the counts above UNDERSTATE reality. */
   degraded: readonly string[];
   /**
-   * Labels examined this run that the canonical layer could not identify at all
-   * — neither whole-string nor by any fragment (see buildBrandMultiResolver).
+   * COMPOUND labels examined this run that resolved to no known brand — the
+   * leak detector.
    *
-   * This is the number that would have caught the NAB leak on 2026-08-10, two
-   * weeks before a human noticed it in the digest. It counts two things it
-   * cannot tell apart: a genuinely new brand, and a brand we already watch
-   * arriving under a phrasing the alias layer has never seen. Both are worth
-   * an operator's eye, which is why the sample ships with the count — a name
-   * you recognise in that list is a leak, one you don't is a new brand.
+   * Why compound-only, measured rather than assumed. The first cut of this
+   * counted EVERY unresolved label, and against the live 30-day window that is
+   * 29 of 44: American Express, Apple Pay, AT&T, Bank of America, Chase… all
+   * real brands we simply do not track. A number that large and that stable
+   * gets skimmed, and the one line that matters hides inside it — which is the
+   * failure this telemetry exists to prevent, reproduced.
    *
-   * Deliberately EXCLUDES hedged labels ("Generic health insurance provider…").
-   * Those are a known, handled class; folding them in would make the number
-   * large, stable and therefore ignored.
+   * A SIMPLE label that resolves to nothing is just a brand we do not track;
+   * there is nothing in it to have parsed wrong. A COMPOUND one is the shape a
+   * brand we DO track can hide inside, because the surrounding prose is what
+   * breaks the key. Narrowing to that gives 2 of 44 on the same window — and
+   * before this PR, "NAB (National Australia Bank)" was one of them.
+   *
+   * Hedged labels are excluded (see isNonBrandLabel): the classifier saying it
+   * could not identify the brand is a handled outcome, not a miss.
    */
-  unresolvedLabels: number;
+  compoundUnresolved: number;
   /** Up to UNRESOLVED_PREVIEW of the above, so the count is actionable. */
-  unresolvedSample: readonly string[];
+  compoundUnresolvedSample: readonly string[];
   /** True when the brand has a known alias — renders a "(known alias)" tag. */
   hasAlias: (rawBrand: string) => boolean;
   /**
@@ -592,11 +633,11 @@ export function buildDigestMessage(d: DigestInput): string {
     // Sits INSIDE the heartbeat, not in a conditional block of its own: this is
     // the accuracy half of proof-of-life, and the run that most needs it is the
     // quiet one. A zero here is a real result and prints as such.
-    ...(d.unresolvedLabels > 0
+    ...(d.compoundUnresolved > 0
       ? [
-          `<b>${d.unresolvedLabels}</b> label(s) matched no known brand: ` +
-            `${d.unresolvedSample.map(escapeHtml).join(", ")}` +
-            `${d.unresolvedLabels > d.unresolvedSample.length ? ", …" : ""}. ` +
+          `<b>${d.compoundUnresolved}</b> compound label(s) matched no known ` +
+            `brand: ${d.compoundUnresolvedSample.map(escapeHtml).join(", ")}` +
+            `${d.compoundUnresolved > d.compoundUnresolvedSample.length ? ", …" : ""}. ` +
             `<i>A name you recognise here is a gate leak, not a new brand.</i>`,
         ]
       : []),
@@ -861,10 +902,14 @@ export const redditBrandsDiscover = inngest.createFunction(
     // Computed over EVERY examined label from both sources — before the
     // fresh-filter, because a label dropped by the gate is exactly the one
     // worth counting. Hedged labels are excluded (see DigestData).
-    const unresolved = [...candidates, ...scamCandidatesRaw]
-      .filter((c) => !isNonBrandLabel(c.rawBrand))
-      .filter((c) => resolveMulti(c.rawBrand).length === 0)
-      .map((c) => c.rawBrand);
+    const examinedLabels = [...candidates, ...scamCandidatesRaw];
+    // The broad count goes to Axiom ONLY — useful as a trend, useless in a
+    // digest (29 of 44 on the live window). The digest gets the compound
+    // subset, which is the part a human can act on.
+    const unresolvedLabels = examinedLabels.filter(
+      (c) => !isNonBrandLabel(c.rawBrand) && resolveMulti(c.rawBrand).length === 0,
+    ).length;
+    const compoundUnresolved = findLeakSuspects(examinedLabels, resolveMulti);
     markDegraded(scamStep.failed);
     const scamFresh = scamCandidatesRaw.filter(isFreshCandidate);
 
@@ -1142,8 +1187,10 @@ export const redditBrandsDiscover = inngest.createFunction(
           needsDomain,
           candidatesExamined: candidates.length,
           scamExamined: scamCandidatesRaw.length,
-          unresolvedLabels: unresolved.length,
-          unresolvedSample: unresolved.slice(0, UNRESOLVED_PREVIEW),
+          compoundUnresolved: compoundUnresolved.length,
+          compoundUnresolvedSample: compoundUnresolved
+            .slice(0, UNRESOLVED_PREVIEW)
+            .map((c) => c.rawBrand),
           upserted,
           upsertAttempted: upsertStep.attempted,
           degraded,
@@ -1157,9 +1204,13 @@ export const redditBrandsDiscover = inngest.createFunction(
       candidates: candidates.length,
       fresh: fresh.length,
       // On the warn-level event so it survives the 10% INFO sampling that made
-      // this cron unobservable in the first place.
-      unresolvedLabels: unresolved.length,
-      unresolvedSample: unresolved.slice(0, UNRESOLVED_PREVIEW),
+      // this cron unobservable in the first place. BOTH numbers ship here:
+      // the broad one is a queryable trend, the compound one is the alarm.
+      unresolvedLabels,
+      compoundUnresolved: compoundUnresolved.length,
+      compoundUnresolvedSample: compoundUnresolved
+        .slice(0, UNRESOLVED_PREVIEW)
+        .map((c) => c.rawBrand),
       scamFresh: scamFresh.length,
       newlySurfaced: newlySurfaced.length,
       auEvidenced: auEvidenced.length,

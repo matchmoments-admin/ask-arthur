@@ -8,11 +8,12 @@ import {
   mergeCandidateSources,
   partitionForDigest,
   planPromotions,
+  findLeakSuspects,
   CANDIDATE_DENYLIST,
   type DigestInput,
   type MergedCandidate,
 } from "@/app/api/inngest/functions/reddit-brands-discover";
-import { brandNormalize } from "@askarthur/shopfront-glue";
+import { brandNormalize, buildBrandMultiResolver } from "@askarthur/shopfront-glue";
 
 describe("aggregateBrandMentions", () => {
   it("counts one mention per distinct normalized brand per post", () => {
@@ -514,8 +515,8 @@ describe("buildDigestMessage — the digest cannot lie about the run", () => {
     upserted: 12,
     upsertAttempted: 12,
     degraded: [],
-    unresolvedLabels: 0,
-    unresolvedSample: [],
+    compoundUnresolved: 0,
+    compoundUnresolvedSample: [],
     hasAlias: () => false,
     ...over,
   });
@@ -654,14 +655,17 @@ describe("buildDigestMessage — the digest cannot lie about the run", () => {
     expect(msg).not.toMatch(/AT&T/);
   });
 
-  it("reports labels the canonical layer could not identify", () => {
+  it("reports COMPOUND labels the canonical layer could not identify", () => {
     // The accuracy half of proof-of-life. The heartbeat says the run LOOKED;
     // this says whether it UNDERSTOOD. Every bug in this file — v260, v261, the
     // NAB leak — was a label silently unresolved for weeks.
     const msg = buildDigestMessage(
-      input({ unresolvedLabels: 7, unresolvedSample: ["NAB (National Australia Bank)"] }),
+      input({
+        compoundUnresolved: 7,
+        compoundUnresolvedSample: ["NAB (National Australia Bank)"],
+      }),
     );
-    expect(msg).toContain("<b>7</b> label(s) matched no known brand");
+    expect(msg).toContain("<b>7</b> compound label(s) matched no known brand");
     expect(msg).toContain("NAB (National Australia Bank)");
     expect(msg).toContain(", …"); // 7 > 1 sampled
   });
@@ -692,8 +696,8 @@ describe("buildDigestMessage — an unattended promotion cannot silently overrid
     upserted: 12,
     upsertAttempted: 12,
     degraded: [],
-    unresolvedLabels: 0,
-    unresolvedSample: [],
+    compoundUnresolved: 0,
+    compoundUnresolvedSample: [],
     hasAlias: () => false,
   };
 
@@ -761,4 +765,52 @@ describe("buildDigestMessage — an unattended promotion cannot silently overrid
     expect(msg).toContain("1 of these reversed a decision");
   });
 
+});
+
+describe("findLeakSuspects — the alarm must stay small enough to read", () => {
+  // Every label below is a literal scam_reports.impersonated_brand from prod,
+  // 2026-08-27. Counting ALL unresolved labels gives 29 of 44 on this window;
+  // the compound-only rule gives 2. Both numbers are measured, not chosen.
+  const aliases = { nab: "NAB", nationalaustraliabank: "NAB" };
+  const resolveMulti = buildBrandMultiResolver(aliases);
+  const label = (rawBrand: string) => ({
+    brandNormalized: brandNormalize(rawBrand) ?? "",
+    rawBrand,
+    mentionCount: 2,
+    auCount: 2,
+  });
+
+  it("ignores a SIMPLE label that resolves to nothing", () => {
+    // Not a leak — we simply do not track these. They were 27 of the 29.
+    const simple = ["American Express", "Apple Pay", "AT&T", "Bank of America", "Chase"];
+    expect(findLeakSuspects(simple.map(label), resolveMulti)).toEqual([]);
+  });
+
+  it("flags a COMPOUND label that resolves to nothing", () => {
+    const r = findLeakSuspects([label("School / Australia Cancer Relief Fund")], resolveMulti);
+    expect(r).toHaveLength(1);
+  });
+
+  it("would have flagged NAB before the alias rows bridged it", () => {
+    // The whole point. Against an alias layer that does NOT know NAB, the leak
+    // shows up in the digest instead of waiting for a human to notice a
+    // familiar name in a promote list two weeks later.
+    const blind = buildBrandMultiResolver({});
+    expect(
+      findLeakSuspects([label("NAB (National Australia Bank)")], blind),
+    ).toHaveLength(1);
+    // …and goes quiet once it resolves, so the alarm tracks the defect.
+    expect(
+      findLeakSuspects([label("NAB (National Australia Bank)")], resolveMulti),
+    ).toEqual([]);
+  });
+
+  it("ignores a hedged label — the classifier already told us it did not know", () => {
+    expect(
+      findLeakSuspects(
+        [label("Generic health insurance provider (OFHC or similar)")],
+        resolveMulti,
+      ),
+    ).toEqual([]);
+  });
 });
