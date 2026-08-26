@@ -154,41 +154,63 @@ export async function promoteCandidate(
   // TypeScript array; `monitored_brands` holds only the overlay (0 rows today),
   // so a SQL guard would see nothing and NAB would sail past it while the guard
   // read as protection. getActiveWatchlist() is the only thing that sees both.
+  //
+  // THE TWO HALVES FAIL DIFFERENTLY, so they are handled separately rather than
+  // wrapped in one try/catch that implies a uniform guarantee:
+  //
+  //   getActiveWatchlist() degrades to the STATIC list and never throws
+  //     (active-watchlist.ts: a null/empty overlay returns staticOnly), so the
+  //     exact-key half is always armed. NAB is on the static list.
+  //
+  //   loadAliasRecord() never throws EITHER — by contract it logs and returns
+  //     whatever loaded, which for this single-page table means `{}` on any
+  //     error. That is the trap: an empty alias map makes the fragment half
+  //     silently resolve NOTHING, so the guard would wave through the very
+  //     brand it exists to stop while looking like it ran. `brand_aliases` has
+  //     ~311 rows and is never legitimately empty, so an empty map is read as
+  //     UNAVAILABLE and the promotion is blocked. Fail closed, and only where
+  //     failing closed is actually achievable.
+  let watched: ReadonlySet<string>;
+  let aliasPairs: Record<string, string>;
   try {
-    const [watchlist, aliasPairs] = await Promise.all([
-      getActiveWatchlist(),
+    [watched, aliasPairs] = await Promise.all([
+      getActiveWatchlist().then(buildWatchedKeySet),
       loadAliasRecord(supabase, "brand-candidates-promote"),
     ]);
-    const watched = buildWatchedKeySet(watchlist);
-    const resolveMulti = buildBrandMultiResolver(aliasPairs);
-    const normalizedKey = brandNormalize(key);
-    const hit =
-      (normalizedKey && watched.has(normalizedKey) ? normalizedKey : null) ??
-      [...resolveMulti(name), ...resolveMulti(key)]
-        .map((c) => brandNormalize(c))
-        .find((k) => k && watched.has(k));
-    if (hit) {
-      logger.warn("brand-candidates: promotion blocked, already watched", {
-        brand: key,
-        watchedAs: hit,
-      });
-      return {
-        ok: false,
-        error:
-          `already_watched: "${name}" resolves to a brand already on the ` +
-          `watchlist (${hit}). Promoting would create a duplicate entry. ` +
-          `Mark it reviewed instead — the label leaked past the gate.`,
-      };
-    }
   } catch (e) {
-    // Fail CLOSED. An unreadable watchlist means we cannot tell a duplicate
-    // from a genuine new brand, and a wrong promotion writes to the live
-    // matcher — the expensive direction. Blocking is recoverable by retrying.
     logger.error("brand-candidates: duplicate guard unavailable", {
       brand: key,
       error: e instanceof Error ? e.message : String(e),
     });
     return { ok: false, error: "watchlist_unavailable_retry" };
+  }
+
+  if (Object.keys(aliasPairs).length === 0) {
+    logger.error("brand-candidates: alias layer empty, cannot check duplicates", {
+      brand: key,
+    });
+    return { ok: false, error: "alias_layer_unavailable_retry" };
+  }
+
+  const resolveMulti = buildBrandMultiResolver(aliasPairs);
+  const normalizedKey = brandNormalize(key);
+  const hit =
+    (normalizedKey && watched.has(normalizedKey) ? normalizedKey : null) ??
+    [...resolveMulti(name), ...resolveMulti(key)]
+      .map((c) => brandNormalize(c))
+      .find((k) => k && watched.has(k));
+  if (hit) {
+    logger.warn("brand-candidates: promotion blocked, already watched", {
+      brand: key,
+      watchedAs: hit,
+    });
+    return {
+      ok: false,
+      error:
+        `already_watched: "${name}" resolves to a brand already on the ` +
+        `watchlist (${hit}). Promoting would create a duplicate entry. ` +
+        `Mark it reviewed instead — the label leaked past the gate.`,
+    };
   }
 
   const { error } = await supabase.rpc("promote_watchlist_candidate", {
