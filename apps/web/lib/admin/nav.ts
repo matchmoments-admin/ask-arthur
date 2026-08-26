@@ -27,6 +27,7 @@ import {
   Sparkles,
   Server,
   CalendarCheck,
+  Presentation,
 } from "lucide-react";
 
 export interface AdminNavItem {
@@ -73,6 +74,7 @@ export const ADMIN_NAV_SECTIONS: AdminNavSection[] = [
       { id: "email-studio", name: "Email Studio", href: "/admin/email-studio", icon: Mail },
       { id: "brand-outreach", name: "Brand reach-out", href: "/admin/brand-outreach", icon: Megaphone },
       { id: "blog", name: "Blog", href: "/admin/blog", icon: FileText },
+      { id: "showcase", name: "System showcase", href: "/admin/showcase", icon: Presentation },
     ],
   },
 ];
