@@ -340,6 +340,50 @@ describe("planPromotions — the domain is never guessed", () => {
   it("returns nothing for an empty candidate list", () => {
     expect(planPromotions([], trusted)).toEqual({ promote: [], needsDomain: [] });
   });
+
+  // REGRESSION (2026-08-27) — before this, planPromotions never saw `status`.
+  // NAB leaked past the already-watched gate, cleared the bar on two reports,
+  // had no known_brands domain under its leaked key, and so appeared under
+  // "Ready to promote — need a confirmed domain" EVERY Monday. Nothing the
+  // operator clicked could stop it: dismissing changed a column this function
+  // did not read. The only exit was to promote it, which would have created a
+  // duplicate NAB on the live matcher.
+  it("stops re-asking for a domain on a brand the operator ruled out", () => {
+    const c = cand("nabnationalaustraliabank", "NAB (National Australia Bank)", {
+      scam: 2,
+      au: 2,
+      total: 2,
+    });
+    expect(planPromotions([c], trusted).needsDomain).toEqual([c]);
+    for (const status of ["dismissed", "not_a_brand"]) {
+      expect(
+        planPromotions([c], trusted, { nabnationalaustraliabank: status })
+          .needsDomain,
+      ).toEqual([]);
+    }
+  });
+
+  it("keeps asking after a REVIEWED decision — that is not a refusal", () => {
+    // 'reviewed' means "worth monitoring, not yet promoted". Suppressing the
+    // domain request there would bury the exact brands we most want promoted.
+    const c = cand("newbrand", "New Brand", { scam: 2, au: 2, total: 2 });
+    expect(
+      planPromotions([c], trusted, { newbrand: "reviewed" }).needsDomain,
+    ).toEqual([c]);
+  });
+
+  it("still AUTO-PROMOTES a dismissed brand — the asymmetry is deliberate", () => {
+    // New evidence may reverse an old triage call, and that override is
+    // announced rather than silent (see summary.promotionOverrides). Only the
+    // "please type a domain" nag is suppressed, because that is a request the
+    // operator has already declined.
+    const r = planPromotions(
+      [cand("gumtree", "Gumtree", { scam: 2, au: 2, total: 2 })],
+      trusted,
+      { gumtree: "dismissed" },
+    );
+    expect(r.promote).toHaveLength(1);
+  });
 });
 
 describe("per-source thresholds — the promotion bar must be reachable", () => {
@@ -470,6 +514,8 @@ describe("buildDigestMessage — the digest cannot lie about the run", () => {
     upserted: 12,
     upsertAttempted: 12,
     degraded: [],
+    unresolvedLabels: 0,
+    unresolvedSample: [],
     hasAlias: () => false,
     ...over,
   });
@@ -589,6 +635,40 @@ describe("buildDigestMessage — the digest cannot lie about the run", () => {
     );
     expect(msg).toContain("(known alias)");
   });
+  it("escapes a brand label so one ampersand cannot kill the whole digest", () => {
+    // sendAdminTelegramMessage posts with parse_mode=HTML. Telegram 400s on
+    // malformed markup, and a 400 means the digest never arrives at all —
+    // indistinguishable from a dead cron, which is the failure this file's
+    // heartbeat exists to prevent.
+    //
+    // Not hypothetical: AT&T has been sitting `pending` in
+    // reddit_watchlist_candidates since 2026-08-24 with 5 mentions. It has not
+    // broken a digest only because it stopped being net-new before it was ever
+    // rendered.
+    const msg = buildDigestMessage(
+      input({
+        auEvidenced: [merged({ brandNormalized: "att", rawBrand: "AT&T", au: 2, scam: 2 })],
+      }),
+    );
+    expect(msg).toContain("AT&amp;T");
+    expect(msg).not.toMatch(/AT&T/);
+  });
+
+  it("reports labels the canonical layer could not identify", () => {
+    // The accuracy half of proof-of-life. The heartbeat says the run LOOKED;
+    // this says whether it UNDERSTOOD. Every bug in this file — v260, v261, the
+    // NAB leak — was a label silently unresolved for weeks.
+    const msg = buildDigestMessage(
+      input({ unresolvedLabels: 7, unresolvedSample: ["NAB (National Australia Bank)"] }),
+    );
+    expect(msg).toContain("<b>7</b> label(s) matched no known brand");
+    expect(msg).toContain("NAB (National Australia Bank)");
+    expect(msg).toContain(", …"); // 7 > 1 sampled
+  });
+
+  it("says nothing about unresolved labels when there are none", () => {
+    expect(buildDigestMessage(input({}))).not.toContain("matched no known brand");
+  });
 });
 
 describe("buildDigestMessage — an unattended promotion cannot silently override a human", () => {
@@ -612,6 +692,8 @@ describe("buildDigestMessage — an unattended promotion cannot silently overrid
     upserted: 12,
     upsertAttempted: 12,
     degraded: [],
+    unresolvedLabels: 0,
+    unresolvedSample: [],
     hasAlias: () => false,
   };
 
@@ -678,4 +760,5 @@ describe("buildDigestMessage — an unattended promotion cannot silently overrid
     expect(msg).toContain("Auto-promoted to the watchlist (3)");
     expect(msg).toContain("1 of these reversed a decision");
   });
+
 });

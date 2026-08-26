@@ -10,6 +10,7 @@
 // zero-Supabase-dependency purity — the Supabase-backed loader that produces the
 // BrandAliasRecord lives app-side (apps/web/lib/brand-aliases.ts loadAliasRecord).
 import { brandNormalize } from "./brand-normalize";
+import { splitBrandLabel } from "./brand-label";
 
 /**
  * A bulk-loaded snapshot of the v174 `brand_aliases` table:
@@ -34,5 +35,51 @@ export function buildBrandResolver(
   return (raw) => {
     const k = brandNormalize(raw);
     return k ? (aliasRecord[k] ?? null) : null;
+  };
+}
+
+/**
+ * Build the RECALL-oriented resolver: a free-text classifier label → every
+ * distinct `canonical_brand` any part of it resolves to. Empty array when
+ * nothing resolves.
+ *
+ * WHY THIS IS A SECOND ADAPTER AND NOT A WIDER buildBrandResolver
+ * --------------------------------------------------------------
+ * The two live callers of buildBrandResolver ask a PRECISION question — "which
+ * brand IS this?" — and act on a single answer:
+ *
+ *   report-brand-stewardship  matchKnownBrand() picks the security contact the
+ *                             stewardship mail is SENT to. A wrong resolution
+ *                             emails the wrong company's phishing desk.
+ *   brand-register-refresh    canonicalFor() folds 30-day counts onto a brand's
+ *                             row. A wrong resolution attributes someone else's
+ *                             scam volume to that brand.
+ *
+ * The already-watched gate in reddit-brands-discover asks a different, RECALL
+ * question — "is ANY part of this a brand we already watch?" — where an extra
+ * match costs a suppressed queue row and a missed match costs a false
+ * "brand-new" proposal to the operator (the NAB leak, 2026-08-24).
+ *
+ * One resolver cannot serve both: widening the single-answer form to satisfy
+ * the gate would silently change which security desk receives mail. So the
+ * Seam gets a second Adapter over the SAME alias snapshot, and
+ * buildBrandResolver stays byte-identical for the outward-facing paths.
+ *
+ * Hedged labels ("Generic cloud storage provider (possibly …/iCloud)") return
+ * `[]` — see isNonBrandLabel. Load the alias record ONCE per run, as with
+ * buildBrandResolver.
+ */
+export function buildBrandMultiResolver(
+  aliasRecord: BrandAliasRecord,
+): (raw: string | null | undefined) => string[] {
+  return (raw) => {
+    const out: string[] = [];
+    for (const part of splitBrandLabel(raw)) {
+      const k = brandNormalize(part);
+      if (!k) continue;
+      const canonical = aliasRecord[k];
+      if (canonical && !out.includes(canonical)) out.push(canonical);
+    }
+    return out;
   };
 }

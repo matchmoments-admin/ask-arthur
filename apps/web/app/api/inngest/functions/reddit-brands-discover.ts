@@ -3,7 +3,9 @@ import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logg
 import {
   brandNormalize,
   buildBrandResolver,
+  buildBrandMultiResolver,
   buildWatchedKeySet,
+  isNonBrandLabel,
   type BrandAliasRecord,
 } from "@askarthur/shopfront-glue";
 import { getActiveWatchlist } from "@askarthur/scam-engine/active-watchlist";
@@ -104,6 +106,8 @@ const SCAM_REPORT_THRESHOLD = 2;
 const DIGEST_CAP = 25;
 // How many global-only (zero AU evidence) brands to name in the summary line.
 const GLOBAL_ONLY_PREVIEW = 5;
+// How many unidentifiable labels to name alongside their count.
+const UNRESOLVED_PREVIEW = 5;
 
 // Platform names the upstream classifier mis-tags as "impersonated" when a scam
 // merely happened ON that platform (Reddit/Discord/Marketplace…). This is a
@@ -339,9 +343,80 @@ export interface PromotionPlan {
  *
  * Pure + unit-tested. Exported for testing.
  */
+/**
+ * Build the already-watched gate: does this aggregated brand mention deserve to
+ * become a Watchlist Candidate at all?
+ *
+ * EXPORTED AND PURE ON PURPOSE. This logic used to live as a closure inside the
+ * handler, which meant the prod-replay harness could only MIRROR it by hand —
+ * and that mirror has already drifted once: an earlier copy omitted the alias
+ * second-chance, so the harness could observe neither the v260 bug nor its fix.
+ * A gate that its own regression test can only approximate is a gate with no
+ * test. Same reasoning that pulled `partitionForDigest` and
+ * `buildDigestMessage` out of their step.run closures in #878.
+ *
+ * The four checks, in the order they must run:
+ *   1. denylisted platform noise ("scam happened ON Discord" ≠ Discord scam)
+ *   2. exact watchlist key
+ *   3. whole-string alias → watchlist key
+ *   4. hedged label, then per-fragment alias → watchlist key   ← added 2026-08-27
+ *
+ * 4 must come after 1–3 so an existing whole-string alias row always wins, and
+ * the hedge check must come before the fragment pass so a label that says it
+ * could not identify the brand is never resolved by a fragment inside it.
+ */
+export function buildFreshCandidateGate(deps: {
+  watched: ReadonlySet<string>;
+  resolveCanonical: (raw: string) => string | null;
+  resolveMulti: (raw: string) => string[];
+}): (c: CandidateAgg) => boolean {
+  const { watched, resolveCanonical, resolveMulti } = deps;
+  return (c) => {
+    if (CANDIDATE_DENYLIST.has(c.brandNormalized)) return false;
+    if (watched.has(c.brandNormalized)) return false;
+    const canonical = resolveCanonical(c.rawBrand);
+    const canonicalKey = canonical ? brandNormalize(canonical) : null;
+    if (canonicalKey && watched.has(canonicalKey)) return false;
+    // A label that DESCRIBES an unidentified brand is not a candidate at all
+    // ("Generic health insurance provider (OFHC or similar)").
+    if (isNonBrandLabel(c.rawBrand)) return false;
+    // THE NAB FIX (2026-08-27). The three checks above are whole-string exact,
+    // and the classifier does not emit whole strings — it emits prose that
+    // CONTAINS a brand name. "NAB (National Australia Bank)" normalises to
+    // `nabnationalaustraliabank`, which matches neither of NAB's two alias rows
+    // nor its watchlist key, so a brand we have monitored since the static list
+    // was written was offered to the operator as ready to promote.
+    //
+    // Third instance of the class (v260 "Australian Tax Office (ATO)", v261
+    // "eBay Australia"). Both earlier fixes seeded ONE alias row per leaked
+    // variant, which does nothing about the next phrasing the classifier
+    // invents. This reads the label instead.
+    for (const canon of resolveMulti(c.rawBrand)) {
+      const k = brandNormalize(canon);
+      if (k && watched.has(k)) return false;
+    }
+    return true;
+  };
+}
+
+/**
+ * Statuses that mean an operator has already ruled this brand OUT. A brand
+ * carrying one must not be re-offered as "ready to promote" week after week.
+ *
+ * Note the asymmetry with auto-promotion, which is deliberate: `promote`
+ * IGNORES prior triage (new evidence should be able to reverse an old call)
+ * but announces the override. `needsDomain` is not an action — it is a request
+ * for the operator to do something they have already declined to do, so
+ * repeating it is pure noise. Before this, NAB would have reappeared under
+ * "Ready to promote" every Monday no matter what the operator clicked, because
+ * this function never saw `status` at all.
+ */
+const TRIAGED_OUT: ReadonlySet<string> = new Set(["dismissed", "not_a_brand"]);
+
 export function planPromotions(
   candidates: readonly MergedCandidate[],
   domainsByKey: ReadonlyMap<string, { domain: string; source: string }>,
+  priorTriage: Readonly<Record<string, string>> = {},
 ): { promote: PromotionPlan[]; needsDomain: MergedCandidate[] } {
   const promote: PromotionPlan[] = [];
   const needsDomain: MergedCandidate[] = [];
@@ -349,7 +424,9 @@ export function planPromotions(
     if (!meetsPromotionBar(c)) continue;
     const known = domainsByKey.get(c.brandNormalized);
     if (!known?.domain) {
-      needsDomain.push(c);
+      if (!TRIAGED_OUT.has(priorTriage[c.brandNormalized] ?? "")) {
+        needsDomain.push(c);
+      }
       continue;
     }
     promote.push({
@@ -382,6 +459,24 @@ export interface DigestInput {
   upsertAttempted: number;
   /** Non-empty means the counts above UNDERSTATE reality. */
   degraded: readonly string[];
+  /**
+   * Labels examined this run that the canonical layer could not identify at all
+   * — neither whole-string nor by any fragment (see buildBrandMultiResolver).
+   *
+   * This is the number that would have caught the NAB leak on 2026-08-10, two
+   * weeks before a human noticed it in the digest. It counts two things it
+   * cannot tell apart: a genuinely new brand, and a brand we already watch
+   * arriving under a phrasing the alias layer has never seen. Both are worth
+   * an operator's eye, which is why the sample ships with the count — a name
+   * you recognise in that list is a leak, one you don't is a new brand.
+   *
+   * Deliberately EXCLUDES hedged labels ("Generic health insurance provider…").
+   * Those are a known, handled class; folding them in would make the number
+   * large, stable and therefore ignored.
+   */
+  unresolvedLabels: number;
+  /** Up to UNRESOLVED_PREVIEW of the above, so the count is actionable. */
+  unresolvedSample: readonly string[];
   /** True when the brand has a known alias — renders a "(known alias)" tag. */
   hasAlias: (rawBrand: string) => boolean;
   /**
@@ -395,6 +490,26 @@ export interface DigestInput {
    * live matcher. So the override is allowed and ANNOUNCED.
    */
   priorTriage?: Readonly<Record<string, string>>;
+}
+
+/**
+ * Escape a classifier-authored label for Telegram's HTML parse mode.
+ *
+ * NOT cosmetic. `sendAdminTelegramMessage` posts with parse_mode=HTML, and
+ * Telegram rejects a message whose markup is malformed — a bare `&` that is not
+ * a valid entity is a 400, and the response to a 400 is that the ENTIRE weekly
+ * digest never arrives. A silent digest is indistinguishable from a dead cron,
+ * which is the exact failure this file's heartbeat exists to prevent (#878).
+ *
+ * These labels are Claude output derived from user-submitted scam text, so
+ * their content is not ours to assume. Live proof rather than a hypothetical:
+ * `AT&T` has been sitting `pending` in reddit_watchlist_candidates since
+ * 2026-08-24 with 5 mentions. It has not broken a digest yet only because it
+ * stopped being net-new before it was ever rendered — the moment it gains AU
+ * evidence, or any label like it arrives fresh, the digest stops sending.
+ */
+function escapeHtml(raw: string): string {
+  return raw.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 /**
@@ -430,7 +545,7 @@ export function buildDigestMessage(d: DigestInput): string {
     // Always show the AU/global split so a 1-of-28 brand can't be mistaken for
     // a strong signal.
     return (
-      `• <b>${m.rawBrand}</b> — ${parts.join(", ")} · ` +
+      `• <b>${escapeHtml(m.rawBrand)}</b> — ${parts.join(", ")} · ` +
       `<b>AU ${m.au}</b>/${m.total}${aliasTag}`
     );
   });
@@ -474,6 +589,17 @@ export function buildDigestMessage(d: DigestInput): string {
             `queue, or a platform name. <i>This is the healthy steady state.</i>`,
         ]
       : []),
+    // Sits INSIDE the heartbeat, not in a conditional block of its own: this is
+    // the accuracy half of proof-of-life, and the run that most needs it is the
+    // quiet one. A zero here is a real result and prints as such.
+    ...(d.unresolvedLabels > 0
+      ? [
+          `<b>${d.unresolvedLabels}</b> label(s) matched no known brand: ` +
+            `${d.unresolvedSample.map(escapeHtml).join(", ")}` +
+            `${d.unresolvedLabels > d.unresolvedSample.length ? ", …" : ""}. ` +
+            `<i>A name you recognise here is a gate leak, not a new brand.</i>`,
+        ]
+      : []),
   ];
 
   // One line, not N — the global tail is context, not a worklist.
@@ -485,7 +611,7 @@ export function buildDigestMessage(d: DigestInput): string {
             `evidence — recorded, not actioned: ` +
             d.globalOnly
               .slice(0, GLOBAL_ONLY_PREVIEW)
-              .map((m) => `${m.rawBrand} ×${m.total}`)
+              .map((m) => `${escapeHtml(m.rawBrand)} ×${m.total}`)
               .join(", ") +
             (d.globalOnly.length > GLOBAL_ONLY_PREVIEW ? ", …" : "") +
             `</i>`,
@@ -513,7 +639,8 @@ export function buildDigestMessage(d: DigestInput): string {
               ? ` — ⚠️ <b>OVERRIDES your earlier '${prior}'</b>`
               : "";
             return (
-              `• <b>${p.brandName}</b> → ${p.domains.join(", ")} ` +
+              `• <b>${escapeHtml(p.brandName)}</b> → ` +
+              `${p.domains.map(escapeHtml).join(", ")} ` +
               `(AU ${p.au}, reported ${p.scam}; domain from ${p.domainSource})${overrode}`
             );
           }),
@@ -536,7 +663,7 @@ export function buildDigestMessage(d: DigestInput): string {
           `<b>Ready to promote — need a confirmed domain (${d.needsDomain.length}):</b>`,
           ...d.needsDomain
             .slice(0, DIGEST_CAP)
-            .map((m) => `• ${m.rawBrand} (AU ${m.au}, reported ${m.scam})`),
+            .map((m) => `• ${escapeHtml(m.rawBrand)} (AU ${m.au}, reported ${m.scam})`),
         ]
       : [];
 
@@ -610,6 +737,10 @@ export const redditBrandsDiscover = inngest.createFunction(
       return loadAliasRecord(sb, "reddit-brands-discover");
     });
     const resolveCanonical = buildBrandResolver(aliasPairs);
+    // The RECALL-oriented Adapter over the SAME snapshot. Used ONLY by the
+    // already-watched gate below — never by anything that acts on a single
+    // answer. See buildBrandMultiResolver's header for why the two are separate.
+    const resolveMulti = buildBrandMultiResolver(aliasPairs);
 
     // 2. Aggregate brand mentions over the window, with the AU-hinted subset
     //    counted separately (v254). Server-side so only aggregated rows ship
@@ -665,14 +796,11 @@ export const redditBrandsDiscover = inngest.createFunction(
       getActiveWatchlist(),
     );
     const watched = buildWatchedKeySet(activeWatchlist);
-    const isFreshCandidate = (c: CandidateAgg): boolean => {
-      if (CANDIDATE_DENYLIST.has(c.brandNormalized)) return false;
-      if (watched.has(c.brandNormalized)) return false;
-      const canonical = resolveCanonical(c.rawBrand);
-      const canonicalKey = canonical ? brandNormalize(canonical) : null;
-      if (canonicalKey && watched.has(canonicalKey)) return false;
-      return true;
-    };
+    const isFreshCandidate = buildFreshCandidateGate({
+      watched,
+      resolveCanonical,
+      resolveMulti,
+    });
     const fresh = candidates.filter(isFreshCandidate);
 
     // 3b. Second source (Phase 1, flag-gated): brands people REPORT to Arthur as
@@ -721,6 +849,22 @@ export const redditBrandsDiscover = inngest.createFunction(
       return { rows: mapped, failed: null as string | null };
     });
     const scamCandidatesRaw = scamStep.rows;
+
+    // ACCURACY TELEMETRY — the gate's own miss rate.
+    //
+    // The heartbeat above answers "did it look?". It cannot answer "did it
+    // understand what it saw?", and that is where every bug in this file has
+    // lived: v260, v261 and the 2026-08-24 NAB leak were all labels the
+    // canonical layer silently failed to identify, each discovered weeks later
+    // by a human reading the digest closely.
+    //
+    // Computed over EVERY examined label from both sources — before the
+    // fresh-filter, because a label dropped by the gate is exactly the one
+    // worth counting. Hedged labels are excluded (see DigestData).
+    const unresolved = [...candidates, ...scamCandidatesRaw]
+      .filter((c) => !isNonBrandLabel(c.rawBrand))
+      .filter((c) => resolveMulti(c.rawBrand).length === 0)
+      .map((c) => c.rawBrand);
     markDegraded(scamStep.failed);
     const scamFresh = scamCandidatesRaw.filter(isFreshCandidate);
 
@@ -906,7 +1050,7 @@ export const redditBrandsDiscover = inngest.createFunction(
     markDegraded(domainsStep.failed);
 
     const { promote, needsDomain } = autoPromote
-      ? planPromotions(allFresh, new Map(domainsStep.rows))
+      ? planPromotions(allFresh, new Map(domainsStep.rows), knownStep.triaged)
       : { promote: [] as PromotionPlan[], needsDomain: [] as MergedCandidate[] };
 
     const promotedStep = await step.run("auto-promote", async () => {
@@ -998,6 +1142,8 @@ export const redditBrandsDiscover = inngest.createFunction(
           needsDomain,
           candidatesExamined: candidates.length,
           scamExamined: scamCandidatesRaw.length,
+          unresolvedLabels: unresolved.length,
+          unresolvedSample: unresolved.slice(0, UNRESOLVED_PREVIEW),
           upserted,
           upsertAttempted: upsertStep.attempted,
           degraded,
@@ -1010,6 +1156,10 @@ export const redditBrandsDiscover = inngest.createFunction(
     const summary = {
       candidates: candidates.length,
       fresh: fresh.length,
+      // On the warn-level event so it survives the 10% INFO sampling that made
+      // this cron unobservable in the first place.
+      unresolvedLabels: unresolved.length,
+      unresolvedSample: unresolved.slice(0, UNRESOLVED_PREVIEW),
       scamFresh: scamFresh.length,
       newlySurfaced: newlySurfaced.length,
       auEvidenced: auEvidenced.length,

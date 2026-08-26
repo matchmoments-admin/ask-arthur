@@ -8,6 +8,17 @@ import {
   type CandidateStatus,
 } from "./actions";
 
+/**
+ * Statuses that render as a settled decision plus an Undo, rather than as the
+ * full action row. Kept as a set so adding a status (v291's `not_a_brand`) is
+ * one entry rather than a growing `||` chain that someone eventually forgets.
+ */
+const UNDOABLE: ReadonlySet<string> = new Set([
+  "dismissed",
+  "reviewed",
+  "not_a_brand",
+]);
+
 const BTN: React.CSSProperties = {
   fontSize: 12,
   padding: "4px 10px",
@@ -108,14 +119,14 @@ export function CandidateActions({
     );
   }
 
-  // Dismissed / reviewed used to render as dead text with no controls, so a
+  // Dismissed / reviewed / not_a_brand used to render as dead text with no controls, so a
   // misclick was unrecoverable from this page — the only surface that shows
   // these rows. That asymmetry was the trap: `promoted` (the consequential,
   // writes-to-the-live-matcher action) had an Undo, while `dismissed` (the
   // cheap one an operator does in bulk down a list) did not. Reversing a
   // triage decision needs no domain and touches nothing live, so there is no
   // reason for it to require an engineer with SQL access.
-  if (current === "dismissed" || current === "reviewed") {
+  if (UNDOABLE.has(current)) {
     return (
       <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
         <span style={{ fontSize: 12, color: "var(--color-muted)" }}>{current}</span>
@@ -161,9 +172,20 @@ export function CandidateActions({
         style={BTN}
         disabled={pending}
         onClick={() => act("dismissed", "Dismissed from the admin queue.")}
-        title="Not relevant to an AU clone-watch list"
+        title="A real brand, but not relevant to an AU clone-watch list"
       >
         Dismiss
+      </button>
+      <button
+        type="button"
+        style={BTN}
+        disabled={pending}
+        onClick={() =>
+          act("not_a_brand", "Not a real brand — recorded from the admin queue.")
+        }
+        title="Not a brand at all — an invented name, or a description rather than a name"
+      >
+        Not a brand
       </button>
       {pending && <span style={{ fontSize: 12, color: "var(--color-muted)" }}>…</span>}
       {error && <span style={{ fontSize: 12, color: "#b91c1c" }}>{error}</span>}
