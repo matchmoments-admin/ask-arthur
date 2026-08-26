@@ -7,12 +7,14 @@ import {
   mergeCandidateSources,
   partitionForDigest,
   planPromotions,
+  buildFreshCandidateGate,
   CANDIDATE_DENYLIST,
 } from "@/app/api/inngest/functions/reddit-brands-discover";
 import {
   AU_BRAND_WATCHLIST,
   brandNormalize,
   buildBrandResolver,
+  buildBrandMultiResolver,
   buildWatchedKeySet,
 } from "@askarthur/shopfront-glue";
 
@@ -131,6 +133,14 @@ const PROD_ALIASES: Record<string, string> = {
   facebook: "Facebook",
   fedex: "FedEx",
   google: "Google",
+  // Verified present in prod brand_aliases 2026-08-27. `nab` is source
+  // 'watchlist'; `nationalaustraliabank` was added by hand on 2026-06-01. Both
+  // are here because the NAB fix depends on them EXISTING — the fragment pass
+  // resolves "NAB (National Australia Bank)" only because one of its fragments
+  // is a real alias row. Without these two lines the harness fails, which is
+  // the correct behaviour: it would mean the fix rests on data we do not have.
+  nab: "NAB",
+  nationalaustraliabank: "NAB",
   instagram: "Instagram",
   linkedin: "LinkedIn",
   meta: "Meta",
@@ -172,8 +182,27 @@ const PROD_ALIASES: Record<string, string> = {
 };
 
 /** Live output of aggregate_scam_report_brands(30d, 2) on 2026-07-30. */
+/**
+ * The COMPLETE result of aggregate_scam_report_brands(now()-30d, 2), captured
+ * 2026-08-27. Refreshed wholesale from the RPC, never hand-transcribed — the
+ * 2026-07-30 pass lost 7 of 45 rows that way and inverted this harness's
+ * headline prediction.
+ *
+ * Both rows are the reason this PR exists. `nabnationalaustraliabank` is NAB,
+ * monitored since the static list was written, leaked by a compound label; the
+ * other is a charity that returns zero matches against acnc_charities.
+ */
 const PROD_SCAM = [
-  { brand_normalized: "australiapost", raw_brand: "Australia Post", mention_count: 2 },
+  {
+    brand_normalized: "nabnationalaustraliabank",
+    raw_brand: "NAB (National Australia Bank)",
+    mention_count: 2,
+  },
+  {
+    brand_normalized: "schoolaustraliacancerrelieffund",
+    raw_brand: "School / Australia Cancer Relief Fund",
+    mention_count: 2,
+  },
 ];
 
 /** brand_normalized values already in reddit_watchlist_candidates (51 rows). */
@@ -204,18 +233,19 @@ function replay(opts: { autoPromote: boolean }) {
   const known = new Set(PROD_EXISTING_KEYS);
   const resolveCanonical = buildBrandResolver(PROD_ALIASES);
 
-  // Mirrors isFreshCandidate() in the cron EXACTLY, including the alias
-  // second-chance. An earlier version of this harness omitted that third check,
-  // which is precisely the leak v260 closes — so a replay without it cannot
-  // observe either the bug or the fix.
-  const isFresh = (c: { brandNormalized: string; rawBrand: string }) => {
-    if (CANDIDATE_DENYLIST.has(c.brandNormalized)) return false;
-    if (watched.has(c.brandNormalized)) return false;
-    const canonical = resolveCanonical(c.rawBrand);
-    const canonicalKey = canonical ? brandNormalize(canonical) : null;
-    if (canonicalKey && watched.has(canonicalKey)) return false;
-    return true;
-  };
+  // The REAL gate, imported — not a hand-written mirror of it.
+  //
+  // This used to be a copy of isFreshCandidate()'s body, and the copy had
+  // already drifted once: an earlier version omitted the alias second-chance,
+  // which is exactly the leak v260 closed, so the harness could observe neither
+  // that bug nor its fix. A regression harness that re-implements the thing it
+  // guards can only ever prove the copy correct. buildFreshCandidateGate() was
+  // extracted so both sides run the same code.
+  const isFresh = buildFreshCandidateGate({
+    watched,
+    resolveCanonical,
+    resolveMulti: buildBrandMultiResolver(PROD_ALIASES),
+  });
 
   const reddit = PROD_REDDIT.map((r) => ({
     brandNormalized: r.brand_normalized,
@@ -385,26 +415,41 @@ describe("PROD REPLAY — what Monday's digest will contain", () => {
     expect(actionable).not.toContain("amazon");
   });
 
-  it("excludes Australia Post because it is ALREADY on the watchlist", () => {
-    // Written expecting a candidate; the replay proved otherwise, and the code
-    // is right. The only brand the reported-scams source yields in this window
-    // is Australia Post, which is already monitored — so the already-watched
-    // gate correctly drops it. Recorded because the tempting misreading is
-    // "the scam source is broken": it is working, there is simply nothing
-    // NEW in it yet. Note this gate now reads the ACTIVE watchlist (#866), so
-    // it also covers overlay-promoted brands, not just the static array.
-    expect(buildWatchedKeySet(AU_BRAND_WATCHLIST).has("australiapost")).toBe(true);
-    expect(r.allFresh.find((m) => m.brandNormalized === "australiapost")).toBeUndefined();
+  it("excludes NAB even though the label never matches its keys", () => {
+    // THE REGRESSION. This is the 2026-08-24 digest bug, replayed on the exact
+    // prod row that produced it.
+    //
+    // NAB is monitored (au-brand-watchlist.ts, nab.com.au) and has TWO alias
+    // rows, `nab` and `nationalaustraliabank`. The candidate key is
+    // `nabnationalaustraliabank` — the classifier's parenthetical, normalised
+    // whole. It matches the watchlist key: no. Either alias: no. So all three
+    // pre-2026-08-27 checks passed it through, it cleared the promotion bar on
+    // two AU reports, and the digest offered a brand we already watch as ready
+    // to promote.
+    //
+    // Asserted as a PROPERTY of the gate, not of this window's contents: the
+    // three negatives below are what make the fourth check load-bearing, so a
+    // future refactor that drops it fails here rather than in production.
+    const watched = buildWatchedKeySet(AU_BRAND_WATCHLIST);
+    expect(watched.has("nab")).toBe(true);
+    expect(watched.has("nabnationalaustraliabank")).toBe(false);
+    expect(PROD_ALIASES["nabnationalaustraliabank"]).toBeUndefined();
+    expect(buildBrandResolver(PROD_ALIASES)("NAB (National Australia Bank)")).toBeNull();
+
+    expect(
+      r.allFresh.find((m) => m.brandNormalized === "nabnationalaustraliabank"),
+    ).toBeUndefined();
   });
 
-  it("the reported-scams source contributes no NEW candidate this window", () => {
-    // The honest state of FF_SCAM_BRANDS_SOURCE on real data: 1 brand over the
-    // 30-day window, already watched. Not a defect — it scales with Arthur's
-    // own traffic, which is the whole point of preferring it over r/Scams
-    // volume. This assertion will start failing the first time a genuinely
-    // new brand is reported twice, which is exactly when someone should look.
-    const fromScam = r.allFresh.filter((m) => m.scam > 0);
-    expect(fromScam).toHaveLength(0);
+  it("still surfaces a genuinely unknown brand from the same window", () => {
+    // The other half of the property, and the reason the fix is not simply
+    // "drop anything with a bracket in it". The Cancer Relief Fund row has the
+    // same compound shape as NAB and resolves to nothing, so it must still
+    // reach the operator. A gate that suppressed both would be silently worse
+    // than the leak it replaced.
+    expect(
+      r.allFresh.find((m) => m.brandNormalized === "schoolaustraliacancerrelieffund"),
+    ).toBeDefined();
   });
 
   it("does not re-announce brands already in the candidate table", () => {
@@ -446,6 +491,8 @@ describe("PROD REPLAY — what Monday's digest will contain", () => {
       upserted: r.allFresh.length,
       upsertAttempted: r.allFresh.length,
       degraded: [],
+      compoundUnresolved: 0,
+      compoundUnresolvedSample: [],
       hasAlias: (raw) => Boolean(PROD_ALIASES[brandNormalize(raw) ?? ""]),
     });
     console.log("\n--- digest as it will be sent ---\n" + msg + "\n---\n");
@@ -461,14 +508,34 @@ describe("PROD REPLAY — auto-promotion, if the flag were ON", () => {
   const r = replay({ autoPromote: true });
 
   it("promotes NOTHING on today's real data — and that is correct", () => {
-    // Measured, not assumed. No unwatched brand in this window clears the bar:
-    // the only au >= 2 candidate is Facebook Marketplace (denylisted as a
-    // platform), and the only scam >= 2 brand is already watched. So an
-    // operator flipping FF_BRAND_AUTO_PROMOTE today would see zero
-    // promotions — which is why the flag stays off until a digest proposes
-    // something worth promoting.
+    // Measured, not assumed. Nothing in this window has both a domain in
+    // known_brands and enough evidence, so an operator with
+    // FF_BRAND_AUTO_PROMOTE ON sees zero unattended writes to the live matcher.
     expect(r.promote).toHaveLength(0);
-    expect(r.needsDomain).toHaveLength(0);
+  });
+
+  it("asks for a domain on the unknown brand ONLY, not on NAB", () => {
+    // The digest line the operator actually reads. Before the gate fix this
+    // window produced TWO entries under "Ready to promote — need a confirmed
+    // domain": the Cancer Relief Fund and NAB, a brand already monitored whose
+    // domain we have held in known_brands since 2026-06-15. One of those is a
+    // real request; the other was the leak.
+    expect(r.needsDomain.map((m) => m.brandNormalized)).toEqual([
+      "schoolaustraliacancerrelieffund",
+    ]);
+  });
+
+  it("suppresses the domain request once an operator marks it not_a_brand", () => {
+    // The Cancer Relief Fund returns zero matches against acnc_charities — a
+    // name the scammer invented. v291 gives the operator a word for that, and
+    // planPromotions now reads it, so the request stops rather than repeating
+    // every Monday for a brand that will never have a legitimate domain.
+    const triaged = planPromotions(
+      r.allFresh,
+      new Map(),
+      { schoolaustraliacancerrelieffund: "not_a_brand" },
+    );
+    expect(triaged.needsDomain).toHaveLength(0);
   });
 
   it("DOES promote a qualifying unwatched brand, using a real known_brands domain", () => {

@@ -3,7 +3,10 @@ import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logg
 import {
   brandNormalize,
   buildBrandResolver,
+  buildBrandMultiResolver,
   buildWatchedKeySet,
+  isNonBrandLabel,
+  splitBrandLabel,
   type BrandAliasRecord,
 } from "@askarthur/shopfront-glue";
 import { getActiveWatchlist } from "@askarthur/scam-engine/active-watchlist";
@@ -104,6 +107,8 @@ const SCAM_REPORT_THRESHOLD = 2;
 const DIGEST_CAP = 25;
 // How many global-only (zero AU evidence) brands to name in the summary line.
 const GLOBAL_ONLY_PREVIEW = 5;
+// How many unidentifiable labels to name alongside their count.
+const UNRESOLVED_PREVIEW = 5;
 
 // Platform names the upstream classifier mis-tags as "impersonated" when a scam
 // merely happened ON that platform (Reddit/Discord/Marketplace…). This is a
@@ -339,17 +344,187 @@ export interface PromotionPlan {
  *
  * Pure + unit-tested. Exported for testing.
  */
+/**
+ * Which candidates count as "a human already ruled on this", by key -> status.
+ *
+ * Exported because the version inlined in `load-existing-candidates` was an
+ * allow-list of two, and v291 added `not_a_brand` at the CONSUMER end only —
+ * so TRIAGED_OUT could never fire and a row set to not_a_brand in prod would
+ * still be re-announced weekly. The tests that covered the consumer all
+ * hand-built this map, which is exactly why they proved nothing: a producer
+ * and a consumer disagreeing about an enum is invisible to a fixture that
+ * plays both parts. This is the producer, and it is now a predicate rather
+ * than a list, so a future status cannot be forgotten here.
+ */
+export function buildTriageMap(
+  rows: readonly { brand_normalized: string; status: string | null }[],
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const r of rows) {
+    if (r.status && r.status !== "pending") out[r.brand_normalized] = r.status;
+  }
+  return out;
+}
+
+/**
+ * One entry per brand key, first occurrence wins.
+ *
+ * The two aggregates overlap by design — a brand named on Reddit AND reported
+ * to Arthur is the strongest signal the feature has — so anything counting
+ * across both must fold them first or it double-counts the very rows that
+ * matter most, and prints the same name twice in a list whose only value is
+ * being short enough to read.
+ */
+export function dedupeByKey<T extends { brandNormalized: string }>(
+  candidates: readonly T[],
+): T[] {
+  const seen = new Set<string>();
+  return candidates.filter((c) =>
+    seen.has(c.brandNormalized) ? false : (seen.add(c.brandNormalized), true),
+  );
+}
+
+/**
+ * The leak detector: COMPOUND labels this run could not resolve to any brand.
+ *
+ * Extracted rather than inlined for the reason this file keeps re-learning —
+ * `partitionForDigest` and `buildDigestMessage` were both pulled out because
+ * reporting logic that lives inside the handler is unreachable to tests, and
+ * reporting is where this feature's bugs live. The compound-only rule below is
+ * a judgement call measured against prod; a comment cannot hold it in place.
+ *
+ * Two exclusions, both deliberate:
+ *   - HEDGED labels. "Generic health insurance provider (OFHC or similar)" is
+ *     the classifier reporting that it could not identify the brand. That is a
+ *     handled outcome, not a miss.
+ *   - DENYLISTED platforms. "X (Twitter)" is compound and resolves to nothing,
+ *     so it qualified on the letter of the rule and showed up in a live probe —
+ *     a permanent, unactionable entry in a list of two. Same reasoning as the
+ *     other exclusions: it is a handled class, and at this sample size one
+ *     standing false entry halves the signal.
+ *   - SIMPLE labels. "American Express" resolving to nothing means we do not
+ *     track American Express; there is no parse to have got wrong. Counting
+ *     them put the number at 29 of 44 on the live 30-day window, which is large
+ *     enough and stable enough to be skimmed — and a skimmed alarm is the
+ *     failure this telemetry exists to prevent.
+ *
+ * What is left is the shape a brand we ALREADY WATCH can hide inside, because
+ * the surrounding prose is what breaks the key: 2 of 44 on that same window,
+ * and before this PR "NAB (National Australia Bank)" was one of the two.
+ */
+export function findLeakSuspects(
+  candidates: readonly CandidateAgg[],
+  resolveMulti: (raw: string) => string[],
+): CandidateAgg[] {
+  return candidates.filter(
+    (c) =>
+      !CANDIDATE_DENYLIST.has(c.brandNormalized) &&
+      !isNonBrandLabel(c.rawBrand) &&
+      splitBrandLabel(c.rawBrand).length > 1 &&
+      resolveMulti(c.rawBrand).length === 0,
+  );
+}
+
+/**
+ * Build the already-watched gate: does this aggregated brand mention deserve to
+ * become a Watchlist Candidate at all?
+ *
+ * EXPORTED AND PURE ON PURPOSE. This logic used to live as a closure inside the
+ * handler, which meant the prod-replay harness could only MIRROR it by hand —
+ * and that mirror has already drifted once: an earlier copy omitted the alias
+ * second-chance, so the harness could observe neither the v260 bug nor its fix.
+ * A gate that its own regression test can only approximate is a gate with no
+ * test. Same reasoning that pulled `partitionForDigest` and
+ * `buildDigestMessage` out of their step.run closures in #878.
+ *
+ * The four checks, in the order they must run:
+ *   1. denylisted platform noise ("scam happened ON Discord" ≠ Discord scam)
+ *   2. exact watchlist key
+ *   3. whole-string alias → watchlist key
+ *   4. hedged label, then per-fragment alias → watchlist key   ← added 2026-08-27
+ *
+ * 4 must come after 1–3 so an existing whole-string alias row always wins, and
+ * the hedge check must come before the fragment pass so a label that says it
+ * could not identify the brand is never resolved by a fragment inside it.
+ */
+export function buildFreshCandidateGate(deps: {
+  watched: ReadonlySet<string>;
+  resolveCanonical: (raw: string) => string | null;
+  resolveMulti: (raw: string) => string[];
+}): (c: CandidateAgg) => boolean {
+  const { watched, resolveCanonical, resolveMulti } = deps;
+  return (c) => {
+    if (CANDIDATE_DENYLIST.has(c.brandNormalized)) return false;
+    if (watched.has(c.brandNormalized)) return false;
+    const canonical = resolveCanonical(c.rawBrand);
+    const canonicalKey = canonical ? brandNormalize(canonical) : null;
+    if (canonicalKey && watched.has(canonicalKey)) return false;
+    // A label that DESCRIBES an unidentified brand is not a candidate at all
+    // ("Generic health insurance provider (OFHC or similar)").
+    if (isNonBrandLabel(c.rawBrand)) return false;
+    // THE NAB FIX (2026-08-27). The three checks above are whole-string exact,
+    // and the classifier does not emit whole strings — it emits prose that
+    // CONTAINS a brand name. "NAB (National Australia Bank)" normalises to
+    // `nabnationalaustraliabank`, which matches neither of NAB's two alias rows
+    // nor its watchlist key, so a brand we have monitored since the static list
+    // was written was offered to the operator as ready to promote.
+    //
+    // Third instance of the class (v260 "Australian Tax Office (ATO)", v261
+    // "eBay Australia"). Both earlier fixes seeded ONE alias row per leaked
+    // variant, which does nothing about the next phrasing the classifier
+    // invents. This reads the label instead.
+    for (const canon of resolveMulti(c.rawBrand)) {
+      const k = brandNormalize(canon);
+      if (k && watched.has(k)) return false;
+    }
+    return true;
+  };
+}
+
+/**
+ * Statuses that mean an operator has already ruled this brand OUT. A brand
+ * carrying one must not be re-offered as "ready to promote" week after week.
+ *
+ * Note the asymmetry with auto-promotion, which is deliberate: `promote`
+ * IGNORES prior triage (new evidence should be able to reverse an old call)
+ * but announces the override. `needsDomain` is not an action — it is a request
+ * for the operator to do something they have already declined to do, so
+ * repeating it is pure noise. Before this, NAB would have reappeared under
+ * "Ready to promote" every Monday no matter what the operator clicked, because
+ * this function never saw `status` at all.
+ */
+const TRIAGED_OUT: ReadonlySet<string> = new Set(["dismissed", "not_a_brand"]);
+
+/**
+ * Statuses that additionally block UNATTENDED promotion.
+ *
+ * `dismissed` is not here on purpose — two Australians independently reporting
+ * a brand is genuinely new evidence, and a triage call made when the evidence
+ * was thinner should not bind forever. That override is allowed and announced.
+ *
+ * `not_a_brand` is different in kind, and v291's own header states the rule: no
+ * volume of reports turns a fabricated entity into a brand with a domain to
+ * protect. The realistic path is not hypothetical either — the fabricated
+ * charity names in this dataset are exactly the sort a scammer registers a
+ * domain for, and a `known_brands` row is all it would take to send one
+ * straight to the live matcher unattended.
+ */
+const NEVER_AUTO_PROMOTE: ReadonlySet<string> = new Set(["not_a_brand"]);
+
 export function planPromotions(
   candidates: readonly MergedCandidate[],
   domainsByKey: ReadonlyMap<string, { domain: string; source: string }>,
+  priorTriage: Readonly<Record<string, string>> = {},
 ): { promote: PromotionPlan[]; needsDomain: MergedCandidate[] } {
   const promote: PromotionPlan[] = [];
   const needsDomain: MergedCandidate[] = [];
   for (const c of candidates) {
     if (!meetsPromotionBar(c)) continue;
+    const status = priorTriage[c.brandNormalized] ?? "";
+    if (NEVER_AUTO_PROMOTE.has(status)) continue;
     const known = domainsByKey.get(c.brandNormalized);
     if (!known?.domain) {
-      needsDomain.push(c);
+      if (!TRIAGED_OUT.has(status)) needsDomain.push(c);
       continue;
     }
     promote.push({
@@ -382,6 +557,29 @@ export interface DigestInput {
   upsertAttempted: number;
   /** Non-empty means the counts above UNDERSTATE reality. */
   degraded: readonly string[];
+  /**
+   * COMPOUND labels examined this run that resolved to no known brand — the
+   * leak detector.
+   *
+   * Why compound-only, measured rather than assumed. The first cut of this
+   * counted EVERY unresolved label, and against the live 30-day window that is
+   * 29 of 44: American Express, Apple Pay, AT&T, Bank of America, Chase… all
+   * real brands we simply do not track. A number that large and that stable
+   * gets skimmed, and the one line that matters hides inside it — which is the
+   * failure this telemetry exists to prevent, reproduced.
+   *
+   * A SIMPLE label that resolves to nothing is just a brand we do not track;
+   * there is nothing in it to have parsed wrong. A COMPOUND one is the shape a
+   * brand we DO track can hide inside, because the surrounding prose is what
+   * breaks the key. Narrowing to that gives 2 of 44 on the same window — and
+   * before this PR, "NAB (National Australia Bank)" was one of them.
+   *
+   * Hedged labels are excluded (see isNonBrandLabel): the classifier saying it
+   * could not identify the brand is a handled outcome, not a miss.
+   */
+  compoundUnresolved: number;
+  /** Up to UNRESOLVED_PREVIEW of the above, so the count is actionable. */
+  compoundUnresolvedSample: readonly string[];
   /** True when the brand has a known alias — renders a "(known alias)" tag. */
   hasAlias: (rawBrand: string) => boolean;
   /**
@@ -395,6 +593,26 @@ export interface DigestInput {
    * live matcher. So the override is allowed and ANNOUNCED.
    */
   priorTriage?: Readonly<Record<string, string>>;
+}
+
+/**
+ * Escape a classifier-authored label for Telegram's HTML parse mode.
+ *
+ * NOT cosmetic. `sendAdminTelegramMessage` posts with parse_mode=HTML, and
+ * Telegram rejects a message whose markup is malformed — a bare `&` that is not
+ * a valid entity is a 400, and the response to a 400 is that the ENTIRE weekly
+ * digest never arrives. A silent digest is indistinguishable from a dead cron,
+ * which is the exact failure this file's heartbeat exists to prevent (#878).
+ *
+ * These labels are Claude output derived from user-submitted scam text, so
+ * their content is not ours to assume. Live proof rather than a hypothetical:
+ * `AT&T` has been sitting `pending` in reddit_watchlist_candidates since
+ * 2026-08-24 with 5 mentions. It has not broken a digest yet only because it
+ * stopped being net-new before it was ever rendered — the moment it gains AU
+ * evidence, or any label like it arrives fresh, the digest stops sending.
+ */
+function escapeHtml(raw: string): string {
+  return raw.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 /**
@@ -430,7 +648,7 @@ export function buildDigestMessage(d: DigestInput): string {
     // Always show the AU/global split so a 1-of-28 brand can't be mistaken for
     // a strong signal.
     return (
-      `• <b>${m.rawBrand}</b> — ${parts.join(", ")} · ` +
+      `• <b>${escapeHtml(m.rawBrand)}</b> — ${parts.join(", ")} · ` +
       `<b>AU ${m.au}</b>/${m.total}${aliasTag}`
     );
   });
@@ -474,6 +692,17 @@ export function buildDigestMessage(d: DigestInput): string {
             `queue, or a platform name. <i>This is the healthy steady state.</i>`,
         ]
       : []),
+    // Sits INSIDE the heartbeat, not in a conditional block of its own: this is
+    // the accuracy half of proof-of-life, and the run that most needs it is the
+    // quiet one. A zero here is a real result and prints as such.
+    ...(d.compoundUnresolved > 0
+      ? [
+          `<b>${d.compoundUnresolved}</b> compound label(s) matched no known ` +
+            `brand: ${d.compoundUnresolvedSample.map(escapeHtml).join(", ")}` +
+            `${d.compoundUnresolved > d.compoundUnresolvedSample.length ? ", …" : ""}. ` +
+            `<i>A name you recognise here is a gate leak, not a new brand.</i>`,
+        ]
+      : []),
   ];
 
   // One line, not N — the global tail is context, not a worklist.
@@ -485,7 +714,7 @@ export function buildDigestMessage(d: DigestInput): string {
             `evidence — recorded, not actioned: ` +
             d.globalOnly
               .slice(0, GLOBAL_ONLY_PREVIEW)
-              .map((m) => `${m.rawBrand} ×${m.total}`)
+              .map((m) => `${escapeHtml(m.rawBrand)} ×${m.total}`)
               .join(", ") +
             (d.globalOnly.length > GLOBAL_ONLY_PREVIEW ? ", …" : "") +
             `</i>`,
@@ -513,7 +742,8 @@ export function buildDigestMessage(d: DigestInput): string {
               ? ` — ⚠️ <b>OVERRIDES your earlier '${prior}'</b>`
               : "";
             return (
-              `• <b>${p.brandName}</b> → ${p.domains.join(", ")} ` +
+              `• <b>${escapeHtml(p.brandName)}</b> → ` +
+              `${p.domains.map(escapeHtml).join(", ")} ` +
               `(AU ${p.au}, reported ${p.scam}; domain from ${p.domainSource})${overrode}`
             );
           }),
@@ -536,11 +766,12 @@ export function buildDigestMessage(d: DigestInput): string {
           `<b>Ready to promote — need a confirmed domain (${d.needsDomain.length}):</b>`,
           ...d.needsDomain
             .slice(0, DIGEST_CAP)
-            .map((m) => `• ${m.rawBrand} (AU ${m.au}, reported ${m.scam})`),
+            .map((m) => `• ${escapeHtml(m.rawBrand)} (AU ${m.au}, reported ${m.scam})`),
         ]
       : [];
 
-  return [
+
+  const msg = [
     `<b>Brands discover</b>`,
     ...degradedLines,
     header,
@@ -553,6 +784,16 @@ export function buildDigestMessage(d: DigestInput): string {
     ``,
     `Review queue: https://askarthur.au/admin/brand-candidates`,
   ].join("\n");
+
+  // Telegram hard-caps a message at 4096 chars and 400s past it — and a 400 is
+  // the digest not arriving at all, which reads exactly like a dead cron. Two
+  // capped lists at DIGEST_CAP=25 each can reach that on a busy week, so the
+  // proof-of-life is truncated rather than lost. Escaping fixed one cause of
+  // the 400; this is the other.
+  const TELEGRAM_MAX = 4096;
+  if (msg.length <= TELEGRAM_MAX) return msg;
+  const notice = "\n\n<i>… truncated to fit Telegram. Full detail in the review queue.</i>";
+  return msg.slice(0, TELEGRAM_MAX - notice.length) + notice;
 }
 
 export const redditBrandsDiscover = inngest.createFunction(
@@ -610,6 +851,10 @@ export const redditBrandsDiscover = inngest.createFunction(
       return loadAliasRecord(sb, "reddit-brands-discover");
     });
     const resolveCanonical = buildBrandResolver(aliasPairs);
+    // The RECALL-oriented Adapter over the SAME snapshot. Used ONLY by the
+    // already-watched gate below — never by anything that acts on a single
+    // answer. See buildBrandMultiResolver's header for why the two are separate.
+    const resolveMulti = buildBrandMultiResolver(aliasPairs);
 
     // 2. Aggregate brand mentions over the window, with the AU-hinted subset
     //    counted separately (v254). Server-side so only aggregated rows ship
@@ -665,14 +910,11 @@ export const redditBrandsDiscover = inngest.createFunction(
       getActiveWatchlist(),
     );
     const watched = buildWatchedKeySet(activeWatchlist);
-    const isFreshCandidate = (c: CandidateAgg): boolean => {
-      if (CANDIDATE_DENYLIST.has(c.brandNormalized)) return false;
-      if (watched.has(c.brandNormalized)) return false;
-      const canonical = resolveCanonical(c.rawBrand);
-      const canonicalKey = canonical ? brandNormalize(canonical) : null;
-      if (canonicalKey && watched.has(canonicalKey)) return false;
-      return true;
-    };
+    const isFreshCandidate = buildFreshCandidateGate({
+      watched,
+      resolveCanonical,
+      resolveMulti,
+    });
     const fresh = candidates.filter(isFreshCandidate);
 
     // 3b. Second source (Phase 1, flag-gated): brands people REPORT to Arthur as
@@ -721,6 +963,30 @@ export const redditBrandsDiscover = inngest.createFunction(
       return { rows: mapped, failed: null as string | null };
     });
     const scamCandidatesRaw = scamStep.rows;
+
+    // ACCURACY TELEMETRY — the gate's own miss rate.
+    //
+    // The heartbeat above answers "did it look?". It cannot answer "did it
+    // understand what it saw?", and that is where every bug in this file has
+    // lived: v260, v261 and the 2026-08-24 NAB leak were all labels the
+    // canonical layer silently failed to identify, each discovered weeks later
+    // by a human reading the digest closely.
+    //
+    // Computed over EVERY examined label from both sources — before the
+    // fresh-filter, because a label dropped by the gate is exactly the one
+    // worth counting. Hedged labels are excluded (see DigestData).
+    // Deduped by key: a brand present in BOTH aggregates (which is the whole
+    // reason two sources exist — NAB is exactly such a case) would otherwise
+    // count twice and print its own name twice in a list whose entire value is
+    // being short enough to read.
+    const examinedLabels = dedupeByKey([...candidates, ...scamCandidatesRaw]);
+    // The broad count goes to Axiom ONLY — useful as a trend, useless in a
+    // digest (29 of 44 on the live window). The digest gets the compound
+    // subset, which is the part a human can act on.
+    const unresolvedLabels = examinedLabels.filter(
+      (c) => !isNonBrandLabel(c.rawBrand) && resolveMulti(c.rawBrand).length === 0,
+    ).length;
+    const compoundUnresolved = findLeakSuspects(examinedLabels, resolveMulti);
     markDegraded(scamStep.failed);
     const scamFresh = scamCandidatesRaw.filter(isFreshCandidate);
 
@@ -760,12 +1026,13 @@ export const redditBrandsDiscover = inngest.createFunction(
             failed: "existing_candidates_partial",
           };
         }
+        const triageRows: { brand_normalized: string; status: string | null }[] = [];
         for (const r of data ?? []) {
           const key = r.brand_normalized as string;
           keys.push(key);
-          const st = r.status as string | null;
-          if (st === "dismissed" || st === "reviewed") triaged[key] = st;
+          triageRows.push({ brand_normalized: key, status: r.status as string | null });
         }
+        Object.assign(triaged, buildTriageMap(triageRows));
         if ((data?.length ?? 0) < 1000) break;
       }
       return { rows: keys, triaged, failed: null as string | null };
@@ -906,7 +1173,7 @@ export const redditBrandsDiscover = inngest.createFunction(
     markDegraded(domainsStep.failed);
 
     const { promote, needsDomain } = autoPromote
-      ? planPromotions(allFresh, new Map(domainsStep.rows))
+      ? planPromotions(allFresh, new Map(domainsStep.rows), knownStep.triaged)
       : { promote: [] as PromotionPlan[], needsDomain: [] as MergedCandidate[] };
 
     const promotedStep = await step.run("auto-promote", async () => {
@@ -988,8 +1255,18 @@ export const redditBrandsDiscover = inngest.createFunction(
     // information too, but only if it arrives.
     const degraded = [...degradedSet];
 
-    await step.run("telegram", async () => {
-      await sendAdminTelegramMessage(
+    // The send RESULT, not fire-and-forget. sendAdminTelegramMessage never
+    // throws — it returns { ok, reason } — so a digest that fails to send
+    // produced a run that reported ok:true with no trace anywhere. For the one
+    // function whose entire output IS the message, "did it arrive?" has to be
+    // answerable, and this is the only always-ship place to answer it (see the
+    // OBSERVABILITY note in the header: fn.complete is INFO at 10%).
+    //
+    // Not routed through recordAlertDelivery(): that requires an ALERTERS id,
+    // and every id there carries an expected-firings floor in the weekly
+    // canary's liveness sweep. Registering one is a separate decision.
+    const delivery = await step.run("telegram", async () => {
+      const res = await sendAdminTelegramMessage(
         buildDigestMessage({
           auEvidenced,
           globalOnly,
@@ -998,18 +1275,41 @@ export const redditBrandsDiscover = inngest.createFunction(
           needsDomain,
           candidatesExamined: candidates.length,
           scamExamined: scamCandidatesRaw.length,
+          compoundUnresolved: compoundUnresolved.length,
+          compoundUnresolvedSample: compoundUnresolved
+            .slice(0, UNRESOLVED_PREVIEW)
+            .map((c) => c.rawBrand),
           upserted,
           upsertAttempted: upsertStep.attempted,
           degraded,
           hasAlias: (raw) => resolveCanonical(raw) !== null,
           priorTriage: knownStep.triaged,
         }),
+        { parseMode: "HTML" },
       );
+      if (!res.ok) {
+        logger.error("reddit-brands-discover: digest FAILED to send", {
+          reason: res.reason,
+        });
+      }
+      return { ok: res.ok, reason: res.reason ?? null };
     });
 
     const summary = {
       candidates: candidates.length,
       fresh: fresh.length,
+      // On the warn-level event so it survives the 10% INFO sampling that made
+      // this cron unobservable in the first place. BOTH numbers ship here:
+      // the broad one is a queryable trend, the compound one is the alarm.
+      unresolvedLabels,
+      // The answer to "did the message actually arrive?" — the one question a
+      // digest-only function must be able to answer, and could not before.
+      digestDelivered: delivery.ok,
+      digestFailReason: delivery.reason,
+      compoundUnresolved: compoundUnresolved.length,
+      compoundUnresolvedSample: compoundUnresolved
+        .slice(0, UNRESOLVED_PREVIEW)
+        .map((c) => c.rawBrand),
       scamFresh: scamFresh.length,
       newlySurfaced: newlySurfaced.length,
       auEvidenced: auEvidenced.length,

@@ -8,11 +8,14 @@ import {
   mergeCandidateSources,
   partitionForDigest,
   planPromotions,
+  findLeakSuspects,
+  buildTriageMap,
+  dedupeByKey,
   CANDIDATE_DENYLIST,
   type DigestInput,
   type MergedCandidate,
 } from "@/app/api/inngest/functions/reddit-brands-discover";
-import { brandNormalize } from "@askarthur/shopfront-glue";
+import { brandNormalize, buildBrandMultiResolver } from "@askarthur/shopfront-glue";
 
 describe("aggregateBrandMentions", () => {
   it("counts one mention per distinct normalized brand per post", () => {
@@ -340,6 +343,66 @@ describe("planPromotions — the domain is never guessed", () => {
   it("returns nothing for an empty candidate list", () => {
     expect(planPromotions([], trusted)).toEqual({ promote: [], needsDomain: [] });
   });
+
+  // REGRESSION (2026-08-27) — before this, planPromotions never saw `status`.
+  // NAB leaked past the already-watched gate, cleared the bar on two reports,
+  // had no known_brands domain under its leaked key, and so appeared under
+  // "Ready to promote — need a confirmed domain" EVERY Monday. Nothing the
+  // operator clicked could stop it: dismissing changed a column this function
+  // did not read. The only exit was to promote it, which would have created a
+  // duplicate NAB on the live matcher.
+  it("stops re-asking for a domain on a brand the operator ruled out", () => {
+    const c = cand("nabnationalaustraliabank", "NAB (National Australia Bank)", {
+      scam: 2,
+      au: 2,
+      total: 2,
+    });
+    expect(planPromotions([c], trusted).needsDomain).toEqual([c]);
+    for (const status of ["dismissed", "not_a_brand"]) {
+      expect(
+        planPromotions([c], trusted, { nabnationalaustraliabank: status })
+          .needsDomain,
+      ).toEqual([]);
+    }
+  });
+
+  it("keeps asking after a REVIEWED decision — that is not a refusal", () => {
+    // 'reviewed' means "worth monitoring, not yet promoted". Suppressing the
+    // domain request there would bury the exact brands we most want promoted.
+    const c = cand("newbrand", "New Brand", { scam: 2, au: 2, total: 2 });
+    expect(
+      planPromotions([c], trusted, { newbrand: "reviewed" }).needsDomain,
+    ).toEqual([c]);
+  });
+
+  it("NEVER auto-promotes a not_a_brand candidate, even with a domain", () => {
+    // v291's own header: no volume of reports turns a fabricated entity into a
+    // brand with a domain to protect. The realistic path is not hypothetical —
+    // the fabricated charity names in this dataset are exactly the sort a
+    // scammer registers a domain for, and one known_brands row is all it would
+    // take to write it to the LIVE matcher unattended, with no override warning
+    // in the digest because needsDomain was the only branch reading triage.
+    const r = planPromotions(
+      [cand("gumtree", "Gumtree", { scam: 2, au: 2, total: 2 })],
+      trusted,
+      { gumtree: "not_a_brand" },
+    );
+    expect(r.promote).toEqual([]);
+    expect(r.needsDomain).toEqual([]);
+  });
+
+  it("still AUTO-PROMOTES a dismissed brand — the asymmetry is deliberate", () => {
+    // New evidence may reverse an old triage call, and that override is
+    // announced rather than silent (see summary.promotionOverrides). Only the
+    // "please type a domain" nag is suppressed, because that is a request the
+    // operator has already declined.
+    const r = planPromotions(
+      [cand("gumtree", "Gumtree", { scam: 2, au: 2, total: 2 })],
+      trusted,
+      { gumtree: "dismissed" },
+    );
+    expect(r.promote).toHaveLength(1);
+  });
 });
 
 describe("per-source thresholds — the promotion bar must be reachable", () => {
@@ -470,6 +533,8 @@ describe("buildDigestMessage — the digest cannot lie about the run", () => {
     upserted: 12,
     upsertAttempted: 12,
     degraded: [],
+    compoundUnresolved: 0,
+    compoundUnresolvedSample: [],
     hasAlias: () => false,
     ...over,
   });
@@ -589,6 +654,61 @@ describe("buildDigestMessage — the digest cannot lie about the run", () => {
     );
     expect(msg).toContain("(known alias)");
   });
+  it("escapes a brand label so one ampersand cannot kill the whole digest", () => {
+    // sendAdminTelegramMessage posts with parse_mode=HTML. Telegram 400s on
+    // malformed markup, and a 400 means the digest never arrives at all —
+    // indistinguishable from a dead cron, which is the failure this file's
+    // heartbeat exists to prevent.
+    //
+    // Not hypothetical: AT&T has been sitting `pending` in
+    // reddit_watchlist_candidates since 2026-08-24 with 5 mentions. It has not
+    // broken a digest only because it stopped being net-new before it was ever
+    // rendered.
+    const msg = buildDigestMessage(
+      input({
+        auEvidenced: [merged({ brandNormalized: "att", rawBrand: "AT&T", au: 2, scam: 2 })],
+      }),
+    );
+    expect(msg).toContain("AT&amp;T");
+    expect(msg).not.toMatch(/AT&T/);
+  });
+
+  it("reports COMPOUND labels the canonical layer could not identify", () => {
+    // The accuracy half of proof-of-life. The heartbeat says the run LOOKED;
+    // this says whether it UNDERSTOOD. Every bug in this file — v260, v261, the
+    // NAB leak — was a label silently unresolved for weeks.
+    const msg = buildDigestMessage(
+      input({
+        compoundUnresolved: 7,
+        compoundUnresolvedSample: ["NAB (National Australia Bank)"],
+      }),
+    );
+    expect(msg).toContain("<b>7</b> compound label(s) matched no known brand");
+    expect(msg).toContain("NAB (National Australia Bank)");
+    expect(msg).toContain(", …"); // 7 > 1 sampled
+  });
+
+  it("says nothing about unresolved labels when there are none", () => {
+    expect(buildDigestMessage(input({}))).not.toContain("matched no known brand");
+  });
+
+  it("truncates rather than letting Telegram 400 the whole digest away", () => {
+    // The other cause of the 400 that escapeHtml does not fix. Telegram caps a
+    // message at 4096 chars; two DIGEST_CAP=25 lists can reach that on a busy
+    // week, and a 400 means the digest simply does not arrive — which reads
+    // exactly like a dead cron.
+    const many = Array.from({ length: 25 }, (_, i) =>
+      merged({
+        brandNormalized: `brand${i}`,
+        rawBrand: `Some Quite Long Australian Brand Name Number ${i}`.repeat(4),
+        au: 2,
+        scam: 2,
+      }),
+    );
+    const msg = buildDigestMessage(input({ auEvidenced: many, needsDomain: many }));
+    expect(msg.length).toBeLessThanOrEqual(4096);
+    expect(msg).toContain("truncated to fit Telegram");
+  });
 });
 
 describe("buildDigestMessage — an unattended promotion cannot silently override a human", () => {
@@ -612,6 +732,8 @@ describe("buildDigestMessage — an unattended promotion cannot silently overrid
     upserted: 12,
     upsertAttempted: 12,
     degraded: [],
+    compoundUnresolved: 0,
+    compoundUnresolvedSample: [],
     hasAlias: () => false,
   };
 
@@ -677,5 +799,123 @@ describe("buildDigestMessage — an unattended promotion cannot silently overrid
     } as DigestInput);
     expect(msg).toContain("Auto-promoted to the watchlist (3)");
     expect(msg).toContain("1 of these reversed a decision");
+  });
+
+});
+
+describe("findLeakSuspects — the alarm must stay small enough to read", () => {
+  // Every label below is a literal scam_reports.impersonated_brand from prod,
+  // 2026-08-27. Counting ALL unresolved labels gives 29 of 44 on this window;
+  // the compound-only rule gives 2. Both numbers are measured, not chosen.
+  const aliases = { nab: "NAB", nationalaustraliabank: "NAB" };
+  const resolveMulti = buildBrandMultiResolver(aliases);
+  const label = (rawBrand: string) => ({
+    brandNormalized: brandNormalize(rawBrand) ?? "",
+    rawBrand,
+    mentionCount: 2,
+    auCount: 2,
+  });
+
+  it("ignores a SIMPLE label that resolves to nothing", () => {
+    // Not a leak — we simply do not track these. They were 27 of the 29.
+    const simple = ["American Express", "Apple Pay", "AT&T", "Bank of America", "Chase"];
+    expect(findLeakSuspects(simple.map(label), resolveMulti)).toEqual([]);
+  });
+
+  it("flags a COMPOUND label that resolves to nothing", () => {
+    const r = findLeakSuspects([label("School / Australia Cancer Relief Fund")], resolveMulti);
+    expect(r).toHaveLength(1);
+  });
+
+  it("would have flagged NAB before the alias rows bridged it", () => {
+    // The whole point. Against an alias layer that does NOT know NAB, the leak
+    // shows up in the digest instead of waiting for a human to notice a
+    // familiar name in a promote list two weeks later.
+    const blind = buildBrandMultiResolver({});
+    expect(
+      findLeakSuspects([label("NAB (National Australia Bank)")], blind),
+    ).toHaveLength(1);
+    // …and goes quiet once it resolves, so the alarm tracks the defect.
+    expect(
+      findLeakSuspects([label("NAB (National Australia Bank)")], resolveMulti),
+    ).toEqual([]);
+  });
+
+  it("ignores a denylisted platform, however compound its label", () => {
+    // "X (Twitter)" is compound and resolves to nothing, so it passed the
+    // letter of the rule and turned up in a live prod probe — one permanent,
+    // unactionable entry in a list of two. A standing false entry in an alarm
+    // this small is not a rounding error, it is half the signal.
+    const r = findLeakSuspects([label("X (Twitter)")], resolveMulti);
+    expect(r).toEqual([]);
+  });
+
+  it("ignores a hedged label — the classifier already told us it did not know", () => {
+    expect(
+      findLeakSuspects(
+        [label("Generic health insurance provider (OFHC or similar)")],
+        resolveMulti,
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe("buildTriageMap — the producer the consumer tests could not see", () => {
+  // THE BUG (caught in review, 2026-08-27). This was an inline allow-list of
+  // two statuses, and v291 added `not_a_brand` at the CONSUMER end only. So
+  // TRIAGED_OUT never fired: "School / Australia Cancer Relief Fund" was
+  // already `not_a_brand` in PROD and would still have been re-announced under
+  // "Ready to promote" every Monday — the exact loop v291 was written to stop.
+  //
+  // Every test covering the consumer hand-built this map, which is why none of
+  // them could catch it: a fixture that plays both parts cannot observe a
+  // producer and consumer disagreeing about an enum. Same read-gate/write
+  // mismatch as the v224 recheck incident, in the PR that cited v224.
+  const row = (brand_normalized: string, status: string | null) => ({
+    brand_normalized,
+    status,
+  });
+
+  it("collects EVERY status a human can set, not a hand-listed pair", () => {
+    expect(
+      buildTriageMap([
+        row("a", "dismissed"),
+        row("b", "reviewed"),
+        row("c", "not_a_brand"),
+        row("d", "promoted"),
+      ]),
+    ).toEqual({ a: "dismissed", b: "reviewed", c: "not_a_brand", d: "promoted" });
+  });
+
+  it("survives a status nobody has invented yet", () => {
+    // The point of a predicate over a list: v292 must not have to remember to
+    // widen a filter three hundred lines from where the status is defined.
+    expect(buildTriageMap([row("x", "future_status")])).toEqual({
+      x: "future_status",
+    });
+  });
+
+  it("treats pending and null as 'nobody has ruled on this'", () => {
+    expect(buildTriageMap([row("a", "pending"), row("b", null)])).toEqual({});
+  });
+});
+
+describe("dedupeByKey — the two sources overlap by design", () => {
+  it("folds a brand named on BOTH Reddit and reported scams", () => {
+    // Not hypothetical: a brand in both aggregates is the strongest signal the
+    // feature has. Counted twice it would print "NAB, NAB" in a list whose only
+    // value is being short enough to read.
+    const r = dedupeByKey([
+      { brandNormalized: "nab", rawBrand: "NAB (National Australia Bank)" },
+      { brandNormalized: "nab", rawBrand: "NAB" },
+      { brandNormalized: "telstra", rawBrand: "Telstra" },
+    ]);
+    expect(r.map((c) => c.brandNormalized)).toEqual(["nab", "telstra"]);
+    expect(r[0].rawBrand).toBe("NAB (National Australia Bank)"); // first wins
+  });
+
+  it("is a no-op on already-distinct input", () => {
+    const input = [{ brandNormalized: "a" }, { brandNormalized: "b" }];
+    expect(dedupeByKey(input)).toEqual(input);
   });
 });
