@@ -1,0 +1,98 @@
+/* Route-scoped animation for /admin/showcase.
+   Pure CSS only — the browser pauses these in hidden tabs, so the page has
+   zero idle cost. The continuous flow loop is restricted to spine edges and
+   the active node's edges (see .flowOverlay rules). */
+
+.nodeIn {
+  animation: nodePop 0.45s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  animation-delay: calc(var(--i) * 45ms + 120ms);
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+@keyframes nodePop {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(4px);
+  }
+}
+
+.clusterIn {
+  animation: clusterFade 0.4s ease-out both;
+}
+
+@keyframes clusterFade {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Edge draw-in: pathLength={100} normalises every path so no JS measuring. */
+.edgeDraw {
+  stroke-dasharray: 100 100;
+  animation: drawIn 0.6s ease-out both;
+  animation-delay: calc(var(--i) * 30ms + 500ms);
+}
+
+@keyframes drawIn {
+  from {
+    stroke-dashoffset: 100;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* The dashed overlay that makes an edge look alive. Hidden by default;
+   spine edges (data-always-flow) and edges of the hovered/selected node
+   (data-active) run it. Everything else costs zero paint at steady state. */
+.flowOverlay {
+  stroke-dasharray: 4 8;
+  opacity: 0;
+}
+
+.flowOverlay[data-always-flow="true"],
+.flowOverlay[data-active="true"] {
+  opacity: 0.85;
+  animation: flowDash 1.4s linear infinite;
+}
+
+@keyframes flowDash {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+
+/* Hover/selection focus: anything not connected to the active node dims. */
+.dimmable {
+  transition: opacity 0.15s ease;
+}
+
+.dimmable[data-dim="true"] {
+  opacity: 0.3;
+}
+
+.nodeGroup {
+  cursor: pointer;
+  outline: none;
+}
+
+.nodeGroup:focus-visible > rect:first-of-type {
+  stroke: var(--color-teal);
+  stroke-width: 2;
+}
+
+/* Reduced motion — required, not optional (hub.module.css precedent).
+   iteration-count matters here because the flow loops are infinite. */
+@media (prefers-reduced-motion: reduce) {
+  .shell *,
+  .shell *::before,
+  .shell *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .flowOverlay {
+    display: none;
+  }
+}
