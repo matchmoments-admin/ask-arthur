@@ -116,6 +116,33 @@ describe("isNonBrandLabel — the load-bearing guard", () => {
     expect(resolveMulti(label)).toEqual([]);
   });
 
+  it("does NOT treat the word 'impersonating' as a hedge", () => {
+    // These were markers in the first cut and were removed after measuring:
+    // across all 35 distinct prod labels they caught ZERO that the structural
+    // markers did not already catch, while silently discarding a whole class
+    // that names a brand perfectly well. The field is literally called
+    // `impersonated_brand` — describing the ACTION is its subject, not a hedge.
+    // A hedge hit drops the label before the upsert AND is excluded from
+    // findLeakSuspects, so the loss would leave no count and no sample.
+    expect(isNonBrandLabel("Scammer impersonating Telstra support")).toBe(false);
+    expect(isNonBrandLabel("Impersonation of Australia Post")).toBe(false);
+    // SURVIVES as a candidate — which is the whole point. It is not RECOGNISED
+    // as Australia Post, and that is an honest boundary of this Module rather
+    // than a gap it papers over: splitting is separator-driven, and prose with
+    // no punctuation has nothing to split on. Such a label lands unresolved and
+    // COMPOUND-negative, so it reaches the operator as a candidate instead of
+    // being silently discarded. Widening to word-window matching would trade
+    // this recall for the false-attribution risk the hedge gate exists to stop.
+    expect(splitBrandLabel("Impersonation of Australia Post")).toEqual([
+      "Impersonation of Australia Post",
+    ]);
+    // …while the structural markers still catch the two real prod labels that
+    // happen to also contain the word.
+    expect(isNonBrandLabel("Designer goods retailers (generic impersonation)")).toBe(true);
+    // And the separator-bearing form DOES resolve, which is this PR's scope.
+    expect(resolveMulti("Australia Post (AusPost)")).toEqual(["Australia Post"]);
+  });
+
   it("does not trip on a brand that merely contains a hedge substring", () => {
     // "genuine" must not match "generic"; word boundaries, not substrings.
     expect(isNonBrandLabel("Genuine Parts Company")).toBe(false);

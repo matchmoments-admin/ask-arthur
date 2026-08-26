@@ -345,6 +345,46 @@ export interface PromotionPlan {
  * Pure + unit-tested. Exported for testing.
  */
 /**
+ * Which candidates count as "a human already ruled on this", by key -> status.
+ *
+ * Exported because the version inlined in `load-existing-candidates` was an
+ * allow-list of two, and v291 added `not_a_brand` at the CONSUMER end only —
+ * so TRIAGED_OUT could never fire and a row set to not_a_brand in prod would
+ * still be re-announced weekly. The tests that covered the consumer all
+ * hand-built this map, which is exactly why they proved nothing: a producer
+ * and a consumer disagreeing about an enum is invisible to a fixture that
+ * plays both parts. This is the producer, and it is now a predicate rather
+ * than a list, so a future status cannot be forgotten here.
+ */
+export function buildTriageMap(
+  rows: readonly { brand_normalized: string; status: string | null }[],
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const r of rows) {
+    if (r.status && r.status !== "pending") out[r.brand_normalized] = r.status;
+  }
+  return out;
+}
+
+/**
+ * One entry per brand key, first occurrence wins.
+ *
+ * The two aggregates overlap by design — a brand named on Reddit AND reported
+ * to Arthur is the strongest signal the feature has — so anything counting
+ * across both must fold them first or it double-counts the very rows that
+ * matter most, and prints the same name twice in a list whose only value is
+ * being short enough to read.
+ */
+export function dedupeByKey<T extends { brandNormalized: string }>(
+  candidates: readonly T[],
+): T[] {
+  const seen = new Set<string>();
+  return candidates.filter((c) =>
+    seen.has(c.brandNormalized) ? false : (seen.add(c.brandNormalized), true),
+  );
+}
+
+/**
  * The leak detector: COMPOUND labels this run could not resolve to any brand.
  *
  * Extracted rather than inlined for the reason this file keeps re-learning —
@@ -357,6 +397,11 @@ export interface PromotionPlan {
  *   - HEDGED labels. "Generic health insurance provider (OFHC or similar)" is
  *     the classifier reporting that it could not identify the brand. That is a
  *     handled outcome, not a miss.
+ *   - DENYLISTED platforms. "X (Twitter)" is compound and resolves to nothing,
+ *     so it qualified on the letter of the rule and showed up in a live probe —
+ *     a permanent, unactionable entry in a list of two. Same reasoning as the
+ *     other exclusions: it is a handled class, and at this sample size one
+ *     standing false entry halves the signal.
  *   - SIMPLE labels. "American Express" resolving to nothing means we do not
  *     track American Express; there is no parse to have got wrong. Counting
  *     them put the number at 29 of 44 on the live 30-day window, which is large
@@ -373,6 +418,7 @@ export function findLeakSuspects(
 ): CandidateAgg[] {
   return candidates.filter(
     (c) =>
+      !CANDIDATE_DENYLIST.has(c.brandNormalized) &&
       !isNonBrandLabel(c.rawBrand) &&
       splitBrandLabel(c.rawBrand).length > 1 &&
       resolveMulti(c.rawBrand).length === 0,
@@ -449,6 +495,22 @@ export function buildFreshCandidateGate(deps: {
  */
 const TRIAGED_OUT: ReadonlySet<string> = new Set(["dismissed", "not_a_brand"]);
 
+/**
+ * Statuses that additionally block UNATTENDED promotion.
+ *
+ * `dismissed` is not here on purpose — two Australians independently reporting
+ * a brand is genuinely new evidence, and a triage call made when the evidence
+ * was thinner should not bind forever. That override is allowed and announced.
+ *
+ * `not_a_brand` is different in kind, and v291's own header states the rule: no
+ * volume of reports turns a fabricated entity into a brand with a domain to
+ * protect. The realistic path is not hypothetical either — the fabricated
+ * charity names in this dataset are exactly the sort a scammer registers a
+ * domain for, and a `known_brands` row is all it would take to send one
+ * straight to the live matcher unattended.
+ */
+const NEVER_AUTO_PROMOTE: ReadonlySet<string> = new Set(["not_a_brand"]);
+
 export function planPromotions(
   candidates: readonly MergedCandidate[],
   domainsByKey: ReadonlyMap<string, { domain: string; source: string }>,
@@ -458,11 +520,11 @@ export function planPromotions(
   const needsDomain: MergedCandidate[] = [];
   for (const c of candidates) {
     if (!meetsPromotionBar(c)) continue;
+    const status = priorTriage[c.brandNormalized] ?? "";
+    if (NEVER_AUTO_PROMOTE.has(status)) continue;
     const known = domainsByKey.get(c.brandNormalized);
     if (!known?.domain) {
-      if (!TRIAGED_OUT.has(priorTriage[c.brandNormalized] ?? "")) {
-        needsDomain.push(c);
-      }
+      if (!TRIAGED_OUT.has(status)) needsDomain.push(c);
       continue;
     }
     promote.push({
@@ -708,7 +770,8 @@ export function buildDigestMessage(d: DigestInput): string {
         ]
       : [];
 
-  return [
+
+  const msg = [
     `<b>Brands discover</b>`,
     ...degradedLines,
     header,
@@ -721,6 +784,16 @@ export function buildDigestMessage(d: DigestInput): string {
     ``,
     `Review queue: https://askarthur.au/admin/brand-candidates`,
   ].join("\n");
+
+  // Telegram hard-caps a message at 4096 chars and 400s past it — and a 400 is
+  // the digest not arriving at all, which reads exactly like a dead cron. Two
+  // capped lists at DIGEST_CAP=25 each can reach that on a busy week, so the
+  // proof-of-life is truncated rather than lost. Escaping fixed one cause of
+  // the 400; this is the other.
+  const TELEGRAM_MAX = 4096;
+  if (msg.length <= TELEGRAM_MAX) return msg;
+  const notice = "\n\n<i>… truncated to fit Telegram. Full detail in the review queue.</i>";
+  return msg.slice(0, TELEGRAM_MAX - notice.length) + notice;
 }
 
 export const redditBrandsDiscover = inngest.createFunction(
@@ -902,7 +975,11 @@ export const redditBrandsDiscover = inngest.createFunction(
     // Computed over EVERY examined label from both sources — before the
     // fresh-filter, because a label dropped by the gate is exactly the one
     // worth counting. Hedged labels are excluded (see DigestData).
-    const examinedLabels = [...candidates, ...scamCandidatesRaw];
+    // Deduped by key: a brand present in BOTH aggregates (which is the whole
+    // reason two sources exist — NAB is exactly such a case) would otherwise
+    // count twice and print its own name twice in a list whose entire value is
+    // being short enough to read.
+    const examinedLabels = dedupeByKey([...candidates, ...scamCandidatesRaw]);
     // The broad count goes to Axiom ONLY — useful as a trend, useless in a
     // digest (29 of 44 on the live window). The digest gets the compound
     // subset, which is the part a human can act on.
@@ -949,12 +1026,13 @@ export const redditBrandsDiscover = inngest.createFunction(
             failed: "existing_candidates_partial",
           };
         }
+        const triageRows: { brand_normalized: string; status: string | null }[] = [];
         for (const r of data ?? []) {
           const key = r.brand_normalized as string;
           keys.push(key);
-          const st = r.status as string | null;
-          if (st === "dismissed" || st === "reviewed") triaged[key] = st;
+          triageRows.push({ brand_normalized: key, status: r.status as string | null });
         }
+        Object.assign(triaged, buildTriageMap(triageRows));
         if ((data?.length ?? 0) < 1000) break;
       }
       return { rows: keys, triaged, failed: null as string | null };
@@ -1177,8 +1255,18 @@ export const redditBrandsDiscover = inngest.createFunction(
     // information too, but only if it arrives.
     const degraded = [...degradedSet];
 
-    await step.run("telegram", async () => {
-      await sendAdminTelegramMessage(
+    // The send RESULT, not fire-and-forget. sendAdminTelegramMessage never
+    // throws — it returns { ok, reason } — so a digest that fails to send
+    // produced a run that reported ok:true with no trace anywhere. For the one
+    // function whose entire output IS the message, "did it arrive?" has to be
+    // answerable, and this is the only always-ship place to answer it (see the
+    // OBSERVABILITY note in the header: fn.complete is INFO at 10%).
+    //
+    // Not routed through recordAlertDelivery(): that requires an ALERTERS id,
+    // and every id there carries an expected-firings floor in the weekly
+    // canary's liveness sweep. Registering one is a separate decision.
+    const delivery = await step.run("telegram", async () => {
+      const res = await sendAdminTelegramMessage(
         buildDigestMessage({
           auEvidenced,
           globalOnly,
@@ -1197,7 +1285,14 @@ export const redditBrandsDiscover = inngest.createFunction(
           hasAlias: (raw) => resolveCanonical(raw) !== null,
           priorTriage: knownStep.triaged,
         }),
+        { parseMode: "HTML" },
       );
+      if (!res.ok) {
+        logger.error("reddit-brands-discover: digest FAILED to send", {
+          reason: res.reason,
+        });
+      }
+      return { ok: res.ok, reason: res.reason ?? null };
     });
 
     const summary = {
@@ -1207,6 +1302,10 @@ export const redditBrandsDiscover = inngest.createFunction(
       // this cron unobservable in the first place. BOTH numbers ship here:
       // the broad one is a queryable trend, the compound one is the alarm.
       unresolvedLabels,
+      // The answer to "did the message actually arrive?" — the one question a
+      // digest-only function must be able to answer, and could not before.
+      digestDelivered: delivery.ok,
+      digestFailReason: delivery.reason,
       compoundUnresolved: compoundUnresolved.length,
       compoundUnresolvedSample: compoundUnresolved
         .slice(0, UNRESOLVED_PREVIEW)

@@ -78,9 +78,21 @@ const HEDGE_MARKERS: readonly string[] = [
   "unknown",
   "unidentified",
   "or similar",
-  "impersonation of",
-  "impersonating",
 ];
+// DELIBERATELY NOT MARKERS: "impersonating" / "impersonation of".
+//
+// Every marker above is STRUCTURAL — it describes the classifier's confidence.
+// Those two describe the ACTION, which is the entire subject of the field they
+// are read from (`scam_reports.impersonated_brand`), so "Scammer impersonating
+// Telstra support" names a brand perfectly well and would have been discarded.
+// A hedge hit drops the label before the upsert AND is excluded from
+// findLeakSuspects, so the loss would leave no count and no sample.
+//
+// Measured before removing them rather than argued: across all 35 distinct
+// prod labels they catch ZERO that the structural markers do not already catch
+// ("Designer goods retailers (generic impersonation)" and "Generic
+// financial/rewards app (impersonation of …)" are both caught by "generic").
+// Nothing gained, a real class silently lost.
 
 const HEDGE_RE = new RegExp(
   `(^|\\W)(${HEDGE_MARKERS.map((m) => m.replace(/\s+/g, "\\s+")).join("|")})(\\W|$)`,

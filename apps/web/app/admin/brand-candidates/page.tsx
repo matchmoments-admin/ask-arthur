@@ -187,7 +187,16 @@ export default async function BrandCandidatesPage() {
                         {new Date(r.last_seen_at).toLocaleDateString("en-AU")}
                       </td>
                       <td style={CELL}>
-                        {r.status === "pending" || r.status === "promoted" ? (
+                        {/* Every status, not just pending/promoted. Gating here
+                            made CandidateActions' own Undo affordance dead on
+                            arrival: a dismissed/reviewed row rendered as plain
+                            text on reload, so the component's UNDOABLE branch
+                            was only ever reachable from in-session state right
+                            after the click. The component already decides what
+                            to show per status — that is its job, not this
+                            table's. v291's not_a_brand would otherwise have
+                            been a fourth one-way door. */}
+                        {r.status ? (
                           <CandidateActions
                             brandNormalized={r.brand_normalized}
                             brandName={r.raw_brand}

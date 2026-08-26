@@ -9,6 +9,8 @@ import {
   partitionForDigest,
   planPromotions,
   findLeakSuspects,
+  buildTriageMap,
+  dedupeByKey,
   CANDIDATE_DENYLIST,
   type DigestInput,
   type MergedCandidate,
@@ -373,6 +375,22 @@ describe("planPromotions — the domain is never guessed", () => {
     ).toEqual([c]);
   });
 
+  it("NEVER auto-promotes a not_a_brand candidate, even with a domain", () => {
+    // v291's own header: no volume of reports turns a fabricated entity into a
+    // brand with a domain to protect. The realistic path is not hypothetical —
+    // the fabricated charity names in this dataset are exactly the sort a
+    // scammer registers a domain for, and one known_brands row is all it would
+    // take to write it to the LIVE matcher unattended, with no override warning
+    // in the digest because needsDomain was the only branch reading triage.
+    const r = planPromotions(
+      [cand("gumtree", "Gumtree", { scam: 2, au: 2, total: 2 })],
+      trusted,
+      { gumtree: "not_a_brand" },
+    );
+    expect(r.promote).toEqual([]);
+    expect(r.needsDomain).toEqual([]);
+  });
+
   it("still AUTO-PROMOTES a dismissed brand — the asymmetry is deliberate", () => {
     // New evidence may reverse an old triage call, and that override is
     // announced rather than silent (see summary.promotionOverrides). Only the
@@ -673,6 +691,24 @@ describe("buildDigestMessage — the digest cannot lie about the run", () => {
   it("says nothing about unresolved labels when there are none", () => {
     expect(buildDigestMessage(input({}))).not.toContain("matched no known brand");
   });
+
+  it("truncates rather than letting Telegram 400 the whole digest away", () => {
+    // The other cause of the 400 that escapeHtml does not fix. Telegram caps a
+    // message at 4096 chars; two DIGEST_CAP=25 lists can reach that on a busy
+    // week, and a 400 means the digest simply does not arrive — which reads
+    // exactly like a dead cron.
+    const many = Array.from({ length: 25 }, (_, i) =>
+      merged({
+        brandNormalized: `brand${i}`,
+        rawBrand: `Some Quite Long Australian Brand Name Number ${i}`.repeat(4),
+        au: 2,
+        scam: 2,
+      }),
+    );
+    const msg = buildDigestMessage(input({ auEvidenced: many, needsDomain: many }));
+    expect(msg.length).toBeLessThanOrEqual(4096);
+    expect(msg).toContain("truncated to fit Telegram");
+  });
 });
 
 describe("buildDigestMessage — an unattended promotion cannot silently override a human", () => {
@@ -805,6 +841,15 @@ describe("findLeakSuspects — the alarm must stay small enough to read", () => 
     ).toEqual([]);
   });
 
+  it("ignores a denylisted platform, however compound its label", () => {
+    // "X (Twitter)" is compound and resolves to nothing, so it passed the
+    // letter of the rule and turned up in a live prod probe — one permanent,
+    // unactionable entry in a list of two. A standing false entry in an alarm
+    // this small is not a rounding error, it is half the signal.
+    const r = findLeakSuspects([label("X (Twitter)")], resolveMulti);
+    expect(r).toEqual([]);
+  });
+
   it("ignores a hedged label — the classifier already told us it did not know", () => {
     expect(
       findLeakSuspects(
@@ -812,5 +857,65 @@ describe("findLeakSuspects — the alarm must stay small enough to read", () => 
         resolveMulti,
       ),
     ).toEqual([]);
+  });
+});
+
+describe("buildTriageMap — the producer the consumer tests could not see", () => {
+  // THE BUG (caught in review, 2026-08-27). This was an inline allow-list of
+  // two statuses, and v291 added `not_a_brand` at the CONSUMER end only. So
+  // TRIAGED_OUT never fired: "School / Australia Cancer Relief Fund" was
+  // already `not_a_brand` in PROD and would still have been re-announced under
+  // "Ready to promote" every Monday — the exact loop v291 was written to stop.
+  //
+  // Every test covering the consumer hand-built this map, which is why none of
+  // them could catch it: a fixture that plays both parts cannot observe a
+  // producer and consumer disagreeing about an enum. Same read-gate/write
+  // mismatch as the v224 recheck incident, in the PR that cited v224.
+  const row = (brand_normalized: string, status: string | null) => ({
+    brand_normalized,
+    status,
+  });
+
+  it("collects EVERY status a human can set, not a hand-listed pair", () => {
+    expect(
+      buildTriageMap([
+        row("a", "dismissed"),
+        row("b", "reviewed"),
+        row("c", "not_a_brand"),
+        row("d", "promoted"),
+      ]),
+    ).toEqual({ a: "dismissed", b: "reviewed", c: "not_a_brand", d: "promoted" });
+  });
+
+  it("survives a status nobody has invented yet", () => {
+    // The point of a predicate over a list: v292 must not have to remember to
+    // widen a filter three hundred lines from where the status is defined.
+    expect(buildTriageMap([row("x", "future_status")])).toEqual({
+      x: "future_status",
+    });
+  });
+
+  it("treats pending and null as 'nobody has ruled on this'", () => {
+    expect(buildTriageMap([row("a", "pending"), row("b", null)])).toEqual({});
+  });
+});
+
+describe("dedupeByKey — the two sources overlap by design", () => {
+  it("folds a brand named on BOTH Reddit and reported scams", () => {
+    // Not hypothetical: a brand in both aggregates is the strongest signal the
+    // feature has. Counted twice it would print "NAB, NAB" in a list whose only
+    // value is being short enough to read.
+    const r = dedupeByKey([
+      { brandNormalized: "nab", rawBrand: "NAB (National Australia Bank)" },
+      { brandNormalized: "nab", rawBrand: "NAB" },
+      { brandNormalized: "telstra", rawBrand: "Telstra" },
+    ]);
+    expect(r.map((c) => c.brandNormalized)).toEqual(["nab", "telstra"]);
+    expect(r[0].rawBrand).toBe("NAB (National Australia Bank)"); // first wins
+  });
+
+  it("is a no-op on already-distinct input", () => {
+    const input = [{ brandNormalized: "a" }, { brandNormalized: "b" }];
+    expect(dedupeByKey(input)).toEqual(input);
   });
 });
