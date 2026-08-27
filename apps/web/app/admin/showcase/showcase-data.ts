@@ -277,7 +277,9 @@ await inngest.send({ id, name: "analyze.completed.v1", data });
       "Per-call usage logging; tiers synced from Stripe subscriptions",
     ],
     techStack: ["Bearer keys", "OpenAPI 3", "Scalar", "pgvector"],
-    deepLink: { href: "/app/developer", label: "Open /app/developer" },
+    // /app/developer sits behind Supabase-session middleware, so an admin on
+    // the HMAC cookie gets bounced to /login mid-demo. /api-docs is public.
+    deepLink: { href: "/api-docs", label: "Open /api-docs" },
     engineeringNotes: [
       "validateApiKey() centralises rate-limit + tier-limit + telemetry — a new endpoint is a handler plus one call, never a re-implementation",
     ],
