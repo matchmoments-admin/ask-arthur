@@ -22,11 +22,12 @@ export default function ShowcaseClient() {
 
   // Deep-linking: /admin/showcase#inngest pre-selects a node so a demo can
   // start anywhere. replaceState (not push) — a click-through shouldn't fill
-  // the back stack.
+  // the back stack. The URL is the source of truth: an empty or unknown hash
+  // clears the selection rather than leaving a stale one on screen.
   useEffect(() => {
     const applyHash = () => {
       const hash = window.location.hash.slice(1);
-      if (hash && NODE_IDS.has(hash)) setSelectedId(hash);
+      setSelectedId(hash && NODE_IDS.has(hash) ? hash : null);
     };
     applyHash();
     window.addEventListener("hashchange", applyHash);
@@ -37,24 +38,34 @@ export default function ShowcaseClient() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setSelectedId(null);
-        history.replaceState(null, "", window.location.pathname);
+        // Keep the query string — only the hash is ours to drop.
+        history.replaceState(null, "", window.location.pathname + window.location.search);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  const handleSelect = useCallback((id: string) => {
-    setSelectedId((current) => {
-      const next = current === id ? null : id;
-      history.replaceState(null, "", next ? `#${next}` : window.location.pathname);
-      return next;
-    });
-    // Below lg the panel renders under the diagram — bring it into view.
-    if (window.matchMedia("(max-width: 1023px)").matches) {
-      requestAnimationFrame(() => panelRef.current?.scrollIntoView({ block: "nearest" }));
-    }
-  }, []);
+  const handleSelect = useCallback(
+    (id: string) => {
+      const next = selectedId === id ? null : id;
+      setSelectedId(next);
+      if (next) {
+        history.replaceState(null, "", `#${next}`);
+      } else {
+        // Keep the query string — only the hash is ours to drop.
+        history.replaceState(null, "", window.location.pathname + window.location.search);
+        // Touch devices fire no mouseleave, so a tap-deselect would otherwise
+        // leave the diagram dimmed around a node that is no longer selected.
+        setHoveredId(null);
+      }
+      // Below lg the panel renders under the diagram — bring it into view.
+      if (window.matchMedia("(max-width: 1023px)").matches) {
+        requestAnimationFrame(() => panelRef.current?.scrollIntoView({ block: "nearest" }));
+      }
+    },
+    [selectedId],
+  );
 
   const activeId = hoveredId ?? selectedId;
   const connected = activeId ? (adjacency.get(activeId) ?? null) : null;
@@ -62,7 +73,11 @@ export default function ShowcaseClient() {
 
   return (
     <div className={`${styles.shell} flex flex-col gap-[26px]`}>
-      {/* Stats row */}
+      {/* Stats row. Kept inline rather than reusing components/admin/overview/
+          StatTopCard: that card is label-above-value with a mandatory tone dot,
+          this one is value-above-label with none, and no prop turns either off.
+          Same admin-card shell though (surface / line / radius 14 / shadow-card)
+          — a change to that grammar has to land in both places. */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         {STATS.map((stat) => (
           <div

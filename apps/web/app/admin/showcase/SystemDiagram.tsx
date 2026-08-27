@@ -126,7 +126,7 @@ export default function SystemDiagram({
                 strokeWidth={style.width}
                 strokeDasharray={style.dash}
                 markerEnd={style.marker}
-                className={styles.edgeDraw}
+                className={style.dash ? styles.edgeFade : styles.edgeDraw}
                 style={{ "--i": index } as React.CSSProperties}
               />
               <path
@@ -154,8 +154,7 @@ export default function SystemDiagram({
           <g
             key={node.id}
             transform={`translate(${node.x}, ${node.y})`}
-            className={`${styles.nodeIn} ${styles.dimmable} ${styles.nodeGroup}`}
-            style={{ "--i": index } as React.CSSProperties}
+            className={`${styles.dimmable} ${styles.nodeGroup}`}
             data-dim={isNodeDim(node.id) || undefined}
             tabIndex={0}
             role="button"
@@ -168,28 +167,33 @@ export default function SystemDiagram({
             onFocus={() => onHover(node.id)}
             onBlur={() => onHover(null)}
           >
-            <rect
-              width={w}
-              height={h}
-              rx={10}
-              fill={selected ? "var(--color-teal-soft)" : "var(--color-surface)"}
-              stroke={selected ? "var(--color-teal)" : "var(--color-line)"}
-              strokeWidth={selected ? 2 : 1}
-            />
-            <text x={14} y={22} fontSize={14} fontWeight={selected ? 700 : 600} fill="var(--color-ink)">
-              {node.title}
-            </text>
-            <text x={14} y={39} fontSize={11} fill={selected ? "#42706b" : "var(--color-muted)"}>
-              {node.tagline}
-            </text>
-            {node.status === "live" ? (
-              <>
-                <rect x={w - 46} y={10} width={34} height={14} rx={7} fill="var(--color-teal-soft)" />
-                <text x={w - 29} y={20} fontSize={8} fontWeight={700} fill="var(--color-teal)" textAnchor="middle">
-                  LIVE
-                </text>
-              </>
-            ) : null}
+            {/* The entrance animation lives on an inner <g>: animating transform
+                on the outer one would replace its translate() and fly the node
+                in from the SVG origin instead of popping it in place. */}
+            <g className={styles.nodeIn} style={{ "--i": index } as React.CSSProperties}>
+              <rect
+                width={w}
+                height={h}
+                rx={10}
+                fill={selected ? "var(--color-teal-soft)" : "var(--color-surface)"}
+                stroke={selected ? "var(--color-teal)" : "var(--color-line)"}
+                strokeWidth={selected ? 2 : 1}
+              />
+              <text x={14} y={22} fontSize={14} fontWeight={selected ? 700 : 600} fill="var(--color-ink)">
+                {node.title}
+              </text>
+              <text x={14} y={39} fontSize={11} fill={selected ? "#42706b" : "var(--color-muted)"}>
+                {node.tagline}
+              </text>
+              {node.status === "live" ? (
+                <>
+                  <rect x={w - 46} y={10} width={34} height={14} rx={7} fill="var(--color-teal-soft)" />
+                  <text x={w - 29} y={20} fontSize={8} fontWeight={700} fill="var(--color-teal)" textAnchor="middle">
+                    LIVE
+                  </text>
+                </>
+              ) : null}
+            </g>
           </g>
         );
       })}
@@ -211,6 +215,8 @@ export default function SystemDiagram({
 /** Label placed at the path midpoint with a white halo so it survives crossings. */
 function EdgeLabel({ d, label, kind }: { d: string; label: string; kind: EdgeKind }) {
   // Cheap midpoint: average of the numeric coordinates in the path string.
+  // Assumes strict x,y alternation — only M/L/C/Q qualify, which the
+  // "hand-tuned edge paths keep their coordinates paired" test enforces.
   const nums = d.match(/-?\d+(\.\d+)?/g)?.map(Number) ?? [];
   const xs = nums.filter((_, i) => i % 2 === 0);
   const ys = nums.filter((_, i) => i % 2 === 1);

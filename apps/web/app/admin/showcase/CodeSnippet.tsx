@@ -26,7 +26,10 @@ const COMMENT_PREFIX: Record<CodeSnippetProps["lang"], string> = {
 
 /**
  * Deliberately tiny highlighter: three token classes (comments, strings,
- * keywords) rendered as spans — no dangerouslySetInnerHTML, no dependency.
+ * keywords). It exists for XSS-inertness, not bundle size — highlight.js is
+ * already in this app (see lib/blogRenderer.ts), but it emits HTML strings
+ * that only reach the DOM via dangerouslySetInnerHTML. This one renders every
+ * token as a React text node, so no snippet can inject markup by construction.
  * A line the tokenizer can't handle renders as plain monospace text.
  */
 function highlightLine(line: string, lang: CodeSnippetProps["lang"], key: number): ReactNode {

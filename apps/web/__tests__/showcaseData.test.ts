@@ -87,6 +87,15 @@ describe("showcase data integrity", () => {
     expect(STATS.length).toBe(6);
   });
 
+  it("hand-tuned edge paths keep their coordinates paired", () => {
+    // EdgeLabel averages the numbers in `d` assuming strict x,y alternation.
+    // M/L/C/Q all take coordinate pairs; H/V/A would silently skew the label.
+    for (const edge of EDGES) {
+      if (!edge.d) continue;
+      expect(edge.d, `edge ${edge.id} path commands`).toMatch(/^[MLCQ\s\d.,-]+$/);
+    }
+  });
+
   it("adjacency covers every node that has edges", () => {
     const adj = buildAdjacency();
     for (const edge of EDGES) {
