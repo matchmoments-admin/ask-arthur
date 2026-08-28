@@ -78,13 +78,51 @@ The pattern is established and proven — reuse it, don't reinvent.
 
 ## Skills (project-scoped, in `.claude/skills/`)
 
+**Committed — these are what a fresh clone gets (5):**
+
 | Skill                            | What it owns                                                                                                                                                                                                                    |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `improve-codebase-architecture/` | Module / Interface / Seam / Adapter vocabulary + the deletion test. The canonical architectural-review skill.                                                                                                                   |
 | `grill-with-docs/`               | Plan-stress-testing skill. Cross-references `CONTEXT.md` + `docs/adr/`. Includes `STACK-PINS.md` documenting the installed-version drift hazards for React 19 / Next 16 / Zod 4 / Expo 54 / WXT / Supabase JS v2 / Inngest SDK. |
 | `system-map/`                    | Quick reference for the deployed-surface map (web routes / DB tables / cron jobs / feature flags).                                                                                                                              |
+| `add-inbound-email-source/`      | Adding a newsletter / gov-alert source to the inbound-email pipeline (Cloudflare Email Routing → Worker → Edge Function → `feed_items`).                                                                                        |
+| `publish-to-linkedin/`           | The approval-gated GitHub Actions publishing lanes for the company page — link cards and document carousels. Copy itself comes from the user-scoped `linkedin-writing` skill.                                                   |
+
+**Present on the maintainer's machine but NOT committed (6):** `clean-code/`,
+`refactoring/`, `pragmatic-programmer/`, `clean-architecture/`,
+`software-architecture/`, `data-intensive-design/` — the book-derived coding
+skills, seeded per the user-scoped convention. They load locally and are
+invisible to anyone else, including CI and any agent working from a fresh
+clone. Commit them or accept that they are personal tooling; do not reference
+them from committed docs as though they ship.
+
+This table said **two** skills for months while ten-plus existed (found by map
+#978, corrected 2026-08-28 under issue #1047). Verify it rather than trusting
+it: `ls -d .claude/skills/*/`, and `git ls-files .claude/skills/` for what
+actually ships.
 
 These are PROJECT-SCOPED skills (live in `.claude/skills/` here). User-scoped skills like `local-ultrareview`, `handoff`, `zoom-out`, `to-issues`, `to-prd`, `write-a-skill`, `diagnose`, `blog`, etc. live at `~/.claude/skills/` and are shared across projects.
+
+---
+
+## Permissions
+
+`settings.json` carries a `permissions.deny` list mirroring `.gitignore`'s
+secret policy — `.env*` is ignored, `!.env.example` is not — so the files that
+must never be committed also cannot be read into a transcript. `.env.example`
+stays readable; it names the vars and holds no values.
+
+Before 2026-08-28 the committed settings had **no permissions block at all**,
+and `settings.local.json` held 319 `allow` entries and zero `deny` entries.
+Nothing anywhere denied reading a secret (audit: issue #1046).
+
+`deny` beats `allow`, including over `settings.local.json`. Two things the deny
+list does **not** cover, deliberately: `Bash(git commit:*)` and
+`Bash(git push:*)` are broadly allowed in `settings.local.json`, so no
+permission prompt gates a commit — `hooks/git-commit-guard.sh` is the only
+thing standing there, which is why it now has a test suite. And a
+credentials-in-URL `curl` rule was attempted and rejected by the settings
+schema (`:*` must be terminal); egress of that shape is currently unguarded.
 
 ---
 

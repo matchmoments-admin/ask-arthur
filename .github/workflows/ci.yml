@@ -40,6 +40,25 @@ jobs:
       - name: Check migration numbering
         run: ./scripts/check-migration-numbers.sh
 
+      # CLAUDE.md Never-Do #7 — the only Never-Do rule with two documented
+      # production failures and, until 2026-08-28, nothing enforcing it.
+      # Deliberately a repo-wide grep rather than a lint rule: only apps/web
+      # is linted, so a lint rule would read as covering the monorepo while
+      # covering one workspace of seventeen. Seconds, no deps.
+      - name: Check readBoolEnv usage
+        run: ./scripts/check-readbool-env.sh
+
+      # The meta-gate. These two suites prove the guards above and the
+      # PreToolUse commit guard can BOTH pass and fail — the property no
+      # control in this repo had until now. The promptfoo workflow was green
+      # 24 times out of 24 having never run an eval; the commit guard blocked
+      # two cases and let four through, unnoticed for three months, because
+      # nobody had ever asked it to fail. Audit: issue #1046.
+      - name: Self-test the change-path guards (both directions)
+        run: |
+          ./.claude/hooks/tests/git-commit-guard.test.sh
+          ./scripts/tests/check-readbool-env.test.sh
+
       - uses: pnpm/action-setup@v4
         # Version is read from the `packageManager` field in package.json
 
