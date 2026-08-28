@@ -128,12 +128,21 @@ jobs:
       # On PR #1055 the action ran 5 turns in 26.5s, spent $0.22, recorded
       # `permission_denials_count: 2`, posted nothing, and exited green.
       #
-      # Root cause: `claude_args` carried only `--max-turns`, never
-      # `--allowedTools`, so the two tools the action's own docs require for
-      # posting -- `Bash(gh pr comment:*)` and
-      # `mcp__github_inline_comment__create_inline_comment` -- were both
-      # denied. Claude wrote the review into its final message, where nobody
-      # reads it, and the job went green.
+      # Best-supported cause, NOT YET CONFIRMED IN PRODUCTION: `claude_args`
+      # carried only `--max-turns`, never `--allowedTools`, so the two tools
+      # the action's own docs require for posting -- `Bash(gh pr comment:*)`
+      # and `mcp__github_inline_comment__create_inline_comment` -- were both
+      # denied. That fits every number from the #1055 run, where the action
+      # genuinely executed. It is a hypothesis with good evidence, not a
+      # verified fix.
+      #
+      # It could not be tested by the PR that introduced it: a PR editing this
+      # file makes the action skip itself (see the workflow-validation branch
+      # in the step below), so the fix's first real test is the NEXT labelled
+      # PR that leaves this file alone. If the reviewer still posts nothing
+      # there, this comment is wrong and the next suspect is the
+      # `code-review@claude-code-plugins` slash command, which may report
+      # findings through a channel the action does not publish.
       #
       # Worth stating plainly because the audit (#1046) initially read the
       # 2026-05-02 run's 6m22s duration as evidence it had posted. It had not.
@@ -149,6 +158,26 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
+
+          # A PR that edits THIS FILE can never be reviewed by this workflow.
+          # claude-code-action refuses to run when the workflow file on the
+          # head branch differs from the copy on the default branch --
+          # a deliberate anti-exfiltration guard, since otherwise a PR could
+          # rewrite the reviewer to leak secrets. The step exits in ~1.6s
+          # having never invoked Claude.
+          #
+          # Without this branch the verification below would fail every such
+          # PR forever, for a reason unrelated to whether the reviewer works.
+          # A permanent false red trains you to ignore the check, which is the
+          # same disease as a permanent false green.
+          #
+          # It is a NOTICE, not silence: the check passes but says out loud
+          # that nothing was verified, and that verification moves to the next
+          # PR that does not touch this file.
+          if gh pr diff "$PR" --name-only | grep -qx '.github/workflows/claude-code-review.yml'; then
+            echo "::notice::This PR modifies the review workflow, so claude-code-action skipped itself (workflow-validation guard). NO REVIEW WAS VERIFIED. Confirm the reviewer posts on the next PR that does not touch this file."
+            exit 0
+          fi
           # Match on a SENTINEL in the body, not on the author.
           #
           # Author matching was the first attempt and it was wrong: when
