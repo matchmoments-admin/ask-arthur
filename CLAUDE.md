@@ -114,7 +114,13 @@ cd pipeline/scrapers && python -m pytest tests/ -v
 
 **For most agent work, prefer scoped commands (`pnpm --filter <pkg> ...`) over the global `pnpm turbo ...` form.** Turbo runs every package in the workspace, which burns context on irrelevant output and slows the agent loop significantly in a 14-package monorepo. Only use the global form when verifying cross-package impact — e.g. you changed an export in `packages/types` and want every consumer rebuilt.
 
-When working inside `apps/<x>/` or `packages/<x>/`, read that subdirectory's `CLAUDE.md` first if one exists. Subdirectory files cover scoped commands, local conventions, and gotchas that this root file deliberately omits to stay lean. Current subdirectory guides: `apps/web/`, `packages/scam-engine/`, `pipeline/scrapers/`.
+When working inside `apps/<x>/` or `packages/<x>/`, read that subdirectory's `CLAUDE.md` first if one exists. Subdirectory files cover scoped commands, local conventions, and gotchas that this root file deliberately omits to stay lean. Current subdirectory guides — **seven**: `apps/web/`, `packages/bot-core/`, `packages/scam-engine/`, `packages/supabase/`, `packages/types/`, `pipeline/scrapers/`, `supabase/`.
+
+<!-- This line claimed three guides for roughly two and a half months while
+     seven existed (found by map #978, corrected 2026-08-28 under issue #1047).
+     Verify it with:  find apps packages pipeline supabase tooling -name CLAUDE.md -not -path "*/node_modules/*" -->
+
+**Skills** live in `.claude/skills/` — see [`.claude/README.md`](./.claude/README.md) for the current table. Do not restate the count here; one home per fact.
 
 ## Import Patterns
 
@@ -288,6 +294,12 @@ EXISTS ... CREATE POLICY ...`, etc.) so re-running is safe.
    - Both bites surface as immediate exceptions on the first call,
      regardless of input data — which is what
      `packages/scam-engine/src/__tests__/rpcs.smoke.test.ts` is for.
+     **Know its limits before you rely on it:** it covers 13 of 124 RPCs
+     and self-skips when its env vars are absent (`describe.skipIf(!hasEnv)`),
+     so a green CI run is NOT evidence it ran. It is nonetheless the only
+     gate between a PL/pgSQL runtime error and production, because
+     `createServiceClient` omits the `<Database>` generic and `.rpc()` is
+     therefore untyped app-wide. See BACKLOG.md.
      Run it with `SUPABASE_INTEGRATION_TEST_URL` +
      `SUPABASE_INTEGRATION_TEST_SERVICE_KEY` set against a preview
      branch after applying any migration that touches a function body.

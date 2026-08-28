@@ -46,6 +46,16 @@ on:
       - "evals/**"
       - "packages/scam-engine/src/claude.ts"
       - "packages/types/src/analysis.ts"
+      # Added 2026-08-28 (audit: issue #1046, from map #978's backlog tail).
+      # The three paths below all change analyze behaviour and none of them
+      # triggered an eval run. `anthropic.ts` is the shared Claude wrapper —
+      # a MODEL UPGRADE lands here and, until this line existed, shipped with
+      # no eval having run. `analyze-core.ts` is the analyze pipeline itself;
+      # `core-analysis/src/verdict.ts` decides the SAFE / SUSPICIOUS /
+      # HIGH_RISK label the fixtures assert on.
+      - "packages/scam-engine/src/anthropic.ts"
+      - "packages/scam-engine/src/analyze-core.ts"
+      - "packages/core-analysis/src/verdict.ts"
   workflow_dispatch:
 
 concurrency:

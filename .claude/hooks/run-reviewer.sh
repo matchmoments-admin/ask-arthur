@@ -46,11 +46,18 @@ reviewers_dir="${project_root}/.claude/hooks/reviewers"
 applicable=()
 
 # db-migration-reviewer:
-#   - supabase/migrations/**
+#   - supabase/migration-*.sql   (the ACTUAL migration layout — flat files at
+#                                  the root of supabase/, NOT a migrations/
+#                                  subdirectory. This glob was `supabase/
+#                                  migrations/*` until 2026-08-28: a directory
+#                                  that has never existed, so the reviewer
+#                                  matched 0 of 289 migrations — 117 of them
+#                                  shipped in the 90 days before the fix.
+#                                  Audit: issue #1046.)
 #   - pipeline/scrapers/**   (post-incident 2026-05-09: scrapers can take down
 #                              the site via hot-table updates)
 case "$rel_path" in
-  supabase/migrations/*|pipeline/scrapers/*)
+  supabase/migration-*.sql|pipeline/scrapers/*)
     applicable+=("db-migration")
     ;;
 esac
@@ -59,8 +66,16 @@ esac
 #   - apps/web/app/api/cron/**
 #   - apps/web/vercel.json
 #   - packages/scam-engine/src/inngest/**
+#   - apps/web/app/api/inngest/**        (added 2026-08-28)
+#   - packages/breach-defence/src/inngest/**  (added 2026-08-28)
+#
+# The two additions close a hole measured by the audit (issue #1046): over the
+# 90 days to 2026-08-28 this reviewer saw 41 changed files under scam-engine
+# and was blind to 42 under apps/web/app/api/inngest — roughly half the Inngest
+# surface. CLAUDE.md calls a blank cell in docs/inngest-brakes.md a P1, and the
+# reviewer meant to catch that could not see half the functions.
 case "$rel_path" in
-  apps/web/app/api/cron/*|apps/web/vercel.json|packages/scam-engine/src/inngest/*)
+  apps/web/app/api/cron/*|apps/web/vercel.json|packages/scam-engine/src/inngest/*|apps/web/app/api/inngest/*|packages/breach-defence/src/inngest/*)
     applicable+=("cron-impact")
     ;;
 esac
@@ -87,6 +102,16 @@ case "$rel_path" in
     applicable+=("rls-and-tenant-isolation")
     ;;
 esac
+
+# DELIBERATE NON-COVERAGE (recorded 2026-08-28 so the next audit does not
+# re-derive it — issue #1046 found these trees dispatch nothing):
+#   - apps/extension/**, apps/mobile/**, apps/cloudflare-email-worker/**
+# All five reviewers check server-side concerns — migrations and hot-table
+# writes, cron/Inngest scheduling and the brake matrix, server flag governance,
+# cost telemetry on paid-API call sites, and RLS/tenant isolation. The client
+# surfaces hold none of those: they call the API, they do not touch the
+# database, schedule work, or read server flags. If that stops being true —
+# an extension that writes to Supabase directly, say — add a matcher here.
 
 # No reviewers applicable — silent exit.
 [ ${#applicable[@]} -eq 0 ] && exit 0
