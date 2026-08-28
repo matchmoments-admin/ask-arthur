@@ -81,6 +81,24 @@ jobs:
               don't disqualify the PR but should be reworded before
               merge if material to a non-obvious technical decision.
 
+            HOW TO POST — this is not optional, and saying the review in
+            your final message does NOT post it. Use `gh pr comment` for the
+            consolidated top-level review below. Use
+            `mcp__github_inline_comment__create_inline_comment` (with
+            `confirmed: true`) for specific file:line issues. If a posting
+            tool is denied, say so explicitly in your final message rather
+            than finishing quietly — a silent no-op is the failure mode this
+            workflow was repaired to end (issue #1056).
+
+            The FIRST LINE of the comment you post must be exactly:
+
+                <!-- ask-arthur-claude-review -->
+
+            A later step greps for that sentinel to confirm the review
+            actually landed, and fails the check if it did not. Without it
+            your review will be reported as missing even though you posted
+            it.
+
             Deliver one consolidated review comment with:
             - **Verdict**: APPROVE / REQUEST CHANGES / COMMENT
             - **Blocking** (if REQUEST CHANGES): file:line refs + fix
@@ -97,3 +115,91 @@ jobs:
           # exits early on its own when the review is complete.
           claude_args: |
             --max-turns 20
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+
+      # --------------------------------------------------------------------
+      # Did the review actually get posted?
+      #
+      # Without this step the job reports success when Claude produces
+      # nothing -- which, measured, is what it has ALWAYS done.
+      #
+      # `commenter:claude` returns 0 across this repository's entire history.
+      # This workflow has never posted a review on any pull request. Not once.
+      # On PR #1055 the action ran 5 turns in 26.5s, spent $0.22, recorded
+      # `permission_denials_count: 2`, posted nothing, and exited green.
+      #
+      # Best-supported cause, NOT YET CONFIRMED IN PRODUCTION: `claude_args`
+      # carried only `--max-turns`, never `--allowedTools`, so the two tools
+      # the action's own docs require for posting -- `Bash(gh pr comment:*)`
+      # and `mcp__github_inline_comment__create_inline_comment` -- were both
+      # denied. That fits every number from the #1055 run, where the action
+      # genuinely executed. It is a hypothesis with good evidence, not a
+      # verified fix.
+      #
+      # It could not be tested by the PR that introduced it: a PR editing this
+      # file makes the action skip itself (see the workflow-validation branch
+      # in the step below), so the fix's first real test is the NEXT labelled
+      # PR that leaves this file alone. If the reviewer still posts nothing
+      # there, this comment is wrong and the next suspect is the
+      # `code-review@claude-code-plugins` slash command, which may report
+      # findings through a channel the action does not publish.
+      #
+      # Worth stating plainly because the audit (#1046) initially read the
+      # 2026-05-02 run's 6m22s duration as evidence it had posted. It had not.
+      # Duration is not delivery, and inferring one from the other is the same
+      # mistake as trusting a green check.
+      #
+      # The --allowedTools line above fixes today's cause. THIS step fixes the
+      # class: a review that produces nothing is now red, whatever the reason.
+      # Audit #1046, remediation #1056, map #1045.
+      - name: Verify a review was actually posted
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          # A PR that edits THIS FILE can never be reviewed by this workflow.
+          # claude-code-action refuses to run when the workflow file on the
+          # head branch differs from the copy on the default branch --
+          # a deliberate anti-exfiltration guard, since otherwise a PR could
+          # rewrite the reviewer to leak secrets. The step exits in ~1.6s
+          # having never invoked Claude.
+          #
+          # Without this branch the verification below would fail every such
+          # PR forever, for a reason unrelated to whether the reviewer works.
+          # A permanent false red trains you to ignore the check, which is the
+          # same disease as a permanent false green.
+          #
+          # It is a NOTICE, not silence: the check passes but says out loud
+          # that nothing was verified, and that verification moves to the next
+          # PR that does not touch this file.
+          if gh pr diff "$PR" --name-only | grep -qx '.github/workflows/claude-code-review.yml'; then
+            echo "::notice::This PR modifies the review workflow, so claude-code-action skipped itself (workflow-validation guard). NO REVIEW WAS VERIFIED. Confirm the reviewer posts on the next PR that does not touch this file."
+            exit 0
+          fi
+          # Match on a SENTINEL in the body, not on the author.
+          #
+          # Author matching was the first attempt and it was wrong: when
+          # Claude posts via `gh pr comment` it uses the workflow token, so
+          # the comment is authored by github-actions[bot], not claude[bot].
+          # Filtering on /claude/ would have reported a false RED on a review
+          # that posted correctly; filtering on github-actions[bot] would go
+          # falsely GREEN on any other workflow's comment. The sentinel is
+          # unambiguous in both directions.
+          SENTINEL='<!-- ask-arthur-claude-review -->'
+
+          hits="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" --paginate \
+            --jq "[.[] | select(.body | contains(\"$SENTINEL\"))] | length")"
+          inline="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}/comments" --paginate \
+            --jq '[.[]] | length')"
+
+          echo "sentinel comments=$hits  inline comments=$inline"
+
+          if [ "$hits" -eq 0 ]; then
+            echo "::error::The review step reported success but no review was posted."
+            echo "::error::Check permission_denials_count in the step log above. If it is non-zero, the tools Claude needs are missing from claude_args --allowedTools (it needs Bash(gh pr comment:*) and mcp__github_inline_comment__create_inline_comment)."
+            echo "::error::A reviewer that produces nothing must not report success. Issue #1056; audit #1046."
+            exit 1
+          fi
+          echo "Review posted."
