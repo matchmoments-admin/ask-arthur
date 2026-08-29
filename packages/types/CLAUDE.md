@@ -41,10 +41,10 @@ The package is one big re-export — `import { ... } from "@askarthur/types"` fo
 ## Scoped commands
 
 ```bash
-pnpm --filter @askarthur/types typecheck
+pnpm --filter @askarthur/types gen:db   # regenerate db.generated.ts from the Supabase schema
 ```
 
-No test suite — schemas are exercised by their consumers' tests.
+No `typecheck` script and no test suite — schemas are exercised by their consumers' tests and typechecked via consumers, e.g. `pnpm --filter @askarthur/web typecheck`.
 
 ## Gotchas
 

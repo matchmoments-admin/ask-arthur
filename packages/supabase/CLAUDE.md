@@ -58,11 +58,7 @@ If you reach for `createServiceClient` outside the allowed tiers, stop and ask. 
 
 ## Scoped commands
 
-```bash
-pnpm --filter @askarthur/supabase typecheck
-```
-
-This package has no test suite — it's thin factories. Coverage comes from consumer packages.
+This package has no `scripts` in `package.json` (no `typecheck`, no test suite — it's thin factories). Coverage and type-checking come from consumer packages, e.g. `pnpm --filter @askarthur/web typecheck`.
 
 ## Gotchas
 
