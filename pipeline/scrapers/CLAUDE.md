@@ -59,4 +59,4 @@ The 2026-05-09 incident's reference fix lives in `pipeline/scrapers/acnc_registe
 | Scraper → cron schedule mapping    | [`docs/system-map/background-workers.md`](../../docs/system-map/background-workers.md)                             |
 | Hot-table list + chunking rule     | Root [CLAUDE.md](../../CLAUDE.md) "Critical Rules"                                                                 |
 | Feed sources + retention policy    | `migration-v98-feed-retention.sql` + `migration-v127-feed-sources.sql`                                             |
-| ACNC dataset access (CKAN gotchas) | Memory: [`reference_acnc_ckan_dataset.md`](../../.claude/projects/-Users-brendanmilton-Desktop-safeverify/memory/) |
+| ACNC dataset access (CKAN gotchas) | `reference_acnc_ckan_dataset.md` — **link broken**; pointed at a local Claude Code session-transcript path (`.claude/projects/...`) not tracked in this repo, and the content isn't found elsewhere in the repo as of 2026-08-30 |

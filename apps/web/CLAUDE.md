@@ -67,7 +67,7 @@ Only fall back to `pnpm turbo build` (no filter) when verifying cross-package im
 
 ## Recommended local tooling
 
-- **TypeScript LSP** — `/plugin install typescript-lsp@anthropics-claude-code` enables real type diagnostics and cross-package go-to-definition for the Claude Code session. High leverage in a 14-package monorepo with strict TS; per-developer choice (not committed config). Requires `typescript-language-server` available — installed via `pnpm install` at the workspace root.
+- **TypeScript LSP** — `/plugin install typescript-lsp@anthropics-claude-code` enables real type diagnostics and cross-package go-to-definition for the Claude Code session. High leverage in an 18-package monorepo with strict TS; per-developer choice (not committed config). Requires `typescript-language-server` available — installed via `pnpm install` at the workspace root.
 
 > The Zod 4 / Next 16 / React 19 drift hazards live in [`.claude/skills/grill-with-docs/STACK-PINS.md`](../../.claude/skills/grill-with-docs/STACK-PINS.md). Read that first if a session involves any of those libraries.
 

@@ -1,10 +1,10 @@
 # supabase/ — local guide
 
-Scoped guidance for the top-level `supabase/` directory — versioned migration SQL, edge functions, and schema source-of-truth. Read this in addition to the [root CLAUDE.md](../../CLAUDE.md).
+Scoped guidance for the top-level `supabase/` directory — versioned migration SQL, edge functions, and schema source-of-truth. Read this in addition to the [root CLAUDE.md](../CLAUDE.md).
 
 ## What this directory owns
 
-- **Versioned migration SQL** — `migration-v<N>-<slug>.sql` files (currently v2 through v142+). Apply with `mcp__supabase__apply_migration` against project `rquomhcgnodxzkhokwni`.
+- **Versioned migration SQL** — `migration-v<N>-<slug>.sql` files (currently v2 through v291+). Apply with `mcp__supabase__apply_migration` against project `rquomhcgnodxzkhokwni`.
 - **Edge functions** — `supabase/functions/` (deployed via Supabase CLI / MCP).
 - **Schema-derived assets** — the generated `packages/types/src/db.generated.ts` is regenerated against this schema after every applied migration.
 
@@ -64,7 +64,7 @@ To list applied migrations on prod: `mcp__supabase__list_migrations` against pro
 
 ## Gotchas
 
-- **The `db-migration.sh` advisory reviewer currently matches the path `supabase/migrations/*`** but actual files live at `supabase/migration-v*.sql`. The reviewer's checks (statement_timeout=0, unchunked hot-table writes, HNSW on parent, etc.) currently do not fire on real edits. Tracked as a follow-up — see [`.claude/README.md`](../.claude/README.md).
+- **The `db-migration.sh` advisory reviewer matched the wrong path (`supabase/migrations/*`) until 2026-08-28** — actual files live at `supabase/migration-v*.sql`, so the reviewer's checks (statement_timeout=0, unchunked hot-table writes, HNSW on parent, etc.) matched 0 of 289 migrations. Fixed in commit `14f992b0` (PR #1055): the dispatcher in `.claude/hooks/run-reviewer.sh` now matches `supabase/migration-*.sql|pipeline/scrapers/*`.
 - **`functions/` is for Supabase edge functions, NOT Inngest functions.** Inngest lives in `packages/scam-engine/src/inngest/` and `apps/web/app/api/inngest/functions/`.
 - **The migration tree is sequential, not branched.** If two PRs both add `v143-...`, the second to merge needs to bump to `v144-...`.
 
