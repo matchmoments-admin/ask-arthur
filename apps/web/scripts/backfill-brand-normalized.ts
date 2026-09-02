@@ -51,15 +51,26 @@ async function main() {
         AND inferred_target_domain IS NOT NULL`,
   )) as Array<{ id: number; inferred_target_domain: string }>;
 
+  // A domain claimed by MORE than one watchlist entry (my.gov.au and
+  // servicesaustralia.gov.au, each shared by 3 gov entries as of 2026-09-03)
+  // is ambiguous — the live matcher knew which entry actually hit; this
+  // backfill cannot. Refuse rather than last-wins-guess (review finding on
+  // #1072). All 36 current targets are google.com, which is single-entry.
   const byDomain = new Map<string, string>();
+  const ambiguous = new Set<string>();
   for (const entry of AU_BRAND_WATCHLIST) {
-    for (const d of entry.legitimate_domains) byDomain.set(d, entry.brand);
+    for (const d of entry.legitimate_domains) {
+      if (byDomain.has(d) && byDomain.get(d) !== entry.brand) ambiguous.add(d);
+      byDomain.set(d, entry.brand);
+    }
   }
 
   const updates: Array<{ id: number; key: string }> = [];
   const unresolved: Array<{ id: number; domain: string }> = [];
   for (const r of rows) {
-    const brand = byDomain.get(r.inferred_target_domain);
+    const brand = ambiguous.has(r.inferred_target_domain)
+      ? null // ambiguous — report, never guess
+      : byDomain.get(r.inferred_target_domain);
     const key = brand ? brandNormalize(brand) : null;
     if (key) updates.push({ id: r.id, key });
     else unresolved.push({ id: r.id, domain: r.inferred_target_domain });
