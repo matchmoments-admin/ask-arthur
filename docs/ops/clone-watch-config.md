@@ -817,6 +817,51 @@ WHERE brand = 'Bunnings';
 
 `FF_SHOPFRONT_CLONE_NOTIFY_BRAND` is **already ON in prod** (since 2026-05-27, first live NAB send at 09:24 UTC) — verifying a `manual_review` row to `fraud_inbox` immediately makes that brand reachable.
 
+### Stranded-count invariant — run this after ANY worklist predicate change
+
+`clone_watch_urlscan_stranded_count` renders on /admin/clone-watch under the
+words "no automated lane will retry". It has regressed three times (v274: 75%
+overstatement, v286: 95%, v292: ~99%) and the cause was identical every time —
+a worklist was widened and one of the metric's three legs was not. The union is
+`count(*) FILTER (WHERE a OR b OR c)`, so no test of the RPC's own output can
+catch this; the check has to compare against the live worklists:
+
+```sql
+WITH stranded AS (
+  -- keep in step with clone_watch_urlscan_stranded_count's predicate
+  SELECT id FROM shopfront_clone_alerts a
+   WHERE a.source = 'nrd' AND a.lifecycle_state <> 'dormant'
+     AND a.urlscan_uuid IS NOT NULL
+     AND a.urlscan_submitted_at IS NULL
+     AND a.urlscan_classification IS NULL
+     AND NOT (a.lifecycle_state IN ('monitoring','declined')
+              AND a.first_seen_at >= now() - interval '90 days')
+     AND a.lifecycle_state NOT IN ('taken_down','weaponised')
+)
+SELECT
+  (SELECT count(*) FROM stranded) AS stranded_rows,
+  (SELECT count(*) FROM stranded s
+     WHERE s.id IN (SELECT id FROM list_clone_alerts_for_recheck(1000, 6, 168)))
+    AS also_in_recheck,   -- MUST be 0
+  (SELECT count(*) FROM stranded s
+     WHERE s.id IN (SELECT id FROM list_clone_alerts_pending_urlscan_submit(100, 0.7, 3)))
+    AS also_in_submit;    -- MUST be 0
+```
+
+Last run 2026-09-03 after v293: `stranded_rows=1, also_in_recheck=0,
+also_in_submit=0`. A non-zero right-hand column means the metric is lying
+again — fix the leg, do not adjust the copy.
+
+**Related honesty bound.** `clone_watch_vendor_gap_stats`' decline→weaponise
+leg admits only pairs whose `netcraft_declined_at` is at or after
+**2026-08-09T21:31Z** — v273's measured apply instant, when
+`advance_clone_lifecycle` stopped re-stamping that column on every no-op
+recheck. Earlier stamps measure the 6h recheck cadence, not the vendor gap, and
+the originals are unrecoverable. The TS twin
+(`apps/web/lib/clone-watch/duration-kpis.ts`, `DECLINE_CLOCK_TRUSTWORTHY_SINCE`)
+carries the same bound because it feeds the report card and the persisted
+monthly `clone_watch_report_summary`; keep the two in step.
+
 ### urlscan coverage (v285, measured 2026-08-23)
 
 **924 of 2,786 alerts had never received a urlscan verdict** — 422 of them rows

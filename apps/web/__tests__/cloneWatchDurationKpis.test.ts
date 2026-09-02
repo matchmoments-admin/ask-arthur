@@ -27,11 +27,17 @@ function row(over: Partial<CloneAlertRow> & { candidate_domain: string }): Clone
   };
 }
 
-const T0 = "2026-07-01T00:00:00Z";
-const T0_PLUS_12H = "2026-07-01T12:00:00Z";
-const T0_PLUS_24H = "2026-07-02T00:00:00Z";
-const T0_PLUS_48H = "2026-07-03T00:00:00Z";
-const T0_PLUS_72H = "2026-07-04T00:00:00Z";
+// Post-v273 (2026-08-09T21:31Z). The decline clock is only trustworthy from
+// that instant — `computeDurationKpis` drops decline→weaponise pairs stamped
+// earlier, because until v273 `advance_clone_lifecycle` re-stamped
+// netcraft_declined_at on every no-op recheck. These fixtures moved from July
+// to September when that bound was added; a pre-bound T0 makes the
+// decline→weaponise leg legitimately empty.
+const T0 = "2026-09-01T00:00:00Z";
+const T0_PLUS_12H = "2026-09-01T12:00:00Z";
+const T0_PLUS_24H = "2026-09-02T00:00:00Z";
+const T0_PLUS_48H = "2026-09-03T00:00:00Z";
+const T0_PLUS_72H = "2026-09-04T00:00:00Z";
 
 describe("computeDurationKpis", () => {
   it("computes all four legs for a complete loop", () => {
@@ -246,7 +252,7 @@ describe("computeDurationKpis", () => {
   });
 
   it("stamps asOf from the provided clock", () => {
-    const now = new Date("2026-07-16T09:00:00Z");
+    const now = new Date("2026-09-16T09:00:00Z");
     expect(computeDurationKpis([], now).asOf).toBe(now.toISOString());
   });
 });
@@ -334,5 +340,55 @@ describe("tldOf / tldWeaponisation", () => {
       { tld: "shop", weaponised: 2 },
       { tld: "com.au", weaponised: 1 },
     ]);
+  });
+
+  // v293 — the decline clock is only trustworthy from v273's apply instant
+  // (2026-08-09T21:31Z). Before it, advance_clone_lifecycle re-stamped
+  // netcraft_declined_at on every no-op recheck, compressing this leg toward
+  // the 6h cadence; the originals were overwritten and are unrecoverable. This
+  // module feeds /admin/report-card AND the persisted monthly
+  // clone_watch_report_summary, so without the bound every cohort month up to
+  // 2026-08 would keep republishing the compressed figure that was removed
+  // from the public page. Mirrors clone_watch_vendor_gap_stats (v293).
+  describe("pre-v273 decline stamps (v293 bound)", () => {
+    const PRE = "2026-08-09T20:00:00Z"; // 91 minutes before the cut-over
+    const POST = "2026-08-09T22:00:00Z"; // 29 minutes after
+
+    it("drops a decline→weaponise pair stamped before the cut-over", () => {
+      const kpis = computeDurationKpis([
+        row({
+          candidate_domain: "pre.example",
+          netcraft_declined_at: PRE,
+          weaponised_at: "2026-08-10T08:00:00Z",
+        }),
+      ]);
+      expect(kpis.declineToWeaponise).toEqual({ n: 0, medianHours: null });
+    });
+
+    it("keeps a pair stamped after the cut-over", () => {
+      const kpis = computeDurationKpis([
+        row({
+          candidate_domain: "post.example",
+          netcraft_declined_at: POST,
+          weaponised_at: "2026-08-10T10:00:00Z",
+        }),
+      ]);
+      expect(kpis.declineToWeaponise).toEqual({ n: 1, medianHours: 12 });
+    });
+
+    it("does not count a dropped pre-cut-over pair as an inversion pathology", () => {
+      // The excluded-negative counter exists for last-touch re-stamping that
+      // postdates weaponisation. An untrustworthy INPUT is a different thing;
+      // folding it in there would inflate a number the ops appendix reads as
+      // "decline pathology".
+      const kpis = computeDurationKpis([
+        row({
+          candidate_domain: "pre2.example",
+          netcraft_declined_at: PRE,
+          weaponised_at: "2026-08-10T08:00:00Z",
+        }),
+      ]);
+      expect(kpis.excludedNegativeN).toBe(0);
+    });
   });
 });
