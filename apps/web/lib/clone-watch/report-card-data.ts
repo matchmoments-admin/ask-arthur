@@ -20,6 +20,12 @@ import {
   type RegistrarWeaponisationRow,
 } from "@/lib/clone-watch/duration-kpis";
 import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
+import {
+  computeTargetingIntelByBrand,
+  type HostingSummary,
+  type InfrastructureCluster,
+  type Mix,
+} from "@/lib/clone-watch/targeting-intelligence";
 import { rollupRegistrars } from "@/lib/clone-watch/registrar-canonical";
 
 /**
@@ -309,7 +315,11 @@ async function fetchMonthByBrand(
       sb
         .from("shopfront_clone_alerts")
         .select(
-          "id, candidate_domain, inferred_target_domain, urlscan_classification, urlscan_evidence, attribution, campaign_key, submitted_to, lifecycle_state, netcraft_declined_at, weaponised_at, first_seen_at",
+          // clone_watch_classifications is a 1:1 embed on alert_id (v157 PK +
+          // FK), the same shape report-brand-stewardship.ts already uses. It
+          // carries the tactic/intent labels the targeting characterisation
+          // needs, so no second query is required.
+          "id, candidate_domain, inferred_target_domain, urlscan_classification, urlscan_evidence, attribution, campaign_key, submitted_to, lifecycle_state, netcraft_declined_at, weaponised_at, first_seen_at, clone_watch_classifications(is_clone, confidence, attack_intent, clone_tactic)",
         )
         .eq("source", CLONE_SOURCE)
         .gte("first_seen_at", startIso)
@@ -349,6 +359,19 @@ export interface BrandTrendRow {
   declined: number;
   escalated: number;
   weaponised: number;
+  // ── targeting characterisation (v296) ──────────────────────────────────
+  // Shape rather than volume: how the names were built, where they were
+  // hosted, what infrastructure they shared. Each jsonb carries its own
+  // denominator and unknown bucket (see targeting-intelligence.ts `Mix`)
+  // because the source fields have very different coverage.
+  deliberate_clones: number;
+  tactic_mix: Mix;
+  intent_mix: Mix;
+  tld_mix: Mix;
+  hosting_mix: HostingSummary;
+  clusters: InfrastructureCluster[];
+  fingerprinted_clones: number;
+  largest_cluster: number;
 }
 export interface RegistrarTrendRow {
   registrar: string;
@@ -384,19 +407,46 @@ export async function getCloneWatchTrendRows(
     periodMonth,
   );
 
+  // Per-brand characterisation over the SAME already-fetched rows — no second
+  // query. Keyed on inferred_target_domain, which is exactly the key `byBrand`
+  // and clone_watch_monthly_brand_stats.brand use (it flows from the
+  // watchlist's legitimate_domains[0] through the ingest); keying on a
+  // normalised brand name would join to nothing (see migration v295).
+  const intelByBrand = computeTargetingIntelByBrand(rows);
+  const emptyMix: Mix = { top: [], other: 0, unknown: 0, total: 0 };
+
   const brandRows: BrandTrendRow[] = [...byBrand.entries()]
-    .map(([brand, m]) => ({
-      brand,
-      is_au: isAuBrand(brand),
-      clones: m.detected,
-      reported_to_netcraft: m.netcraftReported,
-      likely_phishing: m.byClassification["likely_phishing"] ?? 0,
-      parked: m.byClassification["parked_for_sale"] ?? 0,
-      taken_down: m.takenDown,
-      declined: m.declined,
-      escalated: m.escalated,
-      weaponised: m.weaponised,
-    }))
+    .map(([brand, m]) => {
+      const intel = intelByBrand.get(brand);
+      return {
+        brand,
+        is_au: isAuBrand(brand),
+        clones: m.detected,
+        reported_to_netcraft: m.netcraftReported,
+        likely_phishing: m.byClassification["likely_phishing"] ?? 0,
+        parked: m.byClassification["parked_for_sale"] ?? 0,
+        taken_down: m.takenDown,
+        declined: m.declined,
+        escalated: m.escalated,
+        weaponised: m.weaponised,
+        deliberate_clones: intel?.tactics.total ?? 0,
+        tactic_mix: intel?.tactics ?? emptyMix,
+        intent_mix: intel?.intents ?? emptyMix,
+        tld_mix: intel?.tlds ?? emptyMix,
+        hosting_mix:
+          intel?.hosting ?? {
+            asns: emptyMix,
+            countries: emptyMix,
+            frontedN: 0,
+            unattributedN: 0,
+            originVisibleN: 0,
+            total: 0,
+          },
+        clusters: intel?.clusters.clusters ?? [],
+        fingerprinted_clones: intel?.clusters.fingerprintedN ?? 0,
+        largest_cluster: intel?.clusters.largestClusterN ?? 0,
+      };
+    })
     .sort((a, b) => b.clones - a.clones || a.brand.localeCompare(b.brand));
 
   // Full canonicalised registrar list (not sliced) + drop the Unknown bucket —
