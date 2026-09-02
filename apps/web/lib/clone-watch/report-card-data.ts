@@ -21,6 +21,10 @@ import {
 } from "@/lib/clone-watch/duration-kpis";
 import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
 import {
+  computeTargetingIntel,
+  type TargetingIntel,
+} from "@/lib/clone-watch/targeting-intelligence";
+import {
   classifyTrend,
   summariseTrendExclusions,
   type BrandCoverage,
@@ -202,6 +206,12 @@ export interface CloneWatchReportCard {
    * hazard with its own later step.
    */
   brandTrends: BrandTrendGate;
+  /**
+   * Cohort-level targeting characterisation — the shape half of the report
+   * (tactic / TLD / hosting / clusters). Computed from the same rows as every
+   * other figure on the card, so slide and caption cannot disagree.
+   */
+  targeting: TargetingIntel;
   /** The highest-ranked AU super fund among the impersonated brands, if any —
    *  powers the "super fund" spotlight slide. null when no watchlisted fund
    *  appears this month (the slide falls back to the evergreen "why it works"). */
@@ -799,6 +809,7 @@ export async function getCloneWatchReportCard(
     unknownRegistrarCount: unknownCount,
     mom,
     brandTrends,
+    targeting: computeTargetingIntel(rows),
     superFund,
     spotlight,
     // The vendor-gap clock + weaponisation cuts, computed over the SAME

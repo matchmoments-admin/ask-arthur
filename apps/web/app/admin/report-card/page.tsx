@@ -13,6 +13,7 @@ import {
 } from "@/lib/clone-watch/duration-kpis";
 import { logger } from "@askarthur/utils/logger";
 import { buildOutcomesLine } from "@/lib/clone-watch/outcome-copy";
+import { buildClassifierCaveat, tacticLabel } from "@/lib/clone-watch/targeting-copy";
 import { prettyBrand } from "@/lib/clone-watch/brand-display";
 import { reportCardCss } from "./report-card-css";
 
@@ -57,7 +58,11 @@ const jbMono = JetBrains_Mono({ subsets: ["latin"], weight: ["400", "500", "700"
 
 export const dynamic = "force-dynamic";
 
-const SLIDE_COUNT = 7;
+// Keep in sync with SLIDE_COUNT in scripts/clone-watch-report-export.ts.
+// Enforced by apps/web/__tests__/reportCardSlideCount.test.ts — a silent drift
+// exports a PDF missing its last slide, and the export's blank-frame check
+// cannot see that.
+const SLIDE_COUNT = 8;
 const TOT = String(SLIDE_COUNT).padStart(2, "0");
 
 type SlideProps = { data: CloneWatchReportCard; page: number };
@@ -301,10 +306,73 @@ function Slide({ n, data }: { n: number; data: CloneWatchReportCard }) {
     case 2: return <SlideAuBrands data={data} page={n} />;
     case 3: return <SlideSuperFund data={data} page={n} />;
     case 4: return <SlideRegistrars data={data} page={n} />;
-    case 5: return <SlideAnatomy data={data} page={n} />;
-    case 6: return <SlideActed data={data} page={n} />;
+    case 5: return <SlideNames data={data} page={n} />;
+    case 6: return <SlideAnatomy data={data} page={n} />;
+    case 7: return <SlideActed data={data} page={n} />;
     default: return <SlideClose data={data} page={n} />;
   }
+}
+
+/* ── 05 — how the names are built ───────────────────────────────────────── */
+/**
+ * The two most defensible families in the report, on one slide.
+ *
+ * Tactic is a property of the domain STRING, which is all the classifier ever
+ * sees, so it is publishable as "how the name is built" and never as what the
+ * site does. TLD is derived from the string itself — no model, no vendor, 100%
+ * coverage.
+ *
+ * Rows are hard-capped at 5 each so the slide is bounded BY CONSTRUCTION. The
+ * 1080x1350 overflow assert in scripts/clone-watch-report-export.ts only fires
+ * at export time, which is after the founder has approved the edition.
+ */
+function SlideNames({ data, page }: SlideProps) {
+  const period = data.periodLabel.toUpperCase();
+  const tactics = data.targeting.tactics.top.slice(0, 5);
+  const tlds = data.targeting.tlds.top.slice(0, 5);
+  const tacticMax = tactics[0]?.n ?? 1;
+  const tldMax = tlds[0]?.n ?? 1;
+  const deliberate = data.targeting.tactics.total;
+  return (
+    <section className="slide">
+      <div className="hdr">
+        <span className="l">HOW THE NAMES ARE BUILT</span>
+        <span className="r">IN AGGREGATE · {period}</span>
+      </div>
+      <h2 className="h2">The shapes they use</h2>
+      <div className="subhead">
+        Naming pattern across {deliberate} lookalikes judged deliberate — how the
+        domain is constructed, not what any site did.
+      </div>
+      <div className="rows">
+        {tactics.map((t, i) => (
+          <div className="row" key={t.key}>
+            <div className="name reg-name">{tacticLabel(t.key)}</div>
+            <div className="track"><div className={`fill${i === 0 ? " accent" : ""}`} style={{ width: `${((t.n / tacticMax) * 100).toFixed(1)}%` }} /></div>
+            <div className={`val${i === 0 ? " accent" : ""}`}>{t.n}</div>
+          </div>
+        ))}
+      </div>
+      <div className="know" style={{ marginTop: 28 }}>
+        <div className="lab">WHERE THEY REGISTER THEM</div>
+        <div className="txt">
+          {tlds.map((t, i) => (
+            <span key={t.key}>
+              {i > 0 ? " · " : ""}
+              <b style={{ color: "var(--ink)" }}>.{t.key}</b> {t.n}
+            </span>
+          ))}
+        </div>
+      </div>
+      <div className="foot rule2 bot">
+        <div className="reg">
+          {buildClassifierCaveat(data.total, deliberate) ||
+            "Naming pattern is read from the domain itself."}
+        </div>
+        <Pg n={page} />
+      </div>
+    </section>
+  );
 }
 
 /* ── 01 — hook (the number) ──────────────────────────────────────────────── */

@@ -55,6 +55,20 @@ const JUNE: CloneWatchReportCard = {
     totalPct: null,
     brandsDelta: 129,
   },
+  targeting: {
+    tactics: { top: [], other: 0, unknown: 0, total: 0 },
+    intents: { top: [], other: 0, unknown: 0, total: 0 },
+    tlds: { top: [], other: 0, unknown: 0, total: 0 },
+    hosting: {
+      asns: { top: [], other: 0, unknown: 0, total: 0 },
+      countries: { top: [], other: 0, unknown: 0, total: 0 },
+      frontedN: 0,
+      unattributedN: 0,
+      originVisibleN: 0,
+      total: 0,
+    },
+    clusters: { clusters: [], fingerprintedN: 0, unfingerprintedN: 0, largestClusterN: 0, total: 0 },
+  },
   brandTrends: {
     claimable: [],
     excluded: { claimable: 0, coverageStarted: 0, coverageEnded: 0, belowFloor: 0, unknown: 0 },
@@ -371,5 +385,90 @@ describe("lifecycleBadge (watch-list vocabulary)", () => {
     expect(lifecycleBadge("detected")).toBeNull();
     expect(lifecycleBadge(null)).toBeNull();
     expect(lifecycleBadge("reported")).toBeNull();
+  });
+});
+
+/**
+ * The 2,900-char cap is enforced by a THROW in scripts/clone-watch-caption.ts —
+ * correct (a truncated honesty caveat is worse than none), but it fires at
+ * prepare time, which is AFTER the founder has reviewed the edition. This
+ * builds the worst caption the generator can produce and asserts it fits, so
+ * new copy is caught here instead of at publish.
+ */
+describe("caption stays under the LinkedIn cap in the worst case", () => {
+  const CAPTION_MAX = 2_900;
+
+  const WORST: CloneWatchReportCard = {
+    ...JUNE,
+    // Longest month label, a full mover story, every outcome bucket non-zero,
+    // and all three targeting lines present at once.
+    periodLabel: "September 2026",
+    total: 1032,
+    brands: 155,
+    kpis: {
+      ...JUNE.kpis,
+      reportedToNetcraft: 888,
+      likelyPhishing: 52,
+      parkedForSale: 1,
+      takenDown: 15,
+      declined: 543,
+      escalated: 12,
+      weaponised: 45,
+      weaponisedAfterDecline: 9,
+      reTakenDown: 3,
+    },
+    mom: {
+      available: true,
+      priorLabel: "August 2026",
+      priorTotal: 804,
+      priorBrands: 129,
+      totalDelta: 228,
+      totalPct: 28,
+      brandsDelta: 26,
+    },
+    brandTrends: {
+      claimable: [],
+      excluded: {
+        claimable: 38,
+        coverageStarted: 7,
+        coverageEnded: 2,
+        belowFloor: 108,
+        unknown: 3,
+      },
+      publishable: true,
+    },
+    targeting: {
+      ...JUNE.targeting,
+      tactics: { top: [], other: 0, unknown: 0, total: 887 },
+      tlds: {
+        top: [
+          { key: "online", n: 132 },
+          { key: "com", n: 129 },
+          { key: "shop", n: 111 },
+        ],
+        other: 660,
+        unknown: 0,
+        total: 1032,
+      },
+    },
+  };
+
+  it("fits, with the disclosure intact", () => {
+    const c = generateCloneWatchCaption(WORST, "https://askarthur.au/method");
+    expect(c.bodyWithHashtags.length).toBeLessThanOrEqual(CAPTION_MAX);
+    // The disclosure is the line that must never be the one that gets cut.
+    expect(c.body).toContain("38 brands");
+    expect(c.body).toContain("a count, not a trend");
+  });
+
+  it("carries the TLD finding and the classifier caveat", () => {
+    const c = generateCloneWatchCaption(WORST, "https://askarthur.au/method");
+    expect(c.body).toContain(".online");
+    expect(c.body).toContain("judged coincidental");
+  });
+
+  it("still forbids time-to-takedown, as outcome-copy requires", () => {
+    const c = generateCloneWatchCaption(WORST, "https://askarthur.au/method");
+    expect(c.body).not.toMatch(/time.to.takedown|median/i);
   });
 });

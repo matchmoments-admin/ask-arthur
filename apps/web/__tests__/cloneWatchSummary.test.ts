@@ -34,6 +34,20 @@ const CARD: CloneWatchReportCard = {
     totalPct: null,
     brandsDelta: 129,
   },
+  targeting: {
+    tactics: { top: [], other: 0, unknown: 0, total: 0 },
+    intents: { top: [], other: 0, unknown: 0, total: 0 },
+    tlds: { top: [], other: 0, unknown: 0, total: 0 },
+    hosting: {
+      asns: { top: [], other: 0, unknown: 0, total: 0 },
+      countries: { top: [], other: 0, unknown: 0, total: 0 },
+      frontedN: 0,
+      unattributedN: 0,
+      originVisibleN: 0,
+      total: 0,
+    },
+    clusters: { clusters: [], fingerprintedN: 0, unfingerprintedN: 0, largestClusterN: 0, total: 0 },
+  },
   brandTrends: {
     claimable: [],
     excluded: { claimable: 0, coverageStarted: 0, coverageEnded: 0, belowFloor: 0, unknown: 0 },
