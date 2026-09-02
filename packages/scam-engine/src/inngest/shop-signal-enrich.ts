@@ -465,7 +465,7 @@ export const shopSignalEnrich = inngest.createFunction(
   {
     id: "shop-signal-enrich",
     concurrency: { limit: 2 },
-    timeouts: { finish: "3m" },
+    timeouts: { finish: "6m" },
     name: "Shop Signal: Deep Shop Check enrichment",
     idempotency: "event.data.shopCheckId",
     retries: 2,

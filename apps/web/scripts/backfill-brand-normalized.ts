@@ -6,11 +6,19 @@
  * by-brand register (`aggregate_open_clone_alerts_by_brand`) cannot count them
  * — 1.2% of the open population invisible to /admin/brand-register.
  *
- * Derivation mirrors the live ingest exactly (shopfront-nrd-daily-ingest
+ * Derivation follows the live ingest (shopfront-nrd-daily-ingest
  * `buildUpsertRow`): resolve the alert's `inferred_target_domain` to its
- * AU_BRAND_WATCHLIST entry via `legitimate_domains`, then
- * `brandNormalize(entry.brand)`. Rows whose domain no longer appears in the
- * watchlist are REPORTED, not guessed — never invent a brand key.
+ * watchlist entry via `legitimate_domains`, then `brandNormalize(entry.brand)`.
+ *
+ * One deliberate difference: the ingest matches against `getActiveWatchlist()`
+ * — the static list MERGED with promoted `monitored_brands` rows — while this
+ * reads only static `AU_BRAND_WATCHLIST`. An alert whose brand came from a
+ * promoted entry is therefore reported unresolved rather than resolved. That
+ * fails safe (nothing is guessed) and costs nothing today: `monitored_brands`
+ * has 0 rows (checked 2026-09-03). Revisit if the overlay is ever populated.
+ *
+ * Rows whose domain is absent from the watchlist, or claimed by more than one
+ * entry, are REPORTED, not guessed — never invent a brand key.
  *
  *   pnpm --filter @askarthur/web exec tsx scripts/backfill-brand-normalized.ts [--apply]
  *
@@ -45,10 +53,14 @@ async function main() {
   const apply = process.argv.includes("--apply");
 
   const rows = (await runSql(
+    // alert_state='open' matches what the header promises and what the
+    // by-brand register actually counts; a retired/expired row gains nothing
+    // from a brand key.
     `SELECT id, inferred_target_domain
        FROM shopfront_clone_alerts
       WHERE (target_brand_normalized IS NULL OR target_brand_normalized = '')
-        AND inferred_target_domain IS NOT NULL`,
+        AND inferred_target_domain IS NOT NULL
+        AND alert_state = 'open'`,
   )) as Array<{ id: number; inferred_target_domain: string }>;
 
   // A domain claimed by MORE than one watchlist entry (my.gov.au and

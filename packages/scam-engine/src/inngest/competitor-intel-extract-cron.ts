@@ -44,6 +44,9 @@ const BATCH_LIMIT = 8;
 // Only look back this far for candidates (bounds the scan as the table grows).
 const LOOKBACK_DAYS = 45;
 
+// inngest-finish-budget: 9 boundaries — 1 static + 1 per-candidate extract step
+// x BATCH_LIMIT (8). Existing budget already covers it; the declaration exists
+// because per-item step ids make static counting unreliable.
 export const competitorIntelExtractCron = inngest.createFunction(
   // finish ceiling bounds a pathological run (≤8 sequential Sonnet calls) so it
   // can't sit open indefinitely (L16); matches feed-items-embed's shape.

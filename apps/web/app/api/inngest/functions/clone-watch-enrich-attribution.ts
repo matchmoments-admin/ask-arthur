@@ -50,6 +50,9 @@ interface PendingAlert {
   urlscan_evidence: { server?: HostingInfo } | null;
 }
 
+// inngest-finish-budget: 64 boundaries — 4 static + 1 per-item enrich step x
+// ENRICH_RUN_CAP (60). The single largest per-item fan-out in the lane;
+// batching it is the highest-value fold available. See #1074.
 export const cloneWatchEnrichAttribution = inngest.createFunction(
   {
     id: "clone-watch-enrich-attribution",
@@ -58,7 +61,7 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
     // concurrency slots (~30–60s each under contention); the old budget
     // cancelled healthy runs. Finite per ADR-0019; floor guarded by
     // inngestFinishBudgets.test.ts.
-    timeouts: { finish: "8m" },
+    timeouts: { finish: "33m" },
     retries: 2,
     // --- manual-trigger guards (CLAUDE.md: "any cron that also has a
     // manual-trigger must have a throttle AND a same-window cooldown, or

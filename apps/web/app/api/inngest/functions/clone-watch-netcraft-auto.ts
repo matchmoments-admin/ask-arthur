@@ -63,7 +63,7 @@ import { probeLivenessDetailed } from "@/lib/clone-watch/liveness";
  * predicate the issue reporter has enforced since v221 into the worklist RPC.
  *
  * The cron time is load-bearing, not cosmetic: urlscan-submit runs 09:00 and
- * urlscan-retrieve runs every 3h on the hour, so no verdict for the batch exists
+ * urlscan-retrieve runs every 3h at :10 (#1069), so no verdict for the batch exists
  * before 12:00. At 09:30 this lane could not have consulted the evidence even
  * if it wanted to — 407 alerts reached Netcraft with no scan at all. 13:00 is
  * chosen to sit AFTER the 12:00 retrieve. If you move retrieve, move this too,
@@ -268,7 +268,7 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
     timeouts: { finish: "10m" },
   },
   [
-    // 13:00 UTC — deliberately AFTER urlscan-retrieve's 12:00 pass, so the
+    // 13:00 UTC — deliberately AFTER urlscan-retrieve's 12:10 pass, so the
     // v284 evidence gate has a verdict to read. See the header note.
     { cron: "0 13 * * *" },
     { event: "shopfront/clone.netcraft-auto.producer.manual-trigger.v1" },

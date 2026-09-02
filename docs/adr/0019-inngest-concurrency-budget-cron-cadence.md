@@ -116,13 +116,18 @@ on a 15-step function.
 **Rules added (enforced by `apps/web/__tests__/inngestFinishBudgets.test.ts`):**
 
 - A finish budget must cover `step-sites × 30s queue wait, plus inline
-  wall-clocks, plus 60s slack`. Keep it finite (it is still this ADR's circuit
+wall-clocks, plus 60s slack`. Keep it finite (it is still this ADR's circuit
   breaker), but budget for contention, not for the happy path.
 - **A step boundary is not free**: it costs one slot-queue wait (~30–60s under
   contention) on top of its billing cost. Single-query bookkeeping steps
   (brake checks, telemetry writes) should ride inside an adjacent work step.
-- **Telemetry inside Inngest steps must be awaited** (`logCostAsync`), because
-  cancellation kills `waitUntil` promises — precisely when the row matters.
+- **Telemetry inside Inngest steps should be awaited** (`logCostAsync`),
+  because cancellation kills `waitUntil` promises — precisely when the row
+  matters. Converted for the clone-watch urlscan/preclassify lanes in #1069;
+  ~40 sites elsewhere still use fire-and-forget `logCost` and stay lossy on
+  cancellation (#1074). Nothing enforces this yet, so treat it as a convention
+  under migration, not a property of the codebase. Note it fixes
+  loss-by-cancellation only — a failed insert is still swallowed by design.
 - **Prefer off-:00 minutes for new crons.** The top of the hour is the fleet's
   worst pileup; urlscan-retrieve moved to `10 */3` and feedback-triage-refresh
   to `50 *` for this reason.

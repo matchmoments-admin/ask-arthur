@@ -86,6 +86,9 @@ const DASHBOARD_URL = "https://askarthur.au/admin/clone-watch#approvals";
 const BRAND_COOLDOWN_HOURS = 24;
 const MAX_CANDIDATES_PER_BATCH = 50;
 
+// inngest-finish-budget: 59 boundaries — 9 static + 5 per-batch steps
+// (render/assign/mark-sent/record-sent/log-cost) x the 10 brand groups a run
+// realistically stages. See #1074 for the batching fold.
 export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
   {
     id: "shopfront-clone-notify-brand-prepare",
@@ -95,7 +98,7 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
     // { limit: 1 }` shape — same "no overlapping runs" guarantee, but the
     // slot releases cleanly on cancel/timeout/error. See PR #455.
     singleton: { mode: "skip" },
-    timeouts: { finish: "10m" },
+    timeouts: { finish: "31m" },
   },
   [
     { cron: "30 9 * * *" },

@@ -18,11 +18,14 @@ import {
  */
 const OPENPHISH_INTAKE = "report@openphish.com";
 
+// inngest-finish-budget: 4 boundaries — this file has NO step.run of its own;
+// all four steps live in runUrlBlocklistOnward (lib/onward/url-blocklist-report.ts),
+// so static counting sees zero and would pass any budget.
 export const onwardOpenphish = inngest.createFunction(
   {
     id: "report-onward-openphish",
     concurrency: { limit: 2 },
-    timeouts: { finish: "2m" },
+    timeouts: { finish: "5m" },
     name: "Onward report: OpenPhish blocklist",
     retries: 4,
     rateLimit: {

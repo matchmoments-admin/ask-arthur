@@ -80,6 +80,16 @@ import {
 
 const BRAKE = "clone_netcraft_issue";
 const DEFAULT_DAILY_CAP = 20;
+
+// Break the per-uuid loop before the finish budget (#1069). This fn runs up to
+// ~7 step boundaries PER UUID across its branch paths, so at the account's
+// measured ~30s queue wait per boundary a full cap-20 run would need a ~70m
+// budget — an absurd circuit breaker. Bounding by wall clock instead keeps the
+// budget sane: the loop stops early and the untouched uuids are picked up by
+// the next run (the worklist is cadence-throttled and idempotent, and the
+// daily cap counts what was actually filed, so stopping early never
+// double-files). Same shape as urlscan-retrieve's BATCH_WALL_CLOCK_MS.
+const ISSUE_WALL_CLOCK_MS = 420_000;
 const MAX_AGE_DAYS = 30;
 // Bounded re-entry (v248): a deferred alert gets this many cooling-off rounds
 // before the RPC converts it to a terminal skip. 5 × 24h ≈ the 30-day worklist
@@ -121,6 +131,10 @@ interface WorklistGroup {
   alerts: PendingAlert[];
 }
 
+// inngest-finish-budget: 5 boundaries — the 12 per-uuid step sites are
+// bounded by ISSUE_WALL_CLOCK_MS, not by the uuid cap, so only the static
+// steps outside the loop are counted here; the wall clock is added to the
+// floor separately by inngestFinishBudgets.test.ts.
 export const cloneWatchNetcraftIssue = inngest.createFunction(
   {
     id: "shopfront-clone-netcraft-issue",
@@ -135,6 +149,11 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
     // 12m, not 8m (#1069): same work as before, but step boundaries now
     // queue for account-concurrency slots (~30–60s under contention). Finite
     // per ADR-0019; guarded by inngestFinishBudgets.test.ts.
+    // NOTE: this budget now exceeds the 10m pg-stuck-query-watchdog window.
+    // That watchdog pages on a Postgres BACKEND running >=10 min; the long
+    // pole here is external HTTP plus account-concurrency queue wait, not a
+    // PG query, so a long run is expected and is not a watchdog condition
+    // (CLAUDE.md requires documenting exactly this).
     timeouts: { finish: "12m" },
   },
   [
@@ -290,7 +309,19 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
         }
       };
 
+      const issueStartMs = Date.now();
+      let uuidsSkippedForTime = 0;
       for (const group of plan.groups) {
+        if (Date.now() - issueStartMs > ISSUE_WALL_CLOCK_MS) {
+          // Leftovers drain next run rather than the whole run being cancelled
+          // mid-loop (a cancellation gets no retry and no telemetry, #1069).
+          uuidsSkippedForTime = plan.groups.length - plan.groups.indexOf(group);
+          logger.warn("clone-watch netcraft-issue: wall-clock break", {
+            skipped: uuidsSkippedForTime,
+            processed: plan.groups.indexOf(group),
+          });
+          break;
+        }
         const uuid = group.netcraft_uuid;
         const allIds = group.alerts.map((a) => a.id);
 
@@ -632,7 +663,15 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
           operation: "issue_report",
           units: dryRun ? counts.dryRunLogged : counts.filed,
           unitCostUsd: 0,
-          metadata: { dryRun, uuids: plan.groups.length, ...counts, braked: tripBrake },
+          metadata: {
+            dryRun,
+            uuids: plan.groups.length,
+            ...counts,
+            braked: tripBrake,
+            // >0 means the run hit ISSUE_WALL_CLOCK_MS and the tail drains next
+            // run — a normal, bounded outcome, not a failure (#1069).
+            uuids_skipped_for_time: uuidsSkippedForTime,
+          },
         });
       });
 
@@ -643,7 +682,14 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
         braked: tripBrake,
       });
 
-      return { ok: true, dryRun, uuids: plan.groups.length, ...counts, braked: tripBrake };
+      return {
+        ok: true,
+        dryRun,
+        uuids: plan.groups.length,
+        ...counts,
+        braked: tripBrake,
+        uuidsSkippedForTime,
+      };
     },
   ),
 );

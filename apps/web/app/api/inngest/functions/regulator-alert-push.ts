@@ -43,10 +43,12 @@ interface NarrativeRow {
   url: string | null;
 }
 
+// inngest-finish-budget: 13 boundaries — 3 static + 1 per-narrative push step
+// x MAX_PER_TICK (10).
 export const regulatorAlertPush = inngest.createFunction(
   {
     id: "regulator-alert-push",
-    timeouts: { finish: "4m" },
+    timeouts: { finish: "8m" },
     name: "News Intel: Push regulator alerts",
     retries: 2,
   },

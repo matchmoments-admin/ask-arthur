@@ -116,8 +116,13 @@ export const PRICING = {
  * `logCost` below relies on `waitUntil`, and an Inngest run that is CANCELLED
  * (e.g. a `timeouts.finish` breach) tears the invocation down before the
  * deferred promise settles — measured 2026-09-01: 11 of 19 preclassify
- * classifications had no cost row (#1061). Awaiting inside the step makes the
- * row part of the step's work, so it either lands or the step retries.
+ * classifications had no cost row (#1061). Awaiting inside the step closes
+ * THAT window: the insert completes before the step does.
+ *
+ * It does NOT make the write retried or guaranteed. Like `logCost`, a failed
+ * insert is swallowed as a warn and the promise resolves, because the paid
+ * call being measured has already happened and telemetry must never fail the
+ * work. So this fixes loss-by-cancellation, not loss-by-insert-failure.
  */
 export async function logCostAsync(ev: CostEvent): Promise<void> {
   const units = ev.units ?? 1;

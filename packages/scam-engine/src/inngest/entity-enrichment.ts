@@ -262,10 +262,12 @@ async function enrichEmail(value: string): Promise<Record<string, unknown>> {
   return data;
 }
 
+// inngest-finish-budget: 33 boundaries — 3 static + 1 per-entity enrich step x
+// MAX_ENTITIES_PER_RUN (30).
 export const entityEnrichmentFanOut = inngest.createFunction(
   {
     id: "pipeline-entity-enrichment",
-    timeouts: { finish: "6m" },
+    timeouts: { finish: "18m" },
     name: "Pipeline: Enrich Pending Entities",
     concurrency: { limit: 1 },
     // Each fan-out run triggers up to 30 × (Twilio Lookup + AbuseIPDB + IPQS +

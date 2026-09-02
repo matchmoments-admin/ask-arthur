@@ -169,18 +169,21 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
     // < 210), so a worklist regression / manual-trigger storm can't recreate
     // the May-27 urlscan burst (v224).
     throttle: { limit: 210, period: "1d" },
-    // 8m: up to 50 sequential urlscan submits (HTTP) per run + marks. Still
-    // well under the 10m pg-stuck-query-watchdog edge (the slow part is
-    // external HTTP, not PG).
     // 15m, not 8m (#1069): the inline rescan step legitimately runs minutes
     // (50 rechecks incl. urlscan submits), and step boundaries now queue for
     // account-concurrency slots (~30–60s each under contention). Finite per
     // ADR-0019; guarded by inngestFinishBudgets.test.ts.
+    // NOTE: this budget now exceeds the 10m pg-stuck-query-watchdog window.
+    // That watchdog pages on a Postgres BACKEND running >=10 min; the long
+    // pole here is external HTTP plus account-concurrency queue wait, not a
+    // PG query, so a long run is expected and is not a watchdog condition
+    // (CLAUDE.md requires documenting exactly this).
     timeouts: { finish: "15m" },
   },
   [
-    // Offset from urlscan-retrieve (0 */3) so a rescan submit and a retrieve
-    // tick don't race on the same row (v224).
+    // Offset from urlscan-retrieve (10 */3 since #1069) so a rescan submit and
+    // a retrieve tick don't race on the same row (v224). The offset is 20 min,
+    // narrowed from 30 when retrieve moved off the top of the hour.
     { cron: "30 */6 * * *" },
     { event: "shopfront/clone.lifecycle-recheck.manual-trigger.v1" },
   ],

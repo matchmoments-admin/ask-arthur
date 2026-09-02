@@ -12,10 +12,12 @@ import { withAxiomLogging } from "./with-axiom-logging";
 
 const MAX_URLS_PER_RUN = 20;
 
+// inngest-finish-budget: 41 boundaries — 1 static + 2 per-URL steps
+// (submit, retrieve) x MAX_URLS_PER_RUN (20).
 export const urlscanEnrichment = inngest.createFunction(
   {
     id: "pipeline-urlscan-enrichment",
-    timeouts: { finish: "6m" },
+    timeouts: { finish: "22m" },
     name: "Pipeline: URLScan.io Async Enrichment",
     concurrency: { limit: 1 },
     // urlscan.io is metered (paid tier ~$0.03/scan; free tier ~100 scans/day).

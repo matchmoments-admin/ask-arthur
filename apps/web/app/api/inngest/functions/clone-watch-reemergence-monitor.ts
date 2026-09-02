@@ -47,13 +47,15 @@ async function domainResolves(domain: string): Promise<boolean | null> {
   }
 }
 
+// inngest-finish-budget: 52 boundaries — 2 static + 1 per-case recheck step
+// x BATCH_LIMIT (50). See #1074 for the batching fold.
 export const cloneWatchReemergenceMonitor = inngest.createFunction(
   {
     id: "shopfront-clone-reemergence-monitor",
     name: "Clone-Watch: takedown re-emergence monitor",
     retries: 1,
     concurrency: { limit: 1 },
-    timeouts: { finish: "5m" },
+    timeouts: { finish: "27m" },
   },
   [
     { cron: "45 6 * * *" },

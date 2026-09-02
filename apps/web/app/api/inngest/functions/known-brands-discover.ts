@@ -83,11 +83,13 @@ async function fetchSecurityTxt(domain: string): Promise<string | null> {
   }
 }
 
+// inngest-finish-budget: 17 boundaries — 2 static + 1 per-candidate probe step
+// x DISCOVER_RUN_CAP (15).
 export const knownBrandsDiscover = inngest.createFunction(
   {
     id: "known-brands-discover",
     name: "Known Brands: security.txt contact discovery",
-    timeouts: { finish: "5m" },
+    timeouts: { finish: "10m" },
     retries: 1,
     concurrency: { limit: 1 },
   },
