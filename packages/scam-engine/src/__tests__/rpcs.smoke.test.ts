@@ -137,6 +137,36 @@ describe.skipIf(!hasEnv)("SQL RPC smoke tests", () => {
     expect(typeof rows[0]?.decline_to_weaponise_n).toBe("number");
   });
 
+  // Stranded-count breakdown (v274/v286/v292). Third-regression metric — the
+  // union must never be smaller than any single leg, and every leg must be a
+  // number. The semantic check ("nothing counted here is still retried by a
+  // lane") lives in the v292 migration verification queries; this guards the
+  // definition executing at all plus the union invariant.
+  it("clone_watch_urlscan_stranded_count executes with a coherent union", async () => {
+    const supabase = getClient();
+    const { data, error } = await supabase.rpc(
+      "clone_watch_urlscan_stranded_count",
+      { p_max_failure_streak: 3 },
+    );
+    expect(error).toBeNull();
+    const rows = Array.isArray(data) ? data : [data];
+    expect(rows).toHaveLength(1);
+    const r = rows[0] as {
+      stranded_total: number;
+      stranded_streak: number;
+      stranded_submitted_no_uuid: number;
+      stranded_uuid_no_submitted_at: number;
+    };
+    for (const leg of [
+      r.stranded_streak,
+      r.stranded_submitted_no_uuid,
+      r.stranded_uuid_no_submitted_at,
+    ]) {
+      expect(typeof leg).toBe("number");
+      expect(r.stranded_total).toBeGreaterThanOrEqual(leg);
+    }
+  });
+
   // Unactioned-lookalike age snapshot (v231).
   it("clone_watch_unactioned_age_stats executes without error", async () => {
     const supabase = getClient();
