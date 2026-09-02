@@ -34,7 +34,7 @@
  */
 import type { CloneAlertRow } from "@/app/api/inngest/functions/report-brand-stewardship";
 import { tldOf } from "@/lib/clone-watch/duration-kpis";
-import { canonicalRegistrar } from "@/lib/clone-watch/registrar-canonical";
+import { summariseCampaigns } from "@/lib/clone-watch/campaign-summary";
 import { asnLabel, canonicalAsn, isFrontingAsn } from "@/lib/clone-watch/asn-canonical";
 
 /** A distribution that always states what it was computed over. */
@@ -51,12 +51,24 @@ export interface Mix {
 
 const TOP_N = 10;
 
-/** Deduped by candidate_domain, matching every other clone-watch aggregate. */
+/**
+ * Deduped by candidate_domain, matching every other clone-watch aggregate.
+ *
+ * A row with NO candidate_domain is kept, not dropped: dropping it removed it
+ * from every denominator, so `total` under-reported and the module quietly did
+ * the "renormalise until it looks complete" thing its header forbids. Such a
+ * row cannot be deduped (there is nothing to dedupe on) and lands in the
+ * unknown bucket of whichever distribution reads the domain.
+ */
 function dedupe(rows: CloneAlertRow[]): CloneAlertRow[] {
   const seen = new Set<string>();
   const out: CloneAlertRow[] = [];
   for (const row of rows) {
-    if (!row.candidate_domain || seen.has(row.candidate_domain)) continue;
+    if (!row.candidate_domain) {
+      out.push(row);
+      continue;
+    }
+    if (seen.has(row.candidate_domain)) continue;
     seen.add(row.candidate_domain);
     out.push(row);
   }
@@ -168,6 +180,8 @@ export function hostingConcentration(rows: CloneAlertRow[]): HostingSummary {
   let fronted = 0;
   let unattributed = 0;
   let originVisible = 0;
+  let countryRows = 0;
+  let asnUnknown = 0;
 
   for (const r of unique) {
     const asn =
@@ -185,13 +199,25 @@ export function hostingConcentration(rows: CloneAlertRow[]): HostingSummary {
       continue;
     }
     originVisible++;
-    asnCounts.set(asnLabel(asn), (asnCounts.get(asnLabel(asn)) ?? 0) + 1);
-    if (country) countryCounts.set(country, (countryCounts.get(country) ?? 0) + 1);
+    // F5: a row with a country but NO asn cannot be fronting-checked at all —
+    // a CDN-fronted domain whose ASN we failed to capture would be counted as
+    // an origin location. It also must not enter asnCounts, where asnLabel(null)
+    // would publish a network literally named "Unknown" as a top ASN.
+    if (asn) asnCounts.set(asnLabel(asn), (asnCounts.get(asnLabel(asn)) ?? 0) + 1);
+    else asnUnknown++;
+    if (country) {
+      countryCounts.set(country, (countryCounts.get(country) ?? 0) + 1);
+      countryRows++;
+    }
   }
 
   return {
-    asns: toMix(asnCounts, 0, originVisible),
-    countries: toMix(countryCounts, originVisible - countryCounts.size, originVisible),
+    asns: toMix(asnCounts, asnUnknown, originVisible),
+    // countryCounts.size is the number of DISTINCT countries; the unknown
+    // bucket needs the number of ROWS without one. Using .size reported ~254
+    // unknown of 284 on the real August cohort and broke this module's own
+    // stated invariant (top + other + unknown === total).
+    countries: toMix(countryCounts, originVisible - countryRows, originVisible),
     frontedN: fronted,
     unattributedN: unattributed,
     originVisibleN: originVisible,
@@ -232,39 +258,32 @@ export interface ClusterSummary {
  */
 export function infrastructureClusters(rows: CloneAlertRow[]): ClusterSummary {
   const unique = dedupe(rows);
-  const groups = new Map<string, CloneAlertRow[]>();
-  let unfingerprinted = 0;
 
-  for (const r of unique) {
-    const key = r.campaign_key ?? null;
-    // "insufficient" is the v235 sentinel for "fewer than 2 signal components",
-    // i.e. explicitly not a fingerprint. Treating it as one would merge
-    // unrelated domains under a shared placeholder.
-    if (!key || key === "insufficient") {
-      unfingerprinted++;
-      continue;
-    }
-    const bucket = groups.get(key);
-    if (bucket) bucket.push(r);
-    else groups.set(key, [r]);
-  }
+  // Delegate the grouping AND the registrar choice to summariseCampaigns —
+  // it already skips the `insufficient` sentinel, already requires >=2 domains,
+  // already caps at 5, and picks the MODAL registrar across the cluster. An
+  // earlier version of this function reimplemented all of that and took
+  // members[0]'s registrar instead, so the two would have answered "which
+  // registrar is behind this cluster" differently for the same rows — on a
+  // surface that gets emailed to brands (v222: one formula, one home).
+  const summary = summariseCampaigns(unique);
 
-  const clusters = [...groups.entries()]
-    // A cluster of one is a domain, not a cluster.
-    .filter(([, members]) => members.length >= 2)
-    .map(([key, members]) => ({
-      key,
-      domains: members.length,
-      registrar:
-        canonicalRegistrar(members[0].attribution?.whois?.registrar ?? null) ?? null,
-    }))
-    .sort((a, b) => b.domains - a.domains || a.key.localeCompare(b.key));
+  // What summariseCampaigns does not carry: the denominators. A cluster share
+  // is meaningless without knowing how many rows could have been fingerprinted
+  // at all (~56% after dedupe; the rest are the `insufficient` sentinel).
+  const unfingerprinted = unique.filter(
+    (r) => !r.campaign_key || r.campaign_key === "insufficient",
+  ).length;
 
   return {
-    clusters: clusters.slice(0, 5),
+    clusters: summary.top.map((c) => ({
+      key: c.key,
+      domains: c.domainCount,
+      registrar: c.registrar,
+    })),
     fingerprintedN: unique.length - unfingerprinted,
     unfingerprintedN: unfingerprinted,
-    largestClusterN: clusters[0]?.domains ?? 0,
+    largestClusterN: summary.largestCampaign,
     total: unique.length,
   };
 }

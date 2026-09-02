@@ -78,6 +78,7 @@ describe("buildCoverageRows", () => {
         brand_normalized: "bunnings",
         brand_domain: "bunnings.com.au",
         covered_from: "2026-05-24",
+        covered_to: null,
         source: "git-backfill",
         source_ref: "aaa",
       },
@@ -86,6 +87,7 @@ describe("buildCoverageRows", () => {
         brand_normalized: "theordinary",
         brand_domain: "theordinary.com",
         covered_from: "2026-07-21",
+        covered_to: null,
         source: "git-backfill",
         source_ref: "bbb",
       },
@@ -101,6 +103,45 @@ describe("buildCoverageRows", () => {
     ]);
     expect(rows).toHaveLength(1);
     expect(rows[0].covered_from).toBe("2026-05-24");
+  });
+
+  it("stamps covered_to when a brand LEAVES the watchlist", () => {
+    // Without this a de-listed brand reads as permanently covered, so its drop
+    // to zero detections publishes as "targeting collapsed" rather than "we
+    // stopped looking". Real cases: Domain and Lendi, removed 2026-06-07.
+    const bunnings = { brand: "Bunnings", primaryDomain: "bunnings.com.au" };
+    const lendi = { brand: "Lendi", primaryDomain: "lendi.com.au" };
+    const rows = buildCoverageRows([
+      { sha: "aaa", date: "2026-05-29", brands: [bunnings, lendi] },
+      { sha: "bbb", date: "2026-06-07", brands: [bunnings] },
+    ]);
+    const byBrand = new Map(rows.map((r) => [r.brand, r]));
+    expect(byBrand.get("Lendi")?.covered_to).toBe("2026-06-07");
+    expect(byBrand.get("Bunnings")?.covered_to).toBeNull();
+  });
+
+  it("keeps every brand that shares a primary domain", () => {
+    // Services Australia, Medicare and Centrelink all list
+    // servicesaustralia.gov.au. Deduping on the DOMAIN kept only the first, so
+    // Medicare and Centrelink had NO coverage row and would have read as
+    // coverage_unknown forever — suppressed with no error, and masked because
+    // the row total still reconciled to the watchlist size.
+    const rows = buildCoverageRows([
+      {
+        sha: "aaa",
+        date: "2026-06-16",
+        brands: [
+          { brand: "Services Australia", primaryDomain: "servicesaustralia.gov.au" },
+          { brand: "Medicare", primaryDomain: "servicesaustralia.gov.au" },
+          { brand: "Centrelink", primaryDomain: "servicesaustralia.gov.au" },
+        ],
+      },
+    ]);
+    expect(rows.map((r) => r.brand_normalized).sort()).toEqual([
+      "centrelink",
+      "medicare",
+      "servicesaustralia",
+    ]);
   });
 
   it("normalises the brand key the way alerts are keyed", () => {

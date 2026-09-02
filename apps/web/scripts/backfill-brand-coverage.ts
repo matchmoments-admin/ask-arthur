@@ -9,15 +9,17 @@
  *
  *   pnpm --filter @askarthur/web exec tsx scripts/backfill-brand-coverage.ts [--apply]
  *
- * Dry-run by default. Idempotent: rows are upserted on
- * (brand_normalized, covered_from), so re-running after a new watchlist commit
- * adds only the new entries.
+ * Dry-run by default. Idempotent: rows upsert on (brand_normalized,
+ * covered_from) and a re-run REFRESHES covered_to / brand_domain / brand. That
+ * update matters — a brand de-listed after the last run only gets its
+ * covered_to stamped on a re-run, and DO NOTHING would have silently kept
+ * reporting it as covered while logging "already present".
  *
  * PARSING NOTE: watchlist entries are single-line objects —
  *   { brand: "Bunnings", legitimate_domains: ["bunnings.com.au"] },
  * so a `^\s*brand:` match finds only the handful of multi-line entries (55 of
  * 293). Match `brand: "..."` anywhere on the line instead. Guarded by
- * scripts/__tests__/backfillBrandCoverage.test.ts, which asserts HEAD parses to
+ * apps/web/__tests__/backfillBrandCoverage.test.ts, which asserts HEAD parses to
  * the full 293.
  */
 import "./_load-env-config";
@@ -33,6 +35,17 @@ export interface CoverageRow {
   /** legitimate_domains[0], lowercased — the key the monthly stats use. */
   brand_domain: string;
   covered_from: string; // YYYY-MM-DD
+  /**
+   * Date the brand LEFT the watchlist, or null if still listed.
+   *
+   * Load-bearing in the opposite direction to covered_from: without it a
+   * de-listed brand reads as permanently covered, so its drop to zero
+   * detections publishes as "targeting collapsed" when the truth is "we
+   * stopped looking". Two brands are already in this state — Domain
+   * (domain.com.au) and Lendi (lendi.com.au) were FP-denylisted out of the
+   * list.
+   */
+  covered_to: string | null;
   source: "git-backfill";
   source_ref: string; // commit sha
 }
@@ -69,25 +82,55 @@ export function parseBrands(fileSource: string): WatchlistEntry[] {
 export function buildCoverageRows(
   revisions: Array<{ sha: string; date: string; brands: WatchlistEntry[] }>,
 ): CoverageRow[] {
-  // Dedupe on the DOMAIN key, since that is what downstream joins on. Two
-  // watchlist entries can normalise to the same name key while being different
-  // brands; the domain disambiguates them.
+  // Dedupe on the BRAND key. An earlier version deduped on the domain, which
+  // silently dropped every brand sharing a primary domain with another:
+  // Services Australia, Medicare and Centrelink all list
+  // servicesaustralia.gov.au, so Medicare and Centrelink got NO coverage row
+  // at all and would have read as coverage_unknown forever — suppressed with
+  // no error, and hidden because the total still reconciled to the watchlist
+  // size. The domain is deliberately many-to-one.
   const seen = new Set<string>();
   const rows: CoverageRow[] = [];
+  const byKey = new Map<string, CoverageRow>();
   for (const rev of revisions) {
     for (const entry of rev.brands) {
       const nameKey = brandNormalize(entry.brand);
       const domainKey = entry.primaryDomain;
-      if (!nameKey || !domainKey || seen.has(domainKey)) continue;
-      seen.add(domainKey);
-      rows.push({
+      if (!nameKey || !domainKey || seen.has(nameKey)) continue;
+      seen.add(nameKey);
+      const row: CoverageRow = {
         brand: entry.brand,
         brand_normalized: nameKey,
         brand_domain: domainKey,
         covered_from: rev.date,
+        covered_to: null,
         source: "git-backfill",
         source_ref: rev.sha,
-      });
+      };
+      rows.push(row);
+      byKey.set(nameKey, row);
+    }
+  }
+
+  // Close out brands that LEFT the list. Walk forward and stamp covered_to at
+  // the first revision where a previously-present brand is absent. Without
+  // this the gate treats a de-listed brand as still watched, and its silence
+  // reads as "no longer targeted" — the exact inversion this table exists to
+  // prevent, just pointing the other way.
+  const closed = new Set<string>();
+  for (let i = 1; i < revisions.length; i++) {
+    const present = new Set(
+      revisions[i].brands
+        .map((e) => brandNormalize(e.brand))
+        .filter((k): k is string => Boolean(k)),
+    );
+    for (const [key, row] of byKey) {
+      if (closed.has(key)) continue;
+      if (row.covered_from >= revisions[i].date) continue; // not yet listed
+      if (!present.has(key)) {
+        row.covered_to = revisions[i].date;
+        closed.add(key);
+      }
     }
   }
   return rows;
@@ -178,14 +221,17 @@ async function main() {
     const values = chunk
       .map(
         (r) =>
-          `(${lit(r.brand)}, ${lit(r.brand_normalized)}, ${lit(r.brand_domain)}, ${lit(r.covered_from)}::date, ${lit(r.source)}, ${lit(r.source_ref)})`,
+          `(${lit(r.brand)}, ${lit(r.brand_normalized)}, ${lit(r.brand_domain)}, ${lit(r.covered_from)}::date, ${r.covered_to ? `${lit(r.covered_to)}::date` : "NULL"}, ${lit(r.source)}, ${lit(r.source_ref)})`,
       )
       .join(", ");
     const { status, body } = await runSql(
       `INSERT INTO brand_coverage_history
-         (brand, brand_normalized, brand_domain, covered_from, source, source_ref)
+         (brand, brand_normalized, brand_domain, covered_from, covered_to, source, source_ref)
        VALUES ${values}
-       ON CONFLICT (brand_normalized, covered_from) DO NOTHING
+       ON CONFLICT (brand_normalized, covered_from) DO UPDATE
+         SET covered_to = EXCLUDED.covered_to,
+             brand_domain = EXCLUDED.brand_domain,
+             brand = EXCLUDED.brand
        RETURNING brand_normalized`,
     );
     if (status >= 300) throw new Error(`HTTP ${status}: ${body.slice(0, 400)}`);

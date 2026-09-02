@@ -40,6 +40,14 @@ export type TrendKind =
   | "claimable"
   /** Monitoring began inside the window: a rise here is OUR change, not theirs. */
   | "coverage_started"
+  /**
+   * Monitoring STOPPED inside the window. Distinct from coverage_started
+   * because the derived caveat states the reason: saying "we started watching
+   * these" about brands we stopped watching is the opposite of what happened,
+   * and this module's whole argument is that a derived caveat cannot drift
+   * from the gate.
+   */
+  | "coverage_ended"
   /** Too few clones for the movement to mean anything. */
   | "below_floor"
   /** No coverage record at all — treated as unpublishable, never as covered. */
@@ -63,8 +71,21 @@ export interface TrendVerdict {
  */
 export const TREND_FLOOR = 10;
 
+/**
+ * Throws on an unparseable month rather than returning Invalid Date.
+ *
+ * `new Date("2026-8-01T00:00:00Z")` (unpadded) is Invalid Date, and EVERY
+ * comparison against NaN is false — so `coveredForWholeMonth` would skip both
+ * rejection branches and return true, making every brand claimable. A gate
+ * whose contract is "a missing record is never treated as covered" must not
+ * fail open on a malformed input.
+ */
 function monthStart(periodMonth: string): Date {
-  return new Date(`${periodMonth.slice(0, 7)}-01T00:00:00Z`);
+  const d = new Date(`${periodMonth.slice(0, 7)}-01T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) {
+    throw new Error(`brand-coverage: unparseable periodMonth "${periodMonth}"`);
+  }
+  return d;
 }
 
 /**
@@ -78,17 +99,27 @@ export function coveredForWholeMonth(
   coverage: BrandCoverage | null | undefined,
   periodMonth: string,
 ): boolean {
-  if (!coverage) return false;
+  return monthCoverage(coverage, periodMonth) === "covered";
+}
+
+type MonthCoverage = "covered" | "started_late" | "ended_early" | "absent";
+
+/** Why a month is or is not fully covered — the reason the caveat needs. */
+function monthCoverage(
+  coverage: BrandCoverage | null | undefined,
+  periodMonth: string,
+): MonthCoverage {
+  if (!coverage) return "absent";
   const start = monthStart(periodMonth);
   const nextMonth = new Date(start);
   nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1);
 
-  if (new Date(`${coverage.coveredFrom}T00:00:00Z`) > start) return false;
+  if (new Date(`${coverage.coveredFrom}T00:00:00Z`) > start) return "started_late";
   if (coverage.coveredTo) {
     // Must still be covered at the END of the month.
-    if (new Date(`${coverage.coveredTo}T00:00:00Z`) < nextMonth) return false;
+    if (new Date(`${coverage.coveredTo}T00:00:00Z`) < nextMonth) return "ended_early";
   }
-  return true;
+  return "covered";
 }
 
 /**
@@ -111,10 +142,15 @@ export function classifyTrend(input: {
 
   if (!coverage) return { kind: "coverage_unknown", delta, pct: null };
 
-  const coveredBoth =
-    coveredForWholeMonth(coverage, priorMonth) &&
-    coveredForWholeMonth(coverage, currentMonth);
-  if (!coveredBoth) return { kind: "coverage_started", delta, pct: null };
+  const prior = monthCoverage(coverage, priorMonth);
+  const current = monthCoverage(coverage, currentMonth);
+  if (prior !== "covered" || current !== "covered") {
+    // Report WHICH way the coverage moved. A brand de-listed mid-window looks
+    // identical to a collapse in targeting, and calling that "we started
+    // watching" would be precisely backwards.
+    const ended = prior === "ended_early" || current === "ended_early";
+    return { kind: ended ? "coverage_ended" : "coverage_started", delta, pct: null };
+  }
 
   if (currentClones < TREND_FLOOR && priorClones < TREND_FLOOR) {
     return { kind: "below_floor", delta, pct: null };
@@ -134,10 +170,17 @@ export function classifyTrend(input: {
 /** Counts for the post's caveat line, derived from the same verdicts it describes. */
 export function summariseTrendExclusions(
   verdicts: TrendVerdict[],
-): { claimable: number; coverageStarted: number; belowFloor: number; unknown: number } {
+): {
+  claimable: number;
+  coverageStarted: number;
+  coverageEnded: number;
+  belowFloor: number;
+  unknown: number;
+} {
   return {
     claimable: verdicts.filter((v) => v.kind === "claimable").length,
     coverageStarted: verdicts.filter((v) => v.kind === "coverage_started").length,
+    coverageEnded: verdicts.filter((v) => v.kind === "coverage_ended").length,
     belowFloor: verdicts.filter((v) => v.kind === "below_floor").length,
     unknown: verdicts.filter((v) => v.kind === "coverage_unknown").length,
   };

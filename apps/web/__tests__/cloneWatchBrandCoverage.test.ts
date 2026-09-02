@@ -184,8 +184,56 @@ describe("summariseTrendExclusions", () => {
     expect(summariseTrendExclusions(verdicts)).toEqual({
       claimable: 1,
       coverageStarted: 1,
+      coverageEnded: 0,
       belowFloor: 1,
       unknown: 1,
     });
+  });
+});
+
+describe("coverage that ENDED (review finding)", () => {
+  // A brand de-listed mid-window looks identical to a collapse in targeting.
+  // Reporting it as "coverage_started" would make the derived caveat say "we
+  // started watching these" about brands we STOPPED watching — the opposite of
+  // what happened. Real cases: Domain (domain.com.au) and Lendi
+  // (lendi.com.au) left the watchlist on 2026-06-07.
+  const DELISTED: BrandCoverage = {
+    brandDomain: "domain.com.au",
+    brandNormalized: "domain",
+    coveredFrom: "2026-05-26",
+    coveredTo: "2026-06-07",
+  };
+
+  it("classifies a de-listed brand as coverage_ended, not coverage_started", () => {
+    const v = classifyTrend({
+      currentClones: 0,
+      priorClones: 40,
+      currentMonth: AUG,
+      priorMonth: JUL,
+      coverage: DELISTED,
+    });
+    expect(v.kind).toBe("coverage_ended");
+  });
+
+  it("counts the two coverage reasons separately", () => {
+    const verdicts = [
+      classifyTrend({ currentClones: 0, priorClones: 40, currentMonth: AUG, priorMonth: JUL, coverage: DELISTED }),
+      classifyTrend({ currentClones: 11, priorClones: 1, currentMonth: AUG, priorMonth: JUL, coverage: BEAUTY_COHORT }),
+    ];
+    const s = summariseTrendExclusions(verdicts);
+    expect(s.coverageEnded).toBe(1);
+    expect(s.coverageStarted).toBe(1);
+  });
+});
+
+describe("malformed period months (review finding)", () => {
+  it("throws rather than failing OPEN on an unpadded month", () => {
+    // new Date("2026-8-01T00:00:00Z") is Invalid Date, and every comparison
+    // against NaN is false — so the gate would skip both rejection branches and
+    // return true, making EVERY brand claimable. A fail-closed gate must not
+    // fail open on a malformed input.
+    expect(() => coveredForWholeMonth(LONG_COVERED, "2026-8")).toThrow(
+      /unparseable periodMonth/,
+    );
   });
 });

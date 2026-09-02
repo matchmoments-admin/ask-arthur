@@ -1,8 +1,16 @@
 import { canonicalRegistrar } from "./registrar-canonical";
 
 /**
- * Roll a cohort of clone alerts up into COORDINATED CAMPAIGNS by their
- * campaign_key (v235) — "N of these lookalikes trace to M coordinated actors".
+ * Roll a cohort of clone alerts up by their shared INFRASTRUCTURE fingerprint
+ * (campaign_key, v235) — "N of these lookalikes were built on M shared setups".
+ *
+ * NOT "M coordinated actors", which this header used to claim. The key hashes
+ * registrar + nameserver roots + ASN + cert issuer; nothing in it is
+ * actor-specific, so a big cluster is usually a mainstream registrar behind a
+ * CDN with a common cert issuer — the default build of a large slice of the
+ * internet. Cohort-wide the largest cluster is 45 domains and means little;
+ * scoped within ONE brand ("12 of your 51 lookalikes share one setup") it is a
+ * real observation. Callers that publish must scope per-brand.
  * This is the brand-protection headline the campaign-fingerprint feature was
  * built to produce; without a reader the key was orphaned write-cost.
  *

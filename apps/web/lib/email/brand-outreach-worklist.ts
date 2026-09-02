@@ -56,7 +56,12 @@ export function buildHookLine(row: WorklistRow): string {
       row.campaign_domain_count && row.campaign_domain_count > 1
         ? `${row.campaign_domain_count} lookalike domains`
         : "a set of lookalike domains";
-    return `I'm reaching out because we're tracking a coordinated campaign of ${size} — several of them registered to impersonate ${brand}, which is why I wanted to get this in front of your team quickly.`;
+    // NOT "a coordinated campaign". campaign_key fingerprints shared
+    // infrastructure (registrar + nameservers + ASN + cert issuer) — nothing
+    // actor-specific — so a large cluster is usually a common hosting stack
+    // rather than one operator. Claiming coordination to the brand being
+    // impersonated is a claim we cannot support from this data.
+    return `I'm reaching out because we're tracking ${size} impersonating ${brand} that share the same registrar and hosting setup — which usually means they were set up together, and is why I wanted to get this in front of your team quickly.`;
   }
   if (row.weaponised_count > 0) {
     const n = row.weaponised_count;

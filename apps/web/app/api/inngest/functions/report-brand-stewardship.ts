@@ -647,7 +647,11 @@ export const reportBrandStewardship = inngest.createFunction(
             sb
               .from("shopfront_clone_alerts")
               .select(
-                "id, candidate_domain, inferred_target_domain, urlscan_classification, urlscan_evidence, attribution, submitted_to, lifecycle_state, netcraft_declined_at, weaponised_at, first_seen_at, signals, clone_watch_classifications(is_clone, confidence, attack_intent)",
+                // campaign_key + clone_tactic feed targeting-intelligence.ts.
+                // Omitting them does not error — the distributions just come
+                // back 100% empty, which reads as thin classifier coverage
+                // rather than a missing column.
+                "id, candidate_domain, inferred_target_domain, urlscan_classification, urlscan_evidence, attribution, submitted_to, lifecycle_state, netcraft_declined_at, weaponised_at, first_seen_at, signals, campaign_key, clone_watch_classifications(is_clone, confidence, attack_intent, clone_tactic)",
               )
               .eq("source", "nrd")
               .gte("first_seen_at", period.startIso)

@@ -54,12 +54,18 @@ describe("signalSummary", () => {
 });
 
 describe("buildHookLine", () => {
-  it("leads with campaign coordination when in a campaign", () => {
+  it("leads with SHARED INFRASTRUCTURE, never a coordination claim", () => {
+    // campaign_key hashes registrar + nameservers + ASN + cert issuer —
+    // nothing actor-specific — so "a coordinated campaign" is a claim about
+    // attacker intent we cannot support, addressed to the brand being
+    // impersonated. This test previously pinned that wording; it now forbids
+    // it. See campaign-summary.ts and targeting-intelligence.ts.
     const h = buildHookLine(
       makeRow({ in_campaign: true, campaign_domain_count: 28, weaponised_count: 2 }),
     );
-    expect(h).toContain("coordinated campaign");
+    expect(h).not.toMatch(/coordinated|campaign|one actor/i);
     expect(h).toContain("28 lookalike domains");
+    expect(h).toContain("same registrar and hosting");
     expect(h).toContain("Kmart");
   });
 

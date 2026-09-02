@@ -153,6 +153,36 @@ describe("asn canonicalisation and fronting", () => {
   });
 });
 
+describe("hostingConcentration — denominators (review findings)", () => {
+  it("counts unknown countries by ROWS, not by distinct country", () => {
+    // The unknown bucket was `originVisible - countryCounts.size`, i.e. the
+    // number of distinct COUNTRIES, not rows. On the real August cohort that
+    // reported ~254 unknown of 284 when none were missing, and broke this
+    // module's own invariant that top + other + unknown === total.
+    const h = hostingConcentration([
+      row({ candidate_domain: "a.com", attribution: { hosting: { asn: "AS24940", country: "DE" } } }),
+      row({ candidate_domain: "b.com", attribution: { hosting: { asn: "AS24940", country: "DE" } } }),
+      row({ candidate_domain: "c.com", attribution: { hosting: { asn: "AS24940", country: "US" } } }),
+    ]);
+    expect(h.originVisibleN).toBe(3);
+    expect(h.countries.unknown).toBe(0);
+    const summed =
+      h.countries.top.reduce((s, c) => s + c.n, 0) + h.countries.other + h.countries.unknown;
+    expect(summed).toBe(h.countries.total);
+  });
+
+  it("never publishes an ASN literally named 'Unknown'", () => {
+    // A row with a country but no ASN cannot be fronting-checked at all, so it
+    // must not be counted as an origin ASN. asnLabel(null) returns "Unknown",
+    // which would otherwise rank as a real network.
+    const h = hostingConcentration([
+      row({ candidate_domain: "a.com", attribution: { hosting: { country: "DE" } } }),
+    ]);
+    expect(h.asns.top.map((a) => a.key)).not.toContain("Unknown");
+    expect(h.asns.unknown).toBe(1);
+  });
+});
+
 describe("hostingConcentration", () => {
   it("excludes CDN-fronted rows from location claims and counts them", () => {
     const h = hostingConcentration([
@@ -210,6 +240,20 @@ describe("infrastructureClusters", () => {
     ]);
     expect(c.clusters).toEqual([]);
     expect(c.largestClusterN).toBe(0);
+  });
+});
+
+describe("rows without a candidate domain (review finding)", () => {
+  it("keeps them in the denominator instead of vanishing", () => {
+    // Dropping them removed them from every total, so the module quietly
+    // renormalised until the numbers looked complete — the exact behaviour its
+    // header forbids.
+    const mix = tldConcentration([
+      row({ candidate_domain: "real.shop" }),
+      row({ candidate_domain: "" }),
+    ]);
+    expect(mix.total).toBe(2);
+    expect(mix.unknown).toBe(1);
   });
 });
 
