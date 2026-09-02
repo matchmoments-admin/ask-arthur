@@ -800,7 +800,10 @@ export const redditBrandsDiscover = inngest.createFunction(
   {
     id: "reddit-brands-discover",
     name: "Reddit Brands: watchlist candidate discovery",
-    timeouts: { finish: "5m" },
+    // Raised (#1069): step boundaries queue for the account's 5 Hobby-plan
+    // concurrency slots; the old budget could cancel healthy runs. Floor
+    // guarded by inngestFinishBudgets.test.ts.
+    timeouts: { finish: "8m" },
     retries: 1,
     concurrency: { limit: 1 },
     // concurrency alone SERIALISES stacked manual fires, it does not cap them —

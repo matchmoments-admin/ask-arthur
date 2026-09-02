@@ -95,6 +95,42 @@ keeping it as dead code only cost review-surface. Resurrect from git history if
 deepfake→Meta BRP reporting is ever built; the go-live checklist must couple the
 Graph-API call and the `reported_to_meta=true` UPDATE in one commit (#519).
 
+## Amendment 2026-09-02 (#1069) — long inline steps re-created the contention, and the circuit breakers became the casualty
+
+The May failure mode was **volume** (too many step-runs). The September one was
+**duration**: the v284–v286 clone-watch fixes deliberately grew inline-batch
+steps (submit batch 75, recheck pool 200 with inline urlscan submits, second
+reconcile run), and a long step **holds one of the 5 slots for its whole
+execution** — 40–200s each. Fleet demand crossed the 5-slot budget ~Aug 27 and
+every queued step boundary then waited ~30–60s for a slot (measured in a quiet
+window: three preclassify runs advancing in lockstep, one step per ~30s).
+
+The `timeouts.finish` circuit breakers, tuned for fast dispatch, then became
+the failure: a finish-CANCELLED run gets **no retries, no error, and no
+telemetry**. Measured casualties before the fix: 44/51 preclassify runs
+cancelled at exactly start+2m (classifications delayed days, 58% of the lane's
+cost telemetry lost), urlscan-retrieve cancelled at exactly its 5m budget two
+days running, and five weaponised brand alerts silently dropped by a 3m budget
+on a 15-step function.
+
+**Rules added (enforced by `apps/web/__tests__/inngestFinishBudgets.test.ts`):**
+
+- A finish budget must cover `step-sites × 30s queue wait, plus inline
+  wall-clocks, plus 60s slack`. Keep it finite (it is still this ADR's circuit
+  breaker), but budget for contention, not for the happy path.
+- **A step boundary is not free**: it costs one slot-queue wait (~30–60s under
+  contention) on top of its billing cost. Single-query bookkeeping steps
+  (brake checks, telemetry writes) should ride inside an adjacent work step.
+- **Telemetry inside Inngest steps must be awaited** (`logCostAsync`), because
+  cancellation kills `waitUntil` promises — precisely when the row matters.
+- **Prefer off-:00 minutes for new crons.** The top of the hour is the fleet's
+  worst pileup; urlscan-retrieve moved to `10 */3` and feedback-triage-refresh
+  to `50 *` for this reason.
+- When changing an inline batch size or pool size, re-run the slot math: batch
+  growth lengthens the step, which lengthens every OTHER function's queue
+  waits. The Hobby-plan upgrade decision (Pro: 100+ slots) is tracked on
+  wayfinder map #1060.
+
 ## Reversal trigger
 
 If analyze fan-out latency is fine and a recurring function's freshness SLA

@@ -76,7 +76,14 @@ export const cloneWatchNotifyWeaponised = inngest.createFunction(
     retries: 3,
     concurrency: { limit: 2 },
     idempotency: "event.data.alertId",
-    timeouts: { finish: "3m" },
+    // 10m, not 3m (#1069): this fn runs 10+ steps and each boundary queues
+    // for an account-concurrency slot (~30–60s under contention). At 3m it was
+    // structurally unable to finish — five weaponised brand alerts were
+    // silently lost Aug 29–Sep 1 2026 (cancelled runs get no retries, the
+    // event id is dedup-stable, and weaponised_notified_at was already
+    // stamped, so nothing ever retried them). Finite per ADR-0019; guarded by
+    // inngestFinishBudgets.test.ts.
+    timeouts: { finish: "10m" },
   },
   { event: CLONE_WATCH_WEAPONISED_EVENT },
   withAxiomLogging(

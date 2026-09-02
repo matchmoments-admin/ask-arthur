@@ -9,7 +9,7 @@ import { callClaudeJson } from "@askarthur/scam-engine/anthropic";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
-import { logCost } from "@/lib/cost-telemetry";
+import { logCostAsync } from "@/lib/cost-telemetry";
 
 /**
  * PR-D2 (#498) — Haiku pre-classifier for clone-watch candidates.
@@ -161,7 +161,15 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
     // ever re-fanned. The record_clone_watch_classification UPSERT remains the
     // belt-and-braces write-idempotency guard.
     idempotency: "event.id",
-    timeouts: { finish: "2m" },
+    // 10m, not 2m. The real work is one ~3s Haiku call — but each step
+    // boundary queues for one of the account's 5 Hobby-plan concurrency slots,
+    // and under morning contention that wait measured ~30–60s per boundary
+    // (#1061, 2026-09-02: 44 of 51 runs were CANCELLED at exactly start+2m; a
+    // cancellation gets no retries and no error telemetry, so the loss was
+    // silent). The finish timeout stays finite as the ADR-0019 circuit
+    // breaker, but must budget for queue waits: steps × 60s worst-case, plus
+    // headroom. Guarded by inngestFinishBudgets.test.ts.
+    timeouts: { finish: "10m" },
   },
   { event: CLONE_WATCH_PRECLASSIFY_REQUESTED_EVENT },
   withAxiomLogging({ fnId: "shopfront-clone-haiku-preclassify" }, async ({ event, step }) => {
@@ -174,29 +182,6 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
     const sb = createServiceClient();
     if (!sb) return { skipped: true, reason: "supabase_unavailable" };
 
-    // Cost-brake check. `shopfront_clone_outreach` is the shared brake
-    // across all clone-watch sub-features (notify, netcraft, urlscan,
-    // and now preclassify). Skip + log when engaged.
-    const brakeEngaged = await step.run("check-brake", async () => {
-      const { data: row, error } = await sb
-        .from("feature_brakes")
-        .select("paused_until")
-        .eq("feature", "shopfront_clone_outreach")
-        .maybeSingle();
-      if (error) {
-        logger.warn("clone-watch preclassify: brake lookup failed", {
-          error: error.message,
-        });
-        return true; // conservative
-      }
-      return Boolean(
-        row?.paused_until && new Date(row.paused_until).getTime() > Date.now(),
-      );
-    });
-    if (brakeEngaged) {
-      return { skipped: true, reason: "cost_brake_engaged" };
-    }
-
     const userMessage = JSON.stringify({
       brand: data.brand,
       candidate_domain: data.candidateDomain,
@@ -207,15 +192,42 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
     // proven on Reddit Intel). Cache the system prompt (default) so
     // repeat calls within the cache TTL hit at ~10x lower cost.
     //
+    // The cost-brake check (`shopfront_clone_outreach`, the shared brake
+    // across all clone-watch sub-features) rides INSIDE this step rather than
+    // owning its own: each step boundary costs one account-concurrency queue
+    // wait (~30–60s under contention, #1069), and a single-row SELECT does not
+    // earn that. The brake still gates the Claude call — it just shares the
+    // step. A braked run returns a sentinel instead of the call result.
+    //
     // Error path (local-ultrareview F5): emit a $0 `_error` cost-telemetry
     // row BEFORE re-throwing so Inngest's retry+failure surface in the
     // health-digest aggregator (matches `reddit-intel-error` pattern).
     // Without this row, a degraded Anthropic endpoint produces invisible
     // failures — the only signal is the absence of clone_watch_classifications
-    // rows, which the operator wouldn't notice for hours.
-    const callResult = await step.run("classify-haiku", async () => {
+    // rows, which the operator wouldn't notice for hours. Awaited (not
+    // fire-and-forget): a cancelled run kills deferred promises, which is
+    // exactly when the error row matters most.
+    const callOutcome = await step.run("classify-haiku", async () => {
+      const { data: brakeRow, error: brakeError } = await sb
+        .from("feature_brakes")
+        .select("paused_until")
+        .eq("feature", "shopfront_clone_outreach")
+        .maybeSingle();
+      if (brakeError) {
+        logger.warn("clone-watch preclassify: brake lookup failed", {
+          error: brakeError.message,
+        });
+        return { braked: true as const }; // conservative
+      }
+      if (
+        brakeRow?.paused_until &&
+        new Date(brakeRow.paused_until).getTime() > Date.now()
+      ) {
+        return { braked: true as const };
+      }
+
       try {
-        return await callClaudeJson({
+        const call = await callClaudeJson({
           model: "HAIKU_4_5",
           system: SYSTEM_PROMPT,
           user: userMessage,
@@ -234,9 +246,10 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
           toolName: "submit_classification",
           requestId: `clone-watch-preclassify:${data.alertId}`,
         });
+        return { braked: false as const, call };
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : String(err);
-        logCost({
+        await logCostAsync({
           feature: "shopfront_clone_preclassify_error",
           provider: "anthropic",
           operation: "classify_error",
@@ -255,9 +268,20 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
       }
     });
 
+    if (callOutcome.braked) {
+      return { skipped: true, reason: "cost_brake_engaged" };
+    }
+    const callResult = callOutcome.call;
     const classification = callResult.result;
 
-    // Persist via the v157 idempotent UPSERT RPC.
+    // Persist via the v157 idempotent UPSERT RPC. Cost telemetry rides the
+    // same step (fold, #1069): a dedicated log-cost step cost one more
+    // concurrency-queue wait per run and was the FIRST thing a finish-cancel
+    // chopped — 58% of cost rows were lost on 2026-09-01. The insert is
+    // awaited after a successful RPC; a step retry after the RPC succeeded can
+    // duplicate one telemetry row (rare crash window), which beats silently
+    // losing the majority. units = total token count so the dashboard slices
+    // by tokens/day cleanly; estimatedCostUsd already accounts for cache hits.
     await step.run("persist", async () => {
       const { error } = await sb.rpc("record_clone_watch_classification", {
         p_alert_id: data.alertId,
@@ -277,15 +301,9 @@ export const cloneWatchHaikuPreclassify = inngest.createFunction(
       if (error) {
         throw new Error(`record_clone_watch_classification: ${error.message}`);
       }
-    });
-
-    // Cost telemetry. units = total token count so dashboard slices by
-    // tokens/day cleanly. estimatedCostUsd already accounts for cache
-    // hits (cacheReadTokens × cacheReadUsdPerToken).
-    await step.run("log-cost", async () => {
       const totalTokens =
         callResult.usage.inputTokens + callResult.usage.outputTokens;
-      logCost({
+      await logCostAsync({
         feature: "shopfront_clone_preclassify",
         provider: "anthropic",
         operation: callResult.cacheHit ? "classify_cache_hit" : "classify",

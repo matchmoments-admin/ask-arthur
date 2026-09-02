@@ -54,7 +54,11 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
   {
     id: "clone-watch-enrich-attribution",
     name: "Clone-watch: attribution dossier enricher",
-    timeouts: { finish: "5m" },
+    // Raised (#1069): step boundaries queue for the account's 5 Hobby-plan
+    // concurrency slots (~30–60s each under contention); the old budget
+    // cancelled healthy runs. Finite per ADR-0019; floor guarded by
+    // inngestFinishBudgets.test.ts.
+    timeouts: { finish: "8m" },
     retries: 2,
     // --- manual-trigger guards (CLAUDE.md: "any cron that also has a
     // manual-trigger must have a throttle AND a same-window cooldown, or

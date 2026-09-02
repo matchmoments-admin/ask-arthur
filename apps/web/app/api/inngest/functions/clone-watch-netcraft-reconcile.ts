@@ -84,7 +84,11 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
     concurrency: { limit: 1 },
     // 8m finish (matches the poll fn) — the slow part is keyless Netcraft HTTP,
     // not a PG backend, so the 10m pg-stuck-query-watchdog is not at risk.
-    timeouts: { finish: "8m" },
+    // 12m, not 8m (#1069): per-uuid fetch/apply steps each queue for an
+    // account-concurrency slot (~30–60s under contention) on top of the slow
+    // keyless Netcraft HTTP. Finite per ADR-0019; guarded by
+    // inngestFinishBudgets.test.ts.
+    timeouts: { finish: "12m" },
   },
   [
     // Twice daily (v284). Two 12-uuid runs clear ~24 uuids/day against a live

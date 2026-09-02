@@ -8,7 +8,7 @@ import { retrieveURLScanDetailed } from "@askarthur/scam-engine/urlscan";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
-import { logCost } from "@/lib/cost-telemetry";
+import { logCostAsync } from "@/lib/cost-telemetry";
 import {
   classifyScan,
   suggestTriageTransition,
@@ -63,10 +63,19 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
     name: "Clone-Watch: urlscan retrieve (batched)",
     retries: 1,
     concurrency: { limit: 3 },
-    timeouts: { finish: "5m" },
+    // 10m, not 5m. The batch step's own wall-clock guard (200s) bounds the
+    // real work; the finish budget must ALSO cover ~4 step boundaries × up to
+    // 60s of account-concurrency queue wait (#1069 — this fn was cancelled at
+    // exactly 300s on 2026-08-31 and 2026-09-02, chopping the post-batch
+    // steps). Finite per ADR-0019; guarded by inngestFinishBudgets.test.ts.
+    timeouts: { finish: "10m" },
   },
   [
-    { cron: "0 */3 * * *" },
+    // :10, not :00 (#1069): the top of the hour is the fleet's worst
+    // concurrency pileup (hourly + */3 + */4 + */6 + */12 crons all fire).
+    // Same 3h cadence; netcraft-auto's derived cron-ordering test still holds
+    // (first verdict pass after the 09:00 submit is now 12:10 < 13:00).
+    { cron: "10 */3 * * *" },
     { event: "shopfront/clone.urlscan-retrieve.manual-trigger.v1" },
   ],
   withAxiomLogging({ fnId: "shopfront-clone-urlscan-retrieve" }, async ({ step }) => {
@@ -346,7 +355,10 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
     });
 
     await step.run("log-cost", async () => {
-      logCost({
+      // Awaited (#1069): a finish-cancelled run kills waitUntil promises, so
+      // fire-and-forget rows were being lost. Awaiting makes the row part of
+      // the step's work.
+      await logCostAsync({
         feature: "shopfront_clone_urlscan",
         provider: "urlscan",
         operation: "retrieve_batch",

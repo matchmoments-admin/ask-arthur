@@ -75,7 +75,11 @@ export const cloneWatchEnforcementExecute = inngest.createFunction(
     name: "Clone-Watch: enforcement execute (auto blocklist send)",
     retries: 2,
     concurrency: { limit: 1 },
-    timeouts: { finish: "5m" },
+    // Raised (#1069): step boundaries queue for the account's 5 Hobby-plan
+    // concurrency slots (~30–60s each under contention); the old budget
+    // cancelled healthy runs. Finite per ADR-0019; floor guarded by
+    // inngestFinishBudgets.test.ts.
+    timeouts: { finish: "8m" },
   },
   [
     { cron: "15 */3 * * *" },

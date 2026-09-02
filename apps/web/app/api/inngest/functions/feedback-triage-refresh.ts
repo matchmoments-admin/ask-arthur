@@ -32,7 +32,10 @@ export const feedbackTriageRefresh = inngest.createFunction(
   // on the hot MV. This is an admin triage view (30-day sliding window, decoupled
   // from cron cadence), so hourly freshness is ample — no data loss, just halved
   // tick volume (1,440 → 720 runs/mo).
-  { cron: "0 * * * *" },
+  // :50, not :00 (#1069): the top of the hour is the fleet's worst
+  // concurrency pileup; this hourly change-guarded refresh does not care
+  // which minute it runs.
+  { cron: "50 * * * *" },
   withAxiomLogging({ fnId: "feedback-triage-refresh" }, async ({ step }) => {
     const supabase = createServiceClient();
     if (!supabase) {

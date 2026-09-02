@@ -460,6 +460,16 @@ Shipped across PRs #424 / #425 / #431 / #432 / #433; hardened across #468 / #469
 
 ### Netcraft false-negative reporter + lifecycle reconciler (v215–v219)
 
+> **`submitted_to->netcraft->>'state'` is a FOSSIL — do not read it as a live
+> signal (2026-09-02, #1063).** It was written only by the rollup poll
+> (`shopfront-clone-poll-netcraft`, structurally dead, DELETED in #1069) and is
+> `null` on every submission since ~2026-07-20. The live outcome signals are
+> `lifecycle_state` plus the `netcraft_declined_at` / `takedown_at` /
+> `re_takedown_at` stamps, all written by `apply_netcraft_reconcile`. Note the
+> reconcile's no-downgrade rule also means a **weaponised** row is never marked
+> `declined` — post-v284 "decline rate" is structurally unmeasurable for the
+> weaponised cohort; the success signal to watch is takedown conversions.
+
 The per-URL flow (PRs #701/#702/#703, all default-OFF) that reads
 `GET /submission/{uuid}/urls` (keyless — no API key), drives the lifecycle, and
 files false-negative `report_issue` escalations. Plans:

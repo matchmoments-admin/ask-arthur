@@ -261,7 +261,11 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
     // 6m (was 4m): the v250 resubmit lane adds a liveness sweep + a second
     // bulk POST. Still under the 10m pg-stuck-query-watchdog edge, and the slow
     // part is external HTTP rather than a PG backend.
-    timeouts: { finish: "6m" },
+    // 10m, not 6m (#1069): budget for step boundaries queueing on the
+    // account's 5 Hobby-plan concurrency slots (~30–60s each under
+    // contention). Finite per ADR-0019; guarded by
+    // inngestFinishBudgets.test.ts.
+    timeouts: { finish: "10m" },
   },
   [
     // 13:00 UTC — deliberately AFTER urlscan-retrieve's 12:00 pass, so the

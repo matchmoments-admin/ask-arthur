@@ -3,7 +3,7 @@ import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logg
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
-import { logCost } from "@/lib/cost-telemetry";
+import { logCostAsync } from "@/lib/cost-telemetry";
 import {
   submitCloneCandidate,
   type CloneCandidate,
@@ -73,7 +73,13 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
     // fires once, so the real daily figure is SUBMIT_BATCH_LIMIT, and 40 runs
     // is ample headroom for operator re-fires.
     throttle: { limit: 40, period: "1d" },
-    timeouts: { finish: "5m" },
+    // 10m, not 5m: the batch wall-clock guard (200s) bounds real work; the
+    // finish budget must also cover ~4 step boundaries × up to 60s of
+    // account-concurrency queue wait (#1069 — the 2026-08-31 run was
+    // cancelled mid-flight and its leftovers waited a full day because this
+    // cron fires once daily). Finite per ADR-0019; guarded by
+    // inngestFinishBudgets.test.ts.
+    timeouts: { finish: "10m" },
   },
   [
     { cron: "0 9 * * *" },
@@ -132,7 +138,7 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
       // retired rows must not be invisible.
       if (dormant > 0) {
         await step.run("log-cost-dormant-only", async () => {
-          logCost({
+          await logCostAsync({
             feature: "shopfront_clone_urlscan",
             provider: "urlscan",
             operation: "submit_batch",
@@ -198,7 +204,10 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
     const { submitted, submitFailed, rateLimited, reputationHits } = batch;
 
     await step.run("log-cost", async () => {
-      logCost({
+      // Awaited (#1069): the Aug 31 submit run was finish-cancelled after the
+      // batch step and this row silently vanished — the day's submit telemetry
+      // simply did not exist. Awaiting binds the row to the step.
+      await logCostAsync({
         feature: "shopfront_clone_urlscan",
         provider: "urlscan",
         operation: "submit_batch",

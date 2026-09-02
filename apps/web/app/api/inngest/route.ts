@@ -33,7 +33,6 @@ import { cloneWatchNotifyBrand } from "./functions/clone-watch-notify-brand";
 import { cloneWatchWeeklyDigest } from "./functions/clone-watch-weekly-digest";
 // Phase B — poll Netcraft for takedown status every 30 min. Powers the
 // median time-to-takedown metric in the dashboard + weekly digest.
-import { cloneWatchPollNetcraft } from "./functions/clone-watch-poll-netcraft";
 // Lifecycle re-check loop (Wave 0 PR-B) — re-scans monitoring/declined
 // lookalikes so a domain that weaponises after its first scan is caught and
 // promoted to 'weaponised' (→ shopfront/clone.weaponised.v1).
@@ -120,7 +119,6 @@ const appFunctions = [
   cloneWatchNotifyBrand,
   cloneWatchWeeklyDigest,
   // Clone-watch measurement closure Phase B (v145)
-  cloneWatchPollNetcraft,
   cloneWatchLifecycleRecheck,
   cloneWatchEnforcementPlan,
   // F1 — brand-facing weaponisation early-warning alert (v220)

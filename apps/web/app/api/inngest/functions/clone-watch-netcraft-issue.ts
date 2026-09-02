@@ -132,7 +132,10 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
     // a POST + ~4-6 checkpointed steps per uuid; 5m had near-zero headroom and
     // a mid-run cancellation skips the end-of-run autobrake + heartbeat (the
     // reconciler's PR #706 lesson). Still under the 10m watchdog.
-    timeouts: { finish: "8m" },
+    // 12m, not 8m (#1069): same work as before, but step boundaries now
+    // queue for account-concurrency slots (~30–60s under contention). Finite
+    // per ADR-0019; guarded by inngestFinishBudgets.test.ts.
+    timeouts: { finish: "12m" },
   },
   [
     { cron: "0 11 * * *" },

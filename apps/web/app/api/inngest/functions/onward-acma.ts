@@ -37,7 +37,10 @@ export const onwardAcmaEmailSpam = inngest.createFunction(
   {
     id: "report-onward-acma-email-spam",
     concurrency: { limit: 2 },
-    timeouts: { finish: "2m" },
+    // Raised (#1069): step boundaries queue for the account's 5 Hobby-plan
+    // concurrency slots; the old budget could cancel healthy runs. Floor
+    // guarded by inngestFinishBudgets.test.ts.
+    timeouts: { finish: "5m" },
     name: "Onward report: ACMA spam intake",
     retries: 4,
     rateLimit: {

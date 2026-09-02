@@ -172,7 +172,11 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
     // 8m: up to 50 sequential urlscan submits (HTTP) per run + marks. Still
     // well under the 10m pg-stuck-query-watchdog edge (the slow part is
     // external HTTP, not PG).
-    timeouts: { finish: "8m" },
+    // 15m, not 8m (#1069): the inline rescan step legitimately runs minutes
+    // (50 rechecks incl. urlscan submits), and step boundaries now queue for
+    // account-concurrency slots (~30–60s each under contention). Finite per
+    // ADR-0019; guarded by inngestFinishBudgets.test.ts.
+    timeouts: { finish: "15m" },
   },
   [
     // Offset from urlscan-retrieve (0 */3) so a rescan submit and a retrieve

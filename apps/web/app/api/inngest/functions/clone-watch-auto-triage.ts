@@ -137,7 +137,11 @@ export const cloneWatchAutoTriage = inngest.createFunction(
   {
     id: "clone-watch-auto-triage",
     name: "Clone-watch: auto-triage the confident, live tail",
-    timeouts: { finish: "5m" },
+    // Raised (#1069): step boundaries queue for the account's 5 Hobby-plan
+    // concurrency slots (~30–60s each under contention); the old budget
+    // cancelled healthy runs. Finite per ADR-0019; floor guarded by
+    // inngestFinishBudgets.test.ts.
+    timeouts: { finish: "8m" },
     retries: 2,
   },
   { cron: "0 13 * * *" }, // daily, after the 08:30 NRD ingest + urlscan/preclassify
