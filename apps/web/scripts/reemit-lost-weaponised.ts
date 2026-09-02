@@ -11,19 +11,30 @@
  *
  * THE EVENT-ID SUFFIX IS NOT ENOUGH ON ITS OWN, and this cost a silent no-op
  * on the first real run (2026-09-02). There are TWO dedup layers:
- *   1. event-send dedup, keyed on the event id — the suffix defeats this; and
+ *   1. event-send dedup, keyed on the event id; and
  *   2. `idempotency: "event.data.alertId"` on notify-weaponised itself
- *      (clone-watch-notify-weaponised.ts) — a FUNCTION-level key that the
- *      suffix does not touch, with a 24h window.
- * So an alert whose notify run happened (or was cancelled) less than 24h ago
- * is deduped at layer 2: the run completes in ~0.3s having done nothing, and
- * the alert stays unnotified while the script reports success. Alert 3713
- * weaponised 12:04 and was re-emitted 21:41 — 9.6h later — and was silently
- * dropped exactly this way, while five older alerts in the same batch ran fine.
+ *      (clone-watch-notify-weaponised.ts) — a FUNCTION-level key that no event
+ *      id can touch, with a 24h window.
+ * So an alert whose notify run happened less than 24h ago is deduped at layer
+ * 2: the run completes in ~0.3s having done nothing, and the alert stays
+ * unnotified while the script reports success. Alert 3713 weaponised 12:04 and
+ * was re-emitted 21:41 — 9.6h later — and was dropped exactly this way, while
+ * five older alerts in the same batch ran fine.
  *
- * Hence RECOVERY_MIN_AGE_HOURS below: alerts too fresh to escape function
- * idempotency are REPORTED AND SKIPPED rather than sent into a black hole.
- * They need no intervention anyway — re-run after the window lapses.
+ * ANCHORING THE AGE CHECK IS THE SUBTLE PART. Layer 2's window restarts on
+ * every RUN CREATED for that alertId, not on `weaponised_at` — including runs
+ * this script creates, and including runs that return early without stamping
+ * (notify-weaponised exits before its stamp when its feature flags are off).
+ * So the first version of this guard, which measured from `weaponised_at`,
+ * still no-opped on exactly the operator flow it was written for: recovery run
+ * fails, alert re-appears in the worklist, operator re-runs the same day, and
+ * the event is swallowed again while the output says "sent". The age is now
+ * measured from the LAST KNOWN RUN — `weaponised_notified_at` (the emit that
+ * created the original run) or this script's own recorded attempt, whichever
+ * is later — and every emit records itself so repeat runs stay honest.
+ *
+ * The event id carries a full timestamp rather than a date, so layer 1 is out
+ * of the picture entirely and only layer 2 has to be reasoned about.
  *
  * The standing detector is the `unnotified_weaponised` field on
  * `cost_telemetry WHERE feature='shopfront_clone_urlscan'` (written by
@@ -67,6 +78,8 @@ interface LostAlert {
   candidate_url: string;
   recheck_count: number | null;
   weaponised_at: string;
+  /** Hours since the last run that consumed the idempotency key (DB clock). */
+  hours_since_last_run: number;
 }
 
 /**
@@ -82,7 +95,18 @@ const RECOVERY_MIN_AGE_HOURS = 24;
 // that the consumer must have finished, and carrying no completion stamp.
 const LOST_ALERTS_SQL = `
   SELECT a.id, a.candidate_domain, a.candidate_url, a.recheck_count,
-         a.weaponised_at
+         a.weaponised_at,
+         -- Age since the LAST run that consumed the idempotency key, computed
+         -- with the DATABASE clock. Doing this in SQL keeps one clock in play
+         -- and removes the NaN hole a client-side Date.parse split leaves (a
+         -- row that parses to NaN falls out of BOTH buckets and vanishes from
+         -- the output, which is the ambiguity this script exists to end).
+         EXTRACT(EPOCH FROM (now() - GREATEST(
+           a.weaponised_at,
+           COALESCE(a.weaponised_notified_at, a.weaponised_at),
+           COALESCE((a.submitted_to->'weaponised_recovery'->>'at')::timestamptz,
+                    a.weaponised_at)
+         ))) / 3600.0 AS hours_since_last_run
     FROM shopfront_clone_alerts a
    WHERE a.weaponised_at IS NOT NULL
      AND a.weaponised_at > now() - interval '30 days'
@@ -100,10 +124,10 @@ async function main() {
   const all = JSON.parse(body) as LostAlert[];
 
   // Split, never silently filter: an operator who is told "6 lost" and sees 5
-  // recovered must be able to see where the sixth went.
-  const cutoffMs = Date.now() - RECOVERY_MIN_AGE_HOURS * 3_600_000;
-  const rows = all.filter((r) => Date.parse(r.weaponised_at) < cutoffMs);
-  const tooFresh = all.filter((r) => Date.parse(r.weaponised_at) >= cutoffMs);
+  // recovered must be able to see where the sixth went. The age comes from SQL
+  // (DB clock, and null-safe), so no row can fall out of both buckets.
+  const rows = all.filter((r) => Number(r.hours_since_last_run) >= RECOVERY_MIN_AGE_HOURS);
+  const tooFresh = all.filter((r) => Number(r.hours_since_last_run) < RECOVERY_MIN_AGE_HOURS);
 
   console.log(`lost weaponised alerts: ${all.length}`);
   for (const r of rows) console.log(`  #${r.id} ${r.candidate_domain}`);
@@ -113,10 +137,13 @@ async function main() {
         ` re-emitting these would be a silent no-op:`,
     );
     for (const r of tooFresh) {
-      const hrs = ((Date.now() - Date.parse(r.weaponised_at)) / 3_600_000).toFixed(1);
+      const hrs = Number(r.hours_since_last_run);
+      const retryAfter = new Date(
+        Date.now() + (RECOVERY_MIN_AGE_HOURS - hrs) * 3_600_000,
+      ).toISOString();
       console.log(
-        `  #${r.id} ${r.candidate_domain} (weaponised ${hrs}h ago — retry after` +
-          ` ${new Date(Date.parse(r.weaponised_at) + RECOVERY_MIN_AGE_HOURS * 3_600_000).toISOString()})`,
+        `  #${r.id} ${r.candidate_domain} (last run ${hrs.toFixed(1)}h ago —` +
+          ` retry after ~${retryAfter})`,
       );
     }
   }
@@ -126,12 +153,15 @@ async function main() {
     return;
   }
 
-  const date = new Date().toISOString().slice(0, 10);
+  // Full timestamp, not a date: a date-granular suffix meant two runs on the
+  // same UTC day produced byte-identical event ids, so the second was dropped
+  // at layer 1 as well — silently, with an HTTP 200 "sent N events".
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const events = rows.map((r) => {
     const via = (r.recheck_count ?? 0) > 0 ? "recheck" : "initial";
     return {
       name: "shopfront/clone.weaponised.v1",
-      id: `clone-weaponised-${r.id}-${via}-recovery-${date}`,
+      id: `clone-weaponised-${r.id}-${via}-recovery-${stamp}`,
       data: {
         alertId: r.id,
         candidateDomain: r.candidate_domain,
@@ -149,6 +179,25 @@ async function main() {
   console.log(`\nsent ${events.length} events — HTTP ${res.status}`);
   console.log((await res.text()).slice(0, 300));
   if (res.status >= 300) process.exit(1);
+
+  // Record THIS attempt. Nothing else on the row marks it: a recovery run that
+  // is cancelled leaves no trace, so without this the next run measures age
+  // from the original emit, believes the window has lapsed, and is swallowed
+  // again — the same silent no-op one layer up.
+  const ids = rows.map((r) => r.id).join(",");
+  const stampSql = `
+    UPDATE shopfront_clone_alerts
+       SET submitted_to = COALESCE(submitted_to, '{}'::jsonb)
+             || jsonb_build_object('weaponised_recovery',
+                  jsonb_build_object('at', now(), 'events', ${events.length}))
+     WHERE id IN (${ids})`;
+  const stamped = await runSql(stampSql);
+  if (stamped.status >= 300) {
+    console.error(
+      `WARNING: emitted but failed to record the attempt (HTTP ${stamped.status}).` +
+        ` The next run may treat these as eligible and be silently deduped.`,
+    );
+  }
 }
 
 main().catch((err) => {
