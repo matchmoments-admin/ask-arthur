@@ -85,10 +85,18 @@ const REPLY_TO_EMAIL = "brendan@askarthur.au";
 const DASHBOARD_URL = "https://askarthur.au/admin/clone-watch#approvals";
 const BRAND_COOLDOWN_HOURS = 24;
 const MAX_CANDIDATES_PER_BATCH = 50;
+// Groups per run. MAX_CANDIDATES_PER_BATCH bounds the rows INSIDE a group; the
+// NUMBER of groups was unbounded (one per brand+recipient in the worklist), and
+// each group costs 6 step boundaries — so a wide day could not state a
+// worst-case runtime at all, which is what a finish budget has to be sized
+// against (#1069). Oldest-first, and the tail is picked up by tomorrow's run:
+// the worklist is a cooldown-filtered queue, so deferring a group never drops
+// it. 10 groups x 6 boundaries keeps a run inside a ~31m budget.
+const MAX_GROUPS_PER_RUN = 10;
 
-// inngest-finish-budget: 59 boundaries — 9 static + 5 per-batch steps
-// (render/assign/mark-sent/record-sent/log-cost) x the 10 brand groups a run
-// realistically stages. See #1074 for the batching fold.
+// inngest-finish-budget: 69 boundaries — 9 static + 6 per-group steps
+// (mint-batch-id/render/assign/mark-sent/record-sent/log-cost) x
+// MAX_GROUPS_PER_RUN (10). See #1074 for the batching fold.
 export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
   {
     id: "shopfront-clone-notify-brand-prepare",
@@ -98,7 +106,7 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
     // { limit: 1 }` shape — same "no overlapping runs" guarantee, but the
     // slot releases cleanly on cancel/timeout/error. See PR #455.
     singleton: { mode: "skip" },
-    timeouts: { finish: "31m" },
+    timeouts: { finish: "36m" },
   },
   [
     { cron: "30 9 * * *" },
@@ -211,19 +219,29 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
         ok: true,
         batches_prepared: 0,
         groups_skipped_cooldown: groupsSkippedCooldown,
+        // Nothing eligible, so nothing could be deferred by the run cap.
+        groups_deferred_for_cap: 0,
         reason: "all_brands_within_cooldown",
       };
     }
 
     // Cap candidates per batch. Oldest 50 ship today; remainder stays
     // unbatched for tomorrow.
-    const cappedGroups = groups.map((g) => ({
-      ...g,
-      rows: g.rows
-        .slice()
-        .sort((a, b) => a.enqueued_at.localeCompare(b.enqueued_at))
-        .slice(0, MAX_CANDIDATES_PER_BATCH),
-    }));
+    const cappedGroups = groups
+      .map((g) => ({
+        ...g,
+        rows: g.rows
+          .slice()
+          .sort((a, b) => a.enqueued_at.localeCompare(b.enqueued_at))
+          .slice(0, MAX_CANDIDATES_PER_BATCH),
+      }))
+      // Oldest-waiting brand first, so a deferred group is the freshest one
+      // rather than an arbitrary one, and cannot be starved run after run.
+      .sort((a, b) =>
+        (a.rows[0]?.enqueued_at ?? "").localeCompare(b.rows[0]?.enqueued_at ?? ""),
+      )
+      .slice(0, MAX_GROUPS_PER_RUN);
+    const groupsDeferredForCap = Math.max(0, groups.length - cappedGroups.length);
 
     const autoSend = featureFlags.shopfrontCloneNotifyBrandAutoSend;
 
@@ -424,6 +442,8 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
             auto_sent: autoSent,
             groups_failed: groupsFailed,
             groups_skipped_cooldown: groupsSkippedCooldown,
+      // >0 means brands waited on MAX_GROUPS_PER_RUN and ship next run (#1069).
+      groups_deferred_for_cap: groupsDeferredForCap,
           },
         });
       });
@@ -434,6 +454,8 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
       auto_sent: autoSent,
       groups_failed: groupsFailed,
       groups_skipped_cooldown: groupsSkippedCooldown,
+      // >0 means brands waited on MAX_GROUPS_PER_RUN and ship next run (#1069).
+      groups_deferred_for_cap: groupsDeferredForCap,
       mode: autoSend ? "auto_send" : "manual_approval",
     });
 
@@ -443,6 +465,8 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
       auto_sent: autoSent,
       groups_failed: groupsFailed,
       groups_skipped_cooldown: groupsSkippedCooldown,
+      // >0 means brands waited on MAX_GROUPS_PER_RUN and ship next run (#1069).
+      groups_deferred_for_cap: groupsDeferredForCap,
       mode: autoSend ? "auto_send" : "manual_approval",
     };
   }),
