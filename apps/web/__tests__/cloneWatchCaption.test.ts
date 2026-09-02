@@ -55,6 +55,11 @@ const JUNE: CloneWatchReportCard = {
     totalPct: null,
     brandsDelta: 129,
   },
+  brandTrends: {
+    claimable: [],
+    excluded: { claimable: 0, coverageStarted: 0, coverageEnded: 0, belowFloor: 0, unknown: 0 },
+    publishable: true,
+  },
   superFund: { brand: "hesta.com.au", clones: 35, auRank: 2 },
   // June 2026 genuinely led with the fund — the ladder only blocks a REPEAT.
   spotlight: { kind: "super_fund" as const, brand: "hesta.com.au", clones: 35, auRank: 2 },

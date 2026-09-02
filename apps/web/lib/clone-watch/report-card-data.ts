@@ -21,6 +21,12 @@ import {
 } from "@/lib/clone-watch/duration-kpis";
 import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
 import {
+  classifyTrend,
+  summariseTrendExclusions,
+  type BrandCoverage,
+  type TrendVerdict,
+} from "@/lib/clone-watch/brand-coverage";
+import {
   computeTargetingIntelByBrand,
   type HostingSummary,
   type InfrastructureCluster,
@@ -188,6 +194,14 @@ export interface CloneWatchReportCard {
    *  because the recurring-automation build re-introduces a conditional MoM slide
    *  once there's an honest delta (July-vs-June onward). */
   mom: MonthOverMonth;
+  /**
+   * Per-brand month-over-month verdicts + the exclusion counts the published
+   * caveat is built from (#1075). Computed live here rather than read back from
+   * clone_watch_monthly_brand_stats, so the admin preview and the published
+   * post cannot disagree, and so the cron has no write-then-read ordering
+   * hazard with its own later step.
+   */
+  brandTrends: BrandTrendGate;
   /** The highest-ranked AU super fund among the impersonated brands, if any —
    *  powers the "super fund" spotlight slide. null when no watchlisted fund
    *  appears this month (the slide falls back to the evergreen "why it works"). */
@@ -346,6 +360,18 @@ async function fetchMonthByBrand(
   }
   const rows = raw.filter((r) => !isFpBrand(r.inferred_target_domain));
   return { byBrand: aggregateClonesByDomain(rows), rows };
+}
+
+export interface BrandTrendGate {
+  /** Brands whose movement may be published, largest rise first. */
+  claimable: Array<{ brand: string; clones: number; priorClones: number; delta: number; pct: number | null }>;
+  /** Why the rest were withheld — the caveat's numbers. */
+  excluded: ReturnType<typeof summariseTrendExclusions>;
+  /**
+   * False when coverage could not be read at all. The gate fails closed: no
+   * trend claim may be published from a card whose coverage basis is unknown.
+   */
+  publishable: boolean;
 }
 
 export interface BrandTrendRow {
@@ -567,6 +593,69 @@ export async function getCloneWatchReportCard(
     periodMonth.slice(0, 7) >= FIRST_FULL_MONTH &&
     prevWin.periodMonth.slice(0, 7) >= FIRST_FULL_MONTH &&
     prior.total > 0;
+  // Coverage for BOTH months, keyed by brand domain — the key byBrand uses.
+  // A read failure yields an empty map, which makes every verdict
+  // coverage_unknown and the gate unpublishable; degraded reads must never
+  // quietly become "no exclusions".
+  const coverageByBrand = new Map<string, BrandCoverage>();
+  let coverageReadOk = true;
+  {
+    const { data, error } = await sb
+      .from("brand_coverage_history")
+      .select("brand, brand_normalized, brand_domain, covered_from, covered_to");
+    if (error) {
+      coverageReadOk = false;
+      logger.warn("report-card: brand coverage read failed", { error: error.message });
+    } else {
+      for (const r of data ?? []) {
+        const row = r as {
+          brand_normalized: string;
+          brand_domain: string;
+          covered_from: string;
+          covered_to: string | null;
+        };
+        // Keep the EARLIEST open window per brand: a brand re-added after a gap
+        // has two rows, and the later one would understate its coverage.
+        const existing = coverageByBrand.get(row.brand_domain);
+        if (!existing || row.covered_from < existing.coveredFrom) {
+          coverageByBrand.set(row.brand_domain, {
+            brandDomain: row.brand_domain,
+            brandNormalized: row.brand_normalized,
+            coveredFrom: row.covered_from,
+            coveredTo: row.covered_to,
+          });
+        }
+      }
+    }
+  }
+
+  const priorYm = new Date(`${periodMonth.slice(0, 7)}-01T00:00:00Z`);
+  priorYm.setUTCMonth(priorYm.getUTCMonth() - 1);
+  const priorPeriod = priorYm.toISOString().slice(0, 7);
+  const verdicts: TrendVerdict[] = [];
+  const claimable: BrandTrendGate["claimable"] = [];
+  for (const [brand, m] of byBrand) {
+    const priorClones = priorByBrand.get(brand)?.detected ?? 0;
+    const v = classifyTrend({
+      currentClones: m.detected,
+      priorClones,
+      currentMonth: periodMonth.slice(0, 7),
+      priorMonth: priorPeriod,
+      coverage: coverageByBrand.get(brand),
+    });
+    verdicts.push(v);
+    if (v.kind === "claimable" && v.delta !== 0) {
+      claimable.push({ brand, clones: m.detected, priorClones, delta: v.delta, pct: v.pct });
+    }
+  }
+  claimable.sort((a, b) => b.delta - a.delta || a.brand.localeCompare(b.brand));
+
+  const brandTrends: BrandTrendGate = {
+    claimable,
+    excluded: summariseTrendExclusions(verdicts),
+    publishable: coverageReadOk && coverageByBrand.size > 0,
+  };
+
   const mom: MonthOverMonth = {
     available: momAvailable,
     priorLabel: prevWin.label,
@@ -709,6 +798,7 @@ export async function getCloneWatchReportCard(
     topRegistrars,
     unknownRegistrarCount: unknownCount,
     mom,
+    brandTrends,
     superFund,
     spotlight,
     // The vendor-gap clock + weaponisation cuts, computed over the SAME

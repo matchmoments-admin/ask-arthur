@@ -102,16 +102,35 @@ describe("classifyTrend", () => {
     expect(v.pct).toBe(87);
   });
 
-  it("ALLOWS Kmart 21 -> 34 with a percentage", () => {
+  it("ALLOWS Bonds 16 -> 28 with a percentage", () => {
     const v = classifyTrend({
-      currentClones: 34,
-      priorClones: 21,
+      currentClones: 28,
+      priorClones: 16,
       currentMonth: AUG,
       priorMonth: JUL,
-      coverage: { ...LONG_COVERED, brandNormalized: "kmart" },
+      coverage: { ...LONG_COVERED, brandDomain: "bonds.com.au", brandNormalized: "bonds" },
     });
     expect(v.kind).toBe("claimable");
-    expect(v.pct).toBe(62);
+    expect(v.pct).toBe(75);
+  });
+
+  it("uses the DOMAIN key's figures, not the brand-name key's", () => {
+    // Kmart is why this matters. Aggregating by target_brand_normalized splits
+    // kmart.com.au across TWO name keys ("kmart" 21 + "kmartaustralia" 11), so
+    // July reads 21 and Kmart looks like a +62% riser. By the domain key — the
+    // one the pipeline actually aggregates on — July is 32 and the real
+    // movement is +6%. 72 rows fleet-wide have disagreeing keys. A name-keyed
+    // query produces a plausible, publishable, wrong number.
+    const v = classifyTrend({
+      currentClones: 34,
+      priorClones: 32,
+      currentMonth: AUG,
+      priorMonth: JUL,
+      coverage: { ...LONG_COVERED, brandDomain: "kmart.com.au", brandNormalized: "kmart" },
+    });
+    expect(v.kind).toBe("claimable");
+    expect(v.delta).toBe(2);
+    expect(v.pct).toBe(6);
   });
 
   it("BLOCKS NAB 2 -> 1 as below_floor", () => {
