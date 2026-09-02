@@ -133,11 +133,19 @@ export function toSummaryItem(alert: AlertRow): CloneWatchRunSummaryItem {
 import { isCandidateLive } from "@/lib/clone-watch/liveness";
 export { isCandidateLive };
 
+// inngest-finish-budget: 49 boundaries — 4 static + 3 per-item steps
+// (liveness/confirm/feed-entity) x AUTO_TRIAGE_RUN_CAP (15). Folding the
+// three into one batch step (urlscan-retrieve is the reference) would cut
+// this to ~7 and is the better fix; see #1074.
 export const cloneWatchAutoTriage = inngest.createFunction(
   {
     id: "clone-watch-auto-triage",
     name: "Clone-watch: auto-triage the confident, live tail",
-    timeouts: { finish: "5m" },
+    // Raised (#1069): step boundaries queue for the account's 5 Hobby-plan
+    // concurrency slots (~30–60s each under contention); the old budget
+    // cancelled healthy runs. Finite per ADR-0019; floor guarded by
+    // inngestFinishBudgets.test.ts.
+    timeouts: { finish: "26m" },
     retries: 2,
   },
   { cron: "0 13 * * *" }, // daily, after the 08:30 NRD ingest + urlscan/preclassify

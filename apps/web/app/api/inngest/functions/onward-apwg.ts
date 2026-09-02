@@ -17,11 +17,14 @@ import {
  */
 const APWG_INTAKE = "reportphishing@apwg.org";
 
+// inngest-finish-budget: 4 boundaries — this file has NO step.run of its own;
+// all four steps live in runUrlBlocklistOnward (lib/onward/url-blocklist-report.ts),
+// so static counting sees zero and would pass any budget.
 export const onwardApwg = inngest.createFunction(
   {
     id: "report-onward-apwg",
     concurrency: { limit: 2 },
-    timeouts: { finish: "2m" },
+    timeouts: { finish: "5m" },
     name: "Onward report: APWG eCrime Exchange",
     retries: 4,
     rateLimit: {

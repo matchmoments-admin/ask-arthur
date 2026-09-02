@@ -44,7 +44,11 @@ export const cloneWatchEnforcementPlan = inngest.createFunction(
     name: "Clone-Watch: enforcement plan (open cases)",
     retries: 2,
     concurrency: { limit: 3 },
-    timeouts: { finish: "3m" },
+    // Raised (#1069): step boundaries queue for the account's 5 Hobby-plan
+    // concurrency slots (~30–60s each under contention); the old budget
+    // cancelled healthy runs. Finite per ADR-0019; floor guarded by
+    // inngestFinishBudgets.test.ts.
+    timeouts: { finish: "6m" },
   },
   { event: CLONE_WATCH_WEAPONISED_EVENT },
   withAxiomLogging(

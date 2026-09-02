@@ -32,7 +32,11 @@ export const cloneWatchUrlscanScanOne = inngest.createFunction(
     retries: 1,
     concurrency: { limit: 3 },
     idempotency: "event.id",
-    timeouts: { finish: "2m" },
+    // Raised (#1069): step boundaries queue for the account's 5 Hobby-plan
+    // concurrency slots (~30–60s each under contention); the old budget
+    // cancelled healthy runs. Finite per ADR-0019; floor guarded by
+    // inngestFinishBudgets.test.ts.
+    timeouts: { finish: "5m" },
   },
   { event: CLONE_WATCH_SCAN_REQUESTED_EVENT },
   withAxiomLogging({ fnId: "shopfront-clone-urlscan-scan-one" }, async ({ event, step }) => {

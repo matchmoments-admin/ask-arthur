@@ -69,13 +69,19 @@ function reportText(row: PendingSendRow): string {
   ].join("\n");
 }
 
+// inngest-finish-budget: 29 boundaries — 4 static + 1 per-item send step x
+// SEND_BATCH_LIMIT (25). Batching the sends would cut this to ~5; see #1074.
 export const cloneWatchEnforcementExecute = inngest.createFunction(
   {
     id: "shopfront-clone-enforcement-execute",
     name: "Clone-Watch: enforcement execute (auto blocklist send)",
     retries: 2,
     concurrency: { limit: 1 },
-    timeouts: { finish: "5m" },
+    // Raised (#1069): step boundaries queue for the account's 5 Hobby-plan
+    // concurrency slots (~30–60s each under contention); the old budget
+    // cancelled healthy runs. Finite per ADR-0019; floor guarded by
+    // inngestFinishBudgets.test.ts.
+    timeouts: { finish: "16m" },
   },
   [
     { cron: "15 */3 * * *" },

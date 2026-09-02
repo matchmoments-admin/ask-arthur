@@ -104,7 +104,10 @@ export const phoneFootprintRefreshClaimer = inngest.createFunction(
   {
     id: "phone-footprint-refresh-claimer",
     singleton: { mode: "skip" },
-    timeouts: { finish: "4m" },
+    // Raised (#1069): step boundaries queue for the account's 5 Hobby-plan
+    // concurrency slots; the old budget could cancel healthy runs. Floor
+    // guarded by inngestFinishBudgets.test.ts.
+    timeouts: { finish: "8m" },
     name: "Phone Footprint: claim due refreshes",
     concurrency: { limit: 1 }, // one claimer at a time
     retries: 1,

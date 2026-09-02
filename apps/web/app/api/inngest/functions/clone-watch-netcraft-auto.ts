@@ -63,7 +63,7 @@ import { probeLivenessDetailed } from "@/lib/clone-watch/liveness";
  * predicate the issue reporter has enforced since v221 into the worklist RPC.
  *
  * The cron time is load-bearing, not cosmetic: urlscan-submit runs 09:00 and
- * urlscan-retrieve runs every 3h on the hour, so no verdict for the batch exists
+ * urlscan-retrieve runs every 3h at :10 (#1069), so no verdict for the batch exists
  * before 12:00. At 09:30 this lane could not have consulted the evidence even
  * if it wanted to — 407 alerts reached Netcraft with no scan at all. 13:00 is
  * chosen to sit AFTER the 12:00 retrieve. If you move retrieve, move this too,
@@ -261,10 +261,14 @@ export const cloneWatchNetcraftAuto = inngest.createFunction(
     // 6m (was 4m): the v250 resubmit lane adds a liveness sweep + a second
     // bulk POST. Still under the 10m pg-stuck-query-watchdog edge, and the slow
     // part is external HTTP rather than a PG backend.
-    timeouts: { finish: "6m" },
+    // 10m, not 6m (#1069): budget for step boundaries queueing on the
+    // account's 5 Hobby-plan concurrency slots (~30–60s each under
+    // contention). Finite per ADR-0019; guarded by
+    // inngestFinishBudgets.test.ts.
+    timeouts: { finish: "10m" },
   },
   [
-    // 13:00 UTC — deliberately AFTER urlscan-retrieve's 12:00 pass, so the
+    // 13:00 UTC — deliberately AFTER urlscan-retrieve's 12:10 pass, so the
     // v284 evidence gate has a verdict to read. See the header note.
     { cron: "0 13 * * *" },
     { event: "shopfront/clone.netcraft-auto.producer.manual-trigger.v1" },

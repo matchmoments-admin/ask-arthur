@@ -26,10 +26,12 @@ import { checkSSL } from "../ssl";
 
 const MAX_DOMAINS_PER_RUN = 20;
 
+// inngest-finish-budget: 23 boundaries — 3 static + 1 per-domain enrich step x
+// MAX_DOMAINS_PER_RUN (20).
 export const enrichmentFanOut = inngest.createFunction(
   {
     id: "pipeline-enrichment-fanout",
-    timeouts: { finish: "6m" },
+    timeouts: { finish: "13m" },
     name: "Pipeline: Enrich Pending URLs",
     concurrency: { limit: 1 }, // Only one enrichment run at a time
     // Defence-in-depth against manual re-trigger storms from the Inngest

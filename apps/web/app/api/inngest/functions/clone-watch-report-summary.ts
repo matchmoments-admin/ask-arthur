@@ -37,7 +37,11 @@ export const cloneWatchReportSummary = inngest.createFunction(
   {
     id: "clone-watch-report-summary",
     name: "Clone-Watch: monthly report summary snapshot",
-    timeouts: { finish: "2m" },
+    // Raised (#1069): step boundaries queue for the account's 5 Hobby-plan
+    // concurrency slots (~30–60s each under contention); the old budget
+    // cancelled healthy runs. Finite per ADR-0019; floor guarded by
+    // inngestFinishBudgets.test.ts.
+    timeouts: { finish: "6m" },
     retries: 2,
   },
   [

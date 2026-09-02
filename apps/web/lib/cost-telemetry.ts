@@ -109,13 +109,22 @@ export const PRICING = {
 } as const;
 
 /**
- * Fire-and-forget cost telemetry insert.
+ * Awaited cost telemetry insert. Never throws — a failed insert is a warn,
+ * because the paid call it measures has already happened.
  *
- * Wrapped in `waitUntil` so the Supabase write survives the response being
- * returned (Vercel may otherwise kill pending promises). No-ops if Supabase
- * is unreachable or misconfigured — never blocks or throws to the caller.
+ * Use this form inside Inngest `step.run` bodies. The fire-and-forget
+ * `logCost` below relies on `waitUntil`, and an Inngest run that is CANCELLED
+ * (e.g. a `timeouts.finish` breach) tears the invocation down before the
+ * deferred promise settles — measured 2026-09-01: 11 of 19 preclassify
+ * classifications had no cost row (#1061). Awaiting inside the step closes
+ * THAT window: the insert completes before the step does.
+ *
+ * It does NOT make the write retried or guaranteed. Like `logCost`, a failed
+ * insert is swallowed as a warn and the promise resolves, because the paid
+ * call being measured has already happened and telemetry must never fail the
+ * work. So this fixes loss-by-cancellation, not loss-by-insert-failure.
  */
-export function logCost(ev: CostEvent): void {
+export async function logCostAsync(ev: CostEvent): Promise<void> {
   const units = ev.units ?? 1;
   const unitCost = ev.unitCostUsd ?? 0;
   const total = ev.estimatedCostUsd ?? units * unitCost;
@@ -123,30 +132,40 @@ export function logCost(ev: CostEvent): void {
   const supabase = createServiceClient();
   if (!supabase) return;
 
-  const p: Promise<void> = (async () => {
-    try {
-      const { error } = await supabase.from("cost_telemetry").insert({
-        feature: ev.feature,
-        provider: ev.provider,
-        operation: ev.operation,
-        units,
-        unit_cost_usd: unitCost,
-        estimated_cost_usd: total,
-        metadata: ev.metadata ?? {},
-        user_id: ev.userId ?? null,
-        request_id: ev.requestId ?? null,
-      });
-      if (error) {
-        logger.warn("logCost insert failed", { error: String(error) });
-      }
-    } catch (err) {
-      // Telemetry must never throw to the caller (or surface as an unhandled
-      // rejection). A malformed/unavailable client is swallowed as a warn —
-      // the paid call it measures has already happened and must not be broken.
-      logger.warn("logCost insert threw", { error: String(err) });
+  try {
+    const { error } = await supabase.from("cost_telemetry").insert({
+      feature: ev.feature,
+      provider: ev.provider,
+      operation: ev.operation,
+      units,
+      unit_cost_usd: unitCost,
+      estimated_cost_usd: total,
+      metadata: ev.metadata ?? {},
+      user_id: ev.userId ?? null,
+      request_id: ev.requestId ?? null,
+    });
+    if (error) {
+      logger.warn("logCost insert failed", { error: String(error) });
     }
-  })();
+  } catch (err) {
+    // Telemetry must never throw to the caller. A malformed/unavailable
+    // client is swallowed as a warn — the paid call it measures has already
+    // happened and must not be broken.
+    logger.warn("logCost insert threw", { error: String(err) });
+  }
+}
 
+/**
+ * Fire-and-forget cost telemetry insert.
+ *
+ * Wrapped in `waitUntil` so the Supabase write survives the response being
+ * returned (Vercel may otherwise kill pending promises). No-ops if Supabase
+ * is unreachable or misconfigured — never blocks or throws to the caller.
+ *
+ * Inside Inngest steps prefer `logCostAsync` — see its doc comment.
+ */
+export function logCost(ev: CostEvent): void {
+  const p = logCostAsync(ev);
   try {
     waitUntil(p);
   } catch {

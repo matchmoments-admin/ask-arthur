@@ -519,7 +519,10 @@ export function aggregateClonesByDomain(
 export const reportBrandStewardship = inngest.createFunction(
   {
     id: "report-brand-stewardship",
-    timeouts: { finish: "4m" },
+    // Raised (#1069): step boundaries queue for the account's 5 Hobby-plan
+    // concurrency slots; the old budget could cancel healthy runs. Floor
+    // guarded by inngestFinishBudgets.test.ts.
+    timeouts: { finish: "8m" },
     name: "Brand Stewardship: monthly report aggregation",
     retries: 2,
   },

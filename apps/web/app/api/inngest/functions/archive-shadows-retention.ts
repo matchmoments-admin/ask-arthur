@@ -35,10 +35,13 @@ const LOOP_GUARD = 50;
 
 type ArchiveResult = { table_name: string; rows_moved: number };
 
+// inngest-finish-budget: 50 boundaries — 1 per-iteration archive-batch step x
+// LOOP_GUARD (50). Typical runs do 1-2 iterations; this is the worst case the
+// guard must not cancel mid-archive.
 export const archiveShadowsRetention = inngest.createFunction(
   {
     id: "archive-shadows-retention",
-    timeouts: { finish: "4m" },
+    timeouts: { finish: "26m" },
     name: "Archive shadows: nightly housekeeping (8 tables)",
     retries: 2,
   },

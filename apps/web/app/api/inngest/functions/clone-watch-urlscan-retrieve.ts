@@ -8,7 +8,7 @@ import { retrieveURLScanDetailed } from "@askarthur/scam-engine/urlscan";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
-import { logCost } from "@/lib/cost-telemetry";
+import { logCostAsync } from "@/lib/cost-telemetry";
 import {
   classifyScan,
   suggestTriageTransition,
@@ -63,10 +63,19 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
     name: "Clone-Watch: urlscan retrieve (batched)",
     retries: 1,
     concurrency: { limit: 3 },
-    timeouts: { finish: "5m" },
+    // 10m, not 5m. The batch step's own wall-clock guard (200s) bounds the
+    // real work; the finish budget must ALSO cover ~4 step boundaries × up to
+    // 60s of account-concurrency queue wait (#1069 — this fn was cancelled at
+    // exactly 300s on 2026-08-31 and 2026-09-02, chopping the post-batch
+    // steps). Finite per ADR-0019; guarded by inngestFinishBudgets.test.ts.
+    timeouts: { finish: "10m" },
   },
   [
-    { cron: "0 */3 * * *" },
+    // :10, not :00 (#1069): the top of the hour is the fleet's worst
+    // concurrency pileup (hourly + */3 + */4 + */6 + */12 crons all fire).
+    // Same 3h cadence; netcraft-auto's derived cron-ordering test still holds
+    // (first verdict pass after the 09:00 submit is now 12:10 < 13:00).
+    { cron: "10 */3 * * *" },
     { event: "shopfront/clone.urlscan-retrieve.manual-trigger.v1" },
   ],
   withAxiomLogging({ fnId: "shopfront-clone-urlscan-retrieve" }, async ({ step }) => {
@@ -345,8 +354,54 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
       return { emitted: rows.length };
     });
 
+    // Did the events we emit here actually RESULT in anything? (#1069)
+    //
+    // `weaponised_notified_at` marks that we SENT clone.weaponised.v1 — not
+    // that the consumer did its job. When notify-weaponised is finish-cancelled
+    // (its runs are 10+ steps, and a cancellation gets no retry, no error and
+    // no telemetry), the alert ends up emitted-but-never-notified and NOTHING
+    // notices: the emit worklist has already stamped it, so it never
+    // re-presents. Two episodes went unseen this way — 13 alerts 2026-08-03..10
+    // and 7 more 2026-08-29..09-02, including live PayPal and CommBank
+    // credential-phishing clones — and both were found only by a manual audit
+    // weeks later.
+    //
+    // So close the loop on the OUTCOME, not the send: count alerts weaponised
+    // long enough ago that the consumer must have finished, which carry neither
+    // the consumer's `weaponised_notification` stamp nor a queue row. The
+    // durable signal is the cost_telemetry row below (this file's logger is
+    // console-only); recover with apps/web/scripts/reemit-lost-weaponised.ts.
+    const unnotified = await step.run("count-unnotified-weaponised", async () => {
+      const { count, error } = await sb
+        .from("shopfront_clone_alerts")
+        .select("id", { count: "exact", head: true })
+        .not("weaponised_at", "is", null)
+        .gt("weaponised_at", new Date(Date.now() - 30 * 86_400_000).toISOString())
+        .lt("weaponised_at", new Date(Date.now() - 2 * 3_600_000).toISOString())
+        .not("submitted_to", "cs", '{"weaponised_notification":{}}');
+      // A failed head-count returns count=null AND error=null (204, no body),
+      // so `if (error)` alone is blind and `?? 0` prints a confident zero.
+      if (error || count === null) {
+        logger.warn("clone-watch: unnotified-weaponised probe failed", {
+          error: error?.message ?? "count_null_no_error",
+        });
+        return null;
+      }
+      return count;
+    });
+
+    if (unnotified !== null && unnotified > 0) {
+      logger.warn("clone-watch: weaponised alerts emitted but never notified", {
+        unnotified,
+        hint: "notify-weaponised runs were likely cancelled; see #1069",
+      });
+    }
+
     await step.run("log-cost", async () => {
-      logCost({
+      // Awaited (#1069): a finish-cancelled run kills waitUntil promises, so
+      // fire-and-forget rows were being lost. Awaiting makes the row part of
+      // the step's work.
+      await logCostAsync({
         feature: "shopfront_clone_urlscan",
         provider: "urlscan",
         operation: "retrieve_batch",
@@ -358,6 +413,8 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
           reputation_fallback: reputationFallback,
           skipped_not_our_signal: skippedNotOurSignal,
           quota_exhausted: quotaExhausted,
+          // null = the probe itself failed; 0 = genuinely none outstanding.
+          unnotified_weaponised: unnotified,
         },
       });
     });

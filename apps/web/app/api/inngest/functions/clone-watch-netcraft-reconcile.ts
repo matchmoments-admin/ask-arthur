@@ -75,6 +75,8 @@ interface ReconcileGroup {
   alerts: ReconcileAlert[];
 }
 
+// inngest-finish-budget: 27 boundaries — 3 static + 2 effective per-uuid
+// steps (fetch, then archived XOR apply) x UUID_LIMIT (12).
 export const cloneWatchNetcraftReconcile = inngest.createFunction(
   {
     id: "shopfront-clone-netcraft-reconcile",
@@ -84,7 +86,16 @@ export const cloneWatchNetcraftReconcile = inngest.createFunction(
     concurrency: { limit: 1 },
     // 8m finish (matches the poll fn) — the slow part is keyless Netcraft HTTP,
     // not a PG backend, so the 10m pg-stuck-query-watchdog is not at risk.
-    timeouts: { finish: "8m" },
+    // 12m, not 8m (#1069): per-uuid fetch/apply steps each queue for an
+    // account-concurrency slot (~30–60s under contention) on top of the slow
+    // keyless Netcraft HTTP. Finite per ADR-0019; guarded by
+    // inngestFinishBudgets.test.ts.
+    // NOTE: this budget now exceeds the 10m pg-stuck-query-watchdog window.
+    // That watchdog pages on a Postgres BACKEND running >=10 min; the long
+    // pole here is external HTTP plus account-concurrency queue wait, not a
+    // PG query, so a long run is expected and is not a watchdog condition
+    // (CLAUDE.md requires documenting exactly this).
+    timeouts: { finish: "15m" },
   },
   [
     // Twice daily (v284). Two 12-uuid runs clear ~24 uuids/day against a live
