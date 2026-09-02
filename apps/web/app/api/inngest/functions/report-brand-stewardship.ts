@@ -254,7 +254,14 @@ export interface CloneAlertRow {
     ip_rep?: { abuseConfidenceScore?: number };
     au_registrant?: { abnStatus?: string; nameMatchesAbn?: boolean | null };
   } | null;
-  /** Coarse actor fingerprint (v235) — clones sharing a key are one campaign. */
+  /**
+   * Coarse INFRASTRUCTURE fingerprint (v235): registrar + nameserver roots +
+   * ASN + cert issuer. Clones sharing a key share a stack — NOT necessarily an
+   * actor. The largest cohort-wide cluster is 169 domains, which is a
+   * mainstream registrar behind a CDN with a common cert issuer, i.e. the
+   * default build of a large slice of the internet. Only meaningful scoped
+   * within one brand; see targeting-intelligence.ts infrastructureClusters.
+   */
   campaign_key?: string | null;
   /** signals jsonb — weaponisation-risk input (F3). */
   signals?: unknown;
@@ -263,6 +270,13 @@ export interface CloneAlertRow {
     is_clone: boolean | null;
     confidence: number | null;
     attack_intent: string | null;
+    /**
+     * How the NAME is built (typosquat / homograph / lookalike_tld / ...).
+     * Publishable, unlike attack_intent, because the classifier's whole input
+     * is {brand, candidate_domain, candidate_url} — tactic is a property of
+     * that string; intent is a guess about a page it never loaded.
+     */
+    clone_tactic?: string | null;
   } | null;
   submitted_to: Record<string, unknown> | null;
   lifecycle_state: string | null;
