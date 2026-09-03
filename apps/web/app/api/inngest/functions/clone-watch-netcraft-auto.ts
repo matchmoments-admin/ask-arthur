@@ -73,6 +73,23 @@ import { probeLivenessDetailed } from "@/lib/clone-watch/liveness";
  * ~10 are likely_phishing. DAILY_CAP stays 50 as a ceiling, not a target. A
  * run reporting `no_candidates_or_cap_reached` is now the NORMAL case on a
  * quiet day and does not by itself indicate a starved lane.
+ *
+ * BATCH SIZE IS LOAD-BEARING FOR ESCALATION — do not undo it (measured
+ * 2026-08-24). Netcraft permits ONE issue report per submission uuid, and this
+ * lane marks every alert in a batch with the SAME uuid. So a batch of N alerts
+ * gets N-1 alerts that can never be escalated: they drain in the issue lane as
+ * `skipped: "submission_has_issue"`. Pre-v284 batches were 25-37 URLs
+ * (08-18..08-22 measured at 25/28/31/37/30), which stranded 25 live weaponised
+ * clones; v289 had to add a bypass so the resubmit lane could mint them fresh
+ * uuids. Post-v284 the evidence gate makes a batch 1-2 URLs, so one uuid maps
+ * to ~one escalatable alert and the problem dissolves.
+ *
+ * The protection is therefore the EVIDENCE GATE in the worklist RPC, NOT
+ * DAILY_CAP. Loosening that predicate re-fattens the batches and silently
+ * re-creates the bug. There is deliberately no unit test asserting DAILY_CAP
+ * here, because the cap is not what shrank the batches and a test on it would
+ * assert a control that is not doing the work. Watch it in prod instead — the
+ * query is in docs/ops/clone-watch-config.md § Submission precision.
  */
 
 const NETCRAFT_REPORT_ENDPOINT = "https://report.netcraft.com/api/v3/report/urls";
