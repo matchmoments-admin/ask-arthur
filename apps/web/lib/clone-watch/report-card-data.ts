@@ -43,6 +43,7 @@ import {
   type Mix,
 } from "@/lib/clone-watch/targeting-intelligence";
 import { rollupRegistrars } from "@/lib/clone-watch/registrar-canonical";
+import { SUPER_FUND_DOMAINS } from "@/lib/clone-watch/brand-display";
 
 /**
  * Read-only data layer for the monthly Clone-Watch LinkedIn report card
@@ -62,8 +63,16 @@ import { rollupRegistrars } from "@/lib/clone-watch/registrar-canonical";
  * demand from the admin route; safe to run any number of times.
  */
 
-// The window/source/FP filters come from clone-cohort.ts, so counts reconcile
-// with the digest by construction rather than by two files agreeing.
+// The window/source/FP filters come from clone-cohort.ts, shared with the
+// brand-stewardship digest — those two reconcile by construction.
+//
+// NOT the internal digest, which is a THIRD reader and does not:
+// clone-watch-internal-digest.ts keeps its own narrower SELECT, a 5,000 ceiling
+// against this file's 20,000, and — the part that actually bites — applies both
+// the `triage_status` predicate and `isFpBrand` ONLY when
+// `featureFlags.adminCloneSummaryDigest` is on. So "the digest's filters,
+// verbatim" is true of one digest and conditional on a flag for the other. Do
+// not restore the stronger claim until that reader is wired to the cohort too.
 //
 // A REACHABLE ceiling. The previous value was 5000, passed to `.limit()` and
 // then guarded with `raw.length === FETCH_LIMIT` — but PostgREST caps every
@@ -95,22 +104,6 @@ export interface RankedBrand {
  * so the ambiguous ones ("rest", "aware") can't false-match. Extend as funds are
  * added to the watchlist.
  */
-const SUPER_FUND_DOMAINS: ReadonlySet<string> = new Set([
-  "hesta.com.au",
-  "australiansuper.com",
-  "aware.com.au",
-  "hostplus.com.au",
-  "unisuper.com.au",
-  "rest.com.au",
-  "cbus.com.au",
-  "caresuper.com.au",
-  "australianretirementtrust.com.au",
-  "spiritsuper.com.au",
-  "ngssuper.com.au",
-  "brightersuper.com.au",
-  "telstrasuper.com.au",
-  "visionsuper.com.au",
-]);
 
 export interface SuperFundSpotlight {
   /** The impersonated fund's domain, e.g. "hesta.com.au". */
