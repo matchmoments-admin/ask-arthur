@@ -2,7 +2,12 @@ import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
+import { getActiveWatchlist } from "@askarthur/scam-engine/active-watchlist";
 import { priorMonthStart } from "@/app/api/inngest/functions/report-brand-stewardship";
+import {
+  logCoverageChange,
+  planCoverageSync,
+} from "@/lib/clone-watch/record-coverage";
 import {
   getCloneWatchReportCard,
   getCloneWatchTrendRows,
@@ -41,6 +46,9 @@ export const cloneWatchReportSummary = inngest.createFunction(
     // concurrency slots (~30–60s each under contention); the old budget
     // cancelled healthy runs. Finite per ADR-0019; floor guarded by
     // inngestFinishBudgets.test.ts.
+    // 5 step sites x 30s of account-concurrency queue wait + 60s slack = 210s
+    // floor, comfortably inside 360s, so adding the coverage snapshot needs no
+    // budget change. Verified by apps/web/__tests__/inngestFinishBudgets.test.ts.
     timeouts: { finish: "6m" },
     retries: 2,
   },
@@ -64,13 +72,74 @@ export const cloneWatchReportSummary = inngest.createFunction(
         return start.toISOString().slice(0, 7); // "YYYY-MM"
       });
 
+      // Record the CURRENT watchlist before computing anything (#1075).
+      //
+      // Ordering is load-bearing: "monitored in month M" is defined as present
+      // in the snapshot at the start of M and at the start of M+1, and this run
+      // IS the start of M+1. Snapshotting after the summary would leave the
+      // month it is reporting on ungated.
+      //
+      // Never fails the run: a coverage write that errors must not cost the
+      // month's report. The trend gate fails closed on a missing record, so the
+      // worst case is trend claims suppressed for the affected brands — loud in
+      // the caveat line rather than silently wrong.
+      const coverage = await step.run("snapshot-watchlist-coverage", async () => {
+        try {
+          const sb = createServiceClient();
+          if (!sb) return { skipped: "supabase_unavailable" };
+
+          const { data, error } = await sb
+            .from("brand_coverage_history")
+            .select("brand_normalized, covered_to")
+            .is("covered_to", null);
+          if (error) throw new Error(error.message);
+
+          const asOf = new Date().toISOString().slice(0, 10);
+          const plan = planCoverageSync(
+            await getActiveWatchlist(),
+            data ?? [],
+            asOf,
+          );
+
+          if (plan.toAdd.length > 0) {
+            const ins = await sb.from("brand_coverage_history").insert(plan.toAdd);
+            if (ins.error) throw new Error(ins.error.message);
+          }
+          if (plan.toClose.length > 0) {
+            const upd = await sb
+              .from("brand_coverage_history")
+              .update({ covered_to: asOf })
+              .in("brand_normalized", plan.toClose)
+              .is("covered_to", null);
+            if (upd.error) throw new Error(upd.error.message);
+          }
+          logCoverageChange(plan, asOf);
+          return {
+            added: plan.toAdd.length,
+            closed: plan.toClose.length,
+            unchanged: plan.unchanged,
+            // Present only when the planner refused a suspiciously large set of
+            // closures — surfaced in the run output so an operator reading the
+            // Inngest run sees it without going to Axiom.
+            ...(plan.closuresWithheld
+              ? { closuresWithheld: plan.closuresWithheld }
+              : {}),
+          };
+        } catch (err) {
+          logger.error("clone-watch: coverage snapshot failed", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+          return { errored: true };
+        }
+      });
+
       // Reconciled figures — identical numbers to /admin/report-card + the digest.
       const card = await step.run("compute-summary", () =>
         getCloneWatchReportCard(periodYm),
       );
 
       if (card.total === 0) {
-        return { ok: true, period: card.periodMonth, skipped: "no_clones" };
+        return { ok: true, period: card.periodMonth, coverage, skipped: "no_clones" };
       }
 
       const result = await step.run("upsert-summary", async () => {

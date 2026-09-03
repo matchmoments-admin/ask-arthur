@@ -44,22 +44,46 @@ describe("signalSummary", () => {
     );
     expect(s).toContain("3 weaponised");
     expect(s).toContain("14 live");
-    expect(s).toContain("28-domain campaign");
+    expect(s).toContain("28 domains on one stack");
     expect(s).toContain("40 lookalikes total");
   });
 
   it("shows just the total for a quiet brand", () => {
     expect(signalSummary(makeRow({ total_clones: 1 }))).toBe("1 lookalike total");
   });
+
+  it("never claims coordination — the same rule buildHookLine follows", () => {
+    // This line is read in the admin worklist immediately before the founder
+    // contacts the impersonated brand, so it is the worst place to overclaim.
+    // The hook line was fixed and pinned; its twin here was missed.
+    expect(
+      signalSummary(makeRow({ in_campaign: true, campaign_domain_count: 28 })),
+    ).not.toMatch(/coordinated|campaign|one actor/i);
+  });
+
+  it("does not call a cluster of ONE a campaign", () => {
+    // migration-v269's campaign_sizes has no `HAVING count > 1`, so a singleton
+    // yields campaign_domain_count = 1 with in_campaign true — which used to
+    // render "part of a coordinated campaign" off a single domain.
+    const s = signalSummary(makeRow({ in_campaign: true, campaign_domain_count: 1 }));
+    expect(s).not.toMatch(/coordinated|campaign/i);
+    expect(s).toContain("shared hosting stack");
+  });
 });
 
 describe("buildHookLine", () => {
-  it("leads with campaign coordination when in a campaign", () => {
+  it("leads with SHARED INFRASTRUCTURE, never a coordination claim", () => {
+    // campaign_key hashes registrar + nameservers + ASN + cert issuer —
+    // nothing actor-specific — so "a coordinated campaign" is a claim about
+    // attacker intent we cannot support, addressed to the brand being
+    // impersonated. This test previously pinned that wording; it now forbids
+    // it. See campaign-summary.ts and targeting-intelligence.ts.
     const h = buildHookLine(
       makeRow({ in_campaign: true, campaign_domain_count: 28, weaponised_count: 2 }),
     );
-    expect(h).toContain("coordinated campaign");
+    expect(h).not.toMatch(/coordinated|campaign|one actor/i);
     expect(h).toContain("28 lookalike domains");
+    expect(h).toContain("same registrar and hosting");
     expect(h).toContain("Kmart");
   });
 

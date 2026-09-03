@@ -1,4 +1,9 @@
 import type { CloneWatchReportCard } from "@/lib/clone-watch/report-card-data";
+import {
+  buildClassifierCaveat,
+  buildTldLine,
+  buildTrendDisclosure,
+} from "@/lib/clone-watch/targeting-copy";
 import { buildOutcomesBlock } from "@/lib/clone-watch/outcome-copy";
 import { prettyBrand } from "@/lib/clone-watch/brand-display";
 import { pickFurtherReading } from "@/lib/clone-watch/further-reading";
@@ -89,7 +94,15 @@ export function generateCloneWatchCaption(
   // ── Hook ────────────────────────────────────────────────────────────────
   const hook = `In ${month}, we detected ${card.total} newly-registered copycat domains impersonating brands Australians use every day.`;
   const method =
-    "Not confirmed scams — lookalike domains: freshly-registered web addresses built to resemble a real brand. We sweep new domain registrations against ~50 major Australian brands every day and review the matches by hand.";
+    // Brand count is read from the coverage record FOR THIS MONTH, not
+    // hard-coded and not from today's watchlist. The literal it first replaced
+    // said "~50" while the list held 293 — a six-fold understatement published
+    // every month. Reading `AU_BRAND_WATCHLIST.length` fixed that but left a
+    // subtler version: a card can be built for any past month, and the live
+    // length only grows, so re-exporting June with today's number overstates
+    // what we were actually sweeping then. Rounded down to the nearest ten so
+    // it stays true between watchlist edits.
+    `Not confirmed scams — lookalike domains: freshly-registered web addresses built to resemble a real brand. We sweep new domain registrations against ${Math.floor(card.watchlistSize / 10) * 10}+ major Australian brands every day and review the matches by hand.`;
 
   // ── Findings (numbered; count adapts) ─────────────────────────────────────
   const findings: string[] = [];
@@ -131,7 +144,12 @@ export function generateCloneWatchCaption(
   if (sp.kind === "mover" && spName && !spotlightIsLead) {
     const doubled = sp.priorClones != null && sp.priorClones > 0 && sp.clones >= sp.priorClones * 2;
     findings.push(
-      `${spName} was the month's sharpest riser — ${sp.priorClones} lookalike domains last month, ${sp.clones} this month${doubled ? ", more than double" : ""}. A jump like that usually means one actor registering in bulk, not steady background noise.`,
+      // NOT "one actor registering in bulk". Nothing in a month-over-month
+      // count says how many people are behind it — that line inferred an actor
+      // from a volume change alone, which is a weaker basis than the
+      // infrastructure fingerprint we already decline to call an actor
+      // (campaign-summary.ts, targeting-copy.ts rule 3). Say what we measured.
+      `${spName} was the month's sharpest riser — ${sp.priorClones} lookalike domains last month, ${sp.clones} this month${doubled ? ", more than double" : ""}. A jump that size is worth a look: it is registration activity concentrating on one brand rather than spreading evenly.`,
     );
   } else if (sp.kind === "new_entrant" && spName && !spotlightIsLead) {
     findings.push(
@@ -194,12 +212,41 @@ export function generateCloneWatchCaption(
   // gradings; all-zero months keep the pre-F5 caption shape exactly.
   const outcomesBlock = buildOutcomesBlock(card.kpis);
 
+  // ── Targeting characterisation (#1075) ────────────────────────────────────
+  // Ordered by how defensible each line is, because the 2,900-char cap is
+  // enforced by a THROW at prepare time: if something has to go, the least
+  // defensible line should be the one that falls off, never the disclosure.
+  //
+  // The TLD line is the strongest claim in the whole caption — derived from the
+  // domain string, no model and no vendor, and directly actionable for a brand.
+  const tldLine = buildTldLine(card.targeting.tlds.top, card.targeting.tlds.total);
+  // The classifier rejects ~14% of matches as coincidental; publishing the raw
+  // count as "lookalikes" without this overstates by that much.
+  // Both figures come from the SAME (global) dedupe. Using card.total here
+  // would compare a globally-deduped numerator against a per-brand-deduped
+  // denominator: a clone matching two brands counts twice on one side and once
+  // on the other. Identical on the August cohort, wrong by construction.
+  // `rejectedN` counts rows the classifier actually judged coincidental, NOT
+  // `tlds.total - tactics.total` — that difference also sweeps in every row it
+  // never saw, and would grow silently with classifier lag.
+  const classifierCaveat = buildClassifierCaveat(
+    card.targeting.tlds.total,
+    card.targeting.rejectedN,
+  );
+  // MANDATORY whenever any month-over-month movement is published, and built
+  // from the gate's own counts so it cannot drift from the decision it
+  // describes.
+  const trendDisclosure = buildTrendDisclosure(card.brandTrends.excluded);
+
   const body = [
     hook,
     method,
     findingsBlock,
+    tldLine,
     globalsLine,
     outcomesBlock,
+    classifierCaveat,
+    trendDisclosure,
     STATIC_LESSON,
     scamwatchCta,
     seriesLine,

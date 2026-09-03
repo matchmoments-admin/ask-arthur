@@ -19,7 +19,29 @@ import {
   type DurationKpis,
   type RegistrarWeaponisationRow,
 } from "@/lib/clone-watch/duration-kpis";
-import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
+import {
+  applyCohortRules,
+  CLONE_COHORT_SELECT,
+  CLONE_COHORT_SOURCE,
+} from "@/lib/clone-watch/clone-cohort";
+import {
+  computeTargetingIntel,
+  type TargetingIntel,
+} from "@/lib/clone-watch/targeting-intelligence";
+import { AU_BRAND_WATCHLIST } from "@askarthur/shopfront-glue";
+import {
+  brandsCoveredForMonth,
+  classifyTrend,
+  summariseTrendExclusions,
+  type BrandCoverage,
+  type TrendVerdict,
+} from "@/lib/clone-watch/brand-coverage";
+import {
+  computeTargetingIntelByBrand,
+  type HostingSummary,
+  type InfrastructureCluster,
+  type Mix,
+} from "@/lib/clone-watch/targeting-intelligence";
 import { rollupRegistrars } from "@/lib/clone-watch/registrar-canonical";
 
 /**
@@ -40,8 +62,9 @@ import { rollupRegistrars } from "@/lib/clone-watch/registrar-canonical";
  * demand from the admin route; safe to run any number of times.
  */
 
-/** The digest's window/source/FP filters, verbatim, so counts reconcile. */
-const CLONE_SOURCE = "nrd";
+// The window/source/FP filters come from clone-cohort.ts, so counts reconcile
+// with the digest by construction rather than by two files agreeing.
+//
 // A REACHABLE ceiling. The previous value was 5000, passed to `.limit()` and
 // then guarded with `raw.length === FETCH_LIMIT` — but PostgREST caps every
 // response at 1000 rows, so the guard compared against a number the server can
@@ -138,6 +161,18 @@ export interface CloneWatchReportCard {
   periodLabel: string;
   total: number;
   brands: number;
+  /**
+   * How many brands we were monitoring FOR THIS MONTH — the number the caption's
+   * methodology line quotes.
+   *
+   * Read from `brand_coverage_history` rather than `AU_BRAND_WATCHLIST.length`,
+   * because the watchlist is today's and a card can be built for any past month
+   * (`--month=`, and the export workflow's dispatch input). Quoting the live
+   * length restates a past month's methodology with a number that was not true
+   * then — and it only ever grows, so a re-export overstates. Falls back to the
+   * live length when coverage cannot be read, which is the old behaviour.
+   */
+  watchlistSize: number;
   kpis: {
     reportedToNetcraft: number;
     likelyPhishing: number;
@@ -182,6 +217,20 @@ export interface CloneWatchReportCard {
    *  because the recurring-automation build re-introduces a conditional MoM slide
    *  once there's an honest delta (July-vs-June onward). */
   mom: MonthOverMonth;
+  /**
+   * Per-brand month-over-month verdicts + the exclusion counts the published
+   * caveat is built from (#1075). Computed live here rather than read back from
+   * clone_watch_monthly_brand_stats, so the admin preview and the published
+   * post cannot disagree, and so the cron has no write-then-read ordering
+   * hazard with its own later step.
+   */
+  brandTrends: BrandTrendGate;
+  /**
+   * Cohort-level targeting characterisation — the shape half of the report
+   * (tactic / TLD / hosting / clusters). Computed from the same rows as every
+   * other figure on the card, so slide and caption cannot disagree.
+   */
+  targeting: TargetingIntel;
   /** The highest-ranked AU super fund among the impersonated brands, if any —
    *  powers the "super fund" spotlight slide. null when no watchlisted fund
    *  appears this month (the slide falls back to the evergreen "why it works"). */
@@ -308,10 +357,13 @@ async function fetchMonthByBrand(
     (from, to) =>
       sb
         .from("shopfront_clone_alerts")
-        .select(
-          "id, candidate_domain, inferred_target_domain, urlscan_classification, urlscan_evidence, attribution, campaign_key, submitted_to, lifecycle_state, netcraft_declined_at, weaponised_at, first_seen_at",
-        )
-        .eq("source", CLONE_SOURCE)
+        // The cohort's own SELECT (clone-cohort.ts) — shared with the
+        // brand-stewardship digest so the two cannot drift. It was two inline
+        // lists until now, and the drift already cost `clone_tactic` once: the
+        // column simply arrived undefined, which reads as thin classifier
+        // coverage rather than as a missing column.
+        .select(CLONE_COHORT_SELECT)
+        .eq("source", CLONE_COHORT_SOURCE)
         .gte("first_seen_at", startIso)
         .lt("first_seen_at", endIso)
         .not("inferred_target_domain", "is", null)
@@ -334,8 +386,20 @@ async function fetchMonthByBrand(
       period: periodMonth,
     });
   }
-  const rows = raw.filter((r) => !isFpBrand(r.inferred_target_domain));
+  const rows = applyCohortRules(raw);
   return { byBrand: aggregateClonesByDomain(rows), rows };
+}
+
+export interface BrandTrendGate {
+  /** Brands whose movement may be published, largest rise first. */
+  claimable: Array<{ brand: string; clones: number; priorClones: number; delta: number; pct: number | null }>;
+  /** Why the rest were withheld — the caveat's numbers. */
+  excluded: ReturnType<typeof summariseTrendExclusions>;
+  /**
+   * False when coverage could not be read at all. The gate fails closed: no
+   * trend claim may be published from a card whose coverage basis is unknown.
+   */
+  publishable: boolean;
 }
 
 export interface BrandTrendRow {
@@ -349,6 +413,19 @@ export interface BrandTrendRow {
   declined: number;
   escalated: number;
   weaponised: number;
+  // ── targeting characterisation (v296) ──────────────────────────────────
+  // Shape rather than volume: how the names were built, where they were
+  // hosted, what infrastructure they shared. Each jsonb carries its own
+  // denominator and unknown bucket (see targeting-intelligence.ts `Mix`)
+  // because the source fields have very different coverage.
+  deliberate_clones: number;
+  tactic_mix: Mix;
+  intent_mix: Mix;
+  tld_mix: Mix;
+  hosting_mix: HostingSummary;
+  clusters: InfrastructureCluster[];
+  fingerprinted_clones: number;
+  largest_cluster: number;
 }
 export interface RegistrarTrendRow {
   registrar: string;
@@ -384,19 +461,46 @@ export async function getCloneWatchTrendRows(
     periodMonth,
   );
 
+  // Per-brand characterisation over the SAME already-fetched rows — no second
+  // query. Keyed on inferred_target_domain, which is exactly the key `byBrand`
+  // and clone_watch_monthly_brand_stats.brand use (it flows from the
+  // watchlist's legitimate_domains[0] through the ingest); keying on a
+  // normalised brand name would join to nothing (see migration v295).
+  const intelByBrand = computeTargetingIntelByBrand(rows);
+  const emptyMix: Mix = { top: [], other: 0, unknown: 0, total: 0 };
+
   const brandRows: BrandTrendRow[] = [...byBrand.entries()]
-    .map(([brand, m]) => ({
-      brand,
-      is_au: isAuBrand(brand),
-      clones: m.detected,
-      reported_to_netcraft: m.netcraftReported,
-      likely_phishing: m.byClassification["likely_phishing"] ?? 0,
-      parked: m.byClassification["parked_for_sale"] ?? 0,
-      taken_down: m.takenDown,
-      declined: m.declined,
-      escalated: m.escalated,
-      weaponised: m.weaponised,
-    }))
+    .map(([brand, m]) => {
+      const intel = intelByBrand.get(brand);
+      return {
+        brand,
+        is_au: isAuBrand(brand),
+        clones: m.detected,
+        reported_to_netcraft: m.netcraftReported,
+        likely_phishing: m.byClassification["likely_phishing"] ?? 0,
+        parked: m.byClassification["parked_for_sale"] ?? 0,
+        taken_down: m.takenDown,
+        declined: m.declined,
+        escalated: m.escalated,
+        weaponised: m.weaponised,
+        deliberate_clones: intel?.tactics.total ?? 0,
+        tactic_mix: intel?.tactics ?? emptyMix,
+        intent_mix: intel?.intents ?? emptyMix,
+        tld_mix: intel?.tlds ?? emptyMix,
+        hosting_mix:
+          intel?.hosting ?? {
+            asns: emptyMix,
+            countries: emptyMix,
+            frontedN: 0,
+            unattributedN: 0,
+            originVisibleN: 0,
+            total: 0,
+          },
+        clusters: intel?.clusters.clusters ?? [],
+        fingerprinted_clones: intel?.clusters.fingerprintedN ?? 0,
+        largest_cluster: intel?.clusters.largestClusterN ?? 0,
+      };
+    })
     .sort((a, b) => b.clones - a.clones || a.brand.localeCompare(b.brand));
 
   // Full canonicalised registrar list (not sliced) + drop the Unknown bucket —
@@ -517,6 +621,94 @@ export async function getCloneWatchReportCard(
     periodMonth.slice(0, 7) >= FIRST_FULL_MONTH &&
     prevWin.periodMonth.slice(0, 7) >= FIRST_FULL_MONTH &&
     prior.total > 0;
+  // Coverage for BOTH months, keyed by brand domain — the key byBrand uses.
+  // A read failure yields an empty map, which makes every verdict
+  // coverage_unknown and the gate unpublishable; degraded reads must never
+  // quietly become "no exclusions".
+  const coverageByBrand = new Map<string, BrandCoverage[]>();
+  let coverageReadOk = true;
+  {
+    const { data, error } = await sb
+      .from("brand_coverage_history")
+      .select("brand, brand_normalized, brand_domain, covered_from, covered_to");
+    if (error) {
+      coverageReadOk = false;
+      logger.warn("report-card: brand coverage read failed", { error: error.message });
+    } else {
+      for (const r of data ?? []) {
+        const row = r as {
+          brand_normalized: string;
+          brand_domain: string;
+          covered_from: string;
+          covered_to: string | null;
+        };
+        // ALL rows per domain, never a merged window. Several brands can share
+        // one brand_domain (three do today) and a re-added brand has two
+        // disjoint rows, so the gate needs the set — see brandsCoveredForMonth.
+        const bucket = coverageByBrand.get(row.brand_domain);
+        const entry: BrandCoverage = {
+          brandDomain: row.brand_domain,
+          brandNormalized: row.brand_normalized,
+          coveredFrom: row.covered_from,
+          coveredTo: row.covered_to,
+        };
+        if (bucket) bucket.push(entry);
+        else coverageByBrand.set(row.brand_domain, [entry]);
+      }
+      if (coverageByBrand.size === 0) {
+        // An EMPTY table is not an error, so nothing above logs — yet it
+        // suppresses every trend claim exactly as a failed read does, and
+        // silently: `buildTrendDisclosure` early-returns "" when nothing is
+        // claimable, so the caveat that would explain the absence is the very
+        // thing that goes missing. Say so, or a card built before
+        // backfill-brand-coverage.ts has run reads as a quiet month.
+        logger.warn("report-card: brand_coverage_history is EMPTY", {
+          period: periodMonth,
+          consequence: "all trend claims suppressed; run backfill-brand-coverage.ts",
+        });
+      }
+    }
+  }
+
+  // Brands monitored for the WHOLE of the reported month — the methodology
+  // line's denominator, correct for a backfilled month rather than for today.
+  const brandsMonitoredThisMonth = new Set<string>();
+  for (const rows of coverageByBrand.values()) {
+    for (const b of brandsCoveredForMonth(rows, periodMonth.slice(0, 7))) {
+      brandsMonitoredThisMonth.add(b);
+    }
+  }
+  const watchlistSize = brandsMonitoredThisMonth.size || AU_BRAND_WATCHLIST.length;
+
+  const priorYm = new Date(`${periodMonth.slice(0, 7)}-01T00:00:00Z`);
+  priorYm.setUTCMonth(priorYm.getUTCMonth() - 1);
+  const priorPeriod = priorYm.toISOString().slice(0, 7);
+  const verdicts: TrendVerdict[] = [];
+  const verdictByBrand = new Map<string, TrendVerdict>();
+  const claimable: BrandTrendGate["claimable"] = [];
+  for (const [brand, m] of byBrand) {
+    const priorClones = priorByBrand.get(brand)?.detected ?? 0;
+    const v = classifyTrend({
+      currentClones: m.detected,
+      priorClones,
+      currentMonth: periodMonth.slice(0, 7),
+      priorMonth: priorPeriod,
+      coverage: coverageByBrand.get(brand),
+    });
+    verdicts.push(v);
+    verdictByBrand.set(brand, v);
+    if (v.kind === "claimable" && v.delta !== 0) {
+      claimable.push({ brand, clones: m.detected, priorClones, delta: v.delta, pct: v.pct });
+    }
+  }
+  claimable.sort((a, b) => b.delta - a.delta || a.brand.localeCompare(b.brand));
+
+  const brandTrends: BrandTrendGate = {
+    claimable,
+    excluded: summariseTrendExclusions(verdicts),
+    publishable: coverageReadOk && coverageByBrand.size > 0,
+  };
+
   const mom: MonthOverMonth = {
     available: momAvailable,
     priorLabel: prevWin.label,
@@ -576,6 +768,20 @@ export async function getCloneWatchReportCard(
     !priorSpotlightBrand ||
     brand.toLowerCase() !== priorSpotlightBrand.toLowerCase();
 
+  // BOTH comparative rungs must pass the coverage gate, not merely the volume
+  // thresholds. Without this the gate is decorative: it was fully tested, its
+  // caveat was printed in the caption, and the publisher beside it applied none
+  // of it. The Ordinary (1 -> 11) clears priorClones > 0 and delta >= 10, so it
+  // would have been published as "the month's sharpest riser" — the exact
+  // sentence brand_coverage_history exists to prevent, with the gate's own
+  // "these brands were excluded" caveat printed underneath it.
+  //
+  // `claimable` also requires coverage of BOTH months, which subsumes the
+  // "fair prior month" reasoning the momAvailable guard below encodes per-brand
+  // rather than per-cohort.
+  const isClaimable = (brand: string) =>
+    brandTrends.publishable && verdictByBrand.get(brand)?.kind === "claimable";
+
   const mover = !momAvailable
     ? undefined
     : auOrFund
@@ -586,6 +792,7 @@ export async function getCloneWatchReportCard(
         }))
         .filter(
           (r) =>
+            isClaimable(r.brand) &&
             r.priorClones > 0 &&
             r.delta >= MOVER_MIN_DELTA &&
             notLastMonth(r.brand),
@@ -597,6 +804,10 @@ export async function getCloneWatchReportCard(
     : auOrFund
         .filter(
           (r) =>
+            // "It wasn't targeted at all last month" is precisely what a
+            // mid-month watchlist addition manufactures, so this rung needs the
+            // gate even more than the mover does.
+            isClaimable(r.brand) &&
             priorClonesOf(r.brand) === 0 &&
             r.clones >= ENTRANT_MIN_CLONES &&
             notLastMonth(r.brand),
@@ -636,6 +847,7 @@ export async function getCloneWatchReportCard(
     periodLabel: label,
     total,
     brands: byBrand.size,
+    watchlistSize,
     kpis: {
       reportedToNetcraft,
       likelyPhishing: sumClassification(byBrand, "likely_phishing"),
@@ -659,6 +871,8 @@ export async function getCloneWatchReportCard(
     topRegistrars,
     unknownRegistrarCount: unknownCount,
     mom,
+    brandTrends,
+    targeting: computeTargetingIntel(rows),
     superFund,
     spotlight,
     // The vendor-gap clock + weaponisation cuts, computed over the SAME
