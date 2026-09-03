@@ -19,10 +19,11 @@
  *     dropped (losing it from every denominator) or kept as unknown;
  *   - the two fetches used different row caps and different error policies.
  *
- * DEPTH: one call returns the rows a period's figures may be computed from,
- * with pagination, the cohort rules, the FP denylist and truncation reporting
- * behind it. Callers keep the policy that is genuinely theirs — whether a
- * failed fetch should degrade or fail the run — and nothing else.
+ * DEPTH: the row shape, the SELECT list that fills it, and the rules that decide
+ * membership are one thing with one home. A surface reads the cohort by pairing
+ * `CLONE_COHORT_SELECT` + `CLONE_COHORT_SOURCE` with `applyCohortRules`, so a
+ * column added here reaches every consumer at once and the FP judgement cannot
+ * drift between them.
  *
  * This Module owns `CloneAlertRow` because the row shape IS the cohort's
  * Interface. It previously lived in the brand-stewardship Inngest function,
@@ -149,60 +150,24 @@ export function applyCohortRules(rows: CloneAlertRow[]): CloneAlertRow[] {
   );
 }
 
-export interface CohortWindow {
-  startIso: string;
-  endIso: string;
-}
-
-export interface CohortResult {
-  rows: CloneAlertRow[];
-  /** True when the row cap was hit — the caller decides whether that is fatal. */
-  truncated: boolean;
-}
-
-/** Minimal client surface, so the cohort is testable without Supabase. */
-export interface CohortSource {
-  page(
-    select: string,
-    window: CohortWindow,
-    from: number,
-    to: number,
-  ): Promise<{ data: CloneAlertRow[] | null; error: { message: string } | null }>;
-}
-
-const PAGE_SIZE = 1000;
-const DEFAULT_MAX_ROWS = 20_000;
-
 /**
- * The period's cohort: paginated, filtered, deduped.
+ * NO FETCH LIVES HERE, deliberately.
  *
- * THROWS on a read error rather than returning an empty cohort. An empty month
- * and a failed read are different facts, and a Module that conflates them hands
- * every caller a silent zero. Callers that would rather degrade than fail catch
- * it — the brand-stewardship digest does exactly that — but they do so
- * knowingly.
+ * An earlier draft of this Module wrapped the read as well, behind a
+ * `CohortSource` port. It was never wired, and wiring it would have been a
+ * mistake twice over:
+ *
+ *   - pagination is ALREADY factored out, into `fetchAllRows`
+ *     (@askarthur/supabase/paginate), which both callers use and which handles
+ *     the short-page end-of-set signal and the `truncated` ceiling more
+ *     carefully than the wrapper did; and
+ *   - the port only carried `select` + window + range, so each caller still had
+ *     to spell out the identical `.eq/.gte/.lt/.not/.or/.order` chain in its
+ *     adapter. The duplication would have moved, not gone — which is the
+ *     deletion test failing.
+ *
+ * What genuinely had two owners was the SELECT list and the cohort rules, and
+ * those are the constants and pure functions above. Callers keep the two
+ * policies that really are theirs — the row ceiling, and whether a failed read
+ * degrades or throws — and share everything else.
  */
-export async function fetchCloneCohort(
-  source: CohortSource,
-  window: CohortWindow,
-  opts: { maxRows?: number } = {},
-): Promise<CohortResult> {
-  const maxRows = opts.maxRows ?? DEFAULT_MAX_ROWS;
-  const raw: CloneAlertRow[] = [];
-  let truncated = false;
-
-  for (let from = 0; from < maxRows; from += PAGE_SIZE) {
-    const to = Math.min(from + PAGE_SIZE, maxRows) - 1;
-    const { data, error } = await source.page(CLONE_COHORT_SELECT, window, from, to);
-    if (error) throw new Error(`clone cohort fetch failed: ${error.message}`);
-    const page = data ?? [];
-    raw.push(...page);
-    if (page.length < to - from + 1) break;
-    if (raw.length >= maxRows) {
-      truncated = true;
-      break;
-    }
-  }
-
-  return { rows: dedupeByCandidate(applyCohortRules(raw)), truncated };
-}

@@ -35,6 +35,47 @@ export interface BrandCoverage {
   coveredTo: string | null;
 }
 
+/**
+ * Combine two coverage rows that share one `brandDomain` into the window where
+ * BOTH were being watched — the latest start, the earliest end.
+ *
+ * Coverage is recorded per BRAND; the monthly stats are keyed by DOMAIN; and
+ * several brands can share a domain. In prod `servicesaustralia.gov.au` carries
+ * three rows (Services Australia from 2026-05-26, Medicare and Centrelink from
+ * 2026-06-16), so that domain's clone count is a bucket whose composition
+ * changed mid-June. It is comparable across two months only where every brand
+ * feeding it was watched for both.
+ *
+ * Intersecting rather than unioning is what keeps this gate failing closed. The
+ * union reads the domain as covered from 2026-05-26, which makes June-vs-July
+ * "3 -> 13" publishable — a +10 delta that clears the mover threshold and is
+ * substantially the 16 June watchlist commit rather than attacker behaviour.
+ *
+ * A null `coveredTo` means "still open", i.e. infinitely late, so any real date
+ * wins over it. The same intersection also handles the re-added-after-a-gap
+ * case conservatively: the closed row's end date bounds the window.
+ */
+export function narrowestCoverage(
+  a: BrandCoverage | undefined,
+  b: BrandCoverage,
+): BrandCoverage {
+  if (!a) return b;
+  return {
+    brandDomain: b.brandDomain,
+    // Only ever displayed, so first-writer-wins keeps the label run-stable.
+    brandNormalized: a.brandNormalized,
+    coveredFrom: a.coveredFrom > b.coveredFrom ? a.coveredFrom : b.coveredFrom,
+    coveredTo:
+      a.coveredTo === null
+        ? b.coveredTo
+        : b.coveredTo === null
+          ? a.coveredTo
+          : a.coveredTo < b.coveredTo
+            ? a.coveredTo
+            : b.coveredTo,
+  };
+}
+
 export type TrendKind =
   /** Covered throughout both months and above the floor — safe to publish. */
   | "claimable"

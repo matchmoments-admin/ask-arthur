@@ -19,13 +19,18 @@ import {
   type DurationKpis,
   type RegistrarWeaponisationRow,
 } from "@/lib/clone-watch/duration-kpis";
-import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
+import {
+  applyCohortRules,
+  CLONE_COHORT_SELECT,
+  CLONE_COHORT_SOURCE,
+} from "@/lib/clone-watch/clone-cohort";
 import {
   computeTargetingIntel,
   type TargetingIntel,
 } from "@/lib/clone-watch/targeting-intelligence";
 import {
   classifyTrend,
+  narrowestCoverage,
   summariseTrendExclusions,
   type BrandCoverage,
   type TrendVerdict,
@@ -56,8 +61,9 @@ import { rollupRegistrars } from "@/lib/clone-watch/registrar-canonical";
  * demand from the admin route; safe to run any number of times.
  */
 
-/** The digest's window/source/FP filters, verbatim, so counts reconcile. */
-const CLONE_SOURCE = "nrd";
+// The window/source/FP filters come from clone-cohort.ts, so counts reconcile
+// with the digest by construction rather than by two files agreeing.
+//
 // A REACHABLE ceiling. The previous value was 5000, passed to `.limit()` and
 // then guarded with `raw.length === FETCH_LIMIT` — but PostgREST caps every
 // response at 1000 rows, so the guard compared against a number the server can
@@ -338,14 +344,13 @@ async function fetchMonthByBrand(
     (from, to) =>
       sb
         .from("shopfront_clone_alerts")
-        .select(
-          // clone_watch_classifications is a 1:1 embed on alert_id (v157 PK +
-          // FK), the same shape report-brand-stewardship.ts already uses. It
-          // carries the tactic/intent labels the targeting characterisation
-          // needs, so no second query is required.
-          "id, candidate_domain, inferred_target_domain, urlscan_classification, urlscan_evidence, attribution, campaign_key, submitted_to, lifecycle_state, netcraft_declined_at, weaponised_at, first_seen_at, clone_watch_classifications(is_clone, confidence, attack_intent, clone_tactic)",
-        )
-        .eq("source", CLONE_SOURCE)
+        // The cohort's own SELECT (clone-cohort.ts) — shared with the
+        // brand-stewardship digest so the two cannot drift. It was two inline
+        // lists until now, and the drift already cost `clone_tactic` once: the
+        // column simply arrived undefined, which reads as thin classifier
+        // coverage rather than as a missing column.
+        .select(CLONE_COHORT_SELECT)
+        .eq("source", CLONE_COHORT_SOURCE)
         .gte("first_seen_at", startIso)
         .lt("first_seen_at", endIso)
         .not("inferred_target_domain", "is", null)
@@ -368,7 +373,7 @@ async function fetchMonthByBrand(
       period: periodMonth,
     });
   }
-  const rows = raw.filter((r) => !isFpBrand(r.inferred_target_domain));
+  const rows = applyCohortRules(raw);
   return { byBrand: aggregateClonesByDomain(rows), rows };
 }
 
@@ -624,17 +629,18 @@ export async function getCloneWatchReportCard(
           covered_from: string;
           covered_to: string | null;
         };
-        // Keep the EARLIEST open window per brand: a brand re-added after a gap
-        // has two rows, and the later one would understate its coverage.
-        const existing = coverageByBrand.get(row.brand_domain);
-        if (!existing || row.covered_from < existing.coveredFrom) {
-          coverageByBrand.set(row.brand_domain, {
+        // Several brands can share one brand_domain (three do today), so rows
+        // are INTERSECTED into the window where all of them were watched — see
+        // narrowestCoverage. Unioning them fails the gate open.
+        coverageByBrand.set(
+          row.brand_domain,
+          narrowestCoverage(coverageByBrand.get(row.brand_domain), {
             brandDomain: row.brand_domain,
             brandNormalized: row.brand_normalized,
             coveredFrom: row.covered_from,
             coveredTo: row.covered_to,
-          });
-        }
+          }),
+        );
       }
     }
   }

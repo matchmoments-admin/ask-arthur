@@ -11,8 +11,12 @@ import { logger } from "@askarthur/utils/logger";
 import { fetchAllRows } from "@askarthur/supabase/paginate";
 import { loadAliasRecord } from "@/lib/brand-aliases";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
-import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
-import type { CloneAlertRow } from "@/lib/clone-watch/clone-cohort";
+import {
+  applyCohortRules,
+  CLONE_COHORT_SELECT,
+  CLONE_COHORT_SOURCE,
+  type CloneAlertRow,
+} from "@/lib/clone-watch/clone-cohort";
 import { computeWeaponisationRisk } from "@/lib/clone-watch/weaponisation-risk";
 import { urlscanEvidenceFromJsonb } from "./clone-watch-notify-brand-prepare";
 
@@ -608,14 +612,13 @@ export const reportBrandStewardship = inngest.createFunction(
           (from, to) =>
             sb
               .from("shopfront_clone_alerts")
-              .select(
-                // campaign_key + clone_tactic feed targeting-intelligence.ts.
-                // Omitting them does not error — the distributions just come
-                // back 100% empty, which reads as thin classifier coverage
-                // rather than a missing column.
-                "id, candidate_domain, inferred_target_domain, urlscan_classification, urlscan_evidence, attribution, submitted_to, lifecycle_state, netcraft_declined_at, weaponised_at, first_seen_at, signals, campaign_key, clone_watch_classifications(is_clone, confidence, attack_intent, clone_tactic)",
-              )
-              .eq("source", "nrd")
+              // The cohort's own SELECT (clone-cohort.ts), shared with the
+              // report card. campaign_key + clone_tactic feed
+              // targeting-intelligence.ts; omitting one does not error, the
+              // distributions just come back 100% empty, which reads as thin
+              // classifier coverage rather than as a missing column.
+              .select(CLONE_COHORT_SELECT)
+              .eq("source", CLONE_COHORT_SOURCE)
               .gte("first_seen_at", period.startIso)
               .lt("first_seen_at", period.endIso)
               .not("inferred_target_domain", "is", null)
@@ -644,9 +647,7 @@ export const reportBrandStewardship = inngest.createFunction(
         // Drop generic-dictionary FP brands (domain.com.au / lendi.com.au / …)
         // so they never surface in the digest or the LinkedIn worklist, even if
         // a stale detection wasn't triaged 'fp'. Mirrors the Netcraft denylist.
-        return ((data ?? []) as unknown as CloneAlertRow[]).filter(
-          (r) => !isFpBrand(r.inferred_target_domain),
-        );
+        return applyCohortRules((data ?? []) as unknown as CloneAlertRow[]);
       });
       // F3: per-row weaponisation risk (the ONE formula — weaponisation-risk.ts)
       // via a lightweight brand-category map (~300 rows). Inside step.run so the

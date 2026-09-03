@@ -3,6 +3,7 @@ import {
   TREND_FLOOR,
   classifyTrend,
   coveredForWholeMonth,
+  narrowestCoverage,
   summariseTrendExclusions,
   type BrandCoverage,
 } from "@/lib/clone-watch/brand-coverage";
@@ -242,6 +243,97 @@ describe("coverage that ENDED (review finding)", () => {
     const s = summariseTrendExclusions(verdicts);
     expect(s.coverageEnded).toBe(1);
     expect(s.coverageStarted).toBe(1);
+  });
+});
+
+/**
+ * Three brands share `servicesaustralia.gov.au` in prod — the real rows, with
+ * the real dates. Coverage is recorded per BRAND, the monthly stats are keyed
+ * by DOMAIN, so the reader has to reconcile several rows into one window.
+ */
+const SERVICES_AUSTRALIA: BrandCoverage = {
+  brandDomain: "servicesaustralia.gov.au",
+  brandNormalized: "servicesaustralia",
+  coveredFrom: "2026-05-26",
+  coveredTo: null,
+};
+const MEDICARE: BrandCoverage = {
+  brandDomain: "servicesaustralia.gov.au",
+  brandNormalized: "medicare",
+  coveredFrom: "2026-06-16",
+  coveredTo: null,
+};
+const CENTRELINK: BrandCoverage = {
+  brandDomain: "servicesaustralia.gov.au",
+  brandNormalized: "centrelink",
+  coveredFrom: "2026-06-16",
+  coveredTo: null,
+};
+
+describe("narrowestCoverage — several brands, one domain", () => {
+  const merged = [SERVICES_AUSTRALIA, MEDICARE, CENTRELINK].reduce<
+    BrandCoverage | undefined
+  >((acc, row) => narrowestCoverage(acc, row), undefined)!;
+
+  it("intersects to the LATEST start, so the bucket is only comparable once every brand was watched", () => {
+    expect(merged.coveredFrom).toBe("2026-06-16");
+  });
+
+  it("is order-independent", () => {
+    const reversed = [CENTRELINK, MEDICARE, SERVICES_AUSTRALIA].reduce<
+      BrandCoverage | undefined
+    >((acc, row) => narrowestCoverage(acc, row), undefined)!;
+    expect(reversed.coveredFrom).toBe(merged.coveredFrom);
+    expect(reversed.coveredTo).toBe(merged.coveredTo);
+  });
+
+  it("lets a real end date beat a still-open null, because the bucket changes when ANY brand leaves", () => {
+    const delisted: BrandCoverage = { ...MEDICARE, coveredTo: "2026-08-14" };
+    expect(narrowestCoverage(SERVICES_AUSTRALIA, delisted).coveredTo).toBe(
+      "2026-08-14",
+    );
+    expect(narrowestCoverage(delisted, SERVICES_AUSTRALIA).coveredTo).toBe(
+      "2026-08-14",
+    );
+  });
+
+  it("withholds the June-vs-July rise that the union rule would have published", () => {
+    // Real prod counts for this domain: June 3 -> July 13. Under the previous
+    // "earliest start wins" merge the domain read as covered from 2026-05-26,
+    // making this claimable — a +10 delta that clears MOVER_MIN_DELTA and is
+    // substantially the 16 June watchlist commit, not attacker behaviour.
+    const v = classifyTrend({
+      currentClones: 13,
+      priorClones: 3,
+      currentMonth: JUL,
+      priorMonth: "2026-06",
+      coverage: merged,
+    });
+    expect(v.kind).toBe("coverage_started");
+
+    const unioned: BrandCoverage = { ...merged, coveredFrom: "2026-05-26" };
+    expect(
+      classifyTrend({
+        currentClones: 13,
+        priorClones: 3,
+        currentMonth: JUL,
+        priorMonth: "2026-06",
+        coverage: unioned,
+      }).kind,
+    ).toBe("claimable");
+  });
+
+  it("still allows August-vs-July, which both merges agree on", () => {
+    // The pending edition must be unaffected: 2026-06-16 precedes both months.
+    expect(
+      classifyTrend({
+        currentClones: 13,
+        priorClones: 13,
+        currentMonth: AUG,
+        priorMonth: JUL,
+        coverage: merged,
+      }).kind,
+    ).toBe("claimable");
   });
 });
 
