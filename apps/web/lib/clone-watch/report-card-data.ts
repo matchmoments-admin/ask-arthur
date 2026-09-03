@@ -643,6 +643,7 @@ export async function getCloneWatchReportCard(
   priorYm.setUTCMonth(priorYm.getUTCMonth() - 1);
   const priorPeriod = priorYm.toISOString().slice(0, 7);
   const verdicts: TrendVerdict[] = [];
+  const verdictByBrand = new Map<string, TrendVerdict>();
   const claimable: BrandTrendGate["claimable"] = [];
   for (const [brand, m] of byBrand) {
     const priorClones = priorByBrand.get(brand)?.detected ?? 0;
@@ -654,6 +655,7 @@ export async function getCloneWatchReportCard(
       coverage: coverageByBrand.get(brand),
     });
     verdicts.push(v);
+    verdictByBrand.set(brand, v);
     if (v.kind === "claimable" && v.delta !== 0) {
       claimable.push({ brand, clones: m.detected, priorClones, delta: v.delta, pct: v.pct });
     }
@@ -725,6 +727,20 @@ export async function getCloneWatchReportCard(
     !priorSpotlightBrand ||
     brand.toLowerCase() !== priorSpotlightBrand.toLowerCase();
 
+  // BOTH comparative rungs must pass the coverage gate, not merely the volume
+  // thresholds. Without this the gate is decorative: it was fully tested, its
+  // caveat was printed in the caption, and the publisher beside it applied none
+  // of it. The Ordinary (1 -> 11) clears priorClones > 0 and delta >= 10, so it
+  // would have been published as "the month's sharpest riser" — the exact
+  // sentence brand_coverage_history exists to prevent, with the gate's own
+  // "these brands were excluded" caveat printed underneath it.
+  //
+  // `claimable` also requires coverage of BOTH months, which subsumes the
+  // "fair prior month" reasoning the momAvailable guard below encodes per-brand
+  // rather than per-cohort.
+  const isClaimable = (brand: string) =>
+    brandTrends.publishable && verdictByBrand.get(brand)?.kind === "claimable";
+
   const mover = !momAvailable
     ? undefined
     : auOrFund
@@ -735,6 +751,7 @@ export async function getCloneWatchReportCard(
         }))
         .filter(
           (r) =>
+            isClaimable(r.brand) &&
             r.priorClones > 0 &&
             r.delta >= MOVER_MIN_DELTA &&
             notLastMonth(r.brand),
@@ -746,6 +763,10 @@ export async function getCloneWatchReportCard(
     : auOrFund
         .filter(
           (r) =>
+            // "It wasn't targeted at all last month" is precisely what a
+            // mid-month watchlist addition manufactures, so this rung needs the
+            // gate even more than the mover does.
+            isClaimable(r.brand) &&
             priorClonesOf(r.brand) === 0 &&
             r.clones >= ENTRANT_MIN_CLONES &&
             notLastMonth(r.brand),

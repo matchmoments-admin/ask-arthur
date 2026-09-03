@@ -4,7 +4,10 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { getActiveWatchlist } from "@askarthur/scam-engine/active-watchlist";
 import { priorMonthStart } from "@/app/api/inngest/functions/report-brand-stewardship";
-import { syncBrandCoverage } from "@/lib/clone-watch/record-coverage";
+import {
+  logCoverageChange,
+  planCoverageSync,
+} from "@/lib/clone-watch/record-coverage";
 import {
   getCloneWatchReportCard,
   getCloneWatchTrendRows,
@@ -84,34 +87,38 @@ export const cloneWatchReportSummary = inngest.createFunction(
         try {
           const sb = createServiceClient();
           if (!sb) return { skipped: "supabase_unavailable" };
-          const watchlist = await getActiveWatchlist();
+
+          const { data, error } = await sb
+            .from("brand_coverage_history")
+            .select("brand_normalized, covered_to")
+            .is("covered_to", null);
+          if (error) throw new Error(error.message);
+
           const asOf = new Date().toISOString().slice(0, 10);
-          return await syncBrandCoverage(
-            {
-              listOpen: async () => {
-                const { data, error } = await sb
-                  .from("brand_coverage_history")
-                  .select("brand_normalized, covered_to")
-                  .is("covered_to", null);
-                if (error) throw new Error(error.message);
-                return data ?? [];
-              },
-              insert: async (rows) => {
-                const { error } = await sb.from("brand_coverage_history").insert(rows);
-                if (error) throw new Error(error.message);
-              },
-              close: async (keys, coveredTo) => {
-                const { error } = await sb
-                  .from("brand_coverage_history")
-                  .update({ covered_to: coveredTo })
-                  .in("brand_normalized", keys)
-                  .is("covered_to", null);
-                if (error) throw new Error(error.message);
-              },
-            },
-            watchlist,
+          const plan = planCoverageSync(
+            await getActiveWatchlist(),
+            data ?? [],
             asOf,
           );
+
+          if (plan.toAdd.length > 0) {
+            const ins = await sb.from("brand_coverage_history").insert(plan.toAdd);
+            if (ins.error) throw new Error(ins.error.message);
+          }
+          if (plan.toClose.length > 0) {
+            const upd = await sb
+              .from("brand_coverage_history")
+              .update({ covered_to: asOf })
+              .in("brand_normalized", plan.toClose)
+              .is("covered_to", null);
+            if (upd.error) throw new Error(upd.error.message);
+          }
+          logCoverageChange(plan, asOf);
+          return {
+            added: plan.toAdd.length,
+            closed: plan.toClose.length,
+            unchanged: plan.unchanged,
+          };
         } catch (err) {
           logger.error("clone-watch: coverage snapshot failed", {
             error: err instanceof Error ? err.message : String(err),

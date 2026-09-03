@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CloneAlertRow } from "@/app/api/inngest/functions/report-brand-stewardship";
 import {
+  computeTargetingIntel,
   computeTargetingIntelByBrand,
   hostingConcentration,
   infrastructureClusters,
@@ -276,4 +277,83 @@ describe("computeTargetingIntelByBrand", () => {
     ]);
     expect(byBrand.size).toBe(0);
   });
+});
+
+/**
+ * The `Mix` contract, asserted as a property over generated input rather than
+ * as a hand-picked example.
+ *
+ * Both denominator bugs review found were violations of the invariant the
+ * module's own header states — `top + other + unknown === total` — and both
+ * slipped through because every existing case used a fixture whose shape the
+ * test author chose. `countries.unknown` counted DISTINCT COUNTRIES rather than
+ * rows and passed its test only because that fixture had a single row, where
+ * the two coincide.
+ *
+ * This is the cheap check that catches the class rather than the instance.
+ */
+describe("Mix invariant holds for arbitrary input", () => {
+  const TACTICS = ["typosquat", "brandjack", "compound_word", null];
+  const TLDS = ["shop", "online", "com.au", "xyz"];
+  const ASNS = ["AS13335", "AS24940", "AS16509", null];
+  const COUNTRIES = ["AU", "US", "DE", null];
+
+  /** Deterministic pseudo-random so a failure is reproducible from the seed. */
+  function makeRows(seed: number, n: number): CloneAlertRow[] {
+    let x = seed;
+    const next = (m: number) => (x = (x * 1103515245 + 12345) % 2147483648) % m;
+    return Array.from({ length: n }, (_, i) =>
+      row({
+        candidate_domain: next(7) === 0 ? "" : `d${next(50)}-${i}.${TLDS[next(TLDS.length)]}`,
+        inferred_target_domain: next(9) === 0 ? null : "brand.com.au",
+        urlscan_classification: next(3) === 0 ? "likely_phishing" : "neutral",
+        campaign_key: next(4) === 0 ? "insufficient" : `key${next(5)}`,
+        attribution: {
+          hosting: {
+            asn: ASNS[next(ASNS.length)] ?? undefined,
+            country: COUNTRIES[next(COUNTRIES.length)] ?? undefined,
+          },
+        },
+        clone_watch_classifications: {
+          is_clone: next(5) !== 0,
+          confidence: 0.9,
+          attack_intent: next(2) === 0 ? "credential_phishing" : "unknown",
+          clone_tactic: TACTICS[next(TACTICS.length)],
+        },
+      }),
+    );
+  }
+
+  const sums = (m: { top: Array<{ n: number }>; other: number; unknown: number }) =>
+    m.top.reduce((s, t) => s + t.n, 0) + m.other + m.unknown;
+
+  for (const seed of [1, 7, 42, 1337, 90210]) {
+    it(`seed ${seed}: every distribution sums to its own total`, () => {
+      const rows = makeRows(seed, 60);
+      const intel = computeTargetingIntel(rows);
+      expect(sums(intel.tactics)).toBe(intel.tactics.total);
+      expect(sums(intel.tlds)).toBe(intel.tlds.total);
+      expect(sums(intel.intents)).toBe(intel.intents.total);
+      expect(sums(intel.hosting.asns)).toBe(intel.hosting.asns.total);
+      expect(sums(intel.hosting.countries)).toBe(intel.hosting.countries.total);
+    });
+
+    it(`seed ${seed}: hosting buckets partition every row exactly once`, () => {
+      const h = computeTargetingIntel(makeRows(seed, 60)).hosting;
+      expect(h.frontedN + h.unattributedN + h.originVisibleN).toBe(h.total);
+    });
+
+    it(`seed ${seed}: cluster denominators partition every row`, () => {
+      const c = computeTargetingIntel(makeRows(seed, 60)).clusters;
+      expect(c.fingerprintedN + c.unfingerprintedN).toBe(c.total);
+    });
+
+    it(`seed ${seed}: no distribution exceeds the cohort it was drawn from`, () => {
+      const rows = makeRows(seed, 60);
+      const intel = computeTargetingIntel(rows);
+      // Deliberate clones and scan-corroborated rows are both subsets.
+      expect(intel.tactics.total).toBeLessThanOrEqual(intel.tlds.total);
+      expect(intel.intents.total).toBeLessThanOrEqual(intel.tlds.total);
+    });
+  }
 });

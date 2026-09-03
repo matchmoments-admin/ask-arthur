@@ -32,7 +32,10 @@
  * look complete. Coverage measured on August 2026 (1,032 alerts): tactic 99.9%,
  * campaign_key 64%, hosting ASN 53% (of which 48% reverse-proxied).
  */
-import type { CloneAlertRow } from "@/app/api/inngest/functions/report-brand-stewardship";
+import {
+  dedupeByCandidate,
+  type CloneAlertRow,
+} from "@/lib/clone-watch/clone-cohort";
 import { tldOf } from "@/lib/clone-watch/duration-kpis";
 import { summariseCampaigns } from "@/lib/clone-watch/campaign-summary";
 import { asnLabel, canonicalAsn, isFrontingAsn } from "@/lib/clone-watch/asn-canonical";
@@ -51,29 +54,6 @@ export interface Mix {
 
 const TOP_N = 10;
 
-/**
- * Deduped by candidate_domain, matching every other clone-watch aggregate.
- *
- * A row with NO candidate_domain is kept, not dropped: dropping it removed it
- * from every denominator, so `total` under-reported and the module quietly did
- * the "renormalise until it looks complete" thing its header forbids. Such a
- * row cannot be deduped (there is nothing to dedupe on) and lands in the
- * unknown bucket of whichever distribution reads the domain.
- */
-function dedupe(rows: CloneAlertRow[]): CloneAlertRow[] {
-  const seen = new Set<string>();
-  const out: CloneAlertRow[] = [];
-  for (const row of rows) {
-    if (!row.candidate_domain) {
-      out.push(row);
-      continue;
-    }
-    if (seen.has(row.candidate_domain)) continue;
-    seen.add(row.candidate_domain);
-    out.push(row);
-  }
-  return out;
-}
 
 function toMix(counts: Map<string, number>, unknown: number, total: number): Mix {
   const sorted = [...counts.entries()]
@@ -93,7 +73,7 @@ function toMix(counts: Map<string, number>, unknown: number, total: number): Mix
  * are outside the question, and `total` reflects that.
  */
 export function tacticMix(rows: CloneAlertRow[]): Mix {
-  const deliberate = dedupe(rows).filter(
+  const deliberate = dedupeByCandidate(rows).filter(
     (r) => r.clone_watch_classifications?.is_clone === true,
   );
   const counts = new Map<string, number>();
@@ -116,7 +96,7 @@ export function tacticMix(rows: CloneAlertRow[]): Mix {
  * the n must be published beside any percentage.
  */
 export function intentMix(rows: CloneAlertRow[]): Mix {
-  const corroborated = dedupe(rows).filter(
+  const corroborated = dedupeByCandidate(rows).filter(
     (r) => r.urlscan_classification === "likely_phishing",
   );
   const counts = new Map<string, number>();
@@ -138,7 +118,7 @@ export function intentMix(rows: CloneAlertRow[]): Mix {
  * domain-monitoring vendor whether those zones are watched.
  */
 export function tldConcentration(rows: CloneAlertRow[]): Mix {
-  const unique = dedupe(rows);
+  const unique = dedupeByCandidate(rows);
   const counts = new Map<string, number>();
   let unknown = 0;
   for (const r of unique) {
@@ -174,7 +154,7 @@ export interface HostingSummary {
  * published location claim must quote `originVisibleN` against `total`.
  */
 export function hostingConcentration(rows: CloneAlertRow[]): HostingSummary {
-  const unique = dedupe(rows);
+  const unique = dedupeByCandidate(rows);
   const asnCounts = new Map<string, number>();
   const countryCounts = new Map<string, number>();
   let fronted = 0;
@@ -257,7 +237,7 @@ export interface ClusterSummary {
  * pass one brand's rows; passing the whole cohort measures the internet.
  */
 export function infrastructureClusters(rows: CloneAlertRow[]): ClusterSummary {
-  const unique = dedupe(rows);
+  const unique = dedupeByCandidate(rows);
 
   // Delegate the grouping AND the registrar choice to summariseCampaigns —
   // it already skips the `insufficient` sentinel, already requires >=2 domains,

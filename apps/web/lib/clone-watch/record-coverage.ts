@@ -16,6 +16,15 @@
  * than being left to the next manual backfill.
  *
  * Idempotent: safe to run every month, writes only on an actual change.
+ *
+ * SHAPE: a pure planner plus a caller-owned Adapter, matching ADR-0020's
+ * brand-resolver pattern (pure Module in the library, Supabase loader app-side).
+ * An earlier version put a `CoverageStore` port here — a 19-line Interface over
+ * a 25-line Implementation, with one Adapter written inline in the cron and no
+ * second one. That is a hypothetical Seam: it cost more Interface than it
+ * bought, and it spoke PostgREST's snake_case vocabulary rather than the
+ * domain's. `planCoverageSync` is pure set arithmetic and needs no port to be
+ * tested; the cron does the two writes.
  */
 import { brandNormalize } from "@askarthur/shopfront-glue";
 import { logger } from "@askarthur/utils/logger";
@@ -25,30 +34,25 @@ interface CoverageDbRow {
   covered_to: string | null;
 }
 
-/** Minimal client surface, so this stays unit-testable without a live DB. */
-export interface CoverageStore {
-  listOpen(): Promise<CoverageDbRow[]>;
-  insert(
-    rows: Array<{
-      brand: string;
-      brand_normalized: string;
-      brand_domain: string;
-      covered_from: string;
-      source: string;
-    }>,
-  ): Promise<void>;
-  close(brandKeys: string[], coveredTo: string): Promise<void>;
+export interface CoverageInsert {
+  brand: string;
+  brand_normalized: string;
+  brand_domain: string;
+  covered_from: string;
+  source: string;
+}
+
+export interface CoveragePlan {
+  /** Brands that JOINED and need an open window. */
+  toAdd: CoverageInsert[];
+  /** brand_normalized keys that LEFT and need closing at `asOf`. */
+  toClose: string[];
+  unchanged: number;
 }
 
 export interface WatchlistSnapshotEntry {
   brand: string;
   legitimate_domains: string[];
-}
-
-export interface CoverageSyncResult {
-  added: number;
-  closed: number;
-  unchanged: number;
 }
 
 /**
@@ -57,22 +61,24 @@ export interface CoverageSyncResult {
  * `asOf` is the date stamped on any change. Callers pass the run date; tests
  * pass a fixed one.
  */
-export async function syncBrandCoverage(
-  store: CoverageStore,
+export function planCoverageSync(
   watchlist: WatchlistSnapshotEntry[],
+  recorded: CoverageDbRow[],
   asOf: string,
-): Promise<CoverageSyncResult> {
+): CoveragePlan {
   const live = new Map<string, WatchlistSnapshotEntry>();
   for (const entry of watchlist) {
     const key = brandNormalize(entry.brand);
     // A brand with no primary domain cannot be joined to the monthly stats, so
-    // recording it would create a row that can never match anything.
+    // recording it would create a row that can never match anything — and
+    // brand_domain is NOT NULL (v297) besides.
     if (!key || !entry.legitimate_domains?.[0]) continue;
     if (!live.has(key)) live.set(key, entry);
   }
 
-  const recorded = await store.listOpen();
-  const openKeys = new Set(recorded.filter((r) => !r.covered_to).map((r) => r.brand_normalized));
+  const openKeys = new Set(
+    recorded.filter((r) => !r.covered_to).map((r) => r.brand_normalized),
+  );
 
   const toAdd = [...live.entries()]
     .filter(([key]) => !openKeys.has(key))
@@ -86,22 +92,18 @@ export async function syncBrandCoverage(
 
   const toClose = [...openKeys].filter((key) => !live.has(key));
 
-  if (toAdd.length > 0) await store.insert(toAdd);
-  if (toClose.length > 0) await store.close(toClose, asOf);
+  return { toAdd, toClose, unchanged: live.size - toAdd.length };
+}
 
-  if (toAdd.length > 0 || toClose.length > 0) {
-    // Rare and load-bearing: a watchlist change silently invalidates trend
-    // comparisons for the affected brands, so it must be visible in the log.
-    logger.warn("clone-watch: brand coverage changed", {
-      added: toAdd.map((r) => r.brand_normalized),
-      closed: toClose,
-      asOf,
-    });
-  }
-
-  return {
-    added: toAdd.length,
-    closed: toClose.length,
-    unchanged: live.size - toAdd.length,
-  };
+/**
+ * Log a coverage change. Rare and load-bearing: a watchlist edit silently
+ * invalidates trend comparisons for the affected brands, so it must be visible.
+ */
+export function logCoverageChange(plan: CoveragePlan, asOf: string): void {
+  if (plan.toAdd.length === 0 && plan.toClose.length === 0) return;
+  logger.warn("clone-watch: brand coverage changed", {
+    added: plan.toAdd.map((r) => r.brand_normalized),
+    closed: plan.toClose,
+    asOf,
+  });
 }

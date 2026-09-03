@@ -124,22 +124,3 @@ export function buildTldLine(
   const list = named.map((t) => `.${t.key}`).join(", ");
   return `${sum} of ${total} lookalikes were registered on just three domain endings — ${list}.`;
 }
-
-/**
- * Shared-infrastructure line, scoped to ONE brand (rule 3).
- *
- * Deliberately says "share one registrar-and-hosting setup", never "campaign"
- * or "actor". Returns "" below 2 domains — a cluster of one is a domain.
- */
-export function buildInfrastructureLine(
-  brandLabel: string,
-  largestCluster: number,
-  fingerprinted: number,
-): string {
-  if (largestCluster < 2 || fingerprinted === 0) return "";
-  return (
-    `${largestCluster} of the ${fingerprinted} lookalikes of ${brandLabel} we could ` +
-    `fingerprint share one registrar-and-hosting setup, which usually means they ` +
-    `were set up together.`
-  );
-}

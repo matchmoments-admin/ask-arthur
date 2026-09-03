@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   buildClassifierCaveat,
-  buildInfrastructureLine,
   buildTldLine,
   buildTrendDisclosure,
   tacticLabel,
@@ -30,7 +29,6 @@ const ALL_COPY = (): string[] => [
     ],
     1032,
   ),
-  buildInfrastructureLine("Stake", 12, 32),
   ...Object.keys({
     typosquat: 1,
     compound_word: 1,
@@ -146,18 +144,6 @@ describe("buildTldLine", () => {
 
   it("is silent on empty input rather than emitting a zero", () => {
     expect(buildTldLine([], 0)).toBe("");
-  });
-});
-
-describe("buildInfrastructureLine", () => {
-  it("scopes to one brand and quotes the fingerprinted denominator", () => {
-    const s = buildInfrastructureLine("Stake", 12, 32);
-    expect(s).toContain("12 of the 32 lookalikes of Stake");
-    expect(s).toContain("registrar-and-hosting setup");
-  });
-
-  it("says nothing for a cluster of one", () => {
-    expect(buildInfrastructureLine("Stake", 1, 32)).toBe("");
   });
 });
 

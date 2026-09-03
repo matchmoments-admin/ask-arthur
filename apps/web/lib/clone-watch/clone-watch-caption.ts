@@ -220,8 +220,12 @@ export function generateCloneWatchCaption(
   const tldLine = buildTldLine(card.targeting.tlds.top, card.targeting.tlds.total);
   // The classifier rejects ~14% of matches as coincidental; publishing the raw
   // count as "lookalikes" without this overstates by that much.
+  // Both figures come from the SAME (global) dedupe. Using card.total here
+  // would subtract a globally-deduped numerator from a per-brand-deduped
+  // denominator: a clone matching two brands counts twice on one side and once
+  // on the other. Identical on the August cohort, wrong by construction.
   const classifierCaveat = buildClassifierCaveat(
-    card.total,
+    card.targeting.tlds.total,
     card.targeting.tactics.total,
   );
   // MANDATORY whenever any month-over-month movement is published, and built

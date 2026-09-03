@@ -86,10 +86,47 @@ brand-resolver.ts` (`buildBrandResolver`), co-located with the `brandNormalize`
   for no cadence benefit; folding the scam source into the existing weekly run
   costs one extra step.
 
+## Amendment 2026-09-03 — the monthly brand store was never promoted, and a bridge now papers over it
+
+`clone_watch_monthly_brand_stats` (v193, merged **2026-07-05**) keys its rows on
+`brand`, and that column stores the brand's PRIMARY DOMAIN — `apple.com`,
+`hellostake.com` — because `lexical-match` emits `legitimate_domains[0]`, the
+NRD ingest writes it to `inferred_target_domain`, and the aggregation keys on
+that. This ADR was accepted **one day later**, on 2026-07-06, and promotes
+`brand_normalize` to the one join key while explicitly demoting
+`inferred_target_domain` to "the clone alert's discriminator". The table is
+therefore a per-brand aggregate keyed on the discriminator: not a violation
+anyone committed, but a promotion that never reached it. `v198`'s
+`aggregate_open_clone_alerts_by_brand`, built after this ADR, correctly uses
+`target_brand_normalized`, so the two per-brand aggregates now disagree on their
+key.
+
+`brand_coverage_history` (v294/v295, #1075) made that visible by carrying BOTH
+keys: `brand_normalized` to join alerts, `brand_domain` to join the monthly
+stats. That is a **deliberate temporary bridge**, and it is recorded here so the
+next reader does not mistake it for the intended design. It has a real cost:
+three brands (Services Australia, Medicare, Centrelink) share
+`servicesaustralia.gov.au`, so the coverage table can describe them separately
+and the stats table cannot — a de-listing of the earliest-covered sibling would
+suppress all three brands' trend claims, silently and in the fail-closed
+direction.
+
+**The completing move**, when the monthly store is next touched: give
+`clone_watch_monthly_brand_stats` a `brand_normalized` sibling column, mirroring
+what v197 did for the alerts table (the precedent this repo already set), and
+have `getCloneWatchTrendRows` aggregate on it. `brand_coverage_history` then
+drops `brand_domain` to a display/audit column and the bridge disappears.
+
+Not done now because the store has three months of published editions keyed the
+old way, and re-keying it is a data migration with a reconciliation obligation
+to those editions — not something to bundle into a reporting feature. The bridge
+is honest and tested; the debt is named.
+
 ## Related
 
 - `docs/plans/brand-convergence-seam.md` — the phased plan (Phases 0–3).
 - ADR-0015 (signal model), ADR-0016 (source layering / discriminate-not-merge),
   ADR-0019 (Inngest concurrency + cadence budget).
 - Migrations v195 (known_brands alias seed), v196 (multi-source candidates),
-  v197 (clone-triage corroboration), v198 (brand_register).
+  v197 (clone-triage corroboration), v198 (brand_register), v294–v297
+  (brand_coverage_history + the two-key bridge above).

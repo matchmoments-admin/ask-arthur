@@ -12,6 +12,7 @@ import { fetchAllRows } from "@askarthur/supabase/paginate";
 import { loadAliasRecord } from "@/lib/brand-aliases";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
+import type { CloneAlertRow } from "@/lib/clone-watch/clone-cohort";
 import { computeWeaponisationRisk } from "@/lib/clone-watch/weaponisation-risk";
 import { urlscanEvidenceFromJsonb } from "./clone-watch-notify-brand-prepare";
 
@@ -232,58 +233,14 @@ const CLONE_FETCH_LIMIT = 3000;
 // the rest. by_country/registrar/asn + `detected` always reflect the true total.
 const CLONE_DETAIL_CAP = 100;
 
-export interface CloneAlertRow {
-  id: number;
-  candidate_domain: string;
-  inferred_target_domain: string | null;
-  urlscan_classification: string | null;
-  urlscan_evidence: {
-    server?: { ip?: string; asn?: string; country?: string };
-    /** Present when the urlscan retrieval succeeded (see urlscan-classify.ts). */
-    screenshot_url?: string;
-    /** Submission uuid — the public result page is derived from it. */
-    uuid?: string;
-  } | null;
-  attribution: {
-    whois?: {
-      registrar?: string;
-      registrarAbuseEmail?: string;
-      createdDate?: string;
-    };
-    hosting?: { ip?: string; asn?: string; country?: string };
-    ip_rep?: { abuseConfidenceScore?: number };
-    au_registrant?: { abnStatus?: string; nameMatchesAbn?: boolean | null };
-  } | null;
-  /**
-   * Coarse INFRASTRUCTURE fingerprint (v235): registrar + nameserver roots +
-   * ASN + cert issuer. Clones sharing a key share a stack — NOT necessarily an
-   * actor. The largest cohort-wide cluster is 169 domains, which is a
-   * mainstream registrar behind a CDN with a common cert issuer, i.e. the
-   * default build of a large slice of the internet. Only meaningful scoped
-   * within one brand; see targeting-intelligence.ts infrastructureClusters.
-   */
-  campaign_key?: string | null;
-  /** signals jsonb — weaponisation-risk input (F3). */
-  signals?: unknown;
-  /** 1:1 Haiku classification embed (PostgREST to-one via alert_id PK). */
-  clone_watch_classifications?: {
-    is_clone: boolean | null;
-    confidence: number | null;
-    attack_intent: string | null;
-    /**
-     * How the NAME is built (typosquat / homograph / lookalike_tld / ...).
-     * Publishable, unlike attack_intent, because the classifier's whole input
-     * is {brand, candidate_domain, candidate_url} — tactic is a property of
-     * that string; intent is a guess about a page it never loaded.
-     */
-    clone_tactic?: string | null;
-  } | null;
-  submitted_to: Record<string, unknown> | null;
-  lifecycle_state: string | null;
-  netcraft_declined_at: string | null;
-  weaponised_at: string | null;
-  first_seen_at: string | null;
-}
+/**
+ * Re-exported from its real home. The type lived here — inside an Inngest
+ * function — while four `lib/` Modules imported it, pointing the dependency
+ * from library to background job. That inversion is also why the two cohort
+ * SELECT lists could drift apart and lose `clone_tactic`: the row shape had two
+ * owners and no home. See lib/clone-watch/clone-cohort.ts.
+ */
+export type { CloneAlertRow } from "@/lib/clone-watch/clone-cohort";
 
 export interface CloneDetail {
   domain: string;
@@ -474,7 +431,12 @@ export function aggregateClonesByDomain(
       seenDomain.set(brandDomain, new Set());
     }
     const seen = seenDomain.get(brandDomain)!;
-    if (seen.has(row.candidate_domain)) continue; // dedupe same clone domain
+    // PER-BRAND dedupe — deliberately NOT the cohort's global
+    // dedupeByCandidate (clone-cohort.ts). A clone domain impersonating two
+    // brands is one detection for each of them here, because this map is
+    // "what did each brand see". Same words, different question; keep them
+    // apart rather than sharing an implementation.
+    if (seen.has(row.candidate_domain)) continue;
     seen.add(row.candidate_domain);
 
     m.detected += 1;

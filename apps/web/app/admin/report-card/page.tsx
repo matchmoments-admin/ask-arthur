@@ -366,7 +366,7 @@ function SlideNames({ data, page }: SlideProps) {
       </div>
       <div className="foot rule2 bot">
         <div className="reg">
-          {buildClassifierCaveat(data.total, deliberate) ||
+          {buildClassifierCaveat(data.targeting.tlds.total, deliberate) ||
             "Naming pattern is read from the domain itself."}
         </div>
         <Pg n={page} />

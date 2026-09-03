@@ -56,8 +56,6 @@ const ASN_NAMES = new Map<string, string>([
   ["AS51167", "Contabo"],
 ]);
 
-export const UNKNOWN_ASN = "Unknown";
-
 /** `as13335`, `13335`, `AS13335 ` → `AS13335`. Null when unparseable. */
 export function canonicalAsn(raw: string | null | undefined): string | null {
   const s = String(raw ?? "").trim().toUpperCase();
@@ -82,6 +80,6 @@ export function isFrontingAsn(asn: string | null | undefined): boolean {
 /** Human label for an ASN — the operator name when known, else the ASN. */
 export function asnLabel(asn: string | null | undefined): string {
   const c = canonicalAsn(asn);
-  if (!c) return UNKNOWN_ASN;
+  if (!c) return "Unknown";
   return ASN_NAMES.get(c) ?? c;
 }

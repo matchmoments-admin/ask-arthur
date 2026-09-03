@@ -1,4 +1,7 @@
-import type { CloneAlertRow } from "@/app/api/inngest/functions/report-brand-stewardship";
+import {
+  dedupeByCandidate,
+  type CloneAlertRow,
+} from "@/lib/clone-watch/clone-cohort";
 import { canonicalRegistrar } from "@/lib/clone-watch/registrar-canonical";
 
 /**
@@ -141,16 +144,6 @@ export function medianOf(values: number[]): number | null {
 
 /** Dedupe rows by candidate_domain (first occurrence wins), matching the
  *  shared aggregator's dedup convention so counts reconcile with the card. */
-function dedupeByCandidate(rows: CloneAlertRow[]): CloneAlertRow[] {
-  const seen = new Set<string>();
-  const out: CloneAlertRow[] = [];
-  for (const row of rows) {
-    if (!row.candidate_domain || seen.has(row.candidate_domain)) continue;
-    seen.add(row.candidate_domain);
-    out.push(row);
-  }
-  return out;
-}
 
 export function computeDurationKpis(
   rows: CloneAlertRow[],
