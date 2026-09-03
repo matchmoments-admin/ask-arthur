@@ -13,6 +13,13 @@ import { canonicalRegistrar } from "@/lib/clone-watch/registrar-canonical";
  *  - netcraft_declined_at is LAST-touch (re-stamped per decline) and can
  *    postdate weaponised_at → strict non-negative guard per leg; dropped
  *    pairs are counted in excludedNegativeN, never silently discarded.
+ *  - and, before v273, it was re-stamped on every no-op recheck, so a pre-v273
+ *    decline measures the 6h recheck cadence rather than the vendor gap. Those
+ *    pairs are excluded outright (DECLINE_CLOCK_TRUSTWORTHY_SINCE below). This
+ *    module publishes into the report card and the persisted monthly
+ *    clone_watch_report_summary, so without the bound every cohort month up to
+ *    2026-08 would keep republishing the compressed figure the v292/v293 RPC
+ *    fix removed from the public page.
  *  - weaponised_at is first-touch and quantised by the 6h recheck + 3h
  *    retrieve crons → hours, never minutes.
  *  - the re-file signal is netcraft_issue.issue_reported_at specifically
@@ -152,6 +159,14 @@ function dedupeByCandidate(rows: CloneAlertRow[]): CloneAlertRow[] {
   return out;
 }
 
+// v273 (applied 2026-08-09 21:31 UTC) stopped `advance_clone_lifecycle`
+// re-stamping netcraft_declined_at on every no-op recheck. Earlier stamps are
+// one-directionally compressed toward the recheck cadence and the originals
+// were overwritten, so they are unrecoverable — a decline→weaponise pair built
+// from one is not a measurement. Mirrors `decline_clock_trustworthy_since` in
+// clone_watch_vendor_gap_stats (v293); keep the two in step.
+const DECLINE_CLOCK_TRUSTWORTHY_SINCE = Date.parse("2026-08-09T21:31:00Z");
+
 export function computeDurationKpis(
   rows: CloneAlertRow[],
   now: Date = new Date(),
@@ -191,10 +206,15 @@ export function computeDurationKpis(
     const { submittedAt, takedownAt, refiledAt, resubmitted } =
       netcraftTimes(row);
 
-    leg(declinedAt, weaponisedAt, declineToWeaponise, {
-      allowEqual: false,
-      expectedPathology: true,
-    });
+    // Excluded, not counted as a pathology: a pre-v273 stamp is untrustworthy
+    // input, not evidence of an inverted timeline, so it must not inflate
+    // excludedNegativeN either.
+    if (declinedAt !== null && declinedAt >= DECLINE_CLOCK_TRUSTWORTHY_SINCE) {
+      leg(declinedAt, weaponisedAt, declineToWeaponise, {
+        allowEqual: false,
+        expectedPathology: true,
+      });
+    }
     leg(weaponisedAt, refiledAt, weaponiseToRefile, { allowEqual: true });
     // Dropped silently rather than counted as an inversion: a deliberate
     // exclusion, not a data pathology. See netcraftTimes for why fullLoop

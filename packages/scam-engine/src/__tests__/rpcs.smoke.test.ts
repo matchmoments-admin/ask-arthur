@@ -137,6 +137,52 @@ describe.skipIf(!hasEnv)("SQL RPC smoke tests", () => {
     expect(typeof rows[0]?.decline_to_weaponise_n).toBe("number");
   });
 
+  // Stranded-count breakdown (v274/v286/v292/v293) — a metric that has now
+  // regressed three times, always the same way: a worklist was widened and one
+  // of these legs was not.
+  //
+  // BE CLEAR ABOUT WHAT THIS PROVES. `stranded_total` is DEFINED as
+  // `count(*) FILTER (WHERE a OR b OR c)`, so "total >= each leg" is true for
+  // any predicate whatsoever — including the v286 definition that overstated by
+  // 285 rows. This case therefore guards execution (search_path, the CTE, the
+  // grants) and shape, and nothing about correctness.
+  //
+  // The check that WOULD have caught every past regression is semantic and
+  // needs row ids the RPC does not return, so it lives beside the worklists it
+  // compares against — run it after any change to a worklist predicate:
+  //
+  //   WITH stranded AS (...the RPC's predicate...)
+  //   SELECT count(*) FILTER (WHERE id IN (SELECT id FROM list_clone_alerts_for_recheck(1000,6,168)))
+  //        + count(*) FILTER (WHERE id IN (SELECT id FROM list_clone_alerts_pending_urlscan_submit(100,0.7,3)))
+  //   FROM stranded;   -- MUST be 0
+  //
+  // Verified 0 against prod on 2026-09-03 (v293). Documented in
+  // docs/ops/clone-watch-config.md.
+  it("clone_watch_urlscan_stranded_count executes and returns the documented shape", async () => {
+    const supabase = getClient();
+    const { data, error } = await supabase.rpc(
+      "clone_watch_urlscan_stranded_count",
+      { p_max_failure_streak: 3 },
+    );
+    expect(error).toBeNull();
+    const rows = Array.isArray(data) ? data : [data];
+    expect(rows).toHaveLength(1);
+    const r = rows[0] as {
+      stranded_total: number;
+      stranded_streak: number;
+      stranded_submitted_no_uuid: number;
+      stranded_uuid_no_submitted_at: number;
+    };
+    for (const leg of [
+      r.stranded_streak,
+      r.stranded_submitted_no_uuid,
+      r.stranded_uuid_no_submitted_at,
+    ]) {
+      expect(typeof leg).toBe("number");
+      expect(r.stranded_total).toBeGreaterThanOrEqual(leg);
+    }
+  });
+
   // Unactioned-lookalike age snapshot (v231).
   it("clone_watch_unactioned_age_stats executes without error", async () => {
     const supabase = getClient();
