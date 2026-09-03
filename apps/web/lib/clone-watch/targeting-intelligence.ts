@@ -268,12 +268,29 @@ export function infrastructureClusters(rows: CloneAlertRow[]): ClusterSummary {
   };
 }
 
+/**
+ * Rows the classifier actively judged COINCIDENTAL (`is_clone === false`).
+ *
+ * Deliberately not `total - deliberate`: the classifications embed is a
+ * non-inner join and `is_clone` is nullable, so that subtraction also counts
+ * every row the classifier never saw (flag off, cost brake, backlog) as a
+ * rejection. The published caveat quotes this number, so it has to mean what
+ * it says — see buildClassifierCaveat.
+ */
+export function rejectedCount(rows: CloneAlertRow[]): number {
+  return dedupeByCandidate(rows).filter(
+    (r) => r.clone_watch_classifications?.is_clone === false,
+  ).length;
+}
+
 export interface TargetingIntel {
   tactics: Mix;
   intents: Mix;
   tlds: Mix;
   hosting: HostingSummary;
   clusters: ClusterSummary;
+  /** Judged coincidental. NOT `tlds.total - tactics.total` — see rejectedCount. */
+  rejectedN: number;
 }
 
 export function computeTargetingIntel(rows: CloneAlertRow[]): TargetingIntel {
@@ -283,6 +300,7 @@ export function computeTargetingIntel(rows: CloneAlertRow[]): TargetingIntel {
     tlds: tldConcentration(rows),
     hosting: hostingConcentration(rows),
     clusters: infrastructureClusters(rows),
+    rejectedN: rejectedCount(rows),
   };
 }
 

@@ -118,6 +118,12 @@ export const cloneWatchReportSummary = inngest.createFunction(
             added: plan.toAdd.length,
             closed: plan.toClose.length,
             unchanged: plan.unchanged,
+            // Present only when the planner refused a suspiciously large set of
+            // closures — surfaced in the run output so an operator reading the
+            // Inngest run sees it without going to Axiom.
+            ...(plan.closuresWithheld
+              ? { closuresWithheld: plan.closuresWithheld }
+              : {}),
           };
         } catch (err) {
           logger.error("clone-watch: coverage snapshot failed", {

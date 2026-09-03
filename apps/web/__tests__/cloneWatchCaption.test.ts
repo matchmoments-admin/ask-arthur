@@ -14,6 +14,7 @@ const JUNE: CloneWatchReportCard = {
   periodLabel: "June 2026",
   total: 804,
   brands: 129,
+  watchlistSize: 293,
   kpis: {
     reportedToNetcraft: 628,
     likelyPhishing: 25,
@@ -68,10 +69,11 @@ const JUNE: CloneWatchReportCard = {
       total: 0,
     },
     clusters: { clusters: [], fingerprintedN: 0, unfingerprintedN: 0, largestClusterN: 0, total: 0 },
+    rejectedN: 0,
   },
   brandTrends: {
     claimable: [],
-    excluded: { claimable: 0, coverageStarted: 0, coverageEnded: 0, belowFloor: 0, unknown: 0 },
+    excluded: { claimable: 0, unchanged: 0, coverageStarted: 0, coverageEnded: 0, belowFloor: 0, unknown: 0 },
     publishable: true,
   },
   superFund: { brand: "hesta.com.au", clones: 35, auRank: 2 },
@@ -430,6 +432,7 @@ describe("caption stays under the LinkedIn cap in the worst case", () => {
       claimable: [],
       excluded: {
         claimable: 38,
+        unchanged: 0,
         coverageStarted: 7,
         coverageEnded: 2,
         belowFloor: 108,
@@ -440,6 +443,9 @@ describe("caption stays under the LinkedIn cap in the worst case", () => {
     targeting: {
       ...JUNE.targeting,
       tactics: { top: [], other: 0, unknown: 0, total: 887 },
+      // The count the classifier actually rejected — NOT 1032 - 887, which
+      // would also sweep in every row it never judged.
+      rejectedN: 145,
       tlds: {
         top: [
           { key: "online", n: 132 },

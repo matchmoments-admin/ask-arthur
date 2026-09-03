@@ -1,4 +1,3 @@
-import { AU_BRAND_WATCHLIST } from "@askarthur/shopfront-glue";
 import type { CloneWatchReportCard } from "@/lib/clone-watch/report-card-data";
 import {
   buildClassifierCaveat,
@@ -95,12 +94,15 @@ export function generateCloneWatchCaption(
   // ── Hook ────────────────────────────────────────────────────────────────
   const hook = `In ${month}, we detected ${card.total} newly-registered copycat domains impersonating brands Australians use every day.`;
   const method =
-    // Brand count is read from the watchlist, not hard-coded. The literal it
-    // replaced said "~50" while the list held 293 — a six-fold understatement
-    // published every month, and exactly the kind of prose-vs-reality drift
-    // apps/web/CLAUDE.md warns about. Rounded down to the nearest ten so it
-    // stays true between watchlist edits.
-    `Not confirmed scams — lookalike domains: freshly-registered web addresses built to resemble a real brand. We sweep new domain registrations against ${Math.floor(AU_BRAND_WATCHLIST.length / 10) * 10}+ major Australian brands every day and review the matches by hand.`;
+    // Brand count is read from the coverage record FOR THIS MONTH, not
+    // hard-coded and not from today's watchlist. The literal it first replaced
+    // said "~50" while the list held 293 — a six-fold understatement published
+    // every month. Reading `AU_BRAND_WATCHLIST.length` fixed that but left a
+    // subtler version: a card can be built for any past month, and the live
+    // length only grows, so re-exporting June with today's number overstates
+    // what we were actually sweeping then. Rounded down to the nearest ten so
+    // it stays true between watchlist edits.
+    `Not confirmed scams — lookalike domains: freshly-registered web addresses built to resemble a real brand. We sweep new domain registrations against ${Math.floor(card.watchlistSize / 10) * 10}+ major Australian brands every day and review the matches by hand.`;
 
   // ── Findings (numbered; count adapts) ─────────────────────────────────────
   const findings: string[] = [];
@@ -221,12 +223,15 @@ export function generateCloneWatchCaption(
   // The classifier rejects ~14% of matches as coincidental; publishing the raw
   // count as "lookalikes" without this overstates by that much.
   // Both figures come from the SAME (global) dedupe. Using card.total here
-  // would subtract a globally-deduped numerator from a per-brand-deduped
+  // would compare a globally-deduped numerator against a per-brand-deduped
   // denominator: a clone matching two brands counts twice on one side and once
   // on the other. Identical on the August cohort, wrong by construction.
+  // `rejectedN` counts rows the classifier actually judged coincidental, NOT
+  // `tlds.total - tactics.total` — that difference also sweeps in every row it
+  // never saw, and would grow silently with classifier lag.
   const classifierCaveat = buildClassifierCaveat(
     card.targeting.tlds.total,
-    card.targeting.tactics.total,
+    card.targeting.rejectedN,
   );
   // MANDATORY whenever any month-over-month movement is published, and built
   // from the gate's own counts so it cannot drift from the decision it

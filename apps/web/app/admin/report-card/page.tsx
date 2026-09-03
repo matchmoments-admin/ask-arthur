@@ -366,7 +366,7 @@ function SlideNames({ data, page }: SlideProps) {
       </div>
       <div className="foot rule2 bot">
         <div className="reg">
-          {buildClassifierCaveat(data.targeting.tlds.total, deliberate) ||
+          {buildClassifierCaveat(data.targeting.tlds.total, data.targeting.rejectedN) ||
             "Naming pattern is read from the domain itself."}
         </div>
         <Pg n={page} />
@@ -466,7 +466,14 @@ function SlideSuperFund({ data, page }: SlideProps) {
     );
   const lead =
     sp.kind === "mover" ? (
-      <>Up from <b>{sp.priorClones} last month</b> to {sp.clones} — the sharpest single-brand rise we recorded. A spike like this usually means one actor registering in bulk.</>
+      // NO ACTOR ATTRIBUTION (targeting-copy.ts rule 3). This line used to end
+      // "A spike like this usually means one actor registering in bulk." The
+      // caption's identical sentence was removed and pinned by a test, but the
+      // slide's twin was missed — so the carousel would have asserted exactly
+      // what the caption beneath it denies. Nothing we hold can identify an
+      // actor: campaign_key hashes registrar + nameservers + ASN + cert issuer,
+      // all of which a shared hosting stack gives you for free.
+      <>Up from <b>{sp.priorClones} last month</b> to {sp.clones} — the sharpest single-brand rise we recorded across the brands we monitored for both months.</>
     ) : sp.kind === "new_entrant" ? (
       <>Not on last month&rsquo;s map at all. A brand&rsquo;s first appearance is the moment its customers are least primed to expect a fake.</>
     ) : (

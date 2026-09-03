@@ -44,12 +44,30 @@ describe("signalSummary", () => {
     );
     expect(s).toContain("3 weaponised");
     expect(s).toContain("14 live");
-    expect(s).toContain("28-domain campaign");
+    expect(s).toContain("28 domains on one stack");
     expect(s).toContain("40 lookalikes total");
   });
 
   it("shows just the total for a quiet brand", () => {
     expect(signalSummary(makeRow({ total_clones: 1 }))).toBe("1 lookalike total");
+  });
+
+  it("never claims coordination — the same rule buildHookLine follows", () => {
+    // This line is read in the admin worklist immediately before the founder
+    // contacts the impersonated brand, so it is the worst place to overclaim.
+    // The hook line was fixed and pinned; its twin here was missed.
+    expect(
+      signalSummary(makeRow({ in_campaign: true, campaign_domain_count: 28 })),
+    ).not.toMatch(/coordinated|campaign|one actor/i);
+  });
+
+  it("does not call a cluster of ONE a campaign", () => {
+    // migration-v269's campaign_sizes has no `HAVING count > 1`, so a singleton
+    // yields campaign_domain_count = 1 with in_campaign true — which used to
+    // render "part of a coordinated campaign" off a single domain.
+    const s = signalSummary(makeRow({ in_campaign: true, campaign_domain_count: 1 }));
+    expect(s).not.toMatch(/coordinated|campaign/i);
+    expect(s).toContain("shared hosting stack");
   });
 });
 

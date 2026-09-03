@@ -35,47 +35,6 @@ export interface BrandCoverage {
   coveredTo: string | null;
 }
 
-/**
- * Combine two coverage rows that share one `brandDomain` into the window where
- * BOTH were being watched — the latest start, the earliest end.
- *
- * Coverage is recorded per BRAND; the monthly stats are keyed by DOMAIN; and
- * several brands can share a domain. In prod `servicesaustralia.gov.au` carries
- * three rows (Services Australia from 2026-05-26, Medicare and Centrelink from
- * 2026-06-16), so that domain's clone count is a bucket whose composition
- * changed mid-June. It is comparable across two months only where every brand
- * feeding it was watched for both.
- *
- * Intersecting rather than unioning is what keeps this gate failing closed. The
- * union reads the domain as covered from 2026-05-26, which makes June-vs-July
- * "3 -> 13" publishable — a +10 delta that clears the mover threshold and is
- * substantially the 16 June watchlist commit rather than attacker behaviour.
- *
- * A null `coveredTo` means "still open", i.e. infinitely late, so any real date
- * wins over it. The same intersection also handles the re-added-after-a-gap
- * case conservatively: the closed row's end date bounds the window.
- */
-export function narrowestCoverage(
-  a: BrandCoverage | undefined,
-  b: BrandCoverage,
-): BrandCoverage {
-  if (!a) return b;
-  return {
-    brandDomain: b.brandDomain,
-    // Only ever displayed, so first-writer-wins keeps the label run-stable.
-    brandNormalized: a.brandNormalized,
-    coveredFrom: a.coveredFrom > b.coveredFrom ? a.coveredFrom : b.coveredFrom,
-    coveredTo:
-      a.coveredTo === null
-        ? b.coveredTo
-        : b.coveredTo === null
-          ? a.coveredTo
-          : a.coveredTo < b.coveredTo
-            ? a.coveredTo
-            : b.coveredTo,
-  };
-}
-
 export type TrendKind =
   /** Covered throughout both months and above the floor — safe to publish. */
   | "claimable"
@@ -157,14 +116,58 @@ function monthCoverage(
 
   if (new Date(`${coverage.coveredFrom}T00:00:00Z`) > start) return "started_late";
   if (coverage.coveredTo) {
-    // Must still be covered at the END of the month.
-    if (new Date(`${coverage.coveredTo}T00:00:00Z`) < nextMonth) return "ended_early";
+    // `coveredTo` is a DETECTION date, not a departure date — the only writer is
+    // the monthly cron, which stamps its own run date (the 1st of M+1) for a
+    // brand it finds missing. So a stamp of 2026-09-01 means "gone by 1 Sep",
+    // and the brand may have left on 2 August.
+    //
+    // Hence `<=`, not `<`. Under the strict test the gate failed OPEN on exactly
+    // the mirror of the case it was built for: a brand deleted on 10 August is
+    // stamped 2026-09-01, `2026-09-01 < 2026-09-01` is false, August reads fully
+    // covered, and a 40 -> 12 drop across 21 unmonitored days publishes as a
+    // real collapse in targeting. The last month this brand is PROVABLY whole is
+    // the one that ended before the stamp — July, which the 1 August snapshot
+    // saw it in — and `<=` says exactly that.
+    if (new Date(`${coverage.coveredTo}T00:00:00Z`) <= nextMonth) return "ended_early";
   }
   return "covered";
 }
 
 /**
- * Decide whether a brand's month-over-month movement may be published.
+ * The brands whose coverage spans the WHOLE of `periodMonth`.
+ *
+ * Takes every coverage row for one `brandDomain`, because coverage is recorded
+ * per BRAND while the monthly stats are keyed by DOMAIN and several brands can
+ * share one. `servicesaustralia.gov.au` carries three rows in prod — Services
+ * Australia from 2026-05-26, Medicare and Centrelink from 2026-06-16 — so that
+ * domain's clone count is a bucket whose *composition* changed mid-June.
+ *
+ * Returned as a set of brand names rather than a merged window, because "was
+ * this comparable across two months" is a question about the contributing SET,
+ * which a single interval cannot express: a brand de-listed and later re-added
+ * has two disjoint rows, and any single window spanning them is a fiction.
+ */
+export function brandsCoveredForMonth(
+  rows: readonly BrandCoverage[],
+  periodMonth: string,
+): Set<string> {
+  const covered = new Set<string>();
+  for (const row of rows) {
+    if (monthCoverage(row, periodMonth) === "covered") covered.add(row.brandNormalized);
+  }
+  return covered;
+}
+
+/**
+ * Decide whether a domain's month-over-month movement may be published.
+ *
+ * `coverage` is EVERY row for the domain. The movement is comparable only when
+ * the same set of brands fed the bucket, fully monitored, in both months —
+ * anything else is our own measurement changing shape. Taking the union of the
+ * rows instead (an "earliest start wins" merge) made June-vs-July "3 -> 13"
+ * claimable for servicesaustralia.gov.au: a +10 delta that clears the mover
+ * threshold and is substantially the 16 June watchlist commit widening the
+ * sweep mid-month, not attacker behaviour.
  *
  * Order matters: coverage is checked BEFORE the floor, so a newly-monitored
  * brand is reported as `coverage_started` rather than `below_floor` — the two
@@ -176,21 +179,36 @@ export function classifyTrend(input: {
   priorClones: number;
   currentMonth: string;
   priorMonth: string;
-  coverage: BrandCoverage | null | undefined;
+  coverage: readonly BrandCoverage[] | null | undefined;
 }): TrendVerdict {
   const { currentClones, priorClones, currentMonth, priorMonth, coverage } = input;
   const delta = currentClones - priorClones;
 
-  if (!coverage) return { kind: "coverage_unknown", delta, pct: null };
+  if (!coverage || coverage.length === 0) {
+    return { kind: "coverage_unknown", delta, pct: null };
+  }
 
-  const prior = monthCoverage(coverage, priorMonth);
-  const current = monthCoverage(coverage, currentMonth);
-  if (prior !== "covered" || current !== "covered") {
-    // Report WHICH way the coverage moved. A brand de-listed mid-window looks
-    // identical to a collapse in targeting, and calling that "we started
-    // watching" would be precisely backwards.
-    const ended = prior === "ended_early" || current === "ended_early";
-    return { kind: ended ? "coverage_ended" : "coverage_started", delta, pct: null };
+  const prior = brandsCoveredForMonth(coverage, priorMonth);
+  const current = brandsCoveredForMonth(coverage, currentMonth);
+
+  // Report WHICH way the coverage moved. A brand de-listed mid-window looks
+  // identical to a collapse in targeting, and calling that "we started
+  // watching" would be precisely backwards. Losing a brand takes precedence:
+  // it is the direction that overstates attacker retreat.
+  const dropped = [...prior].some((b) => !current.has(b));
+  if (dropped) return { kind: "coverage_ended", delta, pct: null };
+  const gained = [...current].some((b) => !prior.has(b));
+  if (gained) return { kind: "coverage_started", delta, pct: null };
+  if (prior.size === 0) {
+    // Neither month was covered, so neither set names the reason. A row that
+    // was closed at some point is a brand we stopped watching; one that never
+    // closed simply had not started yet.
+    const everClosed = coverage.some((r) => r.coveredTo !== null);
+    return {
+      kind: everClosed ? "coverage_ended" : "coverage_started",
+      delta,
+      pct: null,
+    };
   }
 
   if (currentClones < TREND_FLOOR && priorClones < TREND_FLOOR) {
@@ -208,18 +226,29 @@ export function classifyTrend(input: {
   return { kind: "claimable", delta, pct };
 }
 
-/** Counts for the post's caveat line, derived from the same verdicts it describes. */
+/**
+ * Counts for the post's caveat line, derived from the same verdicts it describes.
+ *
+ * `claimable` counts brands that both cleared the gate AND actually moved,
+ * because that is the set the publisher lists (`delta !== 0`). Counting flat
+ * brands here too made the caveat promise more rows than the post could show —
+ * the drift this whole module exists to prevent, reintroduced one field over.
+ * They are reported separately as `unchanged`: a real, publishable fact, but not
+ * a withheld one, so it stays out of the exclusion tally.
+ */
 export function summariseTrendExclusions(
   verdicts: TrendVerdict[],
 ): {
   claimable: number;
+  unchanged: number;
   coverageStarted: number;
   coverageEnded: number;
   belowFloor: number;
   unknown: number;
 } {
   return {
-    claimable: verdicts.filter((v) => v.kind === "claimable").length,
+    claimable: verdicts.filter((v) => v.kind === "claimable" && v.delta !== 0).length,
+    unchanged: verdicts.filter((v) => v.kind === "claimable" && v.delta === 0).length,
     coverageStarted: verdicts.filter((v) => v.kind === "coverage_started").length,
     coverageEnded: verdicts.filter((v) => v.kind === "coverage_ended").length,
     belowFloor: verdicts.filter((v) => v.kind === "below_floor").length,

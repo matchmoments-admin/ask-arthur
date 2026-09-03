@@ -25,9 +25,21 @@ export interface WorklistRow {
 
 /**
  * One-line signal summary, e.g.
- *   "3 weaponised · 14 live · part of a 28-domain campaign".
+ *   "3 weaponised · 14 live · 28 domains on one stack".
  * Only non-zero signals are shown; always ends with the total-clone count so a
  * quiet brand still reads sensibly.
+ *
+ * SHARED INFRASTRUCTURE, NEVER COORDINATION — the same rule buildHookLine
+ * below already follows, and the same one targeting-copy.ts rule 3 states.
+ * `campaign_key` hashes registrar + nameserver roots + ASN + cert issuer, all
+ * of which a common hosting stack supplies for free, so it cannot evidence one
+ * actor. This line is read in the admin worklist immediately before the founder
+ * contacts the impersonated brand, which makes it the worst place to overclaim.
+ *
+ * The singleton branch matters: migration-v269's `campaign_sizes` has no
+ * `HAVING count > 1`, so a cluster of ONE yields campaign_domain_count = 1 with
+ * in_campaign true — which used to render as "part of a coordinated campaign"
+ * off a single domain.
  */
 export function signalSummary(row: WorklistRow): string {
   const parts: string[] = [];
@@ -36,8 +48,8 @@ export function signalSummary(row: WorklistRow): string {
   if (row.in_campaign) {
     parts.push(
       row.campaign_domain_count && row.campaign_domain_count > 1
-        ? `part of a ${row.campaign_domain_count}-domain campaign`
-        : "part of a coordinated campaign",
+        ? `${row.campaign_domain_count} domains on one stack`
+        : "shared hosting stack",
     );
   }
   parts.push(`${row.total_clones} lookalike${row.total_clones === 1 ? "" : "s"} total`);

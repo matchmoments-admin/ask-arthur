@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { classifyTrend, type BrandCoverage } from "@/lib/clone-watch/brand-coverage";
 
@@ -50,7 +51,7 @@ describe("the spotlight's volume thresholds are not a coverage check", () => {
       priorClones: 1,
       currentMonth: AUG,
       priorMonth: JUL,
-      coverage: coverageStartedMidJuly,
+      coverage: [coverageStartedMidJuly],
     });
     expect(v.kind).toBe("coverage_started");
     // The publisher requires kind === "claimable"; anything else is withheld.
@@ -67,7 +68,7 @@ describe("the spotlight's volume thresholds are not a coverage check", () => {
         priorClones,
         currentMonth: AUG,
         priorMonth: JUL,
-        coverage: coveredThroughout,
+        coverage: [coveredThroughout],
       }).kind,
     ).toBe("claimable");
   });
@@ -80,7 +81,7 @@ describe("the spotlight's volume thresholds are not a coverage check", () => {
       priorClones: 0,
       currentMonth: AUG,
       priorMonth: JUL,
-      coverage: coverageStartedMidJuly,
+      coverage: [coverageStartedMidJuly],
     });
     expect(v.kind).toBe("coverage_started");
   });
@@ -91,8 +92,53 @@ describe("the spotlight's volume thresholds are not a coverage check", () => {
       priorClones: 0,
       currentMonth: AUG,
       priorMonth: JUL,
-      coverage: coveredThroughout,
+      coverage: [coveredThroughout],
     });
     expect(v.kind).toBe("claimable");
+  });
+});
+
+/**
+ * Everything above exercises `classifyTrend` as a pure function, which is
+ * necessary and NOT sufficient: none of it executes the publisher, so deleting
+ * `isClaimable(r.brand) &&` from the two spotlight filters left the whole suite
+ * green. That is this repo's own recorded lesson — a tested gate is decorative
+ * until it is wired into the publishing path — reappearing in the very test
+ * written to prevent it.
+ *
+ * So assert the wiring in the source, the way reportCardSlideCount.test.ts
+ * already does for the deck. Structural rather than behavioural, because the
+ * ladder is buried inside a function that needs a Supabase client; the point is
+ * only that removing the gate must not be silent.
+ */
+const REPORT_CARD = new URL("../lib/clone-watch/report-card-data.ts", import.meta.url);
+
+describe("the gate is wired into the publisher, not merely beside it", () => {
+  const src = readFileSync(REPORT_CARD, "utf8");
+
+  it("defines isClaimable from the verdict, requiring kind === claimable", () => {
+    expect(src).toMatch(/const isClaimable = \(brand: string\) =>/);
+    expect(src).toMatch(/verdictByBrand\.get\(brand\)\?\.kind === "claimable"/);
+    // Fails closed when coverage could not be read at all.
+    expect(src).toMatch(/brandTrends\.publishable &&/);
+  });
+
+  it("applies it on BOTH comparative spotlight rungs", () => {
+    // The mover and the entrant are separate filters; the entrant rung needs it
+    // more, since "wasn't targeted at all last month" is exactly what a
+    // mid-month watchlist addition manufactures.
+    const uses = [...src.matchAll(/isClaimable\(r\.brand\)/g)];
+    expect(
+      uses.length,
+      "isClaimable must gate both the mover and the new-entrant rungs",
+    ).toBe(2);
+  });
+
+  it("mirrors the same MOVER_MIN_DELTA this file asserts against", () => {
+    // The constant is duplicated here deliberately (the ladder is not
+    // exported); pin it so the mirror cannot drift from the original.
+    const m = /const MOVER_MIN_DELTA = (\d+);/.exec(src);
+    expect(m, "MOVER_MIN_DELTA not found in report-card-data.ts").not.toBeNull();
+    expect(Number(m![1])).toBe(MOVER_MIN_DELTA);
   });
 });

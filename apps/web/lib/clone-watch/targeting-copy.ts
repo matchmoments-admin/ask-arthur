@@ -34,6 +34,11 @@
  *     come from the gate that made the decision, never from a hand count.
  */
 
+/** Small numbers read as words in prose; `top` is capped at three here. */
+function numberWord(n: number): string {
+  return ["zero", "one", "two", "three"][n] ?? String(n);
+}
+
 /** Human labels for the classifier's tactic enum — name-shape wording only. */
 const TACTIC_LABELS: Record<string, string> = {
   typosquat: "a one-character misspelling",
@@ -53,6 +58,8 @@ export function tacticLabel(tactic: string): string {
 
 export interface TrendExclusions {
   claimable: number;
+  /** Comparable, but flat — shown nowhere, and withheld for no reason. */
+  unchanged: number;
   coverageStarted: number;
   coverageEnded: number;
   belowFloor: number;
@@ -95,12 +102,19 @@ export function buildTrendDisclosure(x: TrendExclusions): string {
 /**
  * The classifier-rejection caveat.
  *
- * `clones` is every lexical match; `deliberate` is the subset the classifier
- * judged intentional. Publishing the first as "lookalikes" without this
- * sentence overstates by the difference (14% in August 2026).
+ * `clones` is every lexical match; `rejected` is the subset the classifier
+ * actually judged coincidental (`is_clone === false`). Publishing the matches
+ * as "lookalikes" without this sentence overstates by that difference (14% in
+ * August 2026).
+ *
+ * TAKE THE REJECTED COUNT, NEVER `clones - deliberate`. The classifications
+ * embed is a non-inner join and `is_clone` is nullable, so that subtraction also
+ * sweeps in every row the classifier never saw — the flag being off, the cost
+ * brake tripping, or simply a backlog. With 200 unjudged and 100 rejected of
+ * 1,000 it prints "300 … were judged coincidental", a claim about 200 rows
+ * nobody judged, and the overstatement grows silently with classifier lag.
  */
-export function buildClassifierCaveat(clones: number, deliberate: number): string {
-  const rejected = clones - deliberate;
+export function buildClassifierCaveat(clones: number, rejected: number): string {
   if (rejected <= 0) return "";
   return (
     `${rejected} of the ${clones} name matches were judged coincidental rather than ` +
@@ -122,5 +136,10 @@ export function buildTldLine(
   const named = top.slice(0, 3);
   const sum = named.reduce((s, t) => s + t.n, 0);
   const list = named.map((t) => `.${t.key}`).join(", ");
-  return `${sum} of ${total} lookalikes were registered on just three domain endings — ${list}.`;
+  // Count the endings actually NAMED. `top` can hold one or two — the function
+  // takes any Mix, and per-brand reuse is the stated next step — so the literal
+  // "three" published "on just three domain endings — .shop, .com", claiming
+  // three while listing two, in the line this module calls its most defensible.
+  const noun = named.length === 1 ? "one domain ending" : `just ${numberWord(named.length)} domain endings`;
+  return `${sum} of ${total} lookalikes were registered on ${noun} — ${list}.`;
 }

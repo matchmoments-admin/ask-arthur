@@ -15,6 +15,7 @@ import {
 const ALL_COPY = (): string[] => [
   buildTrendDisclosure({
     claimable: 38,
+    unchanged: 0,
     coverageStarted: 7,
     coverageEnded: 1,
     belowFloor: 108,
@@ -77,6 +78,7 @@ describe("buildTrendDisclosure", () => {
   it("names every exclusion reason and totals them", () => {
     const s = buildTrendDisclosure({
       claimable: 38,
+      unchanged: 0,
       coverageStarted: 7,
       coverageEnded: 1,
       belowFloor: 108,
@@ -94,10 +96,10 @@ describe("buildTrendDisclosure", () => {
     // Saying "we started watching these" about brands we stopped watching is
     // the opposite of what happened — the whole reason coverage_ended exists.
     const started = buildTrendDisclosure({
-      claimable: 5, coverageStarted: 3, coverageEnded: 0, belowFloor: 0, unknown: 0,
+      claimable: 5, unchanged: 0, coverageStarted: 3, coverageEnded: 0, belowFloor: 0, unknown: 0,
     });
     const ended = buildTrendDisclosure({
-      claimable: 5, coverageStarted: 0, coverageEnded: 3, belowFloor: 0, unknown: 0,
+      claimable: 5, unchanged: 0, coverageStarted: 0, coverageEnded: 3, belowFloor: 0, unknown: 0,
     });
     expect(started).toContain("only started monitoring");
     expect(started).not.toContain("stopped monitoring");
@@ -109,7 +111,7 @@ describe("buildTrendDisclosure", () => {
     // A dangling caveat with no claim attached is its own kind of confusion.
     expect(
       buildTrendDisclosure({
-        claimable: 0, coverageStarted: 4, coverageEnded: 0, belowFloor: 9, unknown: 0,
+        claimable: 0, unchanged: 0, coverageStarted: 4, coverageEnded: 0, belowFloor: 9, unknown: 0,
       }),
     ).toBe("");
   });
@@ -117,13 +119,27 @@ describe("buildTrendDisclosure", () => {
 
 describe("buildClassifierCaveat", () => {
   it("states the rejected count against the raw match count", () => {
-    expect(buildClassifierCaveat(1032, 887)).toBe(
+    // Real August 2026: 1032 deduped matches, 145 judged coincidental.
+    expect(buildClassifierCaveat(1032, 145)).toBe(
       "145 of the 1032 name matches were judged coincidental rather than deliberate, and are excluded from the naming breakdown.",
     );
   });
 
   it("says nothing when none were rejected", () => {
-    expect(buildClassifierCaveat(50, 50)).toBe("");
+    expect(buildClassifierCaveat(50, 0)).toBe("");
+  });
+
+  it("takes the REJECTED count, never `total - deliberate`", () => {
+    // The classifications embed is a non-inner join and is_clone is nullable,
+    // so rows the classifier never judged (flag off, cost brake, backlog — all
+    // three are documented in clone-watch-haiku-preclassify.ts, and 6 rows sat
+    // unclassified for ~2 days on 2026-05-29) are NOT rejections. Subtracting
+    // would publish a claim about rows nobody judged, growing with lag.
+    const total = 1000;
+    const deliberate = 700;
+    const genuinelyRejected = 100; // the other 200 were never judged
+    expect(buildClassifierCaveat(total, genuinelyRejected)).toContain("100 of the 1000");
+    expect(buildClassifierCaveat(total, total - deliberate)).toContain("300 of the 1000");
   });
 });
 

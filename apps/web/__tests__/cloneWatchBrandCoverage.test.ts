@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   TREND_FLOOR,
+  brandsCoveredForMonth,
   classifyTrend,
   coveredForWholeMonth,
-  narrowestCoverage,
   summariseTrendExclusions,
   type BrandCoverage,
 } from "@/lib/clone-watch/brand-coverage";
@@ -73,7 +73,7 @@ describe("classifyTrend", () => {
       priorClones: 1,
       currentMonth: AUG,
       priorMonth: JUL,
-      coverage: BEAUTY_COHORT,
+      coverage: [BEAUTY_COHORT],
     });
     expect(v.kind).toBe("coverage_started");
     expect(v.pct).toBeNull();
@@ -85,7 +85,7 @@ describe("classifyTrend", () => {
       priorClones: 3,
       currentMonth: AUG,
       priorMonth: JUL,
-      coverage: { ...BEAUTY_COHORT, brandNormalized: "mecca" },
+      coverage: [{ ...BEAUTY_COHORT, brandNormalized: "mecca" }],
     });
     expect(v.kind).toBe("coverage_started");
   });
@@ -96,7 +96,7 @@ describe("classifyTrend", () => {
       priorClones: 38,
       currentMonth: AUG,
       priorMonth: JUL,
-      coverage: LONG_COVERED,
+      coverage: [LONG_COVERED],
     });
     expect(v.kind).toBe("claimable");
     expect(v.delta).toBe(33);
@@ -109,7 +109,7 @@ describe("classifyTrend", () => {
       priorClones: 16,
       currentMonth: AUG,
       priorMonth: JUL,
-      coverage: { ...LONG_COVERED, brandDomain: "bonds.com.au", brandNormalized: "bonds" },
+      coverage: [{ ...LONG_COVERED, brandDomain: "bonds.com.au", brandNormalized: "bonds" }],
     });
     expect(v.kind).toBe("claimable");
     expect(v.pct).toBe(75);
@@ -127,7 +127,7 @@ describe("classifyTrend", () => {
       priorClones: 32,
       currentMonth: AUG,
       priorMonth: JUL,
-      coverage: { ...LONG_COVERED, brandDomain: "kmart.com.au", brandNormalized: "kmart" },
+      coverage: [{ ...LONG_COVERED, brandDomain: "kmart.com.au", brandNormalized: "kmart" }],
     });
     expect(v.kind).toBe("claimable");
     expect(v.delta).toBe(2);
@@ -140,7 +140,7 @@ describe("classifyTrend", () => {
       priorClones: 2,
       currentMonth: AUG,
       priorMonth: JUL,
-      coverage: { ...LONG_COVERED, brandNormalized: "nab" },
+      coverage: [{ ...LONG_COVERED, brandNormalized: "nab" }],
     });
     expect(v.kind).toBe("below_floor");
   });
@@ -153,7 +153,7 @@ describe("classifyTrend", () => {
       priorClones: 6,
       currentMonth: AUG,
       priorMonth: JUL,
-      coverage: { ...LONG_COVERED, brandNormalized: "iinet" },
+      coverage: [{ ...LONG_COVERED, brandNormalized: "iinet" }],
     });
     expect(v.kind).toBe("claimable");
     expect(v.delta).toBe(10);
@@ -170,7 +170,7 @@ describe("classifyTrend", () => {
       priorClones: 0,
       currentMonth: AUG,
       priorMonth: JUL,
-      coverage: BEAUTY_COHORT,
+      coverage: [BEAUTY_COHORT],
     });
     expect(v.kind).toBe("coverage_started");
   });
@@ -196,18 +196,30 @@ describe("classifyTrend", () => {
 describe("summariseTrendExclusions", () => {
   it("counts each reason so the post's caveat cannot drift from the gate", () => {
     const verdicts = [
-      classifyTrend({ currentClones: 71, priorClones: 38, currentMonth: AUG, priorMonth: JUL, coverage: LONG_COVERED }),
-      classifyTrend({ currentClones: 11, priorClones: 1, currentMonth: AUG, priorMonth: JUL, coverage: BEAUTY_COHORT }),
-      classifyTrend({ currentClones: 1, priorClones: 2, currentMonth: AUG, priorMonth: JUL, coverage: LONG_COVERED }),
+      classifyTrend({ currentClones: 71, priorClones: 38, currentMonth: AUG, priorMonth: JUL, coverage: [LONG_COVERED] }),
+      classifyTrend({ currentClones: 11, priorClones: 1, currentMonth: AUG, priorMonth: JUL, coverage: [BEAUTY_COHORT] }),
+      classifyTrend({ currentClones: 1, priorClones: 2, currentMonth: AUG, priorMonth: JUL, coverage: [LONG_COVERED] }),
       classifyTrend({ currentClones: 5, priorClones: 5, currentMonth: AUG, priorMonth: JUL, coverage: null }),
     ];
     expect(summariseTrendExclusions(verdicts)).toEqual({
       claimable: 1,
+      unchanged: 0,
       coverageStarted: 1,
       coverageEnded: 0,
       belowFloor: 1,
       unknown: 1,
     });
+  });
+
+  it("counts a flat covered brand as `unchanged`, NOT as claimable", () => {
+    // The publisher lists only `delta !== 0`, so counting a 12 -> 12 brand as
+    // claimable made the caveat promise more rows than the post could show.
+    const s = summariseTrendExclusions([
+      classifyTrend({ currentClones: 12, priorClones: 12, currentMonth: AUG, priorMonth: JUL, coverage: [LONG_COVERED] }),
+      classifyTrend({ currentClones: 71, priorClones: 38, currentMonth: AUG, priorMonth: JUL, coverage: [LONG_COVERED] }),
+    ]);
+    expect(s.claimable).toBe(1);
+    expect(s.unchanged).toBe(1);
   });
 });
 
@@ -230,15 +242,15 @@ describe("coverage that ENDED (review finding)", () => {
       priorClones: 40,
       currentMonth: AUG,
       priorMonth: JUL,
-      coverage: DELISTED,
+      coverage: [DELISTED],
     });
     expect(v.kind).toBe("coverage_ended");
   });
 
   it("counts the two coverage reasons separately", () => {
     const verdicts = [
-      classifyTrend({ currentClones: 0, priorClones: 40, currentMonth: AUG, priorMonth: JUL, coverage: DELISTED }),
-      classifyTrend({ currentClones: 11, priorClones: 1, currentMonth: AUG, priorMonth: JUL, coverage: BEAUTY_COHORT }),
+      classifyTrend({ currentClones: 0, priorClones: 40, currentMonth: AUG, priorMonth: JUL, coverage: [DELISTED] }),
+      classifyTrend({ currentClones: 11, priorClones: 1, currentMonth: AUG, priorMonth: JUL, coverage: [BEAUTY_COHORT] }),
     ];
     const s = summariseTrendExclusions(verdicts);
     expect(s.coverageEnded).toBe(1);
@@ -270,68 +282,164 @@ const CENTRELINK: BrandCoverage = {
   coveredTo: null,
 };
 
-describe("narrowestCoverage — several brands, one domain", () => {
-  const merged = [SERVICES_AUSTRALIA, MEDICARE, CENTRELINK].reduce<
-    BrandCoverage | undefined
-  >((acc, row) => narrowestCoverage(acc, row), undefined)!;
+const SERVICES_AUSTRALIA_ROWS = [SERVICES_AUSTRALIA, MEDICARE, CENTRELINK];
 
-  it("intersects to the LATEST start, so the bucket is only comparable once every brand was watched", () => {
-    expect(merged.coveredFrom).toBe("2026-06-16");
+describe("several brands, one domain", () => {
+  it("names only the brands covered for the WHOLE month", () => {
+    // June: Services Australia only (the other two start on the 16th).
+    expect([...brandsCoveredForMonth(SERVICES_AUSTRALIA_ROWS, "2026-06")]).toEqual([
+      "servicesaustralia",
+    ]);
+    // July: all three.
+    expect(brandsCoveredForMonth(SERVICES_AUSTRALIA_ROWS, JUL).size).toBe(3);
   });
 
-  it("is order-independent", () => {
-    const reversed = [CENTRELINK, MEDICARE, SERVICES_AUSTRALIA].reduce<
-      BrandCoverage | undefined
-    >((acc, row) => narrowestCoverage(acc, row), undefined)!;
-    expect(reversed.coveredFrom).toBe(merged.coveredFrom);
-    expect(reversed.coveredTo).toBe(merged.coveredTo);
-  });
-
-  it("lets a real end date beat a still-open null, because the bucket changes when ANY brand leaves", () => {
-    const delisted: BrandCoverage = { ...MEDICARE, coveredTo: "2026-08-14" };
-    expect(narrowestCoverage(SERVICES_AUSTRALIA, delisted).coveredTo).toBe(
-      "2026-08-14",
-    );
-    expect(narrowestCoverage(delisted, SERVICES_AUSTRALIA).coveredTo).toBe(
-      "2026-08-14",
-    );
-  });
-
-  it("withholds the June-vs-July rise that the union rule would have published", () => {
-    // Real prod counts for this domain: June 3 -> July 13. Under the previous
-    // "earliest start wins" merge the domain read as covered from 2026-05-26,
-    // making this claimable — a +10 delta that clears MOVER_MIN_DELTA and is
-    // substantially the 16 June watchlist commit, not attacker behaviour.
+  it("withholds the June-vs-July rise a merged window would have published", () => {
+    // Real prod counts for this domain: June 3 -> July 13. Flattening the three
+    // rows into one window with the earliest start reads the domain as covered
+    // from 2026-05-26, making this claimable — a +10 delta that clears
+    // MOVER_MIN_DELTA and is substantially the 16 June watchlist commit
+    // widening the sweep, not attacker behaviour.
     const v = classifyTrend({
       currentClones: 13,
       priorClones: 3,
       currentMonth: JUL,
       priorMonth: "2026-06",
-      coverage: merged,
+      coverage: SERVICES_AUSTRALIA_ROWS,
     });
     expect(v.kind).toBe("coverage_started");
 
-    const unioned: BrandCoverage = { ...merged, coveredFrom: "2026-05-26" };
+    const flattened: BrandCoverage = { ...SERVICES_AUSTRALIA };
     expect(
       classifyTrend({
         currentClones: 13,
         priorClones: 3,
         currentMonth: JUL,
         priorMonth: "2026-06",
-        coverage: unioned,
+        coverage: [flattened],
       }).kind,
     ).toBe("claimable");
   });
 
-  it("still allows August-vs-July, which both merges agree on", () => {
-    // The pending edition must be unaffected: 2026-06-16 precedes both months.
+  it("still allows August-vs-July, so the pending edition is unaffected", () => {
     expect(
       classifyTrend({
         currentClones: 13,
         priorClones: 13,
         currentMonth: AUG,
         priorMonth: JUL,
-        coverage: merged,
+        coverage: SERVICES_AUSTRALIA_ROWS,
+      }).kind,
+    ).toBe("claimable");
+  });
+
+  it("reports coverage_ended when one contributing brand leaves", () => {
+    // Losing a brand shrinks the bucket, which looks exactly like attackers
+    // easing off. It takes precedence over any simultaneous addition.
+    const rows = [
+      SERVICES_AUSTRALIA,
+      { ...MEDICARE, coveredTo: "2026-08-14" },
+      CENTRELINK,
+    ];
+    expect(
+      classifyTrend({
+        currentClones: 4,
+        priorClones: 13,
+        currentMonth: AUG,
+        priorMonth: JUL,
+        coverage: rows,
+      }).kind,
+    ).toBe("coverage_ended");
+  });
+});
+
+describe("a brand de-listed then re-added (review finding)", () => {
+  // planCoverageSync only treats rows with a null covered_to as open, so a
+  // re-added brand gets a SECOND row — permitted by v294's
+  // PRIMARY KEY (brand_normalized, covered_from).
+  const GAPPED: BrandCoverage[] = [
+    {
+      brandDomain: "bonds.com.au",
+      brandNormalized: "bonds",
+      coveredFrom: "2026-01-01",
+      coveredTo: "2026-05-01",
+    },
+    {
+      brandDomain: "bonds.com.au",
+      brandNormalized: "bonds",
+      coveredFrom: "2026-07-01",
+      coveredTo: null,
+    },
+  ];
+
+  it("is claimable once the NEW window covers both months", () => {
+    // Flattening to the earliest row pinned this brand to its stale CLOSED
+    // window, so it read coverage_ended forever: blocked from both spotlight
+    // rungs, and described in the caveat as one we stopped monitoring while we
+    // were actively monitoring it.
+    expect(
+      classifyTrend({
+        currentClones: 28,
+        priorClones: 16,
+        currentMonth: AUG,
+        priorMonth: JUL,
+        coverage: GAPPED,
+      }).kind,
+    ).toBe("claimable");
+  });
+
+  it("is still withheld across the gap itself", () => {
+    expect(
+      classifyTrend({
+        currentClones: 28,
+        priorClones: 16,
+        currentMonth: "2026-06",
+        priorMonth: "2026-05",
+        coverage: GAPPED,
+      }).kind,
+    ).toBe("coverage_ended");
+  });
+});
+
+describe("a brand removed mid-month (review finding)", () => {
+  it("withholds the month the cron DETECTED the removal in", () => {
+    // covered_to is a detection date, not a departure date: the only writer is
+    // the monthly cron, stamping its own run date. A brand deleted on 10 August
+    // is stamped 2026-09-01, and under a strict `<` August read as fully
+    // covered — so a 40 -> 12 drop across 21 unmonitored days would publish as
+    // a real collapse in targeting.
+    const REMOVED: BrandCoverage = {
+      brandDomain: "kmart.com.au",
+      brandNormalized: "kmart",
+      coveredFrom: "2026-06-16",
+      coveredTo: "2026-09-01",
+    };
+    expect(
+      classifyTrend({
+        currentClones: 12,
+        priorClones: 40,
+        currentMonth: AUG,
+        priorMonth: JUL,
+        coverage: [REMOVED],
+      }).kind,
+    ).toBe("coverage_ended");
+  });
+
+  it("still allows the last month the snapshot PROVED it was on the list", () => {
+    // The 1 August snapshot saw it, so July is whole.
+    const REMOVED: BrandCoverage = {
+      brandDomain: "kmart.com.au",
+      brandNormalized: "kmart",
+      coveredFrom: "2026-05-01",
+      coveredTo: "2026-09-01",
+    };
+    expect(
+      classifyTrend({
+        currentClones: 40,
+        priorClones: 20,
+        currentMonth: JUL,
+        priorMonth: "2026-06",
+        coverage: [REMOVED],
       }).kind,
     ).toBe("claimable");
   });

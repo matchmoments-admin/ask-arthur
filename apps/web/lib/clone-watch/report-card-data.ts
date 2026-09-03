@@ -28,9 +28,10 @@ import {
   computeTargetingIntel,
   type TargetingIntel,
 } from "@/lib/clone-watch/targeting-intelligence";
+import { AU_BRAND_WATCHLIST } from "@askarthur/shopfront-glue";
 import {
+  brandsCoveredForMonth,
   classifyTrend,
-  narrowestCoverage,
   summariseTrendExclusions,
   type BrandCoverage,
   type TrendVerdict,
@@ -160,6 +161,18 @@ export interface CloneWatchReportCard {
   periodLabel: string;
   total: number;
   brands: number;
+  /**
+   * How many brands we were monitoring FOR THIS MONTH — the number the caption's
+   * methodology line quotes.
+   *
+   * Read from `brand_coverage_history` rather than `AU_BRAND_WATCHLIST.length`,
+   * because the watchlist is today's and a card can be built for any past month
+   * (`--month=`, and the export workflow's dispatch input). Quoting the live
+   * length restates a past month's methodology with a number that was not true
+   * then — and it only ever grows, so a re-export overstates. Falls back to the
+   * live length when coverage cannot be read, which is the old behaviour.
+   */
+  watchlistSize: number;
   kpis: {
     reportedToNetcraft: number;
     likelyPhishing: number;
@@ -612,7 +625,7 @@ export async function getCloneWatchReportCard(
   // A read failure yields an empty map, which makes every verdict
   // coverage_unknown and the gate unpublishable; degraded reads must never
   // quietly become "no exclusions".
-  const coverageByBrand = new Map<string, BrandCoverage>();
+  const coverageByBrand = new Map<string, BrandCoverage[]>();
   let coverageReadOk = true;
   {
     const { data, error } = await sb
@@ -629,21 +642,43 @@ export async function getCloneWatchReportCard(
           covered_from: string;
           covered_to: string | null;
         };
-        // Several brands can share one brand_domain (three do today), so rows
-        // are INTERSECTED into the window where all of them were watched — see
-        // narrowestCoverage. Unioning them fails the gate open.
-        coverageByBrand.set(
-          row.brand_domain,
-          narrowestCoverage(coverageByBrand.get(row.brand_domain), {
-            brandDomain: row.brand_domain,
-            brandNormalized: row.brand_normalized,
-            coveredFrom: row.covered_from,
-            coveredTo: row.covered_to,
-          }),
-        );
+        // ALL rows per domain, never a merged window. Several brands can share
+        // one brand_domain (three do today) and a re-added brand has two
+        // disjoint rows, so the gate needs the set — see brandsCoveredForMonth.
+        const bucket = coverageByBrand.get(row.brand_domain);
+        const entry: BrandCoverage = {
+          brandDomain: row.brand_domain,
+          brandNormalized: row.brand_normalized,
+          coveredFrom: row.covered_from,
+          coveredTo: row.covered_to,
+        };
+        if (bucket) bucket.push(entry);
+        else coverageByBrand.set(row.brand_domain, [entry]);
+      }
+      if (coverageByBrand.size === 0) {
+        // An EMPTY table is not an error, so nothing above logs — yet it
+        // suppresses every trend claim exactly as a failed read does, and
+        // silently: `buildTrendDisclosure` early-returns "" when nothing is
+        // claimable, so the caveat that would explain the absence is the very
+        // thing that goes missing. Say so, or a card built before
+        // backfill-brand-coverage.ts has run reads as a quiet month.
+        logger.warn("report-card: brand_coverage_history is EMPTY", {
+          period: periodMonth,
+          consequence: "all trend claims suppressed; run backfill-brand-coverage.ts",
+        });
       }
     }
   }
+
+  // Brands monitored for the WHOLE of the reported month — the methodology
+  // line's denominator, correct for a backfilled month rather than for today.
+  const brandsMonitoredThisMonth = new Set<string>();
+  for (const rows of coverageByBrand.values()) {
+    for (const b of brandsCoveredForMonth(rows, periodMonth.slice(0, 7))) {
+      brandsMonitoredThisMonth.add(b);
+    }
+  }
+  const watchlistSize = brandsMonitoredThisMonth.size || AU_BRAND_WATCHLIST.length;
 
   const priorYm = new Date(`${periodMonth.slice(0, 7)}-01T00:00:00Z`);
   priorYm.setUTCMonth(priorYm.getUTCMonth() - 1);
@@ -812,6 +847,7 @@ export async function getCloneWatchReportCard(
     periodLabel: label,
     total,
     brands: byBrand.size,
+    watchlistSize,
     kpis: {
       reportedToNetcraft,
       likelyPhishing: sumClassification(byBrand, "likely_phishing"),
