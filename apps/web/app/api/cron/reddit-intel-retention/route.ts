@@ -20,6 +20,9 @@ export const dynamic = "force-dynamic";
  *     * modus_operandi      (free text, can quote post details)
  *     * novelty_signals[]   (free text array, contains observed phrases)
  *     * narrative_summary   (free text, paraphrases the post)
+ *     * take_tells / take_where / take_au_line (v301 — Arthur's Take free
+ *       text; the row is also flipped to take_status='suppressed' so the
+ *       public detail page stops rendering it)
  *   Structured columns (intent_label, confidence, brands_impersonated,
  *   victim_emotion, tactic_tags, country_hints, embedding) are RETAINED
  *   indefinitely — they're aggregable analysis, not derived narrative.
@@ -72,7 +75,9 @@ export async function GET(req: Request) {
         .from("reddit_post_intel")
         .select("id")
         .lt("processed_at", stage1Cutoff)
-        .or("modus_operandi.not.is.null,narrative_summary.not.is.null")
+        .or(
+          "modus_operandi.not.is.null,narrative_summary.not.is.null,take_where.not.is.null,take_au_line.not.is.null",
+        )
         .order("id", { ascending: true })
         .limit(DELETE_CHUNK);
 
@@ -91,6 +96,24 @@ export async function GET(req: Request) {
           modus_operandi: null,
           novelty_signals: [],
           narrative_summary: null,
+          // Arthur's Take free text (v301). Held to the same 180-day window as
+          // the rest of the derived free text rather than kept indefinitely:
+          // although a take is our own paraphrase and carries no identifying
+          // detail by construction (the validator rejects amounts, handles,
+          // emails and phone numbers before the write), it is still a
+          // characterisation of one identifiable public post. Easier to relax
+          // later than to defend a retention we cannot justify.
+          //
+          // take_tells is an array, so it is emptied rather than nulled — the
+          // column is NOT NULL DEFAULT '{}'.
+          take_tells: [],
+          take_where: null,
+          take_au_line: null,
+          // The take is no longer renderable once its text is gone. Without
+          // this the detail page would keep 200-ing on a row whose panel is
+          // empty, because it gates on take_status rather than on content.
+          take_status: "suppressed",
+          take_suppressed_reason: "retention_180d",
         })
         .in("id", idList);
 
