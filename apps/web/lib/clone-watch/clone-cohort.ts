@@ -43,6 +43,8 @@ import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
 export interface CloneAlertRow {
   id: number;
   candidate_domain: string;
+  /** Full URL. The internal digest lists these verbatim for Scamwatch. */
+  candidate_url?: string | null;
   inferred_target_domain: string | null;
   urlscan_classification: string | null;
   urlscan_evidence: {
@@ -99,7 +101,7 @@ export interface CloneAlertRow {
  * missing one is a distribution that reads as 100% unknown.
  */
 export const CLONE_COHORT_SELECT =
-  "id, candidate_domain, inferred_target_domain, urlscan_classification, urlscan_evidence, attribution, submitted_to, lifecycle_state, netcraft_declined_at, weaponised_at, first_seen_at, triage_status, signals, campaign_key, clone_watch_classifications(is_clone, confidence, attack_intent, clone_tactic)";
+  "id, candidate_domain, candidate_url, inferred_target_domain, urlscan_classification, urlscan_evidence, attribution, submitted_to, lifecycle_state, netcraft_declined_at, weaponised_at, first_seen_at, triage_status, signals, campaign_key, clone_watch_classifications(is_clone, confidence, attack_intent, clone_tactic)";
 
 /** The NRD daily sweep — the only source these reporting surfaces count. */
 export const CLONE_COHORT_SOURCE = "nrd";

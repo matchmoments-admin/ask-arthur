@@ -10,6 +10,7 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "telegram:dev": "tsx scripts/telegram-dev.ts",
+    "clone-watch:compute-card": "tsx scripts/clone-watch-compute-card.ts",
     "report-card:export": "tsx scripts/clone-watch-report-export.ts",
     "clone-watch:caption": "tsx scripts/clone-watch-caption.ts",
     "hub:carousel": "tsx scripts/hub-carousel-export.ts",

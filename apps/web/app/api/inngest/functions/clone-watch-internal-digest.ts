@@ -8,18 +8,31 @@ import { logger } from "@askarthur/utils/logger";
 import { fetchAllRows } from "@askarthur/supabase/paginate";
 import { logCost, PRICING } from "@/lib/cost-telemetry";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
-import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
+import {
+  applyCohortRules,
+  CLONE_COHORT_SELECT,
+  CLONE_COHORT_SOURCE,
+  type CloneAlertRow,
+} from "@/lib/clone-watch/clone-cohort";
 import {
   aggregateClonesByDomain,
-  priorMonthStart,
-  type CloneAlertRow,
+  buildRegistrarRollup,
   type CloneBrandMetrics,
-} from "@/app/api/inngest/functions/report-brand-stewardship";
+} from "@/lib/clone-watch/clone-metrics";
+import { priorMonthStart } from "@/lib/clone-watch/month-window";
 
 /** Local extended row — the shared CloneAlertRow doesn't carry the full URL
  *  (only candidate_domain); we select candidate_url locally for the full-mode
  *  per-brand URL list, without touching the shared type/aggregator. */
 type CloneRowWithUrl = CloneAlertRow & { candidate_url: string | null };
+
+/** What `fetch-clones` returns ACROSS the Inngest step boundary: the two folds,
+ *  as entry arrays. Maps do not survive JSON serialisation, and the cohort rows
+ *  themselves are far too large to cross (see the step's comment). */
+type FoldedClones = {
+  byBrand: [string, CloneBrandMetrics][];
+  urlsByBrand: [string, string[]][];
+};
 
 /**
  * Clone-Watch internal all-clones digest.
@@ -48,36 +61,12 @@ function hosting(d: CloneBrandMetrics["domains"][number]): string {
   return parts.length ? esc(parts.join(" · ")) : "—";
 }
 
-/** Aggregate every brand's per-registrar clone counts (uncapped — byRegistrar
- *  is summed before the per-brand 100-cap) into one global rollup, plus a
- *  best-effort registrar→abuse-email map from the (capped) detail rows. The
- *  null/empty-registrar bucket is keyed "Unknown" by the shared aggregator. */
-export function buildRegistrarRollup(byBrand: Map<string, CloneBrandMetrics>): {
-  rows: Array<{ registrar: string; clones: number; abuseEmail: string | null }>;
-  unknownCount: number;
-} {
-  const counts = new Map<string, number>();
-  const abuse = new Map<string, string>();
-  for (const [, m] of byBrand) {
-    for (const [reg, n] of Object.entries(m.byRegistrar)) {
-      counts.set(reg, (counts.get(reg) ?? 0) + n);
-    }
-    for (const d of m.domains) {
-      if (d.registrar && d.abuse_email && !abuse.has(d.registrar)) {
-        abuse.set(d.registrar, d.abuse_email);
-      }
-    }
-  }
-  const unknownCount = counts.get("Unknown") ?? 0;
-  const rows = [...counts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .map(([registrar, clones]) => ({
-      registrar,
-      clones,
-      abuseEmail: abuse.get(registrar) ?? null,
-    }));
-  return { rows, unknownCount };
-}
+// buildRegistrarRollup moved to lib/clone-watch/clone-metrics.ts. THIS is the
+// edit that dissolves the import cycle: report-card-data.ts imported it from
+// here, so the digest could never import the card back without closing a loop —
+// which is the sole reason clone-watch-report-summary.ts exists as a separate
+// Inngest function. Re-exported for the existing test importer.
+export { buildRegistrarRollup };
 
 /** Build the internal digest HTML. Pure + unit-tested.
  *
@@ -250,21 +239,42 @@ export const cloneWatchInternalDigest = inngest.createFunction(
       // OFF → the digest is byte-identical to today.
       const full = featureFlags.adminCloneSummaryDigest;
 
-      const cloneRows = await step.run("fetch-clones", async () => {
+      // Loads AND folds inside one step. Inngest serialises a step's return
+      // value, and this select is now the full cohort shape (lifecycle columns,
+      // signals, campaign_key, plus the classifications embed) for up to
+      // CLONE_FETCH_LIMIT = 5000 rows — several MB on a heavy month, where the
+      // narrow hand-rolled select it replaced was small. The report-summary
+      // cron already refuses to let CardInputs cross a boundary for exactly this
+      // reason; widening the select here without revisiting it would have left
+      // the same trap one busy month away. Both consumers are pure folds over
+      // the rows, so they belong on this side of the boundary; only the folded
+      // results (bounded per brand) are returned. Maps do not survive JSON, so
+      // they cross as entry arrays and are rebuilt below.
+      const folded = await step.run("fetch-clones", async () => {
         const sb = createServiceClient();
-        if (!sb) return [] as CloneRowWithUrl[];
-        let q = sb
+        if (!sb) return { byBrand: [], urlsByBrand: [] } as FoldedClones;
+        // THE COHORT'S SELECT — the third reader now shares it (clone-cohort.ts).
+        //
+        // It used to hand-roll a narrow list that omitted submitted_to,
+        // lifecycle_state, netcraft_declined_at, weaponised_at and
+        // first_seen_at, then fed those rows to aggregateClonesByDomain, which
+        // reads exactly those fields. They arrived `undefined`, so
+        // netcraftReported / takenDown / declined / escalated / weaponised /
+        // weaponisedAfterDecline / reTakenDown were all ZERO BY CONSTRUCTION in
+        // this digest, and the lifecycle sort collapsed to its default rank for
+        // every row. It typechecked perfectly — the exact failure clone-cohort's
+        // header warns about, and it was NOT gated by the feature flag.
+        const q = sb
           .from("shopfront_clone_alerts")
-          .select(
-            "id, candidate_domain, candidate_url, inferred_target_domain, urlscan_classification, urlscan_evidence, attribution, triage_status",
-          )
-          .eq("source", "nrd")
+          .select(CLONE_COHORT_SELECT)
+          .eq("source", CLONE_COHORT_SOURCE)
           .gte("first_seen_at", period.startIso)
           .lt("first_seen_at", period.endIso)
-          .not("inferred_target_domain", "is", null);
-        // Full mode mirrors the brand report's FP/triage exclusion (the legacy
-        // digest lacked it); OFF path keeps today's rows so it stays identical.
-        if (full) q = q.or("triage_status.is.null,triage_status.neq.fp");
+          .not("inferred_target_domain", "is", null)
+          // Unconditional now. This was gated on `full`, so with the flag OFF
+          // the digest counted confirmed false positives. "Byte-identical to
+          // today" was only worth preserving while today was right.
+          .or("triage_status.is.null,triage_status.neq.fp");
         // Paginated: `.limit(CLONE_FETCH_LIMIT)` returned at most 1000 rows
         // regardless of the constant, and the `=== CLONE_FETCH_LIMIT` guard below
         // it compared against 5000 — unreachable, so it never fired.
@@ -284,13 +294,36 @@ export const cloneWatchInternalDigest = inngest.createFunction(
             period: periodMonth,
           });
         }
-        let rows = data as unknown as CloneRowWithUrl[];
-        if (full)
-          rows = rows.filter((r) => !isFpBrand(r.inferred_target_domain));
-        return rows;
+        // Also unconditional, and via the shared rules rather than a hand-rolled
+        // isFpBrand call — the generic-dictionary FP brands are not a full-mode
+        // nicety, they are what stops domain.com.au / lendi.com.au polluting a
+        // digest the founder reads as fact.
+        const cloneRows = applyCohortRules(
+          data as unknown as CloneAlertRow[],
+        ) as CloneRowWithUrl[];
+
+        // Full mode only: a LOCAL uncapped map of every clone URL per brand (the
+        // shared aggregator caps detail at 100/brand and carries only the domain).
+        const urls = new Map<string, string[]>();
+        if (full) {
+          for (const r of cloneRows) {
+            const brand = r.inferred_target_domain;
+            if (!brand) continue;
+            const url = r.candidate_url || r.candidate_domain;
+            if (!url) continue;
+            const arr = urls.get(brand) ?? [];
+            if (!arr.includes(url)) arr.push(url);
+            urls.set(brand, arr);
+          }
+        }
+
+        return {
+          byBrand: [...aggregateClonesByDomain(cloneRows).entries()],
+          urlsByBrand: [...urls.entries()],
+        } as FoldedClones;
       });
 
-      const byBrand = aggregateClonesByDomain(cloneRows);
+      const byBrand = new Map<string, CloneBrandMetrics>(folded.byBrand);
       if (byBrand.size === 0) {
         return {
           ok: true,
@@ -300,20 +333,7 @@ export const cloneWatchInternalDigest = inngest.createFunction(
         };
       }
 
-      // Full mode only: a LOCAL uncapped map of every clone URL per brand (the
-      // shared aggregator caps detail at 100/brand and carries only the domain).
-      const urlsByBrand = new Map<string, string[]>();
-      if (full) {
-        for (const r of cloneRows) {
-          const brand = r.inferred_target_domain;
-          if (!brand) continue;
-          const url = r.candidate_url || r.candidate_domain;
-          if (!url) continue;
-          const arr = urlsByBrand.get(brand) ?? [];
-          if (!arr.includes(url)) arr.push(url);
-          urlsByBrand.set(brand, arr);
-        }
-      }
+      const urlsByBrand = new Map<string, string[]>(folded.urlsByBrand);
 
       const html = buildInternalDigestHtml(
         label,

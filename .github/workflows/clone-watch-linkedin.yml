@@ -61,6 +61,27 @@ jobs:
       - name: Install Chromium for Puppeteer
         run: pnpm --filter @askarthur/web exec puppeteer browsers install chrome
 
+      # Compute the card ONCE and pin it (v298 card_json + out/card.json).
+      #
+      # Everything downstream — the eight slides, the caption, and the
+      # post-approval publish write-back — then quotes these exact numbers.
+      # They used to be three-to-five INDEPENDENT reads of shopfront_clone_alerts,
+      # whose lifecycle columns the reconciler mutates daily and which every KPI
+      # on slide 06 reads: the export built the card once per slide inside the
+      # prod Next server, the caption rebuilt it here minutes later, and the
+      # write-back rebuilt it a third time AFTER the approval gate below —
+      # which is unbounded. The PDF that got approved and the row persisted
+      # afterwards were computed from different snapshots.
+      #
+      # MUST run before the export, which reads the pin.
+      - name: Compute + pin the report card
+        working-directory: apps/web
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          MONTH: ${{ steps.month.outputs.value }}
+        run: pnpm clone-watch:compute-card -- --month="$MONTH" --out=out
+
       - name: Render carousel PDF (against prod)
         working-directory: apps/web
         env:

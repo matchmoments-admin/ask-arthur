@@ -141,8 +141,48 @@ async function main() {
     const page = await browser.newPage();
     await page.setViewport({ width: WIDTH, height: HEIGHT, deviceScaleFactor: 2 });
     await page.setCookie({ name: "__aa_admin", value: token, domain: hostname, path: "/" });
+    // Render against a PROTECTED preview deployment. Vercel Deployment
+    // Protection answers an unauthenticated request with an SSO redirect, which
+    // the blank-frame check below reports as "slide 1 did not render" — so a
+    // slide fix could never be verified before it reached prod, and the
+    // 1350px overflow that blocked the August 2026 edition was only caught by
+    // the monthly lane itself. A local `VERCEL_OIDC_TOKEN` (from `vercel env
+    // pull`) is a short-lived development identity that Trusted Sources admits
+    // to the same project's previews; sent as this header it passes protection
+    // without disabling it. Never logged. Absent in the GH lane, which renders
+    // against prod.
+    const oidc = process.env.VERCEL_OIDC_TOKEN?.trim();
+    if (oidc) {
+      // Scoped to the target ORIGIN, not attached to every request the page
+      // makes. setExtraHTTPHeaders applies to subresources too, so any
+      // third-party asset the report card ever gains — an urlscan screenshot, a
+      // remote font, a beacon — would be handed a live Vercel identity token.
+      // Interception keeps it on same-origin navigations only.
+      const origin = new URL(base).origin;
+      await page.setRequestInterception(true);
+      page.on("request", (req) => {
+        let sameOrigin = false;
+        try {
+          sameOrigin = new URL(req.url()).origin === origin;
+        } catch {
+          sameOrigin = false;
+        }
+        void req.continue(
+          sameOrigin
+            ? { headers: { ...req.headers(), "x-vercel-trusted-oidc-idp-token": oidc } }
+            : undefined,
+        );
+      });
+    }
 
-    const monthQ = month ? `&month=${month}` : "";
+    // `pinned=1` renders the card PERSISTED for this month (v298 card_json)
+    // rather than recomputing it per slide. Eight slides were eight independent
+    // builds of the card against prod — up to 24 with the retry loop below —
+    // each a fresh read of a table the reconciler mutates daily. Now every
+    // slide, the caption and the publish write-back quote identical numbers.
+    // Only meaningful with an explicit month; the page falls back to a live
+    // computation when no pin exists.
+    const monthQ = month ? `&month=${month}&pinned=1` : "";
     const pngPaths: string[] = [];
     const sizes: number[] = [];
     for (let n = 1; n <= SLIDE_COUNT; n++) {
@@ -160,6 +200,23 @@ async function main() {
           );
         }
         console.log(`  ⟳ slide ${n} captured blank (${bytes} bytes) — retrying`);
+      }
+      // A pin that silently failed to load renders a perfect-looking slide off
+      // a fresher snapshot — invisible to both blank checks above. The page
+      // stamps which card it served; require it on every slide we asked to pin,
+      // so a mixed-snapshot deck fails HERE rather than reaching the founder.
+      if (monthQ) {
+        const served = await page.$eval(
+          "#rc-pin-state",
+          (el) => el.getAttribute("data-pinned"),
+        ).catch(() => null);
+        if (served !== "1") {
+          throw new Error(
+            `slide ${n} was requested with ?pinned=1 but the page served a LIVE recompute ` +
+              `(data-pinned=${served ?? "absent"}) — the deck would mix snapshots. ` +
+              `Check that compute-card pinned ${month} (clone_watch_report_summary.card_json).`,
+          );
+        }
       }
       sizes.push(bytes);
       pngPaths.push(out);

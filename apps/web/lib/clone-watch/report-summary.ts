@@ -44,7 +44,26 @@ export function summaryRow(
     // Cohort-windowed vendor-gap clock (v231 jsonb; includes excludedNegativeN
     // + asOf). Expected to differ from the rolling-window public RPC.
     duration_kpis: card.durations,
+    // Shared-infrastructure clustering (v298). Persisted, never published:
+    // campaign_key hashes registrar + nameservers + ASN + cert issuer and
+    // cannot evidence one actor (targeting-copy.ts rule 3). The card has
+    // computed this since v189 and assigned it to a field with zero readers.
+    campaigns: card.campaigns,
+    // THE WHOLE CARD (v298). Eleven fields had no column, so an edition could
+    // not be rebuilt from its own record — which is why the publish write-back
+    // used to recompute from live data after the approval gate and persist
+    // numbers nobody had approved. This is what the slide export, the caption
+    // and the write-back all read now.
+    card_json: card,
     updated_at: new Date().toISOString(),
+    // Set on INSERT by the column default since v189 (timestamptz NOT NULL
+    // DEFAULT now()) — what it did not do was move on a re-snapshot, while
+    // updated_at did. Stamping it here makes "when were these numbers
+    // computed" answerable. Note the one caller where the two diverge: the
+    // publish write-back persists the PINNED card after the approval gate, so
+    // there generated_at is the write time, not the computation time; card_json
+    // is the record of what was approved.
+    generated_at: new Date().toISOString(),
   };
   if (publishedPostUrn) row.published_post_urn = publishedPostUrn;
   return row;
@@ -61,6 +80,35 @@ export async function upsertSummary(
     .from("clone_watch_report_summary")
     .upsert(summaryRow(card, publishedPostUrn), { onConflict: "period_month" });
   if (error) throw new Error(`summary upsert failed: ${error.message}`);
+}
+
+/**
+ * The card persisted for a month (v298 `card_json`), or null when the row is
+ * absent or predates the column.
+ *
+ * THIS IS THE PIN. A published edition used to be assembled from three-to-five
+ * independent reads of a table the reconciler mutates daily: the slide export
+ * hit prod once per slide, the caption recomputed in the GH runner, and the
+ * publish write-back recomputed a third time — separated from the export by the
+ * ENTIRE human approval latency, which is unbounded. The PDF the founder
+ * approved and the row persisted afterwards were computed from different
+ * snapshots of the data. Reading the pin instead makes them the same bytes.
+ *
+ * Returns null rather than throwing: every caller has a live-computation
+ * fallback, and a missing pin should degrade to "recompute", not to "no
+ * edition".
+ */
+export async function getPinnedCard(
+  sb: ServiceClient,
+  periodMonth: string, // "YYYY-MM-01"
+): Promise<CloneWatchReportCard | null> {
+  const { data, error } = await sb
+    .from("clone_watch_report_summary")
+    .select("card_json")
+    .eq("period_month", periodMonth)
+    .maybeSingle();
+  if (error || !data?.card_json) return null;
+  return data.card_json as CloneWatchReportCard;
 }
 
 /**

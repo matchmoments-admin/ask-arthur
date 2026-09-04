@@ -8,10 +8,11 @@ import {
   logCoverageChange,
   planCoverageSync,
 } from "@/lib/clone-watch/record-coverage";
+import { loadCardInputs } from "@/lib/clone-watch/report-card-data";
 import {
-  getCloneWatchReportCard,
-  getCloneWatchTrendRows,
-} from "@/lib/clone-watch/report-card-data";
+  buildReportCard,
+  buildTrendRows,
+} from "@/lib/clone-watch/report-card";
 import { upsertSummary, writeTrendRows } from "@/lib/clone-watch/report-summary";
 
 /**
@@ -25,9 +26,15 @@ import { upsertSummary, writeTrendRows } from "@/lib/clone-watch/report-summary"
  * pages, and raw-row JSONB pruning.
  *
  * Lives in its own function (not folded into clone-watch-internal-digest)
- * deliberately: report-card-data.ts imports buildRegistrarRollup FROM the
- * digest, so importing getCloneWatchReportCard back into the digest would be a
- * cycle. This function is downstream of report-card-data with no such edge.
+ * because the two have different cadences and failure modes, and a snapshot
+ * that fails should not take an operator email down with it.
+ *
+ * It USED to live here for a worse reason, recorded so nobody restores it:
+ * report-card-data.ts imported `buildRegistrarRollup` FROM the digest, so
+ * importing the card back into the digest closed a value cycle — Inngest
+ * topology dictated by an inverted import. `buildRegistrarRollup` now lives in
+ * lib/clone-watch/clone-metrics.ts and no `lib/` Module imports from
+ * app/api/inngest at all, so that constraint is gone.
  *
  * Idempotent + backfill-safe: the manual-trigger event carries an optional
  * { periodMonth: "YYYY-MM" } override (used to backfill historical months).
@@ -46,9 +53,13 @@ export const cloneWatchReportSummary = inngest.createFunction(
     // concurrency slots (~30–60s each under contention); the old budget
     // cancelled healthy runs. Finite per ADR-0019; floor guarded by
     // inngestFinishBudgets.test.ts.
-    // 5 step sites x 30s of account-concurrency queue wait + 60s slack = 210s
-    // floor, comfortably inside 360s, so adding the coverage snapshot needs no
-    // budget change. Verified by apps/web/__tests__/inngestFinishBudgets.test.ts.
+    // 3 step sites x 30s of account-concurrency queue wait + 60s slack = 150s
+    // floor, comfortably inside 360s. Was 5 sites; compute/upsert/trend-rows
+    // merged into one step (see below), which removes two boundaries to queue
+    // for AND one full pagination of the month. Budget deliberately left at 6m:
+    // the merged step now does two fetches and two writes back-to-back, so the
+    // headroom moved from queue-wait to in-step work rather than disappearing.
+    // Verified by apps/web/__tests__/inngestFinishBudgets.test.ts.
     timeouts: { finish: "6m" },
     retries: 2,
   },
@@ -133,49 +144,57 @@ export const cloneWatchReportSummary = inngest.createFunction(
         }
       });
 
-      // Reconciled figures — identical numbers to /admin/report-card + the digest.
-      const card = await step.run("compute-summary", () =>
-        getCloneWatchReportCard(periodYm),
-      );
-
-      if (card.total === 0) {
-        return { ok: true, period: card.periodMonth, coverage, skipped: "no_clones" };
-      }
-
-      const result = await step.run("upsert-summary", async () => {
+      // ONE load, BOTH folds, both writes — in a single step.
+      //
+      // This used to be two steps that each did their own read, so the current
+      // month was paginated TWICE per run (`compute-summary` built the card,
+      // `write-trend-rows` re-fetched the identical rows to build the trend
+      // rows). Now `loadCardInputs` runs once and the two pure folds share it.
+      //
+      // Kept as one step deliberately: Inngest serialises a step's return
+      // value, and CardInputs carries thousands of alert rows, so it cannot
+      // cross a step boundary. Folding the writes in alongside keeps the rows
+      // inside the step and costs one fewer boundary to queue for — which is
+      // what actually bites on the 5-slot Hobby plan (ADR-0019, #1069). Both
+      // writes are idempotent, so a retry of the whole step is safe.
+      const result = await step.run("compute-and-write-summary", async () => {
+        const inputs = await loadCardInputs(periodYm);
+        const card = buildReportCard(inputs);
+        if (card.total === 0) {
+          return { period: card.periodMonth, skipped: "no_clones" as const };
+        }
         const sb = createServiceClient();
         if (!sb) throw new Error("service client unavailable");
         // Shared writer (report-summary.ts) — omits published_post_urn so a
         // re-snapshot preserves a URN the LinkedIn publish step recorded.
         await upsertSummary(sb, card);
-        return { period: card.periodMonth, total: card.total, brands: card.brands };
-      });
-
-      // Full per-brand + per-registrar trend rows (v193) — powers per-brand /
-      // per-registrar MoM on the owned-media pages. Idempotent delete+insert.
-      const trend = await step.run("write-trend-rows", async () => {
-        const sb = createServiceClient();
-        if (!sb) throw new Error("service client unavailable");
-        const rows = await getCloneWatchTrendRows(periodYm);
-        await writeTrendRows(sb, rows);
+        // Full per-brand + per-registrar trend rows (v193) — powers per-brand /
+        // per-registrar MoM on the owned-media pages. Idempotent delete+insert.
+        const trendRows = buildTrendRows(inputs);
+        await writeTrendRows(sb, trendRows);
         return {
-          brandRows: rows.brandRows.length,
-          registrarRows: rows.registrarRows.length,
+          period: card.periodMonth,
+          total: card.total,
+          brands: card.brands,
+          brandRows: trendRows.brandRows.length,
+          registrarRows: trendRows.registrarRows.length,
+          // Vendor-gap clock medians for the month cohort (null = leg empty).
+          declineToWeaponiseMedianH:
+            card.durations.declineToWeaponise.medianHours,
+          weaponiseToRefileMedianH: card.durations.weaponiseToRefile.medianHours,
+          refileToTakedownMedianH: card.durations.refileToTakedown.medianHours,
+          fullLoopMedianH: card.durations.fullLoop.medianHours,
+          excludedNegativeN: card.durations.excludedNegativeN,
+          anomalousInversionsN: card.durations.anomalousInversionsN,
         };
       });
 
-      logger.info("clone-watch-report-summary: snapshot written", {
-        ...result,
-        ...trend,
-        // Vendor-gap clock medians for the month cohort (null = leg empty).
-        declineToWeaponiseMedianH: card.durations.declineToWeaponise.medianHours,
-        weaponiseToRefileMedianH: card.durations.weaponiseToRefile.medianHours,
-        refileToTakedownMedianH: card.durations.refileToTakedown.medianHours,
-        fullLoopMedianH: card.durations.fullLoop.medianHours,
-        excludedNegativeN: card.durations.excludedNegativeN,
-        anomalousInversionsN: card.durations.anomalousInversionsN,
-      });
-      return { ok: true, ...result, ...trend };
+      if ("skipped" in result) {
+        return { ok: true, period: result.period, coverage, skipped: result.skipped };
+      }
+
+      logger.info("clone-watch-report-summary: snapshot written", result);
+      return { ok: true, ...result };
     },
   ),
 );

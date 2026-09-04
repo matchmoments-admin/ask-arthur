@@ -16,6 +16,39 @@ import { buildOutcomesLine } from "@/lib/clone-watch/outcome-copy";
 import { buildClassifierCaveat, tacticLabel } from "@/lib/clone-watch/targeting-copy";
 import { prettyBrand } from "@/lib/clone-watch/brand-display";
 import { reportCardCss } from "./report-card-css";
+import { getPinnedCard } from "@/lib/clone-watch/report-summary";
+import { monthWindow } from "@/lib/clone-watch/month-window";
+
+/** The card persisted for `month`, or null — never throws, so the page falls
+ *  through to a live computation rather than erroring on a missing pin.
+ *
+ *  It LOGS that fallback, and the caller marks it in the DOM (`data-pinned`).
+ *  The export requests this page once PER SLIDE (eight, up to 24 with retries);
+ *  a single transient PostgREST error on one of them used to yield a deck whose
+ *  slides quoted two different snapshots — silently, and invisibly to the
+ *  blank-frame and runt-size checks, because every slide renders perfectly. That
+ *  is the precise failure this pinning exists to remove, so it must not be able
+ *  to reappear inside the fix. */
+async function loadPinnedCard(
+  month: string,
+): Promise<CloneWatchReportCard | null> {
+  try {
+    const sb = createServiceClient();
+    if (!sb) {
+      logger.warn("report-card: pin requested but no service client", { month });
+      return null;
+    }
+    const pinned = await getPinnedCard(sb, monthWindow(month).periodMonth);
+    if (!pinned) logger.warn("report-card: no pinned card for month", { month });
+    return pinned;
+  } catch (err) {
+    logger.warn("report-card: pinned card read FAILED, falling back to live", {
+      month,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
 
 /**
  * /admin/report-card - renders the monthly "Australian Clone Watch" LinkedIn
@@ -79,14 +112,26 @@ function Pg({ n }: { n: number }) {
 export default async function ReportCardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string; slide?: string }>;
+  searchParams: Promise<{ month?: string; slide?: string; pinned?: string }>;
 }) {
   await requireAdmin();
-  const { month, slide } = await searchParams;
+  const { month, slide, pinned } = await searchParams;
 
   let data: CloneWatchReportCard;
+  // Whether THIS render actually served the pin — asserted by the export.
+  let servedPin = false;
   try {
-    data = await getCloneWatchReportCard(month);
+    // `?pinned=1` renders the card PERSISTED for this month (v298 card_json)
+    // instead of recomputing. The slide export passes it so all eight slides,
+    // the caption and the publish write-back quote one set of numbers — they
+    // used to be three-to-five separate reads of a table the reconciler mutates
+    // daily, minutes to days apart across the approval gate.
+    //
+    // Opt-in and fail-soft: no pin (or no month) falls through to a live
+    // computation, so opening the page by hand behaves exactly as before.
+    const pin = pinned === "1" && month ? await loadPinnedCard(month) : null;
+    servedPin = pin !== null;
+    data = pin ?? (await getCloneWatchReportCard(month));
   } catch (err) {
     return (
       <pre style={{ padding: 32, fontFamily: "monospace" }}>
@@ -108,6 +153,13 @@ export default async function ReportCardPage({
   return (
     <div className={`${archivo.variable} ${jbMono.variable} rc-root${only ? " rc-solo" : ""}`}>
       <style dangerouslySetInnerHTML={{ __html: reportCardCss }} />
+      {/* Machine-readable proof of WHICH card this render served. `?pinned=1`
+          is fail-soft by design, so without this a silent fallback to a live
+          recompute is indistinguishable from a served pin — the deck looks
+          perfect either way. The export asserts data-pinned="1" on every slide
+          it requested pinned, which turns a silent mixed-snapshot deck into a
+          loud failure before the approval gate. */}
+      <div id="rc-pin-state" data-pinned={servedPin ? "1" : "0"} hidden />
       {slides.map((n) => (
         <Slide key={n} n={n} data={data} />
       ))}
@@ -611,7 +663,7 @@ function SlideActed({ data, page }: SlideProps) {
           classification counts, so a reader tried to reconcile 792 / 40 / 6
           against a 1000 headline and could not — three numbers, two different
           axes, no denominator. */}
-      <div className="kpis" style={{ marginTop: 36 }}>
+      <div className="kpis" style={{ marginTop: 14 }}>
         <div className="kpi accent">
           <div className="n">{data.kpis.reportedToNetcraft}</div>
           <div className="l">
@@ -634,7 +686,7 @@ function SlideActed({ data, page }: SlideProps) {
               past that window its unclassified rows are never scanned — for the
               June cohort that was 320 of 804, every one of them permanently
               unscannable. "Not yet" is a promise the pipeline cannot keep. */}
-      <div className="know" style={{ marginTop: 28 }}>
+      <div className="know" style={{ marginTop: 14 }}>
         <div className="lab">WHAT THE SCANS FOUND — ALL {data.total}</div>
         <div className="txt">
           {data.kpis.likelyPhishing} serving likely phishing ·{" "}
@@ -647,14 +699,23 @@ function SlideActed({ data, page }: SlideProps) {
         </div>
       </div>
       {outcomes && (
-        <div className="know" style={{ marginTop: 24 }}>
+        <div className="know" style={{ marginTop: 12 }}>
           <div className="lab">WHAT HAPPENED NEXT</div>
           <div className="txt">Of this month&apos;s detections: {outcomes}.</div>
         </div>
       )}
-      <div className="know" style={{ marginTop: outcomes ? 24 : 28 }}>
+      <div className="know" style={{ marginTop: outcomes ? 12 : 16 }}>
         <div className="lab">HOW WE KNOW</div>
-        <div className="txt">We sweep newly-registered domains against ~50 major Australian brands daily, enrich with WHOIS + certificate data, and review by hand — each with a public evidence page on urlscan.io.</div>
+        {/* The brand count is COMPUTED, not a literal. "~50" shipped on this
+            slide every month while the watchlist held 293 — a six-fold
+            understatement of our own coverage. The caption's identical claim
+            was fixed and pinned by a test; the slide's twin was missed, which
+            is the same one-surface-not-the-seam shape as the actor-attribution
+            sentence. `watchlistSize` is the count monitored for the WHOLE of
+            the reported month, so a re-export of a past edition states what was
+            true THEN. Rounded down to the nearest ten so it stays true between
+            watchlist edits. */}
+        <div className="txt">We sweep newly-registered domains against {Math.floor(data.watchlistSize / 10) * 10}+ major Australian brands daily, enrich with WHOIS + certificate data, and review by hand — each with a public evidence page on urlscan.io.</div>
       </div>
       <div className="note">
         {outcomes ? (
