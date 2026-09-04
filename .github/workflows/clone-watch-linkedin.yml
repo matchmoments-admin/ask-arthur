@@ -175,6 +175,33 @@ jobs:
             --data-urlencode "text=$TEXT" \
             --data-urlencode "parse_mode=Markdown" >/dev/null
 
+      # A RED SCHEDULED PREPARE USED TO PAGE NOBODY.
+      #
+      # `publish` has had a failure ping since it shipped, because a publish
+      # failure happens after founder approval and risks a double-post on
+      # re-run. `prepare` had none — and prepare is the half that runs
+      # UNATTENDED on the 2nd of the month. So on 2026-09-02 the export's
+      # height guard correctly refused a clipping slide 7, the run went red,
+      # and nothing said so: the August edition was simply never published, and
+      # the failure was found two days later only by running the lane by hand.
+      #
+      # Degradation must not be indistinguishable from health. There is no
+      # `exit 0` swallow above this — the export/caption steps fail the job on
+      # error, which is what makes `if: failure()` reachable here.
+      - name: Telegram — prepare failed
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          MONTH: ${{ steps.month.outputs.value }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_ADMIN_CHAT_ID" ]; then exit 0; fi
+          TEXT=$(printf '⚠️ Clone Watch PREPARE failed for %s — no carousel was built, so the edition will NOT publish until this is fixed. Nothing was posted and nothing is awaiting approval: %s' "$MONTH" "$RUN_URL")
+          curl -sS -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+            --data-urlencode "chat_id=$TELEGRAM_ADMIN_CHAT_ID" \
+            --data-urlencode "text=$TEXT" >/dev/null
+
   publish:
     needs: prepare
     runs-on: ubuntu-latest
