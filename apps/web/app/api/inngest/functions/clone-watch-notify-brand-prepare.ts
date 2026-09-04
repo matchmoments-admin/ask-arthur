@@ -13,6 +13,10 @@ import CloneWatchBrandAlert, {
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
 import { logCost, PRICING } from "@/lib/cost-telemetry";
 import { resolveEmailCopy } from "@/lib/email/resolve-copy";
+import {
+  urlscanEvidenceFromJsonb,
+  type UrlscanEvidenceForEmail,
+} from "@/lib/clone-watch/urlscan-evidence";
 
 /**
  * Daily batch builder for clone-watch brand notifications.
@@ -474,40 +478,14 @@ export const cloneWatchNotifyBrandPrepare = inngest.createFunction(
 
 // ── Pure helpers (exported for unit testing) ─────────────────────────────
 
-export interface UrlscanEvidenceForEmail {
-  /** Public urlscan.io result page URL. Always present when scan was
-   *  attempted (even if retrieval timed out — the result page exists). */
-  resultUrl: string;
-  /** Screenshot URL. Only present when retrieval succeeded. */
-  screenshotUrl?: string;
-}
-
 /**
- * Pure helper: shape raw urlscan_evidence JSONB into the email-ready
- * fields. Exported for unit testing.
- *
- * Shape variants seen in prod (2026-05-27):
- *   * `{uuid, retrieved: false, retrieval_timeout: true}` — scan ran,
- *      retrieval timed out; result page still exists at urlscan.io
- *   * `{error, status, submit_failed: true}` — submit rejected (e.g.
- *      DNS-error for parked typosquats). No uuid → no link.
- *   * `{uuid, retrieved: true, screenshot_url, effective_url, ...}` —
- *      full success.
+ * Both moved to lib/clone-watch/urlscan-evidence.ts — a pure decoder should not
+ * live in an email-sending cron (this file's top level pulls Resend,
+ * @react-email/components and the Inngest client). Re-exported here so existing
+ * importers and the outreach test keep working.
  */
-export function urlscanEvidenceFromJsonb(
-  raw: unknown,
-): UrlscanEvidenceForEmail | undefined {
-  if (!raw || typeof raw !== "object") return undefined;
-  const obj = raw as Record<string, unknown>;
-  const uuid = typeof obj.uuid === "string" ? obj.uuid : null;
-  if (!uuid) return undefined;
-  const screenshot =
-    typeof obj.screenshot_url === "string" ? obj.screenshot_url : undefined;
-  return {
-    resultUrl: `https://urlscan.io/result/${uuid}/`,
-    screenshotUrl: screenshot,
-  };
-}
+export type { UrlscanEvidenceForEmail };
+export { urlscanEvidenceFromJsonb };
 
 /**
  * Batch-fetch urlscan_evidence for a list of alert ids. Returns a plain

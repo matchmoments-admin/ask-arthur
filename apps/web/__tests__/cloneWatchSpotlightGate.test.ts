@@ -1,6 +1,11 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { classifyTrend, type BrandCoverage } from "@/lib/clone-watch/brand-coverage";
+import {
+  ENTRANT_MIN_CLONES,
+  MOVER_MIN_DELTA,
+  pickSpotlight,
+} from "@/lib/clone-watch/spotlight";
 
 /**
  * The gate must be IN THE PUBLISHING PATH, not merely beside it.
@@ -13,15 +18,13 @@ import { classifyTrend, type BrandCoverage } from "@/lib/clone-watch/brand-cover
  * docstring is built around would have been published as a riser, with the
  * gate's "these brands were excluded" caveat printed underneath it.
  *
- * These cases pin the arithmetic of that near-miss so the two thresholds cannot
- * drift back apart. `MOVER_MIN_DELTA` (a delta) and `TREND_FLOOR` (a volume)
- * are both 10 and mean different things; that coincidence is what made the hole
- * invisible.
+ * These cases previously had to assert the ladder's arithmetic second-hand,
+ * because the ladder was a `const` inside an async Supabase function and no
+ * test could reach it. It now lives in spotlight.ts and is exercised directly.
  */
 
 const JUL = "2026-07";
 const AUG = "2026-08";
-const MOVER_MIN_DELTA = 10; // mirrors report-card-data.ts
 
 const coverageStartedMidJuly: BrandCoverage = {
   brandDomain: "theordinary.com",
@@ -36,16 +39,27 @@ const coveredThroughout: BrandCoverage = {
   coveredTo: null,
 };
 
-describe("the spotlight's volume thresholds are not a coverage check", () => {
+/** The ladder's inputs, with every gate open unless a case closes one. */
+function ladder(over: Partial<Parameters<typeof pickSpotlight>[0]> = {}) {
+  return pickSpotlight({
+    auOrFund: [],
+    priorClonesOf: () => 0,
+    isClaimable: () => true,
+    priorSpotlightBrand: null,
+    momAvailable: true,
+    superFund: null,
+    ...over,
+  });
+}
+
+describe("the volume thresholds are not a coverage check", () => {
   it("The Ordinary CLEARS the mover thresholds — which is why the gate is needed", () => {
     const priorClones = 1;
     const clones = 11;
-    const delta = clones - priorClones;
-    // Exactly the ladder's own predicate.
-    expect(priorClones > 0 && delta >= MOVER_MIN_DELTA).toBe(true);
+    expect(priorClones > 0 && clones - priorClones >= MOVER_MIN_DELTA).toBe(true);
   });
 
-  it("...and the gate rejects it, so the gate must be the binding filter", () => {
+  it("...and the gate rejects it", () => {
     const v = classifyTrend({
       currentClones: 11,
       priorClones: 1,
@@ -54,91 +68,136 @@ describe("the spotlight's volume thresholds are not a coverage check", () => {
       coverage: [coverageStartedMidJuly],
     });
     expect(v.kind).toBe("coverage_started");
-    // The publisher requires kind === "claimable"; anything else is withheld.
     expect(v.kind).not.toBe("claimable");
   });
+});
 
-  it("a genuinely covered riser still passes both", () => {
-    const priorClones = 38;
-    const clones = 71;
-    expect(priorClones > 0 && clones - priorClones >= MOVER_MIN_DELTA).toBe(true);
+describe("pickSpotlight binds the coverage gate", () => {
+  const ordinary = [{ brand: "theordinary.com", clones: 11 }];
+
+  it("WITHHOLDS a brand that clears the volume bar but fails the gate", () => {
+    const sp = ladder({
+      auOrFund: ordinary,
+      priorClonesOf: () => 1,
+      isClaimable: () => false,
+    });
+    expect(sp.kind).toBe("globals");
+    expect(sp.brand).toBe("");
+  });
+
+  it("publishes the same brand once the gate passes — so the gate is the binding filter", () => {
+    const sp = ladder({
+      auOrFund: ordinary,
+      priorClonesOf: () => 1,
+      isClaimable: () => true,
+    });
+    expect(sp.kind).toBe("mover");
+    expect(sp.brand).toBe("theordinary.com");
+  });
+
+  it("gates the NEW ENTRANT rung too — it needs the gate more than the mover does", () => {
+    // "It wasn't targeted at all last month" is exactly what a mid-month
+    // watchlist addition manufactures.
+    const entrant = [{ brand: "mecca.com.au", clones: ENTRANT_MIN_CLONES + 4 }];
+    expect(ladder({ auOrFund: entrant, isClaimable: () => false }).kind).toBe(
+      "globals",
+    );
+    expect(ladder({ auOrFund: entrant, isClaimable: () => true }).kind).toBe(
+      "new_entrant",
+    );
+  });
+
+  it("skips BOTH comparative rungs when there is no fair prior month", () => {
+    // Without this, priorClonesOf returns 0 for every brand, which disables the
+    // mover rung and makes EVERY brand look like a first-time entrant — the
+    // caption would publish "wasn't targeted at all last month" directly above
+    // its own "This is month one" line.
+    const sp = ladder({
+      auOrFund: [{ brand: "bonds.com.au", clones: 40 }],
+      momAvailable: false,
+    });
+    expect(sp.kind).toBe("globals");
+  });
+
+  it("never repeats last month's spotlight, at any rung", () => {
+    const brand = "hesta.com.au";
+    // mover
     expect(
-      classifyTrend({
-        currentClones: clones,
-        priorClones,
-        currentMonth: AUG,
-        priorMonth: JUL,
-        coverage: [coveredThroughout],
+      ladder({
+        auOrFund: [{ brand, clones: 40 }],
+        priorClonesOf: () => 5,
+        priorSpotlightBrand: brand,
       }).kind,
-    ).toBe("claimable");
+    ).toBe("globals");
+    // entrant
+    expect(
+      ladder({ auOrFund: [{ brand, clones: 40 }], priorSpotlightBrand: brand })
+        .kind,
+    ).toBe("globals");
+    // super fund — the series told the same story twice (HESTA led June AND
+    // July 2026) before the no-repeat rule existed.
+    expect(
+      ladder({
+        superFund: { brand, clones: 35, auRank: 2 },
+        priorSpotlightBrand: brand,
+      }).kind,
+    ).toBe("globals");
   });
 
-  it("a NEW ENTRANT with no prior month is withheld when coverage began mid-window", () => {
-    // The entrant rung publishes "it wasn't targeted at all last month" — the
-    // sentence a mid-month watchlist addition manufactures exactly.
-    const v = classifyTrend({
-      currentClones: 14,
-      priorClones: 0,
-      currentMonth: AUG,
-      priorMonth: JUL,
-      coverage: [coverageStartedMidJuly],
-    });
-    expect(v.kind).toBe("coverage_started");
+  it("matches the prior spotlight case-insensitively", () => {
+    expect(
+      ladder({
+        superFund: { brand: "HESTA.com.au", clones: 35, auRank: 2 },
+        priorSpotlightBrand: "hesta.com.au",
+      }).kind,
+    ).toBe("globals");
   });
 
-  it("a real first-timer we watched all along is claimable", () => {
-    const v = classifyTrend({
-      currentClones: 14,
-      priorClones: 0,
-      currentMonth: AUG,
-      priorMonth: JUL,
-      coverage: [coveredThroughout],
+  it("prefers the biggest mover, then the biggest entrant, then the fund", () => {
+    const sp = ladder({
+      auOrFund: [
+        { brand: "a.com.au", clones: 30 },
+        { brand: "b.com.au", clones: 60 },
+      ],
+      priorClonesOf: (b) => (b === "a.com.au" ? 5 : 45),
+      superFund: { brand: "hesta.com.au", clones: 35, auRank: 2 },
     });
-    expect(v.kind).toBe("claimable");
+    // a: delta 25, b: delta 15 — a wins despite b's larger volume.
+    expect(sp).toMatchObject({ kind: "mover", brand: "a.com.au", delta: 25 });
+  });
+
+  it("reports auRank from the AU-or-fund ranking, not the raw index", () => {
+    const sp = ladder({
+      auOrFund: [
+        { brand: "big.com.au", clones: 90 },
+        { brand: "riser.com.au", clones: 40 },
+      ],
+      priorClonesOf: (b) => (b === "riser.com.au" ? 5 : 88),
+    });
+    expect(sp).toMatchObject({ kind: "mover", brand: "riser.com.au", auRank: 2 });
   });
 });
 
 /**
- * Everything above exercises `classifyTrend` as a pure function, which is
- * necessary and NOT sufficient: none of it executes the publisher, so deleting
- * `isClaimable(r.brand) &&` from the two spotlight filters left the whole suite
- * green. That is this repo's own recorded lesson — a tested gate is decorative
- * until it is wired into the publishing path — reappearing in the very test
- * written to prevent it.
- *
- * So assert the wiring in the source, the way reportCardSlideCount.test.ts
- * already does for the deck. Structural rather than behavioural, because the
- * ladder is buried inside a function that needs a Supabase client; the point is
- * only that removing the gate must not be silent.
+ * The one thing behaviour cannot prove: that the CARD passes a real gate into
+ * the ladder rather than `() => true`. Deleting the verdict check would leave
+ * every test above green, because they supply `isClaimable` themselves. So this
+ * asserts the wiring in the source, the way reportCardSlideCount.test.ts does
+ * for the deck.
  */
-const REPORT_CARD = new URL("../lib/clone-watch/report-card-data.ts", import.meta.url);
+const REPORT_CARD = new URL("../lib/clone-watch/report-card.ts", import.meta.url);
 
-describe("the gate is wired into the publisher, not merely beside it", () => {
+describe("the card wires a real gate into the ladder", () => {
   const src = readFileSync(REPORT_CARD, "utf8");
 
-  it("defines isClaimable from the verdict, requiring kind === claimable", () => {
-    expect(src).toMatch(/const isClaimable = \(brand: string\) =>/);
+  it("passes isClaimable derived from the trend verdict", () => {
+    expect(src).toMatch(/isClaimable:\s*\(brand\)\s*=>/);
     expect(src).toMatch(/verdictByBrand\.get\(brand\)\?\.kind === "claimable"/);
     // Fails closed when coverage could not be read at all.
-    expect(src).toMatch(/brandTrends\.publishable &&/);
+    expect(src).toMatch(/brandTrends\.publishable/);
   });
 
-  it("applies it on BOTH comparative spotlight rungs", () => {
-    // The mover and the entrant are separate filters; the entrant rung needs it
-    // more, since "wasn't targeted at all last month" is exactly what a
-    // mid-month watchlist addition manufactures.
-    const uses = [...src.matchAll(/isClaimable\(r\.brand\)/g)];
-    expect(
-      uses.length,
-      "isClaimable must gate both the mover and the new-entrant rungs",
-    ).toBe(2);
-  });
-
-  it("mirrors the same MOVER_MIN_DELTA this file asserts against", () => {
-    // The constant is duplicated here deliberately (the ladder is not
-    // exported); pin it so the mirror cannot drift from the original.
-    const m = /const MOVER_MIN_DELTA = (\d+);/.exec(src);
-    expect(m, "MOVER_MIN_DELTA not found in report-card-data.ts").not.toBeNull();
-    expect(Number(m![1])).toBe(MOVER_MIN_DELTA);
+  it("does not hand the ladder a constant", () => {
+    expect(src).not.toMatch(/isClaimable:\s*\(\)\s*=>\s*true/);
   });
 });
