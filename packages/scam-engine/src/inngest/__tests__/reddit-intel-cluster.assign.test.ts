@@ -172,3 +172,33 @@ describe("resolveClusterThreshold", () => {
     expect(def).toBeLessThan(0.99);
   });
 });
+
+describe("threshold resolution reaches the assignment", () => {
+  const KEY = "REDDIT_INTEL_CLUSTER_THRESHOLD";
+  const original = process.env[KEY];
+  afterEach(() => {
+    if (original === undefined) delete process.env[KEY];
+    else process.env[KEY] = original;
+  });
+
+  it("honours the env override without the caller threading it", () => {
+    // The defect this pins: assignPostsToThemes used to default to the raw
+    // constant, so the override only applied on the single call site that
+    // passed it explicitly. Every other caller — and every test — clustered
+    // at 0.62 while an operator believed they had changed it.
+    const a = vec(DIM, 0);
+    const nearlyIdentical = vec(DIM, 0, 0.35); // cosine ~0.94 against `a`
+    const themes = [{ id: "t1", centroid: a, memberCount: 5 }];
+
+    delete process.env[KEY];
+    const atDefault = assignPostsToThemes(
+      [post("p1", nearlyIdentical)],
+      themes,
+    );
+    expect(atDefault.assignments[0].isNewTheme).toBe(false);
+
+    process.env[KEY] = "0.97";
+    const atRaised = assignPostsToThemes([post("p2", nearlyIdentical)], themes);
+    expect(atRaised.assignments[0].isNewTheme).toBe(true);
+  });
+});

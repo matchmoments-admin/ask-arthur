@@ -298,7 +298,12 @@ export function assignPostsToThemes(
   themes: ActiveTheme[],
   opts: AssignOptions = {},
 ): { assignments: Assignment[]; oversizedThemeCount: number } {
-  const threshold = opts.threshold ?? COSINE_THRESHOLD;
+  // resolveClusterThreshold(), not the raw constant: otherwise the env
+  // override is honoured only on the one path that happens to pass it
+  // explicitly, and every other caller — including every test — silently
+  // clusters at 0.62 while the operator believes they changed it. One number,
+  // one resolver.
+  const threshold = opts.threshold ?? resolveClusterThreshold();
   const joinCeiling = opts.joinCeiling ?? MAX_THEME_MEMBERS_FOR_JOIN;
   const freezeAt = opts.freezeAt ?? CENTROID_FREEZE_AT;
 
@@ -462,11 +467,12 @@ export const redditIntelCluster = inngest.createFunction(
       // anti-runaway guards (centroid freeze + join ceiling) live inside
       // assignPostsToThemes so the collapse can be reproduced and prevented in a
       // test without a DB.
+      // assignPostsToThemes resolves the threshold itself; read it here only
+      // to report it in the run summary.
       const clusterThreshold = resolveClusterThreshold();
       const { assignments, oversizedThemeCount } = assignPostsToThemes(
         posts,
         themes,
-        { threshold: clusterThreshold },
       );
 
       // Health alarm (always-ship .warn, bypasses INFO sampling): if a cohort of
