@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 
 import { featureFlags } from "@askarthur/utils/feature-flags";
 
 import ArthursTake from "@/components/arthurs-take/ArthursTake";
+import Footer from "@/components/Footer";
+import Nav from "@/components/Nav";
 import { gateOrNotFound } from "@/lib/featureGate";
 import { loadTake, takeSlug } from "@/lib/arthurs-take/loader";
 import { OG_BASE } from "@/lib/og";
@@ -33,14 +35,12 @@ export async function generateMetadata({
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 155);
-  const canonicalSlug = takeSlug(take.feedItemId, take.title);
-
   return {
     title: `${take.title.slice(0, 70)} — what Arthur sees`,
     description:
       description || "Pattern analysis of a reported scam, by Ask Arthur.",
     alternates: {
-      canonical: `https://askarthur.au/scam-feed/${canonicalSlug}`,
+      canonical: `https://askarthur.au/scam-feed/${takeSlug(take.feedItemId, take.title)}`,
     },
     // Next replaces the parent openGraph wholesale — spread the base or the
     // page loses the site's card image entirely. See lib/og.ts.
@@ -74,64 +74,92 @@ export default async function ScamFeedTakePage({ params }: PageProps) {
   const take = await loadTake(id);
   if (!take) notFound();
 
-  // Canonicalise: a bare id, or a stale suffix after a title correction,
-  // redirects to the readable form. Resolution is on the leading id, so an
-  // already-shared link keeps working rather than 404ing.
-  const canonical = takeSlug(take.feedItemId, take.title);
-  if (id !== canonical) {
-    redirect(`/scam-feed/${canonical}`);
-  }
+  // NO redirect here, deliberately.
+  //
+  // An earlier version redirected a bare id to the readable slug. On this
+  // route that produces a BLANK PAGE: `dynamic = "force-dynamic"` streams the
+  // response, metadata has already flushed by the time the body runs, and
+  // Next cannot turn a started stream into a 307 — so `redirect()` threw
+  // mid-stream and the reader got a title and nothing else. Verified in
+  // production: /scam-feed/42353 returned 200 with an empty body while
+  // /scam-feed/42353-legal-process-service rendered fine.
+  //
+  // Every form resolves on the leading id, so a bare id, an old slug, or a
+  // slug from before a title correction all render the same page. The
+  // preferred URL is advertised by `alternates.canonical` in generateMetadata,
+  // which is what search engines and link unfurlers read — and is the correct
+  // mechanism for this regardless of the streaming problem.
 
   return (
-    <main className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
-      <p className="text-sm">
-        <Link
-          href="/scam-feed"
-          className="text-gov-slate underline underline-offset-2 hover:text-deep-navy"
-        >
-          ← Back to the feed
-        </Link>
-      </p>
+    // The marketing shell, per DESIGN_SYSTEM.md § "non-negotiable". The
+    // (marketing) route group has NO layout, so each page renders Nav/Footer
+    // itself — an earlier version of this page shipped without them, leaving a
+    // public page with no site navigation and a dead skip link (root layout
+    // links to #main-content).
+    <div className="min-h-screen flex flex-col">
+      <Nav />
+      <main
+        id="main-content"
+        className="flex-1 w-full max-w-[640px] mx-auto px-5 pt-16 pb-16"
+      >
+        <nav className="text-xs text-slate-400 mb-8">
+          <Link
+            href="/scam-feed"
+            className="hover:text-action-teal transition-colors"
+          >
+            Feed
+          </Link>
+          <span className="mx-1.5">/</span>
+          <span className="text-slate-500">Arthur&rsquo;s Take</span>
+        </nav>
 
-      <article className="mt-6">
-        <header>
-          <p className="text-xs uppercase tracking-wide text-gov-slate">
-            Reported on Reddit
-            {take.postedAt ? ` · ${formatDate(take.postedAt)}` : ""}
-          </p>
-          <h1 className="mt-1 text-2xl font-semibold leading-snug text-deep-navy sm:text-3xl">
-            {take.title}
-          </h1>
-        </header>
+        <article>
+          <header className="mb-6">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+              Reported on Reddit
+              {take.postedAt ? ` \u00b7 ${formatDate(take.postedAt)}` : ""}
+            </p>
+            <h1 className="text-deep-navy text-4xl md:text-5xl font-extrabold mb-4 leading-tight">
+              {take.title}
+            </h1>
+          </header>
 
-        {/* The SAME excerpt the card shows — never body_md. The Reddit terms
-            position is that we publish our paraphrase, not the source body,
-            and this page must not widen what the feed already shows. */}
-        {take.excerpt ? (
-          <blockquote className="mt-5 border-l-2 border-slate-200 pl-4 text-sm leading-relaxed text-gov-slate">
-            {take.excerpt}
-          </blockquote>
-        ) : null}
+          {/* The SAME excerpt the card shows — never body_md. The Reddit-terms
+              position is that we publish our paraphrase, not the source body,
+              and this page must not widen what the feed already shows. */}
+          {take.excerpt ? (
+            <blockquote className="mb-4 border-l-2 border-deep-navy/15 pl-4 text-gov-slate leading-relaxed">
+              {take.excerpt}
+            </blockquote>
+          ) : null}
 
-        {/* Attribution is required, not optional — every derived view links to
-            the original (reddit-intel-reddit-tos.md §4). */}
-        {take.sourceUrl ? (
-          <p className="mt-3 text-sm">
-            <a
-              href={take.sourceUrl}
-              target="_blank"
-              rel="noopener noreferrer nofollow"
-              className="underline underline-offset-2 hover:text-deep-navy"
-            >
-              Read the original report on Reddit ↗
-            </a>
-          </p>
-        ) : null}
+          {/* Attribution is required, not decoration — every derived view
+              links to the original (reddit-intel-reddit-tos.md §4). */}
+          {take.sourceUrl ? (
+            <p className="mb-10">
+              <a
+                href={take.sourceUrl}
+                target="_blank"
+                rel="noopener noreferrer nofollow"
+                className="text-xs font-medium text-deep-navy underline-offset-2 hover:underline"
+              >
+                Read the original report on Reddit →
+              </a>
+            </p>
+          ) : null}
 
-        <div className="mt-8">
           <ArthursTake take={take} />
-        </div>
-      </article>
-    </main>
+
+          <p className="text-sm text-gov-slate mt-10 pt-6 border-t border-deep-navy/10">
+            Back to the{" "}
+            <Link href="/scam-feed" className="underline">
+              scam feed
+            </Link>{" "}
+            for the latest reports.
+          </p>
+        </article>
+      </main>
+      <Footer />
+    </div>
   );
 }
