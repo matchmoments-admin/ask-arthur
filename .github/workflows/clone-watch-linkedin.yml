@@ -209,6 +209,46 @@ jobs:
     # founder). The job pauses here until approved in the GitHub Actions UI.
     environment: clone-watch-linkedin
     steps:
+      # THE POSTING WINDOW. Approval says "this edition is good"; it does not
+      # say "post it right now". The founder cannot post during weekday
+      # business hours, so an approval given at 11:00 must not go out at 11:00.
+      #
+      # Weekdays 17:00–23:59 Australia/Sydney, or any time at the weekend.
+      # Sydney rather than UTC because the constraint is a human working day,
+      # and via TZ (not a fixed offset) so AEST/AEDT is handled for us — GitHub
+      # cron is UTC-only and does not observe DST, which is exactly the trap
+      # that would post an hour early for half the year.
+      #
+      # Fails rather than waits: a sleep-until-17:00 job bills for the whole
+      # hold and dies at the 6h cap if approved before ~11:00. Re-running after
+      # the window opens is safe — the publish step below refuses to double-post
+      # when an URN is already recorded for the month.
+      - name: Enforce the posting window
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          MONTH: ${{ needs.prepare.outputs.month }}
+        run: |
+          HOUR=$(TZ=Australia/Sydney date +%-H)
+          DOW=$(TZ=Australia/Sydney date +%u)   # 1=Mon … 6=Sat, 7=Sun
+          NOW=$(TZ=Australia/Sydney date '+%a %H:%M %Z')
+          if [ "$DOW" -ge 6 ] || [ "$HOUR" -ge 17 ]; then
+            echo "Posting window OPEN ($NOW) — continuing."
+            exit 0
+          fi
+          echo "Posting window CLOSED ($NOW). Weekdays before 17:00 do not post."
+          # Suppress the generic post-approval failure ping below, whose message
+          # ("a re-run may double-post") is wrong and alarming for this case.
+          echo "WINDOW_BLOCKED=true" >> "$GITHUB_ENV"
+          if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_ADMIN_CHAT_ID" ]; then
+            TEXT=$(printf '\xe2\x8f\xb8 Clone Watch %s was approved at %s — OUTSIDE the posting window, so NOTHING was posted. The carousel is built and waiting. Re-run the publish job after 17:00 on a weekday, or any time at the weekend: %s' "$MONTH" "$NOW" "$RUN_URL")
+            curl -sS -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+              --data-urlencode "chat_id=$TELEGRAM_ADMIN_CHAT_ID" \
+              --data-urlencode "text=$TEXT" >/dev/null || true
+          fi
+          exit 1
+
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
@@ -285,8 +325,12 @@ jobs:
             --data-urlencode "text=$TEXT" \
             --data-urlencode "parse_mode=Markdown" >/dev/null
 
+      # Skips the window refusal, which sends its own (accurate) message —
+      # this one's "a re-run may double-post" is false there, and telling the
+      # founder not to re-run is precisely the wrong instruction when a re-run
+      # is the fix.
       - name: Telegram — publish failed
-        if: failure()
+        if: failure() && env.WINDOW_BLOCKED != 'true' 
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
