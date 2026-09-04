@@ -6,6 +6,7 @@ import { normalizeURL, isURLFormat } from "@askarthur/scam-engine/url-normalize"
 import { logger } from "@askarthur/utils/logger";
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
+import { SCAM_URL_LOOKUP_COLUMNS } from "@/lib/b2b/columns";
 
 let _lookupLimiter: Ratelimit | null = null;
 
@@ -81,7 +82,7 @@ export async function GET(req: NextRequest) {
       // Domain-level lookup — return all URLs for the domain
       const result = await supabase
         .from("scam_urls")
-        .select("*")
+        .select(SCAM_URL_LOOKUP_COLUMNS)
         .eq("domain", domainQuery.toLowerCase())
         .eq("is_active", true)
         .order("report_count", { ascending: false })
@@ -157,7 +158,7 @@ export async function GET(req: NextRequest) {
 
     const result = await supabase
       .from("scam_urls")
-      .select("*")
+      .select(SCAM_URL_LOOKUP_COLUMNS)
       .eq("normalized_url", norm.normalized)
       .single();
 

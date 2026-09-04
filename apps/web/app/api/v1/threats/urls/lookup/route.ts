@@ -3,6 +3,7 @@ import { guardV1 } from "@/lib/v1-guard";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { normalizeURL, isURLFormat } from "@askarthur/scam-engine/url-normalize";
 import { logger } from "@askarthur/utils/logger";
+import { SCAM_URL_B2B_COLUMNS } from "@/lib/b2b/columns";
 
 // Map of feed_sources values that mean "AU regulator confirmed" → friendly
 // label for the API response. Keep in lockstep with the v97 source allowlist
@@ -63,7 +64,7 @@ export async function GET(req: NextRequest) {
   try {
     const { data, error } = await supabase
       .from("scam_urls")
-      .select("*")
+      .select(SCAM_URL_B2B_COLUMNS)
       .eq("normalized_url", norm.normalized)
       .single();
 

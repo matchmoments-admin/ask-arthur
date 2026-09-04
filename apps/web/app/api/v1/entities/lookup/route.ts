@@ -3,6 +3,7 @@ import { guardV1 } from "@/lib/v1-guard";
 import { createServiceClient } from "@askarthur/supabase/server";
 import type { EntityType } from "@askarthur/types";
 import { logger } from "@askarthur/utils/logger";
+import { SCAM_ENTITY_COLUMNS } from "@/lib/b2b/columns";
 
 const VALID_ENTITY_TYPES: EntityType[] = [
   "phone",
@@ -49,7 +50,7 @@ export async function GET(req: NextRequest) {
   try {
     const { data, error } = await supabase
       .from("scam_entities")
-      .select("*")
+      .select(SCAM_ENTITY_COLUMNS)
       .eq("entity_type", type)
       .eq("normalized_value", value)
       .single();

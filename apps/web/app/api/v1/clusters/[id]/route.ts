@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { guardV1 } from "@/lib/v1-guard";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
+import { SCAM_CLUSTER_COLUMNS } from "@/lib/b2b/columns";
 
 const CACHE_HEADERS = {
   "Cache-Control": "public, s-maxage=300, stale-while-revalidate=60",
@@ -32,7 +33,7 @@ export async function GET(
     // Fetch cluster
     const { data: cluster, error: clusterError } = await supabase
       .from("scam_clusters")
-      .select("*")
+      .select(SCAM_CLUSTER_COLUMNS)
       .eq("id", clusterId)
       .single();
 
