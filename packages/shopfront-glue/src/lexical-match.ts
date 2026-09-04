@@ -279,7 +279,12 @@ export function lexicalMatch(
       //                            `bunings.net` (bunnings) stays caught.
       //   * brand still present  — an INSERTION typo (`qkmart`, `kmartz`,
       //                            `2kmart`) keeps the brand contiguous; that
-      //                            is a squat, not a coincidence.
+      //                            is a squat, not a coincidence. Separators
+      //                            are stripped first, because inserting one
+      //                            INTO a brand is the canonical shape —
+      //                            `fed-ex.space` (urlscan: likely_phishing,
+      //                            weaponised 2026-08-03) was dropped by the
+      //                            first cut of this gate for exactly that.
       //   * otherwise            — a substitution/deletion into some other
       //                            word must earn it with a scam-context
       //                            token from OUTSIDE the primary label, so
@@ -287,7 +292,7 @@ export function lexicalMatch(
       //                            `mart.services`, `bank.camera` do not.
       const shortBrandTrusted =
         brand.length >= MIN_BRAND_LEN_FOR_UNGATED_LEVENSHTEIN ||
-        matchPrimary.includes(brand) ||
+        matchPrimary.replace(/[-_]/g, "").includes(brand) ||
         hasScamContextOutsidePrimary(decodedDomain, matchPrimary);
       if (dist > 0 && dist <= LEVENSHTEIN_THRESHOLD && shortBrandTrusted) {
         const score = 1 - dist / Math.max(matchPrimary.length, brand.length);

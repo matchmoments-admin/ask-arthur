@@ -53,6 +53,18 @@ describe("PR-K watchlist expansion (finance/consulting/police/gov)", () => {
     }
   });
 
+  // A SEPARATOR-INSERTION squat on a short brand must still fire. `fed-ex.space`
+  // is a real one: urlscan classified it likely_phishing and it reached
+  // `weaponised` on 2026-08-03. The v4 short-brand gate trusted a hit when the
+  // brand "survives contiguously", but a hyphen breaks contiguity, so this was
+  // dropped. Inserting a separator INTO a brand is never a coincidence —
+  // pay-pal, my-gov, fed-ex are the canonical shape.
+  it("still catches a separator-insertion squat on a 5-char brand", () => {
+    const list: BrandEntry[] = [{ brand: "FedEx", legitimate_domains: ["fedex.com"] }];
+    const result = lexicalMatch("fed-ex.space", list);
+    expect(result?.brand, "fed-ex.space").toBe("FedEx");
+  });
+
   // A real homoglyph attack must still fire: the length gate is about SHORT
   // tokens, not about weakening confusable detection.
   it("still catches a genuine homoglyph attack on a long brand", () => {
