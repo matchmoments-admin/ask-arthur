@@ -38,7 +38,7 @@ export default async function ArthursTakeReviewPage() {
   if (!supabase) loadErrors.push("service client unavailable");
 
   let rows: Row[] = [];
-  let counts = { ready: 0, suppressed: 0, failed: 0, reviewed: 0, agree: 0 };
+  const counts = { ready: 0, suppressed: 0, failed: 0, reviewed: 0, agree: 0 };
 
   if (supabase) {
     const { data, error } = await supabase
