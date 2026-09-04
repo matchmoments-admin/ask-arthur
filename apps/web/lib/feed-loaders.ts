@@ -9,6 +9,8 @@ import "server-only";
 
 import { createServiceClient } from "@askarthur/supabase/server";
 
+import { FEED_ITEM_SELECT } from "@/lib/feed";
+
 export interface PinnedAlert {
   id: number;
   source: string;
@@ -26,7 +28,8 @@ export async function getInitialFeed() {
 
   const { data, count, error } = await supabase
     .from("feed_items")
-    .select("*", { count: "exact" })
+    // Explicit columns, never "*" — see FEED_ITEM_COLUMNS in @/lib/feed.
+    .select(FEED_ITEM_SELECT, { count: "exact" })
     .eq("published", true)
     // r/scambait roleplay / image-only posts have no analyzable body and
     // are noise on the consumer feed. Mirror the API filter so SSR and

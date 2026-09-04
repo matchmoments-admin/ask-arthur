@@ -3,6 +3,8 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 
+import { FEED_ITEM_SELECT } from "@/lib/feed";
+
 const EMPTY_RESPONSE = { items: [], total: 0, page: 1, limit: 20, hasMore: false };
 
 export async function GET(req: NextRequest) {
@@ -34,7 +36,9 @@ export async function GET(req: NextRequest) {
     // Build query
     let query = supabase
       .from("feed_items")
-      .select("*", { count: "exact" })
+      // Explicit columns, never "*" — see FEED_ITEM_COLUMNS. "*" published
+      // body_md and the embedding vectors to every caller of this route.
+      .select(FEED_ITEM_SELECT, { count: "exact" })
       .eq("published", true)
       .order("source_created_at", { ascending: false, nullsFirst: false })
       .range(offset, offset + limit - 1);

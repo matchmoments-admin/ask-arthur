@@ -4,14 +4,26 @@ export const CATEGORY_CONFIG: Record<
 > = {
   phishing: { icon: "Fish", color: "#EF4444", label: "Phishing" },
   romance_scam: { icon: "HeartCrack", color: "#EC4899", label: "Romance Scam" },
-  investment_fraud: { icon: "TrendingUp", color: "#F59E0B", label: "Investment Fraud" },
+  investment_fraud: {
+    icon: "TrendingUp",
+    color: "#F59E0B",
+    label: "Investment Fraud",
+  },
   tech_support: { icon: "Monitor", color: "#6B7280", label: "Tech Support" },
   impersonation: { icon: "Theater", color: "#F97316", label: "Impersonation" },
-  shopping_scam: { icon: "ShoppingBag", color: "#8B5CF6", label: "Shopping Scam" },
+  shopping_scam: {
+    icon: "ShoppingBag",
+    color: "#8B5CF6",
+    label: "Shopping Scam",
+  },
   phone_scam: { icon: "Phone", color: "#3B82F6", label: "Phone Scam" },
   email_scam: { icon: "Mail", color: "#8B5CF6", label: "Email Scam" },
   sms_scam: { icon: "MessageSquare", color: "#06B6D4", label: "SMS Scam" },
-  employment_scam: { icon: "Briefcase", color: "#10B981", label: "Employment Scam" },
+  employment_scam: {
+    icon: "Briefcase",
+    color: "#10B981",
+    label: "Employment Scam",
+  },
   advance_fee: { icon: "Banknote", color: "#F59E0B", label: "Advance Fee" },
   rental_scam: { icon: "Home", color: "#8B5CF6", label: "Rental Scam" },
   sextortion: { icon: "ShieldAlert", color: "#DC2626", label: "Sextortion" },
@@ -29,7 +41,11 @@ export const SOURCE_CONFIG: Record<
   scamwatch: { label: "Scamwatch", icon: "Shield" },
   // Regulator narrative sources — surfaced with a "Regulator" pill in
   // FeedCard so they're visually distinct from user-generated content.
-  scamwatch_alert: { label: "ACCC Scamwatch", icon: "Shield", isRegulator: true },
+  scamwatch_alert: {
+    label: "ACCC Scamwatch",
+    icon: "Shield",
+    isRegulator: true,
+  },
   acsc: { label: "ASD ACSC", icon: "Shield", isRegulator: true },
   asic_investor: { label: "ASIC", icon: "Shield", isRegulator: true },
   // Phase B narrative scrapers (austrac shipping in PR-B3 #247).
@@ -39,7 +55,11 @@ export const SOURCE_CONFIG: Record<
   // auto_publish gate; until a row is promoted by the classifier (P3) or
   // an operator, it stays published=false and never appears here. The
   // labels render only when the gate flips a row to published=true.
-  inbound_scamwatch: { label: "ACCC Scamwatch", icon: "Shield", isRegulator: true },
+  inbound_scamwatch: {
+    label: "ACCC Scamwatch",
+    icon: "Shield",
+    isRegulator: true,
+  },
   inbound_acsc: { label: "ASD ACSC", icon: "Shield", isRegulator: true },
   inbound_austrac: { label: "AUSTRAC", icon: "Shield", isRegulator: true },
   inbound_oaic: { label: "OAIC", icon: "Shield", isRegulator: true },
@@ -73,7 +93,11 @@ export const SOURCE_CONFIG: Record<
   // Crown-copyright bars commercial reproduction): items land quarantined as
   // category='competitor_intel', so this label never renders on the public
   // feed — kept for admin surfaces only.
-  inbound_wa_scamnet: { label: "WA ScamNet", icon: "Shield", isRegulator: true },
+  inbound_wa_scamnet: {
+    label: "WA ScamNet",
+    icon: "Shield",
+    isRegulator: true,
+  },
 };
 
 // Humanise an unregistered source slug for the fallback label so the UI
@@ -168,6 +192,45 @@ export const COUNTRY_NAMES: Record<string, string> = {
   BD: "Bangladesh",
   TR: "Turkey",
 };
+
+/**
+ * The columns the public feed exposes — the single source of truth for both
+ * `/api/feed` and the server-side loaders, and deliberately the same list as
+ * the `FeedItem` type below.
+ *
+ * This exists because both readers used `select("*")`, which is not a
+ * shortcut but a decision to publish every column the table ever grows. Two
+ * were being served to the public that should never have been:
+ *
+ *   body_md    — the fuller source text, held for ANALYSIS ONLY. Measured on
+ *                the live site before this fix: /api/feed returned 282 chars
+ *                of it for id 42321. Once the scraper stores full Reddit post
+ *                bodies (v299) that would have published every one of them,
+ *                which both migration-v299 and the privacy-impact assessment
+ *                state is impossible. migration-v302 revoked the column from
+ *                `anon`, but these readers use the SERVICE client, and
+ *                service_role bypasses column grants — so the migration
+ *                closed the PostgREST door and left our own front door open.
+ *   embedding  — a 1024-dimension vector, ~12.5 KB per row, of no use to any
+ *                client and a meaningful share of the payload.
+ *
+ * Adding a column to feed_items no longer publishes it by accident: it has to
+ * be named here, and `apps/web/__tests__/feedApiContract.test.ts` asserts the
+ * two lists agree.
+ */
+// Must stay ONE string literal on one line. TypeScript widens `"a" + "b"` to
+// `string`, and supabase-js infers the row type from the literal — a widened
+// value silently degrades every caller's result to GenericStringError[].
+export const FEED_ITEM_SELECT =
+  "id, source, external_id, title, description, url, source_url, category, channel, r2_image_key, reddit_image_url, has_image, impersonated_brand, country_code, upvotes, verified, published, created_at, source_created_at";
+
+/**
+ * Derived from the select string rather than the other way round: supabase-js
+ * infers a row's TYPE from the string literal passed to `.select()`, so a
+ * value built by `.join()` degrades the result to GenericStringError[]. The
+ * literal has to be the source; this array exists for the contract test.
+ */
+export const FEED_ITEM_COLUMNS = FEED_ITEM_SELECT.split(", ");
 
 export type FeedItem = {
   id: number;
