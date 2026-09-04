@@ -55,6 +55,46 @@ import {
 import { withAxiomLogging } from "./with-axiom-logging";
 
 const COSINE_THRESHOLD = 0.62;
+
+/**
+ * Resolve the join threshold, overridable via REDDIT_INTEL_CLUSTER_THRESHOLD.
+ *
+ * The default is deliberately UNCHANGED at 0.62. A threshold sweep against
+ * prod (2026-09-04, 2,193 posts replayed from zero themes at 0.62 / 0.82 /
+ * 0.85 / 0.88 / 0.90) shows this number has no setting that is simply
+ * "correct" — it trades one failure mode for the other:
+ *
+ *     thr    themes   largest theme   singletons   nameable (>=3)
+ *     0.62        9           11.4%         0.0%         9
+ *     0.82      135           11.4%        68.9%        29
+ *     0.85      355           11.4%        77.7%        55
+ *     0.88      944            4.9%        81.9%        84
+ *     0.90    1,446            2.6%        88.2%        81
+ *
+ * At today's 0.62 a fresh run produces NINE themes for two months of posts,
+ * which is why nothing has been born since July — the collapse is inherent to
+ * the number, not a legacy artefact. But every raised value trades that for a
+ * majority-singleton corpus, which is the 1:1 theme:post failure that caused
+ * the 0.78 -> 0.62 lowering in May 2026 in the first place.
+ *
+ * Raising it is therefore a product decision (are singletons noise, or are
+ * they the "nobody has reported this before" signal?), not a bug fix, and it
+ * wants the offline rebuild that goes with it. Making it an env var means that
+ * decision can be trialled on a preview deployment without a code change.
+ */
+export function resolveClusterThreshold(): number {
+  const raw = (process.env["REDDIT_INTEL_CLUSTER_THRESHOLD"] ?? "").trim();
+  if (!raw) return COSINE_THRESHOLD;
+  const parsed = Number(raw);
+  // Reject anything outside the range where cosine on this embedding space
+  // means anything: the observed floor for a genuine match is ~0.75 and 1.0
+  // would seed a new theme for every post. A typo must not silently disable
+  // clustering, so fall back rather than trust it.
+  if (!Number.isFinite(parsed) || parsed <= 0.5 || parsed >= 0.99) {
+    return COSINE_THRESHOLD;
+  }
+  return parsed;
+}
 const MIN_MEMBERS_FOR_NAMING = 3;
 const NAMING_PROMPT_VERSION = "reddit-cluster-naming-v1@2026-05-01";
 
@@ -258,7 +298,12 @@ export function assignPostsToThemes(
   themes: ActiveTheme[],
   opts: AssignOptions = {},
 ): { assignments: Assignment[]; oversizedThemeCount: number } {
-  const threshold = opts.threshold ?? COSINE_THRESHOLD;
+  // resolveClusterThreshold(), not the raw constant: otherwise the env
+  // override is honoured only on the one path that happens to pass it
+  // explicitly, and every other caller — including every test — silently
+  // clusters at 0.62 while the operator believes they changed it. One number,
+  // one resolver.
+  const threshold = opts.threshold ?? resolveClusterThreshold();
   const joinCeiling = opts.joinCeiling ?? MAX_THEME_MEMBERS_FOR_JOIN;
   const freezeAt = opts.freezeAt ?? CENTROID_FREEZE_AT;
 
@@ -380,10 +425,19 @@ export const redditIntelCluster = inngest.createFunction(
 
         if (postErr) throw new Error(`load posts: ${postErr.message}`);
 
+        // Deliberately NOT filtered on is_active. v300 ages a theme out after
+        // 90 quiet days, and is_active gates the B2B API and the RAG
+        // retrieval — it is a VISIBILITY state. Using it here too would make
+        // deactivation one-way and self-fulfilling: a dormant theme could
+        // never be matched, so its last_seen_at could never advance, so
+        // v300's reactivation branch could never fire. A campaign resurging
+        // in month four would seed a duplicate theme from scratch and orphan
+        // its own history, and the corpus would accumulate duplicates
+        // indefinitely. Matching against a dormant theme and reviving it is
+        // the entire point of tracking themes over time.
         const { data: themeRows, error: themeErr } = await supabase
           .from("reddit_intel_themes")
           .select("id, centroid_embedding, member_count")
-          .eq("is_active", true)
           .not("centroid_embedding", "is", null)
           .limit(500);
 
@@ -422,6 +476,9 @@ export const redditIntelCluster = inngest.createFunction(
       // anti-runaway guards (centroid freeze + join ceiling) live inside
       // assignPostsToThemes so the collapse can be reproduced and prevented in a
       // test without a DB.
+      // assignPostsToThemes resolves the threshold itself; read it here only
+      // to report it in the run summary.
+      const clusterThreshold = resolveClusterThreshold();
       const { assignments, oversizedThemeCount } = assignPostsToThemes(
         posts,
         themes,
@@ -731,15 +788,50 @@ export const redditIntelCluster = inngest.createFunction(
         return { named };
       });
 
-      // ── Step 5: count active themes for downstream event ─────────────────
+      // ── Step 5: recompute theme health ───────────────────────────────────
+      // signal_strength / wow_delta_pct / is_active had no writer until v300:
+      // 200 of 200 themes read 'weak', 0 had a week-on-week delta, and no
+      // theme was ever aged out, so "active themes" meant "all themes ever".
+      const health = await step.run("refresh-theme-health", async () => {
+        const supabase = createServiceClient();
+        if (!supabase) return null;
+        const { data: result, error } = await supabase.rpc(
+          "refresh_reddit_theme_health",
+          {},
+        );
+        if (error) {
+          logger.warn("cluster: theme health refresh failed", {
+            error: error.message,
+          });
+          return null;
+        }
+        return result as {
+          strong_themes: number;
+          inactive_themes: number;
+          theme_births_7d: number;
+          active_themes: number;
+        } | null;
+      });
+
+      // ── Step 6: count active themes for downstream event ─────────────────
       const activeCount = await step.run("count-active-themes", async () => {
         const supabase = createServiceClient();
-        if (!supabase) return 0;
-        const { count } = await supabase
+        if (!supabase) return null;
+        const { count, error } = await supabase
           .from("reddit_intel_themes")
           .select("id", { count: "exact", head: true })
           .eq("is_active", true);
-        return count ?? 0;
+        // A failed head-count returns count=null AND error=null: there is no
+        // body to parse on a 204, so `if (error)` is blind and `count ?? 0`
+        // would emit a confident zero into the downstream event. `count ===
+        // null` is the only signal that the read did not happen.
+        if (error || count === null) {
+          logger.warn("cluster: active theme count unavailable", {
+            error: error?.message ?? "null count (head request returned no body)",
+          });
+          return null;
+        }
+        return count;
       });
 
       await step.run("emit-themes-recomputed", () =>
@@ -747,20 +839,33 @@ export const redditIntelCluster = inngest.createFunction(
           name: REDDIT_INTEL_THEMES_RECOMPUTED_EVENT,
           data: {
             weekStart: data.cohortDate,
-            activeThemeCount: activeCount,
+            // Falls back to the health RPC's own count rather than 0 — an
+            // unavailable count must not read as "no active themes".
+            activeThemeCount: activeCount ?? health?.active_themes ?? null,
             newThemeCount: persistResult.newThemeCount,
             computedAt: new Date().toISOString(),
           },
         }),
       );
 
-      logger.info("reddit-intel-cluster: complete", {
+      // One always-ship warn per run. fn.complete is INFO and prod samples
+      // INFO at 10% with the keep/drop decision taken once per run, so the
+      // question this answers — "is the cluster still birthing themes, or has
+      // it collapsed again?" — was not answerable from Axiom at all. Zero
+      // births over consecutive weeks is the collapse signature.
+      logger.warn("reddit-intel-cluster.summary", {
         cohortDate: data.cohortDate,
         postsConsidered: posts.length,
+        threshold: clusterThreshold,
         newThemes: persistResult.newThemeCount,
         joinedThemes: persistResult.joinedThemeCount,
         themesNamed: namingResult.named,
-        activeThemes: activeCount,
+        activeThemes: activeCount ?? health?.active_themes ?? null,
+        themeBirths7d: health?.theme_births_7d ?? null,
+        strongThemes: health?.strong_themes ?? null,
+        inactiveThemes: health?.inactive_themes ?? null,
+        oversizedThemes: oversizedThemeCount,
+        degraded: activeCount === null || health === null,
       });
 
       return {
@@ -768,6 +873,7 @@ export const redditIntelCluster = inngest.createFunction(
         newThemes: persistResult.newThemeCount,
         joinedThemes: persistResult.joinedThemeCount,
         themesNamed: namingResult.named,
+        themeBirths7d: health?.theme_births_7d ?? null,
       };
     },
   ),
