@@ -20,6 +20,10 @@ export const dynamic = "force-dynamic";
  *     * modus_operandi      (free text, can quote post details)
  *     * novelty_signals[]   (free text array, contains observed phrases)
  *     * narrative_summary   (free text, paraphrases the post)
+ *     * take_tells / take_where / take_au_line (v301 — Arthur's Take free
+ *       text; a row whose take_status was 'ready' is also flipped to
+ *       'suppressed' so the public detail page stops rendering it. Rows that
+ *       never had a take keep take_status='none' — see the second update)
  *   Structured columns (intent_label, confidence, brands_impersonated,
  *   victim_emotion, tactic_tags, country_hints, embedding) are RETAINED
  *   indefinitely — they're aggregable analysis, not derived narrative.
@@ -72,7 +76,17 @@ export async function GET(req: Request) {
         .from("reddit_post_intel")
         .select("id")
         .lt("processed_at", stage1Cutoff)
-        .or("modus_operandi.not.is.null,narrative_summary.not.is.null")
+        // take_tells must be in the PREDICATE, not just the UPDATE. A take
+        // can be `ready` with tells and a null `where` (the validator's
+        // empty_take rule needs BOTH empty), so once modus_operandi and
+        // narrative_summary have been nulled by an earlier pass, such a row
+        // would never be selected again and its free text would be retained
+        // indefinitely — contradicting the retention table in the PIA.
+        // `take_tells` is a NOT NULL array defaulting to '{}', so "still has
+        // content" is a non-empty array, not a non-null one.
+        .or(
+          "modus_operandi.not.is.null,narrative_summary.not.is.null,take_where.not.is.null,take_au_line.not.is.null,take_tells.neq.{}",
+        )
         .order("id", { ascending: true })
         .limit(DELETE_CHUNK);
 
@@ -91,11 +105,48 @@ export async function GET(req: Request) {
           modus_operandi: null,
           novelty_signals: [],
           narrative_summary: null,
+          // Arthur's Take free text (v301). Held to the same 180-day window as
+          // the rest of the derived free text rather than kept indefinitely:
+          // although a take is our own paraphrase and carries no identifying
+          // detail by construction (the validator rejects amounts, handles,
+          // emails and phone numbers before the write), it is still a
+          // characterisation of one identifiable public post. Easier to relax
+          // later than to defend a retention we cannot justify.
+          //
+          // take_tells is an array, so it is emptied rather than nulled — the
+          // column is NOT NULL DEFAULT '{}'.
+          take_tells: [],
+          take_where: null,
+          take_au_line: null,
         })
         .in("id", idList);
 
       if (upErr) {
         throw new Error(`stage1 update: ${upErr.message}`);
+      }
+
+      // Retire the take separately, and ONLY where one was actually shown.
+      // Folding this into the update above flipped take_status on every
+      // selected row — and selection only needs any ONE free-text column to be
+      // populated, which is true of every classified row. The first run would
+      // have moved ~4,000 rows from 'none' to 'suppressed'/'retention_180d',
+      // rows that never had a take and never went through the validator,
+      // polluting the suppression-rate metric that Gate 3 reads.
+      //
+      // The flip is still needed for a real take: the detail page gates on
+      // take_status, not on content, so without it a scrubbed row would keep
+      // returning 200 with an empty panel.
+      const { error: takeErr } = await supabase
+        .from("reddit_post_intel")
+        .update({
+          take_status: "suppressed",
+          take_suppressed_reason: "retention_180d",
+        })
+        .in("id", idList)
+        .eq("take_status", "ready");
+
+      if (takeErr) {
+        throw new Error(`stage1 take retire: ${takeErr.message}`);
       }
 
       stage1Scrubbed += idList.length;

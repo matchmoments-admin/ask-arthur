@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.1"
+    PostgrestVersion: "14.5"
   }
   public: {
     Tables: {
@@ -651,6 +651,39 @@ export type Database = {
         }
         Relationships: []
       }
+      brand_coverage_history: {
+        Row: {
+          brand: string
+          brand_domain: string
+          brand_normalized: string
+          covered_from: string
+          covered_to: string | null
+          created_at: string
+          source: string
+          source_ref: string | null
+        }
+        Insert: {
+          brand: string
+          brand_domain: string
+          brand_normalized: string
+          covered_from: string
+          covered_to?: string | null
+          created_at?: string
+          source?: string
+          source_ref?: string | null
+        }
+        Update: {
+          brand?: string
+          brand_domain?: string
+          brand_normalized?: string
+          covered_from?: string
+          covered_to?: string | null
+          created_at?: string
+          source?: string
+          source_ref?: string | null
+        }
+        Relationships: []
+      }
       brand_impersonation_alerts: {
         Row: {
           brand_category: string | null
@@ -1178,6 +1211,7 @@ export type Database = {
           safe_count: number
           suspicious_count: number
           total_checks: number
+          uncertain_count: number
         }
         Insert: {
           created_at?: string
@@ -1188,6 +1222,7 @@ export type Database = {
           safe_count?: number
           suspicious_count?: number
           total_checks?: number
+          uncertain_count?: number
         }
         Update: {
           created_at?: string
@@ -1198,6 +1233,7 @@ export type Database = {
           safe_count?: number
           suspicious_count?: number
           total_checks?: number
+          uncertain_count?: number
         }
         Relationships: []
       }
@@ -1443,40 +1479,64 @@ export type Database = {
         Row: {
           brand: string
           clones: number
+          clusters: Json | null
           declined: number
+          deliberate_clones: number | null
           escalated: number
+          fingerprinted_clones: number | null
+          hosting_mix: Json | null
+          intent_mix: Json | null
           is_au: boolean
+          largest_cluster: number | null
           likely_phishing: number
           parked: number
           period_month: string
           reported_to_netcraft: number
+          tactic_mix: Json | null
           taken_down: number
+          tld_mix: Json | null
           weaponised: number
         }
         Insert: {
           brand: string
           clones?: number
+          clusters?: Json | null
           declined?: number
+          deliberate_clones?: number | null
           escalated?: number
+          fingerprinted_clones?: number | null
+          hosting_mix?: Json | null
+          intent_mix?: Json | null
           is_au?: boolean
+          largest_cluster?: number | null
           likely_phishing?: number
           parked?: number
           period_month: string
           reported_to_netcraft?: number
+          tactic_mix?: Json | null
           taken_down?: number
+          tld_mix?: Json | null
           weaponised?: number
         }
         Update: {
           brand?: string
           clones?: number
+          clusters?: Json | null
           declined?: number
+          deliberate_clones?: number | null
           escalated?: number
+          fingerprinted_clones?: number | null
+          hosting_mix?: Json | null
+          intent_mix?: Json | null
           is_au?: boolean
+          largest_cluster?: number | null
           likely_phishing?: number
           parked?: number
           period_month?: string
           reported_to_netcraft?: number
+          tactic_mix?: Json | null
           taken_down?: number
+          tld_mix?: Json | null
           weaponised?: number
         }
         Relationships: []
@@ -1508,6 +1568,8 @@ export type Database = {
       clone_watch_report_summary: {
         Row: {
           brand_count: number
+          campaigns: Json | null
+          card_json: Json | null
           declined: number
           duration_kpis: Json | null
           escalated: number
@@ -1520,6 +1582,7 @@ export type Database = {
           published_post_urn: string | null
           re_taken_down: number
           reported_to_netcraft: number
+          spotlight: Json | null
           super_fund: Json | null
           taken_down: number
           top_au_brands: Json
@@ -1531,6 +1594,8 @@ export type Database = {
         }
         Insert: {
           brand_count?: number
+          campaigns?: Json | null
+          card_json?: Json | null
           declined?: number
           duration_kpis?: Json | null
           escalated?: number
@@ -1543,6 +1608,7 @@ export type Database = {
           published_post_urn?: string | null
           re_taken_down?: number
           reported_to_netcraft?: number
+          spotlight?: Json | null
           super_fund?: Json | null
           taken_down?: number
           top_au_brands?: Json
@@ -1554,6 +1620,8 @@ export type Database = {
         }
         Update: {
           brand_count?: number
+          campaigns?: Json | null
+          card_json?: Json | null
           declined?: number
           duration_kpis?: Json | null
           escalated?: number
@@ -1566,6 +1634,7 @@ export type Database = {
           published_post_urn?: string | null
           re_taken_down?: number
           reported_to_netcraft?: number
+          spotlight?: Json | null
           super_fund?: Json | null
           taken_down?: number
           top_au_brands?: Json
@@ -2293,6 +2362,48 @@ export type Database = {
         }
         Relationships: []
       }
+      cost_telemetry_partitioned_y2026m11: {
+        Row: {
+          created_at: string
+          estimated_cost_usd: number
+          feature: string
+          id: number
+          metadata: Json
+          operation: string
+          provider: string
+          request_id: string | null
+          unit_cost_usd: number | null
+          units: number | null
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          estimated_cost_usd: number
+          feature: string
+          id?: never
+          metadata?: Json
+          operation: string
+          provider: string
+          request_id?: string | null
+          unit_cost_usd?: number | null
+          units?: number | null
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          estimated_cost_usd?: number
+          feature?: string
+          id?: never
+          metadata?: Json
+          operation?: string
+          provider?: string
+          request_id?: string | null
+          unit_cost_usd?: number | null
+          units?: number | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       deepfake_detections: {
         Row: {
           ad_text_excerpt: string | null
@@ -2506,6 +2617,102 @@ export type Database = {
           source?: string
           swap_date?: string | null
           swapped?: boolean
+        }
+        Relationships: []
+      }
+      document_check_records: {
+        Row: {
+          api_key_hash: string | null
+          case_ref: string | null
+          check_ref: string
+          checked_at: string
+          doc_sha256: string
+          doc_type: string | null
+          findings: Json
+          id: string
+          jurisdiction: string | null
+          org_id: string | null
+          registry_checks: Json | null
+          source: string
+          structural_summary: Json | null
+        }
+        Insert: {
+          api_key_hash?: string | null
+          case_ref?: string | null
+          check_ref: string
+          checked_at?: string
+          doc_sha256: string
+          doc_type?: string | null
+          findings?: Json
+          id?: string
+          jurisdiction?: string | null
+          org_id?: string | null
+          registry_checks?: Json | null
+          source?: string
+          structural_summary?: Json | null
+        }
+        Update: {
+          api_key_hash?: string | null
+          case_ref?: string | null
+          check_ref?: string
+          checked_at?: string
+          doc_sha256?: string
+          doc_type?: string | null
+          findings?: Json
+          id?: string
+          jurisdiction?: string | null
+          org_id?: string | null
+          registry_checks?: Json | null
+          source?: string
+          structural_summary?: Json | null
+        }
+        Relationships: []
+      }
+      document_check_records_archive: {
+        Row: {
+          api_key_hash: string | null
+          case_ref: string | null
+          check_ref: string
+          checked_at: string
+          doc_sha256: string
+          doc_type: string | null
+          findings: Json
+          id: string
+          jurisdiction: string | null
+          org_id: string | null
+          registry_checks: Json | null
+          source: string
+          structural_summary: Json | null
+        }
+        Insert: {
+          api_key_hash?: string | null
+          case_ref?: string | null
+          check_ref: string
+          checked_at?: string
+          doc_sha256: string
+          doc_type?: string | null
+          findings?: Json
+          id?: string
+          jurisdiction?: string | null
+          org_id?: string | null
+          registry_checks?: Json | null
+          source?: string
+          structural_summary?: Json | null
+        }
+        Update: {
+          api_key_hash?: string | null
+          case_ref?: string | null
+          check_ref?: string
+          checked_at?: string
+          doc_sha256?: string
+          doc_type?: string | null
+          findings?: Json
+          id?: string
+          jurisdiction?: string | null
+          org_id?: string | null
+          registry_checks?: Json | null
+          source?: string
+          structural_summary?: Json | null
         }
         Relationships: []
       }
@@ -3551,6 +3758,48 @@ export type Database = {
         }
         Relationships: []
       }
+      feed_items_partitioned_y2026m11: {
+        Row: {
+          category: string | null
+          country: string | null
+          created_at: string
+          description: string | null
+          feed_name: string
+          id: number
+          metadata: Json
+          published: boolean
+          published_at: string | null
+          title: string | null
+          url: string | null
+        }
+        Insert: {
+          category?: string | null
+          country?: string | null
+          created_at?: string
+          description?: string | null
+          feed_name: string
+          id?: never
+          metadata?: Json
+          published?: boolean
+          published_at?: string | null
+          title?: string | null
+          url?: string | null
+        }
+        Update: {
+          category?: string | null
+          country?: string | null
+          created_at?: string
+          description?: string | null
+          feed_name?: string
+          id?: never
+          metadata?: Json
+          published?: boolean
+          published_at?: string | null
+          title?: string | null
+          url?: string | null
+        }
+        Relationships: []
+      }
       feed_sources: {
         Row: {
           category: string
@@ -3786,6 +4035,7 @@ export type Database = {
           impersonated_brand: string | null
           impersonated_celebrity: string | null
           install_id_hash: string
+          origin_metadata: Json | null
           page_url: string | null
           vision_summary: string | null
         }
@@ -3804,6 +4054,7 @@ export type Database = {
           impersonated_brand?: string | null
           impersonated_celebrity?: string | null
           install_id_hash: string
+          origin_metadata?: Json | null
           page_url?: string | null
           vision_summary?: string | null
         }
@@ -3822,6 +4073,7 @@ export type Database = {
           impersonated_brand?: string | null
           impersonated_celebrity?: string | null
           install_id_hash?: string
+          origin_metadata?: Json | null
           page_url?: string | null
           vision_summary?: string | null
         }
@@ -3843,6 +4095,7 @@ export type Database = {
           impersonated_brand: string | null
           impersonated_celebrity: string | null
           install_id_hash: string
+          origin_metadata: Json | null
           page_url: string | null
           vision_summary: string | null
         }
@@ -3861,6 +4114,7 @@ export type Database = {
           impersonated_brand?: string | null
           impersonated_celebrity?: string | null
           install_id_hash: string
+          origin_metadata?: Json | null
           page_url?: string | null
           vision_summary?: string | null
         }
@@ -3879,6 +4133,7 @@ export type Database = {
           impersonated_brand?: string | null
           impersonated_celebrity?: string | null
           install_id_hash?: string
+          origin_metadata?: Json | null
           page_url?: string | null
           vision_summary?: string | null
         }
@@ -5267,6 +5522,8 @@ export type Database = {
           feed_item_id: number
           id: string
           intent_label: string
+          is_emerging: boolean
+          is_scam_report: boolean | null
           model_version: string
           modus_operandi: string | null
           narrative_summary: string | null
@@ -5274,6 +5531,14 @@ export type Database = {
           processed_at: string
           prompt_version: string
           tactic_tags: string[] | null
+          take_au_line: string | null
+          take_model_version: string | null
+          take_prompt_version: string | null
+          take_status: string
+          take_suppressed_reason: string | null
+          take_tells: string[]
+          take_where: string | null
+          take_written_at: string | null
           theme_id: string | null
           victim_emotion: string | null
         }
@@ -5286,6 +5551,8 @@ export type Database = {
           feed_item_id: number
           id?: string
           intent_label: string
+          is_emerging?: boolean
+          is_scam_report?: boolean | null
           model_version: string
           modus_operandi?: string | null
           narrative_summary?: string | null
@@ -5293,6 +5560,14 @@ export type Database = {
           processed_at?: string
           prompt_version: string
           tactic_tags?: string[] | null
+          take_au_line?: string | null
+          take_model_version?: string | null
+          take_prompt_version?: string | null
+          take_status?: string
+          take_suppressed_reason?: string | null
+          take_tells?: string[]
+          take_where?: string | null
+          take_written_at?: string | null
           theme_id?: string | null
           victim_emotion?: string | null
         }
@@ -5305,6 +5580,8 @@ export type Database = {
           feed_item_id?: number
           id?: string
           intent_label?: string
+          is_emerging?: boolean
+          is_scam_report?: boolean | null
           model_version?: string
           modus_operandi?: string | null
           narrative_summary?: string | null
@@ -5312,6 +5589,14 @@ export type Database = {
           processed_at?: string
           prompt_version?: string
           tactic_tags?: string[] | null
+          take_au_line?: string | null
+          take_model_version?: string | null
+          take_prompt_version?: string | null
+          take_status?: string
+          take_suppressed_reason?: string | null
+          take_tells?: string[]
+          take_where?: string | null
+          take_written_at?: string | null
           theme_id?: string | null
           victim_emotion?: string | null
         }
@@ -5328,6 +5613,44 @@ export type Database = {
             columns: ["theme_id"]
             isOneToOne: false
             referencedRelation: "reddit_intel_themes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      reddit_post_intel_reviews: {
+        Row: {
+          corrected_label: string | null
+          created_at: string
+          id: string
+          intel_id: string
+          note: string | null
+          reviewer: string | null
+          verdict: string
+        }
+        Insert: {
+          corrected_label?: string | null
+          created_at?: string
+          id?: string
+          intel_id: string
+          note?: string | null
+          reviewer?: string | null
+          verdict: string
+        }
+        Update: {
+          corrected_label?: string | null
+          created_at?: string
+          id?: string
+          intel_id?: string
+          note?: string | null
+          reviewer?: string | null
+          verdict?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reddit_post_intel_reviews_intel_id_fkey"
+            columns: ["intel_id"]
+            isOneToOne: false
+            referencedRelation: "reddit_post_intel"
             referencedColumns: ["id"]
           },
         ]
@@ -6586,6 +6909,66 @@ export type Database = {
         Relationships: []
       }
       scam_reports_partitioned_y2026m10: {
+        Row: {
+          analysis_result: Json
+          channel: string | null
+          cluster_id: number | null
+          confidence_score: number
+          country_code: string | null
+          created_at: string
+          delivery_method: string | null
+          id: number
+          impersonated_brand: string | null
+          input_mode: string | null
+          region: string | null
+          reporter_hash: string
+          scam_type: string | null
+          scrubbed_content: string | null
+          source: string
+          verdict: string
+          verified_scam_id: number | null
+        }
+        Insert: {
+          analysis_result?: Json
+          channel?: string | null
+          cluster_id?: number | null
+          confidence_score: number
+          country_code?: string | null
+          created_at?: string
+          delivery_method?: string | null
+          id?: never
+          impersonated_brand?: string | null
+          input_mode?: string | null
+          region?: string | null
+          reporter_hash: string
+          scam_type?: string | null
+          scrubbed_content?: string | null
+          source: string
+          verdict: string
+          verified_scam_id?: number | null
+        }
+        Update: {
+          analysis_result?: Json
+          channel?: string | null
+          cluster_id?: number | null
+          confidence_score?: number
+          country_code?: string | null
+          created_at?: string
+          delivery_method?: string | null
+          id?: never
+          impersonated_brand?: string | null
+          input_mode?: string | null
+          region?: string | null
+          reporter_hash?: string
+          scam_type?: string | null
+          scrubbed_content?: string | null
+          source?: string
+          verdict?: string
+          verified_scam_id?: number | null
+        }
+        Relationships: []
+      }
+      scam_reports_partitioned_y2026m11: {
         Row: {
           analysis_result: Json
           channel: string | null
@@ -8389,6 +8772,42 @@ export type Database = {
           },
         ]
       }
+      weekly_signal_log: {
+        Row: {
+          cache_hit_pct: number | null
+          charity_checks: number
+          notes: string | null
+          pageviews: number
+          recorded_at: string
+          scans_forwarded: number
+          spend_usd: number
+          subscribers_active: number
+          week_start: string
+        }
+        Insert: {
+          cache_hit_pct?: number | null
+          charity_checks?: number
+          notes?: string | null
+          pageviews?: number
+          recorded_at?: string
+          scans_forwarded?: number
+          spend_usd?: number
+          subscribers_active?: number
+          week_start: string
+        }
+        Update: {
+          cache_hit_pct?: number | null
+          charity_checks?: number
+          notes?: string | null
+          pageviews?: number
+          recorded_at?: string
+          scans_forwarded?: number
+          spend_usd?: number
+          subscribers_active?: number
+          week_start?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       analytics_event_daily: {
@@ -9168,6 +9587,15 @@ export type Database = {
           p90_days: number
         }[]
       }
+      clone_watch_urlscan_stranded_count: {
+        Args: { p_max_failure_streak?: number }
+        Returns: {
+          stranded_streak: number
+          stranded_submitted_no_uuid: number
+          stranded_total: number
+          stranded_uuid_no_submitted_at: number
+        }[]
+      }
       clone_watch_vendor_gap_stats: {
         Args: { p_days?: number }
         Returns: {
@@ -9546,7 +9974,11 @@ export type Database = {
         }[]
       }
       list_clone_alerts_for_recheck: {
-        Args: { p_cadence_hours?: number; p_limit?: number }
+        Args: {
+          p_cadence_hours?: number
+          p_dead_cadence_hours?: number
+          p_limit?: number
+        }
         Returns: {
           attribution: Json
           brand_category: string
@@ -9695,6 +10127,7 @@ export type Database = {
       }
       list_clone_alerts_pending_urlscan_submit: {
         Args: {
+          p_dead_cadence_hours?: number
           p_limit?: number
           p_max_failure_streak?: number
           p_min_confidence?: number
@@ -9824,6 +10257,18 @@ export type Database = {
       }
       mark_clone_alert_notifications_processed: {
         Args: { p_queue_ids: number[]; p_status?: string }
+        Returns: number
+      }
+      mark_clone_alert_rechecked: {
+        Args: { p_alert_id: number }
+        Returns: undefined
+      }
+      mark_stale_clone_alerts_dormant: {
+        Args: {
+          p_horizon_days?: number
+          p_limit?: number
+          p_min_confidence?: number
+        }
         Returns: number
       }
       mark_stale_crypto_wallets: {
@@ -10013,6 +10458,10 @@ export type Database = {
         Args: { p_entity_id: number; p_key: string; p_value: Json }
         Returns: undefined
       }
+      merge_org_settings: {
+        Args: { p_key: string; p_org_id: string; p_value: Json }
+        Returns: boolean
+      }
       merge_takedown_case: {
         Args: {
           p_acts_on_parked?: boolean
@@ -10088,6 +10537,10 @@ export type Database = {
         Args: { p_alert_id: number; p_evidence?: Json; p_urlscan_uuid: string }
         Returns: undefined
       }
+      record_clone_alert_urlscan_transient_miss: {
+        Args: { p_alert_id: number; p_detail?: string; p_max_misses?: number }
+        Returns: number
+      }
       record_clone_watch_classification: {
         Args: {
           p_alert_id: number
@@ -10136,6 +10589,10 @@ export type Database = {
         Returns: number
       }
       refresh_feedback_triage_queue: { Args: never; Returns: undefined }
+      refresh_reddit_theme_health: {
+        Args: { p_inactive_after_days?: number }
+        Returns: Json
+      }
       refund_sim_swap_credit: {
         Args: { p_bucket: string; p_reason?: string; p_user_id: string }
         Returns: {
@@ -10252,6 +10709,7 @@ export type Database = {
       upsert_clone_alerts_batch: { Args: { p_rows: Json }; Returns: number }
       upsert_feed_item: {
         Args: {
+          p_body_md?: string
           p_category?: string
           p_channel?: string
           p_country_code?: string
@@ -10443,12 +10901,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -10472,11 +10930,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -10497,11 +10955,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -10522,11 +10980,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -10539,11 +10997,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
