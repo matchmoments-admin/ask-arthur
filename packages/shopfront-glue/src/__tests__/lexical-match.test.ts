@@ -29,6 +29,62 @@ describe("PR-K watchlist expansion (finance/consulting/police/gov)", () => {
     }
   });
 
+  // …AND on the confusable path, which is where the claim above was false.
+  //
+  // Every case above is ASCII, so `hasConfusable` is false and the confusable
+  // branch never runs — the test asserted a gate it never reached. The
+  // confusable rule had NO length gate at all (unlike substring and
+  // levenshtein) and is evaluated FIRST with `continue`, so a 2-char token
+  // matched inside any confusable-folded string. All eight confusable hits in
+  // the August 2026 cohort were this: ordinary Russian .рф domains whose
+  // Cyrillic folds to Latin and happens to contain "ey".
+  //
+  //   xn--b1aga1axn3f      → всеумею        ("I can do anything")
+  //   xn--d1acabkbhglbmjn6e → жидкийлинолеум ("liquid linoleum")
+  //   xn--e1aaokgluu       → неурокех
+  it("does not flood on the 2-char EY token via CONFUSABLE folding", () => {
+    for (const d of [
+      "xn--b1aga1axn3f.xn--p1ai",
+      "xn--d1acabkbhglbmjn6e.xn--p1ai",
+      "xn--e1aaokgluu.xn--p1ai",
+    ]) {
+      const m = lexicalMatch(d);
+      expect(m?.brand, `${d} -> ${m?.brand}`).not.toBe("EY");
+    }
+  });
+
+  // A real homoglyph attack must still fire: the length gate is about SHORT
+  // tokens, not about weakening confusable detection.
+  it("still catches a genuine homoglyph attack on a long brand", () => {
+    // "аuspost" with a Cyrillic а (U+0430).
+    const m = lexicalMatch("\u0430uspost-login.com");
+    expect(m?.brand).toBeTruthy();
+  });
+
+  // Levenshtein-1 on a 5-char brand admits a large neighbourhood of ORDINARY
+  // WORDS: "bonus" is one edit from "bonds", "stage" from "stake", "mart"
+  // from "kmart", "bank" from "ubank". The substring rule gates on a
+  // scam-context token for exactly this reason; levenshtein did not, while
+  // producing 52% of all matches. August 2026: bonds.com.au carried 28 hits,
+  // of which ~21 were this class (bonus.*, bands, bones, bounds, gonds.* ×9).
+  it("does not match an ordinary word one edit from a 5-char brand", () => {
+    for (const d of [
+      "bonus.business",
+      "bonus.markets",
+      "bounds.social",
+      "bands.fyi",
+      "bones.you",
+      "stage.tours",
+      "snake.autos",
+      "mart.services",
+      "codes.select",
+      "festa.social",
+    ]) {
+      const m = lexicalMatch(d);
+      expect(m?.signal_type === "levenshtein" ? m.brand : null, `${d} -> ${m?.brand}`).toBeNull();
+    }
+  });
+
   it("does not flag the new brands' own domains as clones", () => {
     for (const d of ["blackrock.com", "ey.com", "afp.gov.au", "medicare.gov.au" /* not legit, just shouldn't error */]) {
       // own legit domains return null; the matcher must not throw on any input
