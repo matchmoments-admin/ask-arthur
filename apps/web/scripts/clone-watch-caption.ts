@@ -15,8 +15,25 @@
 import "./_load-env-config";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { createServiceClient } from "@askarthur/supabase/server";
 import { getCloneWatchReportCard } from "../lib/clone-watch/report-card-data";
 import { generateCloneWatchCaption } from "../lib/clone-watch/clone-watch-caption";
+import { getPinnedCard } from "../lib/clone-watch/report-summary";
+import { monthWindow } from "../lib/clone-watch/month-window";
+import type { CloneWatchReportCard } from "../lib/clone-watch/report-card-data";
+
+/** The pinned card for a month, or null — never throws. */
+async function loadPinnedCardForMonth(
+  month?: string,
+): Promise<CloneWatchReportCard | null> {
+  try {
+    const sb = createServiceClient();
+    if (!sb) return null;
+    return await getPinnedCard(sb, monthWindow(month).periodMonth);
+  } catch {
+    return null;
+  }
+}
 
 function arg(name: string): string | undefined {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
@@ -28,7 +45,13 @@ async function main() {
   const outDir = path.resolve(arg("out") ?? "report-card-out");
   const methodUrl = arg("method-url");
 
-  const card = await getCloneWatchReportCard(month);
+  // Read the PIN the compute-card step wrote, so the caption quotes the same
+  // numbers the slides do. The caption used to recompute the card in this
+  // process, minutes after the export computed it in the prod Next server —
+  // "always matches the carousel" was true per-read and false across the
+  // pipeline. Falls back to a live build when no pin exists (a hand-run for a
+  // month that was never snapshotted).
+  const card = (await loadPinnedCardForMonth(month)) ?? (await getCloneWatchReportCard(month));
   const caption = generateCloneWatchCaption(card, methodUrl);
 
   // LinkedIn caps post commentary at ~3,000 chars. Fail HERE — in the prepare

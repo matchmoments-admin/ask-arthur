@@ -29,7 +29,11 @@ import {
   verifyPost,
 } from "../lib/linkedin/client";
 import { getCloneWatchReportCard } from "../lib/clone-watch/report-card-data";
-import { getPublishedUrn, upsertSummary } from "../lib/clone-watch/report-summary";
+import {
+  getPinnedCard,
+  getPublishedUrn,
+  upsertSummary,
+} from "../lib/clone-watch/report-summary";
 
 function arg(name: string): string | undefined {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
@@ -100,10 +104,20 @@ async function main() {
       "        it renders before treating this edition as published.",
   );
 
-  // ── 3. Write-back — record the URN (creates/refreshes the row from live data,
-  //       so a re-run is guarded even if the monthly snapshot hasn't run) ──────
+  // ── 3. Write-back — record the URN against the card that was APPROVED ─────
+  //
+  // This step runs after the GitHub Environment approval gate, which is
+  // unbounded: hours to days. Recomputing the card here meant persisting
+  // numbers from a LATER snapshot than the PDF the founder actually approved —
+  // `shopfront_clone_alerts`' lifecycle columns are mutated daily by the
+  // reconciler, and every KPI on slide 06 reads them. So prefer the pin written
+  // by the prepare job (v298 card_json); fall back to a live build only when
+  // there is no pin, which also keeps the "re-run is guarded even if the
+  // monthly snapshot hasn't run" property that motivated the recompute.
   try {
-    const card = await getCloneWatchReportCard(month);
+    const card =
+      (await getPinnedCard(sb, periodMonth)) ??
+      (await getCloneWatchReportCard(month));
     await upsertSummary(sb, card, post);
     console.log(`  ✓ recorded post URN in clone_watch_report_summary (${periodMonth})`);
   } catch (err) {

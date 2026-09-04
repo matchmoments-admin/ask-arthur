@@ -22,7 +22,6 @@ import {
   aggregateClonesByDomain,
   topRiskUnactioned,
   type CloneBrandMetrics,
-  type CloneDetail,
 } from "@/lib/clone-watch/clone-metrics";
 import { priorMonthStart } from "@/lib/clone-watch/month-window";
 

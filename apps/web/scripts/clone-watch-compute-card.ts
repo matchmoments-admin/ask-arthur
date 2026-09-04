@@ -1,0 +1,77 @@
+/**
+ * Compute the month's report card ONCE and pin it.
+ *
+ *   pnpm --filter @askarthur/web clone-watch:compute-card -- --month=2026-08 --out=./out
+ *
+ * Writes `<out>/card.json` AND `clone_watch_report_summary.card_json` (v298),
+ * so the slide export (`?pinned=1`), the caption and the post-approval publish
+ * write-back all quote identical numbers.
+ *
+ * WHY THIS EXISTS. A published edition used to be assembled from three-to-five
+ * INDEPENDENT reads of `shopfront_clone_alerts` — a table whose lifecycle
+ * columns the reconciler mutates daily, and which every KPI on slide 06 reads:
+ *
+ *   - the slide export hit /admin/report-card once PER SLIDE (8, up to 24 with
+ *     its retry loop), each a fresh card build inside the prod Next server;
+ *   - the caption built the card again, in the GH runner, minutes later;
+ *   - the publish write-back built it a THIRD time — after the GitHub
+ *     Environment approval gate, which is unbounded (hours to days).
+ *
+ * So the PDF the founder approved and the row persisted afterwards were
+ * computed from different snapshots. clone-watch-caption.ts's header claimed
+ * the caption "always matches the carousel"; that was true per-read and false
+ * across the pipeline. This step is the fix: one read, one card, one edition.
+ *
+ * Idempotent — re-running for the same month recomputes and re-pins. Requires
+ * SUPABASE_* env.
+ */
+import "./_load-env-config";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { createServiceClient } from "@askarthur/supabase/server";
+import { loadCardInputs } from "../lib/clone-watch/report-card-data";
+import { buildReportCard, buildTrendRows } from "../lib/clone-watch/report-card";
+import { upsertSummary, writeTrendRows } from "../lib/clone-watch/report-summary";
+
+function arg(name: string): string | undefined {
+  const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
+  return hit?.split("=").slice(1).join("=");
+}
+
+async function main() {
+  const month = arg("month");
+  const outDir = path.resolve(arg("out") ?? "report-card-out");
+  const skipWrite = process.argv.includes("--no-write");
+
+  // ONE load, both folds — the same shape the monthly cron uses.
+  const inputs = await loadCardInputs(month);
+  const card = buildReportCard(inputs);
+
+  await fs.mkdir(outDir, { recursive: true });
+  const cardPath = path.join(outDir, "card.json");
+  await fs.writeFile(cardPath, `${JSON.stringify(card, null, 2)}\n`);
+
+  if (!skipWrite) {
+    const sb = createServiceClient();
+    if (!sb) throw new Error("service client unavailable");
+    // upsertSummary writes card_json; omitting the URN preserves an already
+    // recorded LinkedIn post (the publish step owns that column).
+    await upsertSummary(sb, card);
+    await writeTrendRows(sb, buildTrendRows(inputs));
+  }
+
+  console.log(
+    `pinned ${card.periodMonth}: ${card.total} detected / ${card.brands} brands` +
+      ` · spotlight ${card.spotlight.kind}${card.spotlight.brand ? ` (${card.spotlight.brand})` : ""}` +
+      ` · watchlist ${card.watchlistSize}`,
+  );
+  console.log(`wrote ${cardPath}${skipWrite ? " (--no-write: DB not touched)" : " + card_json"}`);
+}
+
+main().catch((err) => {
+  console.error(
+    "clone-watch:compute-card failed:",
+    err instanceof Error ? err.message : err,
+  );
+  process.exit(1);
+});

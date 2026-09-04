@@ -8,7 +8,6 @@ import { logger } from "@askarthur/utils/logger";
 import { fetchAllRows } from "@askarthur/supabase/paginate";
 import { logCost, PRICING } from "@/lib/cost-telemetry";
 import { sendAdminTelegramMessage } from "@/lib/bots/telegram/sendAdminMessage";
-import { isFpBrand } from "@/lib/clone-watch/fp-brand-denylist";
 import {
   applyCohortRules,
   CLONE_COHORT_SELECT,

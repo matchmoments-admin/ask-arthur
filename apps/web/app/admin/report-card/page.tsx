@@ -16,6 +16,22 @@ import { buildOutcomesLine } from "@/lib/clone-watch/outcome-copy";
 import { buildClassifierCaveat, tacticLabel } from "@/lib/clone-watch/targeting-copy";
 import { prettyBrand } from "@/lib/clone-watch/brand-display";
 import { reportCardCss } from "./report-card-css";
+import { getPinnedCard } from "@/lib/clone-watch/report-summary";
+import { monthWindow } from "@/lib/clone-watch/month-window";
+
+/** The card persisted for `month`, or null — never throws, so the page falls
+ *  through to a live computation rather than erroring on a missing pin. */
+async function loadPinnedCard(
+  month: string,
+): Promise<CloneWatchReportCard | null> {
+  try {
+    const sb = createServiceClient();
+    if (!sb) return null;
+    return await getPinnedCard(sb, monthWindow(month).periodMonth);
+  } catch {
+    return null;
+  }
+}
 
 /**
  * /admin/report-card - renders the monthly "Australian Clone Watch" LinkedIn
@@ -79,14 +95,24 @@ function Pg({ n }: { n: number }) {
 export default async function ReportCardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string; slide?: string }>;
+  searchParams: Promise<{ month?: string; slide?: string; pinned?: string }>;
 }) {
   await requireAdmin();
-  const { month, slide } = await searchParams;
+  const { month, slide, pinned } = await searchParams;
 
   let data: CloneWatchReportCard;
   try {
-    data = await getCloneWatchReportCard(month);
+    // `?pinned=1` renders the card PERSISTED for this month (v298 card_json)
+    // instead of recomputing. The slide export passes it so all eight slides,
+    // the caption and the publish write-back quote one set of numbers — they
+    // used to be three-to-five separate reads of a table the reconciler mutates
+    // daily, minutes to days apart across the approval gate.
+    //
+    // Opt-in and fail-soft: no pin (or no month) falls through to a live
+    // computation, so opening the page by hand behaves exactly as before.
+    data =
+      (pinned === "1" && month ? await loadPinnedCard(month) : null) ??
+      (await getCloneWatchReportCard(month));
   } catch (err) {
     return (
       <pre style={{ padding: 32, fontFamily: "monospace" }}>

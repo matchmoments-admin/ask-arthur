@@ -142,7 +142,14 @@ async function main() {
     await page.setViewport({ width: WIDTH, height: HEIGHT, deviceScaleFactor: 2 });
     await page.setCookie({ name: "__aa_admin", value: token, domain: hostname, path: "/" });
 
-    const monthQ = month ? `&month=${month}` : "";
+    // `pinned=1` renders the card PERSISTED for this month (v298 card_json)
+    // rather than recomputing it per slide. Eight slides were eight independent
+    // builds of the card against prod — up to 24 with the retry loop below —
+    // each a fresh read of a table the reconciler mutates daily. Now every
+    // slide, the caption and the publish write-back quote identical numbers.
+    // Only meaningful with an explicit month; the page falls back to a live
+    // computation when no pin exists.
+    const monthQ = month ? `&month=${month}&pinned=1` : "";
     const pngPaths: string[] = [];
     const sizes: number[] = [];
     for (let n = 1; n <= SLIDE_COUNT; n++) {
