@@ -18,6 +18,25 @@
  * a prompt instruction is a request, and the thing standing between a bad
  * generation and a published page has to be code. It is pure and synchronous
  * so the rules are unit-testable without a model call.
+ *
+ * WHAT THIS CANNOT DO — do not describe it as a PII guarantee anywhere.
+ *
+ * It is a net with a known mesh size, measured by adversarial tests in
+ * take-validator.test.ts. Two classes get through by construction:
+ *
+ *   1. Personal names. "The scammer went by Sarah Mitchell" is indistinguishable
+ *      from ordinary prose to a regular expression. Nothing here will ever
+ *      catch it.
+ *   2. Bare handles with no sigil. "the handle deals_direct" reads exactly like
+ *      a compound noun; matching it would suppress legitimate tells constantly.
+ *      Only `@name` and `u/name` forms are caught.
+ *
+ * The compensating controls for those two are the prompt (which forbids both
+ * explicitly) and the admin review queue's `pii` verdict, which flips a live
+ * take to suppressed on one click. If a reviewer is ever asked "does the
+ * validator guarantee no names?", the answer is no — and Gate 3's PII
+ * criterion should be read as "no LEAKS THE VALIDATOR CAN SEE", with the
+ * review queue as the instrument for the rest.
  */
 
 /** The 15-value taxonomy — see migration-v82-reddit-intel-base.sql:41-47. */
@@ -98,15 +117,42 @@ const MIN_CONFIDENCE_FOR_NOT_A_SCAM = 0.7;
 // ── Content patterns ──────────────────────────────────────────────────────
 
 /**
- * Currency amounts. Deliberately broad: a bare "$95" and a written "95 USD"
- * are equally identifying. Ordinary numbers (a year, "2 weeks") are NOT
- * matched — over-suppressing costs a take, but stripping every digit would
- * make the tells useless.
+ * Currency amounts, in four shapes. Adversarial testing of the first version
+ * (symbol-or-currency-word only) found it missed the two most likely ways a
+ * model actually writes an amount in prose:
+ *
+ *     "The seller asked for 1500 up front"      — bare number, money context
+ *     "They asked for two hundred dollars"      — spelled out
+ *
+ * Both are as identifying as "$1500", so all four shapes are matched. Ordinary
+ * numbers stay legal: "within 24 hours", "roughly 2 weeks", "created in 2026"
+ * are the tells' bread and butter and are verified to pass.
  */
-const AMOUNT_RE =
-  /(?:[$£€¥₹]\s?\d|(?:\b|\d)(?:AUD|USD|GBP|EUR|NZD|CAD|BTC|ETH|USDT)\b|\b\d[\d,]*(?:\.\d+)?\s?(?:dollars?|pounds?|euros?|k\b))/i;
+const AMOUNT_RE = new RegExp(
+  [
+    // $95 · £ 250 · ¥50000
+    String.raw`[$£€¥₹]\s?\d`,
+    // 1,200 USD · AU$2,000 · 0.05 BTC
+    String.raw`(?:\b|\d)(?:AUD|USD|GBP|EUR|NZD|CAD|BTC|ETH|USDT)\b`,
+    // 500 dollars · 300 euro · 20k
+    String.raw`\b\d[\d,]*(?:\.\d+)?\s?(?:dollars?|pounds?|euros?|k\b)`,
+    // two hundred dollars · fifty pounds
+    String.raw`\b(?:one|two|three|four|five|six|seven|eight|nine|ten|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million)[\w\s-]{0,20}?(?:dollars?|pounds?|euros?)\b`,
+    // a bare number in an unambiguous money context, either side of it
+    String.raw`\b(?:paid|pay|pays|paying|fee|fees|cost|costs|price|priced|deposit|transferred?|sent|refund|charge[ds]?|worth|owed?|demanded?|requests?|requested|asked\s+for)\b[^.!?]{0,24}?\b\d[\d,]*(?:\.\d+)?\b`,
+    String.raw`\b\d[\d,]*(?:\.\d+)?\b[^.!?]{0,16}?\b(?:up\s?front|in\s+advance|upfront|deposit|per\s+month|a\s+month)\b`,
+  ].join("|"),
+  "i",
+);
 
 const EMAIL_RE = /[\w.+-]+@[\w-]+\.[\w.-]+/;
+
+/**
+ * Obfuscated addresses ("billing at fakeshop dot com"). Unlikely from the
+ * model, but the source posts are full of them and cheap to refuse.
+ */
+const OBFUSCATED_EMAIL_RE =
+  /\b[\w.+-]+\s+(?:at|\(at\)|\[at\])\s+[\w.-]+\s+(?:dot|\(dot\)|\[dot\])\s+\w{2,}/i;
 
 /**
  * Phone-ish runs of digits. Requires 7+ digits with optional separators so a
@@ -131,7 +177,10 @@ interface Rule {
 }
 
 const CONTENT_RULES: Rule[] = [
-  { reason: "contains_email", test: (t) => EMAIL_RE.test(t) },
+  {
+    reason: "contains_email",
+    test: (t) => EMAIL_RE.test(t) || OBFUSCATED_EMAIL_RE.test(t),
+  },
   { reason: "contains_handle", test: (t) => HANDLE_RE.test(t) },
   { reason: "contains_amount", test: (t) => AMOUNT_RE.test(t) },
   { reason: "contains_phone", test: (t) => PHONE_RE.test(t) },

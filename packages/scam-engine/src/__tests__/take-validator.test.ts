@@ -208,3 +208,52 @@ describe("take validator — rule precedence", () => {
     expect(["contains_amount", "contains_handle"]).toContain(r.reason);
   });
 });
+
+/**
+ * Adversarial suite. These strings are what a model plausibly writes, not what
+ * makes the implementation look good — the first version of the amount rule
+ * passed every test above and still missed the two most likely prose forms of
+ * an amount, which is how this suite came to exist.
+ */
+describe("take validator — adversarial", () => {
+  it.each([
+    ["a bare number in a money context", "The seller asked for 1500 up front"],
+    ["a fee with no symbol", "A fee of 95 is requested before delivery"],
+    ["a spelled-out amount", "They asked for two hundred dollars"],
+    ["a localised symbol", "A payment of ¥50000 was demanded"],
+    ["a prefixed currency", "The victim transferred AU$2,000"],
+    ["an obfuscated address", "Contact came from billing at fakeshop dot com"],
+    ["an international number", "Message came from +1 (555) 019-2837"],
+    ["a local mobile", "Reach them on 0400123456"],
+  ])("catches %s", (_label, text) => {
+    expect(findContentViolation(text), text).not.toBeNull();
+  });
+
+  it.each([
+    "Payment is requested before any service is delivered",
+    "Pressure builds over roughly 2 weeks of daily contact",
+    "The account was created in 2026 with no history",
+    "Victims are given 24 hours to respond",
+    "A 3-step verification flow is imitated",
+    "Contact moves off-platform within the first 48 hours",
+    "Delivery is promised in 5 to 7 days and never arrives",
+    "Reported across 4 unrelated marketplaces",
+    "Fees are re-described as tax, insurance, then release charges",
+    // Deliberately vague magnitude: non-identifying by design, and useful.
+    "Losses reached a five-figure sum",
+  ])("does not over-suppress a legitimate tell: %s", (text) => {
+    expect(findContentViolation(text), text).toBeNull();
+  });
+
+  it("documents the two classes it CANNOT catch", () => {
+    // Not aspirational tests — these assert the CURRENT, KNOWN limits so the
+    // mesh size is visible in the suite rather than discovered in production.
+    // If either starts passing, that is an improvement: update this test.
+    // The compensating controls are the prompt and the review queue's `pii`
+    // verdict, and no doc may describe this module as a PII guarantee.
+    expect(findContentViolation("The scammer went by Sarah Mitchell")).toBeNull();
+    expect(
+      findContentViolation("They used the handle deals_direct on Telegram"),
+    ).toBeNull();
+  });
+});
