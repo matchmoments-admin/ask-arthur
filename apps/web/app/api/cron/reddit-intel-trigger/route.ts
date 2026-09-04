@@ -49,8 +49,9 @@ export const dynamic = "force-dynamic";
 // on retries with no successful outcome.
 //
 // At ~38 posts/day actual Reddit volume, one cron tick per day is the
-// steady state. Backlog from a longer outage is drained at 40 posts every
-// 6 hours = 160/day catch-up rate. The original BATCH_SIZE=200 looked
+// steady state — but note the drain rate is 40/day against ~37/day of
+// arrivals, so a missed day never fully recovers and anything that falls
+// out of CANDIDATE_WINDOW is unreachable. The original BATCH_SIZE=200 looked
 // reasonable on paper but caused the first prod fire to time out — see
 // the v82-followup PR description for the post-mortem.
 const BATCH_SIZE = 40;
@@ -118,8 +119,9 @@ export async function GET(req: Request) {
     }
 
     // 3. Take the top BATCH_SIZE (newest) and emit. If there are more, the
-    //    next 6-hourly run picks them up — at ~38 posts/day the next run
-    //    will always have a clean queue.
+    //    next run picks them up — at ~38 posts/day against a 40/run drain
+    //    the queue is usually clean, but a backlog is reported below and
+    //    never prioritised (oldest rows age out of CANDIDATE_WINDOW).
     const batch = unprocessed.slice(0, BATCH_SIZE);
 
     await inngest.send({
