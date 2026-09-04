@@ -221,6 +221,20 @@ export const COUNTRY_NAMES: Record<string, string> = {
 // Must stay ONE string literal on one line. TypeScript widens `"a" + "b"` to
 // `string`, and supabase-js infers the row type from the literal — a widened
 // value silently degrades every caller's result to GenericStringError[].
+/**
+ * Take summary joined onto a feed row.
+ *
+ * A separate constant, not appended to FEED_ITEM_SELECT, because the join is
+ * only paid for when the cards flag is on — the feed is the highest-traffic
+ * surface in the app and the base query must stay exactly as cheap as it was.
+ *
+ * Only what a CARD needs: enough to render a chip and decide whether to link.
+ * The tells and prose live on the detail page, so the list payload does not
+ * carry text nobody reads.
+ */
+export const FEED_TAKE_JOIN =
+  "reddit_post_intel(take_status, take_tells, intent_label, confidence)";
+
 export const FEED_ITEM_SELECT =
   "id, source, external_id, title, description, url, source_url, category, channel, r2_image_key, reddit_image_url, has_image, impersonated_brand, country_code, upvotes, verified, published, created_at, source_created_at";
 
@@ -252,7 +266,35 @@ export type FeedItem = {
   published: boolean;
   created_at: string;
   source_created_at: string | null;
+  /**
+   * Present only when the cards flag is on AND the row has a take. Optional so
+   * every existing consumer keeps compiling and rendering unchanged.
+   */
+  reddit_post_intel?: {
+    take_status: string | null;
+    take_tells: string[] | null;
+    intent_label: string | null;
+    confidence: number | null;
+  } | null;
 };
+
+/**
+ * Does this row have a take good enough to send a reader to its page?
+ *
+ * Must agree with takeIsPageWorthy in lib/arthurs-take/loader.ts — a card that
+ * links to a page which then 404s is worse than a card with no link. Asserted
+ * by a test rather than trusted, since the two live in different modules for
+ * server/client-boundary reasons.
+ */
+export function feedItemHasTake(item: FeedItem): boolean {
+  const t = item.reddit_post_intel;
+  if (!t) return false;
+  return (
+    t.take_status === "ready" &&
+    (t.take_tells?.length ?? 0) >= 2 &&
+    (t.confidence ?? 0) >= 0.7
+  );
+}
 
 const CATEGORY_ILLUSTRATIONS: Record<string, string> = {
   phishing: "/illustrations/category-phishing.webp",
@@ -312,4 +354,32 @@ export function relativeTime(dateStr: string): string {
     day: "numeric",
     month: "short",
   });
+}
+
+/**
+ * A shareable URL that says what it is: `42117-fake-brand-collab`.
+ *
+ * Resolution is on the LEADING NUMERIC ID only, so the readable suffix can be
+ * regenerated — or the title corrected — without breaking a link someone has
+ * already shared or cited. Same approach Reddit and Stack Overflow use.
+ */
+export function takeSlug(feedItemId: number, title: string): string {
+  const words = title
+    .toLowerCase()
+    .replace(/\[[a-z]{2,3}\]/g, " ") // country tags like [US] carry nothing
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w.length > 2)
+    .slice(0, 6)
+    .join("-");
+  return words ? `${feedItemId}-${words}` : String(feedItemId);
+}
+
+/** The leading integer of a slug, or null when the segment is not one. */
+export function parseFeedItemId(slug: string): number | null {
+  const m = /^(\d+)(?:-|$)/.exec(slug);
+  if (!m) return null;
+  const id = Number(m[1]);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
 }

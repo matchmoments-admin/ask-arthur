@@ -8,8 +8,13 @@
 import "server-only";
 
 import { createServiceClient } from "@askarthur/supabase/server";
+import { featureFlags } from "@askarthur/utils/feature-flags";
 
-import { FEED_ITEM_SELECT } from "@/lib/feed";
+import {
+  FEED_ITEM_SELECT,
+  FEED_TAKE_JOIN,
+  type FeedItem,
+} from "@/lib/feed";
 
 export interface PinnedAlert {
   id: number;
@@ -29,7 +34,15 @@ export async function getInitialFeed() {
   const { data, count, error } = await supabase
     .from("feed_items")
     // Explicit columns, never "*" — see FEED_ITEM_COLUMNS in @/lib/feed.
-    .select(FEED_ITEM_SELECT, { count: "exact" })
+    // The take join is only paid for when the cards flag is on; the feed is
+    // the highest-traffic surface and the flag-off query must stay identical
+    // to what it was.
+    .select(
+      featureFlags.arthursTakeCards
+        ? `${FEED_ITEM_SELECT}, ${FEED_TAKE_JOIN}`
+        : FEED_ITEM_SELECT,
+      { count: "exact" },
+    )
     .eq("published", true)
     // r/scambait roleplay / image-only posts have no analyzable body and
     // are noise on the consumer feed. Mirror the API filter so SSR and
@@ -42,7 +55,14 @@ export async function getInitialFeed() {
     return { items: [], total: 0 };
   }
 
-  return { items: data || [], total: count ?? 0 };
+  // One cast, here, where the shape is known. supabase-js infers the row type
+  // from a STRING LITERAL passed to .select(); a ternary produces a union and
+  // the inference degrades to ParserError. Branching the whole query to keep
+  // two literals would duplicate every filter, which is a worse trade.
+  return {
+    items: (data ?? []) as unknown as FeedItem[],
+    total: count ?? 0,
+  };
 }
 
 export async function getPinnedRegulatorAlerts(): Promise<PinnedAlert[]> {

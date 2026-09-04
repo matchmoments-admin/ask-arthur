@@ -7,12 +7,16 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  parseFeedItemId,
   takeIsPageWorthy,
-  takeSlug,
   TAKE_PAGE_MIN_CONFIDENCE,
   TAKE_PAGE_MIN_TELLS,
 } from "@/lib/arthurs-take/loader";
+import {
+  feedItemHasTake,
+  parseFeedItemId,
+  takeSlug,
+  type FeedItem,
+} from "@/lib/feed";
 
 describe("takeSlug — shareable URLs", () => {
   it("produces a readable slug a person can recognise in a chat", () => {
@@ -92,5 +96,42 @@ describe("takeIsPageWorthy — not every take earns a URL", () => {
     // that, the substance rule would be doing nothing.
     expect(TAKE_PAGE_MIN_CONFIDENCE).toBeGreaterThan(0.5);
     expect(TAKE_PAGE_MIN_TELLS).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("card link and page gate must agree", () => {
+  // A card that links to a page which then 404s is worse than a card with no
+  // link. The two checks live in different modules because FeedCard is a
+  // client component and the loader is server-only, so they cannot share an
+  // implementation — which is exactly why they need a test.
+  const cases: { tells: string[]; confidence: number; status: string }[] = [
+    { tells: ["a", "b"], confidence: 0.8, status: "ready" },
+    { tells: ["a"], confidence: 0.9, status: "ready" },
+    { tells: ["a", "b"], confidence: 0.5, status: "ready" },
+    { tells: ["a", "b", "c"], confidence: 0.95, status: "suppressed" },
+    { tells: [], confidence: 0.9, status: "ready" },
+  ];
+
+  for (const c of cases) {
+    it(`agrees for ${c.status}/${c.tells.length} tells/conf ${c.confidence}`, () => {
+      const cardSays = feedItemHasTake({
+        reddit_post_intel: {
+          take_status: c.status,
+          take_tells: c.tells,
+          intent_label: "phishing",
+          confidence: c.confidence,
+        },
+      } as unknown as FeedItem);
+      const pageSays = takeIsPageWorthy({
+        takeStatus: c.status,
+        tells: c.tells,
+        confidence: c.confidence,
+      });
+      expect(cardSays).toBe(pageSays);
+    });
+  }
+
+  it("shows no link when there is no take at all", () => {
+    expect(feedItemHasTake({} as FeedItem)).toBe(false);
   });
 });

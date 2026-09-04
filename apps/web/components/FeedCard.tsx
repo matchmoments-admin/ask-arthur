@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import {
   Fish,
   HeartCrack,
@@ -32,8 +33,11 @@ import {
   getCategoryIllustration,
   humanizeSource,
   relativeTime,
+  feedItemHasTake,
+  takeSlug,
 } from "@/lib/feed";
 import type { FeedItem } from "@/lib/feed";
+
 import Pill from "./Pill";
 
 const ICON_MAP: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
@@ -44,6 +48,9 @@ const ICON_MAP: Record<string, React.ComponentType<{ size?: number; className?: 
 };
 
 export default function FeedCard({ item }: { item: FeedItem }) {
+  // Flag-gated at the DATA layer (the join only runs when the flag is on), so
+  // this is false and the card renders byte-identically when off.
+  const hasTake = feedItemHasTake(item);
   const categoryConfig = item.category ? CATEGORY_CONFIG[item.category] : null;
   // Never fall back to SOURCE_CONFIG.reddit — that made every unregistered
   // source (austrac, every inbound_*, future Phase B slugs) render as
@@ -143,7 +150,28 @@ export default function FeedCard({ item }: { item: FeedItem }) {
           {item.impersonated_brand && (
             <Pill label={item.impersonated_brand} />
           )}
+          {hasTake && <Pill label="Arthur's Take" color="#1B2A4A" />}
         </div>
+
+        {/* The take link. A separate anchor rather than changing the card's
+            own target, so the Reddit attribution link stays exactly where it
+            was — every derived view must keep linking to the original
+            (reddit-intel-reddit-tos.md §4), and a reader should never have to
+            go one level deeper to find it.
+
+            stopPropagation because this sits inside the card's outer anchor;
+            without it a click would follow the card to Reddit instead. */}
+        {hasTake && (
+          <div className="mt-2">
+            <Link
+              href={`/scam-feed/${takeSlug(item.id, item.title)}`}
+              onClick={(e) => e.stopPropagation()}
+              className="text-xs font-medium text-deep-navy underline underline-offset-2"
+            >
+              What Arthur sees in this pattern →
+            </Link>
+          </div>
+        )}
       </div>
     </article>
   );

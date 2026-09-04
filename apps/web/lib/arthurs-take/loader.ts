@@ -5,7 +5,14 @@ import { cache } from "react";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
+import { parseFeedItemId } from "@/lib/feed";
+
 import type { IntentLabel } from "@askarthur/types";
+
+// Re-exported for server callers that already import them from here. The
+// definitions live in lib/feed.ts because FeedCard is a client component and
+// cannot import a "server-only" module.
+export { takeSlug, parseFeedItemId } from "@/lib/feed";
 
 /**
  * Loader for the Arthur's Take detail page.
@@ -66,34 +73,6 @@ export function takeIsPageWorthy(row: {
     (row.tells?.length ?? 0) >= TAKE_PAGE_MIN_TELLS &&
     (row.confidence ?? 0) >= TAKE_PAGE_MIN_CONFIDENCE
   );
-}
-
-/**
- * A shareable URL that says what it is: `42117-fake-brand-collab`.
- *
- * Resolution is on the LEADING NUMERIC ID only, so the readable suffix can be
- * regenerated — or the title corrected — without breaking a link someone has
- * already shared or cited. Same approach Reddit and Stack Overflow use.
- */
-export function takeSlug(feedItemId: number, title: string): string {
-  const words = title
-    .toLowerCase()
-    .replace(/\[[a-z]{2,3}\]/g, " ") // country tags like [US] carry nothing
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim()
-    .split(/\s+/)
-    .filter((w) => w.length > 2)
-    .slice(0, 6)
-    .join("-");
-  return words ? `${feedItemId}-${words}` : String(feedItemId);
-}
-
-/** The leading integer of a slug, or null when the segment is not one. */
-export function parseFeedItemId(slug: string): number | null {
-  const m = /^(\d+)(?:-|$)/.exec(slug);
-  if (!m) return null;
-  const id = Number(m[1]);
-  return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
 export const loadTake = cache(
