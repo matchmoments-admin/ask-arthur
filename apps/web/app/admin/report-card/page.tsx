@@ -637,7 +637,7 @@ function SlideActed({ data, page }: SlideProps) {
           classification counts, so a reader tried to reconcile 792 / 40 / 6
           against a 1000 headline and could not — three numbers, two different
           axes, no denominator. */}
-      <div className="kpis" style={{ marginTop: 24 }}>
+      <div className="kpis" style={{ marginTop: 14 }}>
         <div className="kpi accent">
           <div className="n">{data.kpis.reportedToNetcraft}</div>
           <div className="l">
@@ -660,7 +660,7 @@ function SlideActed({ data, page }: SlideProps) {
               past that window its unclassified rows are never scanned — for the
               June cohort that was 320 of 804, every one of them permanently
               unscannable. "Not yet" is a promise the pipeline cannot keep. */}
-      <div className="know" style={{ marginTop: 20 }}>
+      <div className="know" style={{ marginTop: 14 }}>
         <div className="lab">WHAT THE SCANS FOUND — ALL {data.total}</div>
         <div className="txt">
           {data.kpis.likelyPhishing} serving likely phishing ·{" "}
@@ -673,12 +673,12 @@ function SlideActed({ data, page }: SlideProps) {
         </div>
       </div>
       {outcomes && (
-        <div className="know" style={{ marginTop: 16 }}>
+        <div className="know" style={{ marginTop: 12 }}>
           <div className="lab">WHAT HAPPENED NEXT</div>
           <div className="txt">Of this month&apos;s detections: {outcomes}.</div>
         </div>
       )}
-      <div className="know" style={{ marginTop: outcomes ? 16 : 20 }}>
+      <div className="know" style={{ marginTop: outcomes ? 12 : 16 }}>
         <div className="lab">HOW WE KNOW</div>
         {/* The brand count is COMPUTED, not a literal. "~50" shipped on this
             slide every month while the watchlist held 293 — a six-fold

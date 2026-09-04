@@ -141,6 +141,20 @@ async function main() {
     const page = await browser.newPage();
     await page.setViewport({ width: WIDTH, height: HEIGHT, deviceScaleFactor: 2 });
     await page.setCookie({ name: "__aa_admin", value: token, domain: hostname, path: "/" });
+    // Render against a PROTECTED preview deployment. Vercel Deployment
+    // Protection answers an unauthenticated request with an SSO redirect, which
+    // the blank-frame check below reports as "slide 1 did not render" — so a
+    // slide fix could never be verified before it reached prod, and the
+    // 1350px overflow that blocked the August 2026 edition was only caught by
+    // the monthly lane itself. A local `VERCEL_OIDC_TOKEN` (from `vercel env
+    // pull`) is a short-lived development identity that Trusted Sources admits
+    // to the same project's previews; sent as this header it passes protection
+    // without disabling it. Never logged. Absent in the GH lane, which renders
+    // against prod.
+    const oidc = process.env.VERCEL_OIDC_TOKEN?.trim();
+    if (oidc) {
+      await page.setExtraHTTPHeaders({ "x-vercel-trusted-oidc-idp-token": oidc });
+    }
 
     // `pinned=1` renders the card PERSISTED for this month (v298 card_json)
     // rather than recomputing it per slide. Eight slides were eight independent
