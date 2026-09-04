@@ -335,6 +335,17 @@ export const featureFlags = {
    *  ~270 posts/week volume; daily cost-telemetry alert set at A$50. */
   redditIntelIngest: readBoolEnv("FF_REDDIT_INTEL_INGEST"),
 
+  // ── Arthur's Take ───────────────────────────────────────────────────────
+  // Reader-facing analysis on Reddit feed items. Generation is server-only
+  // and costs money, so it uses readBoolEnv (trims, bracket-access — the
+  // literal form has been bitten by a trailing newline in a Vercel value).
+  // The two display gates are NEXT_PUBLIC_* on the literal pattern so the
+  // client bundle's build-time inlining still works.
+  arthursTakeGenerate: readBoolEnv("FF_ARTHURS_TAKE_GENERATE"),
+  arthursTakeDetail:
+    process.env.NEXT_PUBLIC_FF_ARTHURS_TAKE_DETAIL === "true",
+  arthursTakeCards: process.env.NEXT_PUBLIC_FF_ARTHURS_TAKE_CARDS === "true",
+
   /** Reddit Brands Discover — weekly cron that aggregates
    *  reddit_post_intel.brands_impersonated, resolves via the v174 alias layer,
    *  drops already-watched brands, and writes the unwatched remainder to

@@ -87,6 +87,9 @@ const MIN_CONFIDENCE = 0.5;
  */
 const MIN_CONFIDENCE_FOR_VAGUE_LABEL = 0.7;
 
+/** Labels that assert no specific pattern, so a take needs more to justify it. */
+const VAGUE_LABELS = new Set<IntentLabel>(["other", "informational"]);
+
 /**
  * A post shorter than this is usually a title plus a link. There is no
  * narrative to find a pattern in.
@@ -262,8 +265,13 @@ export function validateTake(
     return { status: "suppressed", reason: "low_confidence" };
   }
 
+  // `informational` joins `other` here. The taxonomy defines it as a post that
+  // is NOT itself a scam report, so a take on one describes the poster's
+  // behaviour rather than a pattern — the dry run produced exactly that:
+  // "Job seeker expresses caution about a platform with minimal reviews",
+  // which tells a reader nothing they could recognise elsewhere.
   if (
-    ctx.intentLabel === "other" &&
+    VAGUE_LABELS.has(ctx.intentLabel) &&
     ctx.confidence < MIN_CONFIDENCE_FOR_VAGUE_LABEL
   ) {
     return { status: "suppressed", reason: "vague_low_confidence" };
