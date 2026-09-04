@@ -864,6 +864,7 @@ def scrape() -> str:
     status = "success"
     total_posts = 0
     skipped_dedup = 0
+    skipped_tombstoned = 0
     images_captured = 0
 
     try:
@@ -896,6 +897,7 @@ def scrape() -> str:
             sub_emails = 0
             post_count = 0
             sub_skipped = 0
+            sub_tombstoned = 0
 
             for post in posts:
                 post_count += 1
@@ -914,7 +916,14 @@ def scrape() -> str:
                 # them at the source; the post is not marked processed, so if
                 # it is ever restored a later run picks it up.
                 if _is_tombstone(post.get("selftext")):
-                    sub_skipped += 1
+                    # Counted separately from the dedup skip: two different
+                    # facts, and folding them together would hide a change in
+                    # Reddit's removal rate inside a number that is expected
+                    # to be large. Note the post is NOT added to new_post_ids,
+                    # so it is re-examined each run until it ages out of /new
+                    # — deliberate, so a post a moderator restores is then
+                    # picked up normally.
+                    sub_tombstoned += 1
                     continue
 
                 # Combine title + selftext for IOC extraction
@@ -988,9 +997,11 @@ def scrape() -> str:
                 new_post_ids.append((post_id, sub_name.lower()))
 
             skipped_dedup += sub_skipped
+            skipped_tombstoned += sub_tombstoned
             total_posts += post_count
             logger.info(
-                f"r/{sub_name}: {post_count} posts ({sub_skipped} skipped dedup) — "
+                f"r/{sub_name}: {post_count} posts "
+                f"({sub_skipped} skipped dedup, {sub_tombstoned} removed/deleted) — "
                 f"{sub_urls} URLs, {sub_wallets} wallets, "
                 f"{sub_phones} phones, {sub_emails} emails",
                 extra={"metadata": {"subreddit": sub_name}},
@@ -1007,7 +1018,8 @@ def scrape() -> str:
         logger.info(
             f"Reddit total: {total_posts} posts across "
             f"{len(SUBREDDITS)} subreddits — "
-            f"{skipped_dedup} skipped (dedup), {images_captured} images captured, "
+            f"{skipped_dedup} skipped (dedup), {skipped_tombstoned} removed/deleted, "
+            f"{images_captured} images captured, "
             f"{len(all_urls)} URLs, {len(all_wallets)} wallets, "
             f"{len(all_entities)} entities (phones+emails)"
         )
@@ -1102,7 +1114,8 @@ def scrape() -> str:
         f"URLs({url_stats['new']} new, {url_stats['updated']} upd) "
         f"Wallets({wallet_stats['new']} new, {wallet_stats['updated']} upd) "
         f"Entities({entity_stats['new']} new, {entity_stats['updated']} upd) "
-        f"dedup_skipped={skipped_dedup}, images={images_captured} "
+        f"dedup_skipped={skipped_dedup}, tombstoned={skipped_tombstoned}, "
+        f"images={images_captured} "
         f"in {duration_ms}ms"
     )
 
