@@ -19,7 +19,9 @@
  * and labelled, because guessing a reader's country from a scam post's
  * language is a worse failure than one extra line.
  */
-import type { ReportingAction } from "@askarthur/types";
+import type { IntentLabel, ReportingAction } from "@askarthur/types";
+
+export type { IntentLabel };
 
 import {
   ACTION_BANK,
@@ -29,31 +31,28 @@ import {
   ACTION_SCAMWATCH,
 } from "@/lib/onward/destinations";
 
-/** The 15-value taxonomy (migration-v82-reddit-intel-base.sql:41-47). */
-export type IntentLabel =
-  | "phishing"
-  | "romance_scam"
-  | "investment_fraud"
-  | "tech_support"
-  | "impersonation"
-  | "shopping_scam"
-  | "phone_scam"
-  | "email_scam"
-  | "sms_scam"
-  | "employment_scam"
-  | "advance_fee"
-  | "rental_scam"
-  | "sextortion"
-  | "informational"
-  | "other";
-
 export interface TakeAction {
   /** Imperative, protective, and about the pattern — never about the poster. */
   label: string;
   description: string;
   href?: string;
+  /**
+   * The actionable payload, carried through from ReportingAction.value: a
+   * phone number for a `call`, the guidance text for an `info`. An earlier
+   * version of this adapter dropped it, so "Call IDCARE (free identity
+   * support)" rendered with no number to call and "Call your bank's fraud
+   * line" rendered with none of the advice about WHICH number to use. Both
+   * are the entire content of those actions.
+   */
+  value?: string;
+  /** `call` renders a tel: link, `info` renders text, `url` renders an href. */
+  actionKind?: "call" | "url" | "info" | "email" | "copy";
+  /** Renders as an urgent callout. Carried through, not re-derived. */
+  urgent?: boolean;
   /** Shown with a jurisdiction chip when set. */
   region?: "AU" | "international";
+  /** From destinations.ts. Lower is shown first; see its priority bands. */
+  priority?: number;
   /**
    * `protective` = what a reader can do about this pattern now.
    * `reporting`  = where to send it.
@@ -108,6 +107,14 @@ function fromReportingAction(
     label: action.label,
     description: action.description ?? "",
     href: action.kind === "url" ? action.value : undefined,
+    // Everything below is carried through rather than dropped. `value` is the
+    // action's whole point for a `call` or `info`; `priority` is the ordering
+    // destinations.ts already declares, so re-encoding it here by hand would
+    // be a second source of truth for the same decision.
+    value: action.value,
+    actionKind: action.kind,
+    urgent: action.urgent,
+    priority: action.priority,
     region,
     kind: "reporting",
   };
@@ -318,7 +325,15 @@ export function actionsForTake(
 ): TakeAction[] {
   const protective = PROTECTIVE[label] ?? [];
   if (opts.isScamReport === false) return protective;
-  return [...protective, ...reportingFor(label), ...INTERNATIONAL_REPORTING];
+  // Reporting order comes from destinations.ts's priority bands (0-9 urgent,
+  // 10-19 police-connected, 40-49 identity support, 50-59 intel), not from the
+  // order they happen to be listed in reportingFor. International routes sort
+  // last: they are a fallback for a reader outside Australia, not a competing
+  // first choice.
+  const reporting = [...reportingFor(label)].sort(
+    (a, b) => (a.priority ?? 99) - (b.priority ?? 99),
+  );
+  return [...protective, ...reporting, ...INTERNATIONAL_REPORTING];
 }
 
 export const INTERNATIONAL_ACTIONS = INTERNATIONAL_REPORTING;

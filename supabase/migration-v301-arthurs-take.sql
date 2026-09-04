@@ -53,8 +53,13 @@ ALTER TABLE public.reddit_post_intel
   ADD COLUMN IF NOT EXISTS take_prompt_version TEXT,
   ADD COLUMN IF NOT EXISTS take_written_at TIMESTAMPTZ,
 
-  -- Written by the cluster step: is this post part of something new? Feeds the
-  -- "new this week" surface and is offered to the take writer as a hint.
+  -- NOT YET WRITTEN BY ANYTHING. Intended for the cluster step, to feed the
+  -- "new this week" surface and give the take writer a hint. The computation
+  -- it needs (theme age, novelty-signal diff against a 28-day baseline, new
+  -- brand) lands with the novelty work; until then every row reads FALSE.
+  -- Stated plainly here rather than described as if the writer exists: a
+  -- comment claiming a control nothing enforces is this repo's most-repeated
+  -- defect, and a self-review of this migration caught it doing exactly that.
   ADD COLUMN IF NOT EXISTS is_emerging BOOLEAN NOT NULL DEFAULT FALSE;
 
 COMMENT ON COLUMN public.reddit_post_intel.take_status IS

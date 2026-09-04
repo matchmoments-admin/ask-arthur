@@ -22,6 +22,8 @@
 
 import { z } from "zod";
 
+import { INTENT_LABELS } from "@askarthur/types";
+
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -101,23 +103,11 @@ export function resolveClassifyModel(): ClaudeModelKey {
   if (raw === "HAIKU_4_5" || raw === "SONNET_4_6") return raw;
   return "SONNET_4_6";
 }
-const ALLOWED_INTENT_LABELS = [
-  "phishing",
-  "romance_scam",
-  "investment_fraud",
-  "tech_support",
-  "impersonation",
-  "shopping_scam",
-  "phone_scam",
-  "email_scam",
-  "sms_scam",
-  "employment_scam",
-  "advance_fee",
-  "rental_scam",
-  "sextortion",
-  "informational",
-  "other",
-] as const;
+// Re-exported from @askarthur/types so the tuple has exactly one home. It was
+// previously declared here, in take-validator.ts and in apps/web's actions
+// map — three byte-identical copies of the same 15 strings, each free to drift
+// from the SQL CHECK they are all keyed to.
+const ALLOWED_INTENT_LABELS = INTENT_LABELS;
 
 // ── System prompt ─────────────────────────────────────────────────────────
 // Cached via cache_control: ephemeral. Cache key changes whenever the text

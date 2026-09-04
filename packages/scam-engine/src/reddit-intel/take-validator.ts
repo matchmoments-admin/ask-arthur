@@ -39,23 +39,8 @@
  * review queue as the instrument for the rest.
  */
 
-/** The 15-value taxonomy — see migration-v82-reddit-intel-base.sql:41-47. */
-export type IntentLabel =
-  | "phishing"
-  | "romance_scam"
-  | "investment_fraud"
-  | "tech_support"
-  | "impersonation"
-  | "shopping_scam"
-  | "phone_scam"
-  | "email_scam"
-  | "sms_scam"
-  | "employment_scam"
-  | "advance_fee"
-  | "rental_scam"
-  | "sextortion"
-  | "informational"
-  | "other";
+export type { IntentLabel } from "@askarthur/types";
+import type { IntentLabel } from "@askarthur/types";
 
 export interface TakeCandidate {
   tells: string[];

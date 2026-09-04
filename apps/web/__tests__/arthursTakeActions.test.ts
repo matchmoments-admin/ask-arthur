@@ -5,10 +5,11 @@
  */
 import { describe, expect, it } from "vitest";
 
+import { INTENT_LABELS, type IntentLabel } from "@askarthur/types";
+
 import {
   actionsForTake,
   INTERNATIONAL_ACTIONS,
-  type IntentLabel,
 } from "@/lib/arthurs-take/actions";
 import {
   ACTION_ESAFETY,
@@ -16,23 +17,10 @@ import {
   IDCARE_PHONE,
 } from "@/lib/onward/destinations";
 
-const ALL_LABELS: IntentLabel[] = [
-  "phishing",
-  "romance_scam",
-  "investment_fraud",
-  "tech_support",
-  "impersonation",
-  "shopping_scam",
-  "phone_scam",
-  "email_scam",
-  "sms_scam",
-  "employment_scam",
-  "advance_fee",
-  "rental_scam",
-  "sextortion",
-  "informational",
-  "other",
-];
+// The taxonomy itself, not a hand-copied seventh transcription of it. The
+// previous local list could only catch a label someone remembered to add in
+// two places — which is the failure it existed to prevent.
+const ALL_LABELS: readonly IntentLabel[] = INTENT_LABELS;
 
 describe("actionsForTake", () => {
   it("returns actions for every label in the taxonomy", () => {
@@ -104,16 +92,43 @@ describe("actionsForTake", () => {
     expect(actions.some((a) => /report to/i.test(a.label))).toBe(false);
   });
 
-  it("does not re-declare destinations that live in the onward module", () => {
-    // Guards the single-source-of-truth rule: a second copy of the IDCARE
-    // number here would drift from the one the reporting flow uses.
-    const source = actionsForTake("phishing")
-      .map((a) => `${a.label} ${a.description} ${a.href ?? ""}`)
-      .join(" ");
-    // IDCARE is a `call` action, so its number is not rendered as an href —
-    // it must come through the imported constant, not a literal.
-    expect(IDCARE_PHONE).toBe("1800 595 160");
-    expect(source).not.toContain("1800 595 160");
+  it("carries the callable payload through, not just the label", () => {
+    // REGRESSION. The first version of this test asserted the IDCARE number
+    // was ABSENT and passed — but for the wrong reason: the adapter was
+    // dropping ReportingAction.value entirely, so "Call IDCARE (free identity
+    // support)" rendered with no number to call, and "Call your bank's fraud
+    // line" rendered with none of the advice about which number to use. For a
+    // `call` or `info` action that value IS the content. A test that locks in
+    // a bug is worse than no test.
+    const idcare = actionsForTake("phishing").find((a) =>
+      /idcare/i.test(a.label),
+    );
+    expect(idcare).toBeDefined();
+    expect(idcare?.value).toBe(IDCARE_PHONE);
+    expect(idcare?.actionKind).toBe("call");
+  });
+
+  it("gives every reporting action something a reader can act on", () => {
+    for (const label of ALL_LABELS) {
+      for (const action of actionsForTake(label)) {
+        if (action.kind !== "reporting") continue;
+        expect(
+          Boolean(action.href) || Boolean(action.value),
+          `${label}: "${action.label}" has neither an href nor a value`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("orders reporting by the priority destinations.ts declares", () => {
+    // Ordering is a decision that module already made (urgent 0-9, police
+    // 10-19, identity 40-49, intel 50-59). Re-encoding it here by hand would
+    // be a second source of truth that drifts the first time one is edited.
+    const reporting = actionsForTake("tech_support").filter(
+      (a) => a.kind === "reporting" && a.region === "AU",
+    );
+    const priorities = reporting.map((a) => a.priority ?? 99);
+    expect(priorities).toEqual([...priorities].sort((a, b) => a - b));
   });
 
   it("keeps every international destination on https", () => {

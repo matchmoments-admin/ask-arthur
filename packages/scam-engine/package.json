@@ -71,7 +71,8 @@
     "./retrieval/similar-reports": "./src/retrieval/similar-reports.ts",
     "./analyze-core": "./src/analyze-core.ts",
     "./retrieval/themes": "./src/retrieval/themes.ts",
-    "./reddit-intel/weekly-synthesis": "./src/reddit-intel/weekly-synthesis.ts"
+    "./reddit-intel/weekly-synthesis": "./src/reddit-intel/weekly-synthesis.ts",
+    "./reddit-intel/take-validator": "./src/reddit-intel/take-validator.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",

@@ -379,6 +379,39 @@ export type BotAnalyzeInput = z.infer<typeof BotAnalyzeInputSchema>;
 // existing OnwardReportPicker / get_onward_destinations RPC — this is only
 // the "what do I do right now" nudge. Destination data + sources live in
 // apps/web/lib/onward/destinations.ts (single source of truth).
+/**
+ * The scam-type taxonomy shared by the Reddit intel pipeline.
+ *
+ * Single source of truth for TypeScript. It is mirrored by two SQL CHECK
+ * constraints that no type system can reach:
+ *   - reddit_post_intel.intent_label  (migration-v82-reddit-intel-base.sql:41)
+ *   - feed_items.category             (migration-v210-competitor-intel-category.sql:16,
+ *                                      which adds a 16th value, `competitor_intel`,
+ *                                      that is NEVER a valid intent label — ADR-0021)
+ * Changing this tuple without a migration will fail at write time, not compile
+ * time. That asymmetry is the reason to have exactly one copy here rather than
+ * four copies that can each drift independently.
+ */
+export const INTENT_LABELS = [
+  "phishing",
+  "romance_scam",
+  "investment_fraud",
+  "tech_support",
+  "impersonation",
+  "shopping_scam",
+  "phone_scam",
+  "email_scam",
+  "sms_scam",
+  "employment_scam",
+  "advance_fee",
+  "rental_scam",
+  "sextortion",
+  "informational",
+  "other",
+] as const;
+
+export type IntentLabel = (typeof INTENT_LABELS)[number];
+
 export const ActionKindSchema = z.enum(["call", "email", "url", "copy", "info"]);
 export type ActionKind = z.infer<typeof ActionKindSchema>;
 
