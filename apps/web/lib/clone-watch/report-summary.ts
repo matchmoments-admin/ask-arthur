@@ -56,8 +56,13 @@ export function summaryRow(
     // and the write-back all read now.
     card_json: card,
     updated_at: new Date().toISOString(),
-    // Was never set, so it silently failed to track re-snapshots while
-    // updated_at did. A re-run is a new generation of the same edition.
+    // Set on INSERT by the column default since v189 (timestamptz NOT NULL
+    // DEFAULT now()) — what it did not do was move on a re-snapshot, while
+    // updated_at did. Stamping it here makes "when were these numbers
+    // computed" answerable. Note the one caller where the two diverge: the
+    // publish write-back persists the PINNED card after the approval gate, so
+    // there generated_at is the write time, not the computation time; card_json
+    // is the record of what was approved.
     generated_at: new Date().toISOString(),
   };
   if (publishedPostUrn) row.published_post_urn = publishedPostUrn;

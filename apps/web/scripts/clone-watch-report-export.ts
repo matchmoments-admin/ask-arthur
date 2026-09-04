@@ -153,7 +153,26 @@ async function main() {
     // against prod.
     const oidc = process.env.VERCEL_OIDC_TOKEN?.trim();
     if (oidc) {
-      await page.setExtraHTTPHeaders({ "x-vercel-trusted-oidc-idp-token": oidc });
+      // Scoped to the target ORIGIN, not attached to every request the page
+      // makes. setExtraHTTPHeaders applies to subresources too, so any
+      // third-party asset the report card ever gains — an urlscan screenshot, a
+      // remote font, a beacon — would be handed a live Vercel identity token.
+      // Interception keeps it on same-origin navigations only.
+      const origin = new URL(base).origin;
+      await page.setRequestInterception(true);
+      page.on("request", (req) => {
+        let sameOrigin = false;
+        try {
+          sameOrigin = new URL(req.url()).origin === origin;
+        } catch {
+          sameOrigin = false;
+        }
+        void req.continue(
+          sameOrigin
+            ? { headers: { ...req.headers(), "x-vercel-trusted-oidc-idp-token": oidc } }
+            : undefined,
+        );
+      });
     }
 
     // `pinned=1` renders the card PERSISTED for this month (v298 card_json)
@@ -181,6 +200,23 @@ async function main() {
           );
         }
         console.log(`  ⟳ slide ${n} captured blank (${bytes} bytes) — retrying`);
+      }
+      // A pin that silently failed to load renders a perfect-looking slide off
+      // a fresher snapshot — invisible to both blank checks above. The page
+      // stamps which card it served; require it on every slide we asked to pin,
+      // so a mixed-snapshot deck fails HERE rather than reaching the founder.
+      if (monthQ) {
+        const served = await page.$eval(
+          "#rc-pin-state",
+          (el) => el.getAttribute("data-pinned"),
+        ).catch(() => null);
+        if (served !== "1") {
+          throw new Error(
+            `slide ${n} was requested with ?pinned=1 but the page served a LIVE recompute ` +
+              `(data-pinned=${served ?? "absent"}) — the deck would mix snapshots. ` +
+              `Check that compute-card pinned ${month} (clone_watch_report_summary.card_json).`,
+          );
+        }
       }
       sizes.push(bytes);
       pngPaths.push(out);

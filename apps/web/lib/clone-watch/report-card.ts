@@ -390,7 +390,15 @@ export function buildReportCard(input: CardInputs): CloneWatchReportCard {
       brandsMonitoredThisMonth.add(b);
     }
   }
-  const watchlistSize = brandsMonitoredThisMonth.size || AU_BRAND_WATCHLIST.length;
+  // `watchlistFallbackSize` first: the whole point of the field is that a
+  // re-export of a past edition must not restate that month's methodology with
+  // TODAY's watchlist. It was declared, documented and tested, and then never
+  // read here — so the property it promises did not hold. AU_BRAND_WATCHLIST is
+  // the last resort, for callers that pass nothing.
+  const watchlistSize =
+    brandsMonitoredThisMonth.size ||
+    input.watchlistFallbackSize ||
+    AU_BRAND_WATCHLIST.length;
 
   const priorYm = new Date(`${periodMonth.slice(0, 7)}-01T00:00:00Z`);
   priorYm.setUTCMonth(priorYm.getUTCMonth() - 1);

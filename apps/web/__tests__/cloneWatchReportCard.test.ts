@@ -205,10 +205,17 @@ describe("buildReportCard — watchlistSize", () => {
     // An explicit input, NOT a module-level read of AU_BRAND_WATCHLIST.length —
     // an ambient value makes the fold non-deterministic across processes, which
     // defeats the point of computing an edition once.
+    //
+    // 7 is deliberately a number the real watchlist can never be. The original
+    // assertion used 293, which was ALSO AU_BRAND_WATCHLIST.length at the time —
+    // so it passed against a fold that ignored the input entirely, and would
+    // have gone red the day someone added a brand. A fallback test whose
+    // expected value can be produced by the thing it is meant to exclude proves
+    // nothing.
     const card = buildReportCard(
-      inputs({ rows: clones("bonds.com.au", 5), watchlistFallbackSize: 293 }),
+      inputs({ rows: clones("bonds.com.au", 5), watchlistFallbackSize: 7 }),
     );
-    expect(card.watchlistSize).toBe(293);
+    expect(card.watchlistSize).toBe(7);
   });
 });
 

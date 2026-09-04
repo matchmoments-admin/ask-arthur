@@ -22,15 +22,32 @@ import { getPinnedCard } from "../lib/clone-watch/report-summary";
 import { monthWindow } from "../lib/clone-watch/month-window";
 import type { CloneWatchReportCard } from "../lib/clone-watch/report-card-data";
 
-/** The pinned card for a month, or null — never throws. */
+/** The pinned card for a month, or null — never throws, but never silently.
+ *  A failed pin read here produces a caption built from a FRESHER snapshot than
+ *  the carousel it accompanies: numbers in the post text disagreeing with the
+ *  numbers in the images, with nothing in the log to say why. */
 async function loadPinnedCardForMonth(
   month?: string,
 ): Promise<CloneWatchReportCard | null> {
   try {
     const sb = createServiceClient();
-    if (!sb) return null;
-    return await getPinnedCard(sb, monthWindow(month).periodMonth);
-  } catch {
+    if (!sb) {
+      console.warn("clone-watch:caption: no service client — caption will be LIVE, not pinned");
+      return null;
+    }
+    const pinned = await getPinnedCard(sb, monthWindow(month).periodMonth);
+    if (!pinned) {
+      console.warn(
+        `clone-watch:caption: no pinned card for ${month ?? "the default month"} —` +
+          " caption will be LIVE and may disagree with the carousel",
+      );
+    }
+    return pinned;
+  } catch (err) {
+    console.warn(
+      "clone-watch:caption: pinned card read FAILED, falling back to live —" +
+        ` caption may disagree with the carousel: ${err instanceof Error ? err.message : err}`,
+    );
     return null;
   }
 }

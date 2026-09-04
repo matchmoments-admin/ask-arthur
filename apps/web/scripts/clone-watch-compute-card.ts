@@ -30,8 +30,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { loadCardInputs } from "../lib/clone-watch/report-card-data";
-import { buildReportCard, buildTrendRows } from "../lib/clone-watch/report-card";
-import { upsertSummary, writeTrendRows } from "../lib/clone-watch/report-summary";
+import { buildReportCard } from "../lib/clone-watch/report-card";
+import { upsertSummary } from "../lib/clone-watch/report-summary";
 
 function arg(name: string): string | undefined {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
@@ -51,13 +51,35 @@ async function main() {
   const cardPath = path.join(outDir, "card.json");
   await fs.writeFile(cardPath, `${JSON.stringify(card, null, 2)}\n`);
 
+  // REFUSE to pin an empty edition. The monthly cron has this guard
+  // (clone-watch-report-summary.ts: `skipped: "no_clones"`); this script,
+  // which the GH lane runs with an operator-supplied --month, did not. A typo
+  // month, a paused sweep or a pre-launch month yields total 0, and the upsert
+  // would then overwrite a good `clone_watch_report_summary` row with zeros and
+  // an empty card_json. out/card.json is already written above, so a dry
+  // inspection still works; only the destructive half is refused.
+  if (card.total === 0) {
+    console.error(
+      `clone-watch:compute-card: ${card.periodMonth} has NO clones — refusing to pin` +
+        ` (would overwrite the stored edition with zeros). Wrote ${cardPath} only.`,
+    );
+    process.exit(1);
+  }
+
   if (!skipWrite) {
     const sb = createServiceClient();
     if (!sb) throw new Error("service client unavailable");
     // upsertSummary writes card_json; omitting the URN preserves an already
     // recorded LinkedIn post (the publish step owns that column).
     await upsertSummary(sb, card);
-    await writeTrendRows(sb, buildTrendRows(inputs));
+    // NO writeTrendRows here, deliberately. It is delete-then-insert against
+    // clone_watch_monthly_brand_stats / _registrar_stats, and this script runs
+    // as an un-retried GitHub Actions step — a runner eviction between the
+    // delete and the insert loses that month's trend rows outright. The monthly
+    // cron owns those tables and does the same write with `retries: 2`.
+    // Correctness argues the same way: a re-pin of a PAST month must state what
+    // was true THEN, and rewriting its trend rows from today's data is exactly
+    // the re-export bug this pipeline has already been bitten by twice.
   }
 
   console.log(

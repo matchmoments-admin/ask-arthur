@@ -26,6 +26,14 @@ import { priorMonthStart } from "@/lib/clone-watch/month-window";
  *  per-brand URL list, without touching the shared type/aggregator. */
 type CloneRowWithUrl = CloneAlertRow & { candidate_url: string | null };
 
+/** What `fetch-clones` returns ACROSS the Inngest step boundary: the two folds,
+ *  as entry arrays. Maps do not survive JSON serialisation, and the cohort rows
+ *  themselves are far too large to cross (see the step's comment). */
+type FoldedClones = {
+  byBrand: [string, CloneBrandMetrics][];
+  urlsByBrand: [string, string[]][];
+};
+
 /**
  * Clone-Watch internal all-clones digest.
  *
@@ -231,9 +239,20 @@ export const cloneWatchInternalDigest = inngest.createFunction(
       // OFF → the digest is byte-identical to today.
       const full = featureFlags.adminCloneSummaryDigest;
 
-      const cloneRows = await step.run("fetch-clones", async () => {
+      // Loads AND folds inside one step. Inngest serialises a step's return
+      // value, and this select is now the full cohort shape (lifecycle columns,
+      // signals, campaign_key, plus the classifications embed) for up to
+      // CLONE_FETCH_LIMIT = 5000 rows — several MB on a heavy month, where the
+      // narrow hand-rolled select it replaced was small. The report-summary
+      // cron already refuses to let CardInputs cross a boundary for exactly this
+      // reason; widening the select here without revisiting it would have left
+      // the same trap one busy month away. Both consumers are pure folds over
+      // the rows, so they belong on this side of the boundary; only the folded
+      // results (bounded per brand) are returned. Maps do not survive JSON, so
+      // they cross as entry arrays and are rebuilt below.
+      const folded = await step.run("fetch-clones", async () => {
         const sb = createServiceClient();
-        if (!sb) return [] as CloneRowWithUrl[];
+        if (!sb) return { byBrand: [], urlsByBrand: [] } as FoldedClones;
         // THE COHORT'S SELECT — the third reader now shares it (clone-cohort.ts).
         //
         // It used to hand-roll a narrow list that omitted submitted_to,
@@ -279,12 +298,32 @@ export const cloneWatchInternalDigest = inngest.createFunction(
         // isFpBrand call — the generic-dictionary FP brands are not a full-mode
         // nicety, they are what stops domain.com.au / lendi.com.au polluting a
         // digest the founder reads as fact.
-        return applyCohortRules(
+        const cloneRows = applyCohortRules(
           data as unknown as CloneAlertRow[],
         ) as CloneRowWithUrl[];
+
+        // Full mode only: a LOCAL uncapped map of every clone URL per brand (the
+        // shared aggregator caps detail at 100/brand and carries only the domain).
+        const urls = new Map<string, string[]>();
+        if (full) {
+          for (const r of cloneRows) {
+            const brand = r.inferred_target_domain;
+            if (!brand) continue;
+            const url = r.candidate_url || r.candidate_domain;
+            if (!url) continue;
+            const arr = urls.get(brand) ?? [];
+            if (!arr.includes(url)) arr.push(url);
+            urls.set(brand, arr);
+          }
+        }
+
+        return {
+          byBrand: [...aggregateClonesByDomain(cloneRows).entries()],
+          urlsByBrand: [...urls.entries()],
+        } as FoldedClones;
       });
 
-      const byBrand = aggregateClonesByDomain(cloneRows);
+      const byBrand = new Map<string, CloneBrandMetrics>(folded.byBrand);
       if (byBrand.size === 0) {
         return {
           ok: true,
@@ -294,20 +333,7 @@ export const cloneWatchInternalDigest = inngest.createFunction(
         };
       }
 
-      // Full mode only: a LOCAL uncapped map of every clone URL per brand (the
-      // shared aggregator caps detail at 100/brand and carries only the domain).
-      const urlsByBrand = new Map<string, string[]>();
-      if (full) {
-        for (const r of cloneRows) {
-          const brand = r.inferred_target_domain;
-          if (!brand) continue;
-          const url = r.candidate_url || r.candidate_domain;
-          if (!url) continue;
-          const arr = urlsByBrand.get(brand) ?? [];
-          if (!arr.includes(url)) arr.push(url);
-          urlsByBrand.set(brand, arr);
-        }
-      }
+      const urlsByBrand = new Map<string, string[]>(folded.urlsByBrand);
 
       const html = buildInternalDigestHtml(
         label,

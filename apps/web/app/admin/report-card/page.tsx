@@ -20,15 +20,32 @@ import { getPinnedCard } from "@/lib/clone-watch/report-summary";
 import { monthWindow } from "@/lib/clone-watch/month-window";
 
 /** The card persisted for `month`, or null — never throws, so the page falls
- *  through to a live computation rather than erroring on a missing pin. */
+ *  through to a live computation rather than erroring on a missing pin.
+ *
+ *  It LOGS that fallback, and the caller marks it in the DOM (`data-pinned`).
+ *  The export requests this page once PER SLIDE (eight, up to 24 with retries);
+ *  a single transient PostgREST error on one of them used to yield a deck whose
+ *  slides quoted two different snapshots — silently, and invisibly to the
+ *  blank-frame and runt-size checks, because every slide renders perfectly. That
+ *  is the precise failure this pinning exists to remove, so it must not be able
+ *  to reappear inside the fix. */
 async function loadPinnedCard(
   month: string,
 ): Promise<CloneWatchReportCard | null> {
   try {
     const sb = createServiceClient();
-    if (!sb) return null;
-    return await getPinnedCard(sb, monthWindow(month).periodMonth);
-  } catch {
+    if (!sb) {
+      logger.warn("report-card: pin requested but no service client", { month });
+      return null;
+    }
+    const pinned = await getPinnedCard(sb, monthWindow(month).periodMonth);
+    if (!pinned) logger.warn("report-card: no pinned card for month", { month });
+    return pinned;
+  } catch (err) {
+    logger.warn("report-card: pinned card read FAILED, falling back to live", {
+      month,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 }
@@ -101,6 +118,8 @@ export default async function ReportCardPage({
   const { month, slide, pinned } = await searchParams;
 
   let data: CloneWatchReportCard;
+  // Whether THIS render actually served the pin — asserted by the export.
+  let servedPin = false;
   try {
     // `?pinned=1` renders the card PERSISTED for this month (v298 card_json)
     // instead of recomputing. The slide export passes it so all eight slides,
@@ -110,9 +129,9 @@ export default async function ReportCardPage({
     //
     // Opt-in and fail-soft: no pin (or no month) falls through to a live
     // computation, so opening the page by hand behaves exactly as before.
-    data =
-      (pinned === "1" && month ? await loadPinnedCard(month) : null) ??
-      (await getCloneWatchReportCard(month));
+    const pin = pinned === "1" && month ? await loadPinnedCard(month) : null;
+    servedPin = pin !== null;
+    data = pin ?? (await getCloneWatchReportCard(month));
   } catch (err) {
     return (
       <pre style={{ padding: 32, fontFamily: "monospace" }}>
@@ -134,6 +153,13 @@ export default async function ReportCardPage({
   return (
     <div className={`${archivo.variable} ${jbMono.variable} rc-root${only ? " rc-solo" : ""}`}>
       <style dangerouslySetInnerHTML={{ __html: reportCardCss }} />
+      {/* Machine-readable proof of WHICH card this render served. `?pinned=1`
+          is fail-soft by design, so without this a silent fallback to a live
+          recompute is indistinguishable from a served pin — the deck looks
+          perfect either way. The export asserts data-pinned="1" on every slide
+          it requested pinned, which turns a silent mixed-snapshot deck into a
+          loud failure before the approval gate. */}
+      <div id="rc-pin-state" data-pinned={servedPin ? "1" : "0"} hidden />
       {slides.map((n) => (
         <Slide key={n} n={n} data={data} />
       ))}
