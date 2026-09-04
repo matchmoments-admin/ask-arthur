@@ -1,6 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 
-import { assignPostsToThemes } from "../reddit-intel-cluster";
+import {
+  assignPostsToThemes,
+  resolveClusterThreshold,
+} from "../reddit-intel-cluster";
 
 // Build a unit vector in `dim` dimensions pointing mostly along axis `axis`
 // with a little spread, so cosine similarity is controllable in a test.
@@ -120,5 +123,52 @@ describe("assignPostsToThemes — anti-runaway guards", () => {
     const { assignments } = assignPostsToThemes(posts, [], { threshold: 0.62 });
     expect(assignments.every((a) => a.isNewTheme)).toBe(true);
     expect(assignments.length).toBe(4);
+  });
+});
+
+describe("resolveClusterThreshold", () => {
+  const KEY = "REDDIT_INTEL_CLUSTER_THRESHOLD";
+  const original = process.env[KEY];
+
+  afterEach(() => {
+    if (original === undefined) delete process.env[KEY];
+    else process.env[KEY] = original;
+  });
+
+  it("defaults to the shipped threshold when unset", () => {
+    delete process.env[KEY];
+    expect(resolveClusterThreshold()).toBe(0.62);
+  });
+
+  it("honours a valid override so the value can be trialled without a deploy", () => {
+    process.env[KEY] = "0.85";
+    expect(resolveClusterThreshold()).toBe(0.85);
+  });
+
+  it("tolerates the trailing whitespace Vercel-stored values carry", () => {
+    // The repo has been bitten by this before: a value stored as "0.85\n"
+    // is not === "0.85", and Number("0.85\n") happens to work but only by
+    // luck. Trim explicitly so the intent is not accidental.
+    process.env[KEY] = " 0.85\n";
+    expect(resolveClusterThreshold()).toBe(0.85);
+  });
+
+  it("falls back rather than trusting a typo that would disable clustering", () => {
+    // "85" (meaning 85%) would make every post seed its own theme, silently
+    // turning the cluster into a 1:1 post:theme map. A fallback is recoverable;
+    // a corrupted theme table is not.
+    for (const bad of ["85", "0", "1", "-0.8", "abc", "0.4", "0.995"]) {
+      process.env[KEY] = bad;
+      expect(resolveClusterThreshold(), `input ${bad}`).toBe(0.62);
+    }
+  });
+
+  it("keeps the default inside the range it will accept from an override", () => {
+    // Guards a future edit that lowers COSINE_THRESHOLD below the validator's
+    // own floor, which would make the default unreachable via the env var.
+    delete process.env[KEY];
+    const def = resolveClusterThreshold();
+    expect(def).toBeGreaterThan(0.5);
+    expect(def).toBeLessThan(0.99);
   });
 });
