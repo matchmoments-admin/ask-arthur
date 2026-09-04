@@ -7,14 +7,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  takeIsPageWorthy,
-  TAKE_PAGE_MIN_CONFIDENCE,
-  TAKE_PAGE_MIN_TELLS,
-} from "@/lib/arthurs-take/loader";
-import {
   feedItemHasTake,
   parseFeedItemId,
+  takeIsPageWorthy,
   takeSlug,
+  TAKE_PAGE_MIN_CONFIDENCE,
+  TAKE_PAGE_MIN_TELLS,
   type FeedItem,
 } from "@/lib/feed";
 
@@ -99,11 +97,11 @@ describe("takeIsPageWorthy — not every take earns a URL", () => {
   });
 });
 
-describe("card link and page gate must agree", () => {
+describe("card link and page gate are one rule", () => {
   // A card that links to a page which then 404s is worse than a card with no
-  // link. The two checks live in different modules because FeedCard is a
-  // client component and the loader is server-only, so they cannot share an
-  // implementation — which is exactly why they need a test.
+  // link. These were two implementations kept honest by this test; they are
+  // now one, and feedItemHasTake delegates. The cases stay because they pin
+  // the RULE, and they would catch a future re-divergence.
   const cases: { tells: string[]; confidence: number; status: string }[] = [
     { tells: ["a", "b"], confidence: 0.8, status: "ready" },
     { tells: ["a"], confidence: 0.9, status: "ready" },
@@ -133,5 +131,34 @@ describe("card link and page gate must agree", () => {
 
   it("shows no link when there is no take at all", () => {
     expect(feedItemHasTake({} as FeedItem)).toBe(false);
+  });
+});
+
+describe("the loader's select string", () => {
+  // This is the shape of a bug that shipped: an ambiguous PostgREST embed made
+  // loadTake return null for EVERY take, so the page rendered a clean "Report
+  // not found" and nothing in typecheck, lint or unit tests could see it —
+  // relationship resolution happens at request time, against real data.
+  //
+  // A unit test cannot run PostgREST. What it CAN do is refuse the specific
+  // mistake: an embed of a table that reddit_post_intel reaches by more than
+  // one foreign key must name the constraint.
+  const AMBIGUOUS_EMBEDS = ["reddit_intel_themes"];
+
+  it("names the constraint on every ambiguous embed", async () => {
+    const src = await import("node:fs").then((fs) =>
+      fs.readFileSync(
+        new URL("../lib/arthurs-take/loader.ts", import.meta.url),
+        "utf8",
+      ),
+    );
+    for (const table of AMBIGUOUS_EMBEDS) {
+      const bare = new RegExp(`(?<!!)\\b${table}\\(`);
+      expect(
+        bare.test(src),
+        `${table} is embedded without naming its FK constraint — reddit_post_intel reaches it by both theme_id and the reddit_post_intel_themes join table, so PostgREST refuses the embed at runtime and the loader silently returns null`,
+      ).toBe(false);
+      expect(src).toContain(`${table}!`);
+    }
   });
 });

@@ -5,14 +5,24 @@ import { cache } from "react";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
-import { parseFeedItemId } from "@/lib/feed";
+import { parseFeedItemId, takeIsPageWorthy } from "@/lib/feed";
 
 import type { IntentLabel } from "@askarthur/types";
 
 // Re-exported for server callers that already import them from here. The
 // definitions live in lib/feed.ts because FeedCard is a client component and
 // cannot import a "server-only" module.
-export { takeSlug, parseFeedItemId } from "@/lib/feed";
+// Re-exported for server callers that already import them from here. The
+// definitions live in lib/feed.ts because FeedCard is a client component and
+// cannot import a "server-only" module — and the page-worthy predicate has to
+// be ONE implementation, not two agreeing ones.
+export {
+  takeSlug,
+  parseFeedItemId,
+  takeIsPageWorthy,
+  TAKE_PAGE_MIN_TELLS,
+  TAKE_PAGE_MIN_CONFIDENCE,
+} from "@/lib/feed";
 
 /**
  * Loader for the Arthur's Take detail page.
@@ -48,33 +58,6 @@ export interface TakeDetail {
   themeTitle: string | null;
 }
 
-/**
- * The substance bar for having a page at all.
- *
- * Not every ready take earns a URL. A take with one thin tell is a worse
- * advert for the analysis than no page: six thousand near-duplicate pages of
- * three bullets is a search liability, and it undercuts the "this is a serious
- * analytical corpus" impression the page exists to create. Two tells and
- * reasonable confidence is the floor.
- *
- * Exported because the sitemap must enumerate exactly the same set — if the
- * two ever disagree, the sitemap advertises 404s.
- */
-export const TAKE_PAGE_MIN_TELLS = 2;
-export const TAKE_PAGE_MIN_CONFIDENCE = 0.7;
-
-export function takeIsPageWorthy(row: {
-  takeStatus: string | null;
-  tells: string[] | null;
-  confidence: number | null;
-}): boolean {
-  return (
-    row.takeStatus === "ready" &&
-    (row.tells?.length ?? 0) >= TAKE_PAGE_MIN_TELLS &&
-    (row.confidence ?? 0) >= TAKE_PAGE_MIN_CONFIDENCE
-  );
-}
-
 export const loadTake = cache(
   async (slug: string): Promise<TakeDetail | null> => {
     const feedItemId = parseFeedItemId(slug);
@@ -89,7 +72,16 @@ export const loadTake = cache(
         // Explicit columns. body_md is deliberately absent: this page renders
         // the same excerpt the card does, per the Reddit-terms position on not
         // republishing full post bodies.
-        "feed_item_id, intent_label, confidence, take_status, take_tells, take_where, take_au_line, take_written_at, is_scam_report, country_hints, brands_impersonated, reddit_intel_themes(slug, title), feed_items(title, description, source_url, source_created_at, published, source)",
+        //
+        // The theme embed MUST name its constraint. Two FK paths exist between
+        // reddit_post_intel and reddit_intel_themes — the direct theme_id, and
+        // the reddit_post_intel_themes join table — so an unqualified embed
+        // fails with "more than one relationship was found". That error is
+        // caught and logged, and the loader returns null, so the page rendered
+        // a perfectly clean "Report not found" for every take. Nothing in
+        // typecheck, lint or the unit tests could see it: it is a runtime
+        // PostgREST resolution, and only a request against real data shows it.
+        "feed_item_id, intent_label, confidence, take_status, take_tells, take_where, take_au_line, take_written_at, is_scam_report, country_hints, brands_impersonated, reddit_intel_themes!reddit_post_intel_theme_id_fkey(slug, title), feed_items(title, description, source_url, source_created_at, published, source)",
       )
       .eq("feed_item_id", feedItemId)
       .maybeSingle();
