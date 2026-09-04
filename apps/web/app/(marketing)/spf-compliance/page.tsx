@@ -9,7 +9,11 @@ export const metadata: Metadata = {
 
 export default function SpfCompliancePage() {
   return (
-    <main className="max-w-4xl mx-auto px-4 py-16">
+    // Was <main className="max-w-4xl mx-auto px-4 py-16"> with no Nav and no
+    // Footer — a public page with no site navigation. Shell now comes from
+    // app/(marketing)/layout.tsx; max-w-4xl is kept because narrowing a live
+    // page's content column is a visual change this fix should not smuggle in.
+    <div className="max-w-4xl mx-auto">
       {/* Hero */}
       <section className="text-center mb-16">
         <h1 className="text-4xl font-bold text-deep-navy mb-4">
@@ -78,6 +82,6 @@ export default function SpfCompliancePage() {
           Explore the API
         </a>
       </section>
-    </main>
+    </div>
   );
 }
