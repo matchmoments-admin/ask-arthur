@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 
 import { featureFlags } from "@askarthur/utils/feature-flags";
 
@@ -74,13 +74,21 @@ export default async function ScamFeedTakePage({ params }: PageProps) {
   const take = await loadTake(id);
   if (!take) notFound();
 
-  // Canonicalise: a bare id, or a stale suffix after a title correction,
-  // redirects to the readable form. Resolution is on the leading id, so an
-  // already-shared link keeps working rather than 404ing.
-  const canonical = takeSlug(take.feedItemId, take.title);
-  if (id !== canonical) {
-    redirect(`/scam-feed/${canonical}`);
-  }
+  // NO redirect here, deliberately.
+  //
+  // An earlier version redirected a bare id to the readable slug. On this
+  // route that produces a BLANK PAGE: `dynamic = "force-dynamic"` streams the
+  // response, metadata has already flushed by the time the body runs, and
+  // Next cannot turn a started stream into a 307 — so `redirect()` threw
+  // mid-stream and the reader got a title and nothing else. Verified in
+  // production: /scam-feed/42353 returned 200 with an empty body while
+  // /scam-feed/42353-legal-process-service rendered fine.
+  //
+  // Every form resolves on the leading id, so a bare id, an old slug, or a
+  // slug from before a title correction all render the same page. The
+  // preferred URL is advertised by `alternates.canonical` in generateMetadata,
+  // which is what search engines and link unfurlers read — and is the correct
+  // mechanism for this regardless of the streaming problem.
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
