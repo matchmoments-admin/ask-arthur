@@ -209,6 +209,10 @@ export async function GET(req: Request) {
         t.feature === "reddit-intel-embed" ||
         t.feature === "reddit-intel-name-themes" ||
         t.feature === "reddit-intel-weekly-synthesis" ||
+        // Arthur's Take stage-2 generation. Without this line the tag is
+        // unmetered and REDDIT_INTEL_CAP_USD cannot see the spend at all —
+        // the take-writer's own comment claiming it is capped would be false.
+        t.feature === "reddit-intel-take" ||
         t.feature === "competitor-intel-extract",
     )
     .reduce((sum, t) => sum + t.cost, 0);

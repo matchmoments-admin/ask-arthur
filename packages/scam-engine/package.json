@@ -72,7 +72,9 @@
     "./analyze-core": "./src/analyze-core.ts",
     "./retrieval/themes": "./src/retrieval/themes.ts",
     "./reddit-intel/weekly-synthesis": "./src/reddit-intel/weekly-synthesis.ts",
-    "./reddit-intel/take-validator": "./src/reddit-intel/take-validator.ts"
+    "./reddit-intel/take-validator": "./src/reddit-intel/take-validator.ts",
+    "./reddit-intel/take-writer": "./src/reddit-intel/take-writer.ts",
+    "./reddit-intel/takes": "./src/reddit-intel/takes.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",

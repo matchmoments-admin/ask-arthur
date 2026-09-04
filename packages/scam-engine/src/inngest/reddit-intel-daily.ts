@@ -24,6 +24,19 @@ import { z } from "zod";
 
 import { INTENT_LABELS } from "@askarthur/types";
 
+// Aliased because this file already has its OWN local logCost — a
+// hand-written cost_telemetry insert, one of four such copies inside
+// packages/scam-engine that predate the in-package sink. New code uses the
+// shared module; the legacy copies are left alone rather than refactored
+// under a feature change.
+import { logCost as logCostShared } from "../cost-log";
+import {
+  generateTakesForPosts,
+  needsTake,
+  type IntelRowForTake,
+} from "../reddit-intel/takes";
+import { TAKE_COST_FEATURE } from "../reddit-intel/take-writer";
+
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -862,6 +875,115 @@ export const redditIntelDaily = inngest.createFunction(
       }),
     );
 
+    // ── Arthur's Take (stage 2) ──────────────────────────────────────────
+    // IO only. Every decision lives in generateTakesForPosts, which is pure
+    // and tested without a database — the rollupBrandRegister shape.
+    //
+    // Ordering is the house pattern: flag, then brake, then work. The brake is
+    // the SAME key the classifier above checked, so a day that trips the cap
+    // stops paying for takes too.
+    const takeResult = await step.run("write-takes", async () => {
+      if (!featureFlags.arthursTakeGenerate) {
+        return { skipped: "flag_off" as const, ready: 0, suppressed: 0 };
+      }
+      const supabase = createServiceClient();
+      if (!supabase) return { skipped: "no_client" as const, ready: 0, suppressed: 0 };
+
+      const feedItemIds = validPerPost.map((e) => e.feedItemId);
+      const { data: rows, error } = await supabase
+        .from("reddit_post_intel")
+        .select(
+          "id, feed_item_id, intent_label, confidence, modus_operandi, narrative_summary, tactic_tags, brands_impersonated, country_hints, is_emerging, is_scam_report, take_status, feed_items(description, body_md)",
+        )
+        .in("feed_item_id", feedItemIds);
+
+      if (error) {
+        logger.warn("write-takes: load failed", { error: error.message });
+        return { skipped: "load_failed" as const, ready: 0, suppressed: 0 };
+      }
+
+      // needsTake is the spend guard: a retry or a re-fired event must never
+      // pay Claude again for a row that already carries a decision.
+      const pending = (rows ?? []).filter((r) =>
+        needsTake({ takeStatus: r.take_status as string | null }),
+      );
+      if (pending.length === 0) {
+        return { skipped: "nothing_pending" as const, ready: 0, suppressed: 0 };
+      }
+
+      const inputs: IntelRowForTake[] = pending.map((r) => {
+        const fi = r.feed_items as unknown as {
+          description: string | null;
+          body_md: string | null;
+        } | null;
+        return {
+          intelId: r.id as string,
+          feedItemId: r.feed_item_id as number,
+          intentLabel: r.intent_label as IntelRowForTake["intentLabel"],
+          confidence: Number(r.confidence),
+          modusOperandi: r.modus_operandi as string | null,
+          narrativeSummary: r.narrative_summary as string | null,
+          tacticTags: (r.tactic_tags as string[]) ?? [],
+          brandsImpersonated: (r.brands_impersonated as string[]) ?? [],
+          countryHints: (r.country_hints as string[]) ?? [],
+          isEmerging: Boolean(r.is_emerging),
+          isScamReport: (r.is_scam_report as boolean | null) ?? null,
+          // Same precedence the classifier uses: the full body when v299 has
+          // stored one, the public excerpt otherwise.
+          sourceText: fi?.body_md ?? fi?.description ?? "",
+        };
+      });
+
+      const generated = await generateTakesForPosts(inputs);
+
+      for (const t of generated.results) {
+        const { error: upErr } = await supabase
+          .from("reddit_post_intel")
+          .update({
+            take_status: t.takeStatus,
+            take_suppressed_reason: t.takeSuppressedReason,
+            take_tells: t.takeTells,
+            take_where: t.takeWhere,
+            take_au_line: t.takeAuLine,
+            take_model_version: t.takeModelVersion,
+            take_prompt_version: t.takePromptVersion,
+            take_written_at: new Date().toISOString(),
+          })
+          .eq("id", t.intelId);
+        if (upErr) {
+          logger.warn("write-takes: row update failed", {
+            intelId: t.intelId,
+            error: upErr.message,
+          });
+        }
+      }
+
+      // Cost goes through the in-package sink, not a hand-written insert —
+      // and the tag must be in cost-daily-check's allowlist or the brake
+      // cannot see this spend at all.
+      await logCostShared({
+        feature: TAKE_COST_FEATURE,
+        provider: "anthropic",
+        operation: "messages.create",
+        units: generated.inputTokens + generated.outputTokens,
+        estimatedCostUsd: generated.estimatedCostUsd,
+        metadata: {
+          model: generated.modelId,
+          posts: inputs.length,
+          ready: generated.readyCount,
+          suppressed: generated.suppressedCount,
+          truncated: generated.truncated,
+        },
+      });
+
+      return {
+        skipped: null,
+        ready: generated.readyCount,
+        suppressed: generated.suppressedCount,
+        costUsd: generated.estimatedCostUsd,
+      };
+    });
+
     await step.run("emit-summarised", () =>
       inngest.send({
         name: REDDIT_INTEL_SUMMARISED_EVENT,
@@ -874,13 +996,19 @@ export const redditIntelDaily = inngest.createFunction(
       }),
     );
 
-    logger.info("reddit-intel-daily: complete", {
+    // One always-ship warn per run. fn.complete is INFO and prod samples INFO
+    // at 10% per run, so "are takes being written, and what share is the
+    // validator refusing?" was not answerable from Axiom otherwise.
+    logger.warn("reddit-intel-daily.summary", {
       requestedIds: data.feedItemIds.length,
       classified: validPerPost.length,
       quotesInserted: upsertResult.quotesInserted,
       cohortDate: upsertResult.cohortDate,
       estimatedCostUsd: classification.estimatedCostUsd.toFixed(6),
       cacheHit: classification.cacheHit,
+      takesReady: takeResult.ready,
+      takesSuppressed: takeResult.suppressed,
+      takesSkipped: takeResult.skipped,
     });
 
     return {
@@ -888,6 +1016,8 @@ export const redditIntelDaily = inngest.createFunction(
       quotesInserted: upsertResult.quotesInserted,
       cohortDate: upsertResult.cohortDate,
       estimatedCostUsd: classification.estimatedCostUsd,
+      takesReady: takeResult.ready,
+      takesSuppressed: takeResult.suppressed,
     };
   }),
 );
