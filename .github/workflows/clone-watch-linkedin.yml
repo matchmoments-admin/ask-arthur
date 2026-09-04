@@ -22,6 +22,14 @@ on:
         description: "Report month YYYY-MM (blank = prior calendar month)"
         required: false
         type: string
+      note:
+        description: >-
+          Optional editorial note, published verbatim in the post immediately
+          after the month-on-month sentence. Use it for RESTATEMENTS — if a
+          method change moved a previously published month, the post must say
+          so, because the series sentence quotes that month's total.
+        required: false
+        type: string
   schedule:
     - cron: "0 1 2 * *" # 2nd of month 01:00 UTC (~11:00 AEST), after the summary snapshot cron
 
@@ -80,7 +88,16 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           MONTH: ${{ steps.month.outputs.value }}
-        run: pnpm clone-watch:compute-card -- --month="$MONTH" --out=out
+          NOTE: ${{ inputs.note }}
+        run: |
+          # The note is pinned into card_json here, NOT applied later: this step
+          # recomputes the card, so anything set on the row beforehand would be
+          # overwritten by it.
+          if [ -n "$NOTE" ]; then
+            pnpm clone-watch:compute-card -- --month="$MONTH" --out=out --note="$NOTE"
+          else
+            pnpm clone-watch:compute-card -- --month="$MONTH" --out=out
+          fi
 
       - name: Render carousel PDF (against prod)
         working-directory: apps/web

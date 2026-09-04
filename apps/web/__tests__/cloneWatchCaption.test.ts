@@ -249,6 +249,29 @@ describe("generateCloneWatchCaption", () => {
   });
 });
 
+describe("card.note — the restatement channel", () => {
+  // A restated series that does not SAY it has been restated is the problem.
+  // The August 2026 edition restated June (804→664) and July (1064→915) after
+  // the v4 matcher fix, while both were already published on LinkedIn with the
+  // old numbers — so the caption's own "915 → 855" sentence contradicted a
+  // live post with nothing to explain it.
+  it("emits the note immediately after the month-on-month sentence", () => {
+    const note = "July's figure is restated on a tightened method.";
+    const c = generateCloneWatchCaption({ ...JULY, note });
+    expect(c.body).toContain(note);
+    const seriesIdx = c.body.indexOf("We publish this every month");
+    const noteIdx = c.body.indexOf(note);
+    expect(seriesIdx).toBeGreaterThan(-1);
+    expect(noteIdx).toBeGreaterThan(seriesIdx);
+  });
+
+  it("changes nothing when absent", () => {
+    expect(generateCloneWatchCaption(JULY).body).toBe(
+      generateCloneWatchCaption({ ...JULY, note: undefined }).body,
+    );
+  });
+});
+
 describe("buildOutcomesBlock (caption paragraph)", () => {
   const ZERO = {
     reportedToNetcraft: 100,
