@@ -250,6 +250,10 @@ export function generateCloneWatchCaption(
     STATIC_LESSON,
     scamwatchCta,
     seriesLine,
+    // Immediately after the MoM sentence, because that sentence is what a
+    // restatement contradicts: it quotes the prior month's total, and a reader
+    // holding last month's post sees a different number with no explanation.
+    card.note,
     STATIC_CLOSING_Q,
     STATIC_DISCLAIMER,
   ]

@@ -118,6 +118,14 @@ export interface CloneWatchReportCard {
   periodMonth: string;
   /** Human label, e.g. "June 2026". */
   periodLabel: string;
+  /** Optional editorial note, emitted verbatim by the caption immediately after
+   *  the month-on-month sentence. Exists for RESTATEMENTS: when the method
+   *  changes we re-run prior months so the comparison is like-for-like, which
+   *  silently contradicts editions already published with the old numbers. A
+   *  restated series that does not say it has been restated is the problem,
+   *  not the restatement. Persisted in card_json, so a re-export of that
+   *  edition keeps saying it. */
+  note?: string;
   total: number;
   brands: number;
   /**

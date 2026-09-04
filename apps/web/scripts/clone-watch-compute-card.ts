@@ -47,6 +47,14 @@ async function main() {
   const inputs = await loadCardInputs(month);
   const card = buildReportCard(inputs);
 
+  // `--note="…"` pins an editorial note into card_json, emitted by the caption
+  // straight after the month-on-month sentence. Its reason for existing is
+  // restatements: when the method changes we re-run prior months so the
+  // comparison is like-for-like, which silently contradicts editions already
+  // published with the old numbers.
+  const note = arg("note")?.trim();
+  if (note) card.note = note;
+
   await fs.mkdir(outDir, { recursive: true });
   const cardPath = path.join(outDir, "card.json");
   await fs.writeFile(cardPath, `${JSON.stringify(card, null, 2)}\n`);
