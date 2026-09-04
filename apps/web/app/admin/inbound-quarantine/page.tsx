@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireAdmin } from "@/lib/adminAuth";
 import {
   getQuarantineRows,
@@ -24,7 +25,7 @@ export default async function InboundQuarantinePage() {
           <h1 className="text-deep-navy text-3xl font-bold">Inbound-email quarantine</h1>
           <p className="mt-2 text-sm text-gov-slate leading-relaxed max-w-3xl">
             Every inbound-email row lands here with <code className="font-mono text-xs">published=false</code>.
-            Promote a row to publish it to the public <a href="/scam-feed" className="text-action-teal underline">/scam-feed</a>;
+            Promote a row to publish it to the public <Link href="/scam-feed" className="text-action-teal underline">/scam-feed</Link>;
             delete a row for subscription confirmations, welcome emails, and pipeline test traffic that
             should never have arrived. The newsletter-classifier (P3) will eventually automate both
             decisions; until then this is the only path to the public feed for inbound rows.

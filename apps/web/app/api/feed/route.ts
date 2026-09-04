@@ -3,7 +3,7 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 
-import { FEED_ITEM_SELECT } from "@/lib/feed";
+import { FEED_ITEM_SELECT, FEED_TAKE_JOIN } from "@/lib/feed";
 
 const EMPTY_RESPONSE = { items: [], total: 0, page: 1, limit: 20, hasMore: false };
 
@@ -38,7 +38,13 @@ export async function GET(req: NextRequest) {
       .from("feed_items")
       // Explicit columns, never "*" — see FEED_ITEM_COLUMNS. "*" published
       // body_md and the embedding vectors to every caller of this route.
-      .select(FEED_ITEM_SELECT, { count: "exact" })
+      // The take join is flag-gated so the flag-off payload is unchanged.
+      .select(
+        featureFlags.arthursTakeCards
+          ? `${FEED_ITEM_SELECT}, ${FEED_TAKE_JOIN}`
+          : FEED_ITEM_SELECT,
+        { count: "exact" },
+      )
       .eq("published", true)
       .order("source_created_at", { ascending: false, nullsFirst: false })
       .range(offset, offset + limit - 1);
