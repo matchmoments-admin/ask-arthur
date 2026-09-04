@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { guardV1 } from "@/lib/v1-guard";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
+import { SCAM_ENTITY_COLUMNS } from "@/lib/b2b/columns";
 
 const CACHE_HEADERS = {
   "Cache-Control": "public, s-maxage=300, stale-while-revalidate=60",
@@ -32,7 +33,7 @@ export async function GET(
     // Fetch entity
     const { data: entity, error: entityError } = await supabase
       .from("scam_entities")
-      .select("*")
+      .select(SCAM_ENTITY_COLUMNS)
       .eq("id", entityId)
       .single();
 
