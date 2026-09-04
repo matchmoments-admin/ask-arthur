@@ -157,3 +157,24 @@ describe("writeTakes", () => {
     );
   });
 });
+
+describe("no model-written string may fail the batch on length", () => {
+  // Third instance of this defect class in one feature: tells, then empty
+  // tells, then auLine at 241 chars losing 24 good takes. The rule is uniform
+  // now, so this test is written over the FIELDS rather than one case.
+  it.each(["where", "auLine"])("truncates an over-long %s", async (field) => {
+    const call = fakeCall([
+      {
+        feedItemId: 41994,
+        tells: ["A tell"],
+        where: field === "where" ? "w".repeat(600) : "short",
+        auLine: field === "auLine" ? "a".repeat(600) : null,
+      },
+    ]);
+    const r = await writeTakes([input()], call as never);
+    const value =
+      field === "where" ? r.takes[0].where : (r.takes[0].auLine ?? "");
+    expect(value!.length).toBeLessThanOrEqual(280);
+    expect(value!.endsWith("…")).toBe(true);
+  });
+});

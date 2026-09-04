@@ -84,6 +84,9 @@ Return a single JSON object with one key, "takes", an array with one entry per i
  */
 const TELL_MAX_CHARS = 140;
 
+/** One-sentence prose fields (`where`, `auLine`). Same truncate-not-reject rule. */
+const PROSE_MAX_CHARS = 280;
+
 /** Truncate at a word boundary — a mid-word cut looks like a rendering fault. */
 function truncateOnWord(text: string, max: number): string {
   const cut = text.slice(0, max - 1);
@@ -114,11 +117,24 @@ const TakeSchema = z.object({
         ),
     )
     .transform((a) => a.slice(0, 3)),
-  // Nullish for the same reason: the prompt asks for one sentence, but a
-  // single null must not cost the batch. A take with no tells and no `where`
-  // is caught downstream by the validator's empty_take rule.
-  where: z.string().max(240).nullish(),
-  auLine: z.string().max(240).nullish(),
+  // Nullish AND truncating, for the same reason as `tells` above. A hard
+  // .max() on a model-written string rejects the entire batch when the model
+  // overshoots by a word — which it did, on auLine, at 241 characters, losing
+  // 24 good takes. This is the third field where the same trade came up, so
+  // the rule is now uniform: EVERY model-generated string here truncates, and
+  // publishability stays the validator's decision.
+  where: z
+    .string()
+    .transform((t) =>
+      t.length <= PROSE_MAX_CHARS ? t : truncateOnWord(t, PROSE_MAX_CHARS),
+    )
+    .nullish(),
+  auLine: z
+    .string()
+    .transform((t) =>
+      t.length <= PROSE_MAX_CHARS ? t : truncateOnWord(t, PROSE_MAX_CHARS),
+    )
+    .nullish(),
 });
 
 export const TakeBatchSchema = z.object({
