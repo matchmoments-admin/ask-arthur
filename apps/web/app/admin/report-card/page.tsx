@@ -637,7 +637,7 @@ function SlideActed({ data, page }: SlideProps) {
           classification counts, so a reader tried to reconcile 792 / 40 / 6
           against a 1000 headline and could not — three numbers, two different
           axes, no denominator. */}
-      <div className="kpis" style={{ marginTop: 36 }}>
+      <div className="kpis" style={{ marginTop: 24 }}>
         <div className="kpi accent">
           <div className="n">{data.kpis.reportedToNetcraft}</div>
           <div className="l">
@@ -660,7 +660,7 @@ function SlideActed({ data, page }: SlideProps) {
               past that window its unclassified rows are never scanned — for the
               June cohort that was 320 of 804, every one of them permanently
               unscannable. "Not yet" is a promise the pipeline cannot keep. */}
-      <div className="know" style={{ marginTop: 28 }}>
+      <div className="know" style={{ marginTop: 20 }}>
         <div className="lab">WHAT THE SCANS FOUND — ALL {data.total}</div>
         <div className="txt">
           {data.kpis.likelyPhishing} serving likely phishing ·{" "}
@@ -673,14 +673,23 @@ function SlideActed({ data, page }: SlideProps) {
         </div>
       </div>
       {outcomes && (
-        <div className="know" style={{ marginTop: 24 }}>
+        <div className="know" style={{ marginTop: 16 }}>
           <div className="lab">WHAT HAPPENED NEXT</div>
           <div className="txt">Of this month&apos;s detections: {outcomes}.</div>
         </div>
       )}
-      <div className="know" style={{ marginTop: outcomes ? 24 : 28 }}>
+      <div className="know" style={{ marginTop: outcomes ? 16 : 20 }}>
         <div className="lab">HOW WE KNOW</div>
-        <div className="txt">We sweep newly-registered domains against ~50 major Australian brands daily, enrich with WHOIS + certificate data, and review by hand — each with a public evidence page on urlscan.io.</div>
+        {/* The brand count is COMPUTED, not a literal. "~50" shipped on this
+            slide every month while the watchlist held 293 — a six-fold
+            understatement of our own coverage. The caption's identical claim
+            was fixed and pinned by a test; the slide's twin was missed, which
+            is the same one-surface-not-the-seam shape as the actor-attribution
+            sentence. `watchlistSize` is the count monitored for the WHOLE of
+            the reported month, so a re-export of a past edition states what was
+            true THEN. Rounded down to the nearest ten so it stays true between
+            watchlist edits. */}
+        <div className="txt">We sweep newly-registered domains against {Math.floor(data.watchlistSize / 10) * 10}+ major Australian brands daily, enrich with WHOIS + certificate data, and review by hand — each with a public evidence page on urlscan.io.</div>
       </div>
       <div className="note">
         {outcomes ? (
