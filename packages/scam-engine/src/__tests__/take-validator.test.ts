@@ -257,3 +257,50 @@ describe("take validator — adversarial", () => {
     ).toBeNull();
   });
 });
+
+/**
+ * The exact strings an adversarial review used to defeat the first hardened
+ * version. Eight were legitimate tells it wrongly suppressed; ten were leaks
+ * it let through. Kept verbatim so a future rewrite of these patterns has to
+ * beat the same bar rather than a friendlier one.
+ */
+describe("take validator — review regression set", () => {
+  it.each([
+    "Listings advertise 4K TVs at ninety per cent below retail",
+    "Sellers offer 24k gold chains with no provenance",
+    "Accounts with 10k followers push the same token",
+    "Targets are asked to roll a 401k into an offshore fund",
+    "The site promises 1.5 - 2.5 - 3.5 per cent daily returns",
+    "Support hours are listed as 9.00 - 17.00 with no address",
+    "Invoices are dated 12.03.2026 but the domain is days old",
+    "Goods advertised @70 per cent below retail",
+  ])("does not suppress: %s", (text) => {
+    expect(findContentViolation(text), text).toBeNull();
+  });
+
+  it.each([
+    // U+2019, which is what a model actually emits — the ASCII-only rule
+    // missed the single likeliest phrasing of the accusation it exists to stop.
+    "You\u2019ve been scammed by a fake recruiter",
+    "You may have been scammed by a fake recruiter",
+    "You are being scammed by a fake recruiter",
+    "You were the target of a fake recruiter",
+    "Victims sent 4500 SGD to the account",
+    "The fee was quoted as 500 US dollars",
+    "The victim was asked to pay 95 upfront",
+    "DMs come from \u201c@cryptoking99\u201d",
+    "Posts from U/ScammerName repeat the offer",
+    "Contact:@deals_direct is given for payment",
+  ])("suppresses: %s", (text) => {
+    expect(findContentViolation(text), text).not.toBeNull();
+  });
+
+  it("treats a whitespace-only take as empty", () => {
+    expect(
+      validateTake(
+        { tells: ["   "], where: null, auLine: null, isScamReport: true },
+        { intentLabel: "phishing", confidence: 0.9, sourceLength: 500 },
+      ),
+    ).toMatchObject({ status: "suppressed", reason: "empty_take" });
+  });
+});

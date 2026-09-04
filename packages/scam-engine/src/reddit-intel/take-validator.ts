@@ -119,12 +119,16 @@ const AMOUNT_RE = new RegExp(
     String.raw`[$£€¥₹]\s?\d`,
     // 1,200 USD · AU$2,000 · 0.05 BTC
     String.raw`(?:\b|\d)(?:AUD|USD|GBP|EUR|NZD|CAD|BTC|ETH|USDT)\b`,
-    // 500 dollars · 300 euro · 20k
-    String.raw`\b\d[\d,]*(?:\.\d+)?\s?(?:dollars?|pounds?|euros?|k\b)`,
+    // 500 dollars · 300 euro. A bare "20k" is NOT matched here: "4K TVs",
+    // "24k gold", "10k followers" and "401k" are ordinary shopping and
+    // investment vocabulary, and suppressing them cost real tells. An amount
+    // written as "20k" still gets caught by the money-context branch below
+    // ("asked for 20k", "paid 20k").
+    String.raw`\b\d[\d,]*(?:\.\d+)?\s?(?:dollars?|pounds?|euros?)`,
     // two hundred dollars · fifty pounds
     String.raw`\b(?:one|two|three|four|five|six|seven|eight|nine|ten|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million)[\w\s-]{0,20}?(?:dollars?|pounds?|euros?)\b`,
     // a bare number in an unambiguous money context, either side of it
-    String.raw`\b(?:paid|pay|pays|paying|fee|fees|cost|costs|price|priced|deposit|transferred?|sent|refund|charge[ds]?|worth|owed?|demanded?|requests?|requested|asked\s+for)\b[^.!?]{0,24}?\b\d[\d,]*(?:\.\d+)?\b`,
+    String.raw`\b(?:paid|pay|pays|paying|fee|fees|cost|costs|price|priced|deposit|transfers?|transferred|transferring|sends?|sent|sending|wires?|wired|refunds?|charge[ds]?|worth|owes?|owed|demands?|demanded|requests?|requested|asked\s+for|asks\s+for)\b[^.!?]{0,24}?\b\d[\d,]*(?:\.\d+)?(?:k|m)?\b`,
     String.raw`\b\d[\d,]*(?:\.\d+)?\b[^.!?]{0,16}?\b(?:up\s?front|in\s+advance|upfront|deposit|per\s+month|a\s+month)\b`,
   ].join("|"),
   "i",
@@ -140,21 +144,56 @@ const OBFUSCATED_EMAIL_RE =
   /\b[\w.+-]+\s+(?:at|\(at\)|\[at\])\s+[\w.-]+\s+(?:dot|\(dot\)|\[dot\])\s+\w{2,}/i;
 
 /**
- * Phone-ish runs of digits. Requires 7+ digits with optional separators so a
- * year or a small count does not trip it.
+ * Phone-ish runs of digits.
+ *
+ * `.` is deliberately NOT a separator here. Including it matched decimal
+ * ranges ("1.5 - 2.5 - 3.5 per cent daily returns"), opening hours
+ * ("9.00 - 17.00") and dates ("12.03.2026") — all legitimate tell content. The
+ * formats that matter (+61 400 123 456, 0400123456, +1 (555) 019-2837) use
+ * spaces, brackets and hyphens.
+ *
+ * The character class alone is not enough either: it counts CHARACTERS, so a
+ * short number padded with spaces would pass while a real one might not.
+ * `looksLikePhone` therefore also counts digits.
  */
-const PHONE_RE = /(?:\+?\d[\d\s().-]{6,}\d)/;
+const PHONE_CANDIDATE_RE = /\+?\d[\d\s()-]{5,}\d/;
+const MIN_PHONE_DIGITS = 7;
 
-/** Reddit and social handles. */
-const HANDLE_RE = /(?:^|[\s(])(?:\/?u\/|@)[A-Za-z0-9_-]{2,}/;
+function looksLikePhone(text: string): boolean {
+  const m = text.match(PHONE_CANDIDATE_RE);
+  if (!m) return false;
+  return (m[0].match(/\d/g) ?? []).length >= MIN_PHONE_DIGITS;
+}
+
+/**
+ * Reddit and social handles. The name must START WITH A LETTER — `@70` in
+ * "advertised @70 per cent below retail" is a price, not a handle, and the
+ * earlier `[A-Za-z0-9_-]` first character suppressed it.
+ *
+ * The prefix class accepts a curly quote and a colon as well as whitespace and
+ * a bracket: `DMs come from “@cryptoking99”` and `Contact:@deals_direct` both
+ * got through the whitespace-only version. `i` is set so `U/Name` is caught.
+ */
+const HANDLE_RE = /(?:^|[\s(:"'\u2018\u2019\u201c\u201d])(?:\/?u\/|@)[A-Za-z][A-Za-z0-9_-]{1,}/i;
 
 /**
  * Second-person constructions that address the reader as the victim. The take
  * describes a pattern to a bystander; "you" turns it into a verdict on the
  * person whose post is linked directly beside it.
  */
-const ACCUSATION_RE =
-  /\byou(?:'ve| have| were| was| got|r)?\s+(?:been\s+)?(?:scammed|conned|defrauded|duped|tricked|fell|fallen|lost|paid|sent)\b|\byou\s+should\s+have\b|\byour\s+mistake\b/i;
+const ACCUSATION_RE = new RegExp(
+  [
+    // "you were scammed", "you\u2019ve been defrauded", "you may have been
+    // conned", "you are being tricked". The apostrophe class matters more than
+    // it looks: a model emits U+2019, not ASCII, so the ASCII-only version
+    // missed the single most likely phrasing of the rule's whole purpose.
+    String.raw`\byou(?:['\u2019]ve|['\u2019]re| have| were| was| got| are| may| might| probably)?\b[^.!?]{0,24}?\b(?:scammed|conned|defrauded|duped|tricked|targeted|fell for|fallen for)\b`,
+    String.raw`\byou\s+should\s+have\b`,
+    String.raw`\byour\s+mistake\b`,
+    String.raw`\byou\s+were\s+the\s+(?:target|victim)\b`,
+  ].join("|"),
+  "i",
+);
 
 interface Rule {
   reason: SuppressionReason;
@@ -168,7 +207,7 @@ const CONTENT_RULES: Rule[] = [
   },
   { reason: "contains_handle", test: (t) => HANDLE_RE.test(t) },
   { reason: "contains_amount", test: (t) => AMOUNT_RE.test(t) },
-  { reason: "contains_phone", test: (t) => PHONE_RE.test(t) },
+  { reason: "contains_phone", test: looksLikePhone },
   { reason: "second_person_accusation", test: (t) => ACCUSATION_RE.test(t) },
 ];
 
@@ -207,7 +246,11 @@ export function validateTake(
     if (violation) return { status: "suppressed", reason: violation };
   }
 
-  if (candidate.tells.length === 0 && !candidate.where) {
+  // Trim before counting: `tells: ["   "]` with a null `where` is not
+  // length-zero, and whitespace-only strings are dropped from the content pass
+  // above, so the take would have rendered as a heading with nothing under it.
+  const renderableTells = candidate.tells.filter((t) => t.trim().length > 0);
+  if (renderableTells.length === 0 && !candidate.where?.trim()) {
     return { status: "suppressed", reason: "empty_take" };
   }
 
