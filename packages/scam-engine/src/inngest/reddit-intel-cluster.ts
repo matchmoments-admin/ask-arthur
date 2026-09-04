@@ -425,10 +425,19 @@ export const redditIntelCluster = inngest.createFunction(
 
         if (postErr) throw new Error(`load posts: ${postErr.message}`);
 
+        // Deliberately NOT filtered on is_active. v300 ages a theme out after
+        // 90 quiet days, and is_active gates the B2B API and the RAG
+        // retrieval — it is a VISIBILITY state. Using it here too would make
+        // deactivation one-way and self-fulfilling: a dormant theme could
+        // never be matched, so its last_seen_at could never advance, so
+        // v300's reactivation branch could never fire. A campaign resurging
+        // in month four would seed a duplicate theme from scratch and orphan
+        // its own history, and the corpus would accumulate duplicates
+        // indefinitely. Matching against a dormant theme and reviving it is
+        // the entire point of tracking themes over time.
         const { data: themeRows, error: themeErr } = await supabase
           .from("reddit_intel_themes")
           .select("id, centroid_embedding, member_count")
-          .eq("is_active", true)
           .not("centroid_embedding", "is", null)
           .limit(500);
 

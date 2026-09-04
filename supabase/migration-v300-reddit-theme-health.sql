@@ -40,7 +40,15 @@ CREATE OR REPLACE FUNCTION public.refresh_reddit_theme_health(
 RETURNS JSON
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, pg_catalog
+-- supabase/CLAUDE.md §4: a SECURITY DEFINER function uses an EMPTY search_path
+-- and fully qualifies every reference. `public, pg_catalog` is the rule for
+-- SECURITY INVOKER functions that need extension operators; this one uses no
+-- extension operator, and pg_temp is searched implicitly BEFORE public when it
+-- is not listed, so a caller able to create a temp table could shadow
+-- reddit_intel_themes and have these UPDATEs hit their object with definer
+-- privileges. EXECUTE is service_role-only, which mitigates it, but the rule
+-- exists so that mitigation is not the only thing standing there.
+SET search_path = ''
 AS $$
 DECLARE
   v_deactivated INT;
@@ -67,13 +75,13 @@ BEGIN
       COUNT(*) FILTER (
         WHERE i.processed_at >= NOW() - INTERVAL '14 days'
       ) AS joins_14d
-    FROM reddit_intel_themes t
-    LEFT JOIN reddit_post_intel_themes m ON m.theme_id = t.id
-    LEFT JOIN reddit_post_intel i        ON i.id = m.intel_id
+    FROM public.reddit_intel_themes t
+    LEFT JOIN public.reddit_post_intel_themes m ON m.theme_id = t.id
+    LEFT JOIN public.reddit_post_intel i        ON i.id = m.intel_id
     GROUP BY t.id
   ),
   updated AS (
-    UPDATE reddit_intel_themes t
+    UPDATE public.reddit_intel_themes t
     SET
       -- 'strong' means established AND still being joined. A big theme nobody
       -- has added to in a fortnight is history, not signal. 'noise' is the set
@@ -87,10 +95,20 @@ BEGIN
       -- NULL, not 0, when the prior week had no joins: the percentage change
       -- from zero is undefined, and a 0 there would read as "flat" when it
       -- actually means "brand new".
+      -- Clamped because reddit_intel_themes.wow_delta_pct is NUMERIC(6,2)
+      -- (v82:112), max 9999.99. One join last week and 101 this week yields
+      -- 10000.0 and raises 22003 numeric_field_overflow — which, because
+      -- PostgREST wraps the RPC in one transaction, would roll back
+      -- signal_strength and is_active too. The caller catches that as a warn
+      -- and returns null, so the entire feature would be dead with one log
+      -- line per run as the only symptom. A 250-member join ceiling and
+      -- 500-post cohorts make a 1 -> 101 week entirely reachable during a
+      -- campaign wave.
       wow_delta_pct = CASE
         WHEN v.joins_prior_7d = 0 THEN NULL
-        ELSE ROUND(
-          100.0 * (v.joins_7d - v.joins_prior_7d) / v.joins_prior_7d, 1
+        ELSE LEAST(
+          ROUND(100.0 * (v.joins_7d - v.joins_prior_7d) / v.joins_prior_7d, 1),
+          9999.99
         )
       END,
       -- Reversible by construction: a theme that gets a new post crosses back
@@ -112,7 +130,7 @@ BEGIN
   FROM updated;
 
   SELECT COUNT(*) INTO v_births_7d
-  FROM reddit_intel_themes
+  FROM public.reddit_intel_themes
   WHERE first_seen_at >= NOW() - INTERVAL '7 days';
 
   RETURN json_build_object(
@@ -122,7 +140,7 @@ BEGIN
     'inactive_themes', v_deactivated,
     'strong_themes', v_strong,
     'theme_births_7d', v_births_7d,
-    'active_themes', (SELECT COUNT(*) FROM reddit_intel_themes WHERE is_active)
+    'active_themes', (SELECT COUNT(*) FROM public.reddit_intel_themes WHERE is_active)
   );
 END;
 $$;

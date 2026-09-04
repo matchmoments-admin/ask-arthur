@@ -297,12 +297,23 @@ export function parseRedditIntelEmbeddedData(
 // ── reddit.intel.themes_recomputed.v1 ────────────────────────────────────
 //
 // Emitted by the weekly clustering function after refreshing
-// reddit_intel_themes member counts and WoW deltas. Consumers: weekly-email
-// digest builder, B2B API cache invalidation.
+// reddit_intel_themes member counts and WoW deltas.
+//
+// NO CONSUMER EXISTS. This event has exactly two references in the tree: this
+// schema and the emit in reddit-intel-cluster.ts. An earlier version of this
+// comment named "weekly-email digest builder, B2B API cache invalidation" as
+// consumers; neither was ever written. Stated plainly so the next person does
+// not go looking for a listener, or assume changing the payload is safe
+// because something downstream validates it — nothing does.
 
 export const RedditIntelThemesRecomputedDataSchema = z.object({
   weekStart: z.string().date(),
-  activeThemeCount: z.number().int().nonnegative(),
+  // Nullable: the count comes from a `count:"exact", head:true` read that can
+  // fail returning count=null AND error=null, and the cluster function
+  // deliberately propagates that unknown rather than emitting a confident 0.
+  // A non-nullable declaration here would have made the schema a lie the day
+  // anyone wrote the consumer it claims to have.
+  activeThemeCount: z.number().int().nonnegative().nullable(),
   newThemeCount: z.number().int().nonnegative(),
   computedAt: z.string().datetime(),
 });
