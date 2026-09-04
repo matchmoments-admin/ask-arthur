@@ -59,6 +59,17 @@ _MAX_RETRIES = 2
 _RETRY_BASE_DELAY = 3  # seconds
 _RETRYABLE_STATUSES = {429, 500, 502, 503, 504}  # 403 is NOT retried
 
+# Bodies Reddit substitutes when a post is removed by a moderator or deleted by
+# its author. Non-empty strings, so they pass every "did we get a body?" guard.
+_TOMBSTONE_BODIES = {"[removed]", "[deleted]"}
+
+# Cap on the full body stored in feed_items.body_md for analysis. The column's
+# hard limit is 50,000 (feed_items_body_md_size, v101); 20,000 is well past the
+# length of any genuine victim narrative (the 99th percentile r/Scams selftext
+# is under 6,000 chars) while bounding both storage and the classifier's input
+# tokens. `description` remains the 500-char public excerpt.
+BODY_MD_MAX_CHARS = 20_000
+
 SUBREDDITS = [
     {"name": "Scams", "limit": 100},
     {"name": "phishing", "limit": 100},
@@ -259,6 +270,59 @@ class ExtractedIOCs(NamedTuple):
     wallets: list[dict]
     phones: list[dict]
     emails: list[dict]
+
+
+def _is_tombstone(selftext: str | None) -> bool:
+    """True when Reddit has replaced the post body with a removal marker.
+
+    Reddit substitutes "[removed]" (moderator) or "[deleted]" (author) for the
+    body text. These are non-empty strings, so every "did we get a body?" guard
+    passes and the marker used to be stored verbatim in feed_items.description
+    and then handed to the classifier as if it were a scam narrative.
+    """
+    return (selftext or "").strip() in _TOMBSTONE_BODIES
+
+
+def _build_feed_item(
+    *,
+    post_id: str,
+    scrubbed_title: str,
+    scrubbed_body: str,
+    first_url: str | None,
+    post_url: str,
+    scam_type: str | None,
+    evidence_r2_key: str | None,
+    image_url: str | None,
+    country_code: str | None,
+    upvotes: int,
+    source_created_at: str | None,
+) -> dict:
+    """Shape one scrubbed Reddit post into a feed_items upsert payload.
+
+    Extracted from scrape() so the description/body_md split is unit-testable:
+    `description` is the SHORT PUBLIC EXCERPT rendered on /scam-feed and must
+    stay at 500 chars, while `body_md` (v299) holds the fuller text for
+    analysis only. Callers must have already scrubbed usernames and rejected
+    tombstones — this function does no filtering.
+    """
+    return {
+        "source": "reddit",
+        "external_id": post_id,
+        "title": scrubbed_title[:300],
+        "description": scrubbed_body[:500] if scrubbed_body else None,
+        "body_md": scrubbed_body[:BODY_MD_MAX_CHARS] if scrubbed_body else None,
+        "url": first_url,
+        "source_url": post_url,
+        "category": scam_type,
+        "channel": None,
+        "r2_image_key": evidence_r2_key,
+        "reddit_image_url": image_url if not evidence_r2_key else None,
+        "impersonated_brand": None,
+        "country_code": country_code,
+        "upvotes": upvotes,
+        "verified": False,
+        "source_created_at": source_created_at,
+    }
 
 
 def _scrub_usernames(text: str) -> str:
@@ -800,6 +864,7 @@ def scrape() -> str:
     status = "success"
     total_posts = 0
     skipped_dedup = 0
+    skipped_tombstoned = 0
     images_captured = 0
 
     try:
@@ -832,6 +897,7 @@ def scrape() -> str:
             sub_emails = 0
             post_count = 0
             sub_skipped = 0
+            sub_tombstoned = 0
 
             for post in posts:
                 post_count += 1
@@ -841,6 +907,26 @@ def scrape() -> str:
                 if post_id in processed_ids:
                     sub_skipped += 1
                     continue
+
+                # Tombstones: Reddit replaces the BODY with a literal marker
+                # when a post is removed by a mod or deleted by its author.
+                # Previously stored verbatim (the `if scrubbed_body else None`
+                # guard does not fire — the marker is non-empty) and then
+                # classified as if it were a scam narrative.
+                #
+                # Deliberately NOT an early `continue`. The title survives a
+                # removal, and on r/Scams it frequently carries the scam domain
+                # or a wallet address; an early skip silently dropped those
+                # IOCs, which is a real loss for a row we were only declining
+                # to PUBLISH. So the tombstone flag is computed here and gates
+                # the feed item and the classifier further down, while IOC
+                # extraction below still runs over the title.
+                is_tombstoned = _is_tombstone(post.get("selftext"))
+                if is_tombstoned:
+                    # Counted apart from the dedup skip: two different facts,
+                    # and the dedup count is large by design, so folding them
+                    # together would hide a change in Reddit's removal rate.
+                    sub_tombstoned += 1
 
                 # Combine title + selftext for IOC extraction
                 raw_text = f"{post.get('title', '')}\n{post.get('selftext', '')}"
@@ -867,10 +953,14 @@ def scrape() -> str:
                 country_code = _detect_country(post.get("title", ""), sub_name)
                 iocs = _extract_iocs(text, post_url, scam_type, feed_name, post_time, country_code)
 
-                # Evidence image capture
+                # Evidence image capture. Skipped for a tombstoned post: no
+                # feed item is created for one, so the upload would leave an
+                # orphaned R2 object nothing references — and copying the
+                # image out of a post its author has just deleted is the wrong
+                # default regardless of the storage cost.
                 evidence_r2_key = None
                 image_url = _extract_first_image(post)
-                if image_url:
+                if image_url and not is_tombstoned:
                     evidence_r2_key = upload_reddit_evidence(image_url, post_id)
                     if evidence_r2_key:
                         images_captured += 1
@@ -889,25 +979,30 @@ def scrape() -> str:
                 scrubbed_title = _scrub_usernames(post.get("title", ""))
                 scrubbed_body = _scrub_usernames(post.get("selftext", ""))
                 first_url = iocs.urls[0]["url"] if iocs.urls else None
-                image_url_for_feed = _extract_first_image(post)
 
-                all_feed_items.append({
-                    "source": "reddit",
-                    "external_id": post_id,
-                    "title": scrubbed_title[:300],
-                    "description": scrubbed_body[:500] if scrubbed_body else None,
-                    "url": first_url,
-                    "source_url": post_url,
-                    "category": scam_type,
-                    "channel": None,
-                    "r2_image_key": evidence_r2_key,
-                    "reddit_image_url": image_url_for_feed if not evidence_r2_key else None,
-                    "impersonated_brand": None,
-                    "country_code": country_code,
-                    "upvotes": post.get("score", 0),
-                    "verified": False,
-                    "source_created_at": post_time,
-                })
+                # A tombstoned post yields no feed item and no classifier
+                # input: there is no body left to analyse, and the marker must
+                # never reach /scam-feed. Its IOCs were harvested above.
+                if is_tombstoned:
+                    continue
+
+                all_feed_items.append(_build_feed_item(
+                    post_id=post_id,
+                    scrubbed_title=scrubbed_title,
+                    scrubbed_body=scrubbed_body,
+                    first_url=first_url,
+                    post_url=post_url,
+                    scam_type=scam_type,
+                    evidence_r2_key=evidence_r2_key,
+                    # The same value the R2 upload used above. It was
+                    # previously re-extracted here, so a non-deterministic
+                    # _extract_first_image could have paired an r2 key with a
+                    # fallback URL for a different image.
+                    image_url=image_url,
+                    country_code=country_code,
+                    upvotes=post.get("score", 0),
+                    source_created_at=post_time,
+                ))
 
                 sub_urls += len(iocs.urls)
                 sub_wallets += len(iocs.wallets)
@@ -917,9 +1012,11 @@ def scrape() -> str:
                 new_post_ids.append((post_id, sub_name.lower()))
 
             skipped_dedup += sub_skipped
+            skipped_tombstoned += sub_tombstoned
             total_posts += post_count
             logger.info(
-                f"r/{sub_name}: {post_count} posts ({sub_skipped} skipped dedup) — "
+                f"r/{sub_name}: {post_count} posts "
+                f"({sub_skipped} skipped dedup, {sub_tombstoned} removed/deleted) — "
                 f"{sub_urls} URLs, {sub_wallets} wallets, "
                 f"{sub_phones} phones, {sub_emails} emails",
                 extra={"metadata": {"subreddit": sub_name}},
@@ -936,7 +1033,8 @@ def scrape() -> str:
         logger.info(
             f"Reddit total: {total_posts} posts across "
             f"{len(SUBREDDITS)} subreddits — "
-            f"{skipped_dedup} skipped (dedup), {images_captured} images captured, "
+            f"{skipped_dedup} skipped (dedup), {skipped_tombstoned} removed/deleted, "
+            f"{images_captured} images captured, "
             f"{len(all_urls)} URLs, {len(all_wallets)} wallets, "
             f"{len(all_entities)} entities (phones+emails)"
         )
@@ -1031,7 +1129,8 @@ def scrape() -> str:
         f"URLs({url_stats['new']} new, {url_stats['updated']} upd) "
         f"Wallets({wallet_stats['new']} new, {wallet_stats['updated']} upd) "
         f"Entities({entity_stats['new']} new, {entity_stats['updated']} upd) "
-        f"dedup_skipped={skipped_dedup}, images={images_captured} "
+        f"dedup_skipped={skipped_dedup}, tombstoned={skipped_tombstoned}, "
+        f"images={images_captured} "
         f"in {duration_ms}ms"
     )
 

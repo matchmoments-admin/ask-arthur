@@ -24,6 +24,63 @@ disclosure obligations.
 | Voyage 3 (or OpenAI) embedding output | 1024-dim vector per post (used for clustering; not personal information)                                                                                          | `reddit_post_intel.embedding` (v82)      |
 | Greedy clustering output              | Theme cluster heads with title, narrative, modus operandi, representative brands                                                                                  | `reddit_intel_themes` (v82)              |
 
+### Amendment 2026-09-04 (v299) — full post body retained for analysis
+
+Until v299 the only copy of a Reddit post body we held was
+`feed_items.description`, capped by the scraper at 500 characters. That cap
+was an artefact of the column's display purpose, not a privacy control — it
+was chosen to size a feed card. Measured in prod on 2026-09-04, it truncated
+**4,974 of 6,168 Reddit rows (81%)** mid-story, so the intelligence we derived
+about a scam was an analysis of its opening paragraph.
+
+From v299 the scraper additionally writes the **full username-scrubbed body**
+to `feed_items.body_md`, capped at 20,000 characters
+(`BODY_MD_MAX_CHARS`, `pipeline/scrapers/reddit_scams.py`), under the column's
+existing 50,000-character constraint (`feed_items_body_md_size`, v101).
+
+What changes and what does not:
+
+- **Source material** — unchanged. The same public Reddit posts, from the same
+  subreddits, at the same cadence. No new collection, no new source.
+- **Username scrubbing** — unchanged and applied first: `body_md` is written
+  from the same `_scrub_usernames` output as `description`.
+- **What is published** — unchanged. Every public surface (`/scam-feed`, the
+  feed API, the B2B API) continues to render `description`, the ≤500-character
+  excerpt. `body_md` is analysis-only. This preserves the position in
+  [`reddit-intel-reddit-tos.md`](./reddit-intel-reddit-tos.md) §3: no
+  republication of full post bodies.
+
+  **Enforced by** `migration-v302-body-md-not-public.sql`: table-wide `SELECT`
+  on `feed_items` is revoked from `anon` and `authenticated` and re-granted
+  column by column, omitting `body_md`. This is not decoration — an earlier
+  draft of this paragraph asserted the same thing while nothing enforced it,
+  and the public anon key could read the column (verified against production,
+  2026-09-04). Row-level security decides which ROWS a role sees and can never
+  restrict a column, so the row policy `feed_items_public_read` was not and
+  could not be the control. A column-level `REVOKE` alone is also insufficient:
+  table-level `SELECT` covers every column, so the table grant has to go first.
+
+- **What is sent to Anthropic** — increases. The classifier reads `body_md` in
+  preference to `description`, capped separately at 4,000 characters per post
+  (`CLASSIFY_BODY_CHARS`, `packages/scam-engine/src/inngest/reddit-intel-daily.ts`).
+  The disclosure is the same class of content already covered by §3, at
+  greater length.
+- **Tombstones** — improvement. Posts whose body Reddit has replaced with
+  `[removed]` or `[deleted]` are now skipped at ingest (`_is_tombstone`) rather
+  than stored verbatim and classified.
+
+Residual risk: a longer retained body is more likely to contain incidental
+personal information about third parties that the victim mentioned (a bank
+branch, a workplace, a first name). This is the same risk the 500-character
+excerpt carried, at greater volume, and is not mitigated by the length cap.
+The existing controls continue to apply — usernames scrubbed at ingest, no
+per-user profiling, deletion on request under §5 — and the deletion path
+already operates on the whole `feed_items` row, so it removes `body_md` with
+it. **Open item carried to §7:** `feed_items` Reddit rows are excluded from
+archival and have no retention window at all, while the derived analysis in
+`reddit_post_intel` is blanked at 180 days. That asymmetry predates v299 but
+this amendment increases what it holds.
+
 We do **not** collect or store:
 
 - Reddit usernames, account ages, karma, or any per-user identifier.

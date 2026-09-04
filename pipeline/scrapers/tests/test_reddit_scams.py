@@ -9,6 +9,9 @@ import requests
 
 from reddit_scams import (
     _scrub_usernames,
+    _is_tombstone,
+    _build_feed_item,
+    BODY_MD_MAX_CHARS,
     _detect_au_relevance,
     _detect_country,
     _map_flair,
@@ -1069,3 +1072,92 @@ class TestEnsureOauthToken:
 
         monkeypatch.setattr(requests, "post", mock_post)
         assert _ensure_oauth_token() == ""
+
+
+
+class TestTombstoneDetection:
+    """Removed/deleted posts must never reach the feed or the classifier.
+
+    Reddit replaces the body with a non-empty marker string, so the old
+    `if scrubbed_body else None` guard did not fire and the marker was stored
+    verbatim as the post's description.
+    """
+
+    def test_removed_is_tombstone(self):
+        assert _is_tombstone("[removed]") is True
+
+    def test_deleted_is_tombstone(self):
+        assert _is_tombstone("[deleted]") is True
+
+    def test_surrounding_whitespace_still_tombstone(self):
+        assert _is_tombstone("  [removed]\n") is True
+
+    def test_real_body_is_not_tombstone(self):
+        assert _is_tombstone("They asked me to pay a $95 shipping fee.") is False
+
+    def test_empty_body_is_not_tombstone(self):
+        """An empty body is a link/image post, handled elsewhere — not a tombstone."""
+        assert _is_tombstone("") is False
+        assert _is_tombstone(None) is False
+
+    def test_body_merely_mentioning_the_word_is_not_tombstone(self):
+        assert _is_tombstone("The post was [removed] by a mod, but here is what it said...") is False
+
+
+class TestBuildFeedItem:
+    """description stays the short public excerpt; body_md carries the full text."""
+
+    def _item(self, body: str, **overrides):
+        kwargs = dict(
+            post_id="abc123",
+            scrubbed_title="Is this a scam?",
+            scrubbed_body=body,
+            first_url=None,
+            post_url="https://reddit.com/r/Scams/comments/abc123/x/",
+            scam_type="phishing",
+            evidence_r2_key=None,
+            image_url=None,
+            country_code="AU",
+            upvotes=3,
+            source_created_at="2026-09-04T00:00:00Z",
+        )
+        kwargs.update(overrides)
+        return _build_feed_item(**kwargs)
+
+    def test_description_is_capped_at_500(self):
+        item = self._item("x" * 3000)
+        assert len(item["description"]) == 500
+
+    def test_body_md_keeps_the_full_text(self):
+        """The regression this ships for: 81% of rows were truncated at 500."""
+        item = self._item("x" * 3000)
+        assert len(item["body_md"]) == 3000
+        assert item["body_md"].startswith(item["description"])
+
+    def test_body_md_is_capped_at_the_column_budget(self):
+        item = self._item("x" * (BODY_MD_MAX_CHARS + 5_000))
+        assert len(item["body_md"]) == BODY_MD_MAX_CHARS
+        assert BODY_MD_MAX_CHARS <= 50_000, "must stay under feed_items_body_md_size"
+
+    def test_short_body_is_identical_in_both_columns(self):
+        item = self._item("Short scam report.")
+        assert item["description"] == "Short scam report."
+        assert item["body_md"] == "Short scam report."
+
+    def test_empty_body_yields_null_in_both_columns(self):
+        item = self._item("")
+        assert item["description"] is None
+        assert item["body_md"] is None
+
+    def test_title_still_capped_at_300(self):
+        item = self._item("body", scrubbed_title="t" * 400)
+        assert len(item["title"]) == 300
+
+    def test_reddit_image_url_suppressed_when_r2_key_present(self):
+        item = self._item("body", evidence_r2_key="k", image_url="https://i.redd.it/x.jpg")
+        assert item["reddit_image_url"] is None
+        assert item["r2_image_key"] == "k"
+
+    def test_reddit_image_url_kept_when_r2_upload_absent(self):
+        item = self._item("body", image_url="https://i.redd.it/x.jpg")
+        assert item["reddit_image_url"] == "https://i.redd.it/x.jpg"

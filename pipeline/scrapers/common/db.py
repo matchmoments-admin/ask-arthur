@@ -597,6 +597,8 @@ def bulk_upsert_feed_items(
         - upvotes: int
         - verified: bool
         - source_created_at: str (ISO 8601)
+        - body_md: str (v299 — fuller source text held for analysis; the
+          public-facing excerpt stays in `description`)
 
     Returns stats: {new: int, updated: int, skipped: int}
     """
@@ -638,6 +640,7 @@ def bulk_upsert_feed_items(
                 item.get("upvotes", 0),
                 item.get("verified", False),
                 item.get("source_created_at"),
+                item.get("body_md"),
             ))
 
         if rows:
@@ -648,9 +651,9 @@ def bulk_upsert_feed_items(
                     SELECT upsert_feed_item(
                         t.c1, t.c2, t.c3, t.c4, t.c5, t.c6, t.c7, t.c8,
                         t.c9, t.c10, t.c11, t.c12, t.c13::int, t.c14::boolean,
-                        t.c15::timestamptz
+                        t.c15::timestamptz, t.c16
                     )
-                    FROM (VALUES %s) AS t(c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15)
+                    FROM (VALUES %s) AS t(c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16)
                     """,
                     rows,
                     fetch=True,
@@ -677,7 +680,7 @@ def bulk_upsert_feed_items(
                         cursor.execute(
                             "SELECT upsert_feed_item("
                             "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
-                            "%s::int, %s::boolean, %s::timestamptz)",
+                            "%s::int, %s::boolean, %s::timestamptz, %s)",
                             row,
                         )
                         r = cursor.fetchone()
@@ -792,10 +795,9 @@ def bulk_upsert_narrative_feed_items(
     """Direct INSERT ... ON CONFLICT for news-style narrative items.
 
     Distinct from bulk_upsert_feed_items() which calls the upsert_feed_item
-    RPC — that RPC doesn't know about body_md/tags/published_at/evidence_r2_key
-    (added in v97). Rather than expand the RPC's signature (which would
-    require migration coordination with reddit_scams.py), this helper writes
-    the new columns directly via SQL.
+    RPC. That RPC gained body_md in v299 but still has no parameter for
+    tags/published_at/evidence_r2_key (added in v97), so this helper keeps
+    writing the narrative-only columns directly via SQL.
 
     Required keys per item:
         source, external_id, title

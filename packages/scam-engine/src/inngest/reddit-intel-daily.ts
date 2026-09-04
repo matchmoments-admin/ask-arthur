@@ -85,6 +85,29 @@ export const CLASSIFY_MAX_TOKENS = 16_000;
 // have room.
 export const CLASSIFY_TIMEOUT_MS = 360_000;
 
+// INPUT budget, per post. Distinct from the scraper's BODY_MD_MAX_CHARS
+// (20,000) which bounds what we STORE — this bounds what we SEND.
+//
+// Until v299 the classifier read feed_items.description, which the scraper
+// capped at 500 chars, so 81% of prod rows were analysed from their first
+// paragraph only. It now reads body_md, which is up to 40x longer, and the
+// prompt is a single batched call over the whole batch — so uncapped bodies
+// move input tokens by the same multiple and the spend with them.
+//
+// 4,000 chars (~1,000 tokens) covers the complete narrative of essentially
+// every genuine victim report; past that a r/Scams post is chat logs pasted
+// in bulk, where the marginal paragraph adds no classification signal.
+//
+// Sizing it per DAY, not per run — the same PR that raised this ceiling also
+// moved the trigger from daily to 6-hourly, and a per-run figure quietly
+// omits the multiplier. Arrivals set the total, not the cadence: ~37 posts a
+// day at ~1,000 input tokens each is ~37K input tokens daily however many
+// batches they arrive in, roughly 3x the pre-v299 spend (measured:
+// US$4.27/30d), landing near US$13/30d. The four cache writes rather than one
+// add about US$0.02/day (see reddit-intel-trigger's header). Both stay an
+// order of magnitude under the REDDIT_INTEL_CAP_USD brake.
+export const CLASSIFY_BODY_CHARS = 4_000;
+
 /**
  * Resolve the Claude model for the daily classify call. Defaults to Sonnet 4.6
  * (the historical model), overridable to Haiku 4.5 via the
@@ -526,7 +549,7 @@ export const redditIntelDaily = inngest.createFunction(
       const { data: rows, error } = await supabase
         .from("feed_items")
         .select(
-          "id, title, description, url, country_code, upvotes, source_created_at",
+          "id, title, description, body_md, url, country_code, upvotes, source_created_at",
         )
         .in("id", data.feedItemIds)
         .eq("source", "reddit");
@@ -575,7 +598,13 @@ export const redditIntelDaily = inngest.createFunction(
         posts: posts.map((p) => ({
           id: p.id,
           title: p.title,
-          description: p.description ?? "",
+          // body_md (v299) is the full scrubbed post; description is the
+          // 500-char public excerpt and is the fallback for rows ingested
+          // before v299 shipped. Capped at CLASSIFY_BODY_CHARS — see there.
+          description: (p.body_md ?? p.description ?? "").slice(
+            0,
+            CLASSIFY_BODY_CHARS,
+          ),
           url: p.url ?? null,
           countryCode: p.country_code ?? null,
           upvotes: p.upvotes ?? 0,

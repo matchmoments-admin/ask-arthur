@@ -11,16 +11,34 @@ export const dynamic = "force-dynamic";
 
 // Reddit Intelligence — trigger cron.
 //
-// Schedule (vercel.json): 0 8 * * * (daily 08:00 UTC = 6pm AEST).
+// Schedule (vercel.json): 0 1,7,13,19 * * * — one hour after each tier-6h
+// scrape (0 */6 * * *, .github/workflows/scrape-feeds.yml:36).
 //
-// Why daily not 6-hourly: Reddit's natural scrape rate is ~38 posts/day,
-// matching one batch (BATCH_SIZE=40). Running 4× per day produces 4
-// small batches with the same fixed system-prompt overhead — about 4×
-// the cost for the same throughput. Once-daily amortises the system
-// prompt across the full ~38-post batch and halves steady-state spend.
+// Why 6-hourly, reversing the earlier daily decision.
+//
+// A first version of this comment argued the reversal was cost-neutral because
+// the system block is sent with cache_control: ephemeral. That was WRONG and a
+// review caught it: anthropic.ts:262 sends ephemeral with no `ttl`, which is
+// the 5-minute default, so runs six hours apart ALWAYS miss the cache — and a
+// cache write is billed at 1.25x input. Four runs a day means four cache
+// writes instead of one, which is exactly the 4x the original daily decision
+// predicted.
+//
+// The honest accounting: the system prompt is ~2K tokens, so the extra three
+// writes cost roughly 2,000 x 1.25 x $3/M x 3 = about US$0.02 a day. Real, and
+// far too small to outweigh what daily was costing us — up to 24 hours of
+// staleness on the items at the TOP of the public feed, the ones a reader
+// actually sees, and a drain rate of 40/day against ~37/day of arrivals, so a
+// single missed run never recovered. The per-post tokens, which dominate the
+// bill, are identical either way. Four smaller batches also sit better with
+// the 5-slot Inngest plan than one long one.
+//
+// So: the change is justified on freshness and backlog, and costs about two
+// cents a day. It is not free, and the earlier claim that it was is struck.
 //
 // Timing dependency: GitHub Actions runs the Reddit scrape at 06:00 UTC.
-// Firing this cron at 08:00 UTC gives the scrape 2h to complete and
+// Each tick fires one hour after a scrape (scrape at 00/06/12/18, this at
+// 01/07/13/19), which gives the scrape an hour to complete and
 // land rows in feed_items before we try to classify them.
 //
 // Polls feed_items for Reddit rows that don't yet have a
