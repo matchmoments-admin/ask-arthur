@@ -792,7 +792,7 @@ export const redditIntelCluster = inngest.createFunction(
         }
         return result as {
           strong_themes: number;
-          deactivated: number;
+          inactive_themes: number;
           theme_births_7d: number;
           active_themes: number;
         } | null;
@@ -848,7 +848,7 @@ export const redditIntelCluster = inngest.createFunction(
         activeThemes: activeCount ?? health?.active_themes ?? null,
         themeBirths7d: health?.theme_births_7d ?? null,
         strongThemes: health?.strong_themes ?? null,
-        deactivated: health?.deactivated ?? null,
+        inactiveThemes: health?.inactive_themes ?? null,
         oversizedThemes: oversizedThemeCount,
         degraded: activeCount === null || health === null,
       });

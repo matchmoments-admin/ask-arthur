@@ -43,87 +43,84 @@ SECURITY DEFINER
 SET search_path = public, pg_catalog
 AS $$
 DECLARE
-  v_strong    INT;
   v_deactivated INT;
-  v_births_7d INT;
+  v_strong      INT;
+  v_births_7d   INT;
 BEGIN
-  -- Joins per theme in the trailing 7 days and the 7 before that.
-  CREATE TEMP TABLE _theme_velocity ON COMMIT DROP AS
-  SELECT
-    t.id AS theme_id,
-    COUNT(*) FILTER (
-      WHERE i.processed_at >= NOW() - INTERVAL '7 days'
-    ) AS joins_7d,
-    COUNT(*) FILTER (
-      WHERE i.processed_at >= NOW() - INTERVAL '14 days'
-        AND i.processed_at <  NOW() - INTERVAL '7 days'
-    ) AS joins_prior_7d,
-    COUNT(*) FILTER (
-      WHERE i.processed_at >= NOW() - INTERVAL '14 days'
-    ) AS joins_14d
-  FROM reddit_intel_themes t
-  LEFT JOIN reddit_post_intel_themes m ON m.theme_id = t.id
-  LEFT JOIN reddit_post_intel i        ON i.id = m.intel_id
-  GROUP BY t.id;
-
-  -- signal_strength: 'strong' means the theme is both established AND still
-  -- being joined. A big theme nobody has added to in a fortnight is history,
-  -- not signal. 'noise' is reserved for themes too small to have been named
-  -- (MIN_MEMBERS_FOR_NAMING = 3 in reddit-intel-cluster.ts), which is also
-  -- exactly the set that renders as "Pending naming".
-  UPDATE reddit_intel_themes t
-  SET signal_strength = CASE
-        WHEN t.member_count < 3                      THEN 'noise'
+  -- One statement, so the three columns can never disagree with each other,
+  -- and no temp table: an earlier draft used `CREATE TEMP TABLE ...
+  -- ON COMMIT DROP`, which throws `relation already exists` the SECOND time
+  -- the function is called inside one transaction. Each PostgREST call is its
+  -- own transaction so that never fired in normal use — it was a landmine for
+  -- the first caller to wrap two calls together, which is exactly the kind of
+  -- defect that surfaces during an incident rather than in review.
+  WITH velocity AS (
+    SELECT
+      t.id AS theme_id,
+      COUNT(*) FILTER (
+        WHERE i.processed_at >= NOW() - INTERVAL '7 days'
+      ) AS joins_7d,
+      COUNT(*) FILTER (
+        WHERE i.processed_at >= NOW() - INTERVAL '14 days'
+          AND i.processed_at <  NOW() - INTERVAL '7 days'
+      ) AS joins_prior_7d,
+      COUNT(*) FILTER (
+        WHERE i.processed_at >= NOW() - INTERVAL '14 days'
+      ) AS joins_14d
+    FROM reddit_intel_themes t
+    LEFT JOIN reddit_post_intel_themes m ON m.theme_id = t.id
+    LEFT JOIN reddit_post_intel i        ON i.id = m.intel_id
+    GROUP BY t.id
+  ),
+  updated AS (
+    UPDATE reddit_intel_themes t
+    SET
+      -- 'strong' means established AND still being joined. A big theme nobody
+      -- has added to in a fortnight is history, not signal. 'noise' is the set
+      -- below MIN_MEMBERS_FOR_NAMING (3) in reddit-intel-cluster.ts, which is
+      -- also exactly the set still titled "Pending naming".
+      signal_strength = CASE
+        WHEN t.member_count < 3                        THEN 'noise'
         WHEN t.member_count >= 10 AND v.joins_14d >= 3 THEN 'strong'
         ELSE 'weak'
       END,
-      updated_at = NOW()
-  FROM _theme_velocity v
-  WHERE v.theme_id = t.id
-    AND t.signal_strength IS DISTINCT FROM CASE
-        WHEN t.member_count < 3                      THEN 'noise'
-        WHEN t.member_count >= 10 AND v.joins_14d >= 3 THEN 'strong'
-        ELSE 'weak'
-      END;
-
-  SELECT COUNT(*) INTO v_strong
-  FROM reddit_intel_themes WHERE signal_strength = 'strong';
-
-  -- wow_delta_pct: week-on-week change in joins. NULL (not 0) when the prior
-  -- week had none — the percentage change from zero is undefined, and writing
-  -- 0 there would read as "flat" when it means "brand new".
-  UPDATE reddit_intel_themes t
-  SET wow_delta_pct = CASE
+      -- NULL, not 0, when the prior week had no joins: the percentage change
+      -- from zero is undefined, and a 0 there would read as "flat" when it
+      -- actually means "brand new".
+      wow_delta_pct = CASE
         WHEN v.joins_prior_7d = 0 THEN NULL
         ELSE ROUND(
           100.0 * (v.joins_7d - v.joins_prior_7d) / v.joins_prior_7d, 1
         )
       END,
+      -- Reversible by construction: a theme that gets a new post crosses back
+      -- over this predicate on the next run. Visibility state, not deletion.
+      is_active = (
+        t.last_seen_at >= NOW() - (p_inactive_after_days || ' days')::INTERVAL
+      ),
       updated_at = NOW()
-  FROM _theme_velocity v
-  WHERE v.theme_id = t.id;
-
-  -- is_active: age out themes with no new member for the retention window.
-  -- Reversible by construction — a theme that gets a new post is reactivated
-  -- by the branch below, so this is a visibility state, not a deletion.
-  UPDATE reddit_intel_themes t
-  SET is_active = FALSE, updated_at = NOW()
-  WHERE t.is_active
-    AND t.last_seen_at < NOW() - (p_inactive_after_days || ' days')::INTERVAL;
-  GET DIAGNOSTICS v_deactivated = ROW_COUNT;
-
-  UPDATE reddit_intel_themes t
-  SET is_active = TRUE, updated_at = NOW()
-  WHERE NOT t.is_active
-    AND t.last_seen_at >= NOW() - (p_inactive_after_days || ' days')::INTERVAL;
+    FROM velocity v
+    WHERE v.theme_id = t.id
+    RETURNING
+      t.is_active AS now_active,
+      t.signal_strength AS now_strength
+  )
+  SELECT
+    COUNT(*) FILTER (WHERE NOT now_active),
+    COUNT(*) FILTER (WHERE now_strength = 'strong')
+  INTO v_deactivated, v_strong
+  FROM updated;
 
   SELECT COUNT(*) INTO v_births_7d
   FROM reddit_intel_themes
   WHERE first_seen_at >= NOW() - INTERVAL '7 days';
 
   RETURN json_build_object(
+    -- Note this is "themes currently inactive", not "deactivated by this run":
+    -- the update is idempotent, so a per-run delta would read 0 on every run
+    -- after the first and look like the sweep had stopped working.
+    'inactive_themes', v_deactivated,
     'strong_themes', v_strong,
-    'deactivated', v_deactivated,
     'theme_births_7d', v_births_7d,
     'active_themes', (SELECT COUNT(*) FROM reddit_intel_themes WHERE is_active)
   );
