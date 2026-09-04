@@ -261,7 +261,7 @@ All have `BRIN(created_at)` for cheap range queries.
 - `match_verified_scams(embedding, match_count, min_similarity)` — HNSW over `verified_scams.embedding`. No recency filter (authoritative anchors).
 - `match_reddit_intel(embedding, limit)` — IVFFlat over `reddit_post_intel.embedding`.
 - `match_reddit_intel_themes(centroid_embedding, limit)` — Centroid-based theme matching.
-- `match_themes_by_centroid(...)` — Greedy centroid assignment (cosine ≥ 0.78).
+- `match_themes_by_centroid(...)` — Greedy centroid assignment (cosine ≥ 0.62).
 - `match_charities_by_embedding(embedding, limit)` — Sibling HNSW on `acnc_charity_embeddings`. v121 JOIN pattern.
 - `match_feed_items_narrative(embedding, limit)` — Narrative feed retrieval.
 - `search_charities(query, limit)` — Trigram + ILIKE prefix ranking for autocomplete. `SQL STABLE`. REVOKE PUBLIC, GRANT anon / authenticated / service_role.

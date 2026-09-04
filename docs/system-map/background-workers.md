@@ -89,7 +89,18 @@ Gated by `FF_ANALYZE_INNGEST_WEB`. When false, the legacy `waitUntil` path runs 
 | ---------------------- | ----------------------------- | ---------------------------------------------- |
 | `reddit-intel-daily`   | `reddit.intel.batch_ready.v1` | Classify + summarise Reddit posts (Sonnet 4.6) |
 | `reddit-intel-embed`   | `reddit.intel.summarised.v1`  | Embed narratives via Voyage 3                  |
-| `reddit-intel-cluster` | `reddit.intel.embedded.v1`    | Cluster posts → themes (greedy cosine ≥ 0.78)  |
+| `reddit-intel-cluster` | `reddit.intel.embedded.v1`    | Cluster posts → themes (greedy cosine ≥ 0.62)  |
+
+> **Clustering is currently collapsed — do not build a "new/emerging theme" surface on
+> `reddit_intel_themes` until it is repaired.** Measured in prod 2026-09-04: 200 themes, every one
+> `signal_strength='weak'`, one theme holding 2,263 of 4,313 posts (52%), 138 single-member themes,
+> **zero themes born since July**, and `wow_delta_pct` non-null on zero rows while the B2B API serves
+> it. Causes: the threshold was lowered 0.78 → 0.62 in May 2026 to fix the opposite failure (1:1
+> theme:post) and now lets nearly everything join the largest centroid; `signal_strength`'s only
+> writer is a hardcoded literal (`reddit-intel-cluster.ts:511`); `is_active` is never set false;
+> `wow_delta_pct` is declared but written by nothing. The working novelty primitive is the weekly
+> synthesis' 28-day set-diff (`weekly-synthesis.ts:137`), which is email-only. Full analysis:
+> [docs/arthurs-take/DISCOVERY.md](../arthurs-take/DISCOVERY.md) § F2.
 
 ### Scam alerts & embed
 
@@ -200,15 +211,15 @@ Run on GitHub Actions, gated by `ENABLE_SCRAPER` (regular) / `ENABLE_VULN_SCRAPE
 
 ### Narrative scrapers (write to `feed_items`)
 
-| Scraper                   | Source                | Schedule                                                | Notes                                                                                                                                                                                                                                                    |
-| ------------------------- | --------------------- | ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `acnc_register.py`        | ACNC CKAN dataset     | Daily 16:00 UTC                                         | Gated `ENABLE_CHARITY_CHECK_INGEST`. Chunked TOUCH_LAST_SEEN_SQL pattern (post-PR #187).                                                                                                                                                                 |
-| `scamwatch_alerts.py`     | scamwatch.gov.au HTML | 3h tier (`*/3`)                                         | Narrative extraction                                                                                                                                                                                                                                     |
-| `acsc_alerts.py`          | cyber.gov.au RSS      | **RETIRED from cron 2026-08-07** (manual dispatch only) | probe_acsc proved GH-runner IPs are blackholed at the HTTP layer (TLS OK → read-timeout, every UA); coverage via `inbound_acsc` email                                                                                                                    |
-| `asic_investor_alerts.py` | asic.gov.au JSON      | Daily 16:00 UTC                                         | Investor alerts snapshot                                                                                                                                                                                                                                 |
-| `austrac.py`              | austrac.gov.au RSS    | **Manual only** (disabled on schedule 2026-06-29)       | Money-mule + payments-fraud typology reports. PR-B3 v131. Akamai blocks CI datacenter IPs regardless of UA → tripped its circuit breaker; feed is healthy from a browser UA/normal IP. Re-probe with `gh workflow run scrape-feeds.yml -f feed=austrac`. |
-| `probe_acsc.py`           | cyber.gov.au probe    | Manual                                                  | Diagnostic for WAF behaviour                                                                                                                                                                                                                             |
-| `reddit_scams.py`         | Reddit `r/Scams`      | Daily 06:00 UTC                                         | Source for Reddit Intel pipeline                                                                                                                                                                                                                         |
+| Scraper                   | Source                          | Schedule                                                | Notes                                                                                                                                                                                                                                                    |
+| ------------------------- | ------------------------------- | ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `acnc_register.py`        | ACNC CKAN dataset               | Daily 16:00 UTC                                         | Gated `ENABLE_CHARITY_CHECK_INGEST`. Chunked TOUCH_LAST_SEEN_SQL pattern (post-PR #187).                                                                                                                                                                 |
+| `scamwatch_alerts.py`     | scamwatch.gov.au HTML           | 3h tier (`*/3`)                                         | Narrative extraction                                                                                                                                                                                                                                     |
+| `acsc_alerts.py`          | cyber.gov.au RSS                | **RETIRED from cron 2026-08-07** (manual dispatch only) | probe_acsc proved GH-runner IPs are blackholed at the HTTP layer (TLS OK → read-timeout, every UA); coverage via `inbound_acsc` email                                                                                                                    |
+| `asic_investor_alerts.py` | asic.gov.au JSON                | Daily 16:00 UTC                                         | Investor alerts snapshot                                                                                                                                                                                                                                 |
+| `austrac.py`              | austrac.gov.au RSS              | **Manual only** (disabled on schedule 2026-06-29)       | Money-mule + payments-fraud typology reports. PR-B3 v131. Akamai blocks CI datacenter IPs regardless of UA → tripped its circuit breaker; feed is healthy from a browser UA/normal IP. Re-probe with `gh workflow run scrape-feeds.yml -f feed=austrac`. |
+| `probe_acsc.py`           | cyber.gov.au probe              | Manual                                                  | Diagnostic for WAF behaviour                                                                                                                                                                                                                             |
+| `reddit_scams.py`         | Reddit `r/Scams` + `r/phishing` | Every 6h (`0 */6 * * *`, tier-6h)                       | Source for Reddit Intel pipeline                                                                                                                                                                                                                         |
 
 ### IOC scrapers (write to `vulnerability_iocs` and entity tables)
 
