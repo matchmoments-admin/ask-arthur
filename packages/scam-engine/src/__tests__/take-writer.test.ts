@@ -112,11 +112,15 @@ describe("writeTakes", () => {
     expect(r.takes[0].where ?? null).toBeNull();
   });
 
-  it("still fails loudly when a take has no tells at all", async () => {
-    // The one thing that must NOT be tolerated: tells is the take. An empty
-    // array here would render a heading with nothing under it.
+  it("accepts a take with no tells rather than failing the batch", async () => {
+    // Reversed from the first version, by measurement: a 25-row batch had 2
+    // rows with an empty tells array, and rejecting them discarded all 25.
+    // A take with no tells is still not publishable — but that is the
+    // validator's decision, per row, and it has `empty_take` for it. See
+    // takes.test.ts for the assertion that such a row ends up suppressed.
     const call = fakeCall([{ feedItemId: 41994, tells: [], where: "w" }]);
-    await expect(writeTakes([input()], call as never)).rejects.toThrow();
+    const r = await writeTakes([input()], call as never);
+    expect(r.takes[0].tells).toEqual([]);
   });
 
   it("caps the excerpt so input tokens cannot track body_md", async () => {
@@ -151,5 +155,26 @@ describe("writeTakes", () => {
     expect(TAKE_TIMEOUT_MS).toBeGreaterThanOrEqual(
       (TAKE_MAX_TOKENS / SLOWEST_TOKENS_PER_SEC) * 1000,
     );
+  });
+});
+
+describe("no model-written string may fail the batch on length", () => {
+  // Third instance of this defect class in one feature: tells, then empty
+  // tells, then auLine at 241 chars losing 24 good takes. The rule is uniform
+  // now, so this test is written over the FIELDS rather than one case.
+  it.each(["where", "auLine"])("truncates an over-long %s", async (field) => {
+    const call = fakeCall([
+      {
+        feedItemId: 41994,
+        tells: ["A tell"],
+        where: field === "where" ? "w".repeat(600) : "short",
+        auLine: field === "auLine" ? "a".repeat(600) : null,
+      },
+    ]);
+    const r = await writeTakes([input()], call as never);
+    const value =
+      field === "where" ? r.takes[0].where : (r.takes[0].auLine ?? "");
+    expect(value!.length).toBeLessThanOrEqual(280);
+    expect(value!.endsWith("…")).toBe(true);
   });
 });
