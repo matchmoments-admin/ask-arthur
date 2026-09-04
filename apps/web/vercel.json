@@ -55,7 +55,7 @@
     },
     {
       "path": "/api/cron/reddit-intel-trigger",
-      "schedule": "0 8 * * *"
+      "schedule": "0 1,7,13,19 * * *"
     },
     {
       "path": "/api/cron/reddit-intel-retention",

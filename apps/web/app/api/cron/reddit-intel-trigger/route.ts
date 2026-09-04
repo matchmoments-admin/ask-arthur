@@ -11,13 +11,19 @@ export const dynamic = "force-dynamic";
 
 // Reddit Intelligence — trigger cron.
 //
-// Schedule (vercel.json): 0 8 * * * (daily 08:00 UTC = 6pm AEST).
+// Schedule (vercel.json): 0 1,7,13,19 * * * — one hour after each tier-6h
+// scrape (0 */6 * * *, .github/workflows/scrape-feeds.yml:36).
 //
-// Why daily not 6-hourly: Reddit's natural scrape rate is ~38 posts/day,
-// matching one batch (BATCH_SIZE=40). Running 4× per day produces 4
-// small batches with the same fixed system-prompt overhead — about 4×
-// the cost for the same throughput. Once-daily amortises the system
-// prompt across the full ~38-post batch and halves steady-state spend.
+// Why 6-hourly, reversing the earlier daily decision: that decision costed 4
+// runs a day as 4× the fixed system-prompt overhead. It is not — the system
+// block is sent with cache_control: ephemeral, so runs inside the cache
+// window are billed at ~0.1× on that prefix, and the per-post tokens (which
+// dominate) are identical whether they arrive in one batch or four. What
+// daily did buy was a guaranteed staleness of up to 24 hours on the items
+// at the TOP of the public feed — the ones a reader actually sees — and a
+// drain rate of 40/day against ~37/day of arrivals, so a single missed run
+// never recovered. Four smaller batches also sit better with the 5-slot
+// Inngest plan than one long one.
 //
 // Timing dependency: GitHub Actions runs the Reddit scrape at 06:00 UTC.
 // Firing this cron at 08:00 UTC gives the scrape 2h to complete and
