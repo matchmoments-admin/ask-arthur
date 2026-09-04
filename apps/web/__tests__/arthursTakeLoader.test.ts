@@ -7,14 +7,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  takeIsPageWorthy,
-  TAKE_PAGE_MIN_CONFIDENCE,
-  TAKE_PAGE_MIN_TELLS,
-} from "@/lib/arthurs-take/loader";
-import {
   feedItemHasTake,
   parseFeedItemId,
+  takeIsPageWorthy,
   takeSlug,
+  TAKE_PAGE_MIN_CONFIDENCE,
+  TAKE_PAGE_MIN_TELLS,
   type FeedItem,
 } from "@/lib/feed";
 
@@ -99,11 +97,11 @@ describe("takeIsPageWorthy — not every take earns a URL", () => {
   });
 });
 
-describe("card link and page gate must agree", () => {
+describe("card link and page gate are one rule", () => {
   // A card that links to a page which then 404s is worse than a card with no
-  // link. The two checks live in different modules because FeedCard is a
-  // client component and the loader is server-only, so they cannot share an
-  // implementation — which is exactly why they need a test.
+  // link. These were two implementations kept honest by this test; they are
+  // now one, and feedItemHasTake delegates. The cases stay because they pin
+  // the RULE, and they would catch a future re-divergence.
   const cases: { tells: string[]; confidence: number; status: string }[] = [
     { tells: ["a", "b"], confidence: 0.8, status: "ready" },
     { tells: ["a"], confidence: 0.9, status: "ready" },

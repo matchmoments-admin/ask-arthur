@@ -5,14 +5,24 @@ import { cache } from "react";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
 
-import { parseFeedItemId } from "@/lib/feed";
+import { parseFeedItemId, takeIsPageWorthy } from "@/lib/feed";
 
 import type { IntentLabel } from "@askarthur/types";
 
 // Re-exported for server callers that already import them from here. The
 // definitions live in lib/feed.ts because FeedCard is a client component and
 // cannot import a "server-only" module.
-export { takeSlug, parseFeedItemId } from "@/lib/feed";
+// Re-exported for server callers that already import them from here. The
+// definitions live in lib/feed.ts because FeedCard is a client component and
+// cannot import a "server-only" module — and the page-worthy predicate has to
+// be ONE implementation, not two agreeing ones.
+export {
+  takeSlug,
+  parseFeedItemId,
+  takeIsPageWorthy,
+  TAKE_PAGE_MIN_TELLS,
+  TAKE_PAGE_MIN_CONFIDENCE,
+} from "@/lib/feed";
 
 /**
  * Loader for the Arthur's Take detail page.
@@ -46,33 +56,6 @@ export interface TakeDetail {
   /** Related pattern, when clustering has assigned one and it has a name. */
   themeSlug: string | null;
   themeTitle: string | null;
-}
-
-/**
- * The substance bar for having a page at all.
- *
- * Not every ready take earns a URL. A take with one thin tell is a worse
- * advert for the analysis than no page: six thousand near-duplicate pages of
- * three bullets is a search liability, and it undercuts the "this is a serious
- * analytical corpus" impression the page exists to create. Two tells and
- * reasonable confidence is the floor.
- *
- * Exported because the sitemap must enumerate exactly the same set — if the
- * two ever disagree, the sitemap advertises 404s.
- */
-export const TAKE_PAGE_MIN_TELLS = 2;
-export const TAKE_PAGE_MIN_CONFIDENCE = 0.7;
-
-export function takeIsPageWorthy(row: {
-  takeStatus: string | null;
-  tells: string[] | null;
-  confidence: number | null;
-}): boolean {
-  return (
-    row.takeStatus === "ready" &&
-    (row.tells?.length ?? 0) >= TAKE_PAGE_MIN_TELLS &&
-    (row.confidence ?? 0) >= TAKE_PAGE_MIN_CONFIDENCE
-  );
 }
 
 export const loadTake = cache(

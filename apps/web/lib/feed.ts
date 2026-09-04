@@ -281,19 +281,20 @@ export type FeedItem = {
 /**
  * Does this row have a take good enough to send a reader to its page?
  *
- * Must agree with takeIsPageWorthy in lib/arthurs-take/loader.ts — a card that
- * links to a page which then 404s is worse than a card with no link. Asserted
- * by a test rather than trusted, since the two live in different modules for
- * server/client-boundary reasons.
+ * Delegates to takeIsPageWorthy — ONE implementation of the rule. An earlier
+ * version reimplemented it here because FeedCard is a client component and the
+ * loader is "server-only", and kept the two honest with a test asserting they
+ * agree. A test that two copies match is a guard, not a fix: the rule now
+ * lives in this module, which both sides already import.
  */
 export function feedItemHasTake(item: FeedItem): boolean {
   const t = item.reddit_post_intel;
   if (!t) return false;
-  return (
-    t.take_status === "ready" &&
-    (t.take_tells?.length ?? 0) >= 2 &&
-    (t.confidence ?? 0) >= 0.7
-  );
+  return takeIsPageWorthy({
+    takeStatus: t.take_status,
+    tells: t.take_tells,
+    confidence: t.confidence,
+  });
 }
 
 const CATEGORY_ILLUSTRATIONS: Record<string, string> = {
@@ -382,4 +383,31 @@ export function parseFeedItemId(slug: string): number | null {
   if (!m) return null;
   const id = Number(m[1]);
   return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+/**
+ * The substance bar for having a page at all.
+ *
+ * Not every ready take earns a URL. A take with one thin tell is a worse
+ * advert for the analysis than no page: six thousand near-duplicate pages of
+ * three bullets is a search liability, and it undercuts the "this is a serious
+ * analytical corpus" impression the page exists to create. Two tells and
+ * reasonable confidence is the floor.
+ *
+ * Exported because the sitemap must enumerate exactly the same set — if the
+ * two ever disagree, the sitemap advertises 404s.
+ */
+export const TAKE_PAGE_MIN_TELLS = 2;
+export const TAKE_PAGE_MIN_CONFIDENCE = 0.7;
+
+export function takeIsPageWorthy(row: {
+  takeStatus: string | null;
+  tells: string[] | null;
+  confidence: number | null;
+}): boolean {
+  return (
+    row.takeStatus === "ready" &&
+    (row.tells?.length ?? 0) >= TAKE_PAGE_MIN_TELLS &&
+    (row.confidence ?? 0) >= TAKE_PAGE_MIN_CONFIDENCE
+  );
 }
