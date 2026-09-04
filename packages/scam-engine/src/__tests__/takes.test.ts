@@ -161,3 +161,31 @@ describe("needsTake — the spend guard", () => {
     expect(needsTake({})).toBe(true);
   });
 });
+
+describe("empty tells are suppressed, not fatal", () => {
+  it("suppresses a take the model returned with no tells", async () => {
+    // The batch-level counterpart to take-writer's "accepts no tells": the
+    // row survives to the validator, which refuses it individually, and the
+    // other 24 takes in the batch are unaffected.
+    const call = fakeCall([{ feedItemId: 41994, tells: [], where: null }]);
+    const r = await generateTakesForPosts([row()], call as never);
+    expect(r.results[0].takeStatus).toBe("suppressed");
+    expect(r.results[0].takeSuppressedReason).toBe("empty_take");
+  });
+
+  it("keeps good takes in a batch that also contains an empty one", async () => {
+    const rows = [row({ feedItemId: 1 }), row({ feedItemId: 2 })];
+    const call = fakeCall([
+      { feedItemId: 1, tells: [], where: null },
+      {
+        feedItemId: 2,
+        tells: ["Payment is requested before any service is delivered"],
+        where: "Reported widely.",
+      },
+    ]);
+    const r = await generateTakesForPosts(rows, call as never);
+    expect(r.results[0].takeStatus).toBe("suppressed");
+    expect(r.results[1].takeStatus).toBe("ready");
+    expect(r.readyCount).toBe(1);
+  });
+});

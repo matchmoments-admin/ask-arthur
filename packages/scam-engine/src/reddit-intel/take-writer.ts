@@ -99,6 +99,12 @@ const TakeSchema = z.object({
   // Transform-truncate rather than reject, matching the classifier's quote
   // handling: a 91-character tell is a formatting miss, and failing the whole
   // batch over it throws away 39 good takes and the money spent on them.
+  // NOT .min(1). Measured on a 25-row batch: the model returned an empty
+  // tells array for 2 rows, and requiring one discarded all 25 — the same
+  // reject-vs-truncate trade as the length cap, one field over. Whether a
+  // take with no tells is publishable is the VALIDATOR's call, per row, and
+  // it already has an `empty_take` reason for exactly this. The schema's job
+  // is to accept what the model plausibly returns.
   tells: z
     .array(
       z
@@ -107,7 +113,6 @@ const TakeSchema = z.object({
           t.length <= TELL_MAX_CHARS ? t : truncateOnWord(t, TELL_MAX_CHARS),
         ),
     )
-    .min(1)
     .transform((a) => a.slice(0, 3)),
   // Nullish for the same reason: the prompt asks for one sentence, but a
   // single null must not cost the batch. A take with no tells and no `where`
