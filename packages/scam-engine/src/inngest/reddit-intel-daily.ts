@@ -96,10 +96,16 @@ export const CLASSIFY_TIMEOUT_MS = 360_000;
 //
 // 4,000 chars (~1,000 tokens) covers the complete narrative of essentially
 // every genuine victim report; past that a r/Scams post is chat logs pasted
-// in bulk, where the marginal paragraph adds no classification signal. At 40
-// posts that is ~40K input tokens a run — roughly 3x the pre-v299 spend
-// (measured: US$4.27/30d), which lands near US$13/30d and stays an order of
-// magnitude under the REDDIT_INTEL_CAP_USD brake.
+// in bulk, where the marginal paragraph adds no classification signal.
+//
+// Sizing it per DAY, not per run — the same PR that raised this ceiling also
+// moved the trigger from daily to 6-hourly, and a per-run figure quietly
+// omits the multiplier. Arrivals set the total, not the cadence: ~37 posts a
+// day at ~1,000 input tokens each is ~37K input tokens daily however many
+// batches they arrive in, roughly 3x the pre-v299 spend (measured:
+// US$4.27/30d), landing near US$13/30d. The four cache writes rather than one
+// add about US$0.02/day (see reddit-intel-trigger's header). Both stay an
+// order of magnitude under the REDDIT_INTEL_CAP_USD brake.
 export const CLASSIFY_BODY_CHARS = 4_000;
 
 /**

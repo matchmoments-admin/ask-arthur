@@ -908,23 +908,25 @@ def scrape() -> str:
                     sub_skipped += 1
                     continue
 
-                # Tombstones carry no analysable content: Reddit replaces the
-                # body with the literal string when a post is removed by a mod
-                # or deleted by its author. Previously these were stored
-                # verbatim (the `if scrubbed_body else None` guard does not
-                # fire — the string is non-empty) and then classified. Skip
-                # them at the source; the post is not marked processed, so if
-                # it is ever restored a later run picks it up.
-                if _is_tombstone(post.get("selftext")):
-                    # Counted separately from the dedup skip: two different
-                    # facts, and folding them together would hide a change in
-                    # Reddit's removal rate inside a number that is expected
-                    # to be large. Note the post is NOT added to new_post_ids,
-                    # so it is re-examined each run until it ages out of /new
-                    # — deliberate, so a post a moderator restores is then
-                    # picked up normally.
+                # Tombstones: Reddit replaces the BODY with a literal marker
+                # when a post is removed by a mod or deleted by its author.
+                # Previously stored verbatim (the `if scrubbed_body else None`
+                # guard does not fire — the marker is non-empty) and then
+                # classified as if it were a scam narrative.
+                #
+                # Deliberately NOT an early `continue`. The title survives a
+                # removal, and on r/Scams it frequently carries the scam domain
+                # or a wallet address; an early skip silently dropped those
+                # IOCs, which is a real loss for a row we were only declining
+                # to PUBLISH. So the tombstone flag is computed here and gates
+                # the feed item and the classifier further down, while IOC
+                # extraction below still runs over the title.
+                is_tombstoned = _is_tombstone(post.get("selftext"))
+                if is_tombstoned:
+                    # Counted apart from the dedup skip: two different facts,
+                    # and the dedup count is large by design, so folding them
+                    # together would hide a change in Reddit's removal rate.
                     sub_tombstoned += 1
-                    continue
 
                 # Combine title + selftext for IOC extraction
                 raw_text = f"{post.get('title', '')}\n{post.get('selftext', '')}"
@@ -951,10 +953,14 @@ def scrape() -> str:
                 country_code = _detect_country(post.get("title", ""), sub_name)
                 iocs = _extract_iocs(text, post_url, scam_type, feed_name, post_time, country_code)
 
-                # Evidence image capture
+                # Evidence image capture. Skipped for a tombstoned post: no
+                # feed item is created for one, so the upload would leave an
+                # orphaned R2 object nothing references — and copying the
+                # image out of a post its author has just deleted is the wrong
+                # default regardless of the storage cost.
                 evidence_r2_key = None
                 image_url = _extract_first_image(post)
-                if image_url:
+                if image_url and not is_tombstoned:
                     evidence_r2_key = upload_reddit_evidence(image_url, post_id)
                     if evidence_r2_key:
                         images_captured += 1
@@ -973,7 +979,12 @@ def scrape() -> str:
                 scrubbed_title = _scrub_usernames(post.get("title", ""))
                 scrubbed_body = _scrub_usernames(post.get("selftext", ""))
                 first_url = iocs.urls[0]["url"] if iocs.urls else None
-                image_url_for_feed = _extract_first_image(post)
+
+                # A tombstoned post yields no feed item and no classifier
+                # input: there is no body left to analyse, and the marker must
+                # never reach /scam-feed. Its IOCs were harvested above.
+                if is_tombstoned:
+                    continue
 
                 all_feed_items.append(_build_feed_item(
                     post_id=post_id,
@@ -983,7 +994,11 @@ def scrape() -> str:
                     post_url=post_url,
                     scam_type=scam_type,
                     evidence_r2_key=evidence_r2_key,
-                    image_url=image_url_for_feed,
+                    # The same value the R2 upload used above. It was
+                    # previously re-extracted here, so a non-deterministic
+                    # _extract_first_image could have paired an r2 key with a
+                    # fallback URL for a different image.
+                    image_url=image_url,
                     country_code=country_code,
                     upvotes=post.get("score", 0),
                     source_created_at=post_time,

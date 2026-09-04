@@ -87,6 +87,21 @@ describe("classify input budget", () => {
     expect(usdPerRun).toBeLessThan(0.2);
   });
 
+  it("bounds the DAILY spend, not just the per-run spend", () => {
+    // A per-run bound alone would not go red if someone moved the cron to
+    // hourly — which is close to what happened: the PR that set this cap also
+    // took the trigger from 1 run a day to 4, and the per-run figure hid it.
+    // Arrivals, not cadence, set the real total, so this is bounded by the
+    // worst case where every run is full.
+    const RUNS_PER_DAY = 4; // vercel.json: 0 1,7,13,19 * * *
+    const dailyInputTokens =
+      (RUNS_PER_DAY * BATCH_SIZE * CLASSIFY_BODY_CHARS) / CHARS_PER_TOKEN;
+    const usdPerDay = dailyInputTokens * SONNET_INPUT_USD_PER_TOKEN;
+    // REDDIT_INTEL_CAP_USD defaults to 10/day; stay an order of magnitude under
+    // it even at the pathological full-batch-every-run rate.
+    expect(usdPerDay).toBeLessThan(1);
+  });
+
   it("is long enough to carry a complete victim narrative", () => {
     // The point of v299. A cap at or below the old 500-char excerpt would
     // reintroduce exactly the truncation this replaced.
