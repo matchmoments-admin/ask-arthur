@@ -43,7 +43,7 @@ function ActionRow({ action }: { action: TakeAction }) {
   );
 
   return (
-    <li className="text-sm leading-relaxed">
+    <li className="leading-relaxed">
       {action.href ? (
         <a
           href={action.href}
@@ -74,11 +74,11 @@ export default function ArthursTake({ take }: { take: TakeDetail }) {
   return (
     <section
       aria-labelledby="arthurs-take-heading"
-      className="rounded-lg border border-slate-200 bg-white p-5 sm:p-6"
+      className="rounded-xl border border-border-light bg-white p-6 shadow-sm"
     >
       <h2
         id="arthurs-take-heading"
-        className="text-lg font-semibold text-deep-navy"
+        className="text-deep-navy text-2xl md:text-3xl font-extrabold mb-1"
       >
         What Arthur sees in this pattern
       </h2>
@@ -97,10 +97,10 @@ export default function ArthursTake({ take }: { take: TakeDetail }) {
 
       {take.tells.length > 0 ? (
         <>
-          <h3 className="mt-5 text-sm font-semibold uppercase tracking-wide text-gov-slate">
+          <h3 className="mt-6 mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
             What gives it away
           </h3>
-          <ul className="mt-2 list-disc space-y-1.5 pl-5 text-sm leading-relaxed text-deep-navy">
+          <ul className="list-disc space-y-2 pl-5 text-gov-slate leading-relaxed">
             {take.tells.map((tell) => (
               <li key={tell}>{tell}</li>
             ))}
@@ -110,10 +110,10 @@ export default function ArthursTake({ take }: { take: TakeDetail }) {
 
       {take.where ? (
         <>
-          <h3 className="mt-5 text-sm font-semibold uppercase tracking-wide text-gov-slate">
+          <h3 className="mt-6 mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
             Where it&rsquo;s showing up
           </h3>
-          <p className="mt-2 text-sm leading-relaxed text-deep-navy">
+          <p className="text-gov-slate leading-relaxed">
             {take.where}
           </p>
         </>
@@ -121,10 +121,10 @@ export default function ArthursTake({ take }: { take: TakeDetail }) {
 
       {take.auLine ? (
         <>
-          <h3 className="mt-5 text-sm font-semibold uppercase tracking-wide text-gov-slate">
+          <h3 className="mt-6 mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
             In Australia
           </h3>
-          <p className="mt-2 text-sm leading-relaxed text-deep-navy">
+          <p className="text-gov-slate leading-relaxed">
             {take.auLine}
           </p>
         </>
@@ -132,10 +132,10 @@ export default function ArthursTake({ take }: { take: TakeDetail }) {
 
       {protective.length > 0 ? (
         <>
-          <h3 className="mt-5 text-sm font-semibold uppercase tracking-wide text-gov-slate">
+          <h3 className="mt-6 mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
             What to do
           </h3>
-          <ul className="mt-2 space-y-2.5">
+          <ul className="space-y-3">
             {protective.map((a) => (
               <ActionRow key={a.label} action={a} />
             ))}
@@ -145,10 +145,10 @@ export default function ArthursTake({ take }: { take: TakeDetail }) {
 
       {reporting.length > 0 ? (
         <>
-          <h3 className="mt-5 text-sm font-semibold uppercase tracking-wide text-gov-slate">
+          <h3 className="mt-6 mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
             Where to report it
           </h3>
-          <ul className="mt-2 space-y-2.5">
+          <ul className="space-y-3">
             {reporting.map((a) => (
               <ActionRow key={a.label} action={a} />
             ))}
@@ -167,7 +167,7 @@ export default function ArthursTake({ take }: { take: TakeDetail }) {
         </p>
       ) : null}
 
-      <p className="mt-6 border-t border-slate-100 pt-4 text-xs leading-relaxed text-gov-slate">
+      <p className="mt-8 border-t border-deep-navy/10 pt-4 text-xs leading-relaxed text-gov-slate">
         Arthur&rsquo;s analysis of the pattern described in this report, not a
         judgment about the person who posted it. Generated automatically and
         reviewed for accuracy.
