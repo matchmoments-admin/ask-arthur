@@ -46,10 +46,20 @@ What changes and what does not:
   from the same `_scrub_usernames` output as `description`.
 - **What is published** — unchanged. Every public surface (`/scam-feed`, the
   feed API, the B2B API) continues to render `description`, the ≤500-character
-  excerpt. `body_md` is analysis-only and is not exposed by any public
-  endpoint. This preserves the position in
+  excerpt. `body_md` is analysis-only. This preserves the position in
   [`reddit-intel-reddit-tos.md`](./reddit-intel-reddit-tos.md) §3: no
   republication of full post bodies.
+
+  **Enforced by** `migration-v302-body-md-not-public.sql`: table-wide `SELECT`
+  on `feed_items` is revoked from `anon` and `authenticated` and re-granted
+  column by column, omitting `body_md`. This is not decoration — an earlier
+  draft of this paragraph asserted the same thing while nothing enforced it,
+  and the public anon key could read the column (verified against production,
+  2026-09-04). Row-level security decides which ROWS a role sees and can never
+  restrict a column, so the row policy `feed_items_public_read` was not and
+  could not be the control. A column-level `REVOKE` alone is also insufficient:
+  table-level `SELECT` covers every column, so the table grant has to go first.
+
 - **What is sent to Anthropic** — increases. The classifier reads `body_md` in
   preference to `description`, capped separately at 4,000 characters per post
   (`CLASSIFY_BODY_CHARS`, `packages/scam-engine/src/inngest/reddit-intel-daily.ts`).
