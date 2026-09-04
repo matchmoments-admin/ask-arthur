@@ -1,7 +1,5 @@
 import type { Metadata } from "next";
 import WorldScamMapWithHighlights from "@/components/charts/WorldScamMapWithHighlights";
-import Nav from "@/components/Nav";
-import Footer from "@/components/Footer";
 import { getWorldStats } from "@/lib/dashboard/public-stats";
 import { OG_BASE } from "@/lib/og";
 
@@ -27,9 +25,9 @@ export default async function ScamMapPage() {
   const countryData = await getWorldStats();
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <Nav />
-      <main id="main-content" className="flex-1 w-full max-w-3xl mx-auto px-5 pt-16 pb-16">
+    // Shell from app/(marketing)/layout.tsx. max-w-3xl is this page's
+    // documented exception in DESIGN_SYSTEM.md, which is why width stays local.
+    <div className="max-w-3xl mx-auto">
         <h1 className="text-deep-navy text-4xl md:text-5xl font-extrabold mb-4 leading-tight text-center">
           Global Scam Map
         </h1>
@@ -38,8 +36,6 @@ export default async function ScamMapPage() {
           any country to open it filtered to that location.
         </p>
         <WorldScamMapWithHighlights countryData={countryData} />
-      </main>
-      <Footer />
     </div>
   );
 }

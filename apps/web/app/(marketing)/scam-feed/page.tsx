@@ -3,8 +3,6 @@ import Link from "next/link";
 import { Shield, ChevronDown } from "lucide-react";
 import { gateOrNotFound } from "@/lib/featureGate";
 import FeedList from "@/components/FeedList";
-import Nav from "@/components/Nav";
-import Footer from "@/components/Footer";
 import { SOURCE_CONFIG, relativeTime } from "@/lib/feed";
 import { getInitialFeed, getPinnedRegulatorAlerts } from "@/lib/feed-loaders";
 import { OG_BASE } from "@/lib/og";
@@ -37,9 +35,9 @@ export default async function ScamFeedPage() {
   ]);
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <Nav />
-      <main id="main-content" className="flex-1 w-full max-w-[640px] mx-auto px-5 pt-16 pb-16">
+    // Shell (Nav / Footer / #main-content / padding) comes from
+    // app/(marketing)/layout.tsx. Width stays here — see the layout's note.
+    <div className="max-w-[640px] mx-auto">
         <h1 className="text-deep-navy text-4xl md:text-5xl font-extrabold mb-4 leading-tight text-center">
           Feed
         </h1>
@@ -112,8 +110,6 @@ export default async function ScamFeedPage() {
         )}
 
         <FeedList initialItems={items} initialTotal={total} />
-      </main>
-      <Footer />
     </div>
   );
 }

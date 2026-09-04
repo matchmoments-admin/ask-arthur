@@ -45,6 +45,9 @@ export interface TakeDetail {
   where: string | null;
   auLine: string | null;
   isScamReport: boolean | null;
+  /** Our own neutral one-liners, used as the "what happened" recap. */
+  narrativeSummary: string | null;
+  modusOperandi: string | null;
   countryHints: string[];
   brandsImpersonated: string[];
   writtenAt: string | null;
@@ -81,7 +84,7 @@ export const loadTake = cache(
         // a perfectly clean "Report not found" for every take. Nothing in
         // typecheck, lint or the unit tests could see it: it is a runtime
         // PostgREST resolution, and only a request against real data shows it.
-        "feed_item_id, intent_label, confidence, take_status, take_tells, take_where, take_au_line, take_written_at, is_scam_report, country_hints, brands_impersonated, reddit_intel_themes!reddit_post_intel_theme_id_fkey(slug, title), feed_items(title, description, source_url, source_created_at, published, source)",
+        "feed_item_id, intent_label, confidence, take_status, take_tells, take_where, take_au_line, take_written_at, is_scam_report, narrative_summary, modus_operandi, country_hints, brands_impersonated, reddit_intel_themes!reddit_post_intel_theme_id_fkey(slug, title), feed_items(title, description, source_url, source_created_at, published, source)",
       )
       .eq("feed_item_id", feedItemId)
       .maybeSingle();
@@ -134,6 +137,8 @@ export const loadTake = cache(
       where: data.take_where as string | null,
       auLine: data.take_au_line as string | null,
       isScamReport: (data.is_scam_report as boolean | null) ?? null,
+      narrativeSummary: data.narrative_summary as string | null,
+      modusOperandi: data.modus_operandi as string | null,
       countryHints: (data.country_hints as string[]) ?? [],
       brandsImpersonated: (data.brands_impersonated as string[]) ?? [],
       writtenAt: data.take_written_at as string | null,

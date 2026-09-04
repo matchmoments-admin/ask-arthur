@@ -5,8 +5,6 @@ import { notFound } from "next/navigation";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 
 import ArthursTake from "@/components/arthurs-take/ArthursTake";
-import Footer from "@/components/Footer";
-import Nav from "@/components/Nav";
 import { gateOrNotFound } from "@/lib/featureGate";
 import { loadTake, takeSlug } from "@/lib/arthurs-take/loader";
 import { OG_BASE } from "@/lib/og";
@@ -96,12 +94,7 @@ export default async function ScamFeedTakePage({ params }: PageProps) {
     // itself — an earlier version of this page shipped without them, leaving a
     // public page with no site navigation and a dead skip link (root layout
     // links to #main-content).
-    <div className="min-h-screen flex flex-col">
-      <Nav />
-      <main
-        id="main-content"
-        className="flex-1 w-full max-w-[640px] mx-auto px-5 pt-16 pb-16"
-      >
+    <div className="max-w-[640px] mx-auto">
         <nav className="text-xs text-slate-400 mb-8">
           <Link
             href="/scam-feed"
@@ -124,13 +117,30 @@ export default async function ScamFeedTakePage({ params }: PageProps) {
             </h1>
           </header>
 
-          {/* The SAME excerpt the card shows — never body_md. The Reddit-terms
-              position is that we publish our paraphrase, not the source body,
-              and this page must not widen what the feed already shows. */}
-          {take.excerpt ? (
-            <blockquote className="mb-4 border-l-2 border-deep-navy/15 pl-4 text-gov-slate leading-relaxed">
-              {take.excerpt}
-            </blockquote>
+          {/* OUR recap, not the poster's raw text.
+              This used to render the 500-char excerpt verbatim. It read badly
+              — cut mid-word, typos intact — and it put someone's unedited
+              account above our analysis, which is the wrong order for a page
+              whose subject is the pattern.
+
+              narrative_summary and modus_operandi are already generated for
+              every classified row and were going unused. They are neutral, ours,
+              and complete sentences. Using them also strengthens the position in
+              reddit-intel-reddit-tos.md §3: we publish our paraphrase, not the
+              source body. The original is one click away, immediately below. */}
+          {take.narrativeSummary || take.modusOperandi ? (
+            <div className="mb-4">
+              <h2 className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+                What happened
+              </h2>
+              <ul className="list-disc space-y-2 pl-5 text-gov-slate leading-relaxed">
+                {take.narrativeSummary ? <li>{take.narrativeSummary}</li> : null}
+                {take.modusOperandi &&
+                take.modusOperandi !== take.narrativeSummary ? (
+                  <li>{take.modusOperandi}</li>
+                ) : null}
+              </ul>
+            </div>
           ) : null}
 
           {/* Attribution is required, not decoration — every derived view
@@ -158,8 +168,6 @@ export default async function ScamFeedTakePage({ params }: PageProps) {
             for the latest reports.
           </p>
         </article>
-      </main>
-      <Footer />
     </div>
   );
 }
