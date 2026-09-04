@@ -135,3 +135,32 @@ describe("card link and page gate must agree", () => {
     expect(feedItemHasTake({} as FeedItem)).toBe(false);
   });
 });
+
+describe("the loader's select string", () => {
+  // This is the shape of a bug that shipped: an ambiguous PostgREST embed made
+  // loadTake return null for EVERY take, so the page rendered a clean "Report
+  // not found" and nothing in typecheck, lint or unit tests could see it —
+  // relationship resolution happens at request time, against real data.
+  //
+  // A unit test cannot run PostgREST. What it CAN do is refuse the specific
+  // mistake: an embed of a table that reddit_post_intel reaches by more than
+  // one foreign key must name the constraint.
+  const AMBIGUOUS_EMBEDS = ["reddit_intel_themes"];
+
+  it("names the constraint on every ambiguous embed", async () => {
+    const src = await import("node:fs").then((fs) =>
+      fs.readFileSync(
+        new URL("../lib/arthurs-take/loader.ts", import.meta.url),
+        "utf8",
+      ),
+    );
+    for (const table of AMBIGUOUS_EMBEDS) {
+      const bare = new RegExp(`(?<!!)\\b${table}\\(`);
+      expect(
+        bare.test(src),
+        `${table} is embedded without naming its FK constraint — reddit_post_intel reaches it by both theme_id and the reddit_post_intel_themes join table, so PostgREST refuses the embed at runtime and the loader silently returns null`,
+      ).toBe(false);
+      expect(src).toContain(`${table}!`);
+    }
+  });
+});

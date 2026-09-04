@@ -89,7 +89,16 @@ export const loadTake = cache(
         // Explicit columns. body_md is deliberately absent: this page renders
         // the same excerpt the card does, per the Reddit-terms position on not
         // republishing full post bodies.
-        "feed_item_id, intent_label, confidence, take_status, take_tells, take_where, take_au_line, take_written_at, is_scam_report, country_hints, brands_impersonated, reddit_intel_themes(slug, title), feed_items(title, description, source_url, source_created_at, published, source)",
+        //
+        // The theme embed MUST name its constraint. Two FK paths exist between
+        // reddit_post_intel and reddit_intel_themes — the direct theme_id, and
+        // the reddit_post_intel_themes join table — so an unqualified embed
+        // fails with "more than one relationship was found". That error is
+        // caught and logged, and the loader returns null, so the page rendered
+        // a perfectly clean "Report not found" for every take. Nothing in
+        // typecheck, lint or the unit tests could see it: it is a runtime
+        // PostgREST resolution, and only a request against real data shows it.
+        "feed_item_id, intent_label, confidence, take_status, take_tells, take_where, take_au_line, take_written_at, is_scam_report, country_hints, brands_impersonated, reddit_intel_themes!reddit_post_intel_theme_id_fkey(slug, title), feed_items(title, description, source_url, source_created_at, published, source)",
       )
       .eq("feed_item_id", feedItemId)
       .maybeSingle();
