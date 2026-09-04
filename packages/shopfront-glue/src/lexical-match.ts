@@ -62,6 +62,18 @@ const CONFUSABLES: Record<string, string> = {
 
 const LEVENSHTEIN_THRESHOLD = 1;
 const MIN_BRAND_LEN_FOR_LEVENSHTEIN = 5;
+// At/above this length a 1-edit neighbourhood is sparse enough to trust, so
+// the hit needs no further justification; below it, see the gate at the
+// Levenshtein branch.
+//
+// MEASURED, not chosen (August 2026 cohort, 1,032 candidates). 7 looked
+// tidier and was badly wrong: amazon / google / qantas are all SIX characters,
+// so a cut at 7 dropped amaz0n.lol, amažon.com, åmazon.net, xn--amazn-3ta.net,
+// g0ogle.net, gooqle.cfd, googlle.id, qantos.site — the highest-value squats
+// in the set. The false positives are a five-character phenomenon (bonds,
+// stake, kmart, ubank, coles, mecca, hesta, iinet, shein, sapol), because
+// that is where the 1-edit neighbourhood is dense with real English words.
+const MIN_BRAND_LEN_FOR_UNGATED_LEVENSHTEIN = 6;
 const MAX_MATCH_SCORE = 0.95;
 
 // Substring threshold: brands ≥ this length match anywhere in the
@@ -204,7 +216,20 @@ export function lexicalMatch(
   let best: MatchResult | null = null;
 
   for (const { entry, token: brand } of index.tokens) {
-    if (hasConfusable && normalisedPrimary.includes(brand)) {
+    // Same length gate the substring rule uses. This branch had NONE — no
+    // length gate, no scam-context gate — and it is evaluated FIRST with a
+    // `continue`, so the loosest rule pre-empted both guarded ones. A 2-char
+    // token therefore matched inside ANY confusable-folded string: all eight
+    // confusable hits in the August 2026 cohort were ordinary Russian .рф
+    // domains whose Cyrillic folds to Latin and happens to contain "ey"
+    // (всеумею, жидкийлинолеум, неурокех). The reasoning in the
+    // MIN_BRAND_LEN_FOR_LOOSE_SUBSTRING comment above always applied here too;
+    // it was just never carried across.
+    const confusableHit =
+      brand.length >= MIN_BRAND_LEN_FOR_LOOSE_SUBSTRING
+        ? normalisedPrimary.includes(brand)
+        : normalisedPrimary.split(/[-_]/).includes(brand);
+    if (hasConfusable && confusableHit) {
       best = pickBetter(best, {
         brand: entry.brand,
         legitimate_domain: entry.legitimate_domains[0] ?? "",
@@ -236,7 +261,35 @@ export function lexicalMatch(
 
     if (brand.length >= MIN_BRAND_LEN_FOR_LEVENSHTEIN) {
       const dist = levenshtein(matchPrimary, brand);
-      if (dist > 0 && dist <= LEVENSHTEIN_THRESHOLD) {
+      // FP gate for SHORT brands only (v4, #1082).
+      //
+      // The 1-edit neighbourhood of a 5-char brand is dense with ordinary
+      // words — bonus/bands/bounds/bones from "bonds", stage/snake/shake from
+      // "stake", mart from "kmart", bank from "ubank", festa/nesta from
+      // "hesta" — and this rule produced 52% of all matches with no FP gate at
+      // all. August 2026: bonds.com.au carried 28 hits of which ~21 were this
+      // class (including gonds.* × 9, one bulk registration).
+      //
+      // But a blanket context gate is WRONG, and the v2 tests say so: the
+      // whole point of this rule is to catch bare misspellings that have no
+      // context token (`qkmart.com`, `bunings.net`). So gate on what actually
+      // separates them:
+      //
+      //   * long brand (≥7)      — its 1-edit neighbourhood has no real words;
+      //                            `bunings.net` (bunnings) stays caught.
+      //   * brand still present  — an INSERTION typo (`qkmart`, `kmartz`,
+      //                            `2kmart`) keeps the brand contiguous; that
+      //                            is a squat, not a coincidence.
+      //   * otherwise            — a substitution/deletion into some other
+      //                            word must earn it with a scam-context
+      //                            token from OUTSIDE the primary label, so
+      //                            `b0nds.shop` fires and `bonus.business`,
+      //                            `mart.services`, `bank.camera` do not.
+      const shortBrandTrusted =
+        brand.length >= MIN_BRAND_LEN_FOR_UNGATED_LEVENSHTEIN ||
+        matchPrimary.includes(brand) ||
+        hasScamContextOutsidePrimary(decodedDomain, matchPrimary);
+      if (dist > 0 && dist <= LEVENSHTEIN_THRESHOLD && shortBrandTrusted) {
         const score = 1 - dist / Math.max(matchPrimary.length, brand.length);
         best = pickBetter(best, {
           brand: entry.brand,
@@ -285,6 +338,29 @@ export function decodeIdnLabel(label: string): string {
 function pickBetter(a: MatchResult | null, b: MatchResult): MatchResult {
   if (!a) return b;
   return b.score > a.score ? b : a;
+}
+
+/**
+ * Scam-context token drawn from anywhere EXCEPT the primary label.
+ *
+ * `hasScamContext` strips the *brand* from the stem, which is right for a
+ * substring hit (the brand is literally there). A Levenshtein hit is different:
+ * the whole primary label IS the near-miss, so leaving it in lets the label
+ * supply its own justification — `bank.camera` would satisfy the "bank" token
+ * with the very word that made it a false positive. Stripping the primary
+ * label instead means the token has to come from a subdomain or the gTLD.
+ */
+function hasScamContextOutsidePrimary(domain: string, primary: string): boolean {
+  const labels = domain.split(".");
+  const lastLabel = labels.at(-1) ?? "";
+  const stem = lastLabel.length <= 2 ? labels.slice(0, -1).join(".") : domain;
+  const residue = stem.replaceAll(primary, " ");
+  const residueSegments = residue.split(/[-_.]/).filter(Boolean);
+  return SCAM_CONTEXT_TOKENS.some((token) =>
+    SEGMENT_BOUNDED_TOKENS.has(token)
+      ? residueSegments.includes(token)
+      : residue.includes(token),
+  );
 }
 
 function hasScamContext(domain: string, primary: string, brand: string): boolean {
