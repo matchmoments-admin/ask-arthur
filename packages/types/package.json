@@ -5,6 +5,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./analysis": "./src/analysis.ts",
+    "./scam-taxonomy": "./src/scam-taxonomy.ts",
     "./billing": "./src/billing.ts",
     "./db": "./src/db.generated.ts",
     "./extension-security": "./src/extension-security.ts",
