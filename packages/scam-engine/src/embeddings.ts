@@ -357,7 +357,12 @@ async function callInChunks(
 }
 
 /** Exported for tests — the chunk boundaries are the part worth asserting. */
-export const __testing = { chunkTexts, EMBED_CHUNK_TEXTS, EMBED_CHUNK_TOKENS };
+export const __testing = {
+  chunkTexts,
+  EMBED_CHUNK_TEXTS,
+  EMBED_CHUNK_TOKENS,
+  EMBED_CHUNK_PAUSE_MS,
+};
 
 function resolveSpec(opts: EmbedOptions): ModelSpec {
   if (opts.modelId) {
