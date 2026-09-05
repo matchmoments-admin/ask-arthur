@@ -25,7 +25,7 @@ import "./_load-env-config";
 
 import { createServiceClient } from "@askarthur/supabase/server";
 import { fetchAllRows } from "@askarthur/supabase/paginate";
-import { isFeatureBraked, logCost } from "@askarthur/scam-engine/cost-log";
+import { runSpendingBackfill } from "@askarthur/scam-engine/backfill";
 import {
   classifyPosts,
   PROMPT_VERSION_FOR_BACKFILL,
@@ -55,10 +55,6 @@ async function main() {
   const supabase = createServiceClient();
   if (!supabase) throw new Error("no supabase service client");
 
-  if (await isFeatureBraked("reddit_intel")) {
-    console.log("feature_brakes.reddit_intel engaged — refusing to spend.");
-    return;
-  }
 
   // Both reads paginate. `.limit(500)` used to cap the candidate pool here, so
   // asking for 1,000 could only ever see the newest 500 posts and would report
@@ -118,109 +114,57 @@ async function main() {
   );
   if (todo.length === 0) return;
 
-  // --dry stops HERE, before the model call.
-  //
-  // It used to stop one step later, guarding the upsert and logCost but not
-  // classifyPosts — so a "dry" run classified every post for real, paid for
-  // it, discarded the result, and recorded nothing to cost_telemetry, the
-  // daily cap or the weekly digest. The same defect was in _take-backfill.ts
-  // and cost US$0.14 of invisible spend before it was found. Untracked spend
-  // is the worse half: even if the call were wanted, it would have to be
-  // logged.
-  if (DRY) {
-    console.log(
-      `DRY — no model call. ${todo.length} posts would cost about US$${(todo.length * USD_PER_POST).toFixed(2)} at the measured rate.`,
-    );
-    return;
-  }
+  // The brake, the dry gate, per-batch isolation, cost logging and the
+  // partial-run exit all live in runSpendingBackfill now. This script and
+  // _take-backfill.ts had four of those five wrong, independently, weeks
+  // apart — which is what a missing Module looks like from the outside.
+  // What is left here is the part that is genuinely about classification.
+  await runSpendingBackfill<ClassifyPostInput>({
+    label: "classify_backfill_script",
+    brakeFeature: "reddit_intel",
+    costFeature: "reddit-intel-classify",
+    provider: "anthropic",
+    operation: "messages.create",
+    usdPerItem: USD_PER_POST,
+    items: todo,
+    batchSize: BATCH,
+    dryRun: DRY,
+    runBatch: async (slice) => {
+      const res = await classifyPosts(slice);
 
-  let inserted = 0;
-  let spend = 0;
-  let batchFailures = 0;
+      const rows = res.result.perPost.map((e) => ({
+        feed_item_id: e.feedItemId,
+        intent_label: e.intentLabel,
+        confidence: e.confidence,
+        modus_operandi: e.modusOperandi ?? null,
+        brands_impersonated: e.brandsImpersonated,
+        victim_emotion: e.victimEmotion ?? null,
+        novelty_signals: e.noveltySignals,
+        tactic_tags: e.tacticTags,
+        country_hints: e.countryHints,
+        narrative_summary: e.narrativeSummary ?? null,
+        model_version: res.modelId,
+        prompt_version: PROMPT_VERSION_FOR_BACKFILL,
+      }));
 
-  for (let i = 0; i < todo.length; i += BATCH) {
-    const slice = todo.slice(i, i + BATCH);
+      // ignoreDuplicates matches the Inngest step: UNIQUE(feed_item_id) is the
+      // idempotency key, and a concurrent classify run must not error here.
+      const { error: upErr } = await supabase
+        .from("reddit_post_intel")
+        .upsert(rows, { onConflict: "feed_item_id", ignoreDuplicates: true });
+      if (upErr) throw new Error(`upsert: ${upErr.message}`);
 
-    // Per-batch isolation. Without it one malformed model response ends the
-    // run: that is what happened to the take backfill on 2026-09-05, at batch
-    // 118 of 133, leaving 382 rows behind while the totals still read like a
-    // finished job. A batch is independent of every other batch.
-    let res: Awaited<ReturnType<typeof classifyPosts>>;
-    try {
-      res = await classifyPosts(slice);
-    } catch (e) {
-      batchFailures += 1;
-      console.error(
-        `  batch ${i / BATCH + 1}: FAILED (${slice.length} posts left for a later run) — ${
-          e instanceof Error ? e.message : String(e)
-        }`,
-      );
-      continue;
-    }
-    spend += res.estimatedCostUsd;
-
-    const rows = res.result.perPost.map((e) => ({
-      feed_item_id: e.feedItemId,
-      intent_label: e.intentLabel,
-      confidence: e.confidence,
-      modus_operandi: e.modusOperandi ?? null,
-      brands_impersonated: e.brandsImpersonated,
-      victim_emotion: e.victimEmotion ?? null,
-      novelty_signals: e.noveltySignals,
-      tactic_tags: e.tacticTags,
-      country_hints: e.countryHints,
-      narrative_summary: e.narrativeSummary ?? null,
-      model_version: res.modelId,
-      prompt_version: PROMPT_VERSION_FOR_BACKFILL,
-    }));
-
-    // Logged before the write and on every path that spends, because the money
-    // is already gone by this line. There is deliberately no flag that skips
-    // this.
-    //
-    // `post_count` is the key the Inngest step uses. This script wrote `posts`,
-    // so backfill spend was invisible to any cost query keyed on the cron's
-    // name — which is why the first cost-per-post figure came out 130x wrong,
-    // computed over the 24 of 79 calls that happened to carry the other key.
-    await logCost({
-      feature: "reddit-intel-classify",
-      provider: "anthropic",
-      operation: "messages.create",
-      units: res.usage.inputTokens + res.usage.outputTokens,
-      estimatedCostUsd: res.estimatedCostUsd,
-      metadata: {
-        model: res.modelId,
-        post_count: slice.length,
-        via: "classify_backfill_script",
-      },
-    });
-
-    // ignoreDuplicates matches the Inngest step: UNIQUE(feed_item_id) is the
-    // idempotency key, and a concurrent classify run must not error here.
-    const { error: upErr } = await supabase
-      .from("reddit_post_intel")
-      .upsert(rows, { onConflict: "feed_item_id", ignoreDuplicates: true });
-    if (upErr) {
-      batchFailures += 1;
-      console.error(`  batch ${i / BATCH + 1}: upsert failed — ${upErr.message}`);
-      continue;
-    }
-
-    inserted += rows.length;
-    console.log(
-      `  batch ${i / BATCH + 1}: ${rows.length} classified · US$${res.estimatedCostUsd.toFixed(4)}${res.truncated ? " · TRUNCATED" : ""}`,
-    );
-  }
-
-  console.log(`\ntotal — ${inserted} classified · US$${spend.toFixed(4)}`);
-
-  if (batchFailures > 0) {
-    console.error(
-      `\n${batchFailures} of ${Math.ceil(todo.length / BATCH)} batches failed. ` +
-        `Re-run the same command — unclassified posts are re-selected, so it picks up where this left off.`,
-    );
-    process.exitCode = 1;
-  }
+      return {
+        costUsd: res.estimatedCostUsd,
+        units: res.usage.inputTokens + res.usage.outputTokens,
+        // `post_count` is the key the Inngest step uses. This script wrote
+        // `posts`, so backfill spend was invisible to any cost query keyed on
+        // the cron's shape.
+        metadata: { model: res.modelId, post_count: slice.length },
+        summary: `${rows.length} classified${res.truncated ? " · TRUNCATED" : ""}`,
+      };
+    },
+  });
 }
 
 main().catch((e) => {
