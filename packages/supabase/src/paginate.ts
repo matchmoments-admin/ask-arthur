@@ -97,11 +97,31 @@ export async function fetchAllRows<T>(
     const page = data ?? [];
     rows.push(...page);
 
+    // maxRows is checked FIRST, and that order is load-bearing.
+    //
+    // It used to come second, after the short-page return. So whenever the
+    // whole result set fitted in one page — fewer than 1,000 rows — the
+    // short-page branch returned everything and maxRows was never applied at
+    // all. A caller asking for 100 got 976.
+    //
+    // That is harmless for a caller using maxRows as a safety ceiling, which
+    // is why it survived: every existing caller either passes a huge value or
+    // re-slices afterwards. It is NOT harmless for a caller using maxRows as a
+    // SPEND limit, which is what _embed-backfill.ts did on its first run —
+    // asked for 100 rows and got the full 976.
+    if (rows.length >= maxRows) {
+      return {
+        rows: rows.slice(0, maxRows),
+        // `truncated` means "rows exist that we did not read". A short page
+        // proves there were none, so the flag depends on which condition we
+        // are in, not merely on having hit the cap.
+        truncated: page.length === pageSize,
+        error: null,
+      };
+    }
+
     // A short page means the server ran out of matching rows — the only
     // trustworthy end-of-set signal, since the server never tells us the total.
     if (page.length < pageSize) return { rows, truncated: false, error: null };
-    if (rows.length >= maxRows) {
-      return { rows: rows.slice(0, maxRows), truncated: true, error: null };
-    }
   }
 }

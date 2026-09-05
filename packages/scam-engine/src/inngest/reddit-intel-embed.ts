@@ -33,7 +33,7 @@ import {
   isRedditIntelBraked,
 } from "./reddit-intel-error-log";
 
-interface IntelRowForEmbed {
+export interface IntelRowForEmbed {
   id: string;
   intent_label: string;
   brands_impersonated: string[] | null;
@@ -47,7 +47,13 @@ interface IntelRowForEmbed {
 // that share narratives but differ in intent (e.g. romance vs employment
 // scams that both involve "I sent them money via gift cards") cluster
 // incorrectly.
-function buildEmbedText(row: IntelRowForEmbed): string {
+/**
+ * Exported so an operator drain can build the SAME text this job builds.
+ * A second copy would produce vectors from a different string, and those
+ * vectors would sit in the same column and cluster against each other while
+ * meaning slightly different things — a difference nothing would surface.
+ */
+export function buildEmbedText(row: IntelRowForEmbed): string {
   const parts: string[] = [`category:${row.intent_label}`];
   if (row.brands_impersonated && row.brands_impersonated.length > 0) {
     parts.push(`brands:${row.brands_impersonated.join(",")}`);
@@ -65,7 +71,7 @@ function buildEmbedText(row: IntelRowForEmbed): string {
 // which PostgREST then sends as Postgres array syntax `{...}` — wrong for
 // vector columns. The unambiguous-everywhere format is the bracketed text
 // `[1,2,3]` which pgvector accepts on insert / update.
-function vectorToPgString(vec: number[]): string {
+export function vectorToPgString(vec: number[]): string {
   return "[" + vec.join(",") + "]";
 }
 
