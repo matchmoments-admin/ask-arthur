@@ -235,10 +235,7 @@ async function embedInternal(
     }
   }
 
-  const result =
-    spec.provider === "voyage"
-      ? await callVoyage(texts, spec, inputType, opts.requestId)
-      : await callOpenAI(texts, spec, opts.requestId);
+  const result = await callInChunks(texts, spec, inputType, opts.requestId);
 
   // Populate cache on success — fire-and-forget, never blocks.
   if (texts.length === 1 && result.vectors.length === 1) {
@@ -247,6 +244,120 @@ async function embedInternal(
 
   return result;
 }
+
+/**
+ * Provider request sizing. One request per chunk, paced between chunks.
+ *
+ * WHY THIS EXISTS. `embed()` used to hand the provider every text in one
+ * request, however many there were. That was correct for the size it was
+ * built at — the Reddit cohort is ~40 posts a day — and it stayed correct
+ * until a backfill made the cohort 500. Voyage returned 429 and the run died:
+ *
+ *   Voyage embeddings 429: "You have not yet added your payment method ...
+ *   reduced rate limits of 3 RPM and 10K TPM"
+ *
+ * 500 rows is roughly 50,000 tokens in one request against a 10,000-per-minute
+ * ceiling. Inngest retried three times, each retry sent the same oversized
+ * request, and 976 rows were left with no embedding and therefore no theme.
+ *
+ * Seven jobs call `embed()`, two of them backfills that will pass large
+ * arrays for the same reason. Chunking one caller would leave six carrying
+ * the same latent defect, so it lives here — the deletion test favours one
+ * home over seven.
+ *
+ * Sized for the FREE tier deliberately. The point is a call path that is
+ * correct at any input size, not one that merely needs a bigger quota; a
+ * paid tier makes this faster, not necessary. Both knobs are env-tunable so
+ * raising the quota does not need a deploy.
+ */
+const EMBED_CHUNK_TEXTS = Number(
+  process.env.EMBED_CHUNK_TEXTS ?? 20,
+);
+/** Rough char/4 heuristic — enough to keep a chunk under the token ceiling. */
+const EMBED_CHUNK_TOKENS = Number(
+  process.env.EMBED_CHUNK_TOKENS ?? 3_000,
+);
+/** Only ever waited BETWEEN chunks, so a single-chunk call is unaffected. */
+const EMBED_CHUNK_PAUSE_MS = Number(
+  process.env.EMBED_CHUNK_PAUSE_MS ?? 20_000,
+);
+
+function chunkTexts(texts: string[]): string[][] {
+  const chunks: string[][] = [];
+  let current: string[] = [];
+  let tokens = 0;
+  for (const t of texts) {
+    const est = Math.ceil(t.length / 4);
+    if (
+      current.length > 0 &&
+      (current.length >= EMBED_CHUNK_TEXTS ||
+        tokens + est > EMBED_CHUNK_TOKENS)
+    ) {
+      chunks.push(current);
+      current = [];
+      tokens = 0;
+    }
+    current.push(t);
+    tokens += est;
+  }
+  if (current.length > 0) chunks.push(current);
+  return chunks;
+}
+
+async function callInChunks(
+  texts: string[],
+  spec: ModelSpec,
+  inputType: VoyageInputType,
+  requestId?: string,
+): Promise<EmbedResult> {
+  const chunks = chunkTexts(texts);
+
+  // The overwhelming majority of calls — every query path, every single-text
+  // embed — are one chunk, and take exactly the path they always did.
+  if (chunks.length === 1) {
+    return spec.provider === "voyage"
+      ? await callVoyage(texts, spec, inputType, requestId)
+      : await callOpenAI(texts, spec, requestId);
+  }
+
+  const vectors: number[][] = [];
+  let totalTokens = 0;
+  let estimatedCostUsd = 0;
+
+  for (let i = 0; i < chunks.length; i++) {
+    // Paced, not just chunked. Splitting a 50,000-token request into fifteen
+    // 3,000-token ones still breaches a per-MINUTE ceiling if they all leave
+    // at once.
+    if (i > 0 && EMBED_CHUNK_PAUSE_MS > 0) {
+      await new Promise((r) => setTimeout(r, EMBED_CHUNK_PAUSE_MS));
+    }
+    const res =
+      spec.provider === "voyage"
+        ? await callVoyage(chunks[i], spec, inputType, requestId)
+        : await callOpenAI(chunks[i], spec, requestId);
+
+    // ORDER IS THE CONTRACT. Callers match vectors to rows by index —
+    // reddit-intel-embed writes `result.vectors[i]` onto `rows[i]` — so a
+    // reordering here attaches every embedding to the wrong post and nothing
+    // would ever surface it. Chunks are consumed in order and appended in
+    // order, and `embeddings.chunking.test.ts` asserts it.
+    vectors.push(...res.vectors);
+    totalTokens += res.totalTokens;
+    estimatedCostUsd += res.estimatedCostUsd;
+  }
+
+  return {
+    vectors,
+    provider: spec.provider,
+    modelId: spec.modelId,
+    domain: spec.domain,
+    totalTokens,
+    estimatedCostUsd,
+  };
+}
+
+/** Exported for tests — the chunk boundaries are the part worth asserting. */
+export const __testing = { chunkTexts, EMBED_CHUNK_TEXTS, EMBED_CHUNK_TOKENS };
 
 function resolveSpec(opts: EmbedOptions): ModelSpec {
   if (opts.modelId) {
