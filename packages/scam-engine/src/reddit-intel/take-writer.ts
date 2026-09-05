@@ -26,6 +26,8 @@
  */
 import { z } from "zod";
 
+import { objectOrJsonString } from "../anthropic";
+
 import type { IntentLabel } from "@askarthur/types";
 
 import { callClaudeJson } from "../anthropic";
@@ -186,8 +188,19 @@ const TakeSchema = z.object({
     .nullish(),
 });
 
+/**
+ * `takes` is wrapped because a batch response is the one shape here that
+ * cannot be flattened — it is an array of objects by definition, and that is
+ * exactly what Claude occasionally hand-stringifies. It did, on 2026-09-05, at
+ * batch 118 of a 133-batch backfill: `expected array, received string`, with
+ * the content itself perfectly well-formed inside the string.
+ *
+ * The unwrapped version threw, and the throw took the remaining 16 batches
+ * with it. See objectOrJsonString for the shared rescue and why a flat schema
+ * is still the first defence.
+ */
 export const TakeBatchSchema = z.object({
-  takes: z.array(TakeSchema),
+  takes: objectOrJsonString(z.array(TakeSchema)),
 });
 
 export type GeneratedTake = z.infer<typeof TakeSchema>;

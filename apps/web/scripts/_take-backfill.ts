@@ -67,6 +67,15 @@ async function main() {
   const SELECT =
     "id, feed_item_id, intent_label, confidence, modus_operandi, narrative_summary, tactic_tags, brands_impersonated, country_hints, is_emerging, is_scam_report, take_status, take_tells, feed_items(description, body_md, published, source)";
 
+  // BOTH paths paginate, and the second one is the reason to say why.
+  //
+  // `.limit(COUNT)` looked safe here because COUNT is an argument — but
+  // PostgREST caps any single read at 1,000 rows, so `... 3400` would have
+  // quietly generated takes for 1,000 rows, printed "1000 rows need a take",
+  // and left 2,307 behind with nothing to indicate they had been skipped.
+  // __tests__/rowCap.test.ts scans for a LITERAL over 1,000 and cannot see a
+  // variable, so this one had no guard at all.
+  //
   // The regenerate path has to SCAN every ready take to find the cut ones,
   // because PostgREST cannot express "any element of this text[] ends with …"
   // and so cannot filter it server-side.
@@ -88,12 +97,18 @@ async function main() {
             .range(from, to),
         { maxRows: 50_000 },
       ).then((r) => ({ data: r.rows, error: r.error }))
-    : await supabase
-        .from("reddit_post_intel")
-        .select(SELECT)
-        .eq("take_status", "none")
-        .order("processed_at", { ascending: false })
-        .limit(COUNT);
+    : await fetchAllRows<Record<string, unknown>>(
+        (from, to) =>
+          supabase
+            .from("reddit_post_intel")
+            .select(SELECT)
+            .eq("take_status", "none")
+            .order("processed_at", { ascending: false })
+            .range(from, to),
+        // Newest first, and stop as soon as we have what was asked for — the
+        // caller chooses the spend, so there is no reason to read further.
+        { maxRows: COUNT },
+      ).then((r) => ({ data: r.rows, error: r.error }));
 
   if (error) throw new Error(error.message);
 
@@ -148,6 +163,7 @@ async function main() {
   let suppressed = 0;
   let failed = 0;
   let spend = 0;
+  let batchFailures = 0;
 
   for (let i = 0; i < candidates.length; i += BATCH) {
     const slice = candidates.slice(i, i + BATCH);
@@ -172,7 +188,31 @@ async function main() {
       };
     });
 
-    const out = await generateTakesForPosts(inputs);
+    // Per-batch isolation.
+    //
+    // Without it, one malformed model response ends the run. That is not
+    // hypothetical: on 2026-09-05 batch 118 of 133 came back with `takes` as a
+    // JSON string, the schema threw, and the throw propagated out of the loop
+    // and abandoned the remaining 16 batches — 382 rows silently left behind
+    // while the process exited. The rows already written were fine, so nothing
+    // looked broken; the run just stopped early.
+    //
+    // A batch is independent of every other batch. The correct response to one
+    // failing is to record it and keep going, and to make the count loud at
+    // the end so a short run cannot be mistaken for a complete one.
+    let out: Awaited<ReturnType<typeof generateTakesForPosts>>;
+    try {
+      out = await generateTakesForPosts(inputs);
+    } catch (e) {
+      batchFailures += 1;
+      failed += inputs.length;
+      console.error(
+        `  batch ${i / BATCH + 1}: FAILED (${inputs.length} rows left for a later run) — ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      );
+      continue;
+    }
     spend += out.estimatedCostUsd;
 
     // Log to cost_telemetry under the SAME tag the live path uses, on every
@@ -231,6 +271,16 @@ async function main() {
   console.log(
     `\ntotal — ready ${ready} · suppressed ${suppressed} · failed ${failed} · US$${spend.toFixed(4)}`,
   );
+
+  // Loud, and a non-zero exit. A partial run that reports like a complete one
+  // is how 382 rows went missing without anyone noticing the first time.
+  if (batchFailures > 0) {
+    console.error(
+      `\n${batchFailures} of ${Math.ceil(candidates.length / BATCH)} batches failed. ` +
+        `Re-run the same command — rows without a take are still selected, so it picks up where this left off.`,
+    );
+    process.exitCode = 1;
+  }
 }
 
 main().catch((e) => {

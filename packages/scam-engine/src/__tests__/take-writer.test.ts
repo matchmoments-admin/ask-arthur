@@ -189,3 +189,93 @@ describe("no model-written string may fail the batch on length", () => {
     expect(value!.endsWith("…")).toBe(true);
   });
 });
+
+describe("a stringified batch does not end the run", () => {
+  /**
+   * The real 2026-09-05 failure, at batch 118 of a 133-batch backfill:
+   *
+   *   Claude output failed schema validation
+   *   issues: [{ path: ["takes"], expected: "array", received: "string" }]
+   *   preview: {"takes":"[\n  {\n    \"feedItemId\": 3265, ...
+   *
+   * The content inside the string was perfectly well-formed. Claude had simply
+   * hand-serialised the array instead of emitting it, which it also did to the
+   * monthly blog generator in June. Unwrapped, the schema threw, the throw
+   * escaped the batch loop, and 382 rows were abandoned mid-run.
+   */
+  it("accepts takes hand-serialised as a JSON string", async () => {
+    const call = vi.fn(
+      async (args: { schema: { parse: (v: unknown) => unknown } }) => ({
+        result: args.schema.parse({
+          takes: JSON.stringify([
+            {
+              feedItemId: 41994,
+              tells: ["Payment is requested before any service is delivered"],
+              where: "Reported across marketplace listings.",
+              auLine: null,
+            },
+          ]),
+        }),
+        modelId: "claude-haiku-4-5-20251001",
+        estimatedCostUsd: 0.0004,
+        usage: {
+          inputTokens: 900,
+          outputTokens: 300,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+        cacheHit: false,
+        stopReason: "tool_use",
+        truncated: false,
+      }),
+    );
+    const r = await writeTakes([input()], call as never);
+    expect(r.takes).toHaveLength(1);
+    expect(r.takes[0].feedItemId).toBe(41994);
+    expect(r.takes[0].where).toBe("Reported across marketplace listings.");
+  });
+
+  it("still rejects a string that is not the right shape", async () => {
+    // The rescue must not become a way for junk to get through. The string
+    // branch parses and then re-validates against the same schema.
+    const call = vi.fn(
+      async (args: { schema: { parse: (v: unknown) => unknown } }) => ({
+        result: args.schema.parse({
+          takes: JSON.stringify([{ feedItemId: "not-a-number", tells: [] }]),
+        }),
+        modelId: "m",
+        estimatedCostUsd: 0,
+        usage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+        cacheHit: false,
+        stopReason: "tool_use",
+        truncated: false,
+      }),
+    );
+    await expect(writeTakes([input()], call as never)).rejects.toThrow();
+  });
+
+  it("still rejects a string that is not JSON at all", async () => {
+    const call = vi.fn(
+      async (args: { schema: { parse: (v: unknown) => unknown } }) => ({
+        result: args.schema.parse({ takes: "sorry, I could not do that" }),
+        modelId: "m",
+        estimatedCostUsd: 0,
+        usage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+        cacheHit: false,
+        stopReason: "tool_use",
+        truncated: false,
+      }),
+    );
+    await expect(writeTakes([input()], call as never)).rejects.toThrow();
+  });
+});

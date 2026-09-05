@@ -107,6 +107,44 @@ export interface CallClaudeResult<T> {
  * transient failure worth retrying. An `output_tokens=587` in the message
  * would therefore be misread as a server error.
  */
+/**
+ * Accept either the structured value or a JSON-encoded string of it.
+ *
+ * Even with tool_choice-forced tool use, Claude sometimes hand-stringifies a
+ * large nested field instead of emitting it as JSON. It has now happened on
+ * two unrelated features:
+ *
+ *   - the monthly blog generator, 2026-06, returned `post` as a JSON string
+ *     and the whole run died on "expected object, received string";
+ *   - the Arthur's Take backfill, 2026-09-05, returned `takes` as a JSON
+ *     string at batch 118 of 133 and took the remaining 16 batches with it.
+ *
+ * The union is representable in the tool's JSON Schema as an `anyOf`, and the
+ * string branch parses and then re-validates against the real schema — so a
+ * genuinely malformed payload still fails rather than slipping through.
+ *
+ * This is a RESCUE, not a licence to nest. The first defence is still a flat
+ * schema: top-level scalars leave nothing to stringify. Use this where the
+ * shape has to be nested — a batch response is an array of objects and cannot
+ * be flattened away.
+ */
+export function objectOrJsonString<T extends z.ZodType>(schema: T) {
+  return z.union([
+    schema,
+    z
+      .string()
+      .transform((str, ctx) => {
+        try {
+          return JSON.parse(str) as unknown;
+        } catch {
+          ctx.addIssue({ code: "custom", message: "not valid JSON" });
+          return z.NEVER;
+        }
+      })
+      .pipe(schema),
+  ]);
+}
+
 export class ClaudeTruncatedOutputError extends Error {
   /** Explicit — a subclass that does not set this still reports "Error",
    *  and `apps/web/app/api/analyze/route.ts` logs `err.name` as `errorType`. */
