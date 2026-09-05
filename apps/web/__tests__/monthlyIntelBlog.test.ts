@@ -41,7 +41,16 @@ const validGeneration = {
 };
 
 const mockCallClaudeJson = vi.fn();
-vi.mock("@askarthur/scam-engine/anthropic", () => ({
+// Spread the real module rather than listing what to keep. The first version
+// returned only `callClaudeJson`, so when monthlyGenerationSchema started
+// importing the shared `objectOrJsonString` from here, this whole FILE failed
+// to load — and a file that fails to load reports no failing test, it reports
+// fifteen fewer passing ones. The suite still said "1,565 passed".
+//
+// Only the network call needs stubbing; every pure helper in this module
+// should stay real, or the schema under test is not the schema that ships.
+vi.mock("@askarthur/scam-engine/anthropic", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@askarthur/scam-engine/anthropic")>()),
   callClaudeJson: (opts: unknown) => mockCallClaudeJson(opts),
 }));
 

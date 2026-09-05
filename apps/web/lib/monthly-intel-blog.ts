@@ -2,6 +2,7 @@ import { z } from "zod";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { fetchAllRows } from "@askarthur/supabase/paginate";
 import { callClaudeJson } from "@askarthur/scam-engine/anthropic";
+import { objectOrJsonString } from "@askarthur/scam-engine/anthropic";
 import { scrubPII } from "@askarthur/scam-engine/sanitize";
 import { logger } from "@askarthur/utils/logger";
 import { logCost } from "@/lib/cost-telemetry";
@@ -300,30 +301,6 @@ const IdeaSchema = z.object({
   targetKeyword: z.string().optional(),
 });
 
-/**
- * Accept either the structured value or a JSON-encoded string of it. Even
- * with tool_choice-forced tool use, models sometimes stringify a large
- * nested field (the 2026-06 rerun returned `post` as a JSON string — the
- * whole run died on `expected object, received string`). The union is
- * representable in the tool's JSON Schema (anyOf), and the string branch
- * parses + re-validates against the real schema, so bad payloads still fail.
- */
-function objectOrJsonString<T extends z.ZodType>(schema: T) {
-  return z.union([
-    schema,
-    z
-      .string()
-      .transform((s, ctx) => {
-        try {
-          return JSON.parse(s) as unknown;
-        } catch {
-          ctx.addIssue({ code: "custom", message: "not valid JSON" });
-          return z.NEVER;
-        }
-      })
-      .pipe(schema),
-  ]);
-}
 
 // Exported for tests — validation runs inside callClaudeJson in production.
 //

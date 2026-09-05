@@ -26,6 +26,13 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
+import {
+  TAKE_SYSTEM_PROMPT,
+  TELL_CAP_CHARS,
+  TELL_PROMPT_TARGET_CHARS,
+  countTruncatedFields,
+} from "../reddit-intel/take-writer";
+
 const SOURCE = new URL("../reddit-intel/take-writer.ts", import.meta.url);
 
 /**
@@ -92,6 +99,80 @@ describe("take schema shape — the batch-rejection guard", () => {
       (schema.match(/truncateOnWord\(/g) ?? []).length,
       "each of tells / where / auLine must pass through truncateOnWord",
     ).toBeGreaterThanOrEqual(3);
+  });
+
+  /**
+   * The cap and the instruction have to move together.
+   *
+   * The cap is a BACKSTOP: the prompt asks for 120 characters and the cap
+   * exists so a model that overshoots produces a long tell instead of a lost
+   * batch. That only holds while the cap sits well above the ask. It did not:
+   * the cap was 140 against an ask of 120, a margin of 17%, and the model
+   * cleared it often enough to clip 145 tells across 125 of the first 870
+   * takes — one take in seven reached a reader with a visible "…".
+   *
+   * Nothing failed. A too-tight backstop is invisible to every gate: it
+   * typechecks, it parses, it writes a row, and the page renders. It was
+   * found by querying production for a trailing ellipsis a month later.
+   *
+   * So the ratio is the thing under test, and the prompt's number is PARSED
+   * FROM THE PROMPT rather than repeated here — a copy would let the two drift
+   * apart and still pass, which is the exact failure this guards.
+   */
+  it("keeps the tell cap a real backstop, not a second limit", () => {
+    const asked = TAKE_SYSTEM_PROMPT.match(
+      /each under (\d+) characters/,
+    )?.[1];
+    expect(
+      asked,
+      "the prompt no longer states a tell length in the form 'each under N " +
+        "characters', so this guard has gone inert — update the pattern",
+    ).toBeDefined();
+
+    expect(
+      Number(asked),
+      "TELL_PROMPT_TARGET_CHARS disagrees with what the prompt actually asks",
+    ).toBe(TELL_PROMPT_TARGET_CHARS);
+
+    expect(
+      TELL_CAP_CHARS / Number(asked),
+      `the tell cap (${TELL_CAP_CHARS}) is not far enough above what the ` +
+        `prompt asks for (${asked}). At 140 against 120 the model cleared it ` +
+        "on 6% of tells and 14% of takes shipped visibly cut off. A backstop " +
+        "the model reaches routinely is a second limit, and it fails silently.",
+    ).toBeGreaterThanOrEqual(2);
+  });
+
+  it("counts a cut-short field so the cap can be tuned from production", () => {
+    // The detector is what makes the cap adjustable from evidence instead of
+    // from another ten-post dry run. If it stops counting, the next bad
+    // threshold is invisible for as long as the last one was.
+    expect(
+      countTruncatedFields({
+        feedItemId: 1,
+        tells: ["fine", "cut off here…"],
+        where: null,
+        auLine: undefined,
+      }),
+    ).toBe(1);
+
+    expect(
+      countTruncatedFields({
+        feedItemId: 1,
+        tells: ["fine"],
+        where: "also cut…",
+        auLine: "and this one too…",
+      }),
+    ).toBe(2);
+
+    expect(
+      countTruncatedFields({
+        feedItemId: 1,
+        tells: ["fine", "also fine"],
+        where: "complete sentence.",
+        auLine: null,
+      }),
+    ).toBe(0);
   });
 
   it("keeps the identifier strict, because it is not model prose", () => {
