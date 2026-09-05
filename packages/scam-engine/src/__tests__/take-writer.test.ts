@@ -14,6 +14,7 @@ import {
   TAKE_TIMEOUT_MS,
   buildTakeUserPayload,
   writeTakes,
+  TELL_CAP_CHARS,
   type TakeWriterInput,
 } from "../reddit-intel/take-writer";
 
@@ -69,28 +70,38 @@ describe("writeTakes", () => {
   it("truncates an over-long tell instead of failing the batch", async () => {
     // 39 good takes and the money spent generating them must not be thrown
     // away because one string ran long. Mirrors the classifier's quote policy.
-    const long = "x".repeat(400);
+    const long = "x".repeat(TELL_CAP_CHARS * 2);
     const call = fakeCall([
       { feedItemId: 41994, tells: [long], where: "Reported widely." },
     ]);
     const r = await writeTakes([input()], call as never);
     expect(r.takes).toHaveLength(1);
-    expect(r.takes[0].tells[0].length).toBeLessThanOrEqual(140);
+    expect(r.takes[0].tells[0].length).toBeLessThanOrEqual(TELL_CAP_CHARS);
     expect(r.takes[0].tells[0].endsWith("…")).toBe(true);
+    // Reported, not just handled. The cap ran 100 chars too tight for a month
+    // because nothing counted how often it fired.
+    expect(r.truncatedFieldCount).toBe(1);
   });
 
   it("truncates at a word boundary, not mid-word", async () => {
     // Measured on a real dry run: 6 of 10 tells were cut, several mid-word
     // ("account compromise or fun…"), which reads as a rendering fault rather
     // than an editorial choice.
+    // Built from the cap so it is always over it. The literal that used to sit
+    // here was 141 characters — written against a 140-char cap, and silently
+    // no longer over the cap the moment that number moved.
     const sentence =
-      "Callers guide the victim through a sequence of steps that typically lead to account compromise or the loss of funds held in the linked account";
+      "Callers guide the victim through a sequence of steps that typically lead to account compromise or the loss of funds held in the linked account " +
+      "and any other account reachable from it, ".repeat(
+        Math.ceil(TELL_CAP_CHARS / 40),
+      );
     const call = fakeCall([
       { feedItemId: 41994, tells: [sentence], where: "Reported widely." },
     ]);
     const r = await writeTakes([input()], call as never);
     const tell = r.takes[0].tells[0];
-    expect(tell.length).toBeLessThanOrEqual(140);
+    expect(tell.length).toBeLessThanOrEqual(TELL_CAP_CHARS);
+    expect(tell.endsWith("…")).toBe(true);
     // The character before the ellipsis must end a word.
     expect(tell.replace(/…$/, "")).toMatch(/\w$/);
     expect(sentence.startsWith(tell.replace(/…$/, ""))).toBe(true);

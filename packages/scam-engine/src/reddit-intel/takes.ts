@@ -102,6 +102,15 @@ export interface GenerateTakesResult {
   /** Counts for the run summary. */
   readyCount: number;
   suppressedCount: number;
+  /**
+   * Fields published looking cut off. Logged to cost_telemetry beside ready
+   * and suppressed so the length cap can be tuned from production instead of
+   * from a dry run — the old 140-char tell cap silently clipped one take in
+   * seven for the whole first month, and the only way to find it was an
+   * ad-hoc SQL query for a trailing ellipsis. A fail-soft path that nobody
+   * counts is a fail-soft path nobody knows is firing.
+   */
+  truncatedFieldCount: number;
 }
 
 /**
@@ -155,6 +164,7 @@ export async function generateTakesForPosts(
       truncated: false,
       readyCount: 0,
       suppressedCount: 0,
+      truncatedFieldCount: 0,
     };
   }
 
@@ -233,5 +243,6 @@ export async function generateTakesForPosts(
     truncated: written.truncated,
     readyCount: results.filter((r) => r.takeStatus === "ready").length,
     suppressedCount: results.filter((r) => r.takeStatus === "suppressed").length,
+    truncatedFieldCount: written.truncatedFieldCount,
   };
 }

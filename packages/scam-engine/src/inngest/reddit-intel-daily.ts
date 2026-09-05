@@ -972,6 +972,7 @@ export const redditIntelDaily = inngest.createFunction(
           posts: inputs.length,
           ready: generated.readyCount,
           suppressed: generated.suppressedCount,
+          truncatedFields: generated.truncatedFieldCount,
           truncated: generated.truncated,
         },
       });
@@ -980,6 +981,7 @@ export const redditIntelDaily = inngest.createFunction(
         skipped: null,
         ready: generated.readyCount,
         suppressed: generated.suppressedCount,
+        truncatedFields: generated.truncatedFieldCount,
         costUsd: generated.estimatedCostUsd,
       };
     });

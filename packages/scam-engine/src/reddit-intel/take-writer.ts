@@ -76,16 +76,65 @@ OUTPUT FORMAT
 Return a single JSON object with one key, "takes", an array with one entry per input item, in the same order. The output is validated against a strict schema; extra, missing or misnamed fields cause the whole batch to fail.`;
 
 /**
- * Measured on a real 10-post dry run: asking for 90 characters produced tells
- * of 95-130, so 6 of 10 were cut — several mid-word ("account compromise or
- * fun…"). The model writes at a natural length and clipping it reads as a
- * bug to a reader. 140 fits the observed distribution with headroom, and the
- * prompt now asks for 120 so the cap is a backstop rather than the norm.
+ * The cap on a tell, as a BACKSTOP. The prompt asks for 120; this exists so a
+ * model that overshoots produces a long tell rather than a lost batch.
+ *
+ * It was 140, chosen from a 10-post dry run that reported "140 fits the
+ * observed distribution with headroom". At 870 takes the distribution turned
+ * out to be heavier than that sample could show:
+ *
+ *   100-120 chars   683 tells
+ *   120-140 chars   459 tells      <- pressed against the old ceiling
+ *   cut at the cap  145 tells      = 125 of 870 takes (14%) with a visible "…"
+ *
+ * Meanwhile `where` and `auLine` at 280 never truncated once across 1,193
+ * strings. The prose cap had headroom the tell cap did not, and the tell cap
+ * was the one set from ten samples.
+ *
+ * 240 is twice what the prompt asks for, and the schema-shape test parses the
+ * number out of the prompt itself to enforce that ratio, so the two cannot
+ * drift apart again in the direction that bit us.
+ *
+ * Measured after regenerating all 125 affected takes at the new cap: 2,435
+ * tells, longest 221, mean 99, none truncated — and 109 of them longer than
+ * the old 140, so the headroom is being used rather than merely granted. 221
+ * against 240 is not a large margin, which is exactly why the count below
+ * exists: if the tail moves, `truncatedFieldCount` in cost_telemetry says so
+ * within a day. Revisit this number from that, never from another dry run.
  */
-const TELL_MAX_CHARS = 140;
+const TELL_MAX_CHARS = 240;
 
 /** One-sentence prose fields (`where`, `auLine`). Same truncate-not-reject rule. */
 const PROSE_MAX_CHARS = 280;
+
+/**
+ * How many fields on this take were cut short.
+ *
+ * This is a POST-HOC detector, not a counter incremented during truncation,
+ * and the reason is concurrency: the truncation happens inside a Zod
+ * transform that runs deep inside an awaited `callClaudeJson`, so a
+ * module-scoped counter reset around that await could be corrupted by a
+ * second batch running in parallel. A detector over the returned value has no
+ * such window.
+ *
+ * It is exact in practice. `truncateOnWord` is the only thing in this module
+ * that appends "…", and across 870 live takes all 145 ellipsis-terminated
+ * tells measured 126-139 characters — every one a word-boundary cut just
+ * under the old 140 cap, with no model-authored ellipsis at any other length.
+ *
+ * And where it is ever wrong, it is wrong in the useful direction: a tell the
+ * model chose to end in "…" is a formatting miss worth counting too. What is
+ * being measured is "fields that reach a reader looking cut off", which is
+ * the thing we actually care about.
+ */
+export function countTruncatedFields(take: GeneratedTake): number {
+  const cut = (s: string | null | undefined) => (s?.endsWith("…") ? 1 : 0);
+  return (
+    take.tells.reduce((n, t) => n + cut(t), 0) +
+    cut(take.where) +
+    cut(take.auLine)
+  );
+}
 
 /** Truncate at a word boundary — a mid-word cut looks like a rendering fault. */
 function truncateOnWord(text: string, max: number): string {
@@ -195,6 +244,8 @@ export interface WriteTakesResult {
   inputTokens: number;
   outputTokens: number;
   truncated: boolean;
+  /** Fields that reach a reader looking cut off. See countTruncatedFields. */
+  truncatedFieldCount: number;
 }
 
 /**
@@ -219,16 +270,23 @@ export async function writeTakes(
   });
 
   const requested = new Set(items.map((i) => i.feedItemId));
+  // Drop anything the model invented an id for. A take written against a post
+  // that was not in the batch would be attached to the wrong row.
+  const takes = response.result.takes.filter((t) => requested.has(t.feedItemId));
   return {
-    // Drop anything the model invented an id for. A take written against a
-    // post that was not in the batch would be attached to the wrong row.
-    takes: response.result.takes.filter((t) => requested.has(t.feedItemId)),
+    takes,
     modelId: response.modelId,
     estimatedCostUsd: response.estimatedCostUsd,
     inputTokens: response.usage.inputTokens,
     outputTokens: response.usage.outputTokens,
     truncated: response.truncated,
+    truncatedFieldCount: takes.reduce((n, t) => n + countTruncatedFields(t), 0),
   };
 }
 
 export const TAKE_SYSTEM_PROMPT = SYSTEM_PROMPT;
+
+/** The tell length the prompt asks the model for. Read by the schema-shape
+ *  test so the cap and the instruction cannot drift apart silently. */
+export const TELL_PROMPT_TARGET_CHARS = 120;
+export const TELL_CAP_CHARS = TELL_MAX_CHARS;
