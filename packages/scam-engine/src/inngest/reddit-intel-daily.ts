@@ -70,6 +70,9 @@ import { withAxiomLogging } from "./with-axiom-logging";
 // on and is irrelevant (input is ~11% of cost).
 const PROMPT_VERSION = "reddit-intel-v2@2026-06-28";
 
+/** Exported so a backfill stamps the same prompt version the live step does. */
+export const PROMPT_VERSION_FOR_BACKFILL = PROMPT_VERSION;
+
 // ── Output budget ─────────────────────────────────────────────────────────
 //
 // One constant, referenced by the call AND by the truncation marker, so the
@@ -515,6 +518,74 @@ async function logCost(args: {
 
 // ── The Inngest function ──────────────────────────────────────────────────
 
+/**
+ * One post as the classifier needs it. Plain data — no Supabase row type — so
+ * a caller can build it from a query, a fixture or a script.
+ */
+export interface ClassifyPostInput {
+  id: number;
+  title: string | null;
+  description: string | null;
+  body_md: string | null;
+  url: string | null;
+  country_code: string | null;
+  upvotes: number | null;
+  source_created_at: string | null;
+}
+
+/**
+ * Build the classifier's user payload.
+ *
+ * Exported so the envelope is testable and reusable. It previously lived
+ * inline inside the `classify` step, which meant the v299 body_md precedence
+ * and the CLASSIFY_BODY_CHARS cap — the two things that decide what the model
+ * actually reads, and what the run costs — could only be asserted by reading
+ * the code. An architecture review flagged exactly this.
+ */
+export function buildClassifyEnvelope(posts: ClassifyPostInput[]): string {
+  return JSON.stringify({
+    instruction:
+      "Classify each post and produce one daily aggregate. Match the schema in the system prompt exactly.",
+    posts: posts.map((p) => ({
+      id: p.id,
+      title: p.title,
+      // body_md (v299) is the full scrubbed post; description is the 500-char
+      // public excerpt and the fallback for rows ingested before v299.
+      description: (p.body_md ?? p.description ?? "").slice(
+        0,
+        CLASSIFY_BODY_CHARS,
+      ),
+      url: p.url ?? null,
+      countryCode: p.country_code ?? null,
+      upvotes: p.upvotes ?? 0,
+      postedAt: p.source_created_at,
+    })),
+  });
+}
+
+/**
+ * Run one classify call. The Inngest step wraps this in `step.run`; the
+ * backfill script calls it directly.
+ *
+ * Extracted because the logic was unreachable from anywhere but the step, so
+ * the only way to classify a backlog was to dispatch an Inngest event — which
+ * needs a key a local operator may not have, and which was the exact wall hit
+ * while trying to get the feature live.
+ */
+export async function classifyPosts(posts: ClassifyPostInput[]) {
+  return classifyWithRetry<typeof SonnetOutputSchema>({
+    model: resolveClassifyModel(),
+    system: SYSTEM_PROMPT,
+    user: buildClassifyEnvelope(posts),
+    schema: SonnetOutputSchema,
+    maxTokens: CLASSIFY_MAX_TOKENS,
+    timeoutMs: CLASSIFY_TIMEOUT_MS,
+    cacheSystem: true,
+    useToolUse: true,
+    toolName: "submit_classification",
+  });
+}
+
 export const redditIntelDaily = inngest.createFunction(
   {
     id: "reddit-intel-daily",
@@ -595,26 +666,6 @@ export const redditIntelDaily = inngest.createFunction(
       // sandwich-defence: even though we trust the envelope structure, the
       // post.title and post.description fields are RAW Reddit content and
       // must not be userIsTrusted'd through.
-      const envelope = {
-        instruction:
-          "Classify each post and produce one daily aggregate. Match the schema in the system prompt exactly.",
-        posts: posts.map((p) => ({
-          id: p.id,
-          title: p.title,
-          // body_md (v299) is the full scrubbed post; description is the
-          // 500-char public excerpt and is the fallback for rows ingested
-          // before v299 shipped. Capped at CLASSIFY_BODY_CHARS — see there.
-          description: (p.body_md ?? p.description ?? "").slice(
-            0,
-            CLASSIFY_BODY_CHARS,
-          ),
-          url: p.url ?? null,
-          countryCode: p.country_code ?? null,
-          upvotes: p.upvotes ?? 0,
-          postedAt: p.source_created_at,
-        })),
-      };
-
       try {
         // #228: retry-with-feedback on schema/parse failure. classifyWithRetry
         // wraps callClaudeJson; the second call gets the Zod error injected
@@ -624,29 +675,11 @@ export const redditIntelDaily = inngest.createFunction(
         // retry-with-feedback. Total upper-bound: 6 Sonnet calls per cron
         // firing (3 Inngest × 2 schema retries), well under the A$10/day
         // brake.
-        const response = await classifyWithRetry<typeof SonnetOutputSchema>({
-          // Sonnet 4.6 by default; flip to Haiku 4.5 via REDDIT_INTEL_CLASSIFY_MODEL
-          // for the cost pilot (see resolveClassifyModel). Pricing, metadata.model,
-          // and reddit_post_intel.model_version all follow the resolved id.
-          model: resolveClassifyModel(),
-          system: SYSTEM_PROMPT,
-          user: JSON.stringify(envelope),
-          schema: SonnetOutputSchema,
-          maxTokens: CLASSIFY_MAX_TOKENS,
-          timeoutMs: CLASSIFY_TIMEOUT_MS,
-          // No assistant prefill in the wrapper anymore (Sonnet 4.6 rejects
-          // it). cacheSystem stays on — wrapper still requests cache, just
-          // without the prefill scaffolding.
-          cacheSystem: true,
-          // Force strict JSON via Anthropic tool-use. Pre-fix baseline
-          // was ~10% of batches failing with "Unterminated string in
-          // JSON" or "Expected ',' or '}'" parse errors at ~$0.54
-          // wasted per failure (3 retries × ~$0.18). Tool-use makes the
-          // model emit a parsed JS object directly — no JSON.parse
-          // step, no malformed output class.
-          useToolUse: true,
-          toolName: "submit_classification",
-        });
+        // Sonnet 4.6 by default (Haiku via REDDIT_INTEL_CLASSIFY_MODEL); strict
+        // JSON via tool-use, which removed a ~10% malformed-output class; one
+        // retry-with-feedback on a schema failure. All of it in classifyPosts,
+        // so the backfill script runs the identical call.
+        const response = await classifyPosts(posts);
         return response;
       } catch (err) {
         await logFunctionError({
