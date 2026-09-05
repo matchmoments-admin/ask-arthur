@@ -20,6 +20,10 @@ import Link from "next/link";
 import { requireAdmin, isAdminRequest } from "@/lib/adminAuth";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
+import {
+  getScamTypeTrend,
+  SCAM_TYPE_WINDOW_DAYS,
+} from "@/lib/scam-type-trend";
 
 export const dynamic = "force-dynamic";
 
@@ -70,6 +74,13 @@ export default async function WeeklyReviewPage() {
 
   const sinceIso = trailing7dIso();
   const loadErrors: string[] = [];
+
+  // Its own read rather than a member of the Promise.all below: it paginates
+  // two tables across 56 days and returns a shaped result, not a PostgREST
+  // response, so it does not fit the `[res, label]` error-check pattern the
+  // others share.
+  const scamTypes = await getScamTypeTrend();
+  if (scamTypes.error) loadErrors.push("scam-type movement");
 
   const [
     canaryRes,
@@ -239,7 +250,8 @@ export default async function WeeklyReviewPage() {
         <Link href="https://github.com/matchmoments-admin/ask-arthur/blob/main/docs/ops/weekly-signal-review.md" className="underline underline-offset-2">
           docs/ops/weekly-signal-review.md
         </Link>
-        . All windows are trailing 7 days (UTC).
+        . Windows are trailing 7 days (UTC), except scam-type movement, which
+        states its own.
       </p>
 
       {loadErrors.length > 0 && (
@@ -333,6 +345,84 @@ export default async function WeeklyReviewPage() {
             </li>
           ))}
         </ul>
+      </section>
+
+
+      {/* 5. Scam types on the move */}
+      <section className="mb-6 rounded-xl border border-border-light bg-white p-5">
+        <h2 className="text-sm font-bold uppercase tracking-wide text-gov-slate mb-1">
+          5 · Scam types on the move ({SCAM_TYPE_WINDOW_DAYS}d vs prior{" "}
+          {SCAM_TYPE_WINDOW_DAYS}d)
+        </h2>
+        <p className="text-xs text-gov-slate mb-3">
+          Both streams under one vocabulary — Reddit intel and submitted
+          reports, whose raw labels disagree (<code className="font-mono">romance</code>{" "}
+          vs <code className="font-mono">romance_scam</code>). Bucketed on{" "}
+          <strong>when the scam was posted</strong>, not when we classified it,
+          so a backfill cannot read as a wave. {SCAM_TYPE_WINDOW_DAYS} days
+          rather than 7 because the smaller categories see only a handful of
+          reports a week.
+        </p>
+        <p className="text-xs text-gov-slate mb-3">
+          Volume for context — <strong>{scamTypes.movements.reduce((n, m) => n + m.recent, 0)}</strong>{" "}
+          categorised in the recent window against{" "}
+          <strong>{scamTypes.movements.reduce((n, m) => n + m.prior, 0)}</strong>{" "}
+          before it. If those two differ a lot, every category moves with them
+          and only the relative order is worth reading.
+        </p>
+        {scamTypes.movements.length === 0 ? (
+          <p className="text-sm text-gov-slate">
+            {scamTypes.error
+              ? "Query failed — this is not a measurement."
+              : "No categorised activity in either window."}
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-left text-xs font-semibold uppercase tracking-wide text-gov-slate">
+                <tr>
+                  <th className="py-1.5 pr-3">Type</th>
+                  <th className="py-1.5 pr-3 text-right">{SCAM_TYPE_WINDOW_DAYS}d</th>
+                  <th className="py-1.5 pr-3 text-right">Prior</th>
+                  <th className="py-1.5 pr-3 text-right">Change</th>
+                </tr>
+              </thead>
+              <tbody>
+                {scamTypes.movements.map((m) => (
+                  <tr key={m.type} className="border-t border-border-light">
+                    <td className="py-1.5 pr-3 text-deep-navy">
+                      {m.label}
+                      {!m.readable && (
+                        <span className="ml-2 text-xs text-slate-400">
+                          too few to read
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-1.5 pr-3 text-right tabular-nums">{m.recent}</td>
+                    <td className="py-1.5 pr-3 text-right tabular-nums text-slate-400">
+                      {m.prior}
+                    </td>
+                    <td
+                      className={`py-1.5 pr-3 text-right tabular-nums ${
+                        !m.readable
+                          ? "text-slate-400"
+                          : m.deltaPct === null
+                            ? "text-deep-navy"
+                            : m.deltaPct > 0
+                              ? "text-red-700"
+                              : "text-green-700"
+                      }`}
+                    >
+                      {m.deltaPct === null
+                        ? "new"
+                        : `${m.deltaPct > 0 ? "+" : ""}${m.deltaPct}%`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
 
       {/* 4. Record */}
