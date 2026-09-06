@@ -38,6 +38,7 @@ import "server-only";
 
 import { createServiceClient } from "@askarthur/supabase/server";
 import { fetchAllRows } from "@askarthur/supabase/paginate";
+import { logger } from "@askarthur/utils/logger";
 import {
   canonicalScamTypeLabel,
   toCanonicalScamType,
@@ -78,6 +79,8 @@ export function computeScamTypeMovement(
   rows: DatedScamType[],
   now: Date,
   windowDays = SCAM_TYPE_WINDOW_DAYS,
+  /** Optional sink for labels that mapped to nothing. See ScamTypeTrend. */
+  unmapped?: Record<string, number>,
 ): ScamTypeMovement[] {
   const ms = windowDays * 86_400_000;
   const recentFrom = now.getTime() - ms;
@@ -92,7 +95,16 @@ export function computeScamTypeMovement(
     // every total. An unmapped value is also null, and the taxonomy drift test
     // is what stops that hiding a new label.
     const type = toCanonicalScamType(r.rawType);
-    if (!type) continue;
+    if (!type) {
+      // `informational` and `none` are deliberate nulls — a judgement that the
+      // post is not a scam — so they are not drift and must not be reported as
+      // such. Anything else reaching here is a label nobody mapped.
+      const raw = (r.rawType ?? "").trim().toLowerCase();
+      if (unmapped && raw && raw !== "informational" && raw !== "none") {
+        unmapped[raw] = (unmapped[raw] ?? 0) + 1;
+      }
+      continue;
+    }
 
     const t = new Date(r.at).getTime();
     if (Number.isNaN(t)) continue;
@@ -129,6 +141,21 @@ export function computeScamTypeMovement(
 
 export interface ScamTypeTrend {
   movements: ScamTypeMovement[];
+  /**
+   * Raw labels that mapped to nothing, with counts.
+   *
+   * `toCanonicalScamType` returns null for an unknown value rather than
+   * guessing — deliberately, because bucketing an unknown into `other` is how
+   * the three vocabulary disagreements went unnoticed for a year. But a null
+   * is silent: a new label would simply stop appearing in every count, and a
+   * chart getting quietly smaller is not a signal anyone reads.
+   *
+   * The drift test fails the build when INTENT_LABELS or the analyze prompt
+   * gains an unmapped value. It cannot see a value that arrives from
+   * free-text `scam_type`, which is `parsed.scamType.slice(0, 100)` and
+   * therefore unconstrained. This is the runtime half of that guard.
+   */
+  unmapped: Record<string, number>;
   /** Rows read per stream, so an empty panel can be told from a failed read. */
   redditRows: number;
   reportRows: number;
@@ -141,6 +168,7 @@ export async function getScamTypeTrend(
 ): Promise<ScamTypeTrend> {
   const empty: ScamTypeTrend = {
     movements: [],
+    unmapped: {},
     redditRows: 0,
     reportRows: 0,
     error: null,
@@ -205,8 +233,26 @@ export async function getScamTypeTrend(
     ...reports.rows.map((r) => ({ rawType: r.scam_type, at: r.created_at })),
   ];
 
+  const unmapped: Record<string, number> = {};
+  const movements = computeScamTypeMovement(
+    rows,
+    now,
+    SCAM_TYPE_WINDOW_DAYS,
+    unmapped,
+  );
+
+  // Rare by construction and high-value when it happens, so `warn` — it
+  // bypasses the 10% INFO sampling and every occurrence ships.
+  if (Object.keys(unmapped).length > 0) {
+    logger.warn("scam_type_unmapped_labels", {
+      labels: unmapped,
+      note: "these rows are absent from every scam-type count until mapped in packages/types/src/scam-taxonomy.ts",
+    });
+  }
+
   return {
-    movements: computeScamTypeMovement(rows, now),
+    movements,
+    unmapped,
     redditRows: reddit.rows.length,
     reportRows: reports.rows.length,
     error: null,

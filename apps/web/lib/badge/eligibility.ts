@@ -23,6 +23,7 @@
 import "server-only";
 
 import { createServiceClient } from "@askarthur/supabase/server";
+import { logger } from "@askarthur/utils/logger";
 
 /**
  * Grades that earn a scored badge: B- or better.
@@ -91,6 +92,13 @@ export const BADGE_MESSAGES: Record<
  * Fails CLOSED on every uncertain path. A badge is a claim; if we cannot
  * check it we do not make it, and a transient outage must not reintroduce the
  * forgery this was written to close.
+ *
+ * And it says WHICH uncertainty. "Not yet scanned" is a claim about the
+ * domain; "Unavailable" is a claim about us. Returning the first when the
+ * lookup failed would be a quiet lie, and would make an outage look like
+ * ordinary traffic. Both non-answers are logged at `warn`, which bypasses
+ * sampling, so a site-wide degradation is visible in Axiom rather than
+ * inferred from a support ticket.
  */
 export async function resolveBadgeSubject(
   rawDomain: string | null | undefined,
@@ -101,7 +109,17 @@ export async function resolveBadgeSubject(
   if (!domain) return { kind: "unscanned" };
 
   const supabase = createServiceClient();
-  if (!supabase) return { kind: "unavailable" };
+  if (!supabase) {
+    // Rare and high-value, so `warn` — it bypasses the 10% INFO sampling
+    // (packages/utils/src/axiom-logger.ts:41) and every occurrence ships.
+    // Without this the badge degrades to neutral across the whole site and
+    // looks exactly like normal operation.
+    logger.warn("badge_subject_unavailable", {
+      reason: "no_service_client",
+      domain,
+    });
+    return { kind: "unavailable" };
+  }
 
   const { data, error } = await supabase
     .from("sites")
@@ -109,7 +127,26 @@ export async function resolveBadgeSubject(
     .eq("domain", domain)
     .single();
 
-  if (error || !data?.latest_grade || data.latest_score == null) {
+  // A FAILED QUERY IS NOT AN UNSCANNED DOMAIN, and conflating them was a bug
+  // rather than only a logging gap.
+  //
+  // Both used to return "unscanned", so a schema change, an RLS change or an
+  // outage would render "Not yet scanned" on every badge — a CLAIM about the
+  // domain — while looking indistinguishable from normal behaviour. Degradation
+  // must not read as health.
+  //
+  // PGRST116 is "no rows", which is a real answer: the domain genuinely is not
+  // in `sites`. Anything else means we could not find out.
+  if (error && error.code !== "PGRST116") {
+    logger.warn("badge_subject_lookup_failed", {
+      domain,
+      code: error.code,
+      message: error.message,
+    });
+    return { kind: "unavailable" };
+  }
+
+  if (!data?.latest_grade || data.latest_score == null) {
     return { kind: "unscanned" };
   }
   if (!BADGE_ELIGIBLE_GRADES.has(data.latest_grade)) {
