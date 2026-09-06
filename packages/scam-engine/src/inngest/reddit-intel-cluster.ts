@@ -121,11 +121,34 @@ const MAX_THEME_MEMBERS_FOR_JOIN = 250;
 
 // ── Vector helpers ────────────────────────────────────────────────────────
 
+/**
+ * Parse pgvector's `[1.234,5.678,...]` wire form.
+ *
+ * Returns null for anything that is not a usable vector, INCLUDING a string
+ * that parses to the right shape but the wrong numbers. The previous version
+ * was `inner.split(",").map(Number)` with no validation, and every malformed
+ * input survived it as a non-empty array:
+ *
+ *   "[abc,def]"  -> [NaN, NaN]   length 2, passes a `.length > 0` filter
+ *   "[]"         -> [0]          Number("") is 0, not NaN
+ *
+ * Both then poison the caller silently rather than failing. A NaN embedding
+ * makes every `sim > bestSim` comparison false — NaN compares false against
+ * everything — so the post matches no theme, takes the seed branch, and writes
+ * a centroid of `[NaN,NaN,...]` that pgvector rejects on insert. The insert
+ * error is caught, warned, and `continue`d, so the post is skipped on that run
+ * and on every run after it. The failure presents as an unexplained orphan,
+ * three steps from its cause.
+ */
 function parsePgVector(s: string | null): number[] | null {
   if (!s) return null;
-  // pgvector serialises as `[1.234,5.678,...]` — strip brackets, split, parse.
   const inner = s.startsWith("[") ? s.slice(1, -1) : s;
-  return inner.split(",").map(Number);
+  if (inner.trim() === "") return null;
+  const parsed = inner.split(",").map(Number);
+  // Reject rather than propagate: a wrong vector is worse than a missing one,
+  // because the caller counts a missing one.
+  if (!parsed.every(Number.isFinite)) return null;
+  return parsed;
 }
 
 function vectorToPgString(vec: number[]): string {
@@ -382,6 +405,206 @@ export function assignPostsToThemes(
  */
 const CLUSTER_POSTS_PER_RUN = 500;
 
+/**
+ * Internals exposed for tests only. parsePgVector's rejection behaviour is the
+ * difference between a dropped row and a poisoned centroid, and it had no test.
+ */
+export const __testing = { parsePgVector, vectorToPgString, cosineSimilarity };
+
+export interface PersistResult {
+  newThemeCount: number;
+  joinedThemeCount: number;
+  /** Posts dropped because their seed theme could not be created OR adopted. */
+  seedFailures: number;
+  /** Posts dropped because the matched theme's centroid update failed. */
+  joinFailures: number;
+  /** Posts whose theme was written but whose own theme_id update failed. */
+  linkFailures: number;
+}
+
+/**
+ * Write one run's assignments: seed or update the theme, link the post, and
+ * record membership.
+ *
+ * Extracted from the step body so it has an interface at all. It previously
+ * lived inline inside step.run, which meant the ONLY test over clustering
+ * (assign.test.ts) exercised the pure matcher and nothing here — you could
+ * have deleted this entire function and every test would still have passed,
+ * while four separate `continue` paths silently orphaned posts.
+ *
+ * Takes the client rather than calling createServiceClient() so a test can
+ * drive the failure paths.
+ */
+export async function persistAssignments(
+  supabase: NonNullable<ReturnType<typeof createServiceClient>>,
+  assignments: Assignment[],
+): Promise<PersistResult> {
+  let newThemeCount = 0;
+  let joinedThemeCount = 0;
+  // Every `continue` below leaves a post unlinked, and an unlinked post
+  // re-presents at the head of the oldest-first worklist on the next run.
+  // Counting them is what separates "nothing to do" from "the same rows
+  // failing forever" — the two were indistinguishable in the summary.
+  let seedFailures = 0;
+  let joinFailures = 0;
+  let linkFailures = 0;
+
+  // Idempotency guard (#520 H5): Inngest retries the WHOLE step on
+  // failure, and the matching above is recomputed deterministically from
+  // the memoised load step. A prior partial run may have already linked
+  // some posts; re-read their current theme_id and skip the done ones so
+  // a retry doesn't create duplicate themes.
+  //
+  // This comment used to end "(slug has no unique constraint, so we
+  // can't rely on upsert-on-conflict)". Prod disagrees, and always did:
+  //
+  //   reddit_intel_themes_slug_key UNIQUE (slug)      -- v82:95
+  //
+  // Believing otherwise made the seed below an `.insert()` against a
+  // DETERMINISTIC slug, which turned a partial run into a permanent
+  // orphan: theme row created, post link not yet written, retry re-reads
+  // theme_id IS NULL, re-attempts the same slug, gets 23505, warns, and
+  // `continue`s — on that run and on every run afterwards. The seed
+  // below now adopts the existing row on 23505 instead of giving up.
+  const alreadyLinked = await supabase
+    .from("reddit_post_intel")
+    .select("id, theme_id")
+    .in(
+      "id",
+      assignments.map((a) => a.postId),
+    );
+  const donePostIds = new Set(
+    (alreadyLinked.data ?? [])
+      .filter((r) => r.theme_id)
+      .map((r) => r.id as string),
+  );
+
+  for (const a of assignments) {
+    if (donePostIds.has(a.postId)) continue; // already persisted in a prior attempt
+    if (a.isNewTheme) {
+      // Insert new theme row first to get its UUID. Slug is DETERMINISTIC
+      // (auto-<seed post id>) not Math.random()-based, so a retry of this
+      // step produces a stable handle instead of proliferating random
+      // slugs. The naming step later rewrites it to the kebab-cased title.
+      const slug = `auto-${a.postId}`;
+      const inserted = await supabase
+        .from("reddit_intel_themes")
+        .insert({
+          slug,
+          title: "Pending naming",
+          centroid_embedding: vectorToPgString(a.newCentroid),
+          centroid_embedding_model_version: a.embeddingModelVersion,
+          member_count: 1,
+          first_seen_at: new Date().toISOString(),
+          last_seen_at: new Date().toISOString(),
+          signal_strength: "weak",
+          is_active: true,
+        })
+        .select("id")
+        .single();
+
+      let created = inserted.data;
+
+      // 23505 = unique_violation on reddit_intel_themes_slug_key. The
+      // slug is deterministic, so this means a PRIOR attempt already
+      // created this theme and then failed before linking the post.
+      // Adopt the existing row.
+      //
+      // Deliberately NOT an upsert-on-conflict: that would rewrite
+      // title/member_count/first_seen_at, and by the time a retry lands
+      // the theme may have gained members and been named. Resetting a
+      // named 50-member theme to "Pending naming" with member_count 1 is
+      // far worse than the orphan this is fixing.
+      if (inserted.error?.code === "23505") {
+        const existing = await supabase
+          .from("reddit_intel_themes")
+          .select("id")
+          .eq("slug", slug)
+          .single();
+        created = existing.data;
+      }
+
+      if (!created) {
+        logger.warn("cluster: new theme insert failed", {
+          slug,
+          error: inserted.error?.message,
+        });
+        seedFailures++;
+        continue;
+      }
+      a.themeId = created.id as string;
+      newThemeCount++;
+    } else {
+      // Existing theme: update centroid + bump member count + last_seen_at.
+      // Stamp the centroid's model version with the joining post's
+      // version. If old centroid was on voyage-3 and the new post is
+      // on voyage-3.5, the centroid is now mixed-model — the version
+      // column captures the most-recent contributor so a future
+      // re-embed sweep can detect mixed centroids and rebuild them.
+      // See ADR-0003.
+      const { error: upErr } = await supabase
+        .from("reddit_intel_themes")
+        .update({
+          centroid_embedding: vectorToPgString(a.newCentroid),
+          centroid_embedding_model_version: a.embeddingModelVersion,
+          member_count: a.newMemberCount,
+          last_seen_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", a.themeId);
+
+      if (upErr) {
+        logger.warn("cluster: theme update failed", {
+          themeId: a.themeId,
+          error: upErr.message,
+        });
+        joinFailures++;
+        continue;
+      }
+      joinedThemeCount++;
+    }
+
+    // Link the post → theme.
+    const { error: postErr } = await supabase
+      .from("reddit_post_intel")
+      .update({ theme_id: a.themeId })
+      .eq("id", a.postId);
+    if (postErr) {
+      logger.warn("cluster: post theme_id update failed", {
+        postId: a.postId,
+        error: postErr.message,
+      });
+      linkFailures++;
+      continue;
+    }
+
+    // Insert membership row (primary).
+    const { error: memErr } = await supabase
+      .from("reddit_post_intel_themes")
+      .insert({
+        intel_id: a.postId,
+        theme_id: a.themeId,
+        similarity: Math.min(1, Math.max(0, a.similarity)),
+        is_primary: true,
+      });
+    if (memErr) {
+      logger.warn("cluster: membership insert failed", {
+        postId: a.postId,
+        themeId: a.themeId,
+        error: memErr.message,
+      });
+    }
+  }
+
+  return {
+    newThemeCount,
+    joinedThemeCount,
+    seedFailures,
+    joinFailures,
+    linkFailures,
+  };
+}
+
 export const redditIntelCluster = inngest.createFunction(
   {
     id: "reddit-intel-cluster",
@@ -489,6 +712,12 @@ export const redditIntelCluster = inngest.createFunction(
           }))
           .filter((p) => p.embedding.length > 0);
 
+        // A row the DB worklist counted (embedding IS NOT NULL) but that did
+        // not survive parsing is invisible everywhere else: it stays in the
+        // worklist forever and is silently absent from this run. Count it so
+        // the summary can say so — see the run summary at the end of the fn.
+        const droppedPosts = (postRows ?? []).length - posts.length;
+
         const themes: ActiveTheme[] = (themeRows ?? [])
           .map((r) => ({
             id: r.id as string,
@@ -497,6 +726,16 @@ export const redditIntelCluster = inngest.createFunction(
             memberCount: (r.member_count as number) ?? 0,
           }))
           .filter((t) => t.centroid.length > 0);
+        const droppedThemes = (themeRows ?? []).length - themes.length;
+
+        if (droppedPosts > 0 || droppedThemes > 0) {
+          // warn, not info: INFO is sampled at 10% in Axiom, and this is a
+          // rare high-value event that must not be sampled away.
+          logger.warn("cluster: rows dropped as unparseable", {
+            droppedPosts,
+            droppedThemes,
+          });
+        }
 
         return { posts, themes };
       });
@@ -562,121 +801,7 @@ export const redditIntelCluster = inngest.createFunction(
       const persistResult = await step.run("persist-clusters", async () => {
         const supabase = createServiceClient();
         if (!supabase) throw new Error("Supabase service client unavailable");
-
-        let newThemeCount = 0;
-        let joinedThemeCount = 0;
-
-        // Idempotency guard (#520 H5): Inngest retries the WHOLE step on
-        // failure, and the matching above is recomputed deterministically from
-        // the memoised load step. A prior partial run may have already linked
-        // some posts; re-read their current theme_id and skip the done ones so
-        // a retry doesn't create duplicate themes. (slug has no unique
-        // constraint, so we can't rely on upsert-on-conflict.)
-        const alreadyLinked = await supabase
-          .from("reddit_post_intel")
-          .select("id, theme_id")
-          .in(
-            "id",
-            assignments.map((a) => a.postId),
-          );
-        const donePostIds = new Set(
-          (alreadyLinked.data ?? [])
-            .filter((r) => r.theme_id)
-            .map((r) => r.id as string),
-        );
-
-        for (const a of assignments) {
-          if (donePostIds.has(a.postId)) continue; // already persisted in a prior attempt
-          if (a.isNewTheme) {
-            // Insert new theme row first to get its UUID. Slug is DETERMINISTIC
-            // (auto-<seed post id>) not Math.random()-based, so a retry of this
-            // step produces a stable handle instead of proliferating random
-            // slugs. The naming step later rewrites it to the kebab-cased title.
-            const { data: created, error: insErr } = await supabase
-              .from("reddit_intel_themes")
-              .insert({
-                slug: `auto-${a.postId}`,
-                title: "Pending naming",
-                centroid_embedding: vectorToPgString(a.newCentroid),
-                centroid_embedding_model_version: a.embeddingModelVersion,
-                member_count: 1,
-                first_seen_at: new Date().toISOString(),
-                last_seen_at: new Date().toISOString(),
-                signal_strength: "weak",
-                is_active: true,
-              })
-              .select("id")
-              .single();
-
-            if (insErr || !created) {
-              logger.warn("cluster: new theme insert failed", {
-                error: insErr?.message,
-              });
-              continue;
-            }
-            a.themeId = created.id as string;
-            newThemeCount++;
-          } else {
-            // Existing theme: update centroid + bump member count + last_seen_at.
-            // Stamp the centroid's model version with the joining post's
-            // version. If old centroid was on voyage-3 and the new post is
-            // on voyage-3.5, the centroid is now mixed-model — the version
-            // column captures the most-recent contributor so a future
-            // re-embed sweep can detect mixed centroids and rebuild them.
-            // See ADR-0003.
-            const { error: upErr } = await supabase
-              .from("reddit_intel_themes")
-              .update({
-                centroid_embedding: vectorToPgString(a.newCentroid),
-                centroid_embedding_model_version: a.embeddingModelVersion,
-                member_count: a.newMemberCount,
-                last_seen_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-              })
-              .eq("id", a.themeId);
-
-            if (upErr) {
-              logger.warn("cluster: theme update failed", {
-                themeId: a.themeId,
-                error: upErr.message,
-              });
-              continue;
-            }
-            joinedThemeCount++;
-          }
-
-          // Link the post → theme.
-          const { error: postErr } = await supabase
-            .from("reddit_post_intel")
-            .update({ theme_id: a.themeId })
-            .eq("id", a.postId);
-          if (postErr) {
-            logger.warn("cluster: post theme_id update failed", {
-              postId: a.postId,
-              error: postErr.message,
-            });
-            continue;
-          }
-
-          // Insert membership row (primary).
-          const { error: memErr } = await supabase
-            .from("reddit_post_intel_themes")
-            .insert({
-              intel_id: a.postId,
-              theme_id: a.themeId,
-              similarity: Math.min(1, Math.max(0, a.similarity)),
-              is_primary: true,
-            });
-          if (memErr) {
-            logger.warn("cluster: membership insert failed", {
-              postId: a.postId,
-              themeId: a.themeId,
-              error: memErr.message,
-            });
-          }
-        }
-
-        return { newThemeCount, joinedThemeCount };
+        return persistAssignments(supabase, assignments);
       });
 
       // ── Step 4: name themes that have just crossed MIN_MEMBERS_FOR_NAMING ─
@@ -692,6 +817,11 @@ export const redditIntelCluster = inngest.createFunction(
           .select("id, member_count")
           .eq("title", "Pending naming")
           .gte("member_count", MIN_MEMBERS_FOR_NAMING)
+          // Ordered, because .limit() without .order() lets PostgREST return
+          // an arbitrary 20. Harmless while the eligible set is smaller than
+          // the limit; undefined drain order the moment it is not. Largest
+          // first: the themes most worth naming are the ones with most members.
+          .order("member_count", { ascending: false })
           .limit(20);
 
         if (pendErr) throw new Error(`pending themes: ${pendErr.message}`);
@@ -864,7 +994,8 @@ export const redditIntelCluster = inngest.createFunction(
         // null` is the only signal that the read did not happen.
         if (error || count === null) {
           logger.warn("cluster: active theme count unavailable", {
-            error: error?.message ?? "null count (head request returned no body)",
+            error:
+              error?.message ?? "null count (head request returned no body)",
           });
           return null;
         }
@@ -885,6 +1016,26 @@ export const redditIntelCluster = inngest.createFunction(
         }),
       );
 
+      // ── Step 6b: how much work is left ───────────────────────────────────
+      //
+      // postsConsidered is capped at CLUSTER_POSTS_PER_RUN, so it says how much
+      // this run did and NOTHING about how much remains. The backlog reached
+      // 1,662 posts in September while every summary looked ordinary — the
+      // number that would have shown it was never emitted.
+      const backlogRemaining = await step.run("count-backlog", async () => {
+        const supabase = createServiceClient();
+        if (!supabase) return null;
+        const { count } = await supabase
+          .from("reddit_post_intel")
+          .select("id", { count: "exact", head: true })
+          .is("theme_id", null)
+          .not("embedding", "is", null);
+        // Same 204/head-count trap as count-active-themes above: a failed
+        // head-count returns count=null AND error=null, so `count ?? 0` would
+        // print a confident "backlog cleared". null means "not measured".
+        return count;
+      });
+
       // One always-ship warn per run. fn.complete is INFO and prod samples
       // INFO at 10% with the keep/drop decision taken once per run, so the
       // question this answers — "is the cluster still birthing themes, or has
@@ -897,6 +1048,16 @@ export const redditIntelCluster = inngest.createFunction(
         newThemes: persistResult.newThemeCount,
         joinedThemes: persistResult.joinedThemeCount,
         themesNamed: namingResult.named,
+        // Work left AFTER this run. postsConsidered is capped, so without this
+        // a saturated run and an idle one produce the same-shaped summary.
+        backlogRemaining,
+        // Non-zero here means posts were considered and then dropped on the
+        // floor — they will re-present at the head of the oldest-first
+        // worklist next run and fail again. Zero-vs-null matters: null is
+        // "not measured", zero is "measured, none".
+        seedFailures: persistResult.seedFailures,
+        joinFailures: persistResult.joinFailures,
+        linkFailures: persistResult.linkFailures,
         activeThemes: activeCount ?? health?.active_themes ?? null,
         themeBirths7d: health?.theme_births_7d ?? null,
         strongThemes: health?.strong_themes ?? null,
