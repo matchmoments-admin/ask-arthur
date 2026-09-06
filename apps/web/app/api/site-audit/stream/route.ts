@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
           if (event.type === "complete") {
             const result = event.data;
             // Store in DB non-blocking
-            storeAuditResult(result, url).then((shareUrl) => {
+            storeAuditResult(result).then((shareUrl) => {
               if (shareUrl) {
                 send("share", { shareUrl });
               }
@@ -117,9 +117,14 @@ export async function POST(req: NextRequest) {
   });
 }
 
+// No original-URL parameter: the RPC stores `result.url`, the NORMALISED url,
+// and `result.domain`. The submitted form was accepted and discarded, so the
+// caller was computing something that could not reach the database. If the
+// pre-normalisation url is ever wanted, add a column for it and pass it then —
+// an ignored parameter is not a placeholder, it is a claim that something is
+// recorded when it is not.
 async function storeAuditResult(
   result: import("@askarthur/site-audit/types").SiteAuditResult,
-  _originalUrl: string
 ): Promise<string | undefined> {
   const supabase = createServiceClient();
   if (!supabase) return undefined;

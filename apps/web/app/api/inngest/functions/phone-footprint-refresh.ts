@@ -474,11 +474,35 @@ async function requeue(monitor: MonitorRow): Promise<void> {
   });
 }
 
-async function markCompleted(queueId: number, _reason: string): Promise<void> {
+/**
+ * Six call sites pass six distinct terminal states — phone_footprint_braked,
+ * monitor_not_found, monitor_inactive, persist_failed, ok — and every one used
+ * to be written as an undifferentiated "completed". A queue where a hard
+ * failure and a success are indistinguishable cannot answer "why did this stop
+ * happening", which is the only question anyone asks of a queue.
+ *
+ * There is no column for it (`phone_footprint_refresh_queue` has completed_at
+ * and last_error, and last_error is the wrong home for "ok"), so the reason is
+ * logged rather than stored. That keeps the distinction observable without a
+ * migration; a column is the better answer if this is ever queried in bulk.
+ *
+ * Non-ok outcomes log at `warn`, which bypasses the 10% INFO sampling — they
+ * are rare and each one means a refresh silently did not happen.
+ */
+async function markCompleted(queueId: number, reason: string): Promise<void> {
   const supa = createServiceClient();
   if (!supa) return;
   await supa
     .from("phone_footprint_refresh_queue")
     .update({ completed_at: new Date().toISOString() })
     .eq("id", queueId);
+
+  if (reason === "ok") {
+    logger.info("phone_footprint_refresh_completed", { queueId, reason });
+  } else {
+    logger.warn("phone_footprint_refresh_completed_without_work", {
+      queueId,
+      reason,
+    });
+  }
 }
