@@ -79,7 +79,18 @@ async function main() {
     batchSize: BATCH,
     dryRun: DRY,
     runBatch: async (slice) => {
-      const result = await embed(slice.map(buildEmbedText));
+      // Pacing is opt-in and defaults to OFF, because that sleep happens
+      // inside whatever calls embed() — and six of its seven callers are
+      // Inngest steps, where sleeping holds one of five concurrency slots.
+      //
+      // This script is the caller that should take it: it runs locally and
+      // holds no slot, so it can afford to wait out the free tier's
+      // 3-requests-per-minute allowance. Without it, 673 rows leave as ~34
+      // back-to-back requests and every batch 429s — which is exactly what
+      // happened on the run that found this.
+      const result = await embed(slice.map(buildEmbedText), {
+        chunkPauseMs: 20_000,
+      });
 
       // The count check the Inngest job also makes. Vectors are matched to
       // rows BY INDEX, so a length mismatch means the mapping is already
