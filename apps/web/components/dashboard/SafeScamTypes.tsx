@@ -23,8 +23,12 @@ export default function SafeScamTypes({
           <h3 className="text-[15px] font-semibold tracking-tight text-deep-navy m-0">
             Top scam types
           </h3>
+          {/* "Categorised" is load-bearing: `other` is excluded from the
+              ranking, so a plain "by volume" would imply a total this chart
+              does not show. The window is now genuinely applied — it used to
+              say "Last 30 days" over all-time data. */}
           <p className="text-[12px] text-slate-500 mt-0.5">
-            Last 30 days · by volume
+            Last 30 days · categorised reports
           </p>
         </div>
         <span
