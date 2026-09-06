@@ -81,7 +81,14 @@ function strip(src: string): string {
  */
 const IDIOMATIC = new Set(["_req", "_"]);
 
-/** Path -> why this discard is genuinely intended. A reason is required. */
+/**
+ * Path -> why this discard is genuinely intended.
+ *
+ * An entry here is a claim someone defends at review, not a way to silence the
+ * test — and the entries are themselves asserted below, because a stale
+ * allowlist permits silently. That is the same failure the guard exists to
+ * prevent, one level up.
+ */
 const ALLOWLIST: Record<string, string> = {
   "apps/web/app/api/inngest/functions/clone-watch-notify-brand.ts":
     "_severity: severity gating was removed 2026-05-27 and the parameter is " +
@@ -135,5 +142,22 @@ describe("a caller's distinction is not silently discarded", () => {
         "simply rename it —\n`getScamTypeBreakdown(_days)` shipped a false " +
         "caption for months because an\nunderscore made it invisible.",
     ).toEqual([]);
+  });
+
+  // House convention, from rowCap.test.ts: the allowlist is asserted too. An
+  // entry pointing at a file that no longer exists, or carrying no real reason,
+  // is an exemption nobody is defending — and it would go on permitting a
+  // rename or a move without anyone noticing.
+  it("every allowlist entry names a real file and carries a reason", () => {
+    for (const [file, reason] of Object.entries(ALLOWLIST)) {
+      expect(
+        fs.existsSync(path.join(repoRoot, file)),
+        `allowlisted file ${file} no longer exists — drop the entry`,
+      ).toBe(true);
+      expect(
+        reason.length,
+        `allowlist entry ${file} needs a real reason, not a placeholder`,
+      ).toBeGreaterThan(20);
+    }
   });
 });
