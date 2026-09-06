@@ -1,17 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@askarthur/supabase/server";
-
-const GRADE_COLORS: Record<string, string> = {
-  "A+": "#388E3C",
-  A: "#388E3C",
-  B: "#006B75",
-  C: "#F57C00",
-  D: "#E65100",
-  F: "#D32F2F",
-};
-
-// Grades eligible for a scored badge
-const ELIGIBLE_GRADES = new Set(["A+", "A", "B"]);
+import {
+  BADGE_MESSAGES,
+  badgeGradeColor,
+  resolveBadgeSubject,
+} from "@/lib/badge/eligibility";
 
 function buildSvgBadge(
   _domain: string,
@@ -23,7 +15,7 @@ function buildSvgBadge(
   const leftWidth = 80;
   const rightWidth = 70;
   const totalWidth = leftWidth + rightWidth;
-  const color = GRADE_COLORS[grade] || GRADE_COLORS["F"];
+  const color = badgeGradeColor(grade);
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${totalWidth}" height="20" role="img" aria-label="${leftText}: ${rightText}">
   <title>${leftText}: ${rightText}</title>
@@ -84,32 +76,12 @@ export async function GET(
   const { domain } = await params;
   const decodedDomain = decodeURIComponent(domain);
 
-  const supabase = createServiceClient();
-  if (!supabase) {
-    return new NextResponse("Service unavailable", { status: 503 });
-  }
-
-  const { data: site, error } = await supabase
-    .from("sites")
-    .select("latest_grade, latest_score")
-    .eq("domain", decodedDomain)
-    .single();
-
-  // Unknown domain — "Not yet scanned" badge
-  if (error || !site || !site.latest_grade || site.latest_score == null) {
-    const svg = buildNeutralBadge("Not yet scanned");
-    return new NextResponse(svg, {
-      headers: {
-        "Content-Type": "image/svg+xml",
-        "Cache-Control": "public, max-age=3600, s-maxage=86400, stale-while-revalidate",
-      },
-    });
-  }
-
-  // D/F grades — "Needs improvement" neutral badge
-  if (!ELIGIBLE_GRADES.has(site.latest_grade)) {
-    const svg = buildNeutralBadge("Needs improvement");
-    return new NextResponse(svg, {
+  // The lookup, the eligibility rule and the wording live in
+  // lib/badge/eligibility.ts. This route and /api/badge had separate copies,
+  // and they disagreed on which grades earn a badge — see that module.
+  const subject = await resolveBadgeSubject(decodedDomain);
+  if (subject.kind !== "ok") {
+    return new NextResponse(buildNeutralBadge(BADGE_MESSAGES[subject.kind]), {
       headers: {
         "Content-Type": "image/svg+xml",
         "Cache-Control": "public, max-age=3600, s-maxage=86400, stale-while-revalidate",
@@ -118,11 +90,7 @@ export async function GET(
   }
 
   // B or better — show full grade badge
-  const svg = buildSvgBadge(
-    decodedDomain,
-    site.latest_grade,
-    site.latest_score
-  );
+  const svg = buildSvgBadge(decodedDomain, subject.grade, subject.score);
 
   return new NextResponse(svg, {
     headers: {

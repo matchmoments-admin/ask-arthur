@@ -1,23 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
+import {
+  BADGE_MESSAGES,
+  badgeGradeColor,
+  resolveBadgeSubject,
+} from "@/lib/badge/eligibility";
 
-export const runtime = "edge";
+// Node, not edge: this route now reads the `sites` table, exactly as
+// app/badge/[domain]/route.ts does. It was edge only because it had no data
+// dependency — which was the whole problem.
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 type BadgeStyle = "shield" | "pill" | "cert";
 
-const GRADE_COLORS: Record<string, string> = {
-  "A+": "#388E3C", "A": "#388E3C", "A-": "#4CAF50",
-  "B+": "#006B75", "B": "#006B75", "B-": "#008A98",
-  "C+": "#F57C00", "C": "#F57C00", "C-": "#E65100",
-  "D": "#D84315", "F": "#D32F2F",
-};
-
-function getGradeColor(grade: string): string {
-  return GRADE_COLORS[grade] || "#D32F2F";
-}
+const getGradeColor = badgeGradeColor;
 
 // ── Shield Badge (240x72, for website footers) ──
 
-function shieldBadge(grade: string, _label: string): string {
+function shieldBadge(grade: string): string {
   const color = getGradeColor(grade);
   return `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="72" viewBox="0 0 240 72">
   <defs>
@@ -88,26 +88,82 @@ function certBadge(grade: string, date: string): string {
 </svg>`;
 }
 
+/**
+ * A badge that asserts nothing. Served when the domain is unknown, ungraded,
+ * or below the eligibility bar — the honest answer, and the same shape
+ * app/badge/[domain]/route.ts already returns for those cases.
+ */
+function neutralBadge(message: string): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="180" height="28" viewBox="0 0 180 28" role="img" aria-label="Ask Arthur: ${message}">
+  <title>Ask Arthur: ${message}</title>
+  <rect width="180" height="28" rx="6" fill="#42526E"/>
+  <text x="90" y="18" text-anchor="middle" font-size="11" font-weight="600" fill="#EFF4F8" font-family="system-ui,sans-serif">Ask Arthur · ${message}</text>
+</svg>`;
+}
+
+/**
+ * THE BADGE NOW REPORTS WHAT WE FOUND, RATHER THAN WHAT THE CALLER ASKED FOR.
+ *
+ * Every value this route rendered used to come from the query string:
+ *
+ *     const grade = searchParams.get("grade") || "A+";
+ *     const score = parseInt(searchParams.get("score") || "97", 10);
+ *     const date  = searchParams.get("date")  || <today>;
+ *
+ * No lookup, no domain binding, no validation. Anyone could embed an <img> on
+ * any site and get an official Ask Arthur badge saying whatever they liked.
+ * Verified against production before this change:
+ *
+ *     ?grade=A%2B&score=100&style=pill        ->  "Ask Arthur"  "A+ · 100"
+ *     ?grade=A%2B&style=cert&date=2030-01-01  ->  "A+" "ASK ARTHUR" "VERIFIED"
+ *                                                 "2030-01-01"
+ *
+ * A VERIFIED certificate on askarthur.au, with a perfect grade and a date four
+ * years out, asserted by whoever wrote the img tag. On a product whose entire
+ * value is telling people what to trust, that is the worst possible thing to
+ * leave unguarded.
+ *
+ * `grade`, `score`, `date` and `label` are no longer inputs. `domain` is, and
+ * it is looked up. This is not new capability — app/badge/[domain]/route.ts has
+ * done it correctly since v20; this route predates the lookup and was never
+ * revisited.
+ *
+ * Related, and deliberately NOT fixed here: migration-v20 declares
+ * `sites.badge_eligible` and `sites.badge_token TEXT UNIQUE` with its own
+ * partial index, and NOTHING READS EITHER. The token is an anti-forgery
+ * mechanism that was designed, schema'd, indexed and never wired. Binding to
+ * the domain closes the hole; adopting the token would additionally prove the
+ * embedder controls the site. That is a separate change with a product
+ * decision in it — see the PR body.
+ */
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
-  const grade = searchParams.get("grade") || "A+";
-  const score = parseInt(searchParams.get("score") || "97", 10);
   const style = (searchParams.get("style") || "shield") as BadgeStyle;
-  const label = searchParams.get("label") || "";
-  const date = searchParams.get("date") || new Date().toISOString().split("T")[0];
+
+  // The lookup, the eligibility rule and the wording all live in
+  // lib/badge/eligibility.ts. They were duplicated here first, and the two
+  // copies disagreed within a day — see that module's header.
+  const subject = await resolveBadgeSubject(searchParams.get("domain"));
+  if (subject.kind !== "ok") {
+    return svgResponse(neutralBadge(BADGE_MESSAGES[subject.kind]));
+  }
 
   let svg: string;
   switch (style) {
     case "pill":
-      svg = pillBadge(grade, score);
+      svg = pillBadge(subject.grade, subject.score);
       break;
     case "cert":
-      svg = certBadge(grade, date);
+      svg = certBadge(subject.grade, subject.scannedAt);
       break;
     default:
-      svg = shieldBadge(grade, label);
+      svg = shieldBadge(subject.grade);
   }
 
+  return svgResponse(svg);
+}
+
+function svgResponse(svg: string): NextResponse {
   return new NextResponse(svg, {
     headers: {
       "Content-Type": "image/svg+xml",

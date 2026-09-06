@@ -226,8 +226,12 @@ export default function ScanResultReport({
         </button>
         {result.grade.startsWith("A") && (
           <span className="text-xs text-slate-400">
+            {/* The badge is now bound to the domain and reads the stored
+                grade. It used to be suggested as `?grade={grade}` — which
+                meant the embedder supplied the grade, and any site could mint
+                an A+. */}
             Embed badge: <code className="bg-slate-50 px-1 py-0.5 rounded text-[10px]">
-              /api/badge?grade={result.grade}&style=pill
+              /api/badge?domain={result.target}&style=pill
             </code>
           </span>
         )}
