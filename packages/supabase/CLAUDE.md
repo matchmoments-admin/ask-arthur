@@ -50,8 +50,7 @@ If you reach for `createServiceClient` outside the allowed tiers, stop and ask. 
 
 | Export                   | From                              | Purpose                                               |
 | ------------------------ | --------------------------------- | ----------------------------------------------------- |
-| `createServerClient`     | `@askarthur/supabase/server`      | RLS-bearing server client (cookies → session)         |
-| `createAuthServerClient` | `@askarthur/supabase/server-auth` | Same as above with auth-flow cookie handling          |
+| `createAuthServerClient` | `@askarthur/supabase/server-auth` | RLS-bearing server client (cookies → session), incl. auth-flow cookie handling |
 | `createBrowserClient`    | `@askarthur/supabase/browser`     | RLS-bearing client-side client                        |
 | `createMiddlewareClient` | `@askarthur/supabase/middleware`  | Cookie-refresh-aware middleware client                |
 | `createServiceClient`    | `@askarthur/supabase/server`      | Service-role; **restricted callers only** (see above) |
