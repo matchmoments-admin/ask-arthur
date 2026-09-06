@@ -190,45 +190,129 @@ describe("no pipeline stage scopes its worklist to the triggering cohort", () =>
  * one where it had no work of its own.
  */
 describe("a stage with no work still invites the next stage", () => {
-  it("reddit-intel-daily emits the cohort event on the no-new-posts path", () => {
-    const src = readFileSync(
-      new URL("../inngest/reddit-intel-daily.ts", import.meta.url),
-      "utf8",
-    );
+  /**
+   * The property, over every stage that fans out — not over the one stage I
+   * happened to fix first.
+   *
+   * reddit-intel-daily returned at `posts.length === 0` before emitting the
+   * event that triggers reddit-intel-embed. I fixed that, wrote a guard for
+   * it, and claimed the pipeline was unblocked. It was not:
+   * reddit-intel-embed had the IDENTICAL shape one stage down, returning at
+   * `rows.length === 0` before emitting the event that triggers
+   * reddit-intel-cluster. A guard naming only the first stage would not have
+   * caught the second, which is exactly how the fourth instance of this
+   * pattern hid behind the three before it.
+   *
+   * So the cases are a table, and adding a stage to the chain means adding a
+   * row here.
+   */
+  const FANOUT_STAGES = [
+    {
+      file: "../inngest/reddit-intel-daily.ts",
+      guard: "if (posts.length === 0)",
+      emits: "REDDIT_INTEL_SUMMARISED_EVENT",
+      starves: "reddit-intel-embed",
+    },
+    {
+      file: "../inngest/reddit-intel-embed.ts",
+      guard: "if (rows.length === 0)",
+      emits: "REDDIT_INTEL_EMBEDDED_EVENT",
+      starves: "reddit-intel-cluster",
+    },
+  ];
 
-    const guard = src.indexOf("if (posts.length === 0)");
-    expect(
-      guard,
-      "the no-new-posts branch was not found — renamed? this guard is inert",
-    ).toBeGreaterThan(-1);
+  for (const stage of FANOUT_STAGES) {
+    const name = stage.file.split("/").pop();
+    it(`${name} emits on its no-work path`, () => {
+      const src = readFileSync(new URL(stage.file, import.meta.url), "utf8");
+      const at = src.indexOf(stage.guard);
+      expect(
+        at,
+        `"${stage.guard}" not found in ${name} — renamed? this guard is inert`,
+      ).toBeGreaterThan(-1);
 
-    // The branch runs from its opening to its `return`. Everything the branch
-    // does must happen before that return, so this is the window to check.
-    const branch = stripComments(
-      src.slice(guard, src.indexOf("return {", guard)),
-    );
+      // The branch runs from its opening to its `return`; everything it does
+      // must happen before that.
+      const branch = stripComments(src.slice(at, src.indexOf("return {", at)));
 
-    expect(
-      branch.includes("REDDIT_INTEL_SUMMARISED_EVENT"),
-      "reddit-intel-daily returns on the no-new-posts path without emitting " +
-        "REDDIT_INTEL_SUMMARISED_EVENT. Every downstream stage is triggered by " +
-        "that event, so this short-circuits the whole pipeline: embed and " +
-        "cluster never run, and their backlogs can only drain as a side effect " +
-        "of new posts arriving. Emit the event and let each stage consult its " +
-        "own worklist.",
-    ).toBe(true);
-  });
+      expect(
+        branch.includes(stage.emits),
+        `${name} returns on its no-work path without emitting ${stage.emits}. ` +
+          `${stage.starves} is triggered only by that event, so this starves ` +
+          "it on every tick where this stage had nothing of its own to do — " +
+          "and its backlog can then only drain as a side effect of upstream " +
+          "work. Emit, and let the next stage consult its own worklist.",
+      ).toBe(true);
+    });
+  }
 
   it("says plainly that no model ran, rather than naming one", () => {
-    // modelVersion is a free string in the schema, so the empty cohort could
-    // silently carry the last real model id and pollute anything that groups
-    // by it. The sentinel is greppable and cannot be mistaken for a model.
+    // modelVersion is a free string, so an empty cohort could silently carry
+    // the last real model id and pollute anything grouping by it.
     const src = readFileSync(
       new URL("../inngest/reddit-intel-daily.ts", import.meta.url),
       "utf8",
     );
-    const guard = src.indexOf("if (posts.length === 0)");
-    const branch = src.slice(guard, src.indexOf("return {", guard));
-    expect(branch).toContain("none:no-new-posts");
+    const at = src.indexOf("if (posts.length === 0)");
+    expect(src.slice(at, src.indexOf("return {", at))).toContain(
+      "none:no-new-posts",
+    );
+  });
+});
+
+/**
+ * Belt and braces, chosen deliberately.
+ *
+ * The emits above keep the chain responsive inside a single trigger. The crons
+ * below guarantee the backlog drains even if no upstream stage produces
+ * anything at all — which matters because the Vercel trigger route ALSO
+ * returns without dispatching when everything is already classified, and it
+ * structurally cannot do otherwise: RedditIntelBatchReadyDataSchema declares
+ * `feedItemIds` as `.min(1)`, so an empty batch cannot be emitted.
+ *
+ * Without a cron, that route's gate silently caps the whole pipeline at
+ * "whatever new posts happened to arrive".
+ */
+describe("the drain stages do not depend on being invited", () => {
+  const CRON_STAGES = [
+    "../inngest/reddit-intel-embed.ts",
+    "../inngest/reddit-intel-cluster.ts",
+  ];
+
+  for (const file of CRON_STAGES) {
+    const name = file.split("/").pop();
+    it(`${name} has its own cron trigger`, () => {
+      const src = readFileSync(new URL(file, import.meta.url), "utf8");
+      expect(
+        /\{\s*cron:\s*"/.test(src),
+        `${name} is triggered only by an upstream event, so its backlog can ` +
+          "only drain when something upstream produced work. Add a cron " +
+          "trigger alongside the event — the repo idiom is " +
+          "[{ cron }, { event }], as in scam-reports-backfill-embed.",
+      ).toBe(true);
+    });
+
+    it(`${name} tolerates a cron invocation with no event payload`, () => {
+      // A cron fires with no event.data. Parsing it unguarded throws on every
+      // scheduled run, which would make the cron worse than useless — it
+      // would look like a failing function rather than a missing one.
+      const src = readFileSync(new URL(file, import.meta.url), "utf8");
+      expect(
+        src.includes("event?.data"),
+        `${name} reads event.data unguarded. On the cron path there is none, ` +
+          "so every scheduled run would throw in the Zod parse.",
+      ).toBe(true);
+    });
+  }
+
+  it("keeps the cron off the top of the hour", () => {
+    // ADR-0019: "Prefer off-:00 minutes for new crons. The top of the hour is
+    // the fleet's worst pileup."
+    for (const file of CRON_STAGES) {
+      const src = readFileSync(new URL(file, import.meta.url), "utf8");
+      const m = src.match(/\{\s*cron:\s*"(\d+)\s/);
+      expect(m, `${file} has no parseable cron minute`).not.toBeNull();
+      expect(Number(m![1]), `${file} fires on the hour`).toBeGreaterThan(0);
+    }
   });
 });

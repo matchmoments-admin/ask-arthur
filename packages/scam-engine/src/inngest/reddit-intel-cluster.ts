@@ -397,7 +397,15 @@ export const redditIntelCluster = inngest.createFunction(
     // infrequent, so limit:1 costs nothing in the steady state.
     concurrency: { limit: 1 },
   },
-  { event: REDDIT_INTEL_EMBEDDED_EVENT },
+  // Dual trigger, same reasoning as reddit-intel-embed: the event keeps the
+  // chain responsive, the cron guarantees the backlog drains even when no
+  // upstream stage produced anything. Safe at any cadence because the worklist
+  // (`theme_id IS NULL AND embedding IS NOT NULL`) reads back over no time
+  // window — ADR-0019's condition for widening a cron freely.
+  //
+  // 20 minutes after the embed sweep so anything that sweep writes is
+  // clusterable on the same cycle rather than waiting six hours.
+  [{ cron: "45 2,8,14,20 * * *" }, { event: REDDIT_INTEL_EMBEDDED_EVENT }],
   withAxiomLogging(
     { fnId: "reddit-intel-cluster" },
     async ({ event, step }) => {
@@ -412,7 +420,16 @@ export const redditIntelCluster = inngest.createFunction(
 
       // Inline (not a step.run): pure deterministic Zod parse, free to re-run on
       // retry — memoising it as a durable step only cost an Inngest execution.
-      const data = parseRedditIntelEmbeddedData(event.data);
+      // No event payload on the cron path. Only cohortDate is read from this,
+      // and only for logging and the recomputed-themes event below.
+      const data = event?.data
+        ? parseRedditIntelEmbeddedData(event.data)
+        : {
+            cohortDate: new Date().toISOString().slice(0, 10),
+            postsEmbedded: 0,
+            embeddingProvider: "voyage" as const,
+            modelId: "none:cron-sweep",
+          };
 
       // ── Step 1: load unassigned embedded posts + themes ──────────────────
       const { posts, themes } = await step.run("load-state", async () => {

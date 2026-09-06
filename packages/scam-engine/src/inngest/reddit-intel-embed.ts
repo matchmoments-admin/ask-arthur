@@ -131,7 +131,24 @@ export const redditIntelEmbed = inngest.createFunction(
     name: "Reddit Intel: Embed newly classified posts",
     retries: 3,
   },
-  { event: REDDIT_INTEL_SUMMARISED_EVENT },
+  // DUAL TRIGGER — the repo idiom already used by scam-reports-backfill-embed
+  // and acnc-charity-backfill-embed: same drain logic, scheduled AND
+  // event-kickable.
+  //
+  // The event alone was not enough. Every stage in this chain only ran when
+  // the stage above it had produced work, so a backlog could drain only as a
+  // SIDE EFFECT of new posts arriving — and 976 rows proved it by sitting
+  // unembedded until an operator drained them by hand.
+  //
+  // The cron is safe at any cadence precisely because the worklist is
+  // `embedding IS NULL` with no time window: ADR-0019's cadence rule says a
+  // cron may be widened freely when the window it reads back over is
+  // unbounded, since a wider gap then delays work but can never drop it.
+  //
+  // Off-:00 and offset from the 01/07/13/19 trigger so the event path runs
+  // first and this only ever mops up what it missed. ADR-0019 again: the top
+  // of the hour is the fleet's worst pileup.
+  [{ cron: "25 2,8,14,20 * * *" }, { event: REDDIT_INTEL_SUMMARISED_EVENT }],
   withAxiomLogging({ fnId: "reddit-intel-embed" }, async ({ event, step }) => {
     if (!featureFlags.redditIntelIngest) {
       return { skipped: true, reason: "redditIntelIngest flag off" };
@@ -144,7 +161,20 @@ export const redditIntelEmbed = inngest.createFunction(
 
     // Inline (not a step.run): pure deterministic Zod parse, free to re-run on
     // retry — memoising it as a durable step only cost an Inngest execution.
-    const data = parseRedditIntelSummarisedData(event.data);
+    //
+    // On the cron path there is no event payload. cohortDate is used for
+    // logging and for the event this function emits downstream, so it is
+    // derived from the clock; the sentinel model version says plainly that no
+    // upstream classification produced this run, rather than repeating a
+    // model id that did not run.
+    const data = event?.data
+      ? parseRedditIntelSummarisedData(event.data)
+      : {
+          cohortDate: new Date().toISOString().slice(0, 10),
+          postsClassified: 0,
+          newQuotesCount: 0,
+          modelVersion: "none:cron-sweep",
+        };
 
     // ── Step 1: load rows that lack embeddings ───────────────────────────
     const rows = await step.run("load-unembedded", async () => {
@@ -194,7 +224,38 @@ export const redditIntelEmbed = inngest.createFunction(
       logger.info("reddit-intel-embed: nothing to embed", {
         cohortDate: data.cohortDate,
       });
-      return { skipped: true, reason: "all_already_embedded" };
+      // Nothing to embed is not nothing to do — the same correction made one
+      // stage up. reddit-intel-cluster is triggered ONLY by the event this
+      // function emits below, so returning here starved it on every tick where
+      // no new vectors were written. That is how 1,649 rows came to sit
+      // embedded and unclustered while the cluster stage was perfectly able to
+      // see them.
+      //
+      // The cluster stage now has its own cron too, so this emit is the fast
+      // path rather than the only path. Both, deliberately: the cron
+      // guarantees drainage, the emit keeps the chain responsive within a
+      // single trigger.
+      //
+      // No schema widening needed. `embeddingProvider` is an enum with no
+      // "none" member, but cluster reads only `cohortDate` from this payload —
+      // so naming the provider that WOULD have run is accurate about
+      // configuration and misleads nobody about work performed, which
+      // `postsEmbedded: 0` states outright.
+      await step.run("emit-embedded-empty", () =>
+        inngest.send({
+          name: REDDIT_INTEL_EMBEDDED_EVENT,
+          data: {
+            cohortDate: data.cohortDate,
+            postsEmbedded: 0,
+            embeddingProvider: (process.env.EMBEDDING_PROVIDER === "openai"
+              ? "openai"
+              : "voyage") as "voyage" | "openai",
+            modelId: "none:nothing-to-embed",
+          },
+        }),
+      );
+
+      return { skipped: true, reason: "all_already_embedded", emitted: true };
     }
 
     // ── Step 2: call Voyage / OpenAI ─────────────────────────────────────
