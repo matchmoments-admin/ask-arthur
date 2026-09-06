@@ -32,7 +32,7 @@ Three things you could recognise in a completely different call. That is the who
 
 ## Why it isn't Australia-only
 
-The reports we learn from are overwhelmingly not Australian. Around 98% of the scam reports in our feed come from somewhere else, mostly the United States and the United Kingdom.
+The reports we learn from are overwhelmingly not Australian. Around 96% of the scam reports in our feed come from somewhere else, mostly the United States and the United Kingdom.
 
 We could have filtered them out. We deliberately didn't, because that is backwards. A scam that is running in Ohio this month is often running here in three. The overseas reports are an early-warning system, and throwing them away to look more local would have made us slower, not more relevant.
 
@@ -52,7 +52,7 @@ This is the section we care most about, because an automated system writing abou
 
 **We never repeat amounts, names, handles, phone numbers or email addresses.** Every take is checked against these before it is stored, and one that carries any of them is withheld rather than shown. That check has already caught a real leak in live output.
 
-**We are honest about what that check can't do.** It cannot recognise a personal name written as ordinary prose, and it cannot spot a username with no `@` in front of it. No pattern match can. So a person reviews the takes, and a single click pulls one down. We would rather tell you where the net has holes than imply it has none.
+**We are honest about what that check can't do.** It cannot recognise a personal name written as ordinary prose, and it cannot spot a username with no `@` in front of it. No pattern match can. So every take has a review queue behind it and a single click pulls one down. We would rather tell you where the net has holes than imply it has none.
 
 **We don't show a take when we aren't confident.** Around one in six is withheld — too thin a source post, a label the classifier wasn't sure about, or a post that isn't really a scam report at all. A confident-sounding paragraph built on a shaky reading is worse than a blank space.
 
@@ -68,7 +68,7 @@ That is the thing we can do that an individual reading Reddit cannot: we already
 
 Three things, in order.
 
-**More coverage.** Around 870 reports carry a take today. The rest of the archive is being worked through, and every new report gets one automatically.
+**More coverage.** Around 5,000 reports carry a take today — the whole archive, not just the newest arrivals — and every new report gets one automatically.
 
 **Reverse lookup.** When you paste something into the scanner, we want to be able to say "fourteen people reported something like this in the last month, and here is what they had in common". The data for that already exists.
 
