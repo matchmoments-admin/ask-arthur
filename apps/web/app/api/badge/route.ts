@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createServiceClient } from "@askarthur/supabase/server";
 
-export const runtime = "edge";
+// Node, not edge: this route now reads the `sites` table, exactly as
+// app/badge/[domain]/route.ts does. It was edge only because it had no data
+// dependency — which was the whole problem.
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 type BadgeStyle = "shield" | "pill" | "cert";
 
@@ -17,7 +22,7 @@ function getGradeColor(grade: string): string {
 
 // ── Shield Badge (240x72, for website footers) ──
 
-function shieldBadge(grade: string, _label: string): string {
+function shieldBadge(grade: string): string {
   const color = getGradeColor(grade);
   return `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="72" viewBox="0 0 240 72">
   <defs>
@@ -88,13 +93,92 @@ function certBadge(grade: string, date: string): string {
 </svg>`;
 }
 
+/** Grades that earn a scored badge. Mirrors app/badge/[domain]/route.ts. */
+const ELIGIBLE_GRADES = new Set(["A+", "A", "A-", "B+", "B", "B-"]);
+
+/**
+ * A badge that asserts nothing. Served when the domain is unknown, ungraded,
+ * or below the eligibility bar — the honest answer, and the same shape
+ * app/badge/[domain]/route.ts already returns for those cases.
+ */
+function neutralBadge(message: string): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="180" height="28" viewBox="0 0 180 28" role="img" aria-label="Ask Arthur: ${message}">
+  <title>Ask Arthur: ${message}</title>
+  <rect width="180" height="28" rx="6" fill="#42526E"/>
+  <text x="90" y="18" text-anchor="middle" font-size="11" font-weight="600" fill="#EFF4F8" font-family="system-ui,sans-serif">Ask Arthur · ${message}</text>
+</svg>`;
+}
+
+/**
+ * THE BADGE NOW REPORTS WHAT WE FOUND, RATHER THAN WHAT THE CALLER ASKED FOR.
+ *
+ * Every value this route rendered used to come from the query string:
+ *
+ *     const grade = searchParams.get("grade") || "A+";
+ *     const score = parseInt(searchParams.get("score") || "97", 10);
+ *     const date  = searchParams.get("date")  || <today>;
+ *
+ * No lookup, no domain binding, no validation. Anyone could embed an <img> on
+ * any site and get an official Ask Arthur badge saying whatever they liked.
+ * Verified against production before this change:
+ *
+ *     ?grade=A%2B&score=100&style=pill        ->  "Ask Arthur"  "A+ · 100"
+ *     ?grade=A%2B&style=cert&date=2030-01-01  ->  "A+" "ASK ARTHUR" "VERIFIED"
+ *                                                 "2030-01-01"
+ *
+ * A VERIFIED certificate on askarthur.au, with a perfect grade and a date four
+ * years out, asserted by whoever wrote the img tag. On a product whose entire
+ * value is telling people what to trust, that is the worst possible thing to
+ * leave unguarded.
+ *
+ * `grade`, `score`, `date` and `label` are no longer inputs. `domain` is, and
+ * it is looked up. This is not new capability — app/badge/[domain]/route.ts has
+ * done it correctly since v20; this route predates the lookup and was never
+ * revisited.
+ *
+ * Related, and deliberately NOT fixed here: migration-v20 declares
+ * `sites.badge_eligible` and `sites.badge_token TEXT UNIQUE` with its own
+ * partial index, and NOTHING READS EITHER. The token is an anti-forgery
+ * mechanism that was designed, schema'd, indexed and never wired. Binding to
+ * the domain closes the hole; adopting the token would additionally prove the
+ * embedder controls the site. That is a separate change with a product
+ * decision in it — see the PR body.
+ */
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
-  const grade = searchParams.get("grade") || "A+";
-  const score = parseInt(searchParams.get("score") || "97", 10);
   const style = (searchParams.get("style") || "shield") as BadgeStyle;
-  const label = searchParams.get("label") || "";
-  const date = searchParams.get("date") || new Date().toISOString().split("T")[0];
+  const domain = (searchParams.get("domain") || "").trim().toLowerCase();
+
+  // No domain means nothing can be asserted. Previously this branch rendered
+  // an A+ by default, which is precisely backwards.
+  if (!domain) {
+    return svgResponse(neutralBadge("Not yet scanned"));
+  }
+
+  const supabase = createServiceClient();
+  if (!supabase) {
+    // Fail closed. A badge is a claim; if we cannot check it, we do not make
+    // it. Returning the old default here would reintroduce the bug on every
+    // transient outage.
+    return svgResponse(neutralBadge("Unavailable"));
+  }
+
+  const { data: site, error } = await supabase
+    .from("sites")
+    .select("latest_grade, latest_score, last_scanned_at")
+    .eq("domain", domain)
+    .single();
+
+  if (error || !site?.latest_grade || site.latest_score == null) {
+    return svgResponse(neutralBadge("Not yet scanned"));
+  }
+  if (!ELIGIBLE_GRADES.has(site.latest_grade)) {
+    return svgResponse(neutralBadge("Needs improvement"));
+  }
+
+  const grade = site.latest_grade;
+  const score = site.latest_score;
+  const date = (site.last_scanned_at ?? new Date().toISOString()).slice(0, 10);
 
   let svg: string;
   switch (style) {
@@ -105,9 +189,13 @@ export async function GET(req: NextRequest) {
       svg = certBadge(grade, date);
       break;
     default:
-      svg = shieldBadge(grade, label);
+      svg = shieldBadge(grade);
   }
 
+  return svgResponse(svg);
+}
+
+function svgResponse(svg: string): NextResponse {
   return new NextResponse(svg, {
     headers: {
       "Content-Type": "image/svg+xml",
