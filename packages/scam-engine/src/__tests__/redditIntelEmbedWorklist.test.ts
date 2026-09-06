@@ -28,6 +28,10 @@ import { describe, expect, it } from "vitest";
 import { __testing } from "../embeddings";
 import { EMBED_ROWS_PER_RUN } from "../inngest/reddit-intel-embed";
 
+function stripComments(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+}
+
 const SOURCE = new URL("../inngest/reddit-intel-embed.ts", import.meta.url);
 
 /** The load-unembedded step body, comments stripped. */
@@ -66,32 +70,53 @@ describe("reddit-intel-embed worklist", () => {
     expect(worklistSource()).toContain('ascending: true');
   });
 
-  it("keeps one run inside the route budget AND the Inngest slot budget", () => {
-    // maxDuration on apps/web/app/api/inngest/route.ts. Hard-coded here
-    // because scam-engine cannot import from the web app; the comment on
-    // EMBED_ROWS_PER_RUN names it too.
-    const ROUTE_MAX_DURATION_MS = 300_000;
-    // A slot held this long on a 5-slot plan starves the rest of the fleet.
-    const SLOT_HOLD_BUDGET_MS = 120_000;
-
-    const chunks = Math.ceil(EMBED_ROWS_PER_RUN / __testing.EMBED_CHUNK_TEXTS);
-    const pacingMs = Math.max(0, chunks - 1) * __testing.EMBED_CHUNK_PAUSE_MS;
-
+  it("does not pace inside a step, and is sized so it need not", () => {
+    // THE CORRECTION THIS TEST EXISTS FOR.
+    //
+    // The first version of chunking paced every call by 20s between provider
+    // requests, by default. That sleep happens inside whatever calls it —
+    // here, an Inngest step.run — holding one of five concurrency slots for
+    // the whole wait. Measured against the real batch sizes of the other
+    // callers:
+    //
+    //   acnc-charity-backfill-embed  200/batch -> 180s/step, up to 75 min/run
+    //   scam-reports-backfill-embed  100/batch ->  80s/step, up to 67 min/run
+    //
+    // Long inline steps holding slots is the documented cause of a fleet-wide
+    // run-cancellation incident here. Pacing by default would have traded a
+    // rate-limit bug for that one.
+    //
+    // So pacing is opt-in and defaults to zero, and an Inngest job must not
+    // opt in. Asserting "the default is 0" alone would go vacuous the moment
+    // someone set the env var, so this asserts the property that actually
+    // matters: THIS job never asks for a pause, and its batch is small enough
+    // that it does not need one.
     expect(
-      pacingMs,
-      `${EMBED_ROWS_PER_RUN} rows is ${chunks} provider requests and ` +
-        `${pacingMs / 1000}s of pacing, which exceeds the route's ` +
-        `${ROUTE_MAX_DURATION_MS / 1000}s maxDuration.`,
-    ).toBeLessThan(ROUTE_MAX_DURATION_MS);
+      __testing.EMBED_CHUNK_PAUSE_MS_DEFAULT,
+      "pacing must default to off — six of the seven embed() callers run " +
+        "inside an Inngest step, where sleeping holds a concurrency slot",
+    ).toBe(0);
 
+    const src = readFileSync(SOURCE, "utf8");
     expect(
-      pacingMs,
-      `${pacingMs / 1000}s of pacing happens INSIDE a step.run, holding one ` +
-        "of five Inngest concurrency slots for that entire time. Long inline " +
-        "steps holding slots is the documented cause of a fleet-wide " +
-        "run-cancellation incident. Drain a backlog with " +
-        "scripts/_embed-backfill.ts, which holds no slot.",
-    ).toBeLessThan(SLOT_HOLD_BUDGET_MS);
+      src.includes("chunkPauseMs"),
+      "this job opts into inter-chunk pacing. That sleep happens inside a " +
+        "step.run and holds one of five Inngest slots. Bulk draining belongs " +
+        "in scripts/_embed-backfill.ts, which holds no slot.",
+    ).toBe(false);
+
+    // Without pacing, the whole batch leaves as back-to-back requests, so the
+    // batch must fit the provider's per-minute request allowance on its own.
+    const VOYAGE_FREE_TIER_RPM = 3;
+    const requests = Math.ceil(
+      EMBED_ROWS_PER_RUN / __testing.EMBED_CHUNK_TEXTS,
+    );
+    expect(
+      requests,
+      `${EMBED_ROWS_PER_RUN} rows is ${requests} back-to-back provider ` +
+        `requests, over the free tier's ${VOYAGE_FREE_TIER_RPM}/minute. ` +
+        "Lower the batch rather than adding a pause — a pause here holds a slot.",
+    ).toBeLessThanOrEqual(VOYAGE_FREE_TIER_RPM);
   });
 
   it("covers the steady-state daily volume in a single run", () => {
@@ -99,4 +124,49 @@ describe("reddit-intel-embed worklist", () => {
     // permanent backlog, which is the problem this file exists about.
     expect(EMBED_ROWS_PER_RUN).toBeGreaterThanOrEqual(40);
   });
+});
+
+/**
+ * The same defect appeared at consecutive stages of one pipeline. Guarding
+ * only the two that were fixed, by name, would leave the next one to be
+ * rediscovered the hard way — so this asserts the PROPERTY across every stage
+ * that has a worklist: none may narrow it to the triggering event's cohort.
+ */
+describe("no pipeline stage scopes its worklist to the triggering cohort", () => {
+  const STAGES = [
+    {
+      file: "../inngest/reddit-intel-embed.ts",
+      step: 'step.run("load-unembedded"',
+      worklist: "embedding IS NULL",
+    },
+    {
+      file: "../inngest/reddit-intel-cluster.ts",
+      step: 'step.run("load-state"',
+      worklist: "theme_id IS NULL AND embedding IS NOT NULL",
+    },
+  ];
+
+  for (const stage of STAGES) {
+    const name = stage.file.split("/").pop();
+    it(`${name} selects on work outstanding, not on the event`, () => {
+      const src = readFileSync(new URL(stage.file, import.meta.url), "utf8");
+      const start = src.indexOf(stage.step);
+      expect(
+        start,
+        `${stage.step} not found in ${name} — renamed? this guard is inert`,
+      ).toBeGreaterThan(-1);
+      const body = stripComments(src.slice(start, src.indexOf("});", start)));
+
+      for (const scoping of ["cohortStart", "cohortEnd"]) {
+        expect(
+          body.includes(scoping),
+          `${name} narrows its worklist by ${scoping}. Its real worklist is ` +
+            `"${stage.worklist}". Scoping to the triggering event means a row ` +
+            "that misses its one window is orphaned permanently, because no " +
+            "other job looks for it. That has already happened twice: 976 " +
+            "rows unembedded, then the same 976 unclustered.",
+        ).toBe(false);
+      }
+    });
+  }
 });

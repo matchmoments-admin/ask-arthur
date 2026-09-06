@@ -148,6 +148,14 @@ interface EmbedOptions {
   modelId?: string;
   // Optional correlation ID for log traces.
   requestId?: string;
+  /**
+   * Milliseconds to wait BETWEEN provider requests when a call is large
+   * enough to be chunked. Defaults to 0 — see EMBED_CHUNK_PAUSE_MS_DEFAULT.
+   *
+   * Only set this from a caller that is NOT inside an Inngest step. Sleeping
+   * inside a step holds a concurrency slot, and this project has five.
+   */
+  chunkPauseMs?: number;
 }
 
 /**
@@ -235,7 +243,13 @@ async function embedInternal(
     }
   }
 
-  const result = await callInChunks(texts, spec, inputType, opts.requestId);
+  const result = await callInChunks(
+    texts,
+    spec,
+    inputType,
+    opts.requestId,
+    opts.chunkPauseMs,
+  );
 
   // Populate cache on success — fire-and-forget, never blocks.
   if (texts.length === 1 && result.vectors.length === 1) {
@@ -277,9 +291,30 @@ const EMBED_CHUNK_TEXTS = Number(
 const EMBED_CHUNK_TOKENS = Number(
   process.env.EMBED_CHUNK_TOKENS ?? 3_000,
 );
-/** Only ever waited BETWEEN chunks, so a single-chunk call is unaffected. */
-const EMBED_CHUNK_PAUSE_MS = Number(
-  process.env.EMBED_CHUNK_PAUSE_MS ?? 20_000,
+/**
+ * Pacing between chunks. DEFAULT ZERO, and opt-in per call — the split from
+ * chunking is deliberate and was a correction.
+ *
+ * Chunking is universally safe: smaller requests are strictly better for
+ * every caller. Pacing is not. The first version paced by default at 20s,
+ * and that sleep happens INSIDE whatever is calling — which for six of the
+ * seven callers is an Inngest `step.run`, holding one of five concurrency
+ * slots for the entire wait. Measured against the real batch sizes:
+ *
+ *   acnc-charity-backfill-embed   200/batch -> 180s per step, up to 75 min/run
+ *   scam-reports-backfill-embed   100/batch ->  80s per step, up to 67 min/run
+ *
+ * Long inline steps holding slots is the documented cause of a fleet-wide
+ * run-cancellation incident on this project. Pacing every caller by default
+ * would have traded a rate-limit bug for that.
+ *
+ * So callers that can afford to wait ask for it. In practice that is the
+ * operator drain script, which runs locally and holds no slot. An Inngest
+ * job should instead size its batch so the request count fits the provider's
+ * per-minute allowance, and let Inngest's own retries handle the rest.
+ */
+const EMBED_CHUNK_PAUSE_MS_DEFAULT = Number(
+  process.env.EMBED_CHUNK_PAUSE_MS ?? 0,
 );
 
 function chunkTexts(texts: string[]): string[][] {
@@ -309,6 +344,7 @@ async function callInChunks(
   spec: ModelSpec,
   inputType: VoyageInputType,
   requestId?: string,
+  pauseMs: number = EMBED_CHUNK_PAUSE_MS_DEFAULT,
 ): Promise<EmbedResult> {
   const chunks = chunkTexts(texts);
 
@@ -328,8 +364,8 @@ async function callInChunks(
     // Paced, not just chunked. Splitting a 50,000-token request into fifteen
     // 3,000-token ones still breaches a per-MINUTE ceiling if they all leave
     // at once.
-    if (i > 0 && EMBED_CHUNK_PAUSE_MS > 0) {
-      await new Promise((r) => setTimeout(r, EMBED_CHUNK_PAUSE_MS));
+    if (i > 0 && pauseMs > 0) {
+      await new Promise((r) => setTimeout(r, pauseMs));
     }
     const res =
       spec.provider === "voyage"
@@ -361,7 +397,7 @@ export const __testing = {
   chunkTexts,
   EMBED_CHUNK_TEXTS,
   EMBED_CHUNK_TOKENS,
-  EMBED_CHUNK_PAUSE_MS,
+  EMBED_CHUNK_PAUSE_MS_DEFAULT,
 };
 
 function resolveSpec(opts: EmbedOptions): ModelSpec {
