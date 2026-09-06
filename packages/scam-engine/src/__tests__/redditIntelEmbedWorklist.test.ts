@@ -170,3 +170,65 @@ describe("no pipeline stage scopes its worklist to the triggering cohort", () =>
     });
   }
 });
+
+/**
+ * A worklist that describes outstanding work is useless if the stage holding it
+ * is never invoked.
+ *
+ * Three stages of this pipeline were fixed so their worklists select on work
+ * outstanding rather than on the triggering event's cohort. The fourth instance
+ * of the same mistake sat one level up: `reddit-intel-daily` returned at
+ * `posts.length === 0` BEFORE emitting the event that triggers everything
+ * downstream. So on a trigger with no new posts, nothing downstream ran at all.
+ *
+ * Measured before the fix: 1 of 4 daily triggers classified anything, so embed
+ * and cluster were invoked about once a day, and 1,649 rows sat embedded and
+ * unclustered while the cluster stage was perfectly able to see them.
+ *
+ * The property under test is therefore not about worklists at all: a stage that
+ * fans out to another stage must emit its event on EVERY path, including the
+ * one where it had no work of its own.
+ */
+describe("a stage with no work still invites the next stage", () => {
+  it("reddit-intel-daily emits the cohort event on the no-new-posts path", () => {
+    const src = readFileSync(
+      new URL("../inngest/reddit-intel-daily.ts", import.meta.url),
+      "utf8",
+    );
+
+    const guard = src.indexOf("if (posts.length === 0)");
+    expect(
+      guard,
+      "the no-new-posts branch was not found — renamed? this guard is inert",
+    ).toBeGreaterThan(-1);
+
+    // The branch runs from its opening to its `return`. Everything the branch
+    // does must happen before that return, so this is the window to check.
+    const branch = stripComments(
+      src.slice(guard, src.indexOf("return {", guard)),
+    );
+
+    expect(
+      branch.includes("REDDIT_INTEL_SUMMARISED_EVENT"),
+      "reddit-intel-daily returns on the no-new-posts path without emitting " +
+        "REDDIT_INTEL_SUMMARISED_EVENT. Every downstream stage is triggered by " +
+        "that event, so this short-circuits the whole pipeline: embed and " +
+        "cluster never run, and their backlogs can only drain as a side effect " +
+        "of new posts arriving. Emit the event and let each stage consult its " +
+        "own worklist.",
+    ).toBe(true);
+  });
+
+  it("says plainly that no model ran, rather than naming one", () => {
+    // modelVersion is a free string in the schema, so the empty cohort could
+    // silently carry the last real model id and pollute anything that groups
+    // by it. The sentinel is greppable and cannot be mistaken for a model.
+    const src = readFileSync(
+      new URL("../inngest/reddit-intel-daily.ts", import.meta.url),
+      "utf8",
+    );
+    const guard = src.indexOf("if (posts.length === 0)");
+    const branch = src.slice(guard, src.indexOf("return {", guard));
+    expect(branch).toContain("none:no-new-posts");
+  });
+});

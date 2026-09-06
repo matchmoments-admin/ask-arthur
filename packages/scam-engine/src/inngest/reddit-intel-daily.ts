@@ -651,10 +651,46 @@ export const redditIntelDaily = inngest.createFunction(
     });
 
     if (posts.length === 0) {
+      // NOTHING NEW TO CLASSIFY IS NOT NOTHING TO DO.
+      //
+      // This used to return here, before the emit at the bottom of the
+      // function — so on a trigger with no new posts the entire downstream
+      // chain never ran. Measured: only 1 of the 4 daily triggers classifies
+      // anything, so reddit-intel-embed and reddit-intel-cluster were invoked
+      // about once a day rather than four times, and a backlog in either could
+      // only drain as a SIDE EFFECT of new posts arriving upstream.
+      //
+      // That was live: 1,649 rows sat embedded and unclustered while the
+      // cluster stage was perfectly capable of seeing them. Fixing a stage's
+      // worklist to describe outstanding work — which the three stages now do
+      // — buys nothing if the stage is never invoked. This is the same mistake
+      // one level up, and the fourth instance of it in this pipeline.
+      //
+      // So the event still fires. Its meaning is "a cohort boundary passed",
+      // not "I produced work for you"; each downstream stage decides for
+      // itself whether it has anything to do by consulting its own worklist.
+      // The cost is a handful of no-op invocations a day, each one indexed
+      // query returning zero rows.
       logger.info("reddit-intel-daily: nothing to classify", {
         requestedIds: data.feedItemIds.length,
       });
-      return { skipped: true, reason: "all_already_classified" };
+
+      await step.run("emit-summarised-empty", () =>
+        inngest.send({
+          name: REDDIT_INTEL_SUMMARISED_EVENT,
+          data: {
+            cohortDate: new Date(data.triggeredAt).toISOString().slice(0, 10),
+            postsClassified: 0,
+            newQuotesCount: 0,
+            // No model ran, so naming one would be a lie. The schema takes any
+            // string; this sentinel is greppable and cannot be mistaken for a
+            // real model id in cost telemetry or a debugging session.
+            modelVersion: "none:no-new-posts",
+          },
+        }),
+      );
+
+      return { skipped: true, reason: "all_already_classified", emitted: true };
     }
 
     // ── Step 2: single Sonnet call ───────────────────────────────────────
