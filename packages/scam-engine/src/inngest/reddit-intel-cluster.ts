@@ -370,6 +370,18 @@ export function assignPostsToThemes(
   return { assignments, oversizedThemeCount: oversized.size };
 }
 
+/**
+ * Posts considered per run.
+ *
+ * Unlike the embed stage there is no provider call here — clustering is
+ * greedy cosine matching in memory — so the ceiling is the step's own
+ * runtime and the Inngest slot it holds, not an API quota. 500 was the
+ * existing value and stays: it comfortably covers the ~40 posts/day steady
+ * state, and a larger backlog now drains across runs instead of being
+ * invisible forever.
+ */
+const CLUSTER_POSTS_PER_RUN = 500;
+
 export const redditIntelCluster = inngest.createFunction(
   {
     id: "reddit-intel-cluster",
@@ -402,26 +414,39 @@ export const redditIntelCluster = inngest.createFunction(
       // retry — memoising it as a durable step only cost an Inngest execution.
       const data = parseRedditIntelEmbeddedData(event.data);
 
-      // ── Step 1: load unassigned posts in this cohort + active themes ─────
+      // ── Step 1: load unassigned embedded posts + themes ──────────────────
       const { posts, themes } = await step.run("load-state", async () => {
         const supabase = createServiceClient();
         if (!supabase) throw new Error("Supabase service client unavailable");
 
-        const cohortStart = new Date(
-          `${data.cohortDate}T00:00:00Z`,
-        ).toISOString();
-        const cohortEnd = new Date(
-          new Date(cohortStart).getTime() + 24 * 3600 * 1000,
-        ).toISOString();
-
+        // NOT scoped to this event's cohort — the same correction made one
+        // stage upstream in reddit-intel-embed, for the same reason.
+        //
+        // `theme_id IS NULL AND embedding IS NOT NULL` IS the worklist: it
+        // describes rows that need clustering. Adding a processed_at window
+        // made it describe rows belonging to whichever event fired, and no
+        // other job anywhere looks for unclustered posts — so a row that
+        // missed its window was orphaned permanently.
+        //
+        // Measured: after the embedding backlog was drained, 976 rows had a
+        // valid 1024-dim vector and still no theme, and no future run would
+        // ever have considered them. Fixing the embed stage alone produced a
+        // pipeline that looked healthier than it was.
+        //
+        // Third instance of one pattern in this pipeline — classify, embed,
+        // cluster each keyed on the triggering event rather than the work
+        // outstanding. CLAUDE.md's clone-watch v224 lesson, one stage at a
+        // time.
+        //
+        // Oldest first so a backlog drains in arrival order rather than
+        // starving behind new posts.
         const { data: postRows, error: postErr } = await supabase
           .from("reddit_post_intel")
           .select("id, embedding, embedding_model_version")
-          .gte("processed_at", cohortStart)
-          .lt("processed_at", cohortEnd)
           .is("theme_id", null)
           .not("embedding", "is", null)
-          .limit(500);
+          .order("processed_at", { ascending: true })
+          .limit(CLUSTER_POSTS_PER_RUN);
 
         if (postErr) throw new Error(`load posts: ${postErr.message}`);
 
