@@ -5,11 +5,10 @@ import {
   resolveBadgeSubject,
 } from "@/lib/badge/eligibility";
 
-function buildSvgBadge(
-  _domain: string,
-  grade: string,
-  score: number
-): string {
+// No domain parameter: the badge's left label is the constant "Ask Arthur".
+// It used to take one and ignore it, which made every caller compute and pass a
+// value that could not affect the output.
+function buildSvgBadge(grade: string, score: number): string {
   const rightText = `${grade} (${score})`;
   const leftText = "Ask Arthur";
   const leftWidth = 80;
@@ -90,7 +89,7 @@ export async function GET(
   }
 
   // B or better — show full grade badge
-  const svg = buildSvgBadge(decodedDomain, subject.grade, subject.score);
+  const svg = buildSvgBadge(subject.grade, subject.score);
 
   return new NextResponse(svg, {
     headers: {
