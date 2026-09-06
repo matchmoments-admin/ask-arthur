@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextRequest, NextResponse } from "next/server";
+import type { Database } from "@askarthur/types/db";
 
 /**
  * Create a Supabase client for use in Next.js edge middleware.
@@ -29,7 +30,7 @@ export function createMiddlewareClient(
     return { supabase: null, response };
   }
 
-  const supabase = createServerClient(url, anonKey, {
+  const supabase = createServerClient<Database>(url, anonKey, {
     cookies: {
       getAll() {
         return req.cookies.getAll();

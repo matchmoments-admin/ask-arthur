@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import type { Database } from "@askarthur/types/db";
 
 // Server-side client with service role key (for API routes)
 // Returns null when credentials are missing (local dev mock mode)
@@ -8,5 +9,5 @@ export function createServiceClient() {
   if (!url || !key) {
     return null;
   }
-  return createClient(url, key);
+  return createClient<Database>(url, key);
 }
