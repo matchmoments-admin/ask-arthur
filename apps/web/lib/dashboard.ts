@@ -1,6 +1,12 @@
 // Dashboard data queries — server-side only (uses service client)
 
 import { createServiceClient } from "@askarthur/supabase/server";
+import { fetchAllRows } from "@askarthur/supabase/paginate";
+import {
+  canonicalScamTypeLabel,
+  toCanonicalScamType,
+  type CanonicalScamType,
+} from "@askarthur/types/scam-taxonomy";
 
 export interface DashboardKPIs {
   totalChecks: number;
@@ -124,25 +130,85 @@ export async function getDashboardKPIs(days = 7): Promise<DashboardKPIs> {
   };
 }
 
-export async function getScamTypeBreakdown(_days = 30): Promise<ScamTypeRow[]> {
+/**
+ * Top scam categories over a real window.
+ *
+ * THREE THINGS WERE WRONG, and they compounded.
+ *
+ * 1. The window was accepted and ignored. The signature was
+ *    `getScamTypeBreakdown(_days = 30)` — underscored to silence the linter —
+ *    and the query had no date filter at all. `app/app/page.tsx` passes 30 and
+ *    SafeScamTypes captions the result "Last 30 days · by volume" plus a "30d"
+ *    chip. All-time data under a one-month claim, twice over.
+ *
+ *    This is a class the repo has fixed twice already: see the post-mortem in
+ *    admin/brand-alerts/BrandAlertsDashboard.tsx ("32 detections vs 2 actually
+ *    in-window", #941 finding 1) and the note at dashboard/admin-health.ts
+ *    naming the #941 finding-10 class. Two live surfaces still had it.
+ *
+ * 2. It read `feed_items.category`, which is NULL on 3,131 of 6,447 published
+ *    rows — 48.6%. So the chart was all-time data from half the corpus.
+ *    `reddit_post_intel.intent_label` carries a category for all 5,979 rows.
+ *
+ * 3. Counting the two vocabularies apart. `intent_label` and the analyze
+ *    path's `scam_type` disagree on romance/romance_scam,
+ *    investment/investment_fraud and smishing/sms_scam, so any tally that
+ *    does not canonicalise under-reports each by the other's share.
+ *    `toCanonicalScamType` is the one home for that mapping.
+ *
+ * BUCKETED ON THE POST'S OWN DATE, not on when we classified it. Using
+ * `processed_at` would make any backfill read as a scam wave — measured at the
+ * time: 1,134 rows in a trailing 28 days by processing date against 847 by
+ * post date. Same reasoning, and the same fix, as lib/scam-type-trend.ts.
+ *
+ * `other` is excluded from the ranking, following NOISE_TOKENS in
+ * lib/partner/dashboard-data.ts. It means "a scam we could not categorise" and
+ * would otherwise lead every chart (159 of the last 30 days) while telling a
+ * reader nothing. The caption says *categorised* so the words stay true.
+ */
+export async function getScamTypeBreakdown(days = 30): Promise<ScamTypeRow[]> {
   const supabase = createServiceClient();
   if (!supabase) return [];
 
-  const { data } = await supabase
-    .from("feed_items")
-    .select("category")
-    .eq("published", true)
-    .not("category", "is", null);
+  const since = new Date(Date.now() - days * 86_400_000).toISOString();
 
-  if (!data) return [];
+  // Paginated: 30 days is ~1,200 rows today and PostgREST caps a single read
+  // at 1,000. A truncated read here would not error — it would quietly
+  // under-count the categories that happen to sort last.
+  const { rows, error } = await fetchAllRows<{
+    intent_label: string | null;
+    feed_items:
+      | { source_created_at: string }
+      | { source_created_at: string }[]
+      | null;
+  }>(
+    (from, to) =>
+      supabase
+        .from("reddit_post_intel")
+        // !inner so the filter on the embedded date restricts parent rows
+        // rather than merely nulling the embed.
+        .select("intent_label, feed_items!inner(source_created_at)")
+        .gte("feed_items.source_created_at", since)
+        .order("id", { ascending: true })
+        .range(from, to),
+    { maxRows: 100_000 },
+  );
+  if (error) return [];
 
-  const counts = new Map<string, number>();
-  for (const row of data) {
-    const cat = row.category || "other";
-    counts.set(cat, (counts.get(cat) || 0) + 1);
+  const counts = new Map<CanonicalScamType, number>();
+  for (const row of rows) {
+    const type = toCanonicalScamType(row.intent_label);
+    // null means "not a scam type" — `informational` and `none` are explicit
+    // judgements that a post is not a scam, and counting them would inflate
+    // every total with posts we decided were not scams.
+    if (!type || type === "other") continue;
+    counts.set(type, (counts.get(type) ?? 0) + 1);
   }
 
-  const total = data.length || 1;
+  // Percentages are of the categorised total, matching the caption. Taking
+  // them over the raw row count would make the bars sum to well under 100%
+  // with no visible reason.
+  const total = [...counts.values()].reduce((n, c) => n + c, 0) || 1;
   return Array.from(counts.entries())
     .map(([category, count]) => ({
       category,
@@ -441,25 +507,20 @@ export function getSpfPosture(): { principles: SpfPrinciple[]; overallPct: numbe
   return { principles, overallPct };
 }
 
-const CATEGORY_LABELS: Record<string, string> = {
-  phishing: "Phishing",
-  romance_scam: "Romance / Pig Butchering",
-  investment_fraud: "Investment / Crypto",
-  tech_support: "Tech Support",
-  impersonation: "Impersonation",
-  shopping_scam: "Shopping Scam",
-  phone_scam: "Phone Scam",
-  email_scam: "Email Scam",
-  sms_scam: "SMS Scam",
-  employment_scam: "Employment Scam",
-  advance_fee: "Advance Fee",
-  rental_scam: "Rental Scam",
-  sextortion: "Sextortion",
-  other: "Other",
-};
-
+/**
+ * Display names now come from the taxonomy, not a second copy here.
+ *
+ * The old CATEGORY_LABELS held keys from BOTH vocabularies and title-cased
+ * anything it missed — so `romance` rendered as "Romance" while `romance_scam`
+ * rendered as "Romance / Pig Butchering", two rows for one thing, and neither
+ * `investment` nor `smishing` had an entry at all.
+ */
 export function getCategoryLabel(key: string): string {
-  return CATEGORY_LABELS[key] || key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  const canonical = toCanonicalScamType(key);
+  if (canonical) return canonicalScamTypeLabel(canonical);
+  // An unmapped value should be visible, not silently retitled — the taxonomy
+  // drift test is what stops one appearing.
+  return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 const SOURCE_LABELS: Record<string, string> = {
