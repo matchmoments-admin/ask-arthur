@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@askarthur/supabase/server";
+import {
+  BADGE_MESSAGES,
+  badgeGradeColor,
+  resolveBadgeSubject,
+} from "@/lib/badge/eligibility";
 
 // Node, not edge: this route now reads the `sites` table, exactly as
 // app/badge/[domain]/route.ts does. It was edge only because it had no data
@@ -9,16 +13,7 @@ export const dynamic = "force-dynamic";
 
 type BadgeStyle = "shield" | "pill" | "cert";
 
-const GRADE_COLORS: Record<string, string> = {
-  "A+": "#388E3C", "A": "#388E3C", "A-": "#4CAF50",
-  "B+": "#006B75", "B": "#006B75", "B-": "#008A98",
-  "C+": "#F57C00", "C": "#F57C00", "C-": "#E65100",
-  "D": "#D84315", "F": "#D32F2F",
-};
-
-function getGradeColor(grade: string): string {
-  return GRADE_COLORS[grade] || "#D32F2F";
-}
+const getGradeColor = badgeGradeColor;
 
 // ── Shield Badge (240x72, for website footers) ──
 
@@ -93,9 +88,6 @@ function certBadge(grade: string, date: string): string {
 </svg>`;
 }
 
-/** Grades that earn a scored badge. Mirrors app/badge/[domain]/route.ts. */
-const ELIGIBLE_GRADES = new Set(["A+", "A", "A-", "B+", "B", "B-"]);
-
 /**
  * A badge that asserts nothing. Served when the domain is unknown, ungraded,
  * or below the eligibility bar — the honest answer, and the same shape
@@ -147,49 +139,25 @@ function neutralBadge(message: string): string {
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
   const style = (searchParams.get("style") || "shield") as BadgeStyle;
-  const domain = (searchParams.get("domain") || "").trim().toLowerCase();
 
-  // No domain means nothing can be asserted. Previously this branch rendered
-  // an A+ by default, which is precisely backwards.
-  if (!domain) {
-    return svgResponse(neutralBadge("Not yet scanned"));
+  // The lookup, the eligibility rule and the wording all live in
+  // lib/badge/eligibility.ts. They were duplicated here first, and the two
+  // copies disagreed within a day — see that module's header.
+  const subject = await resolveBadgeSubject(searchParams.get("domain"));
+  if (subject.kind !== "ok") {
+    return svgResponse(neutralBadge(BADGE_MESSAGES[subject.kind]));
   }
-
-  const supabase = createServiceClient();
-  if (!supabase) {
-    // Fail closed. A badge is a claim; if we cannot check it, we do not make
-    // it. Returning the old default here would reintroduce the bug on every
-    // transient outage.
-    return svgResponse(neutralBadge("Unavailable"));
-  }
-
-  const { data: site, error } = await supabase
-    .from("sites")
-    .select("latest_grade, latest_score, last_scanned_at")
-    .eq("domain", domain)
-    .single();
-
-  if (error || !site?.latest_grade || site.latest_score == null) {
-    return svgResponse(neutralBadge("Not yet scanned"));
-  }
-  if (!ELIGIBLE_GRADES.has(site.latest_grade)) {
-    return svgResponse(neutralBadge("Needs improvement"));
-  }
-
-  const grade = site.latest_grade;
-  const score = site.latest_score;
-  const date = (site.last_scanned_at ?? new Date().toISOString()).slice(0, 10);
 
   let svg: string;
   switch (style) {
     case "pill":
-      svg = pillBadge(grade, score);
+      svg = pillBadge(subject.grade, subject.score);
       break;
     case "cert":
-      svg = certBadge(grade, date);
+      svg = certBadge(subject.grade, subject.scannedAt);
       break;
     default:
-      svg = shieldBadge(grade);
+      svg = shieldBadge(subject.grade);
   }
 
   return svgResponse(svg);
