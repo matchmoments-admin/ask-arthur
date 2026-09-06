@@ -27,6 +27,12 @@ import { describe, expect, it } from "vitest";
 
 import { __testing } from "../embeddings";
 import { EMBED_ROWS_PER_RUN } from "../inngest/reddit-intel-embed";
+import {
+  parseRedditIntelEmbeddedData,
+  parseRedditIntelSummarisedData,
+  resolveRedditIntelEmbeddedData,
+  resolveRedditIntelSummarisedData,
+} from "../inngest/events";
 
 function stripComments(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
@@ -292,16 +298,17 @@ describe("the drain stages do not depend on being invited", () => {
       ).toBe(true);
     });
 
-    it(`${name} tolerates a cron invocation with no event payload`, () => {
-      // A cron fires with no event.data. Parsing it unguarded throws on every
-      // scheduled run, which would make the cron worse than useless — it
-      // would look like a failing function rather than a missing one.
+    it(`${name} delegates payload resolution instead of inlining a fallback`, () => {
+      // Deliberately NOT asserting how the stage discriminates — that is the
+      // mistake this replaced. The stage must not carry its own fallback
+      // literal; the one in events.ts is behaviourally tested below.
       const src = readFileSync(new URL(file, import.meta.url), "utf8");
       expect(
-        src.includes("event?.data"),
-        `${name} reads event.data unguarded. On the cron path there is none, ` +
-          "so every scheduled run would throw in the Zod parse.",
-      ).toBe(true);
+        src.includes("none:cron-sweep"),
+        `${name} inlines its own cron fallback. Two copies of this decision ` +
+          "is how #1107 shipped a truthiness test in one of them. Call the " +
+          "resolver in events.ts instead.",
+      ).toBe(false);
     });
   }
 
@@ -314,5 +321,78 @@ describe("the drain stages do not depend on being invited", () => {
       expect(m, `${file} has no parseable cron minute`).not.toBeNull();
       expect(Number(m![1]), `${file} fires on the hour`).toBeGreaterThan(0);
     }
+  });
+});
+
+/**
+ * The cron payload, exercised rather than grepped.
+ *
+ * #1107 shipped `event?.data ? parse(event.data) : fallback` in both drain
+ * stages, guarded by a test asserting the STRING "event?.data" was present.
+ * The string was present. The code was broken: Inngest's cron tick is not an
+ * empty payload, it is its own internal event carrying `data: { cron }` —
+ *
+ *     type ScheduledTimerEventPayload = … & {
+ *       name: `${internalEvents.ScheduledTimer}`;
+ *       data: { cron: string };        // node_modules/inngest/types.d.ts
+ *     }
+ *
+ * — which is truthy, so every scheduled run took the parse branch and threw on
+ * the missing required fields. Four failures per tick, in both stages, found by
+ * a Telegram page rather than by CI.
+ *
+ * The first assertion in each case is the CONTROL: it pins the fact that made
+ * the old code fatal. If Inngest ever starts sending a payload the schema
+ * accepts, that control goes red and this comment stops being true.
+ */
+describe("a cron tick resolves to a sweep cohort, not an exception", () => {
+  const CRON_PAYLOAD = { cron: "25 2,8,14,20 * * *" };
+
+  it("control: the strict parse throws on Inngest's cron payload", () => {
+    expect(() => parseRedditIntelSummarisedData(CRON_PAYLOAD)).toThrow();
+    expect(() => parseRedditIntelEmbeddedData(CRON_PAYLOAD)).toThrow();
+  });
+
+  it("resolves a cron payload to the sweep sentinel", () => {
+    const summarised = resolveRedditIntelSummarisedData(CRON_PAYLOAD);
+    expect(summarised.modelVersion).toBe("none:cron-sweep");
+    expect(summarised.postsClassified).toBe(0);
+    expect(summarised.cohortDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+
+    const embedded = resolveRedditIntelEmbeddedData(CRON_PAYLOAD);
+    expect(embedded.modelId).toBe("none:cron-sweep");
+    expect(embedded.postsEmbedded).toBe(0);
+    expect(embedded.embeddingProvider).toBe("voyage");
+  });
+
+  it("resolves an absent payload the same way", () => {
+    // `event?.data` is undefined when the function object is invoked without
+    // an event at all — the case the original code believed was the only one.
+    expect(resolveRedditIntelSummarisedData(undefined).modelVersion).toBe(
+      "none:cron-sweep",
+    );
+    expect(resolveRedditIntelEmbeddedData(undefined).modelId).toBe(
+      "none:cron-sweep",
+    );
+  });
+
+  it("passes a real upstream payload through untouched", () => {
+    // The fallback must not swallow a genuine event: if it did, every cohort
+    // would silently become a sweep and the bug would invert.
+    const real = {
+      cohortDate: "2026-09-07",
+      postsClassified: 42,
+      newQuotesCount: 7,
+      modelVersion: "claude-sonnet-4-6",
+    };
+    expect(resolveRedditIntelSummarisedData(real)).toEqual(real);
+
+    const realEmbedded = {
+      cohortDate: "2026-09-07",
+      postsEmbedded: 60,
+      embeddingProvider: "voyage" as const,
+      modelId: "voyage-3.5",
+    };
+    expect(resolveRedditIntelEmbeddedData(realEmbedded)).toEqual(realEmbedded);
   });
 });

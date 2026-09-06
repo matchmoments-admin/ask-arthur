@@ -263,6 +263,44 @@ export function parseRedditIntelSummarisedData(
   return RedditIntelSummarisedDataSchema.parse(raw);
 }
 
+
+// ── Cron-vs-event payload resolution ─────────────────────────────────────
+//
+// Both reddit-intel-embed and reddit-intel-cluster carry TWO triggers: the
+// upstream event, and a cron sweep that drains whatever the event path missed.
+// The cron tick does NOT arrive with an empty payload — Inngest sends its own
+// internal event, and `data` is a populated object:
+//
+//     type ScheduledTimerEventPayload = … & {
+//       name: `${internalEvents.ScheduledTimer}`;
+//       data: { cron: string };          // node_modules/inngest/types.d.ts
+//     }
+//
+// So a truthiness test (`event?.data ? parse(...) : fallback`) takes the PARSE
+// branch on a cron run and throws on every required field — which is exactly
+// what shipped in #1107 and failed four times per tick until it was found by a
+// Telegram page. Discriminate on SHAPE, not on presence.
+//
+// safeParse also makes these total for any future payload Inngest introduces,
+// without this module needing to know its internal event names.
+
+export function resolveRedditIntelSummarisedData(
+  raw: unknown,
+): RedditIntelSummarisedData {
+  const parsed = RedditIntelSummarisedDataSchema.safeParse(raw);
+  if (parsed.success) return parsed.data;
+  // Cron sweep: cohortDate is used for logging and for the event emitted
+  // downstream, so derive it from the clock. The sentinel model version says
+  // plainly that no upstream classification produced this run, rather than
+  // repeating a model id that did not run.
+  return {
+    cohortDate: new Date().toISOString().slice(0, 10),
+    postsClassified: 0,
+    newQuotesCount: 0,
+    modelVersion: "none:cron-sweep",
+  };
+}
+
 // ── reddit.intel.embedded.v1 ─────────────────────────────────────────────
 //
 // Emitted by the embed function after writing Voyage 3 (or OpenAI fallback)
@@ -292,6 +330,19 @@ export function parseRedditIntelEmbeddedData(
   raw: unknown,
 ): RedditIntelEmbeddedData {
   return RedditIntelEmbeddedDataSchema.parse(raw);
+}
+
+export function resolveRedditIntelEmbeddedData(
+  raw: unknown,
+): RedditIntelEmbeddedData {
+  const parsed = RedditIntelEmbeddedDataSchema.safeParse(raw);
+  if (parsed.success) return parsed.data;
+  return {
+    cohortDate: new Date().toISOString().slice(0, 10),
+    postsEmbedded: 0,
+    embeddingProvider: "voyage" as const,
+    modelId: "none:cron-sweep",
+  };
 }
 
 // ── reddit.intel.themes_recomputed.v1 ────────────────────────────────────

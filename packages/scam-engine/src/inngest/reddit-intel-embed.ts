@@ -25,7 +25,7 @@ import { withAxiomLogging } from "./with-axiom-logging";
 import {
   REDDIT_INTEL_SUMMARISED_EVENT,
   REDDIT_INTEL_EMBEDDED_EVENT,
-  parseRedditIntelSummarisedData,
+  resolveRedditIntelSummarisedData,
 } from "./events";
 import { embed } from "../embeddings";
 import {
@@ -162,19 +162,10 @@ export const redditIntelEmbed = inngest.createFunction(
     // Inline (not a step.run): pure deterministic Zod parse, free to re-run on
     // retry — memoising it as a durable step only cost an Inngest execution.
     //
-    // On the cron path there is no event payload. cohortDate is used for
-    // logging and for the event this function emits downstream, so it is
-    // derived from the clock; the sentinel model version says plainly that no
-    // upstream classification produced this run, rather than repeating a
-    // model id that did not run.
-    const data = event?.data
-      ? parseRedditIntelSummarisedData(event.data)
-      : {
-          cohortDate: new Date().toISOString().slice(0, 10),
-          postsClassified: 0,
-          newQuotesCount: 0,
-          modelVersion: "none:cron-sweep",
-        };
+    // Shape-discriminated, NOT truthiness-discriminated: a cron tick arrives
+    // with Inngest's own `data: { cron: "..." }`, which is truthy. See the
+    // resolver's docblock in events.ts.
+    const data = resolveRedditIntelSummarisedData(event?.data);
 
     // ── Step 1: load rows that lack embeddings ───────────────────────────
     const rows = await step.run("load-unembedded", async () => {
