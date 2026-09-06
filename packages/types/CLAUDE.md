@@ -40,11 +40,7 @@ The package is one big re-export — `import { ... } from "@askarthur/types"` fo
 
 ## Scoped commands
 
-```bash
-pnpm --filter @askarthur/types typecheck
-```
-
-No test suite — schemas are exercised by their consumers' tests.
+This package has no `typecheck` or `test` script of its own — schemas are exercised (and typechecked) via consumers' builds (e.g. `pnpm --filter @askarthur/web typecheck`). Regenerate the DB type: `pnpm --filter @askarthur/types gen:db`.
 
 ## Gotchas
 

@@ -45,7 +45,7 @@ pnpm --filter @askarthur/bot-core test
 pnpm --filter @askarthur/bot-core test format-telegram
 ```
 
-There is no separate typecheck script — typecheck via the web app: `pnpm --filter @askarthur/web typecheck`.
+Typecheck: `pnpm --filter @askarthur/bot-core typecheck`.
 
 ## Gotchas
 

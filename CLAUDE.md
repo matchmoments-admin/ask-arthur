@@ -65,7 +65,8 @@ ask-arthur/
 ├── apps/
 │   ├── web/                    # @askarthur/web — Next.js 16 (Turbopack, React 19)
 │   ├── extension/              # @askarthur/extension — Chrome/Firefox (WXT, React 19)
-│   └── mobile/                 # @askarthur/mobile — React Native (Expo 54)
+│   ├── mobile/                 # @askarthur/mobile — React Native (Expo 54)
+│   └── cloudflare-email-worker/ # @askarthur/cloudflare-email-worker — Email Routing Worker for intel.askarthur.au
 │
 ├── packages/
 │   ├── types/                  # @askarthur/types — Zod 4 schemas, TS interfaces
@@ -75,15 +76,20 @@ ask-arthur/
 │   ├── bot-core/               # @askarthur/bot-core — Bot formatters, webhook verify, queue
 │   ├── extension-audit/        # @askarthur/extension-audit — Chrome extension security scanner
 │   ├── mcp-audit/              # @askarthur/mcp-audit — MCP server + AI skill security scanner
-│   └── breach-defence/         # @askarthur/breach-defence — AU Breach Index, DNS drift, typosquat, recovery playbooks
+│   ├── breach-defence/         # @askarthur/breach-defence — AU Breach Index, DNS drift, typosquat, recovery playbooks
+│   ├── charity-check/          # @askarthur/charity-check — ACNC charity legitimacy check orchestrator + scorer
+│   ├── core-analysis/          # @askarthur/core-analysis — Verdict merge logic (mergeVerdict)
+│   ├── shopfront-glue/         # @askarthur/shopfront-glue — Clone-detection brand/watchlist matching
+│   ├── site-audit/             # @askarthur/site-audit — Website security/legitimacy scanner
+│   └── eslint-config/          # @askarthur/eslint-config — Shared ESLint config
 │
 ├── tooling/
 │   └── typescript/             # @askarthur/tsconfig — Shared TS configs
 │
 ├── pipeline/
-│   └── scrapers/               # Python threat feed scrapers (16 feeds)
+│   └── scrapers/               # Python threat feed scrapers (20+ feeds)
 │
-├── supabase/                   # Migration SQL files (v2–v62)
+├── supabase/                   # Migration SQL files (v2–v291+)
 ├── docs/                       # OpenAPI spec, setup guides, compliance
 ├── turbo.json                  # Turborepo task config
 ├── pnpm-workspace.yaml         # Workspace manifest
@@ -112,7 +118,7 @@ pnpm --filter @askarthur/web test
 cd pipeline/scrapers && python -m pytest tests/ -v
 ```
 
-**For most agent work, prefer scoped commands (`pnpm --filter <pkg> ...`) over the global `pnpm turbo ...` form.** Turbo runs every package in the workspace, which burns context on irrelevant output and slows the agent loop significantly in a 14-package monorepo. Only use the global form when verifying cross-package impact — e.g. you changed an export in `packages/types` and want every consumer rebuilt.
+**For most agent work, prefer scoped commands (`pnpm --filter <pkg> ...`) over the global `pnpm turbo ...` form.** Turbo runs every package in the workspace, which burns context on irrelevant output and slows the agent loop significantly in an 18-package monorepo. Only use the global form when verifying cross-package impact — e.g. you changed an export in `packages/types` and want every consumer rebuilt.
 
 When working inside `apps/<x>/` or `packages/<x>/`, read that subdirectory's `CLAUDE.md` first if one exists. Subdirectory files cover scoped commands, local conventions, and gotchas that this root file deliberately omits to stay lean. Current subdirectory guides — **seven**: `apps/web/`, `packages/bot-core/`, `packages/scam-engine/`, `packages/supabase/`, `packages/types/`, `pipeline/scrapers/`, `supabase/`.
 
@@ -187,7 +193,7 @@ import { validateApiKey } from "@/lib/apiAuth";
 - **Bare-`await` `supabase.auth.getUser()` in `apps/web/middleware.ts`** — middleware has a 25s Vercel cap; hitting it returns 504 `MIDDLEWARE_INVOCATION_TIMEOUT` for **every** request, not just authed ones. Always wrap in `Promise.race` with a 3s budget; on timeout, treat the request as anonymous and let route-protection logic redirect protected paths to login. Same rule for `apps/web/lib/auth.ts` `getUser()` (5s budget, throws `AuthUnavailableError`)
 - **Run a single UPDATE/DELETE/UPSERT against >5K rows in one statement on a hot write-frequent table** (`acnc_charities`, `scam_reports`, `verified_scams`, `feedback_triage_queue`, `feed_items`, `scam_entities`). Always chunk via `WHERE pk = ANY(chunk_array)` of size ≤5K with try/except + commit per chunk so a single chunk failure doesn't poison the run
 - **Add a vector / HNSW / large GIN index directly to a write-frequent table.** Every UPDATE on the table — even if the indexed column didn't change — has to consider the index, which dirties index pages and burns Disk IO budget. If embeddings are needed, put them on a 1:1 sibling table (the `acnc_charity_embeddings` pattern in BACKLOG.md → Charity Legitimacy Check; the existing `verified_scams` / `scam_reports` split in v87–v89). The HNSW lives on the read-only sibling, the daily writes happen on the lean parent
-- **Read a server-side boolean env var with `process.env.X === "true"`** (literal access). Two real failure modes have bitten us: (1) trailing whitespace in the Vercel-stored value — `"true\n"` is not `=== "true"`; (2) Next.js/Webpack DefinePlugin statically inlines `process.env.X` references at build time, so vars not visible to the build (encrypted secrets, late-added vars) get baked in as `undefined`. Use the `readBoolEnv()` helper in `packages/utils/src/feature-flags.ts` — it trims AND uses bracket notation (`process.env[name]`) which defeats both. NEXT*PUBLIC*\* flags are the deliberate exception: keep them on the literal pattern so the client bundle's build-time inlining still works
+- **Read a server-side boolean env var with `process.env.X === "true"`** (literal access). Two real failure modes have bitten us: (1) trailing whitespace in the Vercel-stored value — `"true\n"` is not `=== "true"`; (2) Next.js/Webpack DefinePlugin statically inlines `process.env.X` references at build time, so vars not visible to the build (encrypted secrets, late-added vars) get baked in as `undefined`. Use the `readBoolEnv()` helper in `packages/utils/src/env.ts` (imported into `feature-flags.ts`) — it trims AND uses bracket notation (`process.env[name]`) which defeats both. NEXT*PUBLIC*\* flags are the deliberate exception: keep them on the literal pattern so the client bundle's build-time inlining still works
 
 ### Always Do
 
