@@ -47,17 +47,18 @@ Ranked by how many times each has bitten.
 
 ### Unguarded, ranked — this is the backlog
 
-| #   | Shape                                                                                                                             | Sites | Guard                                                                                                           |
-| --- | --------------------------------------------------------------------------------------------------------------------------------- | ----- | --------------------------------------------------------------------------------------------------------------- |
-| A   | **A caption asserts a time window the query never applies**, or applies to the wrong column                                       | 7     | **PARTIAL** — `dashboardScamTypeWindow.test.ts` covers one function behaviourally. Nothing scans for the class. |
-| F   | **A branch or state exists on one side of a seam with no reachable writer or reader on the other**                                | 7     | **NONE** as a class                                                                                             |
-| E   | **A re-submit path fails to move the row back across the exact predicate its consumer filters on**, so the loop is silently inert | 7     | **PARTIAL** — `redditIntelEmbedWorklist.test.ts` guards one pipeline                                            |
-| G   | **One figure computed by N independent reads of a mutating table**, so published artefacts disagree                               | 5     | **PARTIAL** — two specific pairs locked                                                                         |
-| H   | **A dedup key dedups a retry against a _failed_ original**                                                                        | 4     | **NONE**                                                                                                        |
-| I   | **A cron with a manual trigger and no throttle + cooldown** lets stacked fires breach caps                                        | 3     | **NONE** — mechanically checkable off the constructed `inngestFunctions` array                                  |
-| B   | **An off-by-one window boundary makes an N+1-day "week"** (`gte` where `gt` was meant)                                            | 2     | **PARTIAL** — cost digest only                                                                                  |
-| J   | **A test/dry-run early return short-circuits the very lane it claims to validate**                                                | 2     | **NONE**                                                                                                        |
-| K   | **Cron _ordering_ is load-bearing** — move one and the downstream gate starves rather than filters                                | 2     | **NONE**                                                                                                        |
+| #   | Shape                                                                                                                                                                              | Sites | Guard                                                                                                             |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------- |
+| A   | **A caption asserts a time window the query never applies**, or applies to the wrong column                                                                                        | 7     | **PARTIAL** — `dashboardScamTypeWindow.test.ts` covers one function behaviourally. Nothing scans for the class.   |
+| F   | **A branch or state exists on one side of a seam with no reachable writer or reader on the other**                                                                                 | 7     | **NONE** as a class                                                                                               |
+| E   | **A re-submit path fails to move the row back across the exact predicate its consumer filters on**, so the loop is silently inert                                                  | 7     | **PARTIAL** — `redditIntelEmbedWorklist.test.ts` guards one pipeline                                              |
+| G   | **One figure computed by N independent reads of a mutating table**, so published artefacts disagree                                                                                | 5     | **PARTIAL** — two specific pairs locked                                                                           |
+| N   | **A guard asserts a proxy for the behaviour instead of the behaviour** — a source token, a rendered blob, a path where the defect is inert, or a corpus the guard itself truncated | 4     | **PARTIAL** — the cron case is now behavioural (`redditIntelEmbedWorklist.test.ts`). Nothing scans for the class. |
+| H   | **A dedup key dedups a retry against a _failed_ original**                                                                                                                         | 4     | **NONE**                                                                                                          |
+| I   | **A cron with a manual trigger and no throttle + cooldown** lets stacked fires breach caps                                                                                         | 3     | **NONE** — mechanically checkable off the constructed `inngestFunctions` array                                    |
+| B   | **An off-by-one window boundary makes an N+1-day "week"** (`gte` where `gt` was meant)                                                                                             | 2     | **PARTIAL** — cost digest only                                                                                    |
+| J   | **A test/dry-run early return short-circuits the very lane it claims to validate**                                                                                                 | 2     | **NONE**                                                                                                          |
+| K   | **Cron _ordering_ is load-bearing** — move one and the downstream gate starves rather than filters                                                                                 | 2     | **NONE**                                                                                                          |
 
 ### Guarded — no action, listed so a recurrence is recognised as a hole
 
@@ -99,6 +100,50 @@ work: _"a producer and a consumer disagreeing about an enum is invisible to a
 fixture that plays both parts."_ Any guard here has to compare the producer's
 emitted set against the consumer's handled set from **source**, not from a
 fixture.
+
+---
+
+## N — the shape that produced four of this week's misses
+
+Four times in one week a test passed while the thing it named was broken. Each
+time the assertion's **subject** was a stand-in for the behaviour.
+
+It sits mid-table by count, but it is the one shape that acts on the others:
+every row in this file is guarded by a test, and this is the failure mode of
+tests. A proxy assertion does not merely miss its own defect — it converts an
+entry in the guarded table into a false one.
+
+| Site                                       | The assertion                                        | What it let through                                                                                                                                            |
+| ------------------------------------------ | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `redditIntelEmbedWorklist.test.ts` (#1107) | `expect(src.includes("event?.data")).toBe(true)`     | The string was present; the code was fatal on every cron tick. Both drain stages failed 4x per tick until a Telegram page found it.                            |
+| Badge eligibility (#1109)                  | Exercised the route with grade `F`                   | `F` is below `ELIGIBLE_GRADES`, so the route bailed before the forgery it was testing could matter. The test passed with the bug reinstated.                   |
+| Showcase copy (#1044)                      | `expect(html).not.toContain("100")`                  | Matched `stop-offset="100%"` in an SVG gradient, not the figure under test. Fixed with a `visibleText()` extractor.                                            |
+| `ignoredInputs.test.ts`                    | Stripped template literals file-wide before matching | One unbalanced backtick swallowed 2,288 characters _including the declaration the guard existed to find_. It reported clean because it had eaten the evidence. |
+
+**The tell.** Ask what the assertion would still do if the implementation were
+replaced by something that merely _mentions_ the right words. A guard reading
+`readFileSync` and matching a token cannot distinguish working code from a
+comment. A guard exercising a path where the defect is inert proves the path,
+not the defect.
+
+**The remedy, in order of preference.** Call the function with the input that
+breaks it. Where the fix is a decision, extract it as a pure function so the
+test has something to _call_ rather than grep — that is what #1113 did, moving
+the cron/event discrimination into `resolveRedditIntel*Data` in `events.ts`.
+Where a source-level sweep is genuinely the only option (drift, duplication,
+class-wide bans), keep it — but assert **absence of duplication**, never
+presence of an idiom, and pair it with a behavioural test of the single place
+the logic now lives.
+
+**Go-red is the acceptance criterion, not a nicety.** Every guard in this file
+that has caught something was verified by reinstating the bug and watching it
+fail. Three of the four rows above would have been caught at write time by that
+one step. #1113's replacement was verified this way: reinstating the truthiness
+branch fails it with the same `ZodError` prod was throwing.
+
+**Where a source sweep is still the honest tool**, say what it does _not_ catch
+in the file itself — `ignoredInputs.test.ts` does this well, and it is the
+convention.
 
 ---
 
