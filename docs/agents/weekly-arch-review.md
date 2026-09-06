@@ -34,8 +34,13 @@ If the chosen path doesn't exist on the current `main`, abort and send a Telegra
 1. **Read context:** `CLAUDE.md` ("Critical Rules" + "Always Do" + "Never Do"), `CONTEXT.md`, any `docs/adr/*.md` that touches this week's module. State at the top of the issue: "CONTEXT.md terms: ..., ADRs read: ... (or none applicable)."
 2. **Carry-over check:** `gh issue list --label architecture-review --state open` and diff against this run. If a finding recurs from a prior week with no action, prefix with `(carried from week N)` rather than re-writing it fresh.
 3. **Backlog cross-reference:** Grep `BACKLOG.md` and `docs/plans/` for each planned finding's keyword. If a match exists, note inline: `Already tracked: BACKLOG.md L42` and de-prioritise (LOW).
-4. **Stale-triage sweep:** Close any `architecture-review` + `needs-triage` issue older than 21 days as `wontfix` with comment `Stale — re-surface if still relevant`.
-5. **Confirm rotation:** State the slot number and module under review; if skipping, say so and why.
+4. **Known-shape check:** read [`defect-shapes.md`](./defect-shapes.md). For each
+   finding, say whether it is an instance of a listed shape. If the shape is
+   already guarded, the guard has a hole — name it, because that is more
+   actionable than the finding. If the shape is new, propose a row. This is what
+   stops the routine rediscovering a class the repo has already paid for twice.
+5. **Stale-triage sweep:** Close any `architecture-review` + `needs-triage` issue older than 21 days as `wontfix` with comment `Stale — re-surface if still relevant`.
+6. **Confirm rotation:** State the slot number and module under review; if skipping, say so and why.
 
 ---
 
