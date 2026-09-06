@@ -45,7 +45,7 @@ import { inngest } from "./client";
 import {
   REDDIT_INTEL_EMBEDDED_EVENT,
   REDDIT_INTEL_THEMES_RECOMPUTED_EVENT,
-  parseRedditIntelEmbeddedData,
+  resolveRedditIntelEmbeddedData,
 } from "./events";
 import { callClaudeJson } from "../anthropic";
 import {
@@ -420,16 +420,11 @@ export const redditIntelCluster = inngest.createFunction(
 
       // Inline (not a step.run): pure deterministic Zod parse, free to re-run on
       // retry — memoising it as a durable step only cost an Inngest execution.
-      // No event payload on the cron path. Only cohortDate is read from this,
-      // and only for logging and the recomputed-themes event below.
-      const data = event?.data
-        ? parseRedditIntelEmbeddedData(event.data)
-        : {
-            cohortDate: new Date().toISOString().slice(0, 10),
-            postsEmbedded: 0,
-            embeddingProvider: "voyage" as const,
-            modelId: "none:cron-sweep",
-          };
+      //
+      // Shape-discriminated, NOT truthiness-discriminated: a cron tick arrives
+      // with Inngest's own `data: { cron: "..." }`, which is truthy. See the
+      // resolver's docblock in events.ts.
+      const data = resolveRedditIntelEmbeddedData(event?.data);
 
       // ── Step 1: load unassigned embedded posts + themes ──────────────────
       const { posts, themes } = await step.run("load-state", async () => {
