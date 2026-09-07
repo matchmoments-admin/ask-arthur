@@ -415,6 +415,39 @@ const CLUSTER_POSTS_PER_RUN = 500;
  */
 export const __testing = { parsePgVector, vectorToPgString, cosineSimilarity };
 
+/**
+ * Wall-clock budget for the write phase, in milliseconds.
+ *
+ * The Inngest route declares `export const maxDuration = 300`
+ * (apps/web/app/api/inngest/route.ts). Exceeding it is not a slow run — Vercel
+ * kills the request and Inngest reports "HTTP 504 before the SDK responded, no
+ * step output was produced". That happened on 2026-09-07: at the then-current
+ * 0.87s/post the 500-post batch needed ~435s against a 300s budget.
+ *
+ * Since #1117 the load, match and write are ONE step, so a timeout loses the
+ * entire batch and the retry redoes identical work and times out identically —
+ * a loop rather than a degradation. 80% leaves headroom to finish the wave in
+ * flight, write the run summary and return.
+ *
+ * Stopping early is safe because the worklist is self-healing: an unprocessed
+ * post keeps `theme_id IS NULL` and the next run selects it again (#1105).
+ * This grants permission to stop; it needs no resumption machinery.
+ *
+ * ROUTE_MAX_DURATION_S IS A COPY, and it is only safe because a test enforces
+ * the copy. scam-engine cannot import from apps/web (wrong dependency
+ * direction) and Next.js requires `maxDuration` to be a statically analysable
+ * literal, so the number genuinely has to exist twice.
+ * `inngestMaxDurationDrift.test.ts` reads the literal out of
+ * apps/web/app/api/inngest/route.ts and fails if the two disagree. Without
+ * that test this comment would be describing a control that does not exist —
+ * which is what the first version of it did.
+ */
+const ROUTE_MAX_DURATION_S = 300;
+const PERSIST_BUDGET_SHARE = 0.8;
+export const PERSIST_BUDGET_MS = Math.floor(
+  ROUTE_MAX_DURATION_S * 1000 * PERSIST_BUDGET_SHARE,
+);
+
 export interface PersistResult {
   newThemeCount: number;
   joinedThemeCount: number;
@@ -424,6 +457,12 @@ export interface PersistResult {
   joinFailures: number;
   /** Posts whose theme was written but whose own theme_id update failed. */
   linkFailures: number;
+  /**
+   * True when the wall-clock budget stopped the run before every assignment was
+   * written. The remainder is NOT lost — it stays in the worklist for the next
+   * run — but a partial run must not read as a small one.
+   */
+  deadlineHit: boolean;
 }
 
 /**
@@ -464,7 +503,15 @@ export interface PersistResult {
 export async function persistAssignments(
   supabase: NonNullable<ReturnType<typeof createServiceClient>>,
   assignments: Assignment[],
+  /** Absolute epoch ms after which no new write wave starts. */
+  deadlineAt: number = Date.now() + PERSIST_BUDGET_MS,
 ): Promise<PersistResult> {
+  let deadlineHit = false;
+  const outOfTime = () => {
+    if (Date.now() < deadlineAt) return false;
+    deadlineHit = true;
+    return true;
+  };
   let seedFailures = 0;
   let joinFailures = 0;
   let linkFailures = 0;
@@ -476,6 +523,7 @@ export async function persistAssignments(
       seedFailures,
       joinFailures,
       linkFailures,
+      deadlineHit,
     };
   }
 
@@ -503,6 +551,7 @@ export async function persistAssignments(
       seedFailures,
       joinFailures,
       linkFailures,
+      deadlineHit,
     };
   }
 
@@ -585,6 +634,10 @@ export async function persistAssignments(
     [...lastJoinByTheme.values()],
     DB_WRITE_CONCURRENCY,
     async (a) => {
+      // Checked per item rather than per wave: a wave is only as short as its
+      // slowest member, and abandoning work already in flight would waste it.
+      // Items skipped here keep theme_id NULL and return in the next run.
+      if (outOfTime()) return;
       const { error } = await supabase
         .from("reddit_intel_themes")
         .update({
@@ -623,6 +676,7 @@ export async function persistAssignments(
     [...postsByTheme.entries()],
     DB_WRITE_CONCURRENCY,
     async ([themeId, postIds]) => {
+      if (outOfTime()) return;
       const { error } = await supabase
         .from("reddit_post_intel")
         .update({ theme_id: themeId })
@@ -674,6 +728,7 @@ export async function persistAssignments(
     seedFailures,
     joinFailures,
     linkFailures,
+    deadlineHit,
   };
 }
 
@@ -841,6 +896,7 @@ export const redditIntelCluster = inngest.createFunction(
             seedFailures: 0,
             joinFailures: 0,
             linkFailures: 0,
+            deadlineHit: false,
           };
         }
 
@@ -1161,6 +1217,9 @@ export const redditIntelCluster = inngest.createFunction(
         // floor — they will re-present at the head of the oldest-first
         // worklist next run and fail again. Zero-vs-null matters: null is
         // "not measured", zero is "measured, none".
+        // A partial run must not read as a quiet one: the budget stopped it,
+        // and the remainder is waiting in the worklist for the next tick.
+        deadlineHit: batch.deadlineHit,
         seedFailures: batch.seedFailures,
         joinFailures: batch.joinFailures,
         linkFailures: batch.linkFailures,

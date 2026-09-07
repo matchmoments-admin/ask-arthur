@@ -88,8 +88,16 @@ export const CRON_TICK_EVENT = "inngest/scheduled.timer";
  *
  * Returns null rather than 0 when `ts` is absent — `ts` is optional in the SDK
  * type, and a confident zero is the failure mode this whole change is about.
+ *
+ * EXPORTED for wall-clock guards. A loop that awaits `step.run` per item spans
+ * step boundaries, so a `Date.now()` captured in the handler body is reset by
+ * every replay and the guard can never fire — measured across four clone-watch
+ * functions on 2026-09-07, each with a detailed comment describing protection
+ * it was not providing. A guard whose loop sits INSIDE a single step does not
+ * have this problem and may use a local timestamp (see PERSIST_BUDGET_MS in
+ * reddit-intel-cluster).
  */
-function elapsedSinceTrigger(ctx: {
+export function elapsedSinceTrigger(ctx: {
   event?: { ts?: number } | undefined;
 }): number | null {
   const ts = ctx.event?.ts;

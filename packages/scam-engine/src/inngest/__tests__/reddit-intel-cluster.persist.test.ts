@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import {
   __testing,
   persistAssignments,
+  PERSIST_BUDGET_MS,
   type Assignment,
 } from "../reddit-intel-cluster";
 
@@ -260,5 +261,59 @@ describe("parsePgVector rejects rather than propagates", () => {
     // vector that silently fails every dimension check downstream.
     expect(parsePgVector("[]")).toBeNull();
     expect(parsePgVector(null)).toBeNull();
+  });
+});
+
+/**
+ * The write phase must stop before Vercel kills it.
+ *
+ * The Inngest route declares `maxDuration = 300`. Exceeding it is not a slow
+ * run: Vercel kills the request and Inngest reports "HTTP 504 before the SDK
+ * responded, no step output was produced". That happened in production on
+ * 2026-09-07 — at the then-current 0.87s/post a 500-post batch needed ~435s.
+ *
+ * Since #1117 the load, match and write are ONE step, so a timeout loses the
+ * whole batch AND the retry redoes identical work and times out identically.
+ * A loop, not a degradation. Stopping early converts that into partial
+ * progress, which the self-healing worklist finishes on the next run.
+ */
+describe("persistAssignments respects a wall-clock budget", () => {
+  it("stops before writing when the deadline has already passed", async () => {
+    const { client, calls } = fakeSupabase({});
+    const joins = Array.from({ length: 20 }, (_, i) =>
+      joinAssignment(`p${i}`, `theme-${i}`),
+    );
+
+    const r = await persistAssignments(client, joins, Date.now() - 1);
+
+    expect(r.deadlineHit).toBe(true);
+    expect(r.joinedThemeCount).toBe(0);
+    expect(calls.themeUpdates).toBe(0);
+    // Nothing was linked, so nothing is claimed as done — the rows keep
+    // theme_id NULL and the next run selects them again.
+    expect(calls.linkedPostIds).toEqual([]);
+  });
+
+  it("does not flag a deadline when there is time", async () => {
+    const { client, calls } = fakeSupabase({});
+    const joins = Array.from({ length: 5 }, (_, i) =>
+      joinAssignment(`p${i}`, `theme-${i}`),
+    );
+
+    const r = await persistAssignments(client, joins, Date.now() + 60_000);
+
+    expect(r.deadlineHit).toBe(false);
+    expect(r.joinedThemeCount).toBe(5);
+    expect(calls.themeUpdates).toBe(5);
+  });
+
+  it("has a positive default budget", async () => {
+    // Deliberately NOT asserting a bound against a literal 300_000 here. The
+    // first version of this test did, which was a third copy of the same number
+    // and would have passed even if the route dropped to 60s — the exact case
+    // the guard exists for. The route-vs-budget relationship is enforced by
+    // apps/web/__tests__/inngestMaxDurationDrift.test.ts, which reads the
+    // declared maxDuration rather than restating it.
+    expect(PERSIST_BUDGET_MS).toBeGreaterThan(0);
   });
 });

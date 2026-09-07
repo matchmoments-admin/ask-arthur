@@ -3,7 +3,10 @@ import {
   CLONE_WATCH_WEAPONISED_EVENT,
   type CloneWatchWeaponisedData,
 } from "@askarthur/scam-engine/inngest/events";
-import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
+import {
+  elapsedSinceTrigger,
+  withAxiomLogging,
+} from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { retrieveURLScanDetailed } from "@askarthur/scam-engine/urlscan";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -78,153 +81,189 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
     { cron: "10 */3 * * *" },
     { event: "shopfront/clone.urlscan-retrieve.manual-trigger.v1" },
   ],
-  withAxiomLogging({ fnId: "shopfront-clone-urlscan-retrieve" }, async ({ step }) => {
-    if (!featureFlags.shopfrontCloneUrlscan) {
-      return { skipped: true, reason: "FF_SHOPFRONT_CLONE_URLSCAN disabled" };
-    }
-    if (!process.env.URLSCAN_API_KEY) {
-      return { skipped: true, reason: "URLSCAN_API_KEY not set" };
-    }
-    const sb = createServiceClient();
-    if (!sb) return { skipped: true, reason: "supabase_unavailable" };
-
-    const pending = await step.run("load-pending-retrieve", async () => {
-      const { data } = await sb.rpc("list_clone_alerts_pending_urlscan_retrieve", {
-        p_limit: RETRIEVE_BATCH_LIMIT,
-        p_min_age_minutes: MIN_AGE_MINUTES,
-        p_max_failure_streak: MAX_FAILURE_STREAK,
-      });
-      return (data as RetrieveRow[] | null) ?? [];
-    });
-
-    if (pending.length === 0) {
-      return { ok: true, retrieved: 0, reason: "nothing_pending" };
-    }
-
-    // Drive the v199 enforcement lifecycle from the urlscan verdict via the
-    // edge-guarded v200 RPC (never downgrades reported/terminal states). The RPC
-    // stamps weaponised_at on the real transition; the weaponised.v1 emission is
-    // now driven from that persisted state (weaponised_at NOT NULL AND
-    // weaponised_notified_at NULL, v236) rather than an in-memory array — so a
-    // batch step interrupted after a transition but before emit doesn't silently
-    // drop the event (the drop the array approach caused; #762 regression).
-    const applyVerdict = async (
-      row: RetrieveRow,
-      classification: string,
-    ): Promise<void> => {
-      const { error } = await sb.rpc("apply_clone_urlscan_verdict", {
-        p_alert_id: row.id,
-        p_classification: classification,
-      });
-      if (error) {
-        throw new Error(
-          `apply_clone_urlscan_verdict failed for alert ${row.id}: ${error.message}`,
-        );
+  withAxiomLogging(
+    { fnId: "shopfront-clone-urlscan-retrieve" },
+    async ({ event, step }) => {
+      if (!featureFlags.shopfrontCloneUrlscan) {
+        return { skipped: true, reason: "FF_SHOPFRONT_CLONE_URLSCAN disabled" };
       }
-    };
+      if (!process.env.URLSCAN_API_KEY) {
+        return { skipped: true, reason: "URLSCAN_API_KEY not set" };
+      }
+      const sb = createServiceClient();
+      if (!sb) return { skipped: true, reason: "supabase_unavailable" };
 
-    // Retrieve + classify the whole batch inside ONE step instead of one step
-    // per row. Inngest bills per step execution, so a 40-row batch was ~40
-    // executions × 8 runs/day for this fn alone; collapsing to a single step
-    // cuts that ~20×. Safe because every write is an idempotent, edge-guarded
-    // RPC — a batch-step retry re-runs already-processed rows without double-
-    // advancing lifecycle or re-emitting weaponised events (apply_verdict only
-    // reports newly_weaponised on the real transition; retrieve is a GET). Each
-    // row is wrapped in try/catch so one failure doesn't abort the rest; a
-    // failed row is left un-advanced (stays in the worklist) and retried next
-    // tick. Weaponisation is emitted from persisted state (durable emit step
-    // below), not an array, so an interrupted batch can't drop the event.
-    // A wall-clock guard breaks the loop before the 5m finish budget so
-    // worst-case external latency (40 rows × urlscan GET) can't force a
-    // full-batch replay — leftovers drain next tick (worklist is idempotent).
-    const batchStartMs = Date.now();
-    const batch = await step.run("retrieve-batch", async () => {
-      let classified = 0;
-      let stillPending = 0;
-      let reputationFallback = 0;
-      // Rows we did not read because the miss was OUR fault (quota/transient),
-      // not evidence about the URL. Counted, not silent.
-      let skippedNotOurSignal = 0;
-      let quotaExhausted = false;
+      const pending = await step.run("load-pending-retrieve", async () => {
+        const { data } = await sb.rpc(
+          "list_clone_alerts_pending_urlscan_retrieve",
+          {
+            p_limit: RETRIEVE_BATCH_LIMIT,
+            p_min_age_minutes: MIN_AGE_MINUTES,
+            p_max_failure_streak: MAX_FAILURE_STREAK,
+          },
+        );
+        return (data as RetrieveRow[] | null) ?? [];
+      });
 
-      for (const [idx, row] of pending.entries()) {
-        if (Date.now() - batchStartMs > BATCH_WALL_CLOCK_MS) break;
-        try {
-          const reputation = reputationFromEvidence(row.urlscan_evidence);
-          const retrieval = await retrieveURLScanDetailed(row.urlscan_uuid);
-          const nowIso = new Date().toISOString();
+      if (pending.length === 0) {
+        return { ok: true, retrieved: 0, reason: "nothing_pending" };
+      }
 
-          // A 429 is OUR quota running out and a 5xx/timeout is urlscan being
-          // unhealthy — neither is evidence about this URL. Persisting a null
-          // classification here would bump urlscan_failure_streak, and three
-          // strikes drop the row out of BOTH worklists permanently. This lane
-          // runs 8x/day, so a single rate-limited window could strand a whole
-          // batch.
-          //
-          // A 429 is global to the API key, so the rest of the batch would 429
-          // too — stop, don't burn the remaining rows on calls we know will fail.
-          if (retrieval.kind === "quota_exhausted") {
-            skippedNotOurSignal += pending.length - idx;
-            quotaExhausted = true;
-            break;
-          }
+      // Drive the v199 enforcement lifecycle from the urlscan verdict via the
+      // edge-guarded v200 RPC (never downgrades reported/terminal states). The RPC
+      // stamps weaponised_at on the real transition; the weaponised.v1 emission is
+      // now driven from that persisted state (weaponised_at NOT NULL AND
+      // weaponised_notified_at NULL, v236) rather than an in-memory array — so a
+      // batch step interrupted after a transition but before emit doesn't silently
+      // drop the event (the drop the array approach caused; #762 regression).
+      const applyVerdict = async (
+        row: RetrieveRow,
+        classification: string,
+      ): Promise<void> => {
+        const { error } = await sb.rpc("apply_clone_urlscan_verdict", {
+          p_alert_id: row.id,
+          p_classification: classification,
+        });
+        if (error) {
+          throw new Error(
+            `apply_clone_urlscan_verdict failed for alert ${row.id}: ${error.message}`,
+          );
+        }
+      };
 
-          // A transient miss leaves the verdict alone but MUST still be stamped.
-          // The worklist is ORDER BY urlscan_submitted_at ASC LIMIT 40 and is
-          // saturated on ~45% of runs, so a uuid that deterministically returns
-          // `transient` would keep its oldest submitted_at and re-present at the
-          // head forever, starving everything behind it — an unbounded skip is
-          // the worklist-gate-starvation trap, not a fix for it. v274 counts the
-          // miss in evidence without touching urlscan_scanned_at or the streak,
-          // and only escalates to the streak after MAX_TRANSIENT_MISSES.
-          if (retrieval.kind === "transient") {
-            skippedNotOurSignal++;
-            const miss = await sb.rpc(
-              "record_clone_alert_urlscan_transient_miss",
-              {
-                p_alert_id: row.id,
-                p_detail: retrieval.detail.slice(0, 200),
-                p_max_misses: MAX_TRANSIENT_MISSES,
-              },
-            );
-            if (miss.error) {
-              throw new Error(
-                `record_clone_alert_urlscan_transient_miss failed for alert ${row.id}: ${miss.error.message}`,
-              );
+      // Retrieve + classify the whole batch inside ONE step instead of one step
+      // per row. Inngest bills per step execution, so a 40-row batch was ~40
+      // executions × 8 runs/day for this fn alone; collapsing to a single step
+      // cuts that ~20×. Safe because every write is an idempotent, edge-guarded
+      // RPC — a batch-step retry re-runs already-processed rows without double-
+      // advancing lifecycle or re-emitting weaponised events (apply_verdict only
+      // reports newly_weaponised on the real transition; retrieve is a GET). Each
+      // row is wrapped in try/catch so one failure doesn't abort the rest; a
+      // failed row is left un-advanced (stays in the worklist) and retried next
+      // tick. Weaponisation is emitted from persisted state (durable emit step
+      // below), not an array, so an interrupted batch can't drop the event.
+      // A wall-clock guard breaks the loop before the 5m finish budget so
+      // worst-case external latency (40 rows × urlscan GET) can't force a
+      // full-batch replay — leftovers drain next tick (worklist is idempotent).
+      // Replay-safe: this loop awaits step.run per item, so it spans step
+      // boundaries and Inngest re-executes the handler from the top at each
+      // one. A Date.now() captured here would reset on every replay and the
+      // guard below could never fire. event.ts is set when the run is
+      // TRIGGERED and survives replay.
+      const elapsedMs = () => elapsedSinceTrigger({ event }) ?? 0;
+
+      const batch = await step.run("retrieve-batch", async () => {
+        let classified = 0;
+        let stillPending = 0;
+        let reputationFallback = 0;
+        // Rows we did not read because the miss was OUR fault (quota/transient),
+        // not evidence about the URL. Counted, not silent.
+        let skippedNotOurSignal = 0;
+        let quotaExhausted = false;
+
+        for (const [idx, row] of pending.entries()) {
+          if (elapsedMs() > BATCH_WALL_CLOCK_MS) break;
+          try {
+            const reputation = reputationFromEvidence(row.urlscan_evidence);
+            const retrieval = await retrieveURLScanDetailed(row.urlscan_uuid);
+            const nowIso = new Date().toISOString();
+
+            // A 429 is OUR quota running out and a 5xx/timeout is urlscan being
+            // unhealthy — neither is evidence about this URL. Persisting a null
+            // classification here would bump urlscan_failure_streak, and three
+            // strikes drop the row out of BOTH worklists permanently. This lane
+            // runs 8x/day, so a single rate-limited window could strand a whole
+            // batch.
+            //
+            // A 429 is global to the API key, so the rest of the batch would 429
+            // too — stop, don't burn the remaining rows on calls we know will fail.
+            if (retrieval.kind === "quota_exhausted") {
+              skippedNotOurSignal += pending.length - idx;
+              quotaExhausted = true;
+              break;
             }
-            continue;
-          }
 
-          const result = retrieval.kind === "ready" ? retrieval.result : null;
+            // A transient miss leaves the verdict alone but MUST still be stamped.
+            // The worklist is ORDER BY urlscan_submitted_at ASC LIMIT 40 and is
+            // saturated on ~45% of runs, so a uuid that deterministically returns
+            // `transient` would keep its oldest submitted_at and re-present at the
+            // head forever, starving everything behind it — an unbounded skip is
+            // the worklist-gate-starvation trap, not a fix for it. v274 counts the
+            // miss in evidence without touching urlscan_scanned_at or the streak,
+            // and only escalates to the streak after MAX_TRANSIENT_MISSES.
+            if (retrieval.kind === "transient") {
+              skippedNotOurSignal++;
+              const miss = await sb.rpc(
+                "record_clone_alert_urlscan_transient_miss",
+                {
+                  p_alert_id: row.id,
+                  p_detail: retrieval.detail.slice(0, 200),
+                  p_max_misses: MAX_TRANSIENT_MISSES,
+                },
+              );
+              if (miss.error) {
+                throw new Error(
+                  `record_clone_alert_urlscan_transient_miss failed for alert ${row.id}: ${miss.error.message}`,
+                );
+              }
+              continue;
+            }
 
-          // Render ready → full classification (reputation merged in).
-          if (result) {
-            const classification = classifyScan(result, reputation.isMalicious);
-            const persisted = await sb.rpc("persist_clone_alert_urlscan", {
-              p_alert_id: row.id,
-              p_urlscan_uuid: row.urlscan_uuid,
-              p_urlscan_evidence: serialiseRetrievedEvidence(
-                row.urlscan_uuid,
+            const result = retrieval.kind === "ready" ? retrieval.result : null;
+
+            // Render ready → full classification (reputation merged in).
+            if (result) {
+              const classification = classifyScan(
                 result,
-                reputation,
-                nowIso,
-              ),
-              p_classification: classification,
-              p_set_triage_status: suggestTriageTransition(classification),
-            });
-            if (persisted.error) {
-              throw new Error(
-                `persist_clone_alert_urlscan failed for alert ${row.id}: ${persisted.error.message}`,
+                reputation.isMalicious,
               );
+              const persisted = await sb.rpc("persist_clone_alert_urlscan", {
+                p_alert_id: row.id,
+                p_urlscan_uuid: row.urlscan_uuid,
+                p_urlscan_evidence: serialiseRetrievedEvidence(
+                  row.urlscan_uuid,
+                  result,
+                  reputation,
+                  nowIso,
+                ),
+                p_classification: classification,
+                p_set_triage_status: suggestTriageTransition(classification),
+              });
+              if (persisted.error) {
+                throw new Error(
+                  `persist_clone_alert_urlscan failed for alert ${row.id}: ${persisted.error.message}`,
+                );
+              }
+              await applyVerdict(row, classification);
+              classified++;
+              continue;
             }
-            await applyVerdict(row, classification);
-            classified++;
-            continue;
-          }
 
-          // Render not ready. If reputation is decisive, classify now and stop
-          // waiting; otherwise persist NULL (bumps failure_streak → ages out).
-          if (reputation.isMalicious) {
+            // Render not ready. If reputation is decisive, classify now and stop
+            // waiting; otherwise persist NULL (bumps failure_streak → ages out).
+            if (reputation.isMalicious) {
+              const persisted = await sb.rpc("persist_clone_alert_urlscan", {
+                p_alert_id: row.id,
+                p_urlscan_uuid: row.urlscan_uuid,
+                p_urlscan_evidence: serialiseRetrievalPending(
+                  row.urlscan_uuid,
+                  reputation,
+                  nowIso,
+                ),
+                p_classification: "likely_phishing",
+                p_set_triage_status: null, // operator confirms TP (ultrareview F5)
+              });
+              if (persisted.error) {
+                throw new Error(
+                  `persist_clone_alert_urlscan failed for alert ${row.id}: ${persisted.error.message}`,
+                );
+              }
+              await applyVerdict(row, "likely_phishing");
+              classified++;
+              reputationFallback++;
+              continue;
+            }
+
             const persisted = await sb.rpc("persist_clone_alert_urlscan", {
               p_alert_id: row.id,
               p_urlscan_uuid: row.urlscan_uuid,
@@ -233,227 +272,226 @@ export const cloneWatchUrlscanRetrieve = inngest.createFunction(
                 reputation,
                 nowIso,
               ),
-              p_classification: "likely_phishing",
-              p_set_triage_status: null, // operator confirms TP (ultrareview F5)
+              p_classification: null, // failure_streak++; retried next tick
+              p_set_triage_status: null,
             });
             if (persisted.error) {
               throw new Error(
                 `persist_clone_alert_urlscan failed for alert ${row.id}: ${persisted.error.message}`,
               );
             }
-            await applyVerdict(row, "likely_phishing");
-            classified++;
-            reputationFallback++;
-            continue;
+            stillPending++;
+          } catch (err) {
+            logger.error("clone-watch urlscan retrieve: row failed", {
+              alertId: row.id,
+              error: err instanceof Error ? err.message : String(err),
+            });
           }
-
-          const persisted = await sb.rpc("persist_clone_alert_urlscan", {
-            p_alert_id: row.id,
-            p_urlscan_uuid: row.urlscan_uuid,
-            p_urlscan_evidence: serialiseRetrievalPending(
-              row.urlscan_uuid,
-              reputation,
-              nowIso,
-            ),
-            p_classification: null, // failure_streak++; retried next tick
-            p_set_triage_status: null,
-          });
-          if (persisted.error) {
-            throw new Error(
-              `persist_clone_alert_urlscan failed for alert ${row.id}: ${persisted.error.message}`,
-            );
-          }
-          stillPending++;
-        } catch (err) {
-          logger.error("clone-watch urlscan retrieve: row failed", {
-            alertId: row.id,
-            error: err instanceof Error ? err.message : String(err),
-          });
         }
+
+        return {
+          classified,
+          stillPending,
+          reputationFallback,
+          skippedNotOurSignal,
+          quotaExhausted,
+        };
+      });
+
+      const {
+        classified,
+        stillPending,
+        reputationFallback,
+        skippedNotOurSignal,
+        quotaExhausted,
+      } = batch;
+
+      // Durable weaponised.v1 emission (the escalation seam — notify-weaponised +
+      // enforcement-plan consume it). Driven from PERSISTED state, not the batch's
+      // in-memory result: any alert that is weaponised but not yet notified —
+      // including this run's transitions AND any a prior interrupted run missed —
+      // is picked up here. send + stamp happen in one step: on retry the re-query
+      // returns the still-unstamped rows, the send dedupes on the id key, and the
+      // stamp is the completion marker → idempotent, no double-send, no drop.
+      await step.run("emit-weaponised", async () => {
+        const { data, error } = await sb
+          .from("shopfront_clone_alerts")
+          .select("id, candidate_domain, candidate_url, recheck_count")
+          .not("weaponised_at", "is", null)
+          .is("weaponised_notified_at", null)
+          .limit(WEAPONISED_EMIT_CAP);
+        if (error) {
+          throw new Error(`weaponised emit select failed: ${error.message}`);
+        }
+        const rows = (data ?? []) as Array<{
+          id: number;
+          candidate_domain: string;
+          candidate_url: string;
+          recheck_count: number | null;
+        }>;
+        if (rows.length === 0) return { emitted: 0 };
+
+        const events = rows.map((r) => {
+          // via: a clone weaponised on its first scan has recheck_count 0;
+          // one caught on a re-scan has recheck_count > 0.
+          const via = (r.recheck_count ?? 0) > 0 ? "recheck" : "initial";
+          const d: CloneWatchWeaponisedData = {
+            alertId: r.id,
+            candidateDomain: r.candidate_domain,
+            candidateUrl: r.candidate_url,
+            via,
+          };
+          // Rare high-value event: always-ship warn (bypasses INFO sampling).
+          logger.warn(
+            "clone-watch: classification transition — newly weaponised",
+            {
+              alertId: d.alertId,
+              candidateDomain: d.candidateDomain,
+              candidateUrl: d.candidateUrl,
+              via: d.via,
+              classification: "likely_phishing",
+            },
+          );
+          return {
+            name: CLONE_WATCH_WEAPONISED_EVENT,
+            id: `clone-weaponised-${d.alertId}-${d.via}`,
+            data: d,
+          };
+        });
+        await inngest.send(events);
+        // Completion marker — set AFTER the send so a mid-step interrupt re-emits
+        // (deduped) rather than dropping.
+        const { error: stampError } = await sb
+          .from("shopfront_clone_alerts")
+          .update({ weaponised_notified_at: new Date().toISOString() })
+          .in(
+            "id",
+            rows.map((r) => r.id),
+          );
+        if (stampError) {
+          throw new Error(
+            `weaponised notified stamp failed: ${stampError.message}`,
+          );
+        }
+        return { emitted: rows.length };
+      });
+
+      // Did the events we emit here actually RESULT in anything? (#1069)
+      //
+      // `weaponised_notified_at` marks that we SENT clone.weaponised.v1 — not
+      // that the consumer did its job. When notify-weaponised is finish-cancelled
+      // (its runs are 10+ steps, and a cancellation gets no retry, no error and
+      // no telemetry), the alert ends up emitted-but-never-notified and NOTHING
+      // notices: the emit worklist has already stamped it, so it never
+      // re-presents. Two episodes went unseen this way — 13 alerts 2026-08-03..10
+      // and 7 more 2026-08-29..09-02, including live PayPal and CommBank
+      // credential-phishing clones — and both were found only by a manual audit
+      // weeks later.
+      //
+      // So close the loop on the OUTCOME, not the send: count alerts weaponised
+      // long enough ago that the consumer must have finished, which carry neither
+      // the consumer's `weaponised_notification` stamp nor a queue row. The
+      // durable signal is the cost_telemetry row below (this file's logger is
+      // console-only); recover with apps/web/scripts/reemit-lost-weaponised.ts.
+      const unnotified = await step.run(
+        "count-unnotified-weaponised",
+        async () => {
+          const { count, error } = await sb
+            .from("shopfront_clone_alerts")
+            .select("id", { count: "exact", head: true })
+            .not("weaponised_at", "is", null)
+            .gt(
+              "weaponised_at",
+              new Date(Date.now() - 30 * 86_400_000).toISOString(),
+            )
+            .lt(
+              "weaponised_at",
+              new Date(Date.now() - 2 * 3_600_000).toISOString(),
+            )
+            .not("submitted_to", "cs", '{"weaponised_notification":{}}');
+          // A failed head-count returns count=null AND error=null (204, no body),
+          // so `if (error)` alone is blind and `?? 0` prints a confident zero.
+          if (error || count === null) {
+            logger.warn("clone-watch: unnotified-weaponised probe failed", {
+              error: error?.message ?? "count_null_no_error",
+            });
+            return null;
+          }
+          return count;
+        },
+      );
+
+      if (unnotified !== null && unnotified > 0) {
+        logger.warn(
+          "clone-watch: weaponised alerts emitted but never notified",
+          {
+            unnotified,
+            hint: "notify-weaponised runs were likely cancelled; see #1069",
+          },
+        );
+      }
+
+      await step.run("log-cost", async () => {
+        // Awaited (#1069): a finish-cancelled run kills waitUntil promises, so
+        // fire-and-forget rows were being lost. Awaiting makes the row part of
+        // the step's work.
+        await logCostAsync({
+          feature: "shopfront_clone_urlscan",
+          provider: "urlscan",
+          operation: "retrieve_batch",
+          units: pending.length,
+          unitCostUsd: 0,
+          metadata: {
+            classified,
+            still_pending: stillPending,
+            reputation_fallback: reputationFallback,
+            skipped_not_our_signal: skippedNotOurSignal,
+            quota_exhausted: quotaExhausted,
+            // null = the probe itself failed; 0 = genuinely none outstanding.
+            unnotified_weaponised: unnotified,
+          },
+        });
+      });
+
+      logger.info("clone-watch urlscan retrieve: batch complete", {
+        pending: pending.length,
+        classified,
+        stillPending,
+        reputationFallback,
+        skippedNotOurSignal,
+        quotaExhausted,
+      });
+
+      // Rows we could not read because of OUR quota or urlscan's health, not the
+      // URL. Silent before this change — and each one used to cost a
+      // failure-streak strike toward permanent exclusion.
+      //
+      // NOTE ON DESTINATION: `logger` (packages/utils/src/logger.ts) is
+      // console-only — console.log/warn/error, no Axiom transport at ANY level.
+      // The 10%-INFO-sampling rule belongs to the separate axiom-logger.ts, which
+      // this file reaches only through the withAxiomLogging wrapper around the
+      // whole function. So this warn buys stderr visibility and nothing more;
+      // the durable signal is the cost_telemetry metadata written above, which is
+      // what the verification queries read. Do not describe it as "always-ship".
+      if (skippedNotOurSignal > 0) {
+        logger.warn(
+          "clone-watch urlscan retrieve: skipped on quota/transient",
+          {
+            skipped: skippedNotOurSignal,
+            pending: pending.length,
+            quotaExhausted,
+          },
+        );
       }
 
       return {
+        ok: true,
         classified,
         stillPending,
         reputationFallback,
         skippedNotOurSignal,
         quotaExhausted,
       };
-    });
-
-    const {
-      classified,
-      stillPending,
-      reputationFallback,
-      skippedNotOurSignal,
-      quotaExhausted,
-    } = batch;
-
-    // Durable weaponised.v1 emission (the escalation seam — notify-weaponised +
-    // enforcement-plan consume it). Driven from PERSISTED state, not the batch's
-    // in-memory result: any alert that is weaponised but not yet notified —
-    // including this run's transitions AND any a prior interrupted run missed —
-    // is picked up here. send + stamp happen in one step: on retry the re-query
-    // returns the still-unstamped rows, the send dedupes on the id key, and the
-    // stamp is the completion marker → idempotent, no double-send, no drop.
-    await step.run("emit-weaponised", async () => {
-      const { data, error } = await sb
-        .from("shopfront_clone_alerts")
-        .select("id, candidate_domain, candidate_url, recheck_count")
-        .not("weaponised_at", "is", null)
-        .is("weaponised_notified_at", null)
-        .limit(WEAPONISED_EMIT_CAP);
-      if (error) {
-        throw new Error(`weaponised emit select failed: ${error.message}`);
-      }
-      const rows = (data ?? []) as Array<{
-        id: number;
-        candidate_domain: string;
-        candidate_url: string;
-        recheck_count: number | null;
-      }>;
-      if (rows.length === 0) return { emitted: 0 };
-
-      const events = rows.map((r) => {
-        // via: a clone weaponised on its first scan has recheck_count 0;
-        // one caught on a re-scan has recheck_count > 0.
-        const via = (r.recheck_count ?? 0) > 0 ? "recheck" : "initial";
-        const d: CloneWatchWeaponisedData = {
-          alertId: r.id,
-          candidateDomain: r.candidate_domain,
-          candidateUrl: r.candidate_url,
-          via,
-        };
-        // Rare high-value event: always-ship warn (bypasses INFO sampling).
-        logger.warn("clone-watch: classification transition — newly weaponised", {
-          alertId: d.alertId,
-          candidateDomain: d.candidateDomain,
-          candidateUrl: d.candidateUrl,
-          via: d.via,
-          classification: "likely_phishing",
-        });
-        return {
-          name: CLONE_WATCH_WEAPONISED_EVENT,
-          id: `clone-weaponised-${d.alertId}-${d.via}`,
-          data: d,
-        };
-      });
-      await inngest.send(events);
-      // Completion marker — set AFTER the send so a mid-step interrupt re-emits
-      // (deduped) rather than dropping.
-      const { error: stampError } = await sb
-        .from("shopfront_clone_alerts")
-        .update({ weaponised_notified_at: new Date().toISOString() })
-        .in(
-          "id",
-          rows.map((r) => r.id),
-        );
-      if (stampError) {
-        throw new Error(`weaponised notified stamp failed: ${stampError.message}`);
-      }
-      return { emitted: rows.length };
-    });
-
-    // Did the events we emit here actually RESULT in anything? (#1069)
-    //
-    // `weaponised_notified_at` marks that we SENT clone.weaponised.v1 — not
-    // that the consumer did its job. When notify-weaponised is finish-cancelled
-    // (its runs are 10+ steps, and a cancellation gets no retry, no error and
-    // no telemetry), the alert ends up emitted-but-never-notified and NOTHING
-    // notices: the emit worklist has already stamped it, so it never
-    // re-presents. Two episodes went unseen this way — 13 alerts 2026-08-03..10
-    // and 7 more 2026-08-29..09-02, including live PayPal and CommBank
-    // credential-phishing clones — and both were found only by a manual audit
-    // weeks later.
-    //
-    // So close the loop on the OUTCOME, not the send: count alerts weaponised
-    // long enough ago that the consumer must have finished, which carry neither
-    // the consumer's `weaponised_notification` stamp nor a queue row. The
-    // durable signal is the cost_telemetry row below (this file's logger is
-    // console-only); recover with apps/web/scripts/reemit-lost-weaponised.ts.
-    const unnotified = await step.run("count-unnotified-weaponised", async () => {
-      const { count, error } = await sb
-        .from("shopfront_clone_alerts")
-        .select("id", { count: "exact", head: true })
-        .not("weaponised_at", "is", null)
-        .gt("weaponised_at", new Date(Date.now() - 30 * 86_400_000).toISOString())
-        .lt("weaponised_at", new Date(Date.now() - 2 * 3_600_000).toISOString())
-        .not("submitted_to", "cs", '{"weaponised_notification":{}}');
-      // A failed head-count returns count=null AND error=null (204, no body),
-      // so `if (error)` alone is blind and `?? 0` prints a confident zero.
-      if (error || count === null) {
-        logger.warn("clone-watch: unnotified-weaponised probe failed", {
-          error: error?.message ?? "count_null_no_error",
-        });
-        return null;
-      }
-      return count;
-    });
-
-    if (unnotified !== null && unnotified > 0) {
-      logger.warn("clone-watch: weaponised alerts emitted but never notified", {
-        unnotified,
-        hint: "notify-weaponised runs were likely cancelled; see #1069",
-      });
-    }
-
-    await step.run("log-cost", async () => {
-      // Awaited (#1069): a finish-cancelled run kills waitUntil promises, so
-      // fire-and-forget rows were being lost. Awaiting makes the row part of
-      // the step's work.
-      await logCostAsync({
-        feature: "shopfront_clone_urlscan",
-        provider: "urlscan",
-        operation: "retrieve_batch",
-        units: pending.length,
-        unitCostUsd: 0,
-        metadata: {
-          classified,
-          still_pending: stillPending,
-          reputation_fallback: reputationFallback,
-          skipped_not_our_signal: skippedNotOurSignal,
-          quota_exhausted: quotaExhausted,
-          // null = the probe itself failed; 0 = genuinely none outstanding.
-          unnotified_weaponised: unnotified,
-        },
-      });
-    });
-
-    logger.info("clone-watch urlscan retrieve: batch complete", {
-      pending: pending.length,
-      classified,
-      stillPending,
-      reputationFallback,
-      skippedNotOurSignal,
-      quotaExhausted,
-    });
-
-    // Rows we could not read because of OUR quota or urlscan's health, not the
-    // URL. Silent before this change — and each one used to cost a
-    // failure-streak strike toward permanent exclusion.
-    //
-    // NOTE ON DESTINATION: `logger` (packages/utils/src/logger.ts) is
-    // console-only — console.log/warn/error, no Axiom transport at ANY level.
-    // The 10%-INFO-sampling rule belongs to the separate axiom-logger.ts, which
-    // this file reaches only through the withAxiomLogging wrapper around the
-    // whole function. So this warn buys stderr visibility and nothing more;
-    // the durable signal is the cost_telemetry metadata written above, which is
-    // what the verification queries read. Do not describe it as "always-ship".
-    if (skippedNotOurSignal > 0) {
-      logger.warn("clone-watch urlscan retrieve: skipped on quota/transient", {
-        skipped: skippedNotOurSignal,
-        pending: pending.length,
-        quotaExhausted,
-      });
-    }
-
-    return {
-      ok: true,
-      classified,
-      stillPending,
-      reputationFallback,
-      skippedNotOurSignal,
-      quotaExhausted,
-    };
-  }),
+    },
+  ),
 );

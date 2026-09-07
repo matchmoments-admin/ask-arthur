@@ -1,7 +1,10 @@
 import { isFeatureBraked } from "@askarthur/scam-engine/cost-log";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
 import { CLONE_WATCH_WEAPONISED_EVENT } from "@askarthur/scam-engine/inngest/events";
-import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
+import {
+  elapsedSinceTrigger,
+  withAxiomLogging,
+} from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { readStringEnv } from "@askarthur/utils/env";
 import { featureFlags } from "@askarthur/utils/feature-flags";
@@ -177,14 +180,19 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
   ],
   withAxiomLogging(
     { fnId: "shopfront-clone-netcraft-issue" },
-    async ({ step, runId }) => {
+    async ({ event, step, runId }) => {
       if (!featureFlags.shopfrontCloneOutreach) {
-        return { skipped: true, reason: "FF_SHOPFRONT_CLONE_OUTREACH disabled" };
+        return {
+          skipped: true,
+          reason: "FF_SHOPFRONT_CLONE_OUTREACH disabled",
+        };
       }
       if (!featureFlags.cloneNetcraftIssue) {
         return { skipped: true, reason: "FF_CLONE_NETCRAFT_ISSUE disabled" };
       }
-      const braked = await step.run("check-brake", () => isFeatureBraked(BRAKE));
+      const braked = await step.run("check-brake", () =>
+        isFeatureBraked(BRAKE),
+      );
       if (braked) {
         return { skipped: true, reason: `feature_brakes.${BRAKE} engaged` };
       }
@@ -232,18 +240,23 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
         const { data: usedRaw } = await sb.rpc("count_todays_netcraft_issues");
         const used = typeof usedRaw === "number" ? usedRaw : 0;
         const remaining = Math.max(0, cap - used);
-        if (remaining <= 0) return { used, remaining, groups: [] as WorklistGroup[] };
+        if (remaining <= 0)
+          return { used, remaining, groups: [] as WorklistGroup[] };
 
         const { data: rows } = await sb.rpc(
           "list_clone_alerts_pending_netcraft_issue",
           { p_max_age_days: MAX_AGE_DAYS, p_uuid_limit: remaining },
         );
         const groups: WorklistGroup[] = (
-          (rows as Array<{ netcraft_uuid: string; alerts: unknown }> | null) ?? []
+          (rows as Array<{ netcraft_uuid: string; alerts: unknown }> | null) ??
+          []
         )
           .map((r) => ({
             netcraft_uuid: r.netcraft_uuid,
-            alerts: (Array.isArray(r.alerts) ? (r.alerts as PendingAlert[]) : [])
+            alerts: (Array.isArray(r.alerts)
+              ? (r.alerts as PendingAlert[])
+              : []
+            )
               // Extra FP guard beyond the RPC's domain list (v176 brand denylist).
               .filter((a) => !isFpBrand(a.inferred_target_domain ?? "")),
           }))
@@ -255,7 +268,8 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
         return {
           ok: true,
           dryRun,
-          reason: plan.remaining === 0 ? "daily_cap_reached" : "nothing_pending",
+          reason:
+            plan.remaining === 0 ? "daily_cap_reached" : "nothing_pending",
           filed: 0,
         };
       }
@@ -274,7 +288,10 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
         unavailableDeferred: 0,
       };
 
-      const bulkStamp = async (ids: number[], value: Record<string, unknown>) => {
+      const bulkStamp = async (
+        ids: number[],
+        value: Record<string, unknown>,
+      ) => {
         if (ids.length === 0) return;
         const { error } = await sb.rpc("merge_clone_alert_submission_bulk", {
           p_alert_ids: ids,
@@ -309,10 +326,21 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
         }
       };
 
-      const issueStartMs = Date.now();
+      // Replay-safe: this loop awaits step.run per item, so it spans step
+
+      // boundaries and Inngest re-executes the handler from the top at each
+
+      // one. A Date.now() captured here would reset on every replay and the
+
+      // guard below could never fire. event.ts is set when the run is
+
+      // TRIGGERED and survives replay.
+
+      const elapsedMs = () => elapsedSinceTrigger({ event }) ?? 0;
+
       let uuidsSkippedForTime = 0;
       for (const group of plan.groups) {
-        if (Date.now() - issueStartMs > ISSUE_WALL_CLOCK_MS) {
+        if (elapsedMs() > ISSUE_WALL_CLOCK_MS) {
           // Leftovers drain next run rather than the whole run being cancelled
           // mid-loop (a cancellation gets no retry and no telemetry, #1069).
           uuidsSkippedForTime = plan.groups.length - plan.groups.indexOf(group);
@@ -335,7 +363,10 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
           counts.archived++;
           if (!dryRun) {
             await step.run(`drain-archived-${uuid}`, () =>
-              bulkStamp(allIds, { skipped: "archived", at: new Date().toISOString() }),
+              bulkStamp(allIds, {
+                skipped: "archived",
+                at: new Date().toISOString(),
+              }),
             );
           }
           continue;
@@ -370,10 +401,13 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
         // F4 (v221): the TS gate mirror blocked would-be candidates — only
         // possible under RPC/TS deploy skew. Unstamped → retried next run.
         if (sel.gatedOut.length) {
-          logger.warn("netcraft-issue: evidence gate blocked candidates (RPC/TS skew?)", {
-            uuid,
-            gatedOut: sel.gatedOut.map((a) => a.id),
-          });
+          logger.warn(
+            "netcraft-issue: evidence gate blocked candidates (RPC/TS skew?)",
+            {
+              uuid,
+              gatedOut: sel.gatedOut.map((a) => a.id),
+            },
+          );
         }
 
         if (sel.driftStates.length) {
@@ -390,7 +424,11 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
                 domain: group.alerts[0].candidate_domain,
                 channel: "netcraft",
                 runId,
-                extra: { reason: "url_state_drift", uuid, driftStates: sel.driftStates },
+                extra: {
+                  reason: "url_state_drift",
+                  uuid,
+                  driftStates: sel.driftStates,
+                },
               });
             });
           }
@@ -512,7 +550,11 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
           const unavailableIds = sel.deferred
             .filter((d) => d.reason === "unavailable")
             .map((d) => d.alert.id);
-          await bulkDefer(unavailableIds, "unavailable", UNAVAILABLE_RECHECK_MS);
+          await bulkDefer(
+            unavailableIds,
+            "unavailable",
+            UNAVAILABLE_RECHECK_MS,
+          );
           if (sel.transient.length) {
             await bulkDefer(
               sel.transient.map((a) => a.id),
@@ -522,7 +564,10 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
           }
           // FIX-8: only drain not-in-urls when the page is COMPLETE (else an
           // incomplete ingest / paginated tail would lose a real false negative).
-          if (sel.notInUrls.length && fetched.totalCount <= fetched.urls.length) {
+          if (
+            sel.notInUrls.length &&
+            fetched.totalCount <= fetched.urls.length
+          ) {
             await bulkStamp(
               sel.notInUrls.map((a) => a.id),
               { skipped: "not_in_urls", at: now },
@@ -585,7 +630,12 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
                 domain: liveCandidates[0].candidateDomain,
                 channel: "netcraft",
                 runId,
-                extra: { reason: "post_4xx", uuid, status: result.status, body: result.body },
+                extra: {
+                  reason: "post_4xx",
+                  uuid,
+                  status: result.status,
+                  body: result.body,
+                },
               });
             });
           }
@@ -632,7 +682,8 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
         !dryRun &&
         (counts.permanentRejects >= AUTOBRAKE_REJECT_COUNT ||
           (counts.livePosts > 0 &&
-            counts.permanentRejects / counts.livePosts > AUTOBRAKE_REJECT_RATIO));
+            counts.permanentRejects / counts.livePosts >
+              AUTOBRAKE_REJECT_RATIO));
       if (tripBrake) {
         await step.run("autobrake", async () => {
           // UPSERT (not update): the row doesn't exist by default, and
@@ -640,7 +691,9 @@ export const cloneWatchNetcraftIssue = inngest.createFunction(
           await sb.from("feature_brakes").upsert(
             {
               feature: BRAKE,
-              paused_until: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+              paused_until: new Date(
+                Date.now() + 24 * 3600 * 1000,
+              ).toISOString(),
               reason: `auto: ${counts.permanentRejects}/${counts.livePosts} report_issue 4xx rejects`,
               set_by: "netcraft-issue-autobrake",
             },
