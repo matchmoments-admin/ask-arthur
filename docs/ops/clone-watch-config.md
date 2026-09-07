@@ -250,6 +250,74 @@ These are the operationally important pieces. Copy-paste against the
 Supabase prod project (`rquomhcgnodxzkhokwni`) via `mcp__supabase__execute_sql`
 or the dashboard SQL editor.
 
+### 4a. "Why were there only N clones last night?" — read this before answering
+
+Asked on 2026-09-07. Answering it wrongly **twice in ten minutes** is what
+prompted this section, so the traps are written down rather than the conclusion.
+
+**The number people mean by "reported clones" is `weaponised_at`** — a clone
+confirmed as live phishing. Not `first_seen_at` (raw lexical matches, 22–39/day
+and healthy) and not `netcraft_declined_at`.
+
+**The honest series is per `weaponised_at` week.** Nothing else. Measured
+2026-09-07:
+
+```sql
+select date_trunc('week', weaponised_at)::date as wk, count(*) as weaponised
+from shopfront_clone_alerts
+where weaponised_at > now() - interval '56 days'
+group by 1 order by 1 desc;
+```
+
+```
+Jul 13:  6    Aug 03: 23    Aug 24: 16
+Jul 20: 13    Aug 10: 24    Aug 31:  8
+Jul 27:  3    Aug 17: 12
+```
+
+**Range 3–24 per week.** One or two on a given night is ordinary, not a signal.
+Do not react to a single night.
+
+#### Two traps that both produce a false alarm
+
+1. **Never group by `urlscan_scanned_at` and count `weaponised_at IS NOT NULL`.**
+   Alerts are re-scanned, so this counts clones weaponised _long before_ that
+   scan and inflates recent cohorts. Mean scan→weaponise lag is **−103 hours**
+   (median and p90 are **0.0** — weaponisation is stamped at scan time), so the
+   negative tail is entirely re-scans.
+
+2. **Never compare a count keyed on one date column against a count keyed on
+   another.** Comparing `weaponised_at` windows against `urlscan_classification`
+   counted by `urlscan_scanned_at` produced an apparent "detections halved"
+   that does not exist.
+
+#### The check that actually indicates health
+
+Conversion from urlscan's verdict to weaponisation, which has been **90–100%
+every week**:
+
+```sql
+select date_trunc('week', urlscan_scanned_at)::date as wk,
+       count(*) filter (where urlscan_classification = 'likely_phishing') as likely_phishing,
+       count(*) filter (where urlscan_classification = 'likely_phishing'
+                          and weaponised_at is null)                      as unconverted
+from shopfront_clone_alerts
+where urlscan_scanned_at > now() - interval '35 days'
+group by 1 order by 1 desc;
+```
+
+Verified 2026-09-07: `unconverted` is 0–2 every week. It climbing is the real
+regression signal. A low nightly count with `unconverted` near zero means the
+pipeline is working and there was simply less to find.
+
+#### Precision context, so a low rate is not mistaken for a fault
+
+`4c4ce4d7` (v285, 24 Aug) deliberately stopped discarding the pre-weaponisation
+tail before urlscan saw it. Submissions went from ~327 to ~1,740 per fortnight
+as a result, so **submit→weaponised precision is expected to be low** (~1–3%).
+That is the cost of not dropping the tail early, and it is a deliberate
+trade — not something to tune back without revisiting v285.
+
 ### Daily hit count + acceptance-gate floor check
 
 The acceptance gate requires ≥3 daily hits (the "floor" — distinguishes
