@@ -1,5 +1,8 @@
 import { inngest } from "@askarthur/scam-engine/inngest/client";
-import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
+import {
+  elapsedSinceTrigger,
+  withAxiomLogging,
+} from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
@@ -85,169 +88,184 @@ export const cloneWatchUrlscanSubmit = inngest.createFunction(
     { cron: "0 9 * * *" },
     { event: "shopfront/clone.urlscan-submit.manual-trigger.v1" },
   ],
-  withAxiomLogging({ fnId: "shopfront-clone-urlscan-submit" }, async ({ step }) => {
-    if (!featureFlags.shopfrontCloneUrlscan) {
-      return { skipped: true, reason: "FF_SHOPFRONT_CLONE_URLSCAN disabled" };
-    }
-    if (!process.env.URLSCAN_API_KEY) {
-      return { skipped: true, reason: "URLSCAN_API_KEY not set" };
-    }
-    const sb = createServiceClient();
-    if (!sb) return { skipped: true, reason: "supabase_unavailable" };
-
-    const candidates = await step.run("load-gated-candidates", async () => {
-      const { data } = await sb.rpc("list_clone_alerts_pending_urlscan_submit", {
-        p_limit: SUBMIT_BATCH_LIMIT,
-        p_min_confidence: MIN_CONFIDENCE,
-        p_max_failure_streak: MAX_FAILURE_STREAK,
-      });
-      return (data as CloneCandidate[] | null) ?? [];
-    });
-
-    // Retire what we are giving up on, BEFORE the empty-worklist return — a
-    // quiet day is exactly when the horizon still needs sweeping. Widening the
-    // worklist horizon to 90 days without this would only move the silent drop
-    // from day 14 to day 90; stamping `dormant` makes the abandonment countable
-    // (and gives that state its first writer since v199 declared it).
-    const dormant = await step.run("retire-aged-out", async () => {
-      const { data, error } = await sb.rpc("mark_stale_clone_alerts_dormant", {
-        p_horizon_days: DORMANT_HORIZON_DAYS,
-        p_min_confidence: MIN_CONFIDENCE,
-        p_limit: DORMANT_BATCH_LIMIT,
-      });
-      if (error) {
-        // Never fail the submit run over bookkeeping.
-        logger.error("clone-watch urlscan submit: dormant sweep failed", {
-          error: error.message,
-        });
-        return 0;
+  withAxiomLogging(
+    { fnId: "shopfront-clone-urlscan-submit" },
+    async ({ event, step }) => {
+      if (!featureFlags.shopfrontCloneUrlscan) {
+        return { skipped: true, reason: "FF_SHOPFRONT_CLONE_URLSCAN disabled" };
       }
-      return typeof data === "number" ? data : 0;
-    });
+      if (!process.env.URLSCAN_API_KEY) {
+        return { skipped: true, reason: "URLSCAN_API_KEY not set" };
+      }
+      const sb = createServiceClient();
+      if (!sb) return { skipped: true, reason: "supabase_unavailable" };
 
-    if (dormant > 0) {
-      logger.warn("clone-watch urlscan submit: alerts retired as dormant", {
-        dormant,
-        horizonDays: DORMANT_HORIZON_DAYS,
+      const candidates = await step.run("load-gated-candidates", async () => {
+        const { data } = await sb.rpc(
+          "list_clone_alerts_pending_urlscan_submit",
+          {
+            p_limit: SUBMIT_BATCH_LIMIT,
+            p_min_confidence: MIN_CONFIDENCE,
+            p_max_failure_streak: MAX_FAILURE_STREAK,
+          },
+        );
+        return (data as CloneCandidate[] | null) ?? [];
       });
-    }
 
-    if (candidates.length === 0) {
-      // Still log the sweep — cost_telemetry is the durable record (this
-      // logger is console-backed with no Axiom transport), so a run that only
-      // retired rows must not be invisible.
-      if (dormant > 0) {
-        await step.run("log-cost-dormant-only", async () => {
-          await logCostAsync({
-            feature: "shopfront_clone_urlscan",
-            provider: "urlscan",
-            operation: "submit_batch",
-            units: 0,
-            unitCostUsd: 0,
-            metadata: { submitted: 0, dormant_retired: dormant },
+      // Retire what we are giving up on, BEFORE the empty-worklist return — a
+      // quiet day is exactly when the horizon still needs sweeping. Widening the
+      // worklist horizon to 90 days without this would only move the silent drop
+      // from day 14 to day 90; stamping `dormant` makes the abandonment countable
+      // (and gives that state its first writer since v199 declared it).
+      const dormant = await step.run("retire-aged-out", async () => {
+        const { data, error } = await sb.rpc(
+          "mark_stale_clone_alerts_dormant",
+          {
+            p_horizon_days: DORMANT_HORIZON_DAYS,
+            p_min_confidence: MIN_CONFIDENCE,
+            p_limit: DORMANT_BATCH_LIMIT,
+          },
+        );
+        if (error) {
+          // Never fail the submit run over bookkeeping.
+          logger.error("clone-watch urlscan submit: dormant sweep failed", {
+            error: error.message,
           });
+          return 0;
+        }
+        return typeof data === "number" ? data : 0;
+      });
+
+      if (dormant > 0) {
+        logger.warn("clone-watch urlscan submit: alerts retired as dormant", {
+          dormant,
+          horizonDays: DORMANT_HORIZON_DAYS,
         });
       }
-      return {
-        ok: true,
-        submitted: 0,
-        dormant,
-        reason: "no_gated_candidates",
-      };
-    }
 
-    // Submit the whole batch inside ONE step instead of one step per candidate.
-    // Inngest bills per step execution; a single batch step cuts a 30-candidate
-    // run from ~30 executions to ~1. urlscan submit is idempotent (the helper
-    // records urlscan_submitted_at and the retrieve worklist de-dupes on it),
-    // so a batch-step retry re-submits harmlessly and losing per-row
-    // memoisation is safe. Each row is wrapped in try/catch so one failure
-    // doesn't abort the rest; a failed row is retried next tick. A wall-clock
-    // guard breaks before the finish budget so worst-case submit latency can't
-    // force a full-batch replay (which would re-POST to urlscan) — leftovers
-    // drain next tick (submit is urlscan_submitted_at-idempotent).
-    const submitStartMs = Date.now();
-    const batch = await step.run("submit-batch", async () => {
-      let submitted = 0;
-      let submitFailed = 0;
-      let rateLimited = 0;
-      let reputationHits = 0;
-      for (const row of candidates) {
-        if (Date.now() - submitStartMs > SUBMIT_WALL_CLOCK_MS) break;
-        try {
-          const outcome = await submitCloneCandidate(row);
-          if (outcome.reputationMalicious) reputationHits++;
-          if (
-            outcome.kind === "submitted" ||
-            outcome.kind === "reputation_classified"
-          ) {
-            submitted++;
-          } else if (outcome.kind === "rate_limited") {
-            // Counted apart from failures: a 429 is quota exhaustion, leaves the
-            // row untouched, and must not read as evidence about the URL. Before
-            // this it was folded into submitFailed and left no DB trace, so
-            // "has urlscan ever rate-limited us?" had no answer anywhere.
-            rateLimited++;
-          } else {
-            submitFailed++;
-          }
-        } catch (err) {
-          submitFailed++;
-          logger.error("clone-watch urlscan submit: row failed", {
-            alertId: row.id,
-            error: err instanceof Error ? err.message : String(err),
+      if (candidates.length === 0) {
+        // Still log the sweep — cost_telemetry is the durable record (this
+        // logger is console-backed with no Axiom transport), so a run that only
+        // retired rows must not be invisible.
+        if (dormant > 0) {
+          await step.run("log-cost-dormant-only", async () => {
+            await logCostAsync({
+              feature: "shopfront_clone_urlscan",
+              provider: "urlscan",
+              operation: "submit_batch",
+              units: 0,
+              unitCostUsd: 0,
+              metadata: { submitted: 0, dormant_retired: dormant },
+            });
           });
         }
+        return {
+          ok: true,
+          submitted: 0,
+          dormant,
+          reason: "no_gated_candidates",
+        };
       }
-      return { submitted, submitFailed, rateLimited, reputationHits };
-    });
-    const { submitted, submitFailed, rateLimited, reputationHits } = batch;
 
-    await step.run("log-cost", async () => {
-      // Awaited (#1069): the Aug 31 submit run was finish-cancelled after the
-      // batch step and this row silently vanished — the day's submit telemetry
-      // simply did not exist. Awaiting binds the row to the step.
-      await logCostAsync({
-        feature: "shopfront_clone_urlscan",
-        provider: "urlscan",
-        operation: "submit_batch",
-        units: candidates.length,
-        unitCostUsd: 0, // free tier (urlscan + SB/VT)
-        metadata: {
-          submitted,
-          submit_failed: submitFailed,
-          rate_limited: rateLimited,
-          reputation_hits: reputationHits,
-          dormant_retired: dormant,
-        },
+      // Submit the whole batch inside ONE step instead of one step per candidate.
+      // Inngest bills per step execution; a single batch step cuts a 30-candidate
+      // run from ~30 executions to ~1. urlscan submit is idempotent (the helper
+      // records urlscan_submitted_at and the retrieve worklist de-dupes on it),
+      // so a batch-step retry re-submits harmlessly and losing per-row
+      // memoisation is safe. Each row is wrapped in try/catch so one failure
+      // doesn't abort the rest; a failed row is retried next tick. A wall-clock
+      // guard breaks before the finish budget so worst-case submit latency can't
+      // force a full-batch replay (which would re-POST to urlscan) — leftovers
+      // drain next tick (submit is urlscan_submitted_at-idempotent).
+      // Replay-safe: this loop awaits step.run per item, so it spans step
+      // boundaries and Inngest re-executes the handler from the top at each
+      // one. A Date.now() captured here would reset on every replay and the
+      // guard below could never fire. event.ts is set when the run is
+      // TRIGGERED and survives replay.
+      const elapsedMs = () => elapsedSinceTrigger({ event }) ?? 0;
+
+      const batch = await step.run("submit-batch", async () => {
+        let submitted = 0;
+        let submitFailed = 0;
+        let rateLimited = 0;
+        let reputationHits = 0;
+        for (const row of candidates) {
+          if (elapsedMs() > SUBMIT_WALL_CLOCK_MS) break;
+          try {
+            const outcome = await submitCloneCandidate(row);
+            if (outcome.reputationMalicious) reputationHits++;
+            if (
+              outcome.kind === "submitted" ||
+              outcome.kind === "reputation_classified"
+            ) {
+              submitted++;
+            } else if (outcome.kind === "rate_limited") {
+              // Counted apart from failures: a 429 is quota exhaustion, leaves the
+              // row untouched, and must not read as evidence about the URL. Before
+              // this it was folded into submitFailed and left no DB trace, so
+              // "has urlscan ever rate-limited us?" had no answer anywhere.
+              rateLimited++;
+            } else {
+              submitFailed++;
+            }
+          } catch (err) {
+            submitFailed++;
+            logger.error("clone-watch urlscan submit: row failed", {
+              alertId: row.id,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+        return { submitted, submitFailed, rateLimited, reputationHits };
       });
-    });
+      const { submitted, submitFailed, rateLimited, reputationHits } = batch;
 
-    logger.info("clone-watch urlscan submit: batch complete", {
-      candidates: candidates.length,
-      submitted,
-      submitFailed,
-      rateLimited,
-      reputationHits,
-      dormant,
-    });
+      await step.run("log-cost", async () => {
+        // Awaited (#1069): the Aug 31 submit run was finish-cancelled after the
+        // batch step and this row silently vanished — the day's submit telemetry
+        // simply did not exist. Awaiting binds the row to the step.
+        await logCostAsync({
+          feature: "shopfront_clone_urlscan",
+          provider: "urlscan",
+          operation: "submit_batch",
+          units: candidates.length,
+          unitCostUsd: 0, // free tier (urlscan + SB/VT)
+          metadata: {
+            submitted,
+            submit_failed: submitFailed,
+            rate_limited: rateLimited,
+            reputation_hits: reputationHits,
+            dormant_retired: dormant,
+          },
+        });
+      });
 
-    // The durable signal is the cost_telemetry row above; this is stderr only
-    // (packages/utils/src/logger.ts is console-backed, no Axiom transport).
-    if (rateLimited > 0) {
-      logger.warn("clone-watch urlscan submit: rate-limited by urlscan", {
-        rateLimited,
+      logger.info("clone-watch urlscan submit: batch complete", {
         candidates: candidates.length,
+        submitted,
+        submitFailed,
+        rateLimited,
+        reputationHits,
+        dormant,
       });
-    }
 
-    return {
-      ok: true,
-      submitted,
-      submitFailed,
-      rateLimited,
-      reputationHits,
-      dormant,
-    };
-  }),
+      // The durable signal is the cost_telemetry row above; this is stderr only
+      // (packages/utils/src/logger.ts is console-backed, no Axiom transport).
+      if (rateLimited > 0) {
+        logger.warn("clone-watch urlscan submit: rate-limited by urlscan", {
+          rateLimited,
+          candidates: candidates.length,
+        });
+      }
+
+      return {
+        ok: true,
+        submitted,
+        submitFailed,
+        rateLimited,
+        reputationHits,
+        dormant,
+      };
+    },
+  ),
 );

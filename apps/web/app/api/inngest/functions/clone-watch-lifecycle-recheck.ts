@@ -1,6 +1,9 @@
 import { isFeatureBraked } from "@askarthur/scam-engine/cost-log";
 import { inngest } from "@askarthur/scam-engine/inngest/client";
-import { withAxiomLogging } from "@askarthur/scam-engine/inngest/with-axiom-logging";
+import {
+  elapsedSinceTrigger,
+  withAxiomLogging,
+} from "@askarthur/scam-engine/inngest/with-axiom-logging";
 import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
@@ -125,7 +128,8 @@ export function selectTopRiskCandidates(
       attackIntent: r.clf_attack_intent,
       brandCategory: r.brand_category,
       whoisCreatedDate: r.attribution?.whois?.createdDate ?? null,
-      ipAbuseConfidenceScore: r.attribution?.ip_rep?.abuseConfidenceScore ?? null,
+      ipAbuseConfidenceScore:
+        r.attribution?.ip_rep?.abuseConfidenceScore ?? null,
       auAbnStatus: r.attribution?.au_registrant?.abnStatus ?? null,
       auNameMatches: r.attribution?.au_registrant?.nameMatchesAbn ?? null,
       nowMs,
@@ -139,7 +143,8 @@ export function selectTopRiskCandidates(
 
   const floor = Math.min(Math.max(0, staleFloor), limit);
   const chosen = new Map<number, ScoredRow>();
-  for (const r of byRisk.slice(0, Math.max(0, limit - floor))) chosen.set(r.id, r);
+  for (const r of byRisk.slice(0, Math.max(0, limit - floor)))
+    chosen.set(r.id, r);
   // Fill the reserve from the stalest end, then top back up from the risk order
   // if the reserve overlapped what risk already picked.
   for (const r of [...scored].sort(byStaleness)) {
@@ -189,7 +194,7 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
   ],
   withAxiomLogging(
     { fnId: "shopfront-clone-lifecycle-recheck" },
-    async ({ step }) => {
+    async ({ event, step }) => {
       if (!featureFlags.shopfrontCloneRecheck) {
         return { skipped: true, reason: "FF_SHOPFRONT_CLONE_RECHECK disabled" };
       }
@@ -202,7 +207,9 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
       if (!process.env.URLSCAN_API_KEY) {
         return { skipped: true, reason: "URLSCAN_API_KEY not set" };
       }
-      const braked = await step.run("check-brake", () => isFeatureBraked(BRAKE));
+      const braked = await step.run("check-brake", () =>
+        isFeatureBraked(BRAKE),
+      );
       if (braked) {
         return { skipped: true, reason: `feature_brakes.${BRAKE} engaged` };
       }
@@ -224,7 +231,9 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
           .limit(1)
           .maybeSingle();
         if (!data?.created_at) return false;
-        return Date.now() - new Date(data.created_at).getTime() < 50 * 60 * 1000;
+        return (
+          Date.now() - new Date(data.created_at).getTime() < 50 * 60 * 1000
+        );
       });
       if (recentRun) {
         return { skipped: true, reason: "cooldown_active" };
@@ -261,14 +270,19 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
       // wall-clock guard breaks before the 8m finish budget so worst-case submit
       // latency (50 × urlscan POST) can't force a full-batch re-POST — leftovers
       // stay unmarked and rotate through on the next run.
-      const recheckSubmitStartMs = Date.now();
+      // Replay-safe: this loop awaits step.run per item, so it spans step
+      // boundaries and Inngest re-executes the handler from the top at each
+      // one. A Date.now() captured here would reset on every replay and the
+      // guard below could never fire. event.ts is set when the run is
+      // TRIGGERED and survives replay.
+      const elapsedMs = () => elapsedSinceTrigger({ event }) ?? 0;
+
       const submitBatch = await step.run("submit-batch", async () => {
         let submitted = 0;
         let submitFailed = 0;
         let reputationHits = 0;
         for (const c of candidates) {
-          if (Date.now() - recheckSubmitStartMs > RECHECK_SUBMIT_WALL_CLOCK_MS)
-            break;
+          if (elapsedMs() > RECHECK_SUBMIT_WALL_CLOCK_MS) break;
           try {
             const outcome = await submitCloneCandidate({
               id: c.id,
@@ -363,7 +377,11 @@ export const cloneWatchLifecycleRecheck = inngest.createFunction(
           operation: "recheck_submit",
           units: submitted,
           unitCostUsd: 0, // free tier
-          metadata: { submitted, submit_failed: submitFailed, reputation_hits: reputationHits },
+          metadata: {
+            submitted,
+            submit_failed: submitFailed,
+            reputation_hits: reputationHits,
+          },
         });
       });
 
