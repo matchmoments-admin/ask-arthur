@@ -52,17 +52,16 @@ export function verifySvix(
 
 async function suppress(emails: string[], source: string): Promise<void> {
   const sb = createServiceClient();
-  if (!sb) return;
+  if (!sb) throw new Error("suppression_store_unavailable");
   for (const raw of emails) {
     const email = raw.trim().toLowerCase();
     if (!email) continue;
-    await sb
+    const { error: suppressionError } = await sb
       .from("brand_report_unsubscribes")
-      .upsert({ email, source }, { onConflict: "email", ignoreDuplicates: true });
-    await sb
-      .from("email_subscribers")
-      .update({ is_active: false })
-      .eq("email", email);
+      .upsert({ email, source }, { onConflict: "email" });
+    if (suppressionError) throw new Error("suppression_write_failed");
+    const { error: unsubscribeError } = await sb.rpc("unsubscribe_newsletter", { p_email: email });
+    if (unsubscribeError) throw new Error("suppression_write_failed");
   }
 }
 
@@ -117,18 +116,24 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
 
-  const to = recipients(event.data);
-  if (event.type === "email.complained" && to.length) {
-    await suppress(to, "resend_complaint");
-    logger.warn("Resend webhook: spam complaint — suppressed", { count: to.length });
-  } else if (event.type === "email.bounced" && to.length) {
-    // Soft/transient bounces shouldn't permanently suppress; only hard bounces.
-    const bounceType = event.data?.bounce?.type?.toLowerCase() ?? "";
-    const transient = bounceType.includes("transient") || bounceType.includes("soft");
-    if (!transient) {
-      await suppress(to, "resend_bounce");
-      logger.warn("Resend webhook: hard bounce — suppressed", { count: to.length });
+  try {
+    const to = recipients(event.data);
+    if (event.type === "email.complained" && to.length) {
+      await suppress(to, "resend_complaint");
+      logger.warn("Resend webhook: spam complaint — suppressed", { count: to.length });
+    } else if (event.type === "email.bounced" && to.length) {
+      // Soft/transient bounces shouldn't permanently suppress; only hard bounces.
+      const bounceType = event.data?.bounce?.type?.toLowerCase() ?? "";
+      const transient = bounceType.includes("transient") || bounceType.includes("soft");
+      if (!transient) {
+        await suppress(to, "resend_bounce");
+        logger.warn("Resend webhook: hard bounce — suppressed", { count: to.length });
+      }
     }
+
+  } catch {
+    logger.warn("resend_suppression_failed");
+    return NextResponse.json({ error: "suppression_unavailable" }, { status: 503 });
   }
 
   return NextResponse.json({ ok: true });

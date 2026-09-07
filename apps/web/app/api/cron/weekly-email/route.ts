@@ -33,7 +33,13 @@ export async function GET(req: NextRequest) {
   try {
     const supabase = createServiceClient();
     if (!supabase) {
-      return NextResponse.json({ message: "Database not configured" });
+      return NextResponse.json({ error: "store_unavailable" }, { status: 503 });
+    }
+
+    const { error: pruneError } = await supabase.rpc("prune_newsletter_confirmation_requests");
+    if (pruneError) {
+      logger.warn("newsletter_confirmation_cleanup_failed");
+      return NextResponse.json({ error: "subscription_cleanup_failed" }, { status: 503 });
     }
 
     // ── Reddit Intel digest path (gated) ───────────────────────────────────
@@ -49,10 +55,11 @@ export async function GET(req: NextRequest) {
         });
       }
 
-      const { data: subs } = await supabase
+      const { data: subs, error: subscriberError } = await supabase
         .from("email_subscribers")
         .select("email")
         .eq("is_active", true);
+      if (subscriberError) throw new Error("subscriber_read_failed");
       const subscriberEmails = (subs ?? []).map((s) => s.email as string);
       const recipients = Array.from(
         new Set([OPERATOR_EMAIL, ...subscriberEmails]),
@@ -127,11 +134,12 @@ export async function GET(req: NextRequest) {
     }
 
     // ── Legacy verified-scams digest path ──────────────────────────────────
-    const { data: subscribers } = await supabase
+    const { data: subscribers, error: subscriberError } = await supabase
       .from("email_subscribers")
       .select("email")
       .eq("is_active", true);
 
+    if (subscriberError) throw new Error("subscriber_read_failed");
     if (!subscribers || subscribers.length === 0) {
       return NextResponse.json({ message: "No subscribers" });
     }

@@ -38,6 +38,7 @@ export const KNOWN_BRAKE_KEYS = [
   "hive_ai",
   "monthly_intel_blog",
   "news_intel_embed",
+  "newsletter_confirmation",
   "onward_reporting",
   "phone_footprint",
   "reddit_intel",

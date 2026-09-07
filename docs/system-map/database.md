@@ -140,7 +140,8 @@ Supabase Postgres (project `rquomhcgnodxzkhokwni`). 75+ tables across 12 domain 
 - `blog_posts` — CMS posts. `search_vector` TSVECTOR GIN. v2.
 - `blog_categories` — Category taxonomy. v18.
 - `blog_external_links` — Curated "Further reading" links per post (nofollow by default; `origin` audits editorial vs outreach vs partnership). Service-role RLS, managed via `/admin/blog`. Policy: `/blog/editorial-policy`. v227.
-- `email_subscribers` — Newsletter signup. DENY_ALL RLS (v109).
+- `email_subscribers` — Newsletter signup. DENY_ALL RLS (v109). v303 adds pending ownership-confirmation hashes, expiry and request timestamp; new signups stay inactive until confirmed. Deployment pending.
+- `newsletter_confirmation_budget` — v303 service-role-only UTC-day request budget (200). `request_newsletter_confirmation`, `confirm_newsletter_subscription`, `unsubscribe_newsletter` and `prune_newsletter_confirmation_requests` are service-role-only RPCs defined in `supabase/migration-v303-newsletter-confirmation.sql`. Requests use a per-address transaction lock and 15-minute cooldown; opt-out invalidates pending tokens.
 
 ### Clone-watch / Shopfront
 

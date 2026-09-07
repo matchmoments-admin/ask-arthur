@@ -352,3 +352,7 @@ Before flipping any `NEXT_PUBLIC_FF_*` flag from default-OFF to ON in production
 3. Verify the new feature's queries aren't in the top-5 — first real traffic is the wrong time to discover an IO-budget surprise.
 4. Smoke-test the feature on Vercel preview with the flag flipped.
 5. Confirm cost brake env vars are set as bare numbers (not `$10`).
+
+### Newsletter confirmation brake (v303; deployment pending)
+
+`feature_brakes.newsletter_confirmation` is checked inside `request_newsletter_confirmation` in `supabase/migration-v303-newsletter-confirmation.sql`, before reserving a send. The operator dashboard registers it in `apps/web/lib/dashboard/feature-brakes.ts`. It pauses new confirmation requests; confirmed-reader weekly mail uses its existing controls. The same RPC enforces 200 reservations per UTC day and a 15-minute per-address cooldown. Failed provider attempts still consume reservations.

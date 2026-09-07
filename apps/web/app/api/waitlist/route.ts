@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createServiceClient } from "@askarthur/supabase/server";
-import { sendWelcomeEmail } from "@/lib/resend";
+import { requestNewsletterConfirmation } from "@/lib/newsletter-subscription";
 import { checkFormRateLimit } from "@askarthur/utils/rate-limit";
 import { logger } from "@askarthur/utils/logger";
 
 const WaitlistSchema = z.object({
-  email: z.string().email("Please enter a valid email address"),
+  email: z.string().trim().toLowerCase().max(254).pipe(z.email("Please enter a valid email address")),
   subscribedWeekly: z.boolean().default(true),
-  source: z.string().default("homepage"),
+  source: z.enum(["homepage"]).default("homepage"),
 });
 
 export async function POST(req: NextRequest) {
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const body = await req.json();
+    const body = await req.json().catch(() => null);
     const parsed = WaitlistSchema.safeParse(body);
 
     if (!parsed.success) {
@@ -38,10 +38,9 @@ export async function POST(req: NextRequest) {
     const { email, subscribedWeekly, source } = parsed.data;
     const supabase = createServiceClient();
     if (!supabase) {
-      sendWelcomeEmail(email).catch((err) =>
-        logger.error("Failed to send welcome email", { error: String(err) })
-      );
-      return NextResponse.json({ success: true });
+      return NextResponse.json({ error: "waitlist_unavailable" }, {
+        status: 503, headers: { "Retry-After": "60" },
+      });
     }
 
     // Insert into waitlist (upsert to handle duplicates gracefully)
@@ -60,27 +59,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // If they opted into weekly alerts, also add to email_subscribers
     if (subscribedWeekly) {
-      await supabase
-        .from("email_subscribers")
-        .upsert(
-          {
-            email,
-            is_active: true,
-            consent_at: new Date().toISOString(),
-            consent_source: `waitlist_${source}`,
-          },
-          { onConflict: "email" }
-        );
+      await requestNewsletterConfirmation(supabase, email, `waitlist_${source}`);
     }
-
-    // Send welcome email (fire-and-forget)
-    sendWelcomeEmail(email).catch((err) =>
-      logger.error("Failed to send welcome email", { error: String(err) })
-    );
-
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, confirmationRequired: subscribedWeekly });
   } catch {
     return NextResponse.json(
       { error: "Something went wrong. Please try again." },

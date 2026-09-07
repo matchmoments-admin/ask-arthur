@@ -79,11 +79,12 @@ Every consumer page, authenticated page, admin page, and API route, grouped by d
 
 ### Misc consumer
 
-| Route          | Purpose                                                                  |
-| -------------- | ------------------------------------------------------------------------ |
-| `/subscribe`   | Newsletter signup landing (link target for the scan@ email footer; #933) |
-| `/unsubscribe` | Email unsubscribe form                                                   |
-| `/onboarding`  | Post-signup welcome flow (anon)                                          |
+| Route                | Purpose                                                                                |
+| -------------------- | -------------------------------------------------------------------------------------- |
+| `/subscribe`         | Newsletter signup landing (link target for the scan@ email footer; #933)               |
+| `/subscribe/confirm` | Email ownership confirmation; explicit button submits token (v303, deployment pending) |
+| `/unsubscribe`       | Email unsubscribe form                                                                 |
+| `/onboarding`        | Post-signup welcome flow (anon)                                                        |
 
 ---
 
@@ -341,15 +342,16 @@ First-touch is captured by `middleware.ts`, which sets the `aa_attribution` cook
 
 ### Auth + onboarding (open)
 
-| Route                        | Method | Purpose                              |
-| ---------------------------- | ------ | ------------------------------------ |
-| `/api/auth/signout`          | POST   | Clear session + redirect             |
-| `/api/subscribe`             | POST   | Newsletter signup                    |
-| `/api/waitlist`              | POST   | Waitlist form                        |
-| `/api/leads`                 | POST   | B2B contact form                     |
-| `/api/feedback`              | POST   | User feedback collection             |
-| `/api/unsubscribe`           | POST   | Email unsubscribe form               |
-| `/api/unsubscribe-one-click` | GET    | RFC 8058 one-click unsubscribe token |
+| Route                        | Method | Purpose                                                         |
+| ---------------------------- | ------ | --------------------------------------------------------------- |
+| `/api/auth/signout`          | POST   | Clear session + redirect                                        |
+| `/api/subscribe`             | POST   | Request email confirmation; 202 does not mean subscribed (v303) |
+| `/api/subscribe/confirm`     | POST   | Consume hashed 24-hour token and activate subscription (v303)   |
+| `/api/waitlist`              | POST   | Waitlist form                                                   |
+| `/api/leads`                 | POST   | B2B contact form                                                |
+| `/api/feedback`              | POST   | User feedback collection                                        |
+| `/api/unsubscribe`           | POST   | Email unsubscribe form                                          |
+| `/api/unsubscribe-one-click` | POST   | RFC 8058 one-click unsubscribe token                            |
 
 ### Admin (admin)
 
