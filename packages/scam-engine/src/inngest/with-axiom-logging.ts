@@ -2,7 +2,11 @@
 //
 // Wraps an Inngest handler to emit exactly the lifecycle signals the #515
 // dashboards/monitors need: `fn.start` (INFO), `fn.complete` (INFO,
-// durationMs) and `fn.error` (ERROR, always ships). It threads the same
+// elapsedSinceTriggerMs + finalSegmentMs) and `fn.error` (ERROR, always
+// ships). See elapsedSinceTrigger below for why there are two numbers and why
+// the single `durationMs` it replaced was structurally wrong.
+//
+// It threads the same
 // `requestId` that flows through middleware (#490) and /api/analyze (#491)
 // when the triggering event carries one, so an analyze → Inngest fan-out is
 // joinable on a single id. Cron functions have no event.data.requestId, so we
@@ -57,6 +61,40 @@ export const CRON_TICK_EVENT = "inngest/scheduled.timer";
  * on SHAPE with `safeParse` (see resolveRedditIntel*Data in ./events.ts);
  * where it only needs to know which trigger fired, use this.
  */
+/**
+ * True wall-clock elapsed for a run, in milliseconds — or null if unknowable.
+ *
+ * WHY THIS IS NOT `Date.now() - handlerEntry`. Inngest re-executes the handler
+ * body FROM THE TOP at every step boundary, so any timestamp taken on handler
+ * entry is reset by each replay. The previous `durationMs` field did exactly
+ * that and therefore reported only the final segment: measured over seven days
+ * of production, almost every function came back at avg=1ms — including
+ * reddit-intel-cluster, which we watched hold a slot for minutes on 2026-09-07.
+ * A field named "duration" that reports 1ms for a seven-minute run is worse
+ * than no field, because it reads as health.
+ *
+ * The event's own `ts` survives replay because it is set when the run is
+ * triggered, not when the handler starts (`EventPayload.ts` —
+ * "milliseconds since the unix epoch at which this event occurred"). Cron ticks
+ * carry it too.
+ *
+ * This includes queue wait as well as execution. That is deliberate: the
+ * account runs on a 5-slot pool measured at 5/5 in use, so time spent WAITING
+ * for a slot is exactly as interesting as time spent holding one (ADR-0019).
+ *
+ * Returns null rather than 0 when `ts` is absent — `ts` is optional in the SDK
+ * type, and a confident zero is the failure mode this whole change is about.
+ */
+function elapsedSinceTrigger(ctx: {
+  event?: { ts?: number } | undefined;
+}): number | null {
+  const ts = ctx.event?.ts;
+  if (typeof ts !== "number" || !Number.isFinite(ts) || ts <= 0) return null;
+  const elapsed = Date.now() - ts;
+  // A clock-skewed or future-dated ts would otherwise emit a negative duration.
+  return elapsed >= 0 ? elapsed : null;
+}
+
 export function isCronTick(event: { name?: string } | undefined): boolean {
   return event?.name === CRON_TICK_EVENT;
 }
@@ -109,14 +147,21 @@ export function withAxiomLogging<TResult>(
         : ctx.runId;
 
     const log = getLogger({ source: "inngest", requestId, fn: meta.fnId });
-    const startedAt = Date.now();
+    const segmentStartedAt = Date.now();
     log.info("fn.start", { fn: meta.fnId, attempt: ctx.attempt });
 
     try {
       const result = await handler(ctx);
       log.info("fn.complete", {
         fn: meta.fnId,
-        durationMs: Date.now() - startedAt,
+        // attempt is on the completion too, not just fn.start. event.ts is the
+        // ORIGINAL trigger time, so on a retry elapsedSinceTriggerMs includes
+        // every prior attempt and its backoff — which is not slot time. Without
+        // this field there is no way to exclude those rows, and the metric this
+        // change adds would be uninterpretable in exactly the cases that matter.
+        attempt: ctx.attempt,
+        elapsedSinceTriggerMs: elapsedSinceTrigger(ctx),
+        finalSegmentMs: Date.now() - segmentStartedAt,
       });
       // Fire-and-forget per #514: no-op when the flag is off; when on,
       // next-axiom batches and the function instance outlives the flush.
@@ -125,7 +170,9 @@ export function withAxiomLogging<TResult>(
     } catch (err) {
       log.error("fn.error", {
         fn: meta.fnId,
-        durationMs: Date.now() - startedAt,
+        attempt: ctx.attempt,
+        elapsedSinceTriggerMs: elapsedSinceTrigger(ctx),
+        finalSegmentMs: Date.now() - segmentStartedAt,
         error: err instanceof Error ? err.message : String(err),
         error_name: err instanceof Error ? err.name : "Unknown",
       });
