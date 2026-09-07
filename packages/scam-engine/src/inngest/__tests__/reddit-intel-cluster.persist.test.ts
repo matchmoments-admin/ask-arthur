@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 
 import {
   __testing,
@@ -29,18 +30,30 @@ vi.mock("@askarthur/utils/logger", () => ({
 type Row = Record<string, unknown>;
 
 /**
- * The smallest fake that can express the four outcomes we care about. Each
- * table gets a scripted response per operation; unscripted operations succeed
- * with an empty result, so a test only says what it is about.
+ * The smallest fake that can express the outcomes we care about.
+ *
+ * It models the SET-BASED call shapes persistAssignments uses since the write
+ * path was batched: a bulk upsert of seed themes, a select-by-slug that
+ * resolves ids for both new and pre-existing rows, per-theme updates, a
+ * grouped post link, and one bulk membership upsert. Unscripted operations
+ * succeed, so each test only says what it is about.
  */
 function fakeSupabase(script: {
-  themeInsert?: { data: Row | null; error: { code?: string } | null };
-  themeSelectBySlug?: { data: Row | null };
+  /** slug -> id, as the select-by-slug would find it. Defaults to resolving. */
+  resolveSlugs?: "all" | "none";
   themeUpdateError?: { message: string } | null;
   postUpdateError?: { message: string } | null;
   alreadyLinked?: Row[];
 }) {
-  const calls = { inserts: 0, slugSelects: 0, updates: 0, memberships: 0 };
+  const calls = {
+    seedUpsertRows: 0,
+    slugSelects: 0,
+    themeUpdates: 0,
+    linkUpdates: 0,
+    linkedPostIds: [] as string[],
+    membershipRows: 0,
+  };
+  let lastSlugs: string[] = [];
 
   const from = (table: string) => {
     if (table === "reddit_post_intel") {
@@ -49,8 +62,9 @@ function fakeSupabase(script: {
           in: () => Promise.resolve({ data: script.alreadyLinked ?? [] }),
         }),
         update: () => ({
-          eq: () => {
-            calls.updates++;
+          in: (_col: string, ids: string[]) => {
+            calls.linkUpdates++;
+            if (!script.postUpdateError) calls.linkedPostIds.push(...ids);
             return Promise.resolve({ error: script.postUpdateError ?? null });
           },
         }),
@@ -58,41 +72,41 @@ function fakeSupabase(script: {
     }
     if (table === "reddit_intel_themes") {
       return {
-        insert: () => ({
-          select: () => ({
-            single: () => {
-              calls.inserts++;
-              return Promise.resolve(
-                script.themeInsert ?? { data: { id: "theme-new" }, error: null },
-              );
-            },
-          }),
-        }),
+        upsert: (rows: Row[]) => {
+          calls.seedUpsertRows += rows.length;
+          lastSlugs = rows.map((r) => r["slug"] as string);
+          return Promise.resolve({ error: null });
+        },
         select: () => ({
-          eq: () => ({
-            single: () => {
-              calls.slugSelects++;
-              return Promise.resolve(script.themeSelectBySlug ?? { data: null });
-            },
-          }),
+          in: (_col: string, slugs: string[]) => {
+            calls.slugSelects++;
+            if (script.resolveSlugs === "none") {
+              return Promise.resolve({ data: [], error: null });
+            }
+            return Promise.resolve({
+              data: slugs.map((slug) => ({ id: `theme-for-${slug}`, slug })),
+              error: null,
+            });
+          },
         }),
         update: () => ({
-          eq: () => Promise.resolve({ error: script.themeUpdateError ?? null }),
+          eq: () => {
+            calls.themeUpdates++;
+            return Promise.resolve({ error: script.themeUpdateError ?? null });
+          },
         }),
       };
     }
     // reddit_post_intel_themes
     return {
-      insert: () => {
-        calls.memberships++;
+      upsert: (rows: Row[]) => {
+        calls.membershipRows += rows.length;
         return Promise.resolve({ error: null });
       },
     };
   };
 
-  // The production type is the full SupabaseClient; the function uses four
-  // methods of it. Casting here keeps the fake honest about that.
-  return { client: { from } as never, calls };
+  return { client: { from } as never, calls, slugs: () => lastSlugs };
 }
 
 function seedAssignment(postId = "post-1"): Assignment {
@@ -107,43 +121,61 @@ function seedAssignment(postId = "post-1"): Assignment {
   };
 }
 
+function joinAssignment(postId: string, themeId: string): Assignment {
+  return {
+    postId,
+    themeId,
+    similarity: 0.8,
+    newCentroid: [0.3, 0.4],
+    newMemberCount: 7,
+    isNewTheme: false,
+    embeddingModelVersion: "voyage-3.5",
+  };
+}
+
 describe("persistAssignments — a dropped post is counted, not silent", () => {
   it("seeds a theme and links the post on the happy path", async () => {
     const { client, calls } = fakeSupabase({});
-    const a = seedAssignment();
 
-    const r = await persistAssignments(client, [a]);
+    const r = await persistAssignments(client, [seedAssignment()]);
 
     expect(r.newThemeCount).toBe(1);
     expect(r.seedFailures).toBe(0);
-    expect(a.themeId).toBe("theme-new");
-    expect(calls.memberships).toBe(1);
+    expect(calls.linkedPostIds).toEqual(["post-1"]);
+    expect(calls.membershipRows).toBe(1);
   });
 
-  it("adopts the existing theme when a retry hits the slug's unique constraint", async () => {
+  it("adopts a theme a prior attempt already created", async () => {
     // THE BUG THIS FILE WAS WRITTEN FOR. The slug is deterministic
     // (auto-<postId>) and reddit_intel_themes_slug_key is UNIQUE — a fact the
-    // code's own comment denied. So a run that created the theme and then died
-    // before linking the post produced 23505 on every subsequent retry, which
-    // was warned and `continue`d: that post could never be clustered again.
-    const { client, calls } = fakeSupabase({
-      themeInsert: { data: null, error: { code: "23505" } },
-      themeSelectBySlug: { data: { id: "theme-from-prior-attempt" } },
-    });
-    const a = seedAssignment();
+    // code's own comment once denied. A run that created the theme then died
+    // before linking the post used to produce 23505 on every retry, warned and
+    // skipped, so the post could never be clustered again.
+    //
+    // Batched, adoption needs no special case: the upsert is ON CONFLICT DO
+    // NOTHING and the select-by-slug then resolves ids for pre-existing rows
+    // exactly as it does for new ones. This asserts the post still gets linked.
+    const { client, calls } = fakeSupabase({ resolveSlugs: "all" });
 
-    const r = await persistAssignments(client, [a]);
+    const r = await persistAssignments(client, [seedAssignment("post-9")]);
 
     expect(r.seedFailures).toBe(0);
-    expect(r.newThemeCount).toBe(1);
-    expect(a.themeId).toBe("theme-from-prior-attempt");
-    expect(calls.slugSelects).toBe(1);
+    expect(calls.linkedPostIds).toEqual(["post-9"]);
   });
 
-  it("counts a seed failure when the theme can be neither created nor found", async () => {
-    const { client } = fakeSupabase({
-      themeInsert: { data: null, error: { code: "42501" } },
-    });
+  it("never overwrites an existing theme row", async () => {
+    // A plain upsert would reset title/member_count/first_seen_at, and by the
+    // time a retry lands the theme may have grown and been named. Resetting a
+    // named 50-member theme to "Pending naming"/1 is worse than the orphan.
+    const src = readFileSync(
+      new URL("../reddit-intel-cluster.ts", import.meta.url),
+      "utf8",
+    );
+    expect(src).toContain("ignoreDuplicates: true");
+  });
+
+  it("counts a seed failure when the theme is neither created nor found", async () => {
+    const { client } = fakeSupabase({ resolveSlugs: "none" });
 
     const r = await persistAssignments(client, [seedAssignment()]);
 
@@ -151,17 +183,20 @@ describe("persistAssignments — a dropped post is counted, not silent", () => {
     expect(r.seedFailures).toBe(1);
   });
 
-  it("counts a link failure when the post's theme_id update fails", async () => {
+  it("counts link failures per post when the theme_id update fails", async () => {
     const { client } = fakeSupabase({
       postUpdateError: { message: "deadlock detected" },
     });
 
-    const r = await persistAssignments(client, [seedAssignment()]);
+    const r = await persistAssignments(client, [
+      seedAssignment("a"),
+      seedAssignment("b"),
+    ]);
 
-    // The theme was created, so newThemeCount is 1 — but the post is NOT
-    // linked, and that asymmetry is exactly what the counter exists to show.
-    expect(r.newThemeCount).toBe(1);
-    expect(r.linkFailures).toBe(1);
+    // Themes were created, posts were not linked — the asymmetry the counters
+    // exist to show.
+    expect(r.newThemeCount).toBe(2);
+    expect(r.linkFailures).toBe(2);
   });
 
   it("skips posts a prior attempt already linked", async () => {
@@ -172,7 +207,36 @@ describe("persistAssignments — a dropped post is counted, not silent", () => {
     const r = await persistAssignments(client, [seedAssignment()]);
 
     expect(r.newThemeCount).toBe(0);
-    expect(calls.inserts).toBe(0);
+    expect(calls.seedUpsertRows).toBe(0);
+  });
+
+  it("collapses many posts joining one theme into a single update", async () => {
+    // The reason this rewrite exists. Round trips must scale with distinct
+    // THEMES, not with posts: the step holds a concurrency slot for its whole
+    // duration and the account runs on a 5-slot pool.
+    const { client, calls } = fakeSupabase({});
+    const joins = Array.from({ length: 50 }, (_, i) =>
+      joinAssignment(`p${i}`, "theme-hot"),
+    );
+
+    const r = await persistAssignments(client, joins);
+
+    expect(r.joinedThemeCount).toBe(1);
+    expect(calls.themeUpdates).toBe(1); // not 50
+    expect(calls.linkUpdates).toBe(1); // not 50
+    expect(calls.linkedPostIds).toHaveLength(50);
+    expect(calls.membershipRows).toBe(50); // one bulk upsert
+  });
+
+  it("does not mutate the caller's assignments", async () => {
+    // assignPostsToThemes has an explicit no-mutation test; this used to write
+    // `a.themeId = created.id` back into the caller's array without saying so.
+    const { client } = fakeSupabase({});
+    const a = seedAssignment();
+
+    await persistAssignments(client, [a]);
+
+    expect(a.themeId).toBe("");
   });
 });
 
