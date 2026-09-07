@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { withAxiomLogging } from "../with-axiom-logging";
+import * as axiomLogger from "@askarthur/utils/axiom-logger";
 
 // With FF_AXIOM_ENABLED unset, getLogger() returns a NOOP logger, so these
 // tests exercise the HOF's wrapping/passthrough contract without needing
@@ -12,7 +13,7 @@ import { withAxiomLogging } from "../with-axiom-logging";
 // `unknown` to the handler's real parameter type.
 type HandlerCtx = Parameters<ReturnType<typeof withAxiomLogging<unknown>>>[0];
 const ctx = (partial: {
-  event?: { data?: Record<string, unknown> };
+  event?: { data?: Record<string, unknown>; ts?: number };
   runId?: string;
   attempt?: number;
 }): HandlerCtx => partial as unknown as HandlerCtx;
@@ -119,5 +120,93 @@ describe("withAxiomLogging — production-only cron guard", () => {
     } as unknown as HandlerCtx;
     await expect(wrapped(evtCtx)).resolves.toBe("ran");
     expect(handler).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * fn.complete must report the RUN's elapsed time, not the last replay segment.
+ *
+ * The field this replaces, `durationMs`, was `Date.now() - <handler entry>`.
+ * Inngest re-executes the handler body from the top at every step boundary, so
+ * that timestamp resets on each replay and the field only ever measured the
+ * final segment. Over seven days of production almost every function reported
+ * avg=1ms — including reddit-intel-cluster, which was directly observed holding
+ * a slot for minutes on 2026-09-07 (0.87s per post x 500 posts). A field named
+ * "duration" that reads 1ms for a seven-minute run is worse than no field.
+ *
+ * These assertions INVOKE the wrapper and read what actually reached the log
+ * call, rather than checking the source for a token — see
+ * docs/agents/defect-shapes.md shape N.
+ */
+describe("fn.complete reports true elapsed time, not the final replay segment", () => {
+  const logged: Array<{ msg: string; fields: Record<string, unknown> }> = [];
+
+  beforeEach(() => {
+    logged.length = 0;
+    process.env.FF_AXIOM_ENABLED = "true";
+    vi.spyOn(axiomLogger, "getLogger").mockReturnValue({
+      info: (msg: string, fields: Record<string, unknown>) =>
+        logged.push({ msg, fields }),
+      warn: () => {},
+      error: (msg: string, fields: Record<string, unknown>) =>
+        logged.push({ msg, fields }),
+      debug: () => {},
+      flush: async () => {},
+    } as unknown as ReturnType<typeof axiomLogger.getLogger>);
+  });
+
+  const complete = () => logged.find((l) => l.msg === "fn.complete")!.fields;
+
+  it("measures from the event's trigger timestamp, which survives replay", async () => {
+    const wrapped = withAxiomLogging({ fnId: "test-fn" }, async () => "ok");
+    await wrapped(
+      ctx({ event: { ts: Date.now() - 60_000 }, runId: "r", attempt: 0 }),
+    );
+
+    const elapsed = complete()["elapsedSinceTriggerMs"] as number;
+    // ~60s. The old implementation would report single-digit ms here, because
+    // the handler itself is instantaneous — that is the whole defect.
+    expect(elapsed).toBeGreaterThan(55_000);
+    expect(elapsed).toBeLessThan(70_000);
+  });
+
+  it("reports null — not 0 — when the event carries no ts", async () => {
+    // `ts` is optional in Inngest's EventPayload. A confident zero is exactly
+    // the failure mode this change exists to remove.
+    const wrapped = withAxiomLogging({ fnId: "test-fn" }, async () => "ok");
+    await wrapped(ctx({ runId: "r", attempt: 0 }));
+
+    expect(complete()["elapsedSinceTriggerMs"]).toBeNull();
+  });
+
+  it("reports null for a future-dated or clock-skewed ts", async () => {
+    const wrapped = withAxiomLogging({ fnId: "test-fn" }, async () => "ok");
+    await wrapped(ctx({ event: { ts: Date.now() + 60_000 }, runId: "r" }));
+
+    expect(complete()["elapsedSinceTriggerMs"]).toBeNull();
+  });
+
+  it("still reports the final segment, under a name that says so", async () => {
+    const wrapped = withAxiomLogging({ fnId: "test-fn" }, async () => "ok");
+    await wrapped(ctx({ event: { ts: Date.now() - 60_000 }, runId: "r" }));
+
+    const fields = complete();
+    expect(fields["finalSegmentMs"]).toBeTypeOf("number");
+    expect(fields["finalSegmentMs"] as number).toBeLessThan(1_000);
+    // The misleading name must not come back.
+    expect(fields["durationMs"]).toBeUndefined();
+  });
+
+  it("carries both fields onto the error path too", async () => {
+    const wrapped = withAxiomLogging({ fnId: "test-fn" }, async () => {
+      throw new Error("boom");
+    });
+    await expect(
+      wrapped(ctx({ event: { ts: Date.now() - 30_000 }, runId: "r" })),
+    ).rejects.toThrow("boom");
+
+    const err = logged.find((l) => l.msg === "fn.error")!.fields;
+    expect(err["elapsedSinceTriggerMs"] as number).toBeGreaterThan(25_000);
+    expect(err["finalSegmentMs"]).toBeTypeOf("number");
   });
 });
