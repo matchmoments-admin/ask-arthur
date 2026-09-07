@@ -38,7 +38,28 @@ import { inngest } from "./client";
 
 // Inngest's internal event name for a cron-scheduled invocation (vs. an
 // event/manual trigger). Mirrors `internalEvents.ScheduledTimer` in the SDK.
-const CRON_TICK_EVENT = "inngest/scheduled.timer";
+//
+// EXPORTED, and that matters. This fact lived here as a module-private const
+// while #1107 shipped `event?.data ? parse(event.data) : fallback` in two
+// other functions — a truthiness test that is WRONG precisely because a cron
+// tick carries `data: { cron: string }`. The knowledge was in the repo; the
+// seam was not, so two stages failed 4x per tick until a Telegram page found
+// it. One home for one fact.
+export const CRON_TICK_EVENT = "inngest/scheduled.timer";
+
+/**
+ * True when this invocation came from a cron schedule rather than an event.
+ *
+ * Prefer this to any test on `event.data`. The cron payload is a POPULATED
+ * object (`{ cron: "25 2,8,14,20 * * *" }`), so truthiness cannot distinguish
+ * the two paths — and a strict Zod parse of it throws on every scheduled run.
+ * Where a function needs a domain payload with a cron fallback, discriminate
+ * on SHAPE with `safeParse` (see resolveRedditIntel*Data in ./events.ts);
+ * where it only needs to know which trigger fired, use this.
+ */
+export function isCronTick(event: { name?: string } | undefined): boolean {
+  return event?.name === CRON_TICK_EVENT;
+}
 
 // The full Inngest handler context for OUR client (step, event, runId,
 // attempt, logger, …). Using Inngest's own type keeps the wrapped handlers

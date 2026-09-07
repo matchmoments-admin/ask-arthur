@@ -22,6 +22,8 @@
  * number, and it fails if anyone raises the batch without doing the sums.
  */
 import { readFileSync } from "node:fs";
+import fs from "node:fs";
+import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -442,5 +444,77 @@ describe("clustering keeps its vectors inside one step", () => {
           "fails every run as output_too_large.",
       ).toBe(true);
     }
+  });
+});
+
+/**
+ * No dual-trigger function may discriminate its payload by truthiness.
+ *
+ * A cron tick is not an absent payload. Inngest sends its own internal event
+ * carrying `data: { cron: string }` (node_modules/inngest/types.d.ts), which is
+ * TRUTHY — so `event?.data ? parseX(event.data) : fallback` takes the parse
+ * branch on every scheduled run and throws on the required fields. #1107
+ * shipped exactly that into two stages; both failed four times per tick for two
+ * days.
+ *
+ * A fleet sweep on 2026-09-07 found 24 dual-trigger functions and no other
+ * instance — 17 destructure only `{ step }`, five read `event` defensively with
+ * optional chaining, one discriminates on `event.name`. This guard exists
+ * because four of them carry comments instructing a future maintainer to
+ * re-add a cron alongside their event trigger (enrich-vulnerability,
+ * scam-alerts, onward-auto-report, regulator-alert-push): each is one line away
+ * from becoming dual-trigger, and the bug reappears the moment one does.
+ *
+ * WHAT THIS DOES NOT CATCH: a truthiness test written across several lines, or
+ * one hidden behind a helper. It is a source sweep, with the limits described
+ * in docs/agents/defect-shapes.md shape N — which is why the resolvers it
+ * steers people toward are themselves behaviourally tested above.
+ */
+describe("no dual-trigger function truthiness-tests its payload", () => {
+  const dirs = [
+    path.join(__dirname, "..", "inngest"),
+    path.join(
+      __dirname, "..", "..", "..", "..",
+      "apps", "web", "app", "api", "inngest", "functions",
+    ),
+  ];
+
+  const files = dirs.flatMap((d) =>
+    fs.existsSync(d)
+      ? fs.readdirSync(d).filter((f) => f.endsWith(".ts")).map((f) => path.join(d, f))
+      : [],
+  );
+
+  it("finds the Inngest function directories (guards a silently-empty sweep)", () => {
+    expect(files.length).toBeGreaterThan(40);
+  });
+
+  it("has no `event?.data ?` ternary in a function that also has a cron", () => {
+    const offenders: string[] = [];
+    for (const file of files) {
+      // Comments stripped FIRST. The first version of this guard flagged its
+      // own docblock, and flagged `event.data?.identifier` — optional chaining,
+      // not a ternary — because `[^?]` excludes `??` but not `?.`. Matching
+      // text rather than code is the very shape this file is about.
+      const src = fs
+        .readFileSync(file, "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, " ")
+        .split("\n")
+        .map((l) => l.replace(/\/\/[^\n]*/g, " "))
+        .join("\n");
+      if (!/\{\s*cron:\s*"/.test(src)) continue; // event-only: a payload is guaranteed
+      if (/event\??\.data\s*\?(?![?.])/.test(src)) {
+        offenders.push(path.basename(file));
+      }
+    }
+    expect(
+      offenders,
+      "These functions have BOTH a cron trigger and a truthiness test on " +
+        "event.data:\n" + offenders.map((o) => `  - ${o}`).join("\n") +
+        "\n\nA cron tick carries `data: { cron }` — truthy — so the parse " +
+        "branch runs and throws on every scheduled run.\nUse safeParse (see " +
+        "resolveRedditIntelSummarisedData in inngest/events.ts) or isCronTick " +
+        "from inngest/with-axiom-logging.ts.",
+    ).toEqual([]);
   });
 });

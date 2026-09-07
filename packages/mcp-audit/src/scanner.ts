@@ -1,6 +1,11 @@
 // MCP server audit scanner — fetches npm package, analyzes for OWASP MCP Top 10 risks.
 
-import type { ScanCheck, ScanCategory, ScanRecommendation, UnifiedScanResult } from "@askarthur/types/scanner";
+import type {
+  ScanCheck,
+  ScanCategory,
+  ScanRecommendation,
+  UnifiedScanResult,
+} from "@askarthur/types/scanner";
 import { calculateGrade } from "@askarthur/types/scanner";
 import {
   INJECTION_PATTERNS,
@@ -13,19 +18,23 @@ import {
   detectTyposquatting,
 } from "./patterns";
 import { matchCve, cvssToSeverity, type McpCveRule } from "./cve-rulepack";
+import { isCriticalVuln } from "./cvss";
 
 interface NpmPackageMeta {
   name: string;
   description?: string;
   readme?: string;
   "dist-tags"?: { latest?: string };
-  versions?: Record<string, {
-    scripts?: Record<string, string>;
-    dependencies?: Record<string, string>;
-    devDependencies?: Record<string, string>;
-    dist?: { tarball?: string };
-    readme?: string;
-  }>;
+  versions?: Record<
+    string,
+    {
+      scripts?: Record<string, string>;
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+      dist?: { tarball?: string };
+      readme?: string;
+    }
+  >;
   maintainers?: Array<{ name: string }>;
   time?: Record<string, string>;
   repository?: { url?: string };
@@ -45,13 +54,16 @@ type McpCheckCategory =
   | "network"
   | "config";
 
-const CATEGORY_CONFIG: Record<McpCheckCategory, { label: string; weight: number }> = {
+const CATEGORY_CONFIG: Record<
+  McpCheckCategory,
+  { label: string; weight: number }
+> = {
   tool_poisoning: { label: "Tool Poisoning", weight: 0.25 },
   permission_scope: { label: "Permission Scope", weight: 0.15 },
-  supply_chain: { label: "Supply Chain", weight: 0.20 },
-  credentials: { label: "Credential Handling", weight: 0.20 },
-  network: { label: "Network Security", weight: 0.10 },
-  config: { label: "Configuration", weight: 0.10 },
+  supply_chain: { label: "Supply Chain", weight: 0.2 },
+  credentials: { label: "Credential Handling", weight: 0.2 },
+  network: { label: "Network Security", weight: 0.1 },
+  config: { label: "Configuration", weight: 0.1 },
 };
 
 // Fetch npm package metadata
@@ -62,13 +74,14 @@ async function fetchPackageMeta(packageName: string): Promise<NpmPackageMeta> {
   const res = await fetch(`https://registry.npmjs.org/${encoded}`, {
     signal: AbortSignal.timeout(10000),
   });
-  if (!res.ok) throw new Error(`Package not found: ${packageName} (${res.status})`);
+  if (!res.ok)
+    throw new Error(`Package not found: ${packageName} (${res.status})`);
   return res.json();
 }
 
 // Query OSV.dev for vulnerabilities in dependencies
 async function queryOsv(
-  deps: Record<string, string>
+  deps: Record<string, string>,
 ): Promise<Map<string, OsvVuln[]>> {
   const queries = Object.entries(deps).map(([name, version]) => ({
     package: { name, ecosystem: "npm" },
@@ -104,7 +117,9 @@ export interface McpAuditOptions {
   packageName: string;
 }
 
-export async function scanMcpServer(opts: McpAuditOptions): Promise<UnifiedScanResult> {
+export async function scanMcpServer(
+  opts: McpAuditOptions,
+): Promise<UnifiedScanResult> {
   const start = Date.now();
   const checks: ScanCheck[] = [];
   let autoFail = false;
@@ -155,8 +170,13 @@ export async function scanMcpServer(opts: McpAuditOptions): Promise<UnifiedScanR
   // not in the npm registry metadata. Scan up to 32 KB of README for tool-poisoning
   // and prompt-injection patterns targeted at agent readers (Invariant Labs, Apr 2025).
   const readmeRaw = meta.readme ?? latestVersion?.readme ?? "";
-  const readme = readmeRaw.length > 32_768 ? readmeRaw.slice(0, 32_768) : readmeRaw;
-  const readmeFindings: Array<{ id: string; label: string; severity: "critical" | "high" | "medium" }> = [];
+  const readme =
+    readmeRaw.length > 32_768 ? readmeRaw.slice(0, 32_768) : readmeRaw;
+  const readmeFindings: Array<{
+    id: string;
+    label: string;
+    severity: "critical" | "high" | "medium";
+  }> = [];
 
   if (readme) {
     for (const { id, pattern, label, severity } of POISONING_PATTERNS) {
@@ -164,7 +184,8 @@ export async function scanMcpServer(opts: McpAuditOptions): Promise<UnifiedScanR
     }
     // Also run INJECTION_PATTERNS on README — same patterns, different context.
     for (const { id, pattern, label, severity } of INJECTION_PATTERNS) {
-      if (pattern.test(readme)) readmeFindings.push({ id, label: `README: ${label}`, severity });
+      if (pattern.test(readme))
+        readmeFindings.push({ id, label: `README: ${label}`, severity });
     }
   }
 
@@ -172,7 +193,9 @@ export async function scanMcpServer(opts: McpAuditOptions): Promise<UnifiedScanR
     checks.push({
       id: "MCP-TP-README-CLEAN",
       category: "tool_poisoning",
-      label: readme ? "No poisoning patterns in README" : "README not available",
+      label: readme
+        ? "No poisoning patterns in README"
+        : "README not available",
       status: readme ? "pass" : "warn",
       score: readme ? 10 : 5,
       maxScore: 10,
@@ -201,7 +224,8 @@ export async function scanMcpServer(opts: McpAuditOptions): Promise<UnifiedScanR
     }
     if (readmeFindings.some((f) => f.severity === "critical")) {
       autoFail = true;
-      autoFailReason = autoFailReason ?? "Critical tool-poisoning pattern in README";
+      autoFailReason =
+        autoFailReason ?? "Critical tool-poisoning pattern in README";
     }
   }
 
@@ -249,7 +273,8 @@ export async function scanMcpServer(opts: McpAuditOptions): Promise<UnifiedScanR
     status: typosquat ? "warn" : "pass",
     score: typosquat ? 3 : 10,
     maxScore: 10,
-    details: typosquat || "Package name does not resemble known legitimate packages.",
+    details:
+      typosquat || "Package name does not resemble known legitimate packages.",
     reference: "MCP04",
   });
 
@@ -275,15 +300,21 @@ export async function scanMcpServer(opts: McpAuditOptions): Promise<UnifiedScanR
     status: dangerousScripts.length === 0 ? "pass" : "fail",
     score: dangerousScripts.length === 0 ? 15 : 0,
     maxScore: 15,
-    details: dangerousScripts.length === 0
-      ? "No suspicious lifecycle scripts detected."
-      : `Dangerous patterns in scripts: ${dangerousScripts.join("; ")}`,
+    details:
+      dangerousScripts.length === 0
+        ? "No suspicious lifecycle scripts detected."
+        : `Dangerous patterns in scripts: ${dangerousScripts.join("; ")}`,
     reference: "MCP04",
   });
 
-  if (dangerousScripts.some((s) => s.includes("Network request") || s.includes("Code execution"))) {
+  if (
+    dangerousScripts.some(
+      (s) => s.includes("Network request") || s.includes("Code execution"),
+    )
+  ) {
     autoFail = true;
-    autoFailReason = "Suspicious lifecycle scripts executing code or fetching remote content";
+    autoFailReason =
+      "Suspicious lifecycle scripts executing code or fetching remote content";
   }
 
   // Dependency vulnerabilities (OSV.dev)
@@ -295,17 +326,36 @@ export async function scanMcpServer(opts: McpAuditOptions): Promise<UnifiedScanR
     osvFailed = true;
   }
 
-  const totalVulns = Array.from(vulnMap.values()).reduce((sum, v) => sum + v.length, 0);
+  const totalVulns = Array.from(vulnMap.values()).reduce(
+    (sum, v) => sum + v.length,
+    0,
+  );
+  // isCriticalVuln, not parseFloat(s.score): OSV's score for CVSS_V3 is the
+  // VECTOR STRING ("CVSS:3.1/AV:N/..."), so parseFloat was NaN and NaN >= 9.0
+  // is false — this filter matched nothing, ever, and MCP-SC-001 could report
+  // "warn" but never "fail". See ./cvss.ts.
   const criticalVulns = Array.from(vulnMap.values())
     .flat()
-    .filter((v) => v.severity?.some((s) => parseFloat(s.score) >= 9.0));
+    .filter(isCriticalVuln);
 
   checks.push({
     id: "MCP-SC-001",
     category: "supply_chain",
     label: "Dependency vulnerabilities",
-    status: osvFailed ? "error" : totalVulns === 0 ? "pass" : criticalVulns.length > 0 ? "fail" : "warn",
-    score: osvFailed ? 0 : totalVulns === 0 ? 15 : criticalVulns.length > 0 ? 0 : 5,
+    status: osvFailed
+      ? "error"
+      : totalVulns === 0
+        ? "pass"
+        : criticalVulns.length > 0
+          ? "fail"
+          : "warn",
+    score: osvFailed
+      ? 0
+      : totalVulns === 0
+        ? 15
+        : criticalVulns.length > 0
+          ? 0
+          : 5,
     maxScore: 15,
     details: osvFailed
       ? `Vulnerability database (OSV.dev) unavailable — ${Object.keys(allDeps).length} dependencies could not be checked.`
@@ -316,7 +366,11 @@ export async function scanMcpServer(opts: McpAuditOptions): Promise<UnifiedScanR
   });
 
   // MCP-specific CVE rulepack — catches MCP server CVEs that aren't always in OSV.
-  const rulepackMatches: Array<{ pkg: string; version: string; rule: McpCveRule }> = [];
+  const rulepackMatches: Array<{
+    pkg: string;
+    version: string;
+    rule: McpCveRule;
+  }> = [];
   if (latest) {
     for (const rule of matchCve(opts.packageName, latest)) {
       rulepackMatches.push({ pkg: opts.packageName, version: latest, rule });
@@ -347,7 +401,12 @@ export async function scanMcpServer(opts: McpAuditOptions): Promise<UnifiedScanR
         id: `MCP-SC-005-${i + 1}`,
         category: "supply_chain",
         label: `${match.rule.cve} — ${match.rule.summary}`,
-        status: match.rule.cvss >= 9.0 ? "fail" : match.rule.cvss >= 7.0 ? "fail" : "warn",
+        status:
+          match.rule.cvss >= 9.0
+            ? "fail"
+            : match.rule.cvss >= 7.0
+              ? "fail"
+              : "warn",
         score: 0,
         maxScore: 10,
         details: `${match.pkg}@${match.version} matches ${match.rule.vulnerableRange} (CVSS ${match.rule.cvss}). ${match.rule.reference}`,
@@ -366,12 +425,23 @@ export async function scanMcpServer(opts: McpAuditOptions): Promise<UnifiedScanR
   const maintainerCount = meta.maintainers?.length ?? 0;
   const hasRepo = !!meta.repository?.url;
   const hasIntegrity = !!latestVersion?.dist?.tarball;
-  const provenanceSignals = [isOfficial, hasRepo, maintainerCount > 1, hasIntegrity].filter(Boolean).length;
+  const provenanceSignals = [
+    isOfficial,
+    hasRepo,
+    maintainerCount > 1,
+    hasIntegrity,
+  ].filter(Boolean).length;
   checks.push({
     id: "MCP-SC-004",
     category: "supply_chain",
     label: "Package provenance",
-    status: isOfficial ? "pass" : provenanceSignals >= 3 ? "pass" : provenanceSignals >= 2 ? "pass" : "warn",
+    status: isOfficial
+      ? "pass"
+      : provenanceSignals >= 3
+        ? "pass"
+        : provenanceSignals >= 2
+          ? "pass"
+          : "warn",
     score: isOfficial ? 10 : Math.min(10, provenanceSignals * 3),
     maxScore: 10,
     details: isOfficial
@@ -409,7 +479,8 @@ export async function scanMcpServer(opts: McpAuditOptions): Promise<UnifiedScanR
       status: "pass",
       score: 20,
       maxScore: 20,
-      details: "No API keys, tokens, or credentials detected in package metadata.",
+      details:
+        "No API keys, tokens, or credentials detected in package metadata.",
       reference: "MCP01",
     });
   }
@@ -422,8 +493,12 @@ export async function scanMcpServer(opts: McpAuditOptions): Promise<UnifiedScanR
   // ── PERMISSION SCOPE CHECKS (MCP02, MCP07) ──
 
   const depNames = Object.keys(allDeps);
-  const hasFs = depNames.some((d) => /^(fs-extra|graceful-fs|glob|rimraf)$/.test(d));
-  const hasNet = depNames.some((d) => /^(axios|node-fetch|got|undici|request)$/.test(d));
+  const hasFs = depNames.some((d) =>
+    /^(fs-extra|graceful-fs|glob|rimraf)$/.test(d),
+  );
+  const hasNet = depNames.some((d) =>
+    /^(axios|node-fetch|got|undici|request)$/.test(d),
+  );
   const hasExec = depNames.some((d) => /^(execa|shelljs|cross-spawn)$/.test(d));
 
   checks.push({
@@ -433,11 +508,12 @@ export async function scanMcpServer(opts: McpAuditOptions): Promise<UnifiedScanR
     status: hasFs && hasNet ? "warn" : "pass",
     score: hasFs && hasNet ? 5 : hasExec ? 8 : 15,
     maxScore: 15,
-    details: hasFs && hasNet
-      ? "Package has both filesystem and network dependencies — potential exfiltration path."
-      : hasExec
-        ? "Package has shell execution dependency."
-        : "No concerning capability combinations detected.",
+    details:
+      hasFs && hasNet
+        ? "Package has both filesystem and network dependencies — potential exfiltration path."
+        : hasExec
+          ? "Package has shell execution dependency."
+          : "No concerning capability combinations detected.",
     reference: "MCP02",
   });
 
@@ -480,22 +556,31 @@ export async function scanMcpServer(opts: McpAuditOptions): Promise<UnifiedScanR
     id: "MCP-CF-001",
     category: "config",
     label: "Package freshness",
-    status: daysSincePublish === null ? "warn"
-      : daysSincePublish > 365 ? "warn"
-      : daysSincePublish < 7 ? "warn"
-      : "pass",
-    score: daysSincePublish === null ? 5
-      : daysSincePublish > 365 ? 5
-      : daysSincePublish < 7 ? 5
-      : 10,
+    status:
+      daysSincePublish === null
+        ? "warn"
+        : daysSincePublish > 365
+          ? "warn"
+          : daysSincePublish < 7
+            ? "warn"
+            : "pass",
+    score:
+      daysSincePublish === null
+        ? 5
+        : daysSincePublish > 365
+          ? 5
+          : daysSincePublish < 7
+            ? 5
+            : 10,
     maxScore: 10,
-    details: daysSincePublish === null
-      ? "Could not determine publish date."
-      : daysSincePublish > 365
-        ? `Last published ${daysSincePublish} days ago — may be unmaintained.`
-        : daysSincePublish < 7
-          ? `Published ${daysSincePublish} days ago — very new package.`
-          : `Published ${daysSincePublish} days ago.`,
+    details:
+      daysSincePublish === null
+        ? "Could not determine publish date."
+        : daysSincePublish > 365
+          ? `Last published ${daysSincePublish} days ago — may be unmaintained.`
+          : daysSincePublish < 7
+            ? `Published ${daysSincePublish} days ago — very new package.`
+            : `Published ${daysSincePublish} days ago.`,
   });
 
   // ── SCORING ──
@@ -515,14 +600,14 @@ export async function scanMcpServer(opts: McpAuditOptions): Promise<UnifiedScanR
         grade: calculateGrade(pct),
         checks: catChecks,
       };
-    }
+    },
   );
 
   const overallScore = Math.round(
     categories.reduce((sum, cat) => {
       const pct = cat.maxScore > 0 ? cat.score / cat.maxScore : 1;
       return sum + pct * cat.weight * 100;
-    }, 0)
+    }, 0),
   );
 
   const grade = autoFail ? "F" : calculateGrade(overallScore);
@@ -531,19 +616,34 @@ export async function scanMcpServer(opts: McpAuditOptions): Promise<UnifiedScanR
 
   const recommendations: ScanRecommendation[] = [];
   if (injectionCount > 0) {
-    recommendations.push({ text: "Package description contains prompt injection patterns — do not use.", severity: "critical" });
+    recommendations.push({
+      text: "Package description contains prompt injection patterns — do not use.",
+      severity: "critical",
+    });
   }
   if (secretsFound > 0) {
-    recommendations.push({ text: "Hardcoded secrets detected — rotate any exposed credentials immediately.", severity: "critical" });
+    recommendations.push({
+      text: "Hardcoded secrets detected — rotate any exposed credentials immediately.",
+      severity: "critical",
+    });
   }
   if (dangerousScripts.length > 0) {
-    recommendations.push({ text: "Review lifecycle scripts before installing — they execute arbitrary code.", severity: "high" });
+    recommendations.push({
+      text: "Review lifecycle scripts before installing — they execute arbitrary code.",
+      severity: "high",
+    });
   }
   if (totalVulns > 0) {
-    recommendations.push({ text: `${totalVulns} known vulnerabilities in dependencies — check for updates.`, severity: "high" });
+    recommendations.push({
+      text: `${totalVulns} known vulnerabilities in dependencies — check for updates.`,
+      severity: "high",
+    });
   }
   if (typosquat) {
-    recommendations.push({ text: `Package name resembles a legitimate package — verify you have the correct one.`, severity: "medium" });
+    recommendations.push({
+      text: `Package name resembles a legitimate package — verify you have the correct one.`,
+      severity: "medium",
+    });
   }
 
   return {
