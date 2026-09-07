@@ -210,3 +210,48 @@ describe("fn.complete reports true elapsed time, not the final replay segment", 
     expect(err["finalSegmentMs"]).toBeTypeOf("number");
   });
 });
+
+describe("the elapsed metric is interpretable on a retry", () => {
+  const logged: Array<{ msg: string; fields: Record<string, unknown> }> = [];
+
+  beforeEach(() => {
+    logged.length = 0;
+    process.env.FF_AXIOM_ENABLED = "true";
+    vi.spyOn(axiomLogger, "getLogger").mockReturnValue({
+      info: (msg: string, fields: Record<string, unknown>) =>
+        logged.push({ msg, fields }),
+      warn: () => {},
+      error: (msg: string, fields: Record<string, unknown>) =>
+        logged.push({ msg, fields }),
+      debug: () => {},
+      flush: async () => {},
+    } as unknown as ReturnType<typeof axiomLogger.getLogger>);
+  });
+
+  it("carries `attempt` on fn.complete, not only on fn.start", async () => {
+    // event.ts is the ORIGINAL trigger time, so on attempt 2 the elapsed value
+    // includes attempt 1 plus its backoff — time that is not slot occupancy.
+    // Without `attempt` on the completion record there is no way to exclude
+    // those rows, and the metric is unusable for the thing it was added for.
+    const wrapped = withAxiomLogging({ fnId: "test-fn" }, async () => "ok");
+    await wrapped(
+      ctx({ event: { ts: Date.now() - 5_000 }, runId: "r", attempt: 2 }),
+    );
+
+    const fields = logged.find((l) => l.msg === "fn.complete")!.fields;
+    expect(fields["attempt"]).toBe(2);
+  });
+
+  it("carries `attempt` on fn.error too", async () => {
+    const wrapped = withAxiomLogging({ fnId: "test-fn" }, async () => {
+      throw new Error("boom");
+    });
+    await expect(
+      wrapped(
+        ctx({ event: { ts: Date.now() - 5_000 }, runId: "r", attempt: 1 }),
+      ),
+    ).rejects.toThrow("boom");
+
+    expect(logged.find((l) => l.msg === "fn.error")!.fields["attempt"]).toBe(1);
+  });
+});

@@ -4,7 +4,9 @@
 // dashboards/monitors need: `fn.start` (INFO), `fn.complete` (INFO,
 // elapsedSinceTriggerMs + finalSegmentMs) and `fn.error` (ERROR, always
 // ships). See elapsedSinceTrigger below for why there are two numbers and why
-// the single `durationMs` it replaced was structurally wrong. It threads the same
+// the single `durationMs` it replaced was structurally wrong.
+//
+// It threads the same
 // `requestId` that flows through middleware (#490) and /api/analyze (#491)
 // when the triggering event carries one, so an analyze → Inngest fan-out is
 // joinable on a single id. Cron functions have no event.data.requestId, so we
@@ -152,6 +154,12 @@ export function withAxiomLogging<TResult>(
       const result = await handler(ctx);
       log.info("fn.complete", {
         fn: meta.fnId,
+        // attempt is on the completion too, not just fn.start. event.ts is the
+        // ORIGINAL trigger time, so on a retry elapsedSinceTriggerMs includes
+        // every prior attempt and its backoff — which is not slot time. Without
+        // this field there is no way to exclude those rows, and the metric this
+        // change adds would be uninterpretable in exactly the cases that matter.
+        attempt: ctx.attempt,
         elapsedSinceTriggerMs: elapsedSinceTrigger(ctx),
         finalSegmentMs: Date.now() - segmentStartedAt,
       });
@@ -162,6 +170,7 @@ export function withAxiomLogging<TResult>(
     } catch (err) {
       log.error("fn.error", {
         fn: meta.fnId,
+        attempt: ctx.attempt,
         elapsedSinceTriggerMs: elapsedSinceTrigger(ctx),
         finalSegmentMs: Date.now() - segmentStartedAt,
         error: err instanceof Error ? err.message : String(err),
