@@ -307,11 +307,13 @@ describe("persistAssignments respects a wall-clock budget", () => {
     expect(calls.themeUpdates).toBe(5);
   });
 
-  it("defaults to a budget below the route's declared maxDuration", async () => {
-    // One number, not two: the budget is derived from maxDuration = 300s so a
-    // change to the route cannot silently leave this guard measuring against a
-    // stale figure. 80% leaves headroom for the summary write and the return.
-    expect(PERSIST_BUDGET_MS).toBeLessThan(300_000);
-    expect(PERSIST_BUDGET_MS).toBeGreaterThan(150_000);
+  it("has a positive default budget", async () => {
+    // Deliberately NOT asserting a bound against a literal 300_000 here. The
+    // first version of this test did, which was a third copy of the same number
+    // and would have passed even if the route dropped to 60s — the exact case
+    // the guard exists for. The route-vs-budget relationship is enforced by
+    // apps/web/__tests__/inngestMaxDurationDrift.test.ts, which reads the
+    // declared maxDuration rather than restating it.
+    expect(PERSIST_BUDGET_MS).toBeGreaterThan(0);
   });
 });

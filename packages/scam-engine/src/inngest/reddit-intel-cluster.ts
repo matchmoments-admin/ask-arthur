@@ -426,14 +426,27 @@ export const __testing = { parsePgVector, vectorToPgString, cosineSimilarity };
  *
  * Since #1117 the load, match and write are ONE step, so a timeout loses the
  * entire batch and the retry redoes identical work and times out identically —
- * a loop rather than a degradation. 80% of the budget leaves headroom to
- * finish the wave in flight, write the run summary and return.
+ * a loop rather than a degradation. 80% leaves headroom to finish the wave in
+ * flight, write the run summary and return.
  *
  * Stopping early is safe because the worklist is self-healing: an unprocessed
  * post keeps `theme_id IS NULL` and the next run selects it again (#1105).
  * This grants permission to stop; it needs no resumption machinery.
+ *
+ * ROUTE_MAX_DURATION_S IS A COPY, and it is only safe because a test enforces
+ * the copy. scam-engine cannot import from apps/web (wrong dependency
+ * direction) and Next.js requires `maxDuration` to be a statically analysable
+ * literal, so the number genuinely has to exist twice.
+ * `inngestMaxDurationDrift.test.ts` reads the literal out of
+ * apps/web/app/api/inngest/route.ts and fails if the two disagree. Without
+ * that test this comment would be describing a control that does not exist —
+ * which is what the first version of it did.
  */
-export const PERSIST_BUDGET_MS = Math.floor(300_000 * 0.8);
+const ROUTE_MAX_DURATION_S = 300;
+const PERSIST_BUDGET_SHARE = 0.8;
+export const PERSIST_BUDGET_MS = Math.floor(
+  ROUTE_MAX_DURATION_S * 1000 * PERSIST_BUDGET_SHARE,
+);
 
 export interface PersistResult {
   newThemeCount: number;
