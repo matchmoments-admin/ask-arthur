@@ -5,6 +5,11 @@ import { createServiceClient } from "@askarthur/supabase/server";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 import { logger } from "@askarthur/utils/logger";
 import {
+  DB_WRITE_CONCURRENCY,
+  groupBy,
+  mapWithConcurrency,
+} from "@askarthur/utils/concurrency";
+import {
   enrichCloneAttribution,
   type HostingInfo,
 } from "@/lib/clone-watch/enrich-attribution";
@@ -95,209 +100,271 @@ export const cloneWatchEnrichAttribution = inngest.createFunction(
     // produce any evidence at all. Payload is ignored.
     { event: "shopfront/clone.enrich-attribution.manual-trigger.v1" },
   ],
-  withAxiomLogging({ fnId: "clone-watch-enrich-attribution" }, async ({ step }) => {
-    if (!featureFlags.cloneWatchAttribution) {
-      return { skipped: true, reason: "FF_CLONE_WATCH_ATTRIBUTION disabled" };
-    }
-
-    const braked = await step.run("check-brake", () => isFeatureBraked(BRAKE));
-    if (braked) {
-      return { skipped: true, reason: `feature_brakes.${BRAKE} engaged` };
-    }
-
-    const pending = await step.run("select-pending", async () => {
-      const sb = createServiceClient();
-      if (!sb) return [] as PendingAlert[];
-      const since = new Date(
-        Date.now() - RECENT_WINDOW_DAYS * 24 * 60 * 60 * 1000,
-      ).toISOString();
-      // Enrich ALL report-eligible NRD clones (was tp_confirmed-only): the
-      // Brand Stewardship email now surfaces registrar + abuse contact for
-      // every detected clone so brands can action takedowns themselves. Gate
-      // on a completed urlscan render (urlscan_scanned_at) so the dossier's
-      // hosting block is populated; FP/neutral domains still get enriched
-      // because they still appear in the brand's monthly tally.
-      const { data, error } = await sb
-        .from("shopfront_clone_alerts")
-        .select("id, candidate_domain, urlscan_evidence")
-        .eq("source", "nrd")
-        .not("urlscan_scanned_at", "is", null)
-        .is("attribution", null)
-        .gte("first_seen_at", since)
-        .order("first_seen_at", { ascending: false })
-        .limit(ENRICH_RUN_CAP);
-      if (error) {
-        logger.error("clone-watch enrich: select failed", {
-          error: error.message,
-        });
-        return [] as PendingAlert[];
+  withAxiomLogging(
+    { fnId: "clone-watch-enrich-attribution" },
+    async ({ step }) => {
+      if (!featureFlags.cloneWatchAttribution) {
+        return { skipped: true, reason: "FF_CLONE_WATCH_ATTRIBUTION disabled" };
       }
-      return (data ?? []) as PendingAlert[];
-    });
 
-    // NO early return on an empty `pending`. This run has THREE independent
-    // stages — enrich (worklist: attribution IS NULL), kit-pivots (worklist:
-    // likely_phishing AND kit_siblings IS NULL) and the campaign backfill
-    // (worklist: attribution IS NOT NULL AND campaign_key IS NULL). Returning
-    // here when only the FIRST worklist is empty made the other two unreachable
-    // in the enricher's steady state — once it catches up on enrichment (the
-    // normal condition), the backfill and kit-pivots silently stopped running
-    // forever. Measured 2026-07-17: enrich worklist 0, while 1,085 rows awaited
-    // campaign_key and 42 awaited a kit pivot. The empty loop below is a no-op,
-    // so each stage now gates on its OWN worklist and nothing else.
-    let enriched = 0;
-    for (const alert of pending) {
-      const ok = await step.run(`enrich-${alert.id}`, async () => {
-        const hosting: HostingInfo = {
-          ip: alert.urlscan_evidence?.server?.ip ?? null,
-          country: alert.urlscan_evidence?.server?.country ?? null,
-          asn: alert.urlscan_evidence?.server?.asn ?? null,
-        };
-        const dossier = await enrichCloneAttribution(
-          alert.candidate_domain,
-          hosting,
-        );
-        const sb = createServiceClient();
-        if (!sb) return false;
-        // Stamp the campaign key in the SAME write (zero extra writes). Sentinel
-        // "insufficient" for a too-weak fingerprint so the row still crosses the
-        // backfill predicate below and is never re-selected.
-        const update: { attribution: typeof dossier; campaign_key?: string } = {
-          attribution: dossier,
-        };
-        if (featureFlags.cloneCampaigns) {
-          update.campaign_key =
-            campaignKeyFromDossier(dossier) ?? "insufficient";
-        }
-        const { error } = await sb
-          .from("shopfront_clone_alerts")
-          .update(update)
-          .eq("id", alert.id);
-        if (error) {
-          logger.error("clone-watch enrich: update failed", {
-            alertId: alert.id,
-            error: error.message,
-          });
-          return false;
-        }
-        return true;
-      });
-      if (ok) enriched += 1;
-    }
+      const braked = await step.run("check-brake", () =>
+        isFeatureBraked(BRAKE),
+      );
+      if (braked) {
+        return { skipped: true, reason: `feature_brakes.${BRAKE} engaged` };
+      }
 
-    // Kit pivots: for confirmed likely_phishing clones, search urlscan for
-    // other sites on the same hosting IP (a phishing kit deployed repeatedly)
-    // and store attribution.kit_siblings. One batched step (no fan-out). Op-
-    // review rule: EVERY completed search writes a block — even zero siblings —
-    // so the row crosses the `kit_siblings IS NULL` predicate and is never
-    // re-searched; a 429 (quota) writes nothing and aborts the batch, leaving
-    // rows eligible tomorrow.
-    let kitPivoted = 0;
-    if (featureFlags.cloneWatchKitPivots && process.env.URLSCAN_API_KEY) {
-      kitPivoted = await step.run("kit-pivots", async () => {
+      const pending = await step.run("select-pending", async () => {
         const sb = createServiceClient();
-        if (!sb) return 0;
+        if (!sb) return [] as PendingAlert[];
         const since = new Date(
           Date.now() - RECENT_WINDOW_DAYS * 24 * 60 * 60 * 1000,
         ).toISOString();
-        const { data } = await sb
+        // Enrich ALL report-eligible NRD clones (was tp_confirmed-only): the
+        // Brand Stewardship email now surfaces registrar + abuse contact for
+        // every detected clone so brands can action takedowns themselves. Gate
+        // on a completed urlscan render (urlscan_scanned_at) so the dossier's
+        // hosting block is populated; FP/neutral domains still get enriched
+        // because they still appear in the brand's monthly tally.
+        const { data, error } = await sb
           .from("shopfront_clone_alerts")
-          .select("id, candidate_domain, urlscan_evidence, attribution")
-          .eq("urlscan_classification", "likely_phishing")
-          .not("attribution", "is", null)
-          .is("attribution->kit_siblings", null)
+          .select("id, candidate_domain, urlscan_evidence")
+          .eq("source", "nrd")
+          .not("urlscan_scanned_at", "is", null)
+          .is("attribution", null)
           .gte("first_seen_at", since)
-          // Newest first so a backlog of un-pivotable (no-IP) rows can't
-          // monopolise the cap and starve fresh rows that DO have an IP.
           .order("first_seen_at", { ascending: false })
-          .limit(KIT_PIVOT_RUN_CAP);
-        const rows = (data ?? []) as Array<{
-          id: number;
-          candidate_domain: string;
-          urlscan_evidence: { server?: { ip?: string | null } } | null;
-          attribution: Record<string, unknown> | null;
-        }>;
-        let n = 0;
-        for (const r of rows) {
-          const ip = r.urlscan_evidence?.server?.ip ?? null;
-          if (!ip) {
-            // No IP to pivot on — write a sentinel so the row crosses the
-            // kit_siblings-IS-NULL predicate and isn't re-selected forever
-            // (op-review rule). Costs no urlscan search.
+          .limit(ENRICH_RUN_CAP);
+        if (error) {
+          logger.error("clone-watch enrich: select failed", {
+            error: error.message,
+          });
+          return [] as PendingAlert[];
+        }
+        return (data ?? []) as PendingAlert[];
+      });
+
+      // NO early return on an empty `pending`. This run has THREE independent
+      // stages — enrich (worklist: attribution IS NULL), kit-pivots (worklist:
+      // likely_phishing AND kit_siblings IS NULL) and the campaign backfill
+      // (worklist: attribution IS NOT NULL AND campaign_key IS NULL). Returning
+      // here when only the FIRST worklist is empty made the other two unreachable
+      // in the enricher's steady state — once it catches up on enrichment (the
+      // normal condition), the backfill and kit-pivots silently stopped running
+      // forever. Measured 2026-07-17: enrich worklist 0, while 1,085 rows awaited
+      // campaign_key and 42 awaited a kit pivot. The empty loop below is a no-op,
+      // so each stage now gates on its OWN worklist and nothing else.
+      let enriched = 0;
+      for (const alert of pending) {
+        const ok = await step.run(`enrich-${alert.id}`, async () => {
+          const hosting: HostingInfo = {
+            ip: alert.urlscan_evidence?.server?.ip ?? null,
+            country: alert.urlscan_evidence?.server?.country ?? null,
+            asn: alert.urlscan_evidence?.server?.asn ?? null,
+          };
+          const dossier = await enrichCloneAttribution(
+            alert.candidate_domain,
+            hosting,
+          );
+          const sb = createServiceClient();
+          if (!sb) return false;
+          // Stamp the campaign key in the SAME write (zero extra writes). Sentinel
+          // "insufficient" for a too-weak fingerprint so the row still crosses the
+          // backfill predicate below and is never re-selected.
+          const update: { attribution: typeof dossier; campaign_key?: string } =
+            {
+              attribution: dossier,
+            };
+          if (featureFlags.cloneCampaigns) {
+            update.campaign_key =
+              campaignKeyFromDossier(dossier) ?? "insufficient";
+          }
+          const { error } = await sb
+            .from("shopfront_clone_alerts")
+            .update(update)
+            .eq("id", alert.id);
+          if (error) {
+            logger.error("clone-watch enrich: update failed", {
+              alertId: alert.id,
+              error: error.message,
+            });
+            return false;
+          }
+          return true;
+        });
+        if (ok) enriched += 1;
+      }
+
+      // Kit pivots: for confirmed likely_phishing clones, search urlscan for
+      // other sites on the same hosting IP (a phishing kit deployed repeatedly)
+      // and store attribution.kit_siblings. One batched step (no fan-out). Op-
+      // review rule: EVERY completed search writes a block — even zero siblings —
+      // so the row crosses the `kit_siblings IS NULL` predicate and is never
+      // re-searched; a 429 (quota) writes nothing and aborts the batch, leaving
+      // rows eligible tomorrow.
+      let kitPivoted = 0;
+      if (featureFlags.cloneWatchKitPivots && process.env.URLSCAN_API_KEY) {
+        kitPivoted = await step.run("kit-pivots", async () => {
+          const sb = createServiceClient();
+          if (!sb) return 0;
+          const since = new Date(
+            Date.now() - RECENT_WINDOW_DAYS * 24 * 60 * 60 * 1000,
+          ).toISOString();
+          const { data } = await sb
+            .from("shopfront_clone_alerts")
+            .select("id, candidate_domain, urlscan_evidence, attribution")
+            .eq("urlscan_classification", "likely_phishing")
+            .not("attribution", "is", null)
+            .is("attribution->kit_siblings", null)
+            .gte("first_seen_at", since)
+            // Newest first so a backlog of un-pivotable (no-IP) rows can't
+            // monopolise the cap and starve fresh rows that DO have an IP.
+            .order("first_seen_at", { ascending: false })
+            .limit(KIT_PIVOT_RUN_CAP);
+          const rows = (data ?? []) as Array<{
+            id: number;
+            candidate_domain: string;
+            urlscan_evidence: { server?: { ip?: string | null } } | null;
+            attribution: Record<string, unknown> | null;
+          }>;
+          let n = 0;
+          for (const r of rows) {
+            const ip = r.urlscan_evidence?.server?.ip ?? null;
+            if (!ip) {
+              // No IP to pivot on — write a sentinel so the row crosses the
+              // kit_siblings-IS-NULL predicate and isn't re-selected forever
+              // (op-review rule). Costs no urlscan search.
+              const { error } = await sb
+                .from("shopfront_clone_alerts")
+                .update({
+                  attribution: {
+                    ...(r.attribution ?? {}),
+                    kit_siblings: noIpKitSiblings(),
+                  },
+                })
+                .eq("id", r.id);
+              if (!error) n += 1;
+              continue;
+            }
+            const outcome = await searchURLScan(`page.ip:"${ip}"`, 50);
+            if (!outcome.ok) {
+              if (outcome.error === "rate_limited") break; // quota — stop the run
+              continue; // transient — leave the row, retry next tick
+            }
+            const block = shapeKitSiblings(
+              r.candidate_domain,
+              ip,
+              outcome.results,
+            );
             const { error } = await sb
               .from("shopfront_clone_alerts")
               .update({
-                attribution: {
-                  ...(r.attribution ?? {}),
-                  kit_siblings: noIpKitSiblings(),
-                },
+                attribution: { ...(r.attribution ?? {}), kit_siblings: block },
               })
               .eq("id", r.id);
             if (!error) n += 1;
-            continue;
           }
-          const outcome = await searchURLScan(`page.ip:"${ip}"`, 50);
-          if (!outcome.ok) {
-            if (outcome.error === "rate_limited") break; // quota — stop the run
-            continue; // transient — leave the row, retry next tick
-          }
-          const block = shapeKitSiblings(
-            r.candidate_domain,
-            ip,
-            outcome.results,
+          return n;
+        });
+      }
+
+      // Converging backfill: stamp campaign_key on already-enriched rows that
+      // predate this feature. Bounded per run; the "insufficient" sentinel means
+      // weak-attribution rows also cross the predicate, so it drains to zero over
+      // a few days. One batched step (no per-row fan-out).
+      let backfilled = 0;
+      if (featureFlags.cloneCampaigns) {
+        backfilled = await step.run("backfill-campaign-keys", async () => {
+          const sb = createServiceClient();
+          if (!sb) return 0;
+          const { data } = await sb
+            .from("shopfront_clone_alerts")
+            .select("id, attribution")
+            .not("attribution", "is", null)
+            .is("campaign_key", null)
+            .limit(BACKFILL_CAP);
+          const rows = (data ?? []) as Array<{
+            id: number;
+            attribution: DossierShape | null;
+          }>;
+          // Grouped, not one UPDATE per row. campaignKeyFromDossier is pure and
+          // local — there is NO network call in this loop — so every one of the
+          // up-to-500 round trips was pure latency inside a held Inngest slot
+          // (15-40s at 30-80ms each), on an account whose 5 concurrency slots
+          // were measured at 5/5 in use (ADR-0019).
+          //
+          // Honest about the size of the win: prod on 2026-09-07 has 703 distinct
+          // campaign keys across 2,150 keyed rows, so grouping alone is ~3x, not
+          // the 500x a single bulk statement would give. The remaining reduction
+          // comes from running the groups with bounded parallelism. A one-shot
+          // `UPDATE ... FROM unnest(ids, keys)` RPC would beat both, but it needs
+          // a migration and the worklist is currently EMPTY (0 rows needing
+          // backfill), so it is not worth one yet.
+          const byKey = groupBy(
+            rows,
+            (r) => campaignKeyFromDossier(r.attribution) ?? "insufficient",
           );
-          const { error } = await sb
-            .from("shopfront_clone_alerts")
-            .update({
-              attribution: { ...(r.attribution ?? {}), kit_siblings: block },
-            })
-            .eq("id", r.id);
-          if (!error) n += 1;
-        }
-        return n;
-      });
-    }
 
-    // Converging backfill: stamp campaign_key on already-enriched rows that
-    // predate this feature. Bounded per run; the "insufficient" sentinel means
-    // weak-attribution rows also cross the predicate, so it drains to zero over
-    // a few days. One batched step (no per-row fan-out).
-    let backfilled = 0;
-    if (featureFlags.cloneCampaigns) {
-      backfilled = await step.run("backfill-campaign-keys", async () => {
-        const sb = createServiceClient();
-        if (!sb) return 0;
-        const { data } = await sb
-          .from("shopfront_clone_alerts")
-          .select("id, attribution")
-          .not("attribution", "is", null)
-          .is("campaign_key", null)
-          .limit(BACKFILL_CAP);
-        const rows = (data ?? []) as Array<{
-          id: number;
-          attribution: DossierShape | null;
-        }>;
-        let n = 0;
-        for (const r of rows) {
-          const key = campaignKeyFromDossier(r.attribution) ?? "insufficient";
-          const { error } = await sb
-            .from("shopfront_clone_alerts")
-            .update({ campaign_key: key })
-            .eq("id", r.id);
-          if (!error) n += 1;
-        }
-        return n;
-      });
-    }
+          let n = 0;
+          let failures = 0;
+          await mapWithConcurrency(
+            [...byKey.entries()],
+            DB_WRITE_CONCURRENCY,
+            async ([key, group]) => {
+              const { error } = await sb
+                .from("shopfront_clone_alerts")
+                .update({ campaign_key: key })
+                .in(
+                  "id",
+                  group.map((r) => r.id),
+                );
+              if (error) {
+                // Previously `if (!error) n += 1;` — a failed update was neither
+                // logged nor counted, so `backfilled` under-reported silently and
+                // the rows stayed in the worklist with nothing to say why.
+                logger.warn(
+                  "clone-watch enrich: campaign_key backfill failed",
+                  {
+                    campaignKey: key,
+                    rows: group.length,
+                    error: error.message,
+                  },
+                );
+                failures += group.length;
+                return;
+              }
+              n += group.length;
+            },
+          );
 
-    logger.info("clone-watch enrich: complete", {
-      candidates: pending.length,
-      enriched,
-      backfilled,
-      kitPivoted,
-    });
-    return { ok: true, candidates: pending.length, enriched, backfilled, kitPivoted };
-  }),
+          if (failures > 0) {
+            logger.warn(
+              "clone-watch enrich: campaign_key rows left unwritten",
+              {
+                failures,
+                attempted: rows.length,
+              },
+            );
+          }
+          return n;
+        });
+      }
+
+      logger.info("clone-watch enrich: complete", {
+        candidates: pending.length,
+        enriched,
+        backfilled,
+        kitPivoted,
+      });
+      return {
+        ok: true,
+        candidates: pending.length,
+        enriched,
+        backfilled,
+        kitPivoted,
+      };
+    },
+  ),
 );
 
 /** Derive the campaign-fingerprint inputs from a stored/fresh attribution
