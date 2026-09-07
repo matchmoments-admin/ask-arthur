@@ -39,6 +39,10 @@ import { z } from "zod";
 
 import { createServiceClient } from "@askarthur/supabase/server";
 import { logger } from "@askarthur/utils/logger";
+import {
+  DB_WRITE_CONCURRENCY,
+  mapWithConcurrency,
+} from "@askarthur/utils/concurrency";
 import { featureFlags } from "@askarthur/utils/feature-flags";
 
 import { inngest } from "./client";
@@ -411,43 +415,6 @@ const CLUSTER_POSTS_PER_RUN = 500;
  */
 export const __testing = { parsePgVector, vectorToPgString, cosineSimilarity };
 
-/**
- * How many write round trips run at once inside the clustering step.
- *
- * Not 1 (serialised — the 30-45s slot hold this exists to remove) and not
- * unbounded (a burst of hundreds of concurrent statements against a hot table
- * is how the 2026-05-09 pooler incident started). Eight is enough to collapse
- * the wall time by roughly an order of magnitude while staying well inside the
- * pooler's connection budget.
- */
-const WRITE_CONCURRENCY = 8;
-
-/**
- * Run `fn` over `items` with at most `limit` in flight.
- *
- * Deliberately not Promise.all over everything: the point is bounded
- * parallelism. Rejections are not expected — every caller here catches its own
- * error into a counter — but one would reject the whole wave, which is the
- * correct loud behaviour for an unhandled fault inside a durable step.
- */
-async function mapWithConcurrency<T>(
-  items: T[],
-  limit: number,
-  fn: (item: T) => Promise<void>,
-): Promise<void> {
-  let cursor = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length) }, () =>
-    (async () => {
-      for (;;) {
-        const i = cursor++;
-        if (i >= items.length) return;
-        await fn(items[i]!);
-      }
-    })(),
-  );
-  await Promise.all(workers);
-}
-
 export interface PersistResult {
   newThemeCount: number;
   joinedThemeCount: number;
@@ -616,7 +583,7 @@ export async function persistAssignments(
   let joinedThemeCount = 0;
   await mapWithConcurrency(
     [...lastJoinByTheme.values()],
-    WRITE_CONCURRENCY,
+    DB_WRITE_CONCURRENCY,
     async (a) => {
       const { error } = await supabase
         .from("reddit_intel_themes")
@@ -654,7 +621,7 @@ export async function persistAssignments(
   const linkedPostIds: string[] = [];
   await mapWithConcurrency(
     [...postsByTheme.entries()],
-    WRITE_CONCURRENCY,
+    DB_WRITE_CONCURRENCY,
     async ([themeId, postIds]) => {
       const { error } = await supabase
         .from("reddit_post_intel")

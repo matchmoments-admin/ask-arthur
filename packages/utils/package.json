@@ -10,7 +10,12 @@
     "./env": "./src/env.ts",
     "./feature-flags": "./src/feature-flags.ts",
     "./rate-limit": "./src/rate-limit.ts",
-    "./request-id": "./src/request-id.ts"
+    "./request-id": "./src/request-id.ts",
+    "./concurrency": "./src/concurrency.ts"
+  },
+  "scripts": {
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@upstash/ratelimit": "^2.0.8",
