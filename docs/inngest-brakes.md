@@ -2,6 +2,13 @@
 
 Inventory of every Inngest function and its safety brakes. Maintained as a checklist: any blank cell where a brake should exist is a P1 ticket.
 
+> **Slot budget.** Brakes cap _how often_ a function runs; they say nothing about
+> how long it holds one of the account's **5 concurrency slots**. On 2026-09-07
+> the pool was measured at 5/5 in use while events (274/500k) and queue depth
+> (0/100k) sat idle — so slot-seconds, not invocations, are the scarce resource.
+> How to measure it, and the pre-agreed decision rule for the two fan-out
+> functions, live in [`docs/ops/inngest-slot-budget.md`](./ops/inngest-slot-budget.md).
+
 **Brake glossary**
 
 - **Conc.** — `concurrency: { limit: N }`. Caps in-flight runs.
