@@ -650,7 +650,7 @@ export const redditIntelCluster = inngest.createFunction(
       const data = resolveRedditIntelEmbeddedData(event?.data);
 
       // ── Step 1: load unassigned embedded posts + themes ──────────────────
-      const { posts, themes } = await step.run("load-state", async () => {
+      const batch = await step.run("cluster-batch", async () => {
         const supabase = createServiceClient();
         if (!supabase) throw new Error("Supabase service client unavailable");
 
@@ -737,72 +737,106 @@ export const redditIntelCluster = inngest.createFunction(
           });
         }
 
-        return { posts, themes };
+        // ── Assign + persist, INSIDE this step ───────────────────────────
+        //
+        // The load, the match and the write are one step ON PURPOSE. Each post
+        // and each theme carries a 1024-dimension vector, and a step's return
+        // value is serialised and durably stored by Inngest — so returning
+        // `{ posts, themes }` across the boundary meant ~19.5 MB against a 4 MB
+        // step-output limit, and the function failed `output_too_large` on
+        // every run (prod, 2026-09-06/07), growing the backlog it exists to
+        // drain.
+        //
+        // Note the ceiling this hit is NOT a function of the batch size alone:
+        // 200 themes x 1024 dims is already ~3.9 MB, so the split-step shape
+        // could never have survived theme growth regardless. Vectors are an
+        // implementation detail of clustering and must not cross a step
+        // boundary. Only scalars are returned below.
+        //
+        // Merging also cuts three step-runs per invocation to one, which
+        // matters against the Inngest step-run budget (ADR-0019).
+        if (posts.length === 0) {
+          return {
+            postsConsidered: 0,
+            droppedPosts,
+            droppedThemes,
+            threshold: resolveClusterThreshold(),
+            oversizedThemeCount: 0,
+            newThemeSeeds: 0,
+            distinctJoinedThemes: 0,
+            newThemeCount: 0,
+            joinedThemeCount: 0,
+            seedFailures: 0,
+            joinFailures: 0,
+            linkFailures: 0,
+          };
+        }
+
+        // Pure and unit-tested (reddit-intel-cluster.assign.test.ts); the
+        // anti-runaway guards live inside it so the collapse is reproducible
+        // without a DB. It resolves the threshold itself — read here only to
+        // report it in the run summary.
+        const { assignments, oversizedThemeCount } = assignPostsToThemes(
+          posts,
+          themes,
+        );
+        const persisted = await persistAssignments(supabase, assignments);
+
+        return {
+          postsConsidered: posts.length,
+          droppedPosts,
+          droppedThemes,
+          threshold: resolveClusterThreshold(),
+          oversizedThemeCount,
+          newThemeSeeds: assignments.filter((a) => a.isNewTheme).length,
+          distinctJoinedThemes: new Set(
+            assignments.filter((a) => !a.isNewTheme).map((a) => a.themeId),
+          ).size,
+          ...persisted,
+        };
       });
 
-      if (posts.length === 0) {
+      if (batch.postsConsidered === 0) {
         logger.info("reddit-intel-cluster: nothing to cluster", {
           cohortDate: data.cohortDate,
         });
         return { skipped: true, reason: "no_unassigned_posts" };
       }
 
-      // ── Step 2: greedy assignment, in-memory ─────────────────────────────
-      // Pure, unit-tested (see reddit-intel-cluster.assign.test.ts). The
-      // anti-runaway guards (centroid freeze + join ceiling) live inside
-      // assignPostsToThemes so the collapse can be reproduced and prevented in a
-      // test without a DB.
-      // assignPostsToThemes resolves the threshold itself; read it here only
-      // to report it in the run summary.
-      const clusterThreshold = resolveClusterThreshold();
-      const { assignments, oversizedThemeCount } = assignPostsToThemes(
-        posts,
-        themes,
-      );
-
-      // Health alarm (always-ship .warn, bypasses INFO sampling): if a cohort of
-      // real size produced no new themes and every joined post landed in a SINGLE
-      // theme, that is the mega-theme-collapse signature — page instead of
-      // silently persisting (the 2026-07-12 fleet-review lesson). Also warn when
-      // any theme has grown past the join ceiling and is being contained.
-      const joinedThemeIds = new Set(
-        assignments.filter((a) => !a.isNewTheme).map((a) => a.themeId),
-      );
-      const newThemeSeeds = assignments.filter((a) => a.isNewTheme).length;
+      // Health alarms (always-ship .warn, bypasses INFO sampling). These read
+      // scalars off the batch rather than the assignment array, because the
+      // array holds vectors and never leaves the step.
+      //
+      // Collapse signature: a cohort of real size that produced no new themes
+      // AND landed every joined post in a SINGLE theme (the 2026-07-12
+      // fleet-review lesson) — page rather than silently persist.
       if (
-        posts.length >= 10 &&
-        newThemeSeeds === 0 &&
-        joinedThemeIds.size <= 1
+        batch.postsConsidered >= 10 &&
+        batch.newThemeSeeds === 0 &&
+        batch.distinctJoinedThemes <= 1
       ) {
         logger.warn(
           "reddit-intel-cluster: single-attractor collapse signature",
           {
             cohortDate: data.cohortDate,
-            postsConsidered: posts.length,
-            distinctJoinedThemes: joinedThemeIds.size,
-            newThemeSeeds,
+            postsConsidered: batch.postsConsidered,
+            distinctJoinedThemes: batch.distinctJoinedThemes,
+            newThemeSeeds: batch.newThemeSeeds,
             hint: "all posts joined one theme and none re-seeded — check centroid drift / rebuild the runaway theme",
           },
         );
       }
-      if (oversizedThemeCount > 0) {
+      if (batch.oversizedThemeCount > 0) {
         logger.warn(
           "reddit-intel-cluster: themes over member ceiling contained",
           {
             cohortDate: data.cohortDate,
-            oversizedThemeCount,
+            oversizedThemeCount: batch.oversizedThemeCount,
             ceiling: MAX_THEME_MEMBERS_FOR_JOIN,
             hint: "an over-large theme was skipped as a match target — historical rebuild recommended",
           },
         );
       }
-
-      // ── Step 3: persist new themes + assignments + centroid updates ──────
-      const persistResult = await step.run("persist-clusters", async () => {
-        const supabase = createServiceClient();
-        if (!supabase) throw new Error("Supabase service client unavailable");
-        return persistAssignments(supabase, assignments);
-      });
 
       // ── Step 4: name themes that have just crossed MIN_MEMBERS_FOR_NAMING ─
       // Only themes where member_count ≥ 3 AND title still 'Pending naming'.
@@ -1010,7 +1044,7 @@ export const redditIntelCluster = inngest.createFunction(
             // Falls back to the health RPC's own count rather than 0 — an
             // unavailable count must not read as "no active themes".
             activeThemeCount: activeCount ?? health?.active_themes ?? null,
-            newThemeCount: persistResult.newThemeCount,
+            newThemeCount: batch.newThemeCount,
             computedAt: new Date().toISOString(),
           },
         }),
@@ -1043,10 +1077,10 @@ export const redditIntelCluster = inngest.createFunction(
       // births over consecutive weeks is the collapse signature.
       logger.warn("reddit-intel-cluster.summary", {
         cohortDate: data.cohortDate,
-        postsConsidered: posts.length,
-        threshold: clusterThreshold,
-        newThemes: persistResult.newThemeCount,
-        joinedThemes: persistResult.joinedThemeCount,
+        postsConsidered: batch.postsConsidered,
+        threshold: batch.threshold,
+        newThemes: batch.newThemeCount,
+        joinedThemes: batch.joinedThemeCount,
         themesNamed: namingResult.named,
         // Work left AFTER this run. postsConsidered is capped, so without this
         // a saturated run and an idle one produce the same-shaped summary.
@@ -1055,21 +1089,21 @@ export const redditIntelCluster = inngest.createFunction(
         // floor — they will re-present at the head of the oldest-first
         // worklist next run and fail again. Zero-vs-null matters: null is
         // "not measured", zero is "measured, none".
-        seedFailures: persistResult.seedFailures,
-        joinFailures: persistResult.joinFailures,
-        linkFailures: persistResult.linkFailures,
+        seedFailures: batch.seedFailures,
+        joinFailures: batch.joinFailures,
+        linkFailures: batch.linkFailures,
         activeThemes: activeCount ?? health?.active_themes ?? null,
         themeBirths7d: health?.theme_births_7d ?? null,
         strongThemes: health?.strong_themes ?? null,
         inactiveThemes: health?.inactive_themes ?? null,
-        oversizedThemes: oversizedThemeCount,
+        oversizedThemes: batch.oversizedThemeCount,
         degraded: activeCount === null || health === null,
       });
 
       return {
         cohortDate: data.cohortDate,
-        newThemes: persistResult.newThemeCount,
-        joinedThemes: persistResult.joinedThemeCount,
+        newThemes: batch.newThemeCount,
+        joinedThemes: batch.joinedThemeCount,
         themesNamed: namingResult.named,
         themeBirths7d: health?.theme_births_7d ?? null,
       };

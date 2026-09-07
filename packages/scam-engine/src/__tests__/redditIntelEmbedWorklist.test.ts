@@ -147,7 +147,7 @@ describe("no pipeline stage scopes its worklist to the triggering cohort", () =>
     },
     {
       file: "../inngest/reddit-intel-cluster.ts",
-      step: 'step.run("load-state"',
+      step: 'step.run("cluster-batch"',
       worklist: "theme_id IS NULL AND embedding IS NOT NULL",
     },
   ];
@@ -394,5 +394,53 @@ describe("a cron tick resolves to a sweep cohort, not an exception", () => {
       modelId: "voyage-3.5",
     };
     expect(resolveRedditIntelEmbeddedData(realEmbedded)).toEqual(realEmbedded);
+  });
+});
+
+/**
+ * Vectors must not cross a step boundary.
+ *
+ * An Inngest step's return value is serialised and durably stored, against a
+ * 4 MB limit. Clustering handles 1024-dimension vectors: 500 posts plus 200
+ * themes is ~19.5 MB, so when `load-state` returned `{ posts, themes }` for
+ * assignment in a LATER step, the function failed `output_too_large` on every
+ * run and the backlog it exists to drain grew instead (prod, 2026-09-06/07).
+ *
+ * The ceiling is not a function of batch size alone — 200 themes on their own
+ * are ~3.9 MB, so the split-step shape could not have survived theme growth at
+ * any batch size. The invariant is therefore about CO-LOCATION, not size: the
+ * load, the match and the write belong in one step so the vectors stay in
+ * memory and only scalars are returned.
+ *
+ * WHAT THIS DOES NOT CATCH: a future step elsewhere in the file that selects an
+ * embedding column and returns it. This asserts the three stay together, not
+ * that no vector is ever returned anywhere — see docs/agents/defect-shapes.md
+ * shape N on the limits of source-level guards.
+ */
+describe("clustering keeps its vectors inside one step", () => {
+  const file = "../inngest/reddit-intel-cluster.ts";
+
+  it("loads, assigns and persists within the same step.run", () => {
+    const src = readFileSync(new URL(file, import.meta.url), "utf8");
+    const start = src.indexOf('step.run("cluster-batch"');
+    expect(
+      start,
+      "cluster-batch step not found — renamed? this guard is inert",
+    ).toBeGreaterThan(-1);
+
+    // The step body ends where the NEXT step begins; using the next step.run
+    // as the terminator avoids trying to brace-match a 150-line callback.
+    const nextStep = src.indexOf("step.run(", start + 10);
+    const body = src.slice(start, nextStep > -1 ? nextStep : undefined);
+
+    for (const call of ["assignPostsToThemes(", "persistAssignments("]) {
+      expect(
+        body.includes(call),
+        `${call} is no longer inside the cluster-batch step. Moving it out ` +
+          "means the 1024-dim vectors it needs must be RETURNED from the " +
+          "step — ~19.5 MB against Inngest's 4 MB step-output limit, which " +
+          "fails every run as output_too_large.",
+      ).toBe(true);
+    }
   });
 });
