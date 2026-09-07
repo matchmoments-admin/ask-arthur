@@ -411,6 +411,43 @@ const CLUSTER_POSTS_PER_RUN = 500;
  */
 export const __testing = { parsePgVector, vectorToPgString, cosineSimilarity };
 
+/**
+ * How many write round trips run at once inside the clustering step.
+ *
+ * Not 1 (serialised — the 30-45s slot hold this exists to remove) and not
+ * unbounded (a burst of hundreds of concurrent statements against a hot table
+ * is how the 2026-05-09 pooler incident started). Eight is enough to collapse
+ * the wall time by roughly an order of magnitude while staying well inside the
+ * pooler's connection budget.
+ */
+const WRITE_CONCURRENCY = 8;
+
+/**
+ * Run `fn` over `items` with at most `limit` in flight.
+ *
+ * Deliberately not Promise.all over everything: the point is bounded
+ * parallelism. Rejections are not expected — every caller here catches its own
+ * error into a counter — but one would reject the whole wave, which is the
+ * correct loud behaviour for an unhandled fault inside a durable step.
+ */
+async function mapWithConcurrency<T>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<void>,
+): Promise<void> {
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, () =>
+    (async () => {
+      for (;;) {
+        const i = cursor++;
+        if (i >= items.length) return;
+        await fn(items[i]!);
+      }
+    })(),
+  );
+  await Promise.all(workers);
+}
+
 export interface PersistResult {
   newThemeCount: number;
   joinedThemeCount: number;
@@ -423,49 +460,61 @@ export interface PersistResult {
 }
 
 /**
- * Write one run's assignments: seed or update the theme, link the post, and
- * record membership.
+ * Write one run's assignments: seed or adopt themes, link posts, record
+ * membership.
  *
- * Extracted from the step body so it has an interface at all. It previously
- * lived inline inside step.run, which meant the ONLY test over clustering
- * (assign.test.ts) exercised the pure matcher and nothing here — you could
- * have deleted this entire function and every test would still have passed,
- * while four separate `continue` paths silently orphaned posts.
+ * SET-BASED ON PURPOSE. The first version did roughly three sequential round
+ * trips per post — at 500 posts that is ~1,500 serialised queries, 30-45s of
+ * wall time. Since #1117 all of that happens inside ONE step, and an Inngest
+ * step holds a concurrency slot for its whole duration. The production account
+ * runs on a 5-slot free pool and was measured at 5/5 in use on 2026-09-07
+ * (ADR-0019), so slot-SECONDS, not query count, is the scarce resource. A long
+ * inline step is the documented cause of the earlier fleet-wide slot crunch.
  *
- * Takes the client rather than calling createServiceClient() so a test can
- * drive the failure paths.
+ * Round trips are now bounded by the number of distinct THEMES touched, not by
+ * the number of posts:
+ *
+ *     1  read back already-linked posts (retry guard)
+ *     2  bulk-upsert seed themes, then resolve their ids by slug
+ *     N  centroid/member_count updates  (N = distinct themes joined)
+ *     M  post->theme links, grouped     (M = distinct themes assigned)
+ *     1  bulk membership insert
+ *
+ * N and M are typically one to two orders of magnitude below the post count,
+ * and the update waves run with bounded parallelism.
+ *
+ * The INTERFACE is deliberately unchanged from the per-row version — same
+ * arguments, same PersistResult, same counters — so callers, the run summary
+ * and the existing tests all still hold. That is the point of having extracted
+ * it in #1115: the round-trip strategy is an implementation detail with one
+ * home.
+ *
+ * It also no longer mutates the caller's assignments. The old version wrote
+ * `a.themeId = created.id` back into the input array without saying so, while
+ * its sibling assignPostsToThemes has an explicit no-mutation test. Resolved
+ * ids are held in a local map instead.
  */
 export async function persistAssignments(
   supabase: NonNullable<ReturnType<typeof createServiceClient>>,
   assignments: Assignment[],
 ): Promise<PersistResult> {
-  let newThemeCount = 0;
-  let joinedThemeCount = 0;
-  // Every `continue` below leaves a post unlinked, and an unlinked post
-  // re-presents at the head of the oldest-first worklist on the next run.
-  // Counting them is what separates "nothing to do" from "the same rows
-  // failing forever" — the two were indistinguishable in the summary.
   let seedFailures = 0;
   let joinFailures = 0;
   let linkFailures = 0;
 
-  // Idempotency guard (#520 H5): Inngest retries the WHOLE step on
-  // failure, and the matching above is recomputed deterministically from
-  // the memoised load step. A prior partial run may have already linked
-  // some posts; re-read their current theme_id and skip the done ones so
-  // a retry doesn't create duplicate themes.
-  //
-  // This comment used to end "(slug has no unique constraint, so we
-  // can't rely on upsert-on-conflict)". Prod disagrees, and always did:
-  //
-  //   reddit_intel_themes_slug_key UNIQUE (slug)      -- v82:95
-  //
-  // Believing otherwise made the seed below an `.insert()` against a
-  // DETERMINISTIC slug, which turned a partial run into a permanent
-  // orphan: theme row created, post link not yet written, retry re-reads
-  // theme_id IS NULL, re-attempts the same slug, gets 23505, warns, and
-  // `continue`s — on that run and on every run afterwards. The seed
-  // below now adopts the existing row on 23505 instead of giving up.
+  if (assignments.length === 0) {
+    return {
+      newThemeCount: 0,
+      joinedThemeCount: 0,
+      seedFailures,
+      joinFailures,
+      linkFailures,
+    };
+  }
+
+  // Idempotency guard (#520 H5): Inngest retries the WHOLE step, and the
+  // matching above is recomputed deterministically. A prior partial run may
+  // already have linked some posts; skip those so a retry does not re-seed.
   const alreadyLinked = await supabase
     .from("reddit_post_intel")
     .select("id, theme_id")
@@ -479,70 +528,97 @@ export async function persistAssignments(
       .map((r) => r.id as string),
   );
 
-  for (const a of assignments) {
-    if (donePostIds.has(a.postId)) continue; // already persisted in a prior attempt
-    if (a.isNewTheme) {
-      // Insert new theme row first to get its UUID. Slug is DETERMINISTIC
-      // (auto-<seed post id>) not Math.random()-based, so a retry of this
-      // step produces a stable handle instead of proliferating random
-      // slugs. The naming step later rewrites it to the kebab-cased title.
-      const slug = `auto-${a.postId}`;
-      const inserted = await supabase
-        .from("reddit_intel_themes")
-        .insert({
-          slug,
+  const pending = assignments.filter((a) => !donePostIds.has(a.postId));
+  if (pending.length === 0) {
+    return {
+      newThemeCount: 0,
+      joinedThemeCount: 0,
+      seedFailures,
+      joinFailures,
+      linkFailures,
+    };
+  }
+
+  const seeds = pending.filter((a) => a.isNewTheme);
+  const joins = pending.filter((a) => !a.isNewTheme);
+
+  // ── Seeds ────────────────────────────────────────────────────────────────
+  // The slug is deterministic (auto-<postId>) and reddit_intel_themes_slug_key
+  // is UNIQUE, so a retry after a partial run WILL collide. ignoreDuplicates
+  // means ON CONFLICT DO NOTHING — never overwrite, because by the time a retry
+  // lands the theme may have gained members and been named, and resetting a
+  // named 50-member theme to "Pending naming"/1 is far worse than the orphan
+  // this avoids. The follow-up select then resolves ids for BOTH the rows just
+  // inserted and the ones a prior attempt left behind, so adoption needs no
+  // special case.
+  const themeIdByPost = new Map<string, string>();
+  let newThemeCount = 0;
+
+  if (seeds.length > 0) {
+    const now = new Date().toISOString();
+    const { error: seedErr } = await supabase
+      .from("reddit_intel_themes")
+      .upsert(
+        seeds.map((a) => ({
+          slug: `auto-${a.postId}`,
           title: "Pending naming",
           centroid_embedding: vectorToPgString(a.newCentroid),
           centroid_embedding_model_version: a.embeddingModelVersion,
           member_count: 1,
-          first_seen_at: new Date().toISOString(),
-          last_seen_at: new Date().toISOString(),
+          first_seen_at: now,
+          last_seen_at: now,
           signal_strength: "weak",
           is_active: true,
-        })
-        .select("id")
-        .single();
+        })),
+        { onConflict: "slug", ignoreDuplicates: true },
+      );
+    if (seedErr) {
+      logger.warn("cluster: seed theme bulk upsert failed", {
+        error: seedErr.message,
+        seeds: seeds.length,
+      });
+    }
 
-      let created = inserted.data;
-
-      // 23505 = unique_violation on reddit_intel_themes_slug_key. The
-      // slug is deterministic, so this means a PRIOR attempt already
-      // created this theme and then failed before linking the post.
-      // Adopt the existing row.
-      //
-      // Deliberately NOT an upsert-on-conflict: that would rewrite
-      // title/member_count/first_seen_at, and by the time a retry lands
-      // the theme may have gained members and been named. Resetting a
-      // named 50-member theme to "Pending naming" with member_count 1 is
-      // far worse than the orphan this is fixing.
-      if (inserted.error?.code === "23505") {
-        const existing = await supabase
-          .from("reddit_intel_themes")
-          .select("id")
-          .eq("slug", slug)
-          .single();
-        created = existing.data;
-      }
-
-      if (!created) {
-        logger.warn("cluster: new theme insert failed", {
-          slug,
-          error: inserted.error?.message,
-        });
+    const slugs = seeds.map((a) => `auto-${a.postId}`);
+    const { data: resolved, error: resolveErr } = await supabase
+      .from("reddit_intel_themes")
+      .select("id, slug")
+      .in("slug", slugs);
+    if (resolveErr) {
+      logger.warn("cluster: seed theme id resolution failed", {
+        error: resolveErr.message,
+      });
+    }
+    const idBySlug = new Map(
+      (resolved ?? []).map((r) => [r.slug as string, r.id as string]),
+    );
+    for (const a of seeds) {
+      const id = idBySlug.get(`auto-${a.postId}`);
+      // Unresolved means the row is neither newly inserted nor already there:
+      // count it rather than letting the post vanish from the tallies.
+      if (!id) {
         seedFailures++;
         continue;
       }
-      a.themeId = created.id as string;
+      themeIdByPost.set(a.postId, id);
       newThemeCount++;
-    } else {
-      // Existing theme: update centroid + bump member count + last_seen_at.
-      // Stamp the centroid's model version with the joining post's
-      // version. If old centroid was on voyage-3 and the new post is
-      // on voyage-3.5, the centroid is now mixed-model — the version
-      // column captures the most-recent contributor so a future
-      // re-embed sweep can detect mixed centroids and rebuild them.
-      // See ADR-0003.
-      const { error: upErr } = await supabase
+    }
+  }
+
+  // ── Joins: one centroid update per distinct theme ────────────────────────
+  // assignPostsToThemes walks posts in order and carries newMemberCount
+  // forward, so for a theme joined k times in this batch the LAST assignment
+  // holds the final centroid and count. Applying only that one is both correct
+  // and k-1 fewer round trips.
+  const lastJoinByTheme = new Map<string, Assignment>();
+  for (const a of joins) lastJoinByTheme.set(a.themeId, a);
+
+  let joinedThemeCount = 0;
+  await mapWithConcurrency(
+    [...lastJoinByTheme.values()],
+    WRITE_CONCURRENCY,
+    async (a) => {
+      const { error } = await supabase
         .from("reddit_intel_themes")
         .update({
           centroid_embedding: vectorToPgString(a.newCentroid),
@@ -552,46 +628,75 @@ export async function persistAssignments(
           updated_at: new Date().toISOString(),
         })
         .eq("id", a.themeId);
-
-      if (upErr) {
+      if (error) {
         logger.warn("cluster: theme update failed", {
           themeId: a.themeId,
-          error: upErr.message,
+          error: error.message,
         });
         joinFailures++;
-        continue;
+        return;
+      }
+      for (const j of joins) {
+        if (j.themeId === a.themeId) themeIdByPost.set(j.postId, a.themeId);
       }
       joinedThemeCount++;
-    }
+    },
+  );
 
-    // Link the post → theme.
-    const { error: postErr } = await supabase
-      .from("reddit_post_intel")
-      .update({ theme_id: a.themeId })
-      .eq("id", a.postId);
-    if (postErr) {
-      logger.warn("cluster: post theme_id update failed", {
-        postId: a.postId,
-        error: postErr.message,
-      });
-      linkFailures++;
-      continue;
-    }
+  // ── Post -> theme links, grouped by theme ────────────────────────────────
+  const postsByTheme = new Map<string, string[]>();
+  for (const [postId, themeId] of themeIdByPost) {
+    const list = postsByTheme.get(themeId);
+    if (list) list.push(postId);
+    else postsByTheme.set(themeId, [postId]);
+  }
 
-    // Insert membership row (primary).
+  const linkedPostIds: string[] = [];
+  await mapWithConcurrency(
+    [...postsByTheme.entries()],
+    WRITE_CONCURRENCY,
+    async ([themeId, postIds]) => {
+      const { error } = await supabase
+        .from("reddit_post_intel")
+        .update({ theme_id: themeId })
+        .in("id", postIds);
+      if (error) {
+        logger.warn("cluster: post theme_id update failed", {
+          themeId,
+          posts: postIds.length,
+          error: error.message,
+        });
+        linkFailures += postIds.length;
+        return;
+      }
+      linkedPostIds.push(...postIds);
+    },
+  );
+
+  // ── Membership rows, one bulk insert ─────────────────────────────────────
+  // Only for posts whose link actually landed, so membership never claims a
+  // relationship the post row does not carry. PK is (intel_id, theme_id), so a
+  // retry collides harmlessly — ignoreDuplicates rather than a failed batch.
+  if (linkedPostIds.length > 0) {
+    const linked = new Set(linkedPostIds);
+    const simByPost = new Map(pending.map((a) => [a.postId, a.similarity]));
+    const rows = linkedPostIds.map((postId) => ({
+      intel_id: postId,
+      theme_id: themeIdByPost.get(postId)!,
+      similarity: Math.min(1, Math.max(0, simByPost.get(postId) ?? 0)),
+      is_primary: true,
+    }));
     const { error: memErr } = await supabase
       .from("reddit_post_intel_themes")
-      .insert({
-        intel_id: a.postId,
-        theme_id: a.themeId,
-        similarity: Math.min(1, Math.max(0, a.similarity)),
-        is_primary: true,
+      .upsert(rows, {
+        onConflict: "intel_id,theme_id",
+        ignoreDuplicates: true,
       });
     if (memErr) {
-      logger.warn("cluster: membership insert failed", {
-        postId: a.postId,
-        themeId: a.themeId,
+      logger.warn("cluster: membership bulk insert failed", {
         error: memErr.message,
+        rows: rows.length,
+        linked: linked.size,
       });
     }
   }
