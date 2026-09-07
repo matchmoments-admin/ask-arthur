@@ -65,9 +65,23 @@ Run against the `ask-arthur` Axiom dataset (`AXIOM_QUERY_TOKEN`, or
 | sort by p95 desc
 ```
 
-`fn.complete` is INFO and sampled at 10% in prod, with the keep/drop decision
-taken once per run — so `runs` is roughly a tenth of reality, while the
-percentiles are unbiased. Do not read `runs` as a volume count.
+`fn.complete` is emitted at **WARN**, which bypasses sampling entirely, so
+`runs` is a true count and the percentiles cover every run. It fires exactly
+once per logical run, which is what makes it the only real run counter this
+wrapper emits.
+
+That was not always true. Until #1007 it was INFO at 10% sampling, and a
+low-frequency cron was indistinguishable from one that never ran —
+`archive-shadows-retention` showed 1 start and 0 completes across ~19 nightly
+runs. **Axiom data from before 2026-09-07 is still a 10% sample**, so do not
+compare a `count()` across that boundary.
+
+`fn.start` deliberately stays INFO and sampled: the handler is re-executed at
+every step boundary, so it fires more than once per run and un-sampling it would
+add volume without producing a counter. Use
+`dcount(['fields.requestId'])` if you need distinct runs from it, and never
+infer health from a `fn.start` / `fn.complete` gap — they have different sample
+rates _and_ different per-run cardinality.
 
 ## The decision rule — settled in advance, deliberately
 
