@@ -310,6 +310,60 @@ Verified 2026-09-07: `unconverted` is 0–2 every week. It climbing is the real
 regression signal. A low nightly count with `unconverted` near zero means the
 pipeline is working and there was simply less to find.
 
+#### Decompose by lane before concluding anything
+
+`weaponised_at` has two producers: a first scan, and the recheck lane that
+re-scans the `monitoring`/`declined` tail (`clone-watch-lifecycle-recheck.ts`)
+looking for domains that weaponise _after_ first appearing benign. Split them
+before deciding a stage is broken:
+
+```sql
+select date_trunc('week', weaponised_at)::date as wk,
+       count(*)                                                as weaponised,
+       count(*) filter (where coalesce(recheck_count,0) > 0)   as via_recheck,
+       count(*) filter (where coalesce(recheck_count,0) = 0)   as via_initial
+from shopfront_clone_alerts
+where weaponised_at > now() - interval '56 days'
+group by 1 order by 1 desc;
+```
+
+Measured 2026-09-07:
+
+```
+week      total  recheck  initial
+07-13         6        6        0
+07-20        13        7        6
+07-27         3        2        1
+08-03        23       18        5
+08-10        24       11       13
+08-17        12        4        8
+08-24        16        6       10
+08-31         8        4        4
+```
+
+**Both lanes move together**, and the 03–10 August pair (23, 24) is the outlier
+against a July baseline of 6, 13, 3. A single stage failing would show as one
+lane collapsing while the other held. This is what real-world variation in how
+much live phishing exists looks like.
+
+#### Two hypotheses that sound right and are false
+
+Both were proposed from reading the code, and both were killed by one query
+each. They are recorded so nobody re-derives them.
+
+1. _"v284 cut off the `declined` inflow, starving the recheck lane of
+   candidates."_ Decline inflow per week **rose** across that boundary —
+   101 → 305 → 434 (17, 24, 31 August). Check with
+   `select date_trunc('week', netcraft_declined_at), count(*) …`.
+
+2. _"v285 flooded the recheck worklist with never-rechecked rows that displace
+   the productive `declined` tail, since the worklist orders
+   `last_rechecked_at ASC NULLS FIRST` behind a 200-row fetch limit."_
+   There are **zero** never-rechecked rows in either cohort (`declined` 1,849,
+   `monitoring` 426, both with `last_rechecked_at IS NULL` = 0). Check with a
+   `count(*) filter (where last_rechecked_at is null)` grouped by
+   `lifecycle_state`.
+
 #### Precision context, so a low rate is not mistaken for a fault
 
 `4c4ce4d7` (v285, 24 Aug) deliberately stopped discarding the pre-weaponisation
