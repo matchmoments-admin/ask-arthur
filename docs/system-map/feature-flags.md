@@ -356,3 +356,7 @@ Before flipping any `NEXT_PUBLIC_FF_*` flag from default-OFF to ON in production
 ### Newsletter confirmation brake (v303; deployment pending)
 
 `feature_brakes.newsletter_confirmation` is checked inside `request_newsletter_confirmation` in `supabase/migration-v303-newsletter-confirmation.sql`, before reserving a send. The operator dashboard registers it in `apps/web/lib/dashboard/feature-brakes.ts`. It pauses new confirmation requests; confirmed-reader weekly mail uses its existing controls. The same RPC enforces 200 reservations per UTC day and a 15-minute per-address cooldown. Failed provider attempts still consume reservations.
+
+### Manual LinkedIn publishing
+
+`LINKEDIN_STUDIO_PUBLISH_ENABLED=true` enables the draft studio publish route only when `VERCEL_ENV=production`, and `LINKEDIN_ORG_URN` matches Ask Arthur’s company-page URN. Default is disabled. Existing LinkedIn access/refresh credentials stay server-side. Enforcement is in `apps/web/app/api/admin/linkedin-drafts/publish/route.ts`; this switch does not control the older CLI or other social publishers. Draft creation and saving do not need this switch.

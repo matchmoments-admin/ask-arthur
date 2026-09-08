@@ -24,3 +24,7 @@ The [42 launch tasks and 52 review packets](review-baseline/small-start-monetisa
 - [Commercial plan and scorecard](monetisation-and-scorecard.md): pilot offer, interview guide, four-week sequence and remaining gaps.
 - [Release acceptance](release-acceptance.md): evidence, deployment dependencies, controlled inbox steps and rollback.
 - [Read-only live baseline](readiness-baseline.json): aggregate schema and advisor observations; no subscriber addresses.
+
+## Manual LinkedIn drafts
+
+The [LinkedIn draft studio](linkedin-drafts.md) is implemented locally: four editable starters, durable saves, public-text preview and an explicit Publish now action for Ask Arthur’s company page. It has no schedule or automatic retry. Migration v304, production configuration and deployment remain pending.

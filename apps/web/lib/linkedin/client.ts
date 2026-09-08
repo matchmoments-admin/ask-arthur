@@ -48,6 +48,7 @@ export async function resolveAccessToken(): Promise<string> {
   if (refresh && clientId && clientSecret) {
     const res = await fetch(OAUTH, {
       method: "POST",
+      signal: AbortSignal.timeout(15_000),
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
         grant_type: "refresh_token",
@@ -351,4 +352,33 @@ export async function verifyPost(opts: {
 
   out.ok = problems.length === 0;
   return out;
+}
+
+/** One attempt only. Callers must persist a claim before calling this function.
+ * A timeout, rejection or missing receipt is deliberately not retried here.
+ */
+export async function createTextPost(opts: {
+  commentary: string;
+  accessToken: string;
+  authorUrn: string;
+}): Promise<string> {
+  const res = await fetch(`${REST}/posts`, {
+    method: "POST",
+    headers: jsonHeaders(opts.accessToken),
+    signal: AbortSignal.timeout(15_000),
+    body: JSON.stringify({
+      author: opts.authorUrn,
+      commentary: opts.commentary,
+      visibility: "PUBLIC",
+      distribution: { feedDistribution: "MAIN_FEED", targetEntities: [], thirdPartyDistributionChannels: [] },
+      lifecycleState: "PUBLISHED",
+      isReshareDisabledByAuthor: false,
+    }),
+  });
+  // Do not expose provider bodies (or tokens) in the studio's logs/responses.
+  const id = res.headers.get("x-restli-id");
+  if (res.status !== 201 || !id || !/^urn:li:(share|ugcPost):\d+$/.test(id)) {
+    throw new Error("linkedin_publish_unconfirmed");
+  }
+  return id;
 }

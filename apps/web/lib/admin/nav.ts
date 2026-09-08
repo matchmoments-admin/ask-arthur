@@ -71,6 +71,7 @@ export const ADMIN_NAV_SECTIONS: AdminNavSection[] = [
       // /admin/phone-footprint for the revive condition, but the console
       // no longer advertises it (map #939, verdict #944).
       { id: "onward", name: "Onward reports", href: "/admin/onward-reports", icon: Send },
+      { id: "linkedin-drafts", name: "LinkedIn drafts", href: "/admin/linkedin-drafts", icon: Mail },
       { id: "email-studio", name: "Email Studio", href: "/admin/email-studio", icon: Mail },
       { id: "brand-outreach", name: "Brand reach-out", href: "/admin/brand-outreach", icon: Megaphone },
       { id: "blog", name: "Blog", href: "/admin/blog", icon: FileText },

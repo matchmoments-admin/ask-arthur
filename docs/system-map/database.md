@@ -471,3 +471,7 @@ pnpm --filter @askarthur/types gen:db
 The generated file is committed (NOT git-ignored) so CI typechecks have access to it without needing the Supabase CLI or an access token. The trade-off: every regen produces a sizeable diff that must land in the same PR as the migration that prompted it.
 
 **Pilot file** — `apps/web/app/admin/feedback/page.tsx` uses `Tables<'feedback_triage_queue'>` as the base for its `TriageRow` shape and narrows nullability + enum strings at the page boundary with a runtime type guard. Use this pattern (boundary narrowing, no `as` casts) when the MV/view row's nullability is wider than the consumer expects.
+
+### LinkedIn drafts (v304; deployment pending)
+
+`linkedin_drafts` stores private plain-text drafts, revision, status, operator identifier, attempt timestamps and LinkedIn receipt. RLS and grants restrict all access to service_role in `supabase/migration-v304-linkedin-drafts.sql`; admin routes enforce operator access. Conditional updates on `(id, version, status=draft)` prevent stale saves and duplicate claims. Publishing/uncertain rows are locked until an operator reconciles the external outcome. Four seed drafts use stable IDs and never overwrite edits on migration reapplication.
