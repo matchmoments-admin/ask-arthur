@@ -56,6 +56,42 @@ import { inngest } from "./client";
 export const CRON_TICK_EVENT = "inngest/scheduled.timer";
 
 /**
+ * Flush the batched Axiom logs before the handler returns — awaited, bounded,
+ * and never allowed to fail the function.
+ *
+ * WHY AWAITED. This used to be `void log.flush()` with the comment "the
+ * function instance outlives the flush". Measured on 2026-09-08, it does not:
+ * shopfront-clone-haiku-preclassify received 44 events and Axiom recorded 41
+ * fn.complete rows — a ~7% loss on an always-ship WARN signal. next-axiom's
+ * flush is a keepalive fetch, which on a serverless runtime is not a guarantee;
+ * once the response is sent the instance can be frozen with the request still
+ * in flight. For a function that runs once a day, 7% means it vanishes from a
+ * 30-day view about twice a month: clone-watch-enrich-attribution had
+ * completed every daily run in September and showed as silent in Axiom for
+ * all but one of them.
+ *
+ * It is the same false assumption #1072 already removed for cost_telemetry
+ * ("fire-and-forget lost 11 of 19 rows to cancellation on 2026-09-01").
+ *
+ * WHY BOUNDED. next-axiom's flush has no timeout of its own, and awaiting an
+ * external POST unbounded inside every function's final replay would let a
+ * slow Axiom stall the whole fleet. Two seconds is far above the normal
+ * round-trip and far below any step budget.
+ *
+ * WHY SWALLOWED. Telemetry must never be the reason a function fails.
+ */
+const FLUSH_BUDGET_MS = 2_000;
+
+async function flushBounded(log: {
+  flush: () => Promise<void>;
+}): Promise<void> {
+  await Promise.race([
+    log.flush().catch(() => undefined),
+    new Promise<void>((resolve) => setTimeout(resolve, FLUSH_BUDGET_MS)),
+  ]);
+}
+
+/**
  * True when this invocation came from a cron schedule rather than an event.
  *
  * Prefer this to any test on `event.data`. The cron payload is a POPULATED
@@ -189,9 +225,7 @@ export function withAxiomLogging<TResult>(
         elapsedSinceTriggerMs: elapsedSinceTrigger(ctx),
         finalSegmentMs: Date.now() - segmentStartedAt,
       });
-      // Fire-and-forget per #514: no-op when the flag is off; when on,
-      // next-axiom batches and the function instance outlives the flush.
-      void log.flush();
+      await flushBounded(log);
       return result;
     } catch (err) {
       log.error("fn.error", {
@@ -202,7 +236,7 @@ export function withAxiomLogging<TResult>(
         error: err instanceof Error ? err.message : String(err),
         error_name: err instanceof Error ? err.name : "Unknown",
       });
-      void log.flush();
+      await flushBounded(log);
       throw err;
     }
   };

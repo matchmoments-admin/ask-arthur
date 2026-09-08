@@ -83,6 +83,52 @@ add volume without producing a counter. Use
 infer health from a `fn.start` / `fn.complete` gap — they have different sample
 rates _and_ different per-run cardinality.
 
+## Before you conclude a function is dead: ask Inngest, not Axiom
+
+On 2026-09-08 `clone-watch-enrich-attribution` showed **no Axiom signal for a
+month** — no `fn.start`, `fn.complete` or `fn.error`. It was reported as dead.
+Inngest's own records showed the daily cron had **completed every day**:
+
+```
+2026-09-03  Completed  13:30:48 → 13:59:35
+2026-09-05  Completed  13:30:31 → 13:37:42
+2026-09-06  Completed  13:30:33 → 13:35:40
+2026-09-07  Completed  13:30:41 → 13:34:52
+2026-09-08  Completed  13:30:21 → 13:36:18
+```
+
+Two things produced the silence, and both are now documented:
+
+1. Before #1007 (2026-09-07), `fn.complete` was 10%-sampled, so a once-a-day
+   function was expected to be invisible ~90% of days.
+2. The wrapper fire-and-forgot its Axiom flush. Measured loss on a many-run
+   function: **44 events sent, 41 `fn.complete` received — ~7%**. Fixed by
+   awaiting the flush (bounded, never fatal). Data from before that fix still
+   carries the loss.
+
+**Silence in Axiom is not evidence a function did not run.** The ground truth
+is Inngest, and the REST API exposes it without the dashboard:
+
+```bash
+K=$INNGEST_API_KEY   # apps/web/.env.local
+# 1. find the cron tick (retention reaches back weeks)
+curl -s "https://api.inngest.com/v1/events?name=inngest/scheduled.timer&received_after=2026-09-08T13:25:00Z&received_before=2026-09-08T13:35:00Z" -H "Authorization: Bearer $K"
+#    → pick the event whose data.cron matches, take its internal_id
+# 2. what did that tick produce?
+curl -s "https://api.inngest.com/v1/events/<internal_id>/runs" -H "Authorization: Bearer $K"
+#    → status, run_started_at, ended_at, run_id. Empty data = no run was created.
+# 3. a run's current state
+curl -s "https://api.inngest.com/v1/runs/<run_id>" -H "Authorization: Bearer $K"
+```
+
+For an event-triggered function, send its manual-trigger event with the
+production `INNGEST_EVENT_KEY` (`vercel env pull` — it is not Sensitive-typed)
+to `https://inn.gs/e/$EVENT_KEY`; the response `ids[0]` is the event id for
+step 2. That is a real production invocation, so respect the function's caps.
+
+`/v1/runs` (list), `/v1/functions`, `/v1/apps` and `/v1/usage` do not exist on
+this API tier; run visibility is only reachable through an event.
+
 ## The decision rule — settled in advance, deliberately
 
 These thresholds were chosen **before** the data existed, so the decision is
@@ -161,6 +207,23 @@ Merge `check-brake` into `select-pending` in the enricher. It spends a whole
 step boundary — and therefore a slot acquisition — on one single-row
 `feature_brakes` SELECT. The sibling preclassifier already folded this and
 documents why at `clone-watch-haiku-preclassify.ts:195-201`.
+
+## Outcome — applied 2026-09-08 against a full un-sampled day
+
+| function                          | runs/day | p50              | p95   | slot-s/day | share of pool |
+| --------------------------------- | -------- | ---------------- | ----- | ---------- | ------------- |
+| shopfront-clone-haiku-preclassify | 41       | 166 s            | 270 s | 6,810      | 1.6%          |
+| clone-watch-enrich-attribution    | 1        | ~6 min (Inngest) | —     | ~360       | 0.1%          |
+| **whole fleet (30 functions)**    |          |                  |       | **17,448** | **4.04%**     |
+
+**Step 0 says stop.** 17,448 of 432,000 slot-seconds. The 5/5 concurrency
+reading was instantaneous sampling, not sustained pressure. **Neither fan-out
+is reworked.** Revisit only if the dashboard's queue backlog leaves zero or
+cancellations appear.
+
+Two corrections were needed to reach that, both now in this doc: the original
+Step 0 could only ever say "continue" (fixed in #1125), and the enricher's
+absence from Axiom was a telemetry loss, not a dead function (§ above).
 
 ## What has already been done
 
