@@ -208,6 +208,23 @@ step boundary — and therefore a slot acquisition — on one single-row
 `feature_brakes` SELECT. The sibling preclassifier already folded this and
 documents why at `clone-watch-haiku-preclassify.ts:195-201`.
 
+## Outcome — applied 2026-09-08 against a full un-sampled day
+
+| function                          | runs/day | p50              | p95   | slot-s/day | share of pool |
+| --------------------------------- | -------- | ---------------- | ----- | ---------- | ------------- |
+| shopfront-clone-haiku-preclassify | 41       | 166 s            | 270 s | 6,810      | 1.6%          |
+| clone-watch-enrich-attribution    | 1        | ~6 min (Inngest) | —     | ~360       | 0.1%          |
+| **whole fleet (30 functions)**    |          |                  |       | **17,448** | **4.04%**     |
+
+**Step 0 says stop.** 17,448 of 432,000 slot-seconds. The 5/5 concurrency
+reading was instantaneous sampling, not sustained pressure. **Neither fan-out
+is reworked.** Revisit only if the dashboard's queue backlog leaves zero or
+cancellations appear.
+
+Two corrections were needed to reach that, both now in this doc: the original
+Step 0 could only ever say "continue" (fixed in #1125), and the enricher's
+absence from Axiom was a telemetry loss, not a dead function (§ above).
+
 ## What has already been done
 
 | PR    | change                                                                                                 |
