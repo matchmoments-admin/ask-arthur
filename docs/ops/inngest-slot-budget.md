@@ -91,13 +91,31 @@ is the point.
 
 ### Step 0 — is there contention at all?
 
-Compare `p50` against `work` across the fleet.
+**Do not compare `p50` against `finalSegmentMs`.** An earlier version of this
+rule did, and it is invalid: `finalSegmentMs` is only the LAST replay segment,
+not total work, so the ratio is enormous by construction — measured at 215x and
+30,000x on 2026-09-07 — and the gate could only ever return one answer. A rule
+that cannot say "stop" is not a gate. Nothing in the current telemetry separates
+queue wait from execution time, because total execution time across replays is
+not measured.
 
-- **If `p50` is within ~2x of `work`** for most functions, there is **no queue
-  wait**. The 5/5 reading was instantaneous sampling, not sustained pressure.
-  **Stop. Do not rework anything.** Revisit only if the dashboard's queue
-  backlog goes above zero or cancellations appear.
-- If `p50` is many multiples of `work`, runs are waiting for slots. Continue.
+Use **absolute `p95` elapsed, weighted by runs/day**, which is a fair proxy for
+how long a function occupies the system regardless of the work/wait split:
+
+- **If no function's `p95` x runs/day is a meaningful share of a slot-day**
+  (5 slots x 86,400s = 432,000 slot-seconds), the 5/5 reading was instantaneous
+  sampling. **Stop. Do not rework anything.** Revisit only if the dashboard's
+  queue backlog goes above zero or cancellations appear.
+- Otherwise, rank by that product and continue with the biggest.
+
+Two conditions must hold before the numbers mean anything:
+
+1. **#1007 must be deployed** (merged 2026-09-07). Before it, `fn.complete` was
+   INFO at 10% sampling, so `runs` is a tenth of reality.
+2. **A full 24h must have elapsed since the deploy**, so every cron cadence
+   fires at least once — the daily ones (`clone-watch-enrich-attribution` at
+   13:30 UTC, and the preclassify fan-out that follows the 08:30 NRD ingest) are
+   exactly the two under evaluation.
 
 ### Step 1 — `shopfront-clone-haiku-preclassify`
 
